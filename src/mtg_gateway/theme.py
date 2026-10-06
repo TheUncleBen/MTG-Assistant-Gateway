@@ -24,6 +24,12 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 THEME_COOKIE = "mtg_theme"
 FEEDBACK_SCRIPT = "/static/feedback.js"
+# The Content-Security-Policy of every page render() builds (some pages replace it with their own,
+# which keeps the same frame-ancestors and base-uri). form-action is last so sources can follow it.
+DEFAULT_CSP = (
+    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; worker-src 'self'; "
+    "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+)
 THEMES = ("system", "light", "dark")
 _theme: ContextVar[str] = ContextVar("mtg_theme", default="system")
 _path: ContextVar[str] = ContextVar("mtg_path", default="/")
@@ -552,10 +558,10 @@ def render(
             "X-Content-Type-Options": "nosniff",
             "X-Frame-Options": "DENY",
             # Scripts only from the gateway's own origin, never inline: every page loads
-            # static/feedback.js (button feedback, the offline page), and some pages more.
-            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; "
-            + "worker-src 'self'; form-action 'self'"
-            + "".join(f" {src}" for src in form_action),
+            # static/feedback.js (button feedback, the offline page), and some pages more. No page
+            # may be framed (frame-ancestors, with X-Frame-Options for old browsers) or change
+            # its base URL (base-uri). form-action stays last: callers append sources to it.
+            "Content-Security-Policy": DEFAULT_CSP + "".join(f" {src}" for src in form_action),
         },
     )
 
@@ -587,12 +593,22 @@ class ThemeMiddleware:
             _path.reset(ptoken)
 
 
+# One year, the value browsers' preload lists expect. No includeSubDomains: the gateway is usually
+# one host under a domain that also serves other things (a home lab, a router, plain-http
+# devices), and HSTS on the parent would force https on all of them. Add it at the proxy if every
+# subdomain is https. Sent only when MTG_PUBLIC_URL is https.
+HSTS_VALUE = "max-age=31536000"
+
+
 class NoSniffMiddleware:
     """Add ``X-Content-Type-Options: nosniff`` to every HTTP response that lacks it, so no
-    browser guesses a script or page out of JSON, text or a download."""
+    browser guesses a script or page out of JSON, text or a download; with ``hsts`` (the public
+    URL is https) add ``Strict-Transport-Security`` too, so a browser that has been here once
+    never makes a plain-http first request that an attacker on the network could answer."""
 
-    def __init__(self, app: ASGIApp):
+    def __init__(self, app: ASGIApp, hsts: bool = False):
         self.app = app
+        self.hsts = hsts
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -602,9 +618,12 @@ class NoSniffMiddleware:
         async def send_wrapper(message: Message) -> None:
             if message["type"] == "http.response.start":
                 headers = list(message.get("headers", []))
-                if not any(k.lower() == b"x-content-type-options" for k, _ in headers):
+                names = {k.lower() for k, _ in headers}
+                if b"x-content-type-options" not in names:
                     headers.append((b"x-content-type-options", b"nosniff"))
-                    message = {**message, "headers": headers}
+                if self.hsts and b"strict-transport-security" not in names:
+                    headers.append((b"strict-transport-security", HSTS_VALUE.encode()))
+                message = {**message, "headers": headers}
             await send(message)
 
         await self.app(scope, receive, send_wrapper)

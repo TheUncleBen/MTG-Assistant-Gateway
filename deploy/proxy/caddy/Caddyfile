@@ -3,6 +3,10 @@
 # block and change the upstream to wherever the gateway is reachable from it.
 mtg.example.com {
 	encode zstd gzip
+	# HSTS: browsers that have been here once never try plain http again. The gateway
+	# sends the same header itself; no includeSubDomains, since the parent domain may
+	# host other (plain-http) things. Add it only if every subdomain is https.
+	header Strict-Transport-Security "max-age=31536000"
 	reverse_proxy gateway:8080 {
 		# Caddy passes the original Host and sets X-Forwarded-For/-Proto by default.
 		# Long research and goldfish calls can take a while.

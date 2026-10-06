@@ -115,7 +115,10 @@ class LoginCookieMiddleware:
             return
         current = Request(scope).cookies.get(self.name, "")
         key = current if _LOGIN_KEY.fullmatch(current) else secrets.token_urlsafe(32)
-        holder: dict[str, Any] = {"key": key, "used": False}
+        # client_ip: the peer as uvicorn reports it (the visitor's address when the request came
+        # through a trusted proxy), for the per-network caps on pending logins.
+        client = scope.get("client")
+        holder: dict[str, Any] = {"key": key, "used": False, "client_ip": client[0] if client else None}
         token = BROWSER_KEY.set(holder)
 
         replaced = False
@@ -1145,7 +1148,6 @@ def create_app(
     )
     _refuse_mcp_get(app)
     _friendly_errors(app, state)
-    app.add_middleware(NoSniffMiddleware)
     app.add_middleware(ThemeMiddleware)
     app.state.gateway = state
     _use_hashed_client_secrets(app, provider)
@@ -1156,6 +1158,9 @@ def create_app(
     )
     app.add_middleware(MembershipMiddleware, state=state)
     app.add_middleware(BodyLimitMiddleware)
+    # Outermost, so the responses of the middlewares above (413, 503, sign-in error pages) get
+    # nosniff and HSTS too.
+    app.add_middleware(NoSniffMiddleware, hsts=settings.public_url.startswith("https://"))
     return app
 
 

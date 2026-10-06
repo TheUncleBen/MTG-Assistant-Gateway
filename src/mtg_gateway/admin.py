@@ -255,7 +255,7 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
             return JSONResponse({"ok": False, "error": "too_large"}, 413)
         try:
             data = json.loads(raw)
-        except ValueError:
+        except (ValueError, RecursionError):  # RecursionError: deeply nested arrays or objects
             return JSONResponse({"ok": False, "error": "invalid", "message": "bad JSON"}, 400)
         action = data.get("action") if isinstance(data, dict) else None
         try:

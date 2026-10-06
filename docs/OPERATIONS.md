@@ -134,9 +134,21 @@ answer has to be a public address, and the connection goes to the address
 that was checked (the certificate is still verified against the hostname).
 Redirects aren't followed, one five-second deadline covers the whole fetch
 (including waiting for a slot), documents over 64 KB are refused, at most
-two fetches run at once, and an address that failed isn't tried again for a
+eight fetches run at once (one per site), and an address that failed isn't tried again for a
 minute. Only public clients are accepted (`token_endpoint_auth_method`
 `none`).
+
+So that nobody can use the gateway to send requests to someone else's site,
+a client address with a query string (`?...`) is refused, a failed fetch
+blocks every other new address on that host for a minute, and new addresses
+are fetched at most 10 times a minute per site and 60 times a minute in all.
+An address the gateway has accepted before skips those last limits, so a
+client that has signed in here once can't be locked out by someone pointing
+junk addresses at its host. What one document may store is capped like a
+self-registered client (at most 20 redirect URIs of up to 2000 characters,
+8 KB in all), and the cache keeps at most 1000 documents, at most 50 per
+host; when it is full, the host with the most cached documents loses its
+oldest one first.
 
 Two optional stack variables control this:
 
@@ -291,8 +303,21 @@ The same cleanup bounds what anyone on the internet can fill the database
 with: audit log entries older than a year are deleted, the anonymous ones
 (client registrations and client-metadata fetches) are also capped at the
 newest 5000 and keep only a short summary, unfinished sign-ins are capped
-at the newest 5000 (expired ones are also dropped whenever a new sign-in
-starts), and unused registered clients at the newest 2000. The cleanup runs
+at 5000 (expired ones are also dropped whenever a new sign-in starts), and
+unused registered clients at the newest 2000.
+
+Unfinished sign-ins are the part a flood could use against people signing in
+at the same time, so they are capped more carefully: at most 10 per browser,
+500 per AI client (the web pages count as one client), and 5000 in all, and
+when a cap is reached the network (IP address, or /64 for IPv6) holding the
+most unfinished sign-ins loses its oldest one. Someone hammering `/login` or
+`/authorize` therefore only pushes out their own sign-ins. Each network may
+also start at most 30 sign-ins a minute; the 31st gets a "too many sign-in
+attempts" page. This depends on the gateway seeing each visitor's address:
+it takes it from `X-Forwarded-For` only when the request comes from an
+address in `MTG_TRUSTED_PROXIES`. A request that arrives straight from such
+an address (a proxy that doesn't send the header) isn't rate-limited, because
+everyone would share one limit, and all those visitors count as one network. The cleanup runs
 at start and then every hour, with or without backups. It also keeps the
 newest 25 snapshots of each member's deck (plus any a pending restore needs),
 usage counters for 400 days and remembered deck covers for 180 days. A flood of sign-up attempts can therefore cost a connector that was
