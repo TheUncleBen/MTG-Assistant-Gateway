@@ -1140,11 +1140,18 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
 
     @server.custom_route("/sw.js", methods=["GET"], include_in_schema=False)
     async def service_worker(_request: Request) -> Response:
-        # Network only: the pages are private and must never be served from a cache.
+        # Network only: the pages are private and must never be served from a cache. When a page
+        # can't be reached at all (no connection), answer with a plain offline page built here
+        # instead of the browser's own error screen.
         js = (
             "self.addEventListener('install',()=>self.skipWaiting());"
             "self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));"
-            "self.addEventListener('fetch',()=>{});"
+            "self.addEventListener('fetch',e=>{"
+            "if(e.request.mode!=='navigate')return;"
+            "e.respondWith(fetch(e.request).catch(()=>new Response(" + json.dumps(OFFLINE_PAGE) + ","
+            "{status:503,headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store',"
+            "'Content-Security-Policy':\"default-src 'none'; style-src 'unsafe-inline'\"}})));"
+            "});"
         )
         return Response(js, media_type="application/javascript", headers={"Cache-Control": "no-store"})
 
@@ -1170,6 +1177,22 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         return FileResponse(
             target, headers={"Cache-Control": "public, max-age=300", "X-Content-Type-Options": "nosniff"}
         )
+
+
+OFFLINE_PAGE = (
+    "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
+    "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+    "<meta name='color-scheme' content='dark light'><title>You're offline</title>"
+    "<style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;"
+    "font:16px/1.4 Lato,'Helvetica Neue',Arial,sans-serif;background:#181818;color:#e3e3e3;padding:1rem}"
+    "@media (prefers-color-scheme: light){body{background:#f9fafb;color:#383838}}"
+    "main{max-width:28rem;text-align:center}h1{font-size:1.4rem}"
+    "a{display:inline-block;margin-top:1rem;padding:.6rem 1.2rem;border-radius:5px;background:#fa890d;"
+    "color:#111;font-weight:700;text-decoration:none}</style></head><body><main>"
+    "<h1>You're offline</h1><p>The gateway can't be reached right now. If you just pressed a button, "
+    "nothing was sent. Check your connection, then try again.</p>"
+    "<a href=''>Try again</a></main></body></html>"
+)
 
 
 def snapshot_deck(state: AppState, sub: str, snapshot_id: str) -> Deck:

@@ -295,7 +295,33 @@ def overview_data(state: Any, days: int = DAYS) -> dict[str, Any]:
         "errors": by_kind.get("error", 0),
         "by_kind": by_kind,
         "series": _series(state, days),
+        "system": system_data(state),
     }
+
+
+def system_data(state: Any) -> dict[str, Any]:
+    """What an operator checks first when something seems wrong: version, database, last backup."""
+    from . import __version__
+    from . import backup as backup_mod
+
+    settings = getattr(state, "settings", None)
+    backup_dir = getattr(settings, "backup_dir", None)
+    out: dict[str, Any] = {
+        "version": __version__,
+        "schema_version": state.db.schema_version,
+        "database_bytes": state.db.size_bytes(),
+        "backups_enabled": backup_dir is not None,
+        "last_backup_at": None,
+        "last_backup_error": None,
+    }
+    if backup_dir is not None:
+        newest = backup_mod.newest_backup(backup_dir)
+        if newest is not None:
+            out["last_backup_at"] = int(newest[1])
+        if backup_mod.last_run.get("ok") is False:
+            out["last_backup_error"] = backup_mod.last_run.get("error")
+            out["last_backup_error_at"] = backup_mod.last_run.get("at")
+    return out
 
 
 def users_data(state: Any) -> list[dict[str, Any]]:
@@ -373,6 +399,28 @@ def _overview_body(state: Any) -> str:
         + _stat("Errors", d["errors"])
         + "</dl></div>",
     ]
+    sysd = d["system"]
+    if not sysd["backups_enabled"]:
+        backup = "off (MTG_BACKUP_DIR not set)"
+    elif sysd["last_backup_at"]:
+        backup = _when(sysd["last_backup_at"])
+    else:
+        backup = "none yet"
+    size = sysd["database_bytes"]
+    cards.append(
+        "<div class='card'><h2>System</h2><dl class='meta'>"
+        + _stat("Version", sysd["version"])
+        + _stat("Database schema", sysd["schema_version"])
+        + _stat("Database size", f"{size / 1048576:.1f} MB" if size is not None else "in memory")
+        + _stat("Newest backup", backup)
+        + "</dl>"
+        + (
+            _err(f"The last nightly backup failed ({sysd['last_backup_error']}). Check the gateway's log.")
+            if sysd["last_backup_error"]
+            else ""
+        )
+        + "</div>"
+    )
     rows = []
     for kind, by_day in d["series"].items():
         values = list(by_day.values())

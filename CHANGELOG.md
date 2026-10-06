@@ -7,6 +7,98 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.6.0] - 2026-10-06
+
+A production-readiness pass: access checks, failure handling, the database,
+monitoring, testing on different screens and connections, and what people
+see when something goes wrong. The findings and their sources are summarised
+in the release notes' pull request.
+
+### Upgrading from 0.5.0
+
+1. Paste the new `deploy/portainer-stack.yml` (or `deploy/compose/docker-compose.yml`)
+   and update the stack. It adds two settings: `stop_grace_period: 120s`, so a
+   redeploy lets a running deck apply finish, and a `logging:` block that caps
+   each container's logs at three 10 MB files. Nothing in your environment
+   variables changes.
+2. The database is upgraded on start (schema 6: new indexes only). Take a
+   backup first, as for every release; the 0.5.0 image refuses to start on the
+   upgraded file.
+
+### Security
+
+- `/mcp` now re-checks `MTG_REQUIRED_GROUP` on every request, like the web
+  pages and the JSON API already did. Before, an assistant kept working until
+  its access token expired (up to an hour) after the member's recorded groups
+  lost the group.
+- `/healthz` no longer puts the database error text in its public reply; the
+  detail goes to the log.
+
+### Added
+
+- **Delete my data** on the Account page: one checkbox and one button delete
+  everything the gateway keeps for you (proposals, snapshots, reports, scan
+  sessions, the Archidekt link, connected apps, usage counters and the sign-in)
+  and sign you out. Decks on Archidekt are not touched.
+- A **System** card on the admin page: version, database schema and size, the
+  newest backup, and the last backup's failure if it failed.
+- A plain "You're offline" page when a gateway page can't be reached, instead
+  of the browser's own error screen. The service worker builds it on the spot
+  and never caches a page.
+- Android app: if the page's renderer crashes (it can happen under memory
+  pressure during a scan) the app rebuilds the page instead of closing; no
+  connection and a restarting gateway (502/503/504) get their own plain
+  message with Retry; and a camera permission that was denied for good opens
+  the app's settings with an explanation.
+
+### Changed
+
+- Friendly error pages: an unknown address or an unexpected error now shows
+  a styled page that says what happened and what to do next (JSON on
+  `/api/`, `/mcp` and the OAuth endpoints), never a bare "Not Found" or
+  "Internal Server Error". Unexpected errors are logged with their traceback
+  and counted on the admin page.
+- Every button shows that it was pressed at once, and a button that sends a
+  form shows a busy state until the next page arrives; a second press of the
+  same form while it is sending is ignored.
+- Button and badge text now meets WCAG AA contrast: dark text on the orange
+  and green buttons and badges, and a deeper red for danger buttons. White on
+  the old orange was 2.4:1.
+- Long button labels wrap instead of pushing the Account and Install pages
+  wider than a 320 px phone screen; the deck editor's bottom bar keeps its
+  side margins on phones.
+- The scan page says "no connection to the gateway" instead of "Failed to
+  fetch".
+- Scan results split piles of more than 99 copies and add `change_batches`
+  when there are more than 40 changes, so they fit `propose_deck_changes`.
+- `deck_stats` and `compare_decks` accept the snapshot ids `list_snapshots`
+  returns (they only recognised a `snap_` prefix that real ids don't have).
+
+### Fixed
+
+- A deck apply cut off by a crash or redeploy was left "applying" for up to an
+  hour (or until the next nightly cleanup); it is now marked failed as soon
+  as the gateway starts, pointing at the snapshot taken before it. The
+  gateway also lets running requests finish for up to 100 s when it is
+  stopped.
+- The cleanup of expired sign-ins, tokens and proposals ran only with the
+  nightly backup (so never without `MTG_BACKUP_DIR`, and not at all after a
+  failed backup). It now runs hourly on its own.
+- Deck snapshots were never deleted. The newest 25 of each deck are kept,
+  plus any a pending restore needs. Usage counters are kept for 400 days and
+  remembered deck covers for 180.
+- Nightly backups are read through their own connection (requests no longer
+  wait for the copy), written as standalone files, and checked with SQLite's
+  `quick_check` before they are kept.
+- A Mystic Forge that hangs no longer holds up the assistant's tool list for
+  up to five minutes: the listing gives up after 10 seconds and is retried a
+  minute later.
+- A damaged database file at start gives a one-line message pointing at the
+  backups instead of a Python traceback.
+- Indexes for the cleanup and snapshot lists; an explicit SQLite busy timeout;
+  each database upgrade step commits together with its version number.
+- Outbound request URLs are logged only at `DEBUG`.
+
 ## [0.5.0] - 2026-10-06
 
 The first release from this repository, as **MTG Assistant Gateway**. It has the

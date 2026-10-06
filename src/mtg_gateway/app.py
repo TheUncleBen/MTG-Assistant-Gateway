@@ -50,7 +50,7 @@ from .auth_provider import (
     LoginError,
     cookie_name,
 )
-from .backup import nightly_loop
+from .backup import nightly_loop, purge_loop
 from .cimd import CimdFetcher
 from .clickguard import form_stamp, guarded_form, submitted_too_soon
 from .companion import add_companion_routes
@@ -235,18 +235,24 @@ def build_mcp_server(state: AppState) -> MCPServer:
 
     @contextlib.asynccontextmanager
     async def lifespan(_server: MCPServer) -> AsyncIterator[None]:
-        task: asyncio.Task[None] | None = None
-        await asyncio.to_thread(state.db.purge_expired)  # also fails proposals interrupted mid-apply
+        interrupted = await asyncio.to_thread(state.db.fail_interrupted_applies)
+        if interrupted:
+            logger.warning("%d deck change(s) cut off by the last shutdown were marked failed", interrupted)
+        await asyncio.to_thread(state.db.purge_expired)
+        tasks = [asyncio.create_task(purge_loop(state.db))]
         if s.backup_dir is not None:
             s.backup_dir.mkdir(parents=True, exist_ok=True)
-            task = asyncio.create_task(
-                nightly_loop(state.db, s.backup_dir, s.backup_hour_utc, s.backup_keep_days)
+            tasks.append(
+                asyncio.create_task(
+                    nightly_loop(state.db, s.backup_dir, s.backup_hour_utc, s.backup_keep_days)
+                )
             )
         try:
             yield
         finally:
-            if task:
+            for task in tasks:
                 task.cancel()
+            for task in tasks:
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
             await state.oidc.aclose()
@@ -653,10 +659,20 @@ def build_mcp_server(state: AppState) -> MCPServer:
             return _tool_error(exc)
         return {"ok": True, "deck": deck_brief(deck), "stats": deck_stats.compute(deck)}
 
+    def _own_snapshot(sub: str, ref: str) -> Any | None:
+        """The member's own snapshot named by ``ref`` (as list_snapshots returns it, with or without
+        a ``snap_`` prefix), or None when ``ref`` is not one."""
+        sid = ref[5:] if ref.startswith("snap_") else ref
+        if not sid or sid.isdigit():  # deck ids are numbers; snapshot ids never are
+            return None
+        snap = state.db.get_snapshot(sid, sub)
+        return parse_deck(snap["deck"]) if snap else None
+
     async def _deck_or_snapshot(sub: str, ref: str) -> Any:
         ref = str(ref or "").strip()
-        if ref.startswith("snap_"):
-            return parse_deck(state.decks.snapshot(sub, ref)["deck"])
+        snap = _own_snapshot(sub, ref)
+        if snap is not None:
+            return snap
         return await state.decks.get_any_deck(sub, ref)
 
     @server.tool(
@@ -664,8 +680,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
         title="Compare two decks",
         description=(
             "Cards added, removed and changed between two decks, plus the difference in their statistics. "
-            "Each of a and b is an Archidekt deck id or URL, a snapshot id (snap_...), or decklist text (one "
-            "card per line). Use it for 'what changed since this "
+            "Each of a and b is an Archidekt deck id or URL, a snapshot id from list_snapshots, or "
+            "decklist text (one card per line). Use it for 'what changed since this "
             "snapshot', 'my deck versus the EDHREC average "
             "deck' or 'this precon versus my build'. Does not touch Archidekt beyond reading the decks."
         ),
@@ -674,8 +690,9 @@ def build_mcp_server(state: AppState) -> MCPServer:
     async def compare_decks(a: str, b: str) -> dict[str, object]:
         async def load(ref: str) -> Any:
             ref = str(ref or "").strip()
-            if ref.startswith("snap_"):
-                return await _deck_or_snapshot(_sub(), ref)
+            snap = _own_snapshot(_sub(), ref)
+            if snap is not None:
+                return snap
             try:
                 deck_id = _clean_deck_id(ref)
             except DeckError:
@@ -967,8 +984,9 @@ def build_mcp_server(state: AppState) -> MCPServer:
     async def healthz(_request: Request) -> Response:
         try:
             state.db.get_user("__healthcheck__")
-        except Exception as exc:  # pragma: no cover - only on a broken database file
-            return JSONResponse({"status": "error", "detail": str(exc)}, status_code=503)
+        except Exception:  # only on a broken database file; the detail stays in the log
+            logger.exception("health check: database unavailable")
+            return JSONResponse({"status": "error", "detail": "database unavailable"}, status_code=503)
         return JSONResponse({"status": "ok", "version": __version__})
 
     @server.custom_route("/", methods=["GET"], include_in_schema=False)
@@ -1051,6 +1069,7 @@ def create_app(
         host=settings.listen_host,
     )
     _refuse_mcp_get(app)
+    _friendly_errors(app, state)
     app.add_middleware(NoSniffMiddleware)
     app.add_middleware(ThemeMiddleware)
     app.state.gateway = state
@@ -1062,6 +1081,66 @@ def create_app(
     )
     app.add_middleware(BodyLimitMiddleware)
     return app
+
+
+# Paths answered for programs (assistants, the OAuth flow, the JSON API): errors there stay JSON.
+_MACHINE_PREFIXES = ("/api/", "/mcp", "/.well-known/", "/token", "/register", "/revoke", "/scan/api/")
+
+
+def _wants_page(request: Request) -> bool:
+    path = request.url.path
+    if path.startswith(_MACHINE_PREFIXES):
+        return False
+    return "text/html" in request.headers.get("accept", "")
+
+
+def _friendly_errors(app: Starlette, state: AppState) -> None:
+    """No bare "Not Found" or "Internal Server Error" text: a browser gets a themed page that says
+    what happened and what to do next, a program gets JSON in the shape the JSON API uses. An
+    unexpected error is still logged with its traceback (Starlette re-raises it after this handler
+    answers) and counted for the admin page; the person never sees the exception."""
+    site = state.settings.server_name
+
+    async def not_found(request: Request, _exc: Exception) -> Response:
+        if _wants_page(request):
+            return render(
+                "Page not found",
+                "<div class='card'><p>There's nothing at this address. The link may be old or mistyped.</p>"
+                "<div class='actions'><a class='btn btn-primary' href='/decks'>Go to my decks</a>"
+                "<a class='btn' href='/'>Home</a></div></div>",
+                site=site,
+                status=404,
+            )
+        return JSONResponse(
+            {"ok": False, "error": "not_found", "message": "Nothing exists at this address."}, 404
+        )
+
+    async def server_error(request: Request, _exc: Exception) -> Response:
+        if state.metrics is not None:
+            state.metrics.record("error", "server_error")
+        if _wants_page(request):
+            return render(
+                "Something went wrong",
+                "<div class='card'><p>The gateway hit an unexpected problem and didn't finish this request. "
+                "If you were changing a deck, check its page or your proposals before trying again: "
+                "nothing is applied twice.</p><p class='muted small'>The details were written to the "
+                "gateway's log for whoever runs it.</p><div class='actions'>"
+                "<a class='btn btn-primary' href=''>Try again</a><a class='btn' href='/decks'>Go to my decks"
+                "</a></div></div>",
+                site=site,
+                status=500,
+            )
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "server_error",
+                "message": "The gateway hit an unexpected problem; it was logged. Try again in a moment.",
+            },
+            500,
+        )
+
+    app.add_exception_handler(404, not_found)
+    app.add_exception_handler(Exception, server_error)
 
 
 def _refuse_mcp_get(app: Starlette) -> None:

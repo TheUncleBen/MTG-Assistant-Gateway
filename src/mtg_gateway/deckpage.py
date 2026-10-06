@@ -1035,7 +1035,8 @@ ul.erows{list-style:none;margin:.5rem 0 0;padding:0}
 .picker .print.current{border-color:var(--orange)}
 .picker .print:hover{border-color:var(--link)}
 @media (max-width:600px){
-  .editbar{top:auto;bottom:50px;margin:0 -1rem;position:fixed;left:0;right:0;padding:.5rem 1rem}
+  .editbar{top:auto;bottom:50px;margin:0;position:fixed;left:0;right:0;
+    padding:.5rem max(1rem,env(safe-area-inset-right)) .5rem max(1rem,env(safe-area-inset-left))}
   .editor{padding-bottom:6rem}
   .editbar .review{flex:1}
   .addbox form.addcard{grid-template-columns:1fr 1fr}

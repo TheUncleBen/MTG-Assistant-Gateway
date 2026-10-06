@@ -23,6 +23,7 @@ from starlette.responses import HTMLResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 THEME_COOKIE = "mtg_theme"
+FEEDBACK_SCRIPT = "/static/feedback.js"
 THEMES = ("system", "light", "dark")
 _theme: ContextVar[str] = ContextVar("mtg_theme", default="system")
 _path: ContextVar[str] = ContextVar("mtg_path", default="/")
@@ -55,6 +56,9 @@ CSS = (
   --orange:#fa890d; --green:#1ebb6c; --red:#ff555b; --blue:#4286f4; --purple:#6435c9; --pink:#e03997;
   --orange-text:#fa890d; --green-text:#1ebb6c; --red-text:#ff555b; --blue-text:#7fb0ff;
   --on-color:#ffffff;
+  /* Text on the orange and green fills, and the red used as a fill: WCAG AA (4.5:1) for bold 16px
+     labels. White on Archidekt's orange is 2.4:1 and on its red 3.1:1, so those labels were hard to read. */
+  --on-orange:#111111; --on-green:#111111; --danger-fill:#c0182b;
   --orange-tint:rgba(250,137,13,.14); --green-tint:rgba(30,187,108,.14);
   --red-tint:rgba(255,85,91,.14); --blue-tint:rgba(66,134,244,.14);
   --orange-select:rgba(250,137,13,.3);
@@ -190,17 +194,28 @@ input::placeholder,textarea::placeholder{color:var(--text-muted);opacity:1}
 .switch input:checked + .track::after{transform:translateX(20px)}
 .switch input:focus-visible + .track{outline:2px solid var(--focus);outline-offset:2px}
 ol,ul:not([class]){padding-left:1.4rem} ol li,ul:not([class]) li{margin:.25rem 0}
-button,.btn{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;height:var(--ctl);
-  margin:0;padding:0 1rem;font:inherit;font-size:1rem;font-weight:700;white-space:nowrap;cursor:pointer;
+button,.btn{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;min-height:var(--ctl);
+  margin:0;padding:.35rem 1rem;font:inherit;font-size:1rem;font-weight:700;text-align:center;cursor:pointer;
+  -webkit-tap-highlight-color:transparent;touch-action:manipulation;
   border-radius:var(--radius);border:1px solid var(--border);background:var(--surface);color:var(--text);
   text-decoration:none;transition:background-color .2s ease-in-out,filter .2s ease-in-out}
 button:hover,.btn:hover{background:var(--surface-2);color:var(--text)}
 button:disabled,.btn[aria-disabled=true]{opacity:.5;cursor:default}
-.btn-primary,button.primary{background:var(--orange);border-color:var(--orange);color:#fff}
-.btn-primary:hover,button.primary:hover{background:var(--orange);color:#fff;filter:brightness(1.1)}
-button.danger,.btn-danger{background:var(--red);border-color:var(--red);color:#fff}
-button.danger:hover,.btn-danger:hover{background:var(--red);color:#fff;filter:brightness(1.1)}
-button.success,.btn-success{background:var(--green);border-color:var(--green);color:#fff}
+/* Every press shows at once: pressed look on touch, and a busy state while a form submits
+   (static/feedback.js sets aria-busy on the button that sent it). */
+button:active:not(:disabled),.btn:active{transform:translateY(1px);filter:brightness(.9)}
+button[aria-busy=true],.btn[aria-busy=true]{cursor:progress;opacity:.75}
+button[aria-busy=true]::after,.btn[aria-busy=true]::after{content:'';width:.9em;height:.9em;flex:none;
+  border-radius:50%;border:2px solid currentColor;border-right-color:transparent;
+  animation:busy .8s linear infinite}
+@keyframes busy{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){
+  button[aria-busy=true]::after,.btn[aria-busy=true]::after{animation:none} }
+.btn-primary,button.primary{background:var(--orange);border-color:var(--orange);color:var(--on-orange)}
+.btn-primary:hover,button.primary:hover{background:var(--orange);color:var(--on-orange);filter:brightness(1.1)}
+button.danger,.btn-danger{background:var(--danger-fill);border-color:var(--danger-fill);color:#fff}
+button.danger:hover,.btn-danger:hover{background:var(--danger-fill);color:#fff;filter:brightness(1.1)}
+button.success,.btn-success{background:var(--green);border-color:var(--green);color:var(--on-green)}
 button.secondary,.btn-ghost{background:transparent;border-color:transparent}
 button.secondary:hover,.btn-ghost:hover{background:var(--surface-2)}
 .btn-block{width:100%}
@@ -221,8 +236,10 @@ form > button,form .btn{margin-top:1rem}
 /* badges, pills and notices */
 .badge{display:inline-block;vertical-align:middle;padding:.125rem .5rem;border-radius:5px;font-size:.86rem;
   font-weight:700;line-height:1.4;background:#6b6b6b;color:#fff}
-.badge.ok{background:var(--green)} .badge.warn{background:var(--orange)} .badge.danger{background:var(--red)}
-.badge.info{background:var(--blue)}
+.badge.ok{background:var(--green);color:var(--on-green)}
+.badge.warn{background:var(--orange);color:var(--on-orange)}
+.badge.danger{background:var(--danger-fill)}
+.badge.info{background:#2a66c9}
 .pill{display:inline-block;padding:.125rem .25rem;border-radius:3px;border:1px solid var(--border);
   background:var(--toolbar-bg);color:var(--toolbar-text);font-weight:700;font-size:.86rem;line-height:1.3}
 .chip{display:inline-block;padding:.25rem .5rem;border-radius:3px;background:var(--surface-2);
@@ -237,7 +254,7 @@ form > button,form .btn{margin-top:1rem}
   font-weight:400;color:var(--text)}
 .notice.strong::before{content:'!';grid-row:span 2;width:2rem;height:2rem;border-radius:50%;
   display:inline-flex;align-items:center;justify-content:center;font-weight:900;font-size:1.3rem;
-  background:var(--orange);color:#fff}
+  background:var(--orange);color:var(--on-orange)}
 .notice.strong .lead{font-weight:900;color:var(--orange-text);font-size:1.1rem;margin:0}
 .notice.strong p{margin:0}
 .toast{position:fixed;right:2rem;bottom:2rem;z-index:20;width:350px;max-width:calc(100% - 2rem);
@@ -525,7 +542,7 @@ def render(
         "<div class='legal'>Private deck gateway. Nothing on these pages is indexed or shared. "
         "Magic: The Gathering is a trademark of Wizards of the Coast. Card data and images come from "
         "Scryfall; decks live on Archidekt.</div></footer>"
-        f"{tabbar}</body></html>"
+        f"{tabbar}<script src='{FEEDBACK_SCRIPT}' defer></script></body></html>"
     )
     return HTMLResponse(
         doc,
@@ -534,9 +551,10 @@ def render(
             "Cache-Control": "no-store",
             "X-Content-Type-Options": "nosniff",
             "X-Frame-Options": "DENY",
-            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; "
-            + ("script-src 'self'; " if scripts else "")
-            + "form-action 'self'"
+            # Scripts only from the gateway's own origin, never inline: every page loads
+            # static/feedback.js (button feedback, the offline page), and some pages more.
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; "
+            + "worker-src 'self'; form-action 'self'"
             + "".join(f" {src}" for src in form_action),
         },
     )

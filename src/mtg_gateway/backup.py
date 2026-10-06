@@ -65,11 +65,43 @@ def seconds_until(hour_utc: int, now: datetime | None = None) -> float:
     return (target - now).total_seconds()
 
 
+# The outcome of the last backup this process attempted, for the admin page. Survives nothing:
+# after a restart the admin page falls back to the newest file in MTG_BACKUP_DIR.
+last_run: dict[str, object] = {}
+
+
+def newest_backup(backup_dir: Path) -> tuple[Path, float] | None:
+    best: tuple[Path, float] | None = None
+    for f in backup_dir.glob(f"{PREFIX}*{SUFFIX}"):
+        try:
+            mtime = f.stat().st_mtime
+        except OSError:
+            continue
+        if best is None or mtime > best[1]:
+            best = (f, mtime)
+    return best
+
+
 async def nightly_loop(db: Database, backup_dir: Path, hour_utc: int, keep_days: int) -> None:
     while True:
         await asyncio.sleep(seconds_until(hour_utc))
         try:
-            await asyncio.to_thread(export_now, db, backup_dir, keep_days)
+            dest = await asyncio.to_thread(export_now, db, backup_dir, keep_days)
+            last_run.update(ok=True, at=int(time.time()), file=dest.name, error=None)
+        except Exception as exc:
+            last_run.update(ok=False, at=int(time.time()), error=type(exc).__name__)
+            logger.exception("nightly backup failed")
+
+
+PURGE_INTERVAL_SECONDS = 3600
+
+
+async def purge_loop(db: Database, interval: float = PURGE_INTERVAL_SECONDS) -> None:
+    """Expire tokens, sessions and proposals and apply the retention caps every hour, whether or
+    not backups are configured. A failure is logged and retried on the next round."""
+    while True:
+        await asyncio.sleep(interval)
+        try:
             await asyncio.to_thread(db.purge_expired)
         except Exception:
-            logger.exception("nightly backup failed")
+            logger.exception("database purge failed")
