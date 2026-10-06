@@ -409,6 +409,14 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             state=params.state,
         )
 
+    async def idp_origin(self) -> str:
+        """Origin of the identity provider's sign-in page: where /login and the consent page's
+        Approve send the browser. The issuer's origin when the provider's metadata can't be read."""
+        try:
+            return _origin(str((await self.oidc.metadata())["authorization_endpoint"]))
+        except OIDCError:
+            return _origin(self.settings.oidc_issuer)  # Approve will report the IdP outage itself
+
     async def consent_details(self, login_id: str, browser_key: str | None) -> dict[str, Any] | None:
         """What the consent page shows for a pending MCP login, or None if there is none."""
         session = await self._consent_session(login_id, browser_key)
@@ -421,11 +429,7 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         host = urlparse(redirect).hostname or ""
         # Chromium applies the page's form-action CSP to the redirect that follows the POST, so
         # the consent page must allow exactly where Approve (the IdP) and Deny (the client) go.
-        idp_origin = _origin(self.settings.oidc_issuer)
-        try:
-            idp_origin = _origin(str((await self.oidc.metadata())["authorization_endpoint"]))
-        except OIDCError:
-            pass  # Approve will report the IdP outage itself
+        idp_origin = await self.idp_origin()
         return {
             # Sanitised again here so a name stored before the rule existed (a cached
             # metadata document, an old registration) is shown under the same rule.
