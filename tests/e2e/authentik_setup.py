@@ -168,7 +168,8 @@ def main() -> None:
     inval_flow = wait_one("/flows/instances/", slug="default-provider-invalidation-flow")
     signing_key = wait_one("/crypto/certificatekeypairs/", name="authentik Self-signed Certificate")
     scope_pks = []
-    for scope in ("openid", "email", "profile"):
+    # offline_access: the gateway keeps Authentik's refresh token to re-check membership live.
+    for scope in ("openid", "email", "profile", "offline_access"):
         managed = f"goauthentik.io/providers/oauth2/scope-{scope}"
         scope_pks.append(wait_one("/propertymappings/provider/scope/", managed=managed)["pk"])
 
@@ -189,6 +190,9 @@ def main() -> None:
             "property_mappings": scope_pks,
             "sub_mode": "hashed_user_id",
             "include_claims_in_id_token": True,
+            # Short-lived Authentik access tokens, so the suite also exercises the gateway renewing
+            # them with the refresh token for its live membership checks (membership.py).
+            "access_token_validity": "minutes=1",
         },
     )
     # Applications are addressed by slug (the list endpoint has no slug filter).
