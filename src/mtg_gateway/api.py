@@ -84,18 +84,7 @@ async def caller_for(state: AppState, request: Request, *, write: bool) -> Calle
         access = await state.provider.load_access_token(token) if token else None
         if access is None or not access.subject:
             return _unauth("The access token is missing, expired or revoked.")
-        group = state.settings.required_group
-        if group:
-            user = state.db.get_user(access.subject)
-            if user is None or group not in (user.get("groups") or []):
-                return JSONResponse(
-                    {
-                        "ok": False,
-                        "error": "forbidden",
-                        "message": "Your account is not in the gateway's group.",
-                    },
-                    403,
-                )
+        # load_access_token refuses disabled members and anyone outside MTG_REQUIRED_GROUP.
         return Caller(access.subject, access.client_id, "api")
     sub, sid = browser_session(state, request)
     if not sub or not sid:
@@ -229,7 +218,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         a = request.query_params.get("a", "")
         b = request.query_params.get("b", "")
         if not a or not b:
-            raise DeckError("invalid", "give a and b: deck ids or URLs, or snapshot ids (snap_...)")
+            raise DeckError("invalid", "give a and b: deck ids or URLs, or snapshot ids")
         deck_a = await _deck_or_snapshot(who.sub, a)
         deck_b = await _deck_or_snapshot(who.sub, b)
         return ok({"a": deck_brief(deck_a), "b": deck_brief(deck_b), **deck_stats.compare(deck_a, deck_b)})
@@ -238,7 +227,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         from .archidekt import parse_deck
 
         if ref.startswith("snap_") or (not ref.isdigit() and "/" not in ref and "." not in ref):
-            return parse_deck(decks.snapshot(sub, ref)["deck"])
+            return parse_deck(decks.snapshot(sub, ref.removeprefix("snap_"))["deck"])
         return await decks.get_any_deck(sub, ref)
 
     # -- proposals ------------------------------------------------------------

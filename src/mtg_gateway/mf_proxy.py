@@ -83,6 +83,10 @@ MAX_CALLS_PER_USER = 2
 # Every proxied call is cut off after this long (a goldfish run included), so no call holds a
 # slot for hours. Mystic Forge itself may keep working on a cancelled call until it finishes.
 CALL_DEADLINE_SECONDS = 120.0
+# Listing Mystic Forge's tools is quick when it is up. When it hangs, give up after this long and
+# serve the gateway's own tools (plus any cached research tools), then wait before asking again.
+LIST_DEADLINE_SECONDS = 10.0
+LIST_RETRY_SECONDS = 60.0
 
 
 BUSY_PREFIX = "busy: "
@@ -128,15 +132,20 @@ class MysticForgeProxy:
         self._tools: list[dict[str, Any]] = []
         self._tools_at = 0.0
         self._known: set[str] = set()
+        self._retry_at = 0.0
 
     async def tools(self, *, force: bool = False) -> list[dict[str, Any]]:
         if self._tools and not force and time.time() - self._tools_at < self.cache_ttl:
             return self._tools
+        if not force and time.time() < self._retry_at:
+            return self._tools  # it failed moments ago; don't make every tools/list wait again
         try:
-            async with self._client_factory() as client:
-                listing = await client.list_tools()
-        except Exception as exc:
-            logger.warning("Mystic Forge tool listing failed: %s", exc)
+            with anyio.fail_after(LIST_DEADLINE_SECONDS):
+                async with self._client_factory() as client:
+                    listing = await client.list_tools()
+        except Exception as exc:  # includes TimeoutError: a hung Mystic Forge must not stall tools/list
+            logger.warning("Mystic Forge tool listing failed: %s", str(exc) or type(exc).__name__)
+            self._retry_at = time.time() + LIST_RETRY_SECONDS
             return self._tools  # stale list, or empty if never reached
         tools: list[dict[str, Any]] = []
         for t in listing.tools:

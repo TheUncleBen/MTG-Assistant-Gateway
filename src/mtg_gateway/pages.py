@@ -158,6 +158,20 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             "</div></div>",
         )
 
+    @server.custom_route("/data-deleted", methods=["GET"], include_in_schema=False)
+    async def data_deleted(_request: Request) -> Response:
+        return page(
+            "Your data was deleted",
+            "<div class='card'><p>Everything this gateway kept for your account is gone: proposals, "
+            "snapshots, test reports, scan sessions, your Archidekt link, connected apps and your "
+            "sign-in. You are signed out.</p>"
+            "<p class='muted small'>Your decks on Archidekt, including any backup copies the gateway "
+            "made there, are yours on Archidekt and were not touched. The gateway's security log keeps "
+            "a record that this account existed and was deleted until it ages out after a year.</p>"
+            "<div class='actions'><a class='btn btn-primary' href='/login?next=/'>Sign in again</a>"
+            "</div></div>",
+        )
+
     # -- account ------------------------------------------------------------
     @server.custom_route("/account", methods=["GET"], include_in_schema=False)
     async def account(request: Request) -> Response:
@@ -194,6 +208,14 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         if action == "unlink":
             state.decks.unlink(sub)
             return RedirectResponse("/account?ok=unlinked", status_code=303)
+        if action == "delete_data":
+            if data.get("confirm") != "yes":
+                return RedirectResponse("/account?err=confirm_delete", status_code=303)
+            state.db.delete_member_data(sub)
+            resp = RedirectResponse("/data-deleted", status_code=303)
+            resp.delete_cookie(session_cookie, path="/", secure=secure, httponly=True, samesite="lax")
+            resp.headers["Clear-Site-Data"] = '"cache", "storage"'
+            return resp
         if action == "link":
             login_name = data.get("archidekt_login", "").strip()
             password = data.get("archidekt_password", "")
@@ -399,6 +421,7 @@ OK_MESSAGES = {
     "disconnected_all": "Every connected app was disconnected. Each has to be connected and approved again.",
 }
 ERR_MESSAGES = {
+    "confirm_delete": "Nothing was deleted. Tick the box to confirm, then press Delete my data.",
     "failed": "This proposal could not be applied. Details are in the result below, if any.",
     "writes_disabled": "Deck writes are switched off on this gateway. The proposal is kept for review; "
     "nothing was sent to Archidekt.",
@@ -512,6 +535,7 @@ def _account_body(state: Any, sub: str, csrf: str | None) -> str:
             "autocomplete='current-password'>"
             "<button class='primary'>Link account</button></form></div>"
         )
+    out.append(_delete_card(csrf_in))
     return "".join(out)
 
 
@@ -538,6 +562,21 @@ def _apps_card(state: Any, sub: str, csrf_in: str) -> str:
         f"<ul class='plain plist'>{items}</ul>"
         f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='disconnect_all'>"
         "<button class='danger'>Disconnect all apps</button></form></div>"
+    )
+
+
+def _delete_card(csrf_in: str) -> str:
+    """Deleting your data is as easy to find as everything else on the page: no hiding it, no
+    guilt-trip wording; one checkbox so a stray tap can't do it."""
+    return (
+        "<div class='card'><h2>Delete my data</h2>"
+        "<p>Delete everything this gateway keeps for your account: proposals, snapshots, test "
+        "reports, scan sessions, your Archidekt link, connected apps and your sign-in. Your decks on "
+        "Archidekt are not touched. This can't be undone.</p>"
+        f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='delete_data'>"
+        "<label class='check'><input type='checkbox' name='confirm' value='yes' required> "
+        "Yes, delete my data from this gateway</label>"
+        "<button class='danger'>Delete my data</button></form></div>"
     )
 
 

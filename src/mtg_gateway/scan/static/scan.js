@@ -47,6 +47,10 @@
   };
 
   // ---------------------------------------------------------------- helpers
+  // Plain words for a failed request: fetch() rejects with a TypeError when there is no connection.
+  const why = (err) => (err instanceof TypeError || !navigator.onLine)
+    ? 'no connection to the gateway. Check your connection and try again'
+    : (err && err.message) || String(err);
   const h = (tag, attrs, ...children) => {
     const el = document.createElement(tag);
     if (attrs) {
@@ -762,7 +766,7 @@
       setStatus((res.card ? 'Matched. Tap Add, or pick another card.' : 'No match. Pick from the suggestions or type the name.') + glareHint);
       buzz(res.status === 'exact' ? 30 : [20, 40, 20]);
     } catch (err) {
-      setStatus('Scan failed: ' + (err && err.message || err));
+      setStatus('Scan failed: ' + why(err));
     } finally {
       cam && cam.classList.remove('busy'); if (shutter) shutter.disabled = false;
     }
@@ -1091,7 +1095,7 @@
       const hk = hooks();
       if (!hk.loadPrints) throw new Error('printings are not available in this version');
       all = await hk.loadPrints(card.oracle_id); draw();
-    } catch (err) { status.textContent = 'Could not load printings: ' + err.message; }
+    } catch (err) { status.textContent = 'Could not load printings: ' + why(err); }
   }
   function statusLabel(res) {
     return { exact: 'Exact match', printing: 'Matched by set and number', fuzzy: 'Closest match' + (res.note ? ': ' + res.note : ''),
@@ -1131,7 +1135,7 @@
       if (!name.trim()) return;
       const box = $('#type-result'); box.textContent = 'Looking up…';
       try { const out = await api('/scan/api/resolve', 'POST', { cards: [{ name: name.trim() }] }); showTypeResult(out.cards[0]); }
-      catch (err) { box.textContent = 'Lookup failed: ' + err.message; }
+      catch (err) { box.textContent = 'Lookup failed: ' + why(err); }
     };
     input.addEventListener('input', () => {
       clearTimeout(timer); const q = input.value.trim(); selected = -1;
@@ -1162,7 +1166,7 @@
         box.append(h('div', { class: 'notice ' + (deferred ? 'warn' : 'ok'), text: 'Added ' + added + ' line' + (added === 1 ? '' : 's') + ' to the list.' + (review.length ? ' ' + review.length + ' need a decision:' : '') + (deferred ? ' ' + out.message : '') }));
         review.forEach((r) => box.append(resultCard(r, { onAdd: (q) => { addItem(r, q); box.textContent = 'Added.'; }, onOther: () => { input.value = (r.input && r.input.name) || ''; input.focus(); } })));
         if (added && !review.length) ta.value = '';
-      } catch (err) { box.textContent = 'Resolve failed: ' + err.message; }
+      } catch (err) { box.textContent = 'Resolve failed: ' + why(err); }
     } }, 'Resolve list');
     pasteBtn.classList.add('primary');
     panel.append(h('div', { class: 'card' }, h('label', { for: 'type-input', text: 'Type a card name' }), suggest,
@@ -1219,7 +1223,7 @@
         msg.append(h('div', { class: 'notice ok' }, 'Saved as ', h('strong', { text: out.name }), ' (', h('code', { text: out.id }), '). ',
           'In Claude or ChatGPT, say: “get my scan session ', h('em', { text: out.name }), '” to use these cards.'));
         buzz(30);
-      } catch (err) { msg.append(h('div', { class: 'notice error', text: 'Save failed: ' + err.message })); }
+      } catch (err) { msg.append(h('div', { class: 'notice error', text: 'Save failed: ' + why(err) })); }
     } }, 'Save to gateway');
     save.classList.add('primary');
     const copy = h('button', { class: 'secondary', onclick: async () => {
@@ -1254,7 +1258,7 @@
           showTab('sessions');
         } }, '✕'))));
       panel.append(h('div', { class: 'card' }, ul));
-    } catch (err) { panel.textContent = ''; panel.append(h('div', { class: 'notice error', text: 'Could not load sessions: ' + err.message })); }
+    } catch (err) { panel.textContent = ''; panel.append(h('div', { class: 'notice error', text: 'Could not load sessions: ' + why(err) })); }
   }
 
   // ---------------------------------------------------------------- install
