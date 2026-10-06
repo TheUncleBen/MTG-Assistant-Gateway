@@ -39,7 +39,7 @@ next sign-in.
    review page. `true` lets the assistant apply after a yes in chat, which is
    weaker: text the assistant reads (a deck description, a card note) could
    trick it into applying its own proposal.
-5. The database is upgraded on start (schema 9). Take a backup first, as for
+5. The database is upgraded on start (schema 10). Take a backup first, as for
    every release; the 0.6.0 image refuses to start on the upgraded file.
 
 ### Security
@@ -89,22 +89,27 @@ next sign-in.
   same header.
 - Pages forbid framing and base-URL changes in their CSP (`frame-ancestors
   'none'`, `base-uri 'none'`), the offline page too.
-- Sign-in floods: each network may start 30 sign-ins a minute, and unfinished
+- Sign-in floods: each public address may start 30 sign-ins a minute (private
+  addresses, such as an untrusted reverse proxy's, are not limited, and a
+  warning suggests `MTG_TRUSTED_PROXIES` when many browsers share one), and unfinished
   sign-ins are capped at 10 per browser and 500 per AI client. When a cap is
   hit, the network holding the most unfinished sign-ins loses its oldest, so
   a flood only pushes out its own.
 - Client ID Metadata Documents: an address with a query string is refused; a
-  failed fetch blocks new addresses on that host for a minute; new addresses
-  are fetched at most 10 times a minute per site and 60 in all; a document is
-  capped like a registered client (20 redirect URIs, 2000 characters each,
-  8 KB); the cache keeps at most 1000 documents, 50 per host.
+  failed fetch blocks new addresses on that site for a minute; new addresses
+  are fetched at most 10 times a minute per site and 60 in all, counting only
+  requests actually sent; a document is capped like a registered client (20
+  redirect URIs, 2000 characters each, 8 KB); the cache keeps at most 1000
+  documents, 50 per site. Apps a member has signed in with, and hosts in
+  `MTG_CIMD_ALLOWED_HOSTS`, are never throttled or evicted.
 - Archidekt: each member may start `MTG_ARCHIDEKT_CALLS_PER_10_MIN` (120)
   Archidekt calls per 10 minutes, the research tools' `archidekt_*` calls
   included. Five failed Archidekt link attempts in 15 minutes block further
-  attempts for a while.
+  attempts for a while, parallel attempts included.
 - Research tools: oversized arguments (goldfish games, turns and odds sizes,
   text over 200 kB) are refused before anything is forwarded.
-- Read-only connections: a token issued only for the `mtg.read` scope can
+- Read-only connections: a token whose scopes are all read-only (`mtg.read`
+  or `read`; `read write` keeps full access) can
   read but not propose, apply, reject, run reports or save scans.
 - Proposals record the app that made them and show it on the review page.
   Disconnecting an app rejects its pending proposals. One app may hold 30
@@ -117,8 +122,8 @@ next sign-in.
 - An Archidekt session refresh that races an unlink or a relink no longer
   overwrites or revokes the newer link.
 - A deck apply or report still running when the member deleted their data
-  stores nothing for the deleted account. **Delete my data** removes deck
-  covers too.
+  stores nothing for the deleted account. **Delete my data** removes the
+  member's own deck covers too, never another member's.
 - A deck settings change re-reads the deck after the backup copy and refuses
   if its details changed meanwhile.
 - Deeply nested JSON gets a 400 instead of an unhandled error.
