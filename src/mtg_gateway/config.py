@@ -169,6 +169,9 @@ class Settings:
         "mtg-assistant-gateway/0.1 (+https://github.com/TheUncleBen/MTG-Assistant-Gateway)"
     )
     archidekt_min_interval: float = 1.0
+    # Archidekt work one member may start per 10 minutes (decks.RateBudget), proxied archidekt_*
+    # research calls included.
+    archidekt_calls_per_10_min: int = 120
     scryfall_lookup_interval: float = 0.5  # seconds between single-card Scryfall lookups (scan)
     # Card-scan match thresholds (see scan.service.ScanThresholds).
     scan_fuzzy_min_similarity: float = 0.65
@@ -312,6 +315,7 @@ def load_settings() -> Settings:
         writes_enabled=_bool_env("MTG_WRITES_ENABLED", False),
         archidekt_base=(_env("MTG_ARCHIDEKT_BASE", "https://archidekt.com/api") or "").rstrip("/"),
         archidekt_backups=_bool_env("MTG_ARCHIDEKT_BACKUPS", True),
+        archidekt_calls_per_10_min=_int_env("MTG_ARCHIDEKT_CALLS_PER_10_MIN", 120, lo=10, hi=100_000),
         archidekt_backup_folder=(_env("MTG_ARCHIDEKT_BACKUP_FOLDER", "MTG Gateway backups") or "").strip()[
             :100
         ]

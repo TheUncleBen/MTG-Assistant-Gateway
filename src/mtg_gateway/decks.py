@@ -70,11 +70,27 @@ MAX_DESCRIPTION = 20_000
 current_client: ContextVar[str | None] = ContextVar("current_client", default=None)
 MAX_CHANGES = 40
 BROWSER_CLIENT = "__browser__"  # the same value as pages.BROWSER_CLIENT_ID
-# Pending proposals one member may hold at once; another is refused until some are applied,
-# rejected or expire. Closed ones (expired, rejected, failed) beyond the newest
-# MAX_CLOSED_PROPOSALS per member are deleted, so proposals cannot fill the disk.
-MAX_PENDING_PROPOSALS = 50
+# An administrator acting on a member's account from the admin pages (unlink): recorded in the
+# member's own activity log as done by an administrator, never as the member's browser.
+ADMIN_CLIENT = "__admin__"
+# Pending proposals one member may hold at once, and one app (or the browser) may hold for that
+# member; another is refused until some are applied, rejected or expire. The per-app cap keeps
+# one connected app from filling every slot and blocking the member's other apps. Closed ones
+# (expired, rejected, failed) beyond the newest MAX_CLOSED_PROPOSALS per member are deleted, so
+# proposals cannot fill the disk.
+MAX_PENDING_PROPOSALS = 100
+MAX_PENDING_PER_CLIENT = 30
 MAX_CLOSED_PROPOSALS = 100
+# Failed Archidekt sign-ins (wrong username or password) one member may make from the account
+# page in LINK_FAILURE_WINDOW seconds; further attempts are refused until the oldest ages out,
+# so the page cannot be used to guess Archidekt passwords from the gateway's address.
+MAX_LINK_FAILURES = 5
+LINK_FAILURE_WINDOW = 15 * 60
+# OAuth scopes. "mtg" (the default every client gets) allows everything below. A token issued
+# only for a read-only scope ("mtg.read", or a bare "read") may read decks, proposals, snapshots
+# and reports but not propose, apply, reject, run reports or save scans.
+READ_ONLY_SCOPES = frozenset({"mtg.read", "read"})
+FULL_SCOPE = "mtg"
 # Archidekt work one member may have running or queued in the shared pacer at once (a deck
 # read, a proposal, an apply); more is refused at once (rate_limited), so one account cannot
 # queue the pacer up for every other member.
@@ -82,6 +98,45 @@ MAX_ARCHIDEKT_PER_USER = 3
 # The member whose Archidekt slot the running task already holds, so nested calls (an apply's
 # reads and writes, get_any_deck's private retry) do not take a second one.
 _slot_holder: ContextVar[str | None] = ContextVar("_slot_holder", default=None)
+# Archidekt work one member may start per ARCHIDEKT_BUDGET_WINDOW seconds (each deck read,
+# proposal, apply or proxied archidekt_* research call counts once), on top of the concurrency
+# cap above: a looping assistant cannot keep a steady stream of requests going on the member's
+# Archidekt account and the shared pacer. MTG_ARCHIDEKT_CALLS_PER_10_MIN sets it.
+ARCHIDEKT_BUDGET_WINDOW = 600
+
+
+def scopes_allow_writes(scopes: list[str] | tuple[str, ...] | None) -> bool:
+    """False for a token issued only for read-only scopes (see READ_ONLY_SCOPES). A token with no
+    scope, the default "mtg" scope or any other scope keeps full access, as before scopes were
+    checked, so existing connections are unaffected."""
+    have = set(scopes or ())
+    return FULL_SCOPE in have or not (have & READ_ONLY_SCOPES)
+
+
+class RateBudget:
+    """A token bucket per key: ``per_window`` calls, refilled evenly over ``window`` seconds."""
+
+    def __init__(self, per_window: int, window: float = ARCHIDEKT_BUDGET_WINDOW):
+        self.per_window = max(1, int(per_window))
+        self.window = float(window)
+        self._buckets: dict[str, tuple[float, float]] = {}
+
+    def take(self, key: str) -> bool:
+        """Spend one call for ``key``; False (and nothing spent) when its bucket is empty."""
+        now = time.monotonic()
+        tokens, at = self._buckets.get(key, (float(self.per_window), now))
+        tokens = min(float(self.per_window), tokens + (now - at) * self.per_window / self.window)
+        if tokens < 1:
+            self._buckets[key] = (tokens, now)
+            return False
+        self._buckets[key] = (tokens - 1, now)
+        if len(self._buckets) > 10_000:  # forget full buckets, which hold nothing worth keeping
+            self._buckets = {
+                k: v
+                for k, v in self._buckets.items()
+                if v[0] + (now - v[1]) * self.per_window / self.window < self.per_window
+            }
+        return True
 
 
 # -- review rows ----------------------------------------------------------------
@@ -123,7 +178,10 @@ def row_line(r: dict[str, Any]) -> str:
     if kind == "change":
         return f"{r['before']} -> {r['after']} {label}"
     if kind == "category":
-        return f"{r['name']}: category {r['before']} -> {r['after']}"
+        line = f"{r['name']}: category {r['before']} -> {r['after']}"
+        if r.get("leaves"):  # moved into a category the deck does not count (Maybeboard...)
+            line += f" (leaves the deck, -{r['leaves']})"
+        return line
     if kind == "finish":
         return f"{r['name']}: finish {r['before']} -> {r['after']}"
     if kind == "printing":
@@ -152,6 +210,8 @@ def actor_label(client_id: str | None, name: str | None = None) -> str:
         return ""
     if client_id == BROWSER_CLIENT:
         return "browser"
+    if client_id == ADMIN_CLIENT:
+        return "administrator"
     short = clean_text(client_id)
     short = short if len(short) <= 40 else short[:37] + "..."
     shown = clean_text(name or "")[:60]
@@ -487,10 +547,23 @@ def category_plan_rows(
     return want, lines
 
 
+def leaving_deck(deck: Deck, recategorise: dict[int, list[str]]) -> dict[str, int]:
+    """Copies per card name that ``recategorise`` (from ``category_plan``) moves out of the deck
+    proper: rows counted in the deck now whose new categories are all ones the deck excludes."""
+    excluded = deck.excluded_categories()
+    out: dict[str, int] = {}
+    for c in deck.main_cards:
+        cats = recategorise.get(c.relation_id) if c.relation_id is not None else None
+        if cats and all(cat in excluded for cat in cats):
+            out[c.name] = out.get(c.name, 0) + c.quantity
+    return out
+
+
 def plan(deck: Deck, changes: list[Change]) -> tuple[dict[str, int], dict[str, int], list[str]]:
     """Return (before counts, after counts, diff lines) for the deck plus changes. The lines
-    include those of ``category_plan`` for set_category and set_commander changes, which leave
-    the counts alone."""
+    include those of ``category_plan`` for set_category and set_commander changes; the after
+    counts are those of the count changes only (``leaving_deck`` has what a recategorisation
+    moves out of the deck proper), which is what ``build_payload`` needs."""
     before, after, rows = plan_rows(deck, changes)
     return before, after, [row_line(r) for r in rows]
 
@@ -504,7 +577,14 @@ def plan_rows(
     for n in before:  # a double-faced card is also found by its front face
         lookup.setdefault(front_face(n).lower(), n)
     after = dict(before)
-    _cats, cat_lines = category_plan_rows(deck, changes)
+    cats_want, cat_lines = category_plan_rows(deck, changes)
+    # A set_category into a category the deck does not count (Maybeboard, Sideboard...) takes
+    # those copies out of the deck proper: the review says so, and counts them as removed.
+    leaving = leaving_deck(deck, cats_want)
+    for r in cat_lines:
+        if r.get("kind") == "category" and r.get("name") in leaving:
+            r["leaves"] = leaving.pop(r["name"])
+    cat_lines += [_row("remove", name=name, qty=qty) for name, qty in leaving.items()]
     _specs, print_lines = printing_plan_rows(deck, changes)
     cat_lines = cat_lines + print_lines
     for ch in changes:
@@ -786,6 +866,7 @@ class DeckService:
         self._deck_locks: dict[str, asyncio.Lock] = {}
         self._archidekt_in_flight: dict[str, int] = {}
         self.max_archidekt_per_user = MAX_ARCHIDEKT_PER_USER
+        self.archidekt_budget = RateBudget(settings.archidekt_calls_per_10_min)
 
     @asynccontextmanager
     async def archidekt_slot(self, sub: str | None) -> AsyncIterator[None]:
@@ -802,6 +883,9 @@ class DeckService:
                 f"{self.max_archidekt_per_user} Archidekt requests for your account are still running "
                 "or waiting their turn; wait for them to finish and try again.",
             )
+        refused = self.budget_refusal(sub)
+        if refused:
+            raise DeckError("rate_limited", refused)
         self._archidekt_in_flight[sub] = self._archidekt_in_flight.get(sub, 0) + 1
         token = _slot_holder.set(sub)
         try:
@@ -814,13 +898,33 @@ class DeckService:
             else:
                 self._archidekt_in_flight.pop(sub, None)
 
+    def budget_refusal(self, sub: str) -> str | None:
+        """Spend one unit of the member's Archidekt budget; the refusal to show when it is used up
+        (None when the call may go ahead). Also called by the research proxy for its
+        archidekt_* tools, which reach Archidekt through Mystic Forge."""
+        if self.archidekt_budget.take(sub):
+            return None
+        return (
+            f"Your account has used its {self.archidekt_budget.per_window} Archidekt requests for "
+            f"the last {ARCHIDEKT_BUDGET_WINDOW // 60} minutes; wait a few minutes and try again."
+        )
+
     # -- account links --------------------------------------------------------
     async def link(self, sub: str, login: str, password: str) -> dict[str, Any]:
+        since = int(time.time()) - LINK_FAILURE_WINDOW
+        if self.db.count_audit(sub, "archidekt_link_failed", since) >= MAX_LINK_FAILURES:
+            raise DeckError(
+                "rate_limited",
+                f"Too many failed Archidekt sign-ins in the last {LINK_FAILURE_WINDOW // 60} minutes. "
+                "Wait a while, check your Archidekt username and password, then try again.",
+            )
         try:
             async with self.archidekt_slot(sub):
                 session = await self.client.login(login, password)
         except ArchidektError as exc:
             if exc.kind in ("auth", "forbidden", "contract"):
+                # counted against MAX_LINK_FAILURES; the attempted login name is not recorded
+                self._audit("archidekt_link_failed", sub=sub, detail={"error": exc.kind})
                 raise DeckError("auth", "Archidekt did not accept that username and password.") from exc
             raise DeckError(exc.kind, str(exc)) from exc
         secret = json.dumps({"access": session["access"], "refresh": session.get("refresh")})
@@ -881,10 +985,14 @@ class DeckService:
         stored, the refresh itself is rejected, or a freshly refreshed token is rejected too."""
         token, row = self._token(sub)
         refresh = (row.get("_secret") or {}).get("refresh")
+        # The stored session this call works with. Every write below is conditional on the link
+        # still holding exactly it, so a refresh or a failure that races an unlink or a relink
+        # (possibly to another Archidekt account) never touches the newer link.
+        stored = {"secret_enc": row["secret_enc"]}
 
         def expire(reason: str) -> DeckError:
-            self.db.revoke_link(sub)
-            self._audit("archidekt_link_expired", sub=sub, detail={"reason": reason})
+            if self.db.revoke_link(sub, only_secret=stored["secret_enc"]):
+                self._audit("archidekt_link_expired", sub=sub, detail={"reason": reason})
             return DeckError(
                 "not_linked",
                 "Archidekt no longer accepts the stored session. "
@@ -901,11 +1009,24 @@ class DeckService:
                     raise expire(f"{reason}, refresh rejected") from exc
                 raise DeckError(exc.kind, str(exc)) from exc
             blob = json.dumps({"access": access, "refresh": refresh})
-            if not self.db.update_link_secret(sub, self.fernet.encrypt(blob.encode()).decode()):
-                # unlinked or revoked while the refresh was in flight: never resurrect the link
+            new_enc = self.fernet.encrypt(blob.encode()).decode()
+            if not self.db.update_link_secret(sub, new_enc, only_secret=stored["secret_enc"]):
+                # Unlinked, revoked or relinked while the refresh was in flight: never resurrect
+                # the old link or overwrite a newer one with this session. A link to the same
+                # Archidekt account (another request refreshed it first) is simply used as stored.
+                try:
+                    now_access, now_row = self._token(sub)
+                except DeckError:
+                    now_row = None
+                if now_row is not None and _same_account(now_row, row):
+                    stored["secret_enc"] = now_row["secret_enc"]
+                    return now_access
                 raise DeckError(
-                    "not_linked", f"Archidekt is not linked. Link it at {self.settings.public_url}/account."
+                    "not_linked",
+                    "Your Archidekt link changed while this request ran. Nothing was sent; try again"
+                    f" (the link is managed at {self.settings.public_url}/account).",
                 )
+            stored["secret_enc"] = new_enc
             self._audit("archidekt_session_refreshed", sub=sub, detail={"reason": reason})
             return access
 
@@ -935,6 +1056,8 @@ class DeckService:
         # from a name: an app may register any name it likes, "browser" included.
         if client_id == BROWSER_CLIENT:
             detail = {**(detail or {}), "origin": "browser"}
+        elif client_id == ADMIN_CLIENT:
+            detail = {**(detail or {}), "origin": "admin", "by": "admin"}
         elif client_id:
             name = self.db.client_name(client_id)
             detail = {
@@ -1026,7 +1149,7 @@ class DeckService:
         if fmt not in FORMAT_IDS:
             raise DeckError("invalid", f"deck_format must be one of: {', '.join(sorted(FORMAT_IDS))}")
         entries = normalise_cards(cards=cards, decklist_text=decklist_text, csv_text=csv_text)
-        self._token(sub)  # must be linked before we store a proposal that needs the account
+        _token, link = self._token(sub)  # must be linked before we store a proposal that needs it
         self._room_for_proposal(sub)
         total = sum(c["quantity"] for c in entries)
         rows = [_row("new_deck", name=name, format=fmt, cards=total, private=bool(private))]
@@ -1043,7 +1166,16 @@ class DeckService:
                 "deck_id": "new",
                 "deck_name": name,
                 "baseline_fingerprint": "",
-                "changes": {"name": name, "format": fmt, "private": private, "cards": entries},
+                # The Archidekt account the deck is made in: shown on the review page, and the
+                # apply is refused if another account is linked by then.
+                "changes": {
+                    "name": name,
+                    "format": fmt,
+                    "private": private,
+                    "cards": entries,
+                    "archidekt_username": link["archidekt_username"],
+                    "archidekt_user_id": link.get("archidekt_user_id"),
+                },
             },
             rows,
         )
@@ -1074,6 +1206,8 @@ class DeckService:
             "snapshot_id": row["snapshot_id"],
             "result": row["result"],
             "review_url": f"{self.settings.public_url}/proposals/{row['id']}",
+            # Which app made it ("browser", or "app: <its name> (<client id>)"), for the review page.
+            "created_by": self._creator_label(row.get("created_by_client")),
             "writes_enabled": self.settings.writes_enabled,
             "next_step": _next_step(
                 state,
@@ -1085,14 +1219,28 @@ class DeckService:
             ),
         }
 
+    def _creator_label(self, client_id: str | None) -> str:
+        if not client_id:
+            return ""
+        name = None if client_id in (BROWSER_CLIENT, ADMIN_CLIENT) else self.db.client_name(client_id)
+        return actor_label(client_id, name)
+
     def _room_for_proposal(self, sub: str) -> None:
-        """Refuse a new proposal while the member already has MAX_PENDING_PROPOSALS pending."""
+        """Refuse a new proposal while the member already has MAX_PENDING_PROPOSALS pending, or
+        the app making it has MAX_PENDING_PER_CLIENT pending for them."""
         if self.db.count_pending_proposals(sub) >= MAX_PENDING_PROPOSALS:
             raise DeckError(
                 "rate_limited",
                 f"You already have {MAX_PENDING_PROPOSALS} pending proposals. Apply or reject some "
                 f"of them at {self.settings.public_url}/proposals (or wait for them to expire) "
                 "before proposing more.",
+            )
+        if self.db.count_pending_for_client(sub, current_client.get()) >= MAX_PENDING_PER_CLIENT:
+            raise DeckError(
+                "rate_limited",
+                f"This app already has {MAX_PENDING_PER_CLIENT} pending proposals for you. Apply or "
+                f"reject some of them at {self.settings.public_url}/proposals (or wait for them to "
+                "expire) before proposing more.",
             )
 
     def _save_proposal(self, row: dict[str, Any], rows: list[dict[str, Any]]) -> None:
@@ -1108,6 +1256,7 @@ class DeckService:
             },
             max_pending=MAX_PENDING_PROPOSALS,
             max_closed=MAX_CLOSED_PROPOSALS,
+            max_pending_per_client=MAX_PENDING_PER_CLIENT,
         )
         if not saved:
             self._room_for_proposal(row["owner_sub"])
@@ -1118,7 +1267,14 @@ class DeckService:
         out = []
         for r in self.db.list_proposals(sub):
             state = "expired" if r["state"] == "pending" and r["expires_at"] < now else r["state"]
-            out.append({**r, "state": state, "review_url": f"{self.settings.public_url}/proposals/{r['id']}"})
+            out.append(
+                {
+                    **r,
+                    "state": state,
+                    "created_by": self._creator_label(r.get("created_by_client")),
+                    "review_url": f"{self.settings.public_url}/proposals/{r['id']}",
+                }
+            )
         return out
 
     async def apply(self, sub: str, proposal_id: str, *, via: str) -> dict[str, Any]:
@@ -1229,7 +1385,10 @@ class DeckService:
         await self._rows_unchanged(sub, deck)  # lookups and backup take a while: check again
         await self._send(sub, deck.id, payload, progress)
         verified = await self.get_deck(sub, deck.id)
-        mismatches = _mismatches(verified.counts_by_name(), {n: q for n, q in after.items() if q > 0})
+        expected = dict(after)  # the counts after the count changes, less what leaves the deck
+        for name, qty in leaving_deck(deck, recategorise).items():
+            expected[name] = expected.get(name, 0) - qty
+        mismatches = _mismatches(verified.counts_by_name(), {n: q for n, q in expected.items() if q > 0})
         mismatches = sorted(
             set(mismatches)
             | set(_category_mismatches(verified, recategorise))
@@ -1396,14 +1555,22 @@ class DeckService:
 
     def _take_snapshot(self, sub: str, row: dict[str, Any], deck: Deck) -> str:
         snapshot_id = secrets.token_urlsafe(12)
-        self.db.save_snapshot(
+        saved = self.db.save_snapshot(
             snapshot_id,
             owner_sub=sub,
             deck_id=deck.id,
             proposal_id=row["id"],
             fingerprint=deck.fingerprint(),
             deck=deck.raw,
+            while_applying=True,
         )
+        if not saved:
+            # The member deleted their data (or this proposal) while the apply was running.
+            raise DeckError(
+                "not_found",
+                "This proposal was deleted, with your gateway data, while it was being applied. "
+                "Nothing was sent to Archidekt.",
+            )
         self.db.finish_proposal(row["id"], state="applying", snapshot_id=snapshot_id)
         return snapshot_id
 
@@ -1544,6 +1711,14 @@ class DeckService:
     async def _apply_create(self, sub: str, row: dict[str, Any], progress: dict[str, Any]) -> dict[str, Any]:
         spec = row["changes"]
         cards = spec["cards"]
+        _token, link = self._token(sub)
+        if spec.get("archidekt_username") and not _same_account(link, spec):
+            raise DeckError(
+                "other_account",
+                f"This new deck was proposed for Archidekt account {spec['archidekt_username']}, but "
+                f"{link['archidekt_username']} is linked now. Nothing was created; ask for a new "
+                "proposal if the deck should go to this account.",
+            )
         resolve: dict[str, int] = {}
         modifiers: dict[str, str] = {}
         printing_notes: list[str] = []
@@ -1727,6 +1902,15 @@ class DeckService:
         progress["snapshot_id"] = snapshot_id
         backup = await self._backup_on_archidekt(sub, row, deck, snapshot_id)
         progress.update(backup)
+        # The backup takes a while: check again before writing, like card edits do. The details
+        # are compared rather than the fingerprint, which the backup copy may bump.
+        now = await self.get_own_deck(sub, deck.id)
+        if any(_current_detail(now, key) != _current_detail(deck, key) for key in DETAIL_FIELDS):
+            raise DeckError(
+                "stale",
+                "The deck's details changed on Archidekt while this change was being prepared. "
+                "Nothing was sent. Create a new proposal from the current deck.",
+            )
         fields = details_payload(changes)
         await self._call(sub, self.client.update_deck, deck.id, fields)
         verified = await self.get_deck(sub, deck.id)
@@ -1904,6 +2088,13 @@ def _category_mismatches(verified: Deck, want: dict[int, list[str]]) -> list[str
         if row is None or sorted(row.categories) != sorted(cats):
             out.add(row.name if row else f"deck row {rel}")
     return sorted(out)
+
+
+def _same_account(a: dict[str, Any], b: dict[str, Any]) -> bool:
+    """Whether two link rows name the same Archidekt account (user id when both have one)."""
+    if a.get("archidekt_user_id") and b.get("archidekt_user_id"):
+        return str(a["archidekt_user_id"]) == str(b["archidekt_user_id"])
+    return str(a.get("archidekt_username") or "").lower() == str(b.get("archidekt_username") or "").lower()
 
 
 def _sent(progress: dict[str, Any]) -> dict[str, Any]:

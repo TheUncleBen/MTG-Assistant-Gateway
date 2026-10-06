@@ -320,7 +320,15 @@ an address (a proxy that doesn't send the header) isn't rate-limited, because
 everyone would share one limit, and all those visitors count as one network. The cleanup runs
 at start and then every hour, with or without backups. It also keeps the
 newest 25 snapshots of each member's deck (plus any a pending restore needs),
-usage counters for 400 days and remembered deck covers for 180 days. A flood of sign-up attempts can therefore cost a connector that was
+usage counters for 400 days and remembered deck covers for 180 days. Closed
+proposals (expired, rejected, failed) go after 30 days, applied ones after a
+year. Snapshots and reports stay with the member, not with the Archidekt
+account: after unlinking and linking another Archidekt account, the member
+still sees the snapshots and reports taken before (they are the member's own
+backups); they age out with the limits above or go with **Delete my data**.
+"Delete my data" removes a member's rows from the live database; the nightly
+backups in `MTG_BACKUP_DIR` keep a copy until they age out after
+`MTG_BACKUP_KEEP_DAYS`, including the member's encrypted Archidekt session. A flood of sign-up attempts can therefore cost a connector that was
 registered but not used yet; that client just registers again. To slow
 floods down at the proxy, see the optional rate limit in
 [DEPLOY.md](DEPLOY.md#7-reverse-proxy).

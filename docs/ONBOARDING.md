@@ -230,11 +230,13 @@ Good to know:
 
 1. On `https://mtg.example.com/account`, under **Delete my data**, tick the
    box and press **Delete my data**. That deletes everything the gateway
-   keeps for you: proposals, snapshots, test reports, scan sessions, the
-   stored Archidekt session, connected apps and your sign-in. Your decks on
-   Archidekt (and the backup copies in your Archidekt account) stay yours.
-   The owner's security log keeps a record that your account existed and
-   was deleted until it ages out after a year. If you only want to stop
+   keeps for you from its database: proposals, snapshots, test reports, scan
+   sessions, deck covers, the stored Archidekt session, connected apps and
+   your sign-in. Your decks on Archidekt (and the backup copies in your
+   Archidekt account) stay yours. The owner's nightly database backups, if
+   they keep them, still hold a copy until they age out (14 days by default,
+   `MTG_BACKUP_KEEP_DAYS`). The owner's security log keeps a record that your
+   account existed and was deleted until it ages out after a year. If you only want to stop
    using Archidekt through the gateway, press the unlink button instead.
 2. To be sure the old Archidekt session is dead on Archidekt's side too,
    change your Archidekt password.
