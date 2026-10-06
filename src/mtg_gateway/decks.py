@@ -106,11 +106,12 @@ ARCHIDEKT_BUDGET_WINDOW = 600
 
 
 def scopes_allow_writes(scopes: list[str] | tuple[str, ...] | None) -> bool:
-    """False for a token issued only for read-only scopes (see READ_ONLY_SCOPES). A token with no
-    scope, the default "mtg" scope or any other scope keeps full access, as before scopes were
-    checked, so existing connections are unaffected."""
+    """False only for a token that has scopes and every one of them is read-only (see
+    READ_ONLY_SCOPES). A token with no scope, the default "mtg" scope, or any scope that is not a
+    read-only one ("read write", "openid read", "claudeai"...) keeps full access, as before scopes
+    were checked, so existing connections are unaffected."""
     have = set(scopes or ())
-    return FULL_SCOPE in have or not (have & READ_ONLY_SCOPES)
+    return not have or not have <= READ_ONLY_SCOPES
 
 
 class RateBudget:
@@ -865,6 +866,7 @@ class DeckService:
         self.fernet = Fernet(settings.fernet_key.encode())
         self._deck_locks: dict[str, asyncio.Lock] = {}
         self._archidekt_in_flight: dict[str, int] = {}
+        self._link_locks: dict[str, asyncio.Lock] = {}
         self.max_archidekt_per_user = MAX_ARCHIDEKT_PER_USER
         self.archidekt_budget = RateBudget(settings.archidekt_calls_per_10_min)
 
@@ -910,7 +912,8 @@ class DeckService:
         )
 
     # -- account links --------------------------------------------------------
-    async def link(self, sub: str, login: str, password: str) -> dict[str, Any]:
+    async def _link_attempt(self, sub: str, login: str, password: str) -> dict[str, Any]:
+        """One Archidekt sign-in for ``link``, refused past MAX_LINK_FAILURES recent failures."""
         since = int(time.time()) - LINK_FAILURE_WINDOW
         if self.db.count_audit(sub, "archidekt_link_failed", since) >= MAX_LINK_FAILURES:
             raise DeckError(
@@ -920,13 +923,21 @@ class DeckService:
             )
         try:
             async with self.archidekt_slot(sub):
-                session = await self.client.login(login, password)
+                session: dict[str, Any] = await self.client.login(login, password)
         except ArchidektError as exc:
             if exc.kind in ("auth", "forbidden", "contract"):
                 # counted against MAX_LINK_FAILURES; the attempted login name is not recorded
                 self._audit("archidekt_link_failed", sub=sub, detail={"error": exc.kind})
                 raise DeckError("auth", "Archidekt did not accept that username and password.") from exc
             raise DeckError(exc.kind, str(exc)) from exc
+        return session
+
+    async def link(self, sub: str, login: str, password: str) -> dict[str, Any]:
+        # One attempt per member at a time: the failure count is checked and the failure recorded
+        # under the same lock, so parallel attempts cannot all pass the check before any fails.
+        # (One small lock per member who ever linked; members are a known, signed-in set.)
+        async with self._link_locks.setdefault(sub, asyncio.Lock()):
+            session = await self._link_attempt(sub, login, password)
         secret = json.dumps({"access": session["access"], "refresh": session.get("refresh")})
         self.db.save_link(
             sub,

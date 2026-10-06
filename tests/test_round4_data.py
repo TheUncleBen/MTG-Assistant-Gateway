@@ -596,3 +596,48 @@ async def test_concurrent_refreshes_of_one_link_both_succeed(stack: Stack) -> No
     outs = [structured(await t) for t in tasks]
     assert all(o["ok"] for o in outs), outs
     assert h.db.get_link("user-1")["archidekt_username"] == "alice"
+
+
+# -- RD-5: only a token whose every scope is read-only is read-only ----------------------------
+@pytest.mark.parametrize(
+    ("scopes", "writes"),
+    [
+        (["read", "write"], True),
+        (["mtg", "read"], True),
+        ([], True),
+        (None, True),
+        (["claudeai"], True),
+        (["openid", "profile", "read"], True),
+        (["mtg.read"], False),
+        (["read"], False),
+        (["mtg.read", "read"], False),
+    ],
+)
+def test_scopes_allow_writes(scopes, writes) -> None:
+    assert decks_module.scopes_allow_writes(scopes) is writes
+
+
+# -- RD-7: parallel link attempts cannot get past the failure limit ----------------------------
+async def test_parallel_link_attempts_respect_the_failure_limit(stack: Stack) -> None:
+    h = stack.h
+    gw = h.app.state.gateway
+    b = Browser(h)
+    await b.login()
+    for _ in range(decks_module.MAX_LINK_FAILURES - 1):
+        await b.link("alice", "wrong")
+    real = gw.archidekt.login
+    tried = 0
+
+    async def slow_login(*a, **kw):
+        nonlocal tried
+        tried += 1
+        await asyncio.sleep(0.05)
+        return await real(*a, **kw)
+
+    gw.archidekt.login = slow_login
+    results = await asyncio.gather(
+        *(gw.decks.link("user-1", "alice", "wrong") for _ in range(3)), return_exceptions=True
+    )
+    assert tried == 1, results
+    assert sorted(r.kind for r in results) == ["auth", "rate_limited", "rate_limited"]
+    await b.aclose()
