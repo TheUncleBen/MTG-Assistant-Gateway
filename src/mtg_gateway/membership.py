@@ -122,7 +122,7 @@ class MembershipChecker:
                     return self._revoke(sub, "no_idp_refresh_token", None, removed=False)
                 tokens = await self.oidc.refresh(refresh)
                 if tokens is None:
-                    return self._revoke(sub, "idp_refused_refresh", None)
+                    return self._revoke(sub, "idp_refused_refresh", None, removed=False)
                 self.db.save_idp_grant(
                     sub,
                     refresh_enc=self._seal(tokens.refresh_token),
@@ -131,7 +131,7 @@ class MembershipChecker:
                 )
                 info = await self.oidc.userinfo(tokens.access_token or "")
                 if info is None:
-                    return self._revoke(sub, "idp_refused_userinfo", None)
+                    return self._revoke(sub, "idp_refused_userinfo", None, removed=False)
         except IdPUnavailable as exc:
             logger.warning("membership check could not reach the identity provider: %s", exc)
             return Membership.UNAVAILABLE

@@ -42,14 +42,15 @@ up.
 | Discovery | Loads `<MTG_OIDC_ISSUER>/.well-known/openid-configuration` and requires the `issuer` inside to match (a trailing slash on either side doesn't matter) | The provider's **OpenID Configuration Issuer**, `https://auth.example.com/application/o/mtg-gateway/`. The slug in it is the **application's** slug |
 | Sign-in flow | Authorization code with PKCE (`S256`). The redirect URI is `MTG_PUBLIC_URL` + `/auth/callback` | Provider → **Redirect URIs**: `https://mtg.example.com/auth/callback`, matching mode **Strict** |
 | Client authentication | Sends the client ID and secret in the token request body (`client_secret_post`) | Provider → **Client type: Confidential**. Copy the **Client ID** and **Client Secret** |
-| Scopes | Asks for `openid profile email` (`MTG_OIDC_SCOPES`) | Provider → **Scopes**: the three built-in mappings `authentik default OAuth Mapping: OpenID 'openid'`, `… 'email'` and `… 'profile'` |
+| Scopes | Asks for `openid profile email offline_access` (`MTG_OIDC_SCOPES`; `offline_access` is always added) | Provider → **Scopes**: the four built-in mappings `authentik default OAuth Mapping: OpenID 'openid'`, `… 'email'`, `… 'profile'` and `… 'offline_access'`. **Don't skip `offline_access`**: without it Authentik silently issues no refresh token, and members are asked to sign in again every time Authentik's access token runs out (an hour by default) |
 | ID token | Must be in the token response and signed with RS256, RS384, RS512, ES256, ES384, ES512 or PS256. HS256 is refused | Provider → **Signing Key**: a certificate, by default `authentik Self-signed Certificate` (RS256). Leave **Include claims in id_token** on |
 | Identity | Reads `sub` (required), `email`, `name`, `preferred_username` and `groups` from the ID token, and fills any gaps from `/userinfo` | The default claims of the `email` and `profile` mappings. Authentik's `profile` mapping includes `groups` (checked by the end-to-end tests, section 11) |
 | Stable identity | Stores people by `sub`. Linked Archidekt accounts, proposals and tokens all hang off it | Provider → **Subject mode**: `Based on the User's hashed ID` (the default). Change it after people have signed in and everyone becomes a new, empty user |
 | Who gets in, first gate | Nothing. Authentik decides before the gateway ever sees the person | Application → **Policy / Group / User Bindings**: bind `MTG Assistant Gateway Users` |
 | Who gets in, second gate | Anyone whose `groups` claim doesn't include `MTG_REQUIRED_GROUP` exactly gets HTTP 403, and any gateway browser sessions they had are closed. The gateway won't start with it empty unless `MTG_ALLOW_ANY_IDP_USER=true` | The same group name in `MTG_REQUIRED_GROUP`. Exact, case-sensitive match |
-| Sign-out | The gateway's **Log out** button ends its own browser session (with `Clear-Site-Data`). It doesn't call Authentik's end-session endpoint, so the Authentik session stays | Provider → **Invalidation flow**: Authentik requires one, so use the default. Nothing else |
-| Refresh at the provider | None. The gateway issues its own refresh tokens and keeps no Authentik tokens | Provider token lifetimes can stay at their defaults |
+| Live membership | Before serving any request that carries a browser session or a gateway token, asks Authentik's `/userinfo` for the person's groups as they are now, renewing Authentik's access token with its refresh token when needed. The answer is cached for `MTG_MEMBERSHIP_CHECK_TTL` seconds (5 by default). Someone taken out of the group, deactivated or deleted loses everything on their next request. If Authentik can't be reached, requests get a 503 and nothing is revoked | The `offline_access` scope mapping (above). Nothing else |
+| Sign-out | The gateway's **Sign out** button ends its own browser session (with `Clear-Site-Data`); **Sign out on all my devices** (on the `/logout` page) ends every browser and Android app session of that person. It doesn't call Authentik's end-session endpoint, so the Authentik session stays, but for the next hour a sign-in to the gateway's pages in that browser or app asks Authentik for the password again (`prompt=login`), so the next person on a shared device isn't signed straight back in | Provider → **Invalidation flow**: Authentik requires one, so use the default. Nothing else |
+| Refresh at the provider | Keeps Authentik's access and refresh token from each sign-in, encrypted with the `mtg_fernet_key` secret, and uses them only for the live membership check. AI clients still get the gateway's own tokens, never Authentik's | Provider token lifetimes can stay at their defaults. Keep the refresh token validity at least as long as `MTG_REFRESH_TOKEN_TTL` (both 30 days by default): when Authentik refuses an expired refresh token the gateway can't tell that from a deactivated account, so it treats it like a removal, and the person signs in again and relinks Archidekt |
 
 ## 2. Before you start
 
@@ -102,11 +103,11 @@ use the gateway? Make a second group and bind only the first one in section
 | Redirect URIs | one entry, matching mode **Strict**, URL `https://mtg.example.com/auth/callback` | Exactly `MTG_PUBLIC_URL` plus `/auth/callback`, no trailing slash. Strict mode refuses anything else |
 | Signing Key | `authentik Self-signed Certificate` (or any RSA/EC certificate you manage) | Gives RS256 ID tokens. With **no** signing key, Authentik signs with HS256 using the client secret, which the gateway refuses (reported from Authentik's behaviour; the symptom is in section 10) |
 | Encryption Key | none | The gateway doesn't decrypt tokens |
-| Advanced protocol settings → Scopes | `authentik default OAuth Mapping: OpenID 'openid'`, `… 'email'` and `… 'profile'`. Nothing else needed | `openid` makes Authentik issue an ID token. `email` and `profile` carry the claims from section 1, and `profile` includes `groups` |
+| Advanced protocol settings → Scopes | `authentik default OAuth Mapping: OpenID 'openid'`, `… 'email'`, `… 'profile'` and `… 'offline_access'`. Nothing else needed | `openid` makes Authentik issue an ID token. `email` and `profile` carry the claims from section 1, and `profile` includes `groups`. `offline_access` makes Authentik issue a refresh token, which the gateway needs to keep checking membership after Authentik's access token runs out. Leave it out and Authentik says nothing; members just get asked to sign in again every hour |
 | Subject mode | **Based on the User's hashed ID** | A stable, opaque `sub`. Never a username or email mode: people can change those themselves, and whoever picks up an old value inherits that gateway account. Don't change it after the first sign-in |
-| Include claims in id_token | **on** (the default) | The gateway reads the ID token first and only falls back to `/userinfo` |
+| Include claims in id_token | **on** (the default) | At sign-in the gateway reads the ID token first and only falls back to `/userinfo`. The live membership check always asks `/userinfo` |
 | Issuer mode | **Each provider has a different issuer, based on the application slug** (the default, `per_provider`) | Gives you the issuer in section 6 |
-| Access code, access token and refresh token validity | defaults (1 minute, 1 hour, 30 days) | Only the code validity matters here, and a minute is plenty for the redirect |
+| Access code, access token and refresh token validity | defaults (1 minute, 1 hour, 30 days) | A minute is plenty for the redirect. The gateway renews Authentik's access token with the refresh token when it runs out. Don't make the refresh token validity shorter than `MTG_REFRESH_TOKEN_TTL` (30 days); see *Refresh at the provider* in section 1 |
 
 Save. If the Signing Key list is empty, make one first under **System →
 Certificates → Generate**.
@@ -207,7 +208,7 @@ Stack environment variables for the identity provider (the rest are in
 | `MTG_OIDC_ISSUER` | `https://auth.example.com/application/o/mtg-gateway/` |
 | `MTG_OIDC_CLIENT_ID` | the Client ID from section 6 |
 | `MTG_OIDC_CLIENT_SECRET_FILE` | `/run/secrets/mtg_oidc_client_secret` (already set in `deploy/portainer-stack.yml`) |
-| `MTG_OIDC_SCOPES` | leave the default, `openid profile email` |
+| `MTG_OIDC_SCOPES` | leave the default, `openid profile email offline_access` |
 | `MTG_REQUIRED_GROUP` | `MTG Assistant Gateway Users`, exactly as the group is named in Authentik. Required: the gateway refuses to start with it empty unless `MTG_ALLOW_ANY_IDP_USER=true` |
 
 `MTG_REQUIRED_GROUP` compares the name character for character with the
@@ -269,14 +270,19 @@ passwords behind it are what protect those decks. Recommended:
 (Menu names reported from Authentik's docs; the end-to-end tests don't
 cover MFA or Sources.)
 
-**Remove someone.** Take them out of `MTG Assistant Gateway Users` (or deactivate the
-user). Their next sign-in fails at Authentik's binding. If Authentik still
-lets them through (for example the binding is on another group), the
-gateway's group check refuses them and revokes their connected apps and
-browser sessions at once. Tokens they already hold run out on their own
-(an hour for access tokens, and refreshes stop once their last sign-in is
-older than `MTG_REAUTH_INTERVAL`, a week by default). To cut them off right
-away, use the command in [OPERATIONS.md](OPERATIONS.md#revoking-access).
+**Remove someone.** Take them out of `MTG Assistant Gateway Users`, or
+deactivate or delete the user. That's all. The gateway asks Authentik on
+every request (at most `MTG_MEMBERSHIP_CHECK_TTL` seconds old, 5 by
+default), so on their next request it revokes their gateway tokens, browser
+sessions, the Authentik tokens it kept and their Archidekt link, and they
+are signed out everywhere. A new sign-in then fails at Authentik's binding,
+or at the gateway's group check if the binding lets them through. This was
+tested live against Authentik 2026.2.2: taking someone out of a group
+revokes nothing in Authentik itself (it keeps honouring their refresh
+token), but its `/userinfo` shows the change at once, and deactivating or
+deleting the user invalidates their Authentik tokens at once. Taking someone
+out of `MTG_ADMIN_GROUP` likewise removes the admin page on their next
+request. More in [OPERATIONS.md](OPERATIONS.md#revoking-access).
 
 Send each person [ONBOARDING.md](ONBOARDING.md) along with the gateway's
 hostname.
@@ -288,7 +294,7 @@ hostname.
    contact.
 2. In a browser, open `https://mtg.example.com/account`. You get sent to
    Authentik, sign in, and land back on the account page with your name and
-   a **Log out** button.
+   a **Sign out** button.
 3. Connect Claude or ChatGPT ([CONNECT.md](CONNECT.md)) and call the
    `whoami` tool. It should show your `sub`, `email`, `preferred_username`
    and a `groups` list containing `MTG Assistant Gateway Users`.
@@ -310,6 +316,9 @@ hostname.
 | Authentik shows *Redirect URI Error* (or *Invalid redirect URI*) right after leaving the gateway | The provider's Redirect URI doesn't match `https://mtg.example.com/auth/callback`. In Strict mode the scheme, host, path, port and the lack of a trailing slash all count. Fix it on the provider, not the gateway |
 | Authentik shows *Permission denied* | The account isn't in a group bound to the application (section 5). Add them to `MTG Assistant Gateway Users` |
 | Gateway page *Your account is not in the group that may use this service* (HTTP 403) | Authentik let them through, but their `groups` claim doesn't include `MTG_REQUIRED_GROUP`. Check the exact spelling, that they're actually a member, and that the provider still has the `profile` scope mapping (it's what carries `groups`) |
+| Members are asked to sign in again about every hour | The provider is missing the `offline_access` scope mapping, so Authentik issues no refresh token and the gateway can't renew its check once Authentik's access token runs out. Add `authentik default OAuth Mapping: OpenID 'offline_access'` under **Advanced protocol settings → Scopes** (section 4); people sign in once more and it stops |
+| Page *The sign-in service can't be reached to confirm your access* (HTTP 503; JSON `idp_unavailable` for apps); log says `membership check could not reach the identity provider` | Authentik is down, or the gateway container can't reach `auth.example.com` (DNS, firewall, certificate). The gateway refuses requests rather than guess, and revokes nothing; everything works again once Authentik answers. Check Authentik's health and that the gateway's network can reach it |
+| Page *This account belongs to a different sign-in provider than the one this gateway uses now* | `MTG_OIDC_ISSUER` was changed (or pointed at another provider) and a new account has the same `sub` as an old one. The gateway refuses rather than hand over the old account's data. If it's the same person, an admin uses **Delete data** on the old account (admin page, Users), then they sign in again with an empty account |
 | Gateway page *Sign-in could not be completed with the identity provider*; log says `identity provider rejected the code exchange (HTTP 400/401)` | Wrong client secret in the Docker secret (recreate it from section 6), wrong Client ID, or the provider got switched to the **Public** client type |
 | Log says `identity-provider metadata issuer 'https://…' does not match configured '…'` | `MTG_OIDC_ISSUER` has a different slug or host from what the provider reports. Copy the **OpenID Configuration Issuer** from the provider page exactly |
 | Log says `cannot load identity-provider metadata from …` | The gateway container can't reach `auth.example.com` (DNS, firewall, or an overlay network with no way out), or Authentik's certificate isn't from a public CA |
@@ -326,15 +335,20 @@ hostname.
   Docker Swarm and set up through its REST API by
   `tests/e2e/authentik_setup.py`, with exactly the objects on this page: one
   confidential provider, strict redirect URI, the self-signed signing key,
-  the three default scope mappings, hashed-ID subject mode, claims in the ID
-  token, the default authorization and invalidation flows, one application
-  with slug `mtg-gateway`, and two groups bound to it. Four users then sign
-  in through Chromium:
+  the four default scope mappings (`openid`, `email`, `profile`,
+  `offline_access`), hashed-ID subject mode, claims in the ID token, a
+  one-minute access token validity (so the gateway's renewal with the
+  refresh token gets exercised), the default authorization and invalidation
+  flows, one application with slug `mtg-gateway`, and two groups bound to
+  it. Four users then sign in through Chromium:
   - two members of the bound and required group get separate identities,
     with `groups` showing in `whoami`;
   - a member of a bound group that isn't `MTG_REQUIRED_GROUP` gets through
     Authentik and is refused by the gateway;
-  - an account with no binding is refused by Authentik.
+  - an account with no binding is refused by Authentik;
+  - a member connected through an AI client is taken out of the group
+    through Authentik's API, and a few seconds later the gateway refuses
+    their access token (401) and their refresh token (`invalid_grant`).
 
   Sign-out, token and consent paths are covered by the same tests.
 - **Authentik versions:** `2025.6.4` (what this guide was first written

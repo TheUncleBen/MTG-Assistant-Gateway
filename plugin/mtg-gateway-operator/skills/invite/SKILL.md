@@ -51,6 +51,10 @@ Code and say "install this plugin".
 
 ## Removing access later
 
-Remove the user from the group (or disable the user) in Authentik. Existing
-gateway sessions last until their refresh token expires; to cut them off
-now, see `docs/OPERATIONS.md`, "Revoking access".
+Remove the user from the group (or deactivate the user) in Authentik.
+That's enough: the gateway asks Authentik on every request (cached for
+`MTG_MEMBERSHIP_CHECK_TTL` seconds, 5 by default), so on their next request
+their gateway tokens, browser sessions and Archidekt link are revoked. If
+the provider is missing the `offline_access` scope mapping, fix that first
+(`docs/IDP-AUTHENTIK.md`). Details in `docs/OPERATIONS.md`, "Revoking
+access".

@@ -136,7 +136,13 @@ In the Authentik admin UI:
    - Client type: **Confidential**
    - Redirect URIs: `https://mtg.example.com/auth/callback` (Strict)
    - Signing key: your default certificate (RS256). Don't leave it empty.
-   - Scopes: keep the defaults, `openid`, `email` and `profile`
+   - Scopes (under **Advanced protocol settings**): `openid`, `email`,
+     `profile` **and** `authentik default OAuth Mapping: OpenID
+     'offline_access'`. Make sure the last one is selected. Without it
+     Authentik quietly issues no refresh token, and members have to sign in
+     again every time Authentik's access token runs out (an hour by
+     default). The gateway uses the refresh token to ask Authentik on every
+     request whether the person is still in the group.
    - Subject mode: **Based on the User's hashed ID** (the default). Keep it.
      The subject is the only thing the gateway knows a person by: their
      Archidekt link, proposals and tokens all hang off it. The username and
@@ -554,10 +560,11 @@ gateway's `environment:` in the stack file, or it has no effect.
 | `MTG_OIDC_CLIENT_SECRET_FILE` | yes, *stack* | | File holding the OIDC client secret (`/run/secrets/mtg_oidc_client_secret`) |
 | `MTG_FERNET_KEY_FILE` | yes, *stack* | | File holding the encryption key (`/run/secrets/mtg_fernet_key`) |
 | `MTG_SESSION_SECRET_FILE` | yes, *stack* | | File holding a random secret of 32+ characters (`/run/secrets/mtg_session_secret`) |
-| `MTG_OIDC_SCOPES` | no | `openid profile email` | Scopes requested from the identity provider |
+| `MTG_OIDC_SCOPES` | no | `openid profile email offline_access` | Scopes requested from the identity provider. `offline_access` is always added if missing: the provider's refresh token is what lets the gateway keep checking membership |
+| `MTG_MEMBERSHIP_CHECK_TTL` | no, *stack* | `5` | Before serving any request with a browser session or a gateway token, the gateway asks the identity provider's userinfo endpoint whether the person is still in `MTG_REQUIRED_GROUP` (and `MTG_ADMIN_GROUP`). The answer is reused for this many seconds, which is the longest a removed member can keep going. `0` asks on every request; 0 to 60. If the provider can't be reached, requests get 503 and nothing is revoked |
 | `MTG_REQUIRED_GROUP` | yes, *stack* | | Group a user must be in. The gateway refuses to start with it empty unless `MTG_ALLOW_ANY_IDP_USER` is `true` |
 | `MTG_ALLOW_ANY_IDP_USER` | no, *stack* | `false` | `true` lets an empty `MTG_REQUIRED_GROUP` through, so anyone your identity provider signs in gets in. Only for an identity provider that already admits nobody else |
-| `MTG_ADMIN_GROUP` | no, *stack* | empty (no admin page) | Identity-provider group whose members get the `/admin` pages and `/api/v1/admin` (users, activity, metrics; disable, enable, revoke, unlink). They still need to pass `MTG_REQUIRED_GROUP`. Unset or empty, the admin routes answer 404 for everyone. Details in [OPERATIONS.md](OPERATIONS.md#the-admin-page) |
+| `MTG_ADMIN_GROUP` | no, *stack* | empty (no admin page) | Identity-provider group whose members get the `/admin` pages and `/api/v1/admin` (users, activity, metrics; disable, enable, revoke, unlink, delete data). Checked live like `MTG_REQUIRED_GROUP`. They still need to pass `MTG_REQUIRED_GROUP`. Unset or empty, the admin routes answer 404 for everyone. Details in [OPERATIONS.md](OPERATIONS.md#the-admin-page) |
 | `MTG_OIDC_GROUPS_CLAIM` | no, *stack* | `groups` | Dot-path to the group list in the ID token (or userinfo) claims. Authentik: `groups`; Keycloak: `realm_access.roles`; Zitadel: `urn:zitadel:iam:org:project:roles` (a dict whose keys are the role names also works; a key whose value is empty or `false` does not count). The whole value is tried as one claim name first, so Auth0-style `https://example.com/groups` works too. Names are compared exactly, with no trimming. A missing or differently shaped claim means no groups, so `MTG_REQUIRED_GROUP` refuses the sign-in |
 | `MTG_OIDC_TOKEN_AUTH_METHOD` | no, *stack* | `client_secret_post` | How the gateway sends its client secret to the token endpoint: `client_secret_post` (in the form body) or `client_secret_basic` (HTTP Basic header). Match what the client is configured for in the identity provider |
 | `MTG_DATA_DIR` | no, *stack* | `/data` | Where the SQLite database lives. In the stack, the variable is the folder on the host, mounted at `/data` |
@@ -567,7 +574,7 @@ gateway's `environment:` in the stack file, or it has no effect.
 | `MTG_ALLOWED_HOSTS` | no | worked out from the public URL | `Host` headers accepted on `/mcp` |
 | `MTG_ACCESS_TOKEN_TTL` | no, *stack* | `3600` | Access token lifetime, seconds |
 | `MTG_REFRESH_TOKEN_TTL` | no, *stack* | `2592000` | Refresh token lifetime, seconds (30 days) |
-| `MTG_REAUTH_INTERVAL` | no, *stack* | `604800` | How long (seconds, default a week) after signing in an assistant can keep refreshing its tokens without a fresh sign-in. Each refresh re-checks `MTG_REQUIRED_GROUP` against the groups recorded at the last sign-in. Once this runs out the next refresh is refused and the person signs in again, which re-reads their groups from Authentik |
+| `MTG_REAUTH_INTERVAL` | no, *stack* | `604800` | How long (seconds, default a week) after signing in an assistant can keep refreshing its tokens without a fresh sign-in. Once this runs out the next refresh is refused and the person signs in again (and sees the gateway's consent page). Group membership doesn't wait for this: it is checked live with the identity provider on every request (`MTG_MEMBERSHIP_CHECK_TTL`) |
 | `MTG_LOG_LEVEL` | no, *stack* | `INFO` | Logging level |
 | `MTG_SERVER_NAME` | no, *stack* | `MTG Assistant Gateway` | Name shown on the gateway's pages, the install page and to assistants |
 | `MTG_LISTEN_HOST`, `MTG_LISTEN_PORT` | no | `0.0.0.0`, `8080` | Address and port inside the container. Leave them; the stack, Compose file and health checks expect 8080 |

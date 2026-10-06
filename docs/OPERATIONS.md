@@ -90,7 +90,10 @@ update is not rolled back automatically on purpose: a new version may have
 upgraded the database, and the old image refuses to start on it (below).
 Signed-in
 assistants keep working because tokens live in the database on disk. Linked
-Archidekt accounts and proposals survive restarts too.
+Archidekt accounts and proposals survive restarts too. (One exception: the
+first start of 0.7.0 or newer after an older version signs everyone out once,
+because sessions from before have no identity-provider tokens on file for
+the live membership check. See the CHANGELOG.)
 
 Before moving to a new release, read the [CHANGELOG](../CHANGELOG.md) and
 take a backup ([Backups](#backups)). A release can upgrade the database on
@@ -266,22 +269,35 @@ secret.
 
 ## Revoking access
 
-1. Take the person out of the Authentik group or application binding. They
-   can't sign in again.
-2. Tokens they already hold keep working for a bit:
-   - an access token for up to an hour;
-   - refreshes keep working until their last sign-in is older than
-     `MTG_REAUTH_INTERVAL` (a week by default). After that the refresh is
-     refused and they'd have to sign in again, which Authentik now blocks.
+1. Take the person out of the `MTG_REQUIRED_GROUP` group in Authentik, or
+   deactivate or delete their Authentik user. That's enough.
+2. The gateway notices on their next request. Before serving any request
+   that carries a browser session or a gateway token, it asks Authentik's
+   userinfo endpoint for the person's current groups (the answer is cached
+   for `MTG_MEMBERSHIP_CHECK_TTL` seconds, 5 by default, so that's the worst
+   case). A removed person loses every gateway token, every browser session
+   (web pages and Android app), the Authentik tokens the gateway kept, and
+   their Archidekt link, all at once. The audit log gets a
+   `membership_revoked` row with the reason (`not_in_group`,
+   `idp_refused_refresh` for a deactivated or deleted user, and so on). A
+   new sign-in then fails at Authentik.
 
-   The gateway doesn't ask Authentik at refresh time. It only re-checks
-   `MTG_REQUIRED_GROUP` against the groups it recorded at the last sign-in.
-   So changing that variable cuts off everyone outside the new group within
-   an hour, but removing someone in Authentik alone only bites at their next
-   sign-in. Browser sessions on `/account` and the review pages last two
-   hours (`MTG_BROWSER_SESSION_TTL`, in seconds).
+   Taking someone out of `MTG_ADMIN_GROUP` works the same way: the admin
+   page is gone on their next request.
 
-   To cut someone off right now, revoke their tokens and browser sessions:
+   If Authentik can't be reached, the gateway refuses requests with a 503
+   ("The sign-in service can't be reached to confirm your access") and
+   revokes nothing; everything works again once Authentik answers. If
+   Authentik answers but has no refresh token on file for someone (the
+   `offline_access` scope mapping is missing, see
+   [IDP-AUTHENTIK.md](IDP-AUTHENTIK.md#4-create-the-oauth2openid-provider)),
+   that person's gateway tokens and sessions are revoked once Authentik's
+   access token runs out, and they sign in again (audit row
+   `membership_unverifiable`).
+
+   You can also revoke someone's tokens and sessions yourself, without
+   touching Authentik: the admin page's **Revoke tokens and sessions** or
+   **Disable** ([The admin page](#the-admin-page)), or by hand:
 
    ```bash
    docker exec -it --user 1000:1000 $(docker ps -q -f name=mtg_mtg-assistant-gateway) \
@@ -292,7 +308,9 @@ secret.
      c.commit()"
    ```
 
-3. Optionally unlink their Archidekt account too (next section).
+3. If you cut someone off on the gateway only (not in Authentik), unlink
+   their Archidekt account too if you want (next section). A removal in
+   Authentik already did that.
 
 Registered AI clients (one per connector someone added) that never finished
 a sign-in, or whose tokens have all expired and been cleared out, get
@@ -428,12 +446,36 @@ the assistant following its instructions. Two things narrow that gap:
 Tell people to keep `apply_proposal` on "ask every time" (or "needs
 approval") in their AI app rather than "always allow".
 
+Each proposal records the app that made it (or "browser"), and the review
+page and the proposal list show it. An app may apply or reject only its own
+proposals (`other_client` otherwise). When a member disconnects an app on
+their Account page, that app's pending proposals are rejected and can no
+longer be applied. One app may hold at most 30 pending proposals for a
+member, and a member 100 in all, so a runaway app can't use up every slot.
+
+An app connected with the read-only scope `mtg.read` can read decks,
+proposals, snapshots and reports but can't propose, apply, reject, run
+reports or save scans (`insufficient_scope`).
+
 ### Archidekt rate limiting
 
 The gateway paces its own Archidekt requests. If Archidekt says "slow down"
 (HTTP 429) it waits as asked. After repeated failures it pauses all
 Archidekt requests for a while, and users see "Archidekt requests are paused
 after repeated failures; try later". It clears on its own.
+
+Each member also has their own limits, so one looping assistant can't keep
+Archidekt busy for everyone:
+
+- at most three Archidekt requests running or waiting at once;
+- at most `MTG_ARCHIDEKT_CALLS_PER_10_MIN` (120 by default) started per 10
+  minutes, refilled evenly. Deck reads, proposals, applies, links and the
+  research tools' `archidekt_*` calls all count. Past it the member gets
+  `rate_limited` and waits a few minutes;
+- at most five failed Archidekt link attempts (wrong username or password)
+  in 15 minutes, so the Account page can't be used to guess Archidekt
+  passwords from the gateway's address. The attempted username isn't
+  logged.
 
 ## The admin page
 
@@ -468,7 +510,7 @@ The same data is at `/api/v1/admin/overview`, `/api/v1/admin/users` and
 (see [API.md](API.md)). Both need the admin's browser session cookie; the
 API writes also need the `X-CSRF-Token` header.
 
-The four actions, and exactly what each one does:
+The five actions, and exactly what each one does:
 
 | Button | What happens |
 | --- | --- |
@@ -476,11 +518,13 @@ The four actions, and exactly what each one does:
 | **Enable** | Clears `disabled_at`. Nothing is handed back: the person signs in again and reconnects their assistant. |
 | **Revoke tokens and sessions** | The same revocation as Disable (tokens, browser sessions, pending codes) without disabling. The person can sign in again straight away. This is the button version of the SQL in [Revoking access](#revoking-access). |
 | **Unlink Archidekt** | Marks their Archidekt link revoked and deletes the stored session, the same as their own Unlink button on `/account`. They can relink any time. |
+| **Delete data** | Deletes everything the gateway keeps about that person, the same as their own **Delete my data**: proposals, snapshots, reports, scan sessions, deck covers, the Archidekt link, every app grant and browser session, the identity-provider tokens, usage counters and the user record. It needs the confirmation tick next to the button, and you can't use it on yourself (use your own Account page). Meant for former members, and for an account left over from an earlier identity provider (the gateway refuses a new provider's account whose `sub` matches an old one until the old one is deleted). Their decks on Archidekt are not touched, and the audit log keeps its rows. If they're still in the group, they can sign in again as a new, empty account. |
 
-Every action writes an `admin_disable`, `admin_enable`, `admin_revoke` or
-`admin_unlink` row to the audit log under the admin's subject, with the
-target and counts in `detail_json`, and bumps an `admin` counter in the
-metrics table. The admin page never creates a user or changes a group: that
+Every action writes an `admin_disable`, `admin_enable`, `admin_revoke`,
+`admin_unlink` or `admin_delete_data` row to the audit log under the admin's
+subject, with the target and counts in `detail_json`, and bumps an `admin`
+counter in the metrics table. The person's own activity log shows the
+action too, as done by an administrator. The admin page never creates a user or changes a group: that
 stays in the identity provider. Disabling only refuses the account on this
 gateway; the account itself is untouched.
 

@@ -239,6 +239,17 @@ Claude / ChatGPT / browser ──HTTPS──▶ reverse proxy ──▶ mtg-gate
   application binding and groups. The gateway also requires a specific
   group (`MTG_REQUIRED_GROUP`) and refuses to start without one unless
   you opt out with `MTG_ALLOW_ANY_IDP_USER=true`.
+- **Membership is checked live.** Before serving a request, the gateway asks
+  the identity provider whether the person is still in the group (cached
+  for a few seconds, `MTG_MEMBERSHIP_CHECK_TTL`). Take someone out of the
+  group, or deactivate them, and their next request fails: their tokens,
+  sessions and Archidekt link are revoked. If the provider can't be
+  reached, requests are refused rather than let through. With Authentik
+  this needs the `offline_access` scope mapping
+  ([docs/IDP-AUTHENTIK.md](docs/IDP-AUTHENTIK.md)).
+- **Sign out on all my devices** (on the `/logout` page) ends every
+  browser and app session, and for an hour the next sign-in on that device
+  asks for the password again.
 - **Tokens:** `/mcp` only accepts tokens the gateway issued itself, so a
   token straight from the identity provider is rejected.
   - Tokens and registered clients' secrets are stored hashed.
@@ -251,7 +262,14 @@ Claude / ChatGPT / browser ──HTTPS──▶ reverse proxy ──▶ mtg-gate
   - That protects the database and backups. It doesn't protect against
     whoever runs the server, and users are told so.
 - **Deck changes** need the user's own yes. Text found in decks or tool
-  output is never treated as an instruction to edit.
+  output is never treated as an instruction to edit. Each proposal shows
+  which app made it, and disconnecting an app rejects its pending
+  proposals. An app connected with the read-only scope `mtg.read` can't
+  change anything.
+- **Limits.** Sign-in attempts are limited per network, metadata-document
+  fetches per site, and Archidekt calls per member
+  (`MTG_ARCHIDEKT_CALLS_PER_10_MIN`), so neither a flood nor a looping
+  assistant can wear the gateway or Archidekt down.
 - **Mystic Forge** has no published ports and no login of its own. Only the
   gateway can reach it.
 

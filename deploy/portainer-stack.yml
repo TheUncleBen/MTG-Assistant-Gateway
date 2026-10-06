@@ -80,6 +80,8 @@ services:
       MTG_REFRESH_TOKEN_TTL: ${MTG_REFRESH_TOKEN_TTL:-2592000}
       MTG_BROWSER_SESSION_TTL: ${MTG_BROWSER_SESSION_TTL:-7200}
       MTG_REAUTH_INTERVAL: ${MTG_REAUTH_INTERVAL:-604800}
+      MTG_MEMBERSHIP_CHECK_TTL: ${MTG_MEMBERSHIP_CHECK_TTL:-5}
+      MTG_ARCHIDEKT_CALLS_PER_10_MIN: ${MTG_ARCHIDEKT_CALLS_PER_10_MIN:-120}
       # Archidekt API base. Leave the default; the end-to-end tests point it at a local mock.
       MTG_ARCHIDEKT_BASE: ${MTG_ARCHIDEKT_BASE:-https://archidekt.com/api}
       # Peers allowed to set X-Forwarded-* (your reverse proxy). Empty = private networks.

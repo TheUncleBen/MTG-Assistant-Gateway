@@ -46,6 +46,11 @@ connecting an assistant in [CONNECT.md](CONNECT.md#if-sign-in-fails).
 | Log: `ID token validation failed` | The provider signs with HS256 (pick an RSA or EC signing key), the client ID doesn't match, or the clocks are more than a minute apart |
 | Gateway page: *Your account is not in the group that may use this service* | The groups claim (`MTG_OIDC_GROUPS_CLAIM`, default `groups`) doesn't contain `MTG_REQUIRED_GROUP` exactly. See [what your provider sends](IDP-OTHERS.md#about-the-group-check) |
 | Everyone suddenly appears as a new user | The provider's subject (`sub`) changed: a different subject mode, or a different provider. Put it back |
+| Members are signed out about every hour and have to sign in again | The identity provider issues no refresh token. Authentik: add the `offline_access` scope mapping to the provider ([IDP-AUTHENTIK.md](IDP-AUTHENTIK.md#4-create-the-oauth2openid-provider)). Others: allow refresh tokens / `offline_access` for the client ([IDP-OTHERS.md](IDP-OTHERS.md#about-the-group-check)) |
+| Page *The sign-in service can't be reached to confirm your access* (HTTP 503, `idp_unavailable` for apps) | The gateway checks membership with the identity provider before serving signed-in requests, and the provider is down or unreachable from the gateway (same causes as `cannot load identity-provider metadata` above). Nothing is revoked; it works again once the provider answers |
+| Everyone was signed out right after an upgrade to 0.7.0 | Expected, once: sessions from before have no identity-provider tokens on file for the live membership check. Everyone signs in again and reconnects their AI app |
+| Page *This account belongs to a different sign-in provider than the one this gateway uses now* | `MTG_OIDC_ISSUER` now points at another provider than the one this account first signed in with. If it's the same person, delete the old account's data on the admin page, then they sign in again ([IDP-OTHERS.md](IDP-OTHERS.md#switching-providers-later)) |
+| *Too many sign-in attempts from your network* | More than 30 sign-ins started from one address in a minute. Wait a minute. If it hits everyone, the gateway sees your proxy's address for every visitor: list the proxy in `MTG_TRUSTED_PROXIES` and make it send `X-Forwarded-For` |
 | *This sign-in was started in a different browser* | Finish sign-in in the browser the assistant opened. If it happens to everyone, make sure people reach the gateway only at the exact host in `MTG_PUBLIC_URL`, over https (the sign-in cookie is tied to that host), and that nothing in between strips cookies |
 
 ## Using it
@@ -57,6 +62,8 @@ connecting an assistant in [CONNECT.md](CONNECT.md#if-sign-in-fails).
 | `apply_proposal` answers `writes_disabled` | `MTG_WRITES_ENABLED` is `false` |
 | `apply_proposal` answers `browser_required` | `MTG_APPLY_VIA_MCP` is `false`; apply on the review page |
 | `apply_proposal` answers `apply_too_soon` | Working as designed: wait `retry_after_seconds` and try again |
+| `rate_limited`: "Your account has used its ... Archidekt requests" | The member's Archidekt budget (`MTG_ARCHIDEKT_CALLS_PER_10_MIN`, 120 per 10 minutes) is used up, often by an assistant stuck in a loop. It refills over a few minutes |
+| `insufficient_scope` | The app was connected with the read-only scope `mtg.read`. Reconnect it with the `mtg` scope to make changes |
 | Archidekt link keeps dropping | See [OPERATIONS.md](OPERATIONS.md#archidekt-links-and-relinking) |
 | The assistant can't connect at all | Work through [CONNECT.md](CONNECT.md#if-sign-in-fails) |
 

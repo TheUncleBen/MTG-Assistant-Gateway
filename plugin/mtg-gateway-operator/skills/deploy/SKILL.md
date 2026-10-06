@@ -102,7 +102,10 @@ issuer URL; both are not secrets):
 1. Applications, Providers, Create, OAuth2/OpenID Provider. Name `MTG
    Gateway`; client type Confidential; redirect URI
    `https://<gateway host>/auth/callback` (strict); default RS256 signing
-   key; scopes `openid email profile`; subject mode left at the default.
+   key; scopes `openid`, `email`, `profile` and `offline_access` (the
+   `offline_access` mapping is easy to miss and is required: without it
+   Authentik issues no refresh token and members must sign in again every
+   hour); subject mode left at the default.
    Copy the Client ID into the chat. Keep the Client Secret in the clipboard
    or password manager for step 4; do not paste it here.
 2. Applications, Applications, Create. Name `MTG Assistant Gateway`, slug

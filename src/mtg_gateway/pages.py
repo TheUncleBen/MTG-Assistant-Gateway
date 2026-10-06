@@ -555,7 +555,8 @@ def _account_body(state: Any, sub: str, csrf: str | None) -> str:
         "<a class='btn' href='/skill'>Get the assistant skill for Claude or ChatGPT</a> "
         "<a class='btn' href='/app'>Get the Android app</a>"
         f"<form method='post' action='/logout'>{csrf_in}"
-        "<button class='inline'>Sign out</button></form></div>"
+        "<button class='inline'>Sign out</button></form> "
+        "<a class='small' href='/logout'>Sign out on all my devices</a></div>"
     ]
     out.append(_apps_card(state, sub, csrf_in))
     if info["linked"]:

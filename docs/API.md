@@ -23,7 +23,10 @@ or a bare `read`) may call every `GET` route but none of the writes: they answer
 with the default scope `mtg`, with no scope, or with any other scope has full access, as before.
 
 A missing or invalid credential answers `401` with `{"ok": false, "error": "unauthenticated",
-"login": "/login"}`. A bearer caller outside the group gets `403` with `"error": "forbidden"`; a browser session outside the group counts as signed out (`401`).
+"login": "/login"}`. Someone no longer in `MTG_REQUIRED_GROUP` gets the same `401`: before a request is served the gateway
+asks the identity provider whether the caller is still a member (cached for `MTG_MEMBERSHIP_CHECK_TTL`
+seconds) and revokes a removed member's tokens and browser sessions. When the identity provider can't be
+reached, the request gets `503` with `"error": "idp_unavailable"` instead, and nothing is revoked.
 
 Responses are JSON objects with `"ok": true` on success. Failures carry `ok: false`, an `error`
 code and a human `message`:
@@ -43,6 +46,7 @@ code and a human `message`:
 | `apply_too_soon` | 425 | the proposal was created moments ago; apply needs a short pause |
 | `rate_limited` | 429 | the Archidekt pacer is busy, the member's Archidekt budget (`MTG_ARCHIDEKT_CALLS_PER_10_MIN`) is used up, too many failed link attempts, or too many pending proposals (100 per member, 30 per app) |
 | `unavailable` | 503 | Archidekt or Mystic Forge is unreachable |
+| `idp_unavailable` | 503 | the identity provider can't be reached to confirm the caller is still a member; nothing was revoked, try again shortly (`Retry-After: 30`) |
 
 Request bodies are JSON objects of at most 2 MB.
 
@@ -71,7 +75,8 @@ Request bodies are JSON objects of at most 2 MB.
 
 Admin callers (members of `MTG_ADMIN_GROUP`) also have `GET /api/v1/admin/overview`,
 `GET /api/v1/admin/users`, `GET /api/v1/admin/metrics` and
-`POST /api/v1/admin/users/{sub}` with `{"action": "disable" | "enable" | "revoke" | "unlink"}`.
+`POST /api/v1/admin/users/{sub}` with `{"action": "disable" | "enable" | "revoke" | "unlink" | "delete_data"}`.
+`delete_data` also needs `"confirm": true` and is refused for your own account.
 The admin endpoints accept only the browser session cookie (with `X-CSRF-Token` on `POST`), not
 a bearer token. They answer `401` without a browser session, and `404` to signed-in non-admins
 (and to everyone while `MTG_ADMIN_GROUP` is unset).
