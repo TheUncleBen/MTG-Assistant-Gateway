@@ -342,7 +342,7 @@ def test_v010_database_upgrades_in_place(tmp_path: Path) -> None:
 
     db = Database(path)
     try:
-        assert db.schema_version == dbmod.SCHEMA_VERSION == 9
+        assert db.schema_version == dbmod.SCHEMA_VERSION == 10
         user = db.get_user("u1")
         assert user["disabled_at"] is None and user["last_seen_at"] == 200 and user["groups"] == ["g"]
         assert db.list_snapshots("u1")[0]["backup_url"] is None

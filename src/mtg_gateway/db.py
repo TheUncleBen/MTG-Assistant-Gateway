@@ -20,6 +20,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from .cimd import site_of
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     sub TEXT PRIMARY KEY,
@@ -142,7 +144,10 @@ MAX_UNUSED_CLIENTS = 2000
 # Cached client metadata documents (any https URL can be named as a client id). The busiest host
 # gives up its oldest rows first, so one attacker domain cannot push out a real client's row.
 MAX_CIMD_CLIENTS = 1000
-MAX_CIMD_CLIENTS_PER_HOST = 50
+MAX_CIMD_CLIENTS_PER_SITE = 50
+# A metadata document URL that completed a sign-in is "known": never evicted by those caps and
+# never subject to the fetcher's budgets (cimd.py). The mark lasts this long after the last one.
+KNOWN_CIMD_CLIENT_RETENTION_SECONDS = 180 * 86400
 # Audit events any anonymous caller can cause (open registration, CIMD fetches). Their rows are
 # capped by count as well as aged out, and their detail is kept short, so a flood cannot grow the
 # audit log for a year. Trimmed in purge_expired and every ANONYMOUS_AUDIT_TRIM_EVERY inserts.
@@ -166,9 +171,9 @@ DECK_COVER_RETENTION_SECONDS = 180 * 86400
 BUSY_TIMEOUT_MS = 5000
 
 
-def _url_host(url: str) -> str:
-    """Lower-case host of a URL client id, for the per-host cap on cached metadata documents."""
-    return (urlparse(url).hostname or "").rstrip(".")
+def _url_site(url: str) -> str:
+    """Registrable domain of a URL client id, for the per-site cap on cached metadata documents."""
+    return site_of(urlparse(url).hostname or "")
 
 
 def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
@@ -285,8 +290,14 @@ def _step_9(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS deck_covers_owner ON deck_covers(owner_sub)")
 
 
+def _step_10(conn: sqlite3.Connection) -> None:
+    """Security round 4: when a client described by a metadata document last completed a sign-in,
+    so the cache caps never evict it and the fetch budgets never apply to it."""
+    _add_column(conn, "cimd_clients", "signed_in_at", "INTEGER")
+
+
 # Applied in order; ``PRAGMA user_version`` records how many have run. Append, never edit.
-MIGRATIONS = [_step_1, _step_2, _step_3, _step_4, _step_5, _step_6, _step_7, _step_8, _step_9]
+MIGRATIONS = [_step_1, _step_2, _step_3, _step_4, _step_5, _step_6, _step_7, _step_8, _step_9, _step_10]
 SCHEMA_VERSION = len(MIGRATIONS)
 
 
@@ -517,20 +528,41 @@ class Database:
         now = int(time.time())
         with self.tx() as c:
             # Anyone can make the gateway accept documents at many URLs of their own site, so the
-            # cache is capped on every insert: per host, then in all (cimd.py caps each record).
-            c.execute("DELETE FROM cimd_clients WHERE expires_at < ?", (now - 86400,))
-            host = _url_host(client_id)
-            self._trim_cimd_clients(c, MAX_CIMD_CLIENTS_PER_HOST - 1, host=host, skip=client_id)
+            # cache is capped on every insert: per site, then in all (cimd.py caps each record).
+            # Clients that completed a sign-in are never evicted.
+            self._purge_cimd_clients(c, now)
+            site = _url_site(client_id)
+            self._trim_cimd_clients(c, MAX_CIMD_CLIENTS_PER_SITE - 1, site=site, skip=client_id)
             self._trim_cimd_clients(c, MAX_CIMD_CLIENTS - 1, skip=client_id)
             c.execute(
-                "INSERT OR REPLACE INTO cimd_clients (client_id, info_json, fetched_at, expires_at) "
-                "VALUES (?, ?, ?, ?)",
+                "INSERT INTO cimd_clients (client_id, info_json, fetched_at, expires_at) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(client_id) DO UPDATE SET info_json = excluded.info_json, "
+                "fetched_at = excluded.fetched_at, expires_at = excluded.expires_at",
                 (client_id, json.dumps(info), now, now + ttl),
             )
 
+    def mark_cimd_client_signed_in(self, client_id: str) -> None:
+        """Record that a client described by this metadata document completed a sign-in."""
+        with self.tx() as c:
+            c.execute(
+                "UPDATE cimd_clients SET signed_in_at = ? WHERE client_id = ?", (int(time.time()), client_id)
+            )
+
     def cimd_client_known(self, client_id: str) -> bool:
-        """True when this metadata document URL was accepted before (its row may have expired)."""
-        return self._one("SELECT 1 FROM cimd_clients WHERE client_id = ?", (client_id,)) is not None
+        """True when a client with this metadata document URL has completed a sign-in here (its
+        cached document may have expired since)."""
+        row = self._one(
+            "SELECT 1 FROM cimd_clients WHERE client_id = ? AND signed_in_at IS NOT NULL", (client_id,)
+        )
+        return row is not None
+
+    @staticmethod
+    def _purge_cimd_clients(c: sqlite3.Connection, now: int) -> int:
+        """Drop cached documents a day past expiry, unless their client signed in recently."""
+        return c.execute(
+            "DELETE FROM cimd_clients WHERE expires_at < ? AND (signed_in_at IS NULL OR signed_in_at < ?)",
+            (now - 86400, now - KNOWN_CIMD_CLIENT_RETENTION_SECONDS),
+        ).rowcount
 
     def get_cimd_client(self, client_id: str) -> dict[str, Any] | None:
         row = self._one(
@@ -727,7 +759,7 @@ class Database:
             n += c.execute("DELETE FROM auth_codes WHERE expires_at < ?", (now,)).rowcount
             n += c.execute("DELETE FROM login_sessions WHERE expires_at < ?", (now,)).rowcount
             n += c.execute("DELETE FROM browser_sessions WHERE expires_at < ?", (now,)).rowcount
-            n += c.execute("DELETE FROM cimd_clients WHERE expires_at < ?", (now - 86400,)).rowcount
+            n += self._purge_cimd_clients(c, now)
             # Registration is open, so every client that registered and never finished a login,
             # or whose tokens have all expired and been purged, is dropped after a week.
             n += c.execute(
@@ -841,17 +873,21 @@ class Database:
 
     @staticmethod
     def _trim_cimd_clients(
-        c: sqlite3.Connection, keep: int, *, host: str | None = None, skip: str | None = None
+        c: sqlite3.Connection, keep: int, *, site: str | None = None, skip: str | None = None
     ) -> int:
-        """Delete cached metadata documents (of ``host``, or all; never ``skip``) until at most
-        ``keep`` are left: from the host with the most rows, the least recently fetched first."""
+        """Delete cached metadata documents (of ``site``, or all; never ``skip`` and never a client
+        that completed a sign-in) until at most ``keep`` evictable ones are left: from the site
+        with the most rows, the least recently fetched first."""
         rows = [
-            (r[0], r[1], _url_host(r[0]))
-            for r in c.execute("SELECT client_id, fetched_at FROM cimd_clients ORDER BY fetched_at, rowid")
+            (r[0], r[1], _url_site(r[0]))
+            for r in c.execute(
+                "SELECT client_id, fetched_at FROM cimd_clients WHERE signed_in_at IS NULL "
+                "ORDER BY fetched_at, rowid"
+            )
             if r[0] != skip
         ]
-        if host is not None:
-            rows = [r for r in rows if r[2] == host]
+        if site is not None:
+            rows = [r for r in rows if r[2] == site]
         over = len(rows) - max(0, keep)
         if over <= 0:
             return 0
@@ -1038,18 +1074,25 @@ class Database:
         out: dict[str, int] = {}
         with self.tx() as c:
             present = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-            # Deck covers are keyed by deck: those the member's deck pages stored, and those of
-            # any deck their proposals, snapshots or reports name (covers stored before the owner
-            # was recorded). Taken before those rows go.
-            deck_ids = {
-                r[0]
-                for table in ("proposals", "snapshots", "reports")
-                if table in present
-                for r in c.execute(f"SELECT DISTINCT deck_id FROM {table} WHERE owner_sub = ?", (sub,))
-            }
+            # Deck covers are keyed by deck and shared: only the member's own go. Those their deck
+            # pages stored carry their owner_sub; a cover stored before the owner was recorded
+            # (owner_sub NULL) goes when it is of a deck the member has a snapshot of, since
+            # snapshots are taken only of decks the member edits, which are their own. Proposals
+            # and reports can name other members' decks (a clone's source), so they are not used,
+            # and a cover recorded for another member is never touched. Taken before those rows go.
+            deck_ids = (
+                {
+                    r[0]
+                    for r in c.execute("SELECT DISTINCT deck_id FROM snapshots WHERE owner_sub = ?", (sub,))
+                }
+                if "snapshots" in present
+                else set()
+            )
             covers = c.execute("DELETE FROM deck_covers WHERE owner_sub = ?", (sub,)).rowcount
             for deck_id in deck_ids:
-                covers += c.execute("DELETE FROM deck_covers WHERE deck_id = ?", (deck_id,)).rowcount
+                covers += c.execute(
+                    "DELETE FROM deck_covers WHERE deck_id = ? AND owner_sub IS NULL", (deck_id,)
+                ).rowcount
             out["deck_covers"] = covers
             for table, column in self.MEMBER_TABLES:
                 if table in present:

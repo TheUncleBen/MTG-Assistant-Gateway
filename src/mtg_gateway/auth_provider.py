@@ -97,10 +97,15 @@ MAX_STATE_LEN = 512
 
 # Sign-in starts (GET /login, GET /authorize) one network may make per minute. A person needs a
 # few; the limit keeps one address from churning the pending-login table (db.py caps it and evicts
-# the busiest network's rows first). Requests from an address in MTG_TRUSTED_PROXIES are not
-# limited: that is the proxy itself when it sends no X-Forwarded-For (every visitor then looks the
-# same, and a limit would lock everyone out together) or a visitor on the private network.
+# the busiest network's rows first). Only public (globally routable) addresses are limited. A
+# private, loopback, link-local, CGNAT (100.64/10) or ULA address, or one in MTG_TRUSTED_PROXIES,
+# is usually the reverse proxy itself (not trusted, or sending no X-Forwarded-For): every visitor
+# then looks the same, and a limit would let anyone lock everyone out. The per-browser and
+# per-client caps on pending logins still apply to them.
 LOGIN_STARTS_PER_MINUTE = 30
+# This many different browsers starting sign-ins from one address logs a warning (once per
+# address) that the address may be an untrusted proxy.
+SHARED_SOURCE_WARN_BROWSERS = 50
 TOO_MANY_LOGINS = "Too many sign-in attempts from your network. Wait a minute and try again."
 
 
@@ -164,6 +169,8 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         self.membership = membership if membership is not None else MembershipChecker(settings, db, oidc)
         self.cimd = cimd if cimd is not None else CimdFetcher(allowed_hosts=settings.cimd_allowed_hosts)
         self.login_limiter = LoginStartLimiter()
+        self._source_browsers: dict[str, set[str]] = {}  # source -> browser keys seen (bounded)
+        self._warned_sources: set[str] = set()
         self._trusted_nets: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
         for entry in settings.trusted_proxies:
             try:
@@ -294,13 +301,37 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         source = login_source(ip)
         if source is None:
             return None
-        try:
-            from_proxy = any(ipaddress.ip_address(ip or "") in net for net in self._trusted_nets)
-        except ValueError:
-            from_proxy = False
-        if not from_proxy and not self.login_limiter.allow(source):
+        addr = ipaddress.ip_address(ip or "")  # valid: login_source parsed it
+        if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
+            addr = addr.ipv4_mapped
+        trusted = any(addr in net for net in self._trusted_nets)
+        if holder is not None and not trusted:
+            self._note_shared_source(str(addr), str(holder.get("key", "")))
+        if addr.is_global and not trusted and not self.login_limiter.allow(source):
             raise LoginThrottled(source)
         return hash_token(f"login-source:{source}")
+
+    def _note_shared_source(self, ip: str, browser_key: str) -> None:
+        """Warn once when many different browsers start sign-ins from one address that is not a
+        trusted proxy: it is probably the reverse proxy, and without MTG_TRUSTED_PROXIES every
+        visitor shares its address (one rate limit, one group for the pending-login caps)."""
+        if ip in self._warned_sources:
+            return
+        seen = self._source_browsers.setdefault(ip, set())
+        seen.add(hash_token(browser_key)[:16])
+        if len(seen) >= SHARED_SOURCE_WARN_BROWSERS:
+            logger.warning(
+                "%d different browsers started sign-ins from %s. If that is your reverse proxy, add "
+                "its address to MTG_TRUSTED_PROXIES so the gateway sees each visitor's own address.",
+                len(seen),
+                ip,
+            )
+            self._warned_sources.add(ip)
+            del self._source_browsers[ip]
+            if len(self._warned_sources) > 1000:
+                self._warned_sources.clear()
+        elif len(self._source_browsers) > 1000:  # bounded even under abuse
+            self._source_browsers.clear()
 
     def same_browser(self, session: dict[str, Any], browser_key: str | None) -> bool:
         """True when ``browser_key`` (the login cookie) is the one of the browser that started
@@ -559,6 +590,10 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             expires_at=expires_at,
         )
         self.db.audit("login_ok", sub=identity.sub, client_id=session["client_id"])
+        if is_cimd_client_id(session["client_id"]):
+            # A member signed in through it: from now on its cached document is never evicted
+            # and refetching it is never throttled (cimd.py, db.py).
+            self.db.mark_cimd_client_signed_in(session["client_id"])
         return construct_redirect_uri(client_redirect, code=gw_code, state=params.state)
 
     async def start_idp_login(

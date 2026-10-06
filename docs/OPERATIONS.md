@@ -143,15 +143,27 @@ minute. Only public clients are accepted (`token_endpoint_auth_method`
 
 So that nobody can use the gateway to send requests to someone else's site,
 a client address with a query string (`?...`) is refused, a failed fetch
-blocks every other new address on that host for a minute, and new addresses
-are fetched at most 10 times a minute per site and 60 times a minute in all.
-An address the gateway has accepted before skips those last limits, so a
-client that has signed in here once can't be locked out by someone pointing
-junk addresses at its host. What one document may store is capped like a
-self-registered client (at most 20 redirect URIs of up to 2000 characters,
-8 KB in all), and the cache keeps at most 1000 documents, at most 50 per
-host; when it is full, the host with the most cached documents loses its
-oldest one first.
+blocks every other new address on that host for a minute, and requests that
+actually go out are limited to 10 a minute per site and 60 a minute in all.
+A "site" is the registrable domain (`example.com`, `example.co.uk`), so
+subdomains share one budget. Only a request that is about to be sent counts:
+an address refused without one (not on the allowlist, an IP address, a name
+that doesn't resolve or resolves to a private address) uses up nothing.
+
+Two kinds of client are never held back by those limits: a client that a
+member has completed a sign-in through (remembered for 180 days after its
+last sign-in), and any host on `MTG_CIMD_ALLOWED_HOSTS`. So once Claude or
+ChatGPT has connected here, nobody can lock it out by pointing junk
+addresses at the gateway. A client connecting for the very first time to a
+gateway without an allowlist can still be delayed by someone who spends the
+budget with documents on several domains of their own; setting
+`MTG_CIMD_ALLOWED_HOSTS` removes that.
+
+What one document may store is capped like a self-registered client (at
+most 20 redirect URIs of up to 2000 characters, 8 KB in all), and the cache
+keeps at most 1000 documents, at most 50 per site; when it is full, the site
+with the most cached documents loses its oldest one first. Clients a member
+has signed in through are never removed by these caps.
 
 Two optional stack variables control this:
 
@@ -333,9 +345,18 @@ most unfinished sign-ins loses its oldest one. Someone hammering `/login` or
 also start at most 30 sign-ins a minute; the 31st gets a "too many sign-in
 attempts" page. This depends on the gateway seeing each visitor's address:
 it takes it from `X-Forwarded-For` only when the request comes from an
-address in `MTG_TRUSTED_PROXIES`. A request that arrives straight from such
-an address (a proxy that doesn't send the header) isn't rate-limited, because
-everyone would share one limit, and all those visitors count as one network. The cleanup runs
+address in `MTG_TRUSTED_PROXIES`. The rate limit applies only to public
+addresses. A request from a private, loopback, link-local, CGNAT
+(`100.64.0.0/10`, which Tailscale uses) or IPv6 ULA address, or from an
+address in `MTG_TRUSTED_PROXIES`, isn't rate-limited: such an address is
+usually your reverse proxy, and if the gateway doesn't trust it, every
+visitor arrives from it and shares one limit, so anyone could block every
+sign-in. The per-browser and per-client caps still apply to them, and all
+those visitors count as one network. When 50 different browsers have started
+sign-ins from one address, the gateway logs a warning (once per address)
+naming it and suggesting you add it to `MTG_TRUSTED_PROXIES`. A reverse
+proxy on a public address must be in `MTG_TRUSTED_PROXIES`, or every visitor
+shares its 30-a-minute limit and anyone can use it up. The cleanup runs
 at start and then every hour, with or without backups. It also keeps the
 newest 25 snapshots of each member's deck (plus any a pending restore needs),
 usage counters for 400 days and remembered deck covers for 180 days. Closed
@@ -518,7 +539,7 @@ The five actions, and exactly what each one does:
 | **Enable** | Clears `disabled_at`. Nothing is handed back: the person signs in again and reconnects their assistant. |
 | **Revoke tokens and sessions** | The same revocation as Disable (tokens, browser sessions, pending codes) without disabling. The person can sign in again straight away. This is the button version of the SQL in [Revoking access](#revoking-access). |
 | **Unlink Archidekt** | Marks their Archidekt link revoked and deletes the stored session, the same as their own Unlink button on `/account`. They can relink any time. |
-| **Delete data** | Deletes everything the gateway keeps about that person, the same as their own **Delete my data**: proposals, snapshots, reports, scan sessions, deck covers, the Archidekt link, every app grant and browser session, the identity-provider tokens, usage counters and the user record. It needs the confirmation tick next to the button, and you can't use it on yourself (use your own Account page). Meant for former members, and for an account left over from an earlier identity provider (the gateway refuses a new provider's account whose `sub` matches an old one until the old one is deleted). Their decks on Archidekt are not touched, and the audit log keeps its rows. If they're still in the group, they can sign in again as a new, empty account. |
+| **Delete data** | Deletes everything the gateway keeps about that person, the same as their own **Delete my data**: proposals, snapshots, reports, scan sessions, the remembered covers of their own decks (never a cover of someone else's deck they cloned or reported on), the Archidekt link, every app grant and browser session, the identity-provider tokens, usage counters and the user record. It needs the confirmation tick next to the button, and you can't use it on yourself (use your own Account page). Meant for former members, and for an account left over from an earlier identity provider (the gateway refuses a new provider's account whose `sub` matches an old one until the old one is deleted). Their decks on Archidekt are not touched, and the audit log keeps its rows. If they're still in the group, they can sign in again as a new, empty account. |
 
 Every action writes an `admin_disable`, `admin_enable`, `admin_revoke`,
 `admin_unlink` or `admin_delete_data` row to the audit log under the admin's
