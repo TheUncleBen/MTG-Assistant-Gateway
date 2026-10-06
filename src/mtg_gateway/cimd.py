@@ -29,11 +29,16 @@ Relay limits: anyone can name any https URL as a client_id, so the fetcher must
 not become a way to send GETs to someone else's site. A client_id with a query
 string is refused, a failed fetch blocks every other new URL on that host for the
 same minute (not only the URL that failed, which a changed path would dodge), and
-new URLs are fetched at most SITE_FETCHES_PER_MINUTE times a minute per site and
-GLOBAL_FETCHES_PER_MINUTE overall. A URL the gateway has accepted before (the
-caller says so with ``known``) skips the host block and the rate limits, so an
-attacker who points bogus URLs at a real client's host cannot lock that client
-out once it has signed in here; a brand-new client can be delayed by a minute.
+requests that actually go out are limited to SITE_FETCHES_PER_MINUTE a minute per
+site (registrable domain, so subdomains share one budget) and
+GLOBAL_FETCHES_PER_MINUTE overall. Only a request that is about to be sent counts:
+a URL refused locally (allowlist, IP literal) or by DNS (no name, private address)
+uses up nothing, so junk client ids cannot spend the budget. Exempt from the host
+block and the budgets: a client that has completed a sign-in here (the caller says
+so with ``known``) and any host on MTG_CIMD_ALLOWED_HOSTS. So nobody can lock out a
+client that has signed in before, or an allowlisted one; a brand-new client on an
+open gateway can be delayed by someone spending the budget with documents on six or
+more domains of their own.
 
 Fairness: a caller that cannot get a slot within the deadline is told the fetcher
 is busy (CimdThrottled) and nothing is remembered against its URL, and a timeout
@@ -113,10 +118,42 @@ def is_cimd_client_id(client_id: str) -> bool:
     )
 
 
-def _site(host: str) -> str:
-    """The last two labels of ``host``: the unit that gets one fetch slot. Coarser than a
-    registrable domain for names like example.co.uk, which only means fewer parallel fetches."""
-    return ".".join(host.lower().rstrip(".").split(".")[-2:])
+# Second-level labels under a two-letter country code that are public suffixes themselves
+# (example.co.uk, example.com.au): the registrable domain there is three labels.
+_SECOND_LEVEL_SUFFIXES = frozenset(
+    (
+        "ac",
+        "co",
+        "com",
+        "edu",
+        "gob",
+        "gov",
+        "govt",
+        "ltd",
+        "mil",
+        "ne",
+        "net",
+        "nic",
+        "or",
+        "org",
+        "plc",
+        "sch",
+    )
+)
+
+
+def site_of(host: str) -> str:
+    """An approximation of the registrable domain of ``host`` (eTLD+1): the last two labels, or
+    the last three under a country code with a public second level (example.co.uk). The unit
+    that gets one fetch slot, one fetch budget and one share of the metadata cache, so a flood
+    over many subdomains of one domain counts as one site."""
+    labels = host.lower().rstrip(".").split(".")
+    if len(labels) >= 3 and len(labels[-1]) == 2 and labels[-2] in _SECOND_LEVEL_SUFFIXES:
+        return ".".join(labels[-3:])
+    return ".".join(labels[-2:])
+
+
+_site = site_of
 
 
 NAT64_PREFIXES = (ipaddress.ip_network("64:ff9b::/96"), ipaddress.ip_network("64:ff9b:1::/48"))
@@ -349,28 +386,29 @@ class CimdFetcher:
         host = host.lower()
         return any(host == h or host.endswith("." + h) for h in self.allowed_hosts)
 
-    def _admit_new_url(self, host: str, site: str, now: float) -> None:
-        """Refuse (CimdThrottled) a fetch of a URL not accepted before when its host failed in the
-        last minute or its site, or the fetcher, is over its per-minute budget. Only fetches that
-        go out count (_count_fetch), so callers told "busy" use up nothing."""
+    def _check_host_block(self, host: str, now: float) -> None:
+        """Refuse (CimdThrottled) a new URL on a host where a new URL failed in the last minute."""
         failed_at = self._host_failures.get(host)
         if failed_at is not None and now - failed_at < FAILURE_TTL:
             raise CimdThrottled("a metadata document on this host failed recently; not fetching yet")
+
+    def _charge_budget(self, site: str, now: float) -> None:
+        """Count one request that is about to go out to ``site``, or refuse it (CimdThrottled)
+        when the site or the fetcher is over its per-minute budget."""
         recent = [t for t in self._site_fetches.get(site, []) if now - t < 60]
         self._all_fetches = [t for t in self._all_fetches if now - t < 60]
         if len(recent) >= SITE_FETCHES_PER_MINUTE or len(self._all_fetches) >= GLOBAL_FETCHES_PER_MINUTE:
             self._site_fetches[site] = recent
             raise CimdThrottled("too many metadata document fetches; try again shortly")
-
-    def _count_fetch(self, site: str, now: float) -> None:
-        self._site_fetches.setdefault(site, []).append(now)
+        recent.append(now)
+        self._site_fetches[site] = recent
         self._all_fetches.append(now)
         if len(self._site_fetches) > 1000:  # bounded even under abuse
             self._site_fetches = {k: v for k, v in self._site_fetches.items() if v and now - v[-1] < 60}
 
     async def fetch(self, url: str, *, known: bool = False) -> tuple[dict[str, Any], int]:
-        """Return (client record, cache ttl seconds) or raise CimdError. ``known``: the gateway
-        has accepted this URL's document before (see the relay limits in the module docstring)."""
+        """Return (client record, cache ttl seconds) or raise CimdError. ``known``: a client with
+        this URL has completed a sign-in here (see the relay limits in the module docstring)."""
         if not is_cimd_client_id(url):
             raise CimdError("client_id is not an https URL with a path")
         now = time.monotonic()
@@ -379,8 +417,18 @@ class CimdFetcher:
             raise CimdThrottled("metadata document fetch failed recently; not retrying yet")
         host = (urlparse(url).hostname or "").lower().rstrip(".")
         site = _site(host)
-        if not known:
-            self._admit_new_url(host, site, now)
+        # Checks that need no network come first and spend nothing.
+        if not self._host_allowed(host):
+            raise CimdError("client metadata host is not on the allowlist")
+        try:
+            ipaddress.ip_address(host)
+        except ValueError:
+            pass
+        else:
+            raise CimdError("client_id must use a hostname, not an IP address")
+        exempt = known or bool(self.allowed_hosts)  # allowlisted (any other host was refused above)
+        if not exempt:
+            self._check_host_block(host, now)
         lock = self._site_locks.setdefault(site, asyncio.Lock())
         self._site_users[site] = self._site_users.get(site, 0) + 1
         try:
@@ -397,14 +445,12 @@ class CimdFetcher:
             except TimeoutError as exc:
                 raise CimdThrottled("metadata document fetcher is busy; try again shortly") from exc
             try:
-                if not known:
-                    # Checked again now that the slot is ours: callers queued behind the same site
-                    # were admitted together, and the host may have failed meanwhile.
-                    self._admit_new_url(host, site, time.monotonic())
-                    self._count_fetch(site, time.monotonic())
+                if not exempt:
+                    # Checked again now that the slot is ours: the host may have failed meanwhile.
+                    self._check_host_block(host, time.monotonic())
                 # A host that drips one byte at a time must not hold a slot for longer than this.
                 async with asyncio.timeout(self.timeout):
-                    return await self._fetch(url)
+                    return await self._fetch(url, site=None if exempt else site)
             except CimdThrottled:
                 raise
             except TimeoutError as exc:
@@ -414,7 +460,7 @@ class CimdFetcher:
                 raise CimdError("metadata document fetch timed out") from exc
             except CimdError:
                 self._note_failure(url, now)
-                if not known:
+                if not exempt:
                     self._note_host_failure(host, now)
                 raise
             finally:
@@ -436,7 +482,9 @@ class CimdFetcher:
         if len(self._failures) > 1000:  # bounded even under abuse
             self._failures = {u: t for u, t in self._failures.items() if now - t < FAILURE_TTL}
 
-    async def _fetch(self, url: str) -> tuple[dict[str, Any], int]:
+    async def _fetch(self, url: str, *, site: str | None = None) -> tuple[dict[str, Any], int]:
+        """Fetch and validate one document. ``site``: charge the request to that site's budget
+        (and the global one) once the host has passed every check, right before it is sent."""
         host = urlparse(url).hostname or ""
         if not self._host_allowed(host):
             raise CimdError("client metadata host is not on the allowlist")
@@ -452,6 +500,8 @@ class CimdFetcher:
             raise CimdError(f"cannot resolve client metadata host: {exc.__class__.__name__}") from exc
         if not addresses or not all(_address_is_public(a) for a in addresses):
             raise CimdError("client metadata host does not resolve to a public address")
+        if site is not None:
+            self._charge_budget(site, time.monotonic())
         # Connect to the address that was just checked, not to whatever the name resolves to a
         # moment later; the hostname still goes in SNI, the Host header and the certificate check.
         pinned = ipaddress.ip_address(addresses[0])

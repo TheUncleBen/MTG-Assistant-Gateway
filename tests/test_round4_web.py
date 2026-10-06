@@ -22,8 +22,9 @@ from tests.test_admin import _with_admin, admin_browser
 from tests.test_cimd import CLIENT_URL, DocHost, document, start
 from tests.test_decks_and_proxy import Browser
 
-VICTIM_IP = "203.0.113.10"
-ATTACKER_IPS = [f"198.51.100.{i}" for i in range(1, 5)]
+# Public (globally routable) addresses: only those are rate-limited (documentation ranges are not).
+VICTIM_IP = "5.6.8.10"
+ATTACKER_IPS = [f"5.6.7.{i}" for i in range(1, 5)]
 
 
 def _from(h: Harness, ip: str) -> httpx.AsyncClient:
@@ -216,31 +217,42 @@ def test_metadata_document_record_is_bounded():
     assert validate_document(CLIENT_URL, document())["client_name"] == "Example Assistant"
 
 
-async def test_cimd_cache_is_capped_per_host_and_in_all(
+async def cimd_sign_in(gw: Harness) -> None:
+    """A member completes a sign-in through the metadata-document client CLIENT_URL."""
+    r, _ = await start(gw)
+    assert r.status_code == 302, r.text
+    done = await gw.callback(await gw.idp_leg(r))
+    assert done.status_code == 302 and "code=" in done.headers["location"], done.text
+
+
+async def test_cimd_cache_is_capped_per_site_and_in_all(
     tmp_path: Path, idp: FakeIdP, monkeypatch: pytest.MonkeyPatch
 ):
     monkeypatch.setattr(dbmod, "MAX_CIMD_CLIENTS", 12, raising=False)
-    monkeypatch.setattr(dbmod, "MAX_CIMD_CLIENTS_PER_HOST", 5, raising=False)
+    monkeypatch.setattr(dbmod, "MAX_CIMD_CLIENTS_PER_SITE", 5, raising=False)
     monkeypatch.setattr(cimdmod, "SITE_FETCHES_PER_MINUTE", 1000, raising=False)
     monkeypatch.setattr(cimdmod, "GLOBAL_FETCHES_PER_MINUTE", 1000, raising=False)
     docs = DocHost()
     docs.serve()
     async with running(Harness(make_settings(tmp_path), idp, cimd=docs.fetcher())) as gw:
-        r, _ = await start(gw)  # a real client signs in once
-        assert r.status_code == 302
-        for n, host in enumerate(("attacker.example", "attacker2.example", "attacker3.example")):
-            docs.addresses[host] = [f"93.184.216.{50 + n}"]
+        await cimd_sign_in(gw)  # a real client signs in once
+        sites = ("attacker.example", "attacker2.example", "attacker3.example")
+        for n, site in enumerate(sites):
             for i in range(30):
-                url = f"https://{host}/c/{i}.json"
+                host = f"h{i}.{site}"  # every document on its own subdomain
+                docs.addresses[host] = [f"93.184.216.{50 + n}"]
+                url = f"https://{host}/c.json"
                 docs.serve(url, body=document(client_id=url, redirect_uris=[f"https://{host}/cb"]))
                 r, _ = await start(gw, client_id=url, redirect=f"https://{host}/cb")
                 assert r.status_code == 302, r.text
         with gw.db._lock:
             rows = [r[0] for r in gw.db._conn.execute("SELECT client_id FROM cimd_clients")]
-        assert len(rows) <= 12
-        assert CLIENT_URL in rows  # the real client's row was never the one pushed out
-        for host in ("attacker.example", "attacker2.example", "attacker3.example"):
-            assert sum(1 for u in rows if urlparse(u).hostname == host) <= 5
+        assert len(rows) <= 12 + 1  # the signed-in client is kept on top of the cap
+        assert CLIENT_URL in rows  # never pushed out
+        for site in sites:
+            assert sum(1 for u in rows if (urlparse(u).hostname or "").endswith(site)) <= 5
+        gw.db.purge_expired()
+        assert gw.db.cimd_client_known(CLIENT_URL)
 
 
 # -- C-3: the metadata fetcher is not a relay for GETs to other sites --------------------------
@@ -306,8 +318,7 @@ async def test_known_client_still_signs_in_while_its_host_is_blocked(tmp_path: P
     docs = DocHost()
     docs.serve(headers={"cache-control": "max-age=300"})
     async with running(Harness(make_settings(tmp_path), idp, cimd=docs.fetcher())) as gw:
-        r, _ = await start(gw)
-        assert r.status_code == 302
+        await cimd_sign_in(gw)
         # Junk addresses on the client's host block new ones there for a minute...
         r, _ = await start(gw, client_id="https://client.example/junk")
         assert r.status_code == 400
