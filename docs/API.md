@@ -16,11 +16,12 @@ Every `/api/v1` call needs one of:
   `DELETE`) then also need the `X-CSRF-Token` header. The token is the `csrf` hidden field every
   signed-in page carries (the sign-out form) and the `csrf` value in the editor's config block.
 
-A bearer token issued only for the read-only scope `mtg.read` (an app that asked for `scope=mtg.read`,
-or a bare `read`) may call every `GET` route but none of the writes: they answer `403` with
+A bearer token whose scopes are all read-only (`mtg.read` or a bare `read`, for an app that asked
+for `scope=mtg.read`) may call every `GET` route but none of the writes: they answer `403` with
 `"error": "insufficient_scope"`. The MCP tools that change something (`propose_*`, `apply_proposal`,
 `reject_proposal`, `run_deck_report`, `save_scan_session`) refuse such a token the same way. A token
-with the default scope `mtg`, with no scope, or with any other scope has full access, as before.
+with the default scope `mtg`, with no scope, or with any scope that is not read-only (for example
+`read write`) has full access, as before.
 
 A missing or invalid credential answers `401` with `{"ok": false, "error": "unauthenticated",
 "login": "/login"}`. Someone no longer in `MTG_REQUIRED_GROUP` gets the same `401`: before a request is served the gateway
