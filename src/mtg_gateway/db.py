@@ -1071,6 +1071,10 @@ class Database:
             c.execute("UPDATE archidekt_links SET status = 'revoked', secret_enc = '' WHERE sub = ?", (sub,))
         return sum(self.revoke_all_for_user(sub).values())
 
+    def set_user_issuer(self, sub: str, issuer: str) -> None:
+        with self.tx() as c:
+            c.execute("UPDATE users SET idp_issuer = ? WHERE sub = ?", (issuer, sub))
+
     def set_user_groups(self, sub: str, groups: list[str]) -> None:
         """Record the groups the identity provider reported just now."""
         with self.tx() as c:

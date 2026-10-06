@@ -96,15 +96,6 @@ def _token_auth_method_env(name: str, default: str) -> str:
 DEFAULT_OIDC_SCOPES = "openid profile email offline_access"
 
 
-def _with_offline_access(scopes: str) -> str:
-    """``offline_access`` is always asked for: the identity provider's refresh token is what lets
-    the gateway ask it again, on later requests, whether the person is still allowed in."""
-    parts = scopes.split()
-    if "offline_access" not in parts:
-        parts.append("offline_access")
-    return " ".join(parts)
-
-
 def _int_env(name: str, default: int, *, lo: int, hi: int) -> int:
     raw = _env(name, str(default)) or str(default)
     try:
@@ -196,6 +187,7 @@ class Settings:
     refresh_token_ttl: int = 30 * 24 * 3600
     reauth_interval: int = 7 * 24 * 3600
     membership_check_ttl: int = 5
+    oidc_previous_issuers: list[str] = field(default_factory=list)
     auth_code_ttl: int = 300
     login_ttl: int = 600
     listen_host: str = "0.0.0.0"
@@ -291,7 +283,16 @@ def load_settings() -> Settings:
         oidc_issuer=oidc_issuer,
         oidc_client_id=_env("MTG_OIDC_CLIENT_ID", required=True) or "",
         oidc_client_secret=_read_secret("MTG_OIDC_CLIENT_SECRET_FILE") or "",
-        oidc_scopes=_with_offline_access(_env("MTG_OIDC_SCOPES", DEFAULT_OIDC_SCOPES) or DEFAULT_OIDC_SCOPES),
+        # offline_access is in the default: the provider's refresh token is what lets the gateway
+        # keep asking it whether a member is still allowed in (membership.py). A value set here is
+        # used as is, for providers that refuse that scope (members then sign in again whenever
+        # the provider's access token runs out).
+        oidc_scopes=_env("MTG_OIDC_SCOPES", DEFAULT_OIDC_SCOPES) or DEFAULT_OIDC_SCOPES,
+        oidc_previous_issuers=[
+            i.strip().rstrip("/")
+            for i in (_env("MTG_OIDC_PREVIOUS_ISSUERS", "") or "").split(",")
+            if i.strip()
+        ],
         required_group=required_group,
         admin_group=_env("MTG_ADMIN_GROUP") or None,
         oidc_groups_claim=_groups_claim_env("MTG_OIDC_GROUPS_CLAIM", "groups"),

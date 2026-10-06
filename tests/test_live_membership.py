@@ -5,7 +5,6 @@ so the gateway asks its userinfo endpoint before serving any request with a sess
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 
 from .conftest import FakeIdP, Harness, make_settings, running
@@ -143,9 +142,10 @@ async def test_without_offline_access_the_member_signs_in_again_when_the_provide
         grant = h.db.get_idp_grant(SUB)
         assert grant["refresh_enc"] == ""
         assert (await whoami(h, token)).status_code == 200
-        with h.db.tx() as c:
-            c.execute("UPDATE idp_grants SET access_expires_at = ?", (int(time.time()) - 1,))
+        idp.access_tokens.clear()  # the provider access token runs out; there is no refresh token
         assert (await whoami(h, token)).status_code == 401
+        with h.db.tx() as c:
+            assert c.execute("SELECT 1 FROM audit_log WHERE event = 'membership_unverifiable'").fetchone()
 
 
 async def test_checks_are_cached_for_the_configured_seconds(tmp_path: Path, idp: FakeIdP) -> None:
@@ -218,3 +218,104 @@ async def test_an_account_from_another_identity_provider_is_refused(tmp_path: Pa
         assert r2.status_code == 403
         await b.aclose()
         await b2.aclose()
+
+
+async def test_a_removed_member_cannot_ride_on_someone_elses_token(tmp_path: Path, idp: FakeIdP) -> None:
+    """Bearer token of one person plus the session cookie of another: both are checked."""
+    async with running(Harness(live(tmp_path, admin_group="mtg-admins"), idp)) as h:
+        idp.user = {**idp.user, "groups": ["mtg-users", "mtg-admins"]}
+        b = Browser(h)
+        await b.login("/admin")
+        idp.user = {**idp.user, "sub": "user-2", "groups": ["mtg-users"]}
+        other = await mcp_token(h)
+        idp.set_groups(SUB, ["mtg-users"])  # user-1 demoted
+        r = await b.http.get("/admin/users", headers={"Authorization": f"Bearer {other}"})
+        assert r.status_code == 404
+        idp.set_groups(SUB, [])  # user-1 removed
+        r = await b.http.get("/account", headers={"Authorization": f"Bearer {other}"})
+        assert r.status_code == 302
+        await b.aclose()
+
+
+async def test_groups_only_in_the_id_token_are_read_from_a_refresh(tmp_path: Path, idp: FakeIdP) -> None:
+    idp.userinfo_omit = {"groups"}
+    idp.refresh_id_token = True
+    async with running(Harness(live(tmp_path), idp)) as h:
+        token = await mcp_token(h)
+        assert (await whoami(h, token)).status_code == 200
+        assert (await whoami(h, token)).status_code == 200  # stays a member across checks
+        idp.set_groups(SUB, [])
+        assert (await whoami(h, token)).status_code == 401
+
+
+async def test_no_groups_claim_anywhere_fails_closed(tmp_path: Path, idp: FakeIdP) -> None:
+    idp.userinfo_omit = {"groups"}  # and refreshes return no ID token
+    async with running(Harness(live(tmp_path), idp)) as h:
+        client = await h.register()
+        code, verifier = await h.full_login(client)
+        r = await h.token(
+            client,
+            grant_type="authorization_code",
+            code=code,
+            code_verifier=verifier,
+            redirect_uri="https://client.test/cb",
+        )
+        assert r.status_code == 400 and r.json()["error"] == "invalid_grant", r.text
+        with h.db.tx() as c:
+            assert c.execute("SELECT 1 FROM audit_log WHERE event = 'membership_unverifiable'").fetchone()
+
+
+async def test_a_misconfigured_client_secret_refuses_requests_but_revokes_nothing(
+    tmp_path: Path, idp: FakeIdP
+) -> None:
+    idp.access_ttl = 1  # every check refreshes
+    async with running(Harness(live(tmp_path), idp)) as h:
+        token = await mcp_token(h)
+        idp.refresh_error = "invalid_client"
+        r = await whoami(h, token)
+        assert r.status_code == 503
+        idp.refresh_error = None
+        assert (await whoami(h, token)).status_code == 200
+
+
+async def test_provider_without_expires_in_or_refresh_tokens_still_works(
+    tmp_path: Path, idp: FakeIdP
+) -> None:
+    idp.access_ttl = None
+    async with running(Harness(live(tmp_path, oidc_scopes="openid profile email"), idp)) as h:
+        token = await mcp_token(h)
+        assert (await whoami(h, token)).status_code == 200
+        idp.set_groups(SUB, [])
+        assert (await whoami(h, token)).status_code == 401
+
+
+async def test_a_previous_issuer_is_repinned(tmp_path: Path, idp: FakeIdP) -> None:
+    old = "https://old-idp.example/application/o/mtg"
+    async with running(Harness(live(tmp_path, oidc_previous_issuers=[old]), idp)) as h:
+        b = Browser(h)
+        await b.login()
+        with h.db.tx() as c:
+            c.execute("UPDATE users SET idp_issuer = ? WHERE sub = ?", (old + "/", SUB))
+        b2 = Browser(h)
+        await b2.login()
+        assert h.db.get_user(SUB)["idp_issuer"].rstrip("/") == h.oidc.issuer.rstrip("/")
+        await b.aclose()
+        await b2.aclose()
+
+
+async def test_a_provider_outage_does_not_burn_the_authorization_code(tmp_path: Path, idp: FakeIdP) -> None:
+    async with running(Harness(live(tmp_path), idp)) as h:
+        client = await h.register()
+        code, verifier = await h.full_login(client)
+        h.app.state.gateway.membership.forget(SUB)
+        idp.down = True
+        form = {
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": "https://client.test/cb",
+            "code_verifier": verifier,
+        }
+        assert (await h.token(client, **form)).status_code == 400
+        idp.down = False
+        r = await h.token(client, **form)
+        assert r.status_code == 200, r.text

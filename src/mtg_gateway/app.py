@@ -257,19 +257,24 @@ class MembershipMiddleware:
         self.app = app
         self.state = state
 
-    def _subject(self, scope: Scope) -> str | None:
+    def _subjects(self, scope: Scope) -> set[str]:
+        """Everyone this request could act as: the bearer token's person and the session
+        cookie's person. Both are checked, so a removed member can't ride on someone else's
+        token while the route reads their own cookie (or the other way round)."""
         headers = Headers(scope=scope)
         db = self.state.db
+        subs: set[str] = set()
         auth = headers.get("authorization", "")
         if auth[:7].lower() == "bearer ":
             row = db.get_token(auth[7:].strip(), "access")
             if row is not None and row["expires_at"] >= int(time.time()):
-                return row["sub"]
-        cookies = Request(scope).cookies
-        sid = cookies.get(cookie_name(SESSION_COOKIE, self.state.settings))
+                subs.add(row["sub"])
+        sid = Request(scope).cookies.get(cookie_name(SESSION_COOKIE, self.state.settings))
         if sid:
-            return db.get_browser_session(sid)
-        return None
+            sub = db.get_browser_session(sid)
+            if sub:
+                subs.add(sub)
+        return subs
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         checker = self.state.membership
@@ -277,8 +282,8 @@ class MembershipMiddleware:
         if checker is None or scope["type"] != "http" or path.startswith(self.EXEMPT_PREFIXES):
             await self.app(scope, receive, send)
             return
-        sub = self._subject(scope)
-        if sub is not None and await checker.check(sub) is Membership.UNAVAILABLE:
+        outcomes = [await checker.check(sub) for sub in sorted(self._subjects(scope))]
+        if Membership.UNAVAILABLE in outcomes:
             request = Request(scope)
             message = "The sign-in service can't be reached to confirm your access. Try again shortly."
             if _wants_page(request):

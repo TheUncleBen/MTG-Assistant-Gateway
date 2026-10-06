@@ -491,21 +491,29 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
                 "Sign-in could not be completed with the identity provider. Try again.", 502
             ) from exc
 
+        known = self.db.get_user(identity.sub)
+        pinned = (known or {}).get("idp_issuer")
+        if pinned and pinned.rstrip("/") != self.oidc.issuer.rstrip("/"):
+            if pinned.rstrip("/") in self.settings.oidc_previous_issuers:
+                # The same provider under its old address (MTG_OIDC_PREVIOUS_ISSUERS): re-pin.
+                self.db.set_user_issuer(identity.sub, self.oidc.issuer)
+                self.db.audit("issuer_repinned", sub=identity.sub, client_id=session["client_id"])
+            else:
+                # The same subject string from a different identity provider is not the same
+                # person: never hand them the earlier member's decks, apps or Archidekt link.
+                self.db.audit("login_rejected_issuer", sub=identity.sub, client_id=session["client_id"])
+                raise LoginError(
+                    "This account belongs to a different sign-in provider than the one this gateway "
+                    "uses now. Ask the gateway's admin to delete the old account's data, then sign in "
+                    "again.",
+                    403,
+                )
+
         if self.settings.required_group and self.settings.required_group not in identity.groups:
             self.db.audit("login_rejected_group", sub=identity.sub, client_id=session["client_id"])
             self.db.drop_member(identity.sub, identity.groups)  # their apps and browser sessions too
             raise LoginError("Your account is not in the group that may use this service.", 403)
 
-        known = self.db.get_user(identity.sub)
-        if known and known.get("idp_issuer") and known["idp_issuer"] != self.oidc.issuer:
-            # The same subject string from a different identity provider is not the same person:
-            # never hand them the earlier member's decks, apps or Archidekt link.
-            self.db.audit("login_rejected_issuer", sub=identity.sub, client_id=session["client_id"])
-            raise LoginError(
-                "This account belongs to a different sign-in provider than the one this gateway uses "
-                "now. Ask the gateway's admin to delete the old account's data, then sign in again.",
-                403,
-            )
         if known and known.get("disabled_at"):
             self.db.audit("login_rejected_disabled", sub=identity.sub, client_id=session["client_id"])
             self.db.delete_browser_sessions_for(identity.sub)
@@ -665,12 +673,14 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         self, client: OAuthClientInformationFull, authorization_code: AuthorizationCode
     ) -> OAuthToken:
         family = secrets.token_urlsafe(16)
+        if not authorization_code.subject:
+            raise TokenError("invalid_grant", "authorization code has no subject")
+        # Asked before the code is used up, so a brief identity-provider outage doesn't burn it
+        # (a retry would otherwise look like a replayed code).
+        await self._require_member(authorization_code.subject)
         # Single use: marking it used is the check, so a replayed code fails here.
         if not self.db.use_auth_code(authorization_code.code, family):
             raise TokenError("invalid_grant", "authorization code already used")
-        if not authorization_code.subject:
-            raise TokenError("invalid_grant", "authorization code has no subject")
-        await self._require_member(authorization_code.subject)
         return self._issue(
             client.client_id,
             authorization_code.subject,

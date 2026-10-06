@@ -66,6 +66,9 @@ class IdPTokens:
     access_token: str | None = field(default=None, repr=False)
     access_expires_at: int | None = None
     refresh_token: str | None = field(default=None, repr=False)
+    # Validated claims of the ID token a refresh returned, if any (some providers put groups
+    # only there, not in userinfo).
+    id_claims: dict[str, Any] | None = field(default=None, repr=False)
 
 
 def pkce_pair() -> tuple[str, str]:
@@ -245,7 +248,18 @@ class OIDCClient:
                 f"refresh request to identity provider failed: {type(exc).__name__}"
             ) from exc
         if resp.status_code in (400, 401):
-            return None
+            # Only invalid_grant means the grant itself is gone (user deactivated or deleted,
+            # token revoked or expired). Anything else, such as invalid_client after a client
+            # secret change, is a configuration problem: refuse requests, revoke nothing.
+            try:
+                error = resp.json().get("error")
+            except (ValueError, AttributeError):
+                error = None
+            if error == "invalid_grant":
+                return None
+            raise IdPUnavailable(
+                f"identity provider refused the refresh with HTTP {resp.status_code} ({str(error)[:40]})"
+            )
         if resp.status_code != 200:
             raise IdPUnavailable(f"identity provider answered the refresh with HTTP {resp.status_code}")
         try:
@@ -256,6 +270,12 @@ class OIDCClient:
             raise IdPUnavailable("identity provider refresh response has no access_token")
         tokens = _token_fields(body)
         tokens.refresh_token = tokens.refresh_token or refresh_token  # providers that don't rotate
+        id_token = body.get("id_token")
+        if isinstance(id_token, str):
+            try:
+                tokens.id_claims = await self._validate_id_token(id_token, None)
+            except OIDCError as exc:
+                raise IdPUnavailable(str(exc)) from exc
         return tokens
 
     async def userinfo(self, access_token: str) -> dict[str, Any] | None:
@@ -286,7 +306,9 @@ class OIDCClient:
             raise IdPUnavailable("identity provider returned non-object userinfo")
         return info
 
-    async def _validate_id_token(self, id_token: str, nonce: str) -> dict[str, Any]:
+    async def _validate_id_token(self, id_token: str, nonce: str | None) -> dict[str, Any]:
+        """Validate signature, issuer, audience, expiry and (at sign-in) the nonce. A refreshed ID
+        token carries no new nonce, so ``nonce=None`` skips only that check."""
         last_exc: Exception | None = None
         for attempt in range(2):
             keys = await self.jwks(force=attempt == 1)
@@ -298,8 +320,8 @@ class OIDCClient:
                     sub={"essential": True},
                     exp={"essential": True},
                     iat={"essential": True},
-                    nonce={"essential": True, "value": nonce},
                     leeway=60,
+                    **({"nonce": {"essential": True, "value": nonce}} if nonce is not None else {}),
                 )
                 claims = dict(token.claims)
                 # joserfc compares 'iss' exactly; accept a trailing-slash variant.
@@ -341,6 +363,18 @@ def validate_groups_claim(path: str) -> str:
     if any(seg == "" for seg in path.split(".")):
         raise ValueError("groups claim must not start or end with a dot or contain '..'")
     return path
+
+
+def groups_claim_present(claims: Any, path: str) -> bool:
+    """Does ``claims`` carry the groups claim at ``path`` at all (even an empty list)?"""
+    if isinstance(claims, dict) and path in claims:
+        return True
+    node = claims
+    for segment in path.split("."):
+        if not isinstance(node, dict) or segment not in node:
+            return False
+        node = node[segment]
+    return True
 
 
 def resolve_groups(claims: Any, path: str) -> list[str]:

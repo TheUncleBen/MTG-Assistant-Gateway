@@ -29,7 +29,10 @@ next sign-in.
    the web pages and the Android app again, and each connected AI app asks
    to reconnect once.
 3. `MTG_OIDC_SCOPES` now defaults to `openid profile email offline_access`.
-   If you set it yourself, `offline_access` is added for you.
+   If you set it yourself (the 0.6.0 Compose `.env.example` did, as
+   `openid profile email`), add `offline_access` to it; the value is used
+   exactly as set. The gateway logs a warning when the provider issues no
+   refresh token.
 4. The example env files now ship `MTG_APPLY_VIA_MCP=false`. Your own
    deployment keeps whatever it sets; nothing changes unless you change it.
    `false` means a change is applied only by the member's own click on the
@@ -50,11 +53,20 @@ next sign-in.
   it took effect at their next sign-in, up to a week later for assistants.
   Tested live against Authentik 2026.2.2, which on its own keeps honouring a
   removed member's refresh token.
-- A member removed from `MTG_REQUIRED_GROUP` (or deactivated or deleted at
-  the provider) loses every gateway token, browser session, stored
-  identity-provider token and their Archidekt link at once.
-- If the identity provider can't be reached, requests are refused with 503
+- A member removed from `MTG_REQUIRED_GROUP` loses every gateway token,
+  browser session, stored identity-provider token and their Archidekt link
+  at once. A member the provider no longer vouches for (deactivated or
+  deleted, which the provider reports only as a refused token) loses every
+  token and session too; their Archidekt link stays until an admin deletes
+  their data, so a provider hiccup can't unlink everyone.
+- If the identity provider can't be reached, or refuses the gateway itself
+  (a wrong client secret, a refused scope), requests are refused with 503
   and nothing is revoked (fail closed). Service comes back with the provider.
+- When userinfo carries no groups, they are read from a freshly refreshed ID
+  token. When neither has them, the person is signed out and a warning names
+  `MTG_OIDC_GROUPS_CLAIM` (fail closed), instead of being let in.
+- A request carrying both a browser session and a bearer token is checked
+  for both people.
 - Code exchanges and token refreshes at `/token` check membership the same
   way. A leftover code or refresh token of someone who deleted their data
   can't mint new tokens.
@@ -63,7 +75,8 @@ next sign-in.
 - Each member is pinned to the identity provider (issuer) they first signed
   in with. An account from a different provider with the same subject is
   refused instead of inheriting the old member's decks, apps and Archidekt
-  link; an admin can delete the old account's data.
+  link; an admin can delete the old account's data. After moving the
+  provider to a new address, list the old one in `MTG_OIDC_PREVIOUS_ISSUERS`.
 - An ID token issued to several audiences must name the gateway as its
   authorized party (`azp`).
 - **Sign out on all my devices** on the sign-out page (`/logout`) ends every

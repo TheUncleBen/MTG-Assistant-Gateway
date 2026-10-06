@@ -63,7 +63,12 @@ class FakeIdP:
         self.access_tokens: dict[str, str] = {}
         self.refresh_tokens: dict[str, str] = {}
         self.userinfo_calls = 0
-        self.access_ttl = 300
+        self.access_ttl: int | None = 300  # None: no expires_in in token responses
+        # Provider shapes: keys userinfo leaves out (e.g. groups only in the ID token), whether a
+        # refresh returns a new ID token, and an error code every refresh fails with.
+        self.userinfo_omit: set[str] = set()
+        self.refresh_id_token = False
+        self.refresh_error: str | None = None
         self.app = Starlette(
             routes=[
                 Route("/application/o/mtg/.well-known/openid-configuration", self.discovery),
@@ -116,10 +121,17 @@ class FakeIdP:
         if not ok:
             return JSONResponse({"error": "invalid_client"}, status_code=401)
         if form.get("grant_type") == "refresh_token":
+            if self.refresh_error:
+                return JSONResponse({"error": self.refresh_error}, status_code=401)
             sub = self.refresh_tokens.pop(form.get("refresh_token", ""), None)
             if sub is None or sub in self.disabled:
                 return JSONResponse({"error": "invalid_grant"}, status_code=400)
-            return JSONResponse(self._mint(sub, offline=True))
+            body = self._mint(sub, offline=True)
+            if self.refresh_id_token:
+                now = int(time.time())
+                claims = {"iss": IDP, "aud": CLIENT_ID, "exp": now + 300, "iat": now, **self.directory[sub]}
+                body["id_token"] = jwt.encode({"alg": "RS256", "kid": "test-1"}, claims, self.key)
+            return JSONResponse(body)
         q = self.pending.pop(form.get("code", ""), None)
         if q is None:
             return JSONResponse({"error": "invalid_grant"}, status_code=400)
@@ -164,7 +176,8 @@ class FakeIdP:
         sub = self.access_tokens.get(token)
         if sub is None or sub in self.disabled:
             return Response(status_code=401)
-        return JSONResponse(self.directory.get(sub, self.user))
+        info = self.directory.get(sub, self.user)
+        return JSONResponse({k: v for k, v in info.items() if k not in self.userinfo_omit})
 
     def set_groups(self, sub: str, groups: list[str]) -> None:
         """Change a user's groups at the provider (as an admin would in Authentik)."""

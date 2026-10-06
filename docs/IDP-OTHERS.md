@@ -21,7 +21,7 @@ Set up one **confidential** OIDC client (also called a "web application" or
 | Redirect URI | `https://mtg.example.com/auth/callback` | Your `MTG_PUBLIC_URL` plus `/auth/callback`. The only one the gateway uses |
 | Grant type | Authorization code | PKCE (`S256`) is always sent, so providers that require it are fine |
 | Client authentication | **`client_secret_post`** by default | The gateway sends the client ID and secret in the form body. For a client set to HTTP Basic, set `MTG_OIDC_TOKEN_AUTH_METHOD=client_secret_basic` |
-| Scopes | `openid profile email offline_access`, plus whatever makes your provider send groups | Set `MTG_OIDC_SCOPES` if you need more, for example `openid profile email offline_access groups`. `offline_access` is added for you if you leave it out |
+| Scopes | `openid profile email offline_access`, plus whatever makes your provider send groups | Set `MTG_OIDC_SCOPES` if you need more, for example `openid profile email offline_access groups`. Keep `offline_access` in it: the value is used exactly as set |
 | Userinfo endpoint | Listed as `userinfo_endpoint` in the discovery document, and its answer includes the groups claim (`MTG_OIDC_GROUPS_CLAIM`) | The gateway asks it before serving requests, to check membership live (see below). Groups only in the ID token aren't enough |
 | Refresh tokens | Issued for the `offline_access` scope | Without them people have to sign in again whenever the provider's access token runs out. Some providers need refresh tokens or `offline_access` allowed on the client first |
 | ID token signing | RS256/384/512, ES256/384/512 or PS256 | HS256 (shared-secret signing) and EdDSA are refused |

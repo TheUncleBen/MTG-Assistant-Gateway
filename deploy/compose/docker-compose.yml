@@ -58,12 +58,13 @@ services:
       MTG_OIDC_CLIENT_SECRET_FILE: /run/secrets/mtg_oidc_client_secret
       MTG_FERNET_KEY_FILE: /run/secrets/mtg_fernet_key
       MTG_SESSION_SECRET_FILE: /run/secrets/mtg_session_secret
-      MTG_OIDC_SCOPES: ${MTG_OIDC_SCOPES:-openid profile email}
+      MTG_OIDC_SCOPES: ${MTG_OIDC_SCOPES:-openid profile email offline_access}
       MTG_REQUIRED_GROUP: ${MTG_REQUIRED_GROUP:-}
       MTG_ALLOW_ANY_IDP_USER: ${MTG_ALLOW_ANY_IDP_USER:-false}
       # Optional. Empty values fall back to the gateway's defaults (docs/DEPLOY.md, environment reference).
       MTG_ADMIN_GROUP: ${MTG_ADMIN_GROUP:-}
       MTG_OIDC_GROUPS_CLAIM: ${MTG_OIDC_GROUPS_CLAIM:-}
+      MTG_OIDC_PREVIOUS_ISSUERS: ${MTG_OIDC_PREVIOUS_ISSUERS:-}
       MTG_OIDC_TOKEN_AUTH_METHOD: ${MTG_OIDC_TOKEN_AUTH_METHOD:-}
       MTG_SERVER_NAME: ${MTG_SERVER_NAME:-}
       MTG_DATA_DIR: /data
