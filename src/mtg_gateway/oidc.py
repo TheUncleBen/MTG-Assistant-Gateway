@@ -237,7 +237,9 @@ class OIDCClient:
         try:
             resp = await self._http.post(meta["token_endpoint"], data=form, headers=headers)
         except httpx.HTTPError as exc:
-            raise IdPUnavailable(f"refresh request to identity provider failed: {type(exc).__name__}") from exc
+            raise IdPUnavailable(
+                f"refresh request to identity provider failed: {type(exc).__name__}"
+            ) from exc
         if resp.status_code in (400, 401):
             return None
         if resp.status_code != 200:

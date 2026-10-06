@@ -142,7 +142,11 @@ class FakeIdP:
     def _mint(self, sub: str, *, offline: bool) -> dict[str, object]:
         access = f"idp-access-{secrets.token_urlsafe(8)}"
         self.access_tokens[access] = sub
-        body: dict[str, object] = {"access_token": access, "token_type": "Bearer", "expires_in": self.access_ttl}
+        body: dict[str, object] = {
+            "access_token": access,
+            "token_type": "Bearer",
+            "expires_in": self.access_ttl,
+        }
         if offline:
             refresh = f"idp-refresh-{secrets.token_urlsafe(8)}"
             self.refresh_tokens[refresh] = sub
