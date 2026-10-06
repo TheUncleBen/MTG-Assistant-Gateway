@@ -650,6 +650,13 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             self.db.revoke_family(row["family"])
             self.db.audit("disabled_user_refused", sub=row["sub"], client_id=row["client_id"])
             return None
+        group = self.settings.required_group
+        if group and group not in (user.get("groups") or []):
+            # Checked on every request, not only at refresh: a member taken out of the group (or a
+            # changed MTG_REQUIRED_GROUP) loses /mcp at once, like the JSON API and the web pages.
+            self.db.revoke_family(row["family"])
+            self.db.audit("not_in_group_refused", sub=row["sub"], client_id=row["client_id"])
+            return None
         return AccessToken(
             token=token,
             client_id=row["client_id"],

@@ -50,7 +50,21 @@ docker service logs -f mtg_mtg-assistant-mysticforge
 curl -s https://mtg.example.com/healthz
 ```
 
-`/healthz` returns `{"status":"ok","version":"..."}` when the gateway is up.
+`/healthz` returns `{"status":"ok","version":"..."}` when the gateway is up
+and its database answers, and HTTP 503 with `"detail":"database unavailable"`
+otherwise (the reason is in the gateway's log, never in the reply). The admin
+page's **System** card shows the version, database size and schema, and when
+the newest backup was written.
+
+The gateway logs one line per notable event to standard output (`MTG_LOG_LEVEL`,
+default `INFO`). An unexpected error is logged with its full traceback, counted
+under "server_error" on the admin page, and shown to the person only as a plain
+"Something went wrong" page or JSON message. Outbound request URLs are logged
+only at `DEBUG`. Docker keeps at most three 10 MB log files per container
+(the `logging:` block in the stack and compose files), so logs can't fill a
+small disk; raise `max-size` there if you want more history. Nothing is sent
+to any outside error-tracking or analytics service.
+
 If research tools answer "the research service is unavailable right now",
 the gateway is fine but can't reach Mystic Forge. Check that service and its
 logs.
@@ -67,7 +81,14 @@ docker service update --force mtg_mtg-assistant-gateway       # restart
 docker service update --image ghcr.io/<owner>/mtg-assistant-gateway:<tag> mtg_mtg-assistant-gateway
 ```
 
-Updates are `stop-first`, so expect a few seconds of downtime. Signed-in
+Updates are `stop-first`, so expect a few seconds of downtime. On a stop the
+gateway finishes requests already running (such as a deck apply) for up to
+100 seconds; the stack gives it 120 (`stop_grace_period`) before Docker kills
+it. An apply that a crash or a kill still cuts off is marked failed when the
+gateway starts again, with a pointer to the snapshot taken before it. A failed
+update is not rolled back automatically on purpose: a new version may have
+upgraded the database, and the old image refuses to start on it (below).
+Signed-in
 assistants keep working because tokens live in the database on disk. Linked
 Archidekt accounts and proposals survive restarts too.
 
@@ -182,7 +203,11 @@ not in your backups.
 
 - **Nightly:** at `MTG_BACKUP_HOUR_UTC` the gateway writes
   `mtg-gateway-<timestamp>.sqlite` into `MTG_BACKUP_DIR` and deletes copies
-  older than `MTG_BACKUP_KEEP_DAYS`.
+  older than `MTG_BACKUP_KEEP_DAYS`. Each copy is a standalone file (no
+  `-wal` beside it) that passed SQLite's `quick_check` before it was kept; a
+  copy that fails is not kept, the failure is logged and the admin page says
+  so. The copy is read through its own connection, so the gateway keeps
+  answering while it runs.
 - **Back up right now:**
 
   ```bash
@@ -259,7 +284,7 @@ secret.
 
 Registered AI clients (one per connector someone added) that never finished
 a sign-in, or whose tokens have all expired and been cleared out, get
-deleted by the nightly cleanup after seven days. Nothing to do by hand; the
+deleted by the hourly cleanup after seven days. Nothing to do by hand; the
 client registers again next time someone connects.
 
 The same cleanup bounds what anyone on the internet can fill the database
@@ -267,7 +292,10 @@ with: audit log entries older than a year are deleted, the anonymous ones
 (client registrations and client-metadata fetches) are also capped at the
 newest 5000 and keep only a short summary, unfinished sign-ins are capped
 at the newest 5000 (expired ones are also dropped whenever a new sign-in
-starts), and unused registered clients at the newest 2000. A flood of sign-up attempts can therefore cost a connector that was
+starts), and unused registered clients at the newest 2000. The cleanup runs
+at start and then every hour, with or without backups. It also keeps the
+newest 25 snapshots of each member's deck (plus any a pending restore needs),
+usage counters for 400 days and remembered deck covers for 180 days. A flood of sign-up attempts can therefore cost a connector that was
 registered but not used yet; that client just registers again. To slow
 floods down at the proxy, see the optional rate limit in
 [DEPLOY.md](DEPLOY.md#7-reverse-proxy).
@@ -391,7 +419,8 @@ What it shows:
 - **Overview** (`/admin`): how many people have signed in at least once, how
   many are disabled and how many have linked Archidekt; proposals by state,
   applies, tool calls and errors over the last 30 days, with a line per
-  counter kind by day.
+  counter kind by day; and a **System** card with the version, database
+  schema and size, and the newest backup (or the last backup's failure).
 - **Users** (`/admin/users`): every account the identity provider has ever
   signed in, newest sign-in first, with name, email, subject, groups, first
   and last seen, Archidekt username, the AI clients connected, live token

@@ -142,6 +142,14 @@ MAX_ANONYMOUS_AUDIT_DETAIL = 1024
 # Closed proposals (expired, rejected, failed) are deleted this long after they were made.
 CLOSED_PROPOSAL_RETENTION_SECONDS = 30 * 86400
 CLOSED_PROPOSAL_STATES = ("expired", "rejected", "failed")
+# Snapshots are whole decks taken before every edit. The newest SNAPSHOTS_KEEP_PER_DECK of each
+# member's deck are always kept (and any a pending restore still needs); older ones are deleted.
+SNAPSHOTS_KEEP_PER_DECK = 25
+# Per-day usage counters and remembered deck covers are kept this long.
+METRICS_RETENTION_SECONDS = 400 * 86400
+DECK_COVER_RETENTION_SECONDS = 180 * 86400
+# How long a write waits for another connection (such as `mtg-gateway backup`) to finish.
+BUSY_TIMEOUT_MS = 5000
 
 
 def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
@@ -211,8 +219,23 @@ def _step_5(conn: sqlite3.Connection) -> None:
     )
 
 
+def _step_6(conn: sqlite3.Connection) -> None:
+    """Production readiness: indexes for the nightly purge and the snapshot lists, which
+    otherwise scan whole tables as they grow."""
+    for sql in (
+        "CREATE INDEX IF NOT EXISTS audit_log_event ON audit_log(event, id)",
+        "CREATE INDEX IF NOT EXISTS audit_log_at ON audit_log(at)",
+        "CREATE INDEX IF NOT EXISTS browser_sessions_sub ON browser_sessions(sub)",
+        "CREATE INDEX IF NOT EXISTS browser_sessions_expires ON browser_sessions(expires_at)",
+        "CREATE INDEX IF NOT EXISTS tokens_expires ON tokens(expires_at)",
+        "CREATE INDEX IF NOT EXISTS snapshots_owner_taken ON snapshots(owner_sub, taken_at)",
+        "CREATE INDEX IF NOT EXISTS snapshots_owner_deck ON snapshots(owner_sub, deck_id, taken_at)",
+    ):
+        conn.execute(sql)
+
+
 # Applied in order; ``PRAGMA user_version`` records how many have run. Append, never edit.
-MIGRATIONS = [_step_1, _step_2, _step_3, _step_4, _step_5]
+MIGRATIONS = [_step_1, _step_2, _step_3, _step_4, _step_5, _step_6]
 SCHEMA_VERSION = len(MIGRATIONS)
 
 
@@ -233,6 +256,7 @@ class Database:
             if str(self.path) != ":memory:":
                 self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA foreign_keys=ON")
+            self._conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
             try:
                 self._migrate()
             except Exception:
@@ -252,8 +276,21 @@ class Database:
         for number, step in enumerate(MIGRATIONS, start=1):
             if version >= number:
                 continue
-            step(self._conn)
-            self._conn.execute(f"PRAGMA user_version = {number}")
+            if number == 1:
+                # executescript commits on its own, so step 1 can't share a transaction. Every
+                # statement in it is idempotent, so an interrupted run simply repeats it.
+                step(self._conn)
+                self._conn.execute(f"PRAGMA user_version = {number}")
+                continue
+            # A step and its version bump commit together, or neither does.
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                step(self._conn)
+                self._conn.execute(f"PRAGMA user_version = {number}")
+            except BaseException:
+                self._conn.execute("ROLLBACK")
+                raise
+            self._conn.execute("COMMIT")
 
     @property
     def schema_version(self) -> int:
@@ -590,6 +627,20 @@ class Database:
                 "UPDATE tokens SET revoked = 1 WHERE family = ? AND created_at <= ?", (family, created_at)
             )
 
+    def fail_interrupted_applies(self) -> int:
+        """At startup, mark every proposal still 'applying' as failed. There is one gateway process,
+        so an apply left running by the previous one (a crash, a redeploy) can't still be going.
+        The result points at the snapshot taken before it and the deck, so the member can check."""
+        with self.tx() as c:
+            return c.execute(
+                """UPDATE proposals SET state = 'failed',
+                   result_json = COALESCE(result_json, json_object('error', 'interrupted',
+                       'detail', 'the gateway restarted before the apply finished; check the deck on '
+                                 || 'Archidekt and restore the snapshot if it is only partly changed',
+                       'snapshot_id', snapshot_id, 'deck_id', deck_id))
+                   WHERE state = 'applying'"""
+            ).rowcount
+
     def purge_expired(self) -> int:
         now = int(time.time())
         with self.tx() as c:
@@ -608,6 +659,13 @@ class Database:
                 (now - UNUSED_CLIENT_TTL,),
             ).rowcount
             n += self._prune_caps(c, now)
+            n += self._prune_snapshots(c)
+            n += c.execute(
+                "DELETE FROM metrics WHERE day < ?", (self._since_day(METRICS_RETENTION_SECONDS // 86400),)
+            ).rowcount
+            n += c.execute(
+                "DELETE FROM deck_covers WHERE updated_at < ?", (now - DECK_COVER_RETENTION_SECONDS,)
+            ).rowcount
             n += c.execute(
                 "UPDATE proposals SET state = 'expired' WHERE state = 'pending' AND expires_at < ?", (now,)
             ).rowcount
@@ -649,6 +707,23 @@ class Database:
             (MAX_UNUSED_CLIENTS,),
         ).rowcount
         return n
+
+    @staticmethod
+    def _prune_snapshots(c: sqlite3.Connection) -> int:
+        """Keep the newest SNAPSHOTS_KEEP_PER_DECK snapshots of each member's deck, and any
+        snapshot a pending or running proposal (a restore) still points at; delete the rest."""
+        return c.execute(
+            """DELETE FROM snapshots WHERE id IN (
+                   SELECT id FROM (
+                       SELECT id, ROW_NUMBER() OVER (
+                           PARTITION BY owner_sub, deck_id ORDER BY taken_at DESC, rowid DESC) AS n
+                       FROM snapshots)
+                   WHERE n > ?)
+               AND id NOT IN (SELECT json_extract(changes_json, '$.snapshot_id') FROM proposals
+                              WHERE kind = 'restore' AND state IN ('pending', 'applying')
+                                AND json_extract(changes_json, '$.snapshot_id') IS NOT NULL)""",
+            (SNAPSHOTS_KEEP_PER_DECK,),
+        ).rowcount
 
     @staticmethod
     def _trim_login_sessions(c: sqlite3.Connection, keep: int) -> int:
@@ -801,6 +876,37 @@ class Database:
     def delete_browser_sessions_for(self, sub: str) -> int:
         with self.tx() as c:
             return c.execute("DELETE FROM browser_sessions WHERE sub = ?", (sub,)).rowcount
+
+    # Tables a member's own rows live in, and the column naming the member. reports and
+    # scan_sessions belong to optional features and may not exist in this file.
+    MEMBER_TABLES = (
+        ("proposals", "owner_sub"),
+        ("snapshots", "owner_sub"),
+        ("reports", "owner_sub"),
+        ("scan_sessions", "owner_sub"),
+        ("archidekt_links", "sub"),
+        ("tokens", "sub"),
+        ("browser_sessions", "sub"),
+        ("metrics", "sub"),
+        ("users", "sub"),
+    )
+
+    def delete_member_data(self, sub: str) -> dict[str, int]:
+        """Delete everything the gateway keeps about one member, at their request: proposals,
+        snapshots, reports, scan sessions, the Archidekt link, every app grant and browser session,
+        usage counters and the user record. The security audit log is kept (it ages out after a
+        year) and records the deletion itself. Signing in again starts a fresh, empty account."""
+        out: dict[str, int] = {}
+        with self.tx() as c:
+            present = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+            for table, column in self.MEMBER_TABLES:
+                if table in present:
+                    out[table] = c.execute(f"DELETE FROM {table} WHERE {column} = ?", (sub,)).rowcount
+            c.execute(
+                "INSERT INTO audit_log (at, sub, client_id, event, detail_json) VALUES (?, ?, NULL, ?, ?)",
+                (int(time.time()), sub, "member_data_deleted", json.dumps(out)),
+            )
+        return out
 
     def drop_member(self, sub: str, groups: list[str]) -> int:
         """The IdP just showed ``sub`` is no longer in the required group: record the groups it
@@ -1063,10 +1169,45 @@ class Database:
         return {r["deck_id"]: {"scryfall_uid": r["scryfall_uid"], "card_name": r["card_name"]} for r in rows}
 
     def backup_to(self, dest: Path) -> None:
+        """Copy the database to ``dest`` with SQLite's online backup API and check the copy.
+
+        A file database is read through a second connection: in WAL mode it sees one consistent
+        snapshot while the gateway keeps serving requests, instead of holding the shared lock (and
+        every request waiting on it) for the whole copy. Raises if the copy fails its integrity check.
+        """
         dest.parent.mkdir(parents=True, exist_ok=True)
+        target = sqlite3.connect(str(dest))
+        try:
+            if str(self.path) == ":memory:":
+                with self._lock:
+                    self._conn.backup(target)
+            else:
+                source = sqlite3.connect(str(self.path))
+                try:
+                    source.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+                    source.backup(target)
+                finally:
+                    source.close()
+            # The copy must not need the WAL beside it: make it a plain rollback-journal file.
+            target.execute("PRAGMA journal_mode=DELETE")
+            result = target.execute("PRAGMA quick_check").fetchone()[0]
+            if result != "ok":
+                raise RuntimeError(f"backup copy failed its integrity check: {result}")
+        finally:
+            target.close()
+
+    def integrity_ok(self) -> bool:
+        """PRAGMA quick_check on the live database (read-only, cheap on a small file)."""
         with self._lock:
-            target = sqlite3.connect(str(dest))
+            return self._conn.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+
+    def size_bytes(self) -> int | None:
+        if str(self.path) == ":memory:":
+            return None
+        total = 0
+        for suffix in ("", "-wal"):
             try:
-                self._conn.backup(target)
-            finally:
-                target.close()
+                total += Path(f"{self.path}{suffix}").stat().st_size
+            except OSError:
+                pass
+        return total

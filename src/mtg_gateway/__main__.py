@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import argparse
 import logging
+import sqlite3
 import sys
 
 from .config import ConfigError, load_settings
+
+# Matches stop_grace_period (120 s) in deploy/portainer-stack.yml and deploy/compose, minus a margin.
+GRACEFUL_SHUTDOWN_SECONDS = 100
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -25,6 +29,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     logging.basicConfig(level=settings.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    if settings.log_level != "DEBUG":
+        # httpx logs every outbound request URL at INFO; keep that for DEBUG only.
+        for name in ("httpx", "httpcore"):
+            logging.getLogger(name).setLevel(logging.WARNING)
 
     if command == "check-config":
         print("configuration ok")
@@ -57,7 +65,16 @@ def main(argv: list[str] | None = None) -> int:
 
     from .app import create_app
 
-    app = create_app(settings)
+    try:
+        app = create_app(settings)
+    except sqlite3.DatabaseError as exc:
+        print(
+            f"database error: {settings.db_path} could not be opened ({exc}). If the file is damaged, "
+            f"stop the gateway and restore the newest copy from {settings.backup_dir or 'your backups'} "
+            "(docs/OPERATIONS.md, restoring a backup).",
+            file=sys.stderr,
+        )
+        return 3
     uvicorn.run(
         app,
         host=settings.listen_host,
@@ -66,6 +83,9 @@ def main(argv: list[str] | None = None) -> int:
         forwarded_allow_ips=settings.trusted_proxies,
         log_level=settings.log_level.lower(),
         access_log=False,
+        # On SIGTERM (a redeploy), let running requests such as a deck apply finish before exiting.
+        # The stack files give the container a longer stop_grace_period than this.
+        timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_SECONDS,
     )
     return 0
 

@@ -313,7 +313,15 @@ async def test_unlink_and_the_api_guards(gw: Harness) -> None:
 
 
 # -- database -------------------------------------------------------------------------
-V010_SCHEMA = dbmod.SCHEMA  # the CREATE statements v0.1.0 shipped (snapshot backup columns came as ALTERs)
+# The CREATE statements v0.1.0 shipped: today's base schema without the columns later steps add with
+# ALTER TABLE (the snapshot backup columns already came that way), so those ALTERs really run here.
+V010_SCHEMA = (
+    dbmod.SCHEMA.replace(",\n    binding_hash TEXT\n", "\n")
+    .replace(",\n    used_family TEXT\n", "\n")
+    .replace(",\n    auth_time INTEGER\n", "\n")
+    .replace(",\n    created_by_client TEXT\n", "\n")
+)
+assert V010_SCHEMA.count("binding_hash") == V010_SCHEMA.count("created_by_client") == 0
 
 
 def test_v010_database_upgrades_in_place(tmp_path: Path) -> None:
@@ -334,7 +342,7 @@ def test_v010_database_upgrades_in_place(tmp_path: Path) -> None:
 
     db = Database(path)
     try:
-        assert db.schema_version == dbmod.SCHEMA_VERSION == 5
+        assert db.schema_version == dbmod.SCHEMA_VERSION == 6
         user = db.get_user("u1")
         assert user["disabled_at"] is None and user["last_seen_at"] == 200 and user["groups"] == ["g"]
         assert db.list_snapshots("u1")[0]["backup_url"] is None
@@ -354,7 +362,7 @@ def test_v010_database_upgrades_in_place(tmp_path: Path) -> None:
     # Opening again is a no-op (nothing to migrate, nothing lost).
     again = Database(path)
     try:
-        assert again.schema_version == 5 and again.get_user("u1")["disabled_at"]
+        assert again.schema_version == dbmod.SCHEMA_VERSION and again.get_user("u1")["disabled_at"]
     finally:
         again.close()
 

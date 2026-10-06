@@ -328,13 +328,33 @@ def as_changes(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             by_name_only.add(name)
     out: list[dict[str, Any]] = []
     for name, qty in counts.items():
-        change: dict[str, Any] = {"action": "add", "card_name": name, "quantity": qty}
+        change: dict[str, Any] = {"action": "add", "card_name": name}
         if name not in by_name_only and len(prints.get(name, ())) == 1:
             set_code, number, foil = next(iter(prints[name]))
             change.update({"set_code": set_code, "collector_number": number})
             if foil is not None:  # an unknown finish is not a claim of "not foil"
                 change["foil"] = foil
-        out.append(change)
+        # propose_deck_changes takes at most 99 copies per change: split bigger piles (basic lands).
+        while qty > 99:
+            out.append({**change, "quantity": 99})
+            qty -= 99
+        out.append({**change, "quantity": qty})
+    return out
+
+
+def change_fields(resolved: list[dict[str, Any]]) -> dict[str, Any]:
+    """``changes`` for propose_deck_changes, plus ``change_batches`` (one proposal each) when there
+    are more than one proposal can hold."""
+    from ..decks import MAX_CHANGES
+
+    changes = as_changes(resolved)
+    out: dict[str, Any] = {"changes": changes}
+    if len(changes) > MAX_CHANGES:
+        out["change_batches"] = [changes[i : i + MAX_CHANGES] for i in range(0, len(changes), MAX_CHANGES)]
+        out["changes_note"] = (
+            f"{len(changes)} changes: one proposal takes at most {MAX_CHANGES}, so propose each of "
+            "change_batches separately, or use propose_new_deck with decklist_text for a new deck."
+        )
     return out
 
 
@@ -790,7 +810,7 @@ class ScanService:
             "status_counts": {k: v for k, v in counts.items() if v},
             "cards": items,
             "decklist_text": decklist_text(resolved),
-            "changes": as_changes(resolved),
+            **change_fields(resolved),
         }
         if deferred:
             n = self.scryfall.retry_in()
@@ -891,7 +911,7 @@ class ScanService:
             "unresolved": len(items) - len(resolved),
             "items": items,
             "decklist_text": decklist_text(items),
-            "changes": as_changes(resolved),
+            **change_fields(resolved),
         }
 
 

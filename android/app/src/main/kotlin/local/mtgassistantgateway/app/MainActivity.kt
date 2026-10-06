@@ -15,6 +15,7 @@ import android.view.View
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.PermissionRequest
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.URLUtil
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -337,7 +338,20 @@ class MainActivity : ComponentActivity() {
                     startScan()
                 } else {
                     pendingCamera = false
-                    Toast.makeText(this, getString(R.string.camera_permission_needed), Toast.LENGTH_LONG).show()
+                    if (!shouldShowRequestPermissionRationale(Manifest.permission.CAMERA)) {
+                        // Denied for good ("don't ask again"): Android shows no prompt any more, so
+                        // the only way back is the app's settings page. Say so and open it.
+                        Toast.makeText(this, getString(R.string.camera_permission_settings), Toast.LENGTH_LONG).show()
+                        try {
+                            startActivity(
+                                Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null))
+                            )
+                        } catch (e: ActivityNotFoundException) {
+                            // no settings screen on this device; the message above still explains
+                        }
+                    } else {
+                        Toast.makeText(this, getString(R.string.camera_permission_needed), Toast.LENGTH_LONG).show()
+                    }
                 }
             }
             else -> super.onRequestPermissionsResult(requestCode, permissions, grantResults)
@@ -499,6 +513,7 @@ class MainActivity : ComponentActivity() {
         /** Called (posted to the UI thread) once a new main-frame document has committed. */
         override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
             progress.visibility = View.VISIBLE
+            errorBox.visibility = View.GONE // a new page is loading: an older error no longer applies
             nav.pageStarted(url)
             gatewayPage = GatewayUrl.isGateway(origin, url)
             pageGen++
@@ -522,8 +537,17 @@ class MainActivity : ComponentActivity() {
 
         /** A gateway without the scan page (an older release) answers 404: say so instead of waiting. */
         override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
-            if (!request.isForMainFrame || !pendingCamera) return
+            if (!request.isForMainFrame) return
             val url = request.url.toString()
+            // The reverse proxy answers 502/503/504 with its own bare page while the gateway is down or
+            // restarting: show the app's own message with Retry instead.
+            if (GatewayUrl.isGateway(origin, url) && errorResponse.statusCode in 502..504) {
+                progress.visibility = View.GONE
+                errorText.text = getString(R.string.gateway_down)
+                errorBox.visibility = View.VISIBLE
+                return
+            }
+            if (!pendingCamera) return
             if (GatewayUrl.isGateway(origin, url) && GatewayUrl.pathStartsWith(url, "/scan") && errorResponse.statusCode == 404) {
                 pendingCamera = false
                 scanReloaded = false
@@ -538,8 +562,31 @@ class MainActivity : ComponentActivity() {
         override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
             if (!request.isForMainFrame) return
             progress.visibility = View.GONE
-            errorText.text = getString(R.string.page_error, error.description)
+            errorText.text = when (error.errorCode) {
+                WebViewClient.ERROR_HOST_LOOKUP, WebViewClient.ERROR_CONNECT, WebViewClient.ERROR_TIMEOUT -> getString(R.string.page_offline)
+                else -> getString(R.string.page_error, error.description)
+            }
             errorBox.visibility = View.VISIBLE
+        }
+
+        /**
+         * The page's renderer crashed or was killed to free memory (it can happen during a camera
+         * scan on a busy phone). A WebView whose renderer is gone can't be used again: replace it
+         * with a fresh one on the same page instead of letting the whole app crash.
+         */
+        override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+            if (view !== web) return true // a pop-up's renderer: nothing of ours to rebuild
+            val url = view.url?.takeIf { GatewayUrl.isGateway(origin, it) } ?: (origin + "/")
+            if (camera != null) closeCamera()
+            val params = view.layoutParams
+            val index = root.indexOfChild(view)
+            root.removeView(view)
+            view.destroy()
+            web = WebView(this@MainActivity).also { root.addView(it, index, params) }
+            configureWebView()
+            web.loadUrl(url)
+            Toast.makeText(this@MainActivity, getString(R.string.page_reloaded), Toast.LENGTH_LONG).show()
+            return true
         }
     }
 

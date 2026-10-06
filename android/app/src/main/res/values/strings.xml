@@ -18,6 +18,9 @@
     <string name="fab_label">Menu</string>
 
     <string name="page_error">The page could not be loaded: %1$s</string>
+    <string name="page_offline">No connection to your gateway. Check that the phone is online, then tap Retry.</string>
+    <string name="gateway_down">Your gateway is not answering right now (it may be restarting). Wait a minute, then tap Retry.</string>
+    <string name="page_reloaded">The page stopped unexpectedly and was reloaded.</string>
     <string name="retry">Retry</string>
     <string name="downloading">Downloading %1$s</string>
     <string name="download_saved">Saved %1$s to Downloads.</string>
@@ -25,6 +28,7 @@
     <string name="download_signed_out">Your sign-in has ended. Reload the page, sign in again and retry the download.</string>
     <string name="no_app_for_link">No app can open that link.</string>
     <string name="camera_permission_needed">Camera permission is needed to scan cards.</string>
+    <string name="camera_permission_settings">The camera is turned off for this app. Turn on Camera under Permissions, then come back and tap Scan again.</string>
     <string name="scan_page_too_old">This gateway\'s scan page has no photo hooks; it needs a newer gateway version.</string>
     <string name="scan_handoff_failed">The scan page did not take the photo. Tap Done, reload the page and try again.</string>
     <string name="scan_page_slow">The scan page did not answer in time. Tap Done and check the page.</string>
