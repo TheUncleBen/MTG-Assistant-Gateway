@@ -1,6 +1,5 @@
 # syntax=docker/dockerfile:1.7
-# Base images are pinned by digest (the tag is kept for reading); Dependabot proposes updates.
-FROM python:3.12-slim-bookworm@sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258 AS build
+FROM python:3.12-slim-bookworm AS build
 WORKDIR /build
 COPY pyproject.toml README.md LICENSE constraints.txt ./
 COPY src ./src
@@ -10,7 +9,7 @@ RUN python3 scripts/fetch_ocr_assets.py
 RUN pip install --no-cache-dir --upgrade pip wheel \
  && pip wheel --no-cache-dir --wheel-dir /wheels -c constraints.txt .
 
-FROM python:3.12-slim-bookworm@sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258
+FROM python:3.12-slim-bookworm
 LABEL org.opencontainers.image.source="https://github.com/TheUncleBen/MTG-Assistant-Gateway" \
       org.opencontainers.image.licenses="PolyForm-Noncommercial-1.0.0"
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \

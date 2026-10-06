@@ -29,21 +29,6 @@ def test_example_env_keeps_apply_via_mcp_off(name: str):
     assert _env(ROOT / name)["MTG_APPLY_VIA_MCP"] == "false"
 
 
-@pytest.mark.parametrize("name", ["Dockerfile", "docker/mystic-forge/Dockerfile"])
-def test_base_images_pinned_by_digest(name: str):
-    froms = [line for line in (ROOT / name).read_text().splitlines() if line.startswith("FROM ")]
-    assert froms
-    for line in froms:
-        assert re.match(r"FROM [\w./-]+:[\w.-]+@sha256:[0-9a-f]{64}( AS \w+)?$", line), line
-
-
-def test_dependabot_covers_every_ecosystem():
-    text = (ROOT / ".github/dependabot.yml").read_text()
-    for eco in ("github-actions", "pip", "docker", "gradle"):
-        assert f"package-ecosystem: {eco}\n" in text
-    assert "/docker/mystic-forge" in text
-
-
 def _service(compose: str, name: str) -> str:
     m = re.search(rf"^  {name}:\n(.*?)(?=^  \S|^\S)", compose, re.S | re.M)
     assert m, name

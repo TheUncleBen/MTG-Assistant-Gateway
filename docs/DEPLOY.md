@@ -337,10 +337,11 @@ process), and it sets no process limit because older Docker and Portainer
 versions refuse the `pids` key and the stack wouldn't deploy. The Compose
 file ([DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md)) sets both.
 
-The images are built on base images pinned by digest, not only by tag, so
-a rebuild uses exactly the base that was reviewed. Dependabot opens weekly
-pull requests to move those pins, the GitHub Actions pins and the Python and
-Gradle dependencies.
+The images are built on the official Python base images by tag, so every
+release build picks up the base image's latest security patches. GitHub
+Actions are pinned by commit, Python dependencies by version
+(`constraints.txt`), and the Android build checks its Gradle wrapper before
+running it.
 
 ## 7. Reverse proxy
 
