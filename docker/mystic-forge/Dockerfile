@@ -11,9 +11,12 @@ ARG MF_REPO=https://github.com/Kautiontape/mystic-forge.git
 ARG MF_COMMIT=dd82cd1449645862a2e309ae70df2fb7c3a2a839
 ARG MF_VERSION=1.3.2
 # Bump when the patch set changes. The image is tagged <MF_VERSION>-<MF_LOCAL>.
+# Also bump it when the base image digest below changes (a Dependabot update): a
+# published tag is never rebuilt, so a new base reaches the stack only under a new tag.
 ARG MF_LOCAL=mag2
 
-FROM python:3.14-slim AS source
+# Base image pinned by digest (the tag is kept for reading).
+FROM python:3.14-slim@sha256:f85c5697265c178cc6887276c55fe16cf3d14ca35c3df6a5eab3b360534a55d2 AS source
 ARG MF_REPO
 ARG MF_COMMIT
 ARG MF_VERSION
@@ -32,7 +35,7 @@ RUN git init -q . \
  && for p in /patches/*.patch; do git apply --verbose "$p"; done \
  && rm -rf .git
 
-FROM python:3.14-slim
+FROM python:3.14-slim@sha256:f85c5697265c178cc6887276c55fe16cf3d14ca35c3df6a5eab3b360534a55d2
 ARG MF_REPO
 ARG MF_COMMIT
 ARG MF_VERSION

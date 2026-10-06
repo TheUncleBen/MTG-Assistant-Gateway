@@ -65,10 +65,99 @@ class NavPolicyTest {
         assertEquals(Nav.STAY, p.main("$gw/account", redirect = true))
         assertEquals(Nav.BROWSER, p.main("$idp/x", redirect = true))
         assertNull(p.signInOrigin)
-        // /authorize starts a sign-in as /login does.
+        // Nor does a redirect after /authorize: only /login names the provider.
         assertEquals(Nav.STAY, p.main("$gw/authorize?client_id=a", redirect = true))
+        assertEquals(Nav.BROWSER, p.main("$idp/x", redirect = true))
+        assertNull(p.signInOrigin)
+        assertEquals(Nav.STAY, p.main("$gw/login", redirect = true))
         assertEquals(Nav.STAY, p.main("$idp/x", redirect = true))
         assertEquals(idp, p.signInOrigin)
+    }
+
+    /** An application's /authorize link opened in the app, up to its consent page. */
+    private fun atConsent(p: NavPolicy) {
+        val authorize = "$gw/authorize?client_id=c&redirect_uri=https://evil.example/cb"
+        assertEquals(Nav.STAY, p.main(authorize, gesture = true))
+        assertTrue(p.pageStarted(authorize))
+        assertEquals(Nav.STAY, p.main("$gw/authorize/confirm?state=s", redirect = true))
+        assertTrue(p.pageStarted("$gw/authorize/confirm?state=s"))
+    }
+
+    @Test fun denyOnTheConsentPageGoesToTheBrowser() {
+        // Deny answers with a redirect to the application's own site: never the provider.
+        val p = NavPolicy(gw)
+        atConsent(p)
+        assertEquals(Nav.BROWSER, p.main("https://evil.example/cb?error=access_denied", redirect = true))
+        assertNull(p.signInOrigin)
+        assertEquals(Nav.BROWSER, p.main("https://evil.example/fake-login", gesture = true))
+        assertEquals(Nav.BROWSER, p.main("https://evil.example/fake-login", redirect = true))
+    }
+
+    @Test fun denyGoesToTheBrowserAfterAnEarlierSignIn() {
+        val p = NavPolicy(gw)
+        signedInto(p) // still signing in: no gateway page outside the sign-in has loaded
+        atConsent(p)
+        assertEquals(Nav.BROWSER, p.main("https://evil.example/cb?error=access_denied", redirect = true))
+        assertEquals(idp, p.signInOrigin)
+        p.pageFinished("$gw/scan")
+        atConsent(p)
+        assertEquals(Nav.BROWSER, p.main("https://evil.example/cb?error=access_denied", redirect = true))
+        assertNull(p.signInOrigin)
+    }
+
+    @Test fun denyLoadedWithoutAskingIsStopped() {
+        // WebView may not ask shouldOverrideUrlLoading about the redirect after the form post:
+        // the page is refused when it starts, so the app sends it to the browser.
+        val p = NavPolicy(gw)
+        atConsent(p)
+        assertFalse(p.pageStarted("https://evil.example/cb?error=access_denied"))
+        assertFalse(p.pageStarted("https://evil.example/fake-login"))
+        assertNull(p.signInOrigin)
+        signedInto(p)
+        p.pageFinished("$gw/scan")
+        atConsent(p)
+        assertFalse(p.pageStarted("https://evil.example/cb?error=access_denied"))
+        assertNull(p.signInOrigin)
+    }
+
+    @Test fun approveGoesOnToTheProviderNamedByLogin() {
+        val p = NavPolicy(gw)
+        signedInto(p)
+        p.pageFinished("$gw/scan")
+        assertEquals(idp, p.knownProvider)
+        atConsent(p)
+        assertEquals(Nav.STAY, p.main("$idp/application/o/authorize/?x", redirect = true))
+        assertTrue(p.signingIn)
+        assertEquals(idp, p.signInOrigin)
+        assertTrue(p.pageStarted("$idp/if/flow/login/"))
+        assertEquals(Nav.STAY, p.main("$gw/auth/callback?code=c", redirect = true))
+        // The same, when WebView did not ask about the redirect.
+        p.pageFinished("$gw/scan")
+        atConsent(p)
+        assertTrue(p.pageStarted("$idp/application/o/authorize/?x"))
+        assertEquals(idp, p.signInOrigin)
+    }
+
+    @Test fun approveWithoutAKnownProviderGoesToTheBrowser() {
+        val p = NavPolicy(gw)
+        atConsent(p)
+        assertEquals(Nav.BROWSER, p.main("$idp/application/o/authorize/?x", redirect = true))
+        assertNull(p.signInOrigin)
+        atConsent(p)
+        assertFalse(p.pageStarted("$idp/application/o/authorize/?x"))
+    }
+
+    @Test fun legitimatePagesPassTheStartCheck() {
+        val p = NavPolicy(gw)
+        assertTrue(p.pageStarted("$gw/login?next=/"))
+        assertEquals(Nav.STAY, p.main("$idp/application/o/authorize/?x", redirect = true))
+        assertTrue(p.pageStarted("$idp/application/o/authorize/?x"))
+        assertTrue(p.pageStarted("$idp/if/flow/login/"))
+        assertTrue(p.pageStarted("$gw/auth/callback?code=c"))
+        assertTrue(p.pageStarted("about:blank"))
+        p.pageFinished("$gw/scan")
+        assertFalse(p.pageStarted("$idp/if/flow/login/")) // the sign-in is over
+        assertFalse(p.pageStarted("https://scryfall.com/card/x"))
     }
 
     @Test fun loginLoadedDirectlyCountsToo() {

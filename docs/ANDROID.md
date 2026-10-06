@@ -477,10 +477,16 @@ screen is shown without a prefill, so a link can't pick your gateway for you.
   mixed content is blocked.
 - Pages from other sites never load inside the app, so a link can't put a
   look-alike page behind the app's chrome. The one exception is the sign-in
-  service: a single https origin, learned from the redirect that directly
-  follows a gateway `/login` or `/authorize`, and only for that sign-in; it is
-  forgotten as soon as a gateway page outside the sign-in loads. Any further
-  site the sign-in service redirects to opens in the browser.
+  service: a single https origin, learned only from the redirect that directly
+  follows a gateway `/login`, and only for that sign-in; it is forgotten as
+  soon as a gateway page outside the sign-in loads. Any further site the
+  sign-in service redirects to opens in the browser. The page where you
+  approve or deny connecting an AI application never teaches the app a
+  sign-in service: Approve continues in the app only to the service an
+  earlier `/login` named, and Deny, which goes back to the application's own
+  site, always opens in the browser. A page from another site that slips in
+  without the app being asked (the redirect after a form) is stopped and
+  handed to the browser, and the app goes back to the gateway.
 - Links to other apps leave the app only when tapped in the page itself (not
   in a frame, not from a redirect or a script), and only to apps that accept
   links from a browser, as in Chrome.

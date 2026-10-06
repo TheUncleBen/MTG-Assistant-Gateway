@@ -401,9 +401,9 @@ it hasn't expired and the deck hasn't changed.
 code default is `false`: the `apply_proposal` tool answers
 `browser_required` with the review link, so a person's own click always sits
 between anything the assistant read (deck descriptions, card text) and a
-write to Archidekt. The example stack file sets it to `true`, which lets the
-assistant apply after the user says yes in chat. Writes have to be on as
-well.
+write to Archidekt. The example env files keep it `false` too. Setting it to
+`true` lets the assistant apply after the user says yes in chat; writes have
+to be on as well.
 
 With it on, the gateway has no proof the user really said yes; it relies on
 the assistant following its instructions. Two things narrow that gap:
