@@ -492,8 +492,9 @@ screen is shown without a prefill, so a link can't pick your gateway for you.
   application's own site, always opens in the browser. A page from another
   site that slips in without the app being asked (the redirect after a form)
   is stopped and handed to the browser, and the app goes back to the gateway;
-  if that happens again within a few seconds the app only stops the page and
-  shows Retry, so it can never open tab after tab. Once a sign-in finishes,
+  if that happens again within a few seconds the app unloads the page and
+  shows Retry. A page can send at most one link to the browser every few
+  seconds without a tap, so it can never open tab after tab. Once a sign-in finishes,
   the app forgets the pages it went through, so Back doesn't land on the
   sign-in service's old login page.
 - Links to other apps leave the app only when tapped in the page itself (not

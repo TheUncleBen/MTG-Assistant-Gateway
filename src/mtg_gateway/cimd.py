@@ -33,12 +33,14 @@ requests that actually go out are limited to SITE_FETCHES_PER_MINUTE a minute pe
 site (registrable domain, so subdomains share one budget) and
 GLOBAL_FETCHES_PER_MINUTE overall. Only a request that is about to be sent counts:
 a URL refused locally (allowlist, IP literal) or by DNS (no name, private address)
-uses up nothing, so junk client ids cannot spend the budget. Exempt from the host
-block and the budgets: a client that has completed a sign-in here (the caller says
-so with ``known``) and any host on MTG_CIMD_ALLOWED_HOSTS. So nobody can lock out a
-client that has signed in before, or an allowlisted one; a brand-new client on an
-open gateway can be delayed by someone spending the budget with documents on six or
-more domains of their own.
+uses up nothing, so junk client ids cannot spend the budget; a name whose DNS does
+not answer within DNS_TIMEOUT counts as a failure. A client that has completed a
+sign-in here (the caller says so with ``known``) is exempt from the host block and
+the budgets and is fetched in a lane of its own (its own slots, one fetch per URL),
+so junk can neither spend its budget nor hold the slots it needs. A host on
+MTG_CIMD_ALLOWED_HOSTS is not blocked after a failure but its new URLs still count
+against the budgets. A brand-new client can be delayed by someone keeping the
+first-time lane busy.
 
 Fairness: a caller that cannot get a slot within the deadline is told the fetcher
 is busy (CimdThrottled) and nothing is remembered against its URL, and a timeout
@@ -68,6 +70,7 @@ logger = logging.getLogger(__name__)
 
 MAX_DOCUMENT_BYTES = 64 * 1024
 FETCH_TIMEOUT = 5.0
+DNS_TIMEOUT = 2.0  # a name whose DNS never answers fails (and is remembered) after this long
 MIN_TTL = 300
 MAX_TTL = 86400
 DEFAULT_TTL = 3600
@@ -376,6 +379,11 @@ class CimdFetcher:
         self._gate = asyncio.Semaphore(MAX_CONCURRENT_FETCHES)
         self._site_locks: dict[str, asyncio.Lock] = {}  # one fetch in flight per site
         self._site_users: dict[str, int] = {}  # callers holding or waiting on each lock
+        # Clients a member has signed in with get their own lane: their refetches never wait
+        # behind, or share slots with, unauthenticated fetches of client ids seen for the first time.
+        self._known_gate = asyncio.Semaphore(MAX_CONCURRENT_FETCHES)
+        self._url_locks: dict[str, asyncio.Lock] = {}
+        self._url_users: dict[str, int] = {}
 
     async def aclose(self) -> None:
         await self._http.aclose()
@@ -426,8 +434,13 @@ class CimdFetcher:
             pass
         else:
             raise CimdError("client_id must use a hostname, not an IP address")
-        exempt = known or bool(self.allowed_hosts)  # allowlisted (any other host was refused above)
-        if not exempt:
+        if known:
+            return await self._fetch_known(url, now)
+        # A host on MTG_CIMD_ALLOWED_HOSTS (any other host was refused above) is not blocked after
+        # a failure, but its new URLs still count against the budgets: the gateway is no unlimited
+        # relay to it.
+        allowlisted = bool(self.allowed_hosts)
+        if not allowlisted:
             self._check_host_block(host, now)
         lock = self._site_locks.setdefault(site, asyncio.Lock())
         self._site_users[site] = self._site_users.get(site, 0) + 1
@@ -445,12 +458,12 @@ class CimdFetcher:
             except TimeoutError as exc:
                 raise CimdThrottled("metadata document fetcher is busy; try again shortly") from exc
             try:
-                if not exempt:
+                if not allowlisted:
                     # Checked again now that the slot is ours: the host may have failed meanwhile.
                     self._check_host_block(host, time.monotonic())
                 # A host that drips one byte at a time must not hold a slot for longer than this.
                 async with asyncio.timeout(self.timeout):
-                    return await self._fetch(url, site=None if exempt else site)
+                    return await self._fetch(url, site=site)
             except CimdThrottled:
                 raise
             except TimeoutError as exc:
@@ -460,7 +473,7 @@ class CimdFetcher:
                 raise CimdError("metadata document fetch timed out") from exc
             except CimdError:
                 self._note_failure(url, now)
-                if not exempt:
+                if not allowlisted:
                     self._note_host_failure(host, now)
                 raise
             finally:
@@ -471,6 +484,39 @@ class CimdFetcher:
             if not self._site_users[site]:
                 del self._site_users[site]
                 del self._site_locks[site]
+
+    async def _fetch_known(self, url: str, now: float) -> tuple[dict[str, Any], int]:
+        """Refetch the document of a client a member has signed in with: no budgets or host
+        block, one fetch per URL at a time, slots of its own."""
+        lock = self._url_locks.setdefault(url, asyncio.Lock())
+        self._url_users[url] = self._url_users.get(url, 0) + 1
+        try:
+            try:
+                async with asyncio.timeout(self.timeout):
+                    await lock.acquire()
+                    try:
+                        await self._known_gate.acquire()
+                    except BaseException:
+                        lock.release()
+                        raise
+            except TimeoutError as exc:
+                raise CimdThrottled("metadata document fetcher is busy; try again shortly") from exc
+            try:
+                async with asyncio.timeout(self.timeout):
+                    return await self._fetch(url)
+            except TimeoutError as exc:
+                raise CimdError("metadata document fetch timed out") from exc
+            except CimdError:
+                self._note_failure(url, now)
+                raise
+            finally:
+                self._known_gate.release()
+                lock.release()
+        finally:
+            self._url_users[url] -= 1
+            if not self._url_users[url]:
+                del self._url_users[url]
+                del self._url_locks[url]
 
     def _note_host_failure(self, host: str, now: float) -> None:
         self._host_failures[host] = now
@@ -495,7 +541,12 @@ class CimdFetcher:
         else:
             raise CimdError("client_id must use a hostname, not an IP address")
         try:
-            addresses = await self._resolve(host)
+            async with asyncio.timeout(DNS_TIMEOUT):
+                addresses = await self._resolve(host)
+        except TimeoutError as exc:
+            # Remembered as a failure (unlike a slow fetch): a name whose DNS never answers must
+            # not be able to hold a fetch slot again and again.
+            raise CimdError("cannot resolve client metadata host: timed out") from exc
         except OSError as exc:
             raise CimdError(f"cannot resolve client metadata host: {exc.__class__.__name__}") from exc
         if not addresses or not all(_address_is_public(a) for a in addresses):

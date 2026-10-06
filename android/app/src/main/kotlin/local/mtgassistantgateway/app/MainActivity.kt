@@ -552,7 +552,10 @@ class MainActivity : ComponentActivity() {
             return when (nav.decide(request.url.toString(), request.isForMainFrame, request.isRedirect, request.hasGesture())) {
                 Nav.STAY -> false
                 Nav.BROWSER -> {
-                    openExternal(request.url)
+                    // A tap always opens; a navigation nobody tapped opens at most once in a while.
+                    if (request.hasGesture() || nav.openUnasked(SystemClock.elapsedRealtime())) {
+                        openExternal(request.url)
+                    }
                     true
                 }
                 Nav.DROP -> true
@@ -561,6 +564,7 @@ class MainActivity : ComponentActivity() {
 
         /** Called (posted to the UI thread) once a new main-frame document has committed. */
         override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
+            if (url == BLANK) return // the app's own blank page over a refused one (below)
             progress.visibility = View.VISIBLE
             errorBox.visibility = View.GONE // a new page is loading: an older error no longer applies
             val allowed = nav.pageStarted(url)
@@ -576,6 +580,9 @@ class MainActivity : ComponentActivity() {
                     openExternal(Uri.parse(url))
                     view.loadUrl(origin + "/")
                 } else {
+                    // Unload it: a stopped page that has already committed would keep running its
+                    // scripts (and dialogs) behind the message.
+                    view.loadUrl(BLANK)
                     progress.visibility = View.GONE
                     retryHome = true
                     errorText.text = getString(R.string.page_elsewhere)
@@ -586,6 +593,12 @@ class MainActivity : ComponentActivity() {
 
         override fun onPageFinished(view: WebView, url: String) {
             progress.visibility = View.GONE
+            if (url == BLANK) {
+                // Back must not reload the refused page under it; Retry takes the person home.
+                view.clearHistory()
+                syncBackCallback()
+                return
+            }
             val gateway = GatewayUrl.isGateway(origin, url)
             // Once a sign-in ends (or a page was refused), its pages leave the history: Back would
             // otherwise reopen the provider's old login page, or the refused page, every time.
@@ -743,6 +756,7 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
+        private const val BLANK = "about:blank"
         private const val REQ_FILE = 2
         private const val REQ_PERM_WEB_CAMERA = 3
         private const val REQ_PERM_NATIVE_CAMERA = 4

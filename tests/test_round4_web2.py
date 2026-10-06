@@ -1,10 +1,12 @@
 """Security round 4, re-review: the metadata fetch budgets cannot be spent with junk client ids
-and never apply to signed-in or allowlisted clients, the cache caps group by site and never evict
+and never apply to signed-in clients, the cache caps group by site and never evict
 a signed-in client, the sign-in rate limit only applies to public addresses, and "Delete my data"
 leaves other members' deck covers alone."""
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 import time
 from pathlib import Path
@@ -50,9 +52,11 @@ async def test_junk_client_ids_do_not_spend_the_fetch_budget():
     await f.aclose()
 
 
-async def test_allowlisted_host_is_never_throttled(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(cimdmod, "GLOBAL_FETCHES_PER_MINUTE", 2)
-    monkeypatch.setattr(cimdmod, "SITE_FETCHES_PER_MINUTE", 2)
+async def test_allowlisted_host_is_not_blocked_but_still_budgeted(monkeypatch: pytest.MonkeyPatch):
+    """Round 3 (RB-2): an allowlist must not turn the gateway into an unlimited relay to the
+    allowed host. A failure there blocks nothing, but new URLs still count against the budgets."""
+    monkeypatch.setattr(cimdmod, "GLOBAL_FETCHES_PER_MINUTE", 100)
+    monkeypatch.setattr(cimdmod, "SITE_FETCHES_PER_MINUTE", 3)
 
     async def nxdomain(host: str) -> list[str]:
         raise OSError("nxdomain")
@@ -68,9 +72,71 @@ async def test_allowlisted_host_is_never_throttled(monkeypatch: pytest.MonkeyPat
         docs.serve(url, body=document(client_id=url))
     f = docs.fetcher(allowed_hosts=["client.example"])
     with pytest.raises(CimdError):
-        await f.fetch("https://client.example/missing")  # a failure does not block the host either
-    for i in range(5):  # over both budgets, all fetched
+        await f.fetch("https://client.example/missing")  # a failure does not block the host
+    for i in range(2):
         assert (await f.fetch(f"https://client.example/c{i}.json"))[0]["client_name"]
+    with pytest.raises(CimdThrottled, match="too many"):
+        await f.fetch("https://client.example/c2.json")
+    assert len(docs.requests) == 3
+    # A client a member signed in with is fetched whatever the budget says.
+    assert (await f.fetch("https://client.example/c3.json", known=True))[0]["client_name"]
+    await f.aclose()
+
+
+class SlowDns(DocHost):
+    async def resolve(self, host: str) -> list[str]:
+        if host not in self.addresses:
+            await asyncio.sleep(30)  # the attacker's DNS never answers in time
+            raise OSError("timeout")
+        return self.addresses[host]
+
+
+@pytest.mark.parametrize("same_site", [True, False])
+async def test_dns_that_never_answers_cannot_starve_a_signed_in_client(
+    monkeypatch: pytest.MonkeyPatch, same_site: bool
+):
+    """Round 3 (RB-1): junk client ids whose DNS hangs used to hold every fetch slot (or the
+    real client's site lock), so a signed-in client's refetch was told the fetcher was busy."""
+    monkeypatch.setattr(cimdmod, "DNS_TIMEOUT", 0.2)
+    docs = SlowDns()
+    docs.serve()
+    f = docs.fetcher(timeout=0.5)
+
+    async def junk(i: int) -> None:
+        host = f"j{i}.client.example" if same_site else f"j{i}.attacker{i % 20}.example"
+        with contextlib.suppress(CimdError):
+            await f.fetch(f"https://{host}/c")
+
+    tasks: list[asyncio.Task] = []
+
+    async def flood() -> None:
+        i = 0
+        while True:
+            for _ in range(20):
+                tasks.append(asyncio.create_task(junk(i)))
+                i += 1
+            await asyncio.sleep(0.05)
+
+    fl = asyncio.create_task(flood())
+    await asyncio.sleep(1.0)
+    try:
+        info, _ = await f.fetch(CLIENT_URL, known=True)
+        assert info["client_name"] == "Example Assistant"
+    finally:
+        fl.cancel()
+        for t in tasks:
+            t.cancel()
+        await asyncio.gather(fl, *tasks, return_exceptions=True)
+        await f.aclose()
+
+
+async def test_a_dns_timeout_is_remembered_against_the_host(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(cimdmod, "DNS_TIMEOUT", 0.1)
+    f = SlowDns().fetcher()
+    with pytest.raises(CimdError, match="timed out"):
+        await f.fetch("https://slow.attacker.example/a")
+    with pytest.raises(CimdThrottled):
+        await f.fetch("https://slow.attacker.example/b")  # refused without waiting on DNS again
     await f.aclose()
 
 
@@ -193,3 +259,33 @@ def test_delete_my_data_keeps_other_members_deck_covers(tmp_path: Path):
     assert db.deck_covers(["55"]) == {} and db.deck_covers(["56"]) == {}  # B's own go
     assert out["deck_covers"] == 2
     db.close()
+
+
+def test_clients_in_use_before_the_upgrade_stay_known(tmp_path: Path):
+    """Round 3 (RC-1): the new signed_in_at column started empty, so Claude and ChatGPT became
+    first-time clients after the upgrade and one bogus 404 could block their host."""
+    import sqlite3
+
+    path = tmp_path / "g.sqlite"
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    for i, step in enumerate(dbmod.MIGRATIONS[:9], 1):
+        step(conn)
+        conn.execute(f"PRAGMA user_version = {i}")
+    now = int(time.time())
+    used, unused = "https://claude.ai/oauth/client-metadata", "https://junk.example/c"
+    for url in (used, unused):
+        conn.execute(
+            "INSERT INTO cimd_clients (client_id, info_json, fetched_at, expires_at) VALUES (?,?,?,?)",
+            (url, "{}", now - 7200, now - 3600),
+        )
+    conn.execute(
+        "INSERT INTO tokens (token_hash, kind, client_id, sub, scopes_json, family, expires_at, created_at)"
+        " VALUES ('h', 'refresh', ?, 'user-1', '[]', 'f', ?, ?)",
+        (used, now + 3600, now - 100),
+    )
+    conn.commit()
+    conn.close()
+    db = Database(path)
+    assert db.cimd_client_known(used)
+    assert not db.cimd_client_known(unused)

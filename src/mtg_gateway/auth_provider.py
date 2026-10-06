@@ -770,6 +770,9 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         # Families issued before per-app sign-in times keep the old rule (the person's last sign-in).
         auth_time = int(row["auth_time"] or (user or {}).get("last_login_at") or row["created_at"])
         self._recheck_membership(refresh_token.subject, client.client_id, row["family"], auth_time)
+        if is_cimd_client_id(client.client_id):
+            # Still in use by a member: keep it known (and kept) past the 180-day purge window.
+            self.db.mark_cimd_client_signed_in(client.client_id)
         return self._issue(
             client.client_id,
             refresh_token.subject,

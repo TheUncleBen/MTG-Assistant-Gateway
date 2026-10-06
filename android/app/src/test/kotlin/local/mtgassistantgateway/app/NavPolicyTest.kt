@@ -234,6 +234,14 @@ class NavPolicyTest {
         assertTrue(p.handOff(1_000 + NavPolicy.LOOP_GUARD_MS))
     }
 
+    @Test fun browserOpensNobodyTappedAreRateLimited() {
+        val p = NavPolicy(gw)
+        assertTrue(p.openUnasked(1_000))
+        assertFalse(p.openUnasked(1_000 + NavPolicy.UNASKED_GUARD_MS - 1))
+        assertTrue(p.openUnasked(1_000 + NavPolicy.UNASKED_GUARD_MS))
+        assertTrue(p.handOff(1_000)) // a separate guard from the backstop's
+    }
+
     @Test fun loginLoadedDirectlyCountsToo() {
         val p = NavPolicy(gw)
         p.pageStarted("$gw/login?next=/") // loadUrl() does not go through shouldOverrideUrlLoading

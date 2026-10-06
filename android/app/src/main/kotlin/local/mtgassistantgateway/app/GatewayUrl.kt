@@ -156,6 +156,7 @@ class NavPolicy(private val origin: String, pinned: String? = null) {
     private var afterConsent = false
     /** When the backstop last handed a page to the browser (ms), for the loop guard. */
     private var lastHandOff = Long.MIN_VALUE / 2
+    private var lastUnasked = Long.MIN_VALUE / 2
     /** A page was refused since the last gateway page finished: that page's history entry must go. */
     private var refusedSinceHome = false
 
@@ -251,6 +252,17 @@ class NavPolicy(private val origin: String, pinned: String? = null) {
         return true
     }
 
+    /**
+     * [decide] said [Nav.BROWSER] for a navigation nobody tapped (a script or a redirect) at [nowMs]:
+     * true to open it, false to drop it. At most one in [UNASKED_GUARD_MS], so a page can't open
+     * tab after tab in the browser.
+     */
+    fun openUnasked(nowMs: Long): Boolean {
+        if (nowMs - lastUnasked < UNASKED_GUARD_MS) return false
+        lastUnasked = nowMs
+        return true
+    }
+
     private fun noteGatewayPage(url: String) {
         afterSignInStart = GatewayUrl.isSignInStart(origin, url)
         afterConsent = GatewayUrl.isConsentPage(origin, url)
@@ -279,5 +291,6 @@ class NavPolicy(private val origin: String, pinned: String? = null) {
     companion object {
         /** The loop guard's window: at most one browser hand-off per this many milliseconds. */
         const val LOOP_GUARD_MS = 10_000L
+        const val UNASKED_GUARD_MS = 3_000L
     }
 }

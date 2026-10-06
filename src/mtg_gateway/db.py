@@ -294,6 +294,13 @@ def _step_10(conn: sqlite3.Connection) -> None:
     """Security round 4: when a client described by a metadata document last completed a sign-in,
     so the cache caps never evict it and the fetch budgets never apply to it."""
     _add_column(conn, "cimd_clients", "signed_in_at", "INTEGER")
+    # Clients already in use before this column existed: a token was issued to them, so a member
+    # completed a sign-in through them. Without this they would count as first-time clients.
+    conn.execute(
+        "UPDATE cimd_clients SET signed_in_at = "
+        "(SELECT MAX(t.created_at) FROM tokens t WHERE t.client_id = cimd_clients.client_id) "
+        "WHERE signed_in_at IS NULL"
+    )
 
 
 # Applied in order; ``PRAGMA user_version`` records how many have run. Append, never edit.

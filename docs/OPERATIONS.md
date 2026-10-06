@@ -150,14 +150,17 @@ subdomains share one budget. Only a request that is about to be sent counts:
 an address refused without one (not on the allowlist, an IP address, a name
 that doesn't resolve or resolves to a private address) uses up nothing.
 
-Two kinds of client are never held back by those limits: a client that a
-member has completed a sign-in through (remembered for 180 days after its
-last sign-in), and any host on `MTG_CIMD_ALLOWED_HOSTS`. So once Claude or
-ChatGPT has connected here, nobody can lock it out by pointing junk
-addresses at the gateway. A client connecting for the very first time to a
-gateway without an allowlist can still be delayed by someone who spends the
-budget with documents on several domains of their own; setting
-`MTG_CIMD_ALLOWED_HOSTS` removes that.
+A client that a member has completed a sign-in through (remembered for 180
+days after its last sign-in) is never held back by those limits: its
+document is fetched in a lane of its own that first-time addresses can't
+use or fill. So once Claude or ChatGPT has connected here, nobody can lock
+it out by pointing junk addresses at the gateway. A host on
+`MTG_CIMD_ALLOWED_HOSTS` isn't blocked after a failure, but its new
+addresses still count against the budgets. A name whose DNS doesn't answer
+within 2 seconds counts as failed. A client connecting for the very first
+time can still be delayed by someone who keeps the fetcher busy with junk
+addresses (on an open gateway, on several domains of their own; with an
+allowlist, on the allowed hosts); it connects once that stops.
 
 What one document may store is capped like a self-registered client (at
 most 20 redirect URIs of up to 2000 characters, 8 KB in all), and the cache

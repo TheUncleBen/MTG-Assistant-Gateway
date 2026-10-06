@@ -96,12 +96,14 @@ next sign-in.
   hit, the network holding the most unfinished sign-ins loses its oldest, so
   a flood only pushes out its own.
 - Client ID Metadata Documents: an address with a query string is refused; a
-  failed fetch blocks new addresses on that site for a minute; new addresses
+  failed fetch (or a name whose DNS doesn't answer in 2 seconds) blocks new
+  addresses on that host for a minute; new addresses
   are fetched at most 10 times a minute per site and 60 in all, counting only
   requests actually sent; a document is capped like a registered client (20
   redirect URIs, 2000 characters each, 8 KB); the cache keeps at most 1000
-  documents, 50 per site. Apps a member has signed in with, and hosts in
-  `MTG_CIMD_ALLOWED_HOSTS`, are never throttled or evicted.
+  documents, 50 per site. Apps a member has signed in with are never
+  throttled or evicted, and are fetched in a lane of their own that junk
+  addresses can't fill.
 - Archidekt: each member may start `MTG_ARCHIDEKT_CALLS_PER_10_MIN` (120)
   Archidekt calls per 10 minutes, the research tools' `archidekt_*` calls
   included. Five failed Archidekt link attempts in 15 minutes block further
@@ -132,7 +134,9 @@ next sign-in.
   sign-in service from the gateway itself (`/.well-known/mtg-gateway`, or an
   older gateway's `/login` redirect), so **Approve** stays in the app. A page
   from any other site that loads without the app being asked is stopped and
-  opened in the browser, at most once every 10 seconds, and Back no longer
+  opened in the browser, at most once every 10 seconds (after that it is
+  unloaded), a page can open the browser without a tap at most once every 3
+  seconds, and Back no longer
   returns to the sign-in service's old pages after signing in. Sign-ins that
   pass through a second site with a form (SAML, brokered logins) open in the
   browser; use such gateways in the phone's browser.
