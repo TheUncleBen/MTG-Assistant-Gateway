@@ -228,6 +228,14 @@ async def test_health_and_index(gw: Harness):
     assert r.status_code == 302 and r.headers["location"] == "/login?next=/"
 
 
+async def test_app_config_names_the_sign_in_origin_only(gw: Harness):
+    # Public and anonymous: the Android app pins the one sign-in origin it keeps in the app.
+    r = await gw.http.get("/.well-known/mtg-gateway")
+    assert r.status_code == 200
+    assert r.json() == {"idp_origin": "https://idp.test"}
+    assert "public" in r.headers["cache-control"]
+
+
 @pytest.mark.parametrize("path", ["/mcp"])
 async def test_id_token_cannot_be_used_as_access_token(gw: Harness, idp: FakeIdP, path: str):
     """A token from the identity provider is not a gateway token."""

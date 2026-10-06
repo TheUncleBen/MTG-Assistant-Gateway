@@ -1110,6 +1110,16 @@ def build_mcp_server(state: AppState) -> MCPServer:
             return JSONResponse({"status": "error", "detail": "database unavailable"}, status_code=503)
         return JSONResponse({"status": "ok", "version": __version__})
 
+    @server.custom_route(APP_CONFIG_PATH, methods=["GET"], include_in_schema=False)
+    async def app_config(_request: Request) -> Response:
+        # Public: the Android app reads it at start to pin the one sign-in origin it keeps inside
+        # the app (the consent page's Approve goes there, Deny goes to the client's site). Only an
+        # origin the /login redirect shows anyone anyway; nothing about members or secrets.
+        return JSONResponse(
+            {"idp_origin": await state.provider.idp_origin()},
+            headers={"Cache-Control": "public, max-age=300"},
+        )
+
     @server.custom_route("/", methods=["GET"], include_in_schema=False)
     async def index(request: Request) -> Response:
         # The dashboard is for signed-in members only; MCP clients use /mcp and the OAuth routes.
@@ -1306,6 +1316,7 @@ def _refuse_mcp_get(app: Starlette) -> None:
 
 
 METADATA_PATH = "/.well-known/oauth-authorization-server"
+APP_CONFIG_PATH = "/.well-known/mtg-gateway"
 
 
 def _advertise_cimd(app: Starlette, server: MCPServer) -> None:

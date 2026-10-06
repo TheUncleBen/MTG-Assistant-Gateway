@@ -78,6 +78,17 @@ class GatewayUrlTest {
         assertFalse(GatewayUrl.isSignInStart(o, "https://idp.example/login"))
     }
 
+    @Test fun advertisedProvider() {
+        assertEquals("https://auth.example.com", GatewayUrl.parseProvider("""{"idp_origin": "https://auth.example.com"}"""))
+        assertEquals("https://auth.example.com:8443", GatewayUrl.parseProvider("""{"idp_origin":"https://auth.example.com:8443"}"""))
+        assertNull(GatewayUrl.parseProvider("""{"idp_origin": "http://auth.example.com"}"""))
+        assertNull(GatewayUrl.parseProvider("""{"idp_origin": "https://auth.example.com/path"}"""))
+        assertNull(GatewayUrl.parseProvider("""{"idp_origin": "https://user@auth.example.com"}"""))
+        assertNull(GatewayUrl.parseProvider("""{"idp_origin": "javascript:alert(1)"}"""))
+        assertNull(GatewayUrl.parseProvider("""{"status": "ok"}"""))
+        assertNull(GatewayUrl.parseProvider("not json"))
+    }
+
     @Test fun join() {
         assertEquals("https://x.example/scan", GatewayUrl.join("https://x.example", "/scan"))
         assertEquals("https://x.example/scan", GatewayUrl.join("https://x.example/", "scan"))

@@ -99,7 +99,11 @@ else your gateway serves. A few things are native:
   with Discord/GitHub/Google" source, say), that site opens in your browser
   rather than in the app, so a sign-in that chains through a third-party
   provider can't finish in the app; use *Open in browser* in that case and
-  tell the gateway's owner.
+  tell the gateway's owner. The same goes for sign-in services that hand
+  you to another site with a form (SAML or other brokered logins): the app
+  stops that page and opens it in the browser, where the form's data is
+  lost. If your gateway's sign-in works that way, use the gateway in the
+  phone's browser instead of the app.
 - **Downloads** (CSV export, the skill zip) land in your Downloads folder. If
   your sign-in has ended in the meantime, the app says so instead of saving a
   sign-in page; reload, sign in and download again.
@@ -477,16 +481,21 @@ screen is shown without a prefill, so a link can't pick your gateway for you.
   mixed content is blocked.
 - Pages from other sites never load inside the app, so a link can't put a
   look-alike page behind the app's chrome. The one exception is the sign-in
-  service: a single https origin, learned only from the redirect that directly
-  follows a gateway `/login`, and only for that sign-in; it is forgotten as
-  soon as a gateway page outside the sign-in loads. Any further site the
-  sign-in service redirects to opens in the browser. The page where you
-  approve or deny connecting an AI application never teaches the app a
-  sign-in service: Approve continues in the app only to the service an
-  earlier `/login` named, and Deny, which goes back to the application's own
-  site, always opens in the browser. A page from another site that slips in
-  without the app being asked (the redirect after a form) is stopped and
-  handed to the browser, and the app goes back to the gateway.
+  service: a single https origin, the one the gateway advertises at
+  `/.well-known/mtg-gateway` (the app reads it from your gateway each time it
+  starts and keeps it with the gateway address). A gateway too old to have
+  that page falls back to the redirect that directly follows a gateway
+  `/login`. The sign-in service's pages stay in the app only during a
+  sign-in; any further site it redirects to opens in the browser. On the page
+  where you approve or deny connecting an AI application, Approve continues
+  in the app only to that sign-in service, and Deny, which goes back to the
+  application's own site, always opens in the browser. A page from another
+  site that slips in without the app being asked (the redirect after a form)
+  is stopped and handed to the browser, and the app goes back to the gateway;
+  if that happens again within a few seconds the app only stops the page and
+  shows Retry, so it can never open tab after tab. Once a sign-in finishes,
+  the app forgets the pages it went through, so Back doesn't land on the
+  sign-in service's old login page.
 - Links to other apps leave the app only when tapped in the page itself (not
   in a frame, not from a redirect or a script), and only to apps that accept
   links from a browser, as in Chrome.

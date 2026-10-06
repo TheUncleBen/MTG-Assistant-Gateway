@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Message
+import android.os.SystemClock
 import android.provider.MediaStore
 import android.view.View
 import android.webkit.CookieManager
@@ -52,8 +53,8 @@ import java.io.ByteArrayInputStream
  * - a floating menu: scan, reload, open in browser, change gateway.
  *
  * Navigation policy ([NavPolicy]): pages on the gateway's origin, and on the one identity
- * provider a gateway /login redirected to (or the consent page's Approve went on to) during the
- * current sign-in, stay in the app. Links anywhere else open in the phone's browser, as do `target=_blank` links. Other schemes
+ * provider the gateway advertises (`/.well-known/mtg-gateway`; for an older gateway, the one its
+ * /login redirected to) during a sign-in, stay in the app. Links anywhere else open in the phone's browser, as do `target=_blank` links. Other schemes
  * open another app only when tapped in the main frame, and only an activity that accepts links
  * from a browser.
  *
@@ -104,6 +105,8 @@ class MainActivity : ComponentActivity() {
     private var photoSeq = 0
     private lateinit var root: FrameLayout
     private lateinit var fab: ImageButton
+    /** The error box's Retry goes to the gateway's home page instead of reloading a refused page. */
+    private var retryHome = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -116,7 +119,8 @@ class MainActivity : ComponentActivity() {
             return
         }
         origin = saved
-        nav = NavPolicy(origin)
+        nav = NavPolicy(origin, prefs.providerFor(origin))
+        fetchProvider()
         onBackPressedDispatcher.addCallback(this, backCallback)
         setContentView(R.layout.activity_main)
         root = findViewById(R.id.root)
@@ -127,7 +131,8 @@ class MainActivity : ComponentActivity() {
         errorText = findViewById(R.id.error_text)
         findViewById<Button>(R.id.error_retry).setOnClickListener {
             errorBox.visibility = View.GONE
-            web.reload()
+            if (retryHome) web.loadUrl(origin + "/") else web.reload()
+            retryHome = false
         }
         fab = findViewById(R.id.fab)
         fab.setOnClickListener { showMenu(it) }
@@ -361,6 +366,50 @@ class MainActivity : ComponentActivity() {
     // -- helpers -----------------------------------------------------------
 
     /**
+     * Reads the sign-in origin the gateway advertises ([GatewayUrl.APP_CONFIG_PATH]) and pins it, so
+     * the consent page's Approve stays in the app even before this run has seen a /login. One
+     * request to the gateway over https: no cookies, redirects not followed, a small body. A gateway
+     * too old to answer keeps the earlier behaviour (the provider is learned from /login).
+     */
+    private fun fetchProvider() {
+        val gateway = origin
+        val app = applicationContext
+        Thread {
+            val provider = try {
+                val conn = java.net.URL(gateway + GatewayUrl.APP_CONFIG_PATH).openConnection() as java.net.HttpURLConnection
+                try {
+                    conn.instanceFollowRedirects = false
+                    conn.useCaches = false
+                    conn.connectTimeout = 10_000
+                    conn.readTimeout = 10_000
+                    if (conn.responseCode != 200) null
+                    else GatewayUrl.parseProvider(String(conn.inputStream.use { it.readNBytesCompat(4096) }, Charsets.UTF_8))
+                } finally {
+                    conn.disconnect()
+                }
+            } catch (e: java.io.IOException) {
+                null
+            } ?: return@Thread
+            Handler(app.mainLooper).post {
+                Prefs(app).setProvider(gateway, provider)
+                if (!isDestroyed && origin == gateway) nav.pin(provider)
+            }
+        }.start()
+    }
+
+    /** Up to [max] bytes (InputStream.readNBytes needs API 33). */
+    private fun java.io.InputStream.readNBytesCompat(max: Int): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        val buf = ByteArray(1024)
+        while (out.size() < max) {
+            val n = read(buf, 0, minOf(buf.size, max - out.size()))
+            if (n < 0) break
+            out.write(buf, 0, n)
+        }
+        return out.toByteArray()
+    }
+
+    /**
      * Opens [uri] in another app the way a browser would: only activities that accept links from
      * a browser (CATEGORY_BROWSABLE), never a named component. Callers decide whether it may leave
      * the app at all ([NavPolicy]).
@@ -520,18 +569,28 @@ class MainActivity : ComponentActivity() {
             if (!allowed) {
                 // A page from elsewhere that no navigation check saw (WebView does not ask about the
                 // redirect after a form post): it never stays behind the app's chrome. The browser
-                // gets it and the app goes back to the gateway.
+                // gets it and the app goes back to the gateway, at most once in a few seconds; a page
+                // that keeps coming back is only stopped, with Retry taking the person home.
                 view.stopLoading()
-                openExternal(Uri.parse(url))
-                view.loadUrl(origin + "/")
+                if (nav.handOff(SystemClock.elapsedRealtime())) {
+                    openExternal(Uri.parse(url))
+                    view.loadUrl(origin + "/")
+                } else {
+                    progress.visibility = View.GONE
+                    retryHome = true
+                    errorText.text = getString(R.string.page_elsewhere)
+                    errorBox.visibility = View.VISIBLE
+                }
             }
         }
 
         override fun onPageFinished(view: WebView, url: String) {
             progress.visibility = View.GONE
-            syncBackCallback()
             val gateway = GatewayUrl.isGateway(origin, url)
-            nav.pageFinished(url)
+            // Once a sign-in ends (or a page was refused), its pages leave the history: Back would
+            // otherwise reopen the provider's old login page, or the refused page, every time.
+            if (nav.pageFinished(url)) view.clearHistory()
+            syncBackCallback()
             // A new document under an open panel (reload, sign-in bounce) would start the page's own
             // camera and take the lens from the panel, so the panel closes first; the glue is installed
             // fresh and the person taps Scan again.

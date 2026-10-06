@@ -156,8 +156,82 @@ class NavPolicyTest {
         assertTrue(p.pageStarted("$gw/auth/callback?code=c"))
         assertTrue(p.pageStarted("about:blank"))
         p.pageFinished("$gw/scan")
-        assertFalse(p.pageStarted("$idp/if/flow/login/")) // the sign-in is over
+        // The provider's page is never handed off by the backstop (Back to it after a sign-in), any
+        // other site is.
+        assertTrue(p.pageStarted("$idp/if/flow/login/"))
         assertFalse(p.pageStarted("https://scryfall.com/card/x"))
+    }
+
+    @Test fun anAdvertisedProviderLetsApproveStayWithoutALogin() {
+        // Cold start with a valid session, or an App Link to /authorize: no /login in this run.
+        val p = NavPolicy(gw, idp)
+        atConsent(p)
+        assertEquals(Nav.STAY, p.main("$idp/application/o/authorize/?x", redirect = true))
+        assertTrue(p.signingIn)
+        assertEquals(idp, p.signInOrigin)
+        assertEquals(Nav.STAY, p.main("$idp/if/flow/mfa/", gesture = true))
+        assertEquals(Nav.STAY, p.main("$gw/auth/callback?code=c", redirect = true))
+        // The same when WebView did not ask about the redirect after the form.
+        val q = NavPolicy(gw, idp)
+        atConsent(q)
+        assertTrue(q.pageStarted("$idp/application/o/authorize/?x"))
+        assertEquals(idp, q.signInOrigin)
+    }
+
+    @Test fun anAdvertisedProviderStillSendsDenyToTheBrowser() {
+        val p = NavPolicy(gw, idp)
+        atConsent(p)
+        assertEquals(Nav.BROWSER, p.main("https://evil.example/cb?error=access_denied", redirect = true))
+        assertNull(p.signInOrigin)
+        atConsent(p)
+        assertFalse(p.pageStarted("https://evil.example/cb?error=access_denied"))
+        assertNull(p.signInOrigin)
+        assertEquals(idp, p.knownProvider)
+    }
+
+    @Test fun anAdvertisedProviderIsNotReplacedByALoginRedirect() {
+        val p = NavPolicy(gw, idp)
+        assertEquals(Nav.STAY, p.main("$gw/login", redirect = true))
+        assertEquals(Nav.BROWSER, p.main("https://other.example/authorize", redirect = true))
+        assertEquals(idp, p.knownProvider)
+        assertEquals(Nav.STAY, p.main("$gw/login", redirect = true))
+        assertEquals(Nav.STAY, p.main("$idp/application/o/authorize/?x", redirect = true))
+        assertEquals(idp, p.signInOrigin)
+    }
+
+    @Test fun aProviderPinnedLaterCounts() {
+        val p = NavPolicy(gw)
+        p.pin(idp)
+        atConsent(p)
+        assertEquals(Nav.STAY, p.main("$idp/application/o/authorize/?x", redirect = true))
+    }
+
+    @Test fun anUnaskedRedirectToTheAdvertisedProviderStays() {
+        // A WebView that does not report the /login redirect: the provider's page still stays, and
+        // its own steps after it.
+        val p = NavPolicy(gw, idp)
+        assertTrue(p.pageStarted("$idp/if/flow/login/"))
+        assertEquals(Nav.STAY, p.main("$idp/if/flow/mfa/", redirect = true))
+    }
+
+    @Test fun historyIsClearedOnceASignInEndsOrAPageWasRefused() {
+        val p = NavPolicy(gw, idp)
+        signedInto(p)
+        assertFalse(p.pageFinished("$idp/if/flow/login/"))
+        assertFalse(p.pageFinished("$gw/auth/callback?code=c"))
+        assertTrue(p.pageFinished("$gw/")) // Back must not reach the provider's login page
+        assertFalse(p.pageFinished("$gw/scan"))
+        atConsent(p)
+        assertFalse(p.pageStarted("https://evil.example/cb?error=access_denied"))
+        assertTrue(p.pageFinished("$gw/")) // nor the refused page
+        assertFalse(p.pageFinished("$gw/decks"))
+    }
+
+    @Test fun theBackstopHandsOffAtMostOnceInAWhile() {
+        val p = NavPolicy(gw)
+        assertTrue(p.handOff(1_000))
+        assertFalse(p.handOff(1_000 + NavPolicy.LOOP_GUARD_MS - 1))
+        assertTrue(p.handOff(1_000 + NavPolicy.LOOP_GUARD_MS))
     }
 
     @Test fun loginLoadedDirectlyCountsToo() {
