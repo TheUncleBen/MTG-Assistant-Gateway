@@ -142,6 +142,9 @@ MAX_ANONYMOUS_AUDIT_DETAIL = 1024
 # Closed proposals (expired, rejected, failed) are deleted this long after they were made.
 CLOSED_PROPOSAL_RETENTION_SECONDS = 30 * 86400
 CLOSED_PROPOSAL_STATES = ("expired", "rejected", "failed")
+# Applied proposals are the record of what was changed and are kept longer, for as long as the
+# audit log: they are deleted a year after they were applied.
+APPLIED_PROPOSAL_RETENTION_SECONDS = 365 * 86400
 # Snapshots are whole decks taken before every edit. The newest SNAPSHOTS_KEEP_PER_DECK of each
 # member's deck are always kept (and any a pending restore still needs); older ones are deleted.
 SNAPSHOTS_KEEP_PER_DECK = 25
@@ -248,8 +251,15 @@ def _step_7(conn: sqlite3.Connection) -> None:
     )
 
 
+def _step_8(conn: sqlite3.Connection) -> None:
+    """Security round 4: the member whose deck page stored each deck cover, so "Delete my data"
+    removes their covers too (older rows have none and go by the member's deck ids)."""
+    _add_column(conn, "deck_covers", "owner_sub", "TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS deck_covers_owner ON deck_covers(owner_sub)")
+
+
 # Applied in order; ``PRAGMA user_version`` records how many have run. Append, never edit.
-MIGRATIONS = [_step_1, _step_2, _step_3, _step_4, _step_5, _step_6, _step_7]
+MIGRATIONS = [_step_1, _step_2, _step_3, _step_4, _step_5, _step_6, _step_7, _step_8]
 SCHEMA_VERSION = len(MIGRATIONS)
 
 
@@ -691,6 +701,10 @@ class Database:
                 "DELETE FROM proposals WHERE state IN ('expired', 'rejected', 'failed') AND created_at < ?",
                 (now - CLOSED_PROPOSAL_RETENTION_SECONDS,),
             ).rowcount
+            n += c.execute(
+                "DELETE FROM proposals WHERE state = 'applied' AND COALESCE(applied_at, created_at) < ?",
+                (now - APPLIED_PROPOSAL_RETENTION_SECONDS,),
+            ).rowcount
             # An apply interrupted by a restart leaves 'applying' behind; an hour after it started treat
             # it as failed and point at the snapshot (and the created deck id) in the result.
             n += c.execute(
@@ -811,6 +825,13 @@ class Database:
     def audit_for_user(self, sub: str, limit: int = 100) -> list[dict[str, Any]]:
         return self.audit_recent(limit, sub=sub)
 
+    def count_audit(self, sub: str, event: str, since: int) -> int:
+        """How many ``event`` rows ``sub`` has at or after ``since`` (e.g. failed link attempts)."""
+        row = self._one(
+            "SELECT COUNT(*) FROM audit_log WHERE sub = ? AND event = ? AND at >= ?", (sub, event, since)
+        )
+        return int(row[0]) if row else 0
+
     # metrics (per-day counters; see metrics.Metrics) ------------------------
     def metrics_increment(self, day: str, sub: str | None, kind: str, name: str, n: int = 1) -> None:
         with self.tx() as c:
@@ -912,11 +933,25 @@ class Database:
     def delete_member_data(self, sub: str) -> dict[str, int]:
         """Delete everything the gateway keeps about one member, at their request: proposals,
         snapshots, reports, scan sessions, the Archidekt link, every app grant and browser session,
-        usage counters and the user record. The security audit log is kept (it ages out after a
-        year) and records the deletion itself. Signing in again starts a fresh, empty account."""
+        usage counters, the covers of their decks and the user record. The security audit log is
+        kept (it ages out after a year) and records the deletion itself. Signing in again starts a
+        fresh, empty account."""
         out: dict[str, int] = {}
         with self.tx() as c:
             present = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+            # Deck covers are keyed by deck: those the member's deck pages stored, and those of
+            # any deck their proposals, snapshots or reports name (covers stored before the owner
+            # was recorded). Taken before those rows go.
+            deck_ids = {
+                r[0]
+                for table in ("proposals", "snapshots", "reports")
+                if table in present
+                for r in c.execute(f"SELECT DISTINCT deck_id FROM {table} WHERE owner_sub = ?", (sub,))
+            }
+            covers = c.execute("DELETE FROM deck_covers WHERE owner_sub = ?", (sub,)).rowcount
+            for deck_id in deck_ids:
+                covers += c.execute("DELETE FROM deck_covers WHERE deck_id = ?", (deck_id,)).rowcount
+            out["deck_covers"] = covers
             for table, column in self.MEMBER_TABLES:
                 if table in present:
                     out[table] = c.execute(f"DELETE FROM {table} WHERE {column} = ?", (sub,)).rowcount
@@ -971,15 +1006,20 @@ class Database:
                 (sub, username, user_id, secret_enc, now, now),
             )
 
-    def update_link_secret(self, sub: str, secret_enc: str) -> bool:
+    def update_link_secret(self, sub: str, secret_enc: str, *, only_secret: str | None = None) -> bool:
         """Replace the stored session of an *active* link. False when the link was revoked or
-        removed in the meantime, so a refresh that raced an unlink cannot bring it back."""
+        removed in the meantime, so a refresh that raced an unlink cannot bring it back. With
+        ``only_secret``, only while the link still holds that session: a refresh that raced a
+        relink (perhaps to another Archidekt account) cannot overwrite the new link."""
+        sql = (
+            "UPDATE archidekt_links SET secret_enc = ?, refreshed_at = ? WHERE sub = ? AND status = 'active'"
+        )
+        args: tuple[Any, ...] = (secret_enc, int(time.time()), sub)
+        if only_secret is not None:
+            sql += " AND secret_enc = ?"
+            args += (only_secret,)
         with self.tx() as c:
-            cur = c.execute(
-                "UPDATE archidekt_links SET secret_enc = ?, refreshed_at = ? "
-                "WHERE sub = ? AND status = 'active'",
-                (secret_enc, int(time.time()), sub),
-            )
+            cur = c.execute(sql, args)
         return cur.rowcount == 1
 
     def get_link(self, sub: str) -> dict[str, Any] | None:
@@ -990,17 +1030,32 @@ class Database:
         with self.tx() as c:
             c.execute("UPDATE archidekt_links SET last_used_at = ? WHERE sub = ?", (int(time.time()), sub))
 
-    def revoke_link(self, sub: str) -> None:
+    def revoke_link(self, sub: str, *, only_secret: str | None = None) -> bool:
+        """Revoke the member's link (blanking the stored session). With ``only_secret``, only
+        while the link still holds that session, so a failure seen by a request that started
+        before a relink cannot revoke the new link. True when a row was changed."""
+        sql = "UPDATE archidekt_links SET status = 'revoked', secret_enc = '' WHERE sub = ?"
+        args: tuple[Any, ...] = (sub,)
+        if only_secret is not None:
+            sql += " AND status = 'active' AND secret_enc = ?"
+            args += (only_secret,)
         with self.tx() as c:
-            c.execute("UPDATE archidekt_links SET status = 'revoked', secret_enc = '' WHERE sub = ?", (sub,))
+            return c.execute(sql, args).rowcount > 0
 
     # proposals and snapshots -----------------------------------------------
     def save_proposal(
-        self, row: dict[str, Any], *, max_pending: int | None = None, max_closed: int | None = None
+        self,
+        row: dict[str, Any],
+        *,
+        max_pending: int | None = None,
+        max_closed: int | None = None,
+        max_pending_per_client: int | None = None,
     ) -> bool:
         """Insert a pending proposal. With ``max_pending``, refuse it (return False) when the owner
-        already has that many live pending proposals; with ``max_closed``, delete the owner's
-        closed proposals (expired, rejected, failed) beyond the newest ``max_closed``."""
+        already has that many live pending proposals, and with ``max_pending_per_client`` when the
+        app making it (``created_by_client``) already has that many for the owner; with
+        ``max_closed``, delete the owner's closed proposals (expired, rejected, failed) beyond the
+        newest ``max_closed``."""
         now = int(time.time())
         with self.tx() as c:
             if max_pending is not None:
@@ -1010,6 +1065,10 @@ class Database:
                     (row["owner_sub"], now),
                 ).fetchone()
                 if pending >= max_pending:
+                    return False
+            if max_pending_per_client is not None:
+                mine = self.count_pending_for_client(row["owner_sub"], row.get("created_by_client"), c=c)
+                if mine >= max_pending_per_client:
                     return False
             c.execute(
                 """INSERT INTO proposals (id, owner_sub, kind, deck_id, deck_name, baseline_fingerprint,
@@ -1049,6 +1108,43 @@ class Database:
         )
         return int(row[0]) if row else 0
 
+    def count_pending_for_client(
+        self, owner_sub: str, client_id: str | None, *, c: sqlite3.Connection | None = None
+    ) -> int:
+        """Live pending proposals one app (or the browser) made for the owner."""
+        sql = (
+            "SELECT COUNT(*) FROM proposals WHERE owner_sub = ? AND state = 'pending' AND expires_at >= ? "
+            "AND created_by_client IS ?"
+        )
+        args = (owner_sub, int(time.time()), client_id)
+        row = c.execute(sql, args).fetchone() if c is not None else self._one(sql, args)
+        return int(row[0]) if row else 0
+
+    def reject_client_proposals(self, owner_sub: str, client_id: str | None = None) -> list[str]:
+        """Reject the owner's pending proposals made by one app (every app, not the browser, when
+        ``client_id`` is None): the app was disconnected. Returns the rejected ids."""
+        browser = "__browser__"  # decks.BROWSER_CLIENT
+        with self.tx() as c:
+            if client_id is None:
+                where = "created_by_client IS NOT NULL AND created_by_client != ?"
+                args: tuple[Any, ...] = (owner_sub, browser)
+            else:
+                where = "created_by_client = ?"
+                args = (owner_sub, client_id)
+            ids = [
+                r[0]
+                for r in c.execute(
+                    f"SELECT id FROM proposals WHERE owner_sub = ? AND state = 'pending' AND {where}", args
+                )
+            ]
+            for pid in ids:
+                c.execute(
+                    "UPDATE proposals SET state = 'rejected', applied_at = ? "
+                    "WHERE id = ? AND state = 'pending'",
+                    (int(time.time()), pid),
+                )
+        return ids
+
     def get_proposal(self, proposal_id: str, owner_sub: str) -> dict[str, Any] | None:
         row = self._one("SELECT * FROM proposals WHERE id = ? AND owner_sub = ?", (proposal_id, owner_sub))
         if row is None:
@@ -1063,8 +1159,8 @@ class Database:
     def list_proposals(self, owner_sub: str, limit: int = 20) -> list[dict[str, Any]]:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT id, kind, deck_id, deck_name, state, created_at, expires_at, applied_at "
-                "FROM proposals WHERE owner_sub = ? ORDER BY created_at DESC LIMIT ?",
+                "SELECT id, kind, deck_id, deck_name, state, created_at, expires_at, applied_at, "
+                "created_by_client FROM proposals WHERE owner_sub = ? ORDER BY created_at DESC LIMIT ?",
                 (owner_sub, limit),
             ).fetchall()
         return [dict(r) for r in rows]
@@ -1128,21 +1224,29 @@ class Database:
         proposal_id: str | None,
         fingerprint: str,
         deck: dict[str, Any],
-    ) -> None:
+        while_applying: bool = False,
+    ) -> bool:
+        """Store a snapshot. With ``while_applying``, only while ``proposal_id`` of ``owner_sub``
+        is still being applied and the member still exists: an apply that outlives "Delete my
+        data" stores nothing for the deleted member. False when nothing was stored."""
+        values = (
+            snapshot_id,
+            owner_sub,
+            deck_id,
+            proposal_id,
+            int(time.time()),
+            fingerprint,
+            json.dumps(deck),
+        )
+        sql = """INSERT INTO snapshots (id, owner_sub, deck_id, proposal_id, taken_at, fingerprint,
+                 deck_json) SELECT ?, ?, ?, ?, ?, ?, ?"""
+        if while_applying:
+            sql += """ WHERE EXISTS (SELECT 1 FROM users WHERE sub = ?)
+                       AND EXISTS (SELECT 1 FROM proposals WHERE id = ? AND owner_sub = ?
+                                   AND state = 'applying')"""
+            values += (owner_sub, proposal_id, owner_sub)
         with self.tx() as c:
-            c.execute(
-                """INSERT INTO snapshots (id, owner_sub, deck_id, proposal_id, taken_at, fingerprint,
-                   deck_json) VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    snapshot_id,
-                    owner_sub,
-                    deck_id,
-                    proposal_id,
-                    int(time.time()),
-                    fingerprint,
-                    json.dumps(deck),
-                ),
-            )
+            return c.execute(sql, values).rowcount == 1
 
     def list_snapshots(self, owner_sub: str, limit: int = 20) -> list[dict[str, Any]]:
         """Newest first. Each row carries the deck name and card count read from the stored deck,
@@ -1190,13 +1294,17 @@ class Database:
 
     # backup ----------------------------------------------------------------
     # -- deck covers --------------------------------------------------------------------------
-    def save_deck_cover(self, deck_id: str, scryfall_uid: str, card_name: str = "") -> None:
+    def save_deck_cover(
+        self, deck_id: str, scryfall_uid: str, card_name: str = "", *, owner_sub: str | None = None
+    ) -> None:
         with self.tx() as c:
             c.execute(
-                "INSERT INTO deck_covers (deck_id, scryfall_uid, card_name, updated_at) VALUES (?, ?, ?, ?) "
+                "INSERT INTO deck_covers (deck_id, scryfall_uid, card_name, updated_at, owner_sub) "
+                "VALUES (?, ?, ?, ?, ?) "
                 "ON CONFLICT(deck_id) DO UPDATE SET scryfall_uid = excluded.scryfall_uid, "
-                "card_name = excluded.card_name, updated_at = excluded.updated_at",
-                (str(deck_id), scryfall_uid, card_name[:200], int(time.time())),
+                "card_name = excluded.card_name, updated_at = excluded.updated_at, "
+                "owner_sub = COALESCE(excluded.owner_sub, deck_covers.owner_sub)",
+                (str(deck_id), scryfall_uid, card_name[:200], int(time.time()), owner_sub),
             )
 
     def deck_covers(self, deck_ids: list[str]) -> dict[str, dict[str, Any]]:

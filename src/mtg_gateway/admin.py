@@ -20,7 +20,7 @@ from urllib.parse import parse_qs, quote
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from .decks import actor_label, current_client
+from .decks import ADMIN_CLIENT, actor_label, current_client
 from .pages import BROWSER_CLIENT_ID, _csrf, _when, browser_session, login_redirect, read_limited
 from .theme import render
 
@@ -128,7 +128,9 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
         if user is None:
             raise AdminError("not_found", "No such user.", 404, code="no_such_user")
         out: dict[str, Any] = {"action": action, "target": target}
-        current_client.set(BROWSER_CLIENT_ID)
+        # Rows written under the member's own account (the unlink) name an administrator as the
+        # actor, never the member's browser.
+        current_client.set(ADMIN_CLIENT)
         if action == "disable":
             if target == admin_sub:
                 raise AdminError("invalid", "You cannot disable your own account.", code="self_disable")
@@ -140,6 +142,14 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
             out.update(state.db.revoke_all_for_user(target))
         elif action == "unlink":
             state.decks.unlink(target)
+        if action != "unlink":  # the unlink wrote its own row in the member's log above
+            # the member's activity log shows what an administrator did to their account
+            state.db.audit(
+                f"admin_{action}",
+                sub=target,
+                client_id=ADMIN_CLIENT,
+                detail={"by": "admin", **{k: v for k, v in out.items() if k != "action"}},
+            )
         state.db.audit(
             f"admin_{action}",
             sub=admin_sub,

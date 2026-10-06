@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlsplit
 
+import mcp_types as types
 from mcp.server.auth.handlers.metadata import MetadataHandler
 from mcp.server.auth.handlers.revoke import RevocationHandler
 from mcp.server.auth.handlers.token import TokenHandler
@@ -58,7 +59,7 @@ from .companion import add_companion_routes
 from .config import Settings
 from .db import Database
 from .decklist import DecklistError, ListCard, parse_decklist, to_text
-from .decks import DeckError, DeckService, _clean_deck_id, current_client
+from .decks import DeckError, DeckService, _clean_deck_id, current_client, scopes_allow_writes
 from .membership import Membership, MembershipChecker
 from .metrics import Metrics
 from .mf_proxy import ALLOWED_TOOLS, MysticForgeProxy
@@ -91,6 +92,45 @@ class AppState:
 
 def _tool_error(exc: DeckError) -> dict[str, object]:
     return {"ok": False, "error": exc.kind, "message": str(exc), **exc.extra}
+
+
+# Tools that change something (a proposal, an apply, a stored report or scan). A token issued
+# only for a read-only scope (decks.READ_ONLY_SCOPES) is refused them.
+WRITE_TOOLS = frozenset(
+    {
+        "propose_new_deck",
+        "propose_deck_changes",
+        "propose_restore_snapshot",
+        "propose_deck_details",
+        "propose_clone_deck",
+        "apply_proposal",
+        "reject_proposal",
+        "run_deck_report",
+        "save_scan_session",
+    }
+)
+
+
+def scope_guard_middleware():
+    """MCP middleware refusing WRITE_TOOLS to read-only tokens before the tool runs."""
+
+    async def _mw(ctx: Any, call_next: Any) -> Any:
+        if ctx.method == "tools/call" and isinstance(ctx.params, dict):
+            name = ctx.params.get("name")
+            token = get_access_token()
+            if name in WRITE_TOOLS and token is not None and not scopes_allow_writes(token.scopes):
+                message = (
+                    "This app was connected read-only (scope mtg.read), so it cannot propose, apply or "
+                    "store anything. Reconnect it with the mtg scope to make changes."
+                )
+                return types.CallToolResult(
+                    content=[types.TextContent(type="text", text=message)],
+                    structuredContent={"ok": False, "error": "insufficient_scope", "message": message},
+                    isError=True,
+                ).model_dump(by_alias=True, exclude_none=True, mode="json")
+        return await call_next(ctx)
+
+    return _mw
 
 
 class LoginCookieMiddleware:
@@ -1129,7 +1169,10 @@ def create_app(
     )
     server = build_mcp_server(state)
     server.middleware.append(state.metrics.mcp_middleware())  # before the proxy, so its calls count too
+    server.middleware.append(scope_guard_middleware())
     if mf_proxy is not None:
+        # proxied archidekt_* research calls draw on the member's Archidekt budget too
+        mf_proxy.archidekt_budget = state.decks.budget_refusal
         server.middleware.append(mf_proxy.middleware())
     transport_security = TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
