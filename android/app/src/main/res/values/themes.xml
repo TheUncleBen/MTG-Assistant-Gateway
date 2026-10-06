@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Framework Material theme following the system Light/Dark setting (values-night holds the
+         dark parent). The status bar takes the pages' navbar colour and the navigation bar the
+         bottom toolbar's, so the shell reads as one piece with the page. No AndroidX. -->
+    <style name="Theme.MtgAssistantGateway" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:colorPrimary">@color/navbar</item>
+        <item name="android:colorPrimaryDark">@color/navbar</item>
+        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:windowBackground">@color/bg</item>
+        <item name="android:statusBarColor">@color/navbar</item>
+        <item name="android:navigationBarColor">@color/toolbar</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:textColorPrimary">@color/text</item>
+        <item name="android:textColorSecondary">@color/text_muted</item>
+    </style>
+</resources>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Unfolded foldables and tablets: keep the form a readable width. -->
+    <style name="SetupColumn">
+        <item name="android:layout_width">480dp</item>
+    </style>
+</resources>

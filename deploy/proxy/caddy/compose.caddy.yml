@@ -1,0 +1,35 @@
+# Adds Caddy, with automatic HTTPS, to deploy/compose/docker-compose.yml.
+# From deploy/compose/:
+#
+#   docker compose -f docker-compose.yml -f ../proxy/caddy/compose.caddy.yml up -d
+#
+# Edit the Caddyfile first: put your domain where mtg.example.com is. If you
+# downloaded files instead of cloning, set CADDYFILE in .env to its path
+# (default ../proxy/caddy/Caddyfile, relative to docker-compose.yml).
+# Ports 80 and 443 on this machine must be free and reachable from the internet
+# (Let's Encrypt checks them), and your domain's DNS must point here.
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ${CADDYFILE:-../proxy/caddy/Caddyfile}:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - mtg
+    depends_on:
+      - gateway
+
+  gateway:
+    # Caddy reaches the gateway over the Docker network, so nothing needs
+    # publishing on the host.
+    ports: !reset []
+
+volumes:
+  caddy_data:
+  caddy_config:

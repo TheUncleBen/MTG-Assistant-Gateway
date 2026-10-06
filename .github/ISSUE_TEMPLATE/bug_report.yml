@@ -1,0 +1,57 @@
+name: Bug report
+description: Something doesn't work the way the docs say it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please **remove secrets and personal details** (tokens, client secrets,
+        real hostnames, usernames, deck links you don't want public) from everything you paste.
+        Security problems go through **Security → Report a vulnerability** instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Gateway version
+      description: "`curl -s https://<your-gateway>/healthz` shows it."
+      placeholder: "0.5.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: deploy
+    attributes:
+      label: How it's deployed
+      options:
+        - Docker Swarm / Portainer stack
+        - Docker Compose (single host)
+        - Something else (say below)
+    validations:
+      required: true
+  - type: input
+    id: idp
+    attributes:
+      label: Identity provider and version
+      placeholder: "Authentik 2026.2.2, Keycloak 26, ..."
+  - type: input
+    id: proxy
+    attributes:
+      label: Reverse proxy
+      placeholder: "Nginx Proxy Manager, Traefik, Caddy, nginx, ..."
+  - type: input
+    id: client
+    attributes:
+      label: Assistant and app
+      description: Which client, and where you used it.
+      placeholder: "Claude desktop on Windows, ChatGPT web, Android app, ..."
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: The relevant lines from the gateway's logs, with secrets removed.
+      render: text

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/TheUncleBen/MTG-Assistant-Gateway/security/advisories/new
+    about: Please report security problems privately, not as an issue.
+  - name: Deployment and usage guides
+    url: https://github.com/TheUncleBen/MTG-Assistant-Gateway/tree/main/docs
+    about: Deploy, connect, troubleshoot. Worth a look before opening an issue.

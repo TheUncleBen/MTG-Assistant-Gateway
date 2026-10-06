@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MTG Assistant Gateway</string>
+
+    <string name="setup_title">Your gateway</string>
+    <string name="setup_blurb">Type the address of the MTG gateway you were given, for example mtg.example.com. The app opens that site and signs you in there.</string>
+    <string name="setup_label">Gateway address</string>
+    <string name="setup_hint">https://mtg.example.com</string>
+    <string name="setup_continue">Continue</string>
+    <string name="setup_checking">Checking %1$s…</string>
+    <string name="setup_unreachable">Could not reach that address. Check the spelling and your connection.</string>
+    <string name="setup_not_gateway">That address answered (HTTP %1$d) but does not look like an MTG gateway.</string>
+
+    <string name="menu_scan">Scan with phone camera</string>
+    <string name="menu_reload">Reload</string>
+    <string name="menu_browser">Open in browser</string>
+    <string name="menu_gateway">Change gateway</string>
+    <string name="fab_label">Menu</string>
+
+    <string name="page_error">The page could not be loaded: %1$s</string>
+    <string name="retry">Retry</string>
+    <string name="downloading">Downloading %1$s</string>
+    <string name="download_saved">Saved %1$s to Downloads.</string>
+    <string name="download_failed">Could not download %1$s.</string>
+    <string name="download_signed_out">Your sign-in has ended. Reload the page, sign in again and retry the download.</string>
+    <string name="no_app_for_link">No app can open that link.</string>
+    <string name="camera_permission_needed">Camera permission is needed to scan cards.</string>
+    <string name="scan_page_too_old">This gateway\'s scan page has no photo hooks; it needs a newer gateway version.</string>
+    <string name="scan_handoff_failed">The scan page did not take the photo. Tap Done, reload the page and try again.</string>
+    <string name="scan_page_slow">The scan page did not answer in time. Tap Done and check the page.</string>
+    <string name="scan_page_missing">This gateway has no scan page.</string>
+    <string name="link_other_gateway">That link is for another site, not your gateway.</string>
+
+    <string name="camera_title">Scan a card</string>
+    <string name="shoot">Shoot</string>
+    <string name="done">Done</string>
+    <string name="torch">Torch</string>
+    <string name="torch_level">Brightness %1$d of %2$d</string>
+    <string name="zoom">Zoom</string>
+    <string name="exposure">Brightness</string>
+    <string name="camera_none">No back camera found.</string>
+    <string name="camera_error">Camera error (%1$d). Close and try again.</string>
+    <string name="status_no_flash">Fill the dashed box with the card, then tap Shoot.</string>
+    <string name="status_strength">Torch brightness is adjustable on this phone. Fill the dashed box with the card, then tap Shoot.</string>
+    <string name="status_no_strength_old">Torch brightness control needs Android 15. Fill the dashed box with the card, then tap Shoot.</string>
+    <string name="status_no_strength_device">This camera does not report adjustable torch brightness. Fill the dashed box with the card, then tap Shoot.</string>
+    <string name="status_capturing">Taking the picture…</string>
+    <string name="status_reading">Reading the card…</string>
+    <string name="status_next">Next card.</string>
+    <string name="auto_mode">Auto</string>
+    <string name="undo">Undo</string>
+    <string name="auto_on">Auto: hold each card in the dashed box until it is added.</string>
+    <string name="auto_off">Auto off. Tap Shoot for one card at a time.</string>
+    <string name="added_card">Added %1$s · %2$s</string>
+    <string name="removed_card">Removed %1$s · %2$s</string>
+    <string name="unsure_card">Not sure: %1$s. Tap Done to check it on the page.</string>
+    <string name="unidentified_card">Could not place “%1$s”; kept in the unidentified list.</string>
+    <string name="no_card_outline">No card outline found. Use a plain, contrasting background.</string>
+    <string name="scan_failed">Scan failed: %1$s</string>
+    <string name="pending_on_page">Found a match. Tap Done to add it on the page; Shoot again replaces it.</string>
+    <string name="auto_paused_pending">Auto paused: a read waits on the page. Tap Done to check it.</string>
+    <plurals name="cards">
+        <item quantity="one">%d card</item>
+        <item quantity="other">%d cards</item>
+    </plurals>
+</resources>

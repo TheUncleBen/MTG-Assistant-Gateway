@@ -1,0 +1,128 @@
+name: End-to-end
+
+# Deploys the real Portainer stack file on a single-node Swarm with a real
+# Authentik and drives the client flow with a scripted browser and the MCP SDK.
+# See tests/e2e/README.md.
+#
+# What runs where (Actions minutes are paid for): a pull request runs the suite once, against the
+# current Authentik release, and only when its diff touches what the suite exercises (the gateway
+# server, auth and OAuth code, the stack and Docker files, the suite itself); changes under the
+# scan subpackage (its routes, service and UI alike), skill, plugin and documentation skip it, as do drafts. Pushes to main run nothing. A manual run covers
+# both Authentik versions (or the one chosen) and is the way to re-check main.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      authentik:
+        description: "Authentik versions to test"
+        type: choice
+        options: ["both", "2025.6.4", "2026.2.2"]
+        default: both
+
+permissions:
+  contents: read
+
+# A new push to a pull request stops the run it supersedes. A manual run has its own group and is
+# never cancelled.
+concurrency:
+  group: e2e-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  changes:
+    # Whether this pull request touches anything the end-to-end suite exercises.
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.diff.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          relevant=true
+          if [ "$EVENT" = "pull_request" ]; then
+            files=$(git diff --name-only --no-renames "$BASE" "$HEAD")
+            printf '%s\n' "$files"
+            # The suite deploys the stack and drives sign-in, OAuth, decks, scan tools and CIMD through
+            # the gateway, so these paths matter: the gateway package except its scan UI subpackage,
+            # the stack and Docker files, the suite and its mocks, dependencies, and this workflow.
+            # An empty diff counts as relevant (fail safe).
+            hits=$(printf '%s\n' "$files" | grep -E '^(src/mtg_gateway/|deploy/|docker/|Dockerfile|tests/e2e/|tests/fake_|pyproject\.toml|constraints\.txt|\.github/workflows/e2e\.yml)' | grep -vE '^src/mtg_gateway/scan/' || true)
+            if [ -n "$files" ] && [ -z "$hits" ]; then relevant=false; fi
+          fi
+          echo "relevant=$relevant" >> "$GITHUB_OUTPUT"
+          echo "relevant=$relevant"
+
+  e2e:
+    # Once per Authentik release the operator may run: the version DEPLOY.md was written
+    # against and the current release. A manual run covers both (neither stops the other);
+    # a pull request runs only the current release, and only when its diff is relevant
+    # (see the changes job) and it is not a draft; a draft marked ready runs it.
+    name: e2e (authentik ${{ matrix.authentik }})
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || (needs.changes.outputs.relevant == 'true' && !github.event.pull_request.draft)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        authentik: >-
+          ${{ fromJSON(
+                github.event_name == 'pull_request' && '["2026.2.2"]'
+                || (inputs.authentik == 'both' || inputs.authentik == '') && '["2025.6.4", "2026.2.2"]'
+                || format('["{0}"]', inputs.authentik)) }}
+    env:
+      E2E_AUTHENTIK_IMAGE: ghcr.io/goauthentik/server:${{ matrix.authentik }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - run: pip install -c constraints.txt -e ".[dev]" playwright
+      - run: python -m playwright install --with-deps chromium
+      - name: Deploy the stack and configure Authentik
+        run: tests/e2e/run.sh up
+      - name: Run the end-to-end suite
+        run: tests/e2e/run.sh test
+      - name: Authentik evidence (version, blueprints, flows, provider, bindings, asserted identity)
+        if: always()
+        run: |
+          cat tests/e2e/.generated/authentik-evidence.json || true
+          cat tests/e2e/.generated/identity-evidence.json || true
+          echo '== sign-in retries (empty when every login went first time)'; cat tests/e2e/.generated/sign-in-retries.log 2>/dev/null || true
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: authentik-evidence-${{ matrix.authentik }}
+          path: |
+            tests/e2e/.generated/authentik-evidence.json
+            tests/e2e/.generated/identity-evidence.json
+          if-no-files-found: ignore
+      - name: Service logs
+        if: always()
+        # "docker service logs" can hang on a service whose tasks were replaced by
+        # "docker service update" (the suite does that), so read the live containers instead.
+        run: |
+          docker service ls
+          docker ps -a --format '{{.Names}} {{.Status}}'
+          for svc in mtg_mtg-assistant-gateway mtg_mtg-assistant-mysticforge e2eedge_archidektmock e2eedge_scryfallmock e2eedge_cimdmock; do
+            for c in $(docker ps -aq -f "name=$svc"); do echo "== $svc $c"; timeout 30 docker logs --tail 150 "$c" 2>&1 || true; done
+          done
+          # Authentik's own account of every sign-in (events, failed logins, policy results), kept long
+          # enough to explain a refused password; its static-asset lines are dropped.
+          for svc in e2eedge_authentik-server e2eedge_authentik-worker; do
+            for c in $(docker ps -aq -f "name=$svc"); do echo "== $svc $c"; timeout 30 docker logs --tail 3000 "$c" 2>&1 | grep -v '"/static/' | tail -600 || true; done
+          done
+          cat tests/e2e/.generated/memory.txt || true
+      - name: Tear down
+        if: always()
+        run: tests/e2e/run.sh down

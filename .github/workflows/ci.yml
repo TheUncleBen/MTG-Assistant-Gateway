@@ -1,0 +1,419 @@
+name: CI
+
+# What runs where:
+#   pull request   lint + unit tests always; the amd64 container smoke test unless the pull request is a
+#                  draft or touches only documentation. A non-draft pull request that changes android/ also
+#                  gets the Android unit tests and a debug build (no secrets). The version check makes sure
+#                  VERSION was raised above every released version (docs/VERSIONS.md). No image is pushed.
+#   push to main   a release. Every update to main is a new version: lint + unit tests, then the tag
+#                  v<version> is created on this commit (which claims the version, so no other commit can
+#                  publish it), the Android app is built and signed (only when the upload-key secrets are
+#                  set), the linux/arm64 + linux/amd64 image is published as <version> and, unless a
+#                  higher version is already tagged, <major>.<minor> and latest are moved to it; finally
+#                  the read-only branch release/<version> and the GitHub release are created.
+#   recovery       a release that stopped partway is finished with "Re-run failed jobs" (or "Re-run all
+#                  jobs") on its own run: every step accepts what an earlier attempt of the same commit
+#                  already did. A manual run builds main's newest commit the same way (a deliberate
+#                  rebuild: it re-publishes that commit's version).
+# Every action is pinned to a full commit SHA; the comment names the tag it was taken from.
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+# A new push to a pull request stops the run it supersedes. Runs on main are never cancelled or queued
+# behind each other (each commit is its own version), so every version on main gets its release.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Read-only by default; only the claim and release jobs (contents: write) and the publish job
+# (packages: write) get more, and none of those three runs for a pull request.
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/mtg-assistant-gateway
+
+jobs:
+  changes:
+    # Which kind of change this is, so docs-only pull requests skip the heavy jobs.
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.diff.outputs.docs_only }}
+      android: ${{ steps.diff.outputs.android }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          docs_only=false
+          android=false
+          if [ "$EVENT" = "pull_request" ]; then
+            files=$(git diff --name-only --no-renames "$BASE" "$HEAD")
+            printf '%s\n' "$files"
+            # Only docs/ and root-level Markdown count as documentation; skill/ and plugin/ Markdown ships in the image.
+            # The Android app (android/) is not part of the image either, so it skips the image job too,
+            # but gets its own cheap check (android-check) below.
+            if [ -n "$files" ] && ! printf '%s\n' "$files" | grep -qvE '^docs/|^[^/]+\.md$|^android/'; then docs_only=true; fi
+            if printf '%s\n' "$files" | grep -qE '^android/'; then android=true; fi
+          fi
+          {
+            echo "docs_only=$docs_only"
+            echo "android=$android"
+          } >> "$GITHUB_OUTPUT"
+          echo "docs_only=$docs_only android=$android"
+
+  version:
+    # VERSION is the one place the version lives (docs/VERSIONS.md). On a pull request it must be above
+    # every released version and have a CHANGELOG section; on main it must not be released by another
+    # commit, and the job hands the version and its changelog section to the release jobs.
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      minor: ${{ steps.v.outputs.minor }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - id: v
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -eu
+          if [ "$EVENT" = "pull_request" ]; then
+            python3 scripts/release_version.py check
+          else
+            if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+              echo "::error::releases run from main only"; exit 1
+            fi
+            python3 scripts/release_version.py release --notes "$RUNNER_TEMP/notes.md"
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: github.event_name != 'pull_request'
+        with:
+          name: release-notes
+          path: ${{ runner.temp }}/notes.md
+          if-no-files-found: error
+
+  claim:
+    # Creates the tag v<version> on this commit before anything is published. Creating a ref that exists
+    # fails, so of two commits that carry the same version only the first gets this far; a re-run of the
+    # same commit finds its own tag and goes on. Runs no repository code.
+    needs: [test, version]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create tag v<version> on this commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -eu
+          [[ "$VERSION" =~ ^(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$ ]] || { echo "bad version: $VERSION"; exit 1; }
+          if ! gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/v$VERSION" -f sha="$GITHUB_SHA" >/dev/null 2>"$RUNNER_TEMP/err"; then
+            have=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v$VERSION" --jq '.object.type + " " + .object.sha' 2>/dev/null || true)
+            # An annotated tag (made by hand) points at a tag object; follow it to its commit.
+            if [ "${have%% *}" = "tag" ]; then have=$(gh api "repos/$GITHUB_REPOSITORY/git/tags/${have#* }" --jq .object.sha 2>/dev/null || true); else have=${have#* }; fi
+            if [ "$have" != "$GITHUB_SHA" ]; then
+              cat "$RUNNER_TEMP/err"
+              echo "::error::v$VERSION belongs to another commit ($have); raise VERSION (docs/VERSIONS.md)"
+              exit 1
+            fi
+            echo "v$VERSION is already on this commit (a re-run)."
+          fi
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - run: pip install -c constraints.txt -e ".[dev]"
+      - run: ruff check src tests scripts
+      - run: ruff format --check src tests scripts
+      - run: python3 scripts/fetch_ocr_assets.py
+      - run: playwright install --with-deps chromium
+      - run: pytest -q
+
+  android-check:
+    # Pull requests that change android/ only: the Android unit tests and a debug build with Gradle and the
+    # runner's Android SDK, so build-script and Kotlin changes run before merge rather than first in the
+    # signing job. No secrets, read-only token, skipped for drafts and for pull requests that do not touch android/.
+    needs: [changes]
+    if: >-
+      github.event_name == 'pull_request' && needs.changes.outputs.android == 'true'
+      && !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Debug build and unit tests
+        run: |
+          set -eu
+          android/scripts/build.sh debug
+          android/scripts/test.sh
+
+  android:
+    # The Android app (android/), built with Gradle and the runner's Android SDK by android/scripts/build.sh
+    # and signed with the operator's upload key from the android-release environment's secrets
+    # (docs/ANDROID.md, section 9). The ANDROID_APP_LINKS_HOST repository variable, when set, builds the
+    # applinks flavor (docs/ANDROID.md, section 12).
+    # Runs only for a release (a push to main, or a manual run from main), never on other branches or pull
+    # requests; without the secrets it does nothing and the image ships without the app.
+    # The keystore is decoded, used and deleted inside one step, and every action in this job is pinned to a
+    # commit SHA, because any code running in this job could reach the signing secrets.
+    needs: [test, version, claim]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: android-release
+    permissions:
+      contents: read
+    outputs:
+      built: ${{ steps.build.outputs.built }}
+      cert_sha256: ${{ steps.build.outputs.cert_sha256 }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Build, sign and test
+        id: build
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          RELEASE_STORE_PASS: ${{ secrets.ANDROID_STORE_PASS }}
+          RELEASE_KEY_PASS: ${{ secrets.ANDROID_KEY_PASS }}
+          APP_LINKS_HOST: ${{ vars.ANDROID_APP_LINKS_HOST }}
+        run: |
+          set -eu
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::notice::ANDROID_KEYSTORE_B64 is not set, so the Android app is not built (see docs/ANDROID.md)."
+            echo "built=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          KS="$RUNNER_TEMP/upload.jks"
+          # The decoded keystore never outlives this step, whether it succeeds or fails.
+          trap 'rm -f "$KS"' EXIT
+          umask 077
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$KS"
+          RELEASE_KEYSTORE="$KS" android/scripts/build.sh release
+          rm -f "$KS"
+          android/scripts/test.sh
+          mkdir -p docker/app-dist
+          cp android/out/mtg-assistant-gateway-release.apk docker/app-dist/mtg-assistant-gateway.apk
+          cp android/out/mtg-assistant-gateway.json docker/app-dist/mtg-assistant-gateway.json
+          cert=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("cert_sha256", ""))' android/out/mtg-assistant-gateway.json)
+          if ! printf '%s' "$cert" | grep -qE '^[0-9a-f]{64}$'; then
+            echo "::error::mtg-assistant-gateway.json has no signing-certificate fingerprint (cert_sha256)."
+            exit 1
+          fi
+          echo "cert_sha256=$cert" >> "$GITHUB_OUTPUT"
+          echo "Android signing certificate SHA-256: \`$cert\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "built=true" >> "$GITHUB_OUTPUT"
+      - name: Check no keystore is left on disk
+        if: always()
+        run: test ! -e "$RUNNER_TEMP/upload.jks"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: steps.build.outputs.built == 'true'
+        with:
+          name: android-app
+          path: docker/app-dist/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: steps.build.outputs.built == 'true'
+        with:
+          name: android-release-files
+          path: |
+            android/out/mtg-assistant-gateway-release.apk
+            android/out/mtg-assistant-gateway-release.aab
+            android/out/mtg-assistant-gateway.json
+          if-no-files-found: error
+
+  smoke:
+    # Pull requests: the amd64 image is built and smoke-tested, nothing is pushed, and the token is
+    # read-only. Skipped for docs-only and draft pull requests; a draft marked ready runs it.
+    needs: [test, changes, version]
+    if: >-
+      github.event_name == 'pull_request' && needs.changes.outputs.docs_only != 'true'
+      && !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Build amd64 image for a smoke test
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          load: true
+          tags: mtg-gateway:ci
+          cache-from: type=gha
+      - name: Smoke test the container
+        run: scripts/ci_smoke_gateway.sh mtg-gateway:ci
+
+  image:
+    # A release (main): the same smoke test, then the linux/arm64 + linux/amd64 image is published as
+    # <version>. <major>.<minor> and latest are moved to it afterwards, unless a higher version is already
+    # tagged, so a slower run for an older commit never moves them back. The android job
+    # fails a release only when it fails, not when its secrets are missing (then the image has no app).
+    needs: [test, version, claim, android]
+    if: >-
+      !cancelled() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+      && needs.test.result == 'success' && needs.version.result == 'success'
+      && needs.claim.result == 'success' && needs.android.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Put the Android app in the image
+        if: needs.android.outputs.built == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: android-app
+          path: docker/app-dist/
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Build amd64 image for a smoke test
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          load: true
+          tags: mtg-gateway:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test the container
+        run: scripts/ci_smoke_gateway.sh mtg-gateway:ci
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image name
+        id: name
+        env:
+          IMAGE_NAME: ${{ env.IMAGE }}
+        run: echo "image=$(printf '%s' "$IMAGE_NAME" | tr 'A-Z' 'a-z')" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push linux/arm64 and linux/amd64 as <version>
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          platforms: linux/arm64,linux/amd64
+          push: true
+          tags: ${{ steps.name.outputs.image }}:${{ needs.version.outputs.version }}
+          labels: |
+            org.opencontainers.image.version=${{ needs.version.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Move <major>.<minor> and latest to this version (unless a higher version is tagged)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE_NAME: ${{ steps.name.outputs.image }}
+          VERSION: ${{ needs.version.outputs.version }}
+          MINOR: ${{ needs.version.outputs.minor }}
+        run: |
+          set -eu
+          # Versions only go up along main, so the highest v* tag is the newest claimed version. If a newer
+          # commit has claimed a higher one, latest belongs to that commit's run.
+          highest=$(gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v" --jq '.[].ref' \
+            | sed -n 's#^refs/tags/v##p' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)
+          if [ "$(printf '%s\n%s\n' "$VERSION" "$highest" | sort -V | tail -n1)" != "$VERSION" ]; then
+            echo "::notice::v$highest is newer, so latest and $MINOR are left to that version's run."
+            exit 0
+          fi
+          docker buildx imagetools create -t "$IMAGE_NAME:$MINOR" -t "$IMAGE_NAME:latest" "$IMAGE_NAME:$VERSION"
+
+  release:
+    # The last step of a release, after the image is published: the read-only branch release/<version>
+    # on this exact commit (the tag v<version> was created by the claim job) and the GitHub release with
+    # the changelog section and, when the app was built, the signed APK. Nothing here runs code from the
+    # repository: the version comes from the version job, which only accepts MAJOR.MINOR.PATCH, and is
+    # checked again below. Refs made with GITHUB_TOKEN start no other workflow runs.
+    needs: [version, android, image]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-notes
+          path: ${{ runner.temp }}/notes
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: needs.android.outputs.built == 'true'
+        with:
+          name: android-release-files
+          path: ${{ runner.temp }}/app
+      - name: Branch and GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+          CERT: ${{ needs.android.outputs.cert_sha256 }}
+          IMAGE_NAME: ${{ env.IMAGE }}
+        run: |
+          set -eu
+          [[ "$VERSION" =~ ^(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$ ]] || { echo "bad version: $VERSION"; exit 1; }
+          image=$(printf '%s' "$IMAGE_NAME" | tr 'A-Z' 'a-z')
+          # Create the branch on this commit; if it already exists (a re-run), it must point at this commit.
+          ref="heads/release/$VERSION"
+          if ! gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/$ref" -f sha="$GITHUB_SHA" >/dev/null 2>"$RUNNER_TEMP/err"; then
+            have=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/$ref" --jq .object.sha 2>/dev/null || true)
+            if [ "$have" != "$GITHUB_SHA" ]; then cat "$RUNNER_TEMP/err"; echo "::error::release/$VERSION exists on another commit"; exit 1; fi
+          fi
+          notes="$RUNNER_TEMP/release.md"
+          {
+            cat "$RUNNER_TEMP/notes/notes.md"
+            printf '\n## Get this version\n\n'
+            printf -- '- Image: `%s:%s` (also `latest` until the next version)\n' "$image" "$VERSION"
+            printf -- '- Source: tag `v%s`, branch `release/%s`\n' "$VERSION" "$VERSION"
+            if [ -n "$CERT" ]; then printf -- '- Android app signing certificate SHA-256: `%s`\n' "$CERT"; fi
+          } > "$notes"
+          files=()
+          if [ -d "$RUNNER_TEMP/app" ]; then files=("$RUNNER_TEMP"/app/*); fi
+          if gh release view "v$VERSION" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "v$VERSION" -R "$GITHUB_REPOSITORY" --notes-file "$notes"
+            if [ ${#files[@]} -gt 0 ]; then gh release upload "v$VERSION" -R "$GITHUB_REPOSITORY" --clobber "${files[@]}"; fi
+          else
+            gh release create "v$VERSION" -R "$GITHUB_REPOSITORY" --verify-tag \
+              --title "v$VERSION" --notes-file "$notes" "${files[@]}"
+          fi
+          echo "Released v$VERSION: $image:$VERSION, tag v$VERSION, branch release/$VERSION" >> "$GITHUB_STEP_SUMMARY"

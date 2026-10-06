@@ -1,0 +1,36 @@
+# Puts the gateway behind a Traefik you already run, using Docker labels.
+# From deploy/compose/:
+#
+#   docker compose -f docker-compose.yml -f ../proxy/traefik/compose.traefik.yml up -d
+#
+# Set in .env:
+#   TRAEFIK_NETWORK    the Docker network your Traefik container is on (it must exist)
+#   TRAEFIK_ENTRYPOINT the HTTPS entrypoint name in your Traefik config (often websecure)
+#   TRAEFIK_CERTRESOLVER the certificate resolver name in your Traefik config
+# and MTG_PUBLIC_URL as usual; the router rule uses its host via MTG_HOSTNAME.
+#
+# On Swarm, the same labels go under the gateway's deploy: labels: in the stack file.
+services:
+  gateway:
+    ports: !reset []
+    networks:
+      - mtg
+      - traefik
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: ${TRAEFIK_NETWORK:?TRAEFIK NETWORK NAME REQUIRED}
+      traefik.http.routers.mtg-gateway.rule: Host(`${MTG_HOSTNAME:?HOSTNAME REQUIRED e.g. mtg.example.com}`)
+      traefik.http.routers.mtg-gateway.entrypoints: ${TRAEFIK_ENTRYPOINT:-websecure}
+      traefik.http.routers.mtg-gateway.tls.certresolver: ${TRAEFIK_CERTRESOLVER:?TRAEFIK CERT RESOLVER REQUIRED}
+      traefik.http.services.mtg-gateway.loadbalancer.server.port: "8080"
+
+  # Traefik's default exposedByDefault=true would make a router for this
+  # container too. It has no login, so keep it out explicitly.
+  mysticforge:
+    labels:
+      traefik.enable: "false"
+
+networks:
+  traefik:
+    external: true
+    name: ${TRAEFIK_NETWORK:?TRAEFIK NETWORK NAME REQUIRED}

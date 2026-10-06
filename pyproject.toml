@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mtg-gateway"
+version = "0.5.0"
+description = "Authenticated MCP gateway for Magic: The Gathering deck research and editing"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=2.3,<3",
+    "httpx>=0.28,<1",
+    "joserfc>=1.7,<2",
+    "cryptography>=43",
+    "uvicorn[standard]>=0.30,<1",
+    "pillow>=10,<13",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.6",
+    "playwright>=1.47",
+]
+
+[project.scripts]
+mtg-gateway = "mtg_gateway.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"mtg_gateway" = ["static/*"]  # companion.js and clickguard.js (the consent page needs it)
+"mtg_gateway.scan" = ["static/*", "static/vendor/**/*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+# tests/e2e needs a deployed stack (tests/e2e/run.sh); it is run on its own.
+addopts = "--ignore=tests/e2e"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@color/bg">
+
+    <WebView android:id="@+id/web"
+        android:layout_width="match_parent" android:layout_height="match_parent" />
+
+    <ProgressBar android:id="@+id/progress"
+        style="@android:style/Widget.Material.ProgressBar.Horizontal"
+        android:layout_width="match_parent" android:layout_height="4dp"
+        android:layout_gravity="top" android:progressTint="@color/accent"
+        android:visibility="gone" />
+
+    <LinearLayout android:id="@+id/error_box"
+        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:orientation="vertical" android:gravity="center" android:padding="32dp"
+        android:background="@color/bg" android:visibility="gone">
+        <TextView android:id="@+id/error_text"
+            android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:textColor="@color/text" android:textSize="16sp" android:gravity="center" />
+        <Button android:id="@+id/error_retry"
+            android:layout_width="wrap_content" android:layout_height="39dp"
+            android:layout_marginTop="16dp" android:text="@string/retry" android:textAllCaps="false"
+            android:paddingStart="20dp" android:paddingEnd="20dp" android:textStyle="bold"
+            android:background="@drawable/button_primary_bg" android:textColor="@color/on_accent"
+            android:stateListAnimator="@null" />
+    </LinearLayout>
+
+    <ImageButton android:id="@+id/fab"
+        android:layout_width="52dp" android:layout_height="52dp"
+        android:layout_gravity="bottom|end" android:layout_margin="16dp"
+        android:background="@drawable/fab_bg" android:src="@drawable/ic_menu"
+        android:contentDescription="@string/fab_label" android:elevation="6dp" />
+</FrameLayout>

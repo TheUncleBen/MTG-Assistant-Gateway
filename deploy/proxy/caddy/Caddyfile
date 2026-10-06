@@ -1,0 +1,16 @@
+# Caddy in front of the gateway. Caddy gets and renews the certificate itself.
+# Used by caddy/compose.caddy.yml; on a Caddy you already run, copy the site
+# block and change the upstream to wherever the gateway is reachable from it.
+mtg.example.com {
+	encode zstd gzip
+	reverse_proxy gateway:8080 {
+		# Caddy passes the original Host and sets X-Forwarded-For/-Proto by default.
+		# Long research and goldfish calls can take a while.
+		transport http {
+			read_timeout 300s
+		}
+	}
+	request_body {
+		max_size 5MB
+	}
+}

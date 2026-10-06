@@ -1,0 +1,9 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "mtg-gateway": {
+      "type": "streamable-http",
+      "url": "${MTG_GATEWAY_URL}"
+    }
+  }
+}

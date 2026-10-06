@@ -1,0 +1,145 @@
+Subject: Fill in Archidekt categories that come back as null
+
+Archidekt's deck API (GET https://archidekt.com/api/decks/{id}/) sends
+"categories": null for a card that was never given a category. Mystic Forge
+1.3.2 iterates that value directly, so archidekt_deck, archidekt_export,
+validate_archidekt_deck and goldfish_run (by deck id) raise TypeError on such
+a deck. Seen on a live deck where 71 of 72 cards were null.
+
+Archidekt's own deck page shows those cards under the card's suggested
+category (oracleCard.defaultCategory), or "Land" for lands with no
+suggestion; this patch does the same once, in _archidekt_get, and adds tests.
+
+Upstream: Kautiontape/mystic-forge at dd82cd1 (main, 2026-10-03) has no fix.
+Drop this patch when upstream handles null categories.
+
+diff --git a/server.py b/server.py
+index f7c6b30..81524c9 100644
+--- a/server.py
++++ b/server.py
+@@ -1583,7 +1583,33 @@ async def _archidekt_get(path: str, params: Optional[Dict[str, Any]] = None) ->
+             timeout=REQUEST_TIMEOUT,
+         )
+         resp.raise_for_status()
+-        return resp.json()
++        return _archidekt_default_categories(resp.json())
++
++
++def _archidekt_default_categories(data: dict) -> dict:
++    """Fill in categories for deck cards that Archidekt sends as null.
++
++    A card that was never given a category comes back with
++    ``"categories": null``. Archidekt's own deck page shows such a card under
++    its suggested category (``oracleCard.defaultCategory``), or "Land" for a
++    land with no suggestion, so do the same here; anything else gets an empty
++    list. Responses without a card list are returned unchanged."""
++    cards = data.get("cards") if isinstance(data, dict) else None
++    if not isinstance(cards, list):
++        return data
++    for entry in cards:
++        if not isinstance(entry, dict) or entry.get("categories") is not None:
++            continue
++        card = entry.get("card") or {}
++        oracle = card.get("oracleCard") or {}
++        default = oracle.get("defaultCategory")
++        if default:
++            entry["categories"] = [default]
++        elif "Land" in (oracle.get("types") or []):
++            entry["categories"] = ["Land"]
++        else:
++            entry["categories"] = []
++    return data
+ 
+ 
+ def _archidekt_error(e: Exception) -> str:
+diff --git a/tests/test_archidekt_null_categories.py b/tests/test_archidekt_null_categories.py
+new file mode 100644
+index 0000000..c097d61
+--- /dev/null
++++ b/tests/test_archidekt_null_categories.py
+@@ -0,0 +1,85 @@
++"""Archidekt sends "categories": null for cards that were never categorised.
++
++The deck tools iterate a card's categories, so a null used to raise
++TypeError. _archidekt_get now fills in the category Archidekt's own deck page
++shows (the card's defaultCategory, or "Land"), and these tests pin that."""
++
++import copy
++
++import httpx
++
++import server
++
++
++def _oracle(name, types, default):
++    return {"name": name, "types": types, "superTypes": [], "subTypes": [],
++            "manaCost": "", "text": "", "faces": [], "power": "",
++            "toughness": "", "loyalty": None, "defaultCategory": default}
++
++
++DECK = {
++    "id": 1,
++    "name": "Uncategorised Deck",
++    "deckFormat": 3,
++    "owner": {"username": "someone"},
++    "categories": [
++        {"name": "Commander", "isPremier": True, "includedInDeck": True},
++    ],
++    "cards": [
++        {"quantity": 1, "categories": ["Commander"], "modifier": "Normal",
++         "card": {"oracleCard": _oracle("Aesi, Tyrant of Gyre Strait",
++                                        ["Creature"], "Draw")}},
++        {"quantity": 1, "categories": None, "modifier": "Normal",
++         "card": {"oracleCard": _oracle("Cultivate", ["Sorcery"], "Ramp")}},
++        {"quantity": 15, "categories": None, "modifier": "Normal",
++         "card": {"oracleCard": _oracle("Forest", ["Land"], None)}},
++        {"quantity": 1, "categories": None, "modifier": "Normal",
++         "card": {"oracleCard": _oracle("Odd Card", ["Artifact"], None)}},
++    ],
++}
++
++
++def _mock_archidekt(monkeypatch, body):
++    real = httpx.AsyncClient
++
++    def handler(request):
++        return httpx.Response(200, json=copy.deepcopy(body))
++
++    def client(*args, **kwargs):
++        kwargs["transport"] = httpx.MockTransport(handler)
++        return real(*args, **kwargs)
++
++    monkeypatch.setattr(server.httpx, "AsyncClient", client)
++
++
++async def test_get_fills_null_categories(monkeypatch):
++    _mock_archidekt(monkeypatch, DECK)
++    data = await server._archidekt_get("/decks/1/")
++    cats = {c["card"]["oracleCard"]["name"]: c["categories"]
++            for c in data["cards"]}
++    assert cats == {
++        "Aesi, Tyrant of Gyre Strait": ["Commander"],
++        "Cultivate": ["Ramp"],
++        "Forest": ["Land"],
++        "Odd Card": [],
++    }
++
++
++async def test_get_leaves_other_bodies_alone(monkeypatch):
++    body = {"count": 0, "results": []}
++    _mock_archidekt(monkeypatch, body)
++    assert await server._archidekt_get("/decks/v3/") == body
++
++
++async def test_deck_tools_accept_null_categories(monkeypatch):
++    _mock_archidekt(monkeypatch, DECK)
++    deck = await server.archidekt_deck(server.ArchidektDeckInput(deck="1"))
++    assert "1 [CMDR] Aesi, Tyrant of Gyre Strait" in deck
++    assert "15 Forest" in deck
++    assert "1 Cultivate" in deck
++    export = await server.archidekt_export(server.ArchidektDeckInput(deck="1"))
++    assert "15x Forest" in export
++    assert "[Commander{top}]" in export
++    assert server._goldfish_archidekt_commanders(
++        await server._archidekt_get("/decks/1/")) == [
++            "Aesi, Tyrant of Gyre Strait"]
