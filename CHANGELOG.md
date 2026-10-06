@@ -128,15 +128,21 @@ next sign-in.
   if its details changed meanwhile.
 - Deeply nested JSON gets a 400 instead of an unhandled error.
 - Android app: the consent page's **Deny** (which goes back to the
-  application's own site) always opens in the browser, the app learns the
-  sign-in service only from a gateway `/login` redirect, and a page from
-  another site that loads without the app being asked is stopped and opened
-  in the browser.
+  application's own site) always opens in the browser. The app learns the
+  sign-in service from the gateway itself (`/.well-known/mtg-gateway`, or an
+  older gateway's `/login` redirect), so **Approve** stays in the app. A page
+  from any other site that loads without the app being asked is stopped and
+  opened in the browser, at most once every 10 seconds, and Back no longer
+  returns to the sign-in service's old pages after signing in. Sign-ins that
+  pass through a second site with a form (SAML, brokered logins) open in the
+  browser; use such gateways in the phone's browser.
 - Compose: each service may run at most 512 processes and threads. CI checks
   the Gradle wrapper before any Android build.
 
 ### Added
 
+- `GET /.well-known/mtg-gateway` (public): names the sign-in service's
+  origin, for the Android app.
 - `MTG_MEMBERSHIP_CHECK_TTL` (seconds, 0 to 60, default 5; 0 asks the
   provider on every request) and `MTG_ARCHIDEKT_CALLS_PER_10_MIN` (10 to
   100000, default 120).
