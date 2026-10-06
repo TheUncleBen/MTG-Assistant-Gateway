@@ -61,7 +61,15 @@ class GatewayUrlTest {
     @Test fun signInPages() {
         val o = "https://x.example"
         assertTrue(GatewayUrl.isSignInStart(o, "$o/login?next=/scan"))
-        assertTrue(GatewayUrl.isSignInStart(o, "$o/authorize?client_id=a"))
+        // /authorize and its consent page are part of a sign-in but never teach the provider:
+        // Deny on the consent page redirects to the connecting application's own site.
+        assertFalse(GatewayUrl.isSignInStart(o, "$o/authorize?client_id=a"))
+        assertFalse(GatewayUrl.isSignInStart(o, "$o/authorize/confirm?state=s"))
+        assertTrue(GatewayUrl.isSignInPage(o, "$o/authorize?client_id=a"))
+        assertTrue(GatewayUrl.isSignInPage(o, "$o/login"))
+        assertTrue(GatewayUrl.isConsentPage(o, "$o/authorize/confirm?state=s"))
+        assertFalse(GatewayUrl.isConsentPage(o, "$o/authorize?client_id=a"))
+        assertFalse(GatewayUrl.isConsentPage(o, "https://idp.example/authorize/confirm"))
         assertTrue(GatewayUrl.isSignInPage(o, "$o/auth/callback?code=x"))
         assertTrue(GatewayUrl.isSignInPage(o, "$o/authorize/confirm"))
         assertFalse(GatewayUrl.isSignInStart(o, "$o/auth/callback"))

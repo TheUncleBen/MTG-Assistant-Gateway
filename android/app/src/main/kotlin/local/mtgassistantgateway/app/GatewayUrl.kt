@@ -82,13 +82,23 @@ object GatewayUrl {
     /** Join an origin and an absolute path. */
     fun join(origin: String, path: String): String = origin.trimEnd('/') + (if (path.startsWith("/")) path else "/$path")
 
-    /** A gateway page that starts a sign-in by redirecting to the identity provider. */
+    /**
+     * The gateway page whose redirect goes straight to the identity provider: /login. Only its
+     * redirect may teach the app the provider's origin. /authorize and its consent page are not
+     * one: the consent form's Deny redirects to whatever site the connecting application
+     * registered, so a redirect after it says nothing about who the provider is.
+     */
     fun isSignInStart(origin: String, url: String?): Boolean =
-        isGateway(origin, url) && (pathStartsWith(url, "/login") || pathStartsWith(url, "/authorize"))
+        isGateway(origin, url) && pathStartsWith(url, "/login")
 
-    /** A gateway page that is part of a sign-in (its start, the consent page, or the provider's callback). */
+    /** The gateway's consent page for an application (`/authorize/confirm`): Approve goes to the provider, Deny to the application. */
+    fun isConsentPage(origin: String, url: String?): Boolean =
+        isGateway(origin, url) && pathStartsWith(url, "/authorize/confirm")
+
+    /** A gateway page that is part of a sign-in (its start, /authorize and the consent page, or the provider's callback). */
     fun isSignInPage(origin: String, url: String?): Boolean =
-        isSignInStart(origin, url) || (isGateway(origin, url) && pathStartsWith(url, "/auth"))
+        isGateway(origin, url) &&
+            (pathStartsWith(url, "/login") || pathStartsWith(url, "/authorize") || pathStartsWith(url, "/auth"))
 }
 
 /**
@@ -101,21 +111,31 @@ enum class Nav { STAY, BROWSER, DROP }
  * The app's navigation policy, kept free of Android types so the unit tests can drive it.
  *
  * Gateway pages stay in the app. So does one identity-provider origin per sign-in: it is learned
- * only from an https server redirect that directly follows a gateway /login or /authorize load,
- * and it is forgotten once a gateway page outside the sign-in has loaded. Every other page opens
- * in the browser, including any further origin the provider redirects to, so a page from
- * elsewhere never fills the app's frame without an address bar. Other schemes (deep links into
- * other apps) leave the app only on a tap in the main frame; anything else is dropped.
+ * only from an https server redirect that directly follows a gateway /login load (the one gateway
+ * page that redirects nowhere but to the provider), and it is forgotten once a gateway page
+ * outside the sign-in has loaded. The consent page for a connecting application redirects either
+ * to the provider (Approve) or to the application's own site (Deny), and the app cannot tell the
+ * two apart, so a redirect after it stays in the app only when it goes to the provider an earlier
+ * /login in this app session already named ([knownProvider]); anything else, the Deny redirect
+ * included, opens in the browser. Every other page opens in the browser too, including any further
+ * origin the provider redirects to, so a page from elsewhere never fills the app's frame without
+ * an address bar. Other schemes (deep links into other apps) leave the app only on a tap in the
+ * main frame; anything else is dropped.
  */
 class NavPolicy(private val origin: String) {
     /** The identity provider allowed in the app during the current sign-in, if one was learned. */
     var signInOrigin: String? = null
         private set
-    /** A sign-in is in progress: a gateway /login or /authorize page was seen and none other since. */
+    /** The provider a gateway /login redirected to earlier in this app session; kept after the sign-in ends. */
+    var knownProvider: String? = null
+        private set
+    /** A sign-in is in progress: a gateway /login page was seen and none other since. */
     var signingIn = false
         private set
     /** The last main-frame load was a gateway sign-in start, so the next redirect may name the provider. */
     private var afterSignInStart = false
+    /** The last main-frame load was the consent page, so the next redirect may go to [knownProvider]. */
+    private var afterConsent = false
 
     /** Decides a navigation the WebView asks about (`shouldOverrideUrlLoading`). */
     fun decide(url: String, mainFrame: Boolean, redirect: Boolean, gesture: Boolean): Nav {
@@ -130,24 +150,63 @@ class NavPolicy(private val origin: String) {
         if (!mainFrame) return Nav.STAY
         val target = GatewayUrl.originOf(url) ?: return Nav.DROP
         if (target == origin) {
-            afterSignInStart = GatewayUrl.isSignInStart(origin, url)
-            if (afterSignInStart) signingIn = true
+            noteGatewayPage(url)
             return Nav.STAY
         }
-        val follows = afterSignInStart
-        afterSignInStart = false
-        if (redirect && follows && signInOrigin == null && scheme == "https") {
-            // The gateway sending the browser to its identity provider.
-            signInOrigin = target
-            return Nav.STAY
-        }
-        if (signingIn && target == signInOrigin) return Nav.STAY // the provider's own pages and redirects
-        return Nav.BROWSER
+        return if (admit(target, scheme, redirect)) Nav.STAY else Nav.BROWSER
     }
 
-    /** A main-frame page started loading (`onPageStarted`). */
-    fun pageStarted(url: String) {
+    /** Whether a main-frame page on another origin may load in the app; learns the provider as it goes. */
+    private fun admit(target: String, scheme: String, redirect: Boolean): Boolean {
+        val follows = afterSignInStart
+        val consent = afterConsent
+        afterSignInStart = false
+        afterConsent = false
+        if (redirect && follows && signInOrigin == null && scheme == "https") {
+            // The gateway's /login sending the browser to its identity provider.
+            signInOrigin = target
+            knownProvider = target
+            return true
+        }
+        if (redirect && consent && scheme == "https" && target == knownProvider) {
+            // Approve on the consent page, going on to the provider /login named earlier. A Deny
+            // goes to the application's own site, never this origin, so it opens in the browser.
+            signInOrigin = target
+            signingIn = true
+            return true
+        }
+        return signingIn && target == signInOrigin // the provider's own pages and redirects
+    }
+
+    /**
+     * A main-frame page started loading (`onPageStarted`). Returns false when the page must not
+     * stay in the app: the caller stops it and opens it in the browser instead. This is the
+     * backstop for loads WebView never asked [decide] about: it does not ask about POST requests,
+     * so possibly not about the redirect after the consent form either. Such a page arrives
+     * straight from a gateway page, so it is judged as a redirect would be.
+     */
+    fun pageStarted(url: String): Boolean {
+        val scheme = try {
+            URI(url).scheme?.lowercase()
+        } catch (e: URISyntaxException) {
+            null
+        }
+        if (scheme == "https" || scheme == "http") {
+            val target = GatewayUrl.originOf(url)
+            if (target != origin) {
+                if (target != null && admit(target, scheme, redirect = true)) return true
+                afterSignInStart = false
+                afterConsent = false
+                return false
+            }
+        }
+        noteGatewayPage(url)
+        return true
+    }
+
+    private fun noteGatewayPage(url: String) {
         afterSignInStart = GatewayUrl.isSignInStart(origin, url)
+        afterConsent = GatewayUrl.isConsentPage(origin, url)
         if (afterSignInStart) signingIn = true
     }
 
@@ -157,6 +216,7 @@ class NavPolicy(private val origin: String) {
             signingIn = false
             signInOrigin = null
             afterSignInStart = false
+            afterConsent = false
         }
     }
 }

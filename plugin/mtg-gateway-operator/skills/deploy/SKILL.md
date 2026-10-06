@@ -57,7 +57,7 @@ anything that isn't the default:
 | `PUID:PGID` the operator uses in other stacks | `1000:1000` | folder ownership |
 | Overlay network name | `mtg-gateway` | shared with the proxy |
 | Allow deck writes now? | `false` | `MTG_WRITES_ENABLED`; recommend `false` until a throwaway deck test passes |
-| Let the assistant apply approved proposals over MCP? | `false` | `MTG_APPLY_VIA_MCP` |
+| Let the assistant apply approved proposals over MCP? | `false` | `MTG_APPLY_VIA_MCP`; recommend `false`: with `true` a prompt-injected assistant can apply its own proposal after `MTG_APPLY_MIN_AGE_SECONDS`, with `false` the member clicks Apply in the browser |
 
 Everything else uses the values in `deploy/stack.env.example`.
 

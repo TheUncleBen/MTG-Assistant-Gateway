@@ -52,8 +52,8 @@ import java.io.ByteArrayInputStream
  * - a floating menu: scan, reload, open in browser, change gateway.
  *
  * Navigation policy ([NavPolicy]): pages on the gateway's origin, and on the one identity
- * provider a gateway /login or /authorize redirected to during the current sign-in, stay in the
- * app. Links anywhere else open in the phone's browser, as do `target=_blank` links. Other schemes
+ * provider a gateway /login redirected to (or the consent page's Approve went on to) during the
+ * current sign-in, stay in the app. Links anywhere else open in the phone's browser, as do `target=_blank` links. Other schemes
  * open another app only when tapped in the main frame, and only an activity that accepts links
  * from a browser.
  *
@@ -514,9 +514,17 @@ class MainActivity : ComponentActivity() {
         override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
             progress.visibility = View.VISIBLE
             errorBox.visibility = View.GONE // a new page is loading: an older error no longer applies
-            nav.pageStarted(url)
+            val allowed = nav.pageStarted(url)
             gatewayPage = GatewayUrl.isGateway(origin, url)
             pageGen++
+            if (!allowed) {
+                // A page from elsewhere that no navigation check saw (WebView does not ask about the
+                // redirect after a form post): it never stays behind the app's chrome. The browser
+                // gets it and the app goes back to the gateway.
+                view.stopLoading()
+                openExternal(Uri.parse(url))
+                view.loadUrl(origin + "/")
+            }
         }
 
         override fun onPageFinished(view: WebView, url: String) {

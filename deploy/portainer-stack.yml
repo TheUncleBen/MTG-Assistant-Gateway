@@ -100,6 +100,9 @@ services:
     # Least privilege. The entrypoint starts as root only to match PUID/PGID (usermod/groupmod,
     # chown of the data folders) and then drops to that user with setpriv --no-new-privs; these
     # four capabilities are all it needs. Needs Docker 20.10 or newer for Swarm to apply them.
+    # Swarm ignores security_opt (no-new-privileges), so it isn't set here; setpriv --no-new-privs
+    # applies it to the gateway process. A process limit (deploy.resources.limits.pids) is left out
+    # because older Docker and Portainer versions reject the key and the stack would not deploy.
     cap_drop:
       - ALL
     cap_add:

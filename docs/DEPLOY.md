@@ -290,7 +290,7 @@ If the packages are public you can skip this step.
    | `MTG_REQUIRED_GROUP` | the group from step 3, spelled exactly as your identity provider sends it (it's case-sensitive). Required: the gateway won't start with it empty unless you also set `MTG_ALLOW_ANY_IDP_USER=true` (anyone your identity provider lets through gets in) |
    | `MF_IMAGE`, `MF_NODE` | `ghcr.io/<owner>/mtg-assistant-mysticforge`, and the node Mystic Forge should run on (can be the same one) |
    | `MTG_WRITES_ENABLED` | `true` to let approved proposals change Archidekt; `false` keeps everything review-only. Writes have been run live against a throwaway Archidekt account, but make your own first edit on a deck you don't care about |
-   | `MTG_APPLY_VIA_MCP` | `true` lets the assistant apply a change after the user says yes in chat; `false` (the code default) means only the Apply button on the review page can |
+   | `MTG_APPLY_VIA_MCP` | Leave it `false` (the example file and the code default): only the member's own click on Apply on the review page applies a change. `true` lets the assistant apply after the user says yes in chat, which is weaker: text the assistant reads (deck descriptions, card notes) could trick it into applying its own proposal once `MTG_APPLY_MIN_AGE_SECONDS` has passed |
 
    Everything else can stay at its default. The full list is in the
    [environment reference](#environment-reference) below.
@@ -331,7 +331,16 @@ start-up script needs to switch to `PUID:PGID` (`CHOWN`, `DAC_OVERRIDE`,
 20.10 on; older engines ignore them and print `Ignoring unsupported options`
 at deploy. The root filesystem is left writable: when `PUID`/`PGID` differ
 from the image's 1000:1000 the start-up script edits `/etc/passwd` and
-`/etc/group`.
+`/etc/group`. Swarm ignores `security_opt`, so the stack doesn't set
+`no-new-privileges` there (`setpriv --no-new-privs` covers the running
+process), and it sets no process limit because older Docker and Portainer
+versions refuse the `pids` key and the stack wouldn't deploy. The Compose
+file ([DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md)) sets both.
+
+The images are built on base images pinned by digest, not only by tag, so
+a rebuild uses exactly the base that was reviewed. Dependabot opens weekly
+pull requests to move those pins, the GitHub Actions pins and the Python and
+Gradle dependencies.
 
 ## 7. Reverse proxy
 
@@ -563,7 +572,7 @@ gateway's `environment:` in the stack file, or it has no effect.
 | `MTG_LISTEN_HOST`, `MTG_LISTEN_PORT` | no | `0.0.0.0`, `8080` | Address and port inside the container. Leave them; the stack, Compose file and health checks expect 8080 |
 | `MTG_MYSTIC_FORGE_URL` | no, *stack* | empty (no research tools) | Internal Mystic Forge MCP URL; the stack sets `http://mtg-assistant-mysticforge:8000/mcp` |
 | `MTG_WRITES_ENABLED` | no, *stack* | `false` | `true` lets approved proposals be applied to Archidekt |
-| `MTG_APPLY_VIA_MCP` | no, *stack* | `false` | `true` also lets the `apply_proposal` tool apply after the user says yes in chat (`stack.env.example` sets `true`); `false` means only the review page can apply |
+| `MTG_APPLY_VIA_MCP` | no, *stack* | `false` | `true` also lets the `apply_proposal` tool apply after the user says yes in chat (weaker: a tricked assistant could apply its own proposal); `false`, also in `stack.env.example`, means only the review page can apply |
 | `MTG_APPLY_MIN_AGE_SECONDS` | no, *stack* | `15` | The assistant can't apply a proposal younger than this; it gets `apply_too_soon` with `retry_after_seconds`. Stops an assistant proposing and applying in one go. `0` turns it off. Doesn't affect the review page |
 | `MTG_ARCHIDEKT_BACKUPS` | no, *stack* | `true` | Before every applied edit or restore, copy the deck as a private deck into the user's backup folder on Archidekt (using Archidekt's own copy feature, so printings, finishes and categories are kept). If the copy fails, nothing changes and the proposal stays pending |
 | `MTG_ARCHIDEKT_BACKUP_FOLDER` | no, *stack* | `MTG Gateway backups` | Name of that folder, created in the account's root folder the first time. Decks in it are left out of the assistant's deck list |

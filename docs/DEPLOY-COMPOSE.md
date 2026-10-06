@@ -100,7 +100,7 @@ Worth a look:
 | `MTG_HTTP_BIND`, `MTG_HTTP_PORT` | `127.0.0.1`, `8080` | Where the gateway listens on this machine, for a proxy on the same machine. A proxy container on the gateway's network doesn't need it (the proxy overrides remove it) |
 | `MTG_DATA_DIR`, `MTG_BACKUP_DIR` | `./data`, `./backups` | Local disk only, not NFS or SMB |
 | `MTG_WRITES_ENABLED` | `true` | `false` keeps everything review-only: proposals work, nothing is ever applied to Archidekt. If the line is missing, the gateway's own default is `false` |
-| `MTG_APPLY_VIA_MCP` | `true` | Code default `false`. `true` lets the assistant apply a change after the person says yes in chat; `false` means only the Apply button on the review page can |
+| `MTG_APPLY_VIA_MCP` | `false` | Same as the code default: only the Apply button on the review page applies a change. `true` lets the assistant apply after the person says yes in chat, which is weaker: text the assistant reads (deck descriptions, card notes) could trick it into applying its own proposal once `MTG_APPLY_MIN_AGE_SECONDS` has passed |
 
 Every other variable is explained in `.env` and in the
 [environment reference](DEPLOY.md#environment-reference). A setting only
@@ -135,6 +135,23 @@ docker build -f docker/mystic-forge/Dockerfile -t mtg-mysticforge:local .
 
 and set `MTG_IMAGE=mtg-gateway`, `MTG_TAG=local`, `MF_IMAGE=mtg-mysticforge`,
 `MF_TAG=local` in `.env`.
+
+### Hardening already in the Compose file
+
+- Every Linux capability is dropped except the four the start-up script
+  needs to switch to `PUID:PGID`, and `no-new-privileges` is on.
+- Each service may run at most 512 processes and threads
+  (`deploy.resources.limits.pids`), so a runaway process can't exhaust the
+  machine. The gateway normally needs a few dozen.
+- The root filesystem stays writable: when `PUID`/`PGID` differ from
+  1000:1000 the start-up script edits `/etc/passwd` and `/etc/group`.
+- Mystic Forge has no login of its own and publishes no port. It sits on
+  the `mysticforge` network with the gateway only. That network can't be
+  made `internal`, because Mystic Forge needs the internet (Scryfall,
+  EDHREC, the rules). On a plain Docker host, programs running on this
+  machine can still reach a container on a bridge network by its IP, so
+  only run things you trust on this machine, and don't attach other
+  containers to that network.
 
 ## 5. Start it
 

@@ -122,6 +122,9 @@ services:
       resources:
         limits:
           memory: ${MTG_MEMORY_LIMIT:-256M}
+          # A cap on processes and threads, so a runaway or compromised process can't
+          # fork-bomb the machine. The gateway normally runs a few dozen threads.
+          pids: 512
 
   # Mystic Forge: internal research and simulation service. No published ports;
   # only the gateway talks to it.
@@ -173,8 +176,13 @@ services:
       resources:
         limits:
           memory: ${MF_MEMORY_LIMIT:-512M}
+          pids: 512 # processes and threads, as for the gateway
 
 networks:
   mtg:
     name: ${MTG_NETWORK_NAME:-mtg-gateway}
+  # Only the gateway and Mystic Forge are on it. Not "internal": Mystic Forge needs outbound
+  # internet access for Scryfall, EDHREC and the rules. Mystic Forge has no login of its own,
+  # and processes on this machine can reach a bridge network's containers by their IP, so
+  # don't attach other containers to it and don't publish its port.
   mysticforge:
