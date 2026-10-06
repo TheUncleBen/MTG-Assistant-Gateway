@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The applinks flavor only: claim https links to the one gateway named by -PappLinksHost.
+     Android verifies the claim against https://<host>/.well-known/assetlinks.json, which the
+     gateway serves from MTG_ANDROID_ASSETLINKS (docs/ANDROID.md, "App Links"). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity android:name=".MainActivity">
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="${appLinksHost}" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

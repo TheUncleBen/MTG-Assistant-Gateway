@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The phone-camera scan panel. Flat: the viewfinder fills the panel and the controls sit over its
+     bottom edge. Half-folded (tabletop or book): CameraPanel moves the viewfinder onto one half of
+     the screen and the controls onto the other, split at the hinge (see FoldSplit). -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="#000000">
+
+    <FrameLayout android:id="@+id/viewfinder"
+        android:layout_width="match_parent" android:layout_height="match_parent">
+        <androidx.camera.view.PreviewView android:id="@+id/preview"
+            android:layout_width="match_parent" android:layout_height="match_parent" />
+        <local.mtgassistantgateway.app.CardGuideView android:id="@+id/guide"
+            android:layout_width="match_parent" android:layout_height="match_parent" />
+    </FrameLayout>
+
+    <ScrollView android:id="@+id/controls"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_gravity="bottom" android:fillViewport="false"
+        android:background="@drawable/panel_bg">
+    <LinearLayout
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:paddingTop="16dp">
+
+        <LinearLayout
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginStart="16dp" android:layout_marginEnd="16dp"
+            android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="6dp">
+            <TextView android:id="@+id/result_text"
+                android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                android:textColor="@color/accent" android:textSize="16sp" android:textStyle="bold"
+                android:visibility="invisible" android:text="" />
+            <Button android:id="@+id/undo"
+                android:layout_width="wrap_content" android:layout_height="40dp"
+                android:layout_marginStart="12dp" android:minWidth="80dp" android:text="@string/undo"
+                android:visibility="gone" />
+        </LinearLayout>
+
+        <TextView android:id="@+id/camera_status"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginStart="16dp" android:layout_marginEnd="16dp"
+            android:textColor="@color/text" android:textSize="14sp" android:text="@string/status_no_flash" />
+
+        <LinearLayout
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginStart="16dp" android:layout_marginEnd="16dp"
+            android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="8dp">
+            <ToggleButton android:id="@+id/torch_toggle"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:textOn="@string/torch" android:textOff="@string/torch" android:minWidth="96dp" />
+            <TextView android:id="@+id/torch_label"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_marginStart="12dp" android:textColor="@color/text_muted" android:textSize="13sp"
+                android:visibility="gone" />
+        </LinearLayout>
+        <SeekBar android:id="@+id/torch_strength"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginStart="16dp" android:layout_marginEnd="16dp"
+            android:layout_marginTop="4dp" android:visibility="gone"
+            android:contentDescription="@string/torch_level" />
+
+        <LinearLayout android:id="@+id/zoom_row"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginStart="16dp" android:layout_marginEnd="16dp"
+            android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="4dp">
+            <TextView android:layout_width="80dp" android:layout_height="wrap_content"
+                android:text="@string/zoom" android:textColor="@color/text_muted" android:textSize="13sp" />
+            <SeekBar android:id="@+id/zoom"
+                android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                android:contentDescription="@string/zoom" />
+        </LinearLayout>
+
+        <LinearLayout android:id="@+id/exposure_row"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginStart="16dp" android:layout_marginEnd="16dp"
+            android:orientation="horizontal" android:gravity="center_vertical">
+            <TextView android:layout_width="80dp" android:layout_height="wrap_content"
+                android:text="@string/exposure" android:textColor="@color/text_muted" android:textSize="13sp" />
+            <SeekBar android:id="@+id/exposure"
+                android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                android:contentDescription="@string/exposure" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginStart="16dp" android:layout_marginEnd="16dp"
+            android:orientation="horizontal" android:layout_marginTop="8dp" android:layout_marginBottom="16dp">
+            <Button android:id="@+id/done"
+                android:layout_width="0dp" android:layout_weight="1" android:layout_height="56dp"
+                android:text="@string/done" />
+            <ToggleButton android:id="@+id/auto_toggle"
+                android:layout_width="0dp" android:layout_weight="1" android:layout_height="56dp"
+                android:layout_marginStart="12dp" android:textOn="@string/auto_mode" android:textOff="@string/auto_mode" />
+            <Button android:id="@+id/shoot"
+                android:layout_width="0dp" android:layout_weight="2" android:layout_height="56dp"
+                android:layout_marginStart="12dp" android:text="@string/shoot" android:enabled="false"
+                android:backgroundTint="@color/accent" android:textColor="@color/on_accent" android:textSize="18sp" />
+        </LinearLayout>
+    </LinearLayout>
+    </ScrollView>
+</FrameLayout>

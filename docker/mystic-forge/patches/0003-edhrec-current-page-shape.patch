@@ -1,0 +1,152 @@
+Subject: EDHREC: read the current average-deck and commander page shapes
+
+json.edhrec.com/pages/average-decks/<slug>.json now sends "deck" as an
+object: {"commander": [name], "commander_v2": [[name, 1]],
+"cards": {"Artifact": [[name, qty], ...], "Land": [...], ...}}. Mystic Forge
+1.3.2 iterates it as a list of lines, so edhrec_average_deck printed the three
+key names and "Total: 3 cards". The page also no longer has avg_price.
+Checked live on 2026-10-04 for Aesi, Tyrant of Gyre Strait; Atraxa,
+Praetors' Voice; and Kenrith, the Returned King: same shape each time,
+1 commander + 99 cards.
+
+The commander page (pages/commanders/<slug>.json) no longer has
+num_decks_avg or avg_price either, so edhrec_commander printed
+"Based on ? decks | Avg price: $?". The deck count is now at
+container.json_dict.card.num_decks (17254 for Aesi on 2026-10-04).
+
+This patch prints the average deck by card type with quantities and a real
+total, keeps the old list shape working, reads the deck count from the card
+entry, and leaves out the price line when EDHREC sends no price.
+Tests: tests/test_edhrec_current_shape.py.
+
+Upstream: Kautiontape/mystic-forge at dd82cd1 (main, 2026-10-04) has no fix,
+and no open pull request touches this code. Drop this patch when it does.
+
+diff --git a/server.py b/server.py
+index 4dafd14..ffd28ce 100644
+--- a/server.py
++++ b/server.py
+@@ -1159,7 +1159,14 @@ async def edhrec_commander(params: CommanderInput) -> str:
+ 
+     parts: list[str] = []
+     parts.append(f"# {data.get('header', params.name)}")
+-    parts.append(f"Based on {data.get('num_decks_avg', '?')} decks | Avg price: ${data.get('avg_price', '?')}")
++    # EDHREC's commander pages no longer carry num_decks_avg or avg_price; the
++    # deck count now sits on the commander's own card entry.
++    card = ((data.get("container") or {}).get("json_dict") or {}).get("card") or {}
++    num_decks = data.get("num_decks_avg") or card.get("num_decks") or "?"
++    line = f"Based on {num_decks} decks"
++    if data.get("avg_price") is not None:
++        line += f" | Avg price: ${data['avg_price']}"
++    parts.append(line)
+     parts.append("")
+ 
+     types = ["creature", "instant", "sorcery", "artifact", "enchantment", "planeswalker", "land"]
+@@ -1201,11 +1208,35 @@ async def edhrec_average_deck(params: CommanderInput) -> str:
+ 
+     parts: list[str] = []
+     parts.append(f"# {data.get('header', f'Average Deck for {params.name}')}")
+-    parts.append(f"Avg price: ${data.get('avg_price', '?')}")
++    if data.get("avg_price") is not None:
++        parts.append(f"Avg price: ${data['avg_price']}")
+     parts.append("")
+ 
+     deck = data.get("deck", [])
+-    if deck:
++    if isinstance(deck, dict):
++        # Current EDHREC shape: {"commander": [name, ...],
++        # "cards": {"Creature": [[name, qty], ...], ...}}.
++        total = 0
++        commanders = [c for c in deck.get("commander") or [] if isinstance(c, str)]
++        if commanders:
++            parts.append("## Commander")
++            for name in commanders:
++                parts.append(f"1 {name}")
++                total += 1
++            parts.append("")
++        for card_type, entries in (deck.get("cards") or {}).items():
++            lines = [(e[0], e[1]) for e in entries or []
++                     if isinstance(e, (list, tuple)) and len(e) == 2
++                     and isinstance(e[0], str) and isinstance(e[1], int)]
++            if not lines:
++                continue
++            parts.append(f"## {card_type}")
++            for name, qty in lines:
++                parts.append(f"{qty} {name}")
++                total += qty
++            parts.append("")
++        parts.append(f"Total: {total} cards")
++    elif deck:
+         for line in deck:
+             parts.append(line)
+         parts.append("")
+diff --git a/tests/test_edhrec_current_shape.py b/tests/test_edhrec_current_shape.py
+new file mode 100644
+index 0000000..395dbe8
+--- /dev/null
++++ b/tests/test_edhrec_current_shape.py
+@@ -0,0 +1,64 @@
++"""EDHREC's average-deck and commander pages changed shape.
++
++json.edhrec.com/pages/average-decks/<slug>.json now sends "deck" as
++{"commander": [...], "cards": {type: [[name, qty], ...]}}, and the commander
++page has no num_decks_avg/avg_price (the deck count is on
++container.json_dict.card.num_decks). Shapes below are trimmed from live
++responses on 2026-10-04."""
++
++import server
++
++AVERAGE = {
++    "header": "Average Deck for Aesi, Tyrant of Gyre Strait",
++    "description": "",
++    "deck": {
++        "commander": ["Aesi, Tyrant of Gyre Strait"],
++        "commander_v2": [["Aesi, Tyrant of Gyre Strait", 1]],
++        "cards": {
++            "Artifact": [["Arcane Signet", 1], ["Sol Ring", 1]],
++            "Land": [["Command Tower", 1], ["Forest", 13], ["Island", 10]],
++            "Sorcery": [["Cultivate", 1]],
++        },
++    },
++    "container": {"json_dict": {"cardlists": []}},
++}
++
++COMMANDER = {
++    "header": "Aesi, Tyrant of Gyre Strait (Commander)",
++    "creature": 27, "instant": 11,
++    "container": {"json_dict": {
++        "card": {"name": "Aesi, Tyrant of Gyre Strait", "num_decks": 17254},
++        "cardlists": [],
++    }},
++}
++
++
++def _mock(monkeypatch, body):
++    async def fake_get(path):
++        return body
++    monkeypatch.setattr(server, "_edhrec_get", fake_get)
++
++
++async def test_average_deck_new_shape(monkeypatch):
++    _mock(monkeypatch, AVERAGE)
++    out = await server.edhrec_average_deck(server.CommanderInput(name="Aesi, Tyrant of Gyre Strait"))
++    assert "## Commander\n1 Aesi, Tyrant of Gyre Strait" in out
++    assert "## Land" in out and "13 Forest" in out and "10 Island" in out
++    assert "1 Sol Ring" in out and "1 Cultivate" in out
++    assert "Total: 28 cards" in out
++    assert "commander_v2" not in out and "$?" not in out
++
++
++async def test_average_deck_old_list_shape_still_works(monkeypatch):
++    _mock(monkeypatch, {"header": "Average Deck", "avg_price": 250,
++                        "deck": ["1 Sol Ring", "1 Arcane Signet"]})
++    out = await server.edhrec_average_deck(server.CommanderInput(name="x"))
++    assert "Avg price: $250" in out
++    assert "1 Sol Ring" in out and "Total: 2 cards" in out
++
++
++async def test_commander_deck_count_from_card(monkeypatch):
++    _mock(monkeypatch, COMMANDER)
++    out = await server.edhrec_commander(server.CommanderInput(name="Aesi, Tyrant of Gyre Strait"))
++    assert "Based on 17254 decks" in out
++    assert "Avg price" not in out

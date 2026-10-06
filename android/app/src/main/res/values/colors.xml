@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The gateway's own palette (src/mtg_gateway/theme.py, Archidekt-style light theme). The
+     dark set lives in values-night; the WebView pages pick their scheme the same way. -->
+<resources>
+    <color name="bg">#f9fafb</color>
+    <color name="surface">#ffffff</color>
+    <color name="surface_2">#ededed</color>
+    <color name="border">#c8c8c8</color>
+    <color name="text">#383838</color>
+    <color name="text_muted">#6b6b6b</color>
+    <color name="accent">#fa890d</color>
+    <color name="on_accent">#ffffff</color>
+    <color name="danger">#d7263d</color>
+    <color name="navbar">#313131</color>
+    <color name="toolbar">#dcdcdc</color>
+    <color name="icon_bg">#1c1f26</color>
+    <color name="scrim">#99000000</color>
+</resources>

@@ -1,0 +1,337 @@
+/* Scan page. Inherits the site theme from theme.py's shell; every colour below
+   resolves through the shell's variables (either the original names or the
+   Archidekt-style names) with a plain fallback, so a theme change cannot
+   leave the page unstyled.
+
+   Layout rules: one column on phones with the camera controls in a bar that
+   sticks to the bottom of the screen (thumb reach, one-handed), two columns
+   from 700px (an unfolded foldable or a desktop) with the camera on the left
+   and the result on the right. Every tap target is at least 44px. */
+.scan{
+  --s-accent:var(--orange,var(--accent,#fa890d)); --s-accent-hover:var(--accent-hover,var(--orange,#fa890d));
+  --s-on-accent:var(--on-color,#181818); --s-raised:var(--surface,var(--bg-raised,#232323));
+  --s-raised-2:var(--surface-2,var(--bg-raised,#383838));
+  --s-input:var(--bg,var(--bg-input,#181818)); --s-border:var(--border,#5f5f5f);
+  --s-border-soft:var(--border-soft,var(--border,#323232));
+  --s-text:var(--text,#e3e3e3); --s-muted:var(--text-muted,#a8a8a8); --s-radius:var(--radius,5px);
+  --s-radius-lg:var(--radius-lg,8px);
+  --s-ok:var(--green-text,var(--ok,#1ebb6c)); --s-ok-line:var(--green,var(--ok,#1ebb6c));
+  --s-warn:var(--orange-text,var(--warn,#fa890d)); --s-warn-line:var(--orange,var(--warn,#fa890d));
+  --s-danger:var(--red-text,var(--danger,#ff555b)); --s-danger-line:var(--red,var(--danger,#ff555b));
+  --s-ok-tint:var(--green-tint,rgba(30,187,108,.14)); --s-warn-tint:var(--orange-tint,rgba(250,137,13,.14));
+  --s-danger-tint:var(--red-tint,rgba(255,85,91,.14));
+  --tap:2.75rem; /* 44px at 16px, 38.5px at the shell's 14px root: min-height below is in px */
+}
+main.wrap:has(.scan){max-width:64rem}
+.scan{display:flex;flex-direction:column;gap:.75rem}
+.scan .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+.scan .grow{flex:1 1 auto}
+.scan button,.scan .btn{margin-top:0;min-height:44px;min-width:44px;width:auto}
+.scan button.big{font-size:1.05rem;padding:.8rem 1.2rem;min-width:9rem}
+.scan button.icon{padding:.45rem .7rem;line-height:1}
+.scan .muted{color:var(--s-muted);font-size:.9em}
+.scan .hidden{display:none !important}
+.scan .sr{position:absolute;left:-9999px}
+
+/* tabs */
+.scan .tabs{display:flex;gap:.25rem;border-bottom:1px solid var(--s-border-soft);position:sticky;top:0;z-index:4;
+  background:var(--bg,#181818);margin:0 -1rem;padding:0 1rem}
+.scan .tabs button{flex:1 1 0;background:transparent;border:0;border-bottom:3px solid transparent;color:var(--s-muted);
+  border-radius:0;padding:.6rem .4rem;font-weight:700;min-height:48px;white-space:nowrap}
+.scan .tabs button:hover{background:var(--s-raised);color:var(--s-text)}
+.scan .tabs button[aria-selected=true]{color:var(--s-text);border-bottom-color:var(--s-accent)}
+.scan .tabs .badge{margin-left:.25rem;padding:0 .45rem;font-size:.78rem;background:var(--s-accent);
+  color:var(--s-on-accent);border-color:var(--s-accent)}
+@media (min-width:700px){ .scan .tabs{position:static;margin:0;padding:0} .scan .tabs button{flex:0 1 auto;padding:.6rem 1.1rem} }
+
+/* scan options: set lock and foil default, one 44px row above the camera */
+.scan .scan-opts{display:flex;align-items:center;flex-wrap:wrap;gap:.5rem .6rem;padding:.4rem .6rem;
+  border:1px solid var(--s-border-soft);border-radius:var(--s-radius);background:var(--s-raised)}
+.scan .scan-opts .set-field{display:inline-flex;align-items:center;gap:.5rem;margin:0;font-weight:700}
+.scan .scan-opts .set-field .lbl{color:var(--s-muted)}
+.scan .scan-opts input#set-lock{width:5.6rem;min-height:44px;padding:.4rem .6rem;font-size:1.05rem;font-weight:700;
+  letter-spacing:.08em;text-transform:uppercase;text-align:center;font-family:ui-monospace,Menlo,Consolas,monospace}
+.scan .scan-opts.locked input#set-lock{border-color:var(--s-accent);background:var(--s-warn-tint);color:var(--s-warn)}
+.scan .scan-opts.invalid input#set-lock{border-color:var(--s-danger-line);background:var(--s-danger-tint);color:var(--s-danger)}
+.scan .scan-opts .clear{min-width:44px;padding:0;font-size:1.3rem;line-height:1;display:none}
+.scan .scan-opts.locked .clear,.scan .scan-opts.invalid .clear{display:inline-flex}
+.scan .scan-opts .help{flex:1 1 8rem;font-size:.86rem;color:var(--s-muted)}
+.scan .scan-opts.invalid .help{color:var(--s-danger);font-weight:700}
+.scan .switch{display:inline-flex;align-items:center;gap:.5rem;min-height:44px;padding:.3rem .9rem .3rem .4rem;
+  border-radius:999px;font-weight:700;margin-left:auto}
+.scan .switch .knob{position:relative;width:2.6rem;height:1.5rem;border-radius:999px;background:var(--s-raised-2);
+  border:1px solid var(--s-border);transition:background-color .15s;flex:0 0 auto}
+.scan .switch .knob::after{content:"";position:absolute;top:2px;left:2px;width:calc(1.5rem - 6px);height:calc(1.5rem - 6px);
+  border-radius:50%;background:#fff;transition:transform .15s}
+.scan .switch[aria-checked=true] .knob{background:var(--s-accent);border-color:var(--s-accent)}
+.scan .switch[aria-checked=true] .knob::after{transform:translateX(1.1rem)}
+.scan .switch[aria-checked=true] .lbl{color:var(--s-warn)}
+.scan .switch.auto{margin-left:0}
+.scan .shutter.live{animation:scan-live 1.2s ease-in-out infinite}
+@keyframes scan-live{0%,100%{box-shadow:0 0 0 0 rgba(250,137,13,.7)}50%{box-shadow:0 0 0 10px rgba(250,137,13,0)}}
+
+/* continuous mode: the auto-add toast over the viewfinder, and the unidentified tray */
+.scan .toast{position:absolute;left:.6rem;right:.6rem;bottom:.6rem;z-index:3;display:flex;align-items:center;gap:.6rem;
+  min-height:48px;padding:.4rem .5rem .4rem .9rem;border-radius:var(--s-radius-lg);font-weight:700;color:#fff;
+  background:rgba(17,17,17,.88);border-left:5px solid var(--s-ok-line);box-shadow:0 2px 8px rgba(0,0,0,.5)}
+.scan .toast[hidden]{display:none}
+.scan .toast .txt{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
+.scan .toast .undo{min-height:44px;min-width:5rem;background:var(--s-accent);border-color:var(--s-accent);color:var(--s-on-accent)}
+.scan .toast .undo[hidden]{display:none}
+.scan .camera:has(.toast:not([hidden])) .glare-hint{bottom:4.2rem}
+.scan .unid{display:flex;flex-direction:column;align-items:center;gap:.5rem}
+.scan .unid-toggle{border-radius:999px;border-color:var(--s-danger-line);color:var(--s-danger);background:var(--s-danger-tint)}
+.scan .unid-toggle[hidden]{display:none}
+.scan .unid-toggle .count{display:inline-block;min-width:1.6em;margin-right:.35rem;padding:0 .4rem;border-radius:999px;
+  background:var(--s-danger-line);color:#fff;text-align:center}
+.scan .unid-tray{width:100%;padding:.6rem .75rem;border:1px solid var(--s-danger-line);border-radius:var(--s-radius-lg);
+  background:var(--s-raised)}
+.scan .unid-tray[hidden]{display:none}
+.scan .unid-tray > p{margin:0 0 .5rem}
+.scan .unid-list li{display:flex;flex-direction:column;gap:.4rem;padding:.6rem 0;border-top:1px solid var(--s-border-soft)}
+.scan .unid-list img.strip{width:100%;max-width:22rem;border-radius:4px;background:#fff;border:1px solid var(--s-border)}
+.scan .unid-list .actions{margin-top:.25rem}
+.scan .unid-list .actions .primary{flex:1 1 9rem}
+.scan .unid-list .actions .secondary{flex:0 0 auto;min-width:44px}
+@media (max-width:479px){ .scan .scan-opts .help{flex:1 1 100%;order:9;margin:0 .1rem} }
+
+/* printing line: set code and number, plus a foil mark */
+.scan .printing{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin:.1rem 0 .3rem}
+.scan .setcode{display:inline-block;padding:.1rem .5rem;border-radius:4px;font-family:ui-monospace,Menlo,Consolas,monospace;
+  font-weight:700;font-size:.9rem;letter-spacing:.05em;background:var(--s-raised);border:1px solid var(--s-border)}
+.scan .foil{display:inline-block;padding:.1rem .55rem;border-radius:999px;font-size:.78rem;font-weight:900;
+  text-transform:uppercase;letter-spacing:.06em;color:#181818;border:1px solid var(--s-accent);
+  background:linear-gradient(110deg,#f6d365,#fda085 35%,#a1c4fd 70%,#c2e9fb)}
+.scan .foil::before{content:"✦ "}
+.scan ul.items small .foil{margin-left:.4rem;vertical-align:middle}
+.scan .printing .printings{min-height:36px;padding:.3rem .7rem;font-size:.85rem;margin-left:auto}
+.scan ul.items small{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem}
+.scan ul.items .setbtn{min-height:44px;min-width:44px;padding:0 .35rem 0 0;background:transparent;border:0;color:var(--s-muted);
+  font-weight:700;font-size:.9rem;display:inline-flex;align-items:center;gap:.25rem}
+.scan ul.items .setbtn:hover .setcode{border-color:var(--s-accent);color:var(--s-accent)}
+.scan ul.items .stepper{flex:0 0 auto}
+
+/* printing picker: a bottom sheet on phones, a dialog on wide screens, tiles with the card picture */
+.scan .picker{position:fixed;inset:0;z-index:20;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center}
+.scan .sheet{width:100%;max-height:88vh;display:flex;flex-direction:column;background:var(--s-raised);color:var(--s-text);
+  border:1px solid var(--s-border);border-bottom:0;border-radius:var(--s-radius-lg) var(--s-radius-lg) 0 0;
+  box-shadow:0 -8px 30px rgba(0,0,0,.5);padding:.75rem 1rem calc(.75rem + env(safe-area-inset-bottom))}
+.scan .sheet-head{display:flex;align-items:flex-start;gap:.75rem}
+.scan .sheet-head .ttl{flex:1 1 auto;min-width:0}
+.scan .sheet-head h3{margin:0;font-size:1.15rem}
+.scan .sheet-head .close{flex:0 0 auto;font-size:1.2rem}
+.scan .sheet-tools{display:flex;gap:.6rem;align-items:center;margin:.6rem 0 .25rem}
+.scan .sheet-tools input{flex:1 1 auto;min-width:0}
+.scan .sheet-tools .switch{margin-left:0;flex:0 0 auto}
+.scan .pick-status{margin:.2rem 0 .5rem}
+/* The scrolling box wraps the grid: Chromium sizes the rows of a grid that is itself the scroll container
+   to the box, not to the tiles, so the tiles would overlap. Tiles are a fixed width with a fixed-height
+   picture box, so they are the same size before and after their images load. */
+.scan .sheet-body{flex:1 1 auto;min-height:0;overflow:auto;overscroll-behavior:contain;padding:2px}
+.scan .tiles{--tile:7.6rem;--pic:calc((var(--tile) - .8rem - 4px) * 88 / 63);display:grid;
+  grid-template-columns:repeat(auto-fill,var(--tile));justify-content:center;gap:.6rem}
+.scan .tile{display:block;padding:.4rem;min-height:44px;
+  background:var(--s-input);border:2px solid var(--s-border-soft);border-radius:var(--s-radius-lg);color:var(--s-text);text-align:left;
+  cursor:pointer;box-sizing:border-box}
+.scan .tile:hover{border-color:var(--s-border);background:var(--s-raised-2)}
+.scan .tile:focus-visible{outline:2px solid var(--s-accent);outline-offset:2px}
+.scan .tile.current{border-color:var(--s-accent);box-shadow:0 0 0 1px var(--s-accent)}
+/* The picture box takes its height from the card ratio, not the image, so a tile is the same size before
+   and after its image loads (lazy) and a button's quirks around replaced children cannot shrink it. */
+.scan .tile .pic{position:relative;display:block;height:var(--pic);margin-bottom:.3rem;border-radius:5px;
+  overflow:hidden;background:var(--s-raised-2)}
+.scan .tile .pic img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.scan .tile .tag{position:absolute;left:0;right:0;bottom:0;padding:.2rem .3rem;text-align:center;font-size:.72rem;font-weight:900;
+  text-transform:uppercase;letter-spacing:.05em}
+.scan .tile .tag.now{background:var(--s-accent);color:var(--s-on-accent)}
+.scan .tile .setcode{font-size:.85rem}
+.scan .tile .setname{display:block;margin:.3rem 0;font-size:.8rem;line-height:1.25;color:var(--s-muted);overflow-wrap:anywhere}
+.scan .tile .fin{display:flex;flex-wrap:wrap;gap:.25rem;align-items:center}
+.scan .tile .year{font-size:.75rem;color:var(--s-muted);margin-right:.1rem}
+.scan .tile .chip{font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:.1rem .4rem;
+  border-radius:999px;border:1px solid var(--s-border);color:var(--s-muted)}
+.scan .tile .chip.foil,.scan .tile .chip.etched{color:#181818;border-color:var(--s-accent);
+  background:linear-gradient(110deg,#f6d365,#fda085 35%,#a1c4fd 70%,#c2e9fb)}
+body.picker-open{overflow:hidden}
+@media (min-width:700px){
+  .scan .picker{align-items:center;padding:1.5rem}
+  .scan .sheet{max-width:56rem;max-height:86vh;border-bottom:1px solid var(--s-border);border-radius:var(--s-radius-lg);padding:1rem 1.25rem}
+  .scan .tiles{--tile:8.6rem}
+}
+
+/* camera panel: one column, controls stick to the bottom on phones */
+.scan .cam-panel{display:flex;flex-direction:column;gap:.75rem}
+.scan .camera{position:relative;background:#000;border-radius:var(--s-radius-lg);overflow:hidden;
+  aspect-ratio:3/4;max-height:54vh;width:100%;margin:0 auto}
+.scan .camera video{width:100%;height:100%;object-fit:cover;display:block}
+/* once there is a match to confirm, the preview gives up room so the result shows above the controls */
+/* Shrinking by width keeps the 3:4 box and the guide's 78% width, which scan.js relies on for the crop. */
+@media (max-width:699px){
+  .scan .cam-panel.has-result .camera{width:min(100%,calc(30vh * 3 / 4));max-height:30vh}
+  .scan .cam-panel.has-result .camera .hint{display:none}
+}
+.scan .camera .guide{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:78%;aspect-ratio:63/88;border:2px solid rgba(255,255,255,.9);border-radius:4.5%/3.3%;
+  box-shadow:0 0 0 999px rgba(0,0,0,.55);pointer-events:none}
+.scan .camera .guide::before,.scan .camera .guide::after{content:"";position:absolute;width:14%;height:10%;
+  border:3px solid var(--s-accent);pointer-events:none}
+.scan .camera .guide::before{left:-3px;top:-3px;border-right:0;border-bottom:0;border-top-left-radius:6px}
+.scan .camera .guide::after{right:-3px;bottom:-3px;border-left:0;border-top:0;border-bottom-right-radius:6px}
+.scan .camera .guide .title{position:absolute;left:4%;right:4%;top:4%;height:8.5%;
+  border:2px dashed var(--s-accent);border-radius:4px;background:rgba(250,137,13,.12)}
+.scan .camera .guide .title::after{content:"card name";position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);
+  text-align:center;color:#fff;font-weight:700;font-size:.8rem;letter-spacing:.08em;text-transform:uppercase;
+  text-shadow:0 1px 2px #000;opacity:.9}
+.scan .camera .hint{position:absolute;left:0;right:0;top:0;padding:.45rem .75rem;text-align:center;color:#fff;
+  font-size:.86rem;font-weight:700;background:linear-gradient(rgba(0,0,0,.7),rgba(0,0,0,0));text-shadow:0 1px 2px #000}
+.scan .camera.busy video{filter:brightness(.5)}
+.scan .camera.busy::after{content:"Reading…";position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  color:#fff;font-weight:900;font-size:1.1rem;text-shadow:0 1px 3px #000}
+.scan .camera .flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none;transition:opacity .25s}
+.scan .camera .flash.on{opacity:.6;transition:none}
+
+.scan .controls{position:sticky;bottom:0;z-index:3;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;
+  gap:.75rem;padding:.6rem 1rem calc(.6rem + env(safe-area-inset-bottom));margin:0 -1rem;
+  background:var(--bg,#181818);border-top:1px solid var(--s-border-soft)}
+.scan .controls > :first-child{justify-self:end} .scan .controls > :last-child{justify-self:start}
+.scan .controls button,.scan .controls .btn{width:auto}
+.scan .shutter{width:4.75rem;height:4.75rem;min-width:4.75rem;border-radius:50%;border:4px solid #fff;
+  background:var(--s-accent);box-shadow:0 0 0 3px var(--s-accent),0 2px 8px rgba(0,0,0,.5);padding:0;
+  font-size:0;color:transparent;transition:transform .1s}
+.scan .shutter:hover{background:var(--s-accent);filter:brightness(1.1)}
+.scan .shutter:active{transform:scale(.94)}
+.scan .shutter:disabled{opacity:.45;box-shadow:none}
+.scan #cam-status{margin:0;min-height:1.4em;text-align:center}
+.scan .glare-hint{position:absolute;left:0;right:0;bottom:.6rem;margin:0 auto;width:max-content;z-index:2;
+  max-width:calc(100% - 1.2rem);
+  display:inline-flex;align-items:center;gap:.4rem;min-height:44px;padding:.4rem .9rem;border-radius:999px;font-weight:700;
+  color:#181818;background:var(--s-accent);border:1px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.5);text-align:left}
+.scan .glare-hint[hidden]{display:none}
+.scan .glare-hint .ico{font-size:1.2rem;line-height:1}
+.scan .camera.glare{box-shadow:0 0 0 3px var(--s-warn-line)}
+/* torch: a 44px toggle in the viewfinder's top-right corner, only where the camera reports one */
+.scan .torch{position:absolute;right:.5rem;top:.5rem;z-index:2;min-height:44px;min-width:44px;padding:.4rem .7rem;
+  border-radius:999px;border:1px solid rgba(255,255,255,.6);background:rgba(0,0,0,.55);color:#fff;font-weight:700;
+  display:inline-flex;align-items:center;gap:.35rem;backdrop-filter:blur(2px)}
+.scan .torch[hidden]{display:none}
+.scan .torch:hover{background:rgba(0,0,0,.75);color:#fff}
+.scan .torch[aria-pressed=true]{background:var(--s-accent);border-color:var(--s-accent);color:var(--s-on-accent)}
+.scan .torch .ico{font-size:1.1rem;line-height:1}
+.scan .camera:has(.torch:not([hidden])) .hint{padding-right:6rem}
+/* camera controls: zoom and brightness sliders, 44px rows, only when the camera reports them */
+.scan .cam-ctl{display:flex;flex-direction:column;gap:.35rem;padding:.4rem .6rem;border:1px solid var(--s-border-soft);
+  border-radius:var(--s-radius);background:var(--s-raised)}
+.scan .cam-ctl[hidden]{display:none}
+.scan .cam-ctl .ctl{display:grid;grid-template-columns:auto 5.2rem minmax(0,1fr) 3.4rem 44px;align-items:center;gap:.5rem;
+  min-height:44px;margin:0;font-weight:700}
+.scan .cam-ctl .ico{font-size:1.1rem;line-height:1}
+.scan .cam-ctl .lbl{color:var(--s-muted)}
+.scan .cam-ctl output{text-align:right;font-variant-numeric:tabular-nums;color:var(--s-warn)}
+.scan .cam-ctl .reset{min-width:44px;padding:0;font-size:1.2rem;line-height:1}
+.scan .cam-ctl input[type=range]{width:100%;min-height:44px;margin:0;accent-color:var(--s-accent);background:transparent}
+.scan .cam-ctl input[type=range]::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:var(--s-raised-2)}
+.scan .cam-ctl input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:28px;height:28px;margin-top:-11px;
+  border-radius:50%;background:var(--s-accent);border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.4)}
+.scan .cam-ctl input[type=range]::-moz-range-track{height:6px;border-radius:3px;background:var(--s-raised-2)}
+.scan .cam-ctl input[type=range]::-moz-range-thumb{width:28px;height:28px;border-radius:50%;background:var(--s-accent);border:2px solid #fff}
+.scan .cam-ctl input[type=range]:focus-visible{outline:2px solid var(--s-accent);outline-offset:2px}
+@media (max-width:420px){ .scan .cam-ctl .ctl{grid-template-columns:auto minmax(0,1fr) 3.4rem 44px} .scan .cam-ctl .lbl{display:none} }
+/* on phones the sliders must fit between the preview and the sticky control bar */
+@media (max-width:699px){
+  .scan .cam-panel:has(.cam-ctl:not([hidden])) .camera{max-height:40vh;width:min(100%,calc(40vh * 3 / 4))}
+  .scan .cam-panel:has(.cam-ctl:not([hidden])) .camera .hint{display:none}
+  /* while Auto scanning the preview shrinks so the add toast and Undo sit clear of the shutter bar */
+  .scan .cam-panel:has(#auto-switch[aria-checked=true]) .camera{max-height:40vh;width:min(100%,calc(40vh * 3 / 4))}
+  .scan .cam-panel:has(#auto-switch[aria-checked=true]) .camera .hint{display:none}
+}
+
+/* two columns from an unfolded foldable up: camera left, status and result right */
+@media (min-width:700px){
+  .scan .cam-panel{display:grid;grid-template-columns:minmax(0,22rem) minmax(0,1fr);grid-template-areas:
+    "camera opts" "camera status" "camera unid" "camera result" "ctl result" "controls result";align-items:start;column-gap:1.25rem}
+  .scan .unid{grid-area:unid;align-items:flex-start}
+  .scan .scan-opts{grid-area:opts}
+  .scan .cam-ctl{grid-area:ctl}
+  .scan .camera{grid-area:camera;max-height:none}
+  .scan .controls{grid-area:controls;position:static;margin:0;padding:.5rem 0 0;border:0;background:transparent}
+  .scan #cam-status{grid-area:status;text-align:left}
+  .scan #result{grid-area:result}
+}
+
+/* match result: the confirm or fix step */
+.scan .result{display:flex;gap:.9rem;align-items:flex-start;border-left:5px solid var(--s-border)}
+.scan .result.is-exact,.scan .result.is-printing{border-left-color:var(--s-ok-line)}
+.scan .result.is-fuzzy{border-left-color:var(--s-warn-line)}
+.scan .result.is-ambiguous,.scan .result.is-not_found,.scan .result.is-error{border-left-color:var(--s-danger-line)}
+.scan .result img{width:6.5rem;border-radius:6px;background:var(--s-input);flex:0 0 auto}
+.scan .result .meta{flex:1 1 auto;min-width:0;display:block;margin:0}
+.scan .result h3{margin:0 0 .3rem;font-size:1.25rem;line-height:1.25;overflow-wrap:anywhere}
+.scan .result .status{display:inline-block;margin:.15rem 0 .35rem;padding:.15rem .6rem;border-radius:999px;
+  font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;border:1px solid}
+.scan .status-exact,.scan .status-printing{color:var(--s-ok);border-color:var(--s-ok-line);background:var(--s-ok-tint)}
+.scan .status-fuzzy{color:var(--s-warn);border-color:var(--s-warn-line);background:var(--s-warn-tint)}
+.scan .status-not_found,.scan .status-ambiguous,.scan .status-error{color:var(--s-danger);border-color:var(--s-danger-line);
+  background:var(--s-danger-tint)}
+.scan .ocr{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.82em;color:var(--s-muted);word-break:break-all}
+.scan .result .note{margin:.1rem 0 .35rem;font-weight:700;color:var(--s-warn)}
+.scan .suggest-label{margin:.6rem 0 .3rem;font-weight:700}
+.scan .chips{display:flex;flex-wrap:wrap;gap:.5rem;margin:0 0 .5rem}
+.scan .chips button{width:auto;border-radius:999px;padding:.5rem .9rem;font-weight:700;white-space:normal;text-align:left}
+.scan .actions{display:flex;flex-wrap:wrap;gap:.6rem;align-items:center;margin-top:.75rem}
+.scan .actions .primary{flex:1 1 9rem;min-height:48px;font-size:1.05rem}
+.scan .actions .secondary{flex:1 1 9rem}
+
+/* quantity stepper: big buttons either side of the number */
+.scan .stepper{display:inline-flex;align-items:stretch;border:1px solid var(--s-border);border-radius:var(--s-radius);
+  overflow:hidden;background:var(--s-input)}
+.scan .stepper button{min-width:44px;min-height:44px;border:0;border-radius:0;background:var(--s-raised);font-size:1.3rem;
+  font-weight:900;padding:0 .8rem;line-height:1}
+.scan .stepper button:hover{background:var(--s-raised-2)}
+.scan .stepper button.minus{color:var(--s-danger)} .scan .stepper button.plus{color:var(--s-ok)}
+.scan .stepper input[type=number]{width:3.6rem;min-height:44px;border:0;border-left:1px solid var(--s-border);
+  border-right:1px solid var(--s-border);border-radius:0;background:transparent;color:var(--s-text);text-align:center;
+  font-size:1.1rem;font-weight:700;padding:0;-moz-appearance:textfield}
+.scan .stepper input::-webkit-outer-spin-button,.scan .stepper input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.scan .stepper input:focus{outline:2px solid var(--s-accent);outline-offset:-2px;border-color:var(--s-border)}
+
+/* type tab */
+.scan .suggest{position:relative}
+.scan .suggest ul{position:absolute;z-index:5;left:0;right:0;margin:.25rem 0 0;padding:.25rem 0;list-style:none;
+  background:var(--s-raised);border:1px solid var(--s-border);border-radius:var(--s-radius);max-height:16rem;overflow:auto;
+  box-shadow:0 6px 18px rgba(0,0,0,.4)}
+.scan .suggest li{padding:.7rem .9rem;min-height:44px;cursor:pointer;font-weight:700;border-bottom:1px solid var(--s-border-soft)}
+.scan .suggest li:last-child{border-bottom:0}
+.scan .suggest li:hover,.scan .suggest li[aria-selected=true]{background:var(--s-raised-2)}
+.scan input[type=search],.scan input[type=text]{width:100%;min-height:48px;padding:.6rem .9rem;font-size:1.05rem;
+  border-radius:var(--s-radius);border:1px solid var(--s-border);background:var(--s-input);color:var(--s-text)}
+.scan textarea{width:100%;min-height:8rem;background:var(--s-input);color:var(--s-text);border:1px solid var(--s-border);
+  border-radius:var(--s-radius);padding:.6rem .8rem;font:inherit;font-size:1rem;line-height:1.5}
+.scan label{margin-top:0}
+.scan .card > label:first-child{margin-top:0}
+
+/* list tab */
+.scan ul.items{list-style:none;margin:0;padding:0}
+.scan ul.items li{display:flex;gap:.7rem;align-items:center;padding:.6rem 0;border-bottom:1px solid var(--s-border-soft)}
+.scan ul.items li:last-child{border-bottom:0}
+.scan ul.items img,.scan ul.items .thumb{width:2.6rem;height:3.6rem;border-radius:3px;background:var(--s-input);flex:0 0 auto}
+.scan ul.items .name{flex:1 1 auto;min-width:0;font-weight:700;overflow-wrap:anywhere}
+.scan ul.items .name small{display:block;color:var(--s-muted);font-weight:400;font-size:.85rem}
+.scan ul.items .name small [class^=status-]{font-weight:700}
+.scan .summary{margin:.5rem 0 .25rem}
+.scan .list-actions{display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin-top:1rem}
+.scan .list-actions .primary{grid-column:1 / -1;min-height:48px;font-size:1.05rem}
+.scan .list-actions button{width:100%}
+.scan progress{width:100%}
+
+/* sessions tab */
+.scan .sessions li{display:flex;gap:.6rem;padding:.4rem 0;border-bottom:1px solid var(--s-border-soft);align-items:center}
+.scan .sessions li:last-child{border-bottom:0}
+.scan .sessions li a{flex:1 1 auto;min-width:0;display:block;padding:.5rem 0;min-height:44px;text-decoration:none;color:var(--s-text)}
+.scan .sessions li a strong{display:block;font-size:1.05rem}
+.scan .sessions li a small{display:block;color:var(--s-muted);font-size:.85rem}
+.scan .sessions li a:hover strong{color:var(--s-accent)}
+.scan .sessions li button{flex:0 0 auto}
+
+.scan .install{display:none}
+.scan .install.show{display:inline-flex}
+@media (prefers-reduced-motion:reduce){ .scan .shutter,.scan .camera .flash{transition:none} .scan .shutter.live{animation:none;box-shadow:0 0 0 6px rgba(250,137,13,.5)} }

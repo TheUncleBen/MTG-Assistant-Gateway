@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The pages' panel: 3dp corners, 1dp border, surface fill (the camera sheet keeps a scrim). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@color/scrim" />
+    <corners android:topLeftRadius="12dp" android:topRightRadius="12dp" />
+</shape>

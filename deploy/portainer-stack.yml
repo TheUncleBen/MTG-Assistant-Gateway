@@ -1,0 +1,195 @@
+# MTG Assistant Gateway: Portainer / Docker Swarm stack (gateway + Mystic Forge).
+#
+# Paste this whole file into Portainer's stack web editor as is. Everything you
+# change lives in the stack's environment variables: start from
+# deploy/stack.env.example. Create the three external secrets below before you
+# deploy (docs/DEPLOY.md, step 4) and the overlay network (step 1).
+
+version: "3.8"
+
+secrets:
+  mtg_fernet_key:
+    external: true
+  mtg_session_secret:
+    external: true
+  mtg_oidc_client_secret:
+    external: true
+
+services:
+  # The gateway's SQLite database lives on the node named by MTG_NODE.
+  mtg-assistant-gateway:
+    image: ${MTG_IMAGE:-ghcr.io/theuncleben/mtg-assistant-gateway}:${MTG_TAG:-latest}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=5)"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    secrets:
+      - mtg_fernet_key
+      - mtg_session_secret
+      - mtg_oidc_client_secret
+    environment:
+      MTG_PUBLIC_URL: ${MTG_PUBLIC_URL:?PUBLIC HTTPS URL REQUIRED e.g. https://mtg.example.com}
+      MTG_OIDC_ISSUER: ${MTG_OIDC_ISSUER:?OIDC ISSUER URL REQUIRED}
+      MTG_OIDC_CLIENT_ID: ${MTG_OIDC_CLIENT_ID:?OIDC CLIENT ID REQUIRED}
+      MTG_OIDC_CLIENT_SECRET_FILE: /run/secrets/mtg_oidc_client_secret
+      MTG_FERNET_KEY_FILE: /run/secrets/mtg_fernet_key
+      MTG_SESSION_SECRET_FILE: /run/secrets/mtg_session_secret
+      # Only members of this identity provider group get in. The gateway refuses to start when it
+      # is empty unless MTG_ALLOW_ANY_IDP_USER is true (anyone your identity provider signs in).
+      MTG_REQUIRED_GROUP: ${MTG_REQUIRED_GROUP:-}
+      MTG_ALLOW_ANY_IDP_USER: ${MTG_ALLOW_ANY_IDP_USER:-false}
+      # Optional. Empty values fall back to the gateway's defaults (docs/DEPLOY.md, environment reference).
+      MTG_ADMIN_GROUP: ${MTG_ADMIN_GROUP:-}
+      MTG_OIDC_GROUPS_CLAIM: ${MTG_OIDC_GROUPS_CLAIM:-}
+      MTG_OIDC_TOKEN_AUTH_METHOD: ${MTG_OIDC_TOKEN_AUTH_METHOD:-}
+      MTG_SERVER_NAME: ${MTG_SERVER_NAME:-}
+      MTG_DATA_DIR: /data
+      MTG_BACKUP_DIR: /backups
+      MTG_BACKUP_HOUR_UTC: ${MTG_BACKUP_HOUR_UTC:-3}
+      MTG_BACKUP_KEEP_DAYS: ${MTG_BACKUP_KEEP_DAYS:-14}
+      MTG_LOG_LEVEL: ${MTG_LOG_LEVEL:-INFO}
+      # Research tools are proxied from the Mystic Forge service in this stack.
+      MTG_MYSTIC_FORGE_URL: ${MTG_MYSTIC_FORGE_URL-http://mtg-assistant-mysticforge:8000/mcp}
+      # Kill switch for deck edits on Archidekt. Keep false until you have tested
+      # the proposal flow against a disposable deck.
+      MTG_WRITES_ENABLED: ${MTG_WRITES_ENABLED:-false}
+      # Proposals are applied from the browser review page. true also allows the
+      # apply_proposal MCP tool to apply (weaker: an assistant could be tricked into it).
+      MTG_APPLY_VIA_MCP: ${MTG_APPLY_VIA_MCP:-false}
+      # An MCP apply is refused on a proposal younger than this many seconds, so an assistant
+      # cannot propose and apply in one turn without the user seeing the change. 0 disables.
+      MTG_APPLY_MIN_AGE_SECONDS: ${MTG_APPLY_MIN_AGE_SECONDS:-15}
+      MTG_ARCHIDEKT_BACKUPS: ${MTG_ARCHIDEKT_BACKUPS:-true}
+      MTG_ARCHIDEKT_BACKUP_FOLDER: ${MTG_ARCHIDEKT_BACKUP_FOLDER:-MTG Gateway backups}
+      # Token and session lifetimes, in seconds. Shorter is stricter.
+      MTG_ACCESS_TOKEN_TTL: ${MTG_ACCESS_TOKEN_TTL:-3600}
+      MTG_REFRESH_TOKEN_TTL: ${MTG_REFRESH_TOKEN_TTL:-2592000}
+      MTG_BROWSER_SESSION_TTL: ${MTG_BROWSER_SESSION_TTL:-7200}
+      MTG_REAUTH_INTERVAL: ${MTG_REAUTH_INTERVAL:-604800}
+      # Archidekt API base. Leave the default; the end-to-end tests point it at a local mock.
+      MTG_ARCHIDEKT_BASE: ${MTG_ARCHIDEKT_BASE:-https://archidekt.com/api}
+      # Peers allowed to set X-Forwarded-* (your reverse proxy). Empty = private networks.
+      MTG_TRUSTED_PROXIES: ${MTG_TRUSTED_PROXIES:-}
+      # Host headers /mcp accepts. Empty = the host in MTG_PUBLIC_URL.
+      MTG_ALLOWED_HOSTS: ${MTG_ALLOWED_HOSTS:-}
+      # Clients that identify by a Client ID Metadata Document URL (Claude's "published
+      # identity"). false = only self-registering clients.
+      MTG_CIMD_ENABLED: ${MTG_CIMD_ENABLED:-true}
+      # Hosts allowed to identify by Client ID Metadata Document URL. Empty = any https host.
+      MTG_CIMD_ALLOWED_HOSTS: ${MTG_CIMD_ALLOWED_HOSTS:-}
+      # Seconds between single-card Scryfall lookups made for card scanning (0.1 to 5).
+      MTG_SCRYFALL_LOOKUP_INTERVAL: ${MTG_SCRYFALL_LOOKUP_INTERVAL:-0.5}
+      PUID: ${PUID:?PUID REQUIRED}
+      PGID: ${PGID:?PGID REQUIRED}
+      TZ: ${TIMEZONE:-UTC}
+      DISABLE_IPV6: "true"
+    # Least privilege. The entrypoint starts as root only to match PUID/PGID (usermod/groupmod,
+    # chown of the data folders) and then drops to that user with setpriv --no-new-privs; these
+    # four capabilities are all it needs. Needs Docker 20.10 or newer for Swarm to apply them.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
+    networks:
+      # mtgnet: shared with the reverse proxy. mysticforge: private to this stack, the only
+      # way to reach Mystic Forge.
+      - mtgnet
+      - mysticforge
+    volumes:
+      - type: bind
+        source: ${MTG_DATA_DIR:?GATEWAY DATA DIRECTORY REQUIRED}
+        target: /data
+      - type: bind
+        source: ${MTG_BACKUP_DIR:?GATEWAY BACKUP DIRECTORY REQUIRED}
+        target: /backups
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: ${MTG_MEMORY_LIMIT:-256M}
+        reservations:
+          memory: 64M
+      restart_policy:
+        condition: any
+      update_config:
+        order: stop-first
+      rollback_config:
+        order: stop-first
+      placement:
+        constraints:
+          - node.hostname == ${MTG_NODE:?set MTG_NODE to the Swarm node that keeps the gateway data}
+
+  # Mystic Forge on the node named by MF_NODE: internal research and simulation, no published ports.
+  # Only the gateway can talk to it: it is on this stack's private network, not on the shared one
+  # the reverse proxy and other containers use. Do not add an NPM proxy host for it.
+  mtg-assistant-mysticforge:
+    image: ${MF_IMAGE:-ghcr.io/theuncleben/mtg-assistant-mysticforge}:${MF_TAG:-1.3.2-mag2}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=8)"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    environment:
+      # Fixed on purpose: no MTGJSON price ingest (~141 MB download) and no
+      # ntfy.sh pushes. Watchlists and price history stay deferred.
+      MYSTIC_FORGE_NO_INGEST: "1"
+      MYSTIC_FORGE_NTFY_OFF: "1"
+      # Base URL Mystic Forge prints in links. Its default is the upstream
+      # author's public site, so always set it.
+      MYSTIC_FORGE_PUBLIC_BASE: ${MF_PUBLIC_BASE:-http://mtg-assistant-mysticforge:8000}
+      # /data is inside the container and is reset on redeploy. Nothing kept
+      # there matters while watchlists are disabled.
+      MYSTIC_FORGE_DB: /data/mystic_forge.db
+      MYSTIC_FORGE_CR: /data/cr_cache.txt
+      PUID: ${PUID:?PUID REQUIRED}
+      PGID: ${PGID:?PGID REQUIRED}
+      TZ: ${TIMEZONE:-UTC}
+      DISABLE_IPV6: "true"
+    # Least privilege. The entrypoint starts as root only to match PUID/PGID (usermod/groupmod,
+    # chown of the data folders) and then drops to that user with setpriv --no-new-privs; these
+    # four capabilities are all it needs. Needs Docker 20.10 or newer for Swarm to apply them.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
+    networks:
+      - mysticforge
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: ${MF_MEMORY_LIMIT:-512M}
+        reservations:
+          memory: 128M
+      restart_policy:
+        condition: any
+      update_config:
+        order: stop-first
+      rollback_config:
+        order: stop-first
+      placement:
+        constraints:
+          - node.hostname == ${MF_NODE:?set MF_NODE to the Swarm node that runs Mystic Forge}
+
+networks:
+  mtgnet:
+    external: true
+    name: ${MTG_NETWORK_NAME:-mtg-gateway}
+  # Created by the stack (as <stack>_mysticforge) and removed with it. Not attachable, so no
+  # container outside this stack can join it. Not "internal": Mystic Forge needs outbound
+  # internet access for Scryfall, EDHREC and the rules.
+  mysticforge:
+    driver: overlay

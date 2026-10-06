@@ -1,0 +1,247 @@
+name: Mystic Forge image
+
+# Builds the pinned Mystic Forge image (docker/mystic-forge/), with the local
+# patches in docker/mystic-forge/patches/ applied on top of the upstream commit.
+
+# What runs where: a pull request that touches the Mystic Forge build runs the upstream tests and the
+# amd64 smoke test with a read-only token, pushes nothing and skips the emulated arm64 build. A push to
+# main publishes the image tag the Dockerfile names (<MF_VERSION>-<MF_LOCAL>, the one the stack pulls)
+# only the first time main carries it: the claim job creates the git tag mystic-forge-<that tag>, and
+# creating a tag that exists fails, so a published image tag is never rebuilt or overwritten by a push.
+# If that first build fails, re-running its run finishes it. A manual run from main builds
+# and publishes (overwriting the tag, for a deliberate rebuild); from any other branch it builds and
+# tests but pushes nothing.
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    paths:
+      - "docker/mystic-forge/**"
+      - "scripts/ci_smoke_mysticforge.sh"
+      - ".github/workflows/mystic-forge-image.yml"
+  workflow_dispatch:
+
+# A new push to a pull request stops the run it supersedes. Other runs have their own group and are
+# never cancelled.
+concurrency:
+  group: mystic-forge-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Read-only by default; only the claim job (contents: write) and the publishing image job
+# (packages: write) get more, and neither runs for a pull request.
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/mtg-assistant-mysticforge
+  DOCKERFILE: docker/mystic-forge/Dockerfile
+
+jobs:
+  pin:
+    runs-on: ubuntu-latest
+    outputs:
+      repo: ${{ steps.pin.outputs.repo }}
+      commit: ${{ steps.pin.outputs.commit }}
+      version: ${{ steps.pin.outputs.version }}
+      local: ${{ steps.pin.outputs.local }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Read the pin from the Dockerfile
+        id: pin
+        run: |
+          set -eu
+          for k in REPO COMMIT VERSION LOCAL; do
+            v=$(sed -n "s/^ARG MF_${k}=//p" "$DOCKERFILE" | head -n1)
+            test -n "$v"
+            echo "$(echo "$k" | tr 'A-Z' 'a-z')=$v" >> "$GITHUB_OUTPUT"
+            echo "MF_${k}=$v"
+          done
+
+  claim:
+    # Pushes to main only: is this the first main commit that carries this image tag? Runs no repository
+    # code; the tag comes from the pin job and is checked again here.
+    needs: pin
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      build: ${{ steps.claim.outputs.build }}
+    steps:
+      - id: claim
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.pin.outputs.version }}-${{ needs.pin.outputs.local }}
+        run: |
+          set -eu
+          [[ "$TAG" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,100}$ ]] || { echo "bad tag: $TAG"; exit 1; }
+          if gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/mystic-forge-$TAG" -f sha="$GITHUB_SHA" >/dev/null 2>"$RUNNER_TEMP/err"; then
+            echo "$TAG is new on main; building and publishing it."
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            have=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/mystic-forge-$TAG" --jq .object.sha 2>/dev/null) || { cat "$RUNNER_TEMP/err"; exit 1; }
+            if [ "$have" = "$GITHUB_SHA" ]; then
+              echo "mystic-forge-$TAG is on this commit (a re-run); building and publishing it."
+              echo "build=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "$TAG was published by an earlier main commit (git tag mystic-forge-$TAG); nothing to do."
+              echo "build=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+  upstream-tests:
+    needs: [pin, claim]
+    if: >-
+      !cancelled() && needs.pin.result == 'success'
+      && (github.event_name != 'push' || needs.claim.outputs.build == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Check out Mystic Forge at the pinned commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: Kautiontape/mystic-forge
+          ref: ${{ needs.pin.outputs.commit }}
+          path: mystic-forge
+          persist-credentials: false
+      - name: Confirm commit and version
+        working-directory: mystic-forge
+        env:
+          COMMIT: ${{ needs.pin.outputs.commit }}
+          MF_VERSION: ${{ needs.pin.outputs.version }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$COMMIT"
+          test "$(tr -d '[:space:]' < VERSION)" = "$MF_VERSION"
+      - name: Apply the local patches (the same ones the image build applies)
+        working-directory: mystic-forge
+        run: |
+          set -eu
+          for p in ../docker/mystic-forge/patches/*.patch; do git apply --verbose "$p"; done
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.14"
+      - name: Install with the pinned constraints
+        working-directory: mystic-forge
+        run: pip install -r requirements.txt -r requirements-dev.txt -c ../docker/mystic-forge/constraints.txt
+      - name: Run upstream tests and the patches' tests (offline; upstream's own "not slow" selection)
+        working-directory: mystic-forge
+        run: python -m pytest -q -m "not slow"
+
+  smoke:
+    # Pull requests and manual runs from other branches: build amd64 and smoke-test it, push nothing.
+    needs: [pin, upstream-tests]
+    if: >-
+      !cancelled() && needs.upstream-tests.result == 'success'
+      && (github.event_name == 'pull_request' || github.ref != 'refs/heads/main')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Build amd64 image for a smoke test
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ${{ env.DOCKERFILE }}
+          load: true
+          tags: mystic-forge:ci-amd64
+          cache-from: type=gha,scope=mystic-forge
+      - name: Smoke test
+        run: scripts/ci_smoke_mysticforge.sh mystic-forge:ci-amd64
+
+  image:
+    # Main only (a first push of this image tag, or a manual run): both architectures, then publish.
+    needs: [pin, upstream-tests]
+    if: >-
+      !cancelled() && needs.upstream-tests.result == 'success'
+      && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Build amd64 image for a smoke test
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ${{ env.DOCKERFILE }}
+          load: true
+          tags: mystic-forge:ci-amd64
+          cache-from: type=gha,scope=mystic-forge
+          cache-to: type=gha,scope=mystic-forge,mode=max
+
+      - name: Smoke test
+        run: scripts/ci_smoke_mysticforge.sh mystic-forge:ci-amd64
+
+      - name: Build arm64 image (QEMU) and measure memory
+        # The emulated build is the slow part of this job; pull requests get the amd64 smoke test only.
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ${{ env.DOCKERFILE }}
+          platforms: linux/arm64
+          load: true
+          tags: mystic-forge:ci-arm64
+          cache-from: type=gha,scope=mystic-forge-arm64
+          cache-to: type=gha,scope=mystic-forge-arm64,mode=max
+
+      - name: arm64 smoke test and memory report (QEMU emulation, so figures are approximate)
+        run: |
+          set -eux
+          docker run -d --platform linux/arm64 --name mfarm -p 18001:8000 \
+            -e MYSTIC_FORGE_PUBLIC_BASE=http://mtg-assistant-mysticforge:8000 mystic-forge:ci-arm64
+          for i in $(seq 1 180); do
+            if curl -fsS http://127.0.0.1:18001/health; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:18001/health | grep '"status":"ok"'
+          docker exec mfarm uname -m | grep -q aarch64
+          echo "Idle:"; docker stats --no-stream --format '{{.MemUsage}}' mfarm
+          curl -fsS -X POST http://127.0.0.1:18001/mcp \
+            -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+            -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"rules_search","arguments":{"params":{"query":"deathtouch"}}}}' >/dev/null
+          echo "After loading the rules index:"; docker stats --no-stream --format '{{.MemUsage}}' mfarm
+          echo "Peak RSS of PID 1 (VmHWM):"; docker exec mfarm grep -E 'VmHWM|VmRSS' /proc/1/status
+          docker rm -f mfarm
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image tags
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=${{ needs.pin.outputs.version }}-${{ needs.pin.outputs.local }}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=${{ needs.pin.outputs.version }}-${{ needs.pin.outputs.local }}-
+
+      - name: Build and push linux/arm64 and linux/amd64
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ${{ env.DOCKERFILE }}
+          platforms: linux/arm64,linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: |
+            type=gha,scope=mystic-forge
+            type=gha,scope=mystic-forge-arm64

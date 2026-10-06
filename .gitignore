@@ -1,0 +1,28 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+.env
+*.local.yml
+
+# Self-hosted OCR assets, fetched by scripts/fetch_ocr_assets.py (not committed)
+src/mtg_gateway/scan/static/vendor/*
+!src/mtg_gateway/scan/static/vendor/.gitkeep
+
+# The Android APK the CI release build drops here before building the image (not committed)
+docker/app-dist/*
+!docker/app-dist/.gitkeep
+
+# A Compose deployment run from a clone: never commit its secrets or data
+deploy/compose/.env
+deploy/compose/secrets/
+deploy/compose/data/
+deploy/compose/backups/

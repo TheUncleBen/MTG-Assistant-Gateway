@@ -1,0 +1,202 @@
+# Test-only stand-ins for the parts of the owner's Swarm that the gateway
+# stack expects to exist already: a TLS-terminating reverse proxy (nginx here,
+# Nginx Proxy Manager in production) and Authentik with its Postgres and Redis.
+# Deployed on the same external overlay network as the gateway stack.
+# Never deploy this in production: the credentials below are test fixtures.
+version: "3.8"
+
+configs:
+  e2e_nginx_conf:
+    file: ../edge/nginx.conf
+  e2e_scryfall_cert:
+    file: ../.generated/scryfall.crt
+  e2e_scryfall_key:
+    file: ../.generated/scryfall.key
+  e2e_cimd_cert:
+    file: ../.generated/cimd.crt
+  e2e_cimd_key:
+    file: ../.generated/cimd.key
+  e2e_edge_cert:
+    file: ../.generated/edge.crt
+  e2e_edge_key:
+    file: ../.generated/edge.key
+
+services:
+  edge:
+    image: ${E2E_NGINX_IMAGE:-nginx:1.27-alpine}
+    configs:
+      - source: e2e_nginx_conf
+        target: /etc/nginx/nginx.conf
+      - source: e2e_edge_cert
+        target: /etc/nginx/edge.crt
+      - source: e2e_edge_key
+        target: /etc/nginx/edge.key
+    ports:
+      - target: 443
+        published: ${E2E_HTTPS_PORT:-443}
+        mode: host
+    networks:
+      mtgnet:
+        aliases:
+          - mtg.e2e.test
+          - auth.e2e.test
+    deploy:
+      endpoint_mode: dnsrr
+      replicas: 1
+      restart_policy:
+        condition: any
+
+  # Local stand-in for archidekt.com (tests/fake_archidekt.py over HTTP). The gateway
+  # stack is deployed with MTG_ARCHIDEKT_BASE=http://archidektmock:8000/api, so no
+  # test ever reaches the real site. Runs from the gateway image (it has uvicorn).
+  archidektmock:
+    image: ${MTG_IMAGE:-mtg-gateway}:${MTG_TAG:-e2e}
+    command: ["python", "/e2e/tests/e2e/archidekt_mock.py"]
+    healthcheck:
+      disable: true  # the image's healthcheck probes the gateway port, which this service does not use
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+    volumes:
+      - type: bind
+        source: ${E2E_REPO_TESTS:?path to the repository's tests directory}
+        target: /e2e/tests
+        read_only: true
+    networks:
+      - mtgnet
+    deploy:
+      endpoint_mode: dnsrr
+      replicas: 1
+      restart_policy:
+        condition: any
+
+  # Local stand-in for api.scryfall.com (tests/fake_scryfall.py over HTTPS). The gateway's
+  # Scryfall client has no base-URL setting, so this service answers to the real hostname
+  # (network alias) with a test-CA certificate the trusted gateway image accepts.
+  scryfallmock:
+    image: ${MTG_IMAGE:-mtg-gateway}:${MTG_TAG:-e2e}
+    command: ["python", "/e2e/tests/e2e/scryfall_mock.py"]
+    environment:
+      PUID: "0"  # binds port 443
+      PGID: "0"
+      SSL_CERT: /run/e2e/scryfall.crt
+      SSL_KEY: /run/e2e/scryfall.key
+    configs:
+      - source: e2e_scryfall_cert
+        target: /run/e2e/scryfall.crt
+      - source: e2e_scryfall_key
+        target: /run/e2e/scryfall.key
+    healthcheck:
+      disable: true
+    volumes:
+      - type: bind
+        source: ${E2E_REPO_TESTS:?path to the repository's tests directory}
+        target: /e2e/tests
+        read_only: true
+    networks:
+      mtgnet:
+        aliases:
+          - api.scryfall.com
+    deploy:
+      endpoint_mode: dnsrr
+      replicas: 1
+      restart_policy:
+        condition: any
+
+  # Publishes a Client ID Metadata Document at https://cimd.e2e.test/claude-e2e.json, the way an
+  # MCP client that identifies by URL does (see cimd_mock.py and the network subnet note in run.sh).
+  cimdmock:
+    image: ${MTG_IMAGE:-mtg-gateway}:${MTG_TAG:-e2e}
+    command: ["python", "/e2e/tests/e2e/cimd_mock.py"]
+    environment:
+      PUID: "0"
+      PGID: "0"
+      SSL_CERT: /run/e2e/cimd.crt
+      SSL_KEY: /run/e2e/cimd.key
+    configs:
+      - source: e2e_cimd_cert
+        target: /run/e2e/cimd.crt
+      - source: e2e_cimd_key
+        target: /run/e2e/cimd.key
+    healthcheck:
+      disable: true
+    volumes:
+      - type: bind
+        source: ${E2E_REPO_TESTS:?path to the repository's tests directory}
+        target: /e2e/tests
+        read_only: true
+    networks:
+      mtgnet:
+        aliases:
+          - cimd.e2e.test
+    deploy:
+      endpoint_mode: dnsrr
+      replicas: 1
+      restart_policy:
+        condition: any
+
+  postgresql:
+    image: ${E2E_POSTGRES_IMAGE:-postgres:16-alpine}
+    environment:
+      POSTGRES_PASSWORD: e2e-postgres-password
+      POSTGRES_USER: authentik
+      POSTGRES_DB: authentik
+    networks:
+      - mtgnet
+    deploy:
+      endpoint_mode: dnsrr
+      replicas: 1
+      restart_policy:
+        condition: any
+
+  redis:
+    image: ${E2E_REDIS_IMAGE:-redis:7-alpine}
+    command: --save 60 1 --loglevel warning
+    networks:
+      - mtgnet
+    deploy:
+      endpoint_mode: dnsrr
+      replicas: 1
+      restart_policy:
+        condition: any
+
+  authentik-server:
+    image: ${E2E_AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server:2025.6.4}
+    command: server
+    environment: &ak_env
+      AUTHENTIK_SECRET_KEY: e2e-only-secret-key-not-for-production-0123456789abcdef
+      AUTHENTIK_REDIS__HOST: redis
+      AUTHENTIK_POSTGRESQL__HOST: postgresql
+      AUTHENTIK_POSTGRESQL__USER: authentik
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+      AUTHENTIK_POSTGRESQL__PASSWORD: e2e-postgres-password
+      AUTHENTIK_BOOTSTRAP_PASSWORD: ${E2E_AK_ADMIN_PASSWORD:?E2E_AK_ADMIN_PASSWORD REQUIRED}
+      AUTHENTIK_BOOTSTRAP_TOKEN: ${E2E_AK_TOKEN:?E2E_AK_TOKEN REQUIRED}
+      AUTHENTIK_BOOTSTRAP_EMAIL: akadmin@e2e.test
+      AUTHENTIK_DISABLE_UPDATE_CHECK: "true"
+      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+      AUTHENTIK_DISABLE_STARTUP_ANALYTICS: "true"
+    networks:
+      - mtgnet
+    deploy:
+      endpoint_mode: dnsrr
+      replicas: 1
+      restart_policy:
+        condition: any
+
+  authentik-worker:
+    image: ${E2E_AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server:2025.6.4}
+    command: worker
+    environment: *ak_env
+    networks:
+      - mtgnet
+    deploy:
+      endpoint_mode: dnsrr
+      replicas: 1
+      restart_policy:
+        condition: any
+
+networks:
+  mtgnet:
+    external: true
+    name: ${MTG_NETWORK_NAME:-mtg-gateway}

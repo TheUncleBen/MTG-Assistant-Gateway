@@ -1,0 +1,9 @@
+# Downloaded build tools, build output and keystores never go in the repository.
+.tools/
+out/
+*.keystore
+*.jks
+local.properties
+keystore.properties
+.gradle/
+build/

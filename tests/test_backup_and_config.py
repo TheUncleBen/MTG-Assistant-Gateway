@@ -1,0 +1,215 @@
+from __future__ import annotations
+
+import os
+from datetime import UTC, datetime
+from pathlib import Path
+
+import pytest
+from cryptography.fernet import Fernet
+
+from mtg_gateway.backup import export_now, prune, seconds_until
+from mtg_gateway.config import ConfigError, load_settings
+from mtg_gateway.db import Database
+
+
+def test_backup_export_and_prune(tmp_path: Path):
+    db = Database(tmp_path / "d" / "g.sqlite")
+    db.upsert_user("u1", email=None, name="x", preferred_username=None, groups=[])
+    out = export_now(db, tmp_path / "b", keep_days=14)
+    assert out.exists() and out.name.startswith("mtg-gateway-") and out.suffix == ".sqlite"
+    copy = Database(out)
+    assert copy.get_user("u1")["name"] == "x"
+    copy.close()
+    old = tmp_path / "b" / "mtg-gateway-20000101T000000Z.sqlite"
+    old.write_bytes(b"x")
+    os.utime(old, (0, 0))
+    assert prune(tmp_path / "b", keep_days=14) == 1
+    assert not old.exists() and out.exists()
+    db.close()
+
+
+def test_seconds_until_next_hour():
+    now = datetime(2026, 10, 4, 2, 30, tzinfo=UTC)
+    assert seconds_until(3, now) == 1800
+    assert seconds_until(2, now) == 23.5 * 3600
+
+
+def _write_secrets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "fernet").write_text(Fernet.generate_key().decode())
+    (tmp_path / "session").write_text("x" * 40)
+    (tmp_path / "oidc").write_text("client-secret")
+    monkeypatch.setenv("MTG_FERNET_KEY_FILE", str(tmp_path / "fernet"))
+    monkeypatch.setenv("MTG_SESSION_SECRET_FILE", str(tmp_path / "session"))
+    monkeypatch.setenv("MTG_OIDC_CLIENT_SECRET_FILE", str(tmp_path / "oidc"))
+    monkeypatch.setenv("MTG_PUBLIC_URL", "https://mtg.example.test/")
+    monkeypatch.setenv("MTG_OIDC_ISSUER", "https://auth.example.test/application/o/mtg/")
+    monkeypatch.setenv("MTG_OIDC_CLIENT_ID", "abc")
+    monkeypatch.setenv("MTG_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("MTG_REQUIRED_GROUP", "MTG Assistant Gateway Users")
+    monkeypatch.delenv("MTG_ALLOW_ANY_IDP_USER", raising=False)
+
+
+def test_load_settings_ok(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    _write_secrets(tmp_path, monkeypatch)
+    s = load_settings()
+    assert s.public_url == "https://mtg.example.test"
+    assert s.mcp_url == "https://mtg.example.test/mcp"
+    assert s.callback_url == "https://mtg.example.test/auth/callback"
+    assert s.allowed_hosts == ["mtg.example.test", "mtg.example.test:*"]
+    assert s.backup_dir is None
+
+
+def test_load_settings_requires_group_or_explicit_opt_out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    _write_secrets(tmp_path, monkeypatch)
+    assert load_settings().required_group == "MTG Assistant Gateway Users"
+    for empty in ("", "   "):
+        monkeypatch.setenv("MTG_REQUIRED_GROUP", empty)
+        with pytest.raises(ConfigError, match="MTG_ALLOW_ANY_IDP_USER"):
+            load_settings()
+    monkeypatch.delenv("MTG_REQUIRED_GROUP")
+    with pytest.raises(ConfigError, match="MTG_REQUIRED_GROUP is empty"):
+        load_settings()
+    monkeypatch.setenv("MTG_ALLOW_ANY_IDP_USER", "false")
+    with pytest.raises(ConfigError):
+        load_settings()
+    monkeypatch.setenv("MTG_ALLOW_ANY_IDP_USER", "true")
+    assert load_settings().required_group is None
+
+
+def test_load_settings_rejects_bad_fernet(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    _write_secrets(tmp_path, monkeypatch)
+    (tmp_path / "fernet").write_text("not-a-key")
+    with pytest.raises(ConfigError, match="Fernet"):
+        load_settings()
+
+
+def test_load_settings_rejects_http_public_url(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    _write_secrets(tmp_path, monkeypatch)
+    monkeypatch.setenv("MTG_PUBLIC_URL", "http://mtg.example.test")
+    with pytest.raises(ConfigError, match="https"):
+        load_settings()
+
+
+def test_load_settings_missing_secret_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    _write_secrets(tmp_path, monkeypatch)
+    monkeypatch.setenv("MTG_OIDC_CLIENT_SECRET_FILE", str(tmp_path / "missing"))
+    with pytest.raises(ConfigError, match="cannot read secret file"):
+        load_settings()
+
+
+async def test_pacer_releases_lock_when_cancelled() -> None:
+    import asyncio
+
+    from mtg_gateway.archidekt import ArchidektError, Pacer
+
+    pacer = Pacer(0.5)
+    async with pacer:
+        pass  # sets the next allowed time half a second out
+
+    async def waiter() -> None:
+        async with pacer:
+            pass
+
+    task = asyncio.create_task(waiter())
+    await asyncio.sleep(0.1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert not pacer._lock.locked()
+    pacer._open_until = 1e12  # breaker open
+    with pytest.raises(ArchidektError):
+        async with pacer:
+            pass
+    assert not pacer._lock.locked()
+
+
+def test_stuck_applying_proposals_are_failed_by_purge(tmp_path) -> None:
+    import time
+
+    from mtg_gateway.db import Database
+
+    db = Database(tmp_path / "x.sqlite")
+    db.save_proposal(
+        {
+            "id": "p1",
+            "owner_sub": "u",
+            "deck_id": "1",
+            "deck_name": "d",
+            "baseline_fingerprint": "f",
+            "changes": [],
+            "diff_text": "",
+            "expires_at": int(time.time()) + 100,
+        }
+    )
+    assert db.claim_proposal("p1", "u")
+    started = db.get_proposal("p1", "u")["applied_at"]
+    assert started
+    # Recording the snapshot mid-apply must not clear the start time (regression).
+    db.finish_proposal("p1", state="applying", snapshot_id="snap")
+    assert db.get_proposal("p1", "u")["applied_at"] == started
+    with db.tx() as c:
+        c.execute("UPDATE proposals SET created_at = ? WHERE id = 'p1'", (int(time.time()) - 7200,))
+    db.purge_expired()
+    assert db.get_proposal("p1", "u")["state"] == "applying"  # old proposal, but the apply just started
+    with db.tx() as c:
+        c.execute("UPDATE proposals SET applied_at = ? WHERE id = 'p1'", (int(time.time()) - 7200,))
+    db.purge_expired()
+    row = db.get_proposal("p1", "u")
+    assert row["state"] == "failed" and row["result"]["error"] == "interrupted"
+
+
+def test_trusted_proxies_default_and_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    _write_secrets(tmp_path, monkeypatch)
+    assert "10.0.0.0/8" in load_settings().trusted_proxies
+    monkeypatch.setenv("MTG_TRUSTED_PROXIES", "10.0.5.2, 192.168.1.0/24")
+    assert load_settings().trusted_proxies == ["10.0.5.2", "192.168.1.0/24"]
+    for bad in ("npm", "192.168.1.5/24"):
+        monkeypatch.setenv("MTG_TRUSTED_PROXIES", bad)
+        with pytest.raises(ConfigError):
+            load_settings()
+
+
+def test_load_settings_scryfall_lookup_interval(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    _write_secrets(tmp_path, monkeypatch)
+    assert load_settings().scryfall_lookup_interval == 0.5
+    monkeypatch.setenv("MTG_SCRYFALL_LOOKUP_INTERVAL", "1.25")
+    assert load_settings().scryfall_lookup_interval == 1.25
+    monkeypatch.setenv("MTG_SCRYFALL_LOOKUP_INTERVAL", "0")
+    with pytest.raises(ConfigError, match="MTG_SCRYFALL_LOOKUP_INTERVAL"):
+        load_settings()
+    monkeypatch.setenv("MTG_SCRYFALL_LOOKUP_INTERVAL", "fast")
+    with pytest.raises(ConfigError, match="MTG_SCRYFALL_LOOKUP_INTERVAL"):
+        load_settings()
+
+
+def test_load_settings_scan_thresholds(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    _write_secrets(tmp_path, monkeypatch)
+    s = load_settings()
+    assert (s.scan_fuzzy_min_similarity, s.scan_ambiguity_margin) == (0.65, 0.05)
+    assert (s.scan_fuzzy_confident_similarity, s.scan_auto_add_confidence) == (0.8, 80.0)
+    assert (s.scan_glare_ratio, s.scan_min_ocr_confidence) == (0.08, 50.0)
+    monkeypatch.setenv("MTG_SCAN_FUZZY_MIN_SIMILARITY", "0.8")
+    monkeypatch.setenv("MTG_SCAN_AUTO_ADD_CONFIDENCE", "90")
+    monkeypatch.setenv("MTG_SCAN_GLARE_RATIO", "0.2")
+    monkeypatch.setenv("MTG_SCAN_MIN_OCR_CONFIDENCE", "35")
+    s = load_settings()
+    assert (s.scan_fuzzy_min_similarity, s.scan_auto_add_confidence) == (0.8, 90.0)
+    assert (s.scan_glare_ratio, s.scan_min_ocr_confidence) == (0.2, 35.0)
+    monkeypatch.setenv("MTG_SCAN_MIN_OCR_CONFIDENCE", "120")
+    with pytest.raises(ConfigError, match="MTG_SCAN_MIN_OCR_CONFIDENCE"):
+        load_settings()
+    monkeypatch.delenv("MTG_SCAN_MIN_OCR_CONFIDENCE")
+    monkeypatch.setenv("MTG_SCAN_FUZZY_MIN_SIMILARITY", "0.1")
+    with pytest.raises(ConfigError, match="MTG_SCAN_FUZZY_MIN_SIMILARITY"):
+        load_settings()
+
+
+def test_backup_is_owner_only_even_with_a_loose_umask(tmp_path: Path):
+    db = Database(tmp_path / "d" / "g.sqlite")
+    old = os.umask(0o022)  # what `docker exec ... mtg-gateway backup` runs with
+    try:
+        out = export_now(db, tmp_path / "b", keep_days=14)
+    finally:
+        os.umask(old)
+    assert out.stat().st_mode & 0o777 == 0o600
+    db.close()

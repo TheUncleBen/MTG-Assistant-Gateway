@@ -1,0 +1,21 @@
+name: Feature request
+description: An idea for something the gateway could do, or a setup it should support.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you're trying to do
+      description: The problem or the workflow, in your own words.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help
+      description: How you imagine it working. Rough is fine.
+  - type: textarea
+    id: setup
+    attributes:
+      label: Your setup, if it matters
+      description: Identity provider, reverse proxy, how you deploy, which assistant.

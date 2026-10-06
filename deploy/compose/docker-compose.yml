@@ -1,0 +1,163 @@
+# MTG Assistant Gateway: plain Docker Compose (one machine, no Swarm).
+#
+# Same two services as deploy/portainer-stack.yml, for people who don't run a
+# Swarm. Walkthrough: docs/DEPLOY-COMPOSE.md. In short:
+#
+#   cp .env.example .env              # then edit the REQUIRED lines
+#   ./make-secrets.sh                 # or create ./secrets/*.txt by hand
+#   docker compose up -d
+#
+# Everything you change lives in .env. Secrets are files in ./secrets/, mounted
+# at /run/secrets/ exactly like Swarm secrets, never environment variables.
+#
+# The gateway listens on 127.0.0.1:${MTG_HTTP_PORT:-8080} on this machine for a
+# reverse proxy that runs here too. To put a proxy container in front instead,
+# see docs/REVERSE-PROXY.md (deploy/proxy/ has ready-made overrides).
+
+name: ${COMPOSE_PROJECT_NAME:-mtg-gateway}
+
+secrets:
+  mtg_fernet_key:
+    file: ${MTG_SECRETS_DIR:-./secrets}/mtg_fernet_key.txt
+  mtg_session_secret:
+    file: ${MTG_SECRETS_DIR:-./secrets}/mtg_session_secret.txt
+  mtg_oidc_client_secret:
+    file: ${MTG_SECRETS_DIR:-./secrets}/mtg_oidc_client_secret.txt
+
+services:
+  # The gateway: OAuth server for AI clients, MCP endpoint and browser pages.
+  gateway:
+    image: ${MTG_IMAGE:-ghcr.io/theuncleben/mtg-assistant-gateway}:${MTG_TAG:-latest}
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=5)"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    secrets:
+      - mtg_fernet_key
+      - mtg_session_secret
+      - mtg_oidc_client_secret
+    environment:
+      MTG_PUBLIC_URL: ${MTG_PUBLIC_URL:?PUBLIC HTTPS URL REQUIRED e.g. https://mtg.example.com}
+      MTG_OIDC_ISSUER: ${MTG_OIDC_ISSUER:?OIDC ISSUER URL REQUIRED}
+      MTG_OIDC_CLIENT_ID: ${MTG_OIDC_CLIENT_ID:?OIDC CLIENT ID REQUIRED}
+      MTG_OIDC_CLIENT_SECRET_FILE: /run/secrets/mtg_oidc_client_secret
+      MTG_FERNET_KEY_FILE: /run/secrets/mtg_fernet_key
+      MTG_SESSION_SECRET_FILE: /run/secrets/mtg_session_secret
+      MTG_OIDC_SCOPES: ${MTG_OIDC_SCOPES:-openid profile email}
+      MTG_REQUIRED_GROUP: ${MTG_REQUIRED_GROUP:-}
+      MTG_ALLOW_ANY_IDP_USER: ${MTG_ALLOW_ANY_IDP_USER:-false}
+      # Optional. Empty values fall back to the gateway's defaults (docs/DEPLOY.md, environment reference).
+      MTG_ADMIN_GROUP: ${MTG_ADMIN_GROUP:-}
+      MTG_OIDC_GROUPS_CLAIM: ${MTG_OIDC_GROUPS_CLAIM:-}
+      MTG_OIDC_TOKEN_AUTH_METHOD: ${MTG_OIDC_TOKEN_AUTH_METHOD:-}
+      MTG_SERVER_NAME: ${MTG_SERVER_NAME:-}
+      MTG_DATA_DIR: /data
+      MTG_BACKUP_DIR: /backups
+      MTG_BACKUP_HOUR_UTC: ${MTG_BACKUP_HOUR_UTC:-3}
+      MTG_BACKUP_KEEP_DAYS: ${MTG_BACKUP_KEEP_DAYS:-14}
+      MTG_LOG_LEVEL: ${MTG_LOG_LEVEL:-INFO}
+      # Set to an empty value (and drop the mysticforge service) to run without research tools.
+      MTG_MYSTIC_FORGE_URL: ${MTG_MYSTIC_FORGE_URL-http://mysticforge:8000/mcp}
+      MTG_WRITES_ENABLED: ${MTG_WRITES_ENABLED:-false}
+      MTG_APPLY_VIA_MCP: ${MTG_APPLY_VIA_MCP:-false}
+      MTG_APPLY_MIN_AGE_SECONDS: ${MTG_APPLY_MIN_AGE_SECONDS:-15}
+      MTG_ARCHIDEKT_BACKUPS: ${MTG_ARCHIDEKT_BACKUPS:-true}
+      MTG_ARCHIDEKT_BACKUP_FOLDER: ${MTG_ARCHIDEKT_BACKUP_FOLDER:-MTG Gateway backups}
+      MTG_ACCESS_TOKEN_TTL: ${MTG_ACCESS_TOKEN_TTL:-3600}
+      MTG_REFRESH_TOKEN_TTL: ${MTG_REFRESH_TOKEN_TTL:-2592000}
+      MTG_BROWSER_SESSION_TTL: ${MTG_BROWSER_SESSION_TTL:-7200}
+      MTG_REAUTH_INTERVAL: ${MTG_REAUTH_INTERVAL:-604800}
+      MTG_TRUSTED_PROXIES: ${MTG_TRUSTED_PROXIES:-}
+      # Host headers /mcp accepts. Empty = the host in MTG_PUBLIC_URL.
+      MTG_ALLOWED_HOSTS: ${MTG_ALLOWED_HOSTS:-}
+      MTG_CIMD_ENABLED: ${MTG_CIMD_ENABLED:-true}
+      MTG_CIMD_ALLOWED_HOSTS: ${MTG_CIMD_ALLOWED_HOSTS:-}
+      MTG_SCRYFALL_LOOKUP_INTERVAL: ${MTG_SCRYFALL_LOOKUP_INTERVAL:-0.5}
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TIMEZONE:-UTC}
+    ports:
+      # Only this machine can reach it; your reverse proxy adds HTTPS in front.
+      - "${MTG_HTTP_BIND:-127.0.0.1}:${MTG_HTTP_PORT:-8080}:8080"
+    volumes:
+      - type: bind
+        source: ${MTG_DATA_DIR:-./data}
+        target: /data
+      - type: bind
+        source: ${MTG_BACKUP_DIR:-./backups}
+        target: /backups
+    networks:
+      - mtg
+      - mysticforge
+    # Least privilege: the entrypoint starts as root only to match PUID/PGID, then drops to
+    # that user with setpriv --no-new-privs; these four capabilities are all it needs.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      mysticforge:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          memory: ${MTG_MEMORY_LIMIT:-256M}
+
+  # Mystic Forge: internal research and simulation service. No published ports;
+  # only the gateway talks to it.
+  mysticforge:
+    image: ${MF_IMAGE:-ghcr.io/theuncleben/mtg-assistant-mysticforge}:${MF_TAG:-1.3.2-mag2}
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=8)"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    environment:
+      # Fixed on purpose: no MTGJSON price download and no ntfy.sh pushes.
+      MYSTIC_FORGE_NO_INGEST: "1"
+      MYSTIC_FORGE_NTFY_OFF: "1"
+      # Base URL Mystic Forge prints in links. Its own default is the upstream
+      # author's public site, so always set it.
+      MYSTIC_FORGE_PUBLIC_BASE: ${MF_PUBLIC_BASE:-http://mysticforge:8000}
+      MYSTIC_FORGE_DB: /data/mystic_forge.db
+      MYSTIC_FORGE_CR: /data/cr_cache.txt
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TIMEZONE:-UTC}
+    # Only on its own network with the gateway: a proxy container on "mtg" can't reach it.
+    networks:
+      - mysticforge
+    # Least privilege: the entrypoint starts as root only to match PUID/PGID, then drops to
+    # that user with setpriv --no-new-privs; these four capabilities are all it needs.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: ${MF_MEMORY_LIMIT:-512M}
+
+networks:
+  mtg:
+    name: ${MTG_NETWORK_NAME:-mtg-gateway}
+  mysticforge:

@@ -1,0 +1,115 @@
+Subject: archidekt_user_decks: filter on ownerUsername, Archidekt ignores owner
+
+archidekt_user_decks asks GET https://archidekt.com/api/decks/v3/ with
+owner=<username>&ownerexact=true. Archidekt ignores both parameters and
+returns everyone's recently updated decks (count 1000), so the tool listed
+strangers' decks under the requested user's name. Checked live on
+2026-10-04: owner=<a real username> returned 60 decks from other users;
+ownerUsername=DoctorBaggins returned that user's 48 decks only (exact match,
+case-insensitive; a partial name or unknown user gives count -1 and no
+results). Archidekt's own profile page links "View all decks" to
+/search/decks?ownerUsername=<username>. pageSize is ignored as well.
+
+This patch sends ownerUsername, keeps only results owned by that user (in
+case the filter is ignored again), applies the limit locally and reports
+count -1 as 0. Tests: tests/test_archidekt_user_decks_owner.py.
+
+Upstream: Kautiontape/mystic-forge at dd82cd1 (main, 2026-10-04) has no fix,
+and no open pull request touches this code. Drop this patch when it does.
+
+diff --git a/server.py b/server.py
+index 81524c9..4dafd14 100644
+--- a/server.py
++++ b/server.py
+@@ -1828,17 +1828,26 @@ async def archidekt_deck(params: ArchidektDeckInput) -> str:
+ async def archidekt_user_decks(params: ArchidektUserInput) -> str:
+     """List a user's public decks on Archidekt."""
+     try:
++        # Archidekt's deck search ignores "owner"/"ownerexact" and returns
++        # everyone's decks; its own "View all decks" link filters on
++        # ownerUsername (exact, case-insensitive). pageSize is ignored too.
+         data = await _archidekt_get("/decks/v3/", params={
+-            "owner": params.username,
+-            "ownerexact": "true",
++            "ownerUsername": params.username,
+             "orderBy": "-updatedAt",
+             "pageSize": params.limit,
+         })
+     except Exception as e:
+         return _archidekt_error(e)
+ 
+-    results = data.get("results", [])
++    # Keep only the requested owner's decks, in case the filter is ignored again.
++    wanted = params.username.casefold()
++    raw = data.get("results", [])
++    results = [d for d in raw
++               if str((d.get("owner") or {}).get("username", "")).casefold() == wanted]
+     total = data.get("count", len(results))
++    if len(results) != len(raw) or not isinstance(total, int) or total < len(results):
++        total = len(results)  # an unknown user comes back as count -1
++    results = results[:params.limit]
+ 
+     parts: list[str] = []
+     parts.append(f"# Decks by {params.username} ({total} total)")
+diff --git a/tests/test_archidekt_user_decks_owner.py b/tests/test_archidekt_user_decks_owner.py
+new file mode 100644
+index 0000000..7602553
+--- /dev/null
++++ b/tests/test_archidekt_user_decks_owner.py
+@@ -0,0 +1,56 @@
++"""archidekt_user_decks must list only the named user's decks.
++
++Archidekt's deck search ignores "owner"/"ownerexact" and returns everyone's
++recent decks; "ownerUsername" is the filter its own site uses. These tests
++pin the parameter sent and the owner check on the reply."""
++
++import httpx
++
++import server
++
++
++def _deck(i, owner):
++    return {"id": i, "name": f"Deck {i}", "deckFormat": 3,
++            "updatedAt": "2026-10-04T00:00:00Z", "owner": {"username": owner}}
++
++
++def _mock(monkeypatch, body, seen):
++    real = httpx.AsyncClient
++
++    def handler(request):
++        seen.append(request.url)
++        return httpx.Response(200, json=body)
++
++    def client(*args, **kwargs):
++        kwargs["transport"] = httpx.MockTransport(handler)
++        return real(*args, **kwargs)
++
++    monkeypatch.setattr(server.httpx, "AsyncClient", client)
++
++
++async def test_sends_owner_username(monkeypatch):
++    seen = []
++    _mock(monkeypatch, {"count": 2, "results": [_deck(1, "Alice"), _deck(2, "Alice")]}, seen)
++    out = await server.archidekt_user_decks(server.ArchidektUserInput(username="alice", limit=5))
++    params = seen[0].params
++    assert params["ownerUsername"] == "alice"
++    assert "owner" not in params and "ownerexact" not in params
++    assert "# Decks by alice (2 total)" in out
++    assert "Deck 1" in out and "Deck 2" in out
++
++
++async def test_drops_other_owners_and_honours_limit(monkeypatch):
++    body = {"count": 1000, "results": [_deck(1, "Bob"), _deck(2, "Alice"),
++                                       _deck(3, "Alice"), _deck(4, "Alice")]}
++    _mock(monkeypatch, body, [])
++    out = await server.archidekt_user_decks(server.ArchidektUserInput(username="Alice", limit=2))
++    assert "Deck 1" not in out
++    assert "Deck 2" in out and "Deck 3" in out and "Deck 4" not in out
++    assert "(3 total)" in out
++
++
++async def test_unknown_user(monkeypatch):
++    _mock(monkeypatch, {"count": -1, "results": []}, [])
++    out = await server.archidekt_user_decks(server.ArchidektUserInput(username="nobody"))
++    assert "(0 total)" in out
++    assert "No public decks found." in out

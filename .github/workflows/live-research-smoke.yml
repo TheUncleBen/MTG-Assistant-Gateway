@@ -1,0 +1,211 @@
+name: Live research smoke
+
+# Calls every Mystic Forge research tool through the gateway against the live
+# public services (Scryfall, EDHREC, Commander Spellbook, MTGJSON, Wizards,
+# Archidekt's public API) against one public Archidekt deck. Read-only:
+# writes stay disabled and no Archidekt account is linked. Runs only when started by
+# hand: it spends paid runner minutes and calls real services. The deck comes from the
+# deck_id input, or from the repository variable LIVE_SMOKE_DECK_ID; without either the job is skipped.
+# The runner is x86_64, so the memory figures only indicate what the Pi will see.
+
+on:
+  workflow_dispatch:
+    inputs:
+      gateway_tag:
+        description: "Gateway image tag to test (e.g. latest, main-<sha>)"
+        default: latest
+      deck_id:
+        description: "Numeric id of a public Archidekt deck to read (defaults to the LIVE_SMOKE_DECK_ID repository variable)"
+        default: ""
+      mystic_forge_tag:
+        description: "Mystic Forge image tag to test (empty = the tag this branch's Dockerfile builds, e.g. 1.3.2-mag2)"
+        default: ""
+
+permissions:
+  contents: read
+  packages: read
+
+# Image references must be lowercase, so the owner is spelled out (as in deploy/portainer-stack.yml).
+env:
+  MTG_IMAGE: ghcr.io/theuncleben/mtg-assistant-gateway:${{ inputs.gateway_tag || 'latest' }}
+  MF_TAG_INPUT: ${{ inputs.mystic_forge_tag }}
+  LIVE_SMOKE_DECK_ID: ${{ inputs.deck_id || vars.LIVE_SMOKE_DECK_ID }}
+
+jobs:
+  smoke:
+    if: inputs.deck_id != '' || vars.LIVE_SMOKE_DECK_ID != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - run: pip install -c constraints.txt -e ".[dev]"
+
+      - name: Choose the Mystic Forge tag
+        shell: bash
+        run: |
+          set -eu
+          # A manual run tests the tag it was given; a push tests the tag this
+          # branch's Dockerfile produces (MF_VERSION-MF_LOCAL).
+          own="$(sed -n 's/^ARG MF_VERSION=//p' docker/mystic-forge/Dockerfile)-$(sed -n 's/^ARG MF_LOCAL=//p' docker/mystic-forge/Dockerfile)"
+          tag="${MF_TAG_INPUT:-$own}"
+          for t in "$own" "$tag"; do
+            [[ "$t" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] || { echo "bad image tag: $t"; exit 1; }
+          done
+          echo "MF_OWN_TAG=$own" >> "$GITHUB_ENV"
+          echo "MF_IMAGE=ghcr.io/theuncleben/mtg-assistant-mysticforge:$tag" >> "$GITHUB_ENV"
+
+      - name: Pull the published images (build them if the pull is refused)
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          for ref in "$MTG_IMAGE" "$MF_IMAGE"; do
+            # Whole-string match (grep matches per line, so a tag with a newline could pass).
+            [[ "$ref" =~ ^ghcr\.io/theuncleben/[a-z0-9-]+:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] || { echo "bad image tag: $ref"; exit 1; }
+          done
+          trap 'docker logout ghcr.io' EXIT
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          # Building is only a fallback for the default tags; a requested tag must exist.
+          if docker pull "$MTG_IMAGE"; then echo "gateway=pulled $MTG_IMAGE" >> "$RUNNER_TEMP/images.txt"
+          elif [ "${MTG_IMAGE##*:}" = latest ]; then
+            docker build -t "$MTG_IMAGE" . && echo "gateway=built from $GITHUB_SHA" >> "$RUNNER_TEMP/images.txt"
+          else echo "could not pull $MTG_IMAGE"; exit 1; fi
+          if docker pull "$MF_IMAGE"; then echo "mystic_forge=pulled $MF_IMAGE" >> "$RUNNER_TEMP/images.txt"
+          # Also build when the tag is the one this branch's Dockerfile produces, so
+          # an unpublished patch set (a PR bumping MF_LOCAL) can be tested first.
+          elif [ "${MF_IMAGE##*:}" = "$MF_OWN_TAG" ]; then
+            docker build -f docker/mystic-forge/Dockerfile -t "$MF_IMAGE" . && echo "mystic_forge=built from $GITHUB_SHA" >> "$RUNNER_TEMP/images.txt"
+          else echo "could not pull $MF_IMAGE"; exit 1; fi
+          docker image inspect --format '{{index .RepoDigests 0}} {{.Created}}' "$MTG_IMAGE" "$MF_IMAGE" || true
+          cat "$RUNNER_TEMP/images.txt"
+
+      - name: Start Mystic Forge and the gateway with the stack's memory caps
+        run: |
+          set -eux
+          mkdir -p "$RUNNER_TEMP/secrets"
+          python3 -c 'import secrets; print(secrets.token_urlsafe(48))' > "$RUNNER_TEMP/secrets/session"
+          python3 -c 'import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())' > "$RUNNER_TEMP/secrets/fernet"
+          echo unused-client-secret > "$RUNNER_TEMP/secrets/oidc"
+          chmod 0444 "$RUNNER_TEMP"/secrets/*
+          docker network create mtgnet
+          # Same environment as deploy/portainer-stack.yml.
+          docker run -d --name mtg-assistant-mysticforge --network mtgnet --memory 512m \
+            -e MYSTIC_FORGE_NO_INGEST=1 -e MYSTIC_FORGE_NTFY_OFF=1 \
+            -e MYSTIC_FORGE_PUBLIC_BASE=http://mtg-assistant-mysticforge:8000 \
+            -e MYSTIC_FORGE_DB=/data/mystic_forge.db -e MYSTIC_FORGE_CR=/data/cr_cache.txt \
+            -e PUID=1000 -e PGID=1000 -e TZ=UTC "$MF_IMAGE"
+          # No identity provider is needed: the access token is seeded below.
+          docker run -d --name gw --network mtgnet --memory 256m -p 8080:8080 \
+            -e PUID=1000 -e PGID=1000 -e TZ=UTC \
+            -e MTG_PUBLIC_URL=http://localhost:8080 \
+            -e MTG_OIDC_ISSUER=https://auth.invalid/application/o/mtg/ \
+            -e MTG_OIDC_CLIENT_ID=smoke \
+            -e MTG_OIDC_CLIENT_SECRET_FILE=/run/secrets/oidc \
+            -e MTG_FERNET_KEY_FILE=/run/secrets/fernet \
+            -e MTG_SESSION_SECRET_FILE=/run/secrets/session \
+            -e MTG_ALLOW_ANY_IDP_USER=true \
+            -e MTG_MYSTIC_FORGE_URL=http://mtg-assistant-mysticforge:8000/mcp \
+            -e MTG_WRITES_ENABLED=false \
+            -v "$RUNNER_TEMP/secrets:/run/secrets:ro" "$MTG_IMAGE"
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:8080/healthz && break
+            sleep 1
+          done
+          for i in $(seq 1 60); do
+            docker exec mtg-assistant-mysticforge python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)" && break
+            sleep 1
+          done
+          echo "idle:"; docker stats --no-stream --format '{{.Name}} {{.MemUsage}}' gw mtg-assistant-mysticforge
+
+      - name: Seed one test user and a one-hour access token in the gateway database
+        run: |
+          set -eu
+          token=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
+          echo "::add-mask::$token"
+          printf '%s' "$token" > "$RUNNER_TEMP/token"
+          # The token goes in through the environment, never on a command line.
+          SMOKE_TOKEN="$token" docker exec -i -e SMOKE_TOKEN --user 1000:1000 gw python - <<'PY'
+          import os, time
+          from mtg_gateway.config import load_settings
+          from mtg_gateway.db import Database
+          s = load_settings()
+          db = Database(s.db_path)
+          db.upsert_user("smoke-user", email=None, name="Live research smoke", preferred_username="smoke", groups=[])
+          db.save_token(os.environ["SMOKE_TOKEN"], kind="access", client_id="smoke-client", sub="smoke-user", scopes=["mtg"],
+                        resource=s.mcp_url, family="smoke", expires_at=int(time.time()) + 3600)
+          print("seeded token for", s.mcp_url)
+          PY
+
+      - name: Call every research tool through the gateway
+        run: |
+          set -u
+          # Sample container memory once a second while the tools run.
+          ( while true; do docker stats --no-stream --format '{{.Name}} {{.MemUsage}}' gw mtg-assistant-mysticforge >> "$RUNNER_TEMP/memsamples.txt"; sleep 1; done ) &
+          sampler=$!
+          python3 scripts/live_research_smoke.py --url http://localhost:8080/mcp \
+            --token-file "$RUNNER_TEMP/token" --out "$RUNNER_TEMP/results.json"
+          status=$?
+          kill "$sampler" || true
+          echo "status=$status" >> "$GITHUB_ENV"
+
+      - name: Memory report
+        if: always()
+        run: |
+          set -u
+          python3 - <<'PY'
+          import json, os, re, subprocess
+          tmp = os.environ["RUNNER_TEMP"]
+          units = {"B": 1, "KiB": 1024, "MiB": 1024**2, "GiB": 1024**3}
+          peak = {}
+          try:
+              for line in open(f"{tmp}/memsamples.txt"):
+                  m = re.match(r"(\S+) ([\d.]+)(\w+) / ([\d.]+)(\w+)", line)
+                  if m:
+                      used = float(m.group(2)) * units[m.group(3)]
+                      peak[m.group(1)] = max(peak.get(m.group(1), 0), used)
+          except FileNotFoundError:
+              pass
+          mem = {}
+          for name, cap in (("mtg-assistant-mysticforge", 512), ("gw", 256)):
+              cg = subprocess.run(["docker", "exec", name, "cat", "/sys/fs/cgroup/memory.peak"],
+                                  capture_output=True, text=True).stdout.strip()
+              oom = subprocess.run(["docker", "inspect", "-f", "{{.State.OOMKilled}} {{.RestartCount}}", name],
+                                   capture_output=True, text=True).stdout.strip()
+              mem[name] = {
+                  "cap_mib": cap,
+                  "peak_sampled_mib": round(peak.get(name, 0) / 1024**2, 1),
+                  "cgroup_memory_peak_mib": round(int(cg) / 1024**2, 1) if cg.isdigit() else None,
+                  "oom_killed_restarts": oom,
+              }
+          print(json.dumps(mem, indent=2))
+          path = f"{tmp}/results.json"
+          data = json.load(open(path)) if os.path.exists(path) else {"results": []}
+          data["memory"] = mem
+          images = open(f"{tmp}/images.txt").read().splitlines() if os.path.exists(f"{tmp}/images.txt") else []
+          data["runner"] = {"arch": os.uname().machine, "images": images}
+          json.dump(data, open(path, "w"), indent=2)
+          PY
+          cp "$RUNNER_TEMP/results.json" live-research-results.json
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: live-research-results
+          path: live-research-results.json
+          if-no-files-found: warn
+
+      - name: Container logs
+        if: always()
+        run: |
+          docker logs --tail 200 gw 2>&1 || true
+          docker logs --tail 200 mtg-assistant-mysticforge 2>&1 || true
+
+      - name: Fail if any tool failed
+        if: always()
+        run: test "${status:-1}" = "0"
