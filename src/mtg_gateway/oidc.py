@@ -140,7 +140,9 @@ class OIDCClient:
         self._jwks_at = time.time()
         return self._jwks
 
-    async def authorization_url(self, *, state: str, nonce: str, code_challenge: str) -> str:
+    async def authorization_url(
+        self, *, state: str, nonce: str, code_challenge: str, prompt: str | None = None
+    ) -> str:
         meta = await self.metadata()
         params = {
             "response_type": "code",
@@ -152,6 +154,8 @@ class OIDCClient:
             "code_challenge": code_challenge,
             "code_challenge_method": "S256",
         }
+        if prompt:
+            params["prompt"] = prompt
         return f"{meta['authorization_endpoint']}?{urlencode(params)}"
 
     async def exchange_code(self, code: str, code_verifier: str, nonce: str) -> Identity:
@@ -301,6 +305,11 @@ class OIDCClient:
                 # joserfc compares 'iss' exactly; accept a trailing-slash variant.
                 claims["iss"] = str(claims.get("iss", "")).rstrip("/")
                 registry.validate(claims)
+                aud = claims.get("aud")
+                if isinstance(aud, list) and len(aud) > 1 and claims.get("azp") != self.client_id:
+                    # OIDC Core 3.1.3.7: a token for several audiences must name this client as
+                    # the authorized party, or it was issued to someone else.
+                    raise OIDCError("ID token validation failed: azp does not name this client")
                 return claims
             except JoseError as exc:
                 last_exc = exc

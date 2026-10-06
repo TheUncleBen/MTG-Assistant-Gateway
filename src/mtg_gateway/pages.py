@@ -36,6 +36,7 @@ BROWSER_CLIENT_ID = "__browser__"
 def add_browser_routes(server: MCPServer, state: AppState) -> None:
     s = state.settings
     secure = s.public_url.startswith("https://")
+    fresh_cookie = cookie_name("mtg_fresh_login", s)
     session_cookie = cookie_name(SESSION_COOKIE, s)
 
     def page(
@@ -81,11 +82,18 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         sub, _sid = current(request)
         if sub:
             return RedirectResponse(nxt, status_code=302)
+        # Right after a sign-out on this device, the identity provider is asked to make the person
+        # enter their credentials again, so the next person on a shared device or the Android app
+        # is not silently signed back in as the previous one.
+        fresh = request.cookies.get(fresh_cookie) == "1"
         try:
-            url = await state.provider.start_idp_login(BROWSER_CLIENT_ID, {"next": nxt})
+            url = await state.provider.start_idp_login(BROWSER_CLIENT_ID, {"next": nxt}, force_login=fresh)
         except LoginError as exc:
             return page("Sign-in unavailable", f"<p>{html.escape(str(exc))}</p>", status=exc.status)
-        return RedirectResponse(url, status_code=302, headers={"Cache-Control": "no-store"})
+        resp = RedirectResponse(url, status_code=302, headers={"Cache-Control": "no-store"})
+        if fresh:
+            resp.delete_cookie(fresh_cookie, path="/", secure=secure, httponly=True, samesite="lax")
+        return resp
 
     @server.custom_route("/logout", methods=["GET"], include_in_schema=False)
     async def logout_confirm(request: Request) -> Response:
@@ -99,7 +107,10 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             "<p class='muted small'>Unsaved scan drafts on this device are cleared too.</p>"
             "<form method='post' action='/logout'>"
             f"<input type='hidden' name='csrf' value='{html.escape(_csrf(s, sid) or '')}'>"
-            "<button class='primary'>Sign out</button></form></div>",
+            "<div class='actions'><button class='primary'>Sign out</button>"
+            "<button name='everywhere' value='1'>Sign out on all my devices</button></div></form>"
+            "<p class='muted small'>All devices signs out every browser and the Android app. "
+            "Connected AI apps keep working; disconnect them on your Account page.</p></div>",
             sub=sub,
             sid=sid,
         )
@@ -115,11 +126,19 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             # no cookie deletion and no Clear-Site-Data, which would wipe unsaved scan drafts.
             return RedirectResponse("/logout" if sub else "/signed-out", status_code=303)
         state.db.delete_browser_session(sid)
+        if data.get("everywhere") == "1":
+            n = state.db.delete_browser_sessions_for(sub)
+            state.db.audit(
+                "signed_out_everywhere", sub=sub, client_id=BROWSER_CLIENT_ID, detail={"sessions": n}
+            )
         # Not "/": the dashboard needs a session, so it would send the browser straight to sign-in.
         resp = RedirectResponse("/signed-out", status_code=303)
         resp.delete_cookie(session_cookie, path="/", secure=secure, httponly=True, samesite="lax")
         # Ask the browser to drop cached pages and site storage (scan drafts and the like) too.
         resp.headers["Clear-Site-Data"] = '"cache", "storage"'
+        resp.set_cookie(
+            fresh_cookie, "1", max_age=3600, path="/", secure=secure, httponly=True, samesite="lax"
+        )
         return resp
 
     @server.custom_route("/theme", methods=["POST"], include_in_schema=False)
@@ -371,10 +390,11 @@ def _csrf(s: Any, sid: str | None) -> str | None:
 def browser_session(state: Any, request: Request) -> tuple[str | None, str | None]:
     """(subject, session id) for the signed-in person, or (None, None).
 
-    A browser session is only created after a sign-in that passed MTG_REQUIRED_GROUP. The
-    group is checked again on every request against the groups recorded at that sign-in, so
-    changing MTG_REQUIRED_GROUP locks out existing sessions at once, as does an admin disabling
-    the account.
+    A browser session is only created after a sign-in that passed MTG_REQUIRED_GROUP. Before the
+    request reaches here, MembershipMiddleware has asked the identity provider for the person's
+    current groups (membership.py) and revoked everything of a removed member, and the recorded
+    groups were updated; they are checked again here, so a removal at the provider, a changed
+    MTG_REQUIRED_GROUP or an admin disabling the account all lock the session out.
     """
     sid = request.cookies.get(cookie_name(SESSION_COOKIE, state.settings))
     sub = state.db.get_browser_session(sid) if sid else None

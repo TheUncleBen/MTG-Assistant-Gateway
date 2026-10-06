@@ -156,6 +156,9 @@ class Server:
         self.db = Database(settings.db_path)
         oidc = OIDCClient(IDP, CLIENT_ID, CLIENT_SECRET, settings.callback_url, settings.oidc_scopes)
         self.app = create_app(settings, db=self.db, oidc=oidc)
+        # Sessions here are made directly in the database (sign_in), with no identity provider to
+        # ask, so the live membership check is switched off (test_live_membership.py covers it).
+        self.app.state.gateway.membership = None
         self.sf = FakeScryfall()
         service = self.app.state.gateway.scan
         service.scryfall = ScryfallClient("https://scryfall.test", min_interval=0.0, http=self.sf.client())

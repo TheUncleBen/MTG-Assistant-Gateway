@@ -246,6 +246,9 @@ def _step_7(conn: sqlite3.Connection) -> None:
             updated_at INTEGER NOT NULL
         )"""
     )
+    # The identity provider (issuer) each member first signed in with: a subject from another
+    # provider is a different person even when the strings match.
+    _add_column(conn, "users", "idp_issuer", "TEXT")
 
 
 # Applied in order; ``PRAGMA user_version`` records how many have run. Append, never edit.
@@ -340,18 +343,20 @@ class Database:
         name: str | None,
         preferred_username: str | None,
         groups: list[str],
+        issuer: str | None = None,
     ) -> None:
         now = int(time.time())
         with self.tx() as c:
             c.execute(
                 """INSERT INTO users
                    (sub, email, name, preferred_username, groups_json, first_login_at, last_login_at,
-                    last_seen_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    last_seen_at, idp_issuer)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(sub) DO UPDATE SET email=excluded.email, name=excluded.name,
                      preferred_username=excluded.preferred_username, groups_json=excluded.groups_json,
-                     last_login_at=excluded.last_login_at, last_seen_at=excluded.last_seen_at""",
-                (sub, email, name, preferred_username, json.dumps(groups), now, now, now),
+                     last_login_at=excluded.last_login_at, last_seen_at=excluded.last_seen_at,
+                     idp_issuer=COALESCE(users.idp_issuer, excluded.idp_issuer)""",
+                (sub, email, name, preferred_username, json.dumps(groups), now, now, now, issuer),
             )
 
     def touch_user(self, sub: str) -> None:

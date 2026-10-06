@@ -415,6 +415,15 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             raise LoginError("Your account is not in the group that may use this service.", 403)
 
         known = self.db.get_user(identity.sub)
+        if known and known.get("idp_issuer") and known["idp_issuer"] != self.oidc.issuer:
+            # The same subject string from a different identity provider is not the same person:
+            # never hand them the earlier member's decks, apps or Archidekt link.
+            self.db.audit("login_rejected_issuer", sub=identity.sub, client_id=session["client_id"])
+            raise LoginError(
+                "This account belongs to a different sign-in provider than the one this gateway uses "
+                "now. Ask the gateway's admin to delete the old account's data, then sign in again.",
+                403,
+            )
         if known and known.get("disabled_at"):
             self.db.audit("login_rejected_disabled", sub=identity.sub, client_id=session["client_id"])
             self.db.delete_browser_sessions_for(identity.sub)
@@ -470,8 +479,12 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         self.db.audit("login_ok", sub=identity.sub, client_id=session["client_id"])
         return construct_redirect_uri(client_redirect, code=gw_code, state=params.state)
 
-    async def start_idp_login(self, client_id: str, params: dict[str, Any]) -> str:
-        """Create a login session for a non-MCP caller (the browser pages) and return the IdP URL."""
+    async def start_idp_login(
+        self, client_id: str, params: dict[str, Any], *, force_login: bool = False
+    ) -> str:
+        """Create a login session for a non-MCP caller (the browser pages) and return the IdP URL.
+        ``force_login`` asks the provider to make the person enter their credentials again
+        (``prompt=login``), used right after they signed out on this device."""
         login_id = secrets.token_urlsafe(32)
         nonce = secrets.token_urlsafe(24)
         verifier, challenge = pkce_pair()
@@ -485,7 +498,9 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             binding_hash=self._new_login_binding(),
         )
         try:
-            return await self.oidc.authorization_url(state=login_id, nonce=nonce, code_challenge=challenge)
+            return await self.oidc.authorization_url(
+                state=login_id, nonce=nonce, code_challenge=challenge, prompt="login" if force_login else None
+            )
         except OIDCError as exc:
             raise LoginError(
                 "The identity provider is unavailable right now. Try again shortly.", 502
@@ -541,6 +556,7 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             name=identity.name,
             preferred_username=identity.preferred_username,
             groups=identity.groups,
+            issuer=self.oidc.issuer,
         )
 
     # -- codes and tokens ---------------------------------------------------
@@ -689,8 +705,9 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             return None
         group = self.settings.required_group
         if group and group not in (user.get("groups") or []):
-            # Checked on every request, not only at refresh: a member taken out of the group (or a
-            # changed MTG_REQUIRED_GROUP) loses /mcp at once, like the JSON API and the web pages.
+            # Checked on every request, not only at refresh. The recorded groups are the identity
+            # provider's live answer from MembershipMiddleware (at most MTG_MEMBERSHIP_CHECK_TTL
+            # seconds old), so a member taken out of the group loses /mcp on their next request.
             self.db.revoke_family(row["family"])
             self.db.audit("not_in_group_refused", sub=row["sub"], client_id=row["client_id"])
             return None
