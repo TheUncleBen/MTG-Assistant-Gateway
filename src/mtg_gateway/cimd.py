@@ -25,6 +25,16 @@ refused, so a small gzip body cannot inflate past the cap), one fetch in flight
 per site and a few overall, and a one-minute negative cache per URL so a hostile
 client cannot make the gateway hammer a target.
 
+Relay limits: anyone can name any https URL as a client_id, so the fetcher must
+not become a way to send GETs to someone else's site. A client_id with a query
+string is refused, a failed fetch blocks every other new URL on that host for the
+same minute (not only the URL that failed, which a changed path would dodge), and
+new URLs are fetched at most SITE_FETCHES_PER_MINUTE times a minute per site and
+GLOBAL_FETCHES_PER_MINUTE overall. A URL the gateway has accepted before (the
+caller says so with ``known``) skips the host block and the rate limits, so an
+attacker who points bogus URLs at a real client's host cannot lock that client
+out once it has signed in here; a brand-new client can be delayed by a minute.
+
 Fairness: a caller that cannot get a slot within the deadline is told the fetcher
 is busy (CimdThrottled) and nothing is remembered against its URL, and a timeout
 is not negative-cached either; only an answer the URL's own server gave (bad
@@ -58,6 +68,13 @@ MAX_TTL = 86400
 DEFAULT_TTL = 3600
 FAILURE_TTL = 60
 MAX_CONCURRENT_FETCHES = 8  # unknown client ids are unauthenticated input; keep outbound fan-out small
+SITE_FETCHES_PER_MINUTE = 10  # fetches of URLs not accepted before, per site
+GLOBAL_FETCHES_PER_MINUTE = 60  # and in all
+# What one accepted document may store (the gateway keeps it in cimd_clients): the same limits as
+# a registered client (auth_provider.register_client). A real document is well under 1 KB.
+MAX_REDIRECT_URIS = 20
+MAX_REDIRECT_URI_LEN = 2000
+MAX_RECORD_BYTES = 8 * 1024
 REQUIRED_FIELDS = ("client_id", "client_name", "redirect_uris")
 
 Resolver = Callable[[str], Awaitable[list[str]]]
@@ -90,6 +107,8 @@ def is_cimd_client_id(client_id: str) -> bool:
         and not p.username
         and not p.password
         and not p.fragment
+        and not p.query  # a query string only makes the URL a better relay (see the docstring)
+        and "?" not in client_id
         and (port in (None, 443))
     )
 
@@ -253,9 +272,13 @@ def validate_document(url: str, doc: Any) -> dict[str, Any]:
     if not client_name.strip():
         raise CimdError("client_name has no printable characters")
     uris = doc["redirect_uris"]
-    if not isinstance(uris, list) or not all(isinstance(u, str) for u in uris) or len(uris) > 20:
+    if not isinstance(uris, list) or not all(isinstance(u, str) for u in uris):
         raise CimdError("redirect_uris must be a list of strings")
+    if len(uris) > MAX_REDIRECT_URIS:
+        raise CimdError(f"at most {MAX_REDIRECT_URIS} redirect URIs")
     for uri in uris:
+        if len(uri) > MAX_REDIRECT_URI_LEN:
+            raise CimdError(f"redirect URI longer than {MAX_REDIRECT_URI_LEN} characters")
         problem = check_redirect_uri(uri)
         if problem:
             raise CimdError(problem)
@@ -284,7 +307,11 @@ def validate_document(url: str, doc: Any) -> dict[str, Any]:
         if isinstance(value, str) and value.startswith("https://") and len(value) <= 512:
             record[key] = value
     if scope:
+        if len(scope) > 1000:
+            raise CimdError("scope is too long")
         record["scope"] = scope
+    if len(json.dumps(record)) > MAX_RECORD_BYTES:
+        raise CimdError("client metadata is too large")
     return record
 
 
@@ -306,6 +333,9 @@ class CimdFetcher:
         self.timeout = timeout
         self.allowed_hosts = [h.lower() for h in allowed_hosts or []]
         self._failures: dict[str, float] = {}
+        self._host_failures: dict[str, float] = {}  # host -> when a new URL on it last failed
+        self._site_fetches: dict[str, list[float]] = {}  # site -> recent fetch times (new URLs)
+        self._all_fetches: list[float] = []
         self._gate = asyncio.Semaphore(MAX_CONCURRENT_FETCHES)
         self._site_locks: dict[str, asyncio.Lock] = {}  # one fetch in flight per site
         self._site_users: dict[str, int] = {}  # callers holding or waiting on each lock
@@ -319,15 +349,38 @@ class CimdFetcher:
         host = host.lower()
         return any(host == h or host.endswith("." + h) for h in self.allowed_hosts)
 
-    async def fetch(self, url: str) -> tuple[dict[str, Any], int]:
-        """Return (client record, cache ttl seconds) or raise CimdError."""
+    def _admit_new_url(self, host: str, site: str, now: float) -> None:
+        """Refuse (CimdThrottled) a fetch of a URL not accepted before when its host failed in the
+        last minute or its site, or the fetcher, is over its per-minute budget. Only fetches that
+        go out count (_count_fetch), so callers told "busy" use up nothing."""
+        failed_at = self._host_failures.get(host)
+        if failed_at is not None and now - failed_at < FAILURE_TTL:
+            raise CimdThrottled("a metadata document on this host failed recently; not fetching yet")
+        recent = [t for t in self._site_fetches.get(site, []) if now - t < 60]
+        self._all_fetches = [t for t in self._all_fetches if now - t < 60]
+        if len(recent) >= SITE_FETCHES_PER_MINUTE or len(self._all_fetches) >= GLOBAL_FETCHES_PER_MINUTE:
+            self._site_fetches[site] = recent
+            raise CimdThrottled("too many metadata document fetches; try again shortly")
+
+    def _count_fetch(self, site: str, now: float) -> None:
+        self._site_fetches.setdefault(site, []).append(now)
+        self._all_fetches.append(now)
+        if len(self._site_fetches) > 1000:  # bounded even under abuse
+            self._site_fetches = {k: v for k, v in self._site_fetches.items() if v and now - v[-1] < 60}
+
+    async def fetch(self, url: str, *, known: bool = False) -> tuple[dict[str, Any], int]:
+        """Return (client record, cache ttl seconds) or raise CimdError. ``known``: the gateway
+        has accepted this URL's document before (see the relay limits in the module docstring)."""
         if not is_cimd_client_id(url):
             raise CimdError("client_id is not an https URL with a path")
         now = time.monotonic()
         failed_at = self._failures.get(url)
         if failed_at is not None and now - failed_at < FAILURE_TTL:
             raise CimdThrottled("metadata document fetch failed recently; not retrying yet")
-        site = _site(urlparse(url).hostname or "")
+        host = (urlparse(url).hostname or "").lower().rstrip(".")
+        site = _site(host)
+        if not known:
+            self._admit_new_url(host, site, now)
         lock = self._site_locks.setdefault(site, asyncio.Lock())
         self._site_users[site] = self._site_users.get(site, 0) + 1
         try:
@@ -344,9 +397,16 @@ class CimdFetcher:
             except TimeoutError as exc:
                 raise CimdThrottled("metadata document fetcher is busy; try again shortly") from exc
             try:
+                if not known:
+                    # Checked again now that the slot is ours: callers queued behind the same site
+                    # were admitted together, and the host may have failed meanwhile.
+                    self._admit_new_url(host, site, time.monotonic())
+                    self._count_fetch(site, time.monotonic())
                 # A host that drips one byte at a time must not hold a slot for longer than this.
                 async with asyncio.timeout(self.timeout):
                     return await self._fetch(url)
+            except CimdThrottled:
+                raise
             except TimeoutError as exc:
                 # Not negative-cached: a slow network or an overloaded gateway must not lock a
                 # healthy client out for a minute. The per-site slot already stops a hostile
@@ -354,6 +414,8 @@ class CimdFetcher:
                 raise CimdError("metadata document fetch timed out") from exc
             except CimdError:
                 self._note_failure(url, now)
+                if not known:
+                    self._note_host_failure(host, now)
                 raise
             finally:
                 self._gate.release()
@@ -363,6 +425,11 @@ class CimdFetcher:
             if not self._site_users[site]:
                 del self._site_users[site]
                 del self._site_locks[site]
+
+    def _note_host_failure(self, host: str, now: float) -> None:
+        self._host_failures[host] = now
+        if len(self._host_failures) > 1000:  # bounded even under abuse
+            self._host_failures = {h: t for h, t in self._host_failures.items() if now - t < FAILURE_TTL}
 
     def _note_failure(self, url: str, now: float) -> None:
         self._failures[url] = now
@@ -423,6 +490,6 @@ class CimdFetcher:
             raise CimdError(f"cannot fetch metadata document: {exc.__class__.__name__}") from exc
         try:
             doc = json.loads(bytes(body).decode("utf-8"))
-        except (UnicodeDecodeError, ValueError) as exc:
+        except (UnicodeDecodeError, ValueError, RecursionError) as exc:  # RecursionError: deep nesting
             raise CimdError("metadata document is not valid JSON") from exc
         return validate_document(url, doc), ttl

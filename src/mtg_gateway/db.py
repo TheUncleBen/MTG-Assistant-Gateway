@@ -18,6 +18,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -131,7 +132,17 @@ UNUSED_CLIENT_TTL = 7 * 86400
 # anyone, so rows nobody has signed in for are capped as well as aged out.
 AUDIT_RETENTION_SECONDS = 365 * 86400
 MAX_LOGIN_SESSIONS = 5000
+# Pending logins are also capped per client and per browser, and a full table (or a full client)
+# gives up the oldest pending login of the network that holds the most of them, never simply the
+# oldest overall: a flood from one address, with one client or one browser, only pushes out its
+# own pending logins, not those of the people signing in at the same time (create_login_session).
+MAX_LOGIN_SESSIONS_PER_CLIENT = 500
+MAX_LOGIN_SESSIONS_PER_BROWSER = 10
 MAX_UNUSED_CLIENTS = 2000
+# Cached client metadata documents (any https URL can be named as a client id). The busiest host
+# gives up its oldest rows first, so one attacker domain cannot push out a real client's row.
+MAX_CIMD_CLIENTS = 1000
+MAX_CIMD_CLIENTS_PER_HOST = 50
 # Audit events any anonymous caller can cause (open registration, CIMD fetches). Their rows are
 # capped by count as well as aged out, and their detail is kept short, so a flood cannot grow the
 # audit log for a year. Trimmed in purge_expired and every ANONYMOUS_AUDIT_TRIM_EVERY inserts.
@@ -150,6 +161,11 @@ METRICS_RETENTION_SECONDS = 400 * 86400
 DECK_COVER_RETENTION_SECONDS = 180 * 86400
 # How long a write waits for another connection (such as `mtg-gateway backup`) to finish.
 BUSY_TIMEOUT_MS = 5000
+
+
+def _url_host(url: str) -> str:
+    """Lower-case host of a URL client id, for the per-host cap on cached metadata documents."""
+    return (urlparse(url).hostname or "").rstrip(".")
 
 
 def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
@@ -251,8 +267,16 @@ def _step_7(conn: sqlite3.Connection) -> None:
     _add_column(conn, "users", "idp_issuer", "TEXT")
 
 
+def _step_8(conn: sqlite3.Connection) -> None:
+    """Security round 4: the (hashed) network each pending login came from, so a flood of
+    anonymous sign-in starts only pushes out pending logins from the flooding network."""
+    _add_column(conn, "login_sessions", "source_hash", "TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS login_sessions_client ON login_sessions(client_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS login_sessions_binding ON login_sessions(binding_hash)")
+
+
 # Applied in order; ``PRAGMA user_version`` records how many have run. Append, never edit.
-MIGRATIONS = [_step_1, _step_2, _step_3, _step_4, _step_5, _step_6, _step_7]
+MIGRATIONS = [_step_1, _step_2, _step_3, _step_4, _step_5, _step_6, _step_7, _step_8]
 SCHEMA_VERSION = len(MIGRATIONS)
 
 
@@ -482,11 +506,21 @@ class Database:
     def save_cimd_client(self, client_id: str, info: dict[str, Any], ttl: int) -> None:
         now = int(time.time())
         with self.tx() as c:
+            # Anyone can make the gateway accept documents at many URLs of their own site, so the
+            # cache is capped on every insert: per host, then in all (cimd.py caps each record).
+            c.execute("DELETE FROM cimd_clients WHERE expires_at < ?", (now - 86400,))
+            host = _url_host(client_id)
+            self._trim_cimd_clients(c, MAX_CIMD_CLIENTS_PER_HOST - 1, host=host, skip=client_id)
+            self._trim_cimd_clients(c, MAX_CIMD_CLIENTS - 1, skip=client_id)
             c.execute(
                 "INSERT OR REPLACE INTO cimd_clients (client_id, info_json, fetched_at, expires_at) "
                 "VALUES (?, ?, ?, ?)",
                 (client_id, json.dumps(info), now, now + ttl),
             )
+
+    def cimd_client_known(self, client_id: str) -> bool:
+        """True when this metadata document URL was accepted before (its row may have expired)."""
+        return self._one("SELECT 1 FROM cimd_clients WHERE client_id = ?", (client_id,)) is not None
 
     def get_cimd_client(self, client_id: str) -> dict[str, Any] | None:
         row = self._one(
@@ -506,17 +540,29 @@ class Database:
         oidc_code_verifier: str,
         ttl: int,
         binding_hash: str | None = None,
+        source_hash: str | None = None,
     ) -> None:
+        """Store a pending login. ``binding_hash`` names the browser that started it and
+        ``source_hash`` the network it came from (auth_provider), both used by the caps below."""
         now = int(time.time())
         with self.tx() as c:
             # /authorize and /login are anonymous and each stores one row, so expired rows are
-            # deleted and the table trimmed to MAX_LOGIN_SESSIONS on every insert, not only by
-            # the nightly purge (the table is that small, so both statements are cheap).
+            # deleted and the caps applied on every insert, not only by the nightly purge (the
+            # table is that small, so these statements are cheap). One browser keeps its newest
+            # few; a client, and then the whole table, gives up rows of the busiest network.
             c.execute("DELETE FROM login_sessions WHERE expires_at < ?", (now,))
+            if binding_hash:
+                c.execute(
+                    """DELETE FROM login_sessions WHERE rowid IN (
+                           SELECT rowid FROM login_sessions WHERE binding_hash = ?
+                           ORDER BY expires_at DESC, rowid DESC LIMIT -1 OFFSET ?)""",
+                    (binding_hash, MAX_LOGIN_SESSIONS_PER_BROWSER - 1),
+                )
+            self._trim_login_sessions(c, MAX_LOGIN_SESSIONS_PER_CLIENT - 1, client_id=client_id)
             self._trim_login_sessions(c, MAX_LOGIN_SESSIONS - 1)
             c.execute(
                 """INSERT INTO login_sessions (id, client_id, params_json, oidc_nonce, oidc_code_verifier,
-                   expires_at, binding_hash) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                   expires_at, binding_hash, source_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     session_id,
                     client_id,
@@ -525,6 +571,7 @@ class Database:
                     oidc_code_verifier,
                     now + ttl,
                     binding_hash,
+                    source_hash,
                 ),
             )
 
@@ -718,6 +765,7 @@ class Database:
         n = c.execute("DELETE FROM audit_log WHERE at < ?", (now - AUDIT_RETENTION_SECONDS,)).rowcount
         n += Database._trim_anonymous_audit(c)
         n += Database._trim_login_sessions(c, MAX_LOGIN_SESSIONS)
+        n += Database._trim_cimd_clients(c, MAX_CIMD_CLIENTS)
         n += c.execute(
             """DELETE FROM oauth_clients WHERE client_id IN (
                    SELECT client_id FROM oauth_clients
@@ -748,14 +796,60 @@ class Database:
         ).rowcount
 
     @staticmethod
-    def _trim_login_sessions(c: sqlite3.Connection, keep: int) -> int:
-        """Keep the ``keep`` login sessions that expire last; delete the rest."""
-        return c.execute(
-            """DELETE FROM login_sessions WHERE rowid IN (
-                   SELECT rowid FROM login_sessions ORDER BY expires_at DESC, rowid DESC
-                   LIMIT -1 OFFSET ?)""",
-            (max(0, keep),),
-        ).rowcount
+    def _trim_login_sessions(c: sqlite3.Connection, keep: int, *, client_id: str | None = None) -> int:
+        """Delete login sessions (of ``client_id``, or all) until at most ``keep`` are left.
+
+        Rows go from the network (``source_hash``) holding the most of them, oldest first, so a
+        flood from one network gives up its own rows before anyone else's. Rows with no source
+        (made before it was recorded) count as one network."""
+        where, args = ("client_id = ?", (client_id,)) if client_id is not None else ("1", ())
+        n = 0
+        while True:
+            total = c.execute(f"SELECT COUNT(*) FROM login_sessions WHERE {where}", args).fetchone()[0]
+            over = total - max(0, keep)
+            if over <= 0:
+                return n
+            groups = c.execute(
+                f"""SELECT COALESCE(source_hash, '') AS src, COUNT(*) AS k FROM login_sessions
+                    WHERE {where} GROUP BY src ORDER BY k DESC, MIN(expires_at) ASC LIMIT 2""",
+                args,
+            ).fetchall()
+            top, top_count = groups[0][0], groups[0][1]
+            runner_up = groups[1][1] if len(groups) > 1 else 0
+            # Level the busiest network down to the next one (at least one row per round).
+            take = min(over, max(1, top_count - runner_up))
+            n += c.execute(
+                f"""DELETE FROM login_sessions WHERE rowid IN (
+                       SELECT rowid FROM login_sessions WHERE {where} AND COALESCE(source_hash, '') = ?
+                       ORDER BY expires_at ASC, rowid ASC LIMIT ?)""",
+                (*args, top, take),
+            ).rowcount
+
+    @staticmethod
+    def _trim_cimd_clients(
+        c: sqlite3.Connection, keep: int, *, host: str | None = None, skip: str | None = None
+    ) -> int:
+        """Delete cached metadata documents (of ``host``, or all; never ``skip``) until at most
+        ``keep`` are left: from the host with the most rows, the least recently fetched first."""
+        rows = [
+            (r[0], r[1], _url_host(r[0]))
+            for r in c.execute("SELECT client_id, fetched_at FROM cimd_clients ORDER BY fetched_at, rowid")
+            if r[0] != skip
+        ]
+        if host is not None:
+            rows = [r for r in rows if r[2] == host]
+        over = len(rows) - max(0, keep)
+        if over <= 0:
+            return 0
+        by_host: dict[str, list[str]] = {}
+        for client_id, _at, h in rows:
+            by_host.setdefault(h, []).append(client_id)  # oldest first
+        doomed: list[str] = []
+        for _ in range(over):
+            busiest = max(by_host, key=lambda h: len(by_host[h]))
+            doomed.append(by_host[busiest].pop(0))
+        c.executemany("DELETE FROM cimd_clients WHERE client_id = ?", [(d,) for d in doomed])
+        return len(doomed)
 
     @staticmethod
     def _trim_anonymous_audit(c: sqlite3.Connection) -> int:

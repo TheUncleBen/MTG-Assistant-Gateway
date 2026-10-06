@@ -105,7 +105,7 @@ async def json_body(request: Request) -> dict[str, Any] | Response:
         return {}
     try:
         data = json.loads(raw)
-    except ValueError:
+    except (ValueError, RecursionError):  # RecursionError: deeply nested arrays or objects
         return JSONResponse({"ok": False, "error": "invalid", "message": "body must be JSON"}, 400)
     if not isinstance(data, dict):
         return JSONResponse({"ok": False, "error": "invalid", "message": "body must be a JSON object"}, 400)

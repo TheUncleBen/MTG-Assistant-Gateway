@@ -14,6 +14,7 @@ import binascii
 import contextvars
 import hashlib
 import hmac
+import ipaddress
 import logging
 import secrets
 import time
@@ -94,6 +95,58 @@ class LoginError(Exception):
 # Longest OAuth ``state`` accepted on /authorize (it is stored with the pending login).
 MAX_STATE_LEN = 512
 
+# Sign-in starts (GET /login, GET /authorize) one network may make per minute. A person needs a
+# few; the limit keeps one address from churning the pending-login table (db.py caps it and evicts
+# the busiest network's rows first). Requests from an address in MTG_TRUSTED_PROXIES are not
+# limited: that is the proxy itself when it sends no X-Forwarded-For (every visitor then looks the
+# same, and a limit would lock everyone out together) or a visitor on the private network.
+LOGIN_STARTS_PER_MINUTE = 30
+TOO_MANY_LOGINS = "Too many sign-in attempts from your network. Wait a minute and try again."
+
+
+class LoginThrottled(Exception):
+    """This network started too many sign-ins in the last minute."""
+
+
+def login_source(ip: str | None) -> str | None:
+    """The network a request came from, as pending logins are grouped and rate-limited: the
+    IPv4 address, or the /64 of an IPv6 address (one subscriber usually holds a whole /64)."""
+    try:
+        addr = ipaddress.ip_address(ip or "")
+    except ValueError:
+        return None
+    if isinstance(addr, ipaddress.IPv6Address):
+        if addr.ipv4_mapped is not None:
+            return str(addr.ipv4_mapped)
+        return str(ipaddress.ip_network(f"{addr}/64", strict=False))
+    return str(addr)
+
+
+class LoginStartLimiter:
+    """In-memory token bucket per network: ``per_minute`` sign-in starts, refilled evenly."""
+
+    MAX_TRACKED = 10_000
+
+    def __init__(self, per_minute: int = LOGIN_STARTS_PER_MINUTE):
+        self.per_minute = per_minute
+        self._buckets: dict[str, tuple[float, float]] = {}  # source -> (tokens, at)
+
+    def allow(self, source: str, now: float | None = None) -> bool:
+        now = time.monotonic() if now is None else now
+        rate = self.per_minute / 60.0
+        tokens, at = self._buckets.get(source, (float(self.per_minute), now))
+        tokens = min(float(self.per_minute), tokens + (now - at) * rate)
+        if tokens < 1:
+            self._buckets[source] = (tokens, now)
+            return False
+        self._buckets[source] = (tokens - 1, now)
+        if len(self._buckets) > self.MAX_TRACKED:  # bounded even under abuse: drop refilled buckets
+            full = 60.0  # a bucket untouched for a minute is full again
+            self._buckets = {k: v for k, v in self._buckets.items() if now - v[1] < full}
+            if len(self._buckets) > self.MAX_TRACKED:
+                self._buckets.clear()
+        return True
+
 
 class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, RefreshToken, AccessToken]):
     def __init__(
@@ -110,6 +163,13 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         self.oidc = oidc
         self.membership = membership if membership is not None else MembershipChecker(settings, db, oidc)
         self.cimd = cimd if cimd is not None else CimdFetcher(allowed_hosts=settings.cimd_allowed_hosts)
+        self.login_limiter = LoginStartLimiter()
+        self._trusted_nets: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
+        for entry in settings.trusted_proxies:
+            try:
+                self._trusted_nets.append(ipaddress.ip_network(entry, strict=False))
+            except ValueError:
+                pass  # "*" (trust everyone): no address is then a proxy of its own
 
     # -- clients ------------------------------------------------------------
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
@@ -129,7 +189,8 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         if cached:
             return cached
         try:
-            info, ttl = await self.cimd.fetch(url)
+            # A URL accepted before skips the fetcher's per-host block and rate limits (cimd.py).
+            info, ttl = await self.cimd.fetch(url, known=self.db.cimd_client_known(url))
         except CimdThrottled:
             return None
         except CimdError as exc:
@@ -225,6 +286,22 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         holder["used"] = True
         return self.binding_hash(holder["key"])
 
+    def _admit_login(self) -> str | None:
+        """Hash of the network of the request creating a login (None outside such a request), after
+        charging it one sign-in start. Raises LoginThrottled when that network is over its limit."""
+        holder = BROWSER_KEY.get()
+        ip = holder.get("client_ip") if holder else None
+        source = login_source(ip)
+        if source is None:
+            return None
+        try:
+            from_proxy = any(ipaddress.ip_address(ip or "") in net for net in self._trusted_nets)
+        except ValueError:
+            from_proxy = False
+        if not from_proxy and not self.login_limiter.allow(source):
+            raise LoginThrottled(source)
+        return hash_token(f"login-source:{source}")
+
     def same_browser(self, session: dict[str, Any], browser_key: str | None) -> bool:
         """True when ``browser_key`` (the login cookie) is the one of the browser that started
         ``session``. The key is a random secret of that browser, never derived from the state, so
@@ -252,6 +329,10 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             # A client that sends no scope gets the scope it registered with (the
             # registration default is "mtg"), not an empty token.
             params.scopes = (client.scope or "mtg").split()
+        try:
+            source_hash = self._admit_login()
+        except LoginThrottled as exc:
+            raise AuthorizeError("temporarily_unavailable", TOO_MANY_LOGINS) from exc
         login_id = secrets.token_urlsafe(32)
         nonce = secrets.token_urlsafe(24)
         verifier, _challenge = pkce_pair()  # the challenge is derived again on Approve
@@ -263,6 +344,7 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             oidc_code_verifier=verifier,
             ttl=self.settings.login_ttl,
             binding_hash=self._new_login_binding(),
+            source_hash=source_hash,
         )
         # Every MCP client goes through the gateway's own consent page before the IdP. The gateway
         # is one OIDC client of the IdP, so the IdP's consent (or its silent "implicit consent")
@@ -485,6 +567,10 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         """Create a login session for a non-MCP caller (the browser pages) and return the IdP URL.
         ``force_login`` asks the provider to make the person enter their credentials again
         (``prompt=login``), used right after they signed out on this device."""
+        try:
+            source_hash = self._admit_login()
+        except LoginThrottled as exc:
+            raise LoginError(TOO_MANY_LOGINS, 429) from exc
         login_id = secrets.token_urlsafe(32)
         nonce = secrets.token_urlsafe(24)
         verifier, challenge = pkce_pair()
@@ -496,6 +582,7 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             oidc_code_verifier=verifier,
             ttl=self.settings.login_ttl,
             binding_hash=self._new_login_binding(),
+            source_hash=source_hash,
         )
         try:
             return await self.oidc.authorization_url(

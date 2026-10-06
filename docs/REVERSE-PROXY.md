@@ -17,10 +17,16 @@ projects' documentation and real use, but aren't run by the tests.
 | --- | --- |
 | Serve the gateway at the **root** of its own hostname (`https://mtg.example.com/`), not under a path | OAuth discovery for MCP clients lives at fixed paths on the host, and every gateway route is absolute. `MTG_PUBLIC_URL` with a path is refused at startup |
 | **Pass the original `Host` header** | The `/mcp` endpoint only answers requests whose `Host` matches `MTG_PUBLIC_URL` (protection against DNS rebinding). Most proxies do this by default. If yours can't, set `MTG_ALLOWED_HOSTS` |
-| Send `X-Forwarded-For` and `X-Forwarded-Proto` | Used for logs and the request scheme. The gateway trusts them only from addresses in `MTG_TRUSTED_PROXIES` (default: private networks and loopback) |
+| Send `X-Forwarded-For` and `X-Forwarded-Proto` | Used for logs, the request scheme and the per-network limits on sign-in attempts. The gateway trusts them only from addresses in `MTG_TRUSTED_PROXIES` (default: private networks and loopback) |
 | Allow request bodies of at least **2 MB** | Saved card-scan sessions can be up to 2 MB. nginx's default of 1 MB is too small |
 | Read timeout of about **300 seconds** | Most calls take well under a second, but goldfish simulations and some research calls can take a while |
 | A valid certificate | Let's Encrypt is fine. Self-signed certificates won't work with Claude or ChatGPT |
+
+The gateway sends `Strict-Transport-Security: max-age=31536000` itself when
+`MTG_PUBLIC_URL` is `https`, and the examples below set the same header at
+the proxy. It leaves out `includeSubDomains` on purpose: the gateway usually
+shares its domain with other things, and that flag would force https on all
+of them. Add it at your proxy only if every subdomain serves https.
 
 What it doesn't need: websockets, sticky sessions, special headers, or
 response buffering turned off (the `/mcp` endpoint answers with plain JSON,

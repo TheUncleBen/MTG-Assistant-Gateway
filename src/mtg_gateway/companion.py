@@ -1150,7 +1150,8 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             "if(e.request.mode!=='navigate')return;"
             "e.respondWith(fetch(e.request).catch(()=>new Response(" + json.dumps(OFFLINE_PAGE) + ","
             "{status:503,headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store',"
-            "'Content-Security-Policy':\"default-src 'none'; style-src 'unsafe-inline'\"}})));"
+            "'Content-Security-Policy':\"default-src 'none'; style-src 'unsafe-inline'; "
+            "base-uri 'none'; frame-ancestors 'none'\"}})));"
             "});"
         )
         return Response(js, media_type="application/javascript", headers={"Cache-Control": "no-store"})
