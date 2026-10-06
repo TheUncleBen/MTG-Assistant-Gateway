@@ -16,7 +16,7 @@ import hashlib
 import logging
 import secrets
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import quote, urlencode
 
@@ -39,6 +39,11 @@ class OIDCError(Exception):
     """A failure in the identity-provider leg; the message is safe to log."""
 
 
+class IdPUnavailable(OIDCError):
+    """The identity provider could not be asked (network error, timeout, 5xx, bad JSON). The
+    answer is unknown, so callers fail closed for the request at hand and try again later."""
+
+
 @dataclass
 class Identity:
     sub: str
@@ -47,6 +52,20 @@ class Identity:
     preferred_username: str | None
     groups: list[str]
     raw_claims: dict[str, Any]
+    # The provider's own tokens from this sign-in, kept (encrypted) so membership can be asked
+    # again on later requests. Never logged or shown (repr=False).
+    idp_access_token: str | None = field(default=None, repr=False)
+    idp_access_expires_at: int | None = field(default=None, repr=False)
+    idp_refresh_token: str | None = field(default=None, repr=False)
+
+
+@dataclass
+class IdPTokens:
+    """A token response from the provider (sign-in or refresh)."""
+
+    access_token: str | None = field(default=None, repr=False)
+    access_expires_at: int | None = None
+    refresh_token: str | None = field(default=None, repr=False)
 
 
 def pkce_pair() -> tuple[str, str]:
@@ -143,12 +162,7 @@ class OIDCClient:
             "redirect_uri": self.redirect_uri,
             "code_verifier": code_verifier,
         }
-        headers = {"Accept": "application/json"}
-        if self.token_auth_method == "client_secret_basic":
-            headers["Authorization"] = basic_auth_header(self.client_id, self._client_secret)
-        else:
-            form["client_id"] = self.client_id
-            form["client_secret"] = self._client_secret
+        headers = self._token_auth(form)
         try:
             resp = await self._http.post(meta["token_endpoint"], data=form, headers=headers)
         except httpx.HTTPError as exc:
@@ -164,7 +178,11 @@ class OIDCClient:
             raise OIDCError("identity provider returned no id_token; is the 'openid' scope enabled?")
         claims = await self._validate_id_token(id_token, nonce)
 
+        tokens = _token_fields(body)
         identity = Identity(
+            idp_access_token=tokens.access_token,
+            idp_access_expires_at=tokens.access_expires_at,
+            idp_refresh_token=tokens.refresh_token,
             sub=str(claims["sub"]),
             email=_opt_str(claims.get("email")),
             name=_opt_str(claims.get("name")),
@@ -196,6 +214,71 @@ class OIDCClient:
             except (httpx.HTTPError, ValueError):
                 logger.warning("userinfo lookup failed; continuing with ID token claims only")
         return identity
+
+    def _token_auth(self, form: dict[str, str]) -> dict[str, str]:
+        headers = {"Accept": "application/json"}
+        if self.token_auth_method == "client_secret_basic":
+            headers["Authorization"] = basic_auth_header(self.client_id, self._client_secret)
+        else:
+            form["client_id"] = self.client_id
+            form["client_secret"] = self._client_secret
+        return headers
+
+    async def refresh(self, refresh_token: str) -> IdPTokens | None:
+        """Use the provider refresh token. None when the provider refuses it (HTTP 400/401: the
+        user was deactivated or deleted, or the grant was revoked); IdPUnavailable when the
+        answer is unknown."""
+        try:
+            meta = await self.metadata()
+        except OIDCError as exc:
+            raise IdPUnavailable(str(exc)) from exc
+        form = {"grant_type": "refresh_token", "refresh_token": refresh_token}
+        headers = self._token_auth(form)
+        try:
+            resp = await self._http.post(meta["token_endpoint"], data=form, headers=headers)
+        except httpx.HTTPError as exc:
+            raise IdPUnavailable(f"refresh request to identity provider failed: {type(exc).__name__}") from exc
+        if resp.status_code in (400, 401):
+            return None
+        if resp.status_code != 200:
+            raise IdPUnavailable(f"identity provider answered the refresh with HTTP {resp.status_code}")
+        try:
+            body = resp.json()
+        except ValueError as exc:
+            raise IdPUnavailable("identity provider returned a non-JSON refresh response") from exc
+        if not isinstance(body, dict) or not isinstance(body.get("access_token"), str):
+            raise IdPUnavailable("identity provider refresh response has no access_token")
+        tokens = _token_fields(body)
+        tokens.refresh_token = tokens.refresh_token or refresh_token  # providers that don't rotate
+        return tokens
+
+    async def userinfo(self, access_token: str) -> dict[str, Any] | None:
+        """The provider's live view of the user. None when the provider refuses the token
+        (HTTP 401/403); IdPUnavailable when the answer is unknown."""
+        try:
+            meta = await self.metadata()
+        except OIDCError as exc:
+            raise IdPUnavailable(str(exc)) from exc
+        endpoint = meta.get("userinfo_endpoint")
+        if not endpoint:
+            raise IdPUnavailable("identity-provider metadata lacks userinfo_endpoint")
+        try:
+            resp = await self._http.get(
+                endpoint, headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"}
+            )
+        except httpx.HTTPError as exc:
+            raise IdPUnavailable(f"userinfo request failed: {type(exc).__name__}") from exc
+        if resp.status_code in (401, 403):
+            return None
+        if resp.status_code != 200:
+            raise IdPUnavailable(f"identity provider answered userinfo with HTTP {resp.status_code}")
+        try:
+            info = resp.json()
+        except ValueError as exc:
+            raise IdPUnavailable("identity provider returned non-JSON userinfo") from exc
+        if not isinstance(info, dict):
+            raise IdPUnavailable("identity provider returned non-object userinfo")
+        return info
 
     async def _validate_id_token(self, id_token: str, nonce: str) -> dict[str, Any]:
         last_exc: Exception | None = None
@@ -288,6 +371,20 @@ def resolve_groups(claims: Any, path: str) -> list[str]:
         if len(out) >= MAX_GROUPS:
             break
     return out
+
+
+def _token_fields(body: dict[str, Any]) -> IdPTokens:
+    access = body.get("access_token")
+    refresh = body.get("refresh_token")
+    expires_in = body.get("expires_in")
+    expires_at = None
+    if isinstance(expires_in, (int, float)) and not isinstance(expires_in, bool) and expires_in > 0:
+        expires_at = int(time.time()) + int(min(expires_in, 366 * 86400))
+    return IdPTokens(
+        access_token=access if isinstance(access, str) and access else None,
+        access_expires_at=expires_at,
+        refresh_token=refresh if isinstance(refresh, str) and refresh else None,
+    )
 
 
 def _opt_str(v: Any) -> str | None:

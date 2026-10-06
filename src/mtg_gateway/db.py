@@ -234,8 +234,22 @@ def _step_6(conn: sqlite3.Connection) -> None:
         conn.execute(sql)
 
 
+def _step_7(conn: sqlite3.Connection) -> None:
+    """Security round 4: the identity provider's own tokens for each member (Fernet-encrypted), so
+    the gateway can ask the provider on later requests whether the member is still allowed in."""
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS idp_grants (
+            sub TEXT PRIMARY KEY,
+            refresh_enc TEXT NOT NULL DEFAULT '',
+            access_enc TEXT NOT NULL DEFAULT '',
+            access_expires_at INTEGER NOT NULL DEFAULT 0,
+            updated_at INTEGER NOT NULL
+        )"""
+    )
+
+
 # Applied in order; ``PRAGMA user_version`` records how many have run. Append, never edit.
-MIGRATIONS = [_step_1, _step_2, _step_3, _step_4, _step_5, _step_6]
+MIGRATIONS = [_step_1, _step_2, _step_3, _step_4, _step_5, _step_6, _step_7]
 SCHEMA_VERSION = len(MIGRATIONS)
 
 
@@ -418,6 +432,9 @@ class Database:
         with self.tx() as c:
             tokens = c.execute("UPDATE tokens SET revoked = 1 WHERE sub = ? AND revoked = 0", (sub,)).rowcount
             sessions = c.execute("DELETE FROM browser_sessions WHERE sub = ?", (sub,)).rowcount
+            # The provider tokens go too: with no sessions left there is nothing to re-check, and a
+            # fresh sign-in stores new ones.
+            c.execute("DELETE FROM idp_grants WHERE sub = ?", (sub,))
             codes = c.execute(
                 "DELETE FROM auth_codes WHERE json_extract(data_json, '$.subject') = ?"
                 " AND used_family IS NULL",  # redeemed codes stay as replay tombstones
@@ -887,6 +904,7 @@ class Database:
         ("archidekt_links", "sub"),
         ("tokens", "sub"),
         ("browser_sessions", "sub"),
+        ("idp_grants", "sub"),
         ("metrics", "sub"),
         ("users", "sub"),
     )
@@ -914,7 +932,31 @@ class Database:
         re-sign-in comes due. Only an existing user is updated (no rows for strangers)."""
         with self.tx() as c:
             c.execute("UPDATE users SET groups_json = ? WHERE sub = ?", (json.dumps(groups), sub))
+            # Their Archidekt session goes too: someone who is no longer a member should not
+            # leave a usable Archidekt login behind on this server.
+            c.execute("UPDATE archidekt_links SET status = 'revoked', secret_enc = '' WHERE sub = ?", (sub,))
         return sum(self.revoke_all_for_user(sub).values())
+
+    def set_user_groups(self, sub: str, groups: list[str]) -> None:
+        """Record the groups the identity provider reported just now."""
+        with self.tx() as c:
+            c.execute("UPDATE users SET groups_json = ? WHERE sub = ?", (json.dumps(groups), sub))
+
+    # identity-provider grants ------------------------------------------------
+    def save_idp_grant(self, sub: str, *, refresh_enc: str, access_enc: str, access_expires_at: int) -> None:
+        with self.tx() as c:
+            c.execute(
+                """INSERT INTO idp_grants (sub, refresh_enc, access_enc, access_expires_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT(sub) DO UPDATE SET refresh_enc=excluded.refresh_enc,
+                     access_enc=excluded.access_enc, access_expires_at=excluded.access_expires_at,
+                     updated_at=excluded.updated_at""",
+                (sub, refresh_enc, access_enc, access_expires_at, int(time.time())),
+            )
+
+    def get_idp_grant(self, sub: str) -> dict[str, Any] | None:
+        row = self._one("SELECT * FROM idp_grants WHERE sub = ?", (sub,))
+        return dict(row) if row else None
 
     # archidekt links -------------------------------------------------------
     def save_link(self, sub: str, *, username: str, user_id: str | None, secret_enc: str) -> None:

@@ -53,6 +53,17 @@ class FakeIdP:
         # touching userinfo or the default behaviour.
         self.id_token_claims: dict[str, object] = {}
         self.id_token_omit: set[str] = set()
+        # The provider's live directory: sub -> the user dict as it is *now* (the same object a
+        # test assigned to ``self.user``, so editing it in place changes what userinfo says).
+        # ``disabled`` subs get 401 from userinfo and invalid_grant on refresh, like a deactivated
+        # Authentik user; ``down`` makes token and userinfo calls fail with 503.
+        self.directory: dict[str, dict[str, object]] = {}
+        self.disabled: set[str] = set()
+        self.down = False
+        self.access_tokens: dict[str, str] = {}
+        self.refresh_tokens: dict[str, str] = {}
+        self.userinfo_calls = 0
+        self.access_ttl = 300
         self.app = Starlette(
             routes=[
                 Route("/application/o/mtg/.well-known/openid-configuration", self.discovery),
@@ -100,8 +111,15 @@ class FakeIdP:
             form["_auth_method"] = "client_secret_post"
             ok = form.get("client_id") == CLIENT_ID and form.get("client_secret") == CLIENT_SECRET
         self.token_calls.append(form)
+        if self.down:
+            return JSONResponse({"error": "temporarily_unavailable"}, status_code=503)
         if not ok:
             return JSONResponse({"error": "invalid_client"}, status_code=401)
+        if form.get("grant_type") == "refresh_token":
+            sub = self.refresh_tokens.pop(form.get("refresh_token", ""), None)
+            if sub is None or sub in self.disabled:
+                return JSONResponse({"error": "invalid_grant"}, status_code=400)
+            return JSONResponse(self._mint(sub, offline=True))
         q = self.pending.pop(form.get("code", ""), None)
         if q is None:
             return JSONResponse({"error": "invalid_grant"}, status_code=400)
@@ -116,13 +134,37 @@ class FakeIdP:
             **self.id_token_claims,
         }
         id_token = jwt.encode({"alg": "RS256", "kid": "test-1"}, claims, self.key)
-        return JSONResponse({"access_token": "idp-access", "token_type": "Bearer", "id_token": id_token})
+        sub = str(self.user["sub"])
+        self.directory[sub] = self.user
+        body = self._mint(sub, offline="offline_access" in q.get("scope", "").split())
+        return JSONResponse({**body, "id_token": id_token})
+
+    def _mint(self, sub: str, *, offline: bool) -> dict[str, object]:
+        access = f"idp-access-{secrets.token_urlsafe(8)}"
+        self.access_tokens[access] = sub
+        body: dict[str, object] = {"access_token": access, "token_type": "Bearer", "expires_in": self.access_ttl}
+        if offline:
+            refresh = f"idp-refresh-{secrets.token_urlsafe(8)}"
+            self.refresh_tokens[refresh] = sub
+            body["refresh_token"] = refresh
+        return body
 
     async def jwks(self, _req: Request) -> Response:
         return JSONResponse({"keys": [self.key.as_dict(private=False)]})
 
-    async def userinfo(self, _req: Request) -> Response:
-        return JSONResponse(self.user)
+    async def userinfo(self, req: Request) -> Response:
+        self.userinfo_calls += 1
+        if self.down:
+            return JSONResponse({"error": "temporarily_unavailable"}, status_code=503)
+        token = req.headers.get("authorization", "").removeprefix("Bearer ")
+        sub = self.access_tokens.get(token)
+        if sub is None or sub in self.disabled:
+            return Response(status_code=401)
+        return JSONResponse(self.directory.get(sub, self.user))
+
+    def set_groups(self, sub: str, groups: list[str]) -> None:
+        """Change a user's groups at the provider (as an admin would in Authentik)."""
+        self.directory[sub]["groups"] = list(groups)
 
 
 def make_settings(tmp_path: Path, **over: object) -> Settings:
@@ -133,7 +175,7 @@ def make_settings(tmp_path: Path, **over: object) -> Settings:
         oidc_issuer=IDP,
         oidc_client_id=CLIENT_ID,
         oidc_client_secret=CLIENT_SECRET,
-        oidc_scopes="openid profile email",
+        oidc_scopes="openid profile email offline_access",
         required_group=None,
         session_secret="s" * 48,
         fernet_key=Fernet.generate_key().decode(),

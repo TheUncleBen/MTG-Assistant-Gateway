@@ -30,6 +30,7 @@ from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, Re
 from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
+from starlette.datastructures import Headers
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 from starlette.routing import Route, request_response
@@ -58,10 +59,11 @@ from .config import Settings
 from .db import Database
 from .decklist import DecklistError, ListCard, parse_decklist, to_text
 from .decks import DeckError, DeckService, _clean_deck_id, current_client
+from .membership import Membership, MembershipChecker
 from .metrics import Metrics
 from .mf_proxy import ALLOWED_TOOLS, MysticForgeProxy
 from .oidc import OIDCClient
-from .pages import BROWSER_CLIENT_ID, add_browser_routes, browser_user, login_redirect
+from .pages import BROWSER_CLIENT_ID, SESSION_COOKIE, add_browser_routes, browser_user, login_redirect
 from .plugin_page import add_plugin_routes
 from .reports import ReportService
 from .scan import add_scan
@@ -84,6 +86,7 @@ class AppState:
     scan: Any = None
     reports: Any = None
     metrics: Metrics | None = None
+    membership: MembershipChecker | None = None
 
 
 def _tool_error(exc: DeckError) -> dict[str, object]:
@@ -181,6 +184,76 @@ class LoginCookieMiddleware:
 
 
 _LOGIN_KEY = re.compile(r"[A-Za-z0-9_-]{43}")
+
+
+class MembershipMiddleware:
+    """Before any request that carries a browser session or a bearer token is served, ask the
+    identity provider whether that person is still allowed in (membership.py). A removed member's
+    tokens and sessions are revoked here, so the route's own checks then refuse the request; when
+    the provider cannot be asked, the request is refused with 503 and nothing is revoked.
+
+    Sign-in, sign-out and OAuth endpoints, static files and the health check are not gated: they
+    are how a person gets (back) in, or carry no member data. The refresh grant at /token and the
+    code exchange do their own check (auth_provider)."""
+
+    EXEMPT_PREFIXES = (
+        "/static/",
+        "/scan/static/",
+        "/.well-known/",
+        "/authorize",
+        "/auth/callback",
+        "/login",
+        "/logout",
+        "/register",
+        "/token",
+        "/revoke",
+        "/healthz",
+    )
+
+    def __init__(self, app: ASGIApp, state: AppState):
+        self.app = app
+        self.state = state
+
+    def _subject(self, scope: Scope) -> str | None:
+        headers = Headers(scope=scope)
+        db = self.state.db
+        auth = headers.get("authorization", "")
+        if auth[:7].lower() == "bearer ":
+            row = db.get_token(auth[7:].strip(), "access")
+            if row is not None and row["expires_at"] >= int(time.time()):
+                return row["sub"]
+        cookies = Request(scope).cookies
+        sid = cookies.get(cookie_name(SESSION_COOKIE, self.state.settings))
+        if sid:
+            return db.get_browser_session(sid)
+        return None
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        checker = self.state.membership
+        path = scope.get("path", "") if scope["type"] == "http" else ""
+        if checker is None or scope["type"] != "http" or path.startswith(self.EXEMPT_PREFIXES):
+            await self.app(scope, receive, send)
+            return
+        sub = self._subject(scope)
+        if sub is not None and await checker.check(sub) is Membership.UNAVAILABLE:
+            request = Request(scope)
+            message = "The sign-in service can't be reached to confirm your access. Try again shortly."
+            if _wants_page(request):
+                resp: Response = render(
+                    "Try again shortly",
+                    f"<div class='card'><p>{message}</p></div>",
+                    site=self.state.settings.server_name,
+                    status=503,
+                )
+            else:
+                resp = JSONResponse(
+                    {"ok": False, "error": "idp_unavailable", "message": message},
+                    503,
+                    headers={"Retry-After": "30"},
+                )
+            await resp(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
 
 
 class BodyLimitMiddleware:
@@ -1034,7 +1107,8 @@ def create_app(
         groups_claim=settings.oidc_groups_claim,
         token_auth_method=settings.oidc_token_auth_method,
     )
-    provider = GatewayAuthProvider(settings, db, oidc, cimd=cimd)
+    membership = MembershipChecker(settings, db, oidc)
+    provider = GatewayAuthProvider(settings, db, oidc, cimd=cimd, membership=membership)
     archidekt = archidekt or ArchidektClient(
         settings.archidekt_base, settings.archidekt_user_agent, Pacer(settings.archidekt_min_interval)
     )
@@ -1048,6 +1122,7 @@ def create_app(
         archidekt=archidekt,
         decks=DeckService(settings, db, archidekt),
         mf_proxy=mf_proxy,
+        membership=membership,
     )
     state.metrics = Metrics(
         db, known_tool=lambda name: server._tool_manager.get_tool(name) is not None or name in ALLOWED_TOOLS
@@ -1079,6 +1154,7 @@ def create_app(
     app.add_middleware(
         LoginCookieMiddleware, provider=provider, secure=settings.public_url.startswith("https://")
     )
+    app.add_middleware(MembershipMiddleware, state=state)
     app.add_middleware(BodyLimitMiddleware)
     return app
 

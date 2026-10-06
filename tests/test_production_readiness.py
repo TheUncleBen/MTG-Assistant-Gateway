@@ -87,7 +87,7 @@ def test_old_metrics_and_deck_covers_are_purged(tmp_path: Path):
 
 def test_purge_indexes_exist_and_are_used(tmp_path: Path):
     db = Database(tmp_path / "g.sqlite")
-    assert db.schema_version == db_module.SCHEMA_VERSION == 6
+    assert db.schema_version == db_module.SCHEMA_VERSION == 7
     with db.tx() as c:
         names = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
         assert {
@@ -129,7 +129,7 @@ def test_failed_migration_step_rolls_back(tmp_path: Path, monkeypatch: pytest.Mo
     with pytest.raises(RuntimeError, match="boom"):
         Database(path)
     conn = sqlite3.connect(path)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db_module.SCHEMA_VERSION
     assert conn.execute("SELECT COUNT(*) FROM sqlite_master WHERE name = 'half_done'").fetchone()[0] == 0
     conn.close()
 

@@ -45,7 +45,8 @@ from .cimd import (
 )
 from .config import Settings
 from .db import Database, hash_token
-from .oidc import Identity, OIDCClient, OIDCError, pkce_pair
+from .membership import Membership, MembershipChecker
+from .oidc import Identity, IdPTokens, OIDCClient, OIDCError, pkce_pair
 
 logger = logging.getLogger(__name__)
 
@@ -96,11 +97,18 @@ MAX_STATE_LEN = 512
 
 class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, RefreshToken, AccessToken]):
     def __init__(
-        self, settings: Settings, db: Database, oidc: OIDCClient, *, cimd: CimdFetcher | None = None
+        self,
+        settings: Settings,
+        db: Database,
+        oidc: OIDCClient,
+        *,
+        cimd: CimdFetcher | None = None,
+        membership: MembershipChecker | None = None,
     ):
         self.settings = settings
         self.db = db
         self.oidc = oidc
+        self.membership = membership if membership is not None else MembershipChecker(settings, db, oidc)
         self.cimd = cimd if cimd is not None else CimdFetcher(allowed_hosts=settings.cimd_allowed_hosts)
 
     # -- clients ------------------------------------------------------------
@@ -413,6 +421,15 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             raise LoginError(DISABLED_MESSAGE, 403)
 
         self._record_user(identity)
+        # The provider's own tokens, so later requests can ask it again (membership.py).
+        self.membership.store(
+            identity.sub,
+            IdPTokens(
+                access_token=identity.idp_access_token,
+                access_expires_at=identity.idp_access_expires_at,
+                refresh_token=identity.idp_refresh_token,
+            ),
+        )
         return session, identity
 
     async def complete_login(
@@ -473,6 +490,21 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             raise LoginError(
                 "The identity provider is unavailable right now. Try again shortly.", 502
             ) from exc
+
+    async def _require_member(self, sub: str) -> None:
+        """Refuse the token request unless the identity provider says ``sub`` is still in."""
+        user = self.db.get_user(sub)
+        if user is None:
+            # Deleted their data (or never signed in): a code or refresh token left over from
+            # before must not mint new tokens.
+            raise TokenError("invalid_grant", "sign in again to keep using this service")
+        if user.get("disabled_at"):
+            raise TokenError("invalid_grant", "this account has been disabled on this gateway")
+        outcome = await self.membership.check(sub)
+        if outcome is Membership.UNAVAILABLE:
+            raise TokenError("invalid_request", "the identity provider can't be reached; try again shortly")
+        if outcome is Membership.REVOKED:
+            raise TokenError("invalid_grant", "sign in again to keep using this service")
 
     def _recheck_membership(self, sub: str, client_id: str, family: str, auth_time: int) -> None:
         """A refresh is the one moment a long-lived session passes through the gateway, so it is
@@ -535,6 +567,7 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             raise TokenError("invalid_grant", "authorization code already used")
         if not authorization_code.subject:
             raise TokenError("invalid_grant", "authorization code has no subject")
+        await self._require_member(authorization_code.subject)
         return self._issue(
             client.client_id,
             authorization_code.subject,
@@ -568,6 +601,10 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
     async def exchange_refresh_token(
         self, client: OAuthClientInformationFull, refresh_token: RefreshToken, scopes: list[str]
     ) -> OAuthToken:
+        if refresh_token.subject:
+            # Ask the identity provider first: a removed member's whole family is revoked here,
+            # and when the provider can't be reached this refresh token stays usable for a retry.
+            await self._require_member(refresh_token.subject)
         row = self.db.get_token(refresh_token.token, "refresh")
         if row is None:
             raise TokenError("invalid_grant", "refresh token is not valid")

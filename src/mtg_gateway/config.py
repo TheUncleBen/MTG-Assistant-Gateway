@@ -93,6 +93,18 @@ def _token_auth_method_env(name: str, default: str) -> str:
     return raw
 
 
+DEFAULT_OIDC_SCOPES = "openid profile email offline_access"
+
+
+def _with_offline_access(scopes: str) -> str:
+    """``offline_access`` is always asked for: the identity provider's refresh token is what lets
+    the gateway ask it again, on later requests, whether the person is still allowed in."""
+    parts = scopes.split()
+    if "offline_access" not in parts:
+        parts.append("offline_access")
+    return " ".join(parts)
+
+
 def _int_env(name: str, default: int, *, lo: int, hi: int) -> int:
     raw = _env(name, str(default)) or str(default)
     try:
@@ -180,6 +192,7 @@ class Settings:
     access_token_ttl: int = 3600
     refresh_token_ttl: int = 30 * 24 * 3600
     reauth_interval: int = 7 * 24 * 3600
+    membership_check_ttl: int = 5
     auth_code_ttl: int = 300
     login_ttl: int = 600
     listen_host: str = "0.0.0.0"
@@ -275,7 +288,7 @@ def load_settings() -> Settings:
         oidc_issuer=oidc_issuer,
         oidc_client_id=_env("MTG_OIDC_CLIENT_ID", required=True) or "",
         oidc_client_secret=_read_secret("MTG_OIDC_CLIENT_SECRET_FILE") or "",
-        oidc_scopes=_env("MTG_OIDC_SCOPES", "openid profile email") or "openid profile email",
+        oidc_scopes=_with_offline_access(_env("MTG_OIDC_SCOPES", DEFAULT_OIDC_SCOPES) or DEFAULT_OIDC_SCOPES),
         required_group=required_group,
         admin_group=_env("MTG_ADMIN_GROUP") or None,
         oidc_groups_claim=_groups_claim_env("MTG_OIDC_GROUPS_CLAIM", "groups"),
@@ -306,6 +319,7 @@ def load_settings() -> Settings:
         access_token_ttl=_int_env("MTG_ACCESS_TOKEN_TTL", 3600, lo=60, hi=86400),
         refresh_token_ttl=_int_env("MTG_REFRESH_TOKEN_TTL", 30 * 24 * 3600, lo=3600, hi=365 * 24 * 3600),
         reauth_interval=_int_env("MTG_REAUTH_INTERVAL", 7 * 24 * 3600, lo=3600, hi=365 * 24 * 3600),
+        membership_check_ttl=_int_env("MTG_MEMBERSHIP_CHECK_TTL", 5, lo=0, hi=60),
         listen_host=_env("MTG_LISTEN_HOST", "0.0.0.0") or "0.0.0.0",
         listen_port=_int_env("MTG_LISTEN_PORT", 8080, lo=1, hi=65535),
         log_level=(_env("MTG_LOG_LEVEL", "INFO") or "INFO").upper(),
