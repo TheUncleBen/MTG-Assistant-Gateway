@@ -157,8 +157,11 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
   - `propose_deck_changes` (edit a deck) and `propose_new_deck` (build one
     from a card list, a pasted list or a CSV) save the exact diff and a
     review link.
-  - The user says yes, either in chat (if the operator allows
-    `apply_proposal`) or with the Apply button on the review page.
+  - The user approves it: on the card the AI app shows next to the
+    proposal (Claude on the web, desktop and phones; ChatGPT), with the
+    Apply button on the review page, or in chat if the operator allows
+    `apply_proposal`. The card's Approve button carries a one-time code
+    the assistant never sees, so a tricked assistant can't press it.
   - For an edit, the gateway checks the deck hasn't changed since the proposal, saves a
     snapshot, puts a private backup copy of the deck in the user's
     "MTG Gateway backups" folder on Archidekt, makes the change, then reads
@@ -204,7 +207,7 @@ between releases ([docs/VERSIONS.md](docs/VERSIONS.md)).
 | Area | State |
 | --- | --- |
 | Sign-in, research, deck import, account linking, proposals, scanning | Built. Tested against fakes, recorded Archidekt and Scryfall responses, and a real Swarm stack with Authentik in CI |
-| Applying edits, creating decks, backups and restores on Archidekt | Built, and run live against a throwaway Archidekt account (create, add, remove, quantities, categories, commander, backup folder and copy). The code default is off (`MTG_WRITES_ENABLED=false`); the example env files turn writes on (each change is still applied only by the member's own click on the review page; in-chat applying, `MTG_APPLY_VIA_MCP`, stays off). Try your first edit on a deck you don't care about |
+| Applying edits, creating decks, backups and restores on Archidekt | Built, and run live against a throwaway Archidekt account (create, add, remove, quantities, categories, commander, backup folder and copy). The code default is off (`MTG_WRITES_ENABLED=false`); the example env files turn writes on (each change is still applied only by the member's own press: the Approve button on the in-chat card or the Apply button on the review page; the assistant's own apply tool, `MTG_APPLY_VIA_MCP`, stays off). Try your first edit on a deck you don't care about |
 | Client and device coverage | See [docs/CONNECT.md](docs/CONNECT.md#which-apps-and-devices-work), which labels each claim as verified, reported or unverified |
 | Deck statistics, stored deck reports and history, compare, companion pages, admin page, JSON API | Built and covered by the test suite against fakes. The companion pages and admin page have not yet had the same live Swarm run-through as the rest; treat that as unverified |
 | Watchlists, price history | Not yet (Mystic Forge's own saved goldfish reports stay hidden too; the gateway's stored deck reports replace them) |

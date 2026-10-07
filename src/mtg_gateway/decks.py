@@ -31,6 +31,7 @@ from urllib.parse import urlparse
 
 from cryptography.fernet import Fernet, InvalidToken
 
+from .approve import approval_code, approval_matches
 from .archidekt import (
     FORMAT_IDS,
     ArchidektClient,
@@ -1224,6 +1225,7 @@ class DeckService:
                 state,
                 self.settings.writes_enabled,
                 via_mcp=self.settings.apply_via_mcp,
+                in_chat=self.settings.apply_in_chat,
                 min_age=self.settings.apply_min_age_seconds,
                 partial=bool((row["result"] or {}).get("sent_entries")),
                 kind=row.get("kind", "edit"),
@@ -1288,6 +1290,41 @@ class DeckService:
             )
         return out
 
+    def approval_for(self, sub: str, row: dict[str, Any]) -> str:
+        """The in-chat card's one-time code for a proposal (approve.py), bound to the proposal,
+        its owner, the app that made it and its creation time."""
+        return approval_code(
+            self.settings.session_secret,
+            proposal_id=row["id"],
+            sub=sub,
+            client_id=row.get("created_by_client") or "",
+            created_at=int(row["created_at"]),
+        )
+
+    def check_approval(self, sub: str, proposal_id: str, approval: Any) -> dict[str, Any]:
+        """The proposal row when ``approval`` is its code and the caller is the app that made it;
+        otherwise ``invalid_approval`` (audited), and nothing else happens."""
+        row = self.db.get_proposal(proposal_id, sub)
+        if row is None:
+            raise DeckError("not_found", "No such proposal for your account.")
+        creator = row.get("created_by_client")
+        if (
+            not creator
+            or creator != current_client.get()
+            or not approval_matches(self.approval_for(sub, row), approval)
+        ):
+            self._audit(
+                "approval_refused", sub=sub, detail={"proposal_id": proposal_id, "deck_id": row["deck_id"]}
+            )
+            raise DeckError(
+                "invalid_approval",
+                "This approval code does not belong to this proposal, this app and this account. "
+                "Nothing was sent to Archidekt. Only the Approve button on the proposal card or the "
+                "review page can apply it.",
+                review_url=f"{self.settings.public_url}/proposals/{proposal_id}",
+            )
+        return row
+
     async def apply(self, sub: str, proposal_id: str, *, via: str) -> dict[str, Any]:
         if not self.settings.writes_enabled:
             raise DeckError(
@@ -1301,6 +1338,9 @@ class DeckService:
         if row["state"] == "applied":
             raise DeckError("already_applied", "This proposal was already applied; nothing was sent again.")
         age = int(time.time()) - int(row["created_at"])
+        # "mcp" is the assistant's own apply_proposal call (MTG_APPLY_VIA_MCP): it must not land
+        # in the same breath as the proposal. "app" is the person's press on the in-chat card,
+        # already gated by the card's one-time code (approve.py), so it is not held back.
         if via == "mcp" and age < self.settings.apply_min_age_seconds:
             wait = self.settings.apply_min_age_seconds - age
             raise DeckError(
@@ -1311,7 +1351,7 @@ class DeckService:
                 retry_after_seconds=wait,
             )
         creator = row.get("created_by_client")
-        if via == "mcp" and (not creator or creator != current_client.get()):
+        if via in ("mcp", "app") and (not creator or creator != current_client.get()):
             # Only the assistant that proposed (and showed the user this diff) may apply it over
             # MCP; a proposal left pending cannot be picked up by another connected client.
             raise DeckError(
@@ -2181,23 +2221,31 @@ def _next_step(
     writes_enabled: bool,
     *,
     via_mcp: bool = False,
+    in_chat: bool = False,
     min_age: int = 0,
     partial: bool = False,
     kind: str = "edit",
 ) -> str:
     what = "these details" if kind == "details" else "this copy" if kind == "clone" else "this diff"
+    # With the in-chat card (approve.py) the person decides on the card where the app shows one.
+    card = (
+        "If your app shows this proposal as a card with Approve and Reject buttons, the user decides "
+        "there and the gateway tells you the outcome; do not apply it yourself. Otherwise, show"
+        if in_chat
+        else "Show"
+    )
     if state == "pending" and not writes_enabled:
         return "Review only: deck writes are disabled on this gateway, so this cannot be applied yet."
     if state == "pending" and via_mcp:
         hold = f" (the gateway refuses applies made within {min_age} s of proposing)" if min_age else ""
         return (
-            f"Show the user {what} and the review link, wait for their explicit OK in their own "
+            f"{card} the user {what} and the review link, wait for their explicit OK in their own "
             f"message, then call apply_proposal{hold}. They can also press Apply on the review page. "
             "If your app will not run apply_proposal, do not retry: send the user the review link to "
             "press Apply there."
         )
     if state == "pending":
-        return f"Review {what}, then confirm on the review page (the Apply button)."
+        return f"{card} the user {what} and the review link: they confirm on the review page (Apply)."
     if state == "applied" and kind == "details":
         return "Done. The deck's details on Archidekt match this proposal."
     if state == "applied" and kind == "clone":

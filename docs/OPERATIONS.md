@@ -73,7 +73,7 @@ logs.
 
 In Portainer: **Stacks** → `mtg` → **Update the stack**, with "Re-pull
 image" ticked. With `MTG_TAG=latest` that pulls the newest version; with a
-pinned version (for example `0.6.3`), change `MTG_TAG` first
+pinned version (for example `0.6.5`), change `MTG_TAG` first
 ([VERSIONS.md](VERSIONS.md)). Or from the command line:
 
 ```bash
@@ -413,9 +413,10 @@ The gateway only writes to someone's Archidekt account in two steps:
 1. `propose_deck_changes` (edit a deck), `propose_new_deck` (create one) or
    `propose_restore_snapshot` (undo an edit) saves a proposal with the exact
    diff.
-2. The user approves it, either with the Apply button on `/proposals/<id>`
-   or, if `MTG_APPLY_VIA_MCP` is on, by saying yes in chat so the assistant
-   calls `apply_proposal`.
+2. The user approves it: with Approve on the card their AI app shows next
+   to the proposal (Claude, ChatGPT; `MTG_APPLY_IN_CHAT`), with the Apply
+   button on `/proposals/<id>`, or, if `MTG_APPLY_VIA_MCP` is on, by saying
+   yes in chat so the assistant calls `apply_proposal`.
 
 Applying an edit or restore:
 
@@ -455,15 +456,33 @@ switched off on this gateway" and nothing reaches Archidekt. A proposal made
 while writes were off can be applied once you turn them back on, as long as
 it hasn't expired and the deck hasn't changed.
 
+### Approving on the card in the chat
+
+With `MTG_APPLY_IN_CHAT` on (the default), an AI app that renders MCP Apps
+(Claude on the web, desktop and phones; ChatGPT) shows every proposal as a
+card with the change, each card's picture, and Approve and Reject buttons.
+The buttons call the `confirm_proposal` tool, which the app offers to the
+card and not to the model, and which needs a one-time code the gateway
+puts only in the tool result's `_meta` (handed to the card, kept out of the
+model's context). A call without the right code is refused and logged as
+`approval_refused`, with nothing sent; the code is tied to the proposal, the
+member and the app that proposed, and is spent by the apply. The gateway
+cannot see who pressed; it relies on the app keeping the tool and the code
+away from the model, as the MCP Apps standard says. Set it to `false` and
+the card, the code and the tool disappear: members use the review page.
+An app that cannot show the card (Claude Code, older clients) sees the text
+and the review link as before; Claude Code can also open the review page
+for the member when the assistant calls `apply_proposal`.
+
 ### Applying through the assistant
 
 `MTG_APPLY_VIA_MCP` decides whether the assistant can apply a proposal. The
 code default is `false`: the `apply_proposal` tool answers
-`browser_required` with the review link, so a person's own click always sits
+`browser_required` with the review link, so a person's own press always sits
 between anything the assistant read (deck descriptions, card text) and a
 write to Archidekt. The example env files keep it `false` too. Setting it to
 `true` lets the assistant apply after the user says yes in chat; writes have
-to be on as well.
+to be on as well. With the card above, there is little reason to turn it on.
 
 With it on, the gateway has no proof the user really said yes; it relies on
 the assistant following its instructions. Two things narrow that gap:
@@ -517,7 +536,7 @@ Archidekt busy for everyone:
 `MTG_ADMIN_GROUP` is set to the name of a group in your identity provider
 (set it in the stack's environment variables or in `.env`; the stack and
 Compose files already pass it through). Members of that group see it after
-signing in; since 0.6.3 they don't also need to be in `MTG_REQUIRED_GROUP`,
+signing in; since 0.6.5 they don't also need to be in `MTG_REQUIRED_GROUP`,
 because the admin group lets its members sign in too. In the site menu it's
 the **Admin** link, shown only to them. For everyone else, and whenever the variable is unset, `/admin`
 and everything under it answers 404, so ordinary users can't tell the area

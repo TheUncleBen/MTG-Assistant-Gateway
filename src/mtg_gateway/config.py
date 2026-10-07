@@ -152,6 +152,9 @@ class Settings:
     cimd_allowed_hosts: list[str] = field(default_factory=list)
     writes_enabled: bool = False
     apply_via_mcp: bool = False
+    # The Approve/Reject card an AI app shows in the chat (MCP Apps) may apply a proposal with
+    # its one-time code; false leaves only the review page (and apply_via_mcp, if on).
+    apply_in_chat: bool = True
     apply_min_age_seconds: int = 15  # MCP apply refused on proposals younger than this
     archidekt_base: str = "https://archidekt.com/api"
     archidekt_backups: bool = True
@@ -320,6 +323,7 @@ def load_settings() -> Settings:
             h.strip() for h in (_env("MTG_CIMD_ALLOWED_HOSTS", "") or "").split(",") if h.strip()
         ],
         apply_via_mcp=_bool_env("MTG_APPLY_VIA_MCP", False),
+        apply_in_chat=_bool_env("MTG_APPLY_IN_CHAT", True),
         apply_min_age_seconds=_int_env("MTG_APPLY_MIN_AGE_SECONDS", 15, lo=0, hi=3600),
         browser_session_ttl=_int_env("MTG_BROWSER_SESSION_TTL", 2 * 3600, lo=300, hi=86400),
         writes_enabled=_bool_env("MTG_WRITES_ENABLED", False),
