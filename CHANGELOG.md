@@ -74,6 +74,7 @@ touch screens, and a native-feeling layout in the Android app.
 - The navigation is Decks, Search, Collection, Scan, Proposals, History (and
   Admin for admins); the phone tab bar is Decks, Search, Scan, Collection,
   More (More opens the home page with every section).
+
 ## [0.6.2] - 2026-10-07
 
 ### Fixed
