@@ -76,6 +76,13 @@ async def test_home_shows_the_full_navigation_and_every_section(stack: Stack) ->
         assert "Sample Commander Deck" in r.text  # the newest decks with their covers
         assert "href='/guide'" in r.text
         assert "Connect an AI assistant" in r.text and "https://mtg.test/mcp" in r.text
+        # Deck covers come from Scryfall, so the home page carries the deck pages' CSP (the e2e
+        # suite checks the deployed header against the same string).
+        assert r.headers["content-security-policy"] == (
+            "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; "
+            "img-src 'self' https://cards.scryfall.io; form-action 'self'; base-uri 'none'; "
+            "frame-ancestors 'none'"
+        )
         assert "Archidekt account <strong>alice</strong> is linked" in r.text
     finally:
         await b.aclose()
