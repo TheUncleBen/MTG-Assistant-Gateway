@@ -31,6 +31,7 @@ from urllib.parse import urlparse
 
 from cryptography.fernet import Fernet, InvalidToken
 
+from . import modes
 from .approve import approval_code, approval_matches
 from .archidekt import (
     FORMAT_IDS,
@@ -962,6 +963,26 @@ class DeckService:
             "last_used_at": row["last_used_at"] if row else None,
             "writes_enabled": self.settings.writes_enabled,
             "account_page": f"{self.settings.public_url}/account",
+            **self.mode_info(sub),
+        }
+
+    def mode_of(self, sub: str) -> str:
+        """The approval mode governing this member (modes.py): their own choice from the Account
+        page, or the gateway's default while they have not chosen, never above the cap. Read by
+        ``sub`` only, so one member's choice never reaches another's proposals or apps."""
+        user = self.db.get_user(sub) or {}
+        return modes.effective_mode(
+            user.get("approval_mode"),
+            default=self.settings.approval_mode_default,
+            cap=self.settings.approval_mode_max,
+        )
+
+    def mode_info(self, sub: str) -> dict[str, Any]:
+        mode = self.mode_of(sub)
+        return {
+            "approval_mode": mode,
+            "approval_mode_label": modes.MODE_LABELS[mode],
+            "approval_mode_note": modes.MODE_HELP[mode] + " Change it on the account page.",
         }
 
     def _token(self, sub: str) -> tuple[str, dict[str, Any]]:
@@ -1201,9 +1222,13 @@ class DeckService:
         state = row["state"]
         if state == "pending" and row["expires_at"] < int(time.time()):
             state = "expired"
+        kind = row.get("kind", "edit")
+        risk, why = modes.risk_of(kind, row.get("rows"), max_rows=self.settings.auto_apply_max_rows)
+        mode = self.mode_of(sub)
+        may_apply = self.settings.writes_enabled and modes.assistant_may_apply(mode, risk)
         return {
             "proposal_id": row["id"],
-            "kind": row.get("kind", "edit"),
+            "kind": kind,
             "deck_id": row["deck_id"],
             "deck_url": f"https://archidekt.com/decks/{row['deck_id']}" if row["deck_id"].isdigit() else None,
             "deck_name": row["deck_name"],
@@ -1221,14 +1246,22 @@ class DeckService:
             # Which app made it ("browser", or "app: <its name> (<client id>)"), for the review page.
             "created_by": self._creator_label(row.get("created_by_client")),
             "writes_enabled": self.settings.writes_enabled,
+            # The member's approval mode (modes.py) and this proposal's risk tier decide whether
+            # the assistant may apply it itself or the member's own press is needed.
+            "approval_mode": mode,
+            "risk": risk,
+            "risk_reason": why,
+            "assistant_may_apply": may_apply,
             "next_step": _next_step(
                 state,
                 self.settings.writes_enabled,
-                via_mcp=self.settings.apply_via_mcp,
+                may_apply=may_apply,
+                mode=mode,
+                risk=risk,
+                risk_reason=why,
                 in_chat=self.settings.apply_in_chat,
-                min_age=self.settings.apply_min_age_seconds,
                 partial=bool((row["result"] or {}).get("sent_entries")),
-                kind=row.get("kind", "edit"),
+                kind=kind,
             ),
         }
 
@@ -1337,20 +1370,34 @@ class DeckService:
             raise DeckError("not_found", "No such proposal for your account.")
         if row["state"] == "applied":
             raise DeckError("already_applied", "This proposal was already applied; nothing was sent again.")
-        age = int(time.time()) - int(row["created_at"])
-        # "mcp" is the assistant's own apply_proposal call (MTG_APPLY_VIA_MCP): it must not land
-        # in the same breath as the proposal. "app" is the person's press on the in-chat card,
-        # already gated by the card's one-time code (approve.py), so it is not held back.
-        if via == "mcp" and age < self.settings.apply_min_age_seconds:
-            wait = self.settings.apply_min_age_seconds - age
-            raise DeckError(
-                "apply_too_soon",
-                "This proposal was created moments ago. Show the user its change preview and review "
-                "link and wait for their explicit OK in their own message. If they already said yes, "
-                f"retry once after {wait} seconds. Nothing was sent to Archidekt.",
-                retry_after_seconds=wait,
-            )
         creator = row.get("created_by_client")
+        # "mcp" is the assistant's own apply_proposal call: allowed only when this member's
+        # approval mode (modes.py) lets the assistant apply a proposal of this risk itself.
+        # "app" is the member's press on the in-chat card, gated by its one-time code
+        # (approve.py); "browser" is the review page; "auto" is never a caller's choice.
+        if via == "mcp":
+            kind = row.get("kind", "edit")
+            risk, why = modes.risk_of(kind, row.get("rows"), max_rows=self.settings.auto_apply_max_rows)
+            mode = self.mode_of(sub)
+            if not modes.assistant_may_apply(mode, risk):
+                self._audit(
+                    "apply_needs_user",
+                    sub=sub,
+                    detail={
+                        "proposal_id": proposal_id,
+                        "deck_id": row["deck_id"],
+                        "mode": mode,
+                        "risk": risk,
+                    },
+                )
+                raise DeckError(
+                    "browser_required",
+                    _needs_user_message(mode, risk, why),
+                    review_url=f"{self.settings.public_url}/proposals/{proposal_id}",
+                    state=row["state"],
+                    approval_mode=mode,
+                    risk=risk,
+                )
         if via in ("mcp", "app") and (not creator or creator != current_client.get()):
             # Only the assistant that proposed (and showed the user this diff) may apply it over
             # MCP; a proposal left pending cannot be picked up by another connected client.
@@ -2216,13 +2263,28 @@ def _clean_deck_id(deck_id: Any) -> str:
     return raw
 
 
+def _needs_user_message(mode: str, risk: str, why: str) -> str:
+    if mode == "semi":
+        return (
+            f"This proposal is high risk (it {why}), so in the user's semi-automatic approval mode it "
+            "needs their own press on the proposal card or the review page. Nothing was sent to "
+            "Archidekt; do not retry."
+        )
+    return (
+        "The user's approval mode asks them every time: this proposal needs their own press on the "
+        "proposal card or the review page. Nothing was sent to Archidekt; do not retry."
+    )
+
+
 def _next_step(
     state: str,
     writes_enabled: bool,
     *,
-    via_mcp: bool = False,
+    may_apply: bool = False,
+    mode: str = "manual",
+    risk: str = "high",
+    risk_reason: str = "",
     in_chat: bool = False,
-    min_age: int = 0,
     partial: bool = False,
     kind: str = "edit",
 ) -> str:
@@ -2236,16 +2298,27 @@ def _next_step(
     )
     if state == "pending" and not writes_enabled:
         return "Review only: deck writes are disabled on this gateway, so this cannot be applied yet."
-    if state == "pending" and via_mcp:
-        hold = f" (the gateway refuses applies made within {min_age} s of proposing)" if min_age else ""
+    if state == "pending" and may_apply:
+        chose = (
+            "to apply every change without asking"
+            if mode == "auto"
+            else f"to apply low-risk edits without asking, and this one is low risk ({risk_reason})"
+        )
         return (
-            f"{card} the user {what} and the review link, wait for their explicit OK in their own "
-            f"message, then call apply_proposal{hold}. They can also press Apply on the review page. "
-            "If your app will not run apply_proposal, do not retry: send the user the review link to "
-            "press Apply there."
+            f"The user chose {chose}: tell them {what} in one line and call apply_proposal now. "
+            "They can also press Apply on the review page."
+        )
+    if state == "pending" and mode == "semi":
+        return (
+            f"This proposal is high risk (it {risk_reason}), so the user's semi-automatic mode needs "
+            f"their own press. {card} the user {what} and the review link: they confirm on the "
+            "card or the review page. Do not call apply_proposal."
         )
     if state == "pending":
-        return f"{card} the user {what} and the review link: they confirm on the review page (Apply)."
+        return (
+            f"{card} the user {what} and the review link: they confirm on the review page (Apply). "
+            "Do not call apply_proposal: the user's approval mode asks them every time."
+        )
     if state == "applied" and kind == "details":
         return "Done. The deck's details on Archidekt match this proposal."
     if state == "applied" and kind == "clone":

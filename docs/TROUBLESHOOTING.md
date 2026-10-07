@@ -62,10 +62,10 @@ connecting an assistant in [CONNECT.md](CONNECT.md#if-sign-in-fails).
 | Research tools answer "the research service is unavailable right now" | The gateway is fine, Mystic Forge isn't. Check its container and logs |
 | No research tools at all | `MTG_MYSTIC_FORGE_URL` is empty. Set it to `http://mysticforge:8000/mcp` (Compose) or `http://mtg-assistant-mysticforge:8000/mcp` (Swarm stack) |
 | `apply_proposal` answers `writes_disabled` | `MTG_WRITES_ENABLED` is `false` |
-| `apply_proposal` answers `browser_required` | `MTG_APPLY_VIA_MCP` is `false`; approve on the card in the chat or on the review page |
+| `apply_proposal` answers `browser_required` | The member's approval mode (Account page) wants their own press for this proposal: manual mode, or a high-risk proposal in semi mode. Approve on the card in the chat or on the review page |
+| The assistant applied a change without asking | The member chose the semi or auto approval mode on their Account page (audit event `approval_mode_set`). Every applied change has a snapshot on the History page; switch the mode back to "Ask me every time" there |
 | No Approve/Reject card appears next to a proposal | The app doesn't render MCP Apps (Claude Code, older clients), the person declined to display the app the first time Claude asked, or `MTG_APPLY_IN_CHAT` is `false`. The review link in the text always works |
 | `confirm_proposal` answers `invalid_approval`, log shows `approval_refused` | Something called the card's tool without its one-time code: a stale card, another app, or an assistant trying it. Nothing was sent; the proposal is still pending for the review page |
-| `apply_proposal` answers `apply_too_soon` | Working as designed: wait `retry_after_seconds` and try again |
 | `rate_limited`: "Your account has used its ... Archidekt requests" | The member's Archidekt budget (`MTG_ARCHIDEKT_CALLS_PER_10_MIN`, 120 per 10 minutes) is used up, often by an assistant stuck in a loop. It refills over a few minutes |
 | `insufficient_scope` | The app was connected with the read-only scope `mtg.read`. Reconnect it with the `mtg` scope to make changes |
 | Archidekt link keeps dropping | See [OPERATIONS.md](OPERATIONS.md#archidekt-links-and-relinking) |

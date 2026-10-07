@@ -154,10 +154,10 @@ The assistant never changes a deck directly:
 1. It calls `propose_deck_changes` or `propose_new_deck`. The gateway saves
    the exact change and returns a review link.
 2. The person approves it: with **Approve** on the card the AI app shows
-   next to the proposal (an MCP App, see below), on the review page with
-   **Apply**, or in chat if the operator turned on `MTG_APPLY_VIA_MCP` (and
-   only after a short minimum age, so a proposal can't be made and applied
-   in one breath).
+   next to the proposal (an MCP App, see below) or on the review page with
+   **Apply**. A person who chose a looser **approval mode** on their Account
+   page (see below) lets the assistant apply low-risk edits, or everything,
+   itself; the gateway tells the assistant which in every proposal result.
 3. The gateway checks the deck hasn't changed since, saves a snapshot, makes
    a private backup copy of the deck on Archidekt, applies the change, and
    reads the deck back to confirm it.
@@ -228,10 +228,20 @@ For the exact devices and plans tested, see
   The session is encrypted with the `mtg_fernet_key` secret, which protects
   the database and its backups. It doesn't protect against whoever runs the
   server, and users are told that.
-- **Deck changes** need the person's own yes. The code enforces it: changes
-  are proposals until applied with the review page's Apply button, with the
-  in-chat card's Approve button, or in chat only when `MTG_APPLY_VIA_MCP`
-  allows it and the proposal is older than `MTG_APPLY_MIN_AGE_SECONDS`.
+- **Deck changes** need the person's own yes, unless they chose otherwise.
+  The code enforces it: changes are proposals until applied with the review
+  page's Apply button or the in-chat card's Approve button. Each person has
+  an **approval mode** (`src/mtg_gateway/modes.py`), set only on their own
+  Account page in the browser, never over MCP or the API: `manual` (the
+  default: ask every time), `semi` (the assistant may apply a low-risk edit
+  itself: at most `MTG_AUTO_APPLY_MAX_ROWS` review rows of card adds,
+  removes, quantity, category, finish or printing changes of at most four
+  copies each, never the commander; or a clone) or `auto` (the assistant may apply everything).
+  The mode is read by the member's id when an apply is attempted, so one
+  member's choice never reaches another's proposals, decks or apps; the
+  operator can cap it with `MTG_APPROVAL_MODE_MAX` and set the mode of
+  members who have not chosen with `MTG_APPROVAL_MODE_DEFAULT`. Every apply
+  still snapshots the deck first.
   The card is an MCP App (`src/mtg_gateway/approve.py`, the HTML in
   `static/proposal-card.html`): every `propose_*` tool and `get_proposal`
   names it in `_meta.ui.resourceUri`, a host that renders MCP Apps shows it

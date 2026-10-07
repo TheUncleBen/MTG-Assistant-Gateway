@@ -59,7 +59,7 @@ CONFIRM_TOOL_META: dict[str, Any] = {
     "openai/visibility": "private",
     "openai/widgetAccessible": True,
 }
-# apply_proposal (the model's own apply, allowed only with MTG_APPLY_VIA_MCP): Claude Code
+# apply_proposal (the model's own apply, allowed by the member's approval mode): Claude Code
 # shows its permission prompt on every call and offers no "always allow" for it.
 APPLY_TOOL_META: dict[str, Any] = {"anthropic/requiresUserInteraction": True}
 

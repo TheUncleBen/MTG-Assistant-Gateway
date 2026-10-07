@@ -23,10 +23,12 @@ def _env(path: Path) -> dict[str, str]:
 
 
 @pytest.mark.parametrize("name", ["deploy/stack.env.example", "deploy/compose/.env.example"])
-def test_example_env_keeps_apply_via_mcp_off(name: str):
-    # With true, a prompt-injected assistant could apply its own proposal after the minimum wait;
-    # the examples keep the member's own click on the review page in the loop.
-    assert _env(ROOT / name)["MTG_APPLY_VIA_MCP"] == "false"
+def test_example_env_keeps_the_default_approval_mode_manual(name: str):
+    # Out of the box every change waits for the member's own press; members loosen their own
+    # mode on the Account page, and the examples do not cap it.
+    env = _env(ROOT / name)
+    assert env["MTG_APPROVAL_MODE_DEFAULT"] == "manual" and env["MTG_APPROVAL_MODE_MAX"] == "auto"
+    assert "MTG_APPLY_VIA_MCP" not in env and "MTG_APPLY_MIN_AGE_SECONDS" not in env
 
 
 def _service(compose: str, name: str) -> str:
