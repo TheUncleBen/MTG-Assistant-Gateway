@@ -37,7 +37,11 @@ CARD_TOOLS = (
 def _stack_with(tmp_path, idp: FakeIdP, **over):
     ark = FakeArchidekt()
     settings = make_settings(
-        tmp_path, writes_enabled=True, apply_via_mcp=False, archidekt_base="https://ark.test/api", **over
+        tmp_path,
+        writes_enabled=True,
+        approval_mode_default="manual",
+        archidekt_base="https://ark.test/api",
+        **over,
     )
     return Harness(settings, idp, archidekt=_client(settings, ark)), ark
 
@@ -141,11 +145,11 @@ async def test_card_approve_applies_and_the_code_is_spent(stack: Stack) -> None:
     token = await linked_user(stack)
     res = await _propose(h, token)
     p, code = structured(res), res["_meta"][APPROVAL_META_KEY]
-    # The assistant's own apply is refused on this gateway (MTG_APPLY_VIA_MCP=false)...
+    # The assistant's own apply is refused in the member's manual approval mode...
     own = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     assert own["ok"] is False and own["error"] == "browser_required"
     assert _writes(stack.ark) == 0
-    # ...the card's Approve applies at once, with no "too soon" hold.
+    # ...the card's Approve applies at once.
     done = await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": code})
     got = structured(done)
     assert got["ok"] is True and got["state"] == "applied", got

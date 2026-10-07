@@ -40,7 +40,6 @@ STATUS_FOR = {
     "not_linked": 409,
     "writes_disabled": 403,
     "browser_required": 403,
-    "apply_too_soon": 425,
     "not_pending": 409,
     "already_applied": 409,
     "stale": 409,
@@ -294,14 +293,8 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
     @route("/proposals/{pid}/apply", "POST", write=True)
     async def apply(request: Request, who: Caller) -> Response:
         pid = request.path_params["pid"]
-        if who.via == "api" and s.writes_enabled and not s.apply_via_mcp:
-            p = decks.describe(who.sub, pid)
-            raise DeckError(
-                "browser_required",
-                "This gateway applies proposals only from the review page in the browser.",
-                review_url=p["review_url"],
-                state=p["state"],
-            )
+        # A bearer token applies under the member's approval mode, exactly like apply_proposal
+        # over MCP (decks.apply decides); the browser session is the member's own press.
         return ok(await decks.apply(who.sub, pid, via="browser" if who.via == "browser" else "mcp"))
 
     @route("/proposals/{pid}/reject", "POST", write=True)

@@ -284,7 +284,7 @@ If the packages are public you can skip this step.
 
    | Variable | What to put |
    | --- | --- |
-   | `MTG_IMAGE`, `MTG_TAG` | `ghcr.io/<owner>/mtg-assistant-gateway` and `latest` to follow every new version, or one version to stay on it, for example `0.6.5` ([VERSIONS.md](VERSIONS.md)) |
+   | `MTG_IMAGE`, `MTG_TAG` | `ghcr.io/<owner>/mtg-assistant-gateway` and `latest` to follow every new version, or one version to stay on it, for example `0.6.6` ([VERSIONS.md](VERSIONS.md)) |
    | `MTG_PUBLIC_URL` | `https://mtg.example.com` |
    | `MTG_OIDC_ISSUER` | the issuer URL from step 3 |
    | `MTG_OIDC_CLIENT_ID` | the Client ID from step 3 |
@@ -296,7 +296,8 @@ If the packages are public you can skip this step.
    | `MTG_REQUIRED_GROUP` | the group from step 3, spelled exactly as your identity provider sends it (it's case-sensitive). Required: the gateway won't start with it empty unless you also set `MTG_ALLOW_ANY_IDP_USER=true` (anyone your identity provider lets through gets in) |
    | `MF_IMAGE`, `MF_NODE` | `ghcr.io/<owner>/mtg-assistant-mysticforge`, and the node Mystic Forge should run on (can be the same one) |
    | `MTG_WRITES_ENABLED` | `true` to let approved proposals change Archidekt; `false` keeps everything review-only. Writes have been run live against a throwaway Archidekt account, but make your own first edit on a deck you don't care about |
-   | `MTG_APPLY_VIA_MCP` | Leave it `false` (the example file and the code default): only the member's own press applies a change, on the Approve button of the card their AI app shows in the chat or on Apply on the review page. `true` lets the assistant apply after the user says yes in chat, which is weaker: text the assistant reads (deck descriptions, card notes) could trick it into applying its own proposal once `MTG_APPLY_MIN_AGE_SECONDS` has passed |
+   | `MTG_APPROVAL_MODE_DEFAULT` | Leave it `manual` (the example file and the code default): a member who has not chosen an approval mode has every change wait for their own press, on the Approve button of the card in the chat or on Apply on the review page. Each member picks their own mode (`manual`, `semi`: small low-risk edits apply without asking, `auto`: every change) on their Account page |
+   | `MTG_APPROVAL_MODE_MAX` | `auto` (no cap) lets members choose any mode; `semi` or `manual` caps what they may choose |
    | `MTG_APPLY_IN_CHAT` | `true` (the default): Claude and ChatGPT show each proposal as a card with Approve and Reject buttons, and only the card's one-time code can apply it. `false` removes the card; members use the review page |
 
    Everything else can stay at its default. The full list is in the
@@ -444,7 +445,7 @@ From any machine:
 
 ```bash
 curl -s https://mtg.example.com/healthz
-# {"status":"ok","version":"0.6.5"}
+# {"status":"ok","version":"0.6.6"}
 
 curl -s https://mtg.example.com/.well-known/oauth-authorization-server | head -c 300
 # JSON with "issuer":"https://mtg.example.com", "authorization_endpoint", ...
@@ -566,7 +567,7 @@ gateway's `environment:` in the stack file, or it has no effect.
 | `MTG_MEMBERSHIP_CHECK_TTL` | no, *stack* | `5` | Before serving any request with a browser session or a gateway token, the gateway asks the identity provider's userinfo endpoint whether the person is still in `MTG_REQUIRED_GROUP` (and `MTG_ADMIN_GROUP`). The answer is reused for this many seconds, which is the longest a removed member can keep going. `0` asks on every request; 0 to 60. If the provider can't be reached, requests get 503 and nothing is revoked |
 | `MTG_REQUIRED_GROUP` | yes, *stack* | | Group a user must be in. The gateway refuses to start with it empty unless `MTG_ALLOW_ANY_IDP_USER` is `true` |
 | `MTG_ALLOW_ANY_IDP_USER` | no, *stack* | `false` | `true` lets an empty `MTG_REQUIRED_GROUP` through, so anyone your identity provider signs in gets in. Only for an identity provider that already admits nobody else |
-| `MTG_ADMIN_GROUP` | no, *stack* | empty (no admin page) | Identity-provider group whose members get the `/admin` pages and `/api/v1/admin` (users, activity, metrics; disable, enable, revoke, unlink, delete data). Checked live like `MTG_REQUIRED_GROUP`. Members of this group may sign in even when they aren't in `MTG_REQUIRED_GROUP` (since 0.6.5). Unset or empty, the admin routes answer 404 for everyone. Details in [OPERATIONS.md](OPERATIONS.md#the-admin-page) |
+| `MTG_ADMIN_GROUP` | no, *stack* | empty (no admin page) | Identity-provider group whose members get the `/admin` pages and `/api/v1/admin` (users, activity, metrics; disable, enable, revoke, unlink, delete data). Checked live like `MTG_REQUIRED_GROUP`. Members of this group may sign in even when they aren't in `MTG_REQUIRED_GROUP` (since 0.6.6). Unset or empty, the admin routes answer 404 for everyone. Details in [OPERATIONS.md](OPERATIONS.md#the-admin-page) |
 | `MTG_OIDC_GROUPS_CLAIM` | no, *stack* | `groups` | Dot-path to the group list in the ID token (or userinfo) claims. Authentik: `groups`; Keycloak: `realm_access.roles`; Zitadel: `urn:zitadel:iam:org:project:roles` (a dict whose keys are the role names also works; a key whose value is empty or `false` does not count). The whole value is tried as one claim name first, so Auth0-style `https://example.com/groups` works too. Names are compared exactly, with no trimming. A missing or differently shaped claim means no groups, so `MTG_REQUIRED_GROUP` refuses the sign-in |
 | `MTG_OIDC_TOKEN_AUTH_METHOD` | no, *stack* | `client_secret_post` | How the gateway sends its client secret to the token endpoint: `client_secret_post` (in the form body) or `client_secret_basic` (HTTP Basic header). Match what the client is configured for in the identity provider |
 | `MTG_DATA_DIR` | no, *stack* | `/data` | Where the SQLite database lives. In the stack, the variable is the folder on the host, mounted at `/data` |
@@ -582,9 +583,10 @@ gateway's `environment:` in the stack file, or it has no effect.
 | `MTG_LISTEN_HOST`, `MTG_LISTEN_PORT` | no | `0.0.0.0`, `8080` | Address and port inside the container. Leave them; the stack, Compose file and health checks expect 8080 |
 | `MTG_MYSTIC_FORGE_URL` | no, *stack* | empty (no research tools) | Internal Mystic Forge MCP URL; the stack sets `http://mtg-assistant-mysticforge:8000/mcp` |
 | `MTG_WRITES_ENABLED` | no, *stack* | `false` | `true` lets approved proposals be applied to Archidekt |
-| `MTG_APPLY_VIA_MCP` | no, *stack* | `false` | `true` also lets the `apply_proposal` tool apply after the user says yes in chat (weaker: a tricked assistant could apply its own proposal); `false`, also in `stack.env.example`, means only the review page can apply |
-| `MTG_APPLY_IN_CHAT` | no, *stack* | `true` | The Approve/Reject card an AI app that renders MCP Apps shows next to a proposal. Its Approve button calls `confirm_proposal` with a one-time code the assistant never sees; `false` removes the card and the tool, leaving the review page (and `apply_proposal` if allowed) |
-| `MTG_APPLY_MIN_AGE_SECONDS` | no, *stack* | `15` | The assistant can't apply a proposal younger than this; it gets `apply_too_soon` with `retry_after_seconds`. Stops an assistant proposing and applying in one go. `0` turns it off; at most 3600. Doesn't affect the review page |
+| `MTG_APPROVAL_MODE_DEFAULT` | no, *stack* | `manual` | The approval mode of a member who has not chosen one on their Account page: `manual` (every change waits for their own press), `semi` (the assistant applies low-risk edits itself) or `auto` (the assistant applies everything). Members pick their own; see [OPERATIONS.md](OPERATIONS.md#approval-modes-when-the-assistant-may-apply-by-itself) |
+| `MTG_APPROVAL_MODE_MAX` | no, *stack* | `auto` | The highest mode members may choose; `auto` means no cap. A stored choice above the cap is read as the cap |
+| `MTG_AUTO_APPLY_MAX_ROWS` | no, *stack* | `5` | How many review rows an edit may have and still count as low risk in `semi` mode (1 to 100) |
+| `MTG_APPLY_IN_CHAT` | no, *stack* | `true` | The Approve/Reject card an AI app that renders MCP Apps shows next to a proposal. Its Approve button calls `confirm_proposal` with a one-time code the assistant never sees; `false` removes the card and the tool, leaving the review page (and `apply_proposal` where the member's approval mode allows it) |
 | `MTG_ARCHIDEKT_CALLS_PER_10_MIN` | no, *stack* | `120` | Archidekt work one member may start per 10 minutes (a deck read, a proposal, an apply, a link, and the proxied `archidekt_*` research tools), refilled evenly; past it the member gets `rate_limited` for a few minutes. Stops a looping assistant from keeping a steady stream of requests on Archidekt. 10 to 100000 |
 | `MTG_ARCHIDEKT_BACKUPS` | no, *stack* | `true` | Before every applied edit or restore, copy the deck as a private deck into the user's backup folder on Archidekt (using Archidekt's own copy feature, so printings, finishes and categories are kept). If the copy fails, nothing changes and the proposal stays pending |
 | `MTG_ARCHIDEKT_BACKUP_FOLDER` | no, *stack* | `MTG Gateway backups` | Name of that folder (at most 100 characters), created in the account's root folder the first time. Decks in it are left out of the assistant's deck list |

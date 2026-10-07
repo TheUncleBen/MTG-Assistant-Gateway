@@ -240,7 +240,6 @@ def make_settings(tmp_path: Path, **over: object) -> Settings:
         backup_hour_utc=3,
         backup_keep_days=14,
         allowed_hosts=["mtg.test", "mtg.test:*"],
-        apply_min_age_seconds=0,  # tests apply right after proposing; the guard has its own test
     )
     base.update(over)
     return Settings(**base)  # type: ignore[arg-type]

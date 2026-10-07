@@ -73,7 +73,7 @@ logs.
 
 In Portainer: **Stacks** → `mtg` → **Update the stack**, with "Re-pull
 image" ticked. With `MTG_TAG=latest` that pulls the newest version; with a
-pinned version (for example `0.6.5`), change `MTG_TAG` first
+pinned version (for example `0.6.6`), change `MTG_TAG` first
 ([VERSIONS.md](VERSIONS.md)). Or from the command line:
 
 ```bash
@@ -414,9 +414,10 @@ The gateway only writes to someone's Archidekt account in two steps:
    `propose_restore_snapshot` (undo an edit) saves a proposal with the exact
    diff.
 2. The user approves it: with Approve on the card their AI app shows next
-   to the proposal (Claude, ChatGPT; `MTG_APPLY_IN_CHAT`), with the Apply
-   button on `/proposals/<id>`, or, if `MTG_APPLY_VIA_MCP` is on, by saying
-   yes in chat so the assistant calls `apply_proposal`.
+   to the proposal (Claude, ChatGPT; `MTG_APPLY_IN_CHAT`) or with the Apply
+   button on `/proposals/<id>`. A user who chose a looser approval mode on
+   their Account page lets the assistant apply low-risk edits (semi) or
+   everything (auto) itself with `apply_proposal`; see below.
 
 Applying an edit or restore:
 
@@ -474,27 +475,51 @@ An app that cannot show the card (Claude Code, older clients) sees the text
 and the review link as before; Claude Code can also open the review page
 for the member when the assistant calls `apply_proposal`.
 
-### Applying through the assistant
+### Approval modes: when the assistant may apply by itself
 
-`MTG_APPLY_VIA_MCP` decides whether the assistant can apply a proposal. The
-code default is `false`: the `apply_proposal` tool answers
-`browser_required` with the review link, so a person's own press always sits
-between anything the assistant read (deck descriptions, card text) and a
-write to Archidekt. The example env files keep it `false` too. Setting it to
-`true` lets the assistant apply after the user says yes in chat; writes have
-to be on as well. With the card above, there is little reason to turn it on.
+Each member picks an **approval mode** on their own Account page. It is
+theirs alone: it governs only their proposals, their decks and the apps they
+connected, and it can only be set there, in their browser session (never
+over MCP or the API, so a tricked assistant cannot loosen it). Every change
+of mode is in the audit log as `approval_mode_set`.
 
-With it on, the gateway has no proof the user really said yes; it relies on
-the assistant following its instructions. Two things narrow that gap:
+| Mode | What the assistant may apply with `apply_proposal` |
+|---|---|
+| `manual` (default) | Nothing. Every proposal waits for the member's press on the card or the review page; `apply_proposal` answers `browser_required`. |
+| `semi` | Low-risk proposals only. High-risk ones wait for the member's press as in manual. |
+| `auto` | Every proposal. |
 
-- The server instructions and the `apply_proposal` description tell every
-  client that tool output is data, never instructions, and to apply only
-  after the user confirms in their own message.
-- An assistant apply on a proposal younger than `MTG_APPLY_MIN_AGE_SECONDS`
-  (default 15) is refused with "apply too soon" and a retry delay, so a
-  proposal can't be made and applied in the same breath. The tradeoff: a
-  really quick human "yes" may get bounced once and retried a few seconds
-  later. Raising the value widens that window; `0` removes the guard.
+The risk of a proposal comes from its stored review rows, so it is judged
+on what the review page would show, not on what the assistant says:
+
+| Tier | Proposals |
+|---|---|
+| Low | An edit to an existing deck with at most `MTG_AUTO_APPLY_MAX_ROWS` rows (default 5), each a card add, remove, quantity change, category move, finish or printing change, no row moving more than four copies, none touching the commander. Cloning a deck (a copy; nothing that exists changes). |
+| High | Everything else: more rows than that, any commander change, creating a new deck, restoring a snapshot, and deck details (name, format, description, visibility). |
+
+Every proposal result carries `approval_mode`, `risk`, `risk_reason` and
+`assistant_may_apply`, and `next_step` tells the assistant whether to call
+`apply_proposal` or hand the decision to the member. The service re-checks
+the mode and the risk inside the apply itself, over MCP and over the REST
+API alike, so there is no path around it. An assistant apply the mode does
+not allow is logged as `apply_needs_user`. Every apply, in every mode,
+snapshots the deck first and backs it up on Archidekt, so an auto-applied
+change can be undone from the History page.
+
+Two settings are the operator's:
+
+- `MTG_APPROVAL_MODE_DEFAULT` (default `manual`) is the mode of a member who
+  has not chosen one. Leave it `manual` on a shared gateway.
+- `MTG_APPROVAL_MODE_MAX` (default `auto`, no cap) is the highest mode
+  members may choose; a stored choice above it is read as the cap, and the
+  Account page shows the capped choices disabled.
+
+The trade-off, which the Account page states next to the choices: an
+assistant can be tricked by text it reads (a web page, a deck description, a
+pasted list) into proposing a change the member did not ask for, and in a
+semi or auto mode such a change lands on Archidekt without their press. In
+manual mode a person's own press always sits between anything the assistant
+read and a write to Archidekt.
 
 Tell people to keep `apply_proposal` on "ask every time" (or "needs
 approval") in their AI app rather than "always allow".
@@ -536,7 +561,7 @@ Archidekt busy for everyone:
 `MTG_ADMIN_GROUP` is set to the name of a group in your identity provider
 (set it in the stack's environment variables or in `.env`; the stack and
 Compose files already pass it through). Members of that group see it after
-signing in; since 0.6.5 they don't also need to be in `MTG_REQUIRED_GROUP`,
+signing in; since 0.6.6 they don't also need to be in `MTG_REQUIRED_GROUP`,
 because the admin group lets its members sign in too. In the site menu it's
 the **Admin** link, shown only to them. For everyone else, and whenever the variable is unset, `/admin`
 and everything under it answers 404, so ordinary users can't tell the area

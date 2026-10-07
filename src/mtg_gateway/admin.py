@@ -446,6 +446,8 @@ def _overview_body(state: Any) -> str:
         + _stat("Database schema", sysd["schema_version"])
         + _stat("Database size", f"{size / 1048576:.1f} MB" if size is not None else "in memory")
         + _stat("Newest backup", backup)
+        + _stat("Default approval mode", state.settings.approval_mode_default)
+        + _stat("Highest approval mode allowed", state.settings.approval_mode_max)
         + "</dl>"
         + (
             _err(f"The last nightly backup failed ({sysd['last_backup_error']}). Check the gateway's log.")
