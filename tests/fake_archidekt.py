@@ -111,7 +111,74 @@ class FakeArchidekt:
         # private decks out, while an authenticated ownerId listing includes them.
         self.username_listing_hides_private = False
         self.list_auth_schemes: list[str] = []  # Authorization scheme of each /decks/v3/ call
+        self.search_params: list[dict[str, str]] = []  # query of each /decks/v3/ call
+        # The member's Collection (username -> record id -> record in the v2 listing shape), and the
+        # social state: follows (username -> user ids), bookmarks (username -> deck ids), votes
+        # ((username, comment root) -> 1 up / 2 down) and comment threads (root id -> comments).
+        self.collections: dict[str, dict[int, dict[str, Any]]] = {}
+        self.next_coll_id = 5000
+        self.follows: dict[str, set[int]] = {}
+        self.bookmarks: dict[str, set[int]] = {}
+        self.votes: dict[tuple[str, int], int] = {}
+        self.comments: dict[int, list[dict[str, Any]]] = {}  # thread root -> flat list of comments
+        self.next_comment_id = 800000
         self.transport = httpx.MockTransport(self.handle)
+
+    # -- collection and social helpers -------------------------------------------------------------
+    def _user_id(self, who: str) -> int:
+        return int(self.users[who]["id"])
+
+    def _username(self, user_id: int) -> str | None:
+        return next((n for n, u in self.users.items() if u["id"] == user_id), None)
+
+    def owned_count(self, who: str, oracle_name: str) -> int:
+        """Copies of a card (any printing) in a member's collection: what the deck JSON's per-card
+        ``owned`` reports for the session that reads the deck (reported, not verified live)."""
+        return sum(
+            r["quantity"]
+            for r in self.collections.get(who, {}).values()
+            if r["card"]["oracleCard"]["name"].lower() == oracle_name.lower()
+        )
+
+    def _deck_for(self, deck: dict[str, Any], who: str | None) -> dict[str, Any]:
+        """A deck as the live JSON carries it for one session: owner id, social fields and the
+        per-card ``owned`` count."""
+        out = json.loads(json.dumps(deck))
+        owner = out["owner"]["username"]
+        out["owner"] = {"id": self._user_id(owner), **out["owner"]}
+        root = 300000 + out["id"]
+        votes = [v for (u, r), v in self.votes.items() if r == root]
+        out.setdefault("commentRoot", root)
+        out["points"] = sum(1 if v == 1 else -1 for v in votes)
+        out["userInput"] = self.votes.get((who or "", root), 0)
+        out["bookmarked"] = who is not None and out["id"] in self.bookmarks.get(who, set())
+        out["viewCount"] = out.get("viewCount", 0)
+        for c in out["cards"]:
+            c["card"]["owned"] = self.owned_count(who, c["card"]["oracleCard"]["name"]) if who else 0
+        return out
+
+    def _collection_row(self, rid: int, card: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        return {
+            "id": rid,
+            "game": body.get("game", 1),
+            "quantity": int(body["quantity"]),
+            "card": card,
+            "modifier": body.get("modifier") or "Normal",
+            "language": body.get("language") or "EN",
+            "condition": body.get("condition") or "NM",
+            "tags": body.get("tags") or [],
+            "purchasePrice": body.get("purchasePrice"),
+            "createdAt": now,
+            "modifiedAt": now,
+        }
+
+    def _comment(self, cid: int, who: str) -> dict[str, Any]:
+        for comments in self.comments.values():
+            for c in comments:
+                if c["id"] == cid:
+                    return c
+        raise KeyError(cid)
 
     def _folder_name(self, username: str, folder_id: int | None) -> str | None:
         return next((f["name"] for f in self.folders.get(username, []) if f["id"] == folder_id), None)
@@ -196,8 +263,10 @@ class FakeArchidekt:
             deck = self.decks.get(int(parts[2]))
             if deck is None or int(parts[2]) in self.private:
                 return httpx.Response(404, json={"detail": "Not found."})
-            return httpx.Response(200, json=deck)
-        if who is None:
+            return httpx.Response(200, json=self._deck_for(deck, None))
+        # The deck listing answers anonymous callers too (the public deck search; verified live
+        # 2026-10-07); private decks are dropped from it further down.
+        if who is None and not (path == "/api/decks/v3/" and request.method == "GET" and not auth):
             if auth:
                 return httpx.Response(401, json={"detail": "Given token not valid for any token type"})
             return httpx.Response(401, json={"detail": "Authentication credentials were not provided."})
@@ -277,6 +346,15 @@ class FakeArchidekt:
             else:
                 chosen = list(self.decks.values())
             chosen = [d for d in chosen if d["id"] not in self.private or d["owner"]["username"] == who]
+            # The public deck search sends name= (a substring of the deck name; verified live
+            # 2026-10-07) and deckFormat=; both narrow the listing.
+            name = request.url.params.get("name")
+            if name:
+                chosen = [d for d in chosen if name.lower() in d["name"].lower()]
+            fmt = request.url.params.get("deckFormat")
+            if fmt is not None:
+                chosen = [d for d in chosen if str(3) == fmt]
+            self.search_params.append(dict(request.url.params))
             results = [
                 {
                     "id": d["id"],
@@ -332,6 +410,179 @@ class FakeArchidekt:
             ]
             real = [v for k, v in CARD_DB.items() if name in k]
             return httpx.Response(200, json={"results": (fillers + real)[:page]})
+        # -- the member's Collection (routes as archidekt.com's collection page uses them) ------
+        if len(parts) == 4 and parts[1] == "collection" and parts[2].isdigit() and parts[3] == "v2":
+            if int(parts[2]) != self._user_id(who):
+                return httpx.Response(400, json=["No public collection found."])
+            rows = list(self.collections.get(who, {}).values())
+            name = request.url.params.get("cardName", "").lower()
+            if name:
+                rows = [r for r in rows if name in r["card"]["oracleCard"]["name"].lower()]
+            order = request.url.params.get("collectionOrderBy")
+            if order == "editionDate":
+                rows.sort(key=lambda r: r["card"]["edition"]["editioncode"])
+            else:
+                rows.sort(key=lambda r: -r["id"])
+            size = int(request.url.params.get("pageSize", "50"))
+            page = int(request.url.params.get("page", "1"))
+            pages = max(1, -(-len(rows) // size))
+            chunk = rows[(page - 1) * size : page * size]
+            return httpx.Response(
+                200,
+                json={
+                    "count": len(rows),
+                    "results": chunk,
+                    "next": f"https://ark.test/api/collection/{parts[2]}/v2/?page={page + 1}"
+                    if page < pages
+                    else None,
+                    "previous": None,
+                    "page": page,
+                    "totalPages": pages,
+                    "tags": [],
+                    "isPublic": False,
+                    "owner": {"id": self._user_id(who), "username": who, "avatar": None, "frame": None},
+                },
+            )
+        if path == "/api/collection/v2/" and request.method == "POST":
+            body = json.loads(request.content)
+            if not isinstance(body.get("card"), int) or not isinstance(body.get("quantity"), int):
+                return httpx.Response(400, json={"card": ["This field is required."]})
+            try:
+                card = self.printing(body["card"])
+            except AssertionError:
+                return httpx.Response(400, json={"card": ["Invalid pk - object does not exist."]})
+            self.next_coll_id += 1
+            row = self._collection_row(self.next_coll_id, card, body)
+            self.collections.setdefault(who, {})[row["id"]] = row
+            return httpx.Response(201, json=row)
+        if len(parts) == 4 and parts[1:3] == ["collection", "v2"] and parts[3].isdigit():
+            rid = int(parts[3])
+            row = self.collections.get(who, {}).get(rid)
+            if row is None or request.method not in ("PUT", "PATCH"):
+                return httpx.Response(404, json={"detail": "Not found."})
+            body = json.loads(request.content)
+            for key in ("quantity", "modifier", "language", "condition", "tags", "purchasePrice"):
+                if key in body:
+                    row[key] = body[key]
+            row["modifiedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            return httpx.Response(200, json=row)
+        if path == "/api/collection/bulk/" and request.method == "DELETE":
+            body = json.loads(request.content)
+            mine_rows = self.collections.get(who, {})
+            for rid in body.get("ids", []):
+                mine_rows.pop(int(rid), None)
+            return httpx.Response(204)
+        # -- social: follow, following list, votes, comments ---------------------------------------
+        if path == "/api/users/follow/" and request.method == "POST":
+            body = json.loads(request.content)
+            target = body.get("followId")
+            if self._username(target) is None:
+                return httpx.Response(404, json={"detail": "Not found."})
+            follows = self.follows.setdefault(who, set())
+            (follows.discard if body.get("unfollow") else follows.add)(int(target))
+            return httpx.Response(200, json={"following": not body.get("unfollow")})
+        if len(parts) == 4 and parts[1] == "users" and parts[2].isdigit() and parts[3] == "following":
+            name = self._username(int(parts[2]))
+            ids = sorted(self.follows.get(name or "", set()))
+            mine_ids = self.follows.get(who, set())
+            results = [
+                {"id": i, "username": self._username(i), "avatar": None, "following": i in mine_ids}
+                for i in ids
+            ]
+            return httpx.Response(
+                200, json={"count": len(results), "next": None, "previous": None, "results": results}
+            )
+        if (
+            len(parts) == 4
+            and parts[1:3] == ["comments", "vote"]
+            and parts[3].isdigit()
+            and request.method == "PUT"
+        ):
+            body = json.loads(request.content)
+            root = int(parts[3])
+            if body.get("remove"):
+                self.votes.pop((who, root), None)
+            else:
+                self.votes[(who, root)] = 1 if body.get("up") else 2
+            return httpx.Response(200, json={"ok": True})
+        if path == "/api/comments/createComment/" and request.method == "POST":
+            body = json.loads(request.content)
+            parent = body.get("parent")
+            text = body.get("text")
+            if not isinstance(parent, int) or not isinstance(text, str) or not text.strip():
+                return httpx.Response(400, json={"text": ["This field may not be blank."]})
+            root = parent if parent in self.comments or parent >= 300000 and parent < 400000 else None
+            if root is None:
+                root = next(
+                    (r for r, cs in self.comments.items() if any(c["id"] == parent for c in cs)), None
+                )
+            if root is None:
+                return httpx.Response(404, json={"detail": "Not found."})
+            self.next_comment_id += 1
+            comment = {
+                "id": self.next_comment_id,
+                "text": text,
+                "owner": {"id": self._user_id(who), "username": who, "avatar": None, "frame": None},
+                "parent": parent,
+                "originalPost": root,
+                "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "editedAt": None,
+                "points": 0,
+                "userInput": 0,
+                "childrenCount": 0,
+                "children": {"count": 0, "results": []},
+                "archived": False,
+                "locked": False,
+                "type": 4,
+            }
+            self.comments.setdefault(root, []).append(comment)
+            return httpx.Response(201, json=comment)
+        if len(parts) == 3 and parts[1] == "comments" and parts[2].isdigit() and request.method == "GET":
+            root = int(parts[2])
+            deck = self.decks.get(root - 300000)
+            if deck is None:
+                return httpx.Response(404, json={"detail": "Not found."})
+            flat = self.comments.get(root, [])
+
+            def tree(parent: int) -> list[dict[str, Any]]:
+                kids = [c for c in flat if c["parent"] == parent]
+                return [
+                    {
+                        **c,
+                        "childrenCount": len(tree(c["id"])),
+                        "children": {"count": 0, "results": tree(c["id"])},
+                    }
+                    for c in kids
+                ]
+
+            top = tree(root)
+            return httpx.Response(
+                200,
+                json={
+                    "id": root,
+                    "title": None,
+                    "text": None,
+                    "owner": {
+                        "id": self._user_id(deck["owner"]["username"]),
+                        "username": deck["owner"]["username"],
+                    },
+                    "parent": None,
+                    "originalPost": None,
+                    "deck": {"id": deck["id"]},
+                    "childrenCount": len(top),
+                    "children": {
+                        "links": {"next": None, "previous": None},
+                        "count": len(top),
+                        "results": top,
+                    },
+                    "createdAt": "2026-10-01T10:00:00Z",
+                    "points": 0,
+                    "userInput": 0,
+                    "archived": False,
+                    "locked": False,
+                    "type": 4,
+                },
+            )
         if len(parts) >= 3 and parts[1] == "decks" and parts[2].isdigit():
             deck = self.decks.get(int(parts[2]))
             mine = deck is not None and deck["owner"]["username"] == who
@@ -340,7 +591,11 @@ class FakeArchidekt:
             if len(parts) == 3 and request.method == "GET":
                 if self.fail_deck_reads:
                     return httpx.Response(503, json={"detail": "Service unavailable."})
-                return httpx.Response(200, json=deck)
+                return httpx.Response(200, json=self._deck_for(deck, who))
+            if parts[3:] == ["bookmarks"] and request.method in ("POST", "DELETE"):
+                marks = self.bookmarks.setdefault(who, set())
+                (marks.add if request.method == "POST" else marks.discard)(deck["id"])
+                return httpx.Response(200 if request.method == "POST" else 204, json={"ok": True})
             if not mine:
                 return httpx.Response(
                     403, json={"detail": "You do not have permission to perform this action."}

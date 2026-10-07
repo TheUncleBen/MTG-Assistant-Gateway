@@ -532,8 +532,9 @@ longer be applied. One app may hold at most 30 pending proposals for a
 member, and a member 100 in all, so a runaway app can't use up every slot.
 
 An app connected with the read-only scope `mtg.read` can read decks,
-proposals, snapshots and reports but can't propose, apply, reject, run
-reports or save scans (`insufficient_scope`).
+proposals, snapshots, reports and the collection but can't propose (deck or
+collection changes), apply, confirm, reject, run reports or save scans
+(`insufficient_scope`).
 
 ### Archidekt rate limiting
 
@@ -658,7 +659,7 @@ For the SQL snippets on this page, put the query inside the
 
 | Table | What's in it |
 | --- | --- |
-| `proposals` | Each proposal: owner, kind (`edit`, `create_deck`, `restore` or `details`), deck (the new deck's id once a create is applied), change list, diff, state (`pending`, `applying`, `applied`, `failed`, `rejected`; shown as `expired` after 24 hours), result and timestamps |
+| `proposals` | Each proposal: owner, kind (`edit`, `create_deck`, `restore`, `details`, `clone` or `collection`), deck (the new deck's id once a create is applied), change list, diff, state (`pending`, `applying`, `applied`, `failed`, `rejected`; shown as `expired` after 24 hours), result and timestamps |
 | `snapshots` | The full deck as read from Archidekt just before a proposal was applied, plus `backup_deck_id` and `backup_url` for the private backup copy made in the user's Archidekt backup folder at the same moment. Users see theirs with `list_snapshots` and undo an edit with `propose_restore_snapshot`. `deck_json` is the raw deck |
 | `archidekt_links` | One row per user who linked Archidekt: Archidekt username, encrypted session, status and timestamps |
 | `reports` | Stored deck reports (`run_deck_report`, the "Run deck report" button and `POST /api/v1/reports`): owner, deck, a fingerprint of the deck as read, the statistics, and the goldfish and validation results as JSON. The newest 200 per user are kept |

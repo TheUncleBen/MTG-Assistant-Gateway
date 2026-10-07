@@ -134,8 +134,9 @@ verified:
 - Custom MCP apps for individuals: Developer mode, web only, OAuth with
   automatic registration. Pro accounts are documented as read and fetch
   tools only. The gateway marks every tool read-only except
-  `apply_proposal`, `reject_proposal`, `run_deck_report` and
-  `save_scan_session`, so proposing and reviewing still work there.
+  `apply_proposal`, `confirm_proposal`, `reject_proposal`, `run_deck_report`,
+  `save_scan_session` and `propose_collection_changes`, so proposing and
+  reviewing still work there.
 - Codex CLI: `codex mcp add <name> --url <url>` and
   `codex mcp login <name>` for OAuth servers.
 

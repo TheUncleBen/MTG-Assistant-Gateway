@@ -77,6 +77,8 @@ async def _adds(h, token: str, n: int) -> dict:
         ("create_deck", [{"kind": "new_deck"}], "high"),
         ("restore", [{"kind": "restore"}], "high"),
         ("details", [{"kind": "detail"}], "high"),
+        ("collection", [{"kind": "add", "name": "Sol Ring", "qty": 1}], "low"),
+        ("collection", [{"kind": "remove", "name": "Forest", "qty": 12}], "high"),
         ("something_new", [], "high"),
     ],
 )
@@ -230,6 +232,8 @@ async def test_semi_mode_applies_low_risk_and_asks_for_high_risk(stack: Stack) -
             {"name": "Fresh", "deck_format": "commander", "cards": [{"name": "Sol Ring", "quantity": 1}]},
             "high",
         ),
+        ("propose_collection_changes", {"add": [{"name": "Sol Ring", "quantity": 1}]}, "low"),
+        ("propose_collection_changes", {"add": [{"name": "Forest", "quantity": 9}]}, "high"),
     ],
 )
 async def test_every_proposal_kind_has_a_tier(stack: Stack, tool: str, args: dict, risk: str) -> None:

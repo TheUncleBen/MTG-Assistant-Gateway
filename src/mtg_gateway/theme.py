@@ -26,6 +26,8 @@ THEME_COOKIE = "mtg_theme"
 FEEDBACK_SCRIPT = "/static/feedback.js"
 # The Content-Security-Policy of every page render() builds (some pages replace it with their own,
 # which keeps the same frame-ancestors and base-uri). form-action is last so sources can follow it.
+# img-src 'self' is for the gateway's own files only (the select arrow, /static/chevron.svg); pages
+# that show card images add cards.scryfall.io in their own policy.
 DEFAULT_CSP = (
     "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; worker-src 'self'; img-src 'self'; "
     "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
@@ -33,6 +35,10 @@ DEFAULT_CSP = (
 THEMES = ("system", "light", "dark")
 _theme: ContextVar[str] = ContextVar("mtg_theme", default="system")
 _path: ContextVar[str] = ContextVar("mtg_path", default="/")
+# True while rendering for the Android app's WebView (its user agent carries "MTGAssistant/"):
+# pages then use the phone layout at every width and drop the website footer.
+_app: ContextVar[bool] = ContextVar("mtg_app", default=False)
+APP_UA_MARK = "MTGAssistant/"
 
 # Archidekt's light set (body custom properties). Emitted twice: under prefers-color-scheme for
 # "system" and under [data-theme=light] for an explicit choice.
@@ -175,9 +181,7 @@ select{width:100%;height:var(--ctl);padding:0 1rem;font:inherit;border-radius:va
   border:1px solid var(--border);background:var(--surface);color:var(--text);
   transition:background-color .2s ease-in-out}
 select{appearance:none;-webkit-appearance:none;padding-right:2rem;cursor:pointer;
-  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'>"""
-    + """<path d='M1 1l4 4 4-4' fill='none' stroke='%23fa890d' stroke-width='1.6' """
-    + """stroke-linecap='round'/></svg>");
+  background-image:url(/static/chevron.svg);
   background-repeat:no-repeat;background-position:right .75rem center;background-size:10px 6px}
 input[type=number]{padding-right:.5rem}
 textarea{width:100%;min-height:8rem;padding:.5rem .75rem;font:inherit;font-size:.95rem;line-height:1.45;
@@ -340,24 +344,54 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
 }
 @media (max-width:599px){ .pane.aside,.pane.detail.empty{display:none} }
 
-/* phones: icon navbar, bottom floating toolbar (Archidekt's floatingToolbar) */
+@media (max-width:900px){ .topbar nav.site a{padding:0 .45rem;font-size:.93rem} .brand{margin-right:.25rem} }
+/* home dashboard: section tiles (Archidekt's landing cards) */
+.home .hero{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:1rem;
+  margin:0 0 1rem}
+.home .hero h1{margin:0;font-size:1.6rem}
+.home .hero .sub{color:var(--text-muted);margin:.2rem 0 0}
+.home .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(14rem,1fr));gap:1rem;margin:0 0 1rem}
+.home .tile{display:flex;flex-direction:column;gap:.35rem;padding:1rem;background:var(--surface);
+  border:1px solid var(--border);border-radius:var(--radius-panel);color:var(--text);text-decoration:none;
+  min-height:7.5rem;transition:border-color .2s ease}
+.home .tile:hover{border-color:var(--orange)}
+.home .tile .ti{display:flex;align-items:center;gap:.5rem;font-weight:900;font-size:1.1rem}
+.home .tile .ti svg{color:var(--orange)}
+.home .tile .n{font-size:1.6rem;font-weight:900;font-variant-numeric:tabular-nums;line-height:1}
+.home .tile .d{color:var(--text-muted);font-size:.9rem}
+.home .tile.cta{border-color:var(--orange);background:var(--orange-tint)}
+.home .searchbox{display:flex;gap:.5rem;align-items:end;flex-wrap:wrap}
+.home .searchbox .field{flex:1 1 14rem;margin:0}
+.home .searchbox button{margin:0}
+.home .recent{display:grid;grid-template-columns:repeat(auto-fill,minmax(10rem,1fr));gap:.75rem}
+.home .recent a{display:block;position:relative;aspect-ratio:16/9;border-radius:var(--radius);overflow:hidden;
+  background:var(--surface-3) center/cover no-repeat;color:#fff;text-decoration:none;font-weight:700}
+.home .recent a span{position:absolute;left:0;right:0;bottom:0;padding:.4rem .5rem;
+  background:linear-gradient(to top,rgba(0,0,0,.85),rgba(0,0,0,0));font-size:.9rem;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.home details.connect summary{cursor:pointer;font-weight:700;display:flex;flex-wrap:wrap;gap:.25rem .75rem;
+  align-items:baseline}
+.home details.connect summary .addr{font-weight:400;font-size:.9rem;word-break:break-all}
+.home .panel-head{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin:0 0 .75rem}
+.home .panel-head h2{margin:0}
+/* Adaptive navigation after Android's window size classes. Compact (under 600px, any device): a
+   bottom tab bar (Archidekt's floatingToolbar). Medium (600 to 899px) on a touch screen, such as
+   an unfolded foldable or a tablet in a browser, and the Android app at every width from 600px:
+   a navigation rail down the left edge. Wider browsers, or a browser whose "Desktop site" switch
+   widens the viewport past 900px: the desktop top bar. Media queries track the live viewport, so
+   folding, rotating, split screen and pop-up windows re-flow at once; see _MOBILE_RULES and
+   _RAIL_RULES below. */
 .tabbar{display:none}
-@media (max-width:600px){
-  .topbar .wrap{padding:0 1rem;gap:.5rem}
-  .topbar nav.site a:not(.keep){display:none}
-  .topbar .brand .word{display:none}
-  .has-tabbar main.wrap{padding-bottom:5.5rem}
-  .has-tabbar footer{padding-bottom:5.5rem}
-  .tabbar{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;position:fixed;left:0;right:0;bottom:0;
-    z-index:8;background:var(--toolbar-bg);color:var(--toolbar-text);
-  padding-bottom:env(safe-area-inset-bottom)}
-  .tabbar a{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.2rem;
-    height:50px;color:var(--toolbar-text);text-decoration:none;font-weight:700;font-size:10px;
-    transition:color .2s ease}
-  .tabbar a svg{width:20px;height:20px}
-  .tabbar a:hover,.tabbar a:focus-visible,.tabbar a[aria-current=page]{color:var(--orange)}
-}
-
+.topbar .searchbtn{display:none}
+.tabbar details.more{position:relative}
+.tabbar details.more summary{list-style:none;cursor:pointer}
+.tabbar details.more summary::-webkit-details-marker{display:none}
+.tabbar details.more .menu.sheet{position:fixed;left:50%;transform:translateX(-50%);top:auto;
+  bottom:calc(56px + env(safe-area-inset-bottom) + .5rem);width:min(18rem,calc(100vw - 2rem));
+  z-index:30;border-radius:16px;padding:.5rem}
+.tabbar details.more .menu.sheet a{min-height:44px;padding:0 1rem}
+.tabbar details.more .menu.sheet a svg{width:20px;height:20px}
+__MOBILE__
 /* search / filter rows */
 .search{display:flex;gap:0;margin:0 0 .75rem}
 .search input{flex:1;border-radius:var(--radius) 0 0 var(--radius);border-right:0}
@@ -372,6 +406,88 @@ footer.site .links a{color:#fff;text-decoration:none;font-weight:700;text-transf
 footer.site .links a:hover{color:var(--orange)}
 footer.site .legal{color:#ababab;max-width:60rem}
 """
+)
+
+# The compact layout (bottom tab bar), written once and applied under each condition (a media
+# query cannot see a body class, so the rules are emitted per condition). {b} prefixes selectors
+# on <body>.
+_MOBILE_RULES = """
+  body{b} .topbar .wrap{padding:0 1rem;gap:.5rem;padding-left:max(1rem,env(safe-area-inset-left));
+    padding-right:max(1rem,env(safe-area-inset-right))}
+  body{b} .topbar nav.site a:not(.keep){display:none}
+  body{b} .topbar .searchbtn{display:inline-flex}
+  body{b} .tabbar > a.railonly{display:none}
+  body{b}.has-tabbar main.wrap{padding-bottom:calc(5.5rem + env(safe-area-inset-bottom))}
+  body{b}.has-tabbar footer{padding-bottom:calc(5.5rem + env(safe-area-inset-bottom))}
+  body{b} .tabbar{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;position:fixed;left:0;right:0;
+    bottom:0;z-index:8;background:var(--toolbar-bg);color:var(--toolbar-text);
+    border-top:1px solid var(--border);
+    padding-bottom:env(safe-area-inset-bottom);box-shadow:0 -2px 10px rgba(0,0,0,.08)}
+  body{b} .tabbar > a{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.2rem;
+    height:56px;color:var(--toolbar-text);text-decoration:none;font-weight:700;font-size:11px;
+    transition:color .2s ease;-webkit-tap-highlight-color:transparent}
+  body{b} .tabbar > a svg{width:22px;height:22px;transition:transform .15s ease}
+  body{b} .tabbar > a:active svg{transform:scale(.92)}
+  body{b} .tabbar > a:hover,body{b} .tabbar > a:focus-visible,
+  body{b} .tabbar > a[aria-current=page]{color:var(--orange)}
+  body{b} .tabbar > a[aria-current=page]::before{content:'';position:absolute;top:0;width:2.5rem;height:3px;
+    background:var(--orange);border-radius:0 0 3px 3px}
+  body{b} .tabbar > a{position:relative}
+  body{b} .tabbar details.more summary{display:flex;flex-direction:column;align-items:center;
+    justify-content:center;gap:.2rem;height:56px;color:var(--toolbar-text);font-weight:700;font-size:11px;
+    position:relative;-webkit-tap-highlight-color:transparent}
+  body{b} .tabbar details.more summary svg{width:22px;height:22px}
+  body{b} .tabbar details.more summary.on,body{b} .tabbar details.more[open] summary{color:var(--orange)}
+  body{b} details.dd .menu{min-width:14rem}
+"""
+# The medium layout: the same tabs as a navigation rail (80px wide, icon in a pill with the label
+# under it, as Material's rail draws it) fixed to the left edge; the top bar keeps the brand and
+# the account menu and loses its text links. The body is padded by the rail's width so every page
+# re-centres in the remaining space.
+_RAIL_RULES = """
+  body{b} .topbar nav.site a:not(.keep){display:none}
+  body{b}.has-tabbar{padding-left:calc(80px + env(safe-area-inset-left))}
+  body{b} .topbar .wrap{padding:0 1.25rem;padding-right:max(1.25rem,env(safe-area-inset-right))}
+  body{b} .tabbar{display:flex;flex-direction:column;align-items:stretch;gap:.25rem;position:fixed;left:0;
+    top:0;bottom:0;width:calc(80px + env(safe-area-inset-left));z-index:9;background:var(--toolbar-bg);
+    color:var(--toolbar-text);border-right:1px solid var(--border);overflow-y:auto;scrollbar-width:none;
+    padding:calc(.75rem + env(safe-area-inset-top)) 0 calc(.5rem + env(safe-area-inset-bottom))
+      env(safe-area-inset-left)}
+  body{b} .tabbar > a{position:relative;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;gap:.3rem;height:64px;flex:none;color:var(--toolbar-text);text-decoration:none;
+    font-weight:700;font-size:11px;-webkit-tap-highlight-color:transparent}
+  body{b} .tabbar > a svg{width:24px;height:24px;position:relative;z-index:1}
+  body{b} .tabbar > a::before{content:'';position:absolute;top:7px;left:50%;width:56px;height:32px;
+    margin-left:-28px;border-radius:16px;background:transparent;transition:background .15s ease}
+  body{b} .tabbar > a:hover::before,
+  body{b} .tabbar > a:focus-visible::before{background:rgba(127,127,127,.18)}
+  body{b} .tabbar > a[aria-current=page]{color:var(--orange)}
+  body{b} .tabbar > a[aria-current=page]::before{background:rgba(255,111,0,.22)}
+  body{b} .tabbar details.more summary{position:relative;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:.3rem;height:64px;flex:none;color:var(--toolbar-text);
+    font-weight:700;
+    font-size:11px;-webkit-tap-highlight-color:transparent}
+  body{b} .tabbar details.more summary svg{width:24px;height:24px;position:relative;z-index:1}
+  body{b} .tabbar details.more summary::before{content:'';position:absolute;top:7px;left:50%;width:56px;
+    height:32px;margin-left:-28px;border-radius:16px;background:transparent}
+  body{b} .tabbar details.more summary.on,body{b} .tabbar details.more[open] summary{color:var(--orange)}
+  body{b} .tabbar details.more[open] summary::before{background:rgba(255,111,0,.22)}
+  body{b} .tabbar details.more .menu.sheet{left:calc(84px + env(safe-area-inset-left));transform:none;
+    bottom:auto;top:calc(7rem + env(safe-area-inset-top) + 4 * 64px)}
+  body{b} details.dd .menu{min-width:14rem}
+"""
+CSS = CSS.replace(
+    "__MOBILE__",
+    "@media (max-width:599.98px){ .topbar .brand .word{display:none} "
+    + _MOBILE_RULES.replace("{b}", "")
+    + "}\n@media (min-width:600px) and (max-width:899.98px) and ((pointer:coarse) or (hover:none)){"
+    + _RAIL_RULES.replace("{b}", "")
+    + "}\n@media (min-width:600px){"
+    + _RAIL_RULES.replace("{b}", ".app")
+    + "}\n"
+    + "body.app footer.site{display:none}\n"
+    + "body.app .topbar{padding-top:env(safe-area-inset-top)}\n"
+    + "body.app .topbar .brand .word{display:inline}\n",
 )
 
 
@@ -419,9 +535,25 @@ ICONS = {
     "camera": "<path d='M4 8h4l2-3h4l2 3h4v11H4z'/><circle cx='12' cy='13' r='3'/>",
     "copy": "<path d='M9 9h11v11H9z'/><path d='M4 15V4h11'/>",
     "user": "<circle cx='12' cy='8' r='4'/><path d='M4 21a8 8 0 0 1 16 0'/>",
+    "heart": "<path d='M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z'/>",
+    "bookmark": "<path d='M6 3h12v18l-6-4-6 4z'/>",
+    "comment": "<path d='M4 5h16v11H9l-5 4z'/>",
+    "follow": "<circle cx='10' cy='8' r='4'/><path d='M2 21a8 8 0 0 1 16 0'/><path d='M19 8v6M16 11h6'/>",
     "thumb": "<path d='M7 11v9H3v-9zM7 11l4-8a2 2 0 0 1 2 2v4h5a2 2 0 0 1 2 2l-1.5 7a2 2 0 0 1-2 2H7'/>",
     "chev": "<path d='M6 9l6 6 6-6'/>",
     "swap": "<path d='M4 7h13l-3-3M20 17H7l3 3'/>",
+    "collection": "<path d='M4 6h12v14H4z'/><path d='M8 6V3h12v14h-3'/><path d='M7 11h6M7 15h6'/>",
+    "home": "<path d='M3 11l9-7 9 7'/><path d='M5 10v10h14V10'/><path d='M10 20v-6h4v6'/>",
+    "guide": "<path d='M4 5a2 2 0 0 1 2-2h5v17H6a2 2 0 0 0-2 2z'/>"
+    "<path d='M20 5a2 2 0 0 0-2-2h-5v17h5a2 2 0 0 1 2 2z'/>",
+    "refresh": "<path d='M20 12a8 8 0 1 1-2.3-5.7'/><path d='M20 4v5h-5'/>",
+    "link": "<path d='M10 14a4 4 0 0 1 0-5.7l3-3a4 4 0 0 1 5.7 5.7l-1.5 1.5'/>"
+    "<path d='M14 10a4 4 0 0 1 0 5.7l-3 3a4 4 0 0 1-5.7-5.7L6.8 11.5'/>",
+    "drag": "<circle cx='9' cy='6' r='1.3' fill='currentColor'/>"
+    "<circle cx='15' cy='6' r='1.3' fill='currentColor'/><circle cx='9' cy='12' r='1.3' fill='currentColor'/>"
+    "<circle cx='15' cy='12' r='1.3' fill='currentColor'/>"
+    "<circle cx='9' cy='18' r='1.3' fill='currentColor'/>"
+    "<circle cx='15' cy='18' r='1.3' fill='currentColor'/>",
 }
 
 
@@ -439,15 +571,42 @@ def current_path() -> str:
     return _path.get()
 
 
+def in_app() -> bool:
+    """True when the page is rendered for the Android app (see :data:`APP_UA_MARK`)."""
+    return _app.get()
+
+
 def theme_from_cookie(value: str | None) -> str:
     return value if value in THEMES else "system"
 
 
+# The site navigation, in Archidekt's order of sections as far as the gateway has them: decks,
+# deck search, cards you own, scanning, then the gateway's own review pages. The same list feeds
+# the top bar on wide screens and the bottom tab bar on phones.
 NAV_LINKS = [
     ("/decks", "Decks", "decks"),
+    ("/search", "Search", "search"),
+    ("/collection", "Collection", "collection"),
     ("/scan", "Scan", "scan"),
     ("/proposals", "Proposals", "proposals"),
     ("/history", "History", "history"),
+]
+# The tabs, as Material's navigation bar (3 to 5 destinations) and rail (up to 7) have them: on a
+# compact screen Decks, Scan, Collection, Proposals and More, with Search as the icon in the top
+# bar; the rail has room for Search as a sixth tab. More opens a sheet with the remaining pages
+# (Home, History, Guide, Admin, Account) so nothing is more than two taps away.
+TAB_LINKS = [
+    ("/decks", "Decks", "decks", ""),
+    ("/search", "Search", "search", "railonly"),
+    ("/scan", "Scan", "scan", ""),
+    ("/collection", "Collection", "collection", ""),
+    ("/proposals", "Proposals", "proposals", ""),
+]
+MORE_LINKS = [
+    ("/", "Home", "home"),
+    ("/history", "History", "history"),
+    ("/guide", "Guide", "guide"),
+    ("/account", "Account", "account"),
 ]
 
 
@@ -476,6 +635,7 @@ def render(
     deck pages. ``current`` names the nav link to mark as the current page (its path);
     ``heading=False`` leaves the <h1> to the body (deck banner)."""
     theme = current_theme()
+    app = in_app()
     nav = ""
     tabbar = ""
     cur = current or ""
@@ -498,11 +658,27 @@ def render(
             "<details class='dd'><summary class='icon-btn' aria-label='Account menu'>"
             # The member's own picture (their provider's, else their initials: /account/avatar).
             "<img class='av' src='/account/avatar' alt='' width='28' height='28'></summary><div class='menu'>"
+            f"<a href='/'>{icon('home')}Home</a>"
             f"<a href='/account'>{icon('account')}Account</a>"
+            f"<a href='/proposals'>{icon('proposals')}Proposals</a>"
+            f"<a href='/history'>{icon('history')}History</a>"
             f"<a href='/activity'>{icon('history')}My activity</a>"
+            f"<a href='/guide'>{icon('guide')}Guide</a>"
             f"<a href='/skill'>{icon('report')}Assistant skill</a>"
-            f"<a href='/app'>{icon('download')}Android app</a>"
-            "<div class='sep'></div><div class='head'>Site theme</div>"
+            + (f"<a href='/app'>{icon('download')}Android app</a>" if not app else "")
+            + (
+                # The Android app's own actions (its floating button offers them over other pages);
+                # feedback.js calls window.MtgNative for each data-native button.
+                "<div class='sep'></div><div class='head'>App</div>"
+                f"<button type='button' data-native='openCamera'>{icon('camera')}Scan with phone camera"
+                "</button>"
+                f"<button type='button' data-native='reload'>{icon('refresh')}Reload</button>"
+                f"<button type='button' data-native='openInBrowser'>{icon('link')}Open in browser</button>"
+                f"<button type='button' data-native='changeGateway'>{icon('settings')}Change gateway</button>"
+                if app
+                else ""
+            )
+            + "<div class='sep'></div><div class='head'>Site theme</div>"
             f"<form method='post' action='/theme'>{csrf_in}"
             f"<input type='hidden' name='next' value='{html.escape(current_path())}'>"
             f"{theme_items}</form>"
@@ -515,25 +691,42 @@ def render(
             + "".join(a(href, label) for href, label, _ic in links)
             + "</nav>"
         )
-        right = f"<nav class='user' aria-label='Account'>{account_menu}</nav>"
-        tabs = links[:4] + [("/account", "More", "more")]
+        search_btn = (
+            f"<a class='icon-btn searchbtn' href='/search' aria-label='Search decks'"
+            f"{' aria-current=page' if cur == '/search' else ''}>{icon('search')}</a>"
+        )
+        right = f"<nav class='user' aria-label='Account'>{search_btn}{account_menu}</nav>"
+        more_links = list(MORE_LINKS) + ([("/admin", "Admin", "settings")] if admin else [])
+        more_open = cur in {href for href, _l, _i in more_links} and cur != "/"
         tabbar = (
             "<nav class='tabbar' aria-label='Sections'>"
             + "".join(
-                f"<a href='{href}'{' aria-current=page' if cur == href else ''}>{icon(ic)}{label}</a>"
-                for href, label, ic in tabs
+                f"<a href='{href}' class='{cls}'{' aria-current=page' if cur == href else ''}>"
+                f"{icon(ic)}{label}</a>"
+                for href, label, ic, cls in TAB_LINKS
             )
-            + "</nav>"
+            + "<details class='dd more'><summary"
+            + (" class='on'" if more_open else "")
+            + f" aria-label='More sections'>{icon('more')}More</summary><div class='menu sheet'>"
+            + "".join(
+                f"<a href='{href}'{' aria-current=page' if cur == href else ''}>{icon(ic)}{label}</a>"
+                for href, label, ic in more_links
+            )
+            + "</div></details></nav>"
         )
     else:
         right = ""
     h1 = f"<h1>{html.escape(title)}</h1>" if heading else ""
-    classes = " ".join(c for c in ("wide" if wide else "", "has-tabbar" if tabbar else "", body_class) if c)
+    classes = " ".join(
+        c
+        for c in ("wide" if wide else "", "has-tabbar" if tabbar else "", "app" if app else "", body_class)
+        if c
+    )
     main_cls = "wrap panes" if panes else "wrap"
     doc = (
         f"<!doctype html><html lang='en'{f' data-theme={theme}' if theme != 'system' else ''}>"
         "<head><meta charset='utf-8'>"
-        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1, viewport-fit=cover'>"
         "<meta name='referrer' content='no-referrer'>"
         f"<meta name='color-scheme' content='{'dark light' if theme == 'system' else theme}'>"
         "<meta name='theme-color' content='#111111'>"
@@ -541,16 +734,23 @@ def render(
         f"<title>{html.escape(title)} · {html.escape(site)}</title><style>{CSS}</style>{head_extra}</head>"
         f"<body class='{classes}'>"
         "<header class='topbar'><div class='wrap'><div class='left'>"
-        f"<a class='brand' href='/'><span class='mark'>{icon('layers')}</span>"
+        f"<a class='brand' href='/'{' aria-current=page' if cur == '/' else ''}>"
+        f"<span class='mark'>{icon('layers')}</span>"
         f"<span class='word'>{html.escape(site)}</span></a>{nav}</div>"
         f"<div class='right'>{right}</div></div></header>"
         f"<main class='{main_cls}'>{h1}{body}</main>"
-        "<footer class='site'><div class='links'><a href='/decks'>Decks</a><a href='/scan'>Scan</a>"
-        "<a href='/skill'>Assistant</a><a href='/app'>Apps</a><a href='/account'>Account</a></div>"
-        "<div class='legal'>Private deck gateway. Nothing on these pages is indexed or shared. "
-        "Magic: The Gathering is a trademark of Wizards of the Coast. Card data and images come from "
-        "Scryfall; decks live on Archidekt.</div></footer>"
-        f"{tabbar}<script src='{FEEDBACK_SCRIPT}' defer></script></body></html>"
+        + (
+            # The website footer; the Android app has no footer (its pages end at the tab bar).
+            "<footer class='site'><div class='links'><a href='/decks'>Decks</a><a href='/search'>Search</a>"
+            "<a href='/collection'>Collection</a><a href='/scan'>Scan</a><a href='/guide'>Guide</a>"
+            "<a href='/skill'>Assistant</a><a href='/app'>Apps</a><a href='/account'>Account</a></div>"
+            "<div class='legal'>Private deck gateway. Nothing on these pages is indexed or shared. "
+            "Magic: The Gathering is a trademark of Wizards of the Coast. Card data and images come from "
+            "Scryfall; decks live on Archidekt.</div></footer>"
+            if not app
+            else ""
+        )
+        + f"{tabbar}<script src='{FEEDBACK_SCRIPT}' defer></script></body></html>"
     )
     return HTMLResponse(
         doc,
@@ -579,20 +779,25 @@ class ThemeMiddleware:
             await self.app(scope, receive, send)
             return
         value = None
+        app = False
         for k, v in scope.get("headers", []):
             if k == b"cookie":
                 for part in v.decode("latin-1").split(";"):
                     name, _, val = part.strip().partition("=")
                     if name == THEME_COOKIE:
                         value = val.strip()
+            elif k == b"user-agent" and APP_UA_MARK in v.decode("latin-1", "replace"):
+                app = True
         token = _theme.set(theme_from_cookie(value))
         path = scope.get("path") or "/"
         ptoken = _path.set(path)
+        atoken = _app.set(app)
         try:
             await self.app(scope, receive, send)
         finally:
             _theme.reset(token)
             _path.reset(ptoken)
+            _app.reset(atoken)
 
 
 # One year, the value browsers' preload lists expect. No includeSubDomains: the gateway is usually

@@ -98,7 +98,8 @@ identity provider you control (Authentik, Keycloak, Authelia, ...).
 | [PLUGIN.md](docs/PLUGIN.md) | Users and operators | The one-link plugin for Claude Code, Claude, ChatGPT and Codex, plus the operator plugin |
 | [SKILL.md](docs/SKILL.md) | Users | The MTG skill and the ChatGPT instructions that teach the assistant the safe way to work |
 | [API.md](docs/API.md) | Contributors and app builders | The JSON API and the companion pages: authentication, every endpoint, proposal kinds, the page routes the Android app wraps |
-| [SCANNING.md](docs/SCANNING.md) | Users and operators | Turning a pile of physical cards into a decklist with your phone camera or a photo |
+| [SCANNING.md](docs/SCANNING.md) | Users and operators | Turning a pile of physical cards into a decklist, a deck or your collection with your phone camera or a photo |
+| [USING.md](docs/USING.md) | Users | What the pages do: home, decks, search, scan, collection, proposals and history, the guide; the same text the in-app Guide shows |
 | [ANDROID.md](docs/ANDROID.md) | Users and operators | The Android app: getting it from your gateway, the phone-camera scan screen, fold postures, App Links, building, signing and distributing it without an app store |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Everyone | How the pieces fit, what you can swap, how sign-in and deck edits work, the security model |
 | [DEPLOY-COMPOSE.md](docs/DEPLOY-COMPOSE.md) | Operators | A full deploy on one machine with Docker Compose |
@@ -159,8 +160,9 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
     review link.
   - The user approves it: on the card the AI app shows next to the
     proposal (Claude on the web, desktop and phones; ChatGPT), with the
-    Apply button on the review page, or in chat if the operator allows
-    `apply_proposal`. The card's Approve button carries a one-time code
+    Apply button on the review page, or, when the member chose a Semi-auto
+    or Full-auto approval mode on their Account page, the assistant applies
+    it with `apply_proposal`. The card's Approve button carries a one-time code
     the assistant never sees, so a tricked assistant can't press it.
   - For an edit, the gateway checks the deck hasn't changed since the proposal, saves a
     snapshot, puts a private backup copy of the deck in the user's
@@ -173,11 +175,30 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
   - A pending proposal the user no longer wants is closed with
     `reject_proposal` or the Reject button.
   - Every step is audited and limited to the signed-in user.
-- **Companion pages.** `/decks`, `/history` and `/activity` are a
-  phone-friendly deck view and editor behind the same sign-in: browse and
-  open decks, see statistics, run a report, edit quantities, categories and
-  additions as one proposal, and look back over proposals, snapshots and
-  reports. They also serve as the pages an Android app can wrap.
+- **Companion pages.** A home page with the full navigation, `/decks`,
+  `/search` (public decks on Archidekt by name, commander, format, colours
+  or owner, and `/users/{name}` for one person's decks), `/collection`,
+  `/scan`, `/history`, `/activity` and `/guide` are a phone-friendly deck
+  view and editor behind the same sign-in: browse, search and open decks as
+  text, stacks or grid (touch works: tap to fan a stack, press and hold to
+  move a card between categories), see statistics, run a report, edit
+  quantities, categories and additions (your own saves go straight to
+  Archidekt, with a snapshot first), and look back over
+  proposals, snapshots and reports. They are also the pages the Android app
+  wraps.
+- **Collection.** The cards you own, which is your Collection on Archidekt
+  shown and edited through the gateway (nothing about them is stored here):
+  add by name or from a scan, count copies, filter, export CSV. Owned cards
+  get a green dot on every deck page. `list_collection` and
+  `propose_collection_changes` (a proposal, approved like a deck edit) give
+  the assistant the same.
+- **Likes, bookmarks, follows and comments.** Archidekt's social buttons on
+  every deck and user page, each behind a confirmation and sent under your
+  own Archidekt name. Browser-only by design: no tool can do any of it.
+- **Adaptive layout.** Bottom tab bar on phones, a navigation rail from
+  600 px on touch screens and in the Android app, the desktop bar in wider
+  browsers; the layout follows the live window, so a foldable, split screen
+  or the browser's "Desktop site" switch re-flows at once.
 - **Profile pictures.** The account icon shows each member's picture from
   the identity provider (Gravatar, or a picture uploaded to Authentik),
   fetched by the gateway, or their initials. See
@@ -195,7 +216,9 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
   [docs/API.md](docs/API.md).
 - **Card scanning.** The `/scan` page reads physical cards with your phone
   camera. Text recognition runs on the phone, no third-party app needed.
-  `resolve_cards` turns card names read from photos into exact cards.
+  The scanned list goes into your collection, into one of your decks or
+  into a new deck. `resolve_cards` turns card names read from photos into
+  exact cards.
 - **One-link setup.** The gateway serves its own assistant plugin and an
   install page at `/install`.
 

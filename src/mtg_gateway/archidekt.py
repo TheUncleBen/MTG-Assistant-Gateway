@@ -25,6 +25,11 @@ import httpx
 logger = logging.getLogger(__name__)
 
 TOKEN_FIELDS = ("access_token", "access", "token", "jwt")
+# A member's vote on a deck as its JSON reports it ("userInput"; Archidekt's site bundle maps
+# NONE:0, UP:1, DOWN:2).
+VOTE_NONE, VOTE_UP, VOTE_DOWN = 0, 1, 2
+# Collection "modifier" values are the deck ones: Normal, Foil, Etched.
+COLLECTION_PAGE_SIZE = 100
 
 # Archidekt's numeric deck formats as observed by the nccurry/mtg-mcp reference (reported, not verified).
 FORMAT_IDS = {
@@ -45,6 +50,58 @@ FORMAT_NAMES: dict[int, str] = {}
 for _name, _fid in FORMAT_IDS.items():
     FORMAT_NAMES.setdefault(_fid, _name)
 REFRESH_FIELDS = ("refresh_token", "refresh")
+# Sort orders archidekt.com/search/decks offers (its Updated At, Created At, Views, Size, EDH Bracket menu).
+SEARCH_ORDERS = {
+    "-updatedAt": "Updated at",
+    "-createdAt": "Created at",
+    "-viewCount": "Views",
+    "-size": "Size",
+    "edhBracket": "EDH bracket",
+}
+_ART_UUID = re.compile(r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
+
+
+def featured_scryfall_id(url: Any) -> str | None:
+    """The Scryfall id inside a listing's ``featured`` art URL (Archidekt names its art files by the
+    card's Scryfall id, seen live 2026-10-07 on both of its image hosts), so the gateway can show the
+    same art from Scryfall and never hotlink Archidekt's storage."""
+    if not isinstance(url, str):
+        return None
+    m = _ART_UUID.search(url)
+    return m.group(1) if m else None
+
+
+def list_row(d: dict[str, Any]) -> dict[str, Any]:
+    """One deck of a ``/decks/v3/`` listing in the gateway's list shape (the extras were verified
+    in the public v3 listing 2026-10-05: colour-identity pip counts, size, bracket, tag names)."""
+    fmt = d.get("deckFormat")
+    colors = d.get("colors") if isinstance(d.get("colors"), dict) else {}
+    raw_tags = d.get("tags") if isinstance(d.get("tags"), list) else []
+    bracket = d.get("edhBracket")
+    size = d.get("size")
+    folder = d.get("parentFolderName")
+    views = d.get("viewCount")
+    return {
+        "id": str(d["id"]),
+        "name": str(d.get("name", "")),
+        "format": fmt,
+        "format_name": FORMAT_NAMES.get(fmt) if isinstance(fmt, int) else None,
+        "updated_at": str(d.get("updatedAt", "")),
+        "created_at": str(d.get("createdAt", "")),
+        "private": bool(d.get("private", False)),
+        "unlisted": bool(d.get("unlisted", False)),
+        "folder": str(folder) if isinstance(folder, str) and folder else None,
+        "colors": {k: v for k, v in colors.items() if k in "WUBRG" and isinstance(v, int)},
+        "size": size if isinstance(size, int) and not isinstance(size, bool) else None,
+        "bracket": bracket if isinstance(bracket, int) and not isinstance(bracket, bool) else None,
+        "tags": [
+            str(t.get("name") or t.get("tag"))
+            for t in raw_tags
+            if isinstance(t, dict) and (t.get("name") or t.get("tag"))
+        ],
+        "views": views if isinstance(views, int) and not isinstance(views, bool) else None,
+        "featured_scryfall_id": featured_scryfall_id(d.get("featured")),
+    }
 
 
 class ArchidektError(Exception):
@@ -104,6 +161,9 @@ class DeckCard:
     image_hash: str = ""
     scryfall_uid: str = ""
     default_category: str = ""  # Archidekt's auto category for cards with categories null
+    # Copies of this printing in the signed-in member's Archidekt Collection ("owned" on each
+    # deck card when the deck is read with the member's session; 0 otherwise).
+    owned: int = 0
 
 
 @dataclass
@@ -123,6 +183,15 @@ class Deck:
     unlisted: bool = False
     tags: list[str] = field(default_factory=list)
     created_at: str = ""
+    # Social state as the deck JSON reports it for the session that read it: the deck's score
+    # ("points"), this member's own vote (VOTE_NONE / VOTE_UP / VOTE_DOWN from "userInput"),
+    # whether the member bookmarked it, the comment thread root and the owner's id.
+    owner_id: str | None = None
+    points: int = 0
+    user_vote: int = 0
+    bookmarked: bool = False
+    comment_root: int | None = None
+    view_count: int = 0
 
     def _rows(self) -> list[tuple[Any, ...]]:
         return sorted(
@@ -471,45 +540,79 @@ class ArchidektClient:
                 if deck_id in seen:
                     continue
                 seen.add(deck_id)
-                folder = d.get("parentFolderName")
-                folder = str(folder) if isinstance(folder, str) and folder else None
-                if exclude_folder and folder == exclude_folder:
+                row = list_row(d)
+                if exclude_folder and row["folder"] == exclude_folder:
                     continue  # the gateway's backup copies stay out of the user's list
-                fmt = d.get("deckFormat")
-                colors = d.get("colors") if isinstance(d.get("colors"), dict) else {}
-                raw_tags = d.get("tags") if isinstance(d.get("tags"), list) else []
-                bracket = d.get("edhBracket")
-                size = d.get("size")
-                decks.append(
-                    {
-                        "id": deck_id,
-                        "name": str(d.get("name", "")),
-                        "format": fmt,
-                        "format_name": FORMAT_NAMES.get(fmt) if isinstance(fmt, int) else None,
-                        "updated_at": str(d.get("updatedAt", "")),
-                        "created_at": str(d.get("createdAt", "")),
-                        "private": bool(d.get("private", False)),
-                        "unlisted": bool(d.get("unlisted", False)),
-                        "folder": folder,
-                        # The list row's own extras (verified in the public v3 listing 2026-10-05):
-                        # colour-identity pip counts, deck size, bracket and tag names.
-                        "colors": {k: v for k, v in colors.items() if k in "WUBRG" and isinstance(v, int)},
-                        "size": size if isinstance(size, int) and not isinstance(size, bool) else None,
-                        "bracket": bracket
-                        if isinstance(bracket, int) and not isinstance(bracket, bool)
-                        else None,
-                        "tags": [
-                            str(t.get("name") or t.get("tag"))
-                            for t in raw_tags
-                            if isinstance(t, dict) and (t.get("name") or t.get("tag"))
-                        ],
-                        "owner": username,
-                    }
-                )
+                row["owner"] = username
+                decks.append(row)
         if dropped:
             logger.info("deck list: dropped %d entries not owned by the linked account", dropped)
         decks.sort(key=lambda d: d["updated_at"], reverse=True)
         return decks
+
+    async def search_decks(
+        self,
+        *,
+        name: str = "",
+        commander: str = "",
+        owner: str = "",
+        deck_format: int | None = None,
+        colors: str = "",
+        order_by: str = "-updatedAt",
+        page: int = 1,
+    ) -> dict[str, Any]:
+        """Public deck search, the way archidekt.com/search/decks queries its own API (read from the
+        site's requests on 2026-10-07, each parameter checked live against ``/api/decks/v3/``):
+        ``name`` (substring of the deck name), ``commanderName`` (the commander's name; the site's
+        /commanders/ pages send it with ``deckFormat=3``), ``ownerUsername`` (exact owner),
+        ``deckFormat`` (the numeric format), ``colors=W,U&colorIdentity=true`` (identity within
+        those colours; reported from the site's query builder, the result sample looked right) and
+        ``orderBy`` (``-updatedAt``, ``-createdAt``, ``-viewCount``, ``-size``, ``edhBracket``).
+        Archidekt returns 60 rows a page whatever ``pageSize`` says and caps ``count`` at 1000, so
+        only ``page`` is sent. Anonymous: only public decks come back."""
+        params: dict[str, Any] = {"orderBy": order_by if order_by in SEARCH_ORDERS else "-updatedAt"}
+        if name:
+            params["name"] = name[:120]
+        if commander:
+            params["commanderName"] = commander[:120]
+            if deck_format is None:
+                deck_format = 3
+        if owner:
+            params["ownerUsername"] = owner[:60]
+        if deck_format is not None:
+            params["deckFormat"] = int(deck_format)
+        if colors:
+            params["colors"] = ",".join(c for c in "WUBRG" if c in colors.upper())
+            params["colorIdentity"] = "true"
+        if page > 1:
+            params["page"] = int(page)
+        body = await self._request("GET", "/decks/v3/", params=params)
+        results = body.get("results") if isinstance(body, dict) else None
+        if not isinstance(results, list):
+            raise ArchidektError("contract", "unexpected deck search shape")
+        rows = []
+        for d in results:
+            if not isinstance(d, dict) or "id" not in d:
+                raise ArchidektError("contract", "unexpected deck entry shape")
+            if d.get("private"):
+                continue  # never list a private deck, whatever the listing says
+            row = list_row(d)
+            owner_obj = d.get("owner") if isinstance(d.get("owner"), dict) else {}
+            row["owner"] = str(owner_obj.get("username") or "")
+            row["owner_id"] = str(owner_obj["id"]) if owner_obj.get("id") is not None else None
+            rows.append(row)
+        count = body.get("count") if isinstance(body.get("count"), int) else None
+        return {"decks": rows, "count": count, "has_more": bool(body.get("next")), "page": page}
+
+    async def user_profile(self, username: str) -> dict[str, Any] | None:
+        """A public profile by username, through the deck listing (``/api/users/{id}/`` needs the
+        numeric id, which the listing's owner block carries). None when the user has no public
+        decks or does not exist."""
+        found = await self.search_decks(owner=username, order_by="-updatedAt")
+        if not found["decks"]:
+            return None
+        first = found["decks"][0]
+        return {"username": first["owner"], "id": first.get("owner_id"), "decks": found}
 
     async def get_deck(self, token: str | None, deck_id: str) -> Deck:
         """Fetch a deck. With ``token=None`` this is an anonymous read of a public deck."""
@@ -793,6 +896,161 @@ class ArchidektClient:
             "PATCH", f"/decks/{deck_id}/modifyCards/v2/", token=token, json_body={"cards": [entry]}
         )
 
+    # -- the member's Archidekt Collection ---------------------------------------------------
+    # Routes and bodies are the ones archidekt.com's own collection page sends (read from its
+    # bundle on 2026-10-07): GET /collection/{userId}/v2/ lists (checked live, with
+    # ``cardName``, ``collectionOrderBy`` and ``orderDirection`` accepted and ``page`` paging);
+    # POST /collection/v2/ creates one record and PATCH /collection/v2/{id}/ replaces one (both
+    # answer OPTIONS with the field list: game, quantity, card, modifier, language, condition,
+    # purchasePrice); DELETE /collection/bulk/ {"ids": [...]} removes records. The write calls
+    # are taken from the bundle and the OPTIONS schemas; this session could not exercise them.
+
+    async def collection_page(
+        self,
+        token: str,
+        user_id: str,
+        *,
+        page: int = 1,
+        page_size: int = COLLECTION_PAGE_SIZE,
+        card_name: str = "",
+        order_by: str = "",
+        descending: bool = True,
+    ) -> dict[str, Any]:
+        """One page of the member's own collection: {"results": [...], "count", "page",
+        "totalPages", "next", "previous", "tags", "isPublic", "owner"}."""
+        if not str(user_id).isdigit():
+            raise ArchidektError("contract", "the linked account has no Archidekt user id; relink")
+        params: dict[str, Any] = {"page": max(1, int(page)), "pageSize": max(1, min(int(page_size), 500))}
+        if card_name:
+            params["cardName"] = card_name
+        if order_by:
+            params["collectionOrderBy"] = order_by
+            params["orderDirection"] = "descending" if descending else "ascending"
+        body = await self._request("GET", f"/collection/{user_id}/v2/", token=token, params=params)
+        if not isinstance(body, dict) or not isinstance(body.get("results"), list):
+            raise ArchidektError("contract", "unexpected collection listing shape")
+        return body
+
+    async def collection_add(
+        self,
+        token: str,
+        card_id: int,
+        quantity: int,
+        *,
+        modifier: str = "Normal",
+        condition: str | None = None,
+        language: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /collection/v2/: one new record for ``card_id`` (an Archidekt printing id)."""
+        body: dict[str, Any] = {
+            "game": 1,
+            "quantity": int(quantity),
+            "card": int(card_id),
+            "modifier": modifier,
+        }
+        if condition:
+            body["condition"] = condition
+        if language:
+            body["language"] = language
+        resp = await self._request("POST", "/collection/v2/", token=token, json_body=body)
+        if not isinstance(resp, dict):
+            raise ArchidektError("contract", "unexpected collection create response shape")
+        return resp
+
+    async def collection_set(self, token: str, record: dict[str, Any], **changes: Any) -> dict[str, Any]:
+        """PATCH /collection/v2/{id}/ with the record's full body (the site sends every field on an
+        edit) and ``changes`` applied: quantity, modifier, condition, language, purchasePrice."""
+        rid = record.get("id")
+        if isinstance(rid, bool) or not isinstance(rid, int):
+            raise ArchidektError("contract", "collection record has no integer id")
+        card = record.get("card") if isinstance(record.get("card"), dict) else {}
+        card_id = card.get("id", record.get("card"))
+        if isinstance(card_id, bool) or not isinstance(card_id, int):
+            raise ArchidektError("contract", "collection record has no card id")
+        body: dict[str, Any] = {
+            "game": record.get("game") or 1,
+            "id": rid,
+            "quantity": record.get("quantity", 1),
+            "card": card_id,
+            "modifier": record.get("modifier") or "Normal",
+        }
+        for key in ("language", "condition", "tags", "purchasePrice"):
+            if record.get(key) is not None:
+                body[key] = record[key]
+        body.update({k: v for k, v in changes.items() if v is not None})
+        resp = await self._request("PATCH", f"/collection/v2/{rid}/", token=token, json_body=body)
+        if not isinstance(resp, dict):
+            raise ArchidektError("contract", "unexpected collection update response shape")
+        return resp
+
+    async def collection_delete(self, token: str, ids: list[int]) -> None:
+        """DELETE /collection/bulk/ {"ids": [...]}: remove whole records."""
+        clean = [int(i) for i in ids if isinstance(i, int) and not isinstance(i, bool)]
+        if not clean:
+            return
+        await self._request("DELETE", "/collection/bulk/", token=token, json_body={"ids": clean})
+
+    # -- social actions (a person's own clicks; no assistant tool calls these) -----------------
+    # Routes from archidekt.com's deck page bundle (2026-10-07): bookmarks are POST/DELETE
+    # /decks/{id}/bookmarks/ (OPTIONS answers "Bookmark" with POST); a deck's like is a vote on
+    # its comment root, PUT /comments/vote/{root}/ {"up": bool, "remove": bool}; follow is POST
+    # /users/follow/ {"followId", "unfollow"}; the thread is GET /comments/{root}/?page=&orderBy=
+    # (checked live) and POST /comments/createComment/ {"parent", "text"} (OPTIONS lists text and
+    # parent). Writes are reported from the bundle, not exercised by this session.
+
+    async def vote_deck(self, token: str, comment_root: int, *, up: bool, remove: bool = False) -> Any:
+        return await self._request(
+            "PUT", f"/comments/vote/{int(comment_root)}/", token=token, json_body={"up": up, "remove": remove}
+        )
+
+    async def bookmark_deck(self, token: str, deck_id: str, *, on: bool) -> Any:
+        if not DECK_ID_RE.fullmatch(str(deck_id)):
+            raise ArchidektError("contract", "deck id is not a number")
+        if on:
+            return await self._request("POST", f"/decks/{deck_id}/bookmarks/", token=token, json_body={})
+        return await self._request("DELETE", f"/decks/{deck_id}/bookmarks/", token=token)
+
+    async def follow_user(self, token: str, user_id: int, *, on: bool) -> Any:
+        return await self._request(
+            "POST", "/users/follow/", token=token, json_body={"followId": int(user_id), "unfollow": not on}
+        )
+
+    async def following(self, token: str, user_id: str, page: int = 1) -> dict[str, Any]:
+        """GET /users/{id}/following/: {"count", "next", "previous", "results": [{id, username,
+        avatar, following}]} (checked live 2026-10-07)."""
+        if not str(user_id).isdigit():
+            raise ArchidektError("contract", "user id is not a number")
+        body = await self._request(
+            "GET", f"/users/{user_id}/following/", token=token, params={"page": max(1, int(page))}
+        )
+        if not isinstance(body, dict) or not isinstance(body.get("results"), list):
+            raise ArchidektError("contract", "unexpected following list shape")
+        return body
+
+    async def comment_thread(
+        self, token: str | None, comment_root: int, *, page: int = 1, order_by: str = "-points"
+    ) -> dict[str, Any]:
+        """GET /comments/{root}/: the root with its ``children`` {"count", "results": [...]}; each
+        comment has id, text, owner {id, username, avatar}, parent, createdAt, editedAt, points,
+        userInput, childrenCount and its own children (checked live 2026-10-07)."""
+        body = await self._request(
+            "GET",
+            f"/comments/{int(comment_root)}/",
+            token=token,
+            params={"page": max(1, int(page)), "orderBy": order_by},
+        )
+        if not isinstance(body, dict):
+            raise ArchidektError("contract", "unexpected comment thread shape")
+        return body
+
+    async def comment_create(self, token: str, parent: int, text: str) -> dict[str, Any]:
+        resp = await self._request(
+            "POST", "/comments/createComment/", token=token, json_body={"parent": int(parent), "text": text}
+        )
+        if not isinstance(resp, dict):
+            raise ArchidektError("contract", "unexpected comment create response shape")
+        return resp
+
     async def update_deck(self, token: str, deck_id: str, fields: dict[str, Any]) -> dict[str, Any]:
         """PATCH /decks/{id}/update/ with the deck's own details: any of ``name``, ``description``,
         ``deckFormat`` (int, see FORMAT_IDS), ``edhBracket`` (int or None), ``private`` and
@@ -810,6 +1068,10 @@ class ArchidektClient:
         if not isinstance(resp, dict):
             raise ArchidektError("contract", "unexpected deck update response shape")
         return resp
+
+
+def _int(value: Any) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
 
 def _str_list(value: Any) -> list[str]:
@@ -895,6 +1157,7 @@ def parse_deck(body: Any) -> Deck:
                 image_hash=str(card.get("scryfallImageHash") or ""),
                 scryfall_uid=str(card.get("uid") or ""),
                 default_category=str(oracle.get("defaultCategory") or ""),
+                owned=_int(card.get("owned")),
             )
         )
     owner = body.get("owner") if isinstance(body.get("owner"), dict) else {}
@@ -924,4 +1187,10 @@ def parse_deck(body: Any) -> Deck:
         unlisted=body.get("unlisted") is True,
         tags=tags,
         created_at=str(body.get("createdAt") or ""),
+        owner_id=str(owner["id"]) if owner.get("id") is not None else None,
+        points=_int(body.get("points")),
+        user_vote=_int(body.get("userInput")) if _int(body.get("userInput")) in (0, 1, 2) else 0,
+        bookmarked=body.get("bookmarked") is True,
+        comment_root=_int(body.get("commentRoot")) or None,
+        view_count=_int(body.get("viewCount")),
     )

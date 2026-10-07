@@ -64,22 +64,27 @@ from .auth_provider import (
     cookie_name,
 )
 from .backup import nightly_loop, purge_loop
+from .browse import add_browse_routes, add_browse_tools
 from .cimd import CimdFetcher
 from .clickguard import form_stamp, guarded_form, submitted_too_soon
+from .collection import add_collection
 from .companion import add_companion_routes
 from .config import Settings
 from .db import Database
 from .decklist import DecklistError, ListCard, parse_decklist, to_text
 from .decks import DeckError, DeckService, _clean_deck_id, current_client, scopes_allow_writes
+from .guide import add_guide_routes
+from .home import add_home_routes
 from .membership import Membership, MembershipChecker
 from .metrics import Metrics
 from .mf_proxy import ALLOWED_TOOLS, MysticForgeProxy
 from .oidc import OIDCClient
-from .pages import BROWSER_CLIENT_ID, SESSION_COOKIE, add_browser_routes, browser_user, login_redirect
+from .pages import BROWSER_CLIENT_ID, SESSION_COOKIE, add_browser_routes
 from .plugin_page import add_plugin_routes
 from .reports import ReportService
 from .scan import add_scan
 from .skill_page import add_skill_routes
+from .social import add_social_routes
 from .theme import NoSniffMiddleware, ThemeMiddleware, render
 from .views import deck_brief, deck_out
 
@@ -96,6 +101,7 @@ class AppState:
     decks: DeckService
     mf_proxy: MysticForgeProxy | None = None
     scan: Any = None
+    collection: Any = None
     reports: Any = None
     metrics: Metrics | None = None
     membership: MembershipChecker | None = None
@@ -131,6 +137,7 @@ WRITE_TOOLS = frozenset(
         "reject_proposal",
         "run_deck_report",
         "save_scan_session",
+        "propose_collection_changes",
     }
 )
 
@@ -1068,6 +1075,12 @@ def build_mcp_server(state: AppState) -> MCPServer:
     add_app_routes(server, state)
     add_plugin_routes(server, state)
     add_scan(server, state)
+    add_collection(server, state)  # after add_scan: card names are resolved through the scan service
+    add_browse_routes(server, state)
+    add_social_routes(server, state)
+    add_browse_tools(server, state)
+    add_home_routes(server, state)
+    add_guide_routes(server, state)
     state.reports = ReportService(state.db, state.decks, state.mf_proxy)
     add_api_routes(server, state, state.reports)
     add_companion_routes(server, state, state.reports)
@@ -1208,29 +1221,6 @@ def build_mcp_server(state: AppState) -> MCPServer:
         return JSONResponse(
             {"idp_origin": await state.provider.idp_origin()},
             headers={"Cache-Control": "public, max-age=300"},
-        )
-
-    @server.custom_route("/", methods=["GET"], include_in_schema=False)
-    async def index(request: Request) -> Response:
-        # The dashboard is for signed-in members only; MCP clients use /mcp and the OAuth routes.
-        if not browser_user(state, request):
-            return login_redirect("/")
-        return render(
-            s.server_name,
-            "<div class='card'><p>This is an MCP server for AI assistants: research cards, simulate "
-            "games and propose edits to your Archidekt decks from Claude or ChatGPT.</p>"
-            "<h2>Connector URL</h2>"
-            f"<pre>{html.escape(s.mcp_url)}</pre>"
-            "<p>Add it as a custom connector in Claude or ChatGPT and sign in when prompted, or follow "
-            "the guided steps for your app.</p>"
-            "<div class='actions'><a class='btn btn-primary' href='/install'>Install the assistant "
-            "plugin</a></div></div>"
-            "<div class='card'><h2>Your account</h2>"
-            "<p>Link your Archidekt account once so your assistant can read your decks, and review "
-            "any proposed deck changes before they are applied.</p>"
-            "<div class='actions'><a class='btn btn-primary' href='/account'>Account and Archidekt link</a>"
-            "<a class='btn' href='/skill'>Get the assistant skill</a></div></div>",
-            site=s.server_name,
         )
 
     return server

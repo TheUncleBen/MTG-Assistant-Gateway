@@ -7,6 +7,111 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.0] - 2026-10-07
+
+Archidekt parity for the pages: browse and search public decks, a home page
+with the full navigation, your Archidekt Collection shown and edited on the
+gateway, a scan flow that ends in the collection, a deck or a new deck,
+likes, bookmarks, follows and comments as your own buttons, stacks and grid
+views that work on touch screens, and a layout that follows the window
+(bottom bar, navigation rail or desktop bar) on the web and in the Android
+app. This closes the round that began with 0.6.3: sign-in that survives
+real-world token sizes, admins signing in on the admin group alone, profile
+pictures, Approve and Reject cards in the chat with per-member approval
+modes (0.6.3 to 0.6.6), and now the pages themselves.
+
+### Added
+
+- **Home page.** Signing in lands on a dashboard with the same navigation
+  as every other page: your newest decks with their covers, a deck search
+  box, tiles for Decks, Search, Scan, Collection, Proposals (with the
+  number waiting), History and the Guide, and the
+  assistant connection details in a collapsed panel at the end.
+- **Deck search and user pages.** `/search` finds public decks on Archidekt
+  by name, commander, format, colours and owner, ordered by newest, most
+  viewed, largest or bracket, with Archidekt's own paging; `/users/{name}`
+  lists one person's public decks. Results open in the gateway's deck view.
+  The `search_decks` and `archidekt_user` tools give the assistant the same.
+- **Collection.** `/collection` is the list of cards you own: your
+  Collection on Archidekt, read and written through the account you linked,
+  so what you add here is on archidekt.com at once and nothing about your
+  cards is stored on the gateway. Add cards by name or from a scan, count
+  copies with plus and minus, filter by name, sort by newest or set release,
+  grid or list, export CSV. Owned cards show a green dot on every deck page
+  with the copies Archidekt reports. `list_collection` reads it for the
+  assistant; `propose_collection_changes` adds or removes cards as a
+  proposal (kind `collection`) that waits for your approval or your approval
+  mode, like a deck edit. The JSON endpoints under `/collection/api/` give the
+  pages the same (each card is one or two Archidekt calls, about a second).
+- **Your own edits save at once.** In the app, pressing Save is your
+  approval: the deck editor, a drag between categories, New deck, Clone and
+  Deck settings go to Archidekt straight away (still recorded as a proposal,
+  applied with its snapshot, so History can undo it). Only a big removal
+  (more than 10 cards, or 8 different cards) asks you to confirm first; a
+  restore keeps its review page. Assistants' changes stay proposals.
+- **Navigation.** On a phone the tabs are Decks, Scan, Collection, Proposals
+  and More; Search is the magnifier in the top bar. More opens a sheet with
+  Home, History, Guide, Account and, for admins, Admin. The rail (unfolded
+  foldable, tablet, Android app) shows Search as a sixth tab.
+- **Likes, bookmarks, follows and comments.** Every deck page has
+  Archidekt's social buttons (Like with the deck's score, Bookmark, Follow
+  the owner, a Comments panel with the thread and a reply box) and user
+  pages have Follow. Each asks for a confirmation, then goes to Archidekt
+  under your own name. They are browser-only on purpose: no tool and no
+  `/api/v1` route exists for them, so an assistant can never like, follow or
+  comment for you.
+- **Scan flow.** The scan page explains its three steps on first use, and
+  the list ends in **What next?**: save the cards to your collection, add
+  them to one of your decks (the deck editor opens with them filled in), or
+  start a new deck from them (`/decks/new?scan_session=`). "Save to gateway"
+  is now "Save scan". A scan is a draft kept until you send its cards to the
+  collection or a deck (which removes it) or delete it; nothing expires by
+  age.
+- **Guide.** `/guide` is end-user documentation inside the app: what you
+  can do on each page with or without an assistant, how proposals and
+  snapshots protect your decks, the Android app, privacy. Linked from the
+  account menu, the home page and the footer.
+- **Touch and card viewer.** On touch screens a tap fans a stack out and a
+  tap on a card opens it large with its actions (edit, move to another
+  category, mark as owned, Scryfall). On your own deck, cards can be dragged
+  between categories with a mouse or by press-and-hold on a touch screen; the
+  moves become one proposal you review.
+- **Adaptive navigation.** The layout follows Android's window size
+  classes on the web and in the app alike: under 600 px wide the bottom tab
+  bar; from 600 to 900 px on a touch screen (an unfolded foldable or a
+  tablet in a browser), and in the Android app at every width from 600 px,
+  a navigation rail down the left edge; wider browsers keep the desktop top
+  bar. The rules read the live window, so folding, rotating, split screen,
+  pop-up windows and a browser's "Desktop site" switch re-flow at once.
+- **Android app layout.** Pages rendered for the app (its user agent carries
+  `MTGAssistant/`) drop the website footer and respect the display cut-out
+  and gesture bar. The app's own actions (scan with the phone camera,
+  reload, open in browser, change gateway) moved into the page's account
+  menu; the floating button now appears only over pages that are not the
+  gateway's, so it no longer covers the bottom tab bar.
+
+### Fixed
+
+- **View as / Group by / Sort by did nothing** on the deck page: the Quick
+  add form sat inside the view form, so browsers closed the outer form early
+  and the selects submitted nothing. They are separate forms now and apply
+  as soon as you change them.
+- The deck page's **More** menu was clipped by the banner (which hid its
+  overflow for the art). The art is painted by a layer behind the banner
+  now, and the menu opens over the toolbar.
+- Dropdown menus (the account menu, a deck's More menu) close on a tap or
+  click anywhere outside them, on Escape, and on the Back button on phones.
+- Touch screens up to 900 px wide (an unfolded foldable in a browser) use the
+  phone layout with the bottom tab bar instead of a squeezed desktop bar.
+
+### Changed
+
+- The navigation is Decks, Search, Collection, Scan, Proposals, History (and
+  Admin for admins); the phone tab bar and the rail are Decks, Search, Scan,
+  Collection, More (More opens the home page with every section).
+- A member with a linked Archidekt account now reads every deck page with
+  their own session (before, public decks were read anonymously), which is
+  how Archidekt reports the copies they own, their like and their bookmark.
 ## [0.6.6] - 2026-10-07
 
 ### Added

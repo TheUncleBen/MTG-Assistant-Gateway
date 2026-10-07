@@ -908,6 +908,8 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str = "") -> str:
         + (
             "<dt>Deck</dt><dd>Creates a new deck</dd>"
             if p.get("kind") == "create_deck" and p["deck_id"] == "new"
+            else "<dt>Target</dt><dd>Your Archidekt collection</dd>"
+            if p.get("kind") == "collection"
             else f"<dt>Deck</dt><dd><code>{html.escape(p['deck_id'])}</code></dd>"
         )
         + (

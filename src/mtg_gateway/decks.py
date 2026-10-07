@@ -160,6 +160,20 @@ def _row(kind: str, **fields: Any) -> dict[str, Any]:
     return out
 
 
+def _printing_label(item: dict[str, Any]) -> str | None:
+    """'(CMR 472, Foil)' for a collection item that names a printing or finish, else None."""
+    card = item.get("card") or {}
+    code = str(item.get("set") or card.get("set") or "").upper()
+    number = str(item.get("collector_number") or card.get("collector_number") or "")
+    finish = str(item.get("finish") or ("foil" if item.get("foil") is True else "") or "")
+    bits = [
+        b
+        for b in (f"{code} {number}".strip(), finish.capitalize() if finish and finish != "nonfoil" else "")
+        if b
+    ]
+    return f"({', '.join(bits)})" if bits else None
+
+
 def row_label(r: dict[str, Any]) -> str:
     """'Sol Ring (CMR 1, Foil) [Ramp]': a row's card, printing and category."""
     label = str(r.get("name", ""))
@@ -871,6 +885,10 @@ class DeckService:
         self._link_locks: dict[str, asyncio.Lock] = {}
         self.max_archidekt_per_user = MAX_ARCHIDEKT_PER_USER
         self.archidekt_budget = RateBudget(settings.archidekt_calls_per_10_min)
+        # Set by collection.py: applies a ``collection`` proposal's stored changes against the
+        # member's Archidekt Collection and returns the result rows (DeckService itself knows only
+        # decks). None while the collection pages are not loaded.
+        self.collection_apply: Any = None
 
     @asynccontextmanager
     async def archidekt_slot(self, sub: str | None) -> AsyncIterator[None]:
@@ -1131,16 +1149,41 @@ class DeckService:
         return deck
 
     async def get_any_deck(self, sub: str | None, deck_ref: str) -> Deck:
-        """Read a deck anonymously (public or unlisted). When that fails with
-        not-found and the user has a link, retry with their session (private decks)."""
+        """Read a deck. A member with a linked account reads with their session first, which is
+        how Archidekt reports the deck as that person sees it (private decks, the copies they own
+        of each card, their vote and bookmark); when that fails, or there is no link, the deck is
+        read anonymously (public or unlisted)."""
         deck_id = _clean_deck_id(deck_ref)
+        if sub and self.db.get_link(sub):
+            try:
+                return await self.get_deck(sub, deck_id)
+            except DeckError as exc:
+                if exc.kind not in ("not_found", "auth", "forbidden", "not_linked"):
+                    raise
         async with self.archidekt_slot(sub):
             try:
                 return await self.client.get_deck(None, deck_id)
             except ArchidektError as exc:
-                if exc.kind not in ("not_found", "auth", "forbidden") or not sub or not self.db.get_link(sub):
-                    raise DeckError(exc.kind, str(exc)) from exc
-            return await self.get_deck(sub, deck_id)
+                raise DeckError(exc.kind, str(exc)) from exc
+
+    async def search_decks(self, sub: str | None, **query: Any) -> dict[str, Any]:
+        """Search Archidekt's public decks anonymously (see ArchidektClient.search_decks). Counts
+        against the member's Archidekt budget like any other read."""
+        async with self.archidekt_slot(sub):
+            try:
+                return await self.client.search_decks(**query)
+            except ArchidektError as exc:
+                raise DeckError(exc.kind, str(exc)) from exc
+
+    async def user_profile(self, sub: str | None, username: str) -> dict[str, Any] | None:
+        username = re.sub(r"[^A-Za-z0-9_.@ -]", "", str(username or "")).strip()[:60]
+        if not username:
+            raise DeckError("invalid", "give an Archidekt username")
+        async with self.archidekt_slot(sub):
+            try:
+                return await self.client.user_profile(username)
+            except ArchidektError as exc:
+                raise DeckError(exc.kind, str(exc)) from exc
 
     # -- proposals ------------------------------------------------------------
     async def propose(self, sub: str, deck_id: str, raw_changes: Any) -> dict[str, Any]:
@@ -1466,6 +1509,8 @@ class DeckService:
             return await self._apply_details(sub, row, progress)
         if row.get("kind") == "clone":
             return await self._apply_clone(sub, row, progress)
+        if row.get("kind") == "collection":
+            return await self._apply_collection(sub, row, progress)
         changes = parse_changes(row["changes"])
         deck = await self._current_deck_for(sub, row)
         _before, after, _lines = plan(deck, changes)
@@ -1717,6 +1762,71 @@ class DeckService:
         backup = {"backup_deck_id": str(copy["id"]), "backup_url": str(copy.get("url") or "")}
         self.db.set_snapshot_backup(snapshot_id, **backup)
         return backup
+
+    COLLECTION_TARGET = "collection"
+    COLLECTION_NAME = "Your Archidekt collection"
+
+    async def propose_collection(
+        self,
+        sub: str,
+        adds: list[dict[str, Any]],
+        removes: list[dict[str, Any]],
+        *,
+        extra: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """A proposal (kind ``collection``) that adds cards to, or removes cards from, the member's
+        Archidekt Collection. Like every write the assistant can start it waits for the member's
+        approval (or their approval mode); the review rows are ``add`` and ``remove`` rows, so the
+        same tiers apply as to a deck edit. ``adds`` are the items collection.add accepts (already
+        validated), ``removes`` are ``{"id", "name", "quantity"}`` records resolved by the caller."""
+        self._room_for_proposal(sub)
+        if not adds and not removes:
+            raise DeckError("invalid", "nothing to change: give cards to add or remove")
+        rows = [
+            _row(
+                "add",
+                name=str(it.get("name") or (it.get("card") or {}).get("name") or "card"),
+                qty=int(it.get("quantity") or 1),
+                printing=_printing_label(it),
+            )
+            for it in adds
+        ] + [
+            _row("remove", name=str(r["name"]), qty=int(r["quantity"]), printing=r.get("printing"))
+            for r in removes
+        ]
+        pid = secrets.token_urlsafe(12)
+        self._save_proposal(
+            {
+                "id": pid,
+                "owner_sub": sub,
+                "kind": "collection",
+                "deck_id": self.COLLECTION_TARGET,
+                "deck_name": self.COLLECTION_NAME,
+                "baseline_fingerprint": "",
+                "changes": {
+                    **{k: v for k, v in (extra or {}).items() if v},
+                    "add": adds,
+                    "remove": [{"id": r["id"], "quantity": r["quantity"]} for r in removes],
+                },
+            },
+            rows,
+        )
+        self._audit("proposal_created", sub=sub, detail={"proposal_id": pid, "kind": "collection"})
+        return self.describe(sub, pid)
+
+    async def _apply_collection(
+        self, sub: str, row: dict[str, Any], progress: dict[str, Any]
+    ) -> dict[str, Any]:
+        if self.collection_apply is None:
+            raise DeckError("unavailable", "the collection pages are not loaded on this gateway")
+        changes = row.get("changes") or {}
+        result = {
+            **(await self.collection_apply(sub, changes, progress)),
+            "verified": True,
+            "snapshot_id": None,
+        }
+        self.db.finish_proposal(row["id"], state="applied", result=result)
+        return self.describe(sub, row["id"])
 
     async def propose_clone(self, sub: str, deck_id: str, name: str | None = None) -> dict[str, Any]:
         """A proposal (kind ``clone``) that copies one of the member's decks into a new private
