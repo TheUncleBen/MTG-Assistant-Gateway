@@ -56,6 +56,8 @@ class FakeIdP:
         # "HS256" signs the ID token with the client secret, as Authentik does when the provider
         # has no Signing Key.
         self.id_token_alg = "RS256"
+        # Extra fields for the ID token's JWS header (e.g. a certificate chain in x5c).
+        self.id_token_header: dict[str, object] = {}
         # The provider's live directory: sub -> the user dict as it is *now* (the same object a
         # test assigned to ``self.user``, so editing it in place changes what userinfo says).
         # ``disabled`` subs get 401 from userinfo and invalid_grant on refresh, like a deactivated
@@ -151,7 +153,7 @@ class FakeIdP:
         if self.id_token_alg == "HS256":
             id_token = jwt.encode({"alg": "HS256"}, claims, OctKey.import_key(CLIENT_SECRET))
         else:
-            id_token = jwt.encode({"alg": "RS256", "kid": "test-1"}, claims, self.key)
+            id_token = jwt.encode({"alg": "RS256", "kid": "test-1", **self.id_token_header}, claims, self.key)
         sub = str(self.user["sub"])
         self.directory[sub] = self.user
         body = self._mint(sub, offline="offline_access" in q.get("scope", "").split())

@@ -9,6 +9,17 @@ with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 
 ## [0.6.2] - 2026-10-07
 
+### Fixed
+
+- Sign-in failed with *Sign-in could not be completed with the identity
+  provider* and the log line `ID token validation failed:
+  ExceededSizeError` when the provider's ID token was bigger than the
+  token library's built-in limits (a 512-byte header, a 1 KB signature,
+  about 96 KB of claims). The gateway now allows up to 16 KB of header,
+  4 KB of signature and 2 MB of claims, which fits big group lists,
+  avatar claims and certificate chains. The token still has to come from
+  the provider's own token endpoint and pass every other check.
+
 ### Changed
 
 - When sign-in fails while the gateway is collecting your identity

@@ -138,3 +138,32 @@ async def test_free_text_error_codes_are_not_logged():
         await c.exchange_code("code", "verifier", "nonce")
     assert str(err.value) == "identity provider rejected the code exchange (HTTP 400)"
     assert err.value.reason == "other"
+
+
+async def test_large_authentik_id_token_signs_in(h: Harness, idp: FakeIdP):
+    """A real provider's ID token can be far over joserfc's default limits: claims from a
+    property mapping (here an avatar data URI and 150 groups) and a certificate chain in the
+    header. 0.6.1 refused such a token with ExceededSizeError."""
+    groups = [f"team-{i:03d}-{'x' * 40}" for i in range(150)] + ["mtg-users"]
+    idp.user["groups"] = groups
+    idp.id_token_claims = {"picture": "data:image/png;base64," + "A" * 200_000, "groups": groups}
+    idp.id_token_header = {"x5c": ["M" * 1800, "M" * 1800]}
+    r = await _browser_signin(h)
+    assert r.status_code == 302, r.text
+    assert r.headers["location"] == "/account"
+    assert h.db.get_user("user-1") is not None
+
+
+async def test_absurd_id_token_is_still_refused(h: Harness, idp: FakeIdP, caplog: pytest.LogCaptureFixture):
+    idp.id_token_claims = {"picture": "A" * (3 * 1024 * 1024)}
+    with caplog.at_level(logging.WARNING):
+        r = await _browser_signin(h)
+    assert r.status_code == 502
+    assert "ExceededSizeError (Payload size exceeds" in caplog.text
+
+
+async def test_id_token_rules_still_refuse_other_algorithms():
+    from mtg_gateway.oidc import ALLOWED_ALGS, ID_TOKEN_REGISTRY
+
+    assert ID_TOKEN_REGISTRY.allowed == ALLOWED_ALGS
+    assert "HS256" not in ALLOWED_ALGS and "none" not in ALLOWED_ALGS

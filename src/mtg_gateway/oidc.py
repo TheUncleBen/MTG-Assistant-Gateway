@@ -26,6 +26,7 @@ import httpx
 from joserfc import jwt
 from joserfc.errors import JoseError
 from joserfc.jwk import KeySet
+from joserfc.jws import JWSRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,23 @@ DEFAULT_GROUPS_CLAIM = "groups"
 MAX_GROUPS = 200
 MAX_GROUP_LEN = 200
 MAX_GROUPS_CLAIM_LEN = 200
+
+
+def _id_token_registry() -> JWSRegistry:
+    """The JWS rules for ID tokens: only ``ALLOWED_ALGS``, with size limits that fit real
+    providers. joserfc's defaults (a 512-byte header, a 1024-byte signature, a 128,000-byte
+    payload, all base64) refuse genuine tokens: a header carrying a certificate chain, an RSA
+    8192 signature, or claims from a large property mapping (an avatar, many groups). The token
+    only ever comes from the provider's token endpoint over TLS, in answer to the gateway's own
+    authenticated request, so the limits only need to stop the absurd."""
+    registry = JWSRegistry(algorithms=ALLOWED_ALGS)
+    registry.max_header_length = 16 * 1024
+    registry.max_signature_length = 4 * 1024
+    registry.max_payload_length = 2 * 1024 * 1024
+    return registry
+
+
+ID_TOKEN_REGISTRY = _id_token_registry()
 
 
 class OIDCError(Exception):
@@ -379,7 +397,7 @@ class OIDCClient:
         for attempt in range(2):
             keys = await self.jwks(force=attempt == 1)
             try:
-                token = jwt.decode(id_token, keys, algorithms=ALLOWED_ALGS)
+                token = jwt.decode(id_token, keys, registry=ID_TOKEN_REGISTRY)
                 registry = jwt.JWTClaimsRegistry(
                     iss={"essential": True, "value": self.issuer},
                     aud={"essential": True, "value": self.client_id},
