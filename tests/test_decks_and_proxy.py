@@ -52,7 +52,7 @@ class Stack:
 async def stack(tmp_path: Path, idp: FakeIdP):
     ark = FakeArchidekt()
     settings = make_settings(
-        tmp_path, writes_enabled=True, apply_via_mcp=True, archidekt_base="https://ark.test/api"
+        tmp_path, writes_enabled=True, approval_mode_default="auto", archidekt_base="https://ark.test/api"
     )
     client = _client(settings, ark)
     proxy = MysticForgeProxy("http://mf.test/mcp", client_factory=lambda: Client(fake_mystic_forge()))
@@ -796,13 +796,12 @@ async def test_an_app_revoking_its_token_keeps_browser_sessions(stack: Stack) ->
 
 
 @pytest.fixture
-async def stack_min_age(tmp_path: Path, idp: FakeIdP):
+async def stack_manual(tmp_path: Path, idp: FakeIdP):
     ark = FakeArchidekt()
     settings = make_settings(
         tmp_path,
         writes_enabled=True,
-        apply_via_mcp=True,
-        apply_min_age_seconds=30,
+        approval_mode_default="manual",
         archidekt_base="https://ark.test/api",
     )
     client = _client(settings, ark)
@@ -811,11 +810,11 @@ async def stack_min_age(tmp_path: Path, idp: FakeIdP):
         yield Stack(h, ark)
 
 
-async def test_mcp_apply_refused_within_min_age(stack_min_age: Stack) -> None:
-    """An assistant cannot propose and apply in one breath: a young proposal is refused over MCP,
-    the browser page still applies, and an old enough proposal applies over MCP."""
-    h, ark = stack_min_age.h, stack_min_age.ark
-    token = await linked_user(stack_min_age)
+async def test_manual_mode_needs_the_users_own_press(stack_manual: Stack) -> None:
+    """In the default (manual) approval mode an assistant cannot apply over MCP at all: the
+    proposal says so, apply_proposal answers browser_required, and the review page applies."""
+    h, ark = stack_manual.h, stack_manual.ark
+    token = await linked_user(stack_manual)
     p = structured(
         await call(
             h,
@@ -824,33 +823,21 @@ async def test_mcp_apply_refused_within_min_age(stack_min_age: Stack) -> None:
             {"deck_id": "42", "changes": [{"action": "add", "card_name": "Arcane Signet"}]},
         )
     )
-    assert "wait for their explicit OK" in p["next_step"] and "30 s" in p["next_step"]
+    assert p["approval_mode"] == "manual" and p["assistant_may_apply"] is False
+    assert "Do not call apply_proposal" in p["next_step"]
     out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
-    assert out["ok"] is False and out["error"] == "apply_too_soon" and ark.patches == []
-    assert "preview" in out["message"] and 0 < out["retry_after_seconds"] <= 30
+    assert out["ok"] is False and out["error"] == "browser_required" and ark.patches == []
+    assert out["review_url"].endswith(p["proposal_id"]) and out["approval_mode"] == "manual"
     assert structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))["state"] == (
         "pending"
     )
-    # The browser page is a human click, so it is not held back.
+    # The browser page is the member's own press.
     b = Browser(h)
     await b.login()
     url = f"/proposals/{p['proposal_id']}"
     r = await b.http.post(url, data={"csrf": await b.csrf(url), "action": "apply"})
     assert r.status_code == 303 and len(ark.patches) == 1
     await b.aclose()
-    # An older proposal applies over MCP.
-    p2 = structured(
-        await call(
-            h,
-            token,
-            "propose_deck_changes",
-            {"deck_id": "42", "changes": [{"action": "add", "card_name": "Sol Ring"}]},
-        )
-    )
-    with h.db.tx() as c:
-        c.execute("UPDATE proposals SET created_at = created_at - 60 WHERE id = ?", (p2["proposal_id"],))
-    out2 = structured(await call(h, token, "apply_proposal", {"proposal_id": p2["proposal_id"]}))
-    assert out2["ok"] is True and len(ark.patches) == 2
 
 
 async def test_list_my_decks_filters_to_the_linked_owner(stack: Stack) -> None:

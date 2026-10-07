@@ -36,7 +36,7 @@ from .test_decks_and_proxy import Browser, Stack, _client, call, linked_user, mc
 async def stack(tmp_path, idp: FakeIdP):
     ark = FakeArchidekt()
     settings = make_settings(
-        tmp_path, writes_enabled=True, apply_via_mcp=True, archidekt_base="https://ark.test/api"
+        tmp_path, writes_enabled=True, approval_mode_default="auto", archidekt_base="https://ark.test/api"
     )
     async with running(Harness(settings, idp, archidekt=_client(settings, ark))) as h:
         yield Stack(h, ark)

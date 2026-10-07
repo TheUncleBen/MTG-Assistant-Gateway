@@ -47,7 +47,6 @@ code and a human `message`:
 | `other_client` | 403 | the proposal was made by another connected app (or, for reject, in the browser); use the review page (`review_url` is included) |
 | `not_linked` | 409 | no Archidekt account linked yet; send the user to `/account` |
 | `not_pending` / `already_applied` / `stale` | 409 | the proposal cannot be applied in its current state |
-| `apply_too_soon` | 425 | the proposal was created moments ago; apply needs a short pause |
 | `rate_limited` | 429 | the Archidekt pacer is busy, the member's Archidekt budget (`MTG_ARCHIDEKT_CALLS_PER_10_MIN`) is used up, too many failed link attempts, or too many pending proposals (100 per member, 30 per app) |
 | `unavailable` | 503 | Archidekt or Mystic Forge is unreachable |
 | `idp_unavailable` | 503 | the identity provider can't be reached to confirm the caller is still a member; nothing was revoked, try again shortly (`Retry-After: 30`) |
@@ -67,7 +66,7 @@ Request bodies are JSON objects of at most 2 MB.
 | `GET /api/v1/proposals?state=` | The user's proposals, optionally filtered by state |
 | `POST /api/v1/proposals` | Create a proposal (see kinds below). Answers `201` with the proposal, its `diff` and `review_url` |
 | `GET /api/v1/proposals/{pid}` | One proposal with `state`, `diff`, `changes`, `snapshot_id`, `result`, `next_step` |
-| `POST /api/v1/proposals/{pid}/apply` | Apply it: snapshot, Archidekt backup copy, write, re-read verification. Bearer callers get `browser_required` when `MTG_APPLY_VIA_MCP` is off (the in-chat card uses the `confirm_proposal` MCP tool instead, not this route) |
+| `POST /api/v1/proposals/{pid}/apply` | Apply it: snapshot, Archidekt backup copy, write, re-read verification. A bearer caller applies only what the member's approval mode allows (`manual`: nothing, `browser_required`; `semi`: low-risk proposals; `auto`: everything), judged inside the apply; the in-chat card uses the `confirm_proposal` MCP tool instead, not this route |
 | `POST /api/v1/proposals/{pid}/reject` | Mark a pending proposal rejected. A bearer caller can reject only proposals its own app made; others answer `other_client` |
 | `GET /api/v1/snapshots?deck_id=` | Deck snapshots taken before applies (and on demand) |
 | `GET /api/v1/snapshots/{sid}` | One snapshot with the full deck as it was |

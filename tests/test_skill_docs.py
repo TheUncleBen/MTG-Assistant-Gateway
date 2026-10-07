@@ -37,7 +37,7 @@ NOT_TOOLS = {
     "archidekt_links",
     "archidekt_login",
     "archidekt_password",
-    "apply_too_soon",
+    "apply_needs_user",
     "price_total",
     "archidekt_bracket",
     "archidekt_session_refreshed",

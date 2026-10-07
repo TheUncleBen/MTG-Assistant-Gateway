@@ -31,7 +31,7 @@ async def stack(tmp_path: Path, idp: FakeIdP):
     settings = make_settings(
         tmp_path,
         writes_enabled=True,
-        apply_via_mcp=True,
+        approval_mode_default="auto",
         archidekt_base="https://ark.test/api",
         android_assetlinks='[{"relation": ["delegate_permission/common.handle_all_urls"]}]',
     )

@@ -19,6 +19,7 @@ from urllib.parse import parse_qs
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
+from . import modes
 from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
 from .clickguard import form_stamp, guarded_form, submitted_too_soon
 from .decks import DeckError, current_client, row_label, row_line
@@ -247,6 +248,21 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         if action == "unlink":
             state.decks.unlink(sub)
             return RedirectResponse("/account?ok=unlinked", status_code=303)
+        if action == "approval_mode":
+            # The only place a mode can be set: the member's own browser session, never an
+            # assistant over MCP or the API (modes.py).
+            mode = data.get("mode", "")
+            if not modes.valid_mode(mode) or modes.rank(mode) > modes.rank(s.approval_mode_max):
+                return RedirectResponse("/account?err=mode_invalid", status_code=303)
+            before = state.decks.mode_of(sub)
+            state.db.set_approval_mode(sub, mode)
+            state.db.audit(
+                "approval_mode_set",
+                sub=sub,
+                client_id=BROWSER_CLIENT_ID,
+                detail={"from": before, "to": mode, "by": "user"},
+            )
+            return RedirectResponse(f"/account?ok=mode_{mode}", status_code=303)
         if action == "delete_data":
             if data.get("confirm") != "yes":
                 return RedirectResponse("/account?err=confirm_delete", status_code=303)
@@ -466,9 +482,15 @@ OK_MESSAGES = {
     "Its pending proposals were rejected.",
     "disconnected_all": "Every connected app was disconnected. Each has to be connected and approved again. "
     "Their pending proposals were rejected.",
+    "mode_manual": "Saved: your assistant asks you every time.",
+    "mode_semi": "Saved: your assistant applies small, low-risk edits without asking and asks for "
+    "everything else.",
+    "mode_auto": "Saved: your assistant applies every change without asking. Each change keeps a "
+    "snapshot you can restore from History.",
 }
 ERR_MESSAGES = {
     "confirm_delete": "Nothing was deleted. Tick the box to confirm, then press Delete my data.",
+    "mode_invalid": "That approval mode does not exist, or this gateway does not allow it. Nothing changed.",
     "failed": "This proposal could not be applied. Details are in the result below, if any.",
     "writes_disabled": "Deck writes are switched off on this gateway. The proposal is kept for review; "
     "nothing was sent to Archidekt.",
@@ -558,6 +580,7 @@ def _account_body(state: Any, sub: str, csrf: str | None) -> str:
         "<button class='inline'>Sign out</button></form> "
         "<a class='small' href='/logout'>Sign out on all my devices</a></div>"
     ]
+    out.append(_mode_card(state, sub, csrf_in))
     out.append(_apps_card(state, sub, csrf_in))
     if info["linked"]:
         out.append(
@@ -588,6 +611,40 @@ def _account_body(state: Any, sub: str, csrf: str | None) -> str:
     s = state.settings
     out.append(_delete_card(csrf_in, s.backup_keep_days if s.backup_dir is not None else None))
     return "".join(out)
+
+
+def _mode_card(state: Any, sub: str, csrf_in: str) -> str:
+    """The member's approval mode (modes.py): three radio choices, the current one checked,
+    choices above the gateway's cap shown disabled, and the plain cost of the auto modes."""
+    s = state.settings
+    current = state.decks.mode_of(sub)
+    choices = []
+    for mode in modes.MODES:
+        allowed = modes.rank(mode) <= modes.rank(s.approval_mode_max)
+        choices.append(
+            f"<label class='check mode{'' if allowed else ' muted'}'>"
+            f"<input type='radio' name='mode' value='{mode}'{' checked' if mode == current else ''}"
+            f"{'' if allowed else ' disabled'}> <span><strong>{html.escape(modes.MODE_LABELS[mode])}</strong>"
+            f"<br><span class='small'>{html.escape(modes.MODE_HELP[mode])}"
+            f"{'' if allowed else ' (not allowed on this gateway)'}</span></span></label>"
+        )
+    rows = s.auto_apply_max_rows
+    return (
+        "<div class='card'><h2>Approval mode</h2>"
+        "<p>How much your assistant may change on Archidekt without asking you first. This is "
+        "your own setting: it applies to your account, your decks and the apps you connected, "
+        "and to nobody else.</p>"
+        f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='approval_mode'>"
+        f"{''.join(choices)}"
+        f"<p class='muted small'>A small, low-risk edit changes at most {rows} card row"
+        f"{'s' if rows != 1 else ''}: cards added, removed, moved to another category, or with a new "
+        "quantity, finish or printing, no more than four copies each. Everything else counts as high "
+        "risk: more rows than that, "
+        "the commander, a new deck, a restore, and the deck's name, format, description or "
+        "visibility.</p>"
+        f"<div class='notice warn'>{html.escape(modes.AUTO_WARNING)}</div>"
+        "<button class='primary'>Save approval mode</button></form></div>"
+    )
 
 
 def _apps_card(state: Any, sub: str, csrf_in: str) -> str:
@@ -833,6 +890,13 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str = "") -> str:
             else ""
         )
         + (f"<dt>Proposed by</dt><dd>{html.escape(p['created_by'])}</dd>" if p.get("created_by") else "")
+        + (
+            f"<dt>Risk</dt><dd><span class='badge {'warn' if p['risk'] == 'high' else ''}'>"
+            f"{html.escape(p['risk'])}</span> <span class='small muted'>"
+            f"{html.escape(p['risk_reason'])}</span></dd>"
+            if p.get("risk")
+            else ""
+        )
         + f"<dt>Created</dt><dd>{_when(p['created_at'])}</dd>"
         f"<dt>Expires</dt><dd>{_when(p['expires_at'])}</dd></dl>"
     )

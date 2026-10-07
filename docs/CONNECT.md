@@ -167,7 +167,8 @@ each card, and **Approve** and **Reject** buttons (Claude on the web,
 desktop, iOS and Android; Claude Code shows the text and the review link
 instead). The first time, Claude asks whether to display the app; allow it
 for this connector. Nothing reaches Archidekt until you press Approve on
-the card or Apply on the review page. The card's Approve button sends a
+the card or Apply on the review page, unless you chose a looser approval
+mode on your Account page (see below). The card's Approve button sends a
 one-time code the assistant never receives, and the gateway refuses that
 tool without it, so a tricked assistant can't approve its own proposal.
 That rests on Claude keeping the card's tool and code away from the model,
@@ -175,16 +176,26 @@ as the MCP Apps standard says (reported, not yet verified in a live
 session); the review page in your browser never relies on it and is linked
 from every card.
 
+**Your approval mode.** On the gateway's Account page you choose how much
+your assistant may do without asking: *Ask me every time* (the default),
+*Apply small, low-risk edits without asking* (a few cards added, removed,
+moved or changed, never the commander, a new deck, a restore or the deck's
+details) or *Apply every change without asking*. It is your own setting:
+it covers only your account, your decks and the apps you connected, and
+only you can change it, in your browser. In either auto mode the assistant
+applies what the mode allows with `apply_proposal` and tells you; the card
+then shows the change without buttons. Every change still keeps a snapshot
+you can restore from the History page. The cost: an assistant can be
+tricked by text it reads into proposing a change you did not ask for, and
+in an auto mode that change lands without your press.
+
 Claude lets you set each tool to always allow, needs approval, or blocked
-(verified). Keep `apply_proposal` on **needs approval**: if the owner lets
-the assistant apply changes from chat, that's the tool that actually changes
-your deck. Claude's Research mode can call connector tools without asking
-(verified). Everything except `apply_proposal`, `confirm_proposal`
-(the card's own button), `reject_proposal`,
-`run_deck_report` and `save_scan_session` only reads or records proposals. The assistant is told never to apply one you
-haven't said yes to in your own message, but the gateway can't check that
-for itself, which is why "needs approval" on `apply_proposal` is worth
-keeping.
+(verified). Keep `apply_proposal` on **needs approval**: in an auto mode
+that's the tool that actually changes your deck. Claude's Research mode can
+call connector tools without asking (verified). Everything except
+`apply_proposal`, `confirm_proposal` (the card's own button),
+`reject_proposal`, `run_deck_report` and `save_scan_session` only reads or
+records proposals.
 
 ## ChatGPT
 
@@ -238,7 +249,9 @@ tools:
 
 - `apply_proposal`: press **Approve** on the proposal card if ChatGPT shows
   one, or open the proposal's review link (or **Proposals** on the
-  gateway) and press **Apply** there. Same preview, same checks.
+  gateway) and press **Apply** there. Same preview, same checks. If you
+  chose an auto approval mode on your Account page, the assistant applies
+  what the mode allows itself.
 - `reject_proposal`: press **Reject this proposal** on the review page.
 - `run_deck_report`: press **Run deck report** on the deck's page under
   **Decks** on the gateway.

@@ -87,7 +87,7 @@ def test_old_metrics_and_deck_covers_are_purged(tmp_path: Path):
 
 def test_purge_indexes_exist_and_are_used(tmp_path: Path):
     db = Database(tmp_path / "g.sqlite")
-    assert db.schema_version == db_module.SCHEMA_VERSION == 10
+    assert db.schema_version == db_module.SCHEMA_VERSION == 11
     with db.tx() as c:
         names = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
         assert {

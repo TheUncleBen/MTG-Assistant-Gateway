@@ -94,7 +94,6 @@ class Run:
         self.extra_only = extra_only
         self.write = write
         self.mcp_apply = mcp_apply
-        self.too_soon_seen = False
         self.deck_id = deck_id
         self.created: set[str] = set()
         self.steps: list[dict[str, Any]] = []
@@ -150,11 +149,6 @@ class Run:
         said: dict[str, Any]
         if self.mcp_apply:
             said = await self.tool("apply_proposal", {"proposal_id": pid})
-            if said.get("error") == "apply_too_soon":  # guard against applying in the same breath
-                self.too_soon_seen = True
-                wait = said.get("retry_after_seconds") or said.get("retry_after") or 10
-                await asyncio.sleep(min(float(wait) + 1, 120))
-                said = await self.tool("apply_proposal", {"proposal_id": pid})
         else:
             r = await self.review_page(pid, "apply")
             said = {"http": r.status_code, "location": r.headers.get("location")}
@@ -295,12 +289,6 @@ class Run:
             done.get("state") == "applied" and bool(new_id),
             {"said": done.get("apply_said"), "state": done.get("state"), "result": done.get("result")},
         )
-        if self.mcp_apply:
-            self.step(
-                "apply_too_soon guard made the assistant wait before applying",
-                self.too_soon_seen,
-                {"seen": self.too_soon_seen},
-            )
         if not new_id:
             raise Abort("deck was not created")
 
@@ -720,7 +708,7 @@ async def main() -> int:
     ap.add_argument("--offline", action="store_true", help="use the in-memory Archidekt stand-in")
     ap.add_argument("--write", action="store_true", help="create and edit a MAG-TEST deck")
     ap.add_argument("--deck-id", help=f"an existing deck to read; its name must start with {PREFIX!r}")
-    ap.add_argument("--mcp-apply", action="store_true", help="apply with apply_proposal (MTG_APPLY_VIA_MCP)")
+    ap.add_argument("--mcp-apply", action="store_true", help="apply with apply_proposal (auto approval mode)")
     ap.add_argument("--out", help="write the JSON summary here")
     ap.add_argument(
         "--extra-only",
@@ -760,8 +748,7 @@ async def main() -> int:
         settings = make_settings(
             Path(tmp),
             writes_enabled=True,
-            apply_via_mcp=args.mcp_apply,
-            apply_min_age_seconds=15,  # the gateway's production default (tests use 0)
+            approval_mode_default="auto" if args.mcp_apply else "manual",
             archidekt_base=base,
         )
         client = ArchidektClient(base, USER_AGENT, pacer, http=http)

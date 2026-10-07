@@ -67,7 +67,14 @@ li.add .act{color:var(--green)} li.remove .act{color:var(--red)}
 .name{display:block;overflow-wrap:anywhere}
 .qty{font-variant-numeric:tabular-nums;font-weight:600;white-space:nowrap;font-size:13px;color:var(--muted)}
 li.add .qty{color:var(--green)} li.remove .qty{color:var(--red)}
-.more{padding:6px 10px;font-size:12px;color:var(--muted);border-top:1px solid var(--border)}
+ul.changes li.group{display:block;padding:5px 10px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+  color:var(--muted);background:var(--bg2);border-left-color:var(--border)}
+.more{display:block;width:100%;min-height:40px;padding:6px 10px;font-size:13px;font-weight:600;color:var(--text);
+  border:0;border-top:1px solid var(--border);border-radius:0;background:var(--bg2);text-align:left}
+ul.changes li.more-row{display:block;padding:0;border-left-color:var(--border)}
+.badge.risk{margin-left:6px}
+.badge.risk.high{background:var(--amber-bg);color:var(--amber)}
+.note{margin:8px 0 0;font-size:13px;color:var(--muted);overflow-wrap:anywhere}
 .foot{margin:10px 0 0;font-size:12px;color:var(--muted);overflow-wrap:anywhere}
 .actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;align-items:center}
 button{font:inherit;font-weight:600;min-height:44px;padding:0 16px;border-radius:var(--radius);cursor:pointer;
@@ -84,9 +91,10 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
 </head>
 <body>
 <div class="card" id="card">
-  <div class="head"><h1 id="title">Deck change proposal</h1><span class="badge" id="state"></span></div>
+  <div class="head"><h1 id="title">Deck change proposal</h1><span><span class="badge" id="state"></span><span class="badge risk hidden" id="risk"></span></span></div>
   <p class="sum" id="summary">Waiting for the proposal…</p>
   <ul class="changes" id="rows" aria-label="Changes"></ul>
+  <p class="note hidden" id="note"></p>
   <p class="foot" id="foot"></p>
   <div class="actions" id="actions"></div>
   <div class="status hidden" id="status" role="status" aria-live="polite"></div>
@@ -97,7 +105,8 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
   var APP = { name: "MTG Assistant Gateway proposal card", version: "1" };
   var PROTOCOL = "2026-01-26";
   var APPROVAL_KEY = "mtg/approval";
-  var MAX_IMAGES = 12;
+  var MAX_IMAGES = 24;   // Scryfall thumbnails at most, over the whole card
+  var COLLAPSE_AT = 8;   // a longer list shows a summary and this many rows until "Show all"
   var ARM_DELAY_MS = 700; // buttons stay disabled this long after the card is drawn
   var host = window.parent;
   var pending = {}, nextId = 1, hostCaps = null, proposal = null, approval = null, armed = false, busy = false;
@@ -217,6 +226,15 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
     if (p.kind === "details") return "Settings of " + name;
     return "Change to " + name;
   }
+  // Rows are shown grouped by what they do, in this order, so a big edit reads as a summary.
+  var GROUPS = [
+    ["add", "Added"], ["remove", "Removed"], ["change", "Quantity changed"], ["category", "Moved"],
+    ["finish", "Finish"], ["printing", "Printing"], ["commander", "Commander"]
+  ];
+  function groupOf(kind) {
+    for (var i = 0; i < GROUPS.length; i++) if (GROUPS[i][0] === kind) return i;
+    return GROUPS.length;
+  }
   function summaryFor(p, rows) {
     var adds = 0, removes = 0, others = 0;
     rows.forEach(function (r) {
@@ -228,7 +246,19 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
     if (adds) bits.push("+" + adds + " card" + (adds === 1 ? "" : "s"));
     if (removes) bits.push("−" + removes + " card" + (removes === 1 ? "" : "s"));
     if (others) bits.push(others + " other change" + (others === 1 ? "" : "s"));
-    return bits.length ? bits.join(", ") : (rows.length + " change" + (rows.length === 1 ? "" : "s"));
+    var head = bits.length ? bits.join(", ") : (rows.length + " change" + (rows.length === 1 ? "" : "s"));
+    if (rows.length > 1) head = rows.length + " rows: " + head;
+    return head;
+  }
+  function modeNote(p) {
+    if (p.state !== "pending" || !p.writes_enabled) return "";
+    if (p.assistant_may_apply) {
+      return p.approval_mode === "auto"
+        ? "Your approval mode applies every change without asking: your assistant applies this itself."
+        : "Low-risk edit (" + (p.risk_reason || "") + "): your approval mode lets your assistant apply it without asking.";
+    }
+    if (p.approval_mode === "semi" && p.risk === "high") return "High risk (" + (p.risk_reason || "") + "), so this one needs your approval.";
+    return "";
   }
   function setStatus(text, kind) {
     var s = $("status");
@@ -265,15 +295,12 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
         li.appendChild(n); li.appendChild(el("span", "qty", "")); list.appendChild(li);
       });
     }
-    var images = 0;
-    rows.forEach(function (r) {
-      var d = describeRow(r);
-      var li = el("li", String(r.kind || "change"));
-      if (CARD_KINDS[r.kind] && r.name && images < MAX_IMAGES) { li.appendChild(cardImage(String(r.name))); images++; }
-      else li.appendChild(el("span", "pic none"));
-      var n = el("span"); n.appendChild(el("span", "act", d[0])); n.appendChild(el("span", "name", d[1]));
-      li.appendChild(n); li.appendChild(el("span", "qty", d[2])); list.appendChild(li);
-    });
+    var risk = $("risk");
+    if (sc.risk) { risk.textContent = sc.risk + " risk"; risk.className = "badge risk " + sc.risk; }
+    else risk.className = "badge risk hidden";
+    var note = modeNote(sc);
+    $("note").textContent = note; $("note").className = "note" + (note ? "" : " hidden");
+    renderRows(list, rows, rows.length > COLLAPSE_AT ? COLLAPSE_AT : rows.length);
     var foot = [];
     if (sc.created_by) foot.push("Proposed by " + sc.created_by);
     if (sc.state === "pending" && sc.expires_at) {
@@ -283,6 +310,37 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
     $("foot").textContent = foot.join(" · ");
     renderActions();
     setStatus("", "");
+  }
+
+  function renderRows(list, rows, limit) {
+    // Grouped by kind (GROUPS order, stable within a group); only the first ``limit`` rows are
+    // drawn, then one "Show all" button draws the rest. Thumbnails only for drawn rows.
+    var sorted = rows.map(function (r, i) { return [groupOf(r.kind), i, r]; }).sort(function (a, b) {
+      return a[0] - b[0] || a[1] - b[1];
+    });
+    list.replaceChildren();
+    var images = 0, lastGroup = -1, shown = 0;
+    for (var k = 0; k < sorted.length && shown < limit; k++) {
+      var r = sorted[k][2], g = sorted[k][0];
+      if (rows.length > 1 && g !== lastGroup) {
+        var count = sorted.filter(function (x) { return x[0] === g; }).length;
+        list.appendChild(el("li", "group", (g < GROUPS.length ? GROUPS[g][1] : "Other") + " (" + count + ")"));
+        lastGroup = g;
+      }
+      var d = describeRow(r);
+      var li = el("li", String(r.kind || "change"));
+      if (CARD_KINDS[r.kind] && r.name && images < MAX_IMAGES) { li.appendChild(cardImage(String(r.name))); images++; }
+      else li.appendChild(el("span", "pic none"));
+      var n = el("span"); n.appendChild(el("span", "act", d[0])); n.appendChild(el("span", "name", d[1]));
+      li.appendChild(n); li.appendChild(el("span", "qty", d[2])); list.appendChild(li);
+      shown++;
+    }
+    if (shown < rows.length) {
+      var more = el("li", "more-row");
+      var btn = el("button", "more", "Show all " + rows.length + " changes"); btn.type = "button"; btn.id = "more";
+      btn.onclick = function () { renderRows(list, rows, rows.length); reportSize(); };
+      more.appendChild(btn); list.appendChild(more);
+    }
   }
 
   function renderActions() {
@@ -297,11 +355,11 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
       no.onclick = function () { decide("reject"); };
       a.appendChild(ok); a.appendChild(no);
       setTimeout(function () { armed = true; if (!busy) { ok.disabled = false; no.disabled = false; } }, ARM_DELAY_MS);
-    } else if (p.state === "pending" && p.writes_enabled) {
+    } else if (p.state === "pending" && p.writes_enabled && !p.assistant_may_apply) {
       var open = el("button", "primary", "Approve on the review page"); open.type = "button";
       open.onclick = function () { openLink(p.review_url); };
       a.appendChild(open);
-    } else if (p.state === "pending") {
+    } else if (p.state === "pending" && !p.writes_enabled) {
       a.appendChild(el("span", "foot", "Deck writes are switched off on this gateway; this is a preview only."));
     }
     if (p.result && p.result.deck_url) {

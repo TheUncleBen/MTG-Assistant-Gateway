@@ -22,7 +22,7 @@ async def stack(tmp_path: Path, idp: FakeIdP):
     """Writes on, applies allowed over MCP (as test_decks_and_proxy.stack, without the proxy)."""
     ark = FakeArchidekt()
     settings = make_settings(
-        tmp_path, writes_enabled=True, apply_via_mcp=True, archidekt_base="https://ark.test/api"
+        tmp_path, writes_enabled=True, approval_mode_default="auto", archidekt_base="https://ark.test/api"
     )
     async with running(Harness(settings, idp, archidekt=_client(settings, ark))) as h:
         yield Stack(h, ark)

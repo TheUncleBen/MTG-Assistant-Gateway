@@ -111,8 +111,10 @@ def test_card_renders_and_approve_calls_confirm_with_the_code() -> None:
             card.locator("#title").wait_for()
             assert card.locator("#title").inner_text() == "Change to Sample <b>Deck</b>"
             assert card.locator("#state").inner_text().lower() == "pending"
-            rows = card.locator("ul.changes li")
-            assert rows.count() == 3
+            rows = card.locator("ul.changes li:not(.group)")
+            assert (
+                rows.count() == 3 and card.locator("ul.changes li.group").count() == 3
+            )  # one heading per kind
             assert "Island <img src=x onerror=alert(1)>" in rows.nth(1).inner_text()
             assert card.locator("ul.changes img.pic").count() == 3  # one small Scryfall image per card row
             assert "leaves the deck" in rows.nth(2).inner_text()
@@ -150,6 +152,55 @@ def test_card_renders_and_approve_calls_confirm_with_the_code() -> None:
             # A host request to tear down gets an answer.
             page.evaluate("() => window.teardown()")
             page.wait_for_function("() => window.log.some(m => m.id === 999 && 'result' in m)", timeout=5_000)
+            assert not errors, errors
+        finally:
+            browser.close()
+
+
+def test_big_edit_shows_a_summary_first_and_the_auto_modes_hide_the_buttons() -> None:
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    rows = [{"kind": "add", "name": f"Card {i}", "qty": 1} for i in range(9)] + [
+        {"kind": "remove", "name": f"Old {i}", "qty": 1} for i in range(3)
+    ]
+    big = {
+        **PROPOSAL,
+        "rows": rows,
+        "risk": "high",
+        "risk_reason": "changes 12 rows",
+        "approval_mode": "semi",
+    }
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            page = browser.new_page()
+            errors: list[str] = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            card = _open(page, {"structuredContent": big, "_meta": {APPROVAL_META_KEY: "code-123"}})
+            card.locator("#title").wait_for()
+            # Summary first: the counts, the risk, the reason; then only the first rows.
+            assert "12 rows" in card.locator("#summary").inner_text()
+            assert card.locator("#risk").inner_text().lower() == "high risk"
+            assert "needs your approval" in card.locator("#note").inner_text()
+            assert card.locator("ul.changes li:not(.group):not(.more-row)").count() == 8
+            assert card.locator("ul.changes li.group").first.inner_text().lower().startswith("added (9)")
+            more = card.locator("#more")
+            assert more.inner_text() == "Show all 12 changes"
+            more.click()
+            card.locator("ul.changes li:not(.group):not(.more-row)").nth(11).wait_for(timeout=5_000)
+            assert card.locator("#more").count() == 0
+            assert card.locator("ul.changes li.group").count() == 2  # Added, Removed
+            assert card.locator("#approve").count() == 1  # high risk in semi mode: the person decides
+            # A proposal the assistant may apply itself (auto, or low risk in semi) shows no buttons
+            # at all, only the note and the review link.
+            auto = {**PROPOSAL, "approval_mode": "auto", "risk": "low", "assistant_may_apply": True}
+            card = _open(page, {"structuredContent": auto})
+            card.locator("#title").wait_for()
+            page.wait_for_timeout(900)
+            assert "assistant applies this itself" in card.locator("#note").inner_text()
+            assert card.locator("button").count() == 0
+            assert card.locator("a.link", has_text="Review in browser").count() == 1
             assert not errors, errors
         finally:
             browser.close()

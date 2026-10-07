@@ -2,7 +2,7 @@
 
 Archidekt is the local mock from stacks/edge-stack.yml (tests/fake_archidekt.py over HTTP), so
 nothing here touches archidekt.com. The gateway starts with the stack file defaults, writes off;
-the write tests switch MTG_WRITES_ENABLED and MTG_APPLY_VIA_MCP with ``docker service update``
+the write tests switch MTG_WRITES_ENABLED and MTG_APPROVAL_MODE_DEFAULT with ``docker service update``
 and switch them back at the end of the module.
 """
 
@@ -40,7 +40,7 @@ def clients(env: Env) -> dict[str, McpClient]:
 def fresh_mock_and_default_switches():
     mock("/__e2e/reset", method="POST")
     yield
-    set_switches(writes="false", apply_via_mcp="false")
+    set_switches(writes="false", mode="manual")
 
 
 def mock(path: str, method: str = "GET") -> str:
@@ -54,12 +54,13 @@ def mock(path: str, method: str = "GET") -> str:
     return sh("docker", "exec", container_of(GATEWAY), "python", "-c", code)
 
 
-def set_switches(*, writes: str, apply_via_mcp: str) -> None:
-    """Flip the two write switches the way the owner would in Portainer, then wait for the restart."""
+def set_switches(*, writes: str, mode: str) -> None:
+    """Flip the write switch and the default approval mode the way the owner would in Portainer,
+    then wait for the restart."""
     sh(
         "docker", "service", "update", "--quiet",
         "--env-add", f"MTG_WRITES_ENABLED={writes}",
-        "--env-add", f"MTG_APPLY_VIA_MCP={apply_via_mcp}",
+        "--env-add", f"MTG_APPROVAL_MODE_DEFAULT={mode}",
         GATEWAY,
     )  # fmt: skip
     ctx = httpx.Client(verify=str(GEN / "ca.crt"), trust_env=False, timeout=5)
@@ -283,7 +284,7 @@ def test_users_cannot_see_or_touch_each_others_decks_and_proposals(clients, env:
 
 
 def test_writes_on_apply_is_browser_only_and_the_review_page_applies(clients, env: Env):
-    set_switches(writes="true", apply_via_mcp="false")
+    set_switches(writes="true", mode="manual")
     pid = STATE["edit"]
 
     async def go():
@@ -350,8 +351,8 @@ def test_stale_deck_is_refused_on_the_review_page(clients, env: Env):
     run(go())
 
 
-def test_apply_over_mcp_only_when_the_owner_allows_it(clients):
-    set_switches(writes="true", apply_via_mcp="true")
+def test_apply_over_mcp_only_in_auto_mode(clients):
+    set_switches(writes="true", mode="auto")
 
     async def go():
         c = clients["alice-test"]
@@ -365,12 +366,8 @@ def test_apply_over_mcp_only_when_the_owner_allows_it(clients):
                 },
             )
             assert p["ok"], p
-            # A proposal cannot be applied over MCP in the same breath it was made: the gateway
-            # holds it for MTG_APPLY_MIN_AGE_SECONDS so the user sees the preview first.
-            early = await c.call(s, "apply_proposal", {"proposal_id": p["proposal_id"]})
-            assert early["ok"] is False and early["error"] == "apply_too_soon", early
-            assert 0 < early["retry_after_seconds"] <= 60, early
-            await asyncio.sleep(early["retry_after_seconds"] + 1)
+            # In auto mode the proposal says the assistant may apply it, and it may.
+            assert p["approval_mode"] == "auto" and p["assistant_may_apply"] is True, p
             applied = await c.call(s, "apply_proposal", {"proposal_id": p["proposal_id"]})
             assert applied["ok"] and applied["state"] == "applied" and applied["result"]["verified"], applied
             create = await c.call(s, "apply_proposal", {"proposal_id": STATE["create"]})
@@ -383,7 +380,7 @@ def test_apply_over_mcp_only_when_the_owner_allows_it(clients):
             ), create
 
     run(go())
-    set_switches(writes="false", apply_via_mcp="false")
+    set_switches(writes="false", mode="manual")
 
     # The audit log records both routes, and no Archidekt password or session token is in the database.
     c = container_of(GATEWAY)

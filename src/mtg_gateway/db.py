@@ -303,8 +303,26 @@ def _step_10(conn: sqlite3.Connection) -> None:
     )
 
 
+def _step_11(conn: sqlite3.Connection) -> None:
+    """Approval modes (modes.py): the member's own mode, NULL until they choose one on the
+    Account page (then the gateway's default applies)."""
+    _add_column(conn, "users", "approval_mode", "TEXT")
+
+
 # Applied in order; ``PRAGMA user_version`` records how many have run. Append, never edit.
-MIGRATIONS = [_step_1, _step_2, _step_3, _step_4, _step_5, _step_6, _step_7, _step_8, _step_9, _step_10]
+MIGRATIONS = [
+    _step_1,
+    _step_2,
+    _step_3,
+    _step_4,
+    _step_5,
+    _step_6,
+    _step_7,
+    _step_8,
+    _step_9,
+    _step_10,
+    _step_11,
+]
 SCHEMA_VERSION = len(MIGRATIONS)
 
 
@@ -415,6 +433,14 @@ class Database:
         """Stamp last_seen_at (a token refresh: the one cheap, infrequent moment a session passes by)."""
         with self.tx() as c:
             c.execute("UPDATE users SET last_seen_at = ? WHERE sub = ?", (int(time.time()), sub))
+
+    def set_approval_mode(self, sub: str, mode: str | None) -> bool:
+        """Record the member's own approval mode (modes.py), or None to go back to the gateway's
+        default. False if there is no such user. Only the Account page calls this: the mode is
+        never settable over MCP or the API."""
+        with self.tx() as c:
+            cur = c.execute("UPDATE users SET approval_mode = ? WHERE sub = ?", (mode, sub))
+            return cur.rowcount > 0
 
     def set_user_disabled(self, sub: str, disabled: bool) -> bool:
         """Mark a user disabled (refused at token load, refresh, sign-in and browser session) or
