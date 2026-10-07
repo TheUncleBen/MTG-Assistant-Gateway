@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import logging
+import re
 import secrets
 import time
 from dataclasses import dataclass, field
@@ -36,12 +38,47 @@ MAX_GROUPS_CLAIM_LEN = 200
 
 
 class OIDCError(Exception):
-    """A failure in the identity-provider leg; the message is safe to log."""
+    """A failure in the identity-provider leg; the message is safe to log.
+
+    ``reason`` sorts sign-in failures so the gateway can tell people which setting to check
+    without showing them the log: ``client`` (the provider refused the gateway's client ID or
+    secret), ``grant`` (it refused the sign-in code), ``id_token`` (the ID token couldn't be
+    verified), ``unreachable`` (no usable answer) or ``other``."""
+
+    def __init__(self, message: str, reason: str = "other"):
+        super().__init__(message)
+        self.reason = reason
+
+
+_ERROR_CODE = re.compile(r"[A-Za-z0-9_.-]{1,40}")
+
+
+def _idp_error_code(resp: httpx.Response) -> str | None:
+    """The OAuth ``error`` code of a refused token request (RFC 6749 5.2), when it is a plain
+    short code. Only the code is kept: free text from the provider is never logged."""
+    try:
+        error = resp.json().get("error")
+    except (ValueError, AttributeError):
+        return None
+    return error if isinstance(error, str) and _ERROR_CODE.fullmatch(error) else None
+
+
+def _jwt_alg(token: str) -> str | None:
+    """The ``alg`` in a JWT's (unverified) header, to explain a refusal; never trusted."""
+    try:
+        head = token.split(".", 1)[0]
+        alg = json.loads(base64.urlsafe_b64decode(head + "=" * (-len(head) % 4))).get("alg")
+    except (ValueError, AttributeError, TypeError):
+        return None
+    return alg if isinstance(alg, str) and _ERROR_CODE.fullmatch(alg) else None
 
 
 class IdPUnavailable(OIDCError):
     """The identity provider could not be asked (network error, timeout, 5xx, bad JSON). The
     answer is unknown, so callers fail closed for the request at hand and try again later."""
+
+    def __init__(self, message: str, reason: str = "unreachable"):
+        super().__init__(message, reason)
 
 
 @dataclass
@@ -118,7 +155,9 @@ class OIDCClient:
             resp.raise_for_status()
             data = resp.json()
         except (httpx.HTTPError, ValueError) as exc:
-            raise OIDCError(f"cannot load identity-provider metadata from {url}: {exc}") from exc
+            raise OIDCError(
+                f"cannot load identity-provider metadata from {url}: {exc}", "unreachable"
+            ) from exc
         issuer = str(data.get("issuer", "")).rstrip("/")
         if issuer != self.issuer:
             raise OIDCError(
@@ -139,7 +178,7 @@ class OIDCClient:
             resp.raise_for_status()
             self._jwks = KeySet.import_key_set(resp.json())
         except (httpx.HTTPError, ValueError, JoseError) as exc:
-            raise OIDCError(f"cannot load identity-provider signing keys: {exc}") from exc
+            raise OIDCError(f"cannot load identity-provider signing keys: {exc}", "unreachable") from exc
         self._jwks_at = time.time()
         return self._jwks
 
@@ -173,17 +212,37 @@ class OIDCClient:
         try:
             resp = await self._http.post(meta["token_endpoint"], data=form, headers=headers)
         except httpx.HTTPError as exc:
-            raise OIDCError(f"token request to identity provider failed: {exc}") from exc
+            raise OIDCError(f"token request to identity provider failed: {exc}", "unreachable") from exc
         if resp.status_code != 200:
-            raise OIDCError(f"identity provider rejected the code exchange (HTTP {resp.status_code})")
+            code = _idp_error_code(resp)
+            if code in ("invalid_client", "unauthorized_client") or (
+                code is None and resp.status_code == 401
+            ):
+                reason = "client"
+            elif code == "invalid_grant":
+                reason = "grant"
+            elif resp.status_code >= 500:
+                reason = "unreachable"
+            else:
+                reason = "other"
+            raise OIDCError(
+                "identity provider rejected the code exchange "
+                f"(HTTP {resp.status_code}{f', {code}' if code else ''})",
+                reason,
+            )
         try:
             body = resp.json()
         except ValueError as exc:
-            raise OIDCError("identity provider returned a non-JSON token response") from exc
-        id_token = body.get("id_token")
+            raise OIDCError("identity provider returned a non-JSON token response", "unreachable") from exc
+        id_token = body.get("id_token") if isinstance(body, dict) else None
         if not isinstance(id_token, str):
             raise OIDCError("identity provider returned no id_token; is the 'openid' scope enabled?")
-        claims = await self._validate_id_token(id_token, nonce)
+        try:
+            claims = await self._validate_id_token(id_token, nonce)
+        except OIDCError as exc:
+            if exc.reason == "other":
+                exc.reason = "id_token"
+            raise
 
         tokens = _token_fields(body)
         identity = Identity(
@@ -309,6 +368,13 @@ class OIDCClient:
     async def _validate_id_token(self, id_token: str, nonce: str | None) -> dict[str, Any]:
         """Validate signature, issuer, audience, expiry and (at sign-in) the nonce. A refreshed ID
         token carries no new nonce, so ``nonce=None`` skips only that check."""
+        alg = _jwt_alg(id_token)
+        if alg is not None and alg not in ALLOWED_ALGS:
+            # Authentik signs with HS256 when the provider has no Signing Key.
+            raise OIDCError(
+                f"ID token validation failed: it is signed with {alg}, which the gateway refuses; "
+                "give the provider a signing key (RS256 or ES256)"
+            )
         last_exc: Exception | None = None
         for attempt in range(2):
             keys = await self.jwks(force=attempt == 1)
@@ -337,7 +403,11 @@ class OIDCClient:
                 last_exc = exc
                 # A key-id miss can mean the provider rotated keys; refresh once.
                 continue
-        raise OIDCError(f"ID token validation failed: {type(last_exc).__name__}")
+        detail = getattr(last_exc, "description", "") if isinstance(last_exc, JoseError) else ""
+        raise OIDCError(
+            f"ID token validation failed: {type(last_exc).__name__}"
+            + (f" ({str(detail)[:100]})" if detail else "")
+        )
 
 
 def basic_auth_header(client_id: str, client_secret: str) -> str:

@@ -91,6 +91,36 @@ def _eq(a: str, b: str) -> bool:
     return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
 
 
+# What the sign-in page says when the code exchange with the provider fails, by OIDCError.reason.
+# Each names the setting to check, so the admin can fix it without reading the log first; none
+# carries anything from the provider's answer or the gateway's secrets.
+_ADMIN_LOG = " The gateway's log has the details."
+EXCHANGE_FAILED = {
+    "client": (
+        "Sign-in could not be completed: the identity provider refused the gateway's client ID "
+        "or client secret. The gateway's admin should check that MTG_OIDC_CLIENT_ID and the client "
+        "secret (MTG_OIDC_CLIENT_SECRET_FILE) match the provider, and that the provider's "
+        "client type is Confidential." + _ADMIN_LOG
+    ),
+    "grant": (
+        "Sign-in could not be completed: the identity provider refused the sign-in code. It may "
+        "have expired or been used already, so try again. If it keeps happening, the gateway's "
+        "admin should check the provider's redirect URI." + _ADMIN_LOG
+    ),
+    "id_token": (
+        "Sign-in could not be completed: the gateway could not verify the identity provider's "
+        "ID token. The gateway's admin should check that the provider has a Signing Key and no "
+        "Encryption Key, that the client ID matches, and that both servers' clocks are right." + _ADMIN_LOG
+    ),
+    "unreachable": (
+        "Sign-in could not be completed: the gateway got no usable answer from the identity "
+        "provider. Try again in a minute. If it keeps happening, the gateway's admin should check "
+        "that the gateway can reach the provider." + _ADMIN_LOG
+    ),
+    "other": "Sign-in could not be completed with the identity provider. Try again." + _ADMIN_LOG,
+}
+
+
 class LoginError(Exception):
     """A login failure to show the user in the browser (no sensitive detail)."""
 
@@ -561,9 +591,7 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             )
         except OIDCError as exc:
             logger.warning("identity provider exchange failed: %s", exc)
-            raise LoginError(
-                "Sign-in could not be completed with the identity provider. Try again.", 502
-            ) from exc
+            raise LoginError(EXCHANGE_FAILED.get(exc.reason, EXCHANGE_FAILED["other"]), 502) from exc
 
         known = self.db.get_user(identity.sub)
         pinned = (known or {}).get("idp_issuer")

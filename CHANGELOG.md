@@ -7,6 +7,27 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.6.2] - 2026-10-07
+
+### Changed
+
+- When sign-in fails while the gateway is collecting your identity
+  provider's answer, the page now says which setting to check instead of
+  only "Try again": the client ID or secret, the sign-in code (usually
+  just try again, otherwise the redirect URI), the ID token (signing key,
+  encryption key, client ID or clocks), or reaching the provider. The page
+  shows no part of the provider's answer and no secret.
+- The log line `identity provider exchange failed` now includes the
+  provider's error code (for example `HTTP 401, invalid_client`), says
+  outright when the ID token is signed with HS256 (Authentik does that
+  when the provider has no Signing Key), and says why the ID token was
+  refused (for example `Invalid claim: 'aud'`, or `The token is expired`
+  when the clocks differ).
+- Troubleshooting tables in [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
+  and [docs/IDP-AUTHENTIK.md](docs/IDP-AUTHENTIK.md) list each new message.
+
+Nothing to do when upgrading from 0.6.1.
+
 ## [0.6.1] - 2026-10-06
 
 A fourth security pass. The headline: taking someone out of the group at
