@@ -237,6 +237,10 @@ def main() -> None:
             "signing_key": signing_key["pk"],
             "property_mappings": scope_pks,
             "sub_mode": "hashed_user_id",
+            # Authentik 2026.5 and newer refuse an authorization request whose grant type the
+            # provider doesn't list; an API-created provider lists none (the admin form ticks all).
+            # Older versions ignore the field.
+            "grant_types": ["authorization_code", "refresh_token"],
             "include_claims_in_id_token": True,
             # Short-lived Authentik access tokens, so the suite also exercises the gateway renewing
             # them with the refresh token for its live membership checks (membership.py).
