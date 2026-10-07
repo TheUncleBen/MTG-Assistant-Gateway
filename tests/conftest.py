@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import hashlib
 import json
 import re
 import secrets
@@ -72,6 +73,11 @@ class FakeIdP:
         # Extra characters in every minted access token: Authentik copies the ID token's claims
         # into its access token, so a big claim (an embedded avatar) makes it huge.
         self.access_token_pad = 0
+        # The optional Authentik scope mapping for uploaded pictures (docs/IDP-AUTHENTIK.md):
+        # sub -> data URI. Tokens and userinfo carry a short version; userinfo asked with
+        # mtg_picture=1 carries the image. picture_fetches counts those asks.
+        self.uploaded: dict[str, str] = {}
+        self.picture_fetches = 0
         self.access_ttl: int | None = 300  # None: no expires_in in token responses
         # Provider shapes: keys userinfo leaves out (e.g. groups only in the ID token), whether a
         # refresh returns a new ID token, and an error code every refresh fails with.
@@ -152,6 +158,7 @@ class FakeIdP:
             "iat": now,
             "nonce": q["nonce"],
             **{k: v for k, v in self.user.items() if k not in self.id_token_omit},
+            **self._uploaded_claims(str(self.user["sub"]), full=False),
             **self.id_token_claims,
         }
         if self.id_token_alg == "HS256":
@@ -196,7 +203,20 @@ class FakeIdP:
         if sub is None or sub in self.disabled:
             return Response(status_code=401)
         info = self.directory.get(sub, self.user)
-        return JSONResponse({k: v for k, v in info.items() if k not in self.userinfo_omit})
+        full = req.query_params.get("mtg_picture") == "1"
+        self.picture_fetches += full
+        return JSONResponse(
+            {k: v for k, v in info.items() if k not in self.userinfo_omit}
+            | self._uploaded_claims(sub, full=full)
+        )
+
+    def _uploaded_claims(self, sub: str, *, full: bool) -> dict[str, str]:
+        avatar = self.uploaded.get(sub)
+        if not avatar:
+            return {}
+        if full:
+            return {"mtg_picture": avatar}
+        return {"mtg_picture_version": hashlib.sha256(avatar.encode()).hexdigest()[:16]}
 
     def set_groups(self, sub: str, groups: list[str]) -> None:
         """Change a user's groups at the provider (as an admin would in Authentik)."""

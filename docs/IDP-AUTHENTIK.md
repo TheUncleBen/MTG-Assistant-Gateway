@@ -48,7 +48,7 @@ up.
 | Stable identity | Stores people by `sub`. Linked Archidekt accounts, proposals and tokens all hang off it | Provider → **Subject mode**: `Based on the User's hashed ID` (the default). Change it after people have signed in and everyone becomes a new, empty user |
 | Who gets in, first gate | Nothing. Authentik decides before the gateway ever sees the person | Application → **Policy / Group / User Bindings**: bind `MTG Assistant Gateway Users` |
 | Who gets in, second gate | Anyone whose `groups` claim includes neither `MTG_REQUIRED_GROUP` nor `MTG_ADMIN_GROUP` (exactly) gets HTTP 403, and any gateway browser sessions they had are closed. The gateway won't start with it empty unless `MTG_ALLOW_ANY_IDP_USER=true` | The same group name in `MTG_REQUIRED_GROUP`. Exact, case-sensitive match |
-| Live membership | Before serving any request that carries a browser session or a gateway token, asks Authentik's `/userinfo` for the person's groups as they are now, renewing Authentik's access token with its refresh token when needed. The answer is cached for `MTG_MEMBERSHIP_CHECK_TTL` seconds (5 by default; `0` asks every time). Someone taken out of the group loses every gateway token and session and their Archidekt link on their next request; someone deactivated or deleted loses every token and session (their Archidekt link stays until an admin deletes their data). If Authentik can't be reached, requests get a 503 and nothing is revoked | The `offline_access` scope mapping (above). Nothing else |
+| Live membership | Before serving any request that carries a browser session or a gateway token, asks Authentik's `/userinfo` for the person's groups as they are now, renewing Authentik's access token with its refresh token when needed. The answer is cached for `MTG_MEMBERSHIP_CHECK_TTL` seconds (5 by default; `0` asks every time). Someone taken out of the group loses every gateway token and session and their Archidekt link on their next request; someone deactivated or deleted loses every token and session (their Archidekt link stays until an admin deletes their data). If Authentik can't be reached (a dropped connection is tried once more first), requests get a 503 and nothing is revoked | The `offline_access` scope mapping (above). Nothing else |
 | Sign-out | The gateway's **Sign out** button ends its own browser session (with `Clear-Site-Data`); **Sign out on all my devices** (on the `/logout` page) ends every browser and Android app session of that person. It doesn't call Authentik's end-session endpoint, so the Authentik session stays, but for the next hour a sign-in to the gateway's pages in that browser or app asks Authentik for the password again (`prompt=login`), so the next person on a shared device isn't signed straight back in | Provider → **Invalidation flow**: Authentik requires one, so use the default. Nothing else |
 | Refresh at the provider | Keeps Authentik's access and refresh token from each sign-in, encrypted with the `mtg_fernet_key` secret, and uses them only for the live membership check. AI clients still get the gateway's own tokens, never Authentik's | Provider token lifetimes can stay at their defaults. Keep the refresh token validity at least as long as `MTG_REFRESH_TOKEN_TTL` (both 30 days by default): when Authentik refuses an expired refresh token the gateway can't tell that from a deactivated account, so it signs the person out everywhere (tokens and sessions revoked, Archidekt link kept) and they sign in again |
 
@@ -293,27 +293,58 @@ hostname.
 
 ### Profile pictures
 
-The account icon shows the picture Authentik puts in the `picture` claim,
-chosen under **System → Settings → Avatars**, and refreshes it with the live
-membership check:
+The account icon shows the same picture Authentik shows for the member,
+following **System → Settings → Avatars** (Authentik tries each entry in
+order), and keeps it up to date with the live membership check:
 
-- **Gravatar** (`gravatar` in Avatars): the gateway fetches the picture from
-  Gravatar itself, once per change, so members' browsers never contact
-  Gravatar;
-- **a picture uploaded to the member's Authentik profile** (an
-  `attributes.…` entry in Avatars): Authentik 2026.8.0 to 2026.8.2 embed it
-  in the claim, and the gateway keeps a copy;
-- anything else, or nothing: the member's initials.
+- **Gravatar** (`gravatar` in Avatars): Authentik sends its address in the
+  `picture` claim, and the gateway fetches the picture itself, once per
+  change, so members' browsers never contact Gravatar;
+- **a picture the member uploaded to their Authentik profile** (an
+  `attributes.…` entry in Avatars, filled by a file field in the user
+  settings flow): see below;
+- anything else, or nothing: the member's initials, drawn by the gateway.
 
-Only PNG, JPEG, GIF and WebP pictures are kept, and only Gravatar addresses
-are fetched; other addresses in the claim are ignored. The copy lives under
-the gateway's data folder and *Delete my data* removes it.
+Only PNG, JPEG, GIF and WebP pictures are kept (checked by their bytes, never
+SVG), and only Gravatar addresses are fetched; other addresses are ignored.
+The copy lives under the gateway's data folder and *Delete my data* removes
+it.
 
-An embedded picture makes every Authentik token as large as the image (a
-1 MB upload means 1 MB tokens on every check). Authentik 2026.8.3 and newer
-leave embedded pictures out of the claim, which keeps tokens small but means
-uploaded pictures no longer reach the gateway: members then see their
-Gravatar if Avatars lists `gravatar`, otherwise their initials.
+**Uploaded pictures.** Authentik keeps an uploaded picture as a whole image
+inside the user's attributes. Authentik 2026.8.0 to 2026.8.2 copied it into
+the `picture` claim, which made every token as big as the image (a 1 MB
+picture meant 1 MB tokens on every check); the gateway still copes with
+that, but upgrade. Authentik 2026.8.3 and newer leave it out of `picture`,
+so tokens stay small. To show uploaded pictures on 2026.8.3 and newer, add
+this optional scope mapping. It puts only a 16-character fingerprint of the
+picture in tokens; the gateway asks for the image itself only when the
+fingerprint changes.
+
+1. **Customization → Property Mappings → Create → Scope Mapping**.
+   Name: `MTG Assistant Gateway: uploaded picture`. Scope name: `profile`.
+   Expression:
+
+<!-- uploaded-picture-mapping: tests/e2e/authentik_setup.py installs exactly this expression -->
+```python
+# MTG Assistant Gateway: a picture uploaded to the user's profile, kept out of tokens.
+avatar = request.user.avatar or ""
+if not avatar.startswith(("data:image/png", "data:image/jpeg", "data:image/gif", "data:image/webp")):
+    return {}
+http = request.http_request
+if http is not None and http.GET.get("mtg_picture") == "1":
+    return {"mtg_picture": avatar}
+from hashlib import sha256
+return {"mtg_picture_version": sha256(avatar.encode()).hexdigest()[:16]}
+```
+<!-- /uploaded-picture-mapping -->
+
+2. Open the gateway's provider, **Edit → Advanced protocol settings →
+   Scopes**, add the new mapping next to the four built-in ones, and save.
+
+Nothing changes on the gateway, and nobody needs to sign in again: the
+picture appears within a few seconds of the member's next page. Any other
+application on the same provider that asks userinfo for `mtg_picture=1`
+gets the member's own picture, nothing more.
 
 ## 9. Check the sign-in
 
@@ -355,7 +386,7 @@ Gravatar if Avatars lists `gravatar`, otherwise their initials.
 | Gateway page *… could not verify the identity provider's ID token*; log says `ID token validation failed: …` | `signed with HS256`: no **Signing Key** on the provider (section 4). Otherwise an **Encryption Key** is set (clear it), a key the gateway hasn't seen (it refreshes the key set once, then gives up), a Client ID that doesn't match the token's `aud`, or the two machines' clocks are more than a minute apart (`ExpiredTokenError` or `issued in the future`). `ExceededSizeError` on 0.6.1 or older: the token was over the old size limits (a large property mapping or many groups); upgrade to 0.6.2 or newer |
 | Gateway page *This sign-in was started in a different browser* | The sign-in link from the AI client was opened in a different browser from the one the client used, or cookies are blocked for `mtg.example.com`. Finish in the same browser. If it happens to everyone, make sure people reach the gateway only at the exact host in `MTG_PUBLIC_URL`, over https, and that nothing in between strips cookies |
 | Log says `identity provider issued unusually large tokens …; largest ID token claims: …` | A scope mapping on the provider adds a lot of data (an image, a long attribute, hundreds of groups). The gateway copes, but Authentik repeats it in the access token sent on every group check. Find the named claim under **Advanced protocol settings → Scopes** (or the user's or group's attributes) and trim it. The four mappings in section 4 are all the gateway needs |
-| Log says `largest ID token claims: picture=…` with hundreds of KB, and pages say *The sign-in service can't be reached* (log: `answered userinfo with HTTP 400; the access token is … bytes`) | Authentik 2026.8.0 to 2026.8.2 put the user's avatar in the `picture` claim, embedded as a whole image when the avatar comes from a user attribute (**System → Settings → Avatars** set to `attributes.…`). Authentik copies the claims into its access token too, so it can grow past a megabyte. Fix it in Authentik: upgrade to 2026.8.3 or newer, whose default `profile` mapping leaves embedded images out; or move the `attributes.…` entry after `gravatar` or `initials` in **Avatars**. Then sign in again. Either way uploaded pictures stop reaching the gateway's account icon (see [Profile pictures](#profile-pictures)). Since 0.6.3 the gateway sends a token that big in the body of its userinfo request, which proxies such as Nginx Proxy Manager accept, so it keeps working meanwhile, but every check still moves a megabyte |
+| Log says `largest ID token claims: picture=…` with hundreds of KB, and pages say *The sign-in service can't be reached* (log: `answered userinfo with HTTP 400; the access token is … bytes`) | Authentik 2026.8.0 to 2026.8.2 put the user's avatar in the `picture` claim, embedded as a whole image when the avatar comes from a user attribute (**System → Settings → Avatars** set to `attributes.…`). Authentik copies the claims into its access token too, so it can grow past a megabyte. Fix it in Authentik: upgrade to 2026.8.3 or newer, whose default `profile` mapping leaves embedded images out; or move the `attributes.…` entry after `gravatar` or `initials` in **Avatars**. Then sign in again. To keep showing uploaded pictures after upgrading, add the optional mapping in [Profile pictures](#profile-pictures), which keeps them out of tokens. Since 0.6.3 the gateway sends a token that big in the body of its userinfo request, which proxies such as Nginx Proxy Manager accept, so it keeps working meanwhile, but every check still moves a megabyte |
 | Everyone is suddenly a new user after a provider change | **Subject mode** was changed. Put it back; the gateway can't merge identities |
 | `whoami` shows a name but no email | The account has no email in Authentik, or the `email` scope mapping was removed |
 
@@ -383,10 +414,12 @@ Gravatar if Avatars lists `gravatar`, otherwise their initials.
 
   Sign-out, token and consent paths are covered by the same tests.
 - **Authentik versions:** `2025.6.4` (what this guide was first written
-  against) and `2026.2.2`. Pull requests run the tests against `2026.2.2`
-  only; a manual run of the workflow covers both. Both passed when this page
-  was written (October 2026), and the provider fields, flows and group
-  bindings came out the same on each. For the current state, look at the
+  against), `2026.2.2` and `2026.8.3`. Pull requests run the tests against
+  `2026.8.3`, the current release, including the uploaded-picture mapping
+  from [Profile pictures](#profile-pictures), installed exactly as printed
+  there; a manual run of the workflow covers `2025.6.4` and `2026.8.3`.
+  `2025.6.4` and `2026.2.2` passed in October 2026, and the provider fields,
+  flows and group bindings came out the same on each. For the current state, look at the
   latest `e2e` workflow run. Newer Authentik releases should work, but they
   aren't covered until that list is updated.
 - **Reported, not re-checked for this page:** the admin UI menu paths and

@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from enum import Enum
 from typing import Any
 
@@ -130,6 +131,7 @@ class MembershipChecker:
         info: dict[str, Any] | None = None
         id_claims: dict[str, Any] | None = None
         refreshed = False
+        current = access  # the provider access token that got the answer
         try:
             # Without a refresh token (or a stated expiry) the access token is simply tried: the
             # provider's own 401 says when it has run out.
@@ -143,7 +145,7 @@ class MembershipChecker:
                 tokens = await self._renew(sub, refresh)
                 if tokens is None:
                     return self._revoke(sub, "idp_refused_refresh", None, removed=False)
-                id_claims, refreshed = tokens.id_claims, True
+                id_claims, refreshed, current = tokens.id_claims, True, tokens.access_token
                 info = await self.oidc.userinfo(tokens.access_token or "")
                 if info is None:
                     return self._revoke(sub, "idp_refused_userinfo", None, removed=False)
@@ -153,7 +155,7 @@ class MembershipChecker:
                 tokens = await self._renew(sub, refresh)
                 if tokens is None:
                     return self._revoke(sub, "idp_refused_refresh", None, removed=False)
-                id_claims = tokens.id_claims
+                id_claims, current = tokens.id_claims, tokens.access_token or current
         except IdPUnavailable as exc:
             logger.warning("membership check could not reach the identity provider: %s", exc)
             return Membership.UNAVAILABLE
@@ -186,8 +188,14 @@ class MembershipChecker:
         if groups != user.get("groups"):
             self.db.set_user_groups(sub, groups)
             self.db.audit("groups_changed", sub=sub, detail={"groups": groups[:50]})
-        await self.avatars.update(sub, info.get("picture"))
+        await self.avatars.update(sub, info, self.picture_fetcher(current))
         return Membership.ALLOWED
+
+    def picture_fetcher(self, access: str | None) -> Callable[[], Awaitable[str | None]] | None:
+        """Fetch the member's uploaded picture with the provider token that just worked."""
+        if not access:
+            return None
+        return lambda: self.oidc.uploaded_picture(access)
 
     async def _renew(self, sub: str, refresh: str) -> IdPTokens | None:
         """Use the provider refresh token and keep what it returns (it may rotate)."""

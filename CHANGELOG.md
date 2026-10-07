@@ -19,6 +19,12 @@ with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
   bytes, never SVG), only Gravatar addresses are fetched, and *Delete my
   data* removes the stored copy. See
   [docs/IDP-AUTHENTIK.md](docs/IDP-AUTHENTIK.md#profile-pictures).
+- Uploaded Authentik pictures on Authentik 2026.8.3 and newer, which leave
+  them out of the `picture` claim: an optional scope mapping, printed in the
+  guide, puts a 16-character fingerprint in tokens instead, and the gateway
+  asks userinfo for the image itself only when the fingerprint changes.
+- The end-to-end tests run against Authentik 2026.8.3, the current release,
+  and install that mapping exactly as the guide prints it.
 
 ### Fixed
 
@@ -41,6 +47,9 @@ with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
   `MTG_REQUIRED_GROUP`. The membership check reads both groups live, so
   someone taken out of the admin group, and not in the users group, is cut
   off on their next request.
+- A userinfo connection that drops before any answer is tried once more
+  straight away instead of answering *Try again shortly*. Removal is still
+  seen on the next request; nothing is cached longer.
 
 ## [0.6.2] - 2026-10-07
 

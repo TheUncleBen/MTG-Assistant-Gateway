@@ -387,3 +387,28 @@ async def test_neither_group_is_still_refused_at_sign_in(tmp_path: Path, idp: Fa
         cb = await h.idp_leg(r)
         page = await h.callback(cb)
         assert page.status_code == 403 and "not in the group" in page.text
+
+
+async def test_a_dropped_connection_to_userinfo_is_tried_once_more(tmp_path: Path, idp: FakeIdP) -> None:
+    import httpx
+
+    async with running(Harness(live(tmp_path), idp)) as h:
+        b = Browser(h)
+        await b.login()
+        real = h.oidc._http.get
+        drops: list[int] = []
+
+        async def flaky(*args: object, **kw: object) -> httpx.Response:
+            if drops:
+                drops.pop()
+                raise httpx.ConnectError("connection reset")
+            return await real(*args, **kw)  # type: ignore[arg-type]
+
+        h.oidc._http.get = flaky  # type: ignore[method-assign]
+        drops[:] = [1]  # one drop: the retry answers, the member never notices
+        assert (await b.http.get("/account")).status_code == 200 and not drops
+        drops[:] = [1, 1]  # still down on the retry: refused, nothing revoked
+        page = await b.http.get("/account")
+        assert page.status_code == 503 and not drops
+        assert h.db.get_idp_grant(SUB) is not None
+        await b.aclose()
