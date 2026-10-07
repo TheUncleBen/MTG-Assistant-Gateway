@@ -40,6 +40,7 @@ from .cimd import (
     CimdError,
     CimdFetcher,
     CimdThrottled,
+    CimdUnavailable,
     check_redirect_uri,
     is_cimd_client_id,
     sanitise_client_name,
@@ -59,6 +60,9 @@ BROWSER_KEY: contextvars.ContextVar[dict[str, Any] | None] = contextvars.Context
     "mtg_browser_key", default=None
 )
 CONSENT_PATH = "/authorize/confirm"
+# How long past its expiry the last good document of a client a member signed in with is still
+# used while its server can't be reached (or the fetcher is flooded).
+CIMD_STALE_FOR = 7 * 86400
 SECRET_HASH_KEY = "client_secret_hash"  # stored in place of the plaintext client_secret
 
 
@@ -195,18 +199,33 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         cached = self.db.get_cimd_client(url)
         if cached:
             return cached
+        known = self.db.cimd_client_known(url)
         try:
-            # A URL accepted before skips the fetcher's per-host block and rate limits (cimd.py).
-            info, ttl = await self.cimd.fetch(url, known=self.db.cimd_client_known(url))
-        except CimdThrottled:
+            # A client a member signed in with skips the fetcher's per-host block and rate limits
+            # and has a lane of its own (cimd.py).
+            info, ttl = await self.cimd.fetch(url, known=known)
+        except (CimdThrottled, CimdUnavailable) as exc:
+            if known:
+                # Its server can't be reached right now (or someone is flooding the fetcher): keep
+                # using the last good copy for a while rather than lock its members out.
+                stale = self.db.get_cimd_client(url, stale_for=CIMD_STALE_FOR)
+                if stale:
+                    logger.warning("using the last good metadata document of %s: %s", url[:120], exc)
+                    return stale
+            if isinstance(exc, CimdThrottled):
+                return None
+            self._cimd_rejected(url, exc)
             return None
         except CimdError as exc:
-            logger.info("rejected client id metadata document %s: %s", url[:120], exc)
-            self.db.audit("cimd_rejected", client_id=url[:200], detail={"reason": str(exc)[:200]})
+            self._cimd_rejected(url, exc)
             return None
         self.db.save_cimd_client(url, info, ttl)
         self.db.audit("cimd_accepted", client_id=url[:200], detail={"client_name": info["client_name"]})
         return info
+
+    def _cimd_rejected(self, url: str, exc: Exception) -> None:
+        logger.info("rejected client id metadata document %s: %s", url[:120], exc)
+        self.db.audit("cimd_rejected", client_id=url[:200], detail={"reason": str(exc)[:200]})
 
     @staticmethod
     def is_cimd_client(client: OAuthClientInformationFull) -> bool:

@@ -102,8 +102,9 @@ next sign-in.
   requests actually sent; a document is capped like a registered client (20
   redirect URIs, 2000 characters each, 8 KB); the cache keeps at most 1000
   documents, 50 per site. Apps a member has signed in with are never
-  throttled or evicted, and are fetched in a lane of their own that junk
-  addresses can't fill.
+  throttled or evicted, are fetched in a lane of their own (fetch slots and
+  DNS threads) that junk addresses can't fill, and keep their last good
+  document for up to a week while their server can't be reached.
 - Archidekt: each member may start `MTG_ARCHIDEKT_CALLS_PER_10_MIN` (120)
   Archidekt calls per 10 minutes, the research tools' `archidekt_*` calls
   included. Five failed Archidekt link attempts in 15 minutes block further

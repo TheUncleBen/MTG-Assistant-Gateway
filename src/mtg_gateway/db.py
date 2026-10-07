@@ -571,10 +571,11 @@ class Database:
             (now - 86400, now - KNOWN_CIMD_CLIENT_RETENTION_SECONDS),
         ).rowcount
 
-    def get_cimd_client(self, client_id: str) -> dict[str, Any] | None:
+    def get_cimd_client(self, client_id: str, *, stale_for: int = 0) -> dict[str, Any] | None:
+        """The cached document, if still fresh (or expired less than ``stale_for`` seconds ago)."""
         row = self._one(
             "SELECT info_json FROM cimd_clients WHERE client_id = ? AND expires_at >= ?",
-            (client_id, int(time.time())),
+            (client_id, int(time.time()) - stale_for),
         )
         return json.loads(row["info_json"]) if row else None
 

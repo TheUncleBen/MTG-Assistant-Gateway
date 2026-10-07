@@ -152,8 +152,9 @@ that doesn't resolve or resolves to a private address) uses up nothing.
 
 A client that a member has completed a sign-in through (remembered for 180
 days after its last sign-in) is never held back by those limits: its
-document is fetched in a lane of its own that first-time addresses can't
-use or fill. So once Claude or ChatGPT has connected here, nobody can lock
+document is fetched in a lane of its own (its own fetch slots and DNS
+threads) that first-time addresses can't use or fill, and while its server
+can't be reached the last good copy is used for up to a week. So once Claude or ChatGPT has connected here, nobody can lock
 it out by pointing junk addresses at the gateway. A host on
 `MTG_CIMD_ALLOWED_HOSTS` isn't blocked after a failure, but its new
 addresses still count against the budgets. A name whose DNS doesn't answer

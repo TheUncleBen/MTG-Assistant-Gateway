@@ -140,7 +140,11 @@ class MainActivity : ComponentActivity() {
         // A link is consumed once: after a restore the saved page wins, not the old intent.
         val linked = takeLinkedUrl(intent)?.takeIf { GatewayUrl.isGateway(origin, it) }
         when {
-            savedInstanceState != null -> web.restoreState(savedInstanceState)
+            savedInstanceState != null -> {
+                // The blank page over a refused one has no Retry after a restore: start at home.
+                val restored = web.restoreState(savedInstanceState)
+                if (restored == null || restored.currentItem?.url in listOf(null, BLANK)) web.loadUrl(origin + "/")
+            }
             linked != null -> web.loadUrl(linked)
             else -> web.loadUrl(origin + "/")
         }

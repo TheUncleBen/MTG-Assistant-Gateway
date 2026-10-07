@@ -289,3 +289,71 @@ def test_clients_in_use_before_the_upgrade_stay_known(tmp_path: Path):
     db = Database(path)
     assert db.cimd_client_known(used)
     assert not db.cimd_client_known(unused)
+
+
+# -- Round 4 (RE-1): a lookup that never answers keeps its thread; signed-in clients keep working --
+
+
+async def test_hung_lookups_of_junk_ids_do_not_reach_the_signed_in_lane(monkeypatch: pytest.MonkeyPatch):
+    """Junk client ids whose DNS hangs fill threads that a timeout can't free. They used to share
+    the resolver pool with signed-in clients, whose refetch then timed out and was remembered as a
+    failure for a minute."""
+    import socket
+    import threading
+
+    monkeypatch.setattr(cimdmod, "DNS_TIMEOUT", 0.3)
+    release = threading.Event()
+    real = ("93.184.216.34", 443)
+
+    def getaddrinfo(host: str, *args: object, **kw: object) -> list:
+        if host != "client.example":
+            release.wait(10)  # a resolver that never answers in time
+            raise OSError("timeout")
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", real)]
+
+    monkeypatch.setattr(cimdmod.socket, "getaddrinfo", getaddrinfo)
+    docs = DocHost()
+    docs.serve()
+    http = httpx.AsyncClient(transport=httpx.MockTransport(docs.handler), follow_redirects=False)
+    f = cimdmod.CimdFetcher(http=http, timeout=1.0)
+    try:
+        junk = [asyncio.create_task(f.fetch(f"https://x.junk{i}.example/c")) for i in range(12)]
+        for result in await asyncio.gather(*junk, return_exceptions=True):
+            assert isinstance(result, CimdError)
+        info, _ = await f.fetch(CLIENT_URL, known=True)  # every first-time DNS thread still hung
+        assert info["client_name"] == "Example Assistant"
+    finally:
+        release.set()
+        await f.aclose()
+
+
+async def test_an_unreachable_signed_in_client_is_not_remembered_as_failed(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(cimdmod, "DNS_TIMEOUT", 0.1)
+    docs = SlowDns()
+    docs.serve()
+    saved = docs.addresses.pop("client.example")
+    f = docs.fetcher()
+    with pytest.raises(cimdmod.CimdUnavailable):
+        await f.fetch(CLIENT_URL, known=True)
+    docs.addresses["client.example"] = saved
+    assert (await f.fetch(CLIENT_URL, known=True))[0]["client_name"]  # not "failed recently"
+    await f.aclose()
+
+
+async def test_a_signed_in_client_keeps_its_last_good_document_while_unreachable(
+    tmp_path: Path, idp: FakeIdP
+):
+    docs = DocHost()
+    docs.serve()
+    async with running(Harness(make_settings(tmp_path), idp, cimd=docs.fetcher())) as h:
+        provider = h.app.state.gateway.provider
+        assert (await provider._cimd_client(CLIENT_URL))["client_name"] == "Example Assistant"
+        h.db.mark_cimd_client_signed_in(CLIENT_URL)
+        with h.db.tx() as c:
+            c.execute("UPDATE cimd_clients SET expires_at = ?", (int(time.time()) - 60,))
+        del docs.addresses["client.example"]  # its server can't be reached now
+        assert (await provider._cimd_client(CLIENT_URL))["client_name"] == "Example Assistant"
+        # A client nobody signed in with gets no such grace.
+        with h.db.tx() as c:
+            c.execute("UPDATE cimd_clients SET signed_in_at = NULL")
+        assert await provider._cimd_client(CLIENT_URL) is None

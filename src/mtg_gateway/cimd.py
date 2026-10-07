@@ -36,8 +36,10 @@ a URL refused locally (allowlist, IP literal) or by DNS (no name, private addres
 uses up nothing, so junk client ids cannot spend the budget; a name whose DNS does
 not answer within DNS_TIMEOUT counts as a failure. A client that has completed a
 sign-in here (the caller says so with ``known``) is exempt from the host block and
-the budgets and is fetched in a lane of its own (its own slots, one fetch per URL),
-so junk can neither spend its budget nor hold the slots it needs. A host on
+the budgets and is fetched in a lane of its own (its own slots and DNS threads, one
+fetch per URL), so junk can neither spend its budget nor hold the slots it needs; an
+unreachable server (CimdUnavailable) is not remembered against it, and the caller
+keeps using its last good document meanwhile (auth_provider.CIMD_STALE_FOR). A host on
 MTG_CIMD_ALLOWED_HOSTS is not blocked after a failure but its new URLs still count
 against the budgets. A brand-new client can be delayed by someone keeping the
 first-time lane busy.
@@ -53,6 +55,8 @@ each site gets one slot, one attacker domain holds at most one of them.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
+import functools
 import ipaddress
 import json
 import logging
@@ -94,6 +98,11 @@ class CimdError(Exception):
 
 class CimdThrottled(CimdError):
     """The same URL failed less than a minute ago; nothing was fetched this time."""
+
+
+class CimdUnavailable(CimdError):
+    """The document's server could not be reached (DNS, connection, deadline): says nothing about
+    the document itself, so a client a member signed in with keeps its last good copy."""
 
 
 def is_cimd_client_id(client_id: str) -> bool:
@@ -196,9 +205,11 @@ def _address_is_public(ip: str) -> bool:
     return addr.is_global and not addr.is_multicast and not addr.is_private and not addr.is_reserved
 
 
-async def default_resolver(host: str) -> list[str]:
+async def default_resolver(host: str, executor: concurrent.futures.Executor | None = None) -> list[str]:
     loop = asyncio.get_running_loop()
-    infos = await loop.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+    infos = await loop.run_in_executor(
+        executor, functools.partial(socket.getaddrinfo, host, 443, type=socket.SOCK_STREAM)
+    )
     return sorted({info[4][0] for info in infos})
 
 
@@ -369,7 +380,12 @@ class CimdFetcher:
         self._http = http or httpx.AsyncClient(
             timeout=httpx.Timeout(timeout), follow_redirects=False, trust_env=False
         )
-        self._resolve = resolver or default_resolver
+        self._resolver = resolver
+        # A lookup that never answers keeps its thread busy after DNS_TIMEOUT gives up on it, so
+        # each lane resolves in threads of its own: junk client ids can fill only the first-time
+        # lane's, never the signed-in lane's nor the pool the rest of the gateway resolves in.
+        self._dns_new = concurrent.futures.ThreadPoolExecutor(4, thread_name_prefix="cimd-dns-new")
+        self._dns_known = concurrent.futures.ThreadPoolExecutor(2, thread_name_prefix="cimd-dns-known")
         self.timeout = timeout
         self.allowed_hosts = [h.lower() for h in allowed_hosts or []]
         self._failures: dict[str, float] = {}
@@ -387,6 +403,13 @@ class CimdFetcher:
 
     async def aclose(self) -> None:
         await self._http.aclose()
+        self._dns_new.shutdown(wait=False, cancel_futures=True)
+        self._dns_known.shutdown(wait=False, cancel_futures=True)
+
+    async def _resolve(self, host: str, *, known: bool) -> list[str]:
+        if self._resolver is not None:
+            return await self._resolver(host)
+        return await default_resolver(host, self._dns_known if known else self._dns_new)
 
     def _host_allowed(self, host: str) -> bool:
         if not self.allowed_hosts:
@@ -470,7 +493,7 @@ class CimdFetcher:
                 # Not negative-cached: a slow network or an overloaded gateway must not lock a
                 # healthy client out for a minute. The per-site slot already stops a hostile
                 # client_id from keeping more than one connection to a target open.
-                raise CimdError("metadata document fetch timed out") from exc
+                raise CimdUnavailable("metadata document fetch timed out") from exc
             except CimdError:
                 self._note_failure(url, now)
                 if not allowlisted:
@@ -503,9 +526,11 @@ class CimdFetcher:
                 raise CimdThrottled("metadata document fetcher is busy; try again shortly") from exc
             try:
                 async with asyncio.timeout(self.timeout):
-                    return await self._fetch(url)
+                    return await self._fetch(url, known=True)
             except TimeoutError as exc:
-                raise CimdError("metadata document fetch timed out") from exc
+                raise CimdUnavailable("metadata document fetch timed out") from exc
+            except CimdUnavailable:
+                raise  # not remembered: an unreachable server says nothing about the document
             except CimdError:
                 self._note_failure(url, now)
                 raise
@@ -528,7 +553,9 @@ class CimdFetcher:
         if len(self._failures) > 1000:  # bounded even under abuse
             self._failures = {u: t for u, t in self._failures.items() if now - t < FAILURE_TTL}
 
-    async def _fetch(self, url: str, *, site: str | None = None) -> tuple[dict[str, Any], int]:
+    async def _fetch(
+        self, url: str, *, site: str | None = None, known: bool = False
+    ) -> tuple[dict[str, Any], int]:
         """Fetch and validate one document. ``site``: charge the request to that site's budget
         (and the global one) once the host has passed every check, right before it is sent."""
         host = urlparse(url).hostname or ""
@@ -542,13 +569,13 @@ class CimdFetcher:
             raise CimdError("client_id must use a hostname, not an IP address")
         try:
             async with asyncio.timeout(DNS_TIMEOUT):
-                addresses = await self._resolve(host)
+                addresses = await self._resolve(host, known=known)
         except TimeoutError as exc:
-            # Remembered as a failure (unlike a slow fetch): a name whose DNS never answers must
-            # not be able to hold a fetch slot again and again.
-            raise CimdError("cannot resolve client metadata host: timed out") from exc
+            # For a first-time URL this is remembered against the host (unlike a slow fetch): a
+            # name whose DNS never answers must not hold a fetch slot again and again.
+            raise CimdUnavailable("cannot resolve client metadata host: timed out") from exc
         except OSError as exc:
-            raise CimdError(f"cannot resolve client metadata host: {exc.__class__.__name__}") from exc
+            raise CimdUnavailable(f"cannot resolve client metadata host: {exc.__class__.__name__}") from exc
         if not addresses or not all(_address_is_public(a) for a in addresses):
             raise CimdError("client metadata host does not resolve to a public address")
         if site is not None:
@@ -585,6 +612,8 @@ class CimdFetcher:
                     if len(body) > MAX_DOCUMENT_BYTES:
                         raise CimdError("metadata document is too large")
                 ttl = _cache_ttl(resp.headers.get("cache-control"))
+        except httpx.TransportError as exc:
+            raise CimdUnavailable(f"cannot fetch metadata document: {exc.__class__.__name__}") from exc
         except (httpx.HTTPError, ValueError) as exc:
             # ValueError covers httpx's own URL and header encoding errors (UnicodeEncodeError
             # among them), which would otherwise surface as a 500 and skip the negative cache.
