@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Deck change proposal</title>
+<style>
+:root{
+  color-scheme:light dark;
+  --bg:var(--color-background-primary,#ffffff);--bg2:var(--color-background-secondary,#f5f4ed);
+  --text:var(--color-text-primary,#141413);--muted:var(--color-text-tertiary,#73726c);
+  --border:var(--color-border-tertiary,rgba(31,30,29,.15));--radius:var(--border-radius-md,8px);
+  --green:var(--color-text-success,#265b19);--green-bg:var(--color-background-success,#e9f1dc);
+  --red:var(--color-text-danger,#7f2c28);--red-bg:var(--color-background-danger,#f7ecec);
+  --amber:var(--color-text-warning,#5a4815);--amber-bg:var(--color-background-warning,#f6eedf);
+  --blue:var(--color-text-info,#3266ad);--blue-bg:var(--color-background-info,#d6e4f6);
+  --btn-bg:var(--color-background-inverse,#141413);--btn-text:var(--color-text-inverse,#ffffff);
+  --font:var(--font-sans,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif);
+  --pad:12px;--inset-top:0px;--inset-right:0px;--inset-bottom:0px;--inset-left:0px;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){
+  --bg:var(--color-background-primary,#30302e);--bg2:var(--color-background-secondary,#262624);
+  --text:var(--color-text-primary,#faf9f5);--muted:var(--color-text-tertiary,#9c9a92);
+  --border:var(--color-border-tertiary,rgba(222,220,209,.15));
+  --green:var(--color-text-success,#7ab948);--green-bg:var(--color-background-success,#1b4614);
+  --red:var(--color-text-danger,#ee8884);--red-bg:var(--color-background-danger,#602a28);
+  --amber:var(--color-text-warning,#d1a041);--amber-bg:var(--color-background-warning,#483a0f);
+  --blue:var(--color-text-info,#80aadd);--blue-bg:var(--color-background-info,#253e5f);
+  --btn-bg:var(--color-background-inverse,#faf9f5);--btn-text:var(--color-text-inverse,#141413);
+}}
+:root[data-theme=dark]{
+  --bg:var(--color-background-primary,#30302e);--bg2:var(--color-background-secondary,#262624);
+  --text:var(--color-text-primary,#faf9f5);--muted:var(--color-text-tertiary,#9c9a92);
+  --border:var(--color-border-tertiary,rgba(222,220,209,.15));
+  --green:var(--color-text-success,#7ab948);--green-bg:var(--color-background-success,#1b4614);
+  --red:var(--color-text-danger,#ee8884);--red-bg:var(--color-background-danger,#602a28);
+  --amber:var(--color-text-warning,#d1a041);--amber-bg:var(--color-background-warning,#483a0f);
+  --blue:var(--color-text-info,#80aadd);--blue-bg:var(--color-background-info,#253e5f);
+  --btn-bg:var(--color-background-inverse,#faf9f5);--btn-text:var(--color-text-inverse,#141413);
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:transparent}
+body{font-family:var(--font);font-size:var(--font-text-sm-size,14px);line-height:1.4;color:var(--text);
+  padding:calc(var(--pad) + var(--inset-top)) calc(var(--pad) + var(--inset-right))
+          calc(var(--pad) + var(--inset-bottom)) calc(var(--pad) + var(--inset-left))}
+.card{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:14px 14px 12px;max-width:720px}
+.head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:6px}
+h1{font-size:var(--font-heading-md-size,16px);font-weight:600;margin:0;line-height:1.3;overflow-wrap:anywhere}
+.badge{flex:none;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;border-radius:999px;
+  padding:3px 9px;background:var(--bg2);color:var(--muted);border:1px solid var(--border)}
+.badge.pending{background:var(--amber-bg);color:var(--amber)}
+.badge.applied{background:var(--green-bg);color:var(--green)}
+.badge.rejected,.badge.failed,.badge.expired{background:var(--red-bg);color:var(--red)}
+.sum{color:var(--muted);font-size:13px;margin:0 0 10px;overflow-wrap:anywhere}
+ul.changes{list-style:none;margin:0;padding:0;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+ul.changes li{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;padding:7px 10px;
+  border-top:1px solid var(--border);border-left:4px solid var(--border);background:var(--bg)}
+ul.changes li:first-child{border-top:0}
+ul.changes li.add{border-left-color:var(--green)} ul.changes li.remove{border-left-color:var(--red)}
+ul.changes li.change,ul.changes li.category,ul.changes li.finish,ul.changes li.printing,ul.changes li.commander,
+ul.changes li.detail,ul.changes li.description{border-left-color:var(--blue)}
+.pic{width:34px;height:48px;border-radius:3px;background:var(--bg2);object-fit:cover;display:block;flex:none}
+.pic.none{visibility:hidden}
+.act{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);display:block}
+li.add .act{color:var(--green)} li.remove .act{color:var(--red)}
+.name{display:block;overflow-wrap:anywhere}
+.qty{font-variant-numeric:tabular-nums;font-weight:600;white-space:nowrap;font-size:13px;color:var(--muted)}
+li.add .qty{color:var(--green)} li.remove .qty{color:var(--red)}
+.more{padding:6px 10px;font-size:12px;color:var(--muted);border-top:1px solid var(--border)}
+.foot{margin:10px 0 0;font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;align-items:center}
+button{font:inherit;font-weight:600;min-height:44px;padding:0 16px;border-radius:var(--radius);cursor:pointer;
+  border:1px solid var(--border);background:var(--bg2);color:var(--text)}
+button.primary{background:var(--btn-bg);color:var(--btn-text);border-color:var(--btn-bg)}
+button.danger{color:var(--red)}
+button:disabled{opacity:.55;cursor:default}
+a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer;min-height:44px;display:inline-flex;align-items:center}
+.status{margin-top:10px;padding:9px 11px;border-radius:var(--radius);font-size:13px;background:var(--bg2);overflow-wrap:anywhere}
+.status.ok{background:var(--green-bg);color:var(--green)} .status.err{background:var(--red-bg);color:var(--red)}
+.hidden{display:none}
+.sr{position:absolute;left:-9999px}
+</style>
+</head>
+<body>
+<div class="card" id="card">
+  <div class="head"><h1 id="title">Deck change proposal</h1><span class="badge" id="state"></span></div>
+  <p class="sum" id="summary">Waiting for the proposal…</p>
+  <ul class="changes" id="rows" aria-label="Changes"></ul>
+  <p class="foot" id="foot"></p>
+  <div class="actions" id="actions"></div>
+  <div class="status hidden" id="status" role="status" aria-live="polite"></div>
+</div>
+<script>
+(function () {
+  "use strict";
+  var APP = { name: "MTG Assistant Gateway proposal card", version: "1" };
+  var PROTOCOL = "2026-01-26";
+  var APPROVAL_KEY = "mtg/approval";
+  var MAX_IMAGES = 12;
+  var ARM_DELAY_MS = 700; // buttons stay disabled this long after the card is drawn
+  var host = window.parent;
+  var pending = {}, nextId = 1, hostCaps = null, proposal = null, approval = null, armed = false, busy = false;
+
+  function post(msg) { host.postMessage(msg, "*"); }
+  function request(method, params) {
+    return new Promise(function (resolve, reject) {
+      var id = nextId++;
+      pending[id] = { resolve: resolve, reject: reject };
+      post({ jsonrpc: "2.0", id: id, method: method, params: params || {} });
+    });
+  }
+  function notify(method, params) { post({ jsonrpc: "2.0", method: method, params: params || {} }); }
+  function reply(id, result) { post({ jsonrpc: "2.0", id: id, result: result }); }
+  function replyError(id, code, message) { post({ jsonrpc: "2.0", id: id, error: { code: code, message: message } }); }
+
+  window.addEventListener("message", function (ev) {
+    if (ev.source !== host) return;
+    var m = ev.data;
+    if (!m || m.jsonrpc !== "2.0") return;
+    if (m.id !== undefined && m.method === undefined) {
+      var p = pending[m.id];
+      if (!p) return;
+      delete pending[m.id];
+      if (m.error) p.reject(m.error); else p.resolve(m.result);
+      return;
+    }
+    switch (m.method) {
+      case "ui/notifications/tool-result": render(m.params || {}); break;
+      case "ui/notifications/host-context-changed": applyContext(m.params || {}); break;
+      case "ui/notifications/tool-input": case "ui/notifications/tool-input-partial":
+      case "ui/notifications/tool-cancelled": case "ui/notifications/request-teardown": break;
+      case "ui/resource-teardown": if (m.id !== undefined) reply(m.id, {}); break;
+      case "ping": if (m.id !== undefined) reply(m.id, {}); break;
+      default: if (m.id !== undefined) replyError(m.id, -32601, "Method not found");
+    }
+  });
+
+  function applyContext(ctx) {
+    if (!ctx) return;
+    var root = document.documentElement;
+    if (ctx.theme) root.setAttribute("data-theme", ctx.theme);
+    var vars = ctx.styles && ctx.styles.variables;
+    if (vars) Object.keys(vars).forEach(function (k) {
+      root.style.setProperty(k.indexOf("--") === 0 ? k : "--" + k, String(vars[k]));
+    });
+    var fonts = ctx.styles && ctx.styles.css && ctx.styles.css.fonts;
+    if (fonts && !document.getElementById("hostfonts")) {
+      var st = document.createElement("style"); st.id = "hostfonts"; st.textContent = String(fonts);
+      document.head.appendChild(st);
+    }
+    var ins = ctx.safeAreaInsets;
+    if (ins) ["top", "right", "bottom", "left"].forEach(function (side) {
+      if (typeof ins[side] === "number") root.style.setProperty("--inset-" + side, ins[side] + "px");
+    });
+  }
+
+  var sizeTimer = null;
+  function reportSize() {
+    if (sizeTimer) return;
+    sizeTimer = setTimeout(function () {
+      sizeTimer = null;
+      var el = document.documentElement;
+      notify("ui/notifications/size-changed", { width: el.scrollWidth, height: el.scrollHeight });
+    }, 30);
+  }
+  if (window.ResizeObserver) {
+    var ro = new ResizeObserver(reportSize);
+    ro.observe(document.documentElement); ro.observe(document.body);
+  }
+
+  // -- rendering (every value goes through textContent; names are data, never markup) ---------
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined && text !== null) e.textContent = String(text);
+    return e;
+  }
+  function $(id) { return document.getElementById(id); }
+  function label(r) {
+    var l = r.name == null ? "" : String(r.name);
+    if (r.printing) l += " " + r.printing;
+    if (r.category) l += " [" + r.category + "]";
+    return l;
+  }
+  function arrow(a, b) { return String(a) + " → " + String(b); }
+  function describeRow(r) {
+    switch (r.kind) {
+      case "add": return ["Add", label(r), "+" + r.qty];
+      case "remove": return ["Remove", label(r), "−" + r.qty];
+      case "change": return ["Change", label(r), arrow(r.before, r.after)];
+      case "category": return ["Category", r.name, arrow(r.before, r.after) + (r.leaves ? " (leaves the deck, −" + r.leaves + ")" : "")];
+      case "finish": return ["Finish", r.name, arrow(r.before, r.after)];
+      case "printing": return ["Printing", r.name, arrow(r.before, r.after)];
+      case "commander": return ["Commander", arrow(r.before, r.after), ""];
+      case "clone": return ["Copy", "'" + r.source + "' (" + r.cards + " cards) as '" + r.name + "'", ""];
+      case "new_deck": return ["New deck", r.name + " (" + r.format + ", " + r.cards + " cards, " + (r.private ? "private" : "public") + ")", ""];
+      case "restore": return ["Restore", "snapshot " + r.snapshot_id + " taken " + r.taken + " (" + r.rows + " rows)", ""];
+      case "description": return ["Description", r.after_len ? "changed, " + r.after_len + " chars" : "cleared", ""];
+      case "detail": return [String(r.field || "Setting"), arrow(r.before, r.after), ""];
+      default: return ["Change", r.text || "", ""];
+    }
+  }
+  var CARD_KINDS = { add: 1, remove: 1, change: 1, category: 1, finish: 1, printing: 1 };
+  function cardImage(name) {
+    var img = el("img", "pic");
+    img.alt = ""; img.loading = "lazy"; img.decoding = "async"; img.referrerPolicy = "no-referrer";
+    img.src = "https://api.scryfall.com/cards/named?exact=" + encodeURIComponent(name) + "&format=image&version=small";
+    img.onerror = function () { img.classList.add("none"); img.onerror = null; };
+    return img;
+  }
+  function titleFor(p) {
+    var name = p.deck_name || p.deck_id || "";
+    if (p.kind === "create_deck") return "New deck: " + name;
+    if (p.kind === "clone") return "Copy of " + name;
+    if (p.kind === "restore") return "Restore " + name;
+    if (p.kind === "details") return "Settings of " + name;
+    return "Change to " + name;
+  }
+  function summaryFor(p, rows) {
+    var adds = 0, removes = 0, others = 0;
+    rows.forEach(function (r) {
+      if (r.kind === "add") adds += Number(r.qty) || 0;
+      else if (r.kind === "remove") removes += Number(r.qty) || 0;
+      else others += 1;
+    });
+    var bits = [];
+    if (adds) bits.push("+" + adds + " card" + (adds === 1 ? "" : "s"));
+    if (removes) bits.push("−" + removes + " card" + (removes === 1 ? "" : "s"));
+    if (others) bits.push(others + " other change" + (others === 1 ? "" : "s"));
+    return bits.length ? bits.join(", ") : (rows.length + " change" + (rows.length === 1 ? "" : "s"));
+  }
+  function setStatus(text, kind) {
+    var s = $("status");
+    s.textContent = text || "";
+    s.className = "status" + (kind ? " " + kind : "") + (text ? "" : " hidden");
+    reportSize();
+  }
+
+  function render(result) {
+    var sc = result.structuredContent || {};
+    var meta = result._meta || {};
+    approval = typeof meta[APPROVAL_KEY] === "string" ? meta[APPROVAL_KEY] : null;
+    if (sc.ok === false || result.isError) {
+      proposal = null;
+      $("title").textContent = "No proposal";
+      $("state").textContent = ""; $("state").className = "badge hidden";
+      $("summary").textContent = "";
+      $("rows").replaceChildren(); $("foot").textContent = ""; $("actions").replaceChildren();
+      var text = sc.message || (result.content && result.content[0] && result.content[0].text) || "The proposal could not be made.";
+      setStatus(String(text), "err");
+      return;
+    }
+    proposal = sc;
+    var rows = Array.isArray(sc.rows) ? sc.rows : [];
+    $("title").textContent = titleFor(sc);
+    var st = $("state"); st.textContent = sc.state || ""; st.className = "badge " + (sc.state || "");
+    $("summary").textContent = summaryFor(sc, rows);
+    var list = $("rows"); list.replaceChildren();
+    if (!rows.length && sc.diff) {
+      String(sc.diff).split("\n").forEach(function (line) {
+        if (!line.trim()) return;
+        var li = el("li", "change"); li.appendChild(el("span", "pic none"));
+        var n = el("span"); n.appendChild(el("span", "act", "Change")); n.appendChild(el("span", "name", line));
+        li.appendChild(n); li.appendChild(el("span", "qty", "")); list.appendChild(li);
+      });
+    }
+    var images = 0;
+    rows.forEach(function (r) {
+      var d = describeRow(r);
+      var li = el("li", String(r.kind || "change"));
+      if (CARD_KINDS[r.kind] && r.name && images < MAX_IMAGES) { li.appendChild(cardImage(String(r.name))); images++; }
+      else li.appendChild(el("span", "pic none"));
+      var n = el("span"); n.appendChild(el("span", "act", d[0])); n.appendChild(el("span", "name", d[1]));
+      li.appendChild(n); li.appendChild(el("span", "qty", d[2])); list.appendChild(li);
+    });
+    var foot = [];
+    if (sc.created_by) foot.push("Proposed by " + sc.created_by);
+    if (sc.state === "pending" && sc.expires_at) {
+      var mins = Math.max(0, Math.round((Number(sc.expires_at) * 1000 - Date.now()) / 60000));
+      foot.push("expires in " + (mins >= 120 ? Math.round(mins / 60) + " h" : mins + " min"));
+    }
+    $("foot").textContent = foot.join(" · ");
+    renderActions();
+    setStatus("", "");
+  }
+
+  function renderActions() {
+    var a = $("actions"); a.replaceChildren();
+    if (!proposal) return;
+    var p = proposal;
+    if (p.state === "pending" && p.writes_enabled && approval) {
+      var ok = el("button", "primary", "Approve: apply to Archidekt"); ok.type = "button"; ok.id = "approve";
+      var no = el("button", "danger", "Reject"); no.type = "button"; no.id = "reject";
+      ok.disabled = no.disabled = true; armed = false;
+      ok.onclick = function () { decide("approve"); };
+      no.onclick = function () { decide("reject"); };
+      a.appendChild(ok); a.appendChild(no);
+      setTimeout(function () { armed = true; if (!busy) { ok.disabled = false; no.disabled = false; } }, ARM_DELAY_MS);
+    } else if (p.state === "pending" && p.writes_enabled) {
+      var open = el("button", "primary", "Approve on the review page"); open.type = "button";
+      open.onclick = function () { openLink(p.review_url); };
+      a.appendChild(open);
+    } else if (p.state === "pending") {
+      a.appendChild(el("span", "foot", "Deck writes are switched off on this gateway; this is a preview only."));
+    }
+    if (p.result && p.result.deck_url) {
+      var deck = el("a", "link", "Open the deck on Archidekt"); deck.href = "#";
+      deck.onclick = function (e) { e.preventDefault(); openLink(p.result.deck_url); };
+      a.appendChild(deck);
+    }
+    if (p.review_url) {
+      var rv = el("a", "link", "Review in browser"); rv.href = "#";
+      rv.onclick = function (e) { e.preventDefault(); openLink(p.review_url); };
+      a.appendChild(rv);
+    }
+    reportSize();
+  }
+
+  function openLink(url) {
+    if (!url) return;
+    request("ui/open-link", { url: String(url) }).catch(function () {
+      setStatus("Open this link in your browser: " + url, "");
+    });
+  }
+
+  function tellModel(text) {
+    request("ui/update-model-context", { content: [{ type: "text", text: text }] }).catch(function () {});
+  }
+
+  function decide(decision) {
+    if (!proposal || !approval || !armed || busy) return;
+    busy = true;
+    var ok = $("approve"), no = $("reject");
+    if (ok) ok.disabled = true; if (no) no.disabled = true;
+    setStatus(decision === "approve" ? "Applying to Archidekt…" : "Rejecting…", "");
+    var pid = proposal.proposal_id;
+    request("tools/call", { name: "confirm_proposal", arguments: { proposal_id: pid, approval: approval, decision: decision } })
+      .then(function (res) {
+        var sc = (res && res.structuredContent) || {};
+        if (sc.ok === false || (res && res.isError)) {
+          var msg = sc.message || (res && res.content && res.content[0] && res.content[0].text) || "The gateway refused.";
+          busy = false;
+          if (sc.state && sc.state !== "pending") { proposal.state = sc.state; proposal.result = sc.result || proposal.result; approval = null; render({ structuredContent: proposal, _meta: {} }); }
+          else { if (ok) ok.disabled = false; if (no) no.disabled = false; }
+          setStatus(String(msg), "err");
+          tellModel("The user pressed " + decision + " on the proposal card for " + pid + ", but the gateway answered: " + msg);
+          return;
+        }
+        approval = null; busy = false;
+        render({ structuredContent: Object.assign({}, proposal, sc), _meta: {} });
+        var done = sc.state === "applied" ? "applied to Archidekt" : sc.state === "rejected" ? "rejected; nothing was sent" : "now " + sc.state;
+        setStatus(sc.state === "applied" ? "Applied. The deck on Archidekt matches this proposal." : sc.state === "rejected" ? "Rejected. Nothing was sent to Archidekt." : String(sc.next_step || done), sc.state === "applied" ? "ok" : sc.state === "rejected" ? "" : "err");
+        tellModel("The user pressed " + (decision === "approve" ? "Approve" : "Reject") + " on the proposal card; proposal " + pid + " is " + done + ".");
+      })
+      .catch(function (err) {
+        busy = false;
+        if (ok) ok.disabled = false; if (no) no.disabled = false;
+        setStatus("Could not reach the gateway: " + ((err && err.message) || "unknown error") + ". Use the review page instead.", "err");
+      });
+  }
+
+  request("ui/initialize", { appInfo: APP, appCapabilities: { availableDisplayModes: ["inline"] }, protocolVersion: PROTOCOL })
+    .then(function (res) {
+      hostCaps = (res && res.hostCapabilities) || {};
+      applyContext(res && res.hostContext);
+      notify("ui/notifications/initialized", {});
+      reportSize();
+    })
+    .catch(function () { setStatus("This app could not connect to the chat. Use the review page in your browser.", "err"); });
+})();
+</script>
+</body>
+</html>
