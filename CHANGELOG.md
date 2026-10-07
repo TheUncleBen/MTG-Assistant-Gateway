@@ -7,6 +7,74 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.6.3] - 2026-10-07
+
+Archidekt parity for the pages: browse and search public decks, a home page
+with the full navigation, an owned-cards collection, a scan flow that ends
+in a collection, a deck or a new deck, stacks and grid views that work on
+touch screens, and a native-feeling layout in the Android app.
+
+### Added
+
+- **Home page.** Signing in lands on a dashboard with the same navigation
+  as every other page: your newest decks with their covers, a deck search
+  box, tiles for Decks, Search, Scan, Collection (with your card count),
+  Proposals (with the number waiting), History and the Guide, and the
+  assistant connection details in a collapsed panel at the end.
+- **Deck search and user pages.** `/search` finds public decks on Archidekt
+  by name, commander, format, colours and owner, ordered by newest, most
+  viewed, largest or bracket, with Archidekt's own paging; `/users/{name}`
+  lists one person's public decks. Results open in the gateway's deck view.
+  The `search_decks` and `archidekt_user` tools give the assistant the same.
+- **Collection.** `/collection` is the list of cards you own, kept on the
+  gateway: add cards by name or from a scan, count copies with plus and
+  minus, filter, sort, grid or list, export CSV. Owned cards show a green
+  dot on every deck page (Archidekt's collection mark). The tools
+  `list_collection`, `add_to_collection` and `remove_from_collection`, and
+  the JSON endpoints under `/collection/api/`, give assistants and apps the
+  same. Database schema 11 adds the `collection_cards` table.
+- **Scan flow.** The scan page explains its three steps on first use, and
+  the list ends in **What next?**: save the cards to your collection, add
+  them to one of your decks (the deck editor opens with them filled in), or
+  start a new deck from them (`/decks/new?scan_session=`). "Save to gateway"
+  is now "Save scan".
+- **Guide.** `/guide` is end-user documentation inside the app: what you
+  can do on each page with or without an assistant, how proposals and
+  snapshots protect your decks, the Android app, privacy. Linked from the
+  account menu, the home page and the footer.
+- **Touch and card viewer.** On touch screens a tap fans a stack out and a
+  tap on a card opens it large with its actions (edit, move to another
+  category, mark as owned, Scryfall). On your own deck, cards can be dragged
+  between categories with a mouse or by press-and-hold on a touch screen; the
+  moves become one proposal you review.
+- **Android app layout.** Pages rendered for the app (its user agent carries
+  `MTGAssistant/`) drop the website footer, keep the phone layout at every
+  width (an unfolded foldable included) and respect the display cut-out and
+  gesture bar. The app's own actions (scan with the phone camera, reload,
+  open in browser, change gateway) moved into the page's account menu; the
+  floating button now appears only over pages that are not the gateway's,
+  so it no longer covers the bottom tab bar.
+
+### Fixed
+
+- **View as / Group by / Sort by did nothing** on the deck page: the Quick
+  add form sat inside the view form, so browsers closed the outer form early
+  and the selects submitted nothing. They are separate forms now and apply
+  as soon as you change them.
+- The deck page's **More** menu was clipped by the banner (which hid its
+  overflow for the art). The art is painted by a layer behind the banner
+  now, and the menu opens over the toolbar.
+- Dropdown menus (the account menu, a deck's More menu) close on a tap or
+  click anywhere outside them, on Escape, and on the Back button on phones.
+- Touch screens up to 900 px wide (an unfolded foldable in a browser) use the
+  phone layout with the bottom tab bar instead of a squeezed desktop bar.
+
+### Changed
+
+- The navigation is Decks, Search, Collection, Scan, Proposals, History (and
+  Admin for admins); the phone tab bar is Decks, Search, Scan, Collection,
+  More (More opens the home page with every section).
+
 ## [0.6.1] - 2026-10-06
 
 A fourth security pass. The headline: taking someone out of the group at

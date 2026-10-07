@@ -136,6 +136,7 @@ class MainActivity : ComponentActivity() {
         }
         fab = findViewById(R.id.fab)
         fab.setOnClickListener { showMenu(it) }
+        fab.visibility = View.GONE // shown by syncFab over pages that are not the gateway's
         configureWebView()
         // A link is consumed once: after a restore the saved page wins, not the old intent.
         val linked = takeLinkedUrl(intent)?.takeIf { GatewayUrl.isGateway(origin, it) }
@@ -219,6 +220,15 @@ class MainActivity : ComponentActivity() {
             true
         }
         menu.show()
+    }
+
+    /**
+     * The floating menu button shows only over pages that are not the gateway's (the sign-in page
+     * of the identity provider, say). The gateway's own pages carry the same actions in their
+     * account menu through [NativeBridge], so the button never covers their bottom tab bar.
+     */
+    private fun syncFab() {
+        fab.visibility = if (camera == null && !gatewayPage) View.VISIBLE else View.GONE
     }
 
     /** Opens the phone-camera scan panel, going to the /scan page first if needed. */
@@ -310,7 +320,7 @@ class MainActivity : ComponentActivity() {
         camera = null
         root.removeView(panel.view)
         photo = null
-        fab.visibility = View.VISIBLE
+        syncFab()
         syncBackCallback()
         // Closes the camera and waits for it, so the page's own camera can have the lens; only then
         // back to the page's camera tab, when a shaky read waits there for a tap.
@@ -574,6 +584,7 @@ class MainActivity : ComponentActivity() {
             val allowed = nav.pageStarted(url)
             gatewayPage = GatewayUrl.isGateway(origin, url)
             pageGen++
+            syncFab()
             if (!allowed) {
                 // A page from elsewhere that no navigation check saw (WebView does not ask about the
                 // redirect after a form post): it never stays behind the app's chrome. The browser
@@ -753,6 +764,19 @@ class MainActivity : ComponentActivity() {
 
         @JavascriptInterface
         fun version(): String = if (gatewayPage) BuildConfig.VERSION_NAME else ""
+
+        /** The page's account menu: the actions the floating button offers elsewhere. */
+        @JavascriptInterface
+        fun reload() = onGatewayPage { web.reload() }
+
+        @JavascriptInterface
+        fun openInBrowser() = onGatewayPage { openExternal(Uri.parse(web.url ?: origin)) }
+
+        @JavascriptInterface
+        fun changeGateway() = onGatewayPage {
+            startActivity(Intent(this@MainActivity, SetupActivity::class.java))
+            finish()
+        }
 
         /** The /scan page reporting what it did with a photo (see [ScanGlue]). */
         @JavascriptInterface

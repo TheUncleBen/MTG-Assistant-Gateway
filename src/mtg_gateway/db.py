@@ -303,8 +303,55 @@ def _step_10(conn: sqlite3.Connection) -> None:
     )
 
 
+def _step_11(conn: sqlite3.Connection) -> None:
+    """Owned cards: one row per (member, printing, finish, language, condition); quantity counts
+    the copies. Card facts are copied from Scryfall at add time so the page needs no lookups."""
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS collection_cards (
+            id TEXT PRIMARY KEY,
+            owner_sub TEXT NOT NULL,
+            scryfall_id TEXT NOT NULL,
+            oracle_id TEXT NOT NULL DEFAULT '',
+            name TEXT NOT NULL,
+            set_code TEXT NOT NULL DEFAULT '',
+            set_name TEXT NOT NULL DEFAULT '',
+            collector_number TEXT NOT NULL DEFAULT '',
+            rarity TEXT NOT NULL DEFAULT '',
+            type_line TEXT NOT NULL DEFAULT '',
+            mana_cost TEXT NOT NULL DEFAULT '',
+            mana_value REAL,
+            color_identity TEXT NOT NULL DEFAULT '',
+            finish TEXT NOT NULL DEFAULT 'nonfoil',
+            lang TEXT NOT NULL DEFAULT 'en',
+            condition TEXT NOT NULL DEFAULT '',
+            quantity INTEGER NOT NULL DEFAULT 1,
+            notes TEXT NOT NULL DEFAULT '',
+            source TEXT NOT NULL DEFAULT 'manual',
+            added_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            UNIQUE(owner_sub, scryfall_id, finish, lang, condition)
+        )"""
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS collection_owner_name ON collection_cards(owner_sub, name)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS collection_owner_updated ON collection_cards(owner_sub, updated_at)"
+    )
+
+
 # Applied in order; ``PRAGMA user_version`` records how many have run. Append, never edit.
-MIGRATIONS = [_step_1, _step_2, _step_3, _step_4, _step_5, _step_6, _step_7, _step_8, _step_9, _step_10]
+MIGRATIONS = [
+    _step_1,
+    _step_2,
+    _step_3,
+    _step_4,
+    _step_5,
+    _step_6,
+    _step_7,
+    _step_8,
+    _step_9,
+    _step_10,
+    _step_11,
+]
 SCHEMA_VERSION = len(MIGRATIONS)
 
 
@@ -1071,6 +1118,7 @@ class Database:
         ("snapshots", "owner_sub"),
         ("reports", "owner_sub"),
         ("scan_sessions", "owner_sub"),
+        ("collection_cards", "owner_sub"),
         ("archidekt_links", "sub"),
         ("tokens", "sub"),
         ("browser_sessions", "sub"),

@@ -83,8 +83,16 @@ still works, it just can't scan.
 The app shows the gateway's pages: home, account, proposals, scan, and whatever
 else your gateway serves. A few things are native:
 
-- **The round menu button** (bottom right): *Scan with phone camera*, *Reload*,
-  *Open in browser*, *Change gateway*.
+- **The App section of the account menu** (the person icon, top right):
+  *Scan with phone camera*, *Reload*, *Open in browser*, *Change gateway*.
+  The same four actions sit on a round button at the bottom right while a
+  page that is not the gateway's is showing (the sign-in service, say); on
+  the gateway's own pages the button stays out of the way of the bottom tab
+  bar.
+- **Layout.** The gateway's pages know they are in the app (the app adds
+  `MTGAssistant/<version>` to the browser's user agent) and use the phone
+  layout at every width, with the bottom tab bar and no website footer; an
+  unfolded foldable gets the same app layout, wider.
 - **Back** goes back a page; on the first page it leaves the app.
 - **Links to your gateway** from other apps open in the app: share a gateway
   link to it from the browser's share sheet, or, when the operator built the

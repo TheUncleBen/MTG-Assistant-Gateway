@@ -98,7 +98,8 @@ identity provider you control (Authentik, Keycloak, Authelia, ...).
 | [PLUGIN.md](docs/PLUGIN.md) | Users and operators | The one-link plugin for Claude Code, Claude, ChatGPT and Codex, plus the operator plugin |
 | [SKILL.md](docs/SKILL.md) | Users | The MTG skill and the ChatGPT instructions that teach the assistant the safe way to work |
 | [API.md](docs/API.md) | Contributors and app builders | The JSON API and the companion pages: authentication, every endpoint, proposal kinds, the page routes the Android app wraps |
-| [SCANNING.md](docs/SCANNING.md) | Users and operators | Turning a pile of physical cards into a decklist with your phone camera or a photo |
+| [SCANNING.md](docs/SCANNING.md) | Users and operators | Turning a pile of physical cards into a decklist, a deck or your collection with your phone camera or a photo |
+| [USING.md](docs/USING.md) | Users | What the pages do: home, decks, search, scan, collection, proposals and history, the guide; the same text the in-app Guide shows |
 | [ANDROID.md](docs/ANDROID.md) | Users and operators | The Android app: getting it from your gateway, the phone-camera scan screen, fold postures, App Links, building, signing and distributing it without an app store |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Everyone | How the pieces fit, what you can swap, how sign-in and deck edits work, the security model |
 | [DEPLOY-COMPOSE.md](docs/DEPLOY-COMPOSE.md) | Operators | A full deploy on one machine with Docker Compose |
@@ -170,11 +171,20 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
   - A pending proposal the user no longer wants is closed with
     `reject_proposal` or the Reject button.
   - Every step is audited and limited to the signed-in user.
-- **Companion pages.** `/decks`, `/history` and `/activity` are a
-  phone-friendly deck view and editor behind the same sign-in: browse and
-  open decks, see statistics, run a report, edit quantities, categories and
-  additions as one proposal, and look back over proposals, snapshots and
-  reports. They also serve as the pages an Android app can wrap.
+- **Companion pages.** A home page with the full navigation, `/decks`,
+  `/search` (public decks on Archidekt by name, commander, format, colours
+  or owner, and `/users/{name}` for one person's decks), `/collection`,
+  `/scan`, `/history`, `/activity` and `/guide` are a phone-friendly deck
+  view and editor behind the same sign-in: browse, search and open decks as
+  text, stacks or grid (touch works: tap to fan a stack, press and hold to
+  move a card between categories), see statistics, run a report, edit
+  quantities, categories and additions as one proposal, and look back over
+  proposals, snapshots and reports. They are also the pages the Android app
+  wraps.
+- **Collection.** The cards you own, kept on the gateway: add by name or
+  from a scan, count copies, filter, export CSV. Owned cards get a green dot
+  on every deck page. `list_collection`, `add_to_collection` and
+  `remove_from_collection` give the assistant the same.
 - **Admin page.** Members of `MTG_ADMIN_GROUP` get `/admin`: who has signed
   in, their activity, per-day usage counts, a System card (version, database
   size and schema, newest backup), and buttons to disable or enable an
@@ -187,7 +197,9 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
   [docs/API.md](docs/API.md).
 - **Card scanning.** The `/scan` page reads physical cards with your phone
   camera. Text recognition runs on the phone, no third-party app needed.
-  `resolve_cards` turns card names read from photos into exact cards.
+  The scanned list goes into your collection, into one of your decks or
+  into a new deck. `resolve_cards` turns card names read from photos into
+  exact cards.
 - **One-link setup.** The gateway serves its own assistant plugin and an
   install page at `/install`.
 

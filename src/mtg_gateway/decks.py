@@ -1120,6 +1120,25 @@ class DeckService:
                     raise DeckError(exc.kind, str(exc)) from exc
             return await self.get_deck(sub, deck_id)
 
+    async def search_decks(self, sub: str | None, **query: Any) -> dict[str, Any]:
+        """Search Archidekt's public decks anonymously (see ArchidektClient.search_decks). Counts
+        against the member's Archidekt budget like any other read."""
+        async with self.archidekt_slot(sub):
+            try:
+                return await self.client.search_decks(**query)
+            except ArchidektError as exc:
+                raise DeckError(exc.kind, str(exc)) from exc
+
+    async def user_profile(self, sub: str | None, username: str) -> dict[str, Any] | None:
+        username = re.sub(r"[^A-Za-z0-9_.@ -]", "", str(username or "")).strip()[:60]
+        if not username:
+            raise DeckError("invalid", "give an Archidekt username")
+        async with self.archidekt_slot(sub):
+            try:
+                return await self.client.user_profile(username)
+            except ArchidektError as exc:
+                raise DeckError(exc.kind, str(exc)) from exc
+
     # -- proposals ------------------------------------------------------------
     async def propose(self, sub: str, deck_id: str, raw_changes: Any) -> dict[str, Any]:
         deck_id = _clean_deck_id(deck_id)

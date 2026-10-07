@@ -111,6 +111,7 @@ class FakeArchidekt:
         # private decks out, while an authenticated ownerId listing includes them.
         self.username_listing_hides_private = False
         self.list_auth_schemes: list[str] = []  # Authorization scheme of each /decks/v3/ call
+        self.search_params: list[dict[str, str]] = []  # query of each /decks/v3/ call
         self.transport = httpx.MockTransport(self.handle)
 
     def _folder_name(self, username: str, folder_id: int | None) -> str | None:
@@ -197,7 +198,9 @@ class FakeArchidekt:
             if deck is None or int(parts[2]) in self.private:
                 return httpx.Response(404, json={"detail": "Not found."})
             return httpx.Response(200, json=deck)
-        if who is None:
+        # The deck listing answers anonymous callers too (the public deck search; verified live
+        # 2026-10-07); private decks are dropped from it further down.
+        if who is None and not (path == "/api/decks/v3/" and request.method == "GET" and not auth):
             if auth:
                 return httpx.Response(401, json={"detail": "Given token not valid for any token type"})
             return httpx.Response(401, json={"detail": "Authentication credentials were not provided."})
@@ -277,6 +280,15 @@ class FakeArchidekt:
             else:
                 chosen = list(self.decks.values())
             chosen = [d for d in chosen if d["id"] not in self.private or d["owner"]["username"] == who]
+            # The public deck search sends name= (a substring of the deck name; verified live
+            # 2026-10-07) and deckFormat=; both narrow the listing.
+            name = request.url.params.get("name")
+            if name:
+                chosen = [d for d in chosen if name.lower() in d["name"].lower()]
+            fmt = request.url.params.get("deckFormat")
+            if fmt is not None:
+                chosen = [d for d in chosen if str(3) == fmt]
+            self.search_params.append(dict(request.url.params))
             results = [
                 {
                     "id": d["id"],

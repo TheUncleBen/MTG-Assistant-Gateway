@@ -45,6 +45,58 @@ FORMAT_NAMES: dict[int, str] = {}
 for _name, _fid in FORMAT_IDS.items():
     FORMAT_NAMES.setdefault(_fid, _name)
 REFRESH_FIELDS = ("refresh_token", "refresh")
+# Sort orders archidekt.com/search/decks offers (its Updated At, Created At, Views, Size, EDH Bracket menu).
+SEARCH_ORDERS = {
+    "-updatedAt": "Updated at",
+    "-createdAt": "Created at",
+    "-viewCount": "Views",
+    "-size": "Size",
+    "edhBracket": "EDH bracket",
+}
+_ART_UUID = re.compile(r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
+
+
+def featured_scryfall_id(url: Any) -> str | None:
+    """The Scryfall id inside a listing's ``featured`` art URL (Archidekt names its art files by the
+    card's Scryfall id, seen live 2026-10-07 on both of its image hosts), so the gateway can show the
+    same art from Scryfall and never hotlink Archidekt's storage."""
+    if not isinstance(url, str):
+        return None
+    m = _ART_UUID.search(url)
+    return m.group(1) if m else None
+
+
+def list_row(d: dict[str, Any]) -> dict[str, Any]:
+    """One deck of a ``/decks/v3/`` listing in the gateway's list shape (the extras were verified
+    in the public v3 listing 2026-10-05: colour-identity pip counts, size, bracket, tag names)."""
+    fmt = d.get("deckFormat")
+    colors = d.get("colors") if isinstance(d.get("colors"), dict) else {}
+    raw_tags = d.get("tags") if isinstance(d.get("tags"), list) else []
+    bracket = d.get("edhBracket")
+    size = d.get("size")
+    folder = d.get("parentFolderName")
+    views = d.get("viewCount")
+    return {
+        "id": str(d["id"]),
+        "name": str(d.get("name", "")),
+        "format": fmt,
+        "format_name": FORMAT_NAMES.get(fmt) if isinstance(fmt, int) else None,
+        "updated_at": str(d.get("updatedAt", "")),
+        "created_at": str(d.get("createdAt", "")),
+        "private": bool(d.get("private", False)),
+        "unlisted": bool(d.get("unlisted", False)),
+        "folder": str(folder) if isinstance(folder, str) and folder else None,
+        "colors": {k: v for k, v in colors.items() if k in "WUBRG" and isinstance(v, int)},
+        "size": size if isinstance(size, int) and not isinstance(size, bool) else None,
+        "bracket": bracket if isinstance(bracket, int) and not isinstance(bracket, bool) else None,
+        "tags": [
+            str(t.get("name") or t.get("tag"))
+            for t in raw_tags
+            if isinstance(t, dict) and (t.get("name") or t.get("tag"))
+        ],
+        "views": views if isinstance(views, int) and not isinstance(views, bool) else None,
+        "featured_scryfall_id": featured_scryfall_id(d.get("featured")),
+    }
 
 
 class ArchidektError(Exception):
@@ -471,45 +523,79 @@ class ArchidektClient:
                 if deck_id in seen:
                     continue
                 seen.add(deck_id)
-                folder = d.get("parentFolderName")
-                folder = str(folder) if isinstance(folder, str) and folder else None
-                if exclude_folder and folder == exclude_folder:
+                row = list_row(d)
+                if exclude_folder and row["folder"] == exclude_folder:
                     continue  # the gateway's backup copies stay out of the user's list
-                fmt = d.get("deckFormat")
-                colors = d.get("colors") if isinstance(d.get("colors"), dict) else {}
-                raw_tags = d.get("tags") if isinstance(d.get("tags"), list) else []
-                bracket = d.get("edhBracket")
-                size = d.get("size")
-                decks.append(
-                    {
-                        "id": deck_id,
-                        "name": str(d.get("name", "")),
-                        "format": fmt,
-                        "format_name": FORMAT_NAMES.get(fmt) if isinstance(fmt, int) else None,
-                        "updated_at": str(d.get("updatedAt", "")),
-                        "created_at": str(d.get("createdAt", "")),
-                        "private": bool(d.get("private", False)),
-                        "unlisted": bool(d.get("unlisted", False)),
-                        "folder": folder,
-                        # The list row's own extras (verified in the public v3 listing 2026-10-05):
-                        # colour-identity pip counts, deck size, bracket and tag names.
-                        "colors": {k: v for k, v in colors.items() if k in "WUBRG" and isinstance(v, int)},
-                        "size": size if isinstance(size, int) and not isinstance(size, bool) else None,
-                        "bracket": bracket
-                        if isinstance(bracket, int) and not isinstance(bracket, bool)
-                        else None,
-                        "tags": [
-                            str(t.get("name") or t.get("tag"))
-                            for t in raw_tags
-                            if isinstance(t, dict) and (t.get("name") or t.get("tag"))
-                        ],
-                        "owner": username,
-                    }
-                )
+                row["owner"] = username
+                decks.append(row)
         if dropped:
             logger.info("deck list: dropped %d entries not owned by the linked account", dropped)
         decks.sort(key=lambda d: d["updated_at"], reverse=True)
         return decks
+
+    async def search_decks(
+        self,
+        *,
+        name: str = "",
+        commander: str = "",
+        owner: str = "",
+        deck_format: int | None = None,
+        colors: str = "",
+        order_by: str = "-updatedAt",
+        page: int = 1,
+    ) -> dict[str, Any]:
+        """Public deck search, the way archidekt.com/search/decks queries its own API (read from the
+        site's requests on 2026-10-07, each parameter checked live against ``/api/decks/v3/``):
+        ``name`` (substring of the deck name), ``commanderName`` (the commander's name; the site's
+        /commanders/ pages send it with ``deckFormat=3``), ``ownerUsername`` (exact owner),
+        ``deckFormat`` (the numeric format), ``colors=W,U&colorIdentity=true`` (identity within
+        those colours; reported from the site's query builder, the result sample looked right) and
+        ``orderBy`` (``-updatedAt``, ``-createdAt``, ``-viewCount``, ``-size``, ``edhBracket``).
+        Archidekt returns 60 rows a page whatever ``pageSize`` says and caps ``count`` at 1000, so
+        only ``page`` is sent. Anonymous: only public decks come back."""
+        params: dict[str, Any] = {"orderBy": order_by if order_by in SEARCH_ORDERS else "-updatedAt"}
+        if name:
+            params["name"] = name[:120]
+        if commander:
+            params["commanderName"] = commander[:120]
+            if deck_format is None:
+                deck_format = 3
+        if owner:
+            params["ownerUsername"] = owner[:60]
+        if deck_format is not None:
+            params["deckFormat"] = int(deck_format)
+        if colors:
+            params["colors"] = ",".join(c for c in "WUBRG" if c in colors.upper())
+            params["colorIdentity"] = "true"
+        if page > 1:
+            params["page"] = int(page)
+        body = await self._request("GET", "/decks/v3/", params=params)
+        results = body.get("results") if isinstance(body, dict) else None
+        if not isinstance(results, list):
+            raise ArchidektError("contract", "unexpected deck search shape")
+        rows = []
+        for d in results:
+            if not isinstance(d, dict) or "id" not in d:
+                raise ArchidektError("contract", "unexpected deck entry shape")
+            if d.get("private"):
+                continue  # never list a private deck, whatever the listing says
+            row = list_row(d)
+            owner_obj = d.get("owner") if isinstance(d.get("owner"), dict) else {}
+            row["owner"] = str(owner_obj.get("username") or "")
+            row["owner_id"] = str(owner_obj["id"]) if owner_obj.get("id") is not None else None
+            rows.append(row)
+        count = body.get("count") if isinstance(body.get("count"), int) else None
+        return {"decks": rows, "count": count, "has_more": bool(body.get("next")), "page": page}
+
+    async def user_profile(self, username: str) -> dict[str, Any] | None:
+        """A public profile by username, through the deck listing (``/api/users/{id}/`` needs the
+        numeric id, which the listing's owner block carries). None when the user has no public
+        decks or does not exist."""
+        found = await self.search_decks(owner=username, order_by="-updatedAt")
+        if not found["decks"]:
+            return None
+        first = found["decks"][0]
+        return {"username": first["owner"], "id": first.get("owner_id"), "decks": found}
 
     async def get_deck(self, token: str | None, deck_id: str) -> Deck:
         """Fetch a deck. With ``token=None`` this is an anonymous read of a public deck."""

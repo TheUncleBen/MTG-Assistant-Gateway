@@ -373,9 +373,19 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         sub, sid = browser_session(state, request)
         if not sub:
             return login_redirect("/decks/new")
-        return page(
-            "New deck", new_deck_form({"csrf": _csrf(s, sid) or ""}), sub=sub, sid=sid, current="/decks"
-        )
+        values = {"csrf": _csrf(s, sid) or ""}
+        scan_ref = (request.query_params.get("scan_session") or "").strip()[:80]
+        if scan_ref and state.scan is not None:
+            # "New deck from these cards" on the scan page: the scan's list is the decklist.
+            from .scan.service import ScanError
+
+            try:
+                sess = state.scan.find_session(sub, scan_ref)
+                values["source"] = sess.get("decklist_text") or ""
+                values["name"] = str(sess.get("name") or "")[:120]
+            except ScanError:
+                pass
+        return page("New deck", new_deck_form(values), sub=sub, sid=sid, current="/decks")
 
     @server.custom_route("/decks/new", methods=["POST"], include_in_schema=False)
     async def new_deck_post(request: Request) -> Response:
@@ -436,12 +446,14 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         elif err_code in DECK_ERR_MESSAGES:
             # Only known codes; the text is fixed here, so a link cannot choose the words.
             notice = f"<p class='notice error'>{_esc(DECK_ERR_MESSAGES[err_code])}</p>"
+        collection = getattr(state, "collection", None)
         body = deck_page_html(
             deck,
             stats,
             own=own,
             csrf=_csrf(s, sid),
             writes_enabled=s.writes_enabled,
+            owned=collection.store.owned_names(sub) if collection is not None else None,
             view=qp.get("view") or "text",
             group=qp.get("group") or "category",
             sort=qp.get("sort") or "name",

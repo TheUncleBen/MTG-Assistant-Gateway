@@ -81,13 +81,24 @@ What's on it:
 - **Photo.** Uses your camera app or gallery instead, for browsers that
   can't stream video. It does the same edge-finding over the whole picture.
 - **Type.** Card name with autocomplete, or paste a whole decklist.
-- **List.** Quantities, cards still unresolved, **Save to gateway** and
-  **Copy decklist**.
+- **List.** Quantities, cards still unresolved, **Save scan** and
+  **Copy decklist**, then **What next?** with the three places the cards
+  can go: **Save to collection** (your owned cards, see
+  [USING.md](USING.md#collection)), **Add to deck** (pick one of your decks;
+  the deck editor opens with the cards filled in and you review the change
+  before it is applied) and **New deck from these cards** (the new-deck form
+  opens with the list as its decklist). The first two save the scan on the
+  way if it isn't yet.
 - **Sessions.** Your earlier scans. Open one to keep going, or delete it.
 
-Once you've saved, tell the assistant: *"get my scan session &lt;name&gt;"*.
-From there it can create a deck (`propose_new_deck`), add the cards to one
-of your decks (`propose_deck_changes`), or just talk about them.
+The first visit shows a short "How scanning works" card; **Got it** hides
+it, and the "How it works" link under the tabs brings it back.
+
+Once you've saved, you can also tell the assistant: *"get my scan session
+&lt;name&gt;"*. From there it can create a deck (`propose_new_deck`), add
+the cards to one of your decks (`propose_deck_changes`), add them to your
+collection (`add_to_collection` with `scan_session`), or just talk about
+them.
 
 Scan sessions belong to you, live in the gateway's database (so they're in
 the nightly backup), and are capped at 500 cards and 100 sessions per person

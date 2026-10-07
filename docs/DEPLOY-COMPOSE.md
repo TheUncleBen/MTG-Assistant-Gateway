@@ -192,7 +192,7 @@ docker compose logs -f gateway
 
 ```bash
 curl -s https://mtg.example.com/healthz
-# {"status":"ok","version":"0.6.1"}
+# {"status":"ok","version":"0.6.3"}
 
 curl -s https://mtg.example.com/.well-known/oauth-authorization-server | head -c 300
 # JSON with "issuer":"https://mtg.example.com", ...

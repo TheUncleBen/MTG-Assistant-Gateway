@@ -74,6 +74,14 @@ Request bodies are JSON objects of at most 2 MB.
 | `DELETE /api/v1/reports/{rid}` | Delete a report. With a bearer token only a report that same app ran; the browser session may delete any of the member's reports |
 | `GET /api/v1/activity?limit=50` | The user's own audit trail |
 
+The collection has its own small JSON API for the pages and the Android app, under the browser
+session only (cookie plus `X-CSRF-Token` on writes; a bearer token uses the `*_collection` tools
+instead): `POST /collection/api/add` with `{"items": [{"name" | "scryfall_id" | "card": {...},
+"quantity", "finish" | "foil", "condition"}], "source": "scan" | "manual"}` answers `added`,
+`skipped` and `totals`; `POST /collection/api/rows/{id}` with `{"quantity": n}` (0 removes) or
+other row fields; `DELETE /collection/api/rows/{id}`; `GET /collection/api/summary`. Rows belong
+to the signed-in member only; another member's row id answers `404`.
+
 Admin callers (members of `MTG_ADMIN_GROUP`) also have `GET /api/v1/admin/overview`,
 `GET /api/v1/admin/users`, `GET /api/v1/admin/metrics` and
 `POST /api/v1/admin/users/{sub}` with `{"action": "disable" | "enable" | "revoke" | "unlink" | "delete_data"}`.
@@ -111,9 +119,14 @@ cookie, set by `POST /theme`); internal links never open a new tab.
 
 | Path | Page |
 |---|---|
+| `/` | Home: newest decks with covers, a deck search box, one tile per section with counts (collection cards, pending proposals), the assistant connection details |
+| `/search?name=&commander=&owner=&format=&colors=&order=&page=` | Public deck search on Archidekt (name substring, commander, owner, format, colour identity; order `-updatedAt`, `-createdAt`, `-viewCount`, `-size`, `edhBracket`; Archidekt pages of 60) |
+| `/users/{username}` | One Archidekt user's public decks |
+| `/collection?q=&set=&finish=&color=&sort=&view=grid|list&page=` | My collection: the cards I own, with filters, grid or list, plus and minus, remove, add by name; `/collection/export.csv` downloads it |
+| `/guide` | The in-app guide (end-user documentation) |
 | `/decks?q=&folder=&view=grid|list&order=` | My decks: filter by name or Archidekt folder, grid or list, order by updated / created / name / format, "New deck" |
 | `/decks/open?ref=` | Redirects an Archidekt link or id to its deck page |
-| `/decks/new` | New deck form (name, format, private, pasted list or CSV) that makes a `new_deck` proposal |
+| `/decks/new?scan_session=` | New deck form (name, format, private, pasted list or CSV) that makes a `new_deck` proposal; a scan session prefills the list |
 | `/decks/{id}?view=&group=&sort=&q=` | One deck: banner (art, legality, bracket, size, price, tags), toolbar (Quick add, View as text / stacks / grid, Group by, Sort by, local filter), cards, deck stats, description; owners get Edit deck, Clone deck and Deck settings |
 | `/decks/{id}/edit?scan_session=&add=` | The editor: quantities, categories (new ones by typing), finish, printing (picker over Scryfall), additions with autocomplete and Undo become one proposal; a scan session or a Quick add name prefills it |
 | `/decks/{id}/settings` | Deck settings (name, format, bracket, description, private, unlisted) as a `details` proposal |

@@ -268,7 +268,7 @@ def banner_html(
     stats = stats or {}
     art = featured(deck)
     art_url = card_image(art, "art_crop") if art else None
-    style = f" style=\"background-image:url('{esc(art_url)}')\"" if art_url else ""
+    style = f" style=\"--art:url('{esc(art_url)}')\"" if art_url else ""
     bracket = stats.get("bracket_estimate") or {}
     bracket_names = {1: "Exhibition (1)", 2: "Core (2)", 3: "Upgraded (3)", 4: "Optimized (4)", 5: "cEDH (5)"}
     legal_problems = stats.get("legality_problems") or []
@@ -338,7 +338,8 @@ def banner_html(
         else ""
     )
     return (
-        f"<section class='banner'{style}><div class='shade'><div class='content'>"
+        f"<section class='banner{'' if art_url else ' noart'}'{style}>"
+        "<div class='shade'><div class='content'>"
         f"<div class='strip'{style}></div>"
         "<div class='info'>"
         f"<h1 class='deckname'>{privacy}<span>{esc(deck.name)}</span></h1>"
@@ -355,8 +356,7 @@ def banner_html(
         f"<div class='tags'>{icon('tag')} {tags}</div>"
         f"<div class='controls'><div class='primary'>{primary}{more}</div></div>{writes_note}"
         "</div>"
-        f"<a class='owner' href='https://archidekt.com/u/{esc(deck.owner)}' target='_blank' "
-        "rel='noreferrer noopener'>"
+        f"<a class='owner' href='/users/{esc(deck.owner)}' title='{esc(deck.owner)}: public decks'>"
         f"{avatar_html(deck.owner)}<span class='uname'>{esc(deck.owner or 'unknown')}</span></a>"
         "</div></div></section>"
     )
@@ -374,30 +374,33 @@ def _select(name: str, options: dict[str, str], current: str, label: str, ic: st
 
 
 def toolbar_html(deck: Deck, *, own: bool, view: str, group: str, sort: str, q: str) -> str:
+    """The toolbar panel. Two separate forms: Quick add (goes to the editor) and the view controls.
+    They must never nest: HTML has no nested forms, the parser would end the outer form at the
+    inner one's close tag and the View / Group / Sort selects would submit nothing."""
     did = esc(deck.id)
     add = (
-        "<div class='field add'><label for='quick'>Add card</label>"
-        f"<form method='get' action='/decks/{did}/edit' class='quick'>"
+        "<form method='get' action='/decks/{did}/edit' class='field add quick'>"
+        "<label for='quick'>Add card</label><div class='quickrow'>"
         "<input id='quick' type='text' name='add' placeholder='Quick add (card name)' list='cardnames' "
         "autocomplete='off'><datalist id='cardnames'></datalist>"
-        f"<button type='submit' class='primary'>{icon('search')} Card search</button></form></div>"
+        f"<button type='submit' class='primary'>{icon('search')} "
+        "<span>Card search</span></button></div></form>"
         if own
         else ""
-    )
+    ).replace("{did}", did)
     return (
-        "<section class='toolbar panel'>"
-        f"<form method='get' action='/decks/{did}' class='controls' id='viewform'>{add}"
-        "<div class='views'>"
+        "<section class='toolbar panel'><div class='controls'>"
+        f"{add}"
+        f"<form method='get' action='/decks/{did}' class='views' id='viewform'>"
         + _select("view", VIEWS, view, "View as", "layers")
         + _select("group", GROUPS, group, "Group by", "grid")
         + _select("sort", SORTS, sort, "Sort by", "sort")
-        + "</div>"
-        "<div class='field filter'><label for='q'>Local filter</label><span class='search'>"
+        + "<div class='field filter'><label for='q'>Local filter</label><span class='search'>"
         f"<input id='q' type='search' name='q' value='{esc(q)}' placeholder='Filter deck (eg: Sol Ring)' "
         "autocomplete='off'>"
         f"<button type='submit' aria-label='Apply filter'>{icon('search')}</button></span></div>"
         "<noscript><button type='submit' class='apply'>Apply</button></noscript>"
-        "</form></section>"
+        "</form></div></section>"
     )
 
 
@@ -417,15 +420,31 @@ def _label_dot(card: DeckCard) -> str:
     return ""
 
 
-def text_row(card: DeckCard, *, deck: Deck) -> str:
+def _owned_dot(card: DeckCard, owned: dict[str, int] | None) -> str:
+    """Archidekt's green collection dot: the member owns copies of this card (by name)."""
+    if not owned:
+        return ""
+    n = owned.get(card.name.lower()) or owned.get(front_name(card.name).lower())
+    if not n:
+        return ""
+    return f"<span class='owned' title='You own {n}'><span class='sr-only'>owned {n}</span></span>"
+
+
+def front_name(name: str) -> str:
+    return name.split(" // ")[0].strip() if " // " in name else name
+
+
+def text_row(card: DeckCard, *, deck: Deck, owned: dict[str, int] | None = None) -> str:
     img = card_image(card)
     hover = f"<span class='hover'><img src='{esc(img)}' alt='' loading='lazy'></span>" if img else ""
     cls = " side" if not deck.in_deck(card) else ""
     return (
-        f"<li class='row{cls}' data-name='{esc(card.name.lower())}'>"
+        f"<li class='row{cls}' data-name='{esc(card.name.lower())}' data-card='{esc(card.name)}'"
+        f"{_card_data(card)}>"
         f"<span class='q'>{card.quantity}</span>"
-        f"<span class='n'>{_label_dot(card)}<span class='name'>{esc(card.name)}</span>{_finish_badge(card)}"
-        f"{hover}</span>"
+        f"<span class='n'>{_label_dot(card)}{_owned_dot(card, owned)}<span "
+        f"class='name'>{esc(card.name)}</span>"
+        f"{_finish_badge(card)}{hover}</span>"
         f"<span class='mc'>{mana_html(card.mana_cost)}</span>"
         f"<span class='set' title='{esc(card.set_code.upper())} {esc(card.collector_number)}'>"
         f"{esc(card.set_code.upper())}</span>"
@@ -434,7 +453,17 @@ def text_row(card: DeckCard, *, deck: Deck) -> str:
     )
 
 
-def image_card(card: DeckCard) -> str:
+def _card_data(card: DeckCard) -> str:
+    """Data attributes the page script reads for the card viewer and for dragging between stacks."""
+    img = card_image(card)
+    return (
+        (f" data-img='{esc(img)}'" if img else "")
+        + f" data-set='{esc(card.set_code.upper())} {esc(card.collector_number)}'"
+        f" data-type='{esc(' '.join(card.types))}'"
+    )
+
+
+def image_card(card: DeckCard, *, owned: dict[str, int] | None = None) -> str:
     img = card_image(card)
     body = (
         f"<img src='{esc(img)}' alt='{esc(card.name)}' loading='lazy'>"
@@ -452,12 +481,15 @@ def image_card(card: DeckCard) -> str:
     if card.game_changer:
         extra += "<span class='corner gc' title='Game changer'></span>"
     return (
-        f"<div class='c' data-name='{esc(card.name.lower())}' title='{esc(card.name)}'>{body}{qty}{extra}"
-        f"{_finish_badge(card)}</div>"
+        f"<div class='c' data-name='{esc(card.name.lower())}' data-card='{esc(card.name)}'{_card_data(card)} "
+        f"title='{esc(card.name)}' tabindex='0' role='button'>{body}{qty}{extra}"
+        f"{_finish_badge(card)}{_owned_dot(card, owned)}</div>"
     )
 
 
-def cards_html(deck: Deck, *, view: str, group: str, sort: str, q: str, own: bool) -> str:
+def cards_html(
+    deck: Deck, *, view: str, group: str, sort: str, q: str, own: bool, owned: dict[str, int] | None = None
+) -> str:
     groups = group_cards(deck, group, sort, q)
     if not groups:
         return "<section class='panel'><p class='muted'>No cards match the filter.</p></section>"
@@ -482,11 +514,21 @@ def cards_html(deck: Deck, *, view: str, group: str, sort: str, q: str, own: boo
             f"<div class='meta'>Qty: {qty}" + (f" · Price: {money(price)}" if price else "") + "</div></div>"
         )
         if view == "text":
-            body = "<ul class='plain rows'>" + "".join(text_row(c, deck=deck) for c in cards) + "</ul>"
+            body = (
+                "<ul class='plain rows'>"
+                + "".join(text_row(c, deck=deck, owned=owned) for c in cards)
+                + "</ul>"
+            )
         else:
-            body = "<div class='cards'>" + "".join(image_card(c) for c in cards) + "</div>"
+            body = "<div class='cards'>" + "".join(image_card(c, owned=owned) for c in cards) + "</div>"
         sections.append(f"<section class='stack' data-group='{esc(name)}'>{head}{body}</section>")
-    return f"<div class='deckview {esc(view)}' id='cards'>{''.join(sections)}</div>"
+    # data-own and data-group let deck.js offer drag-and-drop between categories on the member's
+    # own deck (the drops become one proposal, applied from the review page like every other edit).
+    droppable = " data-own='1'" if own and group == "category" else ""
+    return (
+        f"<div class='deckview {esc(view)}' id='cards' data-deck='{esc(deck.id)}'{droppable}>"
+        f"{''.join(sections)}</div>"
+    )
 
 
 def _bar(parts: dict[str, float], *, label: str) -> str:
@@ -626,6 +668,7 @@ def deck_page_html(
     sort: str,
     q: str,
     notice: str = "",
+    owned: dict[str, int] | None = None,
 ) -> str:
     view = view if view in VIEWS else "text"
     group = group if group in GROUPS else "category"
@@ -634,7 +677,7 @@ def deck_page_html(
         banner_html(deck, stats, own=own, csrf=csrf, writes_enabled=writes_enabled)
         + notice
         + toolbar_html(deck, own=own, view=view, group=group, sort=sort, q=q)
-        + cards_html(deck, view=view, group=group, sort=sort, q=q, own=own)
+        + cards_html(deck, view=view, group=group, sort=sort, q=q, own=own, owned=owned)
         + stats_panel_html(deck, stats)
         + description_html(deck)
     )
@@ -650,7 +693,9 @@ def colour_bar_html(colors: dict[str, Any] | None) -> str:
     return _bar(parts, label="Colour identity") if parts else "<div class='cbar empty'></div>"
 
 
-def deck_card_html(d: dict[str, Any], *, cover: dict[str, Any] | None, selected: bool) -> str:
+def deck_card_html(
+    d: dict[str, Any], *, cover: dict[str, Any] | None, selected: bool, show_owner: bool = False
+) -> str:
     did = esc(d["id"])
     art = image_url((cover or {}).get("scryfall_uid"), "art_crop")
     style = f" style=\"background-image:url('{esc(art)}')\"" if art else ""
@@ -670,6 +715,15 @@ def deck_card_html(d: dict[str, Any], *, cover: dict[str, Any] | None, selected:
     )
     initial = esc((d.get("name") or "?")[:1].upper())
     size = d.get("size")
+    sub_bits = []
+    if show_owner and d.get("owner"):
+        sub_bits.append(f"by {d['owner']}")
+    elif d.get("folder"):
+        sub_bits.append(str(d["folder"]))
+    if d.get("views") and show_owner:
+        sub_bits.append(f"{d['views']:,} views")
+    if ago(d.get("updated_at") or ""):
+        sub_bits.append(ago(d.get("updated_at") or ""))
     return (
         f"<li class='deck{' selected' if selected else ''}'><a href='/decks/{did}'>"
         f"<span class='thumb{' noart' if not art else ''}'{style}><span class='ini'>{initial}</span>"
@@ -680,8 +734,7 @@ def deck_card_html(d: dict[str, Any], *, cover: dict[str, Any] | None, selected:
         f"{avatar_html(d.get('owner') or '', 'sm')}"
         f"<span class='text'><span class='name'>{esc(d.get('name'))}</span>"
         f"<span class='fmt'>{esc(line)}</span>"
-        f"<span class='sub'>{esc(d.get('folder') or '')}{' · ' if d.get('folder') else ''}"
-        f"{esc(ago(d.get('updated_at') or ''))}</span>"
+        f"<span class='sub'>{esc(' · '.join(sub_bits))}</span>"
         "</span></span>"
         f"<span class='tags'>{tags_html}</span></a></li>"
     )
@@ -694,6 +747,7 @@ def deck_list_html(
     selected: str | None = None,
     q: str = "",
     view: str = "grid",
+    show_owner: bool = False,
 ) -> str:
     if not decks:
         return (
@@ -706,6 +760,7 @@ def deck_list_html(
             d,
             cover=(covers or {}).get(str(d["id"])),
             selected=bool(selected and str(d["id"]) == str(selected)),
+            show_owner=show_owner,
         )
         for d in decks
     )
@@ -742,10 +797,19 @@ def deck_list_controls_html(
 
 DECK_CSS = """
 /* deck banner (cardBanner / deckHeaderInfo) */
-.banner{position:relative;margin:0 -1rem 1rem;background:var(--surface-2) center 30%/cover no-repeat;
-  color:#fff;overflow:hidden}
+.banner{position:relative;margin:0 -1rem 1rem;color:#fff;isolation:isolate;z-index:2}
+/* the toolbar below is positioned too; while a banner menu is open the banner must win */
+.banner:has(details[open]){z-index:6}
+/* no featured art: no empty grey band on phones */
+@media (max-width:600px){ .banner.noart .strip{height:0} }
+/* the blurred art sits on a pseudo-element clipped to the banner, so the banner itself can stay
+   overflow:visible and its More menu is never cut off */
+.banner::before{content:'';position:absolute;inset:0;z-index:-1;background:var(--surface-2) var(--art,
+  none) center 30%/cover no-repeat;
+  border-radius:0;overflow:hidden}
 .banner .shade{background:linear-gradient(112deg,var(--banner-a),var(--banner-a) 25%,var(--banner-b) 76%,
   var(--banner-a));backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);padding:1rem}
+.banner .controls details.dd .menu{z-index:40}
 .banner .content{display:flex;justify-content:space-between;gap:1rem;max-width:2300px;margin:0 auto}
 .banner .info{min-width:0;flex:1}
 .banner h1.deckname{display:flex;align-items:center;gap:.5rem;margin:0 0 .5rem;font-size:28px;
@@ -777,7 +841,8 @@ DECK_CSS = """
 @media (max-width:600px){
   .banner .shade{padding:0}
   .banner .content{flex-direction:column;gap:0}
-  .banner .strip{display:block;height:110px;background:var(--surface-2) center 30%/cover no-repeat}
+  .banner .strip{display:block;height:110px;background:var(--surface-2) var(--art,
+    none) center 30%/cover no-repeat}
   .banner .info{padding:0 1rem 1rem}
   .banner h1.deckname{font-size:24px;margin-top:.5rem}
   .banner .row{font-size:13px}
@@ -789,22 +854,27 @@ DECK_CSS = """
 }
 
 /* toolbar panel (filterBar) */
-.toolbar{padding:.5rem 1rem 1rem}
-.toolbar .controls{display:grid;grid-template-columns:auto 1fr auto;gap:1rem;align-items:end}
-.toolbar .views{display:grid;grid-template-columns:repeat(3,minmax(140px,1fr));gap:.5rem 1rem}
+.toolbar{padding:.5rem 1rem 1rem;position:relative;z-index:1}
+.toolbar .controls{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,2fr);gap:1rem;align-items:end}
+.toolbar .controls > form.views:only-child{grid-column:1 / -1}
+.toolbar form.quick{margin:0} .toolbar .quickrow{display:flex;gap:.5rem}
+.toolbar .quickrow input{min-width:0;flex:1}
+.toolbar .quickrow button{margin:0;flex:none}
+.toolbar .views{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) minmax(10rem,1.4fr);
+  gap:.5rem 1rem;margin:0}
+.toolbar .views .field{margin:0}
 .field .sel{position:relative;display:block}
 .field .sel > svg{position:absolute;left:.75rem;top:50%;transform:translateY(-50%);color:var(--orange);
   pointer-events:none}
 .field .sel select{padding-left:2.1rem}
 .field .search{margin:0}
-.toolbar .quick{display:flex;gap:.5rem}
-.toolbar .quick input{min-width:12rem}
 .toolbar .apply{margin-top:.5rem}
-@media (max-width:1000px){ .toolbar .controls{grid-template-columns:1fr 1fr}
-  .toolbar .filter{grid-column:1 / -1} }
-@media (max-width:600px){ .toolbar .controls{grid-template-columns:1fr}
-  .toolbar .views{grid-template-columns:1fr 1fr}
-  .toolbar .quick{flex-direction:column} }
+@media (max-width:1200px){ .toolbar .controls{grid-template-columns:1fr}
+  .toolbar .views{grid-template-columns:repeat(3,minmax(0,1fr))} .toolbar .filter{grid-column:1 / -1} }
+@media (max-width:600px){ .toolbar{padding:.5rem .75rem .75rem}
+  .toolbar .views{grid-template-columns:1fr 1fr} .toolbar .views .field:nth-child(3){grid-column:1 / -1}
+  .toolbar .quickrow button span{display:none} .toolbar .quickrow button{width:var(--ctl);padding:0;
+    justify-content:center} }
 
 /* category (stack) headers */
 .stackhead{padding-top:.5rem;margin-bottom:.25rem}
@@ -849,6 +919,9 @@ ul.rows .price{font-size:.86rem;color:var(--text-muted);text-align:right;font-va
   font-size:10px;font-weight:900;background:linear-gradient(135deg,#f6d365,#b7e3ff 50%,#f6a5c0);
   color:#111;flex:none}
 .tagdot{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--orange);flex:none}
+.owned{display:inline-block;width:9px;height:9px;border-radius:50%;background:#1ebb6c;flex:none;
+  box-shadow:0 0 0 2px var(--bg)}
+.deckview .c .owned{position:absolute;left:8px;bottom:8px;width:12px;height:12px;box-shadow:0 0 0 2px #fff}
 ul.rows .hover{display:none;position:absolute;left:2rem;top:30px;z-index:12;width:223px;aspect-ratio:5/7;
   border-radius:4.5%;overflow:hidden;box-shadow:var(--shadow);background:var(--surface-2);pointer-events:none}
 ul.rows .hover img{width:100%;height:100%;display:block}
@@ -876,7 +949,47 @@ ul.rows .hover img{width:100%;height:100%;display:block}
 .deckview .c .ph .ty{color:var(--text-muted);font-size:.72rem}
 .deckview.stacks .cards{display:flex;flex-direction:column}
 .deckview.stacks .c + .c{margin-top:-123%}
-.deckview.stacks .c:hover ~ .c{transform:translateY(90%)}
+.deckview .c{cursor:pointer}
+.deckview .c:focus-visible{outline:3px solid var(--orange);outline-offset:2px}
+/* a stack fans out below the card under the pointer (Archidekt's hover); on touch screens a tap on the
+   stack toggles the fan instead, and a tap on a fanned card opens it */
+@media (hover:hover){ .deckview.stacks .c:hover ~ .c{transform:translateY(90%)} }
+.deckview.stacks .cards.fanned .c + .c{margin-top:-108%}
+.deckview.stacks .cards.fanned .c{transform:none}
+.deckview .c.dragging{opacity:.4}
+.deckview .stack.dropping{outline:3px dashed var(--orange);outline-offset:4px;border-radius:5px}
+.deckview[data-own] .stackhead .meta::after{content:' · drag cards here to recategorise';
+  color:var(--text-muted)}
+@media (hover:none){ .deckview[data-own] .stackhead .meta::after{content:' · hold a card to move it'} }
+/* card viewer: a tapped card, large, with what can be done with it */
+.cardview{position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;
+  background:rgba(0,0,0,.72);padding:1rem}
+.cardview.open{display:flex}
+.cardview .box{display:grid;grid-template-columns:minmax(0,1fr) minmax(14rem,18rem);gap:1rem;max-width:44rem;
+  width:100%;
+  max-height:100%;background:var(--surface);border-radius:var(--radius-panel);padding:1rem;box-shadow:var(--shadow);overflow:auto}
+.cardview img{width:100%;aspect-ratio:5/7;border-radius:4.5%;object-fit:cover;background:var(--surface-2)}
+.cardview .ph{display:flex;align-items:center;justify-content:center;aspect-ratio:5/7;border-radius:4.5%;
+  background:var(--surface-2);color:var(--text-muted);padding:1rem;text-align:center;font-weight:700}
+.cardview h3{margin:0 0 .25rem;font-size:1.2rem}
+.cardview .meta{color:var(--text-muted);font-size:.9rem;margin:0 0 .75rem}
+.cardview .acts{display:flex;flex-direction:column;gap:.5rem}
+.cardview .acts .btn,.cardview .acts button{margin:0;width:100%}
+.cardview .close{position:absolute;top:.75rem;right:.75rem}
+@media (max-width:600px){ .cardview{padding:0;align-items:flex-end}
+  .cardview .box{grid-template-columns:1fr;max-height:92vh;
+    border-radius:var(--radius-panel) var(--radius-panel) 0 0;
+    padding:.75rem .75rem calc(.75rem + env(safe-area-inset-bottom))}
+  .cardview img,.cardview .ph{max-width:52vw;margin:0 auto} }
+/* pending category moves (own deck, stacks or grid): a bar like the editor's */
+.movebar{position:sticky;bottom:0;z-index:20;display:none;align-items:center;gap:.5rem;flex-wrap:wrap;
+  background:var(--toolbar-bg);color:var(--toolbar-text);padding:.5rem 1rem;margin:1rem -1rem 0;
+  box-shadow:0 -2px 6px rgba(0,0,0,.35)}
+.movebar.show{display:flex}
+.movebar button{margin:0} .movebar .count{opacity:.85}
+.movebar .status{margin:0;flex-basis:100%} .movebar .status:empty{display:none}
+@media (max-width:900px){ .has-tabbar .movebar{position:fixed;left:0;right:0;
+  bottom:calc(56px + env(safe-area-inset-bottom));margin:0} }
 .deckview.grid .cards{display:grid;grid-template-columns:repeat(5,1fr);gap:1rem}
 @media (max-width:1500px){ .deckview.grid .cards{grid-template-columns:repeat(4,1fr)} }
 @media (max-width:1200px){ .deckview.grid .cards{grid-template-columns:repeat(3,1fr)} }
