@@ -103,15 +103,17 @@ def test_tool_surface_includes_deck_and_proxied_research_tools(clients):
             "parse_deck_export", "propose_new_deck", "propose_deck_changes", "list_my_proposals",
             "get_proposal", "apply_proposal",
         } <= names, names  # fmt: skip
-        # research tools proxied from Mystic Forge (allow-list), nothing from its block-list
+        # research tools proxied from Mystic Forge (allow-list), nothing from its block-list, and none
+        # of the duplicates a gateway tool owns (one tool per job)
         assert {
             "scryfall_named",
-            "goldfish_run",
+            "goldfish_annotate",
             "validate_decklist",
-            "archidekt_deck",
+            "precon_search",
             "rules_search",
         } <= names
         assert not names & {"goldfish_start", "goldfish_state", "watchlist_list", "price_history"}, names
+        assert not names & {"goldfish_run", "goldfish_ab", "archidekt_deck", "precon_diff"}, names
 
     run(go())
 

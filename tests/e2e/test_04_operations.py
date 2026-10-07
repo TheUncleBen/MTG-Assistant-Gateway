@@ -121,12 +121,14 @@ print(len(tools)); print(','.join(sorted(t['name'] for t in tools)))
     names = out[2].split(",")
     for expected in (
         "scryfall_search",
-        "goldfish_run",
+        "goldfish_annotate",
         "rules_search",
         "validate_decklist",
-        "archidekt_deck",
+        "precon_search",
     ):
         assert expected in names
+    for hidden in ("goldfish_run", "archidekt_deck"):  # a gateway tool owns the job
+        assert hidden not in names
 
 
 def test_mystic_forge_is_not_reachable_through_the_edge(env: Env):
