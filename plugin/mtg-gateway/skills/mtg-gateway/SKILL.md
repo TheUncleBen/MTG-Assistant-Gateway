@@ -157,11 +157,15 @@ cannot value interaction, removal, politics or an opponent's deck.
    `goldfish_odds`. It is exact maths, no simulation.
 2. Before a simulation, run `goldfish_annotate` on the deck's `decklist_text`.
    It reports which cards the engine models and which it cannot.
-3. Run `run_deck_report` (the one simulation tool: it validates the deck,
-   plays `games` goldfish games and stores the report for the user). To
-   compare two versions of a deck, run a report of each with the same `games`
-   and compare the two; the gateway's proposals and snapshots give the
-   versions.
+3. Run `run_deck_report` (the one simulation tool for a deck: it validates
+   the deck, plays `games` goldfish games and stores the report for the
+   user). Pass what `goldfish_annotate` asked for as `options.annotations`;
+   `options` also takes `combos`, `seed`, `until_turn`, `opponents` and
+   `mulligan`. To compare two versions of a deck, call `compare_decks` with
+   `simulate: true` (a snapshot id or decklist text on either side): both are
+   played game for game under the same seeds and the deltas come back with
+   confidence intervals and significance, which two separate reports cannot
+   give.
 4. Report, every time:
    - the number of games, turns simulated and mulligan settings from the
      report's `goldfish` section;
@@ -175,7 +179,8 @@ cannot value interaction, removal, politics or an opponent's deck.
 Mystic Forge's own stored reports and step-by-step games (`goldfish_report`,
 `goldfish_start`, `goldfish_step`, `goldfish_state`), watchlists and price
 history are switched off on this gateway, and so are its `goldfish_run` and
-`goldfish_ab` (the report owns the simulation). Do not offer them.
+`goldfish_ab` (`run_deck_report` owns the simulation of one deck,
+`compare_decks` the paired A/B). Do not offer them.
 
 ## Changing or creating a deck: propose, review, apply
 

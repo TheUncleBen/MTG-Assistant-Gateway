@@ -176,6 +176,7 @@ def compute(deck: Deck) -> dict[str, Any]:
             elif status != "legal":
                 problems.append({"name": c.name, "status": status})
 
+    commanders = [c for c in cards if "Commander" in c.categories]
     return {
         "card_count": qty,
         "distinct": len({c.name for c in cards}),
@@ -197,10 +198,75 @@ def compute(deck: Deck) -> dict[str, Any]:
         "extra_turns": sum(c.quantity for c in cards if c.extra_turns),
         "mass_land_denial": sum(c.quantity for c in cards if c.mass_land_denial),
         "salt_total": _round(sum(c.salt * c.quantity for c in cards if c.salt is not None)),
-        "commanders": [c.name for c in cards if "Commander" in c.categories],
+        "commanders": [c.name for c in commanders],
         "colour_identity": colour_identity(cards),
         "bracket_estimate": bracket_estimate(cards, deck.format),
         "archidekt_bracket": deck.edh_bracket,
+        "checks": deck_checks(deck, cards, commanders, qty),
+    }
+
+
+_SINGLETON_FORMATS = {"commander", "brawl", "oathbreaker"}
+_DECK_SIZES = {"commander": 100, "brawl": 100, "oathbreaker": 60}
+_ANY_NUMBER = "any number of cards named"
+
+
+def _can_command(card: DeckCard) -> bool:
+    legendary = any(t.lower() == "legendary" for t in card.supertypes + card.types)
+    creature = any(t.lower() == "creature" for t in card.types)
+    return (legendary and creature) or "can be your commander" in card.oracle_text.lower()
+
+
+def deck_checks(deck: Deck, cards: list[DeckCard], commanders: list[DeckCard], qty: int) -> dict[str, Any]:
+    """Structural checks from the deck's own data: deck size for the format, commander zone
+    (count and whether each card may command), colour identity against the commanders,
+    singleton rule, uncategorised rows. Each entry says what was checked; ``problems`` lists
+    the failures in plain words. Card legality by format is ``legality_problems``."""
+    problems: list[str] = []
+    expected = _DECK_SIZES.get(deck.format or "")
+    size: dict[str, Any] = {"actual": qty, "expected": expected, "ok": expected is None or qty == expected}
+    if not size["ok"]:
+        problems.append(f"deck has {qty} cards; {deck.format} wants {expected}")
+    zone: dict[str, Any] = {"count": sum(c.quantity for c in commanders), "ok": True}
+    if deck.format in _SINGLETON_FORMATS:
+        if not commanders:
+            zone["ok"] = False
+            problems.append("no card in the Commander category")
+        elif zone["count"] > 2:
+            zone["ok"] = False
+            problems.append(f"{zone['count']} cards in the Commander category (expected 1 or 2)")
+        not_commanders = [c.name for c in commanders if not _can_command(c)]
+        if not_commanders:
+            zone["ok"] = False
+            zone["cannot_command"] = not_commanders
+            problems.append("not a legal commander: " + ", ".join(not_commanders))
+    identity: list[dict[str, Any]] = []
+    if commanders and deck.format in _SINGLETON_FORMATS:
+        allowed = {x for c in commanders for x in c.color_identity}
+        for c in cards:
+            outside = sorted(set(c.color_identity) - allowed)
+            if outside and c.color_identity:
+                identity.append({"name": c.name, "outside": outside})
+        if identity:
+            problems.append(f"{len(identity)} card(s) outside the commander's colour identity")
+    singleton: list[dict[str, Any]] = []
+    if deck.format in _SINGLETON_FORMATS:
+        for c in cards:
+            if c.quantity > 1 and not is_land(c) and _ANY_NUMBER not in c.oracle_text.lower():
+                singleton.append({"name": c.name, "quantity": c.quantity})
+            elif c.quantity > 1 and is_land(c) and "basic" not in [t.lower() for t in c.supertypes]:
+                singleton.append({"name": c.name, "quantity": c.quantity})
+        if singleton:
+            problems.append(f"{len(singleton)} card(s) with more than one copy")
+    uncategorised = sorted({c.name for c in cards if not c.categories})
+    return {
+        "deck_size": size,
+        "commander_zone": zone,
+        "colour_identity_violations": identity,
+        "singleton_violations": singleton,
+        "uncategorised": uncategorised,
+        "problems": problems,
+        "ok": not problems,
     }
 
 
@@ -217,15 +283,59 @@ def _counts(deck: Deck | dict[str, int]) -> dict[str, int]:
     return deck.counts_by_name() if isinstance(deck, Deck) else dict(deck)
 
 
+_BASIC_KEYS = {
+    n.casefold()
+    for n in (
+        "Plains", "Island", "Swamp", "Mountain", "Forest", "Wastes",
+        "Snow-Covered Plains", "Snow-Covered Island", "Snow-Covered Swamp",
+        "Snow-Covered Mountain", "Snow-Covered Forest", "Snow-Covered Wastes",
+    )
+}  # fmt: skip
+
+
+def _match_key(name: str) -> str:
+    return name.split(" // ", 1)[0].strip().casefold()
+
+
 def compare(before: Deck | dict[str, int], after: Deck | dict[str, int]) -> dict[str, Any]:
     """Card-level differences between two decks (or name -> count maps): ``added``, ``removed``
     and ``changed`` rows, and when both sides are decks, ``stats_delta`` (after minus before)
     for the numeric statistics."""
     a, b = _counts(before), _counts(after)
-    added = [{"name": n, "quantity": b[n]} for n in sorted(b) if n not in a]
-    removed = [{"name": n, "quantity": a[n]} for n in sorted(a) if n not in b]
-    changed = [{"name": n, "before": a[n], "after": b[n]} for n in sorted(a) if n in b and a[n] != b[n]]
+    # Names are matched case-insensitively and by front face, so "Delver of Secrets" in one list
+    # equals "Delver of Secrets // Insectile Aberration" in the other; rows keep each side's spelling.
+    ka = {_match_key(n): n for n in a}
+    kb = {_match_key(n): n for n in b}
+    added = [{"name": kb[k], "quantity": b[kb[k]]} for k in sorted(kb) if k not in ka]
+    removed = [{"name": ka[k], "quantity": a[ka[k]]} for k in sorted(ka) if k not in kb]
+    changed = [
+        {"name": kb[k], "before": a[ka[k]], "after": b[kb[k]]}
+        for k in sorted(ka)
+        if k in kb and a[ka[k]] != b[kb[k]]
+    ]
     out: dict[str, Any] = {"added": added, "removed": removed, "changed": changed}
+    basic = lambda row: _match_key(row["name"]) in _BASIC_KEYS  # noqa: E731
+    before_size, after_size = sum(a.values()), sum(b.values())
+    cut, add = [r for r in removed if not basic(r)], [r for r in added if not basic(r)]
+    pct = lambda n: round(n / before_size * 100) if before_size else 0  # noqa: E731
+    out["summary"] = {
+        "before_size": before_size,
+        "after_size": after_size,
+        "cut": len(cut),
+        "added": len(add),
+        "kept": len([k for k in ka if k in kb and k not in _BASIC_KEYS]),
+        "cut_pct": pct(len(cut)),
+        "added_pct": pct(len(add)),
+        "basic_land_changes": [
+            {
+                "name": (kb.get(k) or ka[k]),
+                "before": a.get(ka.get(k, ""), 0),
+                "after": b.get(kb.get(k, ""), 0),
+            }
+            for k in sorted(set(ka) | set(kb))
+            if k in _BASIC_KEYS and a.get(ka.get(k, ""), 0) != b.get(kb.get(k, ""), 0)
+        ],
+    }
     if isinstance(before, Deck) and isinstance(after, Deck):
         sb, sa = compute(before), compute(after)
         delta: dict[str, float | int | None] = {}

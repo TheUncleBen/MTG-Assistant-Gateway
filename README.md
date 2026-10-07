@@ -100,6 +100,7 @@ identity provider you control (Authentik, Keycloak, Authelia, ...).
 | [API.md](docs/API.md) | Contributors and app builders | The JSON API and the companion pages: authentication, every endpoint, proposal kinds, the page routes the Android app wraps |
 | [SCANNING.md](docs/SCANNING.md) | Users and operators | Turning a pile of physical cards into a decklist, a deck or your collection with your phone camera or a photo |
 | [USING.md](docs/USING.md) | Users | What the pages do: home, decks, search, scan, collection, proposals and history, the guide; the same text the in-app Guide shows |
+| [CAPABILITIES.md](docs/CAPABILITIES.md) | Everyone | The capability map: every assistant tool and who owns each job, every hand action on the pages and in the app, and how the two paths relate |
 | [ANDROID.md](docs/ANDROID.md) | Users and operators | The Android app: getting it from your gateway, the phone-camera scan screen, fold postures, App Links, building, signing and distributing it without an app store |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Everyone | How the pieces fit, what you can swap, how sign-in and deck edits work, the security model |
 | [DEPLOY-COMPOSE.md](docs/DEPLOY-COMPOSE.md) | Operators | A full deploy on one machine with Docker Compose |
@@ -145,17 +146,21 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
   curve, colour pips against mana sources, types, rarities, lands, average
   mana value, price total, format legality problems, salt, game changers,
   tutors, extra turns and mass land denial from Archidekt's own card data,
-  plus a Commander bracket estimate (2 to 4) from those flags. It is an
+  plus a Commander bracket estimate (2 to 4) from those flags and the
+  structural checks (deck size for the format, commander zone, colour
+  identity, singleton rule, uncategorised rows). It is an
   estimate, not an official bracket, and the tools say so.
 - **Deck reports and history.** `run_deck_report` stores the statistics
   together with a decklist validation and a goldfish simulation (when Mystic
-  Forge is up) so a deck's numbers can be followed over time with
+  Forge is up; the simulator's options such as annotations, seed, turns,
+  opponents and mulligan rules pass through) so a deck's numbers can be followed over time with
   `list_deck_reports` and `get_deck_report`, or on the `/history` page next
   to the deck's proposals and snapshots.
 - **Compare decks.** `compare_decks` lists the cards added, removed and
   changed between any two of: an Archidekt deck, a snapshot
   (`get_snapshot` shows one in full) or a pasted list, with the change in
-  the statistics.
+  the statistics, a precon-style summary (cut and added percentages, basic
+  lands apart) and, on request, a paired goldfish A/B of the two.
 - **Safe writes.** Every edit starts as a proposal:
   - `propose_deck_changes` (edit a deck) and `propose_new_deck` (build one
     from a card list, a pasted list or a CSV) save the exact diff and a
@@ -243,13 +248,14 @@ assistant never has to guess which one to use:
 
 | Job | The one tool | Hidden duplicates |
 | --- | --- | --- |
-| Read any Archidekt deck, or export it as a list | `get_deck` | `archidekt_deck`, `archidekt_export` |
+| Read any Archidekt deck (rules text on request), or export it in Archidekt's import syntax | `get_deck` | `archidekt_deck`, `archidekt_export` |
 | List the signed-in member's decks | `list_my_decks` | `archidekt_user_decks` |
 | List another user's public decks | `archidekt_user` | |
-| Legality, bracket, curve, colours and price of a deck | `deck_stats` | `validate_archidekt_deck` |
+| Legality, structural checks, bracket, curve, colours and price of a deck | `deck_stats` | `validate_archidekt_deck` |
 | Legality of a pasted list that is not a deck yet | `validate_decklist` | |
-| Cuts and adds between two decks, a precon included | `compare_decks` | `precon_diff` |
-| Goldfish simulation (and comparing two versions: run it twice) | `run_deck_report` | `goldfish_run`, `goldfish_ab` |
+| Cuts and adds between two decks, a precon included, with the summary and basics apart | `compare_decks` | `precon_diff` |
+| Paired goldfish A/B of two decks (same seeds game for game, deltas with confidence intervals) | `compare_decks` with `simulate` | `goldfish_ab` |
+| Goldfish simulation of one deck, stored, with the simulator's options | `run_deck_report` | `goldfish_run` |
 | Draw odds without a simulation, and what the engine models | `goldfish_odds`, `goldfish_annotate` | |
 | Card names from photos or text to exact printings | `resolve_cards` | |
 

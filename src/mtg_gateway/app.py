@@ -72,7 +72,7 @@ from .companion import add_companion_routes
 from .config import Settings
 from .db import Database
 from .decklist import DecklistError, ListCard, parse_decklist, to_text
-from .decks import DeckError, DeckService, _clean_deck_id, current_client, scopes_allow_writes
+from .decks import DeckError, DeckService, _clean_deck_id, current_client, deck_to_text, scopes_allow_writes
 from .guide import add_guide_routes
 from .home import add_home_routes
 from .membership import Membership, MembershipChecker
@@ -552,16 +552,17 @@ def build_mcp_server(state: AppState) -> MCPServer:
         name="get_my_deck",
         title="Get one of my decks",
         description=(
-            "Fetch a deck from the linked Archidekt account by its numeric deck id (from the deck URL)."
+            "Fetch a deck from the linked Archidekt account by its numeric deck id (from the deck URL). "
+            "Same fields and include_text option as get_deck."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )
-    async def get_my_deck(deck_id: str) -> dict[str, object]:
+    async def get_my_deck(deck_id: str, include_text: bool = False) -> dict[str, object]:
         try:
             deck = await state.decks.get_own_deck(_sub(), deck_id)
         except DeckError as exc:
             return _tool_error(exc)
-        return deck_out(deck)
+        return deck_out(deck, include_text=bool(include_text))
 
     @server.tool(
         name="get_deck",
@@ -569,18 +570,21 @@ def build_mcp_server(state: AppState) -> MCPServer:
         description=(
             "Fetch any public or unlisted Archidekt deck by id or URL, without needing a linked account. "
             "If it is private and you have linked your account, your own private decks are fetched too. "
-            "Returns the cards and a decklist_text you can hand to validate_decklist, goldfish_annotate or "
-            "compare_decks, or give the user as an export. This is the one tool that reads an Archidekt "
-            "deck; nothing else fetches or exports one."
+            "Returns the cards (set, collector number, finish, categories, in_deck, oracle fields), "
+            "decklist_text (plain, for validate_decklist, goldfish_annotate or compare_decks), "
+            "sideboard_text and archidekt_text (Archidekt's own import syntax with finishes, "
+            "categories and labels, which pastes back into Archidekt as the same deck). include_text=true "
+            "adds each card's rules text (oracle_text): set it whenever you will discuss what cards do. "
+            "This is the one tool that reads or exports an Archidekt deck."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )
-    async def get_deck(deck_ref: str) -> dict[str, object]:
+    async def get_deck(deck_ref: str, include_text: bool = False) -> dict[str, object]:
         try:
             deck = await state.decks.get_any_deck(_sub(), deck_ref)
         except DeckError as exc:
             return _tool_error(exc)
-        return deck_out(deck)
+        return deck_out(deck, include_text=bool(include_text))
 
     @server.tool(
         name="parse_decklist",
@@ -869,11 +873,13 @@ def build_mcp_server(state: AppState) -> MCPServer:
         description=(
             "Mana curve, colour pips against mana sources, type and rarity counts, average mana value, price "
             "total, format legality problems, game changers, tutors, "
-            "extra turns, mass land denial, salt and a "
-            "Commander bracket ESTIMATE, all from Archidekt's own card data in one read (no Mystic Forge "
-            "call). deck_ref is an Archidekt id or URL, or a snapshot id. Say 'estimate' when you quote the "
-            "bracket. This is the one tool for an Archidekt deck's legality and structure; validate_decklist "
-            "is for pasted lists only."
+            "extra turns, mass land denial, salt, a "
+            "Commander bracket ESTIMATE and structural checks (deck size for the format, commander zone "
+            "and whether each card may command, colour identity violations, singleton violations, "
+            "uncategorised rows: stats.checks), all from Archidekt's own card data in one read (no Mystic "
+            "Forge call). deck_ref is an Archidekt id or URL, or a snapshot id. Say 'estimate' when you "
+            "quote the bracket. This is the one tool for an Archidekt deck's legality and structure; "
+            "validate_decklist is for pasted lists only."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )
@@ -904,30 +910,43 @@ def build_mcp_server(state: AppState) -> MCPServer:
         name="compare_decks",
         title="Compare two decks",
         description=(
-            "Cards added, removed and changed between two decks, plus the difference in their statistics. "
+            "Cards added, removed and changed between two decks (names matched by front face, case "
+            "aside), a summary with cut and added percentages and the basic-land changes apart, plus the "
+            "difference in their statistics. "
             "Each of a and b is an Archidekt deck id or URL, a snapshot id from list_snapshots, or "
-            "decklist text (one card per line). Use it for 'what changed since this "
-            "snapshot', 'my deck versus the EDHREC average "
-            "deck' or 'this precon versus my build'. Does not touch Archidekt beyond reading the decks. This "
-            "is the one tool for deck differences, precon upgrades included."
+            "decklist text (one card per line, such as precon_decklist's). Use it for 'what changed since "
+            "this snapshot', 'my deck versus the EDHREC average deck' or 'this precon versus my build'. "
+            "simulate=true adds a paired goldfish A/B from the research service (both decks played game "
+            "for game under the same seeds; per-metric deltas with confidence intervals and significance; "
+            "games, default 300; options: annotations, annotations_a, annotations_b, combos, seed, "
+            "until_turn, allow_different_commanders) as goldfish_ab, not stored. Does not touch Archidekt "
+            "beyond reading the decks. This is the one tool for deck differences, precon upgrades and "
+            "A/B simulations included."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )
-    async def compare_decks(a: str, b: str) -> dict[str, object]:
-        async def load(ref: str) -> Any:
+    async def compare_decks(
+        a: str,
+        b: str,
+        simulate: bool = False,
+        games: int = 300,
+        options: dict[str, Any] | None = None,
+    ) -> dict[str, object]:
+        async def load(ref: str) -> tuple[Any, str]:
             ref = str(ref or "").strip()
             snap = _own_snapshot(_sub(), ref)
             if snap is not None:
-                return snap
+                return snap, deck_to_text(snap)
             try:
                 deck_id = _clean_deck_id(ref)
             except DeckError:
                 cards = parse_decklist(ref)
-                return {c.name: c.quantity for c in cards if c.zone == "main"}
-            return await state.decks.get_any_deck(_sub(), deck_id)
+                return {c.name: c.quantity for c in cards if c.zone == "main"}, ref
+            deck = await state.decks.get_any_deck(_sub(), deck_id)
+            return deck, deck_to_text(deck)
 
         try:
-            deck_a, deck_b = await load(a), await load(b)
+            (deck_a, text_a), (deck_b, text_b) = await load(a), await load(b)
         except (DeckError, DecklistError) as exc:
             kind = exc.kind if isinstance(exc, DeckError) else "invalid"
             return {"ok": False, "error": kind, "message": str(exc)}
@@ -936,6 +955,16 @@ def build_mcp_server(state: AppState) -> MCPServer:
             out["a"] = deck_brief(deck_a)
         if not isinstance(deck_b, dict):
             out["b"] = deck_brief(deck_b)
+        if simulate:
+            try:
+                ab = await state.reports.ab(_sub(), text_a, text_b, games=games, options=options)
+            except DeckError as exc:
+                return _tool_error(exc)
+            out["goldfish_ab"] = ab or {
+                "ok": False,
+                "error": "unavailable",
+                "message": "the research service is not configured on this gateway",
+            }
         return out
 
     @server.tool(
@@ -948,15 +977,23 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "user (see list_deck_reports and the gateway's History "
             "page) so results can be compared over time. "
             "Reads the deck; changes nothing on Archidekt. A report of an unchanged deck within ten minutes "
-            "returns the existing one. This is the one tool that runs goldfish games; to compare two "
-            "versions, run a report of each. goldfish_odds (draw odds) and goldfish_annotate (card roles) "
-            "stay separate."
+            "returns the existing one (not when options are given). options passes the simulator's knobs "
+            "through: annotations (goldfish_annotate's output, for cards the engine cannot derive), combos "
+            "(lists of card names, or {cards, wins}), seed, until_turn (1-30), opponents (1-5), mulligan "
+            "(min_sources, max_sources, lands_only, free_first, min_real_lands). This is the one tool that "
+            "runs goldfish games of one deck; compare_decks with simulate=true is the paired A/B of two. "
+            "goldfish_odds (draw odds) and goldfish_annotate (card roles) stay separate."
         ),
         annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": True},
     )
-    async def run_deck_report(deck_ref: str, games: int = 300, simulate: bool = True) -> dict[str, object]:
+    async def run_deck_report(
+        deck_ref: str, games: int = 300, simulate: bool = True, options: dict[str, Any] | None = None
+    ) -> dict[str, object]:
         try:
-            return {"ok": True, **(await state.reports.run(_sub(), deck_ref, simulate=simulate, games=games))}
+            report = await state.reports.run(
+                _sub(), deck_ref, simulate=simulate, games=games, options=options
+            )
+            return {"ok": True, **report}
         except DeckError as exc:
             return _tool_error(exc)
 

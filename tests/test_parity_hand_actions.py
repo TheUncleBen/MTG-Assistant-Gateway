@@ -360,3 +360,152 @@ async def test_precons_page_lists_sets_and_filters(stack: Stack) -> None:
         assert stack.ark.calls.count(("GET", "/api/decks/precons/")) == 1
     finally:
         await b.aclose()
+
+
+# -- what the hidden duplicates had, the owners now carry ------------------------------------------
+
+
+class _RecordingMF:
+    """A research service that records what the gateway sends it."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict]] = []
+
+    async def call(self, name: str, arguments: dict, *, owner=None, internal: bool = False):
+        import mcp_types as types
+
+        self.calls.append((name, dict(arguments)))
+        return types.CallToolResult(content=[types.TextContent(type="text", text=f"# {name} ran")])
+
+
+def test_parse_deck_carries_rules_text_and_the_archidekt_import_syntax() -> None:
+    from pathlib import Path
+
+    from mtg_gateway.archidekt import FORMAT_NAMES, Deck, DeckCard, parse_deck
+    from mtg_gateway.decks import deck_to_archidekt_text
+
+    sample = Path(__file__).parent / "fixtures" / "live" / "archidekt_deck_sample.json"
+    deck = parse_deck(json.loads(sample.read_text(encoding="utf-8")))
+    assert all(c.oracle_text for c in deck.cards)  # the live payload has text for every card
+    text = deck_to_archidekt_text(deck)
+    assert "[Commander{top}]" in text and text.splitlines() == sorted(text.splitlines())
+
+    def card(name: str, qty: int, **over) -> DeckCard:
+        base = dict(
+            relation_id=None,
+            card_id=None,
+            name=name,
+            quantity=qty,
+            categories=[],
+            modifier="Normal",
+            set_code="",
+            collector_number="",
+        )
+        return DeckCard(**{**base, **over})  # fmt: skip
+
+    deck = Deck(
+        id="1", name="t", owner="o", updated_at="", raw={}, format_id=3, format=FORMAT_NAMES[3],
+        categories=[
+            {"name": "Commander", "isPremier": True, "includedInDeck": True},
+            {"name": "Maybeboard", "includedInDeck": False},
+        ],
+        cards=[
+            card("Sol Ring", 1, set_code="cmr", collector_number="1", modifier="Foil", categories=["Ramp"],
+                 label="Upgrade,#ff0000"),
+            card("Aesi, Tyrant of Gyre Strait", 1, categories=["Commander"], modifier="Etched"),
+            card("Opt", 2, categories=["Maybeboard"], label=",#656565"),  # Archidekt's colour-only label
+            card("Weird ^ Name [x]", 1, categories=["A,b"]),
+        ],
+    )  # fmt: skip
+    assert deck_to_archidekt_text(deck).splitlines() == [
+        "1x Aesi, Tyrant of Gyre Strait *E* [Commander{top}]",
+        "1x Sol Ring (cmr) 1 *F* [Ramp] ^Upgrade,#ff0000^",
+        "1x Weird Name [x] [A b]",
+        "2x Opt [Maybeboard{noDeck}{noPrice}]",
+    ]
+
+
+async def test_owner_tools_carry_what_the_hidden_duplicates_had(stack: Stack) -> None:
+    token = await mcp_token(stack.h)
+    gw = stack.h.app.state.gateway
+    # get_deck: rules text on request, Archidekt's import syntax always (archidekt_deck, archidekt_export)
+    plain = structured(await call(stack.h, token, "get_deck", {"deck_ref": "42"}))
+    assert plain["ok"] and all("oracle_text" not in c for c in plain["cards"])
+    assert "\n1x " in plain["archidekt_text"] and "[Commander{top}]" in plain["archidekt_text"]
+    full = structured(await call(stack.h, token, "get_deck", {"deck_ref": "42", "include_text": True}))
+    assert all("oracle_text" in c for c in full["cards"])
+    # deck_stats: the structural checks validate_archidekt_deck made
+    stats = structured(await call(stack.h, token, "deck_stats", {"deck_ref": "42"}))["stats"]
+    checks = stats["checks"]
+    assert set(checks) == {
+        "deck_size", "commander_zone", "colour_identity_violations", "singleton_violations",
+        "uncategorised", "problems", "ok",
+    }  # fmt: skip
+    assert checks["deck_size"]["actual"] == plain["card_count"] and checks["commander_zone"]["count"] == 1
+    # compare_decks: a precon-style summary with the basics apart (precon_diff)
+    cmp_ = structured(await call(stack.h, token, "compare_decks", {"a": "42", "b": "1 Sol Ring\n1 Opt"}))
+    assert cmp_["ok"] and set(cmp_["summary"]) == {
+        "before_size", "after_size", "cut", "added", "kept", "cut_pct", "added_pct", "basic_land_changes",
+    }  # fmt: skip
+    assert cmp_["summary"]["before_size"] == plain["card_count"]
+    # run_deck_report passes the simulator's knobs through (goldfish_run); unknown ones are refused
+    real = gw.reports.mf
+    rec = _RecordingMF()
+    gw.reports.mf = rec
+    try:
+        options = {
+            "seed": 7,
+            "until_turn": 8,
+            "opponents": 2,
+            "mulligan": {"min_sources": 2},
+            "annotations": [{"card": "Opt", "role": "cantrip"}],
+            "combos": [["Opt", "Sol Ring"]],
+        }
+        out = structured(
+            await call(stack.h, token, "run_deck_report", {"deck_ref": "42", "games": 10, "options": options})
+        )
+        assert out["ok"] and not out.get("reused"), out
+        name, args = next(c for c in rec.calls if c[0] == "goldfish_run")
+        assert args == {"deck": args["deck"], "n": 10, **options}
+        again = structured(
+            await call(stack.h, token, "run_deck_report", {"deck_ref": "42", "games": 10, "options": options})
+        )
+        assert not again.get("reused")  # options change the simulation: no ten-minute reuse
+        bad = structured(
+            await call(stack.h, token, "run_deck_report", {"deck_ref": "42", "options": {"nn": 5}})
+        )
+        assert bad == {"ok": False, "error": "invalid", "message": "unknown simulation option(s): nn"}
+        # compare_decks simulate=true is the paired A/B (goldfish_ab), with its own knobs, not stored
+        before = len(gw.reports.list("user-1"))
+        ab = structured(
+            await call(
+                stack.h,
+                token,
+                "compare_decks",
+                {"a": "42", "b": "1 Sol Ring\n1 Opt", "simulate": True, "games": 20,
+                 "options": {"allow_different_commanders": True, "annotations_b": [{"card": "Opt"}]}},
+            )
+        )  # fmt: skip
+        assert ab["ok"] and ab["goldfish_ab"]["ok"] and "goldfish_ab ran" in ab["goldfish_ab"]["text"]
+        name, args = rec.calls[-1]
+        assert name == "goldfish_ab"
+        assert args["deck_b"] == "1 Sol Ring\n1 Opt" and args["n"] == 20
+        assert args["allow_different_commanders"] is True and args["annotations_b"] == [{"card": "Opt"}]
+        assert "opponents" not in args
+        assert len(gw.reports.list("user-1")) == before  # an A/B is not a stored report
+        bad = structured(
+            await call(stack.h, token, "compare_decks", {"a": "42", "b": "1 Opt", "simulate": True,
+                                                       "options": {"opponents": 2}})
+        )  # fmt: skip
+        assert bad["error"] == "invalid" and "opponents" in bad["message"]
+    finally:
+        gw.reports.mf = real
+    # without the research service the A/B says so instead of failing the comparison
+    gw.reports.mf = None
+    try:
+        out = structured(
+            await call(stack.h, token, "compare_decks", {"a": "42", "b": "1 Opt", "simulate": True})
+        )
+        assert out["ok"] and out["goldfish_ab"]["error"] == "unavailable"
+    finally:
+        gw.reports.mf = real

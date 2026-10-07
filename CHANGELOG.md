@@ -27,6 +27,17 @@ one owner per capability among the assistant's tools.
 - Collection: a details menu per row sets finish, condition, language and price paid.
 - Precons page: every preconstructed deck Archidekt lists, by set, with a filter; linked from Search
   and the home page.
+- `get_deck` and `get_my_deck`: `include_text` adds each card's rules text; every deck read carries
+  `archidekt_text`, the deck in Archidekt's import syntax (finishes, categories with their flags,
+  labels) so it pastes back as the same deck.
+- `deck_stats`: structural `checks` (deck size for the format, commander zone and whether each card
+  may command, colour identity violations, singleton violations, uncategorised rows).
+- `compare_decks`: names matched by front face and case, a `summary` with cut and added
+  percentages and the basic-land changes apart, and `simulate: true` for a paired goldfish A/B of
+  the two sides (same seeds game for game, deltas with confidence intervals), with its options.
+- `run_deck_report`: `options` passes the simulator's knobs through (annotations, combos, seed,
+  until_turn, opponents, mulligan rules).
+- docs/CAPABILITIES.md: the capability map, by path (assistant, pages and app) and how they relate.
 
 ### Changed
 
@@ -34,7 +45,9 @@ one owner per capability among the assistant's tools.
   `validate_archidekt_deck`, `precon_diff`, `goldfish_run` and `goldfish_ab` are hidden because
   `get_deck`, `list_my_decks`, `deck_stats`, `compare_decks` and `run_deck_report` do the same job;
   an assistant that calls one is told which tool owns it. The tool descriptions and server
-  instructions state the owners; a test pins the list. `run_deck_report` still runs the simulation.
+  instructions state the owners; a test pins the list. Each owner carries every input and output
+  of the tool it hides (the additions above close the gaps there were), and `run_deck_report`
+  still runs the simulation through the research service.
 
 ## [0.7.1] - 2026-10-07
 

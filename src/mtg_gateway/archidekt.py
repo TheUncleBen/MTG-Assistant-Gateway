@@ -171,6 +171,7 @@ class DeckCard:
     image_hash: str = ""
     scryfall_uid: str = ""
     default_category: str = ""  # Archidekt's auto category for cards with categories null
+    oracle_text: str = ""  # rules text, faces joined with " // "; empty when Archidekt sent none
     # Copies of this printing in the signed-in member's Archidekt Collection ("owned" on each
     # deck card when the deck is read with the member's session; 0 otherwise).
     owned: int = 0
@@ -1260,6 +1261,24 @@ def _mana_production(value: Any) -> dict[str, int] | None:
     return out or None
 
 
+def _oracle_text(oracle: dict[str, Any]) -> str:
+    """The card's rules text as Archidekt carries it: ``text`` for one-faced cards, else each
+    face's name, mana cost and text joined with ``//`` (multi-faced cards have empty top-level
+    text and the real data in ``faces``)."""
+    text = oracle.get("text")
+    if isinstance(text, str) and text.strip():
+        return text.strip()
+    faces = oracle.get("faces")
+    parts: list[str] = []
+    for face in faces if isinstance(faces, list) else []:
+        if not isinstance(face, dict):
+            continue
+        head = " ".join(x for x in (str(face.get("name") or ""), str(face.get("manaCost") or "")) if x)
+        body = str(face.get("text") or "").strip()
+        parts.append(f"{head}: {body}" if head and body else head or body)
+    return " // ".join(x for x in parts if x)
+
+
 def parse_deck(body: Any) -> Deck:
     if not isinstance(body, dict) or "id" not in body or not isinstance(body.get("cards"), list):
         raise ArchidektError("contract", "unexpected deck shape")
@@ -1314,6 +1333,7 @@ def parse_deck(body: Any) -> Deck:
                 image_hash=str(card.get("scryfallImageHash") or ""),
                 scryfall_uid=str(card.get("uid") or ""),
                 default_category=str(oracle.get("defaultCategory") or ""),
+                oracle_text=_oracle_text(oracle),
                 owned=_int(card.get("owned")),
             )
         )

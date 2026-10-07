@@ -48,7 +48,7 @@ from .archidekt import (
 from .archidekt_csv import CsvError, parse_export
 from .config import Settings
 from .db import Database
-from .decklist import DecklistError, ListCard, clean_text, parse_decklist, to_text
+from .decklist import DecklistError, ListCard, clean_category, clean_text, parse_decklist, to_text
 
 logger = logging.getLogger(__name__)
 
@@ -993,6 +993,43 @@ def deck_to_text(deck: Deck, *, zone: str = "main") -> str:
         for c in deck.cards
     ]
     return to_text(cards, zone=zone)
+
+
+_FINISH_MARKS = {"foil": " *F*", "etched": " *E*"}
+
+
+def deck_to_archidekt_text(deck: Deck) -> str:
+    """The deck in Archidekt's own import syntax, one line per row, sorted:
+    ``1x Name (set) 123 *F* [Category{top}] ^Label,#hex^``. ``{top}`` marks the commander
+    (premier) category, ``{noDeck}{noPrice}`` a category outside the deck (maybeboard), so the
+    text pastes back into Archidekt's import dialog as the same deck, finishes and labels kept."""
+    premier = {
+        str(c.get("name")) for c in deck.categories if isinstance(c.get("name"), str) and c.get("isPremier")
+    }
+    excluded = deck.excluded_categories()
+    lines: list[str] = []
+    for c in deck.cards:
+        line = f"{c.quantity}x {clean_text(c.name.replace(chr(94), chr(32)))}"  # ^ would open a label
+        if c.set_code:
+            line += f" ({clean_text(c.set_code)})"
+            if c.collector_number:
+                line += f" {clean_text(c.collector_number)}"
+        line += _FINISH_MARKS.get(c.modifier.lower(), "")
+        cats = []
+        for cat in c.categories:
+            name = clean_category(cat)
+            if not name:
+                continue
+            flags = "{top}" if cat in premier else "{noDeck}{noPrice}" if cat in excluded else ""
+            cats.append(name + flags)
+        if cats:
+            line += " [" + ",".join(cats) + "]"
+        label = clean_text(c.label).replace("^", " ").strip()
+        if label and not label.startswith(","):  # Archidekt stores labels as "name,#colour"
+            line += f" ^{label}^"
+        lines.append(line)
+    lines.sort()
+    return "\n".join(lines) + ("\n" if lines else "")
 
 
 class DeckService:

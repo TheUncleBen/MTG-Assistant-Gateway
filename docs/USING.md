@@ -188,7 +188,9 @@ search for decks with a commander; look up a card, its rulings, prices,
 combos; goldfish a deck; swap cards or build a new deck from a list (each a
 proposal with a review link); read my card photos or use my last scan;
 which cards in this deck do I own. The [assistant skill](SKILL.md) teaches
-the house rules.
+the house rules. [CAPABILITIES.md](CAPABILITIES.md) lists every tool the
+assistant has, which one owns each job, everything you can do by hand, and
+what only one of the two paths can do.
 
 ## The Android app
 

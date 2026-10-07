@@ -92,13 +92,21 @@ class ReportService:
 
     # -- running --------------------------------------------------------------
     async def run(
-        self, sub: str, deck_ref: str, *, simulate: bool = True, games: int = DEFAULT_GAMES
+        self,
+        sub: str,
+        deck_ref: str,
+        *,
+        simulate: bool = True,
+        games: int = DEFAULT_GAMES,
+        options: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Read the deck, compute its statistics, optionally simulate and validate it, store
         the result and return it. Refuses a second report of an unchanged deck within
-        ``min_interval`` seconds (returns the existing one instead)."""
+        ``min_interval`` seconds (returns the existing one instead) unless ``options`` (the
+        simulator's knobs, see ``sim_options``) are given, since they change the simulation."""
         if not isinstance(games, int) or isinstance(games, bool) or games < 10 or games > MAX_GAMES:
             raise DeckError("invalid", f"games must be an integer from 10 to {MAX_GAMES}")
+        options = sim_options(options)
         key = (sub, _clean_deck_id(deck_ref))
         flight = self._runs.setdefault(key, _Flight())
         flight.users += 1
@@ -111,7 +119,7 @@ class ReportService:
                     out = self.get(sub, flight.report_id)
                     out["reused"] = True
                     return out
-                out = await self._run(sub, deck_ref, simulate=simulate, games=games)
+                out = await self._run(sub, deck_ref, simulate=simulate, games=games, options=options)
                 flight.report_id = out["report_id"]
                 flight.finished += 1
                 return out
@@ -120,12 +128,15 @@ class ReportService:
             if flight.users <= 0:
                 self._runs.pop(key, None)
 
-    async def _run(self, sub: str, deck_ref: str, *, simulate: bool, games: int) -> dict[str, Any]:
+    async def _run(
+        self, sub: str, deck_ref: str, *, simulate: bool, games: int, options: dict[str, Any]
+    ) -> dict[str, Any]:
         deck = await self.decks.get_any_deck(sub, deck_ref)
         latest = self._latest(sub, deck.id)
         now = int(time.time())
         if (
-            latest is not None
+            not options
+            and latest is not None
             and latest["fingerprint"] == deck.fingerprint()
             and now - int(latest["taken_at"]) < self.min_interval
         ):
@@ -140,7 +151,7 @@ class ReportService:
             commander = (stats.get("commanders") or [None])[0]
             validation = await self._mf(sub, "validate_decklist", {"decklist": text, "commander": commander})
             if simulate:
-                goldfish = await self._mf(sub, "goldfish_run", {"deck": text, "n": games})
+                goldfish = await self._mf(sub, "goldfish_run", {"deck": text, "n": games, **options})
         rid = "rep_" + secrets.token_urlsafe(9)
         with self.db.tx() as c:
             # Stored only while the member exists: a report still running when they deleted
@@ -174,6 +185,25 @@ class ReportService:
             )
         self.db.audit("report_created", sub=sub, detail={"report_id": rid, "deck_id": deck.id})
         return self.get(sub, rid)
+
+    async def ab(
+        self,
+        sub: str,
+        text_a: str,
+        text_b: str,
+        *,
+        games: int = DEFAULT_GAMES,
+        options: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """A paired goldfish A/B of two decklists (game for game under the same seeds, with the
+        deltas' confidence intervals and significance), as the research service reports it.
+        Not stored: it is a comparison, not a report of one deck. None without the service."""
+        if self.mf is None:
+            return None
+        if not isinstance(games, int) or isinstance(games, bool) or games < 10 or games > MAX_GAMES:
+            raise DeckError("invalid", f"games must be an integer from 10 to {MAX_GAMES}")
+        args = {"deck_a": text_a, "deck_b": text_b, "n": games, **sim_options(options, ab=True)}
+        return await self._mf(sub, "goldfish_ab", args)
 
     async def _mf(self, sub: str, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """One Mystic Forge call, recorded as it came back: structured content when the tool
@@ -281,6 +311,31 @@ class ReportService:
         }
 
 
+# The simulator's knobs a report or an A/B passes through to the research service, which
+# validates their values (the proxy already bounds n and until_turn). Unknown keys are refused
+# here so a typo never silently runs the default simulation.
+RUN_OPTIONS = ("annotations", "combos", "seed", "until_turn", "opponents", "mulligan")
+AB_OPTIONS = ("annotations", "annotations_a", "annotations_b", "combos", "seed", "until_turn")
+AB_FLAGS = ("allow_different_commanders",)
+
+
+def sim_options(options: dict[str, Any] | None, *, ab: bool = False) -> dict[str, Any]:
+    """The given simulator options with unset ones dropped; refuses keys the simulation does
+    not take (``invalid``)."""
+    if not options:
+        return {}
+    if not isinstance(options, dict):
+        raise DeckError("invalid", "simulation options must be an object")
+    allowed = (*AB_OPTIONS, *AB_FLAGS) if ab else RUN_OPTIONS
+    out = {k: v for k, v in options.items() if v is not None and v != [] and v != {}}
+    unknown = sorted(k for k in out if k not in allowed)
+    if unknown:
+        raise DeckError("invalid", f"unknown simulation option(s): {', '.join(unknown)}")
+    if len(json.dumps(out)) > 60_000:
+        raise DeckError("too_large", "simulation options larger than 60 kB")
+    return out
+
+
 def deck_summary_for(deck: Deck) -> dict[str, Any]:
     """The short deck block shared by tools, pages and the API."""
     return {
@@ -292,4 +347,4 @@ def deck_summary_for(deck: Deck) -> dict[str, Any]:
     }
 
 
-__all__ = ["ReportService", "TREND_KEYS", "deck_summary_for"]
+__all__ = ["ReportService", "TREND_KEYS", "deck_summary_for", "sim_options"]

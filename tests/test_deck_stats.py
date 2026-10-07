@@ -315,6 +315,16 @@ def test_compare_dicts_and_decks() -> None:
         "added": [{"name": "New", "quantity": 1}],
         "removed": [{"name": "Gone", "quantity": 1}],
         "changed": [{"name": "Opt", "before": 2, "after": 3}],
+        "summary": {
+            "before_size": 13,
+            "after_size": 14,
+            "cut": 1,
+            "added": 1,
+            "kept": 1,
+            "cut_pct": 8,
+            "added_pct": 8,
+            "basic_land_changes": [],
+        },
     }
     assert "stats_delta" not in out
     before = deck([card("Island", 10, types=["Land"], price=0.1), card("Opt", 1, cmc=1.0, types=["Instant"])])
@@ -344,6 +354,74 @@ def test_compare_leaves_the_maybeboard_out() -> None:
         "added": [],
         "removed": [],
         "changed": [],
+        "summary": compare(d1, d2)["summary"],
         "stats_delta": compare(d1, d2)["stats_delta"],
     }
     assert all(v in (0, 0.0, None) for v in compare(d1, d2)["stats_delta"].values())
+
+
+def test_compare_matches_faces_and_case_and_summarises_like_a_precon_diff() -> None:
+    # The precon side names the front face only; basics are counted apart from the cuts and adds.
+    precon = {"Delver of Secrets": 1, "sol ring": 1, "Island": 30, "Forest": 10, "Gone": 1}
+    build = {
+        "Delver of Secrets // Insectile Aberration": 1,
+        "Sol Ring": 1,
+        "Island": 28,
+        "Forest": 10,
+        "New": 2,
+    }
+    out = compare(precon, build)
+    assert out["added"] == [{"name": "New", "quantity": 2}]
+    assert out["removed"] == [{"name": "Gone", "quantity": 1}]
+    assert out["changed"] == [{"name": "Island", "before": 30, "after": 28}]
+    assert out["summary"] == {
+        "before_size": 43,
+        "after_size": 42,
+        "cut": 1,
+        "added": 1,
+        "kept": 2,
+        "cut_pct": 2,
+        "added_pct": 2,
+        "basic_land_changes": [{"name": "Island", "before": 30, "after": 28}],
+    }
+
+
+def test_checks_cover_what_the_archidekt_validator_checked() -> None:
+    cats = [{"name": "Commander", "isPremier": True, "includedInDeck": True}]
+    ok = deck(
+        [
+            card("Aesi", 1, categories=["Commander"], types=["Creature"], supertypes=["Legendary"],
+                 color_identity=["G", "U"]),
+            card("Island", 50, types=["Land"], supertypes=["Basic"], color_identity=["U"]),
+            card("Forest", 48, types=["Land"], supertypes=["Basic"], color_identity=["G"]),
+            card("Opt", 1, types=["Instant"], color_identity=["U"], categories=["Draw"]),
+        ],
+        categories=cats,
+    )  # fmt: skip
+    checks = compute(ok)["checks"]
+    assert checks["ok"] and checks["problems"] == []
+    assert checks["deck_size"] == {"actual": 100, "expected": 100, "ok": True}
+    assert checks["commander_zone"] == {"count": 1, "ok": True}
+    bad = deck(
+        [
+            card("Opt", 2, categories=["Commander"], types=["Instant"], color_identity=["U"]),
+            card("Lightning Bolt", 1, types=["Instant"], color_identity=["R"]),
+            card("Relentless Rats", 3, types=["Creature"], color_identity=["B"],
+                 oracle_text="A deck can have any number of cards named Relentless Rats.", categories=["x"]),
+            card("Island", 10, types=["Land"], supertypes=["Basic"], color_identity=["U"], 
+                 categories=["Land"]),
+        ],
+        categories=cats,
+    )  # fmt: skip
+    checks = compute(bad)["checks"]
+    assert not checks["ok"]
+    assert checks["deck_size"]["ok"] is False and "16 cards" in checks["problems"][0]
+    assert checks["commander_zone"] == {"count": 2, "ok": False, "cannot_command": ["Opt"]}
+    assert checks["colour_identity_violations"] == [
+        {"name": "Lightning Bolt", "outside": ["R"]},
+        {"name": "Relentless Rats", "outside": ["B"]},
+    ]
+    assert checks["singleton_violations"] == [{"name": "Opt", "quantity": 2}]  # the Rats may repeat
+    assert checks["uncategorised"] == ["Lightning Bolt"]
+    # a 60-card format has no commander checks and no size rule the deck would fail
+    assert compute(deck([card("Opt", 4)], format_id=1))["checks"]["ok"]
