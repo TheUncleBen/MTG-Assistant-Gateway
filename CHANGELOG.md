@@ -7,7 +7,7 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
-## [0.7.0] - 2026-10-06
+## [0.6.1] - 2026-10-06
 
 A fourth security pass. The headline: taking someone out of the group at
 the identity provider now cuts them off on their next request, not at their

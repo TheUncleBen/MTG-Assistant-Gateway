@@ -252,7 +252,7 @@ assistant read and edit your own decks, link Archidekt once in a browser at
 | "This sign-in link has expired or was already used" | Go back to the AI app and press Connect again. Sign-in links last ten minutes, including time spent on the confirmation page. |
 | Claude shows an error right after you picked **Use Claude's published identity**, before any gateway page appears | The gateway couldn't fetch or accept Claude's published description, or the owner has limited which ones it accepts. Wait a minute (a failed fetch isn't retried sooner) and try again, or remove the connector and add it with **Register automatically**. Tell the owner either way. |
 | "This sign-in was started in a different browser" | The AI app opened sign-in in one browser and you finished it in another. Try again and keep the whole sign-in in one browser window. On a phone this can happen when a link opens in a different browser app. |
-| The connector worked before but now wants you to sign in again | Normal. By default the gateway asks you to sign in again about once a week (the owner can change that), and also after about 30 days of not using it, if the owner revoked your access, and once after the owner upgrades the gateway to version 0.7.0. Reconnect it in the app's connector settings. |
+| The connector worked before but now wants you to sign in again | Normal. By default the gateway asks you to sign in again about once a week (the owner can change that), and also after about 30 days of not using it, if the owner revoked your access, and once after the owner upgrades the gateway to version 0.6.1. Reconnect it in the app's connector settings. |
 
 Your sign-in password only ever goes into the owner's sign-in page,
 never into the AI app or the gateway.

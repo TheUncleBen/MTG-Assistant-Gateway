@@ -91,7 +91,7 @@ upgraded the database, and the old image refuses to start on it (below).
 Signed-in
 assistants keep working because tokens live in the database on disk. Linked
 Archidekt accounts and proposals survive restarts too. (One exception: the
-first start of 0.7.0 or newer after an older version signs everyone out once,
+first start of 0.6.1 or newer after an older version signs everyone out once,
 because sessions from before have no identity-provider tokens on file for
 the live membership check. See the CHANGELOG.)
 

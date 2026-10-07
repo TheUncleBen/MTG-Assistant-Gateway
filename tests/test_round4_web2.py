@@ -579,3 +579,23 @@ async def test_a_record_stored_before_the_stricter_checks_is_refetched(tmp_path:
         client = await h.app.state.gateway.provider.get_client(CLIENT_URL)
         assert client is not None and client.client_uri is None
         assert len(docs.requests) == 1
+
+
+def test_validate_document_accepts_its_own_records():
+    record = cimdmod.validate_document(
+        CLIENT_URL, {**document(), "scope": "mtg", "client_uri": "https://c.example/"}
+    )
+    assert cimdmod.validate_document(CLIENT_URL, record) == record
+
+
+async def test_a_stored_copy_failing_todays_checks_is_refetched(tmp_path: Path, idp: FakeIdP):
+    """Round 12 (RN-1): a copy stored by an older version with a scope today's checks refuse
+    (one pydantic accepts) is discarded and fetched afresh, not served until it expires."""
+    docs = DocHost()
+    docs.serve()
+    async with running(Harness(make_settings(tmp_path), idp, cimd=docs.fetcher())) as h:
+        old = {**cimdmod.validate_document(CLIENT_URL, document()), "scope": "mtg\ud800"}
+        h.db.save_cimd_client(CLIENT_URL, old, 86400)
+        client = await h.app.state.gateway.provider.get_client(CLIENT_URL)
+        assert client is not None and client.scope != "mtg\ud800"
+        assert len(docs.requests) == 1

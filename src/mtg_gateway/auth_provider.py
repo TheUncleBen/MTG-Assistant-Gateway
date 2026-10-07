@@ -46,6 +46,7 @@ from .cimd import (
     check_redirect_uri,
     is_cimd_client_id,
     sanitise_client_name,
+    validate_document,
 )
 from .config import Settings
 from .db import Database, hash_token
@@ -196,8 +197,9 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
                 if not info:
                     return None
                 try:
+                    validate_document(client_id, info)  # a stored copy passes today's checks too
                     return OAuthClientInformationFull.model_validate(info)
-                except ValueError:
+                except (CimdError, ValueError):
                     # A copy stored before documents were checked this strictly: never used
                     # again (also not as a stale copy); fetched afresh once.
                     logger.info("discarding a stored metadata document that no longer validates")
