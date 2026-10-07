@@ -7,6 +7,47 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.6.5] - 2026-10-07
+
+### Added
+
+- Approval modes. Each member now picks, on their own Account page, how
+  much their assistant may change on Archidekt without asking: **Ask me
+  every time** (`manual`, the default on a fresh install), **Apply small,
+  low-risk edits without asking** (`semi`) or **Apply every change without
+  asking** (`auto`). The choice is the member's alone: it covers only their
+  account, their decks and the apps they connected, it can be set only in
+  their browser (never over MCP or the API, so a tricked assistant cannot
+  loosen it), and every change of it is in the audit log. A proposal's
+  risk is judged from its stored review rows: low means an edit of at most
+  five rows (card adds, removes, quantity, category, finish or printing
+  changes of at most four copies each, never the commander) or a clone; everything else (bigger edits,
+  the commander, a new deck, a restore, deck details) is high. Every
+  proposal result now says `approval_mode`, `risk`, `risk_reason` and
+  `assistant_may_apply`, and `next_step` tells the assistant whether to call
+  `apply_proposal` or leave the decision to the member. Every apply still
+  snapshots the deck first, so an auto-applied change can be undone from
+  History. The Account page states the trade-off next to the choices.
+- `MTG_APPROVAL_MODE_DEFAULT` (the mode of members who have not chosen;
+  `manual`), `MTG_APPROVAL_MODE_MAX` (the highest mode members may choose;
+  `auto` = no cap) and `MTG_AUTO_APPLY_MAX_ROWS` (the row limit of a
+  low-risk edit; `5`). The admin overview shows the first two.
+- The in-chat card shows a big change as a summary first: rows grouped by
+  what they do (added, removed, quantity, moved, finish, printing,
+  commander), the first eight rows with their pictures, and a **Show all**
+  button for the rest. It also shows the proposal's risk and, in the semi
+  and auto modes, who applies it.
+
+### Changed
+
+- `MTG_APPLY_VIA_MCP` and `MTG_APPLY_MIN_AGE_SECONDS` are gone; the
+  approval modes replace them. A gateway that still sets them simply
+  ignores them. The assistant's `apply_proposal` now applies only what the
+  member's mode allows and answers `browser_required` otherwise; the
+  `apply_too_soon` error no longer exists. The REST apply route follows the
+  same rule for bearer tokens.
+- The review page shows each proposal's risk tier and why.
+
 ## [0.6.4] - 2026-10-07
 
 ### Added

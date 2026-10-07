@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parent.parent
 async def stack(tmp_path: Path, idp: FakeIdP):
     ark = FakeArchidekt()
     settings = make_settings(
-        tmp_path, writes_enabled=True, apply_via_mcp=True, archidekt_base="https://ark.test/api"
+        tmp_path, writes_enabled=True, approval_mode_default="auto", archidekt_base="https://ark.test/api"
     )
     async with running(Harness(settings, idp, archidekt=_client(settings, ark))) as h:
         yield Stack(h, ark)
@@ -39,7 +39,7 @@ async def stack(tmp_path: Path, idp: FakeIdP):
 async def stack_browser_only(tmp_path: Path, idp: FakeIdP):
     ark = FakeArchidekt()
     settings = make_settings(
-        tmp_path, writes_enabled=True, apply_via_mcp=False, archidekt_base="https://ark.test/api"
+        tmp_path, writes_enabled=True, approval_mode_default="manual", archidekt_base="https://ark.test/api"
     )
     async with running(Harness(settings, idp, archidekt=_client(settings, ark))) as h:
         yield Stack(h, ark)

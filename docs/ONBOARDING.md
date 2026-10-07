@@ -156,9 +156,16 @@ so:
      the assistant gives you the review link. Open it, check the change,
      press **Apply these changes to Archidekt**, then tell the assistant you
      did. In Claude Code the assistant can offer to open that page for you.
-   - **The assistant applies it** (only if the owner turned on
-     `MTG_APPLY_VIA_MCP`, which the example setup leaves off): after your
-     yes in chat, it applies the proposal itself.
+   - **The assistant applies it** (only if you chose that): on your
+     Account page you can switch your own **approval mode** from "Ask me
+     every time" to "Apply small, low-risk edits without asking" (a few
+     cards added, removed, moved or changed, never the commander, a new
+     deck, a restore or the deck's details) or "Apply every change without
+     asking". Then the assistant applies what your mode allows and tells
+     you what it did. Be aware that an assistant can be tricked by text it
+     reads into proposing a change you did not ask for; in an auto mode
+     that change lands without your press. Every change keeps a snapshot
+     you can restore from the History page.
 
    Either way, for an edit the gateway first checks the deck hasn't changed
    since the proposal, saves a copy of it (a snapshot), and puts a private

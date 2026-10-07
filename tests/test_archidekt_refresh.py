@@ -25,7 +25,7 @@ from .test_decks_and_proxy import Stack, _client, call, fake_mystic_forge, linke
 async def stack(tmp_path: Path, idp: FakeIdP):
     ark = FakeArchidekt()
     settings = make_settings(
-        tmp_path, writes_enabled=True, apply_via_mcp=True, archidekt_base="https://ark.test/api"
+        tmp_path, writes_enabled=True, approval_mode_default="auto", archidekt_base="https://ark.test/api"
     )
     proxy = MysticForgeProxy("http://mf.test/mcp", client_factory=lambda: Client(fake_mystic_forge()))
     async with running(Harness(settings, idp, archidekt=_client(settings, ark), mf_proxy=proxy)) as h:
