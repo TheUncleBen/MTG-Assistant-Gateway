@@ -20,8 +20,8 @@ from urllib.parse import urlencode
 from starlette.requests import Request
 from starlette.responses import Response
 
-from .archidekt import FORMAT_NAMES, SEARCH_ORDERS
-from .deckpage import DECK_CSS, avatar_html, deck_list_html
+from .archidekt import FORMAT_NAMES, SEARCH_ORDERS, list_row
+from .deckpage import DECK_CSS, avatar_html, covers_for, deck_list_html
 from .decks import DeckError
 from .pages import _csrf, browser_session, login_redirect
 from .theme import icon, render
@@ -72,6 +72,14 @@ BROWSE_CSS = """
   background:var(--surface-2);color:var(--text);text-decoration:none;font-size:.9rem;
     border:1px solid var(--border)}
 .popular a:hover{border-color:var(--orange);color:var(--orange)}
+.popular a.precons{gap:.4rem;font-weight:700}
+.preconset summary{display:flex;align-items:center;justify-content:space-between;gap:1rem;cursor:pointer;
+  font-weight:700;font-size:1.1rem;padding:.25rem 0}
+.preconset[open] summary{margin-bottom:.75rem}
+.preconset .decklist{margin-bottom:0}
+.listbar .controls{display:flex;flex-wrap:wrap;gap:1rem;align-items:end}
+.listbar .controls .field{margin:0}
+.listbar .controls .grow{flex:1 1 16rem}
 """
 
 
@@ -264,9 +272,73 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
                 "colours, sorted the way the site sorts them. Open "
                 "a deck to see it on the gateway, with the same "
                 "views, stats and export as your own; clone it to your account from its page.</p>"
-                f"<div class='popular'>{popular}</div></section>"
+                f"<div class='popular'>{popular}"
+                f"<a class='precons' href='/precons'>{icon('box')} Preconstructed decks by set</a></div>"
+                "</section>"
             )
         return page("Search decks", body, sub=sub, sid=sid)
+
+    @server.custom_route("/precons", methods=["GET"], include_in_schema=False)
+    async def precons_page(request: Request) -> Response:
+        """Archidekt's preconstructed decks, grouped by set as the site lists them (newest set
+        first). A filter narrows by set or deck name; every deck opens on the gateway like any
+        public deck and can be cloned from there."""
+        sub, sid = browser_session(state, request)
+        if not sub:
+            return login_redirect("/precons")
+        q = (request.query_params.get("q") or "").strip()[:80]
+        try:
+            listing = await decks.precons(sub)
+        except DeckError as exc:
+            return page(
+                "Preconstructed decks", precons_form(q) + problem(exc), sub=sub, sid=sid, current="/search"
+            )
+        sections = []
+        shown = 0
+        for i, (set_name, raw_rows) in enumerate(listing.items()):
+            rows = [list_row(d) for d in raw_rows]
+            if q:
+                ql = q.lower()
+                if ql not in set_name.lower():
+                    rows = [r for r in rows if ql in r["name"].lower()]
+            if not rows:
+                continue
+            shown += len(rows)
+            opened = " open" if q or i < 3 else ""
+            sections.append(
+                f"<details class='panel preconset'{opened}><summary><span class='setname'>{_esc(set_name)}"
+                f"</span><span class='muted small'>{len(rows)} deck{'' if len(rows) == 1 else 's'}</span>"
+                f"</summary>{deck_list_html(rows, covers=covers_for(rows), view='grid')}</details>"
+            )
+        if not sections:
+            sections.append(
+                "<section class='panel'><p class='muted'>No preconstructed deck matches that filter.</p>"
+                "</section>"
+            )
+        total = sum(len(v) for v in listing.values())
+        head = (
+            "<div class='results-head'><h2>By set</h2>"
+            f"<p class='muted'>{shown if q else total} of {total} decks in {len(listing)} sets, as Archidekt "
+            "lists them. Open one to see it here, clone it to your account from its page, or compare it with "
+            "your build.</p></div>"
+        )
+        return page(
+            "Preconstructed decks",
+            precons_form(q) + head + "".join(sections),
+            sub=sub,
+            sid=sid,
+            current="/search",
+        )
+
+    def precons_form(q: str) -> str:
+        return (
+            "<section class='panel listbar'><form method='get' action='/precons' class='controls'>"
+            "<div class='field grow'><label for='q'>Filter by set or deck name</label><span class='search'>"
+            f"<input id='q' type='search' name='q' value='{_esc(q)}' placeholder='Example: Bloomburrow'>"
+            f"<button type='submit' aria-label='Filter'>{icon('search')}</button></span></div>"
+            f"<div class='field'><a class='btn' href='/search'>{icon('search')} Search all decks</a></div>"
+            "</form></section>"
+        )
 
     @server.custom_route("/users/{username}", methods=["GET"], include_in_schema=False)
     async def user_page(request: Request) -> Response:
@@ -387,7 +459,8 @@ def add_browse_tools(server: MCPServer, state: AppState) -> None:
         title="An Archidekt user's public decks",
         description=(
             "The public decks of one Archidekt user by `username` (newest first; `page` for more), like "
-            "their profile page on the site. Read-only."
+            "their profile page on the site. Read-only. This is the one tool for another user's deck list; "
+            "list_my_decks is for the signed-in member's own."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )

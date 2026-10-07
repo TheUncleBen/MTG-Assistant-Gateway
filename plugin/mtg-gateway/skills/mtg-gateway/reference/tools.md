@@ -66,6 +66,7 @@ A list of 1 to 40 objects:
 | `category` | for `set_category` | For `add`: the category a card new to the deck is filed under (cards already in the deck keep their categories). For `set_category`: the one category every deck-proper row of that card is moved to (maybeboard and sideboard rows are left alone) (up to 60 characters). |
 | `set_code`, `collector_number` | no, together | For `add`: pin the exact printing (as `resolve_cards` and `get_deck` report them). The printing must exist on Archidekt and be this card, or `apply_proposal` refuses the proposal with `not_found` and changes nothing. A pinned add goes in as its own deck row unless the deck already has that printing and finish. |
 | `finish` | no | For `add`: `normal`, `foil` or `etched` (`foil: true` also works). A finish the printing does not come in falls back to what Archidekt offers. For `set_finish` (required) and `set_printing` (optional): the finish every copy already in the deck gets. |
+| `zone` | no | `main` (default: the deck proper) or `side` (the maybeboard and sideboard rows, which do not count toward the deck). With `side`, `add`, `remove`, `set_quantity` and `set_category` work on those rows; `set_commander`, `set_finish`, `set_printing` and a pinned printing are for the deck proper only. A side add is filed under the deck's Maybeboard (or its first uncounted category). Diff lines for side rows end in "(maybeboard/sideboard)". |
 
 `set_category` and `set_commander` take only `card_name` (plus `category` for
 `set_category`): no quantity or printing. The card must already be in the deck.
@@ -87,9 +88,10 @@ per proposal, and not also a count or category change. Diff lines read
 Diff lines read `+1 Card` (added), `-1 Card` (removed), `4 -> 6 Card`
 (quantity changed), `Sol Ring: category Ramp -> Artifacts` and
 `Commander: Old Name -> New Name`; an add with a pinned printing or finish shows it, as in
-`+1 Sol Ring (SLD 1074, Etched)`. Counts compare and change only the deck proper
-(maybeboard and sideboard rows are left alone); `set_category` and
-`set_commander` touch every deck-proper row of the named card.
+`+1 Sol Ring (SLD 1074, Etched)`. Counts compare and change the deck proper unless a
+change says `zone: side` (then its maybeboard and sideboard rows, counted
+separately); `set_category` and `set_commander` touch every deck-proper row
+of the named card.
 
 ### `propose_new_deck` arguments
 
@@ -161,23 +163,21 @@ tool's schema for the rest.
 | `precon_search` | `query`, `commander_only` | Find a preconstructed deck. |
 | `precon_decklist` | `file_name` | Its official list. |
 | `precon_export` | `file_name` | The list in Archidekt import format. |
-| `precon_diff` | `file_name`, `deck` or `decklist` | Exact cuts and adds between a precon and an upgraded deck. |
 
-### Archidekt public decks and formatting
+### Formatting
 
 | Tool | Main arguments | Use |
 | --- | --- | --- |
-| `archidekt_deck` | `deck` (id or URL), `include_text` | Read any public deck. Lists a card once per category, so its total can be too high for multi-category cards; count with `get_deck` instead. |
-| `archidekt_user_decks` | `username` | A user's public decks. |
-| `archidekt_export` | `deck` | A public deck in Archidekt import format. |
 | `format_archidekt` | `cards`, `include_set_codes` | Turns a card list into Archidekt import text. Use it whenever you output a list for import. |
+
+Reading Archidekt decks is the gateway's job: `get_deck` (any deck, with `decklist_text` as the
+export), `list_my_decks` (the member's) and `archidekt_user` (another user's public decks).
 
 ### Validation
 
 | Tool | Main arguments | Use |
 | --- | --- | --- |
-| `validate_decklist` | `decklist`, `commander` | Card names, deck size and colour identity for pasted text. |
-| `validate_archidekt_deck` | `deck` | The same plus category structure, for a public Archidekt deck. |
+| `validate_decklist` | `decklist`, `commander` | Card names, deck size and colour identity for pasted text that is not a deck yet. For an Archidekt deck use `deck_stats`. |
 
 ### Simulation (goldfish)
 
@@ -185,23 +185,34 @@ tool's schema for the rest.
 | --- | --- | --- |
 | `goldfish_odds` | `deck_size`, `draws`, `copies`, `min_successes` | Exact draw odds; no simulation. |
 | `goldfish_annotate` | `deck` | What the engine models for this deck and which cards it cannot. Run first. |
-| `goldfish_run` | `deck`, `n`, `seed`, `until_turn`, `mulligan`, `annotations`, `combos` | Simulate `n` games (default 1000, seed 42, 10 turns) with confidence intervals and an honesty report. |
-| `goldfish_ab` | `deck_a`, `deck_b`, `n`, `seed`, `until_turn` | Paired comparison of two decks under identical seeds. |
 
-`deck` arguments accept an Archidekt id or URL (public decks only) or
-decklist text with one `1 Card Name` per line, commander first or marked with
-a trailing ` *CMDR*`.
+The simulation itself is `run_deck_report` (gateway tools above): it plays the
+games and stores the result. To compare two versions, run a report of each.
 
-The gateway refuses, before forwarding, a goldfish `n` above 2000, an
-`until_turn` above 30, `goldfish_odds` sizes above 1000, and any text argument
-over 200 kB. The `archidekt_*` tools (and a `deck` given as an Archidekt id or
-URL) count against the user's Archidekt budget; past it they answer that the
-budget is used up for a few minutes.
+`deck` arguments take decklist text with one `1 Card Name` per line,
+commander first or marked with a trailing ` *CMDR*`: pass the `decklist_text`
+a gateway tool returned. (An Archidekt id or URL works for public decks but
+counts against the user's Archidekt budget; `get_deck` is the deck reader.)
+
+The gateway refuses, before forwarding, `goldfish_odds` sizes above 1000 and
+any text argument over 200 kB.
 
 ## Not available on this gateway
 
 Hidden on purpose until the gateway can record who owns them:
 `goldfish_report`, `goldfish_start`, `goldfish_step`, `goldfish_state`,
-every `watchlist_*` tool and `price_history`. The gateway's own stored
-reports (`run_deck_report`) cover the saved-report case. There is no tool to
-delete a deck.
+every `watchlist_*` tool and `price_history`.
+
+Hidden because a gateway tool owns the job (one tool per capability; calling
+one of these answers with the owner's name):
+
+| Hidden Mystic Forge tool | Owner |
+| --- | --- |
+| `archidekt_deck`, `archidekt_export` | `get_deck` |
+| `archidekt_user_decks` | `list_my_decks` (the member) and `archidekt_user` (anyone else) |
+| `validate_archidekt_deck` | `deck_stats` |
+| `precon_diff` | `compare_decks` |
+| `goldfish_run`, `goldfish_ab` | `run_deck_report` |
+
+There is no tool to delete a deck, set its cover, move it, tag it, or edit a
+comment: those are buttons on the gateway's pages for the member alone.

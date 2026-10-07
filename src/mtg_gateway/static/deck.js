@@ -461,6 +461,8 @@
     var textarea = $("textarea", form);
     var replyTo = $(".replyto", form);
     var parentId = null;
+    var me = null;  // the member's Archidekt user id, from the thread load; own comments get Edit and Delete
+    var deckUrl = "/social/api/decks/" + encodeURIComponent(commentsPanel.getAttribute("data-deck")) + "/comments";
     var when = function (iso) {
       var d = new Date(iso);
       return isNaN(d) ? "" : d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
@@ -491,6 +493,60 @@
         textarea.focus();
       });
       acts.appendChild(reply);
+      if (me !== null && c.owner && c.owner.id === me) {
+        var edit = el("button", "btn-ghost", "Edit");
+        edit.type = "button";
+        edit.addEventListener("click", function () {
+          if ($("form.editcomment", box)) return;
+          var f = el("form", "editcomment");
+          var ta = document.createElement("textarea");
+          ta.value = c.text; ta.rows = 3; ta.maxLength = 2000; ta.setAttribute("aria-label", "Edit your comment");
+          var save = el("button", "btn-primary", "Save");
+          var cancel = el("button", "", "Cancel"); cancel.type = "button";
+          var note = el("span", "muted small", "");
+          f.appendChild(ta); f.appendChild(save); f.appendChild(cancel); f.appendChild(note);
+          cancel.addEventListener("click", function () { f.remove(); p.hidden = false; });
+          f.addEventListener("submit", function (ev) {
+            ev.preventDefault();
+            var text = ta.value.trim();
+            if (!text) { ta.focus(); return; }
+            save.disabled = true; note.textContent = "Saving…";
+            socialRequest("PATCH", deckUrl + "/" + encodeURIComponent(c.id), { text: text }).then(function (d) {
+              if (!d.ok) { save.disabled = false; note.textContent = ""; note.appendChild(socialProblem(d)); return; }
+              c.text = d.comment.text; p.textContent = c.text; p.hidden = false; f.remove();
+              if (!/edited/.test(who.textContent)) who.appendChild(document.createTextNode(" · edited"));
+            }).catch(function () { save.disabled = false; note.textContent = "Network error; nothing was changed."; });
+          });
+          p.hidden = true;
+          box.insertBefore(f, acts);
+          ta.focus();
+        });
+        acts.appendChild(edit);
+        var del = el("button", "btn-ghost del", "Delete");
+        del.type = "button";
+        del.addEventListener("click", function () {
+          if ($(".confirmbar", box)) return;
+          var bar = el("div", "confirmbar notice warn");
+          bar.setAttribute("role", "alertdialog");
+          bar.appendChild(document.createTextNode("Delete this comment on Archidekt? "));
+          var yes = el("button", "btn-danger", "Delete"); yes.type = "button";
+          var no = el("button", "", "Keep"); no.type = "button";
+          bar.appendChild(yes); bar.appendChild(no);
+          no.addEventListener("click", function () { bar.remove(); });
+          yes.addEventListener("click", function () {
+            yes.disabled = true;
+            socialRequest("DELETE", deckUrl + "/" + encodeURIComponent(c.id)).then(function (d) {
+              if (!d.ok) { yes.disabled = false; bar.textContent = ""; bar.appendChild(socialProblem(d)); bar.appendChild(no); return; }
+              box.remove();
+              if (countEl) countEl.textContent = d.count === 1 ? "1 comment" : d.count + " comments";
+              if (!$(".cmt", thread)) thread.appendChild(el("p", "muted", "No comments yet. Be the first."));
+            }).catch(function () { yes.disabled = false; bar.textContent = "Network error; nothing was changed."; });
+          });
+          box.insertBefore(bar, acts.nextSibling);
+          yes.focus();
+        });
+        acts.appendChild(del);
+      }
       box.appendChild(acts);
       if (c.replies && c.replies.length) {
         var kids = el("div", "replies");
@@ -506,6 +562,7 @@
       socialRequest("GET", thread.getAttribute("data-src")).then(function (d) {
         if (!d.ok) { thread.textContent = ""; var p = el("p", "muted"); p.appendChild(socialProblem(d)); thread.appendChild(p); return; }
         thread.textContent = "";
+        me = typeof d.me === "number" ? d.me : null;
         if (countEl) countEl.textContent = d.count === 1 ? "1 comment" : d.count + " comments";
         if (!d.comments.length) { thread.appendChild(el("p", "muted", "No comments yet. Be the first.")); return; }
         d.comments.forEach(function (c) { thread.appendChild(render(c)); });

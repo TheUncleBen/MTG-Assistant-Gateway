@@ -7,6 +7,35 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.2] - 2026-10-07
+
+The rest of what Archidekt's own pages offer for a member's decks, as hand
+actions in the app and on the web (none of them is an assistant tool), and
+one owner per capability among the assistant's tools.
+
+### Added
+
+- Delete a deck from its More menu: type the deck's name, a snapshot is kept (and the Archidekt
+  backup copy when backups are on), the deletion is verified by reading the deck back.
+- Deck settings: the cover image (any card of the deck, or Archidekt's automatic pick), the deck's
+  tags (Archidekt's public tags, reused or created) and the folder it sits in. A Folders page under
+  My decks creates and renames folders. Deck lists and the banner show the cover chosen on Archidekt.
+- Editor: maybeboard and sideboard rows are edited like deck rows (count, category) and new cards
+  can be added to the maybeboard; a list can be pasted into an existing deck. Proposals take a
+  `zone` of `main` or `side` per change; the review shows side rows as such.
+- Comments: edit and delete your own, on the deck page.
+- Collection: a details menu per row sets finish, condition, language and price paid.
+- Precons page: every preconstructed deck Archidekt lists, by set, with a filter; linked from Search
+  and the home page.
+
+### Changed
+
+- One tool per job. Mystic Forge's `archidekt_deck`, `archidekt_export`, `archidekt_user_decks`,
+  `validate_archidekt_deck`, `precon_diff`, `goldfish_run` and `goldfish_ab` are hidden because
+  `get_deck`, `list_my_decks`, `deck_stats`, `compare_decks` and `run_deck_report` do the same job;
+  an assistant that calls one is told which tool owns it. The tool descriptions and server
+  instructions state the owners; a test pins the list. `run_deck_report` still runs the simulation.
+
 ## [0.7.1] - 2026-10-07
 
 ### Fixed

@@ -239,18 +239,18 @@ class _SlowClient:
 async def test_proxy_limits_calls_per_user_and_has_a_deadline() -> None:
     gate = asyncio.Event()
     proxy = MysticForgeProxy("http://x/mcp", client_factory=lambda: _SlowClient(gate))
-    running_calls = [asyncio.create_task(proxy.call("archidekt_deck", {}, owner="a")) for _ in range(2)]
+    running_calls = [asyncio.create_task(proxy.call("scryfall_named", {}, owner="a")) for _ in range(2)]
     await asyncio.sleep(0.01)
-    busy = await proxy.call("archidekt_deck", {}, owner="a")
+    busy = await proxy.call("scryfall_named", {}, owner="a")
     assert busy.is_error and "busy" in busy.content[0].text  # type: ignore[union-attr]
-    other = asyncio.create_task(proxy.call("archidekt_deck", {}, owner="b"))  # another member is fine
+    other = asyncio.create_task(proxy.call("scryfall_named", {}, owner="b"))  # another member is fine
     gate.set()
     outs = await asyncio.gather(*running_calls, other)
     assert all(not o.is_error for o in outs)
     assert proxy._in_flight == {}
 
     stuck = MysticForgeProxy("http://x/mcp", client_factory=lambda: _SlowClient(), deadline=0.05)
-    out = await asyncio.wait_for(stuck.call("goldfish_run", {"n": 2000}, owner="a"), 5)
+    out = await asyncio.wait_for(stuck.call("goldfish_odds", {"params": {"deck_size": 99}}, owner="a"), 5)
     assert out.is_error and "longer than" in out.content[0].text  # type: ignore[union-attr]
     assert stuck._in_flight == {}
 

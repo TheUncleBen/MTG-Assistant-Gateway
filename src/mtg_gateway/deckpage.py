@@ -20,7 +20,7 @@ import time
 from collections import Counter
 from typing import Any
 
-from .archidekt import VOTE_UP, Deck, DeckCard
+from .archidekt import VOTE_UP, Deck, DeckCard, featured_scryfall_id
 from .deck_stats import WUBRG, colour_letter, is_land, mana_pips
 from .theme import icon
 from .views import cards_by_category
@@ -247,7 +247,13 @@ def avatar_html(name: str, size: str = "lg") -> str:
 
 
 def featured(deck: Deck) -> DeckCard | None:
-    """The card whose art fronts the deck: the first commander, else the first card with art."""
+    """The card whose art fronts the deck: the cover the owner picked on Archidekt when it is a card
+    of the deck, else the first commander, else the first card with art."""
+    chosen = featured_scryfall_id(deck.featured)
+    if chosen:
+        for c in deck.cards:
+            if c.scryfall_uid.lower() == chosen.lower() and card_image(c):
+                return c
     for c in deck.cards:
         if "Commander" in c.categories and card_image(c):
             return c
@@ -317,6 +323,8 @@ def banner_html(
         more_items.append(f"<a href='/decks/{did}/settings'>{icon('settings')} Deck settings</a>")
     more_items.append(f"<a href='/decks/{did}/export'>{icon('download')} Export deck</a>")
     more_items.append(f"<a href='/history?deck_id={did}'>{icon('history')} History and snapshots</a>")
+    if own and csrf:
+        more_items.append(f"<a class='danger' href='/decks/{did}/delete'>{icon('trash')} Delete deck…</a>")
     if csrf:
         more_items.append(
             f"<form method='post' action='/decks/{did}/report'>{csrf_in}"
@@ -799,6 +807,19 @@ def deck_card_html(
     )
 
 
+def covers_for(
+    decks: list[dict[str, Any]], stored: dict[str, dict[str, Any]] | None = None
+) -> dict[str, dict[str, Any]]:
+    """Cover art per deck id for a listing: the cover chosen on Archidekt (its ``featured`` art, a
+    Scryfall id) wins over the card the gateway remembered from the deck page."""
+    out = dict(stored or {})
+    for d in decks:
+        uid = d.get("featured_scryfall_id")
+        if uid:
+            out[str(d["id"])] = {"scryfall_uid": uid, "card_name": ""}
+    return out
+
+
 def deck_list_html(
     decks: list[dict[str, Any]],
     *,
@@ -848,6 +869,7 @@ def deck_list_controls_html(
             else ""
         )
         + f"<div class='field'><span class='lbl'>Total decks: {total}</span>"
+        f"<a class='btn' href='/folders'>{icon('folder')} Folders</a>"
         f"<a class='btn btn-primary' href='/decks/new'>{icon('plus')} New deck</a></div>"
         "<noscript><button type='submit' class='apply'>Apply</button></noscript>"
         "</form></section>"
@@ -912,6 +934,10 @@ DECK_CSS = """
 .comments .cmt .who b{color:var(--text)}
 .comments .cmt p{margin:.3rem 0;white-space:pre-wrap;overflow-wrap:anywhere}
 .comments .cmt .replies{margin-left:1rem;border-left:2px solid var(--border);padding-left:.75rem}
+.comments .cmt .acts .del{color:var(--danger-fill)}
+.comments .cmt form.editcomment{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.3rem 0}
+.comments .cmt form.editcomment textarea{flex:1 1 100%;min-height:4rem}
+.comments .cmt .confirmbar{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.3rem 0}
 .comments .cmt .acts button{margin:0;height:28px;padding:0 .6rem;font-size:.8rem}
 .comments form.newcomment{display:flex;flex-direction:column;gap:.5rem}
 .comments form.newcomment textarea{width:100%;resize:vertical;min-height:4.5rem}
@@ -1210,7 +1236,34 @@ ul.erows{list-style:none;margin:.5rem 0 0;padding:0}
   align-items:center;padding:.4rem 0;border-top:1px solid var(--border)}
 .erow.changed{background:var(--orange-tint)}
 .erow.removed .name{text-decoration:line-through;color:var(--text-muted)}
-.erow.side{opacity:.75}
+.erow.side .thumb{filter:saturate(.6)}
+.erow.side .meta{font-style:italic}
+.erow .remove{margin-left:.25rem}
+/* settings page: cover, tags, folder, delete */
+.coverform{display:flex;flex-wrap:wrap;gap:1rem;align-items:flex-end}
+.coverart{width:100%;max-width:22rem;aspect-ratio:16/9;object-fit:cover;border-radius:var(--radius-panel);
+  background:var(--surface-2);display:flex;align-items:center;justify-content:center;flex:1 1 14rem}
+.coverform .field{flex:1 1 14rem;margin:0}
+.taglist{display:flex;flex-wrap:wrap;gap:.5rem;margin:0 0 1rem}
+.taglist li{display:flex;align-items:center;gap:.25rem}
+.taglist .pill{font-size:.95rem;padding:.3rem .6rem}
+.taglist form.inline{display:inline;margin:0}
+.taglist button.mini{width:1.9rem;height:1.9rem;min-height:0;padding:0;margin:0;display:inline-flex;
+  align-items:center;justify-content:center;border-radius:50%}
+.taglist button.mini svg{width:14px;height:14px}
+.addtag,.moveform{display:flex;flex-wrap:wrap;gap:.75rem;align-items:flex-end}
+.addtag .field,.moveform .field{margin:0}
+.foldertree li{padding-left:calc(var(--depth,0) * 1.25rem)}
+.foldertree li .name{display:flex;align-items:center;gap:.5rem}
+.foldertree li .btn{margin-left:auto}
+.folderform .row{display:flex;flex-wrap:wrap;gap:.75rem}
+.folderform .row .field{margin:0}
+.panel.danger{border-color:var(--danger-fill)}
+.panel.danger h2{color:var(--danger-fill)}
+.pastebox{margin:.75rem 0 0}
+.pastebox summary{cursor:pointer;font-weight:700;padding:.4rem 0}
+.pastebox textarea{width:100%;font-family:ui-monospace,monospace;margin:.5rem 0}
+.pastebox .actions{margin-top:.25rem}
 .erow .thumb{width:34px;height:48px;border-radius:3px;object-fit:cover;background:var(--surface-3);
   display:inline-flex;align-items:center;justify-content:center;color:var(--text-muted)}
 .erow .main{display:flex;flex-direction:column;min-width:0}
@@ -1248,7 +1301,7 @@ ul.erows{list-style:none;margin:.5rem 0 0;padding:0}
   .addbox form.addcard .grow,.addbox form.addcard button{grid-column:1 / -1}
   .erow{grid-template-columns:34px minmax(0,1fr) auto;grid-template-rows:auto auto}
   .erow .sel{grid-column:2;grid-row:2}
-  .erow details.dd{grid-column:3;grid-row:2;justify-self:end}
+  .erow details.dd,.erow button.remove{grid-column:3;grid-row:2;justify-self:end}
 }
 """
 
@@ -1258,6 +1311,7 @@ __all__ = [
     "SORTS",
     "VIEWS",
     "card_image",
+    "covers_for",
     "deck_list_controls_html",
     "deck_list_html",
     "deck_page_html",

@@ -182,7 +182,9 @@ class ReportService:
         member's own Mystic Forge cap like an interactive one; past it the report is refused
         (rate_limited) and nothing is stored."""
         assert self.mf is not None
-        result = await self.mf.call(tool, {k: v for k, v in arguments.items() if v is not None}, owner=sub)
+        result = await self.mf.call(
+            tool, {k: v for k, v in arguments.items() if v is not None}, owner=sub, internal=True
+        )
         if is_busy(result):
             raise DeckError(
                 "rate_limited",

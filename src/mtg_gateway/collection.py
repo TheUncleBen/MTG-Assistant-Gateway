@@ -352,6 +352,8 @@ class CollectionService:
         return {"row": row_out({**rec, **out, "card": rec.get("card")})}
 
     async def update(self, sub: str, rid: int, data: dict[str, Any]) -> dict[str, Any]:
+        """Change a record's details: finish, condition, language and price paid (the fields
+        Archidekt's own row editor offers; tags are read-only here)."""
         rec = await self._record(sub, rid)
         opts = _item_options({k: v for k, v in data.items() if k in ("finish", "foil", "condition")}, 0)
         changes: dict[str, Any] = {}
@@ -359,10 +361,30 @@ class CollectionService:
             changes["modifier"] = MODIFIERS[opts["finish"]]
         if "condition" in data:
             changes["condition"] = opts["condition"] or None
+        if "language" in data or "lang" in data:
+            changes["language"] = _language(data.get("language", data.get("lang")))
+        if "purchase_price" in data:
+            changes["purchasePrice"] = _price(data["purchase_price"])
         if not changes:
-            raise CollectionError("invalid", "nothing to change: give finish or condition")
+            raise CollectionError("invalid", "nothing to change: give finish, condition, language or price")
         out = await self._run(sub, lambda token: self.client.collection_set(token, rec, **changes))
-        return {"row": row_out({**rec, **out, "card": rec.get("card")})}
+        row = row_out({**rec, **out, "card": rec.get("card")})
+        wrong = [
+            k
+            for k, want in changes.items()
+            if (out.get(k) if k != "purchasePrice" else _price(out.get(k))) != want
+        ]
+        self.decks.db.audit(
+            "collection_updated",
+            sub=sub,
+            detail={"id": rid, "fields": sorted(changes), "verified": not wrong},
+        )
+        if wrong:
+            raise CollectionError(
+                "unavailable",
+                "Archidekt accepted the change but answered with other values for: " + ", ".join(wrong),
+            )
+        return {"row": row}
 
     async def remove(self, sub: str, rid: int, quantity: int | None = None) -> dict[str, Any]:
         rec = await self._record(sub, rid)
@@ -437,6 +459,33 @@ def _item_options(raw: dict[str, Any], i: int) -> dict[str, Any]:
     return {"quantity": qty, "finish": finish, "condition": condition}
 
 
+# Language codes as Archidekt's collection shows them (reported from its row editor, not verified
+# against a list it publishes); the gateway accepts any two- or three-letter code.
+LANGUAGES = ("EN", "ES", "FR", "DE", "IT", "PT", "JA", "KO", "RU", "ZHS", "ZHT", "PH")
+MAX_PRICE = 99999.0
+
+
+def _language(value: Any) -> str:
+    code = _clean(value, 3).upper()
+    if not code or len(code) < 2 or not code.isalpha():
+        raise CollectionError("invalid", "language must be a two- or three-letter code such as EN")
+    return code
+
+
+def _price(value: Any) -> float | None:
+    """The price paid, as Archidekt stores it (a number or null). Accepts "", None, a number or a
+    numeric string, with at most two decimals kept."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    try:
+        price = round(float(str(value).strip().lstrip("$").replace(",", ".")), 2)
+    except ValueError as exc:
+        raise CollectionError("invalid", "price paid must be a number") from exc
+    if price < 0 or price > MAX_PRICE or price != price:
+        raise CollectionError("invalid", f"price paid must be between 0 and {int(MAX_PRICE)}")
+    return price
+
+
 # -- browser page and JSON -----------------------------------------------------------------------------
 NO_STORE = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
 _STATUS = {
@@ -497,6 +546,7 @@ def row_html(r: dict[str, Any], csrf: str, *, view: str) -> str:
         f"collection' title='Remove'>{icon('x')}</button></form>"
     )
     set_line = f"{_esc((r.get('set') or '').upper())} {_esc(r.get('collector_number'))}"
+    details = details_html(r, csrf_in)
     if view == "grid":
         body = (
             f"<img src='{_esc(img)}' alt='{_esc(r['name'])}' loading='lazy'>"
@@ -508,7 +558,7 @@ def row_html(r: dict[str, Any], csrf: str, *, view: str) -> str:
             f"<div class='pic'>{body}<span class='qty'>{int(r['quantity'])}</span>{badges}</div>"
             f"<div class='cap'><span class='name'>{_esc(r['name'])}</span><span "
             f"class='set'>{set_line}</span></div>"
-            f"<div class='act'>{stepper}{remove}</div></li>"
+            f"<div class='act'>{stepper}{details}{remove}</div></li>"
         )
     return (
         f"<li class='row col' data-name='{_esc(r['name'].lower())}' data-id='{rid}'>"
@@ -522,7 +572,53 @@ def row_html(r: dict[str, Any], csrf: str, *, view: str) -> str:
         + (f" · {_esc(r.get('set_name'))}" if r.get("set_name") else "")
         + (f" · {_esc(r.get('type_line'))}" if r.get("type_line") else "")
         + "</span></span>"
-        f"<span class='mc'>{mana_html(r.get('mana_cost') or '')}</span>{stepper}{remove}</li>"
+        f"<span class='mc'>{mana_html(r.get('mana_cost') or '')}</span>{stepper}{details}{remove}</li>"
+    )
+
+
+def details_html(r: dict[str, Any], csrf_in: str) -> str:
+    """A row's details menu: the finish, condition, language and price paid, saved to Archidekt
+    on the member's click (tags are shown as Archidekt holds them)."""
+    rid = _esc(r["id"])
+    finish = r.get("finish") or "nonfoil"
+    cond = (r.get("condition") or "").upper()
+    lang = (r.get("lang") or "").upper()
+    price = r.get("purchase_price")
+    price_val = (
+        "" if price is None else f"{float(price):.2f}" if isinstance(price, (int, float)) else _esc(price)
+    )
+
+    def opts(values: tuple[str, ...], current: str, labels: dict[str, str] | None = None) -> str:
+        return "".join(
+            f"<option value='{_esc(v)}'{' selected' if v == current else ''}>{_esc((labels or {}).get(v, v))}"
+            "</option>"
+            for v in values
+        )
+
+    langs = LANGUAGES if not lang or lang in LANGUAGES else (lang, *LANGUAGES)
+    tags = "".join(f"<span class='pill'>{_esc(t)}</span>" for t in (r.get("tags") or [])[:8])
+    return (
+        f"<details class='dd rowmenu details'><summary class='mini' aria-label='Details of "
+        f"{_esc(r['name'])}'>{icon('more')}</summary>"
+        f"<form method='post' action='/collection' class='menu detailsform' data-id='{rid}'>"
+        f"{csrf_in}<input type='hidden' name='action' value='details'>"
+        f"<div class='head'>{_esc(r['name'])}</div>"
+        f"<label class='field'><span>Finish</span><select name='finish'>"
+        f"{opts(FINISHES, finish, {'nonfoil': 'Normal', 'foil': 'Foil', 'etched': 'Etched'})}</select>"
+        "</label>"
+        f"<label class='field'><span>Condition</span><select name='condition'>"
+        f"{opts(CONDITIONS, cond, {'': 'Not set'})}</select></label>"
+        f"<label class='field'><span>Language</span><select name='language'>{opts(langs, lang or 'EN')}"
+        "</select></label>"
+        f"<label class='field'><span>Price paid</span><input type='number' name='purchase_price' min='0' "
+        f"max='{int(MAX_PRICE)}' step='0.01' inputmode='decimal' value='{price_val}' placeholder='none'>"
+        "</label>"
+        + (
+            f"<div class='field tags'><span>Tags</span><span class='tagline'>{tags}</span></div>"
+            if tags
+            else ""
+        )
+        + f"<div class='actions'><button class='primary'>{icon('check')} Save</button></div></form></details>"
     )
 
 
@@ -565,7 +661,7 @@ form.qty button.mini,form.rm button.mini{margin:0;width:2.25rem;height:2.25rem;p
 form.qty output{min-width:2rem;text-align:center;font-weight:700;font-variant-numeric:tabular-nums}
 form.rm{display:inline;margin:0 0 0 auto}
 ul.colllist{list-style:none;margin:0;padding:0}
-ul.colllist .row{display:grid;grid-template-columns:34px minmax(0,1fr) auto auto auto;gap:.6rem;
+ul.colllist .row{display:grid;grid-template-columns:34px minmax(0,1fr) auto auto auto auto;gap:.6rem;
   align-items:center;
   padding:.4rem 0;border-top:1px solid var(--border)}
 ul.colllist .thumb{width:34px;height:48px;border-radius:3px;object-fit:cover;background:var(--surface-3);
@@ -574,11 +670,20 @@ ul.colllist .n{display:flex;flex-direction:column;min-width:0}
 ul.colllist .n .name{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 ul.colllist .n .meta{font-size:.8rem;color:var(--text-muted);white-space:nowrap;overflow:hidden;
   text-overflow:ellipsis}
-ul.colllist .n .finish,ul.colllist .n .cond{margin-left:.35rem;vertical-align:middle}
+ul.colllist .n .finish,ul.colllist .n .cond{margin-left:.35rem;vertical-align:middle;align-self:flex-start}
+ul.colllist details.rowmenu summary.mini,ul.collgrid details.rowmenu summary.mini{display:inline-flex;
+  align-items:center;justify-content:center;width:2.25rem;height:2.25rem;margin:0;padding:0}
+details.rowmenu.details .menu{min-width:14rem;padding:.4rem 0 .6rem}
+details.rowmenu.details .menu .field{display:flex;flex-direction:column;gap:.25rem;padding:.35rem .9rem}
+details.rowmenu.details .menu .field select,details.rowmenu.details .menu .field input{margin:0}
+details.rowmenu.details .menu .tags .tagline{display:flex;flex-wrap:wrap;gap:.3rem}
+details.rowmenu.details .menu .actions{margin:.4rem .9rem 0}
+details.rowmenu.details .menu .actions button{width:100%;margin:0}
 @media (max-width:600px){ ul.colllist .row{grid-template-columns:34px minmax(0,
-  1fr) auto} ul.colllist .mc{display:none}
-  ul.colllist form.rm{grid-column:3;grid-row:2;justify-self:end} ul.colllist form.qty{grid-column:2;
-    grid-row:2} }
+  1fr) auto auto} ul.colllist .mc{display:none}
+  ul.colllist form.rm{grid-column:4;grid-row:2;justify-self:end}
+  ul.colllist details.rowmenu{grid-column:3;grid-row:2;justify-self:end}
+  ul.colllist form.qty{grid-column:2;grid-row:2} ul.colllist .n{grid-column:2 / span 3} }
 .pager{display:flex;justify-content:center;gap:.5rem;margin:1rem 0}
 .pager .btn{margin:0}
 .coll-empty{text-align:center;padding:2rem 1rem}
@@ -681,6 +786,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         msgs = {
             "added": "Added to your Archidekt collection.",
             "removed": "Removed from your Archidekt collection.",
+            "updated": "Card details saved to your Archidekt collection.",
             "nothing": "Nothing was added: no card matched. Check the name or pick a suggestion.",
             "expired": "This form expired. Reload the page and try again.",
             "invalid": "That was not a valid request.",
@@ -689,7 +795,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         }
         if not code or code not in msgs:
             return ""
-        cls = "ok" if code in ("added", "removed") else "error"
+        cls = "ok" if code in ("added", "removed", "updated") else "error"
         return f"<p class='notice {cls}'>{_esc(msgs[code])}</p>"
 
     def problem(exc: CollectionError, *, link_hint: bool) -> str:
@@ -874,6 +980,19 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                     source="manual",
                 )
                 code = "ok=added" if out["added"] else "err=nothing"
+            elif action == "details":
+                rid = _rid(data.get("id"))
+                await service.update(
+                    sub,
+                    rid,
+                    {
+                        "finish": data.get("finish", "nonfoil"),
+                        "condition": data.get("condition", ""),
+                        "language": data.get("language", "EN"),
+                        "purchase_price": data.get("purchase_price", ""),
+                    },
+                )
+                code = "ok=updated"
             elif action in ("inc", "dec", "remove"):
                 rid = _rid(data.get("id"))
                 if action == "remove":

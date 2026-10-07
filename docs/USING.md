@@ -40,9 +40,11 @@ assistant** at the end holds the connector URL and the guided setup.
 ## Your decks
 
 **Decks** lists the decks of your linked Archidekt account with their cover
-art. Filter by name or folder, grid or list, sort by last updated, created,
-name or format. **New deck** creates one from a name, a pasted list, a CSV
-export or a scan.
+art (the image you chose on Archidekt, else the commander). Filter by name or
+folder, grid or list, sort by last updated, created, name or format. **New
+deck** creates one from a name, a pasted list, a CSV export or a scan.
+**Folders** creates and renames your Archidekt folders; a deck is moved
+between them from its settings page.
 
 One deck:
 
@@ -58,12 +60,24 @@ One deck:
 - **Quick add** types a card name and takes you to the editor with it
   filled in.
 - The **More** menu in the banner holds Edit deck, Deck settings, Clone, Run
-  report, Export (text, JSON or CSV) and the deck's page on Archidekt.
+  report, Export (text, JSON or CSV), the deck's page on Archidekt and
+  **Delete deck**. Deleting asks you to type the deck's name; a snapshot is
+  kept under History and, when backups are on, a copy in your backup folder
+  on Archidekt. Archidekt itself has no undo for a deleted deck.
+- **Deck settings** holds the name, format, bracket, description and
+  privacy, and also the **cover image** (any card of the deck, or Archidekt's
+  automatic pick), the deck's **tags** (Archidekt's public deck tags) and the
+  **folder** it sits in. Each saves to Archidekt at once; cover and tag
+  changes take a snapshot first.
 - Below the cards: statistics (mana curve, colours, types, prices,
   legality, bracket estimate) and the description.
 
 The **editor** changes quantities, categories (type a new one to create it),
 foil or printing, adds cards with autocompletion, removes cards, and undoes.
+Maybeboard and sideboard rows are edited the same way (count and category;
+they never count toward the deck), and **Add to** sends a new card to the
+deck or to the maybeboard. **Paste a list** adds many cards at once, one per
+line with a count in front; names the gateway cannot match stay in the box.
 Press **Save changes** and they go to Archidekt straight away (a snapshot
 first, so History can undo); only a large removal asks you to confirm.
 
@@ -75,6 +89,11 @@ ordered by newest, most viewed or largest. Open any result to read it with
 the same views as your own decks; the owner's name opens their profile with
 every public deck they have. From a public deck you can run the statistics,
 export it, or clone it into your own account.
+
+**Precons** (from Search or the home page) lists every preconstructed deck
+Archidekt knows, newest set first, with a filter by set or deck name. Each
+opens like any public deck, so you can clone it or compare it with your own
+build.
 
 ## Scanning cards
 
@@ -109,7 +128,9 @@ condition and count.
 
 - Filter by name, show it as a grid or a list, sort by newest or by set
   release, and page through it. Plus and minus change the count; the cross
-  removes a card.
+  removes a card; the dots open the card's details: finish, condition,
+  language and the price you paid, saved to Archidekt on **Save** (its tags
+  are shown as Archidekt holds them).
 - Cards you own show a **green dot** on every deck page, your own decks and
   public ones alike, with the number of copies Archidekt knows about.
 - **Export CSV** downloads the whole collection in the column layout
@@ -127,8 +148,8 @@ because each one is written to Archidekt.
 
 Every deck page has Archidekt's own social buttons: **Like** (with the
 deck's score), **Bookmark**, **Follow** its owner, and a **Comments** panel
-that shows the deck's thread and lets you reply or add a comment. A user
-page has the Follow button too. Each one asks you to confirm first, then
+that shows the deck's thread and lets you reply or add a comment, and edit
+or delete your own comments. A user page has the Follow button too. Each one asks you to confirm first, then
 goes to Archidekt under your Archidekt name, exactly as if you had pressed
 it on archidekt.com. These buttons are yours alone: your assistant has no
 tool for any of them and cannot like, follow or comment for you.

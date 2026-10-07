@@ -37,12 +37,8 @@ ALLOWED_TOOLS: frozenset[str] = frozenset(
         "edhrec_recommendations",
         "edhrec_salt",
         "edhrec_precon_upgrade",
-        "archidekt_deck",
-        "archidekt_user_decks",
-        "archidekt_export",
         "format_archidekt",
         "validate_decklist",
-        "validate_archidekt_deck",
         "spellbook_combos",
         "spellbook_card_combos",
         "rules_get",
@@ -50,16 +46,37 @@ ALLOWED_TOOLS: frozenset[str] = frozenset(
         "precon_search",
         "precon_decklist",
         "precon_export",
-        "precon_diff",
         "goldfish_odds",
         "goldfish_annotate",
-        "goldfish_run",
-        "goldfish_ab",
     }
 )
 
+# One owner per capability. These Mystic Forge tools do what a gateway tool already does, so they
+# are neither listed nor callable by an assistant: the gateway tool named here owns the job, and
+# an assistant that asks for one of these is told which tool to call instead. The gateway itself
+# still runs goldfish_run inside run_deck_report (``call(..., internal=True)``).
+OWNED_ELSEWHERE: dict[str, str] = {
+    "goldfish_run": "run_deck_report",
+    "goldfish_ab": "run_deck_report",
+    "archidekt_deck": "get_deck",
+    "archidekt_export": "get_deck",
+    "archidekt_user_decks": "list_my_decks",
+    "validate_archidekt_deck": "deck_stats",
+    "precon_diff": "compare_decks",
+}
+# What each owner does, for the refusal an assistant gets when it calls the hidden duplicate.
+OWNER_NOTES: dict[str, str] = {
+    "run_deck_report": "the gateway's simulation: it reads the deck, validates it, runs the goldfish games "
+    "and stores the report; run it twice to compare two versions",
+    "get_deck": "the gateway's deck reader: any Archidekt deck by id or link, with decklist_text to export",
+    "list_my_decks": "the signed-in member's decks; archidekt_user lists another user's public decks",
+    "deck_stats": "legality, bracket, curve, colours and price from one read",
+    "compare_decks": "the exact adds and cuts between two decks, snapshots or lists",
+}
+
 BLOCKED_TOOLS: frozenset[str] = frozenset(
     {
+        *OWNED_ELSEWHERE,
         "goldfish_report",
         "goldfish_start",
         "goldfish_step",
@@ -184,6 +201,17 @@ def reads_archidekt(name: str, arguments: dict[str, Any] | None) -> bool:
     return False
 
 
+def owned_elsewhere_text(name: str) -> str | None:
+    """The refusal for a hidden duplicate: which gateway tool to call instead, or None."""
+    owner = OWNED_ELSEWHERE.get(name)
+    if owner is None:
+        return None
+    return (
+        f"{name} is not offered here: {owner} owns this on the gateway ({OWNER_NOTES.get(owner, '')}). "
+        f"Call {owner} instead."
+    )
+
+
 def is_busy(result: types.CallToolResult) -> bool:
     """True for the refusal ``call`` gives when the owner already runs their share of calls."""
     if not result.is_error or not result.content:
@@ -247,17 +275,24 @@ class MysticForgeProxy:
         return tools
 
     def is_proxied(self, name: str) -> bool:
-        return name in ALLOWED_TOOLS
+        """Calls the proxy answers itself: the allowed tools, and the hidden duplicates (answered
+        with the name of the gateway tool that owns the job)."""
+        return name in ALLOWED_TOOLS or name in OWNED_ELSEWHERE
 
     async def call(
-        self, name: str, arguments: dict[str, Any] | None, *, owner: str | None = None
+        self,
+        name: str,
+        arguments: dict[str, Any] | None,
+        *,
+        owner: str | None = None,
+        internal: bool = False,
     ) -> types.CallToolResult:
         """Forward one call. With ``owner`` set, at most ``max_calls_per_user`` run at once for
-        that account; every call is stopped after ``deadline`` seconds."""
-        if name not in ALLOWED_TOOLS:
-            return types.CallToolResult(
-                content=[types.TextContent(type="text", text=f"tool {name} is not available")], isError=True
-            )
+        that account; every call is stopped after ``deadline`` seconds. ``internal`` is for the
+        gateway's own tools (run_deck_report), which may use a Mystic Forge tool that assistants
+        reach only through them (OWNED_ELSEWHERE)."""
+        if name not in ALLOWED_TOOLS and not (internal and name in OWNED_ELSEWHERE):
+            return _refusal(owned_elsewhere_text(name) or f"tool {name} is not available")
         problem = argument_problem(name, arguments)
         if problem:
             return _refusal(f"{name} refused: {problem}; nothing was sent to the research service")
@@ -331,4 +366,4 @@ class MysticForgeProxy:
         return _mw
 
 
-__all__ = ["ALLOWED_TOOLS", "BLOCKED_TOOLS", "MysticForgeProxy", "is_busy"]
+__all__ = ["ALLOWED_TOOLS", "BLOCKED_TOOLS", "OWNED_ELSEWHERE", "MysticForgeProxy", "is_busy"]

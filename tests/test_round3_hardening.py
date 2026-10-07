@@ -68,7 +68,9 @@ class _FakeMF:
         self.calls: list[tuple[str, str | None]] = []
         self.busy = busy
 
-    async def call(self, name: str, arguments: Any, *, owner: str | None = None) -> types.CallToolResult:
+    async def call(
+        self, name: str, arguments: Any, *, owner: str | None = None, internal: bool = False
+    ) -> types.CallToolResult:
         self.calls.append((name, owner))
         if self.busy:
             return _busy()

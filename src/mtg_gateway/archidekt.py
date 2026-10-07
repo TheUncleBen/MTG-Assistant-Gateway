@@ -61,6 +61,16 @@ SEARCH_ORDERS = {
 _ART_UUID = re.compile(r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
 
 
+def art_url(scryfall_uid: str) -> str:
+    """The card-art URL Archidekt stores as a deck's ``featured`` cover: its art images live at
+    card-images.archidekt.com/art/front/<u[0]>/<u[1]>/<uid>.webp (the pattern of every ``featured``
+    in the live precon listing, 2026-10-07; a path with other characters is refused)."""
+    uid = str(scryfall_uid or "").lower()
+    if not re.fullmatch(r"[0-9a-f-]{36}", uid):
+        raise ArchidektError("invalid", "not a Scryfall card id")
+    return f"https://card-images.archidekt.com/art/front/{uid[0]}/{uid[1]}/{uid}.webp"
+
+
 def featured_scryfall_id(url: Any) -> str | None:
     """The Scryfall id inside a listing's ``featured`` art URL (Archidekt names its art files by the
     card's Scryfall id, seen live 2026-10-07 on both of its image hosts), so the gateway can show the
@@ -182,6 +192,11 @@ class Deck:
     private: bool = False
     unlisted: bool = False
     tags: list[str] = field(default_factory=list)
+    # The tag relations as the deck JSON's deckTags carries them ({id, tag, name, position}; the
+    # relation id is what removes a tag) and the cover art URL (``featured``, auto or chosen).
+    tag_relations: list[dict[str, Any]] = field(default_factory=list)
+    featured: str = ""
+    parent_folder: int | None = None  # the folder the deck sits in (``parentFolder``; None = root)
     created_at: str = ""
     # Social state as the deck JSON reports it for the session that read it: the deck's score
     # ("points"), this member's own vote (VOTE_NONE / VOTE_UP / VOTE_DOWN from "userInput"),
@@ -242,6 +257,27 @@ class Deck:
         for c in self.main_cards:
             out[c.name] = out.get(c.name, 0) + c.quantity
         return out
+
+    def side_counts_by_name(self) -> dict[str, int]:
+        """Card counts of the maybeboard and sideboard rows (cards whose every category the deck
+        excludes), the mirror of ``counts_by_name``."""
+        out: dict[str, int] = {}
+        for c in self.side_cards:
+            out[c.name] = out.get(c.name, 0) + c.quantity
+        return out
+
+    def cards_in(self, zone: str) -> list[DeckCard]:
+        """``main_cards`` or ``side_cards`` by zone name."""
+        return self.side_cards if zone == "side" else self.main_cards
+
+    def side_category(self) -> str:
+        """The category a card goes in when it is added to the maybeboard: the deck's own
+        Maybeboard when it has one, else its first excluded category, else "Maybeboard" (which
+        Archidekt treats as its maybeboard by name)."""
+        excluded = self.excluded_categories()
+        if "Maybeboard" in excluded or not excluded:
+            return "Maybeboard"
+        return sorted(excluded)[0]
 
 
 def jwt_exp(token: str) -> int | None:
@@ -977,7 +1013,11 @@ class ArchidektClient:
         for key in ("language", "condition", "tags", "purchasePrice"):
             if record.get(key) is not None:
                 body[key] = record[key]
-        body.update({k: v for k, v in changes.items() if v is not None})
+        # None clears purchasePrice and condition (the site sends null for "no price" and "no
+        # condition"); for the other fields None means "leave as is".
+        body.update(
+            {k: v for k, v in changes.items() if v is not None or k in ("purchasePrice", "condition")}
+        )
         resp = await self._request("PATCH", f"/collection/v2/{rid}/", token=token, json_body=body)
         if not isinstance(resp, dict):
             raise ArchidektError("contract", "unexpected collection update response shape")
@@ -1054,13 +1094,25 @@ class ArchidektClient:
     async def update_deck(self, token: str, deck_id: str, fields: dict[str, Any]) -> dict[str, Any]:
         """PATCH /decks/{id}/update/ with the deck's own details: any of ``name``, ``description``,
         ``deckFormat`` (int, see FORMAT_IDS), ``edhBracket`` (int or None), ``private`` and
-        ``unlisted`` (bool). Only the keys given are sent. The route with ``description`` is
-        verified live (backup_deck uses it); the other keys are what Archidekt's own site bundle
-        sends on the same route (reported, not verified). Callers re-read the deck afterwards and
-        compare every field rather than trusting the response, which only has to be a JSON object."""
+        ``unlisted`` (bool), and the cover: ``featured`` (a card-art URL, see ``art_url``) with
+        ``customFeatured`` ``""`` (the site sends both when a member picks a card; ``{"customFeatured":
+        ""}`` alone is its "Autoselect deck image"). Only the keys given are sent. The route with
+        ``description`` is verified live (backup_deck uses it); the other keys are what Archidekt's
+        own site bundle sends on the same route (reported 2026-10-07, not verified). Callers re-read
+        the deck afterwards and compare every field rather than trusting the response, which only
+        has to be a JSON object."""
         if not DECK_ID_RE.fullmatch(str(deck_id)):
             raise ArchidektError("contract", "deck id is not a number")
-        allowed = ("name", "description", "deckFormat", "edhBracket", "private", "unlisted")
+        allowed = (
+            "name",
+            "description",
+            "deckFormat",
+            "edhBracket",
+            "private",
+            "unlisted",
+            "featured",
+            "customFeatured",
+        )
         body = {k: fields[k] for k in allowed if k in fields}
         if not body:
             raise ArchidektError("contract", "no deck details to update")
@@ -1068,6 +1120,111 @@ class ArchidektClient:
         if not isinstance(resp, dict):
             raise ArchidektError("contract", "unexpected deck update response shape")
         return resp
+
+    # -- a member's own hand actions on their decks: delete, folders, tags, comments ---------------
+    # Routes read from archidekt.com's bundle on 2026-10-07 (the deck service, folder service, tag
+    # service and comment service classes). None of these writes was exercised by the sessions that
+    # wrote them; every caller re-reads what it changed and reports a mismatch instead of trusting
+    # the response.
+
+    async def delete_deck(self, token: str, deck_id: str) -> None:
+        """DELETE /decks/{id}/ (the site's "Delete deck", reported)."""
+        if not DECK_ID_RE.fullmatch(str(deck_id)):
+            raise ArchidektError("contract", "deck id is not a number")
+        await self._request("DELETE", f"/decks/{deck_id}/", token=token)
+
+    async def folder_tree(self, token: str) -> dict[str, Any]:
+        """GET /decks/folderTree/: the account's root folder with ``children`` (verified live
+        2026-10-05 by ensure_folder)."""
+        tree = await self._request("GET", "/decks/folderTree/", token=token)
+        if not isinstance(tree, dict) or not isinstance(tree.get("id"), int):
+            raise ArchidektError("contract", "unexpected folder tree shape")
+        return tree
+
+    async def create_folder(
+        self, token: str, name: str, parent_id: int, *, private: bool = False
+    ) -> dict[str, Any]:
+        """POST /decks/folders/ {name, private, parentFolder} (verified live 2026-10-05)."""
+        made = await self._request(
+            "POST",
+            "/decks/folders/",
+            token=token,
+            json_body={"name": name, "private": private, "parentFolder": int(parent_id)},
+        )
+        if not isinstance(made, dict) or not isinstance(made.get("id"), int):
+            raise ArchidektError("contract", "unexpected folder create response")
+        return made
+
+    async def mass_update(self, token: str, items: list[dict[str, Any]]) -> Any:
+        """PATCH /massUpdate/ {"items": [{id, type: "deck" | "folder", patch: {...}, parentFolderId?}]}:
+        the folder page's move (patch ``parentFolder``) and rename (patch ``name``) (reported)."""
+        return await self._request("PATCH", "/massUpdate/", token=token, json_body={"items": items})
+
+    async def deck_tags(self, token: str | None, deck_id: str) -> list[dict[str, Any]]:
+        """GET /decks/{id}/tagRelations/: ``results`` of {id (the relation), tag, deck, name,
+        position} (reported; the public precon listing carries the same shape under ``tags``)."""
+        if not DECK_ID_RE.fullmatch(str(deck_id)):
+            raise ArchidektError("contract", "deck id is not a number")
+        body = await self._request("GET", f"/decks/{deck_id}/tagRelations/", token=token)
+        results = body.get("results") if isinstance(body, dict) else body
+        if not isinstance(results, list):
+            raise ArchidektError("contract", "unexpected tag relation listing shape")
+        return [r for r in results if isinstance(r, dict)]
+
+    async def search_tags(self, token: str, query: str) -> list[dict[str, Any]]:
+        """GET /decks/tags/v2/?q=: the site's tag picker lookup ({id, name} rows; reported)."""
+        body = await self._request("GET", "/decks/tags/v2/", token=token, params={"q": query[:60]})
+        results = body.get("results") if isinstance(body, dict) else body
+        if not isinstance(results, list):
+            raise ArchidektError("contract", "unexpected tag search shape")
+        return [r for r in results if isinstance(r, dict)]
+
+    async def create_tag(self, token: str, name: str) -> dict[str, Any]:
+        """POST /decks/tags/ {name}: a new global deck tag (reported; the body is inferred from the
+        site's picker, which creates a tag by its typed name)."""
+        made = await self._request("POST", "/decks/tags/", token=token, json_body={"name": name})
+        if not isinstance(made, dict) or not isinstance(made.get("id"), int):
+            raise ArchidektError("contract", "unexpected tag create response")
+        return made
+
+    async def add_deck_tag(self, token: str, deck_id: str, tag_id: int, position: str) -> dict[str, Any]:
+        """POST /decks/tagRelations/ {deck, tag, position} (reported)."""
+        made = await self._request(
+            "POST",
+            "/decks/tagRelations/",
+            token=token,
+            json_body={"deck": int(deck_id), "tag": int(tag_id), "position": position},
+        )
+        if not isinstance(made, dict):
+            raise ArchidektError("contract", "unexpected tag relation response")
+        return made
+
+    async def remove_deck_tag(self, token: str, relation_id: int) -> None:
+        """DELETE /decks/tagRelations/{id}/ (reported)."""
+        await self._request("DELETE", f"/decks/tagRelations/{int(relation_id)}/", token=token)
+
+    async def comment_update(self, token: str, comment_id: int, text: str) -> dict[str, Any]:
+        """PATCH /comments/{id}/ {text}: edit one's own comment (the site sends text, archived and
+        locked; only the text is sent here; reported)."""
+        resp = await self._request(
+            "PATCH", f"/comments/{int(comment_id)}/", token=token, json_body={"text": text}
+        )
+        if not isinstance(resp, dict):
+            raise ArchidektError("contract", "unexpected comment update response shape")
+        return resp
+
+    async def comment_delete(self, token: str, comment_id: int) -> None:
+        """DELETE /comments/{id}/: the site's "hard delete" of a comment (reported)."""
+        await self._request("DELETE", f"/comments/{int(comment_id)}/", token=token)
+
+    async def precons(self) -> dict[str, list[dict[str, Any]]]:
+        """GET /decks/precons/ (anonymous; checked live 2026-10-07): ``{"Set name (CODE)": [deck
+        listing rows]}`` in the site's order, newest set first; each row has the ``/decks/v3/``
+        listing shape plus ``tags`` and the owner Archidekt_Precons."""
+        body = await self._request("GET", "/decks/precons/", token=None)
+        if not isinstance(body, dict) or not all(isinstance(v, list) for v in body.values()):
+            raise ArchidektError("contract", "unexpected precon listing shape")
+        return {str(k): [d for d in v if isinstance(d, dict) and "id" in d] for k, v in body.items()}
 
 
 def _int(value: Any) -> int:
@@ -1165,12 +1322,15 @@ def parse_deck(body: Any) -> Deck:
     format_id = fmt if isinstance(fmt, int) and not isinstance(fmt, bool) else None
     bracket = body.get("edhBracket")
     tags: list[str] = []
+    relations: list[dict[str, Any]] = []
     raw_tags = body.get("deckTags")
     for t in raw_tags if isinstance(raw_tags, list) else []:
         if isinstance(t, str):
             tags.append(t)
         elif isinstance(t, dict) and isinstance(t.get("name"), str):
             tags.append(t["name"])
+            relations.append({k: t.get(k) for k in ("id", "tag", "name", "position") if k in t})
+    featured = body.get("customFeatured") or body.get("featured")
     return Deck(
         id=str(body["id"]),
         name=str(body.get("name", "")),
@@ -1186,6 +1346,11 @@ def parse_deck(body: Any) -> Deck:
         private=body.get("private") is True,
         unlisted=body.get("unlisted") is True,
         tags=tags,
+        tag_relations=relations,
+        featured=str(featured) if isinstance(featured, str) else "",
+        parent_folder=body["parentFolder"]
+        if isinstance(body.get("parentFolder"), int) and not isinstance(body.get("parentFolder"), bool)
+        else None,
         created_at=str(body.get("createdAt") or ""),
         owner_id=str(owner["id"]) if owner.get("id") is not None else None,
         points=_int(body.get("points")),

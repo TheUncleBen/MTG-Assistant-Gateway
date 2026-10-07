@@ -15,16 +15,19 @@
   if (!root) return;
   var MAX = cfg.maxChanges || 40;
 
-  // state: lower-case name -> row of an existing card
-  // Maybeboard and sideboard rows are shown but not edited here (the gateway's counts and plans
-  // cover the deck proper), so only in-deck rows feed the state.
+  // state: key -> row of an existing card. The key is the lower-case name for a row of the deck
+  // proper and "side:" + name for a maybeboard / sideboard row: the two zones count separately,
+  // so one card may have a row in each. Side rows take count and category changes (zone "side");
+  // finish and printing changes are for the deck proper.
   var rows = {};
+  function zoneOf(c) { return c.in_deck === false || c.zone === "side" ? "side" : "main"; }
+  function keyFor(name, zone) { return (zone === "side" ? "side:" : "") + name.toLowerCase(); }
   cfg.cards.forEach(function (c) {
-    if (c.in_deck === false) return;
-    var key = c.name.toLowerCase();
+    var zone = zoneOf(c);
+    var key = keyFor(c.name, zone);
     if (!rows[key]) {
       rows[key] = {
-        name: c.name, before: 0, after: 0, categories: c.categories || [], autoCategory: c.auto_category || "", setCategory: null,
+        name: c.name, zone: zone, before: 0, after: 0, categories: c.categories || [], autoCategory: c.auto_category || "", setCategory: null,
         finish: (c.modifier || "Normal").toLowerCase(), setFinish: null, printing: null,
         set: c.set_code || "", number: c.collector_number || "", image: c.image || null, mana: c.mana_cost || "",
         price: c.price
@@ -33,7 +36,7 @@
     rows[key].before += c.quantity;
     rows[key].after += c.quantity;
   });
-  var added = {}; // lower name -> {name, quantity, category, set_code, collector_number, foil}
+  var added = {}; // key -> {name, zone, quantity, category, set_code, collector_number, foil}
   var rowEls = {}; // lower name -> the <li> of an existing card
   var history = []; // snapshots for Undo
 
@@ -62,19 +65,21 @@
     render();
   }
 
-  function addCard(name, qty, category, printing, finish) {
-    var key = name.toLowerCase();
+  function addCard(name, qty, category, printing, finish, zone) {
+    zone = zone === "side" ? "side" : "main";
+    var key = keyFor(name, zone);
     if (rows[key]) {
       rows[key].after = Math.min(99, rows[key].after + qty);
     } else if (added[key]) {
       added[key].quantity = Math.min(99, added[key].quantity + qty);
     } else {
-      added[key] = { name: name, quantity: qty, category: category || null };
-      if (printing && printing.set_code && printing.collector_number) {
+      added[key] = { name: name, zone: zone, quantity: qty, category: category || null };
+      // a pinned printing or a foil goes to the deck proper only (the gateway refuses them for zone side)
+      if (zone === "main" && printing && printing.set_code && printing.collector_number) {
         added[key].set_code = printing.set_code;
         added[key].collector_number = printing.collector_number;
       }
-      if ((printing && printing.foil === true) || finish === "foil") added[key].foil = true;
+      if (zone === "main" && ((printing && printing.foil === true) || finish === "foil")) added[key].foil = true;
     }
   }
   (cfg.prefill || []).forEach(function (ch) {
@@ -87,12 +92,14 @@
     var out = { change: null, waiting: [] };
     if (r.after !== r.before) {
       out.change = r.after === 0 ? { action: "remove", card_name: r.name } : { action: "set_quantity", card_name: r.name, quantity: r.after };
+      if (r.zone === "side") out.change.zone = "side";
       if (r.setCategory && r.setCategory !== shownCategory(r)) out.waiting.push("category");
       if (r.printing || (r.setFinish && r.setFinish !== r.finish)) out.waiting.push("printing");
       return out;
     }
     if (r.setCategory && r.setCategory !== shownCategory(r)) {
-      out.change = r.setCategory === "Commander" ? { action: "set_commander", card_name: r.name } : { action: "set_category", card_name: r.name, category: r.setCategory };
+      out.change = r.setCategory === "Commander" && r.zone !== "side" ? { action: "set_commander", card_name: r.name } : { action: "set_category", card_name: r.name, category: r.setCategory };
+      if (r.zone === "side") out.change.zone = "side";
       if (r.printing || (r.setFinish && r.setFinish !== r.finish)) out.waiting.push("printing");
       return out;
     }
@@ -114,6 +121,7 @@
     Object.keys(added).forEach(function (k) {
       var a = added[k];
       var ch = { action: "add", card_name: a.name, quantity: a.quantity };
+      if (a.zone === "side") ch.zone = "side";
       if (a.category) ch.category = a.category;
       if (a.set_code) { ch.set_code = a.set_code; ch.collector_number = a.collector_number; }
       if (a.foil) ch.foil = true;
@@ -148,10 +156,11 @@
     ]);
   }
 
-  function categorySelect(current, onchange, allowAuto) {
+  function categorySelect(current, onchange, allowAuto, side) {
     var sel = el("select", { "aria-label": "category" });
     var cats = cfg.categories.slice();
-    if (cats.indexOf("Commander") < 0) cats.unshift("Commander");
+    if (side) cats = cats.filter(function (c) { return c !== "Commander"; });  // a commander is a deck-proper row
+    else if (cats.indexOf("Commander") < 0) cats.unshift("Commander");
     if (current && cats.indexOf(current) < 0) cats.unshift(current);
     if (allowAuto) sel.appendChild(el("option", { value: "", text: "Auto" }));
     cats.forEach(function (c) {
@@ -184,10 +193,11 @@
   }
 
   function describe(ch) {
+    var side = ch.zone === "side" ? " · " + (cfg.sideCategory || "maybeboard").toLowerCase() : "";
     switch (ch.action) {
-      case "add": return "+" + ch.quantity + (ch.set_code ? " (" + ch.set_code.toUpperCase() + " " + ch.collector_number + ")" : "") + (ch.foil ? " foil" : "");
-      case "remove": return "remove";
-      case "set_quantity": return "→ " + ch.quantity;
+      case "add": return "+" + ch.quantity + (ch.set_code ? " (" + ch.set_code.toUpperCase() + " " + ch.collector_number + ")" : "") + (ch.foil ? " foil" : "") + side;
+      case "remove": return "remove" + side;
+      case "set_quantity": return "→ " + ch.quantity + side;
       case "set_commander": return "commander";
       case "set_category": return "→ " + ch.category;
       case "set_finish": return "→ " + ch.finish;
@@ -230,10 +240,10 @@
         el("span", { class: "thumb ph" }, [svg("plus")]),
         el("span", { class: "main" }, [
           el("span", { class: "name", text: a.name }),
-          el("span", { class: "meta", text: (a.set_code ? a.set_code.toUpperCase() + " " + a.collector_number + " · " : "") + (a.foil ? "foil · " : "") + "new card" })
+          el("span", { class: "meta", text: (a.set_code ? a.set_code.toUpperCase() + " " + a.collector_number + " · " : "") + (a.foil ? "foil · " : "") + (a.zone === "side" ? "new " + (cfg.sideCategory || "maybeboard").toLowerCase() + " card" : "new card") })
         ]),
         qtyControls(function () { return a.quantity; }, function (v) { mutate(function () { if (v === 0) delete added[k]; else a.quantity = v; }); }),
-        categorySelect(a.category || "", function (v) { mutate(function () { a.category = v || null; }); }, true),
+        a.zone === "side" ? el("span", { class: "s muted small", text: cfg.sideCategory || "Maybeboard" }) : categorySelect(a.category || "", function (v) { mutate(function () { a.category = v || null; }); }, true),
         el("button", { type: "button", class: "mini remove", "aria-label": "remove " + a.name, onclick: function () { mutate(function () { delete added[k]; }); } }, [svg("x")])
       ]));
     });
@@ -313,18 +323,26 @@
     ]);
     var ul = el("ul", { class: "erows" });
     g.cards.forEach(function (c) {
-      var key = c.name.toLowerCase();
-      if (c.in_deck === false) {
-        ul.appendChild(el("li", { class: "erow side" }, [
-          c.image ? el("img", { class: "thumb", src: c.image, alt: "", loading: "lazy" }) : el("span", { class: "thumb ph" }),
+      var zone = zoneOf(c);
+      var key = keyFor(c.name, zone);
+      var r = rows[key];
+      if (zone === "side") {
+        if (rowEls[key]) return;  // the same side card listed twice: one row
+        var sideLi = el("li", { class: "erow side", "data-row": key }, [
+          r.image ? el("img", { class: "thumb", src: r.image, alt: "", loading: "lazy" }) : el("span", { class: "thumb ph" }),
           el("span", { class: "main" }, [
-            el("span", { class: "name", text: c.quantity + " " + c.name }),
-            el("span", { class: "meta", text: "maybeboard / sideboard row; edited on Archidekt" })
-          ])
-        ]));
+            el("span", { class: "name", text: c.name }),
+            el("span", { class: "meta", text: (r.set ? r.set.toUpperCase() + " " + r.number : "") + (r.finish !== "normal" ? " · " + r.finish : "") + " · not in the deck's count" }),
+            el("span", { class: "note muted small" })
+          ]),
+          qtyControls(function () { return r.after; }, function (v) { mutate(function () { r.after = v; }); }),
+          categorySelect(r.setCategory || shownCategory(r), function (v) { mutate(function () { r.setCategory = v; }); }, false, true),
+          el("button", { type: "button", class: "mini remove", "aria-label": "remove " + c.name, onclick: function () { mutate(function () { r.after = 0; }); } }, [svg("x")])
+        ]);
+        rowEls[key] = sideLi;
+        ul.appendChild(sideLi);
         return;
       }
-      var r = rows[key];
       if (rowEls[key]) {  // the same card in two categories: one state, the first row carries the controls
         ul.appendChild(el("li", { class: "erow side" }, [
           el("span", { class: "thumb ph" }),
@@ -383,9 +401,54 @@
     var qty = parseInt(root.querySelector("input[name=qty]").value, 10) || 1;
     var cat = root.querySelector("select[name=addcat]").value || null;
     var finish = root.querySelector("select[name=addfinish]").value || null;
-    mutate(function () { addCard(name, qty, cat, null, finish); });
+    var zone = root.querySelector("select[name=addzone]").value || "main";
+    mutate(function () { addCard(name, qty, cat, null, finish, zone); });
     input.value = "";
     input.focus();
+  });
+
+  // paste a list: "2 Lightning Bolt" per line, names checked through the gateway's card lookup,
+  // then added like typed cards (to the zone picked in the add form)
+  var pasteForm = root.querySelector("form.pastelist");
+  if (pasteForm) pasteForm.addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var area = pasteForm.querySelector("textarea");
+    var status = pasteForm.querySelector(".pastestatus");
+    var items = [];
+    area.value.split(/\r?\n/).forEach(function (line) {
+      line = line.trim();
+      if (!line || /^(deck|sideboard|maybeboard|commander|companion)\s*:?$/i.test(line) || line.charAt(0) === "#") return;
+      var m = /^(\d{1,2})\s*[xX]?\s+(.+)$/.exec(line) || /^(.+?)\s+[xX]?(\d{1,2})$/.exec(line);
+      var qty = 1, name = line;
+      if (m) { if (/^\d/.test(m[1])) { qty = parseInt(m[1], 10); name = m[2]; } else { name = m[1]; qty = parseInt(m[2], 10); } }
+      name = name.replace(/\s*\([A-Za-z0-9]{2,6}\)\s*[A-Za-z0-9★†-]*\s*$/, "").replace(/\s*\*F\*\s*$/i, "").trim();
+      if (name && items.length < 200) items.push({ name: name, quantity: Math.max(1, Math.min(99, qty)) });
+    });
+    if (!items.length) { status.textContent = "Nothing to add: paste one card per line."; return; }
+    var btn = pasteForm.querySelector("button");
+    btn.disabled = true;
+    status.textContent = "Checking " + items.length + " name" + (items.length === 1 ? "" : "s") + "…";
+    fetch("/scan/api/resolve", {
+      method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": cfg.csrf },
+      body: JSON.stringify({ cards: items })
+    })
+      .then(function (res) { return res.json(); })
+      .then(function (d) {
+        var zone = root.querySelector("select[name=addzone]").value || "main";
+        var missed = [];
+        var found = 0;
+        mutate(function () {
+          (d.cards || []).forEach(function (it, i) {
+            if (it.card && it.card.name) { addCard(it.card.name, it.quantity || items[i].quantity || 1, null, null, null, zone); found += it.quantity || 1; }
+            else missed.push((it.input && it.input.name) || items[i].name);
+          });
+        });
+        area.value = missed.join("\n");
+        status.textContent = found + " card" + (found === 1 ? "" : "s") + " added to the pending changes" + (missed.length ? "; " + missed.length + " name" + (missed.length === 1 ? " was" : "s were") + " not recognised and stay in the box." : ".");
+        btn.disabled = false;
+      })
+      .catch(function () { status.textContent = "The names could not be checked (network error); nothing was added."; btn.disabled = false; });
   });
   root.querySelector("button.undo").addEventListener("click", undo);
 

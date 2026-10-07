@@ -284,7 +284,7 @@ If the packages are public you can skip this step.
 
    | Variable | What to put |
    | --- | --- |
-   | `MTG_IMAGE`, `MTG_TAG` | `ghcr.io/<owner>/mtg-assistant-gateway` and `latest` to follow every new version, or one version to stay on it, for example `0.7.1` ([VERSIONS.md](VERSIONS.md)) |
+   | `MTG_IMAGE`, `MTG_TAG` | `ghcr.io/<owner>/mtg-assistant-gateway` and `latest` to follow every new version, or one version to stay on it, for example `0.7.2` ([VERSIONS.md](VERSIONS.md)) |
    | `MTG_PUBLIC_URL` | `https://mtg.example.com` |
    | `MTG_OIDC_ISSUER` | the issuer URL from step 3 |
    | `MTG_OIDC_CLIENT_ID` | the Client ID from step 3 |
@@ -445,7 +445,7 @@ From any machine:
 
 ```bash
 curl -s https://mtg.example.com/healthz
-# {"status":"ok","version":"0.7.1"}
+# {"status":"ok","version":"0.7.2"}
 
 curl -s https://mtg.example.com/.well-known/oauth-authorization-server | head -c 300
 # JSON with "issuer":"https://mtg.example.com", "authorization_endpoint", ...
@@ -480,10 +480,14 @@ Upstream code is unchanged apart from three small patches in
 
 - `0001-archidekt-null-categories.patch`: Archidekt sends
   `"categories": null` for cards that never got a category (it happens in
-  some imported decks). Without the patch, `archidekt_deck`,
-  `archidekt_export`, `validate_archidekt_deck` and `goldfish_run` (by deck
-  id) crash on those decks. The patch fills in the category Archidekt's own
-  deck page shows: the card's suggested category, or `Land`.
+  some imported decks). Without the patch, Mystic Forge's Archidekt readers
+  (`archidekt_deck`, `archidekt_export`, `validate_archidekt_deck`, and
+  `goldfish_run` given a deck id) crash on those decks. Since 0.7.2 those
+  tools are hidden behind the gateway's own (`get_deck`, `deck_stats`,
+  `run_deck_report`), which read Archidekt themselves, but the patch still
+  matters for a `deck` argument given as an Archidekt link. It fills in the
+  category Archidekt's own deck page shows: the card's suggested category,
+  or `Land`.
 - `0002-archidekt-user-decks-owner-filter.patch`: Archidekt's deck search
   ignores the `owner` filter Mystic Forge sends, so `archidekt_user_decks`
   listed other people's decks. The patch uses `ownerUsername`, which is what

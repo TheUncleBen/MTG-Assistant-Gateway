@@ -120,10 +120,12 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
 - **Sign in.** Users sign in from Claude or ChatGPT with OAuth, through the
   operator's identity provider. The `whoami` tool shows who's signed in.
 - **Research.** Card search, prices, rulings, the Comprehensive Rules,
-  EDHREC, Commander Spellbook combos, precons, deck validation, public
-  Archidekt decks and goldfish simulation.
+  EDHREC, Commander Spellbook combos, precons, deck validation and goldfish
+  simulation.
   - These come from Mystic Forge. The gateway only passes through tools on
-    an allowlist, and always as the signed-in user.
+    an allowlist, and always as the signed-in user. Mystic Forge tools that
+    duplicate a gateway tool are hidden, so each job has exactly one tool
+    (see [One tool per job](#one-tool-per-job)).
   - Mystic Forge features that keep per-user state (watchlists, its own
     saved reports, interactive games) stay hidden until the gateway can
     track who owns them. Saved reports are covered by the gateway's own
@@ -186,15 +188,24 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
   Archidekt, with a snapshot first), and look back over
   proposals, snapshots and reports. They are also the pages the Android app
   wraps.
+  - Everything Archidekt's own deck page offers is there for your own decks:
+    the editor also edits maybeboard and sideboard rows and takes a pasted
+    list; the settings page sets the cover image, deck tags and folder;
+    `/folders` creates and renames folders; Delete deck asks you to type the
+    deck's name and keeps a snapshot (and the Archidekt backup copy) first.
+    `/precons` lists every preconstructed deck Archidekt knows, by set.
+    None of these is an assistant tool; they are your own buttons.
 - **Collection.** The cards you own, which is your Collection on Archidekt
   shown and edited through the gateway (nothing about them is stored here):
-  add by name or from a scan, count copies, filter, export CSV. Owned cards
+  add by name or from a scan, count copies, set a card's finish, condition,
+  language and price paid, filter, export CSV. Owned cards
   get a green dot on every deck page. `list_collection` and
   `propose_collection_changes` (a proposal, approved like a deck edit) give
   the assistant the same.
 - **Likes, bookmarks, follows and comments.** Archidekt's social buttons on
   every deck and user page, each behind a confirmation and sent under your
-  own Archidekt name. Browser-only by design: no tool can do any of it.
+  own Archidekt name; your own comments can be edited and deleted. Browser-only
+  by design: no tool can do any of it.
 - **Adaptive layout.** Bottom tab bar on phones, a navigation rail from
   600 px on touch screens and in the Android app, the desktop bar in wider
   browsers; the layout follows the live window, so a foldable, split screen
@@ -222,6 +233,28 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
 - **One-link setup.** The gateway serves its own assistant plugin and an
   install page at `/install`.
 
+
+### One tool per job
+
+No two assistant tools offer the same capability. Where Mystic Forge has a
+tool that does what a gateway tool already does, the Mystic Forge one is
+hidden (an assistant that calls it is told which tool owns the job), so an
+assistant never has to guess which one to use:
+
+| Job | The one tool | Hidden duplicates |
+| --- | --- | --- |
+| Read any Archidekt deck, or export it as a list | `get_deck` | `archidekt_deck`, `archidekt_export` |
+| List the signed-in member's decks | `list_my_decks` | `archidekt_user_decks` |
+| List another user's public decks | `archidekt_user` | |
+| Legality, bracket, curve, colours and price of a deck | `deck_stats` | `validate_archidekt_deck` |
+| Legality of a pasted list that is not a deck yet | `validate_decklist` | |
+| Cuts and adds between two decks, a precon included | `compare_decks` | `precon_diff` |
+| Goldfish simulation (and comparing two versions: run it twice) | `run_deck_report` | `goldfish_run`, `goldfish_ab` |
+| Draw odds without a simulation, and what the engine models | `goldfish_odds`, `goldfish_annotate` | |
+| Card names from photos or text to exact printings | `resolve_cards` | |
+
+A test pins the hidden list, and the tool descriptions say who owns what.
+
 ### Status
 
 The gateway is in testing: versions below 1.0.0 can still change in small ways
@@ -233,6 +266,7 @@ between releases ([docs/VERSIONS.md](docs/VERSIONS.md)).
 | Applying edits, creating decks, backups and restores on Archidekt | Built, and run live against a throwaway Archidekt account (create, add, remove, quantities, categories, commander, backup folder and copy). The code default is off (`MTG_WRITES_ENABLED=false`); the example env files turn writes on (each change is still applied only by the member's own press, the Approve button on the in-chat card or the Apply button on the review page, unless the member chose a looser approval mode on their Account page). Try your first edit on a deck you don't care about |
 | Client and device coverage | See [docs/CONNECT.md](docs/CONNECT.md#which-apps-and-devices-work), which labels each claim as verified, reported or unverified |
 | Deck statistics, stored deck reports and history, compare, companion pages, admin page, JSON API | Built and covered by the test suite against fakes. The companion pages and admin page have not yet had the same live Swarm run-through as the rest; treat that as unverified |
+| Deck deletion, cover image, folders, tags, comment editing, collection details (0.7.2) | Built against Archidekt routes read from its own site code and covered by tests against a fake; not yet exercised live. Each one reads the result back and reports a mismatch rather than trusting Archidekt's answer |
 | Watchlists, price history | Not yet (Mystic Forge's own saved goldfish reports stay hidden too; the gateway's stored deck reports replace them) |
 
 ## How it works

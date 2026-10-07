@@ -135,6 +135,7 @@ details.dd .menu a,details.dd .menu button,details.dd .menu .item{display:flex;a
 details.dd .menu a:hover,details.dd .menu button:hover,details.dd .menu a:focus-visible{
   background:var(--border);color:var(--text)}
 details.dd .menu .sep{height:1px;background:var(--border);margin:.25rem 0}
+details.dd .menu a.danger{color:var(--danger-fill)}
 details.dd .menu .head{padding:.4rem 1rem .2rem;font-size:.8rem;font-weight:700;color:var(--text-muted);
   text-transform:uppercase;letter-spacing:.04em}
 details.dd .menu form{margin:0;display:contents}
@@ -517,6 +518,10 @@ ICONS = {
     "<circle cx='4' cy='12' r='1' fill='currentColor'/><circle cx='4' cy='18' r='1' fill='currentColor'/>",
     "sort": "<path d='M4 6h10M4 12h7M4 18h4'/><path d='M17 8v10M14 15l3 3 3-3'/>",
     "tag": "<path d='M3 12V4h8l9 9-8 8z'/><circle cx='7' cy='8' r='1.2' fill='currentColor'/>",
+    "trash": "<path d='M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13'/><path d='M10 11v6M14 11v6'/>",
+    "folder": "<path d='M3 6h6l2 2h10v11H3z'/>",
+    "image": "<path d='M4 5h16v14H4z'/><circle cx='9' cy='10' r='1.5'/><path d='M4 17l5-5 4 4 3-3 4 4'/>",
+    "box": "<path d='M3 8l9-5 9 5-9 5z'/><path d='M3 8v8l9 5 9-5V8'/><path d='M12 13v8'/>",
     "play": "<circle cx='12' cy='12' r='9'/><path d='M10 8l6 4-6 4z' fill='currentColor'/>",
     "plus": "<path d='M12 5v14M5 12h14'/>",
     "minus": "<path d='M5 12h14'/>",

@@ -139,14 +139,20 @@ cookie, set by `POST /theme`); internal links never open a new tab.
 | `/` | Home: newest decks with covers, a deck search box, one tile per section (with the count of pending proposals), the assistant connection details |
 | `/search?name=&commander=&owner=&format=&colors=&order=&page=` | Public deck search on Archidekt (name substring, commander, owner, format, colour identity; order `-updatedAt`, `-createdAt`, `-viewCount`, `-size`, `edhBracket`; Archidekt pages of 60) |
 | `/users/{username}` | One Archidekt user's public decks |
-| `/collection?q=&sort=added|edition&view=grid|list&page=` | My collection: the member's Archidekt Collection, filtered by name, grid or list, plus and minus, remove, add by name; `/collection/export.csv` downloads it |
+| `/collection?q=&sort=added|edition&view=grid|list&page=` | My collection: the member's Archidekt Collection, filtered by name, grid or list, plus and minus, remove, add by name, a details menu per row (finish, condition, language, price paid; `action=details`); `/collection/export.csv` downloads it |
 | `/guide` | The in-app guide (end-user documentation) |
-| `/decks?q=&folder=&view=grid|list&order=` | My decks: filter by name or Archidekt folder, grid or list, order by updated / created / name / format, "New deck" |
+| `/decks?q=&folder=&view=grid|list&order=` | My decks: filter by name or Archidekt folder, grid or list, order by updated / created / name / format, "New deck", "Folders" |
+| `/folders` (GET, POST `action=create|rename`) | The member's Archidekt folders: create one (`name`, `parent_id`) or rename one (`folder_id`, `name`); verified by re-reading the folder tree |
+| `/precons?q=` | Archidekt's preconstructed decks grouped by set (cached an hour), filtered by set or deck name |
 | `/decks/open?ref=` | Redirects an Archidekt link or id to its deck page |
 | `/decks/new?scan_session=` | New deck form (name, format, private, pasted list or CSV) that makes a `new_deck` proposal; a scan session prefills the list |
 | `/decks/{id}?view=&group=&sort=&q=` | One deck: banner (art, legality, bracket, size, price, tags), toolbar (Quick add, View as text / stacks / grid, Group by, Sort by, local filter), cards, deck stats, description; owners get Edit deck, Clone deck and Deck settings |
 | `/decks/{id}/edit?scan_session=&add=` | The editor: quantities, categories (new ones by typing), finish, printing (picker over Scryfall), additions with autocomplete and Undo become one proposal; a scan session or a Quick add name prefills it |
-| `/decks/{id}/settings` | Deck settings (name, format, bracket, description, private, unlisted) as a `details` proposal |
+| `/decks/{id}/settings` | Deck settings (name, format, bracket, description, private, unlisted) as a `details` proposal, plus the hand actions below |
+| `/decks/{id}/cover` (POST `card`) | Set the cover image to a card of the deck (its Scryfall id) or back to Archidekt's automatic pick (empty); snapshot first, verified by re-reading |
+| `/decks/{id}/tags` (POST `action=add name=` or `action=remove relation_id=`) | Add an Archidekt deck tag (reused if it exists, else created) or remove one; snapshot first, verified |
+| `/decks/{id}/move` (POST `folder_id`) | Move the deck into one of the member's folders; verified |
+| `/decks/{id}/delete` (GET, POST `name`) | Delete the deck after its exact name is typed; a gateway snapshot and, with backups on, an Archidekt backup copy are made first, and the deletion is verified by reading the deck back. Owners only; never a tool |
 | `/decks/{id}/clone` (POST) | A `clone` proposal for the deck |
 | `/decks/{id}/report` (POST) | Run a deck report and open it |
 | `/decks/{id}/export`, `.txt`, `.json`, `.csv` | Export as text, JSON or an Archidekt-style CSV |

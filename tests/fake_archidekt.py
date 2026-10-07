@@ -122,7 +122,42 @@ class FakeArchidekt:
         self.votes: dict[tuple[str, int], int] = {}
         self.comments: dict[int, list[dict[str, Any]]] = {}  # thread root -> flat list of comments
         self.next_comment_id = 800000
+        # Hand actions added 2026-10-07: global deck tags (id -> name), each deck's tag relations
+        # (deck id -> [{id, tag, name, position}]), deleted deck ids and massUpdate bodies.
+        self.tags: dict[int, str] = {1: "budget", 2: "tribal"}
+        self.deck_tags: dict[int, list[dict[str, Any]]] = {}
+        self.next_tag_id = 10
+        self.next_tag_rel_id = 90000
+        self.deleted: list[int] = []
+        self.mass_updates: list[dict[str, Any]] = []
         self.transport = httpx.MockTransport(self.handle)
+
+    def add_side_row(self, deck_id: int, name: str, quantity: int = 1, category: str = "Maybeboard") -> None:
+        """Give a deck a maybeboard / sideboard row (a category not counted in the deck) holding
+        ``name``, a printing already known to the fake."""
+        deck = self.decks[deck_id]
+        if not any(c["name"] == category for c in deck["categories"]):
+            deck["categories"].append({"name": category, "isPremier": False, "includedInDeck": False})
+        card = self.printing(CARD_DB[name.lower()]["id"]) if name.lower() in CARD_DB else None
+        if card is None:
+            for d in self.decks.values():
+                for c in d["cards"]:
+                    if c["card"]["oracleCard"]["name"] == name:
+                        card = json.loads(json.dumps(c["card"]))
+                        break
+                if card:
+                    break
+        assert card is not None, name
+        self.next_rel_id += 1
+        deck["cards"].append(
+            {
+                "id": self.next_rel_id,
+                "quantity": quantity,
+                "modifier": "Normal",
+                "categories": [category],
+                "card": card,
+            }
+        )
 
     # -- collection and social helpers -------------------------------------------------------------
     def _user_id(self, who: str) -> int:
@@ -153,6 +188,10 @@ class FakeArchidekt:
         out["userInput"] = self.votes.get((who or "", root), 0)
         out["bookmarked"] = who is not None and out["id"] in self.bookmarks.get(who, set())
         out["viewCount"] = out.get("viewCount", 0)
+        out["deckTags"] = [dict(r) for r in self.deck_tags.get(out["id"], [])]
+        out["parentFolder"] = self.deck_folder.get(out["id"], 1000 + self._user_id(owner))
+        out.setdefault("featured", "")
+        out.setdefault("customFeatured", "")
         for c in out["cards"]:
             c["card"]["owned"] = self.owned_count(who, c["card"]["oracleCard"]["name"]) if who else 0
         return out
@@ -215,6 +254,27 @@ class FakeArchidekt:
         self.decks[deck_id]["cards"][0]["quantity"] += 1
         self.decks[deck_id]["updatedAt"] = "2026-10-02T00:00:00Z"
 
+    def _listing_row(self, d: dict[str, Any]) -> dict[str, Any]:
+        """One row of the ``/decks/v3/`` listing (and of the precon listing) for a stored deck."""
+        return {
+            "id": d["id"],
+            "name": d["name"],
+            "owner": {"id": self.users[d["owner"]["username"]]["id"], **d["owner"]},
+            "updatedAt": d["updatedAt"],
+            "deckFormat": 3,
+            "private": d["id"] in self.private,
+            # Live listings carry the deck's folder (verified 2026-10-05); decks in the
+            # root folder are reported here as null.
+            "parentFolderId": self.deck_folder.get(d["id"]),
+            "parentFolderName": self._folder_name(d["owner"]["username"], self.deck_folder.get(d["id"])),
+            # Listing extras as the live v3 rows carry them (seen 2026-10-05).
+            "size": sum(c["quantity"] for c in d["cards"]),
+            "edhBracket": d.get("edhBracket"),
+            "colors": {"W": 0, "U": 12, "B": 0, "R": 0, "G": 14},
+            "featured": d.get("featured") or "",
+            "tags": ([{"id": 1, "name": "ramp"}, {"id": 2, "name": "sea monsters"}] if d["id"] == 42 else []),
+        }
+
     def handle(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
         self.calls.append((request.method, path))
@@ -266,6 +326,9 @@ class FakeArchidekt:
             return httpx.Response(200, json=self._deck_for(deck, None))
         # The deck listing answers anonymous callers too (the public deck search; verified live
         # 2026-10-07); private decks are dropped from it further down.
+        if path == "/api/decks/precons/" and request.method == "GET":
+            rows = [self._listing_row(d) for d in self.decks.values() if d["id"] not in self.private]
+            return httpx.Response(200, json={"Sample Set (SMP)": rows[:1], "Older Set (OLD)": rows[1:2]})
         if who is None and not (path == "/api/decks/v3/" and request.method == "GET" and not auth):
             if auth:
                 return httpx.Response(401, json={"detail": "Given token not valid for any token type"})
@@ -283,6 +346,93 @@ class FakeArchidekt:
             folder = {"id": self.next_folder_id, "name": body["name"], "private": body["private"]}
             self.folders.setdefault(who, []).append(folder)
             return httpx.Response(201, json={**folder, "parentFolder": body["parentFolder"]})
+        if path == "/api/massUpdate/" and request.method == "PATCH":
+            body = json.loads(request.content)
+            self.mass_updates.append(body)
+            own = {f["id"] for f in self.folders.get(who, [])} | {1000 + self.users[who]["id"]}
+            for item in body.get("items", []):
+                patch = item.get("patch") or {}
+                if item.get("type") == "deck":
+                    deck = self.decks.get(item.get("id"))
+                    if deck is None or deck["owner"]["username"] != who:
+                        return httpx.Response(404, json={"detail": "Not found."})
+                    if "parentFolder" in patch:
+                        if patch["parentFolder"] not in own:
+                            return httpx.Response(400, json={"parentFolder": ["Invalid folder."]})
+                        self.deck_folder[deck["id"]] = patch["parentFolder"]
+                elif item.get("type") == "folder":
+                    folder = next((f for f in self.folders.get(who, []) if f["id"] == item.get("id")), None)
+                    if folder is None:
+                        return httpx.Response(404, json={"detail": "Not found."})
+                    if "name" in patch:
+                        folder["name"] = patch["name"]
+                else:
+                    return httpx.Response(400, json={"items": ["Unknown type."]})
+            return httpx.Response(200, json={"ok": True})
+        if path == "/api/decks/tags/v2/" and request.method == "GET":
+            q = (request.url.params.get("q") or "").lower()
+            hits = [{"id": i, "name": n} for i, n in self.tags.items() if q in n.lower()]
+            return httpx.Response(200, json={"count": len(hits), "results": hits})
+        if path == "/api/decks/tags/" and request.method == "POST":
+            body = json.loads(request.content)
+            name = str(body.get("name") or "").strip()
+            if not name:
+                return httpx.Response(400, json={"name": ["This field may not be blank."]})
+            self.next_tag_id += 1
+            self.tags[self.next_tag_id] = name
+            return httpx.Response(201, json={"id": self.next_tag_id, "name": name})
+        if path == "/api/decks/tagRelations/" and request.method == "POST":
+            body = json.loads(request.content)
+            deck = self.decks.get(body.get("deck"))
+            if deck is None or deck["owner"]["username"] != who or body.get("tag") not in self.tags:
+                return httpx.Response(400, json={"deck": ["Invalid."]})
+            self.next_tag_rel_id += 1
+            rel = {
+                "id": self.next_tag_rel_id,
+                "tag": body["tag"],
+                "deck": deck["id"],
+                "name": self.tags[body["tag"]],
+                "position": body.get("position"),
+            }
+            self.deck_tags.setdefault(deck["id"], []).append(rel)
+            return httpx.Response(201, json=rel)
+        if (
+            len(parts) == 4
+            and parts[1:3] == ["decks", "tagRelations"]
+            and parts[3].isdigit()
+            and request.method == "DELETE"
+        ):
+            rid = int(parts[3])
+            for did, rels in self.deck_tags.items():
+                hit = next((r for r in rels if r["id"] == rid), None)
+                if hit is not None:
+                    if self.decks[did]["owner"]["username"] != who:
+                        return httpx.Response(403, json={"detail": "Not yours."})
+                    rels.remove(hit)
+                    return httpx.Response(204)
+            return httpx.Response(404, json={"detail": "Not found."})
+        if (
+            len(parts) == 3
+            and parts[1] == "comments"
+            and parts[2].isdigit()
+            and request.method in ("PATCH", "DELETE")
+        ):
+            cid = int(parts[2])
+            for flat in self.comments.values():
+                hit = next((c for c in flat if c["id"] == cid), None)
+                if hit is None:
+                    continue
+                if hit["owner"]["username"] != who:
+                    return httpx.Response(403, json={"detail": "You do not have permission."})
+                if request.method == "DELETE":
+                    flat[:] = [c for c in flat if c["id"] != cid and c["parent"] != cid]
+                    return httpx.Response(204)
+                body = json.loads(request.content)
+                if isinstance(body.get("text"), str) and body["text"].strip():
+                    hit["text"] = body["text"]
+                    hit["editedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                return httpx.Response(200, json=hit)
+            return httpx.Response(404, json={"detail": "Not found."})
         if path == "/api/decks/copy/" and request.method == "POST":
             if self.fail_backup:
                 return httpx.Response(503, json={"detail": "Service unavailable."})
@@ -355,32 +505,7 @@ class FakeArchidekt:
             if fmt is not None:
                 chosen = [d for d in chosen if str(3) == fmt]
             self.search_params.append(dict(request.url.params))
-            results = [
-                {
-                    "id": d["id"],
-                    "name": d["name"],
-                    "owner": {"id": self.users[d["owner"]["username"]]["id"], **d["owner"]},
-                    "updatedAt": d["updatedAt"],
-                    "deckFormat": 3,
-                    "private": d["id"] in self.private,
-                    # Live listings carry the deck's folder (verified 2026-10-05); decks in the
-                    # root folder are reported here as null.
-                    "parentFolderId": self.deck_folder.get(d["id"]),
-                    "parentFolderName": self._folder_name(
-                        d["owner"]["username"], self.deck_folder.get(d["id"])
-                    ),
-                    # Listing extras as the live v3 rows carry them (seen 2026-10-05).
-                    "size": sum(c["quantity"] for c in d["cards"]),
-                    "edhBracket": d.get("edhBracket"),
-                    "colors": {"W": 0, "U": 12, "B": 0, "R": 0, "G": 14},
-                    "tags": (
-                        [{"id": 1, "name": "ramp"}, {"id": 2, "name": "sea monsters"}]
-                        if d["id"] == 42
-                        else []
-                    ),
-                }
-                for d in chosen
-            ]
+            results = [self._listing_row(d) for d in chosen]
             return httpx.Response(200, json={"count": len(results), "results": results})
         if path == "/api/cards/v2/":
             # name= is a substring search over a huge card pool; exact=true returns exact oracle
@@ -592,6 +717,9 @@ class FakeArchidekt:
                 if self.fail_deck_reads:
                     return httpx.Response(503, json={"detail": "Service unavailable."})
                 return httpx.Response(200, json=self._deck_for(deck, who))
+            if parts[3:] == ["tagRelations"] and request.method == "GET":
+                rels = self.deck_tags.get(deck["id"], [])
+                return httpx.Response(200, json={"count": len(rels), "results": [dict(r) for r in rels]})
             if parts[3:] == ["bookmarks"] and request.method in ("POST", "DELETE"):
                 marks = self.bookmarks.setdefault(who, set())
                 (marks.add if request.method == "POST" else marks.discard)(deck["id"])
@@ -600,6 +728,12 @@ class FakeArchidekt:
                 return httpx.Response(
                     403, json={"detail": "You do not have permission to perform this action."}
                 )
+            if len(parts) == 3 and request.method == "DELETE":
+                del self.decks[deck["id"]]
+                self.private.discard(deck["id"])
+                self.deck_tags.pop(deck["id"], None)
+                self.deleted.append(deck["id"])
+                return httpx.Response(204)
             if parts[3:] == ["update"] and request.method == "PATCH":
                 if self.fail_deck_update:
                     return httpx.Response(503, json={"detail": "Service unavailable."})
@@ -608,6 +742,14 @@ class FakeArchidekt:
                 for key in ("name", "description", "deckFormat", "edhBracket", "private", "unlisted"):
                     if key in body:
                         deck[key] = body[key]
+                if "customFeatured" in body or "featured" in body:
+                    # the site's "deck image": a card art URL, or an empty customFeatured for automatic
+                    deck["customFeatured"] = body.get("customFeatured") or ""
+                    deck["featured"] = body.get("featured") or (
+                        ""
+                        if "customFeatured" in body and "featured" not in body
+                        else deck.get("featured", "")
+                    )
                 if "private" in body:
                     (self.private.add if body["private"] else self.private.discard)(deck["id"])
                 deck["updatedAt"] = "2026-10-03T00:00:00Z"
