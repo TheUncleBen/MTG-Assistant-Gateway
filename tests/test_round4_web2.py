@@ -558,3 +558,24 @@ async def test_odd_documents_never_become_server_errors(tmp_path: Path, idp: Fak
             assert all(k not in extra for k in client.model_dump(exclude_none=True))
         r = await h.http.get("/authorize", params={"client_id": CLIENT_URL, "response_type": "code"})
         assert r.status_code < 500
+
+
+# -- Round 11 (RM-1, RM-2) -----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("scope", ["mtg\ud800", "mtg  read", 'mtg"x', "mtg\\x", " mtg"])
+def test_scopes_outside_the_oauth_charset_are_refused(scope: str):
+    with pytest.raises(CimdError):
+        cimdmod.validate_document(CLIENT_URL, {**document(), "scope": scope})
+    assert cimdmod.validate_document(CLIENT_URL, {**document(), "scope": "mtg mtg.read"})["scope"]
+
+
+async def test_a_record_stored_before_the_stricter_checks_is_refetched(tmp_path: Path, idp: FakeIdP):
+    docs = DocHost()
+    docs.serve()
+    async with running(Harness(make_settings(tmp_path), idp, cimd=docs.fetcher())) as h:
+        bad = {**cimdmod.validate_document(CLIENT_URL, document()), "client_uri": "https://"}
+        h.db.save_cimd_client(CLIENT_URL, bad, 86400)
+        client = await h.app.state.gateway.provider.get_client(CLIENT_URL)
+        assert client is not None and client.client_uri is None
+        assert len(docs.requests) == 1

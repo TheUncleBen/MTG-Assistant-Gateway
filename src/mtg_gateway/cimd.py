@@ -325,6 +325,10 @@ def _cache_ttl(cache_control: str | None) -> int:
     return DEFAULT_TTL
 
 
+# RFC 6749 section 3.3: scope-token = 1*( %x21 / %x23-5B / %x5D-7E ), separated by single spaces.
+_SCOPE = re.compile(r"[\x21\x23-\x5b\x5d-\x7e]+(?: [\x21\x23-\x5b\x5d-\x7e]+)*")
+
+
 def validate_document(url: str, doc: Any) -> dict[str, Any]:
     """Check a fetched document and return the client record the gateway will use."""
     if not isinstance(doc, dict):
@@ -388,9 +392,15 @@ def validate_document(url: str, doc: Any) -> dict[str, Any]:
     if scope:
         if len(scope) > 1000:
             raise CimdError("scope is too long")
+        if not _SCOPE.fullmatch(scope):
+            raise CimdError("scope must be space-separated scope tokens (RFC 6749 section 3.3)")
         record["scope"] = scope
     if len(json.dumps(record)) > MAX_RECORD_BYTES:
         raise CimdError("client metadata is too large")
+    try:
+        json.dumps(record, ensure_ascii=False).encode("utf-8")  # tokens are sent as UTF-8 JSON
+    except UnicodeEncodeError as exc:
+        raise CimdError("client metadata is not valid text") from exc
     try:
         # What get_client will build from the stored record must build here, or the record would
         # turn every later request for this client into a server error.

@@ -191,9 +191,17 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             info = {k: v for k, v in info.items() if k not in (SECRET_HASH_KEY, "client_secret")}
             return OAuthClientInformationFull.model_validate(info)
         if self.settings.cimd_enabled and is_cimd_client_id(client_id):
-            info = await self._cimd_client(client_id)
-            if info:
-                return OAuthClientInformationFull.model_validate(info)
+            for _ in range(2):
+                info = await self._cimd_client(client_id)
+                if not info:
+                    return None
+                try:
+                    return OAuthClientInformationFull.model_validate(info)
+                except ValueError:
+                    # A copy stored before documents were checked this strictly: never used
+                    # again (also not as a stale copy); fetched afresh once.
+                    logger.info("discarding a stored metadata document that no longer validates")
+                    self.db.expire_cimd_client(client_id)
         return None
 
     async def _cimd_client(self, url: str) -> dict[str, Any] | None:
