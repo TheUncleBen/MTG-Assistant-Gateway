@@ -40,6 +40,7 @@ from .cimd import (
     CimdBusy,
     CimdError,
     CimdFetcher,
+    CimdHeldBack,
     CimdThrottled,
     CimdUnavailable,
     check_redirect_uri,
@@ -214,7 +215,9 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
                 if stale:
                     logger.warning("using the last good metadata document of %s: %s", url[:120], exc)
                     return stale
-            if isinstance(exc, CimdBusy):
+            if isinstance(exc, CimdBusy | CimdHeldBack):
+                # Nothing was asked of the server this time; a held-back lookup's failure was
+                # already recorded when the backoff began (no audit row per anonymous lookup).
                 return None
             self._cimd_rejected(url, exc)
             return None

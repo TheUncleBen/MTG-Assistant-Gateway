@@ -512,3 +512,22 @@ async def test_lookups_queued_behind_a_failing_one_do_not_ask_again():
     assert len(docs.requests) == 1
     assert f._known_gate._value == cimdmod.MAX_CONCURRENT_FETCHES and not f._url_locks
     await f.aclose()
+
+
+async def test_held_back_lookups_write_no_audit_rows(tmp_path: Path, idp: FakeIdP):
+    """Round 9 (RK-1): with no usable stale copy, every anonymous lookup during the backoff used to
+    write a cimd_rejected row, pushing genuine rows out of the capped anonymous audit log."""
+    docs = DocHost()
+    docs.serve()
+    async with running(Harness(make_settings(tmp_path), idp, cimd=docs.fetcher())) as h:
+        provider = h.app.state.gateway.provider
+        assert await provider._cimd_client(CLIENT_URL)
+        h.db.mark_cimd_client_signed_in(CLIENT_URL)
+        with h.db.tx() as c:
+            c.execute("UPDATE cimd_clients SET expires_at = ?", (int(time.time()) - 30 * 86400,))
+        docs.serve(status=503)
+        for _ in range(50):
+            assert await provider._cimd_client(CLIENT_URL) is None
+        with h.db.tx() as c:
+            n = c.execute("SELECT COUNT(*) FROM audit_log WHERE event = 'cimd_rejected'").fetchone()[0]
+        assert n == 1

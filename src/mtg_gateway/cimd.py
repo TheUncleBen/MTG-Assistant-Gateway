@@ -113,7 +113,7 @@ class CimdDnsTimeout(CimdUnavailable):
     """The host's DNS did not answer within DNS_TIMEOUT (the lookup may still hold a thread)."""
 
 
-class _HeldBack(CimdUnavailable):
+class CimdHeldBack(CimdUnavailable):
     """A signed-in client's server failed a moment ago; not asked again yet."""
 
 
@@ -567,12 +567,12 @@ class CimdFetcher:
         if unreachable_at is not None and now - unreachable_at < FAILURE_TTL:
             # Its server was down or asked us to slow down a moment ago: don't ask again on every
             # anonymous lookup (the caller keeps the last good copy meanwhile).
-            raise _HeldBack("metadata document server was unreachable recently; not retrying yet")
+            raise CimdHeldBack("metadata document server was unreachable recently; not retrying yet")
         failed_at = self._known_dns_failures.get(host)
         if failed_at is not None and now - failed_at < FAILURE_TTL:
             # Its DNS hung a moment ago and that lookup may still hold a thread: don't start
             # another, so one such name can't use up the lane's DNS threads.
-            raise _HeldBack("client metadata host did not resolve recently; not retrying yet")
+            raise CimdHeldBack("client metadata host did not resolve recently; not retrying yet")
 
     async def _fetch_known(self, url: str, now: float) -> tuple[dict[str, Any], int]:
         """Refetch the document of a client a member has signed in with: no budgets or host
@@ -600,11 +600,12 @@ class CimdFetcher:
                         return await self._fetch(url, known=True)
                 except TimeoutError as exc:
                     raise CimdUnavailable("metadata document fetch timed out") from exc
-            except (CimdBusy, _HeldBack):
+            except (CimdBusy, CimdHeldBack):
                 raise
             except CimdUnavailable as exc:
                 # Not a failure of the document (the caller keeps its last good copy), but its
                 # server is left alone for a minute; a hung lookup also holds back the host.
+                now = time.monotonic()  # when it failed, not when the lookup queued
                 self._known_backoff[url] = now
                 if len(self._known_backoff) > 1000:
                     self._known_backoff = {
