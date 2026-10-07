@@ -74,6 +74,49 @@ touch screens, and a native-feeling layout in the Android app.
 - The navigation is Decks, Search, Collection, Scan, Proposals, History (and
   Admin for admins); the phone tab bar is Decks, Search, Scan, Collection,
   More (More opens the home page with every section).
+## [0.6.2] - 2026-10-07
+
+### Fixed
+
+- Sign-in failed with *Sign-in could not be completed with the identity
+  provider* and the log line `ID token validation failed:
+  ExceededSizeError` when the provider's ID token was bigger than the
+  token library's built-in limits (a 512-byte header, a 1 KB signature,
+  about 96 KB of claims). The gateway now allows up to 16 KB of header,
+  4 KB of signature and 2 MB of claims, which fits big group lists,
+  avatar claims and certificate chains. The token still has to come from
+  the provider's own token endpoint and pass every other check.
+- A token that big usually means a scope mapping adds far more than the
+  gateway needs, and Authentik puts the same claims in its access token,
+  which the gateway sends to Authentik's userinfo endpoint for the group
+  check. So when a sign-in brings an ID or access token over 16 KB, the log
+  now warns `identity provider issued unusually large tokens` and lists the
+  five biggest claims by name and size (never their values). If userinfo
+  then refuses the oversized request (HTTP 400, 413 or 431), the log says
+  so.
+
+### Changed
+
+- That sign-in failure page now answers HTTP 500 instead of 502. The
+  Android app treats 502-504 as the reverse proxy's "gateway is down" page
+  and covered the real message with *Your gateway is not answering right
+  now*.
+- When sign-in fails while the gateway is collecting your identity
+  provider's answer, the page now says which setting to check instead of
+  only "Try again": the client ID or secret, the sign-in code (usually
+  just try again, otherwise the redirect URI), the ID token (signing key,
+  encryption key, client ID or clocks), or reaching the provider. The page
+  shows no part of the provider's answer and no secret.
+- The log line `identity provider exchange failed` now includes the
+  provider's error code (for example `HTTP 401, invalid_client`), says
+  outright when the ID token is signed with HS256 (Authentik does that
+  when the provider has no Signing Key), and says why the ID token was
+  refused (for example `Invalid claim: 'aud'`, or `The token is expired`
+  when the clocks differ).
+- Troubleshooting tables in [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
+  and [docs/IDP-AUTHENTIK.md](docs/IDP-AUTHENTIK.md) list each new message.
+
+Nothing to do when upgrading from 0.6.1.
 
 ## [0.6.1] - 2026-10-06
 
