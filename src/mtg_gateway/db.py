@@ -571,6 +571,12 @@ class Database:
             (now - 86400, now - KNOWN_CIMD_CLIENT_RETENTION_SECONDS),
         ).rowcount
 
+    def expire_cimd_client(self, client_id: str) -> None:
+        """The document's server refused it: the stored copy is never used again (the row, and
+        when the client last signed in, stay until the purge)."""
+        with self.tx() as c:
+            c.execute("UPDATE cimd_clients SET expires_at = 0 WHERE client_id = ?", (client_id,))
+
     def get_cimd_client(self, client_id: str, *, stale_for: int = 0) -> dict[str, Any] | None:
         """The cached document, if still fresh (or expired less than ``stale_for`` seconds ago)."""
         row = self._one(

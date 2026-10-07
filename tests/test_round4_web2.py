@@ -328,15 +328,16 @@ async def test_hung_lookups_of_junk_ids_do_not_reach_the_signed_in_lane(monkeypa
 
 
 async def test_an_unreachable_signed_in_client_is_not_remembered_as_failed(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(cimdmod, "DNS_TIMEOUT", 0.1)
-    docs = SlowDns()
+    docs = DocHost()
     docs.serve()
-    saved = docs.addresses.pop("client.example")
+    saved = docs.addresses.pop("client.example")  # its DNS fails for a moment
     f = docs.fetcher()
     with pytest.raises(cimdmod.CimdUnavailable):
         await f.fetch(CLIENT_URL, known=True)
     docs.addresses["client.example"] = saved
     assert (await f.fetch(CLIENT_URL, known=True))[0]["client_name"]  # not "failed recently"
+    # A lookup that hangs is held back for a minute instead (the next test), but as
+    # "unavailable", so the caller keeps the last good copy meanwhile.
     await f.aclose()
 
 
@@ -357,3 +358,63 @@ async def test_a_signed_in_client_keeps_its_last_good_document_while_unreachable
         with h.db.tx() as c:
             c.execute("UPDATE cimd_clients SET signed_in_at = NULL")
         assert await provider._cimd_client(CLIENT_URL) is None
+
+
+# -- Round 5 (RF-1, RF-2) ------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("change", ["withdrawn", "invalid"])
+async def test_a_refused_document_is_never_served_stale(tmp_path: Path, idp: FakeIdP, change: str):
+    """The stale copy is only for an unreachable server: once the server itself withdraws the
+    document or serves an unacceptable one, the old copy (old redirect URIs) is never used again,
+    also not through the one-minute negative cache."""
+    docs = DocHost()
+    docs.serve()
+    async with running(Harness(make_settings(tmp_path), idp, cimd=docs.fetcher())) as h:
+        provider = h.app.state.gateway.provider
+        assert await provider._cimd_client(CLIENT_URL)
+        h.db.mark_cimd_client_signed_in(CLIENT_URL)
+        with h.db.tx() as c:
+            c.execute("UPDATE cimd_clients SET expires_at = ?", (int(time.time()) - 60,))
+        if change == "withdrawn":
+            del docs.docs[CLIENT_URL]
+        else:
+            docs.serve(body=document(client_id="https://other.example/x.json"))
+        for _ in range(3):
+            assert await provider._cimd_client(CLIENT_URL) is None
+        assert await provider.get_client(CLIENT_URL) is None
+        assert h.db.cimd_client_known(CLIENT_URL)  # still remembered as signed in, for a fixed document
+        docs.serve()
+        provider.cimd._failures.clear()  # past the negative cache
+        assert (await provider._cimd_client(CLIENT_URL))["client_name"] == "Example Assistant"
+
+
+async def test_one_hung_signed_in_host_cannot_use_up_the_lanes_dns_threads(monkeypatch: pytest.MonkeyPatch):
+    import socket
+    import threading
+
+    monkeypatch.setattr(cimdmod, "DNS_TIMEOUT", 0.3)
+    release = threading.Event()
+    lookups: list[str] = []
+
+    def getaddrinfo(host: str, *args: object, **kw: object) -> list:
+        lookups.append(host)
+        if host == "hung.example":
+            release.wait(10)
+            raise OSError("timeout")
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
+
+    monkeypatch.setattr(cimdmod.socket, "getaddrinfo", getaddrinfo)
+    docs = DocHost()
+    docs.serve()
+    http = httpx.AsyncClient(transport=httpx.MockTransport(docs.handler), follow_redirects=False)
+    f = cimdmod.CimdFetcher(http=http, timeout=1.0)
+    try:
+        for _ in range(6):
+            with pytest.raises(cimdmod.CimdUnavailable):
+                await f.fetch("https://hung.example/c.json", known=True)
+        assert lookups.count("hung.example") == 1  # one hung thread, not one per request
+        assert (await f.fetch(CLIENT_URL, known=True))[0]["client_name"]
+    finally:
+        release.set()
+        await f.aclose()

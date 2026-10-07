@@ -37,6 +37,7 @@ from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from starlette.requests import Request
 
 from .cimd import (
+    CimdBusy,
     CimdError,
     CimdFetcher,
     CimdThrottled,
@@ -204,19 +205,25 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             # A client a member signed in with skips the fetcher's per-host block and rate limits
             # and has a lane of its own (cimd.py).
             info, ttl = await self.cimd.fetch(url, known=known)
-        except (CimdThrottled, CimdUnavailable) as exc:
+        except (CimdBusy, CimdUnavailable) as exc:
             if known:
                 # Its server can't be reached right now (or someone is flooding the fetcher): keep
-                # using the last good copy for a while rather than lock its members out.
+                # using the last good copy for a while rather than lock its members out. Never
+                # after the server's own answer refused the document (below).
                 stale = self.db.get_cimd_client(url, stale_for=CIMD_STALE_FOR)
                 if stale:
                     logger.warning("using the last good metadata document of %s: %s", url[:120], exc)
                     return stale
-            if isinstance(exc, CimdThrottled):
+            if isinstance(exc, CimdBusy):
                 return None
             self._cimd_rejected(url, exc)
             return None
+        except CimdThrottled:
+            return None
         except CimdError as exc:
+            # The document's own server withdrew it or serves one that is no longer acceptable:
+            # the stored copy must not be used again, stale or not.
+            self.db.expire_cimd_client(url)
             self._cimd_rejected(url, exc)
             return None
         self.db.save_cimd_client(url, info, ttl)

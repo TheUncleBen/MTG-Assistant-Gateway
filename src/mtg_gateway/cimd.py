@@ -100,9 +100,17 @@ class CimdThrottled(CimdError):
     """The same URL failed less than a minute ago; nothing was fetched this time."""
 
 
+class CimdBusy(CimdThrottled):
+    """No fetch slot came free in time: says nothing about the URL."""
+
+
 class CimdUnavailable(CimdError):
     """The document's server could not be reached (DNS, connection, deadline): says nothing about
     the document itself, so a client a member signed in with keeps its last good copy."""
+
+
+class CimdDnsTimeout(CimdUnavailable):
+    """The host's DNS did not answer within DNS_TIMEOUT (the lookup may still hold a thread)."""
 
 
 def is_cimd_client_id(client_id: str) -> bool:
@@ -385,7 +393,7 @@ class CimdFetcher:
         # each lane resolves in threads of its own: junk client ids can fill only the first-time
         # lane's, never the signed-in lane's nor the pool the rest of the gateway resolves in.
         self._dns_new = concurrent.futures.ThreadPoolExecutor(4, thread_name_prefix="cimd-dns-new")
-        self._dns_known = concurrent.futures.ThreadPoolExecutor(2, thread_name_prefix="cimd-dns-known")
+        self._dns_known = concurrent.futures.ThreadPoolExecutor(4, thread_name_prefix="cimd-dns-known")
         self.timeout = timeout
         self.allowed_hosts = [h.lower() for h in allowed_hosts or []]
         self._failures: dict[str, float] = {}
@@ -400,6 +408,7 @@ class CimdFetcher:
         self._known_gate = asyncio.Semaphore(MAX_CONCURRENT_FETCHES)
         self._url_locks: dict[str, asyncio.Lock] = {}
         self._url_users: dict[str, int] = {}
+        self._known_dns_failures: dict[str, float] = {}  # host -> when its lookup last timed out
 
     async def aclose(self) -> None:
         await self._http.aclose()
@@ -479,7 +488,7 @@ class CimdFetcher:
                         lock.release()
                         raise
             except TimeoutError as exc:
-                raise CimdThrottled("metadata document fetcher is busy; try again shortly") from exc
+                raise CimdBusy("metadata document fetcher is busy; try again shortly") from exc
             try:
                 if not allowlisted:
                     # Checked again now that the slot is ours: the host may have failed meanwhile.
@@ -523,14 +532,28 @@ class CimdFetcher:
                         lock.release()
                         raise
             except TimeoutError as exc:
-                raise CimdThrottled("metadata document fetcher is busy; try again shortly") from exc
+                raise CimdBusy("metadata document fetcher is busy; try again shortly") from exc
+            host = (urlparse(url).hostname or "").lower().rstrip(".")
+            failed_at = self._known_dns_failures.get(host)
+            if failed_at is not None and now - failed_at < FAILURE_TTL:
+                # Its DNS hung a moment ago and that lookup may still hold a thread: don't start
+                # another, so one such name can't use up the lane's DNS threads.
+                raise CimdUnavailable("client metadata host did not resolve recently; not retrying yet")
             try:
                 async with asyncio.timeout(self.timeout):
                     return await self._fetch(url, known=True)
             except TimeoutError as exc:
                 raise CimdUnavailable("metadata document fetch timed out") from exc
-            except CimdUnavailable:
-                raise  # not remembered: an unreachable server says nothing about the document
+            except CimdUnavailable as exc:
+                # Not remembered against the URL: an unreachable server says nothing about the
+                # document. A hung lookup is remembered against the host for the lane's DNS threads.
+                if isinstance(exc, CimdDnsTimeout):
+                    self._known_dns_failures[host] = now
+                    if len(self._known_dns_failures) > 1000:
+                        self._known_dns_failures = {
+                            h: t for h, t in self._known_dns_failures.items() if now - t < FAILURE_TTL
+                        }
+                raise
             except CimdError:
                 self._note_failure(url, now)
                 raise
@@ -573,7 +596,7 @@ class CimdFetcher:
         except TimeoutError as exc:
             # For a first-time URL this is remembered against the host (unlike a slow fetch): a
             # name whose DNS never answers must not hold a fetch slot again and again.
-            raise CimdUnavailable("cannot resolve client metadata host: timed out") from exc
+            raise CimdDnsTimeout("cannot resolve client metadata host: timed out") from exc
         except OSError as exc:
             raise CimdUnavailable(f"cannot resolve client metadata host: {exc.__class__.__name__}") from exc
         if not addresses or not all(_address_is_public(a) for a in addresses):

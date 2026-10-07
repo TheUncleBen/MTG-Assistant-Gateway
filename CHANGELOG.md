@@ -104,7 +104,8 @@ next sign-in.
   documents, 50 per site. Apps a member has signed in with are never
   throttled or evicted, are fetched in a lane of their own (fetch slots and
   DNS threads) that junk addresses can't fill, and keep their last good
-  document for up to a week while their server can't be reached.
+  document for up to a week while their server can't be reached (never
+  after the server withdraws it or serves one that isn't accepted).
 - Archidekt: each member may start `MTG_ARCHIDEKT_CALLS_PER_10_MIN` (120)
   Archidekt calls per 10 minutes, the research tools' `archidekt_*` calls
   included. Five failed Archidekt link attempts in 15 minutes block further
