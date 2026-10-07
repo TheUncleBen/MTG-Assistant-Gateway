@@ -289,3 +289,36 @@ def test_consent_on_a_phone_unlocks_with_a_first_tap(server: Server) -> None:
             page.wait_for_url(f"{server.outside}/application/o/authorize/**", timeout=10_000)
         finally:
             browser.close()
+
+
+def test_consent_unlocking_tap_is_swallowed_even_when_its_click_comes_late(server: Server) -> None:
+    """A busy phone can deliver the click of a tap long after its touchstart, past the settle time.
+    The unlocking tap's click is swallowed whatever the timing; the next tap approves."""
+    from playwright.sync_api import expect, sync_playwright
+
+    exe = _chromium_or_skip()
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            page = browser.new_context(has_touch=True, is_mobile=True).new_page()
+            page.goto(server.authorize_url())
+            page.wait_for_selector(APPROVE)
+            page.wait_for_timeout(1000)
+            # The touch by itself, then its click 600 ms later (longer than data-settle).
+            page.evaluate(
+                "(sel) => { const b = document.querySelector(sel);"
+                " for (const t of ['touchstart', 'touchend'])"
+                " b.dispatchEvent(new TouchEvent(t, {bubbles: true, cancelable: true})); }",
+                APPROVE,
+            )
+            page.wait_for_timeout(600)
+            expect(page.locator(APPROVE)).to_be_enabled()
+            page.evaluate("(sel) => document.querySelector(sel).click()", APPROVE)
+            page.wait_for_timeout(300)
+            assert page.url.startswith(f"{server.base}/authorize/confirm"), page.url
+            box = page.locator(APPROVE).bounding_box()
+            assert box is not None
+            page.touchscreen.tap(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+            page.wait_for_url(f"{server.outside}/application/o/authorize/**", timeout=10_000)
+        finally:
+            browser.close()
