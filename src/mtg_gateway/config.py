@@ -195,6 +195,15 @@ class Settings:
     log_level: str = "INFO"
     server_name: str = "MTG Assistant Gateway"
 
+    def grants_access(self, groups: list[str] | None) -> bool:
+        """May someone in ``groups`` use the gateway? Members of MTG_REQUIRED_GROUP may, and so
+        may members of MTG_ADMIN_GROUP: an admin needs no second group to sign in. Both are read
+        from the identity provider's live answer, so leaving either group is seen the same way."""
+        if not self.required_group:
+            return True
+        held = groups or []
+        return self.required_group in held or bool(self.admin_group and self.admin_group in held)
+
     @property
     def public_host(self) -> str:
         return urlparse(self.public_url).netloc

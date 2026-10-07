@@ -178,8 +178,7 @@ class MembershipChecker:
             )
             return self._revoke(sub, "no_groups_claim", None, removed=False)
         groups = resolve_groups(source, claim)
-        required = self.settings.required_group
-        if required and required not in groups:
+        if not self.settings.grants_access(groups):
             return self._revoke(sub, "not_in_group", groups)
         if groups != user.get("groups"):
             self.db.set_user_groups(sub, groups)

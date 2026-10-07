@@ -428,8 +428,7 @@ def browser_session(state: Any, request: Request) -> tuple[str | None, str | Non
     user = state.db.get_user(sub)
     if user is None or user.get("disabled_at"):
         return None, None  # a disabled account keeps no browser session either
-    group = state.settings.required_group
-    if group and group not in user["groups"]:
+    if not state.settings.grants_access(user["groups"]):
         return None, None
     return sub, sid
 

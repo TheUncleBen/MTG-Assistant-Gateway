@@ -333,3 +333,57 @@ async def test_any_idp_user_without_a_groups_claim_stays_signed_in(tmp_path: Pat
         idp.disabled.add(SUB)
         idp.access_tokens.clear()
         assert (await whoami(h, token)).status_code == 401
+
+
+async def test_huge_access_token_is_checked_in_a_post_body(tmp_path: Path, idp: FakeIdP) -> None:
+    """Authentik copies the ID token's claims into its access token, so an embedded avatar can
+    make it over a megabyte. A reverse proxy refuses a header that size (0.6.2 answered every page
+    with "the sign-in service can't be reached"); the check now sends it in a POST body, and a
+    removal is still seen on the next request."""
+    idp.access_token_pad = 1_200_000
+    async with running(Harness(live(tmp_path), idp)) as h:
+        b = Browser(h)
+        await b.login()
+        assert (await b.http.get("/account")).status_code == 200
+        assert idp.userinfo_methods and set(idp.userinfo_methods) == {"POST"}
+        idp.set_groups(SUB, ["someone-else"])
+        page = await b.http.get("/account")
+        assert page.status_code == 302 and page.headers["location"].startswith("/login")
+        await b.aclose()
+
+
+async def test_small_access_token_still_uses_the_header(tmp_path: Path, idp: FakeIdP) -> None:
+    async with running(Harness(live(tmp_path), idp)) as h:
+        b = Browser(h)
+        await b.login()
+        assert (await b.http.get("/account")).status_code == 200
+        assert idp.userinfo_methods and set(idp.userinfo_methods) == {"GET"}
+        await b.aclose()
+
+
+async def test_admin_group_alone_grants_access_and_leaving_it_cuts_off(tmp_path: Path, idp: FakeIdP) -> None:
+    """An admin needs no second group to sign in; leaving the admin group (with no users group)
+    is seen on the next request like any other removal."""
+    async with running(Harness(live(tmp_path, admin_group="mtg-admins"), idp)) as h:
+        idp.user = {**idp.user, "groups": ["mtg-admins"]}
+        b = Browser(h)
+        await b.login("/admin")
+        assert (await b.http.get("/admin/users")).status_code == 200
+        assert (await b.http.get("/account")).status_code == 200
+        client = await h.register()
+        tokens = await h.tokens_for(client)
+        assert (await whoami(h, tokens["access_token"])).status_code == 200
+        idp.set_groups(SUB, ["someone-else"])
+        assert (await whoami(h, tokens["access_token"])).status_code == 401
+        page = await b.http.get("/account")
+        assert page.status_code == 302 and page.headers["location"].startswith("/login")
+        await b.aclose()
+
+
+async def test_neither_group_is_still_refused_at_sign_in(tmp_path: Path, idp: FakeIdP) -> None:
+    async with running(Harness(live(tmp_path, admin_group="mtg-admins"), idp)) as h:
+        idp.user = {**idp.user, "groups": ["other"]}
+        r, _ = await h.start_login(await h.register())
+        cb = await h.idp_leg(r)
+        page = await h.callback(cb)
+        assert page.status_code == 403 and "not in the group" in page.text

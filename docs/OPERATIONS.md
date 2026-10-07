@@ -73,7 +73,7 @@ logs.
 
 In Portainer: **Stacks** → `mtg` → **Update the stack**, with "Re-pull
 image" ticked. With `MTG_TAG=latest` that pulls the newest version; with a
-pinned version (for example `0.6.2`), change `MTG_TAG` first
+pinned version (for example `0.6.3`), change `MTG_TAG` first
 ([VERSIONS.md](VERSIONS.md)). Or from the command line:
 
 ```bash
@@ -516,9 +516,10 @@ Archidekt busy for everyone:
 `/admin` is a browser page for whoever runs the gateway. It exists only when
 `MTG_ADMIN_GROUP` is set to the name of a group in your identity provider
 (set it in the stack's environment variables or in `.env`; the stack and
-Compose files already pass it through). Members of that group who are also allowed
-to sign in (so also in `MTG_REQUIRED_GROUP`, if one is set) see it after
-signing in. For everyone else, and whenever the variable is unset, `/admin`
+Compose files already pass it through). Members of that group see it after
+signing in; since 0.6.3 they don't also need to be in `MTG_REQUIRED_GROUP`,
+because the admin group lets its members sign in too. In the site menu it's
+the **Admin** link, shown only to them. For everyone else, and whenever the variable is unset, `/admin`
 and everything under it answers 404, so ordinary users can't tell the area
 exists. Group membership is what the live membership check last recorded
 (at most `MTG_MEMBERSHIP_CHECK_TTL` seconds old, see

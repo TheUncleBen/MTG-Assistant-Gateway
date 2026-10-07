@@ -284,9 +284,7 @@ class OIDCClient:
             and (identity.email is None or not identity.groups)
         ):
             try:
-                ui = await self._http.get(
-                    meta["userinfo_endpoint"], headers={"Authorization": f"Bearer {access_token}"}
-                )
+                ui = await self._userinfo_request(meta["userinfo_endpoint"], access_token)
                 if ui.status_code == 200:
                     info = ui.json()
                     if str(info.get("sub")) == identity.sub:
@@ -367,17 +365,16 @@ class OIDCClient:
         if not endpoint:
             raise IdPUnavailable("identity-provider metadata lacks userinfo_endpoint")
         try:
-            resp = await self._http.get(
-                endpoint, headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"}
-            )
+            resp = await self._userinfo_request(endpoint, access_token)
         except httpx.HTTPError as exc:
             raise IdPUnavailable(f"userinfo request failed: {type(exc).__name__}") from exc
         if resp.status_code in (401, 403):
             return None
         if resp.status_code != 200:
             hint = (
-                f"; the access token is {len(access_token)} bytes, too big for some servers' header "
-                "limits, so trim the provider's scope mappings"
+                f"; the access token is {len(access_token)} bytes, more than the provider or a proxy "
+                "in front of it accepts, so remove what makes it big (see the 'unusually large "
+                "tokens' warning)"
                 if resp.status_code in (400, 413, 431) and len(access_token) >= LARGE_TOKEN_BYTES
                 else ""
             )
@@ -389,6 +386,20 @@ class OIDCClient:
         if not isinstance(info, dict):
             raise IdPUnavailable("identity provider returned non-object userinfo")
         return info
+
+    async def _userinfo_request(self, endpoint: str, access_token: str) -> httpx.Response:
+        """Ask userinfo with ``access_token``. Normally in the Authorization header (RFC 6750
+        2.1). A token too big for a header (reverse proxies such as nginx refuse request header
+        lines over 8 KB by default) goes in a form-encoded POST body instead (RFC 6750 2.2; OIDC
+        Core 5.3.1 lets userinfo be POSTed), which Authentik and most providers accept. The
+        answer and its checks are the same either way."""
+        if len(access_token) <= HEADER_TOKEN_MAX:
+            return await self._http.get(
+                endpoint, headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"}
+            )
+        return await self._http.post(
+            endpoint, data={"access_token": access_token}, headers={"Accept": "application/json"}
+        )
 
     async def _validate_id_token(self, id_token: str, nonce: str | None) -> dict[str, Any]:
         """Validate signature, issuer, audience, expiry and (at sign-in) the nonce. A refreshed ID
@@ -436,6 +447,8 @@ class OIDCClient:
 
 
 LARGE_TOKEN_BYTES = 16 * 1024  # a typical provider's ID token is 1-4 KB
+# Longest access token sent in an Authorization header; longer ones go in a POST body.
+HEADER_TOKEN_MAX = 7 * 1024  # under nginx's 8 KB default for one header line
 
 
 def _safe_name(name: str) -> str:
@@ -457,7 +470,8 @@ def _log_large_tokens(id_token: str, claims: dict[str, Any], access_token: Any) 
     biggest = ", ".join(f"{name}={size} bytes" for size, name in sizes[:5])
     logger.warning(
         "identity provider issued unusually large tokens (ID token %d bytes, access token %d bytes); "
-        "largest ID token claims: %s. Look for the scope or property mapping that adds them",
+        "largest ID token claims: %s. Look for the scope or property mapping that adds them "
+        "(a 'picture' claim holding an embedded image: see docs/IDP-AUTHENTIK.md, Troubleshooting)",
         len(id_token),
         access_len,
         biggest,

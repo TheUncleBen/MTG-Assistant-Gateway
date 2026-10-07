@@ -7,6 +7,30 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.6.3] - 2026-10-07
+
+### Fixed
+
+- Signed-in pages kept answering *The sign-in service can't be reached to
+  confirm your access* a few seconds after sign-in, with the log line
+  `identity provider answered userinfo with HTTP 400; the access token is …
+  bytes`. Authentik 2026.8.0 to 2026.8.2 embed an attribute-based avatar
+  in the `picture` claim and copy the claims into the access token, which
+  then grew past a megabyte, and the reverse proxy refused it as a request
+  header. The live membership check now sends any access token over 7 KB
+  in a form-encoded POST body to userinfo (RFC 6750 section 2.2, which
+  Authentik accepts), so it works through Nginx Proxy Manager. It still
+  asks on every check, exactly as before. Trimming the token is still
+  worth doing: see the new row in
+  [docs/IDP-AUTHENTIK.md](docs/IDP-AUTHENTIK.md#10-troubleshooting).
+
+### Changed
+
+- Members of `MTG_ADMIN_GROUP` may sign in without also being in
+  `MTG_REQUIRED_GROUP`. The membership check reads both groups live, so
+  someone taken out of the admin group, and not in the users group, is cut
+  off on their next request.
+
 ## [0.6.2] - 2026-10-07
 
 ### Fixed
