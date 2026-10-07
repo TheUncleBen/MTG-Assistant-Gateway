@@ -178,7 +178,12 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
   open decks, see statistics, run a report, edit quantities, categories and
   additions as one proposal, and look back over proposals, snapshots and
   reports. They also serve as the pages an Android app can wrap.
-- **Admin page.** Members of `MTG_ADMIN_GROUP` get `/admin`: who has signed
+- **Profile pictures.** The account icon shows each member's picture from
+  the identity provider (Gravatar, or a picture uploaded to Authentik),
+  fetched by the gateway, or their initials. See
+  [docs/IDP-AUTHENTIK.md](docs/IDP-AUTHENTIK.md#profile-pictures).
+- **Admin page.** Members of `MTG_ADMIN_GROUP` get `/admin` (they don't
+  also need `MTG_REQUIRED_GROUP`): who has signed
   in, their activity, per-day usage counts, a System card (version, database
   size and schema, newest backup), and buttons to disable or enable an
   account, revoke its tokens and sessions, unlink Archidekt, or delete

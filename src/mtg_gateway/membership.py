@@ -26,11 +26,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from enum import Enum
 from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
 
+from .avatars import AvatarStore
 from .oidc import IdPTokens, IdPUnavailable, groups_claim_present, resolve_groups
 
 logger = logging.getLogger(__name__)
@@ -55,6 +57,8 @@ class MembershipChecker:
         self._checked: dict[str, float] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._warned_no_refresh = False
+        # The member's profile picture follows the provider's answer (avatars.py).
+        self.avatars = AvatarStore(settings.data_dir / "avatars")
 
     # -- storage ----------------------------------------------------------------
     def store(self, sub: str, tokens: IdPTokens) -> None:
@@ -127,6 +131,7 @@ class MembershipChecker:
         info: dict[str, Any] | None = None
         id_claims: dict[str, Any] | None = None
         refreshed = False
+        current = access  # the provider access token that got the answer
         try:
             # Without a refresh token (or a stated expiry) the access token is simply tried: the
             # provider's own 401 says when it has run out.
@@ -140,7 +145,7 @@ class MembershipChecker:
                 tokens = await self._renew(sub, refresh)
                 if tokens is None:
                     return self._revoke(sub, "idp_refused_refresh", None, removed=False)
-                id_claims, refreshed = tokens.id_claims, True
+                id_claims, refreshed, current = tokens.id_claims, True, tokens.access_token
                 info = await self.oidc.userinfo(tokens.access_token or "")
                 if info is None:
                     return self._revoke(sub, "idp_refused_userinfo", None, removed=False)
@@ -150,7 +155,7 @@ class MembershipChecker:
                 tokens = await self._renew(sub, refresh)
                 if tokens is None:
                     return self._revoke(sub, "idp_refused_refresh", None, removed=False)
-                id_claims = tokens.id_claims
+                id_claims, current = tokens.id_claims, tokens.access_token or current
         except IdPUnavailable as exc:
             logger.warning("membership check could not reach the identity provider: %s", exc)
             return Membership.UNAVAILABLE
@@ -178,13 +183,19 @@ class MembershipChecker:
             )
             return self._revoke(sub, "no_groups_claim", None, removed=False)
         groups = resolve_groups(source, claim)
-        required = self.settings.required_group
-        if required and required not in groups:
+        if not self.settings.grants_access(groups):
             return self._revoke(sub, "not_in_group", groups)
         if groups != user.get("groups"):
             self.db.set_user_groups(sub, groups)
             self.db.audit("groups_changed", sub=sub, detail={"groups": groups[:50]})
+        await self.avatars.update(sub, info, self.picture_fetcher(current))
         return Membership.ALLOWED
+
+    def picture_fetcher(self, access: str | None) -> Callable[[], Awaitable[str | None]] | None:
+        """Fetch the member's uploaded picture with the provider token that just worked."""
+        if not access:
+            return None
+        return lambda: self.oidc.uploaded_picture(access)
 
     async def _renew(self, sub: str, refresh: str) -> IdPTokens | None:
         """Use the provider refresh token and keep what it returns (it may rotate)."""

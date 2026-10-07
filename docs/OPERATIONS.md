@@ -73,7 +73,7 @@ logs.
 
 In Portainer: **Stacks** → `mtg` → **Update the stack**, with "Re-pull
 image" ticked. With `MTG_TAG=latest` that pulls the newest version; with a
-pinned version (for example `0.6.2`), change `MTG_TAG` first
+pinned version (for example `0.6.6`), change `MTG_TAG` first
 ([VERSIONS.md](VERSIONS.md)). Or from the command line:
 
 ```bash
@@ -560,9 +560,10 @@ Archidekt busy for everyone:
 `/admin` is a browser page for whoever runs the gateway. It exists only when
 `MTG_ADMIN_GROUP` is set to the name of a group in your identity provider
 (set it in the stack's environment variables or in `.env`; the stack and
-Compose files already pass it through). Members of that group who are also allowed
-to sign in (so also in `MTG_REQUIRED_GROUP`, if one is set) see it after
-signing in. For everyone else, and whenever the variable is unset, `/admin`
+Compose files already pass it through). Members of that group see it after
+signing in; since 0.6.6 they don't also need to be in `MTG_REQUIRED_GROUP`,
+because the admin group lets its members sign in too. In the site menu it's
+the **Admin** link, shown only to them. For everyone else, and whenever the variable is unset, `/admin`
 and everything under it answers 404, so ordinary users can't tell the area
 exists. Group membership is what the live membership check last recorded
 (at most `MTG_MEMBERSHIP_CHECK_TTL` seconds old, see
@@ -597,7 +598,7 @@ The five actions, and exactly what each one does:
 | **Enable** | Clears `disabled_at`. Nothing is handed back: the person signs in again and reconnects their assistant. |
 | **Revoke tokens and sessions** | The same revocation as Disable (tokens, browser sessions, pending codes, identity-provider tokens) without disabling. The person can sign in again straight away. This is the button version of the SQL in [Revoking access](#revoking-access). |
 | **Unlink Archidekt** | Marks their Archidekt link revoked and deletes the stored session, the same as their own Unlink button on `/account`. They can relink any time. |
-| **Delete data** | Deletes everything the gateway keeps about that person, the same as their own **Delete my data**: proposals, snapshots, reports, scan sessions, the remembered covers of their own decks (never a cover of someone else's deck they cloned or reported on), the Archidekt link, every app grant and browser session, the identity-provider tokens, usage counters and the user record. It needs the confirmation tick next to the button, and you can't use it on yourself (use your own Account page). Meant for former members, and for an account left over from an earlier identity provider (the gateway refuses a new provider's account whose `sub` matches an old one until the old one is deleted). Their decks on Archidekt are not touched, and the audit log keeps its rows. If they're still in the group, they can sign in again as a new, empty account. |
+| **Delete data** | Deletes everything the gateway keeps about that person, the same as their own **Delete my data**: proposals, snapshots, reports, scan sessions, the remembered covers of their own decks (never a cover of someone else's deck they cloned or reported on), the Archidekt link, every app grant and browser session, the identity-provider tokens, the copy of their profile picture, usage counters and the user record. It needs the confirmation tick next to the button, and you can't use it on yourself (use your own Account page). Meant for former members, and for an account left over from an earlier identity provider (the gateway refuses a new provider's account whose `sub` matches an old one until the old one is deleted). Their decks on Archidekt are not touched, and the audit log keeps its rows. If they're still in the group, they can sign in again as a new, empty account. |
 
 Every action writes an `admin_disable`, `admin_enable`, `admin_revoke`,
 `admin_unlink` or `admin_delete_data` row to the audit log under the admin's
@@ -641,7 +642,8 @@ rejected too.
 
 ## Looking at proposals, snapshots, links and the audit log
 
-Everything lives in `<MTG_DATA_DIR>/mtg-gateway.sqlite`. The container has
+Everything lives in `<MTG_DATA_DIR>/mtg-gateway.sqlite` (profile pictures are
+separate files under `<MTG_DATA_DIR>/avatars`, fetched again when missing). The container has
 Python but no `sqlite3` command, so run queries through Python on the
 gateway's node. For example, the latest proposals:
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import hashlib
 import json
 import re
 import secrets
@@ -68,6 +69,15 @@ class FakeIdP:
         self.access_tokens: dict[str, str] = {}
         self.refresh_tokens: dict[str, str] = {}
         self.userinfo_calls = 0
+        self.userinfo_methods: list[str] = []
+        # Extra characters in every minted access token: Authentik copies the ID token's claims
+        # into its access token, so a big claim (an embedded avatar) makes it huge.
+        self.access_token_pad = 0
+        # The optional Authentik scope mapping for uploaded pictures (docs/IDP-AUTHENTIK.md):
+        # sub -> data URI. Tokens and userinfo carry a short version; userinfo asked with
+        # mtg_picture=1 carries the image. picture_fetches counts those asks.
+        self.uploaded: dict[str, str] = {}
+        self.picture_fetches = 0
         self.access_ttl: int | None = 300  # None: no expires_in in token responses
         # Provider shapes: keys userinfo leaves out (e.g. groups only in the ID token), whether a
         # refresh returns a new ID token, and an error code every refresh fails with.
@@ -80,7 +90,7 @@ class FakeIdP:
                 Route("/application/o/authorize/", self.authorize),
                 Route("/application/o/token/", self.token, methods=["POST"]),
                 Route("/application/o/mtg/jwks/", self.jwks),
-                Route("/application/o/userinfo/", self.userinfo),
+                Route("/application/o/userinfo/", self.userinfo, methods=["GET", "POST"]),
             ]
         )
 
@@ -148,6 +158,7 @@ class FakeIdP:
             "iat": now,
             "nonce": q["nonce"],
             **{k: v for k, v in self.user.items() if k not in self.id_token_omit},
+            **self._uploaded_claims(str(self.user["sub"]), full=False),
             **self.id_token_claims,
         }
         if self.id_token_alg == "HS256":
@@ -160,7 +171,7 @@ class FakeIdP:
         return JSONResponse({**body, "id_token": id_token})
 
     def _mint(self, sub: str, *, offline: bool) -> dict[str, object]:
-        access = f"idp-access-{secrets.token_urlsafe(8)}"
+        access = f"idp-access-{secrets.token_urlsafe(8)}" + "x" * self.access_token_pad
         self.access_tokens[access] = sub
         body: dict[str, object] = {
             "access_token": access,
@@ -181,11 +192,31 @@ class FakeIdP:
         if self.down:
             return JSONResponse({"error": "temporarily_unavailable"}, status_code=503)
         token = req.headers.get("authorization", "").removeprefix("Bearer ")
+        if len(token) > 8192:
+            # nginx's default limit on one request header line (large_client_header_buffers)
+            return Response("Request Header Or Cookie Too Large", status_code=400)
+        if not token and req.method == "POST":
+            # RFC 6750 2.2, parsed by hand: Starlette's form parser stops at 1 MB, Django's at 2.5 MB
+            token = parse_qs((await req.body()).decode()).get("access_token", [""])[0]
+        self.userinfo_methods.append(req.method)
         sub = self.access_tokens.get(token)
         if sub is None or sub in self.disabled:
             return Response(status_code=401)
         info = self.directory.get(sub, self.user)
-        return JSONResponse({k: v for k, v in info.items() if k not in self.userinfo_omit})
+        full = req.query_params.get("mtg_picture") == "1"
+        self.picture_fetches += full
+        return JSONResponse(
+            {k: v for k, v in info.items() if k not in self.userinfo_omit}
+            | self._uploaded_claims(sub, full=full)
+        )
+
+    def _uploaded_claims(self, sub: str, *, full: bool) -> dict[str, str]:
+        avatar = self.uploaded.get(sub)
+        if not avatar:
+            return {}
+        if full:
+            return {"mtg_picture": avatar}
+        return {"mtg_picture_version": hashlib.sha256(avatar.encode()).hexdigest()[:16]}
 
     def set_groups(self, sub: str, groups: list[str]) -> None:
         """Change a user's groups at the provider (as an admin would in Authentik)."""
