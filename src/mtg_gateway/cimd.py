@@ -68,6 +68,7 @@ from typing import Any
 from urllib.parse import urlparse, urlunparse
 
 import httpx
+from mcp.shared.auth import OAuthClientInformationFull
 from pydantic import AnyUrl
 
 logger = logging.getLogger(__name__)
@@ -356,9 +357,13 @@ def validate_document(url: str, doc: Any) -> dict[str, Any]:
     if method != "none":
         raise CimdError(f"token_endpoint_auth_method {method!r} is not supported; only public clients")
     grants = doc.get("grant_types") or ["authorization_code"]
+    if not isinstance(grants, list) or not all(isinstance(g, str) for g in grants):
+        raise CimdError("grant_types must be a list of strings")
     if "authorization_code" not in grants:
         raise CimdError("grant_types must include authorization_code")
     responses = doc.get("response_types") or ["code"]
+    if not isinstance(responses, list) or not all(isinstance(r, str) for r in responses):
+        raise CimdError("response_types must be a list of strings")
     if "code" not in responses:
         raise CimdError("response_types must include code")
     scope = doc.get("scope")
@@ -375,6 +380,10 @@ def validate_document(url: str, doc: Any) -> dict[str, Any]:
     for key in ("client_uri", "logo_uri", "policy_uri", "tos_uri"):
         value = doc.get(key)
         if isinstance(value, str) and value.startswith("https://") and len(value) <= 512:
+            try:
+                AnyUrl(value)
+            except ValueError:
+                continue  # optional and malformed: left out rather than stored
             record[key] = value
     if scope:
         if len(scope) > 1000:
@@ -382,6 +391,12 @@ def validate_document(url: str, doc: Any) -> dict[str, Any]:
         record["scope"] = scope
     if len(json.dumps(record)) > MAX_RECORD_BYTES:
         raise CimdError("client metadata is too large")
+    try:
+        # What get_client will build from the stored record must build here, or the record would
+        # turn every later request for this client into a server error.
+        OAuthClientInformationFull.model_validate(record)
+    except ValueError as exc:
+        raise CimdError("client metadata is not a valid client description") from exc
     return record
 
 

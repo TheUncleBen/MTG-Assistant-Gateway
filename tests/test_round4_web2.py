@@ -531,3 +531,30 @@ async def test_held_back_lookups_write_no_audit_rows(tmp_path: Path, idp: FakeId
         with h.db.tx() as c:
             n = c.execute("SELECT COUNT(*) FROM audit_log WHERE event = 'cimd_rejected'").fetchone()[0]
         assert n == 1
+
+
+# -- Round 10 (RL-1, RL-2) -----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"client_uri": "https://"},
+        {"logo_uri": "https://a b/"},
+        {"tos_uri": "https://[x/"},
+        {"grant_types": 5},
+        {"grant_types": True},
+        {"response_types": 7},
+        {"grant_types": [1, "authorization_code"]},
+    ],
+)
+async def test_odd_documents_never_become_server_errors(tmp_path: Path, idp: FakeIdP, extra: dict):
+    docs = DocHost()
+    docs.serve(body={**document(), **extra})
+    async with running(Harness(make_settings(tmp_path), idp, cimd=docs.fetcher())) as h:
+        provider = h.app.state.gateway.provider
+        client = await provider.get_client(CLIENT_URL)  # no exception escapes
+        if client is not None:  # a malformed optional link is just left out
+            assert all(k not in extra for k in client.model_dump(exclude_none=True))
+        r = await h.http.get("/authorize", params={"client_id": CLIENT_URL, "response_type": "code"})
+        assert r.status_code < 500
