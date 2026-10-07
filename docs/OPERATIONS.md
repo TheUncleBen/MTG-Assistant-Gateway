@@ -154,7 +154,8 @@ A client that a member has completed a sign-in through (remembered for 180
 days after its last sign-in) is never held back by those limits: its
 document is fetched in a lane of its own (its own fetch slots and DNS
 threads) that first-time addresses can't use or fill, and while its server
-can't be reached the last good copy is used for up to a week (never once
+can't be reached (or answers 5xx, 408 or 429) the last good copy is used
+for up to a week past its expiry (never once
 the server itself has withdrawn or changed the document to one that isn't
 accepted). So once Claude or ChatGPT has connected here, nobody can lock
 it out by pointing junk addresses at the gateway. A host on

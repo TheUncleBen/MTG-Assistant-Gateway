@@ -409,6 +409,7 @@ class CimdFetcher:
         self._url_locks: dict[str, asyncio.Lock] = {}
         self._url_users: dict[str, int] = {}
         self._known_dns_failures: dict[str, float] = {}  # host -> when its lookup last timed out
+        self._known_resolving: set[str] = set()  # hosts with a signed-in lookup still running
 
     async def aclose(self) -> None:
         await self._http.aclose()
@@ -416,9 +417,40 @@ class CimdFetcher:
         self._dns_known.shutdown(wait=False, cancel_futures=True)
 
     async def _resolve(self, host: str, *, known: bool) -> list[str]:
+        """Resolve ``host`` within DNS_TIMEOUT. Raises CimdDnsTimeout when the lookup ran and did
+        not answer, CimdBusy when it never got a thread, OSError when the name doesn't resolve."""
+        if not known:
+            try:
+                async with asyncio.timeout(DNS_TIMEOUT):
+                    if self._resolver is not None:
+                        return await self._resolver(host)
+                    return await default_resolver(host, self._dns_new)
+            except TimeoutError as exc:
+                raise CimdDnsTimeout("cannot resolve client metadata host: timed out") from exc
+        # Signed-in lane: one lookup per host at a time, counted until its thread is done (a
+        # timeout can't stop it), so one hung name holds at most one of the lane's threads.
+        if host in self._known_resolving:
+            raise CimdBusy("a lookup of this host is still running")
+        self._known_resolving.add(host)
+        loop = asyncio.get_running_loop()
         if self._resolver is not None:
-            return await self._resolver(host)
-        return await default_resolver(host, self._dns_known if known else self._dns_new)
+            job: asyncio.Future = asyncio.ensure_future(self._resolver(host))
+            job.add_done_callback(lambda _: self._known_resolving.discard(host))
+        else:
+            cf = self._dns_known.submit(socket.getaddrinfo, host, 443, type=socket.SOCK_STREAM)
+            cf.add_done_callback(lambda _: loop.call_soon_threadsafe(self._known_resolving.discard, host))
+            job = asyncio.wrap_future(cf)
+        try:
+            async with asyncio.timeout(DNS_TIMEOUT):
+                result = await asyncio.shield(job)
+        except TimeoutError as exc:
+            if self._resolver is None and cf.cancel():
+                # It never got a thread: the lane is busy, this host is not to blame.
+                raise CimdBusy("metadata document fetcher is busy; try again shortly") from exc
+            raise CimdDnsTimeout("cannot resolve client metadata host: timed out") from exc
+        if self._resolver is not None:
+            return result
+        return sorted({info[4][0] for info in result})
 
     def _host_allowed(self, host: str) -> bool:
         if not self.allowed_hosts:
@@ -544,6 +576,8 @@ class CimdFetcher:
                     return await self._fetch(url, known=True)
             except TimeoutError as exc:
                 raise CimdUnavailable("metadata document fetch timed out") from exc
+            except CimdBusy:
+                raise
             except CimdUnavailable as exc:
                 # Not remembered against the URL: an unreachable server says nothing about the
                 # document. A hung lookup is remembered against the host for the lane's DNS threads.
@@ -591,12 +625,9 @@ class CimdFetcher:
         else:
             raise CimdError("client_id must use a hostname, not an IP address")
         try:
-            async with asyncio.timeout(DNS_TIMEOUT):
-                addresses = await self._resolve(host, known=known)
-        except TimeoutError as exc:
-            # For a first-time URL this is remembered against the host (unlike a slow fetch): a
-            # name whose DNS never answers must not hold a fetch slot again and again.
-            raise CimdDnsTimeout("cannot resolve client metadata host: timed out") from exc
+            # A CimdDnsTimeout is remembered against the host (unlike a slow fetch): a name whose
+            # DNS never answers must not hold a fetch slot or DNS thread again and again.
+            addresses = await self._resolve(host, known=known)
         except OSError as exc:
             raise CimdUnavailable(f"cannot resolve client metadata host: {exc.__class__.__name__}") from exc
         if not addresses or not all(_address_is_public(a) for a in addresses):
@@ -620,6 +651,10 @@ class CimdFetcher:
                 },
                 extensions={"sni_hostname": host},
             ) as resp:
+                if resp.status_code in (408, 429) or resp.status_code >= 500:
+                    # The server is struggling, not refusing the document: a signed-in client
+                    # keeps its last good copy meanwhile (auth_provider).
+                    raise CimdUnavailable(f"metadata document returned HTTP {resp.status_code}")
                 if resp.status_code != 200:
                     raise CimdError(f"metadata document returned HTTP {resp.status_code}")
                 # httpx would inflate a compressed body before the size check below sees it (one

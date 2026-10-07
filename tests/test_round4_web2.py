@@ -418,3 +418,54 @@ async def test_one_hung_signed_in_host_cannot_use_up_the_lanes_dns_threads(monke
     finally:
         release.set()
         await f.aclose()
+
+
+# -- Round 6 (RG-1, RG-2) ------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("status", [429, 502, 503, 504])
+async def test_a_struggling_server_keeps_the_last_good_document(tmp_path: Path, idp: FakeIdP, status: int):
+    docs = DocHost()
+    docs.serve()
+    async with running(Harness(make_settings(tmp_path), idp, cimd=docs.fetcher())) as h:
+        provider = h.app.state.gateway.provider
+        assert await provider._cimd_client(CLIENT_URL)
+        h.db.mark_cimd_client_signed_in(CLIENT_URL)
+        with h.db.tx() as c:
+            c.execute("UPDATE cimd_clients SET expires_at = ?", (int(time.time()) - 60,))
+        docs.serve(status=status)
+        assert (await provider._cimd_client(CLIENT_URL))["client_name"] == "Example Assistant"
+        docs.serve()
+        assert (await provider._cimd_client(CLIENT_URL))["client_name"] == "Example Assistant"
+        assert h.db.get_cimd_client(CLIENT_URL)  # fresh again
+
+
+async def test_urls_on_one_hung_host_hold_one_signed_in_dns_thread(monkeypatch: pytest.MonkeyPatch):
+    import socket
+    import threading
+
+    monkeypatch.setattr(cimdmod, "DNS_TIMEOUT", 0.3)
+    release = threading.Event()
+    lookups: list[str] = []
+
+    def getaddrinfo(host: str, *args: object, **kw: object) -> list:
+        lookups.append(host)
+        if host == "hung.example":
+            release.wait(10)
+            raise OSError("timeout")
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
+
+    monkeypatch.setattr(cimdmod.socket, "getaddrinfo", getaddrinfo)
+    docs = DocHost()
+    docs.serve()
+    http = httpx.AsyncClient(transport=httpx.MockTransport(docs.handler), follow_redirects=False)
+    f = cimdmod.CimdFetcher(http=http, timeout=1.0)
+    try:
+        hung = [asyncio.create_task(f.fetch(f"https://hung.example/c{i}.json", known=True)) for i in range(8)]
+        for result in await asyncio.gather(*hung, return_exceptions=True):
+            assert isinstance(result, cimdmod.CimdUnavailable | cimdmod.CimdBusy), result
+        assert lookups.count("hung.example") == 1
+        assert (await f.fetch(CLIENT_URL, known=True))[0]["client_name"]
+    finally:
+        release.set()
+        await f.aclose()
