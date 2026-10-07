@@ -9,6 +9,17 @@ with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 
 ## [0.6.3] - 2026-10-07
 
+### Added
+
+- The account icon shows each member's profile picture from the identity
+  provider's `picture` claim: a picture uploaded to their Authentik
+  profile (embedded in the claim) or their Gravatar, which the gateway
+  fetches itself so browsers never contact Gravatar. Without one it shows
+  their initials. Only PNG, JPEG, GIF and WebP are kept (checked by their
+  bytes, never SVG), only Gravatar addresses are fetched, and *Delete my
+  data* removes the stored copy. See
+  [docs/IDP-AUTHENTIK.md](docs/IDP-AUTHENTIK.md#profile-pictures).
+
 ### Fixed
 
 - Signed-in pages kept answering *The sign-in service can't be reached to

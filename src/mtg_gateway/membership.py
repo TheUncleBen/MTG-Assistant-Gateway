@@ -31,6 +31,7 @@ from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
 
+from .avatars import AvatarStore
 from .oidc import IdPTokens, IdPUnavailable, groups_claim_present, resolve_groups
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,8 @@ class MembershipChecker:
         self._checked: dict[str, float] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._warned_no_refresh = False
+        # The member's profile picture follows the provider's answer (avatars.py).
+        self.avatars = AvatarStore(settings.data_dir / "avatars")
 
     # -- storage ----------------------------------------------------------------
     def store(self, sub: str, tokens: IdPTokens) -> None:
@@ -183,6 +186,7 @@ class MembershipChecker:
         if groups != user.get("groups"):
             self.db.set_user_groups(sub, groups)
             self.db.audit("groups_changed", sub=sub, detail={"groups": groups[:50]})
+        await self.avatars.update(sub, info.get("picture"))
         return Membership.ALLOWED
 
     async def _renew(self, sub: str, refresh: str) -> IdPTokens | None:

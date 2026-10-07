@@ -291,6 +291,30 @@ request. More in [OPERATIONS.md](OPERATIONS.md#revoking-access).
 Send each person [ONBOARDING.md](ONBOARDING.md) along with the gateway's
 hostname.
 
+### Profile pictures
+
+The account icon shows the picture Authentik puts in the `picture` claim,
+chosen under **System → Settings → Avatars**, and refreshes it with the live
+membership check:
+
+- **Gravatar** (`gravatar` in Avatars): the gateway fetches the picture from
+  Gravatar itself, once per change, so members' browsers never contact
+  Gravatar;
+- **a picture uploaded to the member's Authentik profile** (an
+  `attributes.…` entry in Avatars): Authentik 2026.8.0 to 2026.8.2 embed it
+  in the claim, and the gateway keeps a copy;
+- anything else, or nothing: the member's initials.
+
+Only PNG, JPEG, GIF and WebP pictures are kept, and only Gravatar addresses
+are fetched; other addresses in the claim are ignored. The copy lives under
+the gateway's data folder and *Delete my data* removes it.
+
+An embedded picture makes every Authentik token as large as the image (a
+1 MB upload means 1 MB tokens on every check). Authentik 2026.8.3 and newer
+leave embedded pictures out of the claim, which keeps tokens small but means
+uploaded pictures no longer reach the gateway: members then see their
+Gravatar if Avatars lists `gravatar`, otherwise their initials.
+
 ## 9. Check the sign-in
 
 1. Deploy the stack ([DEPLOY.md](DEPLOY.md) step 6). The service goes
@@ -331,7 +355,7 @@ hostname.
 | Gateway page *… could not verify the identity provider's ID token*; log says `ID token validation failed: …` | `signed with HS256`: no **Signing Key** on the provider (section 4). Otherwise an **Encryption Key** is set (clear it), a key the gateway hasn't seen (it refreshes the key set once, then gives up), a Client ID that doesn't match the token's `aud`, or the two machines' clocks are more than a minute apart (`ExpiredTokenError` or `issued in the future`). `ExceededSizeError` on 0.6.1 or older: the token was over the old size limits (a large property mapping or many groups); upgrade to 0.6.2 or newer |
 | Gateway page *This sign-in was started in a different browser* | The sign-in link from the AI client was opened in a different browser from the one the client used, or cookies are blocked for `mtg.example.com`. Finish in the same browser. If it happens to everyone, make sure people reach the gateway only at the exact host in `MTG_PUBLIC_URL`, over https, and that nothing in between strips cookies |
 | Log says `identity provider issued unusually large tokens …; largest ID token claims: …` | A scope mapping on the provider adds a lot of data (an image, a long attribute, hundreds of groups). The gateway copes, but Authentik repeats it in the access token sent on every group check. Find the named claim under **Advanced protocol settings → Scopes** (or the user's or group's attributes) and trim it. The four mappings in section 4 are all the gateway needs |
-| Log says `largest ID token claims: picture=…` with hundreds of KB, and pages say *The sign-in service can't be reached* (log: `answered userinfo with HTTP 400; the access token is … bytes`) | Authentik 2026.8.0 to 2026.8.2 put the user's avatar in the `picture` claim, embedded as a whole image when the avatar comes from a user attribute (**System → Settings → Avatars** set to `attributes.…`). Authentik copies the claims into its access token too, so it can grow past a megabyte. Fix it in Authentik: upgrade to 2026.8.3 or newer, whose default `profile` mapping leaves embedded images out; or put a picture URL (not a `data:` image) in that attribute; or move the `attributes.…` entry after `initials` in **Avatars**. Then sign in again. Since 0.6.3 the gateway sends a token that big in the body of its userinfo request, which proxies such as Nginx Proxy Manager accept, so it keeps working meanwhile, but every check still moves a megabyte |
+| Log says `largest ID token claims: picture=…` with hundreds of KB, and pages say *The sign-in service can't be reached* (log: `answered userinfo with HTTP 400; the access token is … bytes`) | Authentik 2026.8.0 to 2026.8.2 put the user's avatar in the `picture` claim, embedded as a whole image when the avatar comes from a user attribute (**System → Settings → Avatars** set to `attributes.…`). Authentik copies the claims into its access token too, so it can grow past a megabyte. Fix it in Authentik: upgrade to 2026.8.3 or newer, whose default `profile` mapping leaves embedded images out; or move the `attributes.…` entry after `gravatar` or `initials` in **Avatars**. Then sign in again. Either way uploaded pictures stop reaching the gateway's account icon (see [Profile pictures](#profile-pictures)). Since 0.6.3 the gateway sends a token that big in the body of its userinfo request, which proxies such as Nginx Proxy Manager accept, so it keeps working meanwhile, but every check still moves a megabyte |
 | Everyone is suddenly a new user after a provider change | **Subject mode** was changed. Put it back; the gateway can't merge identities |
 | `whoami` shows a name but no email | The account has no email in Authentik, or the `email` scope mapping was removed |
 

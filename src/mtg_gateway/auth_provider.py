@@ -633,6 +633,7 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
                 refresh_token=identity.idp_refresh_token,
             ),
         )
+        await self.membership.avatars.update(identity.sub, identity.raw_claims.get("picture"))
         return session, identity
 
     async def complete_login(

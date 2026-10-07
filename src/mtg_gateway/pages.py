@@ -20,6 +20,7 @@ from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
 from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
+from .avatars import initials_svg
 from .clickguard import form_stamp, guarded_form, submitted_too_soon
 from .decks import DeckError, current_client, row_label, row_line
 from .theme import THEME_COOKIE, render, theme_from_cookie
@@ -207,6 +208,32 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         notice = _notice(request.query_params.get("ok"), request.query_params.get("err"))
         return page("Account", notice + _account_body(state, sub, _csrf(s, sid)), sub=sub, sid=sid)
 
+    @server.custom_route("/account/avatar", methods=["GET"], include_in_schema=False)
+    async def account_avatar(request: Request) -> Response:
+        """The signed-in member's picture for the account menu: the one their identity provider
+        gave (avatars.py), else their initials. Never someone else's: there is no parameter."""
+        sub, _sid = current(request)
+        if not sub:
+            return Response(status_code=404)
+        stored = state.membership.avatars.get(sub) if state.membership is not None else None
+        if stored is not None:
+            body, kind = stored
+        else:
+            user = state.db.get_user(sub) or {}
+            name = user.get("name") or user.get("preferred_username") or user.get("email") or ""
+            body, kind = initials_svg(str(name), sub), "image/svg+xml"
+        return Response(
+            body,
+            media_type=kind,
+            headers={
+                "Cache-Control": "private, max-age=300",
+                "X-Content-Type-Options": "nosniff",
+                # Opened on its own, an image (above all the SVG) can run nothing and load nothing.
+                "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+                "Vary": "Cookie",
+            },
+        )
+
     @server.custom_route("/account", methods=["POST"], include_in_schema=False)
     async def account_post(request: Request) -> Response:
         sub, sid = current(request)
@@ -251,6 +278,8 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             if data.get("confirm") != "yes":
                 return RedirectResponse("/account?err=confirm_delete", status_code=303)
             state.db.delete_member_data(sub)
+            if state.membership is not None:
+                state.membership.avatars.delete(sub)
             resp = RedirectResponse("/data-deleted", status_code=303)
             resp.delete_cookie(session_cookie, path="/", secure=secure, httponly=True, samesite="lax")
             resp.headers["Clear-Site-Data"] = '"cache", "storage"'
