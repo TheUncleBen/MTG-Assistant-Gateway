@@ -7,6 +7,54 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.6.6] - 2026-10-07
+
+### Added
+
+- The account icon shows each member's profile picture from the identity
+  provider's `picture` claim: a picture uploaded to their Authentik
+  profile (embedded in the claim) or their Gravatar, which the gateway
+  fetches itself so browsers never contact Gravatar. Without one it shows
+  their initials. Only PNG, JPEG, GIF and WebP are kept (checked by their
+  bytes, never SVG), only Gravatar addresses are fetched, and *Delete my
+  data* removes the stored copy. See
+  [docs/IDP-AUTHENTIK.md](docs/IDP-AUTHENTIK.md#profile-pictures).
+- Uploaded Authentik pictures on Authentik 2026.8.3 and newer, which leave
+  them out of the `picture` claim: an optional scope mapping, printed in the
+  guide, puts a 16-character fingerprint in tokens instead, and the gateway
+  asks userinfo for the image itself only when the fingerprint changes.
+- The end-to-end tests run against Authentik 2026.8.3, the current release,
+  and install that mapping exactly as the guide prints it. The Authentik
+  guide now covers two things 2026.8 needs: the provider's **Grant Types**
+  must include Authorization Code and Refresh token, and the reverse proxy
+  must be in Authentik's trusted proxy ranges (the defaults cover the usual
+  private Docker networks).
+
+### Fixed
+
+- Signed-in pages kept answering *The sign-in service can't be reached to
+  confirm your access* a few seconds after sign-in, with the log line
+  `identity provider answered userinfo with HTTP 400; the access token is …
+  bytes`. Authentik 2026.8.0 to 2026.8.2 embed an attribute-based avatar
+  in the `picture` claim and copy the claims into the access token, which
+  then grew past a megabyte, and the reverse proxy refused it as a request
+  header. The live membership check now sends any access token over 7 KB
+  in a form-encoded POST body to userinfo (RFC 6750 section 2.2, which
+  Authentik accepts), so it works through Nginx Proxy Manager. It still
+  asks on every check, exactly as before. Trimming the token is still
+  worth doing: see the new row in
+  [docs/IDP-AUTHENTIK.md](docs/IDP-AUTHENTIK.md#10-troubleshooting).
+
+### Changed
+
+- Members of `MTG_ADMIN_GROUP` may sign in without also being in
+  `MTG_REQUIRED_GROUP`. The membership check reads both groups live, so
+  someone taken out of the admin group, and not in the users group, is cut
+  off on their next request.
+- A userinfo connection that drops before any answer is tried once more
+  straight away instead of answering *Try again shortly*. Removal is still
+  seen on the next request; nothing is cached longer.
+
 ## [0.6.5] - 2026-10-07
 
 ### Added

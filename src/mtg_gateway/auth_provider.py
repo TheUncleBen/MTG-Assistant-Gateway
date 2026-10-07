@@ -613,7 +613,7 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
                     403,
                 )
 
-        if self.settings.required_group and self.settings.required_group not in identity.groups:
+        if not self.settings.grants_access(identity.groups):
             self.db.audit("login_rejected_group", sub=identity.sub, client_id=session["client_id"])
             self.db.drop_member(identity.sub, identity.groups)  # their apps and browser sessions too
             raise LoginError("Your account is not in the group that may use this service.", 403)
@@ -632,6 +632,9 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
                 access_expires_at=identity.idp_access_expires_at,
                 refresh_token=identity.idp_refresh_token,
             ),
+        )
+        await self.membership.avatars.update(
+            identity.sub, identity.raw_claims, self.membership.picture_fetcher(identity.idp_access_token)
         )
         return session, identity
 
@@ -739,7 +742,7 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             reason = "unknown_user"
         elif user.get("disabled_at"):
             reason = "disabled"
-        elif self.settings.required_group and self.settings.required_group not in user["groups"]:
+        elif not self.settings.grants_access(user["groups"]):
             reason = "group"
         elif auth_time + self.settings.reauth_interval < int(time.time()):
             reason = "reauth_due"
@@ -911,8 +914,7 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             self.db.revoke_family(row["family"])
             self.db.audit("disabled_user_refused", sub=row["sub"], client_id=row["client_id"])
             return None
-        group = self.settings.required_group
-        if group and group not in (user.get("groups") or []):
+        if not self.settings.grants_access(user.get("groups")):
             # Checked on every request, not only at refresh. The recorded groups are the identity
             # provider's live answer from MembershipMiddleware (at most MTG_MEMBERSHIP_CHECK_TTL
             # seconds old), so a member taken out of the group loses /mcp on their next request.

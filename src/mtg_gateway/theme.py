@@ -27,7 +27,7 @@ FEEDBACK_SCRIPT = "/static/feedback.js"
 # The Content-Security-Policy of every page render() builds (some pages replace it with their own,
 # which keeps the same frame-ancestors and base-uri). form-action is last so sources can follow it.
 DEFAULT_CSP = (
-    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; worker-src 'self'; "
+    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; worker-src 'self'; img-src 'self'; "
     "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
 )
 THEMES = ("system", "light", "dark")
@@ -112,6 +112,7 @@ svg.i{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:2;stroke-l
 .topbar nav a[aria-current=page]{color:var(--orange)}
 .topbar nav form{display:inline;margin:0}
 .topbar .icon-btn{width:40px;padding:0;justify-content:center;font-size:1.2rem}
+.topbar .icon-btn img.av{width:28px;height:28px;border-radius:50%;object-fit:cover;display:block}
 
 /* dropdown menus (details/summary, no script): phatDropdown trigger + menu panel */
 details.dd{position:relative;margin:0}
@@ -495,7 +496,8 @@ def render(
         )
         account_menu = (
             "<details class='dd'><summary class='icon-btn' aria-label='Account menu'>"
-            f"{icon('user')}</summary><div class='menu'>"
+            # The member's own picture (their provider's, else their initials: /account/avatar).
+            "<img class='av' src='/account/avatar' alt='' width='28' height='28'></summary><div class='menu'>"
             f"<a href='/account'>{icon('account')}Account</a>"
             f"<a href='/activity'>{icon('history')}My activity</a>"
             f"<a href='/skill'>{icon('report')}Assistant skill</a>"

@@ -238,6 +238,11 @@ Good to know:
   service's tokens for your account (encrypted) and asks it, every few
   seconds while you use the gateway, whether you're still in the group. If
   the owner removes you, you're signed out everywhere on your next click.
+- Your profile picture (the one the sign-in service shows: Gravatar, or a
+  picture you uploaded there) is copied to the owner's server for the
+  account icon. The server fetches it, so your browser never contacts
+  Gravatar. Without one you see your initials. **Delete my data** removes
+  the copy.
 - Every tool call is tied to your account. Sign-ins, proposals, applies,
   links and unlinks go in an audit log, and the gateway keeps a snapshot of
   each deck from just before a change. The owner can see these. The backup
@@ -264,8 +269,8 @@ doesn't land in your account.
 1. On `https://mtg.example.com/account`, under **Delete my data**, tick the
    box and press **Delete my data**. That deletes everything the gateway
    keeps for you from its database: proposals, snapshots, test reports, scan
-   sessions, deck covers, the stored Archidekt session, connected apps and
-   your sign-in. Your decks on Archidekt (and the backup copies in your
+   sessions, deck covers, the stored Archidekt session, connected apps,
+   the copy of your profile picture and your sign-in. Your decks on Archidekt (and the backup copies in your
    Archidekt account) stay yours. The owner's nightly database backups, if
    they keep them, still hold a copy until they age out (14 days by default,
    `MTG_BACKUP_KEEP_DAYS`). The owner's security log keeps a record that your

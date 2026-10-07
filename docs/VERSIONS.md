@@ -26,7 +26,7 @@ can need a change on your side.
 
 ## Staying on one version
 
-Set `MTG_TAG` to a version, for example `MTG_TAG=0.6.2`, and redeploy. You stay
+Set `MTG_TAG` to a version, for example `MTG_TAG=0.6.6`, and redeploy. You stay
 on it until you change the variable. To go back to an older version, set its
 number, but read [OPERATIONS.md](OPERATIONS.md#restart-or-update) first: a newer
 version may have upgraded the database, and an older image refuses to open it.
