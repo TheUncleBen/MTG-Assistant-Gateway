@@ -38,7 +38,10 @@ code and a human `message`:
 | `not_found` | 404 | not yours, or does not exist |
 | `forbidden` | 403 | the deck belongs to someone else |
 | `writes_disabled` | 403 | `MTG_WRITES_ENABLED` is off |
-| `browser_required` | 403 | this gateway applies proposals only on the review page (`review_url` is included) |
+| `browser_required` | 403 | this gateway applies proposals only on the review page or the in-chat card (`review_url` is included) |
+| `browser_pending` | 409 | MCP only: the client opened the review page for the user (URL elicitation) but the proposal is still pending |
+| `invalid_approval` | 403 | MCP only: `confirm_proposal` was called without the card's one-time code for this proposal, app and member; audited as `approval_refused` |
+| `in_chat_disabled` | 403 | MCP only: `MTG_APPLY_IN_CHAT` is off, so the card cannot apply; use the review page |
 | `insufficient_scope` | 403 | the bearer token is read-only (`mtg.read`) and the route writes |
 | `other_account` | 409 | a new-deck proposal was made for another Archidekt account than the one linked now |
 | `other_client` | 403 | the proposal was made by another connected app (or, for reject, in the browser); use the review page (`review_url` is included) |
@@ -64,7 +67,7 @@ Request bodies are JSON objects of at most 2 MB.
 | `GET /api/v1/proposals?state=` | The user's proposals, optionally filtered by state |
 | `POST /api/v1/proposals` | Create a proposal (see kinds below). Answers `201` with the proposal, its `diff` and `review_url` |
 | `GET /api/v1/proposals/{pid}` | One proposal with `state`, `diff`, `changes`, `snapshot_id`, `result`, `next_step` |
-| `POST /api/v1/proposals/{pid}/apply` | Apply it: snapshot, Archidekt backup copy, write, re-read verification. Bearer callers get `browser_required` when `MTG_APPLY_VIA_MCP` is off |
+| `POST /api/v1/proposals/{pid}/apply` | Apply it: snapshot, Archidekt backup copy, write, re-read verification. Bearer callers get `browser_required` when `MTG_APPLY_VIA_MCP` is off (the in-chat card uses the `confirm_proposal` MCP tool instead, not this route) |
 | `POST /api/v1/proposals/{pid}/reject` | Mark a pending proposal rejected. A bearer caller can reject only proposals its own app made; others answer `other_client` |
 | `GET /api/v1/snapshots?deck_id=` | Deck snapshots taken before applies (and on demand) |
 | `GET /api/v1/snapshots/{sid}` | One snapshot with the full deck as it was |

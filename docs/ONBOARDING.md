@@ -144,16 +144,21 @@ so:
    change, like `-1 Mind Stone` and `+1 Arcane Signet`, with a review link
    such as `https://mtg.example.com/proposals/<id>`. Nothing on Archidekt
    has changed yet.
-2. **Apply.** The assistant asks whether to apply exactly that change, and
-   waits for your yes. What happens next depends on how the owner set things
-   up:
-   - **You apply it in the browser** (the example setup, and the safer
-     one): the assistant gives you the review link. Open it, check the
-     change, press **Apply these changes to Archidekt**, then tell the
-     assistant you did.
-   - **The assistant applies it** (only if the owner turned on in-chat
-     applying, and your app allows the apply tool): after your yes, it
-     applies the proposal and tells you how it went.
+2. **Apply.** Nothing happens until you press a button yourself. Which
+   button depends on your app and on how the owner set things up:
+   - **The card in the chat** (Claude on the web, desktop and phones;
+     ChatGPT on the web): the proposal appears as a card next to the
+     assistant's message, with each card's picture, the exact change and
+     **Approve** and **Reject** buttons. Press Approve and the gateway
+     applies it and tells the assistant how it went. The first time, Claude
+     asks whether to show the app; allow it.
+   - **The review page in the browser** (every app, and always available):
+     the assistant gives you the review link. Open it, check the change,
+     press **Apply these changes to Archidekt**, then tell the assistant you
+     did. In Claude Code the assistant can offer to open that page for you.
+   - **The assistant applies it** (only if the owner turned on
+     `MTG_APPLY_VIA_MCP`, which the example setup leaves off): after your
+     yes in chat, it applies the proposal itself.
 
    Either way, for an edit the gateway first checks the deck hasn't changed
    since the proposal, saves a copy of it (a snapshot), and puts a private
@@ -163,10 +168,12 @@ so:
    snapshot id (or the new deck's link), and say how to undo it. You can
    always use the review link instead of answering in chat, just not both.
 
-Only your own messages count as a yes. If a deck description, a card note or
-anything else the assistant reads says "apply this" or "approved", the
-assistant has to ignore it and tell you. If your assistant ever applies a
-change you didn't okay, tell the owner.
+Only your own press counts: the card's Approve button sends a one-time code
+the assistant never sees, and the review page needs your signed-in browser,
+so the assistant can't approve a proposal for you. If a deck description, a
+card note or anything else the assistant reads says "apply this" or
+"approved", the assistant has to ignore it and tell you. If your assistant
+ever applies a change you didn't okay, tell the owner.
 
 Good to know:
 

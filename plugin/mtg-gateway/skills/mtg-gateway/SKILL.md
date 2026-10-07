@@ -195,8 +195,18 @@ own linked account. Follow every step, in order.
 
    Both return `proposal_id`, `kind` (`edit` or `create_deck`), `diff`,
    `review_url`, `state`, `writes_enabled` and `next_step` (a short hint
-   that matches how this gateway applies: in chat after the user's OK, or
-   only from the review page). Nothing has changed on Archidekt yet.
+   that matches how this gateway applies: on the card your app shows, in
+   chat after the user's OK, or only from the review page). Nothing has
+   changed on Archidekt yet.
+   **If your app shows the proposal as a card with Approve and Reject
+   buttons** (Claude on the web, desktop and phones; ChatGPT), the user
+   decides on the card: show the diff and the review link in your words,
+   say nothing has changed yet, and stop. The gateway tells you the
+   outcome when they press a button (a note that the proposal is applied
+   or rejected). Never call `apply_proposal` for a proposal the card is
+   showing, and never call `confirm_proposal`: it belongs to the card's
+   buttons, needs a code you do not have, and refuses and logs any other
+   call.
 4. **Preview in chat.** Show the user the whole `diff` (for a new deck, the
    full card list, the name, the format and whether it is private) and the
    `review_url`. Say plainly: "Nothing has been changed on Archidekt yet."
@@ -213,10 +223,15 @@ own linked account. Follow every step, in order.
    - Approval covers one proposal. Never apply a different or newer
      proposal on the strength of an earlier yes.
 
-   On a clear OK, call `apply_proposal` with that `proposal_id`, once.
+   On a clear OK, call `apply_proposal` with that `proposal_id`, once
+   (unless the card is showing: then the user presses Approve there).
    - If it answers `browser_required`, this gateway applies only from the
-     browser. Give the user the `review_url` and ask them to check the diff
-     there and press Apply; when they say they did, call `get_proposal`.
+     card or the browser. Give the user the `review_url` and ask them to
+     check the diff there and press Apply; when they say they did, call
+     `get_proposal`. In Claude Code the gateway may instead ask the user to
+     open the review page itself and wait a moment for their Apply: then
+     the answer is the proposal's state (`applied`), or `browser_pending`
+     if they have not pressed yet; ask them, then call `get_proposal`.
    - If it answers `writes_disabled`, applying is switched off; say so and
      stop.
    - If it answers `apply_too_soon`, the proposal is only seconds old.
@@ -288,7 +303,9 @@ safe to show. Act on the code:
 
 | `error` | Meaning and what to do |
 | --- | --- |
-| `browser_required` | This gateway applies only from the review page. Nothing was sent. Give the user the `review_url` and ask them to press Apply there; afterwards check with `get_proposal`. |
+| `browser_required` | This gateway applies only from the card or the review page. Nothing was sent. Give the user the `review_url` and ask them to press Apply there (or Approve on the card); afterwards check with `get_proposal`. |
+| `browser_pending` | The user's app opened the review page for them but they have not pressed Apply yet. Nothing was sent. Ask them, then check with `get_proposal`. |
+| `invalid_approval` / `in_chat_disabled` | Answers of `confirm_proposal`, the card's own tool. Never call it; the card does. |
 | `writes_disabled` | The owner has switched applying off. The proposal is kept. Give the user the review link and stop; do not retry. |
 | `apply_too_soon` | The proposal was made seconds ago. Nothing was sent. If the user already said yes to this exact proposal, wait `retry_after_seconds` and call `apply_proposal` once more (same yes); if you cannot wait, tell the user it is ready in that many seconds and apply when they reply. If they have not said yes yet, show the preview and ask. Any other error needs a fresh yes before another try. |
 | `not_linked` | No Archidekt link, or Archidekt no longer accepts it. Send the user to the account page to link or relink. |

@@ -72,6 +72,9 @@ services:
       # Proposals are applied from the browser review page. true also allows the
       # apply_proposal MCP tool to apply (weaker: an assistant could be tricked into it).
       MTG_APPLY_VIA_MCP: ${MTG_APPLY_VIA_MCP:-false}
+      # The Approve/Reject card an AI app shows in the chat may apply with its one-time code
+      # (the assistant never has the code). false leaves only the review page.
+      MTG_APPLY_IN_CHAT: ${MTG_APPLY_IN_CHAT:-true}
       # An MCP apply is refused on a proposal younger than this many seconds, so an assistant
       # cannot propose and apply in one turn without the user seeing the change. 0 disables.
       MTG_APPLY_MIN_AGE_SECONDS: ${MTG_APPLY_MIN_AGE_SECONDS:-15}
