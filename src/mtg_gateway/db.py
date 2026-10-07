@@ -18,6 +18,9 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
+
+from .cimd import site_of
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -131,7 +134,20 @@ UNUSED_CLIENT_TTL = 7 * 86400
 # anyone, so rows nobody has signed in for are capped as well as aged out.
 AUDIT_RETENTION_SECONDS = 365 * 86400
 MAX_LOGIN_SESSIONS = 5000
+# Pending logins are also capped per client and per browser, and a full table (or a full client)
+# gives up the oldest pending login of the network that holds the most of them, never simply the
+# oldest overall: a flood from one address, with one client or one browser, only pushes out its
+# own pending logins, not those of the people signing in at the same time (create_login_session).
+MAX_LOGIN_SESSIONS_PER_CLIENT = 500
+MAX_LOGIN_SESSIONS_PER_BROWSER = 10
 MAX_UNUSED_CLIENTS = 2000
+# Cached client metadata documents (any https URL can be named as a client id). The busiest host
+# gives up its oldest rows first, so one attacker domain cannot push out a real client's row.
+MAX_CIMD_CLIENTS = 1000
+MAX_CIMD_CLIENTS_PER_SITE = 50
+# A metadata document URL that completed a sign-in is "known": never evicted by those caps and
+# never subject to the fetcher's budgets (cimd.py). The mark lasts this long after the last one.
+KNOWN_CIMD_CLIENT_RETENTION_SECONDS = 180 * 86400
 # Audit events any anonymous caller can cause (open registration, CIMD fetches). Their rows are
 # capped by count as well as aged out, and their detail is kept short, so a flood cannot grow the
 # audit log for a year. Trimmed in purge_expired and every ANONYMOUS_AUDIT_TRIM_EVERY inserts.
@@ -142,6 +158,9 @@ MAX_ANONYMOUS_AUDIT_DETAIL = 1024
 # Closed proposals (expired, rejected, failed) are deleted this long after they were made.
 CLOSED_PROPOSAL_RETENTION_SECONDS = 30 * 86400
 CLOSED_PROPOSAL_STATES = ("expired", "rejected", "failed")
+# Applied proposals are the record of what was changed and are kept longer, for as long as the
+# audit log: they are deleted a year after they were applied.
+APPLIED_PROPOSAL_RETENTION_SECONDS = 365 * 86400
 # Snapshots are whole decks taken before every edit. The newest SNAPSHOTS_KEEP_PER_DECK of each
 # member's deck are always kept (and any a pending restore still needs); older ones are deleted.
 SNAPSHOTS_KEEP_PER_DECK = 25
@@ -150,6 +169,11 @@ METRICS_RETENTION_SECONDS = 400 * 86400
 DECK_COVER_RETENTION_SECONDS = 180 * 86400
 # How long a write waits for another connection (such as `mtg-gateway backup`) to finish.
 BUSY_TIMEOUT_MS = 5000
+
+
+def _url_site(url: str) -> str:
+    """Registrable domain of a URL client id, for the per-site cap on cached metadata documents."""
+    return site_of(urlparse(url).hostname or "")
 
 
 def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
@@ -234,8 +258,53 @@ def _step_6(conn: sqlite3.Connection) -> None:
         conn.execute(sql)
 
 
+def _step_7(conn: sqlite3.Connection) -> None:
+    """Security round 4: the identity provider's own tokens for each member (Fernet-encrypted), so
+    the gateway can ask the provider on later requests whether the member is still allowed in."""
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS idp_grants (
+            sub TEXT PRIMARY KEY,
+            refresh_enc TEXT NOT NULL DEFAULT '',
+            access_enc TEXT NOT NULL DEFAULT '',
+            access_expires_at INTEGER NOT NULL DEFAULT 0,
+            updated_at INTEGER NOT NULL
+        )"""
+    )
+    # The identity provider (issuer) each member first signed in with: a subject from another
+    # provider is a different person even when the strings match.
+    _add_column(conn, "users", "idp_issuer", "TEXT")
+
+
+def _step_8(conn: sqlite3.Connection) -> None:
+    """Security round 4: the (hashed) network each pending login came from, so a flood of
+    anonymous sign-in starts only pushes out pending logins from the flooding network."""
+    _add_column(conn, "login_sessions", "source_hash", "TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS login_sessions_client ON login_sessions(client_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS login_sessions_binding ON login_sessions(binding_hash)")
+
+
+def _step_9(conn: sqlite3.Connection) -> None:
+    """Security round 4: the member whose deck page stored each deck cover, so "Delete my data"
+    removes their covers too (older rows have none and go by the member's deck ids)."""
+    _add_column(conn, "deck_covers", "owner_sub", "TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS deck_covers_owner ON deck_covers(owner_sub)")
+
+
+def _step_10(conn: sqlite3.Connection) -> None:
+    """Security round 4: when a client described by a metadata document last completed a sign-in,
+    so the cache caps never evict it and the fetch budgets never apply to it."""
+    _add_column(conn, "cimd_clients", "signed_in_at", "INTEGER")
+    # Clients already in use before this column existed: a token was issued to them, so a member
+    # completed a sign-in through them. Without this they would count as first-time clients.
+    conn.execute(
+        "UPDATE cimd_clients SET signed_in_at = "
+        "(SELECT MAX(t.created_at) FROM tokens t WHERE t.client_id = cimd_clients.client_id) "
+        "WHERE signed_in_at IS NULL"
+    )
+
+
 # Applied in order; ``PRAGMA user_version`` records how many have run. Append, never edit.
-MIGRATIONS = [_step_1, _step_2, _step_3, _step_4, _step_5, _step_6]
+MIGRATIONS = [_step_1, _step_2, _step_3, _step_4, _step_5, _step_6, _step_7, _step_8, _step_9, _step_10]
 SCHEMA_VERSION = len(MIGRATIONS)
 
 
@@ -326,18 +395,20 @@ class Database:
         name: str | None,
         preferred_username: str | None,
         groups: list[str],
+        issuer: str | None = None,
     ) -> None:
         now = int(time.time())
         with self.tx() as c:
             c.execute(
                 """INSERT INTO users
                    (sub, email, name, preferred_username, groups_json, first_login_at, last_login_at,
-                    last_seen_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    last_seen_at, idp_issuer)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(sub) DO UPDATE SET email=excluded.email, name=excluded.name,
                      preferred_username=excluded.preferred_username, groups_json=excluded.groups_json,
-                     last_login_at=excluded.last_login_at, last_seen_at=excluded.last_seen_at""",
-                (sub, email, name, preferred_username, json.dumps(groups), now, now, now),
+                     last_login_at=excluded.last_login_at, last_seen_at=excluded.last_seen_at,
+                     idp_issuer=COALESCE(users.idp_issuer, excluded.idp_issuer)""",
+                (sub, email, name, preferred_username, json.dumps(groups), now, now, now, issuer),
             )
 
     def touch_user(self, sub: str) -> None:
@@ -418,6 +489,9 @@ class Database:
         with self.tx() as c:
             tokens = c.execute("UPDATE tokens SET revoked = 1 WHERE sub = ? AND revoked = 0", (sub,)).rowcount
             sessions = c.execute("DELETE FROM browser_sessions WHERE sub = ?", (sub,)).rowcount
+            # The provider tokens go too: with no sessions left there is nothing to re-check, and a
+            # fresh sign-in stores new ones.
+            c.execute("DELETE FROM idp_grants WHERE sub = ?", (sub,))
             codes = c.execute(
                 "DELETE FROM auth_codes WHERE json_extract(data_json, '$.subject') = ?"
                 " AND used_family IS NULL",  # redeemed codes stay as replay tombstones
@@ -460,16 +534,54 @@ class Database:
     def save_cimd_client(self, client_id: str, info: dict[str, Any], ttl: int) -> None:
         now = int(time.time())
         with self.tx() as c:
+            # Anyone can make the gateway accept documents at many URLs of their own site, so the
+            # cache is capped on every insert: per site, then in all (cimd.py caps each record).
+            # Clients that completed a sign-in are never evicted.
+            self._purge_cimd_clients(c, now)
+            site = _url_site(client_id)
+            self._trim_cimd_clients(c, MAX_CIMD_CLIENTS_PER_SITE - 1, site=site, skip=client_id)
+            self._trim_cimd_clients(c, MAX_CIMD_CLIENTS - 1, skip=client_id)
             c.execute(
-                "INSERT OR REPLACE INTO cimd_clients (client_id, info_json, fetched_at, expires_at) "
-                "VALUES (?, ?, ?, ?)",
+                "INSERT INTO cimd_clients (client_id, info_json, fetched_at, expires_at) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(client_id) DO UPDATE SET info_json = excluded.info_json, "
+                "fetched_at = excluded.fetched_at, expires_at = excluded.expires_at",
                 (client_id, json.dumps(info), now, now + ttl),
             )
 
-    def get_cimd_client(self, client_id: str) -> dict[str, Any] | None:
+    def mark_cimd_client_signed_in(self, client_id: str) -> None:
+        """Record that a client described by this metadata document completed a sign-in."""
+        with self.tx() as c:
+            c.execute(
+                "UPDATE cimd_clients SET signed_in_at = ? WHERE client_id = ?", (int(time.time()), client_id)
+            )
+
+    def cimd_client_known(self, client_id: str) -> bool:
+        """True when a client with this metadata document URL has completed a sign-in here (its
+        cached document may have expired since)."""
+        row = self._one(
+            "SELECT 1 FROM cimd_clients WHERE client_id = ? AND signed_in_at IS NOT NULL", (client_id,)
+        )
+        return row is not None
+
+    @staticmethod
+    def _purge_cimd_clients(c: sqlite3.Connection, now: int) -> int:
+        """Drop cached documents a day past expiry, unless their client signed in recently."""
+        return c.execute(
+            "DELETE FROM cimd_clients WHERE expires_at < ? AND (signed_in_at IS NULL OR signed_in_at < ?)",
+            (now - 86400, now - KNOWN_CIMD_CLIENT_RETENTION_SECONDS),
+        ).rowcount
+
+    def expire_cimd_client(self, client_id: str) -> None:
+        """The document's server refused it: the stored copy is never used again (the row, and
+        when the client last signed in, stay until the purge)."""
+        with self.tx() as c:
+            c.execute("UPDATE cimd_clients SET expires_at = 0 WHERE client_id = ?", (client_id,))
+
+    def get_cimd_client(self, client_id: str, *, stale_for: int = 0) -> dict[str, Any] | None:
+        """The cached document, if still fresh (or expired less than ``stale_for`` seconds ago)."""
         row = self._one(
             "SELECT info_json FROM cimd_clients WHERE client_id = ? AND expires_at >= ?",
-            (client_id, int(time.time())),
+            (client_id, int(time.time()) - stale_for),
         )
         return json.loads(row["info_json"]) if row else None
 
@@ -484,17 +596,29 @@ class Database:
         oidc_code_verifier: str,
         ttl: int,
         binding_hash: str | None = None,
+        source_hash: str | None = None,
     ) -> None:
+        """Store a pending login. ``binding_hash`` names the browser that started it and
+        ``source_hash`` the network it came from (auth_provider), both used by the caps below."""
         now = int(time.time())
         with self.tx() as c:
             # /authorize and /login are anonymous and each stores one row, so expired rows are
-            # deleted and the table trimmed to MAX_LOGIN_SESSIONS on every insert, not only by
-            # the nightly purge (the table is that small, so both statements are cheap).
+            # deleted and the caps applied on every insert, not only by the nightly purge (the
+            # table is that small, so these statements are cheap). One browser keeps its newest
+            # few; a client, and then the whole table, gives up rows of the busiest network.
             c.execute("DELETE FROM login_sessions WHERE expires_at < ?", (now,))
+            if binding_hash:
+                c.execute(
+                    """DELETE FROM login_sessions WHERE rowid IN (
+                           SELECT rowid FROM login_sessions WHERE binding_hash = ?
+                           ORDER BY expires_at DESC, rowid DESC LIMIT -1 OFFSET ?)""",
+                    (binding_hash, MAX_LOGIN_SESSIONS_PER_BROWSER - 1),
+                )
+            self._trim_login_sessions(c, MAX_LOGIN_SESSIONS_PER_CLIENT - 1, client_id=client_id)
             self._trim_login_sessions(c, MAX_LOGIN_SESSIONS - 1)
             c.execute(
                 """INSERT INTO login_sessions (id, client_id, params_json, oidc_nonce, oidc_code_verifier,
-                   expires_at, binding_hash) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                   expires_at, binding_hash, source_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     session_id,
                     client_id,
@@ -503,6 +627,7 @@ class Database:
                     oidc_code_verifier,
                     now + ttl,
                     binding_hash,
+                    source_hash,
                 ),
             )
 
@@ -648,7 +773,7 @@ class Database:
             n += c.execute("DELETE FROM auth_codes WHERE expires_at < ?", (now,)).rowcount
             n += c.execute("DELETE FROM login_sessions WHERE expires_at < ?", (now,)).rowcount
             n += c.execute("DELETE FROM browser_sessions WHERE expires_at < ?", (now,)).rowcount
-            n += c.execute("DELETE FROM cimd_clients WHERE expires_at < ?", (now - 86400,)).rowcount
+            n += self._purge_cimd_clients(c, now)
             # Registration is open, so every client that registered and never finished a login,
             # or whose tokens have all expired and been purged, is dropped after a week.
             n += c.execute(
@@ -674,6 +799,10 @@ class Database:
                 "DELETE FROM proposals WHERE state IN ('expired', 'rejected', 'failed') AND created_at < ?",
                 (now - CLOSED_PROPOSAL_RETENTION_SECONDS,),
             ).rowcount
+            n += c.execute(
+                "DELETE FROM proposals WHERE state = 'applied' AND COALESCE(applied_at, created_at) < ?",
+                (now - APPLIED_PROPOSAL_RETENTION_SECONDS,),
+            ).rowcount
             # An apply interrupted by a restart leaves 'applying' behind; an hour after it started treat
             # it as failed and point at the snapshot (and the created deck id) in the result.
             n += c.execute(
@@ -696,6 +825,7 @@ class Database:
         n = c.execute("DELETE FROM audit_log WHERE at < ?", (now - AUDIT_RETENTION_SECONDS,)).rowcount
         n += Database._trim_anonymous_audit(c)
         n += Database._trim_login_sessions(c, MAX_LOGIN_SESSIONS)
+        n += Database._trim_cimd_clients(c, MAX_CIMD_CLIENTS)
         n += c.execute(
             """DELETE FROM oauth_clients WHERE client_id IN (
                    SELECT client_id FROM oauth_clients
@@ -726,14 +856,64 @@ class Database:
         ).rowcount
 
     @staticmethod
-    def _trim_login_sessions(c: sqlite3.Connection, keep: int) -> int:
-        """Keep the ``keep`` login sessions that expire last; delete the rest."""
-        return c.execute(
-            """DELETE FROM login_sessions WHERE rowid IN (
-                   SELECT rowid FROM login_sessions ORDER BY expires_at DESC, rowid DESC
-                   LIMIT -1 OFFSET ?)""",
-            (max(0, keep),),
-        ).rowcount
+    def _trim_login_sessions(c: sqlite3.Connection, keep: int, *, client_id: str | None = None) -> int:
+        """Delete login sessions (of ``client_id``, or all) until at most ``keep`` are left.
+
+        Rows go from the network (``source_hash``) holding the most of them, oldest first, so a
+        flood from one network gives up its own rows before anyone else's. Rows with no source
+        (made before it was recorded) count as one network."""
+        where, args = ("client_id = ?", (client_id,)) if client_id is not None else ("1", ())
+        n = 0
+        while True:
+            total = c.execute(f"SELECT COUNT(*) FROM login_sessions WHERE {where}", args).fetchone()[0]
+            over = total - max(0, keep)
+            if over <= 0:
+                return n
+            groups = c.execute(
+                f"""SELECT COALESCE(source_hash, '') AS src, COUNT(*) AS k FROM login_sessions
+                    WHERE {where} GROUP BY src ORDER BY k DESC, MIN(expires_at) ASC LIMIT 2""",
+                args,
+            ).fetchall()
+            top, top_count = groups[0][0], groups[0][1]
+            runner_up = groups[1][1] if len(groups) > 1 else 0
+            # Level the busiest network down to the next one (at least one row per round).
+            take = min(over, max(1, top_count - runner_up))
+            n += c.execute(
+                f"""DELETE FROM login_sessions WHERE rowid IN (
+                       SELECT rowid FROM login_sessions WHERE {where} AND COALESCE(source_hash, '') = ?
+                       ORDER BY expires_at ASC, rowid ASC LIMIT ?)""",
+                (*args, top, take),
+            ).rowcount
+
+    @staticmethod
+    def _trim_cimd_clients(
+        c: sqlite3.Connection, keep: int, *, site: str | None = None, skip: str | None = None
+    ) -> int:
+        """Delete cached metadata documents (of ``site``, or all; never ``skip`` and never a client
+        that completed a sign-in) until at most ``keep`` evictable ones are left: from the site
+        with the most rows, the least recently fetched first."""
+        rows = [
+            (r[0], r[1], _url_site(r[0]))
+            for r in c.execute(
+                "SELECT client_id, fetched_at FROM cimd_clients WHERE signed_in_at IS NULL "
+                "ORDER BY fetched_at, rowid"
+            )
+            if r[0] != skip
+        ]
+        if site is not None:
+            rows = [r for r in rows if r[2] == site]
+        over = len(rows) - max(0, keep)
+        if over <= 0:
+            return 0
+        by_host: dict[str, list[str]] = {}
+        for client_id, _at, h in rows:
+            by_host.setdefault(h, []).append(client_id)  # oldest first
+        doomed: list[str] = []
+        for _ in range(over):
+            busiest = max(by_host, key=lambda h: len(by_host[h]))
+            doomed.append(by_host[busiest].pop(0))
+        c.executemany("DELETE FROM cimd_clients WHERE client_id = ?", [(d,) for d in doomed])
+        return len(doomed)
 
     @staticmethod
     def _trim_anonymous_audit(c: sqlite3.Connection) -> int:
@@ -793,6 +973,13 @@ class Database:
 
     def audit_for_user(self, sub: str, limit: int = 100) -> list[dict[str, Any]]:
         return self.audit_recent(limit, sub=sub)
+
+    def count_audit(self, sub: str, event: str, since: int) -> int:
+        """How many ``event`` rows ``sub`` has at or after ``since`` (e.g. failed link attempts)."""
+        row = self._one(
+            "SELECT COUNT(*) FROM audit_log WHERE sub = ? AND event = ? AND at >= ?", (sub, event, since)
+        )
+        return int(row[0]) if row else 0
 
     # metrics (per-day counters; see metrics.Metrics) ------------------------
     def metrics_increment(self, day: str, sub: str | None, kind: str, name: str, n: int = 1) -> None:
@@ -887,6 +1074,7 @@ class Database:
         ("archidekt_links", "sub"),
         ("tokens", "sub"),
         ("browser_sessions", "sub"),
+        ("idp_grants", "sub"),
         ("metrics", "sub"),
         ("users", "sub"),
     )
@@ -894,11 +1082,32 @@ class Database:
     def delete_member_data(self, sub: str) -> dict[str, int]:
         """Delete everything the gateway keeps about one member, at their request: proposals,
         snapshots, reports, scan sessions, the Archidekt link, every app grant and browser session,
-        usage counters and the user record. The security audit log is kept (it ages out after a
-        year) and records the deletion itself. Signing in again starts a fresh, empty account."""
+        usage counters, the covers of their decks and the user record. The security audit log is
+        kept (it ages out after a year) and records the deletion itself. Signing in again starts a
+        fresh, empty account."""
         out: dict[str, int] = {}
         with self.tx() as c:
             present = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+            # Deck covers are keyed by deck and shared: only the member's own go. Those their deck
+            # pages stored carry their owner_sub; a cover stored before the owner was recorded
+            # (owner_sub NULL) goes when it is of a deck the member has a snapshot of, since
+            # snapshots are taken only of decks the member edits, which are their own. Proposals
+            # and reports can name other members' decks (a clone's source), so they are not used,
+            # and a cover recorded for another member is never touched. Taken before those rows go.
+            deck_ids = (
+                {
+                    r[0]
+                    for r in c.execute("SELECT DISTINCT deck_id FROM snapshots WHERE owner_sub = ?", (sub,))
+                }
+                if "snapshots" in present
+                else set()
+            )
+            covers = c.execute("DELETE FROM deck_covers WHERE owner_sub = ?", (sub,)).rowcount
+            for deck_id in deck_ids:
+                covers += c.execute(
+                    "DELETE FROM deck_covers WHERE deck_id = ? AND owner_sub IS NULL", (deck_id,)
+                ).rowcount
+            out["deck_covers"] = covers
             for table, column in self.MEMBER_TABLES:
                 if table in present:
                     out[table] = c.execute(f"DELETE FROM {table} WHERE {column} = ?", (sub,)).rowcount
@@ -914,7 +1123,35 @@ class Database:
         re-sign-in comes due. Only an existing user is updated (no rows for strangers)."""
         with self.tx() as c:
             c.execute("UPDATE users SET groups_json = ? WHERE sub = ?", (json.dumps(groups), sub))
+            # Their Archidekt session goes too: someone who is no longer a member should not
+            # leave a usable Archidekt login behind on this server.
+            c.execute("UPDATE archidekt_links SET status = 'revoked', secret_enc = '' WHERE sub = ?", (sub,))
         return sum(self.revoke_all_for_user(sub).values())
+
+    def set_user_issuer(self, sub: str, issuer: str) -> None:
+        with self.tx() as c:
+            c.execute("UPDATE users SET idp_issuer = ? WHERE sub = ?", (issuer, sub))
+
+    def set_user_groups(self, sub: str, groups: list[str]) -> None:
+        """Record the groups the identity provider reported just now."""
+        with self.tx() as c:
+            c.execute("UPDATE users SET groups_json = ? WHERE sub = ?", (json.dumps(groups), sub))
+
+    # identity-provider grants ------------------------------------------------
+    def save_idp_grant(self, sub: str, *, refresh_enc: str, access_enc: str, access_expires_at: int) -> None:
+        with self.tx() as c:
+            c.execute(
+                """INSERT INTO idp_grants (sub, refresh_enc, access_enc, access_expires_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT(sub) DO UPDATE SET refresh_enc=excluded.refresh_enc,
+                     access_enc=excluded.access_enc, access_expires_at=excluded.access_expires_at,
+                     updated_at=excluded.updated_at""",
+                (sub, refresh_enc, access_enc, access_expires_at, int(time.time())),
+            )
+
+    def get_idp_grant(self, sub: str) -> dict[str, Any] | None:
+        row = self._one("SELECT * FROM idp_grants WHERE sub = ?", (sub,))
+        return dict(row) if row else None
 
     # archidekt links -------------------------------------------------------
     def save_link(self, sub: str, *, username: str, user_id: str | None, secret_enc: str) -> None:
@@ -929,15 +1166,20 @@ class Database:
                 (sub, username, user_id, secret_enc, now, now),
             )
 
-    def update_link_secret(self, sub: str, secret_enc: str) -> bool:
+    def update_link_secret(self, sub: str, secret_enc: str, *, only_secret: str | None = None) -> bool:
         """Replace the stored session of an *active* link. False when the link was revoked or
-        removed in the meantime, so a refresh that raced an unlink cannot bring it back."""
+        removed in the meantime, so a refresh that raced an unlink cannot bring it back. With
+        ``only_secret``, only while the link still holds that session: a refresh that raced a
+        relink (perhaps to another Archidekt account) cannot overwrite the new link."""
+        sql = (
+            "UPDATE archidekt_links SET secret_enc = ?, refreshed_at = ? WHERE sub = ? AND status = 'active'"
+        )
+        args: tuple[Any, ...] = (secret_enc, int(time.time()), sub)
+        if only_secret is not None:
+            sql += " AND secret_enc = ?"
+            args += (only_secret,)
         with self.tx() as c:
-            cur = c.execute(
-                "UPDATE archidekt_links SET secret_enc = ?, refreshed_at = ? "
-                "WHERE sub = ? AND status = 'active'",
-                (secret_enc, int(time.time()), sub),
-            )
+            cur = c.execute(sql, args)
         return cur.rowcount == 1
 
     def get_link(self, sub: str) -> dict[str, Any] | None:
@@ -948,17 +1190,32 @@ class Database:
         with self.tx() as c:
             c.execute("UPDATE archidekt_links SET last_used_at = ? WHERE sub = ?", (int(time.time()), sub))
 
-    def revoke_link(self, sub: str) -> None:
+    def revoke_link(self, sub: str, *, only_secret: str | None = None) -> bool:
+        """Revoke the member's link (blanking the stored session). With ``only_secret``, only
+        while the link still holds that session, so a failure seen by a request that started
+        before a relink cannot revoke the new link. True when a row was changed."""
+        sql = "UPDATE archidekt_links SET status = 'revoked', secret_enc = '' WHERE sub = ?"
+        args: tuple[Any, ...] = (sub,)
+        if only_secret is not None:
+            sql += " AND status = 'active' AND secret_enc = ?"
+            args += (only_secret,)
         with self.tx() as c:
-            c.execute("UPDATE archidekt_links SET status = 'revoked', secret_enc = '' WHERE sub = ?", (sub,))
+            return c.execute(sql, args).rowcount > 0
 
     # proposals and snapshots -----------------------------------------------
     def save_proposal(
-        self, row: dict[str, Any], *, max_pending: int | None = None, max_closed: int | None = None
+        self,
+        row: dict[str, Any],
+        *,
+        max_pending: int | None = None,
+        max_closed: int | None = None,
+        max_pending_per_client: int | None = None,
     ) -> bool:
         """Insert a pending proposal. With ``max_pending``, refuse it (return False) when the owner
-        already has that many live pending proposals; with ``max_closed``, delete the owner's
-        closed proposals (expired, rejected, failed) beyond the newest ``max_closed``."""
+        already has that many live pending proposals, and with ``max_pending_per_client`` when the
+        app making it (``created_by_client``) already has that many for the owner; with
+        ``max_closed``, delete the owner's closed proposals (expired, rejected, failed) beyond the
+        newest ``max_closed``."""
         now = int(time.time())
         with self.tx() as c:
             if max_pending is not None:
@@ -968,6 +1225,10 @@ class Database:
                     (row["owner_sub"], now),
                 ).fetchone()
                 if pending >= max_pending:
+                    return False
+            if max_pending_per_client is not None:
+                mine = self.count_pending_for_client(row["owner_sub"], row.get("created_by_client"), c=c)
+                if mine >= max_pending_per_client:
                     return False
             c.execute(
                 """INSERT INTO proposals (id, owner_sub, kind, deck_id, deck_name, baseline_fingerprint,
@@ -1007,6 +1268,43 @@ class Database:
         )
         return int(row[0]) if row else 0
 
+    def count_pending_for_client(
+        self, owner_sub: str, client_id: str | None, *, c: sqlite3.Connection | None = None
+    ) -> int:
+        """Live pending proposals one app (or the browser) made for the owner."""
+        sql = (
+            "SELECT COUNT(*) FROM proposals WHERE owner_sub = ? AND state = 'pending' AND expires_at >= ? "
+            "AND created_by_client IS ?"
+        )
+        args = (owner_sub, int(time.time()), client_id)
+        row = c.execute(sql, args).fetchone() if c is not None else self._one(sql, args)
+        return int(row[0]) if row else 0
+
+    def reject_client_proposals(self, owner_sub: str, client_id: str | None = None) -> list[str]:
+        """Reject the owner's pending proposals made by one app (every app, not the browser, when
+        ``client_id`` is None): the app was disconnected. Returns the rejected ids."""
+        browser = "__browser__"  # decks.BROWSER_CLIENT
+        with self.tx() as c:
+            if client_id is None:
+                where = "created_by_client IS NOT NULL AND created_by_client != ?"
+                args: tuple[Any, ...] = (owner_sub, browser)
+            else:
+                where = "created_by_client = ?"
+                args = (owner_sub, client_id)
+            ids = [
+                r[0]
+                for r in c.execute(
+                    f"SELECT id FROM proposals WHERE owner_sub = ? AND state = 'pending' AND {where}", args
+                )
+            ]
+            for pid in ids:
+                c.execute(
+                    "UPDATE proposals SET state = 'rejected', applied_at = ? "
+                    "WHERE id = ? AND state = 'pending'",
+                    (int(time.time()), pid),
+                )
+        return ids
+
     def get_proposal(self, proposal_id: str, owner_sub: str) -> dict[str, Any] | None:
         row = self._one("SELECT * FROM proposals WHERE id = ? AND owner_sub = ?", (proposal_id, owner_sub))
         if row is None:
@@ -1021,8 +1319,8 @@ class Database:
     def list_proposals(self, owner_sub: str, limit: int = 20) -> list[dict[str, Any]]:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT id, kind, deck_id, deck_name, state, created_at, expires_at, applied_at "
-                "FROM proposals WHERE owner_sub = ? ORDER BY created_at DESC LIMIT ?",
+                "SELECT id, kind, deck_id, deck_name, state, created_at, expires_at, applied_at, "
+                "created_by_client FROM proposals WHERE owner_sub = ? ORDER BY created_at DESC LIMIT ?",
                 (owner_sub, limit),
             ).fetchall()
         return [dict(r) for r in rows]
@@ -1086,21 +1384,29 @@ class Database:
         proposal_id: str | None,
         fingerprint: str,
         deck: dict[str, Any],
-    ) -> None:
+        while_applying: bool = False,
+    ) -> bool:
+        """Store a snapshot. With ``while_applying``, only while ``proposal_id`` of ``owner_sub``
+        is still being applied and the member still exists: an apply that outlives "Delete my
+        data" stores nothing for the deleted member. False when nothing was stored."""
+        values = (
+            snapshot_id,
+            owner_sub,
+            deck_id,
+            proposal_id,
+            int(time.time()),
+            fingerprint,
+            json.dumps(deck),
+        )
+        sql = """INSERT INTO snapshots (id, owner_sub, deck_id, proposal_id, taken_at, fingerprint,
+                 deck_json) SELECT ?, ?, ?, ?, ?, ?, ?"""
+        if while_applying:
+            sql += """ WHERE EXISTS (SELECT 1 FROM users WHERE sub = ?)
+                       AND EXISTS (SELECT 1 FROM proposals WHERE id = ? AND owner_sub = ?
+                                   AND state = 'applying')"""
+            values += (owner_sub, proposal_id, owner_sub)
         with self.tx() as c:
-            c.execute(
-                """INSERT INTO snapshots (id, owner_sub, deck_id, proposal_id, taken_at, fingerprint,
-                   deck_json) VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    snapshot_id,
-                    owner_sub,
-                    deck_id,
-                    proposal_id,
-                    int(time.time()),
-                    fingerprint,
-                    json.dumps(deck),
-                ),
-            )
+            return c.execute(sql, values).rowcount == 1
 
     def list_snapshots(self, owner_sub: str, limit: int = 20) -> list[dict[str, Any]]:
         """Newest first. Each row carries the deck name and card count read from the stored deck,
@@ -1148,13 +1454,17 @@ class Database:
 
     # backup ----------------------------------------------------------------
     # -- deck covers --------------------------------------------------------------------------
-    def save_deck_cover(self, deck_id: str, scryfall_uid: str, card_name: str = "") -> None:
+    def save_deck_cover(
+        self, deck_id: str, scryfall_uid: str, card_name: str = "", *, owner_sub: str | None = None
+    ) -> None:
         with self.tx() as c:
             c.execute(
-                "INSERT INTO deck_covers (deck_id, scryfall_uid, card_name, updated_at) VALUES (?, ?, ?, ?) "
+                "INSERT INTO deck_covers (deck_id, scryfall_uid, card_name, updated_at, owner_sub) "
+                "VALUES (?, ?, ?, ?, ?) "
                 "ON CONFLICT(deck_id) DO UPDATE SET scryfall_uid = excluded.scryfall_uid, "
-                "card_name = excluded.card_name, updated_at = excluded.updated_at",
-                (str(deck_id), scryfall_uid, card_name[:200], int(time.time())),
+                "card_name = excluded.card_name, updated_at = excluded.updated_at, "
+                "owner_sub = COALESCE(excluded.owner_sub, deck_covers.owner_sub)",
+                (str(deck_id), scryfall_uid, card_name[:200], int(time.time()), owner_sub),
             )
 
     def deck_covers(self, deck_ids: list[str]) -> dict[str, dict[str, Any]]:

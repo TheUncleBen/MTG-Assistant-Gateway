@@ -59,7 +59,7 @@ variables:
 
 | File in `secrets/` | What's in it |
 | --- | --- |
-| `mtg_fernet_key.txt` | Encryption key for linked Archidekt sessions. **Keep a copy**: lose it and everyone has to relink Archidekt |
+| `mtg_fernet_key.txt` | Encryption key for linked Archidekt sessions and the identity provider's tokens the gateway keeps. **Keep a copy**: lose it and everyone has to relink Archidekt (and sign in once more) |
 | `mtg_session_secret.txt` | Random key that signs browser cookies. No need to keep a copy |
 | `mtg_oidc_client_secret.txt` | The client secret from step 1 |
 
@@ -90,7 +90,7 @@ Edit `.env`. The lines marked **REQUIRED**:
 | `MTG_OIDC_ISSUER` | The issuer URL from step 1 |
 | `MTG_OIDC_CLIENT_ID` | The client ID from step 1 |
 | `MTG_REQUIRED_GROUP` | The group from step 1, exactly as your provider sends it. Required unless you set `MTG_ALLOW_ANY_IDP_USER=true` (see [IDP-OTHERS.md](IDP-OTHERS.md#about-the-group-check)) |
-| `MTG_TAG` | `latest` to follow every new version, or one version to stay on it, for example `0.5.0` ([VERSIONS.md](VERSIONS.md)) |
+| `MTG_TAG` | `latest` to follow every new version, or one version to stay on it, for example `0.6.1` ([VERSIONS.md](VERSIONS.md)) |
 
 Worth a look:
 
@@ -100,7 +100,7 @@ Worth a look:
 | `MTG_HTTP_BIND`, `MTG_HTTP_PORT` | `127.0.0.1`, `8080` | Where the gateway listens on this machine, for a proxy on the same machine. A proxy container on the gateway's network doesn't need it (the proxy overrides remove it) |
 | `MTG_DATA_DIR`, `MTG_BACKUP_DIR` | `./data`, `./backups` | Local disk only, not NFS or SMB |
 | `MTG_WRITES_ENABLED` | `true` | `false` keeps everything review-only: proposals work, nothing is ever applied to Archidekt. If the line is missing, the gateway's own default is `false` |
-| `MTG_APPLY_VIA_MCP` | `true` | Code default `false`. `true` lets the assistant apply a change after the person says yes in chat; `false` means only the Apply button on the review page can |
+| `MTG_APPLY_VIA_MCP` | `false` | Same as the code default: only the Apply button on the review page applies a change. `true` lets the assistant apply after the person says yes in chat, which is weaker: text the assistant reads (deck descriptions, card notes) could trick it into applying its own proposal once `MTG_APPLY_MIN_AGE_SECONDS` has passed |
 
 Every other variable is explained in `.env` and in the
 [environment reference](DEPLOY.md#environment-reference). A setting only
@@ -135,6 +135,23 @@ docker build -f docker/mystic-forge/Dockerfile -t mtg-mysticforge:local .
 
 and set `MTG_IMAGE=mtg-gateway`, `MTG_TAG=local`, `MF_IMAGE=mtg-mysticforge`,
 `MF_TAG=local` in `.env`.
+
+### Hardening already in the Compose file
+
+- Every Linux capability is dropped except the four the start-up script
+  needs to switch to `PUID:PGID`, and `no-new-privileges` is on.
+- Each service may run at most 512 processes and threads
+  (`deploy.resources.limits.pids`), so a runaway process can't exhaust the
+  machine. The gateway normally needs a few dozen.
+- The root filesystem stays writable: when `PUID`/`PGID` differ from
+  1000:1000 the start-up script edits `/etc/passwd` and `/etc/group`.
+- Mystic Forge has no login of its own and publishes no port. It sits on
+  the `mysticforge` network with the gateway only. That network can't be
+  made `internal`, because Mystic Forge needs the internet (Scryfall,
+  EDHREC, the rules). On a plain Docker host, programs running on this
+  machine can still reach a container on a bridge network by its IP, so
+  only run things you trust on this machine, and don't attach other
+  containers to that network.
 
 ## 5. Start it
 
@@ -175,7 +192,7 @@ docker compose logs -f gateway
 
 ```bash
 curl -s https://mtg.example.com/healthz
-# {"status":"ok","version":"0.5.0"}
+# {"status":"ok","version":"0.6.1"}
 
 curl -s https://mtg.example.com/.well-known/oauth-authorization-server | head -c 300
 # JSON with "issuer":"https://mtg.example.com", ...

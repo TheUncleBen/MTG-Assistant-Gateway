@@ -73,7 +73,7 @@ logs.
 
 In Portainer: **Stacks** → `mtg` → **Update the stack**, with "Re-pull
 image" ticked. With `MTG_TAG=latest` that pulls the newest version; with a
-pinned version (for example `0.5.0`), change `MTG_TAG` first
+pinned version (for example `0.6.1`), change `MTG_TAG` first
 ([VERSIONS.md](VERSIONS.md)). Or from the command line:
 
 ```bash
@@ -90,7 +90,10 @@ update is not rolled back automatically on purpose: a new version may have
 upgraded the database, and the old image refuses to start on it (below).
 Signed-in
 assistants keep working because tokens live in the database on disk. Linked
-Archidekt accounts and proposals survive restarts too.
+Archidekt accounts and proposals survive restarts too. (One exception: the
+first start of 0.6.1 or newer after an older version signs everyone out once,
+because sessions from before have no identity-provider tokens on file for
+the live membership check. See the CHANGELOG.)
 
 Before moving to a new release, read the [CHANGELOG](../CHANGELOG.md) and
 take a backup ([Backups](#backups)). A release can upgrade the database on
@@ -134,9 +137,40 @@ answer has to be a public address, and the connection goes to the address
 that was checked (the certificate is still verified against the hostname).
 Redirects aren't followed, one five-second deadline covers the whole fetch
 (including waiting for a slot), documents over 64 KB are refused, at most
-two fetches run at once, and an address that failed isn't tried again for a
+eight fetches run at once (one per site), and an address that failed isn't tried again for a
 minute. Only public clients are accepted (`token_endpoint_auth_method`
 `none`).
+
+So that nobody can use the gateway to send requests to someone else's site,
+a client address with a query string (`?...`) is refused, a failed fetch
+blocks every other new address on that host for a minute, and requests that
+actually go out are limited to 10 a minute per site and 60 a minute in all.
+A "site" is the registrable domain (`example.com`, `example.co.uk`), so
+subdomains share one budget. Only a request that is about to be sent counts:
+an address refused without one (not on the allowlist, an IP address, a name
+that doesn't resolve or resolves to a private address) uses up nothing.
+
+A client that a member has completed a sign-in through (remembered for 180
+days after its last sign-in) is never held back by those limits: its
+document is fetched in a lane of its own (its own fetch slots and DNS
+threads) that first-time addresses can't use or fill, and while its server
+can't be reached (or answers 5xx, 408 or 429) the last good copy is used
+for up to a week past its expiry (never once
+the server itself has withdrawn or changed the document to one that isn't
+accepted). So once Claude or ChatGPT has connected here, nobody can lock
+it out by pointing junk addresses at the gateway. A host on
+`MTG_CIMD_ALLOWED_HOSTS` isn't blocked after a failure, but its new
+addresses still count against the budgets. A name whose DNS doesn't answer
+within 2 seconds counts as failed. A client connecting for the very first
+time can still be delayed by someone who keeps the fetcher busy with junk
+addresses (on an open gateway, on several domains of their own; with an
+allowlist, on the allowed hosts); it connects once that stops.
+
+What one document may store is capped like a self-registered client (at
+most 20 redirect URIs of up to 2000 characters, 8 KB in all), and the cache
+keeps at most 1000 documents, at most 50 per site; when it is full, the site
+with the most cached documents loses its oldest one first. Clients a member
+has signed in through are never removed by these caps.
 
 Two optional stack variables control this:
 
@@ -185,15 +219,17 @@ page, `/install` and the plugin marketplace all read from there.
 
 **What's backed up:** the gateway's SQLite database. It holds users
 (identity provider subject, name, email, groups, disabled flag), registered
-OAuth clients, hashed tokens, Archidekt links (sessions encrypted with the
-Fernet key), proposals, deck snapshots, deck reports, scan sessions, usage
+OAuth clients, hashed tokens, the identity provider's tokens kept for the
+live membership check and Archidekt links (both encrypted with the Fernet
+key), proposals, deck snapshots, deck reports, scan sessions, usage
 counters and the audit log. Mystic Forge
 keeps nothing worth backing up.
 
 **What isn't:** the Fernet key. It's a Docker secret and stays out of the
 backup on purpose. Without it, a restored database still works for sign-in,
 proposals and the audit log, but every Archidekt link is unreadable and
-everyone has to relink. Keep your copy of the key with your other
+everyone has to relink (and sign in once more, since the stored
+identity-provider tokens are unreadable too). Keep your copy of the key with your other
 credentials.
 
 Separately, every applied edit also leaves a private backup copy of the deck
@@ -250,26 +286,42 @@ secret.
 | --- | --- |
 | `mtg_session_secret` | Safe any time. Sign-ins in progress fail once, and anyone with `/account` or a review page open has to reload it. |
 | `mtg_oidc_client_secret` | Rotate it together with the client secret on the Authentik provider. |
-| `mtg_fernet_key` | Every stored Archidekt session becomes unreadable, so everyone has to relink at `/account`. Proposals and sign-ins aren't affected. |
+| `mtg_fernet_key` | Every stored Archidekt session becomes unreadable, so everyone has to relink at `/account`. The identity-provider tokens kept for the live membership check become unreadable too, so everyone is signed out once on their next request and signs in again (their AI apps reconnect once). Proposals aren't affected. |
 
 ## Revoking access
 
-1. Take the person out of the Authentik group or application binding. They
-   can't sign in again.
-2. Tokens they already hold keep working for a bit:
-   - an access token for up to an hour;
-   - refreshes keep working until their last sign-in is older than
-     `MTG_REAUTH_INTERVAL` (a week by default). After that the refresh is
-     refused and they'd have to sign in again, which Authentik now blocks.
+1. Take the person out of the `MTG_REQUIRED_GROUP` group in Authentik, or
+   deactivate or delete their Authentik user. That's enough.
+2. The gateway notices on their next request. Before serving any request
+   that carries a browser session or a gateway token, it asks Authentik's
+   userinfo endpoint for the person's current groups (the answer is cached
+   for `MTG_MEMBERSHIP_CHECK_TTL` seconds, 5 by default, so that's the worst
+   case). Someone taken out of the group loses every gateway token, every
+   browser session (web pages and Android app), the Authentik tokens the
+   gateway kept, and their Archidekt link, all at once; the audit log gets
+   a `membership_revoked` row with the reason `not_in_group`. A deactivated
+   or deleted user shows up only as a refused token, so they lose every
+   token and session but keep their Archidekt link (an admin can remove it
+   with **Delete data**); the audit log gets a `membership_unverifiable` row
+   with the reason (`idp_refused_refresh`, `idp_refused_userinfo` and so
+   on). A new sign-in then fails at Authentik.
 
-   The gateway doesn't ask Authentik at refresh time. It only re-checks
-   `MTG_REQUIRED_GROUP` against the groups it recorded at the last sign-in.
-   So changing that variable cuts off everyone outside the new group within
-   an hour, but removing someone in Authentik alone only bites at their next
-   sign-in. Browser sessions on `/account` and the review pages last two
-   hours (`MTG_BROWSER_SESSION_TTL`, in seconds).
+   Taking someone out of `MTG_ADMIN_GROUP` works the same way: the admin
+   page is gone on their next request.
 
-   To cut someone off right now, revoke their tokens and browser sessions:
+   If Authentik can't be reached, the gateway refuses requests with a 503
+   ("The sign-in service can't be reached to confirm your access") and
+   revokes nothing; everything works again once Authentik answers. If
+   Authentik answers but has no refresh token on file for someone (the
+   `offline_access` scope mapping is missing, see
+   [IDP-AUTHENTIK.md](IDP-AUTHENTIK.md#4-create-the-oauth2openid-provider)),
+   that person's gateway tokens and sessions are revoked once Authentik's
+   access token runs out, and they sign in again (audit row
+   `membership_unverifiable`).
+
+   You can also revoke someone's tokens and sessions yourself, without
+   touching Authentik: the admin page's **Revoke tokens and sessions** or
+   **Disable** ([The admin page](#the-admin-page)), or by hand:
 
    ```bash
    docker exec -it --user 1000:1000 $(docker ps -q -f name=mtg_mtg-assistant-gateway) \
@@ -280,7 +332,9 @@ secret.
      c.commit()"
    ```
 
-3. Optionally unlink their Archidekt account too (next section).
+3. If you cut someone off on the gateway only (not in Authentik), unlink
+   their Archidekt account too if you want (next section). A removal in
+   Authentik already did that.
 
 Registered AI clients (one per connector someone added) that never finished
 a sign-in, or whose tokens have all expired and been cleared out, get
@@ -291,11 +345,41 @@ The same cleanup bounds what anyone on the internet can fill the database
 with: audit log entries older than a year are deleted, the anonymous ones
 (client registrations and client-metadata fetches) are also capped at the
 newest 5000 and keep only a short summary, unfinished sign-ins are capped
-at the newest 5000 (expired ones are also dropped whenever a new sign-in
-starts), and unused registered clients at the newest 2000. The cleanup runs
+at 5000 (expired ones are also dropped whenever a new sign-in starts), and
+unused registered clients at the newest 2000.
+
+Unfinished sign-ins are the part a flood could use against people signing in
+at the same time, so they are capped more carefully: at most 10 per browser,
+500 per AI client (the web pages count as one client), and 5000 in all, and
+when a cap is reached the network (IP address, or /64 for IPv6) holding the
+most unfinished sign-ins loses its oldest one. Someone hammering `/login` or
+`/authorize` therefore only pushes out their own sign-ins. Each network may
+also start at most 30 sign-ins a minute; the 31st gets a "too many sign-in
+attempts" page. This depends on the gateway seeing each visitor's address:
+it takes it from `X-Forwarded-For` only when the request comes from an
+address in `MTG_TRUSTED_PROXIES`. The rate limit applies only to public
+addresses. A request from a private, loopback, link-local, CGNAT
+(`100.64.0.0/10`, which Tailscale uses) or IPv6 ULA address, or from an
+address in `MTG_TRUSTED_PROXIES`, isn't rate-limited: such an address is
+usually your reverse proxy, and if the gateway doesn't trust it, every
+visitor arrives from it and shares one limit, so anyone could block every
+sign-in. The per-browser and per-client caps still apply to them, and all
+those visitors count as one network. When 50 different browsers have started
+sign-ins from one address, the gateway logs a warning (once per address)
+naming it and suggesting you add it to `MTG_TRUSTED_PROXIES`. A reverse
+proxy on a public address must be in `MTG_TRUSTED_PROXIES`, or every visitor
+shares its 30-a-minute limit and anyone can use it up. The cleanup runs
 at start and then every hour, with or without backups. It also keeps the
 newest 25 snapshots of each member's deck (plus any a pending restore needs),
-usage counters for 400 days and remembered deck covers for 180 days. A flood of sign-up attempts can therefore cost a connector that was
+usage counters for 400 days and remembered deck covers for 180 days. Closed
+proposals (expired, rejected, failed) go after 30 days, applied ones after a
+year. Snapshots and reports stay with the member, not with the Archidekt
+account: after unlinking and linking another Archidekt account, the member
+still sees the snapshots and reports taken before (they are the member's own
+backups); they age out with the limits above or go with **Delete my data**.
+"Delete my data" removes a member's rows from the live database; the nightly
+backups in `MTG_BACKUP_DIR` keep a copy until they age out after
+`MTG_BACKUP_KEEP_DAYS`, including the member's encrypted Archidekt session. A flood of sign-up attempts can therefore cost a connector that was
 registered but not used yet; that client just registers again. To slow
 floods down at the proxy, see the optional rate limit in
 [DEPLOY.md](DEPLOY.md#7-reverse-proxy).
@@ -356,7 +440,8 @@ and copy). Still, make your own first edit on a deck you don't care about,
 and check the result on Archidekt.
 
 **The kill switch is `MTG_WRITES_ENABLED`.** It decides whether any proposal
-can be applied. The code default is off; the example stack file turns it on.
+can be applied. The code default is off; the example env files
+(`deploy/stack.env.example`, `deploy/compose/.env.example`) turn it on.
 
 - **To turn writes on:** set it to `true` in the stack's environment
   variables in Portainer and update the stack. Any other value, or leaving it
@@ -376,9 +461,9 @@ it hasn't expired and the deck hasn't changed.
 code default is `false`: the `apply_proposal` tool answers
 `browser_required` with the review link, so a person's own click always sits
 between anything the assistant read (deck descriptions, card text) and a
-write to Archidekt. The example stack file sets it to `true`, which lets the
-assistant apply after the user says yes in chat. Writes have to be on as
-well.
+write to Archidekt. The example env files keep it `false` too. Setting it to
+`true` lets the assistant apply after the user says yes in chat; writes have
+to be on as well.
 
 With it on, the gateway has no proof the user really said yes; it relies on
 the assistant following its instructions. Two things narrow that gap:
@@ -395,6 +480,17 @@ the assistant following its instructions. Two things narrow that gap:
 Tell people to keep `apply_proposal` on "ask every time" (or "needs
 approval") in their AI app rather than "always allow".
 
+Each proposal records the app that made it (or "browser"), and the review
+page and the proposal list show it. An app may apply or reject only its own
+proposals (`other_client` otherwise). When a member disconnects an app on
+their Account page, that app's pending proposals are rejected and can no
+longer be applied. One app may hold at most 30 pending proposals for a
+member, and a member 100 in all, so a runaway app can't use up every slot.
+
+An app connected with the read-only scope `mtg.read` can read decks,
+proposals, snapshots and reports but can't propose, apply, reject, run
+reports or save scans (`insufficient_scope`).
+
 ### Archidekt rate limiting
 
 The gateway paces its own Archidekt requests. If Archidekt says "slow down"
@@ -402,17 +498,31 @@ The gateway paces its own Archidekt requests. If Archidekt says "slow down"
 Archidekt requests for a while, and users see "Archidekt requests are paused
 after repeated failures; try later". It clears on its own.
 
+Each member also has their own limits, so one looping assistant can't keep
+Archidekt busy for everyone:
+
+- at most three Archidekt requests running or waiting at once;
+- at most `MTG_ARCHIDEKT_CALLS_PER_10_MIN` (120 by default) started per 10
+  minutes, refilled evenly. Deck reads, proposals, applies, links and the
+  research tools' `archidekt_*` calls all count. Past it the member gets
+  `rate_limited` and waits a few minutes;
+- at most five failed Archidekt link attempts (wrong username or password)
+  in 15 minutes, so the Account page can't be used to guess Archidekt
+  passwords from the gateway's address. The attempted username isn't
+  logged.
+
 ## The admin page
 
 `/admin` is a browser page for whoever runs the gateway. It exists only when
 `MTG_ADMIN_GROUP` is set to the name of a group in your identity provider
-(add it under the gateway's `environment:` in the stack file, the same way
-as the other optional settings). Members of that group who are also allowed
+(set it in the stack's environment variables or in `.env`; the stack and
+Compose files already pass it through). Members of that group who are also allowed
 to sign in (so also in `MTG_REQUIRED_GROUP`, if one is set) see it after
 signing in. For everyone else, and whenever the variable is unset, `/admin`
 and everything under it answers 404, so ordinary users can't tell the area
-exists. Group membership is whatever the gateway recorded at the person's
-last sign-in; a disabled account is never an admin.
+exists. Group membership is what the live membership check last recorded
+(at most `MTG_MEMBERSHIP_CHECK_TTL` seconds old, see
+[Revoking access](#revoking-access)); a disabled account is never an admin.
 
 What it shows:
 
@@ -435,19 +545,21 @@ The same data is at `/api/v1/admin/overview`, `/api/v1/admin/users` and
 (see [API.md](API.md)). Both need the admin's browser session cookie; the
 API writes also need the `X-CSRF-Token` header.
 
-The four actions, and exactly what each one does:
+The five actions, and exactly what each one does:
 
 | Button | What happens |
 | --- | --- |
-| **Disable** | Sets `disabled_at` on the user, revokes every token they hold, deletes their browser sessions and any sign-in codes in flight. From then on the gateway refuses them everywhere: a sign-in through the identity provider is rejected with "Your account has been disabled on this gateway" (audited as `login_rejected_disabled`), a token refresh fails (`refresh_rejected`, reason `disabled`), an access token that is still in someone's hands is refused on its next use and its chain revoked (`disabled_user_refused`), and a browser session cookie is treated as signed out. You can't disable your own account. |
+| **Disable** | Sets `disabled_at` on the user, revokes every token they hold, deletes their browser sessions, any sign-in codes in flight and the identity-provider tokens the gateway kept for them. From then on the gateway refuses them everywhere: a sign-in through the identity provider is rejected with "Your account has been disabled on this gateway" (audited as `login_rejected_disabled`), a token refresh fails (`refresh_rejected`, reason `disabled`), an access token that is still in someone's hands is refused on its next use and its chain revoked (`disabled_user_refused`), and a browser session cookie is treated as signed out. You can't disable your own account. |
 | **Enable** | Clears `disabled_at`. Nothing is handed back: the person signs in again and reconnects their assistant. |
-| **Revoke tokens and sessions** | The same revocation as Disable (tokens, browser sessions, pending codes) without disabling. The person can sign in again straight away. This is the button version of the SQL in [Revoking access](#revoking-access). |
+| **Revoke tokens and sessions** | The same revocation as Disable (tokens, browser sessions, pending codes, identity-provider tokens) without disabling. The person can sign in again straight away. This is the button version of the SQL in [Revoking access](#revoking-access). |
 | **Unlink Archidekt** | Marks their Archidekt link revoked and deletes the stored session, the same as their own Unlink button on `/account`. They can relink any time. |
+| **Delete data** | Deletes everything the gateway keeps about that person, the same as their own **Delete my data**: proposals, snapshots, reports, scan sessions, the remembered covers of their own decks (never a cover of someone else's deck they cloned or reported on), the Archidekt link, every app grant and browser session, the identity-provider tokens, usage counters and the user record. It needs the confirmation tick next to the button, and you can't use it on yourself (use your own Account page). Meant for former members, and for an account left over from an earlier identity provider (the gateway refuses a new provider's account whose `sub` matches an old one until the old one is deleted). Their decks on Archidekt are not touched, and the audit log keeps its rows. If they're still in the group, they can sign in again as a new, empty account. |
 
-Every action writes an `admin_disable`, `admin_enable`, `admin_revoke` or
-`admin_unlink` row to the audit log under the admin's subject, with the
-target and counts in `detail_json`, and bumps an `admin` counter in the
-metrics table. The admin page never creates a user or changes a group: that
+Every action writes an `admin_disable`, `admin_enable`, `admin_revoke`,
+`admin_unlink` or `admin_delete_data` row to the audit log under the admin's
+subject, with the target and counts in `detail_json`, and bumps an `admin`
+counter in the metrics table. The person's own activity log shows the
+action too, as done by an administrator. The admin page never creates a user or changes a group: that
 stays in the identity provider. Disabling only refuses the account on this
 gateway; the account itself is untouched.
 

@@ -64,7 +64,7 @@ A list of 1 to 40 objects:
 
 `set_category` and `set_commander` take only `card_name` (plus `category` for
 `set_category`): no quantity or printing. The card must already be in the deck.
-`set_category` moves every deck-proper row of the card to exactly that category; maybeboard and sideboard rows are left alone.
+`set_category` moves every deck-proper row of the card to exactly that category; maybeboard and sideboard rows are left alone. Moving a card into a category the deck does not count (Maybeboard, Sideboard) takes it out of the deck proper: the diff line ends in "(leaves the deck, -N)" and the review page counts it as removed.
 `set_commander` files the card under `Commander` and takes `Commander` off every
 other card, so the commanders become exactly the cards named by the proposal's
 `set_commander` changes (give two for partners). A card may have one
@@ -186,6 +186,12 @@ tool's schema for the rest.
 `deck` arguments accept an Archidekt id or URL (public decks only) or
 decklist text with one `1 Card Name` per line, commander first or marked with
 a trailing ` *CMDR*`.
+
+The gateway refuses, before forwarding, a goldfish `n` above 2000, an
+`until_turn` above 30, `goldfish_odds` sizes above 1000, and any text argument
+over 200 kB. The `archidekt_*` tools (and a `deck` given as an Archidekt id or
+URL) count against the user's Archidekt budget; past it they answer that the
+budget is used up for a few minutes.
 
 ## Not available on this gateway
 

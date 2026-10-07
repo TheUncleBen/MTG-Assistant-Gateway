@@ -36,6 +36,7 @@ BROWSER_CLIENT_ID = "__browser__"
 def add_browser_routes(server: MCPServer, state: AppState) -> None:
     s = state.settings
     secure = s.public_url.startswith("https://")
+    fresh_cookie = cookie_name("mtg_fresh_login", s)
     session_cookie = cookie_name(SESSION_COOKIE, s)
 
     def page(
@@ -81,11 +82,18 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         sub, _sid = current(request)
         if sub:
             return RedirectResponse(nxt, status_code=302)
+        # Right after a sign-out on this device, the identity provider is asked to make the person
+        # enter their credentials again, so the next person on a shared device or the Android app
+        # is not silently signed back in as the previous one.
+        fresh = request.cookies.get(fresh_cookie) == "1"
         try:
-            url = await state.provider.start_idp_login(BROWSER_CLIENT_ID, {"next": nxt})
+            url = await state.provider.start_idp_login(BROWSER_CLIENT_ID, {"next": nxt}, force_login=fresh)
         except LoginError as exc:
             return page("Sign-in unavailable", f"<p>{html.escape(str(exc))}</p>", status=exc.status)
-        return RedirectResponse(url, status_code=302, headers={"Cache-Control": "no-store"})
+        resp = RedirectResponse(url, status_code=302, headers={"Cache-Control": "no-store"})
+        if fresh:
+            resp.delete_cookie(fresh_cookie, path="/", secure=secure, httponly=True, samesite="lax")
+        return resp
 
     @server.custom_route("/logout", methods=["GET"], include_in_schema=False)
     async def logout_confirm(request: Request) -> Response:
@@ -99,7 +107,10 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             "<p class='muted small'>Unsaved scan drafts on this device are cleared too.</p>"
             "<form method='post' action='/logout'>"
             f"<input type='hidden' name='csrf' value='{html.escape(_csrf(s, sid) or '')}'>"
-            "<button class='primary'>Sign out</button></form></div>",
+            "<div class='actions'><button class='primary'>Sign out</button>"
+            "<button name='everywhere' value='1'>Sign out on all my devices</button></div></form>"
+            "<p class='muted small'>All devices signs out every browser and the Android app. "
+            "Connected AI apps keep working; disconnect them on your Account page.</p></div>",
             sub=sub,
             sid=sid,
         )
@@ -115,11 +126,19 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             # no cookie deletion and no Clear-Site-Data, which would wipe unsaved scan drafts.
             return RedirectResponse("/logout" if sub else "/signed-out", status_code=303)
         state.db.delete_browser_session(sid)
+        if data.get("everywhere") == "1":
+            n = state.db.delete_browser_sessions_for(sub)
+            state.db.audit(
+                "signed_out_everywhere", sub=sub, client_id=BROWSER_CLIENT_ID, detail={"sessions": n}
+            )
         # Not "/": the dashboard needs a session, so it would send the browser straight to sign-in.
         resp = RedirectResponse("/signed-out", status_code=303)
         resp.delete_cookie(session_cookie, path="/", secure=secure, httponly=True, samesite="lax")
         # Ask the browser to drop cached pages and site storage (scan drafts and the like) too.
         resp.headers["Clear-Site-Data"] = '"cache", "storage"'
+        resp.set_cookie(
+            fresh_cookie, "1", max_age=3600, path="/", secure=secure, httponly=True, samesite="lax"
+        )
         return resp
 
     @server.custom_route("/theme", methods=["POST"], include_in_schema=False)
@@ -160,13 +179,20 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
 
     @server.custom_route("/data-deleted", methods=["GET"], include_in_schema=False)
     async def data_deleted(_request: Request) -> Response:
+        backups = (
+            "The gateway's nightly database backups made before now still hold a copy of what was "
+            f"deleted until they age out, after {s.backup_keep_days} days. "
+            if s.backup_dir is not None
+            else ""
+        )
         return page(
             "Your data was deleted",
-            "<div class='card'><p>Everything this gateway kept for your account is gone: proposals, "
-            "snapshots, test reports, scan sessions, your Archidekt link, connected apps and your "
-            "sign-in. You are signed out.</p>"
+            "<div class='card'><p>What this gateway kept for your account was deleted from its "
+            "database: proposals, snapshots, test reports, scan sessions, deck covers, your Archidekt "
+            "link, connected apps and your sign-in. You are signed out.</p>"
             "<p class='muted small'>Your decks on Archidekt, including any backup copies the gateway "
-            "made there, are yours on Archidekt and were not touched. The gateway's security log keeps "
+            "made there, are yours on Archidekt and were not touched. "
+            f"{html.escape(backups)}The gateway's security log keeps "
             "a record that this account existed and was deleted until it ages out after a year.</p>"
             "<div class='actions'><a class='btn btn-primary' href='/login?next=/'>Sign in again</a>"
             "</div></div>",
@@ -201,9 +227,22 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         if action in ("disconnect", "disconnect_all"):
             client_id = data.get("client_id") if action == "disconnect" else None
             n = state.db.revoke_client_for_user(sub, client_id)
+            # A disconnected app's pending proposals go with it: they stay visible, rejected, and
+            # can no longer be applied from the review page.
+            closed = state.db.reject_client_proposals(sub, client_id)
             state.db.audit(
-                "apps_disconnected", sub=sub, client_id=client_id, detail={"tokens": n, "by": "user"}
+                "apps_disconnected",
+                sub=sub,
+                client_id=client_id,
+                detail={"tokens": n, "by": "user", "proposals_rejected": len(closed)},
             )
+            for pid in closed:
+                state.db.audit(
+                    "proposal_rejected",
+                    sub=sub,
+                    client_id=BROWSER_CLIENT_ID,
+                    detail={"proposal_id": pid, "origin": "browser", "reason": "app disconnected"},
+                )
             return RedirectResponse(f"/account?ok={'disconnected' if client_id else 'disconnected_all'}", 303)
         if action == "unlink":
             state.decks.unlink(sub)
@@ -258,7 +297,12 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 f"<li><a class='name' href='/proposals/{html.escape(r['id'])}'>"
                 f"{html.escape(r['deck_name'] or r['deck_id'])}</a>"
                 f"<span class='badge {_badge(r['state'])}'>{html.escape(r['state'])}</span>"
-                f"<span class='when'>{_when(r['created_at'])}</span></li>"
+                + (
+                    f"<span class='muted small'>{html.escape(r['created_by'])}</span>"
+                    if r.get("created_by")
+                    else ""
+                )
+                + f"<span class='when'>{_when(r['created_at'])}</span></li>"
                 for r in rows
             )
             body = f"<div class='card'><ul class='plain plist'>{items}</ul></div>"
@@ -371,10 +415,11 @@ def _csrf(s: Any, sid: str | None) -> str | None:
 def browser_session(state: Any, request: Request) -> tuple[str | None, str | None]:
     """(subject, session id) for the signed-in person, or (None, None).
 
-    A browser session is only created after a sign-in that passed MTG_REQUIRED_GROUP. The
-    group is checked again on every request against the groups recorded at that sign-in, so
-    changing MTG_REQUIRED_GROUP locks out existing sessions at once, as does an admin disabling
-    the account.
+    A browser session is only created after a sign-in that passed MTG_REQUIRED_GROUP. Before the
+    request reaches here, MembershipMiddleware has asked the identity provider for the person's
+    current groups (membership.py) and revoked everything of a removed member, and the recorded
+    groups were updated; they are checked again here, so a removal at the provider, a changed
+    MTG_REQUIRED_GROUP or an admin disabling the account all lock the session out.
     """
     sid = request.cookies.get(cookie_name(SESSION_COOKIE, state.settings))
     sub = state.db.get_browser_session(sid) if sid else None
@@ -417,8 +462,10 @@ OK_MESSAGES = {
     "accepting it until it expires. If you think it was exposed, change your Archidekt password.",
     "applied": "Applied. Archidekt now matches this proposal.",
     "rejected": "Rejected. Nothing was sent to Archidekt.",
-    "disconnected": "Disconnected. That app has to be connected and approved again to use your account.",
-    "disconnected_all": "Every connected app was disconnected. Each has to be connected and approved again.",
+    "disconnected": "Disconnected. That app has to be connected and approved again to use your account. "
+    "Its pending proposals were rejected.",
+    "disconnected_all": "Every connected app was disconnected. Each has to be connected and approved again. "
+    "Their pending proposals were rejected.",
 }
 ERR_MESSAGES = {
     "confirm_delete": "Nothing was deleted. Tick the box to confirm, then press Delete my data.",
@@ -435,6 +482,8 @@ ERR_MESSAGES = {
     "not_linked": "Your Archidekt account is not linked, or Archidekt no longer accepts the stored "
     "session. Relink it on the Account page.",
     "forbidden": "This deck belongs to another Archidekt account than the one you linked.",
+    "other_account": "This new deck was proposed for another Archidekt account than the one linked now, "
+    "so nothing was created. Ask for a new proposal.",
     "verify_mismatch": "Archidekt accepted the change but the deck does not fully match the proposal. "
     "A snapshot of the deck from before the change was kept; see the result below.",
 }
@@ -506,7 +555,8 @@ def _account_body(state: Any, sub: str, csrf: str | None) -> str:
         "<a class='btn' href='/skill'>Get the assistant skill for Claude or ChatGPT</a> "
         "<a class='btn' href='/app'>Get the Android app</a>"
         f"<form method='post' action='/logout'>{csrf_in}"
-        "<button class='inline'>Sign out</button></form></div>"
+        "<button class='inline'>Sign out</button></form> "
+        "<a class='small' href='/logout'>Sign out on all my devices</a></div>"
     ]
     out.append(_apps_card(state, sub, csrf_in))
     if info["linked"]:
@@ -535,7 +585,8 @@ def _account_body(state: Any, sub: str, csrf: str | None) -> str:
             "autocomplete='current-password'>"
             "<button class='primary'>Link account</button></form></div>"
         )
-    out.append(_delete_card(csrf_in))
+    s = state.settings
+    out.append(_delete_card(csrf_in, s.backup_keep_days if s.backup_dir is not None else None))
     return "".join(out)
 
 
@@ -549,6 +600,8 @@ def _apps_card(state: Any, sub: str, csrf_in: str) -> str:
         )
     items = "".join(
         f"<li><span class='name'>{html.escape(a['name'] or 'Unnamed app')}</span>"
+        # the name is the app's own choice; its client id tells two apps of one name apart
+        f"<code class='small'>{html.escape(_short_id(a['client_id']))}</code>"
         f"<span class='when'>last signed in or refreshed {_when(a['last_issued_at'])}</span>"
         f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='disconnect'>"
         f"<input type='hidden' name='client_id' value='{html.escape(a['client_id'])}'>"
@@ -565,14 +618,23 @@ def _apps_card(state: Any, sub: str, csrf_in: str) -> str:
     )
 
 
-def _delete_card(csrf_in: str) -> str:
+def _short_id(client_id: str) -> str:
+    return client_id if len(client_id) <= 40 else client_id[:37] + "..."
+
+
+def _delete_card(csrf_in: str, backup_days: int | None = None) -> str:
     """Deleting your data is as easy to find as everything else on the page: no hiding it, no
     guilt-trip wording; one checkbox so a stray tap can't do it."""
+    kept = (
+        f" Nightly database backups keep a copy until they age out after {backup_days} days."
+        if backup_days
+        else ""
+    )
     return (
         "<div class='card'><h2>Delete my data</h2>"
         "<p>Delete everything this gateway keeps for your account: proposals, snapshots, test "
         "reports, scan sessions, your Archidekt link, connected apps and your sign-in. Your decks on "
-        "Archidekt are not touched. This can't be undone.</p>"
+        f"Archidekt are not touched. This can't be undone.{kept}</p>"
         f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='delete_data'>"
         "<label class='check'><input type='checkbox' name='confirm' value='yes' required> "
         "Yes, delete my data from this gateway</label>"
@@ -632,6 +694,20 @@ def _change_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, dic
                     name,
                     f"<span class='was'>{before}</span> &rarr; {after} "
                     f"<span class='sr-only'>copies, </span>({'+' if delta > 0 else ''}{delta})",
+                )
+            )
+        elif kind == "category" and r.get("leaves"):
+            # Moved into a category the deck does not count (Maybeboard, Sideboard): the copies
+            # leave the deck proper, so this is shown and counted as a removal.
+            qty = int(r.get("leaves") or 0)
+            counts["del"] += 1
+            net -= qty
+            out.append(
+                _li(
+                    "del",
+                    "Move out of deck",
+                    name,
+                    _was_now(r.get("before", ""), r.get("after", "")) + f" (leaves the deck, -{qty})",
                 )
             )
         elif kind == "category":
@@ -749,6 +825,14 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str = "") -> str:
             if p.get("kind") == "create_deck" and p["deck_id"] == "new"
             else f"<dt>Deck</dt><dd><code>{html.escape(p['deck_id'])}</code></dd>"
         )
+        + (
+            f"<dt>Archidekt account</dt><dd>{html.escape(str(p['changes']['archidekt_username']))}</dd>"
+            if p.get("kind") == "create_deck"
+            and isinstance(p.get("changes"), dict)
+            and p["changes"].get("archidekt_username")
+            else ""
+        )
+        + (f"<dt>Proposed by</dt><dd>{html.escape(p['created_by'])}</dd>" if p.get("created_by") else "")
         + f"<dt>Created</dt><dd>{_when(p['created_at'])}</dd>"
         f"<dt>Expires</dt><dd>{_when(p['expires_at'])}</dd></dl>"
     )

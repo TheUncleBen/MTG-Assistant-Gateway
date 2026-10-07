@@ -113,7 +113,7 @@ def add_scan_routes(server: MCPServer, state: AppState, service: ScanService) ->
             return JSONResponse({"ok": False, "error": "too_large"}, 413, headers=NO_STORE)
         try:
             data = json.loads(raw)
-        except ValueError:
+        except (ValueError, RecursionError):  # RecursionError: deeply nested arrays or objects
             return JSONResponse(
                 {"ok": False, "error": "invalid", "message": "bad JSON"}, 400, headers=NO_STORE
             )

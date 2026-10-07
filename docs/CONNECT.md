@@ -59,7 +59,8 @@ In plain terms:
   tools on the web. The help center is newer and narrower, and doesn't
   mention Plus at all.
 - **What that means for deck changes in ChatGPT.** The gateway marks every
-  tool as read-only except two: `apply_proposal` and `save_scan_session`.
+  tool as read-only except four: `apply_proposal`, `reject_proposal`,
+  `run_deck_report` and `save_scan_session`.
   Making a proposal only records it, so even if ChatGPT limits you to
   read-only tools you should still be able to propose changes and then press
   Apply on the gateway's review page in your browser. Whether ChatGPT's
@@ -160,8 +161,8 @@ Claude lets you set each tool to always allow, needs approval, or blocked
 (verified). Keep `apply_proposal` on **needs approval**: if the owner lets
 the assistant apply changes from chat, that's the tool that actually changes
 your deck. Claude's Research mode can call connector tools without asking
-(verified). Everything except `apply_proposal` and `save_scan_session` only
-reads or records proposals. The assistant is told never to apply one you
+(verified). Everything except `apply_proposal`, `reject_proposal`,
+`run_deck_report` and `save_scan_session` only reads or records proposals. The assistant is told never to apply one you
 haven't said yes to in your own message, but the gateway can't check that
 for itself, which is why "needs approval" on `apply_proposal` is worth
 keeping.
@@ -208,13 +209,16 @@ and may block some risky ones (reported). If ChatGPT refuses or hides
 ### If ChatGPT blocks write tools
 
 OpenAI says some plans only get reading tools (reported). Every gateway
-tool is marked read-only except two, so all of this keeps working: research
+tool is marked read-only except four, so all of this keeps working: research
 (Scryfall, EDHREC, rules), goldfish simulation, reading and importing decks,
-card lookups for scanning, and making deck proposals. For the two write
+card lookups for scanning, and making deck proposals. For the four write
 tools:
 
 - `apply_proposal`: open the proposal's review link (or **Proposals** on the
   gateway) and press **Apply** there. Same preview, same checks.
+- `reject_proposal`: press **Reject this proposal** on the review page.
+- `run_deck_report`: press **Run deck report** on the deck's page under
+  **Decks** on the gateway.
 - `save_scan_session`: scan on the gateway's `/scan` page in your browser
   instead.
 
@@ -252,7 +256,7 @@ assistant read and edit your own decks, link Archidekt once in a browser at
 | "This sign-in link has expired or was already used" | Go back to the AI app and press Connect again. Sign-in links last ten minutes, including time spent on the confirmation page. |
 | Claude shows an error right after you picked **Use Claude's published identity**, before any gateway page appears | The gateway couldn't fetch or accept Claude's published description, or the owner has limited which ones it accepts. Wait a minute (a failed fetch isn't retried sooner) and try again, or remove the connector and add it with **Register automatically**. Tell the owner either way. |
 | "This sign-in was started in a different browser" | The AI app opened sign-in in one browser and you finished it in another. Try again and keep the whole sign-in in one browser window. On a phone this can happen when a link opens in a different browser app. |
-| The connector worked before but now wants you to sign in again | Normal. By default the gateway asks you to sign in again about once a week (the owner can change that), and also after about 30 days of not using it, or if the owner revoked your access. Reconnect it in the app's connector settings. |
+| The connector worked before but now wants you to sign in again | Normal. By default the gateway asks you to sign in again about once a week (the owner can change that), and also after about 30 days of not using it, if the owner revoked your access, and once after the owner upgrades the gateway to version 0.6.1. Reconnect it in the app's connector settings. |
 
 Your sign-in password only ever goes into the owner's sign-in page,
 never into the AI app or the gateway.

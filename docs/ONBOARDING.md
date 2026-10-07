@@ -147,12 +147,13 @@ so:
 2. **Apply.** The assistant asks whether to apply exactly that change, and
    waits for your yes. What happens next depends on how the owner set things
    up:
-   - **The assistant applies it** (the example setup): after your yes, it
+   - **You apply it in the browser** (the example setup, and the safer
+     one): the assistant gives you the review link. Open it, check the
+     change, press **Apply these changes to Archidekt**, then tell the
+     assistant you did.
+   - **The assistant applies it** (only if the owner turned on in-chat
+     applying, and your app allows the apply tool): after your yes, it
      applies the proposal and tells you how it went.
-   - **You apply it in the browser** (if the owner turned in-chat applying
-     off, or your app blocks the apply tool): the assistant gives you the
-     review link. Open it, check the change, press **Apply these changes to
-     Archidekt**, then tell the assistant you did.
 
    Either way, for an edit the gateway first checks the deck hasn't changed
    since the proposal, saves a copy of it (a snapshot), and puts a private
@@ -171,7 +172,11 @@ Good to know:
 
 - Only decks your linked Archidekt account owns can be changed.
 - Edits only touch the main deck. Your maybeboard and sideboard are left
-  alone.
+  alone. Moving a card into the Maybeboard or Sideboard category takes it
+  out of the main deck; the review shows that as "leaves the deck".
+- The review page says which app made the proposal ("browser", or the AI
+  app's name). If you disconnect an app on your Account page, its pending
+  proposals are rejected.
 - A proposal expires after 24 hours and can only be applied once. Don't want
   it? Press **Reject this proposal** on the review page. Nothing goes to
   Archidekt, and the assistant sees it as rejected.
@@ -215,6 +220,10 @@ Good to know:
   Honest caveat: that encryption protects the database file and backups, not
   against the owner, who runs the server and holds the key. Only link an
   account if you're fine with that.
+- To check you're still allowed in, the gateway keeps the sign-in
+  service's tokens for your account (encrypted) and asks it, every few
+  seconds while you use the gateway, whether you're still in the group. If
+  the owner removes you, you're signed out everywhere on your next click.
 - Every tool call is tied to your account. Sign-ins, proposals, applies,
   links and unlinks go in an audit log, and the gateway keeps a snapshot of
   each deck from just before a change. The owner can see these. The backup
@@ -226,15 +235,27 @@ Good to know:
   like this. The gateway paces its requests and only writes after you
   approve. If Archidekt objects, the owner may turn writes off.
 
-## 9. Leaving
+## 9. Signing out and leaving
+
+**Signing out.** Use **Sign out** in the account menu or on the Account
+page. To sign out everywhere (say you lost a phone), open
+`https://mtg.example.com/logout` and press **Sign out on all my devices**.
+That signs out every browser and the Android app; connected AI apps keep
+working, so disconnect them on the Account page too. For an hour after you sign out, signing back in on that
+device asks for your password again, so the next person on a shared phone
+doesn't land in your account.
+
+**Leaving for good:**
 
 1. On `https://mtg.example.com/account`, under **Delete my data**, tick the
    box and press **Delete my data**. That deletes everything the gateway
-   keeps for you: proposals, snapshots, test reports, scan sessions, the
-   stored Archidekt session, connected apps and your sign-in. Your decks on
-   Archidekt (and the backup copies in your Archidekt account) stay yours.
-   The owner's security log keeps a record that your account existed and
-   was deleted until it ages out after a year. If you only want to stop
+   keeps for you from its database: proposals, snapshots, test reports, scan
+   sessions, deck covers, the stored Archidekt session, connected apps and
+   your sign-in. Your decks on Archidekt (and the backup copies in your
+   Archidekt account) stay yours. The owner's nightly database backups, if
+   they keep them, still hold a copy until they age out (14 days by default,
+   `MTG_BACKUP_KEEP_DAYS`). The owner's security log keeps a record that your
+   account existed and was deleted until it ages out after a year. If you only want to stop
    using Archidekt through the gateway, press the unlink button instead.
 2. To be sure the old Archidekt session is dead on Archidekt's side too,
    change your Archidekt password.

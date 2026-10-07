@@ -106,7 +106,9 @@ AI client and any identity provider work together:
 2. **Gateway → identity provider.** The gateway is one confidential OpenID
    Connect client at your identity provider. When someone connects, the
    gateway sends their browser there to sign in, checks the ID token and the
-   group, and records who they are.
+   group, and records who they are. It keeps the provider's own access and
+   refresh token (encrypted), so it can ask the provider again later
+   whether the person is still allowed in.
 
 ```mermaid
 sequenceDiagram
@@ -129,14 +131,21 @@ sequenceDiagram
   C->>G: /token (code + PKCE verifier)
   G->>C: gateway access + refresh token
   C->>G: /mcp with the access token
+  G->>I: userinfo: still in the group? (cached a few seconds)
 ```
 
 The result is one identity per person: the same user on Claude, ChatGPT,
 the Android app and the browser pages, with their own Archidekt link,
 proposals and scan sessions.
 
-Every assistant has to sign in again after `MTG_REAUTH_INTERVAL` (a week by
-default), which re-checks group membership at the identity provider.
+Membership is checked live. Before serving any request that carries a
+browser session or a gateway token, the gateway asks the identity
+provider's userinfo endpoint for the person's current groups (the answer is
+cached for `MTG_MEMBERSHIP_CHECK_TTL` seconds, 5 by default; `0` asks every
+time). Someone taken
+out of the group, or deactivated or deleted at the provider, is cut off on
+their next request. Separately, every assistant has to sign in again after
+`MTG_REAUTH_INTERVAL` (a week by default).
 
 ## How deck edits work
 
@@ -173,12 +182,25 @@ For the exact devices and plans tested, see
 
 - **Who can sign in** is decided by your identity provider (who has an
   account, who is bound to the application) and, on top, by
-  `MTG_REQUIRED_GROUP`. The group is read from the identity provider at each
-  sign-in, and the groups recorded then are checked again on every token
-  refresh and every browser page. Removing someone from the group therefore
-  takes effect at their next sign-in (within `MTG_REAUTH_INTERVAL` for
-  assistants); to cut someone off at once, see
-  [OPERATIONS.md](OPERATIONS.md#revoking-access).
+  `MTG_REQUIRED_GROUP`.
+- **Membership is live.** Before any request with a browser session or a
+  gateway token is served, and at every code exchange and refresh, the
+  gateway asks the identity provider's userinfo endpoint for the person's
+  groups, at most `MTG_MEMBERSHIP_CHECK_TTL` seconds (5) old. Removing
+  someone from `MTG_REQUIRED_GROUP`, or deactivating or deleting them at the
+  provider, takes effect on their next request: every gateway token,
+  browser session and stored provider token is revoked, and a removal from
+  the group revokes their Archidekt link too (a deactivated or deleted
+  account, which the provider reports only as a refused token, keeps the
+  link until an admin deletes their data). Removing someone from `MTG_ADMIN_GROUP` takes the admin page away
+  the same way. This doesn't rely on the provider revoking anything:
+  Authentik, for one, keeps honouring a removed member's refresh token. If
+  the provider can't be reached, requests are refused with 503 and nothing
+  is revoked (fail closed). The provider's tokens are stored encrypted with
+  the `mtg_fernet_key` secret and are never handed to AI clients.
+- **One provider per account.** Each person is pinned to the provider
+  (issuer) they first signed in with; an account from another provider with
+  the same `sub` is refused rather than given the old account's data.
 - **Tokens.** `/mcp` accepts only tokens the gateway issued, never a token
   straight from the identity provider. Tokens and client secrets are stored
   hashed. Refresh tokens rotate, and reusing an old one revokes the whole
@@ -188,7 +210,18 @@ For the exact devices and plans tested, see
   re-sign-in, shows the gateway's own page naming the client and where it
   will send the sign-in, with Approve and Deny, before the identity
   provider is involved. An identity provider that signs people in silently
-  can't skip it.
+  can't skip it. An app can ask for the read-only scope `mtg.read`; its
+  token can then read but never propose, apply or store anything.
+- **Sign-out.** **Sign out on all my devices** (on the `/logout` page)
+  ends every browser and Android app session. For an hour after signing out, a sign-in on that
+  device asks the identity provider for the password again, so a shared
+  device isn't silently signed back in as the previous person.
+- **Limits on anonymous traffic.** Sign-in starts are limited per network
+  (30 a minute), unfinished sign-ins are capped per browser, per client and
+  in all, and Client ID Metadata Document fetches are limited per site and
+  overall, so the gateway can't be used to flood itself or someone else's
+  site ([OPERATIONS.md](OPERATIONS.md)). Every response carries
+  `Strict-Transport-Security` when the public URL is https.
 - **Archidekt passwords** are used once to get a session and never stored.
   The session is encrypted with the `mtg_fernet_key` secret, which protects
   the database and its backups. It doesn't protect against whoever runs the
@@ -197,7 +230,14 @@ For the exact devices and plans tested, see
   are proposals until applied with the review page's Apply button, or in
   chat only when `MTG_APPLY_VIA_MCP` allows it and the proposal is older
   than `MTG_APPLY_MIN_AGE_SECONDS`. The MTG skill also tells the assistant
-  never to treat text inside decks or tool output as an instruction.
+  never to treat text inside decks or tool output as an instruction. Each
+  proposal records and shows the app that made it; disconnecting an app
+  rejects its pending proposals, and one app may hold at most 30 pending
+  proposals per member.
+- **Archidekt load** is capped per member: `MTG_ARCHIDEKT_CALLS_PER_10_MIN`
+  calls (120 by default) and three at a time, so a looping assistant can't
+  hammer Archidekt or starve other members. Five failed Archidekt link
+  attempts in 15 minutes block further tries for a while.
 - **Mystic Forge** is only reachable from the gateway, and only tools on an
   allowlist are passed through.
 - **Nothing site-specific is in the code.** Everything that differs between

@@ -256,8 +256,11 @@ own linked account. Follow every step, in order.
   again; a second attempt is a new decision for them. The one exception is
   `apply_too_soon`: retry once after the stated wait under the same yes.
 - A proposal expires after 24 hours and can be applied only once.
-- Edits change only the deck proper. Maybeboard and sideboard rows are never
-  touched and are not counted in the diff.
+- Edits change only the deck proper: maybeboard and sideboard rows are not
+  edited and are not counted in the diff. A `set_category` into a category the
+  deck does not count (Maybeboard, Sideboard) takes those cards out of the deck
+  proper; the diff shows it as "leaves the deck" and counts them as removed.
+  Tell the user that, rather than calling it a recategorisation.
 - Cards already in the deck keep their categories. A card new to the deck
   gets the `category` named in its `add` change, if any. A new deck gets the
   categories from its source list.

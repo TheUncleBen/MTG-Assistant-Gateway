@@ -136,7 +136,13 @@ In the Authentik admin UI:
    - Client type: **Confidential**
    - Redirect URIs: `https://mtg.example.com/auth/callback` (Strict)
    - Signing key: your default certificate (RS256). Don't leave it empty.
-   - Scopes: keep the defaults, `openid`, `email` and `profile`
+   - Scopes (under **Advanced protocol settings**): `openid`, `email`,
+     `profile` **and** `authentik default OAuth Mapping: OpenID
+     'offline_access'`. Make sure the last one is selected. Without it
+     Authentik quietly issues no refresh token, and members have to sign in
+     again every time Authentik's access token runs out (an hour by
+     default). The gateway uses the refresh token to ask Authentik on every
+     request whether the person is still in the group.
    - Subject mode: **Based on the User's hashed ID** (the default). Keep it.
      The subject is the only thing the gateway knows a person by: their
      Archidekt link, proposals and tokens all hang off it. The username and
@@ -170,7 +176,7 @@ The stack expects three Swarm secrets with exactly these names:
 
 | Secret name | What goes in it |
 | --- | --- |
-| `mtg_fernet_key` | A random encryption key for linked Archidekt sessions. **Keep a copy** (password manager or similar). Lose it and every linked account has to be relinked, and old backups' Archidekt sessions can't be decrypted |
+| `mtg_fernet_key` | A random encryption key for linked Archidekt sessions and the identity provider's tokens the gateway keeps. **Keep a copy** (password manager or similar). Lose it and every linked account has to be relinked (and everyone signs in once more), and old backups' Archidekt sessions can't be decrypted |
 | `mtg_session_secret` | A random string of 32+ characters that signs the browser sign-in cookie. No need to keep a copy |
 | `mtg_oidc_client_secret` | The Client Secret from the Authentik provider in step 3 |
 
@@ -223,7 +229,7 @@ list all three.
 Swarm secrets can't be edited. To change one later, remove the stack (or
 take the secret out of it), delete the secret, create it again with the
 same name, and redeploy. Changing `mtg_fernet_key` means everyone relinks
-Archidekt.
+Archidekt and signs in once more.
 
 ## 5. Registry login in Portainer
 
@@ -278,7 +284,7 @@ If the packages are public you can skip this step.
 
    | Variable | What to put |
    | --- | --- |
-   | `MTG_IMAGE`, `MTG_TAG` | `ghcr.io/<owner>/mtg-assistant-gateway` and `latest` to follow every new version, or one version to stay on it, for example `0.5.0` ([VERSIONS.md](VERSIONS.md)) |
+   | `MTG_IMAGE`, `MTG_TAG` | `ghcr.io/<owner>/mtg-assistant-gateway` and `latest` to follow every new version, or one version to stay on it, for example `0.6.1` ([VERSIONS.md](VERSIONS.md)) |
    | `MTG_PUBLIC_URL` | `https://mtg.example.com` |
    | `MTG_OIDC_ISSUER` | the issuer URL from step 3 |
    | `MTG_OIDC_CLIENT_ID` | the Client ID from step 3 |
@@ -290,7 +296,7 @@ If the packages are public you can skip this step.
    | `MTG_REQUIRED_GROUP` | the group from step 3, spelled exactly as your identity provider sends it (it's case-sensitive). Required: the gateway won't start with it empty unless you also set `MTG_ALLOW_ANY_IDP_USER=true` (anyone your identity provider lets through gets in) |
    | `MF_IMAGE`, `MF_NODE` | `ghcr.io/<owner>/mtg-assistant-mysticforge`, and the node Mystic Forge should run on (can be the same one) |
    | `MTG_WRITES_ENABLED` | `true` to let approved proposals change Archidekt; `false` keeps everything review-only. Writes have been run live against a throwaway Archidekt account, but make your own first edit on a deck you don't care about |
-   | `MTG_APPLY_VIA_MCP` | `true` lets the assistant apply a change after the user says yes in chat; `false` (the code default) means only the Apply button on the review page can |
+   | `MTG_APPLY_VIA_MCP` | Leave it `false` (the example file and the code default): only the member's own click on Apply on the review page applies a change. `true` lets the assistant apply after the user says yes in chat, which is weaker: text the assistant reads (deck descriptions, card notes) could trick it into applying its own proposal once `MTG_APPLY_MIN_AGE_SECONDS` has passed |
 
    Everything else can stay at its default. The full list is in the
    [environment reference](#environment-reference) below.
@@ -331,7 +337,17 @@ start-up script needs to switch to `PUID:PGID` (`CHOWN`, `DAC_OVERRIDE`,
 20.10 on; older engines ignore them and print `Ignoring unsupported options`
 at deploy. The root filesystem is left writable: when `PUID`/`PGID` differ
 from the image's 1000:1000 the start-up script edits `/etc/passwd` and
-`/etc/group`.
+`/etc/group`. Swarm ignores `security_opt`, so the stack doesn't set
+`no-new-privileges` there (`setpriv --no-new-privs` covers the running
+process), and it sets no process limit because older Docker and Portainer
+versions refuse the `pids` key and the stack wouldn't deploy. The Compose
+file ([DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md)) sets both.
+
+The images are built on the official Python base images by tag, so every
+release build picks up the base image's latest security patches. GitHub
+Actions are pinned by commit, Python dependencies by version
+(`constraints.txt`), and the Android build checks its Gradle wrapper before
+running it.
 
 ## 7. Reverse proxy
 
@@ -427,7 +443,7 @@ From any machine:
 
 ```bash
 curl -s https://mtg.example.com/healthz
-# {"status":"ok","version":"0.5.0"}
+# {"status":"ok","version":"0.6.1"}
 
 curl -s https://mtg.example.com/.well-known/oauth-authorization-server | head -c 300
 # JSON with "issuer":"https://mtg.example.com", "authorization_endpoint", ...
@@ -502,7 +518,7 @@ What to know about it:
 
 | Variable | Default | What it does |
 | --- | --- | --- |
-| `MF_IMAGE` | none you can rely on, set it | Image, `ghcr.io/<owner>/mtg-assistant-mysticforge` |
+| `MF_IMAGE` | `ghcr.io/theuncleben/mtg-assistant-mysticforge` | Image. A fork that builds its own images sets `ghcr.io/<owner>/mtg-assistant-mysticforge` |
 | `MF_TAG` | `1.3.2-mag2` | Image tag |
 | `MF_PUBLIC_BASE` | `http://mtg-assistant-mysticforge:8000` | Base URL Mystic Forge uses in links (its own default points at the upstream author's site, so keep this) |
 | `MF_NODE` | none, required | Hostname of the node it runs on. The stack won't start without it |
@@ -525,7 +541,7 @@ itself:
 
 | Variable | Default | What it does |
 | --- | --- | --- |
-| `MTG_IMAGE` | none you can rely on, set it | Gateway image, `ghcr.io/<owner>/mtg-assistant-gateway` |
+| `MTG_IMAGE` | `ghcr.io/theuncleben/mtg-assistant-gateway` | Gateway image. A fork that builds its own images sets `ghcr.io/<owner>/mtg-assistant-gateway` |
 | `MTG_TAG` | `latest` | Gateway image tag. Pin a release rather than relying on `latest` |
 | `MTG_NODE` | none, required | Hostname of the node the gateway runs on. The stack won't start without it |
 | `MTG_MEMORY_LIMIT` | `256M` | Memory cap |
@@ -544,30 +560,33 @@ gateway's `environment:` in the stack file, or it has no effect.
 | `MTG_OIDC_CLIENT_SECRET_FILE` | yes, *stack* | | File holding the OIDC client secret (`/run/secrets/mtg_oidc_client_secret`) |
 | `MTG_FERNET_KEY_FILE` | yes, *stack* | | File holding the encryption key (`/run/secrets/mtg_fernet_key`) |
 | `MTG_SESSION_SECRET_FILE` | yes, *stack* | | File holding a random secret of 32+ characters (`/run/secrets/mtg_session_secret`) |
-| `MTG_OIDC_SCOPES` | no | `openid profile email` | Scopes requested from the identity provider |
+| `MTG_OIDC_SCOPES` | no, *stack* | `openid profile email offline_access` | Scopes requested from the identity provider, used exactly as set. Keep `offline_access` in it: the provider's refresh token is what lets the gateway keep checking membership. Leave it out only for a provider that refuses it; members then sign in again whenever the provider's access token runs out |
+| `MTG_OIDC_PREVIOUS_ISSUERS` | no, *stack* | | Only when you move the identity provider to a new address: the old issuer URL(s), comma separated, with `MTG_OIDC_ISSUER` set to the new one. Members whose account was created under an old address are moved to the new one at their next sign-in. Anyone else signing in with a different issuer than their account was created with is refused, so a second provider can't take over accounts |
+| `MTG_MEMBERSHIP_CHECK_TTL` | no, *stack* | `5` | Before serving any request with a browser session or a gateway token, the gateway asks the identity provider's userinfo endpoint whether the person is still in `MTG_REQUIRED_GROUP` (and `MTG_ADMIN_GROUP`). The answer is reused for this many seconds, which is the longest a removed member can keep going. `0` asks on every request; 0 to 60. If the provider can't be reached, requests get 503 and nothing is revoked |
 | `MTG_REQUIRED_GROUP` | yes, *stack* | | Group a user must be in. The gateway refuses to start with it empty unless `MTG_ALLOW_ANY_IDP_USER` is `true` |
 | `MTG_ALLOW_ANY_IDP_USER` | no, *stack* | `false` | `true` lets an empty `MTG_REQUIRED_GROUP` through, so anyone your identity provider signs in gets in. Only for an identity provider that already admits nobody else |
-| `MTG_ADMIN_GROUP` | no, *stack* | empty (no admin page) | Identity-provider group whose members get the `/admin` pages and `/api/v1/admin` (users, activity, metrics; disable, enable, revoke, unlink). They still need to pass `MTG_REQUIRED_GROUP`. Unset or empty, the admin routes answer 404 for everyone. Details in [OPERATIONS.md](OPERATIONS.md#the-admin-page) |
+| `MTG_ADMIN_GROUP` | no, *stack* | empty (no admin page) | Identity-provider group whose members get the `/admin` pages and `/api/v1/admin` (users, activity, metrics; disable, enable, revoke, unlink, delete data). Checked live like `MTG_REQUIRED_GROUP`. They still need to pass `MTG_REQUIRED_GROUP`. Unset or empty, the admin routes answer 404 for everyone. Details in [OPERATIONS.md](OPERATIONS.md#the-admin-page) |
 | `MTG_OIDC_GROUPS_CLAIM` | no, *stack* | `groups` | Dot-path to the group list in the ID token (or userinfo) claims. Authentik: `groups`; Keycloak: `realm_access.roles`; Zitadel: `urn:zitadel:iam:org:project:roles` (a dict whose keys are the role names also works; a key whose value is empty or `false` does not count). The whole value is tried as one claim name first, so Auth0-style `https://example.com/groups` works too. Names are compared exactly, with no trimming. A missing or differently shaped claim means no groups, so `MTG_REQUIRED_GROUP` refuses the sign-in |
 | `MTG_OIDC_TOKEN_AUTH_METHOD` | no, *stack* | `client_secret_post` | How the gateway sends its client secret to the token endpoint: `client_secret_post` (in the form body) or `client_secret_basic` (HTTP Basic header). Match what the client is configured for in the identity provider |
 | `MTG_DATA_DIR` | no, *stack* | `/data` | Where the SQLite database lives. In the stack, the variable is the folder on the host, mounted at `/data` |
 | `MTG_BACKUP_DIR` | no, *stack* | `/backups` in the image | Where nightly backups go; empty turns them off. In the stack, the folder on the host, mounted at `/backups` |
-| `MTG_BACKUP_HOUR_UTC` | no, *stack* | `3` | Hour (UTC) of the nightly backup |
-| `MTG_BACKUP_KEEP_DAYS` | no, *stack* | `14` | How many days of backups to keep |
-| `MTG_ALLOWED_HOSTS` | no | worked out from the public URL | `Host` headers accepted on `/mcp` |
-| `MTG_ACCESS_TOKEN_TTL` | no, *stack* | `3600` | Access token lifetime, seconds |
-| `MTG_REFRESH_TOKEN_TTL` | no, *stack* | `2592000` | Refresh token lifetime, seconds (30 days) |
-| `MTG_REAUTH_INTERVAL` | no, *stack* | `604800` | How long (seconds, default a week) after signing in an assistant can keep refreshing its tokens without a fresh sign-in. Each refresh re-checks `MTG_REQUIRED_GROUP` against the groups recorded at the last sign-in. Once this runs out the next refresh is refused and the person signs in again, which re-reads their groups from Authentik |
+| `MTG_BACKUP_HOUR_UTC` | no, *stack* | `3` | Hour (UTC) of the nightly backup, 0 to 23 |
+| `MTG_BACKUP_KEEP_DAYS` | no, *stack* | `14` | How many days of backups to keep, 1 to 3650 |
+| `MTG_ALLOWED_HOSTS` | no, *stack* | worked out from the public URL | `Host` headers accepted on `/mcp` |
+| `MTG_ACCESS_TOKEN_TTL` | no, *stack* | `3600` | Access token lifetime, seconds (60 to 86400) |
+| `MTG_REFRESH_TOKEN_TTL` | no, *stack* | `2592000` | Refresh token lifetime, seconds (30 days; 3600 to 31536000) |
+| `MTG_REAUTH_INTERVAL` | no, *stack* | `604800` | How long (seconds, default a week) after signing in an assistant can keep refreshing its tokens without a fresh sign-in (3600 to 31536000). Once this runs out the next refresh is refused and the person signs in again (and sees the gateway's consent page). Group membership doesn't wait for this: it is checked live with the identity provider on every request (`MTG_MEMBERSHIP_CHECK_TTL`) |
 | `MTG_LOG_LEVEL` | no, *stack* | `INFO` | Logging level |
 | `MTG_SERVER_NAME` | no, *stack* | `MTG Assistant Gateway` | Name shown on the gateway's pages, the install page and to assistants |
 | `MTG_LISTEN_HOST`, `MTG_LISTEN_PORT` | no | `0.0.0.0`, `8080` | Address and port inside the container. Leave them; the stack, Compose file and health checks expect 8080 |
 | `MTG_MYSTIC_FORGE_URL` | no, *stack* | empty (no research tools) | Internal Mystic Forge MCP URL; the stack sets `http://mtg-assistant-mysticforge:8000/mcp` |
 | `MTG_WRITES_ENABLED` | no, *stack* | `false` | `true` lets approved proposals be applied to Archidekt |
-| `MTG_APPLY_VIA_MCP` | no, *stack* | `false` | `true` also lets the `apply_proposal` tool apply after the user says yes in chat (`stack.env.example` sets `true`); `false` means only the review page can apply |
-| `MTG_APPLY_MIN_AGE_SECONDS` | no, *stack* | `15` | The assistant can't apply a proposal younger than this; it gets `apply_too_soon` with `retry_after_seconds`. Stops an assistant proposing and applying in one go. `0` turns it off. Doesn't affect the review page |
+| `MTG_APPLY_VIA_MCP` | no, *stack* | `false` | `true` also lets the `apply_proposal` tool apply after the user says yes in chat (weaker: a tricked assistant could apply its own proposal); `false`, also in `stack.env.example`, means only the review page can apply |
+| `MTG_APPLY_MIN_AGE_SECONDS` | no, *stack* | `15` | The assistant can't apply a proposal younger than this; it gets `apply_too_soon` with `retry_after_seconds`. Stops an assistant proposing and applying in one go. `0` turns it off; at most 3600. Doesn't affect the review page |
+| `MTG_ARCHIDEKT_CALLS_PER_10_MIN` | no, *stack* | `120` | Archidekt work one member may start per 10 minutes (a deck read, a proposal, an apply, a link, and the proxied `archidekt_*` research tools), refilled evenly; past it the member gets `rate_limited` for a few minutes. Stops a looping assistant from keeping a steady stream of requests on Archidekt. 10 to 100000 |
 | `MTG_ARCHIDEKT_BACKUPS` | no, *stack* | `true` | Before every applied edit or restore, copy the deck as a private deck into the user's backup folder on Archidekt (using Archidekt's own copy feature, so printings, finishes and categories are kept). If the copy fails, nothing changes and the proposal stays pending |
-| `MTG_ARCHIDEKT_BACKUP_FOLDER` | no, *stack* | `MTG Gateway backups` | Name of that folder, created in the account's root folder the first time. Decks in it are left out of the assistant's deck list |
-| `MTG_BROWSER_SESSION_TTL` | no, *stack* | `7200` | Browser session lifetime for `/account` and review pages, seconds |
+| `MTG_ARCHIDEKT_BACKUP_FOLDER` | no, *stack* | `MTG Gateway backups` | Name of that folder (at most 100 characters), created in the account's root folder the first time. Decks in it are left out of the assistant's deck list |
+| `MTG_BROWSER_SESSION_TTL` | no, *stack* | `7200` | Browser session lifetime for `/account` and review pages, seconds (300 to 86400) |
 | `MTG_ARCHIDEKT_BASE` | no, *stack* | `https://archidekt.com/api` | Archidekt API base. Only the tests change it |
 | `MTG_TRUSTED_PROXIES` | no, *stack* | private networks (`10/8`, `172.16/12`, `192.168/16`, loopback) | Comma-separated IPs or CIDR ranges whose `X-Forwarded-*` headers are trusted. Recommended: narrow it to NPM's address or the overlay subnet (see [step 7](#7-reverse-proxy)) |
 | `MTG_CIMD_ENABLED` | no, *stack* | `true` | Accept clients that identify themselves with a Client ID Metadata Document URL (Claude's "Use Claude's published identity" and, reportedly, ChatGPT). `false` leaves only automatic registration |

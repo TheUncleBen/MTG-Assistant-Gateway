@@ -20,7 +20,7 @@ from urllib.parse import parse_qs, quote
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from .decks import actor_label, current_client
+from .decks import ADMIN_CLIENT, actor_label, current_client
 from .pages import BROWSER_CLIENT_ID, _csrf, _when, browser_session, login_redirect, read_limited
 from .theme import render
 
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
     from .app import AppState
 
-ACTIONS = ("disable", "enable", "revoke", "unlink")
+ACTIONS = ("disable", "enable", "revoke", "unlink", "delete_data")
 METRIC_KINDS = ("tool", "error", "api", "admin")
 MAX_JSON = 16_384
 DAYS = 30
@@ -53,11 +53,14 @@ OK_MESSAGES = {
     "enable": "Account enabled. The person must sign in again.",
     "revoke": "Tokens and browser sessions revoked.",
     "unlink": "Archidekt account unlinked; the stored session was deleted.",
+    "delete_data": "Deleted everything the gateway kept about that person.",
 }
 ERR_MESSAGES = {
     "unknown_action": "Unknown action.",
     "no_such_user": "No such user.",
     "self_disable": "You cannot disable your own account.",
+    "self_delete": "Use Delete my data on your Account page.",
+    "confirm_delete": "Tick the confirmation box to delete.",
     "failed": "That action could not be done.",
 }
 
@@ -120,7 +123,7 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
             return {}
         return {k: v[0] for k, v in parse_qs(raw.decode("utf-8", "replace"), keep_blank_values=True).items()}
 
-    def act(admin_sub: str, target: str, action: str | None) -> dict[str, Any]:
+    def act(admin_sub: str, target: str, action: str | None, *, confirmed: bool = False) -> dict[str, Any]:
         """Apply one admin action to ``target`` on behalf of ``admin_sub``; raises AdminError."""
         if action not in ACTIONS:
             raise AdminError("invalid", "Unknown action.", code="unknown_action")
@@ -128,7 +131,9 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
         if user is None:
             raise AdminError("not_found", "No such user.", 404, code="no_such_user")
         out: dict[str, Any] = {"action": action, "target": target}
-        current_client.set(BROWSER_CLIENT_ID)
+        # Rows written under the member's own account (the unlink) name an administrator as the
+        # actor, never the member's browser.
+        current_client.set(ADMIN_CLIENT)
         if action == "disable":
             if target == admin_sub:
                 raise AdminError("invalid", "You cannot disable your own account.", code="self_disable")
@@ -140,6 +145,22 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
             out.update(state.db.revoke_all_for_user(target))
         elif action == "unlink":
             state.decks.unlink(target)
+        elif action == "delete_data":
+            # For a former member (or an account from an earlier identity provider): everything
+            # the gateway keeps about them, as their own "Delete my data" does.
+            if target == admin_sub:
+                raise AdminError("invalid", "Use Delete my data on your Account page.", code="self_delete")
+            if not confirmed:
+                raise AdminError("invalid", "Tick the confirmation box to delete.", code="confirm_delete")
+            out.update(state.db.delete_member_data(target))
+        if action != "unlink":  # the unlink wrote its own row in the member's log above
+            # the member's activity log shows what an administrator did to their account
+            state.db.audit(
+                f"admin_{action}",
+                sub=target,
+                client_id=ADMIN_CLIENT,
+                detail={"by": "admin", **{k: v for k, v in out.items() if k != "action"}},
+            )
         state.db.audit(
             f"admin_{action}",
             sub=admin_sub,
@@ -182,7 +203,12 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
                 "Users", _err("This form expired. Reload the page and try again."), status=403, sid=sid
             )
         try:
-            out = act(admin_sub, request.path_params["sub"], data.get("action"))
+            out = act(
+                admin_sub,
+                request.path_params["sub"],
+                data.get("action"),
+                confirmed=data.get("confirm") == "yes",
+            )
         except AdminError as exc:
             return RedirectResponse(f"/admin/users?err={quote(exc.code)}", status_code=303)
         return RedirectResponse(f"/admin/users?ok={out['action']}", status_code=303)
@@ -255,11 +281,16 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
             return JSONResponse({"ok": False, "error": "too_large"}, 413)
         try:
             data = json.loads(raw)
-        except ValueError:
+        except (ValueError, RecursionError):  # RecursionError: deeply nested arrays or objects
             return JSONResponse({"ok": False, "error": "invalid", "message": "bad JSON"}, 400)
         action = data.get("action") if isinstance(data, dict) else None
         try:
-            out = act(admin_sub, request.path_params["sub"], action if isinstance(action, str) else None)
+            out = act(
+                admin_sub,
+                request.path_params["sub"],
+                action if isinstance(action, str) else None,
+                confirmed=isinstance(data, dict) and data.get("confirm") is True,
+            )
         except AdminError as exc:
             return JSONResponse(
                 {"ok": False, "error": exc.kind, "message": str(exc)}, exc.status, headers=NO_STORE
@@ -476,12 +507,21 @@ def _users_body(state: Any, admin_sub: str, csrf: str | None) -> str:
         if u["archidekt_username"]:
             buttons += "<button name='action' value='unlink'>Unlink Archidekt</button>"
         buttons += f"<a class='btn' href='/admin/activity?sub={quote(sub, safe='')}'>Activity</a>"
+        delete_form = ""
+        if sub != admin_sub:
+            delete_form = (
+                f"<form method='post' action='/admin/users/{quote(sub, safe='')}'>{csrf_in}"
+                "<label class='small'><input type='checkbox' name='confirm' value='yes' required> "
+                "Delete everything the gateway keeps about this person</label>"
+                "<div class='actions'><button name='action' value='delete_data' class='danger'>"
+                "Delete data</button></div></form>"
+            )
         items.append(
             f"<li><span class='name'>{_who(u)}</span>{badges}"
             f"<span class='when'>seen {_when(u.get('last_seen_at') or u['last_login_at'])}</span>"
             f"<details><summary>Details and actions</summary>{meta}"
             f"<form method='post' action='/admin/users/{quote(sub, safe='')}'>{csrf_in}"
-            f"<div class='actions'>{buttons}</div></form></details></li>"
+            f"<div class='actions'>{buttons}</div></form>{delete_form}</details></li>"
         )
     return (
         f"<div class='card'><p class='muted small'>{len(users)} user{'s' if len(users) != 1 else ''}. "

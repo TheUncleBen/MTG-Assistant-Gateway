@@ -55,6 +55,8 @@ services:
       # Optional. Empty values fall back to the gateway's defaults (docs/DEPLOY.md, environment reference).
       MTG_ADMIN_GROUP: ${MTG_ADMIN_GROUP:-}
       MTG_OIDC_GROUPS_CLAIM: ${MTG_OIDC_GROUPS_CLAIM:-}
+      MTG_OIDC_PREVIOUS_ISSUERS: ${MTG_OIDC_PREVIOUS_ISSUERS:-}
+      MTG_OIDC_SCOPES: ${MTG_OIDC_SCOPES:-openid profile email offline_access}
       MTG_OIDC_TOKEN_AUTH_METHOD: ${MTG_OIDC_TOKEN_AUTH_METHOD:-}
       MTG_SERVER_NAME: ${MTG_SERVER_NAME:-}
       MTG_DATA_DIR: /data
@@ -80,6 +82,8 @@ services:
       MTG_REFRESH_TOKEN_TTL: ${MTG_REFRESH_TOKEN_TTL:-2592000}
       MTG_BROWSER_SESSION_TTL: ${MTG_BROWSER_SESSION_TTL:-7200}
       MTG_REAUTH_INTERVAL: ${MTG_REAUTH_INTERVAL:-604800}
+      MTG_MEMBERSHIP_CHECK_TTL: ${MTG_MEMBERSHIP_CHECK_TTL:-5}
+      MTG_ARCHIDEKT_CALLS_PER_10_MIN: ${MTG_ARCHIDEKT_CALLS_PER_10_MIN:-120}
       # Archidekt API base. Leave the default; the end-to-end tests point it at a local mock.
       MTG_ARCHIDEKT_BASE: ${MTG_ARCHIDEKT_BASE:-https://archidekt.com/api}
       # Peers allowed to set X-Forwarded-* (your reverse proxy). Empty = private networks.
@@ -100,6 +104,9 @@ services:
     # Least privilege. The entrypoint starts as root only to match PUID/PGID (usermod/groupmod,
     # chown of the data folders) and then drops to that user with setpriv --no-new-privs; these
     # four capabilities are all it needs. Needs Docker 20.10 or newer for Swarm to apply them.
+    # Swarm ignores security_opt (no-new-privileges), so it isn't set here; setpriv --no-new-privs
+    # applies it to the gateway process. A process limit (deploy.resources.limits.pids) is left out
+    # because older Docker and Portainer versions reject the key and the stack would not deploy.
     cap_drop:
       - ALL
     cap_add:

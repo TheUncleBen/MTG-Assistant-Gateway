@@ -7,6 +7,184 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.6.1] - 2026-10-06
+
+A fourth security pass. The headline: taking someone out of the group at
+the identity provider now cuts them off on their next request, not at their
+next sign-in.
+
+### Upgrading from 0.6.0
+
+1. **Authentik: add the `offline_access` scope mapping.** Open the provider
+   (**Applications → Providers → your provider → Edit → Advanced protocol
+   settings → Scopes**) and add `authentik default OAuth Mapping: OpenID
+   'offline_access'` next to the `openid`, `email` and `profile` ones. Without
+   it Authentik quietly issues no refresh token, and every member is asked to
+   sign in again each time Authentik's access token runs out (an hour by
+   default). Other providers: see
+   [docs/IDP-OTHERS.md](docs/IDP-OTHERS.md#about-the-group-check).
+2. **Everyone signs in once more.** Sessions and assistant connections from
+   before the upgrade have no identity-provider tokens on file, so the first
+   request after the upgrade signs the person out. Each member signs in to
+   the web pages and the Android app again, and each connected AI app asks
+   to reconnect once.
+3. `MTG_OIDC_SCOPES` now defaults to `openid profile email offline_access`.
+   If you set it yourself (the 0.6.0 Compose `.env.example` did, as
+   `openid profile email`), add `offline_access` to it; the value is used
+   exactly as set. The gateway logs a warning when the provider issues no
+   refresh token. Use the new `deploy/compose/docker-compose.yml` too: the
+   0.6.0 one fell back to `openid profile email` when `.env` didn't set the
+   scopes. The new stack and Compose files also pass
+   `MTG_OIDC_PREVIOUS_ISSUERS`, `MTG_MEMBERSHIP_CHECK_TTL` and
+   `MTG_ARCHIDEKT_CALLS_PER_10_MIN` through.
+4. The example env files now ship `MTG_APPLY_VIA_MCP=false`. Your own
+   deployment keeps whatever it sets; nothing changes unless you change it.
+   `false` means a change is applied only by the member's own click on the
+   review page. `true` lets the assistant apply after a yes in chat, which is
+   weaker: text the assistant reads (a deck description, a card note) could
+   trick it into applying its own proposal.
+5. The database is upgraded on start (schema 10). Take a backup first, as for
+   every release; the 0.6.0 image refuses to start on the upgraded file.
+
+### Security
+
+- **Live membership.** Before serving any request that carries a browser
+  session or a bearer token, the gateway asks the identity provider's
+  userinfo endpoint whether the person is still allowed in (cached for
+  `MTG_MEMBERSHIP_CHECK_TTL` seconds, 5 by default). Removal from
+  `MTG_REQUIRED_GROUP` or `MTG_ADMIN_GROUP`, or deactivating or deleting the
+  account at the provider, takes effect on the person's next request. Before,
+  it took effect at their next sign-in, up to a week later for assistants.
+  Tested live against Authentik 2026.2.2, which on its own keeps honouring a
+  removed member's refresh token.
+- A member removed from `MTG_REQUIRED_GROUP` loses every gateway token,
+  browser session, stored identity-provider token and their Archidekt link
+  at once. A member the provider no longer vouches for (deactivated or
+  deleted, which the provider reports only as a refused token) loses every
+  token and session too; their Archidekt link stays until an admin deletes
+  their data, so a provider hiccup can't unlink everyone.
+- If the identity provider can't be reached, or refuses the gateway itself
+  (a wrong client secret, a refused scope), requests are refused with 503
+  and nothing is revoked (fail closed). Service comes back with the provider.
+- When userinfo carries no groups, they are read from a freshly refreshed ID
+  token. When neither has them, the person is signed out and a warning names
+  `MTG_OIDC_GROUPS_CLAIM` (fail closed), instead of being let in. With
+  `MTG_ALLOW_ANY_IDP_USER=true` and no `MTG_REQUIRED_GROUP` there is no group
+  to leave, so a provider that sends no groups at all (Google, Entra ID)
+  keeps working; a disabled or deleted account is still cut off.
+- A request carrying both a browser session and a bearer token is checked
+  for both people.
+- Code exchanges and token refreshes at `/token` check membership the same
+  way. A leftover code or refresh token of someone who deleted their data
+  can't mint new tokens.
+- The identity provider's access and refresh tokens are stored encrypted
+  with the `mtg_fernet_key` secret.
+- Each member is pinned to the identity provider (issuer) they first signed
+  in with. An account from a different provider with the same subject is
+  refused instead of inheriting the old member's decks, apps and Archidekt
+  link; an admin can delete the old account's data. After moving the
+  provider to a new address, list the old one in `MTG_OIDC_PREVIOUS_ISSUERS`.
+- An ID token issued to several audiences must name the gateway as its
+  authorized party (`azp`).
+- **Sign out on all my devices** on the sign-out page (`/logout`) ends every
+  browser and Android app session. For an hour after signing out, a sign-in to the
+  gateway's pages on that device asks the identity provider for the password
+  again (`prompt=login`), so the next person on a shared phone isn't signed
+  straight back in.
+- `Strict-Transport-Security` (one year, no `includeSubDomains`) on every
+  response when `MTG_PUBLIC_URL` is https. The example proxy configs set the
+  same header.
+- Pages forbid framing and base-URL changes in their CSP (`frame-ancestors
+  'none'`, `base-uri 'none'`), the offline page too.
+- Sign-in floods: each public address may start 30 sign-ins a minute (private
+  addresses, such as an untrusted reverse proxy's, are not limited, and a
+  warning suggests `MTG_TRUSTED_PROXIES` when many browsers share one), and unfinished
+  sign-ins are capped at 10 per browser and 500 per AI client. When a cap is
+  hit, the network holding the most unfinished sign-ins loses its oldest, so
+  a flood only pushes out its own.
+- Client ID Metadata Documents: an address with a query string is refused; a
+  failed fetch (or a name whose DNS doesn't answer in 2 seconds) blocks new
+  addresses on that host for a minute; new addresses
+  are fetched at most 10 times a minute per site and 60 in all, counting only
+  requests actually sent; a document is capped like a registered client (20
+  redirect URIs, 2000 characters each, 8 KB); the cache keeps at most 1000
+  documents, 50 per site. Apps a member has signed in with are never
+  throttled or evicted, are fetched in a lane of their own (fetch slots and
+  DNS threads) that junk addresses can't fill, and keep their last good
+  document (up to a week past its expiry) while their server can't be
+  reached or answers 5xx, 408 or 429 (never after the server withdraws it
+  or serves one that isn't accepted).
+- Client ID Metadata Documents are checked more strictly: `grant_types` and
+  `response_types` must be lists of strings, `scope` must use the OAuth
+  scope characters, malformed optional links (`client_uri`, `logo_uri` and
+  the like) are left out, and a document the gateway couldn't turn into a
+  client is refused instead of causing server errors later. A copy cached
+  by an earlier version that no longer passes is discarded and fetched
+  afresh.
+- Archidekt: each member may start `MTG_ARCHIDEKT_CALLS_PER_10_MIN` (120)
+  Archidekt calls per 10 minutes, the research tools' `archidekt_*` calls
+  included. Five failed Archidekt link attempts in 15 minutes block further
+  attempts for a while, parallel attempts included.
+- Research tools: oversized arguments (goldfish games, turns and odds sizes,
+  text over 200 kB) are refused before anything is forwarded.
+- Read-only connections: a token whose scopes are all read-only (`mtg.read`
+  or `read`; `read write` keeps full access) can
+  read but not propose, apply, reject, run reports or save scans.
+- Proposals record the app that made them and show it on the review page.
+  Disconnecting an app rejects its pending proposals. One app may hold 30
+  pending proposals per member (a member 100 in all), so one app can't use
+  up every slot.
+- A new-deck proposal is tied to the Archidekt account linked when it was
+  made; applying it after linking a different account is refused
+  (`other_account`).
+- An app can delete through the API only the reports it ran itself.
+- An Archidekt session refresh that races an unlink or a relink no longer
+  overwrites or revokes the newer link.
+- A deck apply or report still running when the member deleted their data
+  stores nothing for the deleted account. **Delete my data** removes the
+  member's own deck covers too, never another member's.
+- A deck settings change re-reads the deck after the backup copy and refuses
+  if its details changed meanwhile.
+- Deeply nested JSON gets a 400 instead of an unhandled error.
+- Android app: the consent page's **Deny** (which goes back to the
+  application's own site) always opens in the browser. The app learns the
+  sign-in service from the gateway itself (`/.well-known/mtg-gateway`, or an
+  older gateway's `/login` redirect), so **Approve** stays in the app. A page
+  from any other site that loads without the app being asked is stopped and
+  opened in the browser, at most once every 10 seconds (after that it is
+  unloaded), a page can open the browser without a tap at most once every 3
+  seconds, and Back no longer
+  returns to the sign-in service's old pages after signing in. Sign-ins that
+  pass through a second site with a form (SAML, brokered logins) open in the
+  browser; use such gateways in the phone's browser.
+- Compose: each service may run at most 512 processes and threads. CI checks
+  the Gradle wrapper before any Android build.
+
+### Added
+
+- `GET /.well-known/mtg-gateway` (public): names the sign-in service's
+  origin, for the Android app.
+- `MTG_MEMBERSHIP_CHECK_TTL` (seconds, 0 to 60, default 5; 0 asks the
+  provider on every request) and `MTG_ARCHIDEKT_CALLS_PER_10_MIN` (10 to
+  100000, default 120).
+- Admin page: **Delete data** for another member (a former member, or an
+  account from an earlier identity provider). It needs a confirmation tick
+  and can't be used on yourself.
+- Admin actions on a member's account show up in that member's own activity
+  log as done by an administrator.
+- The Account page shows each connected app's client id next to its name,
+  so two apps with the same name can be told apart.
+
+### Changed
+
+- The example env files ship `MTG_APPLY_VIA_MCP=false` (see Upgrading).
+- Moving a card into a category the deck doesn't count (Maybeboard,
+  Sideboard) is shown as "leaves the deck" and counted as a removal.
+- Applied proposals are deleted a year after they were applied; closed ones
+  still go after 30 days.
+- The "data deleted" page and the Account page say that nightly database
+  backups keep a copy until they age out (`MTG_BACKUP_KEEP_DAYS`).
+
 ## [0.6.0] - 2026-10-06
 
 A production-readiness pass: access checks, failure handling, the database,

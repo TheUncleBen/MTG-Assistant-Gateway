@@ -427,7 +427,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         stats = deck_stats.compute(deck)
         art = featured(deck)
         if own and art is not None:  # the deck list shows covers for the member's own decks
-            state.db.save_deck_cover(deck.id, art.scryfall_uid, art.name)
+            state.db.save_deck_cover(deck.id, art.scryfall_uid, art.name, owner_sub=sub)
         notice = ""
         qp = request.query_params
         ok_code, err_code = qp.get("ok"), qp.get("err")
@@ -1094,7 +1094,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             extra = ", ".join(
                 f"{k} {v}"
                 for k, v in detail.items()
-                if k in ("proposal_id", "deck_id", "via", "error", "archidekt_username")
+                if k in ("proposal_id", "deck_id", "via", "error", "archidekt_username", "by")
             )
             items.append(
                 f"<li><span class='name'>{_esc(r['event'].replace('_', ' '))}</span>"
@@ -1104,7 +1104,8 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             )
         body = (
             "<p class='muted small'>Everything done in your name on this gateway: sign-ins, which assistant "
-            "proposed and applied what, links and unlinks.</p>"
+            "proposed and applied what, links and unlinks, and anything an administrator did to your "
+            "account.</p>"
             + (
                 f"<div class='card'><ul class='plain plist'>{''.join(items)}</ul></div>"
                 if items
@@ -1150,7 +1151,8 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             "if(e.request.mode!=='navigate')return;"
             "e.respondWith(fetch(e.request).catch(()=>new Response(" + json.dumps(OFFLINE_PAGE) + ","
             "{status:503,headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store',"
-            "'Content-Security-Policy':\"default-src 'none'; style-src 'unsafe-inline'\"}})));"
+            "'Content-Security-Policy':\"default-src 'none'; style-src 'unsafe-inline'; "
+            "base-uri 'none'; frame-ancestors 'none'\"}})));"
             "});"
         )
         return Response(js, media_type="application/javascript", headers={"Cache-Control": "no-store"})

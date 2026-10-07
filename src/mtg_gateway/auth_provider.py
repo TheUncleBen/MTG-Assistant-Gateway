@@ -14,6 +14,7 @@ import binascii
 import contextvars
 import hashlib
 import hmac
+import ipaddress
 import logging
 import secrets
 import time
@@ -36,16 +37,21 @@ from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from starlette.requests import Request
 
 from .cimd import (
+    CimdBusy,
     CimdError,
     CimdFetcher,
+    CimdHeldBack,
     CimdThrottled,
+    CimdUnavailable,
     check_redirect_uri,
     is_cimd_client_id,
     sanitise_client_name,
+    validate_document,
 )
 from .config import Settings
 from .db import Database, hash_token
-from .oidc import Identity, OIDCClient, OIDCError, pkce_pair
+from .membership import Membership, MembershipChecker
+from .oidc import Identity, IdPTokens, OIDCClient, OIDCError, pkce_pair
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +63,9 @@ BROWSER_KEY: contextvars.ContextVar[dict[str, Any] | None] = contextvars.Context
     "mtg_browser_key", default=None
 )
 CONSENT_PATH = "/authorize/confirm"
+# How long past its expiry the last good document of a client a member signed in with is still
+# used while its server can't be reached (or the fetcher is flooded).
+CIMD_STALE_FOR = 7 * 86400
 SECRET_HASH_KEY = "client_secret_hash"  # stored in place of the plaintext client_secret
 
 
@@ -93,15 +102,88 @@ class LoginError(Exception):
 # Longest OAuth ``state`` accepted on /authorize (it is stored with the pending login).
 MAX_STATE_LEN = 512
 
+# Sign-in starts (GET /login, GET /authorize) one network may make per minute. A person needs a
+# few; the limit keeps one address from churning the pending-login table (db.py caps it and evicts
+# the busiest network's rows first). Only public (globally routable) addresses are limited. A
+# private, loopback, link-local, CGNAT (100.64/10) or ULA address, or one in MTG_TRUSTED_PROXIES,
+# is usually the reverse proxy itself (not trusted, or sending no X-Forwarded-For): every visitor
+# then looks the same, and a limit would let anyone lock everyone out. The per-browser and
+# per-client caps on pending logins still apply to them.
+LOGIN_STARTS_PER_MINUTE = 30
+# This many different browsers starting sign-ins from one address logs a warning (once per
+# address) that the address may be an untrusted proxy.
+SHARED_SOURCE_WARN_BROWSERS = 50
+TOO_MANY_LOGINS = "Too many sign-in attempts from your network. Wait a minute and try again."
+
+
+class LoginThrottled(Exception):
+    """This network started too many sign-ins in the last minute."""
+
+
+def login_source(ip: str | None) -> str | None:
+    """The network a request came from, as pending logins are grouped and rate-limited: the
+    IPv4 address, or the /64 of an IPv6 address (one subscriber usually holds a whole /64)."""
+    try:
+        addr = ipaddress.ip_address(ip or "")
+    except ValueError:
+        return None
+    if isinstance(addr, ipaddress.IPv6Address):
+        if addr.ipv4_mapped is not None:
+            return str(addr.ipv4_mapped)
+        return str(ipaddress.ip_network(f"{addr}/64", strict=False))
+    return str(addr)
+
+
+class LoginStartLimiter:
+    """In-memory token bucket per network: ``per_minute`` sign-in starts, refilled evenly."""
+
+    MAX_TRACKED = 10_000
+
+    def __init__(self, per_minute: int = LOGIN_STARTS_PER_MINUTE):
+        self.per_minute = per_minute
+        self._buckets: dict[str, tuple[float, float]] = {}  # source -> (tokens, at)
+
+    def allow(self, source: str, now: float | None = None) -> bool:
+        now = time.monotonic() if now is None else now
+        rate = self.per_minute / 60.0
+        tokens, at = self._buckets.get(source, (float(self.per_minute), now))
+        tokens = min(float(self.per_minute), tokens + (now - at) * rate)
+        if tokens < 1:
+            self._buckets[source] = (tokens, now)
+            return False
+        self._buckets[source] = (tokens - 1, now)
+        if len(self._buckets) > self.MAX_TRACKED:  # bounded even under abuse: drop refilled buckets
+            full = 60.0  # a bucket untouched for a minute is full again
+            self._buckets = {k: v for k, v in self._buckets.items() if now - v[1] < full}
+            if len(self._buckets) > self.MAX_TRACKED:
+                self._buckets.clear()
+        return True
+
 
 class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, RefreshToken, AccessToken]):
     def __init__(
-        self, settings: Settings, db: Database, oidc: OIDCClient, *, cimd: CimdFetcher | None = None
+        self,
+        settings: Settings,
+        db: Database,
+        oidc: OIDCClient,
+        *,
+        cimd: CimdFetcher | None = None,
+        membership: MembershipChecker | None = None,
     ):
         self.settings = settings
         self.db = db
         self.oidc = oidc
+        self.membership = membership if membership is not None else MembershipChecker(settings, db, oidc)
         self.cimd = cimd if cimd is not None else CimdFetcher(allowed_hosts=settings.cimd_allowed_hosts)
+        self.login_limiter = LoginStartLimiter()
+        self._source_browsers: dict[str, set[str]] = {}  # source -> browser keys seen (bounded)
+        self._warned_sources: set[str] = set()
+        self._trusted_nets: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
+        for entry in settings.trusted_proxies:
+            try:
+                self._trusted_nets.append(ipaddress.ip_network(entry, strict=False))
+            except ValueError:
+                pass  # "*" (trust everyone): no address is then a proxy of its own
 
     # -- clients ------------------------------------------------------------
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
@@ -110,9 +192,18 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             info = {k: v for k, v in info.items() if k not in (SECRET_HASH_KEY, "client_secret")}
             return OAuthClientInformationFull.model_validate(info)
         if self.settings.cimd_enabled and is_cimd_client_id(client_id):
-            info = await self._cimd_client(client_id)
-            if info:
-                return OAuthClientInformationFull.model_validate(info)
+            for _ in range(2):
+                info = await self._cimd_client(client_id)
+                if not info:
+                    return None
+                try:
+                    validate_document(client_id, info)  # a stored copy passes today's checks too
+                    return OAuthClientInformationFull.model_validate(info)
+                except (CimdError, ValueError):
+                    # A copy stored before documents were checked this strictly: never used
+                    # again (also not as a stale copy); fetched afresh once.
+                    logger.info("discarding a stored metadata document that no longer validates")
+                    self.db.expire_cimd_client(client_id)
         return None
 
     async def _cimd_client(self, url: str) -> dict[str, Any] | None:
@@ -120,17 +211,41 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         cached = self.db.get_cimd_client(url)
         if cached:
             return cached
+        known = self.db.cimd_client_known(url)
         try:
-            info, ttl = await self.cimd.fetch(url)
+            # A client a member signed in with skips the fetcher's per-host block and rate limits
+            # and has a lane of its own (cimd.py).
+            info, ttl = await self.cimd.fetch(url, known=known)
+        except (CimdBusy, CimdUnavailable) as exc:
+            if known:
+                # Its server can't be reached right now (or someone is flooding the fetcher): keep
+                # using the last good copy for a while rather than lock its members out. Never
+                # after the server's own answer refused the document (below).
+                stale = self.db.get_cimd_client(url, stale_for=CIMD_STALE_FOR)
+                if stale:
+                    logger.warning("using the last good metadata document of %s: %s", url[:120], exc)
+                    return stale
+            if isinstance(exc, CimdBusy | CimdHeldBack):
+                # Nothing was asked of the server this time; a held-back lookup's failure was
+                # already recorded when the backoff began (no audit row per anonymous lookup).
+                return None
+            self._cimd_rejected(url, exc)
+            return None
         except CimdThrottled:
             return None
         except CimdError as exc:
-            logger.info("rejected client id metadata document %s: %s", url[:120], exc)
-            self.db.audit("cimd_rejected", client_id=url[:200], detail={"reason": str(exc)[:200]})
+            # The document's own server withdrew it or serves one that is no longer acceptable:
+            # the stored copy must not be used again, stale or not.
+            self.db.expire_cimd_client(url)
+            self._cimd_rejected(url, exc)
             return None
         self.db.save_cimd_client(url, info, ttl)
         self.db.audit("cimd_accepted", client_id=url[:200], detail={"client_name": info["client_name"]})
         return info
+
+    def _cimd_rejected(self, url: str, exc: Exception) -> None:
+        logger.info("rejected client id metadata document %s: %s", url[:120], exc)
+        self.db.audit("cimd_rejected", client_id=url[:200], detail={"reason": str(exc)[:200]})
 
     @staticmethod
     def is_cimd_client(client: OAuthClientInformationFull) -> bool:
@@ -217,6 +332,46 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         holder["used"] = True
         return self.binding_hash(holder["key"])
 
+    def _admit_login(self) -> str | None:
+        """Hash of the network of the request creating a login (None outside such a request), after
+        charging it one sign-in start. Raises LoginThrottled when that network is over its limit."""
+        holder = BROWSER_KEY.get()
+        ip = holder.get("client_ip") if holder else None
+        source = login_source(ip)
+        if source is None:
+            return None
+        addr = ipaddress.ip_address(ip or "")  # valid: login_source parsed it
+        if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
+            addr = addr.ipv4_mapped
+        trusted = any(addr in net for net in self._trusted_nets)
+        if holder is not None and not trusted:
+            self._note_shared_source(str(addr), str(holder.get("key", "")))
+        if addr.is_global and not trusted and not self.login_limiter.allow(source):
+            raise LoginThrottled(source)
+        return hash_token(f"login-source:{source}")
+
+    def _note_shared_source(self, ip: str, browser_key: str) -> None:
+        """Warn once when many different browsers start sign-ins from one address that is not a
+        trusted proxy: it is probably the reverse proxy, and without MTG_TRUSTED_PROXIES every
+        visitor shares its address (one rate limit, one group for the pending-login caps)."""
+        if ip in self._warned_sources:
+            return
+        seen = self._source_browsers.setdefault(ip, set())
+        seen.add(hash_token(browser_key)[:16])
+        if len(seen) >= SHARED_SOURCE_WARN_BROWSERS:
+            logger.warning(
+                "%d different browsers started sign-ins from %s. If that is your reverse proxy, add "
+                "its address to MTG_TRUSTED_PROXIES so the gateway sees each visitor's own address.",
+                len(seen),
+                ip,
+            )
+            self._warned_sources.add(ip)
+            del self._source_browsers[ip]
+            if len(self._warned_sources) > 1000:
+                self._warned_sources.clear()
+        elif len(self._source_browsers) > 1000:  # bounded even under abuse
+            self._source_browsers.clear()
+
     def same_browser(self, session: dict[str, Any], browser_key: str | None) -> bool:
         """True when ``browser_key`` (the login cookie) is the one of the browser that started
         ``session``. The key is a random secret of that browser, never derived from the state, so
@@ -244,6 +399,10 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             # A client that sends no scope gets the scope it registered with (the
             # registration default is "mtg"), not an empty token.
             params.scopes = (client.scope or "mtg").split()
+        try:
+            source_hash = self._admit_login()
+        except LoginThrottled as exc:
+            raise AuthorizeError("temporarily_unavailable", TOO_MANY_LOGINS) from exc
         login_id = secrets.token_urlsafe(32)
         nonce = secrets.token_urlsafe(24)
         verifier, _challenge = pkce_pair()  # the challenge is derived again on Approve
@@ -255,6 +414,7 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             oidc_code_verifier=verifier,
             ttl=self.settings.login_ttl,
             binding_hash=self._new_login_binding(),
+            source_hash=source_hash,
         )
         # Every MCP client goes through the gateway's own consent page before the IdP. The gateway
         # is one OIDC client of the IdP, so the IdP's consent (or its silent "implicit consent")
@@ -319,6 +479,14 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             state=params.state,
         )
 
+    async def idp_origin(self) -> str:
+        """Origin of the identity provider's sign-in page: where /login and the consent page's
+        Approve send the browser. The issuer's origin when the provider's metadata can't be read."""
+        try:
+            return _origin(str((await self.oidc.metadata())["authorization_endpoint"]))
+        except OIDCError:
+            return _origin(self.settings.oidc_issuer)  # Approve will report the IdP outage itself
+
     async def consent_details(self, login_id: str, browser_key: str | None) -> dict[str, Any] | None:
         """What the consent page shows for a pending MCP login, or None if there is none."""
         session = await self._consent_session(login_id, browser_key)
@@ -331,11 +499,7 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         host = urlparse(redirect).hostname or ""
         # Chromium applies the page's form-action CSP to the redirect that follows the POST, so
         # the consent page must allow exactly where Approve (the IdP) and Deny (the client) go.
-        idp_origin = _origin(self.settings.oidc_issuer)
-        try:
-            idp_origin = _origin(str((await self.oidc.metadata())["authorization_endpoint"]))
-        except OIDCError:
-            pass  # Approve will report the IdP outage itself
+        idp_origin = await self.idp_origin()
         return {
             # Sanitised again here so a name stored before the rule existed (a cached
             # metadata document, an old registration) is shown under the same rule.
@@ -401,18 +565,44 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
                 "Sign-in could not be completed with the identity provider. Try again.", 502
             ) from exc
 
+        known = self.db.get_user(identity.sub)
+        pinned = (known or {}).get("idp_issuer")
+        if pinned and pinned.rstrip("/") != self.oidc.issuer.rstrip("/"):
+            if pinned.rstrip("/") in self.settings.oidc_previous_issuers:
+                # The same provider under its old address (MTG_OIDC_PREVIOUS_ISSUERS): re-pin.
+                self.db.set_user_issuer(identity.sub, self.oidc.issuer)
+                self.db.audit("issuer_repinned", sub=identity.sub, client_id=session["client_id"])
+            else:
+                # The same subject string from a different identity provider is not the same
+                # person: never hand them the earlier member's decks, apps or Archidekt link.
+                self.db.audit("login_rejected_issuer", sub=identity.sub, client_id=session["client_id"])
+                raise LoginError(
+                    "This account belongs to a different sign-in provider than the one this gateway "
+                    "uses now. Ask the gateway's admin to delete the old account's data, then sign in "
+                    "again.",
+                    403,
+                )
+
         if self.settings.required_group and self.settings.required_group not in identity.groups:
             self.db.audit("login_rejected_group", sub=identity.sub, client_id=session["client_id"])
             self.db.drop_member(identity.sub, identity.groups)  # their apps and browser sessions too
             raise LoginError("Your account is not in the group that may use this service.", 403)
 
-        known = self.db.get_user(identity.sub)
         if known and known.get("disabled_at"):
             self.db.audit("login_rejected_disabled", sub=identity.sub, client_id=session["client_id"])
             self.db.delete_browser_sessions_for(identity.sub)
             raise LoginError(DISABLED_MESSAGE, 403)
 
         self._record_user(identity)
+        # The provider's own tokens, so later requests can ask it again (membership.py).
+        self.membership.store(
+            identity.sub,
+            IdPTokens(
+                access_token=identity.idp_access_token,
+                access_expires_at=identity.idp_access_expires_at,
+                refresh_token=identity.idp_refresh_token,
+            ),
+        )
         return session, identity
 
     async def complete_login(
@@ -451,10 +641,22 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             expires_at=expires_at,
         )
         self.db.audit("login_ok", sub=identity.sub, client_id=session["client_id"])
+        if is_cimd_client_id(session["client_id"]):
+            # A member signed in through it: from now on its cached document is never evicted
+            # and refetching it is never throttled (cimd.py, db.py).
+            self.db.mark_cimd_client_signed_in(session["client_id"])
         return construct_redirect_uri(client_redirect, code=gw_code, state=params.state)
 
-    async def start_idp_login(self, client_id: str, params: dict[str, Any]) -> str:
-        """Create a login session for a non-MCP caller (the browser pages) and return the IdP URL."""
+    async def start_idp_login(
+        self, client_id: str, params: dict[str, Any], *, force_login: bool = False
+    ) -> str:
+        """Create a login session for a non-MCP caller (the browser pages) and return the IdP URL.
+        ``force_login`` asks the provider to make the person enter their credentials again
+        (``prompt=login``), used right after they signed out on this device."""
+        try:
+            source_hash = self._admit_login()
+        except LoginThrottled as exc:
+            raise LoginError(TOO_MANY_LOGINS, 429) from exc
         login_id = secrets.token_urlsafe(32)
         nonce = secrets.token_urlsafe(24)
         verifier, challenge = pkce_pair()
@@ -466,13 +668,31 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             oidc_code_verifier=verifier,
             ttl=self.settings.login_ttl,
             binding_hash=self._new_login_binding(),
+            source_hash=source_hash,
         )
         try:
-            return await self.oidc.authorization_url(state=login_id, nonce=nonce, code_challenge=challenge)
+            return await self.oidc.authorization_url(
+                state=login_id, nonce=nonce, code_challenge=challenge, prompt="login" if force_login else None
+            )
         except OIDCError as exc:
             raise LoginError(
                 "The identity provider is unavailable right now. Try again shortly.", 502
             ) from exc
+
+    async def _require_member(self, sub: str) -> None:
+        """Refuse the token request unless the identity provider says ``sub`` is still in."""
+        user = self.db.get_user(sub)
+        if user is None:
+            # Deleted their data (or never signed in): a code or refresh token left over from
+            # before must not mint new tokens.
+            raise TokenError("invalid_grant", "sign in again to keep using this service")
+        if user.get("disabled_at"):
+            raise TokenError("invalid_grant", "this account has been disabled on this gateway")
+        outcome = await self.membership.check(sub)
+        if outcome is Membership.UNAVAILABLE:
+            raise TokenError("invalid_request", "the identity provider can't be reached; try again shortly")
+        if outcome is Membership.REVOKED:
+            raise TokenError("invalid_grant", "sign in again to keep using this service")
 
     def _recheck_membership(self, sub: str, client_id: str, family: str, auth_time: int) -> None:
         """A refresh is the one moment a long-lived session passes through the gateway, so it is
@@ -509,6 +729,7 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             name=identity.name,
             preferred_username=identity.preferred_username,
             groups=identity.groups,
+            issuer=self.oidc.issuer,
         )
 
     # -- codes and tokens ---------------------------------------------------
@@ -530,11 +751,14 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         self, client: OAuthClientInformationFull, authorization_code: AuthorizationCode
     ) -> OAuthToken:
         family = secrets.token_urlsafe(16)
+        if not authorization_code.subject:
+            raise TokenError("invalid_grant", "authorization code has no subject")
+        # Asked before the code is used up, so a brief identity-provider outage doesn't burn it
+        # (a retry would otherwise look like a replayed code).
+        await self._require_member(authorization_code.subject)
         # Single use: marking it used is the check, so a replayed code fails here.
         if not self.db.use_auth_code(authorization_code.code, family):
             raise TokenError("invalid_grant", "authorization code already used")
-        if not authorization_code.subject:
-            raise TokenError("invalid_grant", "authorization code has no subject")
         return self._issue(
             client.client_id,
             authorization_code.subject,
@@ -568,6 +792,10 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
     async def exchange_refresh_token(
         self, client: OAuthClientInformationFull, refresh_token: RefreshToken, scopes: list[str]
     ) -> OAuthToken:
+        if refresh_token.subject:
+            # Ask the identity provider first: a removed member's whole family is revoked here,
+            # and when the provider can't be reached this refresh token stays usable for a retry.
+            await self._require_member(refresh_token.subject)
         row = self.db.get_token(refresh_token.token, "refresh")
         if row is None:
             raise TokenError("invalid_grant", "refresh token is not valid")
@@ -581,6 +809,9 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         # Families issued before per-app sign-in times keep the old rule (the person's last sign-in).
         auth_time = int(row["auth_time"] or (user or {}).get("last_login_at") or row["created_at"])
         self._recheck_membership(refresh_token.subject, client.client_id, row["family"], auth_time)
+        if is_cimd_client_id(client.client_id):
+            # Still in use by a member: keep it known (and kept) past the 180-day purge window.
+            self.db.mark_cimd_client_signed_in(client.client_id)
         return self._issue(
             client.client_id,
             refresh_token.subject,
@@ -652,8 +883,9 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             return None
         group = self.settings.required_group
         if group and group not in (user.get("groups") or []):
-            # Checked on every request, not only at refresh: a member taken out of the group (or a
-            # changed MTG_REQUIRED_GROUP) loses /mcp at once, like the JSON API and the web pages.
+            # Checked on every request, not only at refresh. The recorded groups are the identity
+            # provider's live answer from MembershipMiddleware (at most MTG_MEMBERSHIP_CHECK_TTL
+            # seconds old), so a member taken out of the group loses /mcp on their next request.
             self.db.revoke_family(row["family"])
             self.db.audit("not_in_group_refused", sub=row["sub"], client_id=row["client_id"])
             return None
