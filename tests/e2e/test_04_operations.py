@@ -119,16 +119,16 @@ print(len(tools)); print(','.join(sorted(t['name'] for t in tools)))
     assert out[0] == "200"
     assert int(out[1]) >= 40, out
     names = out[2].split(",")
+    # Mystic Forge's own list, unfiltered: it still has goldfish_run and archidekt_deck. The
+    # gateway hides those from assistants (one tool per job); test_05 checks the gateway's list.
     for expected in (
         "scryfall_search",
-        "goldfish_annotate",
+        "goldfish_run",
         "rules_search",
         "validate_decklist",
-        "precon_search",
+        "archidekt_deck",
     ):
         assert expected in names
-    for hidden in ("goldfish_run", "archidekt_deck"):  # a gateway tool owns the job
-        assert hidden not in names
 
 
 def test_mystic_forge_is_not_reachable_through_the_edge(env: Env):
