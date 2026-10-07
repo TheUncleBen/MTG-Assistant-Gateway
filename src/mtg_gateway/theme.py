@@ -369,7 +369,9 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
 .home .recent a span{position:absolute;left:0;right:0;bottom:0;padding:.4rem .5rem;
   background:linear-gradient(to top,rgba(0,0,0,.85),rgba(0,0,0,0));font-size:.9rem;white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis}
-.home details.connect summary{cursor:pointer;font-weight:700}
+.home details.connect summary{cursor:pointer;font-weight:700;display:flex;flex-wrap:wrap;gap:.25rem .75rem;
+  align-items:baseline}
+.home details.connect summary .addr{font-weight:400;font-size:.9rem;word-break:break-all}
 .home .panel-head{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin:0 0 .75rem}
 .home .panel-head h2{margin:0}
 /* Adaptive navigation after Android's window size classes. Compact (under 600px, any device): a

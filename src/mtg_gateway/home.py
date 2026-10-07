@@ -177,7 +177,8 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             + "</div>"
         )
         connect = (
-            "<details class='connect panel'><summary>Connect an AI assistant</summary>"
+            "<details class='connect panel'><summary>Connect an AI assistant "
+            f"<span class='muted addr'>{_esc(s.mcp_url)}</span></summary>"
             "<p>Claude and ChatGPT talk to this gateway through its connector URL. Add it as a custom "
             "connector and sign in when asked; the assistant can then read your decks, research cards and "
             "propose edits you approve here.</p>"
