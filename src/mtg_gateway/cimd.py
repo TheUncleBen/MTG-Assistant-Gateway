@@ -113,6 +113,10 @@ class CimdDnsTimeout(CimdUnavailable):
     """The host's DNS did not answer within DNS_TIMEOUT (the lookup may still hold a thread)."""
 
 
+class _HeldBack(CimdUnavailable):
+    """A signed-in client's server failed a moment ago; not asked again yet."""
+
+
 def is_cimd_client_id(client_id: str) -> bool:
     """True when ``client_id`` has the shape of a metadata document URL."""
     # ASCII only: a Unicode (IDN) host would fail later inside httpx with a UnicodeEncodeError
@@ -558,20 +562,23 @@ class CimdFetcher:
                 del self._site_users[site]
                 del self._site_locks[site]
 
-    async def _fetch_known(self, url: str, now: float) -> tuple[dict[str, Any], int]:
-        """Refetch the document of a client a member has signed in with: no budgets or host
-        block, one fetch per URL at a time, slots of its own."""
-        host = (urlparse(url).hostname or "").lower().rstrip(".")
+    def _known_held_back(self, url: str, host: str, now: float) -> None:
         unreachable_at = self._known_backoff.get(url)
         if unreachable_at is not None and now - unreachable_at < FAILURE_TTL:
             # Its server was down or asked us to slow down a moment ago: don't ask again on every
             # anonymous lookup (the caller keeps the last good copy meanwhile).
-            raise CimdUnavailable("metadata document server was unreachable recently; not retrying yet")
+            raise _HeldBack("metadata document server was unreachable recently; not retrying yet")
         failed_at = self._known_dns_failures.get(host)
         if failed_at is not None and now - failed_at < FAILURE_TTL:
             # Its DNS hung a moment ago and that lookup may still hold a thread: don't start
             # another, so one such name can't use up the lane's DNS threads.
-            raise CimdUnavailable("client metadata host did not resolve recently; not retrying yet")
+            raise _HeldBack("client metadata host did not resolve recently; not retrying yet")
+
+    async def _fetch_known(self, url: str, now: float) -> tuple[dict[str, Any], int]:
+        """Refetch the document of a client a member has signed in with: no budgets or host
+        block, one fetch per URL at a time, slots of its own."""
+        host = (urlparse(url).hostname or "").lower().rstrip(".")
+        self._known_held_back(url, host, now)  # before taking anything
         lock = self._url_locks.setdefault(url, asyncio.Lock())
         self._url_users[url] = self._url_users.get(url, 0) + 1
         try:
@@ -586,11 +593,14 @@ class CimdFetcher:
             except TimeoutError as exc:
                 raise CimdBusy("metadata document fetcher is busy; try again shortly") from exc
             try:
-                async with asyncio.timeout(self.timeout):
-                    return await self._fetch(url, known=True)
-            except TimeoutError as exc:
-                raise CimdUnavailable("metadata document fetch timed out") from exc
-            except CimdBusy:
+                # Again now that the slot is ours: a lookup we queued behind may have just failed.
+                self._known_held_back(url, host, time.monotonic())
+                try:
+                    async with asyncio.timeout(self.timeout):
+                        return await self._fetch(url, known=True)
+                except TimeoutError as exc:
+                    raise CimdUnavailable("metadata document fetch timed out") from exc
+            except (CimdBusy, _HeldBack):
                 raise
             except CimdUnavailable as exc:
                 # Not a failure of the document (the caller keeps its last good copy), but its

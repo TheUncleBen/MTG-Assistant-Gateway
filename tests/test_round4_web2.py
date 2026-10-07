@@ -480,3 +480,35 @@ async def test_urls_on_one_hung_host_hold_one_signed_in_dns_thread(monkeypatch: 
     finally:
         release.set()
         await f.aclose()
+
+
+# -- Round 8 (RJ-1, RJ-2) ------------------------------------------------------------------------
+
+
+async def test_a_hanging_signed_in_server_is_backed_off_too():
+    class Hanging(DocHost):
+        async def handler(self, request: httpx.Request) -> httpx.Response:  # type: ignore[override]
+            self.requests.append(str(request.url))
+            await asyncio.sleep(30)
+            return httpx.Response(200)
+
+    docs = Hanging()
+    http = httpx.AsyncClient(transport=httpx.MockTransport(docs.handler), follow_redirects=False)
+    f = cimdmod.CimdFetcher(http=http, resolver=docs.resolve, timeout=0.2)
+    for _ in range(5):
+        with pytest.raises(cimdmod.CimdUnavailable):
+            await f.fetch(CLIENT_URL, known=True)
+    assert len(docs.requests) == 1
+    await f.aclose()
+
+
+async def test_lookups_queued_behind_a_failing_one_do_not_ask_again():
+    docs = DocHost()
+    docs.serve(status=503)
+    f = docs.fetcher()
+    lookups = (f.fetch(CLIENT_URL, known=True) for _ in range(10))
+    results = await asyncio.gather(*lookups, return_exceptions=True)
+    assert all(isinstance(r, cimdmod.CimdUnavailable) for r in results)
+    assert len(docs.requests) == 1
+    assert f._known_gate._value == cimdmod.MAX_CONCURRENT_FETCHES and not f._url_locks
+    await f.aclose()
