@@ -95,6 +95,7 @@ async def test_login_sessions_are_capped_and_expired_rows_dropped_on_insert(
 ):
     monkeypatch.setattr(dbmod, "MAX_LOGIN_SESSIONS", 15)
     for _ in range(40):
+        gw.http.cookies.clear()  # a new browser each time (one browser keeps only its newest 10)
         r = await gw.http.get("/login")
         assert r.status_code == 302
     assert _count(gw, "login_sessions") == 15

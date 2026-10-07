@@ -20,7 +20,7 @@ from typing import Any
 from . import deck_stats
 from .archidekt import Deck
 from .db import Database
-from .decks import DeckError, DeckService, _clean_deck_id, deck_to_text
+from .decks import DeckError, DeckService, _clean_deck_id, current_client, deck_to_text
 from .mf_proxy import MysticForgeProxy, is_busy
 
 logger = logging.getLogger(__name__)
@@ -85,6 +85,10 @@ class ReportService:
             for stmt in SCHEMA.split(";"):
                 if stmt.strip():
                     c.execute(stmt)
+            # The app (OAuth client id, or the browser) that ran each report: an app deletes only
+            # its own reports through the API. Older reports have none and only the browser may.
+            if "created_by_client" not in {r["name"] for r in c.execute("PRAGMA table_info(reports)")}:
+                c.execute("ALTER TABLE reports ADD COLUMN created_by_client TEXT")
 
     # -- running --------------------------------------------------------------
     async def run(
@@ -139,9 +143,12 @@ class ReportService:
                 goldfish = await self._mf(sub, "goldfish_run", {"deck": text, "n": games})
         rid = "rep_" + secrets.token_urlsafe(9)
         with self.db.tx() as c:
-            c.execute(
+            # Stored only while the member exists: a report still running when they deleted
+            # their data is dropped, not written back for the deleted account.
+            stored = c.execute(
                 "INSERT INTO reports (id, owner_sub, deck_id, deck_name, fingerprint, taken_at, stats_json, "
-                "goldfish_json, validation_json) VALUES (?,?,?,?,?,?,?,?,?)",
+                "goldfish_json, validation_json, created_by_client) SELECT ?,?,?,?,?,?,?,?,?,? "
+                "WHERE EXISTS (SELECT 1 FROM users WHERE sub = ?)",
                 (
                     rid,
                     sub,
@@ -152,8 +159,14 @@ class ReportService:
                     json.dumps(stats),
                     json.dumps(goldfish) if goldfish is not None else None,
                     json.dumps(validation) if validation is not None else None,
+                    current_client.get(),
+                    sub,
                 ),
-            )
+            ).rowcount
+            if not stored:
+                raise DeckError(
+                    "not_found", "Your gateway data was deleted while the report ran; nothing was kept."
+                )
             c.execute(
                 "DELETE FROM reports WHERE owner_sub = ? AND id NOT IN ("
                 "SELECT id FROM reports WHERE owner_sub = ? ORDER BY taken_at DESC, rowid DESC LIMIT ?)",
@@ -234,9 +247,16 @@ class ReportService:
             {"report_id": r["report_id"], "taken_at": r["taken_at"], **r["metrics"]} for r in reversed(rows)
         ]
 
-    def delete(self, sub: str, report_id: str) -> None:
+    def delete(self, sub: str, report_id: str, *, client_id: str | None = None) -> None:
+        """Delete one of the member's reports. With ``client_id`` (an app's bearer token), only a
+        report that app ran itself; the member's browser passes none and may delete any."""
+        sql = "DELETE FROM reports WHERE id = ? AND owner_sub = ?"
+        args: tuple[str, ...] = (str(report_id), sub)
+        if client_id is not None:
+            sql += " AND created_by_client = ?"
+            args += (client_id,)
         with self.db.tx() as c:
-            cur = c.execute("DELETE FROM reports WHERE id = ? AND owner_sub = ?", (str(report_id), sub))
+            cur = c.execute(sql, args)
         if cur.rowcount == 0:
             raise DeckError("not_found", "No such report for your account.")
 

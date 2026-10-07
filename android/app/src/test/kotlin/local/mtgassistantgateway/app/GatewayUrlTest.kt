@@ -61,13 +61,32 @@ class GatewayUrlTest {
     @Test fun signInPages() {
         val o = "https://x.example"
         assertTrue(GatewayUrl.isSignInStart(o, "$o/login?next=/scan"))
-        assertTrue(GatewayUrl.isSignInStart(o, "$o/authorize?client_id=a"))
+        // /authorize and its consent page are part of a sign-in but never teach the provider:
+        // Deny on the consent page redirects to the connecting application's own site.
+        assertFalse(GatewayUrl.isSignInStart(o, "$o/authorize?client_id=a"))
+        assertFalse(GatewayUrl.isSignInStart(o, "$o/authorize/confirm?state=s"))
+        assertTrue(GatewayUrl.isSignInPage(o, "$o/authorize?client_id=a"))
+        assertTrue(GatewayUrl.isSignInPage(o, "$o/login"))
+        assertTrue(GatewayUrl.isConsentPage(o, "$o/authorize/confirm?state=s"))
+        assertFalse(GatewayUrl.isConsentPage(o, "$o/authorize?client_id=a"))
+        assertFalse(GatewayUrl.isConsentPage(o, "https://idp.example/authorize/confirm"))
         assertTrue(GatewayUrl.isSignInPage(o, "$o/auth/callback?code=x"))
         assertTrue(GatewayUrl.isSignInPage(o, "$o/authorize/confirm"))
         assertFalse(GatewayUrl.isSignInStart(o, "$o/auth/callback"))
         assertFalse(GatewayUrl.isSignInStart(o, "$o/loginx"))
         assertFalse(GatewayUrl.isSignInPage(o, "$o/account"))
         assertFalse(GatewayUrl.isSignInStart(o, "https://idp.example/login"))
+    }
+
+    @Test fun advertisedProvider() {
+        assertEquals("https://auth.example.com", GatewayUrl.parseProvider("""{"idp_origin": "https://auth.example.com"}"""))
+        assertEquals("https://auth.example.com:8443", GatewayUrl.parseProvider("""{"idp_origin":"https://auth.example.com:8443"}"""))
+        assertNull(GatewayUrl.parseProvider("""{"idp_origin": "http://auth.example.com"}"""))
+        assertNull(GatewayUrl.parseProvider("""{"idp_origin": "https://auth.example.com/path"}"""))
+        assertNull(GatewayUrl.parseProvider("""{"idp_origin": "https://user@auth.example.com"}"""))
+        assertNull(GatewayUrl.parseProvider("""{"idp_origin": "javascript:alert(1)"}"""))
+        assertNull(GatewayUrl.parseProvider("""{"status": "ok"}"""))
+        assertNull(GatewayUrl.parseProvider("not json"))
     }
 
     @Test fun join() {

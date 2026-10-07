@@ -57,7 +57,7 @@ anything that isn't the default:
 | `PUID:PGID` the operator uses in other stacks | `1000:1000` | folder ownership |
 | Overlay network name | `mtg-gateway` | shared with the proxy |
 | Allow deck writes now? | `false` | `MTG_WRITES_ENABLED`; recommend `false` until a throwaway deck test passes |
-| Let the assistant apply approved proposals over MCP? | `false` | `MTG_APPLY_VIA_MCP` |
+| Let the assistant apply approved proposals over MCP? | `false` | `MTG_APPLY_VIA_MCP`; recommend `false`: with `true` a prompt-injected assistant can apply its own proposal after `MTG_APPLY_MIN_AGE_SECONDS`, with `false` the member clicks Apply in the browser |
 
 Everything else uses the values in `deploy/stack.env.example`.
 
@@ -100,9 +100,12 @@ Give these as a checklist and wait for the answers you need (client ID and
 issuer URL; both are not secrets):
 
 1. Applications, Providers, Create, OAuth2/OpenID Provider. Name `MTG
-   Gateway`; client type Confidential; redirect URI
+   Assistant Gateway`; client type Confidential; redirect URI
    `https://<gateway host>/auth/callback` (strict); default RS256 signing
-   key; scopes `openid email profile`; subject mode left at the default.
+   key; scopes `openid`, `email`, `profile` and `offline_access` (the
+   `offline_access` mapping is easy to miss and is required: without it
+   Authentik issues no refresh token and members must sign in again every
+   hour); subject mode left at the default.
    Copy the Client ID into the chat. Keep the Client Secret in the clipboard
    or password manager for step 4; do not paste it here.
 2. Applications, Applications, Create. Name `MTG Assistant Gateway`, slug
@@ -123,15 +126,16 @@ A JSON document with `"issuer"` equal to the issuer URL means step 3 is right.
 
 Hand these over; do not run them, even over ssh. The first two generate
 and pipe the values; the Fernet key is also shown once so the operator
-can keep a copy (backups are unreadable without it), which is exactly why
-it must not run from here. The third reads the Authentik client secret
-from the keyboard:
+can keep a copy (without it every Archidekt link, including those in old
+backups, can't be decrypted), which is exactly why it must not run from
+here. The third reads the Authentik client secret from the keyboard at a
+silent prompt:
 
 ```bash
 python3 -c 'import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())' | tee /dev/stderr | docker secret create mtg_fernet_key -
 python3 -c 'import secrets; print(secrets.token_urlsafe(48))' | docker secret create mtg_session_secret -
-# Paste the Authentik client secret, press Enter, then Ctrl-D:
-docker secret create mtg_oidc_client_secret -
+# Paste the Authentik client secret at the (silent) prompt and press Enter:
+read -rs S && printf %s "$S" | docker secret create mtg_oidc_client_secret - ; unset S
 docker secret ls
 ```
 
@@ -142,7 +146,7 @@ Fernet key and `openssl rand -base64 48` a session secret.
 
 ### 5. GHCR pull credential (Portainer, browser)
 
-The images are private. The operator creates a GitHub classic token with
+Only needed if the GHCR packages are private. The operator creates a GitHub classic token with
 only `read:packages` and adds it in Portainer under Registries, Add
 registry, Custom, URL `ghcr.io`, with their GitHub login. The token is a
 secret: it goes into Portainer, not into this chat. The registry URL must be exactly
@@ -176,13 +180,15 @@ usually names the missing variable or secret in its last log lines.
 ### 7. Nginx Proxy Manager host (browser)
 
 Proxy host for the gateway hostname: scheme `http`, forward host
-`mtg_mtg-assistant-gateway` (full Swarm service name), port `8080`, Websockets support on, Block common exploits
-on; SSL tab with a Let's Encrypt certificate, Force SSL and HTTP/2; Advanced
-tab:
+`mtg_mtg-assistant-gateway` (full Swarm service name), port `8080`, Block
+common exploits on, Websockets support off (the gateway has no websocket
+endpoints); SSL tab with a Let's Encrypt certificate, Force SSL, HTTP/2 and
+HSTS; Advanced tab:
 
 ```nginx
 proxy_buffering off;
 proxy_read_timeout 300s;
+client_max_body_size 4m;
 ```
 
 No proxy host for Mystic Forge: it stays internal.
@@ -215,9 +221,12 @@ the rest, including linking Archidekt.
 
 ### 10. After the first sign-in
 
-- If a Claude client signed in with "Use Claude's published identity", the
-  consent page showed the publisher host. Set `MTG_CIMD_ALLOWED_HOSTS` to
-  it in the stack and update the stack, so only that publisher is accepted.
+- Leave `MTG_CIMD_ALLOWED_HOSTS` empty (the default). Listing only the
+  host Claude's published identity came from locks ChatGPT out; narrow it
+  only if the operator lists every client's host (`docs/OPERATIONS.md`,
+  "Which AI clients may connect").
+- Recommend narrowing `MTG_TRUSTED_PROXIES` to NPM's address or the overlay
+  subnet once NPM works (`docs/DEPLOY.md` step 7).
 - Keep `MTG_WRITES_ENABLED=false` until a proposal has been applied to a
   throwaway deck and verified on Archidekt (see `docs/OPERATIONS.md`, "Deck
   writes and the kill switch").

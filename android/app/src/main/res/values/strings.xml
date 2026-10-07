@@ -33,6 +33,7 @@
     <string name="scan_handoff_failed">The scan page did not take the photo. Tap Done, reload the page and try again.</string>
     <string name="scan_page_slow">The scan page did not answer in time. Tap Done and check the page.</string>
     <string name="scan_page_missing">This gateway has no scan page.</string>
+    <string name="page_elsewhere">A page from another site tried to open inside the app and was stopped. Tap Retry to go back to your gateway.</string>
     <string name="link_other_gateway">That link is for another site, not your gateway.</string>
 
     <string name="camera_title">Scan a card</string>

@@ -8,6 +8,7 @@ are not exposed until the gateway can record ownership for them.
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from typing import Any
@@ -89,6 +90,28 @@ LIST_DEADLINE_SECONDS = 10.0
 LIST_RETRY_SECONDS = 60.0
 
 
+# Bounds on the arguments of proxied calls, checked before anything is forwarded. Numbers of the
+# simulation tools (goldfish_*): games as run_deck_report allows (reports.MAX_GAMES), turns, and
+# the sizes of goldfish_odds. Any text argument (a decklist) up to the gateway's own decklist
+# limit, and the arguments as a whole up to MAX_ARGUMENT_BYTES.
+GOLDFISH_LIMITS: dict[str, int] = {
+    "n": 2000,
+    "until_turn": 30,
+    "deck_size": 1000,
+    "draws": 1000,
+    "copies": 1000,
+    "min_successes": 1000,
+}
+MAX_TEXT_ARGUMENT = 200_000
+MAX_ARGUMENT_BYTES = 1_000_000
+# Proxied tools that read from Archidekt (through Mystic Forge, outside the gateway's pacer): they
+# draw on the member's Archidekt budget (decks.DeckService.budget_refusal). A goldfish or precon
+# tool given an Archidekt deck id or link reads Archidekt as well.
+ARCHIDEKT_TOOLS = frozenset(
+    {"archidekt_deck", "archidekt_user_decks", "archidekt_export", "validate_archidekt_deck"}
+)
+DECK_ARGUMENTS = ("deck", "deck_a", "deck_b")
+
 BUSY_PREFIX = "busy: "
 
 
@@ -103,6 +126,62 @@ def _busy() -> types.CallToolResult:
         ],
         isError=True,
     )
+
+
+def _refusal(text: str) -> types.CallToolResult:
+    return types.CallToolResult(content=[types.TextContent(type="text", text=text)], isError=True)
+
+
+def argument_problem(name: str, arguments: dict[str, Any] | None) -> str | None:
+    """Why ``arguments`` are out of bounds for proxied tool ``name`` (see GOLDFISH_LIMITS), or None."""
+    try:
+        size = len(json.dumps(arguments or {}))
+    except (TypeError, ValueError):
+        return "the arguments could not be read"
+    if size > MAX_ARGUMENT_BYTES:
+        return f"the arguments may be at most {MAX_ARGUMENT_BYTES // 1000} kB"
+
+    def walk(value: Any, depth: int = 0) -> str | None:
+        if depth > 4:
+            return None
+        if isinstance(value, str) and len(value) > MAX_TEXT_ARGUMENT:
+            return f"a text argument may be at most {MAX_TEXT_ARGUMENT // 1000} kB"
+        if isinstance(value, list):
+            for item in value:
+                if problem := walk(item, depth + 1):
+                    return problem
+        if isinstance(value, dict):
+            for key, item in value.items():
+                limit = GOLDFISH_LIMITS.get(key) if name.startswith("goldfish_") else None
+                if limit is not None and not isinstance(item, bool):
+                    number: float | None = None
+                    if isinstance(item, int | float):
+                        number = item
+                    elif isinstance(item, str):
+                        try:
+                            number = float(item.strip())
+                        except ValueError:
+                            number = None
+                    if number is not None and number > limit:
+                        return f"{key} may be at most {limit}"
+                if problem := walk(item, depth + 1):
+                    return problem
+        return None
+
+    return walk(arguments or {})
+
+
+def reads_archidekt(name: str, arguments: dict[str, Any] | None) -> bool:
+    """Whether proxied tool ``name`` reaches Archidekt with these arguments."""
+    if name in ARCHIDEKT_TOOLS:
+        return True
+    for key in DECK_ARGUMENTS:
+        value = (arguments or {}).get(key)
+        if isinstance(value, int) and not isinstance(value, bool):
+            return True
+        if isinstance(value, str) and (value.strip().isdigit() or "archidekt.com" in value.lower()):
+            return True
+    return False
 
 
 def is_busy(result: types.CallToolResult) -> bool:
@@ -133,6 +212,9 @@ class MysticForgeProxy:
         self._tools_at = 0.0
         self._known: set[str] = set()
         self._retry_at = 0.0
+        # Set by the app: spends one unit of a member's Archidekt budget, returning the refusal
+        # text when it is used up (None to go ahead).
+        self.archidekt_budget: Any = None
 
     async def tools(self, *, force: bool = False) -> list[dict[str, Any]]:
         if self._tools and not force and time.time() - self._tools_at < self.cache_ttl:
@@ -176,6 +258,13 @@ class MysticForgeProxy:
             return types.CallToolResult(
                 content=[types.TextContent(type="text", text=f"tool {name} is not available")], isError=True
             )
+        problem = argument_problem(name, arguments)
+        if problem:
+            return _refusal(f"{name} refused: {problem}; nothing was sent to the research service")
+        if owner is not None and self.archidekt_budget is not None and reads_archidekt(name, arguments):
+            refused = self.archidekt_budget(owner)
+            if refused:
+                return _refusal(refused)
         if owner is not None:
             if self._in_flight.get(owner, 0) >= self.max_calls_per_user:
                 return _busy()

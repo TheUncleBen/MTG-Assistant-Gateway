@@ -23,6 +23,10 @@ services:
       traefik.http.routers.mtg-gateway.entrypoints: ${TRAEFIK_ENTRYPOINT:-websecure}
       traefik.http.routers.mtg-gateway.tls.certresolver: ${TRAEFIK_CERTRESOLVER:?TRAEFIK CERT RESOLVER REQUIRED}
       traefik.http.services.mtg-gateway.loadbalancer.server.port: "8080"
+      # HSTS (the gateway sends the same header). No includeSubDomains: the parent domain
+      # may host other (plain-http) things; add it only if every subdomain is https.
+      traefik.http.routers.mtg-gateway.middlewares: mtg-gateway-hsts
+      traefik.http.middlewares.mtg-gateway-hsts.headers.stsSeconds: "31536000"
 
   # Traefik's default exposedByDefault=true would make a router for this
   # container too. It has no login, so keep it out explicitly.

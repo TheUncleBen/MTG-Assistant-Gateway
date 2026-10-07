@@ -7,8 +7,8 @@ Skills for whoever deploys and runs the gateway. It bundles no MCP server.
 - `skills/invite/`: adds a user in Authentik and sends them the install
   link.
 
-Install (needs read access to this repository, which `gh auth login` or
-your git credentials provide):
+Install (a private copy of the repository also needs read access, which
+`gh auth login` or your git credentials provide):
 
 ```
 claude plugin marketplace add TheUncleBen/MTG-Assistant-Gateway

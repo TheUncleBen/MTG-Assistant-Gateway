@@ -78,6 +78,8 @@ class _FakeMF:
 
 async def test_reports_count_against_the_members_mystic_forge_cap(tmp_path: Path) -> None:
     db = Database(tmp_path / "t.sqlite")
+    for sub in ("alice", "bob"):  # reports are stored only for members that exist
+        db.upsert_user(sub, email=None, name=None, preferred_username=None, groups=[])
     mf = _FakeMF()
     reports = ReportService(db, _FakeDecks(), mf)  # type: ignore[arg-type]
     await reports.run("alice", "42", games=20)
@@ -92,6 +94,7 @@ async def test_reports_count_against_the_members_mystic_forge_cap(tmp_path: Path
 
 async def test_concurrent_identical_reports_run_once(tmp_path: Path) -> None:
     db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
     mf = _FakeMF()
     reports = ReportService(db, _FakeDecks(), mf)  # type: ignore[arg-type]
     outs = await asyncio.gather(*(reports.run("alice", "42", games=2000) for _ in range(10)))

@@ -176,9 +176,11 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
   additions as one proposal, and look back over proposals, snapshots and
   reports. They also serve as the pages an Android app can wrap.
 - **Admin page.** Members of `MTG_ADMIN_GROUP` get `/admin`: who has signed
-  in, their activity, per-day usage counts, and buttons to disable or enable
-  an account, revoke its tokens and sessions, or unlink Archidekt. Unset,
-  the page does not exist. Details in
+  in, their activity, per-day usage counts, a System card (version, database
+  size and schema, newest backup), and buttons to disable or enable an
+  account, revoke its tokens and sessions, unlink Archidekt, or delete
+  everything the gateway keeps about a person. Unset, the page does not
+  exist. Details in
   [docs/OPERATIONS.md](docs/OPERATIONS.md#the-admin-page).
 - **JSON API.** Everything the tools and pages do is also under `/api/v1`
   for app builders, with the same sign-in and the same proposal flow. See
@@ -197,7 +199,7 @@ between releases ([docs/VERSIONS.md](docs/VERSIONS.md)).
 | Area | State |
 | --- | --- |
 | Sign-in, research, deck import, account linking, proposals, scanning | Built. Tested against fakes, recorded Archidekt and Scryfall responses, and a real Swarm stack with Authentik in CI |
-| Applying edits, creating decks, backups and restores on Archidekt | Built, and run live against a throwaway Archidekt account (create, add, remove, quantities, categories, commander, backup folder and copy). The code default is off (`MTG_WRITES_ENABLED=false`); the example stack file turns writes and in-chat applying on. Try your first edit on a deck you don't care about |
+| Applying edits, creating decks, backups and restores on Archidekt | Built, and run live against a throwaway Archidekt account (create, add, remove, quantities, categories, commander, backup folder and copy). The code default is off (`MTG_WRITES_ENABLED=false`); the example env files turn writes on (each change is still applied only by the member's own click on the review page; in-chat applying, `MTG_APPLY_VIA_MCP`, stays off). Try your first edit on a deck you don't care about |
 | Client and device coverage | See [docs/CONNECT.md](docs/CONNECT.md#which-apps-and-devices-work), which labels each claim as verified, reported or unverified |
 | Deck statistics, stored deck reports and history, compare, companion pages, admin page, JSON API | Built and covered by the test suite against fakes. The companion pages and admin page have not yet had the same live Swarm run-through as the rest; treat that as unverified |
 | Watchlists, price history | Not yet (Mystic Forge's own saved goldfish reports stay hidden too; the gateway's stored deck reports replace them) |
@@ -239,6 +241,18 @@ Claude / ChatGPT / browser ──HTTPS──▶ reverse proxy ──▶ mtg-gate
   application binding and groups. The gateway also requires a specific
   group (`MTG_REQUIRED_GROUP`) and refuses to start without one unless
   you opt out with `MTG_ALLOW_ANY_IDP_USER=true`.
+- **Membership is checked live.** Before serving a request, the gateway asks
+  the identity provider whether the person is still in the group (cached
+  for a few seconds, `MTG_MEMBERSHIP_CHECK_TTL`). Take someone out of the
+  group, or deactivate them, and their next request fails: their tokens and
+  sessions are revoked, and a removal from the group revokes their
+  Archidekt link too. If the provider can't be reached, requests are
+  refused rather than let through. With Authentik
+  this needs the `offline_access` scope mapping
+  ([docs/IDP-AUTHENTIK.md](docs/IDP-AUTHENTIK.md)).
+- **Sign out on all my devices** (on the `/logout` page) ends every
+  browser and app session, and for an hour the next sign-in on that device
+  asks for the password again.
 - **Tokens:** `/mcp` only accepts tokens the gateway issued itself, so a
   token straight from the identity provider is rejected.
   - Tokens and registered clients' secrets are stored hashed.
@@ -251,7 +265,14 @@ Claude / ChatGPT / browser ──HTTPS──▶ reverse proxy ──▶ mtg-gate
   - That protects the database and backups. It doesn't protect against
     whoever runs the server, and users are told so.
 - **Deck changes** need the user's own yes. Text found in decks or tool
-  output is never treated as an instruction to edit.
+  output is never treated as an instruction to edit. Each proposal shows
+  which app made it, and disconnecting an app rejects its pending
+  proposals. An app connected with the read-only scope `mtg.read` can't
+  change anything.
+- **Limits.** Sign-in attempts are limited per network, metadata-document
+  fetches per site, and Archidekt calls per member
+  (`MTG_ARCHIDEKT_CALLS_PER_10_MIN`), so neither a flood nor a looping
+  assistant can wear the gateway or Archidekt down.
 - **Mystic Forge** has no published ports and no login of its own. Only the
   gateway can reach it.
 
@@ -266,14 +287,14 @@ Claude / ChatGPT / browser ──HTTPS──▶ reverse proxy ──▶ mtg-gate
 | `deploy/` | The Swarm stack file and its example settings; `deploy/compose/` for plain Docker Compose; `deploy/proxy/` with Caddy, Traefik and nginx examples |
 | `android/` | The Android app (Kotlin, CameraX, WindowManager) as a Gradle project with a build script that fetches the SDK; see [docs/ANDROID.md](docs/ANDROID.md) |
 | `docs/` | The guides listed under [Documentation](#documentation), plus screenshots |
-| `.github/workflows/` | Tests, end-to-end tests, container smoke test, image publishing to GHCR |
+| `.github/workflows/` | Tests, end-to-end tests, container smoke test, and the release on every merge to `main` (tag, image on GHCR, Android app, GitHub release; see [docs/VERSIONS.md](docs/VERSIONS.md)) |
 
 ## Development
 
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -c constraints.txt -e ".[dev]"
-ruff check src tests && ruff format --check src tests && pytest -q
+ruff check src tests scripts && ruff format --check src tests scripts && pytest -q
 ```
 
 Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md) and the

@@ -58,12 +58,13 @@ services:
       MTG_OIDC_CLIENT_SECRET_FILE: /run/secrets/mtg_oidc_client_secret
       MTG_FERNET_KEY_FILE: /run/secrets/mtg_fernet_key
       MTG_SESSION_SECRET_FILE: /run/secrets/mtg_session_secret
-      MTG_OIDC_SCOPES: ${MTG_OIDC_SCOPES:-openid profile email}
+      MTG_OIDC_SCOPES: ${MTG_OIDC_SCOPES:-openid profile email offline_access}
       MTG_REQUIRED_GROUP: ${MTG_REQUIRED_GROUP:-}
       MTG_ALLOW_ANY_IDP_USER: ${MTG_ALLOW_ANY_IDP_USER:-false}
       # Optional. Empty values fall back to the gateway's defaults (docs/DEPLOY.md, environment reference).
       MTG_ADMIN_GROUP: ${MTG_ADMIN_GROUP:-}
       MTG_OIDC_GROUPS_CLAIM: ${MTG_OIDC_GROUPS_CLAIM:-}
+      MTG_OIDC_PREVIOUS_ISSUERS: ${MTG_OIDC_PREVIOUS_ISSUERS:-}
       MTG_OIDC_TOKEN_AUTH_METHOD: ${MTG_OIDC_TOKEN_AUTH_METHOD:-}
       MTG_SERVER_NAME: ${MTG_SERVER_NAME:-}
       MTG_DATA_DIR: /data
@@ -82,6 +83,8 @@ services:
       MTG_REFRESH_TOKEN_TTL: ${MTG_REFRESH_TOKEN_TTL:-2592000}
       MTG_BROWSER_SESSION_TTL: ${MTG_BROWSER_SESSION_TTL:-7200}
       MTG_REAUTH_INTERVAL: ${MTG_REAUTH_INTERVAL:-604800}
+      MTG_MEMBERSHIP_CHECK_TTL: ${MTG_MEMBERSHIP_CHECK_TTL:-5}
+      MTG_ARCHIDEKT_CALLS_PER_10_MIN: ${MTG_ARCHIDEKT_CALLS_PER_10_MIN:-120}
       MTG_TRUSTED_PROXIES: ${MTG_TRUSTED_PROXIES:-}
       # Host headers /mcp accepts. Empty = the host in MTG_PUBLIC_URL.
       MTG_ALLOWED_HOSTS: ${MTG_ALLOWED_HOSTS:-}
@@ -122,6 +125,9 @@ services:
       resources:
         limits:
           memory: ${MTG_MEMORY_LIMIT:-256M}
+          # A cap on processes and threads, so a runaway or compromised process can't
+          # fork-bomb the machine. The gateway normally runs a few dozen threads.
+          pids: 512
 
   # Mystic Forge: internal research and simulation service. No published ports;
   # only the gateway talks to it.
@@ -173,8 +179,13 @@ services:
       resources:
         limits:
           memory: ${MF_MEMORY_LIMIT:-512M}
+          pids: 512 # processes and threads, as for the gateway
 
 networks:
   mtg:
     name: ${MTG_NETWORK_NAME:-mtg-gateway}
+  # Only the gateway and Mystic Forge are on it. Not "internal": Mystic Forge needs outbound
+  # internet access for Scryfall, EDHREC and the rules. Mystic Forge has no login of its own,
+  # and processes on this machine can reach a bridge network's containers by their IP, so
+  # don't attach other containers to it and don't publish its port.
   mysticforge:

@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlsplit
 
+import mcp_types as types
 from mcp.server.auth.handlers.metadata import MetadataHandler
 from mcp.server.auth.handlers.revoke import RevocationHandler
 from mcp.server.auth.handlers.token import TokenHandler
@@ -30,6 +31,7 @@ from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, Re
 from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
+from starlette.datastructures import Headers
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 from starlette.routing import Route, request_response
@@ -57,11 +59,12 @@ from .companion import add_companion_routes
 from .config import Settings
 from .db import Database
 from .decklist import DecklistError, ListCard, parse_decklist, to_text
-from .decks import DeckError, DeckService, _clean_deck_id, current_client
+from .decks import DeckError, DeckService, _clean_deck_id, current_client, scopes_allow_writes
+from .membership import Membership, MembershipChecker
 from .metrics import Metrics
 from .mf_proxy import ALLOWED_TOOLS, MysticForgeProxy
 from .oidc import OIDCClient
-from .pages import BROWSER_CLIENT_ID, add_browser_routes, browser_user, login_redirect
+from .pages import BROWSER_CLIENT_ID, SESSION_COOKIE, add_browser_routes, browser_user, login_redirect
 from .plugin_page import add_plugin_routes
 from .reports import ReportService
 from .scan import add_scan
@@ -84,10 +87,50 @@ class AppState:
     scan: Any = None
     reports: Any = None
     metrics: Metrics | None = None
+    membership: MembershipChecker | None = None
 
 
 def _tool_error(exc: DeckError) -> dict[str, object]:
     return {"ok": False, "error": exc.kind, "message": str(exc), **exc.extra}
+
+
+# Tools that change something (a proposal, an apply, a stored report or scan). A token issued
+# only for a read-only scope (decks.READ_ONLY_SCOPES) is refused them.
+WRITE_TOOLS = frozenset(
+    {
+        "propose_new_deck",
+        "propose_deck_changes",
+        "propose_restore_snapshot",
+        "propose_deck_details",
+        "propose_clone_deck",
+        "apply_proposal",
+        "reject_proposal",
+        "run_deck_report",
+        "save_scan_session",
+    }
+)
+
+
+def scope_guard_middleware():
+    """MCP middleware refusing WRITE_TOOLS to read-only tokens before the tool runs."""
+
+    async def _mw(ctx: Any, call_next: Any) -> Any:
+        if ctx.method == "tools/call" and isinstance(ctx.params, dict):
+            name = ctx.params.get("name")
+            token = get_access_token()
+            if name in WRITE_TOOLS and token is not None and not scopes_allow_writes(token.scopes):
+                message = (
+                    "This app was connected read-only (scope mtg.read), so it cannot propose, apply or "
+                    "store anything. Reconnect it with the mtg scope to make changes."
+                )
+                return types.CallToolResult(
+                    content=[types.TextContent(type="text", text=message)],
+                    structuredContent={"ok": False, "error": "insufficient_scope", "message": message},
+                    isError=True,
+                ).model_dump(by_alias=True, exclude_none=True, mode="json")
+        return await call_next(ctx)
+
+    return _mw
 
 
 class LoginCookieMiddleware:
@@ -112,7 +155,10 @@ class LoginCookieMiddleware:
             return
         current = Request(scope).cookies.get(self.name, "")
         key = current if _LOGIN_KEY.fullmatch(current) else secrets.token_urlsafe(32)
-        holder: dict[str, Any] = {"key": key, "used": False}
+        # client_ip: the peer as uvicorn reports it (the visitor's address when the request came
+        # through a trusted proxy), for the per-network caps on pending logins.
+        client = scope.get("client")
+        holder: dict[str, Any] = {"key": key, "used": False, "client_ip": client[0] if client else None}
         token = BROWSER_KEY.set(holder)
 
         replaced = False
@@ -181,6 +227,81 @@ class LoginCookieMiddleware:
 
 
 _LOGIN_KEY = re.compile(r"[A-Za-z0-9_-]{43}")
+
+
+class MembershipMiddleware:
+    """Before any request that carries a browser session or a bearer token is served, ask the
+    identity provider whether that person is still allowed in (membership.py). A removed member's
+    tokens and sessions are revoked here, so the route's own checks then refuse the request; when
+    the provider cannot be asked, the request is refused with 503 and nothing is revoked.
+
+    Sign-in, sign-out and OAuth endpoints, static files and the health check are not gated: they
+    are how a person gets (back) in, or carry no member data. The refresh grant at /token and the
+    code exchange do their own check (auth_provider)."""
+
+    EXEMPT_PREFIXES = (
+        "/static/",
+        "/scan/static/",
+        "/.well-known/",
+        "/authorize",
+        "/auth/callback",
+        "/login",
+        "/logout",
+        "/register",
+        "/token",
+        "/revoke",
+        "/healthz",
+    )
+
+    def __init__(self, app: ASGIApp, state: AppState):
+        self.app = app
+        self.state = state
+
+    def _subjects(self, scope: Scope) -> set[str]:
+        """Everyone this request could act as: the bearer token's person and the session
+        cookie's person. Both are checked, so a removed member can't ride on someone else's
+        token while the route reads their own cookie (or the other way round)."""
+        headers = Headers(scope=scope)
+        db = self.state.db
+        subs: set[str] = set()
+        auth = headers.get("authorization", "")
+        if auth[:7].lower() == "bearer ":
+            row = db.get_token(auth[7:].strip(), "access")
+            if row is not None and row["expires_at"] >= int(time.time()):
+                subs.add(row["sub"])
+        sid = Request(scope).cookies.get(cookie_name(SESSION_COOKIE, self.state.settings))
+        if sid:
+            sub = db.get_browser_session(sid)
+            if sub:
+                subs.add(sub)
+        return subs
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        checker = self.state.membership
+        path = scope.get("path", "") if scope["type"] == "http" else ""
+        if checker is None or scope["type"] != "http" or path.startswith(self.EXEMPT_PREFIXES):
+            await self.app(scope, receive, send)
+            return
+        outcomes = [await checker.check(sub) for sub in sorted(self._subjects(scope))]
+        if Membership.UNAVAILABLE in outcomes:
+            request = Request(scope)
+            message = "The sign-in service can't be reached to confirm your access. Try again shortly."
+            if _wants_page(request):
+                resp: Response = render(
+                    "Try again shortly",
+                    f"<div class='card'><p>{message}</p></div>",
+                    site=self.state.settings.server_name,
+                    status=503,
+                )
+            else:
+                resp = JSONResponse(
+                    {"ok": False, "error": "idp_unavailable", "message": message},
+                    503,
+                    headers={"Retry-After": "30"},
+                )
+            await resp(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
 
 
 class BodyLimitMiddleware:
@@ -291,7 +412,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "test run the user can see later on the gateway's History page. "
             "If your app refuses, hides or blocks a tool (rather than the gateway returning an error), do "
             "not call it again in this conversation. For apply_proposal, give the user the proposal's "
-            f"review_url and ask them to press Apply there. For save_scan_session, point them to "
+            "review_url and ask them to press Apply (or Reject) there. For run_deck_report, point them to "
+            f"the deck's page under {s.public_url}/decks. For save_scan_session, point them to "
             f"{s.public_url}/scan. Never retry an install or connection step that the app or plan does not "
             "support; say once what does not work and which path does."
         ),
@@ -989,6 +1111,16 @@ def build_mcp_server(state: AppState) -> MCPServer:
             return JSONResponse({"status": "error", "detail": "database unavailable"}, status_code=503)
         return JSONResponse({"status": "ok", "version": __version__})
 
+    @server.custom_route(APP_CONFIG_PATH, methods=["GET"], include_in_schema=False)
+    async def app_config(_request: Request) -> Response:
+        # Public: the Android app reads it at start to pin the one sign-in origin it keeps inside
+        # the app (the consent page's Approve goes there, Deny goes to the client's site). Only an
+        # origin the /login redirect shows anyone anyway; nothing about members or secrets.
+        return JSONResponse(
+            {"idp_origin": await state.provider.idp_origin()},
+            headers={"Cache-Control": "public, max-age=300"},
+        )
+
     @server.custom_route("/", methods=["GET"], include_in_schema=False)
     async def index(request: Request) -> Response:
         # The dashboard is for signed-in members only; MCP clients use /mcp and the OAuth routes.
@@ -1034,7 +1166,8 @@ def create_app(
         groups_claim=settings.oidc_groups_claim,
         token_auth_method=settings.oidc_token_auth_method,
     )
-    provider = GatewayAuthProvider(settings, db, oidc, cimd=cimd)
+    membership = MembershipChecker(settings, db, oidc)
+    provider = GatewayAuthProvider(settings, db, oidc, cimd=cimd, membership=membership)
     archidekt = archidekt or ArchidektClient(
         settings.archidekt_base, settings.archidekt_user_agent, Pacer(settings.archidekt_min_interval)
     )
@@ -1048,13 +1181,17 @@ def create_app(
         archidekt=archidekt,
         decks=DeckService(settings, db, archidekt),
         mf_proxy=mf_proxy,
+        membership=membership,
     )
     state.metrics = Metrics(
         db, known_tool=lambda name: server._tool_manager.get_tool(name) is not None or name in ALLOWED_TOOLS
     )
     server = build_mcp_server(state)
     server.middleware.append(state.metrics.mcp_middleware())  # before the proxy, so its calls count too
+    server.middleware.append(scope_guard_middleware())
     if mf_proxy is not None:
+        # proxied archidekt_* research calls draw on the member's Archidekt budget too
+        mf_proxy.archidekt_budget = state.decks.budget_refusal
         server.middleware.append(mf_proxy.middleware())
     transport_security = TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
@@ -1070,7 +1207,6 @@ def create_app(
     )
     _refuse_mcp_get(app)
     _friendly_errors(app, state)
-    app.add_middleware(NoSniffMiddleware)
     app.add_middleware(ThemeMiddleware)
     app.state.gateway = state
     _use_hashed_client_secrets(app, provider)
@@ -1079,7 +1215,11 @@ def create_app(
     app.add_middleware(
         LoginCookieMiddleware, provider=provider, secure=settings.public_url.startswith("https://")
     )
+    app.add_middleware(MembershipMiddleware, state=state)
     app.add_middleware(BodyLimitMiddleware)
+    # Outermost, so the responses of the middlewares above (413, 503, sign-in error pages) get
+    # nosniff and HSTS too.
+    app.add_middleware(NoSniffMiddleware, hsts=settings.public_url.startswith("https://"))
     return app
 
 
@@ -1177,6 +1317,7 @@ def _refuse_mcp_get(app: Starlette) -> None:
 
 
 METADATA_PATH = "/.well-known/oauth-authorization-server"
+APP_CONFIG_PATH = "/.well-known/mtg-gateway"
 
 
 def _advertise_cimd(app: Starlette, server: MCPServer) -> None:

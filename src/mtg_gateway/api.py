@@ -20,7 +20,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from . import deck_stats
-from .decks import DeckError, current_client
+from .decks import DeckError, current_client, scopes_allow_writes
 from .pages import BROWSER_CLIENT_ID, _csrf, browser_session, read_limited
 from .views import deck_brief, deck_out
 
@@ -46,6 +46,7 @@ STATUS_FOR = {
     "stale": 409,
     "rate_limited": 429,
     "other_client": 403,
+    "other_account": 409,
     "unavailable": 503,
     "contract": 502,
     "auth": 409,
@@ -59,6 +60,7 @@ class Caller:
     sub: str
     actor: str  # OAuth client id, or "__browser__"
     via: str  # "api" for a bearer token, "browser" for the cookie
+    scopes: tuple[str, ...] = ()  # the bearer token's OAuth scopes (none for the browser)
 
 
 def fail(exc: DeckError) -> JSONResponse:
@@ -85,7 +87,7 @@ async def caller_for(state: AppState, request: Request, *, write: bool) -> Calle
         if access is None or not access.subject:
             return _unauth("The access token is missing, expired or revoked.")
         # load_access_token refuses disabled members and anyone outside MTG_REQUIRED_GROUP.
-        return Caller(access.subject, access.client_id, "api")
+        return Caller(access.subject, access.client_id, "api", tuple(access.scopes or ()))
     sub, sid = browser_session(state, request)
     if not sub or not sid:
         return _unauth()
@@ -105,7 +107,7 @@ async def json_body(request: Request) -> dict[str, Any] | Response:
         return {}
     try:
         data = json.loads(raw)
-    except ValueError:
+    except (ValueError, RecursionError):  # RecursionError: deeply nested arrays or objects
         return JSONResponse({"ok": False, "error": "invalid", "message": "body must be JSON"}, 400)
     if not isinstance(data, dict):
         return JSONResponse({"ok": False, "error": "invalid", "message": "body must be a JSON object"}, 400)
@@ -135,6 +137,17 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                 who = await caller_for(state, request, write=write)
                 if isinstance(who, Response):
                     return who
+                if write and who.via == "api" and not scopes_allow_writes(who.scopes):
+                    return JSONResponse(
+                        {
+                            "ok": False,
+                            "error": "insufficient_scope",
+                            "message": "This app was connected read-only (scope mtg.read); it cannot "
+                            "change anything. Reconnect it with the mtg scope to propose changes.",
+                        },
+                        403,
+                        headers={"WWW-Authenticate": 'Bearer error="insufficient_scope", scope="mtg"'},
+                    )
                 current_client.set(who.actor)
                 if state.metrics is not None:
                     state.metrics.record("api", f"{method} {path}", who.sub)
@@ -347,7 +360,8 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
 
     @route("/reports/{rid}", "DELETE", write=True)
     async def delete_report(request: Request, who: Caller) -> Response:
-        reports.delete(who.sub, request.path_params["rid"])
+        # an app deletes only reports it ran; the member's browser any of theirs
+        reports.delete(who.sub, request.path_params["rid"], client_id=who.actor if who.via == "api" else None)
         return ok({})
 
     # -- my activity ----------------------------------------------------------

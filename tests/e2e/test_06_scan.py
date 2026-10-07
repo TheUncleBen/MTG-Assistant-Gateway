@@ -18,7 +18,8 @@ from .test_04_operations import GATEWAY, container_of, sh
 
 # Every other page may load only the gateway's own scripts (feedback.js, the offline service worker).
 STRICT_CSP = (
-    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; worker-src 'self'; form-action 'self'"
+    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; worker-src 'self'; "
+    "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
 )
 STATE: dict[str, str] = {}
 

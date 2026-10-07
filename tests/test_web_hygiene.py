@@ -250,7 +250,7 @@ async def test_proxy_limits_calls_per_user_and_has_a_deadline() -> None:
     assert proxy._in_flight == {}
 
     stuck = MysticForgeProxy("http://x/mcp", client_factory=lambda: _SlowClient(), deadline=0.05)
-    out = await asyncio.wait_for(stuck.call("goldfish_run", {"n": 20000}, owner="a"), 5)
+    out = await asyncio.wait_for(stuck.call("goldfish_run", {"n": 2000}, owner="a"), 5)
     assert out.is_error and "longer than" in out.content[0].text  # type: ignore[union-attr]
     assert stuck._in_flight == {}
 

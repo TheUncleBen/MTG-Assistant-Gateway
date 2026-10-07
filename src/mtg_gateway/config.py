@@ -93,6 +93,9 @@ def _token_auth_method_env(name: str, default: str) -> str:
     return raw
 
 
+DEFAULT_OIDC_SCOPES = "openid profile email offline_access"
+
+
 def _int_env(name: str, default: int, *, lo: int, hi: int) -> int:
     raw = _env(name, str(default)) or str(default)
     try:
@@ -157,6 +160,9 @@ class Settings:
         "mtg-assistant-gateway/0.1 (+https://github.com/TheUncleBen/MTG-Assistant-Gateway)"
     )
     archidekt_min_interval: float = 1.0
+    # Archidekt work one member may start per 10 minutes (decks.RateBudget), proxied archidekt_*
+    # research calls included.
+    archidekt_calls_per_10_min: int = 120
     scryfall_lookup_interval: float = 0.5  # seconds between single-card Scryfall lookups (scan)
     # Card-scan match thresholds (see scan.service.ScanThresholds).
     scan_fuzzy_min_similarity: float = 0.65
@@ -180,6 +186,8 @@ class Settings:
     access_token_ttl: int = 3600
     refresh_token_ttl: int = 30 * 24 * 3600
     reauth_interval: int = 7 * 24 * 3600
+    membership_check_ttl: int = 5
+    oidc_previous_issuers: list[str] = field(default_factory=list)
     auth_code_ttl: int = 300
     login_ttl: int = 600
     listen_host: str = "0.0.0.0"
@@ -275,7 +283,16 @@ def load_settings() -> Settings:
         oidc_issuer=oidc_issuer,
         oidc_client_id=_env("MTG_OIDC_CLIENT_ID", required=True) or "",
         oidc_client_secret=_read_secret("MTG_OIDC_CLIENT_SECRET_FILE") or "",
-        oidc_scopes=_env("MTG_OIDC_SCOPES", "openid profile email") or "openid profile email",
+        # offline_access is in the default: the provider's refresh token is what lets the gateway
+        # keep asking it whether a member is still allowed in (membership.py). A value set here is
+        # used as is, for providers that refuse that scope (members then sign in again whenever
+        # the provider's access token runs out).
+        oidc_scopes=_env("MTG_OIDC_SCOPES", DEFAULT_OIDC_SCOPES) or DEFAULT_OIDC_SCOPES,
+        oidc_previous_issuers=[
+            i.strip().rstrip("/")
+            for i in (_env("MTG_OIDC_PREVIOUS_ISSUERS", "") or "").split(",")
+            if i.strip()
+        ],
         required_group=required_group,
         admin_group=_env("MTG_ADMIN_GROUP") or None,
         oidc_groups_claim=_groups_claim_env("MTG_OIDC_GROUPS_CLAIM", "groups"),
@@ -299,6 +316,7 @@ def load_settings() -> Settings:
         writes_enabled=_bool_env("MTG_WRITES_ENABLED", False),
         archidekt_base=(_env("MTG_ARCHIDEKT_BASE", "https://archidekt.com/api") or "").rstrip("/"),
         archidekt_backups=_bool_env("MTG_ARCHIDEKT_BACKUPS", True),
+        archidekt_calls_per_10_min=_int_env("MTG_ARCHIDEKT_CALLS_PER_10_MIN", 120, lo=10, hi=100_000),
         archidekt_backup_folder=(_env("MTG_ARCHIDEKT_BACKUP_FOLDER", "MTG Gateway backups") or "").strip()[
             :100
         ]
@@ -306,6 +324,7 @@ def load_settings() -> Settings:
         access_token_ttl=_int_env("MTG_ACCESS_TOKEN_TTL", 3600, lo=60, hi=86400),
         refresh_token_ttl=_int_env("MTG_REFRESH_TOKEN_TTL", 30 * 24 * 3600, lo=3600, hi=365 * 24 * 3600),
         reauth_interval=_int_env("MTG_REAUTH_INTERVAL", 7 * 24 * 3600, lo=3600, hi=365 * 24 * 3600),
+        membership_check_ttl=_int_env("MTG_MEMBERSHIP_CHECK_TTL", 5, lo=0, hi=60),
         listen_host=_env("MTG_LISTEN_HOST", "0.0.0.0") or "0.0.0.0",
         listen_port=_int_env("MTG_LISTEN_PORT", 8080, lo=1, hi=65535),
         log_level=(_env("MTG_LOG_LEVEL", "INFO") or "INFO").upper(),

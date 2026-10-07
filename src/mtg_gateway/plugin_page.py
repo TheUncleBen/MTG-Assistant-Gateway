@@ -164,13 +164,16 @@ AGENT_RULES = """## If you are an AI agent doing this install
 
 BLOCKED_TOOLS = """## If a tool is blocked
 
-Some apps or plans allow only tools that read. Everything except two tools is
+Some apps or plans allow only tools that read. Everything except four tools is
 marked read-only, so research, goldfish simulation, reading decks, scanning
-and making deck proposals keep working. The two write tools have browser
+and making deck proposals keep working. The four write tools have browser
 fallbacks:
 
 - `apply_proposal`: open the proposal's review link (`review_url`, or
   `{public_url}/proposals`) and press Apply there. Same preview, same checks.
+- `reject_proposal`: press "Reject this proposal" on the same review page.
+- `run_deck_report`: press "Run deck report" on the deck's page under
+  `{public_url}/decks`.
 - `save_scan_session`: scan at `{public_url}/scan` in the browser instead, or
   keep the resolved list in the chat.
 """

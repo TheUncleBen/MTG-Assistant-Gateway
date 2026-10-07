@@ -67,6 +67,7 @@ step_certs() {
   [ -f "$GEN/edge.crt" ] && { step_scryfall_cert; return; }
   log "generating a test CA and an edge certificate for mtg.e2e.test and auth.e2e.test"
   openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj "/CN=MTG Assistant Gateway e2e test CA" \
+    -addext "keyUsage=critical,keyCertSign,cRLSign" \
     -keyout "$GEN/ca.key" -out "$GEN/ca.crt" 2>/dev/null
   openssl req -newkey rsa:2048 -nodes -subj "/CN=mtg.e2e.test" \
     -keyout "$GEN/edge.key" -out "$GEN/edge.csr" 2>/dev/null
