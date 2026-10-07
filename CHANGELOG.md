@@ -7,6 +7,14 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.1] - 2026-10-07
+
+### Fixed
+
+- Consent and review pages on a touch screen: the tap that unlocks the page never acts, however
+  slowly the browser delivers its click. The guard used to rely on the click arriving within the
+  settle time, which a busy device could miss, so a single tap could approve.
+
 ## [0.7.0] - 2026-10-07
 
 Archidekt parity for the pages: browse and search public decks, a home page
