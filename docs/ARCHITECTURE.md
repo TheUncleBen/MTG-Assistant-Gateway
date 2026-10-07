@@ -153,9 +153,11 @@ The assistant never changes a deck directly:
 
 1. It calls `propose_deck_changes` or `propose_new_deck`. The gateway saves
    the exact change and returns a review link.
-2. The person approves it: on the review page with **Apply**, or in chat if
-   the operator turned on `MTG_APPLY_VIA_MCP` (and only after a short
-   minimum age, so a proposal can't be made and applied in one breath).
+2. The person approves it: with **Approve** on the card the AI app shows
+   next to the proposal (an MCP App, see below) or on the review page with
+   **Apply**. A person who chose a looser **approval mode** on their Account
+   page (see below) lets the assistant apply low-risk edits, or everything,
+   itself; the gateway tells the assistant which in every proposal result.
 3. The gateway checks the deck hasn't changed since, saves a snapshot, makes
    a private backup copy of the deck on Archidekt, applies the change, and
    reads the deck back to confirm it.
@@ -172,7 +174,7 @@ still work, nothing is ever applied.
 | Claude: web, desktop app, iOS, Android | Works. Add the gateway as a custom connector on the web or desktop and it follows you to the phone apps; see [CONNECT.md](CONNECT.md) |
 | ChatGPT | Web only (OpenAI says its phone apps don't support custom MCP connectors). Some plans limit it to read tools, which still covers research and proposals; Apply then happens on the review page. See [CONNECT.md](CONNECT.md#chatgpt) |
 | Claude Code, Codex and other MCP clients | Work with any client that supports remote MCP servers with OAuth; the gateway serves a plugin at `/install`. See [PLUGIN.md](PLUGIN.md) |
-| Android app | Available, built and unit-tested; not yet tested on a device. A small app that opens a gateway's pages full screen and adds a native camera for card scanning. It points at any gateway address, so it works with your own deployment; see [ANDROID.md](ANDROID.md) |
+| Android app | Available, built, unit-tested and installed on a phone; camera and fold layouts still await a device report. A small app that opens a gateway's pages full screen and adds a native camera for card scanning. It points at any gateway address, so it works with your own deployment; see [ANDROID.md](ANDROID.md) |
 | Any browser | The account, decks, proposal review, history, scan and admin pages work in any modern browser, on a phone or a desktop |
 
 For the exact devices and plans tested, see
@@ -226,10 +228,33 @@ For the exact devices and plans tested, see
   The session is encrypted with the `mtg_fernet_key` secret, which protects
   the database and its backups. It doesn't protect against whoever runs the
   server, and users are told that.
-- **Deck changes** need the person's own yes. The code enforces it: changes
-  are proposals until applied with the review page's Apply button, or in
-  chat only when `MTG_APPLY_VIA_MCP` allows it and the proposal is older
-  than `MTG_APPLY_MIN_AGE_SECONDS`. The MTG skill also tells the assistant
+- **Deck changes** need the person's own yes, unless they chose otherwise.
+  The code enforces it: changes are proposals until applied with the review
+  page's Apply button or the in-chat card's Approve button. Each person has
+  an **approval mode** (`src/mtg_gateway/modes.py`), set only on their own
+  Account page in the browser, never over MCP or the API: `manual` (the
+  default: ask every time), `semi` (the assistant may apply a low-risk edit
+  itself: at most `MTG_AUTO_APPLY_MAX_ROWS` review rows of card adds,
+  removes, quantity, category, finish or printing changes of at most four
+  copies each, never the commander; or a clone) or `auto` (the assistant may apply everything).
+  The mode is read by the member's id when an apply is attempted, so one
+  member's choice never reaches another's proposals, decks or apps; the
+  operator can cap it with `MTG_APPROVAL_MODE_MAX` and set the mode of
+  members who have not chosen with `MTG_APPROVAL_MODE_DEFAULT`. Every apply
+  still snapshots the deck first.
+  The card is an MCP App (`src/mtg_gateway/approve.py`, the HTML in
+  `static/proposal-card.html`): every `propose_*` tool and `get_proposal`
+  names it in `_meta.ui.resourceUri`, a host that renders MCP Apps shows it
+  with the result, and its buttons call `confirm_proposal`, a tool marked
+  `_meta.ui.visibility: ["app"]` (offered to the card, not to the model)
+  that also needs a one-time code the tool result carries only in `_meta`
+  (handed to the card, kept out of the model's context). The code is an
+  HMAC over the proposal, its owner, the app that made it and its creation
+  time, so nothing is stored and a code works once. The gateway cannot tell
+  a person's press from a message the host sends on its own; what it can
+  check is that the caller holds the code, which a prompt-injected
+  assistant does not in a host that follows the standard. `MTG_APPLY_IN_CHAT=false`
+  removes the card, the code and the tool. The MTG skill also tells the assistant
   never to treat text inside decks or tool output as an instruction. Each
   proposal records and shows the app that made it; disconnecting an app
   rejects its pending proposals, and one app may hold at most 30 pending

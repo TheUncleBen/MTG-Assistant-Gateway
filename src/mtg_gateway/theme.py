@@ -118,6 +118,7 @@ svg.i{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:2;stroke-l
 .topbar nav a[aria-current=page]{color:var(--orange)}
 .topbar nav form{display:inline;margin:0}
 .topbar .icon-btn{width:40px;padding:0;justify-content:center;font-size:1.2rem}
+.topbar .icon-btn img.av{width:28px;height:28px;border-radius:50%;object-fit:cover;display:block}
 
 /* dropdown menus (details/summary, no script): phatDropdown trigger + menu panel */
 details.dd{position:relative;margin:0}
@@ -379,6 +380,15 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
    folding, rotating, split screen and pop-up windows re-flow at once; see _MOBILE_RULES and
    _RAIL_RULES below. */
 .tabbar{display:none}
+.topbar .searchbtn{display:none}
+.tabbar details.more{position:relative}
+.tabbar details.more summary{list-style:none;cursor:pointer}
+.tabbar details.more summary::-webkit-details-marker{display:none}
+.tabbar details.more .menu.sheet{position:fixed;left:50%;transform:translateX(-50%);top:auto;
+  bottom:calc(56px + env(safe-area-inset-bottom) + .5rem);width:min(18rem,calc(100vw - 2rem));
+  z-index:30;border-radius:16px;padding:.5rem}
+.tabbar details.more .menu.sheet a{min-height:44px;padding:0 1rem}
+.tabbar details.more .menu.sheet a svg{width:20px;height:20px}
 __MOBILE__
 /* search / filter rows */
 .search{display:flex;gap:0;margin:0 0 .75rem}
@@ -403,22 +413,29 @@ _MOBILE_RULES = """
   body{b} .topbar .wrap{padding:0 1rem;gap:.5rem;padding-left:max(1rem,env(safe-area-inset-left));
     padding-right:max(1rem,env(safe-area-inset-right))}
   body{b} .topbar nav.site a:not(.keep){display:none}
+  body{b} .topbar .searchbtn{display:inline-flex}
+  body{b} .tabbar > a.railonly{display:none}
   body{b}.has-tabbar main.wrap{padding-bottom:calc(5.5rem + env(safe-area-inset-bottom))}
   body{b}.has-tabbar footer{padding-bottom:calc(5.5rem + env(safe-area-inset-bottom))}
   body{b} .tabbar{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;position:fixed;left:0;right:0;
     bottom:0;z-index:8;background:var(--toolbar-bg);color:var(--toolbar-text);
     border-top:1px solid var(--border);
     padding-bottom:env(safe-area-inset-bottom);box-shadow:0 -2px 10px rgba(0,0,0,.08)}
-  body{b} .tabbar a{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.2rem;
+  body{b} .tabbar > a{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.2rem;
     height:56px;color:var(--toolbar-text);text-decoration:none;font-weight:700;font-size:11px;
     transition:color .2s ease;-webkit-tap-highlight-color:transparent}
-  body{b} .tabbar a svg{width:22px;height:22px;transition:transform .15s ease}
-  body{b} .tabbar a:active svg{transform:scale(.92)}
-  body{b} .tabbar a:hover,body{b} .tabbar a:focus-visible,
-  body{b} .tabbar a[aria-current=page]{color:var(--orange)}
-  body{b} .tabbar a[aria-current=page]::before{content:'';position:absolute;top:0;width:2.5rem;height:3px;
+  body{b} .tabbar > a svg{width:22px;height:22px;transition:transform .15s ease}
+  body{b} .tabbar > a:active svg{transform:scale(.92)}
+  body{b} .tabbar > a:hover,body{b} .tabbar > a:focus-visible,
+  body{b} .tabbar > a[aria-current=page]{color:var(--orange)}
+  body{b} .tabbar > a[aria-current=page]::before{content:'';position:absolute;top:0;width:2.5rem;height:3px;
     background:var(--orange);border-radius:0 0 3px 3px}
-  body{b} .tabbar a{position:relative}
+  body{b} .tabbar > a{position:relative}
+  body{b} .tabbar details.more summary{display:flex;flex-direction:column;align-items:center;
+    justify-content:center;gap:.2rem;height:56px;color:var(--toolbar-text);font-weight:700;font-size:11px;
+    position:relative;-webkit-tap-highlight-color:transparent}
+  body{b} .tabbar details.more summary svg{width:22px;height:22px}
+  body{b} .tabbar details.more summary.on,body{b} .tabbar details.more[open] summary{color:var(--orange)}
   body{b} details.dd .menu{min-width:14rem}
 """
 # The medium layout: the same tabs as a navigation rail (80px wide, icon in a pill with the label
@@ -434,15 +451,27 @@ _RAIL_RULES = """
     color:var(--toolbar-text);border-right:1px solid var(--border);overflow-y:auto;scrollbar-width:none;
     padding:calc(.75rem + env(safe-area-inset-top)) 0 calc(.5rem + env(safe-area-inset-bottom))
       env(safe-area-inset-left)}
-  body{b} .tabbar a{position:relative;display:flex;flex-direction:column;align-items:center;
+  body{b} .tabbar > a{position:relative;display:flex;flex-direction:column;align-items:center;
     justify-content:center;gap:.3rem;height:64px;flex:none;color:var(--toolbar-text);text-decoration:none;
     font-weight:700;font-size:11px;-webkit-tap-highlight-color:transparent}
-  body{b} .tabbar a svg{width:24px;height:24px;position:relative;z-index:1}
-  body{b} .tabbar a::before{content:'';position:absolute;top:7px;left:50%;width:56px;height:32px;
+  body{b} .tabbar > a svg{width:24px;height:24px;position:relative;z-index:1}
+  body{b} .tabbar > a::before{content:'';position:absolute;top:7px;left:50%;width:56px;height:32px;
     margin-left:-28px;border-radius:16px;background:transparent;transition:background .15s ease}
-  body{b} .tabbar a:hover::before,body{b} .tabbar a:focus-visible::before{background:rgba(127,127,127,.18)}
-  body{b} .tabbar a[aria-current=page]{color:var(--orange)}
-  body{b} .tabbar a[aria-current=page]::before{background:rgba(255,111,0,.22)}
+  body{b} .tabbar > a:hover::before,
+  body{b} .tabbar > a:focus-visible::before{background:rgba(127,127,127,.18)}
+  body{b} .tabbar > a[aria-current=page]{color:var(--orange)}
+  body{b} .tabbar > a[aria-current=page]::before{background:rgba(255,111,0,.22)}
+  body{b} .tabbar details.more summary{position:relative;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:.3rem;height:64px;flex:none;color:var(--toolbar-text);
+    font-weight:700;
+    font-size:11px;-webkit-tap-highlight-color:transparent}
+  body{b} .tabbar details.more summary svg{width:24px;height:24px;position:relative;z-index:1}
+  body{b} .tabbar details.more summary::before{content:'';position:absolute;top:7px;left:50%;width:56px;
+    height:32px;margin-left:-28px;border-radius:16px;background:transparent}
+  body{b} .tabbar details.more summary.on,body{b} .tabbar details.more[open] summary{color:var(--orange)}
+  body{b} .tabbar details.more[open] summary::before{background:rgba(255,111,0,.22)}
+  body{b} .tabbar details.more .menu.sheet{left:calc(84px + env(safe-area-inset-left));transform:none;
+    bottom:auto;top:calc(7rem + env(safe-area-inset-top) + 4 * 64px)}
   body{b} details.dd .menu{min-width:14rem}
 """
 CSS = CSS.replace(
@@ -560,13 +589,22 @@ NAV_LINKS = [
     ("/proposals", "Proposals", "proposals"),
     ("/history", "History", "history"),
 ]
-# The phone tab bar: five tabs, then More (the home page lists every section).
+# The tabs, as Material's navigation bar (3 to 5 destinations) and rail (up to 7) have them: on a
+# compact screen Decks, Scan, Collection, Proposals and More, with Search as the icon in the top
+# bar; the rail has room for Search as a sixth tab. More opens a sheet with the remaining pages
+# (Home, History, Guide, Admin, Account) so nothing is more than two taps away.
 TAB_LINKS = [
-    ("/decks", "Decks", "decks"),
-    ("/search", "Search", "search"),
-    ("/scan", "Scan", "scan"),
-    ("/collection", "Collection", "collection"),
-    ("/", "More", "more"),
+    ("/decks", "Decks", "decks", ""),
+    ("/search", "Search", "search", "railonly"),
+    ("/scan", "Scan", "scan", ""),
+    ("/collection", "Collection", "collection", ""),
+    ("/proposals", "Proposals", "proposals", ""),
+]
+MORE_LINKS = [
+    ("/", "Home", "home"),
+    ("/history", "History", "history"),
+    ("/guide", "Guide", "guide"),
+    ("/account", "Account", "account"),
 ]
 
 
@@ -616,7 +654,8 @@ def render(
         )
         account_menu = (
             "<details class='dd'><summary class='icon-btn' aria-label='Account menu'>"
-            f"{icon('user')}</summary><div class='menu'>"
+            # The member's own picture (their provider's, else their initials: /account/avatar).
+            "<img class='av' src='/account/avatar' alt='' width='28' height='28'></summary><div class='menu'>"
             f"<a href='/'>{icon('home')}Home</a>"
             f"<a href='/account'>{icon('account')}Account</a>"
             f"<a href='/proposals'>{icon('proposals')}Proposals</a>"
@@ -650,15 +689,28 @@ def render(
             + "".join(a(href, label) for href, label, _ic in links)
             + "</nav>"
         )
-        right = f"<nav class='user' aria-label='Account'>{account_menu}</nav>"
-        tabs = list(TAB_LINKS)
+        search_btn = (
+            f"<a class='icon-btn searchbtn' href='/search' aria-label='Search decks'"
+            f"{' aria-current=page' if cur == '/search' else ''}>{icon('search')}</a>"
+        )
+        right = f"<nav class='user' aria-label='Account'>{search_btn}{account_menu}</nav>"
+        more_links = list(MORE_LINKS) + ([("/admin", "Admin", "settings")] if admin else [])
+        more_open = cur in {href for href, _l, _i in more_links} and cur != "/"
         tabbar = (
             "<nav class='tabbar' aria-label='Sections'>"
             + "".join(
-                f"<a href='{href}'{' aria-current=page' if cur == href else ''}>{icon(ic)}{label}</a>"
-                for href, label, ic in tabs
+                f"<a href='{href}' class='{cls}'{' aria-current=page' if cur == href else ''}>"
+                f"{icon(ic)}{label}</a>"
+                for href, label, ic, cls in TAB_LINKS
             )
-            + "</nav>"
+            + "<details class='dd more'><summary"
+            + (" class='on'" if more_open else "")
+            + f" aria-label='More sections'>{icon('more')}More</summary><div class='menu sheet'>"
+            + "".join(
+                f"<a href='{href}'{' aria-current=page' if cur == href else ''}>{icon(ic)}{label}</a>"
+                for href, label, ic in more_links
+            )
+            + "</div></details></nav>"
         )
     else:
         right = ""

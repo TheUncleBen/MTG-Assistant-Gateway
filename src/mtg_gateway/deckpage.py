@@ -897,8 +897,10 @@ DECK_CSS = """
 .banner .social .soc.on:hover{color:#fff;filter:brightness(1.08)}
 .banner .social .soc svg{width:18px;height:18px}
 .banner .social .soc[disabled]{opacity:.6;cursor:progress}
-.banner .social .confirm{display:inline-flex;align-items:center;gap:.4rem;background:#fff;color:#111;
-  border-radius:17px;padding:0 .35rem 0 .85rem;height:34px;font-size:.9rem;font-weight:700}
+.banner .social .soc[hidden]{display:none}
+.banner .social .confirm{display:inline-flex;align-items:center;flex-wrap:wrap;gap:.4rem;background:#fff;
+  color:#111;border-radius:17px;padding:.25rem .35rem .25rem .85rem;min-height:34px;max-width:100%;
+  font-size:.9rem;font-weight:700;box-sizing:border-box}
 .banner .social .confirm button{margin:0;height:26px;padding:0 .7rem;border-radius:13px;font-size:.85rem}
 .banner .social .note{flex-basis:100%;color:#ffd9b3;font-size:.9rem}
 .banner .social .note a{color:#fff}

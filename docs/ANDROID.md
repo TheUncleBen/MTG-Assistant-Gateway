@@ -15,9 +15,10 @@ may change that from 2027; see [section 10](#10-googles-developer-verification).
 
 This page covers using the app, how it is distributed, building and signing it,
 and what Google's developer-verification programme means for it. It is honest
-about what was and wasn't tested: at the time of writing the app had been built,
-unit-tested and its page hand-off exercised in a headless browser, not yet run
-on a phone.
+about what was and wasn't tested: the app has been built, unit-tested, its
+page hand-off exercised in a headless browser, and installed and signed in on
+the owner's phone; the camera scan and the fold layouts on a real device are
+still the owner's test to report.
 
 ## Contents
 
@@ -188,8 +189,9 @@ the text it read plus the small art fingerprint that tells printings apart.
   controls the right. Flat or fully open, the controls sit over the bottom of
   the viewfinder as on any phone. A hinge too close to an edge of the panel is
   ignored rather than leaving a sliver of screen for one side.
-- Written against the WindowManager API, not tried on a foldable yet; the
-  split geometry has unit tests (`FoldSplit`).
+- Written against the WindowManager API; the split geometry has unit tests
+  (`FoldSplit`), and the half-folded layout still awaits a report from a real
+  foldable.
 
 ## 5. What it needs from the gateway
 
@@ -535,11 +537,10 @@ screen is shown without a prefill, so a link can't pick your gateway for you.
 
 ## 14. Not done yet
 
-- **Not run on a device.** Built, unit-tested and exercised in a headless
-  browser only; the first device test is the owner's. Anything in this page
-  about on-device behaviour (sign-in in the WebView, the camera controls, the
-  photo hand-off, the fold layouts) is how the code is written, not something
-  observed working.
+- **Device coverage is thin.** The app has been installed and signed in on
+  one phone; the camera controls, the photo hand-off and the fold layouts are
+  how the code is written and unit-tested, not yet something observed working
+  on a device.
 - **Camera choice**: CameraX's default back camera. Phones with several back
   cameras may prefer another one.
 - **Developer registration** for 2027 ([section 10](#10-googles-developer-verification))

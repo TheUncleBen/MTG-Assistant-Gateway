@@ -169,7 +169,7 @@ def results_html(found: dict[str, Any], query: dict[str, Any], *, heading: str) 
     }
     count = found.get("count")
     if isinstance(count, int):
-        about = f"About {count:,} decks" if count >= 1000 else f"{count} decks"
+        about = f"About {count:,} decks" if count >= 1000 else f"{count} deck{'' if count == 1 else 's'}"
     else:
         about = ""
     head = f"<div class='results-head'><h2>{_esc(heading)}</h2><p class='muted'>{_esc(about)}</p></div>"

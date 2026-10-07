@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from . import deck_stats
+from . import deck_stats, modes
 from .decks import DeckError, current_client, scopes_allow_writes
 from .pages import BROWSER_CLIENT_ID, _csrf, browser_session, read_limited
 from .views import deck_brief, deck_out
@@ -40,7 +40,6 @@ STATUS_FOR = {
     "not_linked": 409,
     "writes_disabled": 403,
     "browser_required": 403,
-    "apply_too_soon": 425,
     "not_pending": 409,
     "already_applied": 409,
     "stale": 409,
@@ -259,7 +258,18 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
             return data
         kind = str(data.get("kind") or ("new_deck" if "name" in data and "deck_id" not in data else "edit"))
         if kind == "edit":
-            return ok(await decks.propose(who.sub, str(data.get("deck_id", "")), data.get("changes")), 201)
+            p = await decks.propose(who.sub, str(data.get("deck_id", "")), data.get("changes"))
+            # The member's own edit in the app is their approval (``apply: true``): it is applied at
+            # once with its snapshot, unless the change is big enough to ask first (modes.hand_edit_confirm),
+            # when the page shows the reason and sends ``confirmed: true``. Bearer tokens (apps,
+            # assistants) cannot use this: their proposals wait for the approval mode as always.
+            if who.via == "browser" and data.get("apply") is True:
+                why = modes.hand_edit_confirm("edit", p.get("rows"))
+                if why and data.get("confirmed") is not True:
+                    return ok({**p, "applied": False, "needs_confirm": True, "why": why}, 201)
+                result = await decks.apply(who.sub, p["proposal_id"], via="browser")
+                return ok({**p, "applied": True, "result": result}, 201)
+            return ok(p, 201)
         if kind == "new_deck":
             return ok(
                 await decks.propose_new_deck(
@@ -294,14 +304,8 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
     @route("/proposals/{pid}/apply", "POST", write=True)
     async def apply(request: Request, who: Caller) -> Response:
         pid = request.path_params["pid"]
-        if who.via == "api" and s.writes_enabled and not s.apply_via_mcp:
-            p = decks.describe(who.sub, pid)
-            raise DeckError(
-                "browser_required",
-                "This gateway applies proposals only from the review page in the browser.",
-                review_url=p["review_url"],
-                state=p["state"],
-            )
+        # A bearer token applies under the member's approval mode, exactly like apply_proposal
+        # over MCP (decks.apply decides); the browser session is the member's own press.
         return ok(await decks.apply(who.sub, pid, via="browser" if who.via == "browser" else "mcp"))
 
     @route("/proposals/{pid}/reject", "POST", write=True)

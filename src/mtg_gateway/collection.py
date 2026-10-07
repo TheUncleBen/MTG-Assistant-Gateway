@@ -3,8 +3,8 @@
 Nothing about the cards a person owns is stored on the gateway. The ``/collection`` page, its JSON
 API and the ``*_collection`` tools read and write the member's own Archidekt Collection through
 the Archidekt session they linked on the Account page (the same routes archidekt.com's collection
-page uses; see ``ArchidektClient.collection_page`` and friends). A scan is a short-lived inbox:
-once its cards are saved here or into a deck, the scan session is gone.
+page uses; see ``ArchidektClient.collection_page`` and friends). A scan is a draft the member keeps
+until its cards are saved here or into a deck, which removes it.
 
 Every call runs under the member's own Archidekt session, so nothing here can read another
 member's cards. Rows carry Archidekt's record id (an integer); card images come from Scryfall by
@@ -84,6 +84,37 @@ def _wrap(exc: Exception) -> CollectionError:
 def _finish_of(modifier: Any) -> str:
     m = str(modifier or "Normal").strip().lower()
     return "foil" if m == "foil" else "etched" if m == "etched" else "nonfoil"
+
+
+def normalise_items(items: Any) -> list[dict[str, Any]]:
+    """Validate the cards an add names (a scan item with ``card``, ``{name, set?, collector_number?,
+    scryfall_id?, quantity?, finish?, condition?}`` or a plain name) into flat records the add and
+    a stored proposal both accept. Raises CollectionError for anything unusable."""
+    if not isinstance(items, list) or not items:
+        raise CollectionError("invalid", "give a non-empty list of cards")
+    if len(items) > MAX_ITEMS_PER_CALL:
+        raise CollectionError("invalid", f"at most {MAX_ITEMS_PER_CALL} cards per call")
+    out: list[dict[str, Any]] = []
+    for i, raw in enumerate(items):
+        if isinstance(raw, str):
+            raw = {"name": raw}
+        if not isinstance(raw, dict):
+            raise CollectionError("invalid", f"card {i} must be an object")
+        card = raw.get("card") if isinstance(raw.get("card"), dict) else raw
+        opts = _item_options(raw, i)
+        sid = str(card.get("scryfall_id") or "").strip().lower()
+        spec = {
+            "name": _clean(card.get("name"), 200),
+            "set": _clean(card.get("set") or card.get("set_code"), 10).lower(),
+            "collector_number": _clean(card.get("collector_number"), 20),
+            "scryfall_id": sid if _ID.fullmatch(sid) else "",
+        }
+        if not spec["name"] and not spec["scryfall_id"] and not (spec["set"] and spec["collector_number"]):
+            raise CollectionError("invalid", f"card {i}: give a name, or a set and collector number")
+        if not spec["name"] and spec["scryfall_id"]:
+            spec["name"] = "?"
+        out.append({**spec, **opts})
+    return out
 
 
 def row_out(rec: dict[str, Any]) -> dict[str, Any]:
@@ -214,34 +245,9 @@ class CollectionService:
         ``collector_number``; ``quantity``, ``finish`` (or ``foil: true``) and ``condition`` are
         optional. A printing already in the collection in that finish gets its copies added to the
         existing record (as the site's own add does); otherwise a record is created."""
-        if not isinstance(items, list) or not items:
-            raise CollectionError("invalid", "give a non-empty list of cards")
-        if len(items) > MAX_ITEMS_PER_CALL:
-            raise CollectionError("invalid", f"at most {MAX_ITEMS_PER_CALL} cards per call")
-        wanted: list[tuple[dict[str, Any], dict[str, Any]]] = []
-        for i, raw in enumerate(items):
-            if isinstance(raw, str):
-                raw = {"name": raw}
-            if not isinstance(raw, dict):
-                raise CollectionError("invalid", f"card {i} must be an object")
-            card = raw.get("card") if isinstance(raw.get("card"), dict) else raw
-            opts = _item_options(raw, i)
-            sid = str(card.get("scryfall_id") or "").strip().lower()
-            spec = {
-                "name": _clean(card.get("name"), 200),
-                "set": _clean(card.get("set") or card.get("set_code"), 10).lower(),
-                "collector_number": _clean(card.get("collector_number"), 20),
-                "scryfall_id": sid if _ID.fullmatch(sid) else "",
-            }
-            if (
-                not spec["name"]
-                and not spec["scryfall_id"]
-                and not (spec["set"] and spec["collector_number"])
-            ):
-                raise CollectionError("invalid", f"card {i}: give a name, or a set and collector number")
-            if not spec["name"] and spec["scryfall_id"]:
-                spec["name"] = "?"
-            wanted.append((spec, opts))
+        wanted = [
+            (it, {k: it[k] for k in ("quantity", "finish", "condition")}) for it in normalise_items(items)
+        ]
         self._user_id(sub)  # fail early when no account is linked
         existing: dict[tuple[Any, str], dict[str, Any]] = {}
         for rec in await self._raw_rows(sub, max_pages=10):
@@ -544,6 +550,9 @@ ul.collgrid .col .pic img{width:100%;height:100%;display:block;object-fit:cover}
 ul.collgrid .col .pic .qty{position:absolute;top:0;left:0;width:38px;height:38px;clip-path:polygon(0 0,
   0 100%,100% 0);
   border-radius:11px 0 0 0;background:#3a3a3a;color:#fff;font-size:12px;font-weight:700;padding:5px 0 0 7px}
+ul.collgrid .col .pic .ph{position:absolute;inset:0;display:flex;padding:.5rem .5rem .5rem 2.6rem;
+  color:var(--text);font-size:.85rem;line-height:1.2}
+ul.collgrid .col .pic .ph .nm{font-weight:700;overflow-wrap:anywhere}
 ul.collgrid .col .pic .finish{position:absolute;right:6px;bottom:6px}
 ul.collgrid .col .pic .cond{position:absolute;left:6px;bottom:6px;font-size:.7rem}
 ul.collgrid .col .cap{display:flex;flex-direction:column;margin:.35rem 0 .25rem;min-width:0}
@@ -922,7 +931,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         try:
             out = await service.add(who[0], data.get("items") or data.get("cards"), source=source)
             if source == "scan" and service.scan is not None and isinstance(data.get("scan_session"), str):
-                # The scan was an inbox for these cards; saved, it has done its job.
+                # The scan was the draft for these cards; saved, it has done its job.
                 service.scan.store.delete(data["scan_session"][:60], who[0])
         except CollectionError as exc:
             return _fail(exc)
@@ -1008,27 +1017,102 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
             return _err(exc)
         return {"ok": True, "cards": out["rows"], **{k: v for k, v in out.items() if k != "rows"}}
 
+    async def _removals(sub: str, remove: Any) -> list[dict[str, Any]]:
+        """Resolve ``remove`` entries ({id | name, quantity?}) against the collection now, so the
+        review rows name the cards and copies that will go."""
+        if remove is None:
+            return []
+        if not isinstance(remove, list) or len(remove) > 100:
+            raise CollectionError("invalid", "remove must be a list of up to 100 entries")
+        out: list[dict[str, Any]] = []
+        for entry in remove:
+            if isinstance(entry, str):
+                entry = {"name": entry}
+            if not isinstance(entry, dict):
+                raise CollectionError("invalid", "each remove entry is {id | name, quantity?}")
+            qty = entry.get("quantity")
+            if qty is not None and (not isinstance(qty, int) or isinstance(qty, bool) or qty < 1):
+                raise CollectionError("invalid", "quantity must be a whole number of 1 or more")
+            if entry.get("id") is not None and str(entry["id"]).strip():
+                rec = row_out(await service._record(sub, _rid(entry["id"])))
+                rows = [rec]
+            elif entry.get("name"):
+                rows = await service.find_by_name(sub, str(entry["name"]))
+                if not rows:
+                    raise CollectionError(
+                        "not_found", f"no card named '{_clean(str(entry['name']), 60)}' in your collection"
+                    )
+            else:
+                raise CollectionError("invalid", "each remove entry needs id or name")
+            left = qty
+            for r in rows:
+                if left is not None and left <= 0:
+                    break
+                take = int(r["quantity"]) if left is None else min(left, int(r["quantity"]))
+                out.append(
+                    {
+                        "id": int(r["id"]),
+                        "name": r["name"],
+                        "quantity": take,
+                        "printing": f"({r['set'].upper()} {r['collector_number']}"
+                        f"{', Foil' if r.get('finish') and r['finish'] != 'nonfoil' else ''})"
+                        if r.get("set")
+                        else None,
+                    }
+                )
+                if left is not None:
+                    left -= take
+        return out
+
+    async def apply_changes(sub: str, changes: dict[str, Any], progress: dict[str, Any]) -> dict[str, Any]:
+        """Apply an approved ``collection`` proposal: the stored adds go through service.add (the
+        same path as the page), the stored removals by record id. A scan the adds came from is
+        removed once every card went in. Called by DeckService under its Archidekt slot."""
+        adds = changes.get("add") or []
+        result: dict[str, Any] = {"added": [], "skipped": [], "removed": []}
+        try:
+            if adds:
+                source = str(changes.get("source") or "assistant")
+                out = await service.add(sub, adds, source=source)
+                result["added"], result["skipped"] = out["added"], out["skipped"]
+                progress["sent_entries"] = len(out["added"])
+                session_id = changes.get("scan_session_id")
+                if session_id and service.scan is not None and not out["skipped"]:
+                    service.scan.store.delete(str(session_id), sub)
+            for r in changes.get("remove") or []:
+                gone = await service.remove(sub, _rid(r["id"]), int(r["quantity"]))
+                result["removed"].append(gone["removed"])
+                progress["sent_entries"] = int(progress.get("sent_entries") or 0) + 1
+        except CollectionError as exc:
+            raise DeckError(exc.kind, str(exc)) from exc
+        return result
+
+    service.decks.collection_apply = apply_changes
+
     @server.tool(
-        name="add_to_collection",
-        title="Add cards to my collection",
+        name="propose_collection_changes",
+        title="Propose changes to my collection",
         description=(
-            "Record cards the user owns in their Archidekt Collection. Give `cards` (list of {name, "
-            "set?, collector_number?, quantity?, finish? (nonfoil|foil|etched), condition? "
-            "(NM|LP|MP|HP|DMG)} or plain names), `text` (one card per line, e.g. '2 Sol Ring (CMR) "
-            "472 *F*') or `scan_session` (the id or name of a scan session: every matched card in it "
-            "is added and the session is then removed). At most 100 cards per call; each takes about "
-            "a second. Cards Archidekt cannot match come back in `skipped`. Writes to the user's own "
-            "Archidekt account."
+            "Propose adding cards to, or removing cards from, the user's Archidekt Collection. Like a "
+            "deck edit this is a proposal: show its diff and review_url; it is applied by the user "
+            "(Approve on the card or the review page) or by you when assistant_may_apply is true, with "
+            "apply_proposal. `add`: list of {name, set?, collector_number?, quantity?, finish? "
+            "(nonfoil|foil|etched), condition? (NM|LP|MP|HP|DMG)} or plain names; `text`: one card per "
+            "line, e.g. '2 Sol Ring (CMR) 472 *F*'; `scan_session`: the id or name of a scan session, "
+            "every matched card in it is added and the session is removed once applied; `remove`: list "
+            "of {id (from list_collection) | name, quantity?} (no quantity removes every copy). At most "
+            "100 cards each way per proposal."
         ),
-        annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": True},
+        annotations={"readOnlyHint": False, "destructiveHint": True, "openWorldHint": True},
     )
-    async def add_to_collection(
-        cards: list[dict[str, Any] | str] | None = None,
+    async def propose_collection_changes(
+        add: list[dict[str, Any] | str] | None = None,
         text: str | None = None,
         scan_session: str | None = None,
+        remove: list[dict[str, Any] | str] | None = None,
     ) -> dict[str, Any]:
         sub = _sub()
-        items: list[Any] = list(cards or [])
+        items: list[Any] = list(add or [])
         source = "assistant"
         session_id = None
         try:
@@ -1061,46 +1145,15 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
                 ]
                 source = "scan"
                 session_id = sess.get("id")
-            out = await service.add(sub, items, source=source)
-            if session_id and service.scan is not None and not out["skipped"]:
-                service.scan.store.delete(str(session_id), sub)
+            adds = normalise_items(items) if items else []
+            removals = await _removals(sub, remove)
         except CollectionError as exc:
             return _err(exc)
-        return {"ok": True, **out}
-
-    @server.tool(
-        name="remove_from_collection",
-        title="Remove cards from my collection",
-        description=(
-            "Take cards out of the user's Archidekt Collection. Give `id` (a collection record id from "
-            "list_collection) or `name` (every printing of that name), and optionally `quantity` to remove "
-            "only some copies. Only after the user asked for it."
-        ),
-        annotations={"readOnlyHint": False, "destructiveHint": True, "openWorldHint": True},
-    )
-    async def remove_from_collection(
-        id: str | int | None = None,  # noqa: A002 - the tool argument is named for the user
-        name: str | None = None,
-        quantity: int | None = None,
-    ) -> dict[str, Any]:
-        sub = _sub()
         try:
-            if id is not None and str(id).strip():
-                return {"ok": True, **await service.remove(sub, _rid(id), quantity)}
-            if not name:
-                raise CollectionError("invalid", "give id or name")
-            rows = await service.find_by_name(sub, name)
-            if not rows:
-                raise CollectionError("not_found", f"no card named '{_clean(name, 60)}' in your collection")
-            removed = []
-            left = quantity
-            for r in rows:
-                if left is not None and left <= 0:
-                    break
-                take = None if left is None else min(left, int(r["quantity"]))
-                removed.append((await service.remove(sub, int(r["id"]), take))["removed"])
-                if left is not None:
-                    left -= take or 0
-            return {"ok": True, "removed": removed}
-        except CollectionError as exc:
-            return _err(exc)
+            # the source and scan id travel with the proposal so the apply can drop the scan
+            p = await service.decks.propose_collection(
+                sub, adds, removals, extra={"source": source, "scan_session_id": session_id}
+            )
+        except DeckError as exc:
+            return {"ok": False, "error": exc.kind, "message": str(exc), **exc.extra}
+        return {"ok": True, **p}

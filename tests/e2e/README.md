@@ -64,11 +64,11 @@ tests/e2e/run.sh test
 tests/e2e/run.sh down
 ```
 
-The workflow's matrix knows two Authentik versions: `2025.6.4`, which `docs/DEPLOY.md` was written
-against, and `2026.2.2`, the current release. A pull request runs the suite once, against the current
+The workflow's matrix knows three Authentik versions: `2025.6.4`, which `docs/DEPLOY.md` was written
+against, `2026.2.2`, and `2026.8.3`, the current release. A pull request runs the suite once, against the current
 release, and only when its diff touches the gateway package (scan UI excluded), the stack or Docker
-files, the suite itself or its dependencies; a manual run (Actions tab, "Run workflow") runs both
-versions, or the one chosen, and is how main is re-checked. `authentik_setup.py`
+files, the suite itself or its dependencies; a manual run (Actions tab, "Run workflow") runs
+`2025.6.4` and `2026.8.3`, or the one chosen, and is how main is re-checked. `authentik_setup.py`
 records what each version produced in `.generated/authentik-evidence.json` (version, applied
 blueprints, flows, provider fields, group bindings) and the sign-in test records the identity
 Authentik asserted in `.generated/identity-evidence.json`; the workflow prints and uploads both,

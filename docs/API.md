@@ -19,7 +19,8 @@ Every `/api/v1` call needs one of:
 A bearer token whose scopes are all read-only (`mtg.read` or a bare `read`, for an app that asked
 for `scope=mtg.read`) may call every `GET` route but none of the writes: they answer `403` with
 `"error": "insufficient_scope"`. The MCP tools that change something (`propose_*`, `apply_proposal`,
-`reject_proposal`, `run_deck_report`, `save_scan_session`) refuse such a token the same way. A token
+`confirm_proposal`, `reject_proposal`, `run_deck_report`, `save_scan_session`) refuse such a token
+the same way. A token
 with the default scope `mtg`, with no scope, or with any scope that is not read-only (for example
 `read write`) has full access, as before.
 
@@ -38,13 +39,15 @@ code and a human `message`:
 | `not_found` | 404 | not yours, or does not exist |
 | `forbidden` | 403 | the deck belongs to someone else |
 | `writes_disabled` | 403 | `MTG_WRITES_ENABLED` is off |
-| `browser_required` | 403 | this gateway applies proposals only on the review page (`review_url` is included) |
+| `browser_required` | 403 | this gateway applies proposals only on the review page or the in-chat card (`review_url` is included) |
+| `browser_pending` | 409 | MCP only: the client opened the review page for the user (URL elicitation) but the proposal is still pending |
+| `invalid_approval` | 403 | MCP only: `confirm_proposal` was called without the card's one-time code for this proposal, app and member; audited as `approval_refused` |
+| `in_chat_disabled` | 403 | MCP only: `MTG_APPLY_IN_CHAT` is off, so the card cannot apply; use the review page |
 | `insufficient_scope` | 403 | the bearer token is read-only (`mtg.read`) and the route writes |
 | `other_account` | 409 | a new-deck proposal was made for another Archidekt account than the one linked now |
 | `other_client` | 403 | the proposal was made by another connected app (or, for reject, in the browser); use the review page (`review_url` is included) |
 | `not_linked` | 409 | no Archidekt account linked yet; send the user to `/account` |
 | `not_pending` / `already_applied` / `stale` | 409 | the proposal cannot be applied in its current state |
-| `apply_too_soon` | 425 | the proposal was created moments ago; apply needs a short pause |
 | `rate_limited` | 429 | the Archidekt pacer is busy, the member's Archidekt budget (`MTG_ARCHIDEKT_CALLS_PER_10_MIN`) is used up, too many failed link attempts, or too many pending proposals (100 per member, 30 per app) |
 | `unavailable` | 503 | Archidekt or Mystic Forge is unreachable |
 | `idp_unavailable` | 503 | the identity provider can't be reached to confirm the caller is still a member; nothing was revoked, try again shortly (`Retry-After: 30`) |
@@ -64,7 +67,7 @@ Request bodies are JSON objects of at most 2 MB.
 | `GET /api/v1/proposals?state=` | The user's proposals, optionally filtered by state |
 | `POST /api/v1/proposals` | Create a proposal (see kinds below). Answers `201` with the proposal, its `diff` and `review_url` |
 | `GET /api/v1/proposals/{pid}` | One proposal with `state`, `diff`, `changes`, `snapshot_id`, `result`, `next_step` |
-| `POST /api/v1/proposals/{pid}/apply` | Apply it: snapshot, Archidekt backup copy, write, re-read verification. Bearer callers get `browser_required` when `MTG_APPLY_VIA_MCP` is off |
+| `POST /api/v1/proposals/{pid}/apply` | Apply it: snapshot, Archidekt backup copy, write, re-read verification. A bearer caller applies only what the member's approval mode allows (`manual`: nothing, `browser_required`; `semi`: low-risk proposals; `auto`: everything), judged inside the apply; the in-chat card uses the `confirm_proposal` MCP tool instead, not this route |
 | `POST /api/v1/proposals/{pid}/reject` | Mark a pending proposal rejected. A bearer caller can reject only proposals its own app made; others answer `other_client` |
 | `GET /api/v1/snapshots?deck_id=` | Deck snapshots taken before applies (and on demand) |
 | `GET /api/v1/snapshots/{sid}` | One snapshot with the full deck as it was |
@@ -153,6 +156,7 @@ cookie, set by `POST /theme`); internal links never open a new tab.
 | `/proposals`, `/proposals/{pid}` | Review and Apply, Reject |
 | `/scan` | The card scanner (see SCANNING.md) |
 | `/account`, `/login`, `/logout`, `/signed-out` | Account, Archidekt link, sign-in and sign-out |
+| `/account/avatar` | The signed-in member's picture (the provider's, else Gravatar, else initials) for the account menu |
 | `/app`, `/app/mtg-assistant-gateway.apk` | The Android app page and download ([ANDROID.md](ANDROID.md)) |
 | `/admin`, `/admin/users`, `/admin/activity`, `/admin/metrics` | Admin page (members of `MTG_ADMIN_GROUP`) |
 | `/app.webmanifest`, `/sw.js`, `/static/{file}` | App shell |

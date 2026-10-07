@@ -57,7 +57,9 @@ anything that isn't the default:
 | `PUID:PGID` the operator uses in other stacks | `1000:1000` | folder ownership |
 | Overlay network name | `mtg-gateway` | shared with the proxy |
 | Allow deck writes now? | `false` | `MTG_WRITES_ENABLED`; recommend `false` until a throwaway deck test passes |
-| Let the assistant apply approved proposals over MCP? | `false` | `MTG_APPLY_VIA_MCP`; recommend `false`: with `true` a prompt-injected assistant can apply its own proposal after `MTG_APPLY_MIN_AGE_SECONDS`, with `false` the member clicks Apply in the browser |
+| Default approval mode for members who have not chosen one? | `manual` | `MTG_APPROVAL_MODE_DEFAULT`; recommend `manual` (every change waits for the member's own press). Each member picks their own mode (`manual`, `semi`: low-risk edits apply without asking, `auto`: everything) on their Account page |
+| Cap the approval mode members may choose? | `auto` (no cap) | `MTG_APPROVAL_MODE_MAX`; `semi` or `manual` to stop members choosing looser modes. `MTG_AUTO_APPLY_MAX_ROWS` (default 5) is the row limit of a low-risk edit |
+| Show the Approve/Reject card in the chat? | `true` | `MTG_APPLY_IN_CHAT`; recommend `true`: Claude and ChatGPT show each proposal as a card whose Approve button carries a one-time code the assistant never sees; `false` leaves only the review page |
 
 Everything else uses the values in `deploy/stack.env.example`.
 
@@ -165,7 +167,8 @@ variables: produce the full list for the operator from
 that must change from the example are `MTG_PUBLIC_URL`, `MTG_OIDC_ISSUER`,
 `MTG_OIDC_CLIENT_ID`, `MTG_NODE`, `MF_NODE`, `MTG_DATA_DIR`, `MTG_BACKUP_DIR`
 (if the folders differ from step 2's example), `MTG_REQUIRED_GROUP`, `PUID`, `PGID`, `TIMEZONE`
-and, if chosen, `MTG_WRITES_ENABLED` and `MTG_APPLY_VIA_MCP`.
+and, if chosen, `MTG_WRITES_ENABLED`, `MTG_APPROVAL_MODE_DEFAULT`, `MTG_APPROVAL_MODE_MAX`
+and `MTG_APPLY_IN_CHAT`.
 
 Check (manager):
 

@@ -90,7 +90,7 @@ Edit `.env`. The lines marked **REQUIRED**:
 | `MTG_OIDC_ISSUER` | The issuer URL from step 1 |
 | `MTG_OIDC_CLIENT_ID` | The client ID from step 1 |
 | `MTG_REQUIRED_GROUP` | The group from step 1, exactly as your provider sends it. Required unless you set `MTG_ALLOW_ANY_IDP_USER=true` (see [IDP-OTHERS.md](IDP-OTHERS.md#about-the-group-check)) |
-| `MTG_TAG` | `latest` to follow every new version, or one version to stay on it, for example `0.6.1` ([VERSIONS.md](VERSIONS.md)) |
+| `MTG_TAG` | `latest` to follow every new version, or one version to stay on it, for example `0.7.0` ([VERSIONS.md](VERSIONS.md)) |
 
 Worth a look:
 
@@ -100,7 +100,9 @@ Worth a look:
 | `MTG_HTTP_BIND`, `MTG_HTTP_PORT` | `127.0.0.1`, `8080` | Where the gateway listens on this machine, for a proxy on the same machine. A proxy container on the gateway's network doesn't need it (the proxy overrides remove it) |
 | `MTG_DATA_DIR`, `MTG_BACKUP_DIR` | `./data`, `./backups` | Local disk only, not NFS or SMB |
 | `MTG_WRITES_ENABLED` | `true` | `false` keeps everything review-only: proposals work, nothing is ever applied to Archidekt. If the line is missing, the gateway's own default is `false` |
-| `MTG_APPLY_VIA_MCP` | `false` | Same as the code default: only the Apply button on the review page applies a change. `true` lets the assistant apply after the person says yes in chat, which is weaker: text the assistant reads (deck descriptions, card notes) could trick it into applying its own proposal once `MTG_APPLY_MIN_AGE_SECONDS` has passed |
+| `MTG_APPROVAL_MODE_DEFAULT` | `manual` | Same as the code default: a person who has not chosen an approval mode has every change wait for their own press, on the card in the chat or the Apply button on the review page. Each person picks their own mode (`manual`, `semi`: small low-risk edits apply without asking, `auto`: every change) on their Account page |
+| `MTG_APPROVAL_MODE_MAX` | `auto` | No cap on what people may choose; `semi` or `manual` caps it. `MTG_AUTO_APPLY_MAX_ROWS` (`5`) is the row limit of a low-risk edit |
+| `MTG_APPLY_IN_CHAT` | `true` | The Approve/Reject card Claude and ChatGPT show next to a proposal; only its one-time code can apply. `false` removes it, leaving the review page |
 
 Every other variable is explained in `.env` and in the
 [environment reference](DEPLOY.md#environment-reference). A setting only
@@ -192,7 +194,7 @@ docker compose logs -f gateway
 
 ```bash
 curl -s https://mtg.example.com/healthz
-# {"status":"ok","version":"0.6.4"}
+# {"status":"ok","version":"0.7.0"}
 
 curl -s https://mtg.example.com/.well-known/oauth-authorization-server | head -c 300
 # JSON with "issuer":"https://mtg.example.com", ...

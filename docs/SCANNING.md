@@ -97,12 +97,15 @@ it, and the "How it works" link under the tabs brings it back.
 Once you've saved, you can also tell the assistant: *"get my scan session
 &lt;name&gt;"*. From there it can create a deck (`propose_new_deck`), add
 the cards to one of your decks (`propose_deck_changes`), add them to your
-collection (`add_to_collection` with `scan_session`), or just talk about
+collection (`propose_collection_changes` with `scan_session`), or just talk about
 them.
 
-Scan sessions belong to you, live in the gateway's database (so they're in
-the nightly backup), and are capped at 500 cards and 100 sessions per person
-(the oldest drop off). Scanning never sends anything to Archidekt.
+Scan sessions belong to you and live in the gateway's database (so they're
+in the nightly backup) for as long as you keep them: they are drafts, up to
+500 cards each and 500 per person, and never expire by age (only past that
+ceiling does the oldest go). Saving a scan's cards to a deck or your
+collection removes the draft. Scanning itself never sends anything to
+Archidekt.
 
 ## How matching works
 

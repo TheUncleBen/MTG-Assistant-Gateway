@@ -73,7 +73,7 @@ logs.
 
 In Portainer: **Stacks** → `mtg` → **Update the stack**, with "Re-pull
 image" ticked. With `MTG_TAG=latest` that pulls the newest version; with a
-pinned version (for example `0.6.2`), change `MTG_TAG` first
+pinned version (for example `0.6.6`), change `MTG_TAG` first
 ([VERSIONS.md](VERSIONS.md)). Or from the command line:
 
 ```bash
@@ -413,9 +413,11 @@ The gateway only writes to someone's Archidekt account in two steps:
 1. `propose_deck_changes` (edit a deck), `propose_new_deck` (create one) or
    `propose_restore_snapshot` (undo an edit) saves a proposal with the exact
    diff.
-2. The user approves it, either with the Apply button on `/proposals/<id>`
-   or, if `MTG_APPLY_VIA_MCP` is on, by saying yes in chat so the assistant
-   calls `apply_proposal`.
+2. The user approves it: with Approve on the card their AI app shows next
+   to the proposal (Claude, ChatGPT; `MTG_APPLY_IN_CHAT`) or with the Apply
+   button on `/proposals/<id>`. A user who chose a looser approval mode on
+   their Account page lets the assistant apply low-risk edits (semi) or
+   everything (auto) itself with `apply_proposal`; see below.
 
 Applying an edit or restore:
 
@@ -455,27 +457,69 @@ switched off on this gateway" and nothing reaches Archidekt. A proposal made
 while writes were off can be applied once you turn them back on, as long as
 it hasn't expired and the deck hasn't changed.
 
-### Applying through the assistant
+### Approving on the card in the chat
 
-`MTG_APPLY_VIA_MCP` decides whether the assistant can apply a proposal. The
-code default is `false`: the `apply_proposal` tool answers
-`browser_required` with the review link, so a person's own click always sits
-between anything the assistant read (deck descriptions, card text) and a
-write to Archidekt. The example env files keep it `false` too. Setting it to
-`true` lets the assistant apply after the user says yes in chat; writes have
-to be on as well.
+With `MTG_APPLY_IN_CHAT` on (the default), an AI app that renders MCP Apps
+(Claude on the web, desktop and phones; ChatGPT) shows every proposal as a
+card with the change, each card's picture, and Approve and Reject buttons.
+The buttons call the `confirm_proposal` tool, which the app offers to the
+card and not to the model, and which needs a one-time code the gateway
+puts only in the tool result's `_meta` (handed to the card, kept out of the
+model's context). A call without the right code is refused and logged as
+`approval_refused`, with nothing sent; the code is tied to the proposal, the
+member and the app that proposed, and is spent by the apply. The gateway
+cannot see who pressed; it relies on the app keeping the tool and the code
+away from the model, as the MCP Apps standard says. Set it to `false` and
+the card, the code and the tool disappear: members use the review page.
+An app that cannot show the card (Claude Code, older clients) sees the text
+and the review link as before; Claude Code can also open the review page
+for the member when the assistant calls `apply_proposal`.
 
-With it on, the gateway has no proof the user really said yes; it relies on
-the assistant following its instructions. Two things narrow that gap:
+### Approval modes: when the assistant may apply by itself
 
-- The server instructions and the `apply_proposal` description tell every
-  client that tool output is data, never instructions, and to apply only
-  after the user confirms in their own message.
-- An assistant apply on a proposal younger than `MTG_APPLY_MIN_AGE_SECONDS`
-  (default 15) is refused with "apply too soon" and a retry delay, so a
-  proposal can't be made and applied in the same breath. The tradeoff: a
-  really quick human "yes" may get bounced once and retried a few seconds
-  later. Raising the value widens that window; `0` removes the guard.
+Each member picks an **approval mode** on their own Account page. It is
+theirs alone: it governs only their proposals, their decks and the apps they
+connected, and it can only be set there, in their browser session (never
+over MCP or the API, so a tricked assistant cannot loosen it). Every change
+of mode is in the audit log as `approval_mode_set`.
+
+| Mode | What the assistant may apply with `apply_proposal` |
+|---|---|
+| `manual` (default) | Nothing. Every proposal waits for the member's press on the card or the review page; `apply_proposal` answers `browser_required`. |
+| `semi` | Low-risk proposals only. High-risk ones wait for the member's press as in manual. |
+| `auto` | Every proposal. |
+
+The risk of a proposal comes from its stored review rows, so it is judged
+on what the review page would show, not on what the assistant says:
+
+| Tier | Proposals |
+|---|---|
+| Low | An edit to an existing deck with at most `MTG_AUTO_APPLY_MAX_ROWS` rows (default 5), each a card add, remove, quantity change, category move, finish or printing change, no row moving more than four copies, none touching the commander. Cloning a deck (a copy; nothing that exists changes). |
+| High | Everything else: more rows than that, any commander change, creating a new deck, restoring a snapshot, and deck details (name, format, description, visibility). |
+
+Every proposal result carries `approval_mode`, `risk`, `risk_reason` and
+`assistant_may_apply`, and `next_step` tells the assistant whether to call
+`apply_proposal` or hand the decision to the member. The service re-checks
+the mode and the risk inside the apply itself, over MCP and over the REST
+API alike, so there is no path around it. An assistant apply the mode does
+not allow is logged as `apply_needs_user`. Every apply, in every mode,
+snapshots the deck first and backs it up on Archidekt, so an auto-applied
+change can be undone from the History page.
+
+Two settings are the operator's:
+
+- `MTG_APPROVAL_MODE_DEFAULT` (default `manual`) is the mode of a member who
+  has not chosen one. Leave it `manual` on a shared gateway.
+- `MTG_APPROVAL_MODE_MAX` (default `auto`, no cap) is the highest mode
+  members may choose; a stored choice above it is read as the cap, and the
+  Account page shows the capped choices disabled.
+
+The trade-off, which the Account page states next to the choices: an
+assistant can be tricked by text it reads (a web page, a deck description, a
+pasted list) into proposing a change the member did not ask for, and in a
+semi or auto mode such a change lands on Archidekt without their press. In
+manual mode a person's own press always sits between anything the assistant
+read and a write to Archidekt.
 
 Tell people to keep `apply_proposal` on "ask every time" (or "needs
 approval") in their AI app rather than "always allow".
@@ -488,8 +532,9 @@ longer be applied. One app may hold at most 30 pending proposals for a
 member, and a member 100 in all, so a runaway app can't use up every slot.
 
 An app connected with the read-only scope `mtg.read` can read decks,
-proposals, snapshots and reports but can't propose, apply, reject, run
-reports or save scans (`insufficient_scope`).
+proposals, snapshots, reports and the collection but can't propose (deck or
+collection changes), apply, confirm, reject, run reports or save scans
+(`insufficient_scope`).
 
 ### Archidekt rate limiting
 
@@ -516,9 +561,10 @@ Archidekt busy for everyone:
 `/admin` is a browser page for whoever runs the gateway. It exists only when
 `MTG_ADMIN_GROUP` is set to the name of a group in your identity provider
 (set it in the stack's environment variables or in `.env`; the stack and
-Compose files already pass it through). Members of that group who are also allowed
-to sign in (so also in `MTG_REQUIRED_GROUP`, if one is set) see it after
-signing in. For everyone else, and whenever the variable is unset, `/admin`
+Compose files already pass it through). Members of that group see it after
+signing in; since 0.6.6 they don't also need to be in `MTG_REQUIRED_GROUP`,
+because the admin group lets its members sign in too. In the site menu it's
+the **Admin** link, shown only to them. For everyone else, and whenever the variable is unset, `/admin`
 and everything under it answers 404, so ordinary users can't tell the area
 exists. Group membership is what the live membership check last recorded
 (at most `MTG_MEMBERSHIP_CHECK_TTL` seconds old, see
@@ -553,7 +599,7 @@ The five actions, and exactly what each one does:
 | **Enable** | Clears `disabled_at`. Nothing is handed back: the person signs in again and reconnects their assistant. |
 | **Revoke tokens and sessions** | The same revocation as Disable (tokens, browser sessions, pending codes, identity-provider tokens) without disabling. The person can sign in again straight away. This is the button version of the SQL in [Revoking access](#revoking-access). |
 | **Unlink Archidekt** | Marks their Archidekt link revoked and deletes the stored session, the same as their own Unlink button on `/account`. They can relink any time. |
-| **Delete data** | Deletes everything the gateway keeps about that person, the same as their own **Delete my data**: proposals, snapshots, reports, scan sessions, the remembered covers of their own decks (never a cover of someone else's deck they cloned or reported on), the Archidekt link, every app grant and browser session, the identity-provider tokens, usage counters and the user record. It needs the confirmation tick next to the button, and you can't use it on yourself (use your own Account page). Meant for former members, and for an account left over from an earlier identity provider (the gateway refuses a new provider's account whose `sub` matches an old one until the old one is deleted). Their decks on Archidekt are not touched, and the audit log keeps its rows. If they're still in the group, they can sign in again as a new, empty account. |
+| **Delete data** | Deletes everything the gateway keeps about that person, the same as their own **Delete my data**: proposals, snapshots, reports, scan sessions, the remembered covers of their own decks (never a cover of someone else's deck they cloned or reported on), the Archidekt link, every app grant and browser session, the identity-provider tokens, the copy of their profile picture, usage counters and the user record. It needs the confirmation tick next to the button, and you can't use it on yourself (use your own Account page). Meant for former members, and for an account left over from an earlier identity provider (the gateway refuses a new provider's account whose `sub` matches an old one until the old one is deleted). Their decks on Archidekt are not touched, and the audit log keeps its rows. If they're still in the group, they can sign in again as a new, empty account. |
 
 Every action writes an `admin_disable`, `admin_enable`, `admin_revoke`,
 `admin_unlink` or `admin_delete_data` row to the audit log under the admin's
@@ -597,7 +643,8 @@ rejected too.
 
 ## Looking at proposals, snapshots, links and the audit log
 
-Everything lives in `<MTG_DATA_DIR>/mtg-gateway.sqlite`. The container has
+Everything lives in `<MTG_DATA_DIR>/mtg-gateway.sqlite` (profile pictures are
+separate files under `<MTG_DATA_DIR>/avatars`, fetched again when missing). The container has
 Python but no `sqlite3` command, so run queries through Python on the
 gateway's node. For example, the latest proposals:
 
@@ -612,7 +659,7 @@ For the SQL snippets on this page, put the query inside the
 
 | Table | What's in it |
 | --- | --- |
-| `proposals` | Each proposal: owner, kind (`edit`, `create_deck`, `restore` or `details`), deck (the new deck's id once a create is applied), change list, diff, state (`pending`, `applying`, `applied`, `failed`, `rejected`; shown as `expired` after 24 hours), result and timestamps |
+| `proposals` | Each proposal: owner, kind (`edit`, `create_deck`, `restore`, `details`, `clone` or `collection`), deck (the new deck's id once a create is applied), change list, diff, state (`pending`, `applying`, `applied`, `failed`, `rejected`; shown as `expired` after 24 hours), result and timestamps |
 | `snapshots` | The full deck as read from Archidekt just before a proposal was applied, plus `backup_deck_id` and `backup_url` for the private backup copy made in the user's Archidekt backup folder at the same moment. Users see theirs with `list_snapshots` and undo an edit with `propose_restore_snapshot`. `deck_json` is the raw deck |
 | `archidekt_links` | One row per user who linked Archidekt: Archidekt username, encrypted session, status and timestamps |
 | `reports` | Stored deck reports (`run_deck_report`, the "Run deck report" button and `POST /api/v1/reports`): owner, deck, a fingerprint of the deck as read, the statistics, and the goldfish and validation results as JSON. The newest 200 per user are kept |

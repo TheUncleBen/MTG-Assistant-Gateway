@@ -7,7 +7,7 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
-## [0.6.4] - 2026-10-07
+## [0.7.0] - 2026-10-07
 
 Archidekt parity for the pages: browse and search public decks, a home page
 with the full navigation, your Archidekt Collection shown and edited on the
@@ -15,14 +15,17 @@ gateway, a scan flow that ends in the collection, a deck or a new deck,
 likes, bookmarks, follows and comments as your own buttons, stacks and grid
 views that work on touch screens, and a layout that follows the window
 (bottom bar, navigation rail or desktop bar) on the web and in the Android
-app. (0.6.3 was the sign-in release that landed in between.)
+app. This closes the round that began with 0.6.3: sign-in that survives
+real-world token sizes, admins signing in on the admin group alone, profile
+pictures, Approve and Reject cards in the chat with per-member approval
+modes (0.6.3 to 0.6.6), and now the pages themselves.
 
 ### Added
 
 - **Home page.** Signing in lands on a dashboard with the same navigation
   as every other page: your newest decks with their covers, a deck search
-  box, tiles for Decks, Search, Scan, Collection (with your card count),
-  Proposals (with the number waiting), History and the Guide, and the
+  box, tiles for Decks, Search, Scan, Collection, Proposals (with the
+  number waiting), History and the Guide, and the
   assistant connection details in a collapsed panel at the end.
 - **Deck search and user pages.** `/search` finds public decks on Archidekt
   by name, commander, format, colours and owner, ordered by newest, most
@@ -35,10 +38,21 @@ app. (0.6.3 was the sign-in release that landed in between.)
   cards is stored on the gateway. Add cards by name or from a scan, count
   copies with plus and minus, filter by name, sort by newest or set release,
   grid or list, export CSV. Owned cards show a green dot on every deck page
-  with the copies Archidekt reports. The tools `list_collection`,
-  `add_to_collection` and `remove_from_collection`, and the JSON endpoints
-  under `/collection/api/`, give assistants and apps the same (each card is
-  one or two Archidekt calls, about a second).
+  with the copies Archidekt reports. `list_collection` reads it for the
+  assistant; `propose_collection_changes` adds or removes cards as a
+  proposal (kind `collection`) that waits for your approval or your approval
+  mode, like a deck edit. The JSON endpoints under `/collection/api/` give the
+  pages the same (each card is one or two Archidekt calls, about a second).
+- **Your own edits save at once.** In the app, pressing Save is your
+  approval: the deck editor, a drag between categories, New deck, Clone and
+  Deck settings go to Archidekt straight away (still recorded as a proposal,
+  applied with its snapshot, so History can undo it). Only a big removal
+  (more than 10 cards, or 8 different cards) asks you to confirm first; a
+  restore keeps its review page. Assistants' changes stay proposals.
+- **Navigation.** On a phone the tabs are Decks, Scan, Collection, Proposals
+  and More; Search is the magnifier in the top bar. More opens a sheet with
+  Home, History, Guide, Account and, for admins, Admin. The rail (unfolded
+  foldable, tablet, Android app) shows Search as a sixth tab.
 - **Likes, bookmarks, follows and comments.** Every deck page has
   Archidekt's social buttons (Like with the deck's score, Bookmark, Follow
   the owner, a Comments panel with the thread and a reply box) and user
@@ -50,8 +64,9 @@ app. (0.6.3 was the sign-in release that landed in between.)
   the list ends in **What next?**: save the cards to your collection, add
   them to one of your decks (the deck editor opens with them filled in), or
   start a new deck from them (`/decks/new?scan_session=`). "Save to gateway"
-  is now "Save scan". A scan is an inbox: saving its cards to the collection
-  removes it, and scans untouched for 30 days are dropped.
+  is now "Save scan". A scan is a draft kept until you send its cards to the
+  collection or a deck (which removes it) or delete it; nothing expires by
+  age.
 - **Guide.** `/guide` is end-user documentation inside the app: what you
   can do on each page with or without an assistant, how proposals and
   snapshots protect your decks, the Android app, privacy. Linked from the
@@ -97,6 +112,123 @@ app. (0.6.3 was the sign-in release that landed in between.)
 - A member with a linked Archidekt account now reads every deck page with
   their own session (before, public decks were read anonymously), which is
   how Archidekt reports the copies they own, their like and their bookmark.
+## [0.6.6] - 2026-10-07
+
+### Added
+
+- The account icon shows each member's profile picture from the identity
+  provider's `picture` claim: a picture uploaded to their Authentik
+  profile (embedded in the claim) or their Gravatar, which the gateway
+  fetches itself so browsers never contact Gravatar. Without one it shows
+  their initials. Only PNG, JPEG, GIF and WebP are kept (checked by their
+  bytes, never SVG), only Gravatar addresses are fetched, and *Delete my
+  data* removes the stored copy. See
+  [docs/IDP-AUTHENTIK.md](docs/IDP-AUTHENTIK.md#profile-pictures).
+- Uploaded Authentik pictures on Authentik 2026.8.3 and newer, which leave
+  them out of the `picture` claim: an optional scope mapping, printed in the
+  guide, puts a 16-character fingerprint in tokens instead, and the gateway
+  asks userinfo for the image itself only when the fingerprint changes.
+- The end-to-end tests run against Authentik 2026.8.3, the current release,
+  and install that mapping exactly as the guide prints it. The Authentik
+  guide now covers two things 2026.8 needs: the provider's **Grant Types**
+  must include Authorization Code and Refresh token, and the reverse proxy
+  must be in Authentik's trusted proxy ranges (the defaults cover the usual
+  private Docker networks).
+
+### Fixed
+
+- Signed-in pages kept answering *The sign-in service can't be reached to
+  confirm your access* a few seconds after sign-in, with the log line
+  `identity provider answered userinfo with HTTP 400; the access token is …
+  bytes`. Authentik 2026.8.0 to 2026.8.2 embed an attribute-based avatar
+  in the `picture` claim and copy the claims into the access token, which
+  then grew past a megabyte, and the reverse proxy refused it as a request
+  header. The live membership check now sends any access token over 7 KB
+  in a form-encoded POST body to userinfo (RFC 6750 section 2.2, which
+  Authentik accepts), so it works through Nginx Proxy Manager. It still
+  asks on every check, exactly as before. Trimming the token is still
+  worth doing: see the new row in
+  [docs/IDP-AUTHENTIK.md](docs/IDP-AUTHENTIK.md#10-troubleshooting).
+
+### Changed
+
+- Members of `MTG_ADMIN_GROUP` may sign in without also being in
+  `MTG_REQUIRED_GROUP`. The membership check reads both groups live, so
+  someone taken out of the admin group, and not in the users group, is cut
+  off on their next request.
+- A userinfo connection that drops before any answer is tried once more
+  straight away instead of answering *Try again shortly*. Removal is still
+  seen on the next request; nothing is cached longer.
+
+## [0.6.5] - 2026-10-07
+
+### Added
+
+- Approval modes. Each member now picks, on their own Account page, how
+  much their assistant may change on Archidekt without asking: **Ask me
+  every time** (`manual`, the default on a fresh install), **Apply small,
+  low-risk edits without asking** (`semi`) or **Apply every change without
+  asking** (`auto`). The choice is the member's alone: it covers only their
+  account, their decks and the apps they connected, it can be set only in
+  their browser (never over MCP or the API, so a tricked assistant cannot
+  loosen it), and every change of it is in the audit log. A proposal's
+  risk is judged from its stored review rows: low means an edit of at most
+  five rows (card adds, removes, quantity, category, finish or printing
+  changes of at most four copies each, never the commander) or a clone; everything else (bigger edits,
+  the commander, a new deck, a restore, deck details) is high. Every
+  proposal result now says `approval_mode`, `risk`, `risk_reason` and
+  `assistant_may_apply`, and `next_step` tells the assistant whether to call
+  `apply_proposal` or leave the decision to the member. Every apply still
+  snapshots the deck first, so an auto-applied change can be undone from
+  History. The Account page states the trade-off next to the choices.
+- `MTG_APPROVAL_MODE_DEFAULT` (the mode of members who have not chosen;
+  `manual`), `MTG_APPROVAL_MODE_MAX` (the highest mode members may choose;
+  `auto` = no cap) and `MTG_AUTO_APPLY_MAX_ROWS` (the row limit of a
+  low-risk edit; `5`). The admin overview shows the first two.
+- The in-chat card shows a big change as a summary first: rows grouped by
+  what they do (added, removed, quantity, moved, finish, printing,
+  commander), the first eight rows with their pictures, and a **Show all**
+  button for the rest. It also shows the proposal's risk and, in the semi
+  and auto modes, who applies it.
+
+### Changed
+
+- `MTG_APPLY_VIA_MCP` and `MTG_APPLY_MIN_AGE_SECONDS` are gone; the
+  approval modes replace them. A gateway that still sets them simply
+  ignores them. The assistant's `apply_proposal` now applies only what the
+  member's mode allows and answers `browser_required` otherwise; the
+  `apply_too_soon` error no longer exists. The REST apply route follows the
+  same rule for bearer tokens.
+- The review page shows each proposal's risk tier and why.
+
+## [0.6.4] - 2026-10-07
+
+### Added
+
+- Approve or reject a proposed deck change on a card inside the chat. Every
+  proposal tool now returns the proposal as an MCP App (the
+  `io.modelcontextprotocol/ui` extension): a client that renders MCP Apps
+  (Claude on the web, desktop, iOS and Android) shows the proposal as a card
+  with the change summary, small card images from Scryfall, and **Approve**
+  and **Reject** buttons. The gateway applies the change only when the
+  button is pressed: the buttons call a tool that is marked for the app only
+  (not for the model) and that needs a one-time approval code the gateway
+  puts in the tool result's `_meta`, where the assistant never sees it. An
+  assistant that tries to approve its own proposal gets `invalid_approval`
+  and the attempt is logged. In Claude Code, which does not render apps,
+  `apply_proposal` instead asks the client to open the browser review page
+  and waits for your decision there. Everywhere else the card or the
+  assistant shows a link to the review page, as before. Turn the card and
+  the in-chat buttons off with `MTG_APPLY_IN_CHAT=false`.
+- `confirm_proposal` tool (app-only; needs the `mtg.write` scope) and the
+  `browser_pending`, `invalid_approval` and `in_chat_disabled` errors
+  ([docs/API.md](docs/API.md)).
+
+### Changed
+
+- `MTG_APPLY_VIA_MCP` keeps its default of `false`. The review page and the
+  card are the two ways to apply a change; leaving this on lets a tricked
+  assistant apply its own proposal, so the docs now say so plainly.
 
 ## [0.6.2] - 2026-10-07
 

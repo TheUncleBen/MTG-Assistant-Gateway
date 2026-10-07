@@ -59,12 +59,15 @@ In plain terms:
   tools on the web. The help center is newer and narrower, and doesn't
   mention Plus at all.
 - **What that means for deck changes in ChatGPT.** The gateway marks every
-  tool as read-only except four: `apply_proposal`, `reject_proposal`,
-  `run_deck_report` and `save_scan_session`.
+  tool as read-only except six: `apply_proposal`, `confirm_proposal`,
+  `reject_proposal`, `run_deck_report`, `save_scan_session` and
+  `propose_collection_changes`.
   Making a proposal only records it, so even if ChatGPT limits you to
   read-only tools you should still be able to propose changes and then press
-  Apply on the gateway's review page in your browser. Whether ChatGPT's
-  "read/fetch" limit actually follows those markings hasn't been tested yet.
+  Approve on the card ChatGPT shows with the proposal, or Apply on the
+  gateway's review page in your browser. Whether ChatGPT's "read/fetch"
+  limit actually follows those markings, and whether it shows the card for
+  a connector added in developer mode, hasn't been tested yet.
 - **On ChatGPT Plus and Android? Use Claude for deck edits.** Claude's free
   plan allows one custom connector (verified), and it works in Claude's
   Android app once added on the web. ChatGPT might still work for you in a
@@ -105,8 +108,9 @@ Custom connectors work on Claude's Free, Pro, Max, Team and Enterprise plans
    - You first see the gateway's **Connect an application** page. It says "An application wants to connect to your
      account", names the application (**Claude**) and the host it's
      "identified by", lists what it'll be able to do (read your decks and
-     propose deck changes, and apply them if the owner allows applying from
-     the assistant), and
+     propose deck changes, and apply them only when you approve, unless you
+     chose an approval mode on your account page that lets it apply changes
+     without asking), and
      shows "After sign-in you go to" a host. That host should be
      `claude.ai`, Claude's sign-in return address for its hosted apps
      (verified). If it all looks right, press **Approve and sign in**. If
@@ -157,15 +161,44 @@ Android apps the next time you sign in there (verified). Anthropic calls
 adding connectors from the phone apps a beta, and its custom-connector page
 doesn't list mobile, so add it on the web or desktop.
 
+### Approving a change in the chat
+
+When the assistant proposes a deck change, Claude shows the proposal as a
+card right in the conversation: the exact change with a small picture of
+each card, and **Approve** and **Reject** buttons (Claude on the web,
+desktop, iOS and Android; Claude Code shows the text and the review link
+instead). The first time, Claude asks whether to display the app; allow it
+for this connector. Nothing reaches Archidekt until you press Approve on
+the card or Apply on the review page, unless you chose a looser approval
+mode on your Account page (see below). The card's Approve button sends a
+one-time code the assistant never receives, and the gateway refuses that
+tool without it, so a tricked assistant can't approve its own proposal.
+That rests on Claude keeping the card's tool and code away from the model,
+as the MCP Apps standard says (reported, not yet verified in a live
+session); the review page in your browser never relies on it and is linked
+from every card.
+
+**Your approval mode.** On the gateway's Account page you choose how much
+your assistant may do without asking: *Ask me every time* (the default),
+*Apply small, low-risk edits without asking* (a few cards added, removed,
+moved or changed, never the commander, a new deck, a restore or the deck's
+details) or *Apply every change without asking*. It is your own setting:
+it covers only your account, your decks and the apps you connected, and
+only you can change it, in your browser. In either auto mode the assistant
+applies what the mode allows with `apply_proposal` and tells you; the card
+then shows the change without buttons. Every change still keeps a snapshot
+you can restore from the History page. The cost: an assistant can be
+tricked by text it reads into proposing a change you did not ask for, and
+in an auto mode that change lands without your press.
+
 Claude lets you set each tool to always allow, needs approval, or blocked
-(verified). Keep `apply_proposal` on **needs approval**: if the owner lets
-the assistant apply changes from chat, that's the tool that actually changes
-your deck. Claude's Research mode can call connector tools without asking
-(verified). Everything except `apply_proposal`, `reject_proposal`,
-`run_deck_report` and `save_scan_session` only reads or records proposals. The assistant is told never to apply one you
-haven't said yes to in your own message, but the gateway can't check that
-for itself, which is why "needs approval" on `apply_proposal` is worth
-keeping.
+(verified). Keep `apply_proposal` on **needs approval**: in an auto mode
+that's the tool that actually changes your deck. Claude's Research mode can
+call connector tools without asking (verified). Everything except
+`apply_proposal`, `confirm_proposal` (the card's own button),
+`reject_proposal`, `run_deck_report`, `save_scan_session` and
+`propose_collection_changes` (which only records a proposal) only reads or
+records proposals.
 
 ## ChatGPT
 
@@ -203,19 +236,25 @@ and pick the MTG Assistant Gateway app (in developer mode it may be under a deve
 mode or apps entry). Then ask it to call `whoami`. (Unverified.)
 
 OpenAI says ChatGPT asks for confirmation before write actions by default,
-and may block some risky ones (reported). If ChatGPT refuses or hides
-`apply_proposal`, ask for the proposal's review link and press Apply there.
+and may block some risky ones (reported). OpenAI also says ChatGPT renders
+MCP Apps (reported), so a proposal should appear as a card with Approve and
+Reject buttons like in Claude; this hasn't been tried with ChatGPT yet. If
+no card appears and ChatGPT refuses or hides `apply_proposal`, ask for the
+proposal's review link and press Apply there.
 
 ### If ChatGPT blocks write tools
 
 OpenAI says some plans only get reading tools (reported). Every gateway
-tool is marked read-only except four, so all of this keeps working: research
+tool is marked read-only except six, so all of this keeps working: research
 (Scryfall, EDHREC, rules), goldfish simulation, reading and importing decks,
-card lookups for scanning, and making deck proposals. For the four write
-tools:
+card lookups for scanning, and making deck proposals. For the write tools
+(collection changes: add or remove cards on the `/collection` page instead):
 
-- `apply_proposal`: open the proposal's review link (or **Proposals** on the
-  gateway) and press **Apply** there. Same preview, same checks.
+- `apply_proposal`: press **Approve** on the proposal card if ChatGPT shows
+  one, or open the proposal's review link (or **Proposals** on the
+  gateway) and press **Apply** there. Same preview, same checks. If you
+  chose an auto approval mode on your Account page, the assistant applies
+  what the mode allows itself.
 - `reject_proposal`: press **Reject this proposal** on the review page.
 - `run_deck_report`: press **Run deck report** on the deck's page under
   **Decks** on the gateway.

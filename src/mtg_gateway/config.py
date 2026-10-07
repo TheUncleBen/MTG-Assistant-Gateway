@@ -96,6 +96,16 @@ def _token_auth_method_env(name: str, default: str) -> str:
 DEFAULT_OIDC_SCOPES = "openid profile email offline_access"
 
 
+def _mode_env(name: str, default: str) -> str:
+    """An approval mode (manual, semi or auto; see modes.py)."""
+    raw = (_env(name, "") or "").strip().lower()
+    if not raw:
+        return default
+    if raw not in ("manual", "semi", "auto"):
+        raise ConfigError(f"{name} must be manual, semi or auto, not {raw!r}")
+    return raw
+
+
 def _int_env(name: str, default: int, *, lo: int, hi: int) -> int:
     raw = _env(name, str(default)) or str(default)
     try:
@@ -151,8 +161,15 @@ class Settings:
     cimd_enabled: bool = True
     cimd_allowed_hosts: list[str] = field(default_factory=list)
     writes_enabled: bool = False
-    apply_via_mcp: bool = False
-    apply_min_age_seconds: int = 15  # MCP apply refused on proposals younger than this
+    # The Approve/Reject card an AI app shows in the chat (MCP Apps) may apply a proposal with
+    # its one-time code; false leaves only the review page.
+    apply_in_chat: bool = True
+    # Approval modes (modes.py): the mode of a member who has not chosen one on their Account
+    # page, the highest mode members may choose (auto = no cap), and how many review rows an
+    # edit may have and still count as low risk in semi mode.
+    approval_mode_default: str = "manual"
+    approval_mode_max: str = "auto"
+    auto_apply_max_rows: int = 5
     archidekt_base: str = "https://archidekt.com/api"
     archidekt_backups: bool = True
     archidekt_backup_folder: str = "MTG Gateway backups"
@@ -194,6 +211,15 @@ class Settings:
     listen_port: int = 8080
     log_level: str = "INFO"
     server_name: str = "MTG Assistant Gateway"
+
+    def grants_access(self, groups: list[str] | None) -> bool:
+        """May someone in ``groups`` use the gateway? Members of MTG_REQUIRED_GROUP may, and so
+        may members of MTG_ADMIN_GROUP: an admin needs no second group to sign in. Both are read
+        from the identity provider's live answer, so leaving either group is seen the same way."""
+        if not self.required_group:
+            return True
+        held = groups or []
+        return self.required_group in held or bool(self.admin_group and self.admin_group in held)
 
     @property
     def public_host(self) -> str:
@@ -310,8 +336,10 @@ def load_settings() -> Settings:
         cimd_allowed_hosts=[
             h.strip() for h in (_env("MTG_CIMD_ALLOWED_HOSTS", "") or "").split(",") if h.strip()
         ],
-        apply_via_mcp=_bool_env("MTG_APPLY_VIA_MCP", False),
-        apply_min_age_seconds=_int_env("MTG_APPLY_MIN_AGE_SECONDS", 15, lo=0, hi=3600),
+        apply_in_chat=_bool_env("MTG_APPLY_IN_CHAT", True),
+        approval_mode_default=_mode_env("MTG_APPROVAL_MODE_DEFAULT", "manual"),
+        approval_mode_max=_mode_env("MTG_APPROVAL_MODE_MAX", "auto"),
+        auto_apply_max_rows=_int_env("MTG_AUTO_APPLY_MAX_ROWS", 5, lo=1, hi=100),
         browser_session_ttl=_int_env("MTG_BROWSER_SESSION_TTL", 2 * 3600, lo=300, hi=86400),
         writes_enabled=_bool_env("MTG_WRITES_ENABLED", False),
         archidekt_base=(_env("MTG_ARCHIDEKT_BASE", "https://archidekt.com/api") or "").rstrip("/"),

@@ -11,15 +11,50 @@ Prints nothing secret; the client secret is written only to <out.json>.
 
 from __future__ import annotations
 
+import base64
 import json
+import re
 import secrets
+import struct
 import sys
 import time
+import zlib
+from pathlib import Path
 
 import httpx
 
 ALLOWED_GROUP = "MTG Assistant Gateway Users"  # bound to the application AND MTG_REQUIRED_GROUP
 GUEST_GROUP = "MTG Assistant Gateway Guests"  # bound to the application but NOT MTG_REQUIRED_GROUP
+PICTURE_USER = "alice-test"  # has an uploaded profile picture (docs/IDP-AUTHENTIK.md "Profile pictures")
+DOCS = Path(__file__).resolve().parents[2] / "docs" / "IDP-AUTHENTIK.md"
+
+
+def picture_mapping_expression() -> str:
+    """The optional scope mapping exactly as the guide prints it, so the tests prove the docs."""
+    m = re.search(
+        r"<!-- uploaded-picture-mapping:.*?-->\s*```python\n(.*?)```\s*<!-- /uploaded-picture-mapping -->",
+        DOCS.read_text(encoding="utf-8"),
+        re.S,
+    )
+    if not m:
+        raise SystemExit(f"the uploaded-picture mapping is missing from {DOCS}")
+    return m.group(1)
+
+
+def small_png() -> bytes:
+    """An 8x8 orange PNG, built here so no image file is needed."""
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+    rows = b"".join(b"\x00" + b"\xd9\x77\x06" * 8 for _ in range(8))
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", 8, 8, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(rows))
+        + chunk(b"IEND", b"")
+    )
+
 
 USERS = {
     # username: (display name, groups)
@@ -172,6 +207,19 @@ def main() -> None:
     for scope in ("openid", "email", "profile", "offline_access"):
         managed = f"goauthentik.io/providers/oauth2/scope-{scope}"
         scope_pks.append(wait_one("/propertymappings/provider/scope/", managed=managed)["pk"])
+    # The optional mapping for uploaded pictures, and Avatars set to use the uploaded one first.
+    name = "MTG Assistant Gateway: uploaded picture"
+    picture_mapping = ak.find_or_create(
+        "/propertymappings/provider/scope/",
+        {"name": name},
+        {"name": name, "scope_name": "profile", "expression": picture_mapping_expression()},
+    )
+    scope_pks.append(picture_mapping["pk"])
+    r = ak.http.patch("/admin/settings/", json={"avatars": "attributes.avatar,initials"})
+    if r.status_code >= 400:
+        raise SystemExit(f"avatar setting failed {r.status_code}: {r.text}")
+    png = small_png()
+    Path(out).with_name("avatar.png").write_bytes(png)
 
     client_id = secrets.token_hex(20)
     client_secret = secrets.token_urlsafe(64)
@@ -189,6 +237,10 @@ def main() -> None:
             "signing_key": signing_key["pk"],
             "property_mappings": scope_pks,
             "sub_mode": "hashed_user_id",
+            # Authentik 2026.5 and newer refuse an authorization request whose grant type the
+            # provider doesn't list; an API-created provider lists none (the admin form ticks all).
+            # Older versions ignore the field.
+            "grant_types": ["authorization_code", "refresh_token"],
             "include_claims_in_id_token": True,
             # Short-lived Authentik access tokens, so the suite also exercises the gateway renewing
             # them with the refresh token for its live membership checks (membership.py).
@@ -240,6 +292,11 @@ def main() -> None:
                 "is_active": True,
                 "groups": [groups[g]["pk"] for g in user_groups],
                 "path": "users",
+                "attributes": (
+                    {"avatar": "data:image/png;base64," + base64.b64encode(png).decode()}
+                    if username == PICTURE_USER
+                    else {}
+                ),
             },
         )
         pw = secrets.token_urlsafe(18)

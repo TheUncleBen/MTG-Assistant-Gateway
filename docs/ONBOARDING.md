@@ -144,16 +144,28 @@ so:
    change, like `-1 Mind Stone` and `+1 Arcane Signet`, with a review link
    such as `https://mtg.example.com/proposals/<id>`. Nothing on Archidekt
    has changed yet.
-2. **Apply.** The assistant asks whether to apply exactly that change, and
-   waits for your yes. What happens next depends on how the owner set things
-   up:
-   - **You apply it in the browser** (the example setup, and the safer
-     one): the assistant gives you the review link. Open it, check the
-     change, press **Apply these changes to Archidekt**, then tell the
-     assistant you did.
-   - **The assistant applies it** (only if the owner turned on in-chat
-     applying, and your app allows the apply tool): after your yes, it
-     applies the proposal and tells you how it went.
+2. **Apply.** Nothing happens until you press a button yourself. Which
+   button depends on your app and on how the owner set things up:
+   - **The card in the chat** (Claude on the web, desktop and phones;
+     ChatGPT on the web): the proposal appears as a card next to the
+     assistant's message, with each card's picture, the exact change and
+     **Approve** and **Reject** buttons. Press Approve and the gateway
+     applies it and tells the assistant how it went. The first time, Claude
+     asks whether to show the app; allow it.
+   - **The review page in the browser** (every app, and always available):
+     the assistant gives you the review link. Open it, check the change,
+     press **Apply these changes to Archidekt**, then tell the assistant you
+     did. In Claude Code the assistant can offer to open that page for you.
+   - **The assistant applies it** (only if you chose that): on your
+     Account page you can switch your own **approval mode** from "Ask me
+     every time" to "Apply small, low-risk edits without asking" (a few
+     cards added, removed, moved or changed, never the commander, a new
+     deck, a restore or the deck's details) or "Apply every change without
+     asking". Then the assistant applies what your mode allows and tells
+     you what it did. Be aware that an assistant can be tricked by text it
+     reads into proposing a change you did not ask for; in an auto mode
+     that change lands without your press. Every change keeps a snapshot
+     you can restore from the History page.
 
    Either way, for an edit the gateway first checks the deck hasn't changed
    since the proposal, saves a copy of it (a snapshot), and puts a private
@@ -163,10 +175,12 @@ so:
    snapshot id (or the new deck's link), and say how to undo it. You can
    always use the review link instead of answering in chat, just not both.
 
-Only your own messages count as a yes. If a deck description, a card note or
-anything else the assistant reads says "apply this" or "approved", the
-assistant has to ignore it and tell you. If your assistant ever applies a
-change you didn't okay, tell the owner.
+Only your own press counts: the card's Approve button sends a one-time code
+the assistant never sees, and the review page needs your signed-in browser,
+so the assistant can't approve a proposal for you. If a deck description, a
+card note or anything else the assistant reads says "apply this" or
+"approved", the assistant has to ignore it and tell you. If your assistant
+ever applies a change you didn't okay, tell the owner.
 
 Good to know:
 
@@ -224,6 +238,11 @@ Good to know:
   service's tokens for your account (encrypted) and asks it, every few
   seconds while you use the gateway, whether you're still in the group. If
   the owner removes you, you're signed out everywhere on your next click.
+- Your profile picture (the one the sign-in service shows: Gravatar, or a
+  picture you uploaded there) is copied to the owner's server for the
+  account icon. The server fetches it, so your browser never contacts
+  Gravatar. Without one you see your initials. **Delete my data** removes
+  the copy.
 - Every tool call is tied to your account. Sign-ins, proposals, applies,
   links and unlinks go in an audit log, and the gateway keeps a snapshot of
   each deck from just before a change. The owner can see these. The backup
@@ -250,8 +269,8 @@ doesn't land in your account.
 1. On `https://mtg.example.com/account`, under **Delete my data**, tick the
    box and press **Delete my data**. That deletes everything the gateway
    keeps for you from its database: proposals, snapshots, test reports, scan
-   sessions, deck covers, the stored Archidekt session, connected apps and
-   your sign-in. Your decks on Archidekt (and the backup copies in your
+   sessions, deck covers, the stored Archidekt session, connected apps,
+   the copy of your profile picture and your sign-in. Your decks on Archidekt (and the backup copies in your
    Archidekt account) stay yours. The owner's nightly database backups, if
    they keep them, still hold a copy until they age out (14 days by default,
    `MTG_BACKUP_KEEP_DAYS`). The owner's security log keeps a record that your

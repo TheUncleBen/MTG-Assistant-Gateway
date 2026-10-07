@@ -17,7 +17,7 @@ on:
       authentik:
         description: "Authentik versions to test"
         type: choice
-        options: ["both", "2025.6.4", "2026.2.2"]
+        options: ["both", "2025.6.4", "2026.2.2", "2026.8.3"]
         default: both
 
 permissions:
@@ -75,8 +75,8 @@ jobs:
       matrix:
         authentik: >-
           ${{ fromJSON(
-                github.event_name == 'pull_request' && '["2026.2.2"]'
-                || (inputs.authentik == 'both' || inputs.authentik == '') && '["2025.6.4", "2026.2.2"]'
+                github.event_name == 'pull_request' && '["2026.8.3"]'
+                || (inputs.authentik == 'both' || inputs.authentik == '') && '["2025.6.4", "2026.8.3"]'
                 || format('["{0}"]', inputs.authentik)) }}
     env:
       E2E_AUTHENTIK_IMAGE: ghcr.io/goauthentik/server:${{ matrix.authentik }}

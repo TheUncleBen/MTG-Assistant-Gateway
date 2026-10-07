@@ -65,7 +65,7 @@ SECTIONS = [
 ]
 
 
-def guide_body(*, site: str, writes_enabled: bool, apply_via_mcp: bool, has_collection: bool) -> str:
+def guide_body(*, site: str, writes_enabled: bool, has_collection: bool) -> str:
     toc = (
         "<nav class='toc' aria-label='Guide sections'>"
         + "".join(f"<a href='#{sid}'>{icon(ic)}{_esc(label)}</a>" for sid, ic, label in SECTIONS)
@@ -77,22 +77,23 @@ def guide_body(*, site: str, writes_enabled: bool, apply_via_mcp: bool, has_coll
         return f"<section class='panel' id='{sid}'><h2>{icon(ic)}{_esc(label)}</h2>{body}</section>"
 
     writes = (
-        "Edits are switched on here, so an approved proposal is applied to Archidekt for you."
+        "Edits are switched on here: what you save in the app goes to Archidekt at once, and an "
+        "approved proposal from your assistant is applied for you."
         if writes_enabled
-        else "Edits are switched off on this gateway for now: you can review proposals, but they are "
-        "not applied until the person running it turns writes on."
+        else "Edits are switched off on this gateway for now: your saves and your assistant's proposals "
+        "are kept as proposals and applied once the person running it turns writes on."
     )
     chat_apply = (
-        "You can approve a proposal in chat, and the assistant applies it, or open the review page."
-        if apply_via_mcp
-        else "Approving happens on the review page in your browser, never in chat: the assistant sends "
-        "you a link, you read the exact change and press Apply."
+        "Approve on the card the assistant shows in the chat, or open the review page and press Apply. "
+        "On your Account page you can pick an approval mode: Manual (every change asks you), Semi-auto "
+        "(the assistant applies small, low-risk edits itself and asks about the rest) or Full auto. "
+        "Every change keeps a snapshot either way."
     )
     start = (
         f"<p>{_esc(site)} is a private companion to <strong>Archidekt</strong>. Everything you can do on "
         "the Archidekt website with your own decks, you can do here on your phone or computer, and an AI "
-        "assistant such as Claude or ChatGPT can do it with you. Your decks stay on Archidekt; this site "
-        "never changes one without showing you the exact change first.</p>"
+        "assistant such as Claude or ChatGPT can do it with you. Your decks stay on Archidekt; what you do "
+        "here is saved there, and an assistant never changes one without a proposal you approve.</p>"
         "<ol class='steps'>"
         "<li><span><strong>Link Archidekt</strong> once on the <a href='/account'>Account</a> page. The "
         "site then sees the decks of that account, private ones included.</span></li>"
@@ -102,10 +103,11 @@ def guide_body(*, site: str, writes_enabled: bool, apply_via_mcp: bool, has_coll
         "collection, and <strong>search</strong> public decks for ideas.</span></li>"
         "<li><span>Optional: <strong>connect an assistant</strong> from the home page and ask it to "
         "research, "
-        "simulate or edit for you. Every edit still comes back to you as a proposal.</span></li></ol>"
-        "<p class='tip'>On a phone the five tabs at the bottom are Decks, Search, Scan, Collection and More. "
-        "More opens this home page with every section; your account menu is the person icon at the top "
-        "right, and a tap anywhere else closes it.</p>"
+        "simulate or edit for you. An assistant's edit comes back to you as a proposal.</span></li></ol>"
+        "<p class='tip'>On a phone the tabs at the bottom are Decks, Scan, Collection, Proposals and More; "
+        "Search is the magnifier at the top. More opens Home, History, Guide and Account (and Admin). "
+        "Unfolded or on a tablet the tabs move to a rail down the left edge, with Search among them. "
+        "Your account menu is your picture at the top right, and a tap anywhere else closes it.</p>"
     )
     decks = (
         "<p><a href='/decks'>Decks</a> lists the decks of your linked Archidekt account with their cover "
@@ -120,15 +122,17 @@ def guide_body(*, site: str, writes_enabled: bool, apply_via_mcp: bool, has_coll
         "<li>Tap a card (or a stack on a phone, which fans it out) to see it large, open it on Scryfall, "
         "mark it as owned, or move it to another category.</li>"
         "<li>On your own deck, <strong>drag a card</strong> onto another category: with a mouse, or press "
-        "and hold on a touch screen and slide. The moves are collected into one proposal you review.</li>"
+        "and hold on a touch screen and slide, then press <strong>Save moves</strong>: they go to Archidekt "
+        "at once.</li>"
         "<li><strong>Quick add</strong> types a card name and takes you to the editor with it filled in.</li>"
         "<li>The <strong>More</strong> menu in the banner holds Edit deck, Deck settings, Clone, Run report, "
         "Export (text, JSON or CSV) and the deck's page on Archidekt.</li>"
         "<li>Below the cards: statistics (mana curve, colours, types, prices, legality, bracket estimate) "
         "and the description.</li></ul>"
         "<h3>The editor</h3><p>Change quantities, categories (type a new one to create it), foil or "
-        "printing, add cards with autocompletion, remove cards, and undo. Everything becomes "
-        "<em>one</em> proposal when you press Review, so a session of edits is one change you approve.</p>"
+        "printing, add cards with autocompletion, remove cards, and undo. <strong>Save changes</strong> "
+        "sends the whole session to Archidekt in one go, after a snapshot of the deck as it was; only a big "
+        "removal (many cards at once) asks you to confirm first.</p>"
         f"<p class='tip'>{_esc(writes)}</p>"
     )
     search = (
@@ -136,8 +140,8 @@ def guide_body(*, site: str, writes_enabled: bool, apply_via_mcp: bool, has_coll
         "deck name, commander, format, colours or the person who built it, ordered by newest, most viewed "
         "or largest. Open any result to read it with the same views as your own decks; the owner's name "
         "opens their profile with every public deck they have.</p>"
-        "<p>From a public deck you can run the statistics, export it, or clone it into your own account "
-        "(a proposal, like every change).</p>"
+        "<p>From a public deck you can run the statistics, export it, like, bookmark or comment on it, "
+        "follow its owner, or clone it into your own account.</p>"
     )
     scan = (
         "<p><a href='/scan'>Scan</a> turns physical cards into a list with your phone camera. Text "
@@ -167,24 +171,27 @@ def guide_body(*, site: str, writes_enabled: bool, apply_via_mcp: bool, has_coll
         "ones alike, with the number of copies Archidekt knows about.</li>"
         "<li><strong>Export CSV</strong> downloads the whole collection in the column layout Archidekt's "
         "own import reads.</li>"
-        "<li>A scan is an inbox: once you save its cards to the collection or a deck, the scan is done "
-        "with and disappears. Scans nobody touched for a month go too.</li></ul>"
-        "<p class='tip'>Your assistant can read and add to the collection too, for questions like "
-        "“which cards in this deck do I not own yet?” It cannot like, follow or comment for you: those "
-        "buttons only work when you press them yourself.</p>"
+        "<li>A scan is a draft that stays here as long as you like, up to a whole deck: fix misread cards, "
+        "printings and quantities first, then send it to your collection or a deck, which removes the "
+        "draft. Nothing expires; you delete what you do not want.</li></ul>"
+        "<p class='tip'>Your assistant can read the collection too, for questions like “which cards in "
+        "this deck do I not own yet?”, and propose additions or removals that you approve like a deck "
+        "edit. It cannot like, follow or comment for you: those buttons only work when you press them "
+        "yourself.</p>"
     )
     proposals = (
-        "<p>No deck is ever changed directly. Every edit, new deck, clone, settings change or restore is "
-        "first saved as a <strong>proposal</strong>: the exact list of what would change. "
+        "<p>Your own saves in the app go to Archidekt at once: pressing Save is your approval. An "
+        "<strong>assistant's</strong> edit, new deck, clone, settings change, restore or collection change "
+        "is first saved as a <strong>proposal</strong>: the exact list of what would change. "
         f"{_esc(chat_apply)}</p><ul>"
         "<li><a href='/proposals'>Proposals</a> lists what is waiting. Open one to read the diff and press "
-        "<strong>Apply</strong> or <strong>Reject</strong>.</li>"
+        "<strong>Apply</strong> or <strong>Reject</strong>. Your own saves appear here too, already "
+        "applied, so every change has a record.</li>"
         "<li>Before an edit is applied, the gateway checks the deck has not changed in the meantime, saves a "
         "<strong>snapshot</strong> and puts a backup copy of the deck in an “MTG Gateway backups” "
         "folder on your Archidekt account, then reads the deck back to confirm.</li>"
         "<li><a href='/history'>History</a> shows proposals, snapshots and deck reports over time. "
-        "<strong>Restore</strong> puts a deck back exactly as a snapshot had it (another proposal you "
-        "approve).</li>"
+        "<strong>Restore</strong> puts a deck back exactly as a snapshot had it, after you confirm.</li>"
         "<li><strong>Reports</strong> store a deck's statistics, a legality check and a goldfish simulation "
         "so you can follow how it develops.</li></ul>"
     )
@@ -214,8 +221,10 @@ def guide_body(*, site: str, writes_enabled: bool, apply_via_mcp: bool, has_coll
         "the phone camera, reload, open in browser, change gateway) sit in the account menu at the top "
         "right. Links to Archidekt or Scryfall open in your browser; gateway links shared from other apps "
         "open in the app.</p>"
-        "<p>On a foldable, the unfolded screen uses the same app layout as the folded one; while "
-        "scanning, half-folding the phone puts the camera on the top half and the list on the bottom.</p>"
+        "<p>On a foldable, the folded screen has the tabs at the bottom and the unfolded screen moves them "
+        "to a rail down the left edge, like other Android apps; the layout follows the window, so split "
+        "screen and pop-up windows work too. While scanning, half-folding the phone puts the camera on "
+        "the top half and the list on the bottom.</p>"
         "<p>No Android phone? Add this site to your home screen from the browser (Chrome and Samsung "
         "Internet on Android, Safari on iPhone: Share, then Add to Home Screen) and it opens like an app, "
         "scanning included.</p>"
@@ -223,7 +232,8 @@ def guide_body(*, site: str, writes_enabled: bool, apply_via_mcp: bool, has_coll
     privacy = (
         "<p>The <a href='/account'>Account</a> page shows who you are signed in as and your Archidekt "
         "link. Unlinking removes the stored Archidekt session at once. <strong>Sign out on all my "
-        "devices</strong> ends every session and assistant connection you have.</p><ul>"
+        "devices</strong> ends every browser and Android app session; connected assistants keep working "
+        "until you disconnect them under <strong>Connected apps</strong>.</p><ul>"
         "<li>Only you can see your decks, proposals, snapshots, scans and collection; another member "
         "cannot reach them, and neither can their assistant.</li>"
         "<li>Your assistant's access can be withdrawn at any time from the Account page (the "
@@ -262,7 +272,6 @@ def add_guide_routes(server: MCPServer, state: AppState) -> None:
             guide_body(
                 site=s.server_name,
                 writes_enabled=bool(s.writes_enabled),
-                apply_via_mcp=bool(getattr(s, "apply_via_mcp", False)),
                 has_collection=getattr(state, "collection", None) is not None,
             ),
             site=s.server_name,

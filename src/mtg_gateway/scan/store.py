@@ -22,9 +22,10 @@ CREATE TABLE IF NOT EXISTS scan_sessions (
 CREATE INDEX IF NOT EXISTS scan_sessions_owner ON scan_sessions(owner_sub, updated_at);
 """
 
-MAX_SESSIONS_PER_USER = 100
-# A scan is an inbox, not an archive: sessions nobody touched for this long are dropped.
-INBOX_DAYS = 30
+# Scans are drafts the member keeps for as long as they like (up to a whole deck's worth, fixed up
+# before it goes to Archidekt), so nothing expires by age; only a per-member ceiling guards the
+# database, and the oldest draft goes only when a new one arrives past it.
+MAX_SESSIONS_PER_USER = 500
 
 
 class ScanStore:
@@ -87,19 +88,14 @@ class ScanStore:
             return cur.rowcount > 0
 
     def prune(self, owner_sub: str) -> int:
-        """Keep the newest MAX_SESSIONS_PER_USER sessions for a user, and none older than
-        INBOX_DAYS (a scan is a short-lived inbox until its cards are saved somewhere)."""
+        """Keep the newest MAX_SESSIONS_PER_USER sessions for a user; drafts never expire by age."""
         with self.db.tx() as c:
-            old = c.execute(
-                "DELETE FROM scan_sessions WHERE owner_sub = ? AND updated_at < ?",
-                (owner_sub, self.now() - INBOX_DAYS * 86400),
-            ).rowcount
             cur = c.execute(
                 """DELETE FROM scan_sessions WHERE owner_sub = ? AND id NOT IN (
                        SELECT id FROM scan_sessions WHERE owner_sub = ? ORDER BY updated_at DESC LIMIT ?)""",
                 (owner_sub, owner_sub, MAX_SESSIONS_PER_USER),
             )
-            return cur.rowcount + old
+            return cur.rowcount
 
     def count(self) -> int:
         with self.db.tx() as c:

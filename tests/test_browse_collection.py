@@ -275,26 +275,72 @@ async def test_collection_json_api_and_cross_member_isolation(stack: Stack) -> N
 
 
 async def test_collection_tools(stack: Stack) -> None:
-    b = await linked(stack)  # the tools work on the member's linked Archidekt account
+    """The assistant reads the collection freely; changing it is a proposal (kind ``collection``)
+    that waits for the member like a deck edit, and applies through the same gate."""
+    b = await linked(stack)
     try:
         token = await mcp_token(stack.h)
-        out = structured(
-            await call(stack.h, token, "add_to_collection", {"cards": [{"name": "Sol Ring", "quantity": 2}]})
+        p = structured(
+            await call(
+                stack.h,
+                token,
+                "propose_collection_changes",
+                {"add": [{"name": "Sol Ring", "quantity": 2}, "Arcane Signet"]},
+            )
         )
-        assert out["ok"] is True and out["added"][0]["quantity"] == 2, out
+        assert p["ok"] is True and p["kind"] == "collection" and p["state"] == "pending", p
+        assert p["risk"] == "low" and p["assistant_may_apply"] is False  # manual mode: the member applies
+        assert "+2 Sol Ring" in p["diff"] and "+1 Arcane Signet" in p["diff"]
+        assert stack.ark.collections.get("alice", {}) == {}  # nothing sent yet
+        # the review page names the target, and the member's Apply writes to Archidekt
+        csrf = await b.csrf("/collection")
+        review = await b.http.get(f"/proposals/{p['proposal_id']}", headers=NAV)
+        assert review.status_code == 200 and "Your Archidekt collection" in review.text
+        applied = await b.http.post(
+            f"/api/v1/proposals/{p['proposal_id']}/apply", headers={"X-CSRF-Token": csrf}
+        )
+        assert applied.status_code == 200, applied.text
+        a = applied.json()
+        assert a.get("state") == "applied", a
+        assert [r["quantity"] for r in a["result"]["added"]] == [2, 1], a
         out = structured(await call(stack.h, token, "list_collection", {}))
-        assert out["ok"] is True and out["count"] == 1 and out["cards"][0]["name"] == "Sol Ring"
-        out = structured(
-            await call(stack.h, token, "remove_from_collection", {"name": "Sol Ring", "quantity": 1})
+        assert out["ok"] is True and out["count"] == 2
+        # removing is a proposal too, resolved against the collection so the diff names the card
+        rid = next(r["id"] for r in out["cards"] if r["name"] == "Sol Ring")
+        p2 = structured(
+            await call(stack.h, token, "propose_collection_changes", {"remove": [{"id": rid, "quantity": 1}]})
         )
-        assert out["ok"] is True and out["removed"][0]["quantity"] == 2
-        assert [r["quantity"] for r in stack.ark.collections["alice"].values()] == [1]
-        # no tool exists for social actions (likes, follows, comments are a person's own clicks)
+        assert p2["ok"] is True and "-1 Sol Ring" in p2["diff"], p2
+        a2 = await b.http.post(f"/api/v1/proposals/{p2['proposal_id']}/apply", headers={"X-CSRF-Token": csrf})
+        assert a2.status_code == 200 and a2.json()["result"]["removed"][0]["quantity"] == 2
+        assert sorted(r["quantity"] for r in stack.ark.collections["alice"].values()) == [1, 1]
+        # the assistant cannot apply it itself in manual mode
+        p3 = structured(await call(stack.h, token, "propose_collection_changes", {"add": ["Sol Ring"]}))
+        refused = structured(await call(stack.h, token, "apply_proposal", {"proposal_id": p3["proposal_id"]}))
+        assert refused["ok"] is False and refused["error"] == "browser_required"
+        # no tool exists for social actions (likes, follows, comments are a person's own clicks),
+        # and no tool writes the collection directly
         listing = sse_json(await stack.h.mcp(token, "tools/list"))
         names = {t["name"] for t in listing["result"]["tools"]}
-        assert {"list_collection", "add_to_collection", "remove_from_collection"} <= names
+        assert {"list_collection", "propose_collection_changes"} <= names
+        assert not {"add_to_collection", "remove_from_collection"} & names
         social = ("vote", "like", "follow", "comment", "bookmark")
         assert not any(w in n for n in names for w in social), names
+    finally:
+        await b.aclose()
+
+
+async def test_read_only_token_cannot_propose_collection_changes(stack: Stack) -> None:
+    from .test_round4_data import _app_token
+
+    b = await linked(stack)
+    try:
+        token, _cid = await _app_token(stack.h, "reader", scope="mtg.read")
+        out = structured(await call(stack.h, token, "propose_collection_changes", {"add": ["Sol Ring"]}))
+        assert out["ok"] is False and out["error"] == "insufficient_scope", out
+        assert stack.ark.collections.get("alice", {}) == {}
+        listed = structured(await call(stack.h, token, "list_collection", {}))
+        assert listed["ok"] is True  # reading stays open to a read-only app
     finally:
         await b.aclose()
 

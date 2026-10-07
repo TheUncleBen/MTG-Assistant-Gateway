@@ -6,7 +6,7 @@
    - on touch screens a tap fans a stack out and a tap on a card opens a viewer with the card
      large and what can be done with it (grid view, stacks, text rows alike);
    - on the member's own deck, cards can be dragged between categories (mouse, or press and hold
-     on touch); the moves become one proposal, applied from the review page like every edit. */
+     on touch); the moves are saved to Archidekt in one go, with a snapshot first. */
 (function () {
   "use strict";
   var $ = function (sel, root) { return (root || document).querySelector(sel); };
@@ -184,7 +184,7 @@
   bar.className = "movebar";
   bar.setAttribute("role", "region");
   bar.setAttribute("aria-label", "Pending category moves");
-  var review = el("button", "btn-primary", "Review moves");
+  var review = el("button", "btn-primary", "Save moves");
   review.type = "button";
   var undo = el("button", null, "Undo all");
   undo.type = "button";
@@ -215,21 +215,23 @@
     refreshBar();
   }
   undo.addEventListener("click", function () { location.reload(); });
+  // The member's own moves are saved to Archidekt at once (one proposal, applied with its
+  // snapshot); the assistant never reaches this path.
   review.addEventListener("click", function () {
     var changes = Object.keys(moves).map(function (name) { return { action: "set_category", card_name: name, categories: [moves[name].to] }; });
     if (!changes.length) return;
     review.disabled = true;
-    status.textContent = "Making the proposal…";
+    status.textContent = "Saving to Archidekt…";
     fetch("/api/v1/proposals", {
       method: "POST", credentials: "same-origin",
       headers: { "Content-Type": "application/json", "X-CSRF-Token": CSRF },
-      body: JSON.stringify({ kind: "edit", deck_id: deckId, changes: changes })
+      body: JSON.stringify({ kind: "edit", deck_id: deckId, changes: changes, apply: true, confirmed: true })
     }).then(function (r) { return r.json(); }).then(function (d) {
-      if (d.ok && d.review_url) { location.href = d.review_url; return; }
+      if (d.ok && d.applied) { location.href = "/decks/" + encodeURIComponent(deckId) + "?ok=saved"; return; }
       if (d.ok && d.proposal_id) { location.href = "/proposals/" + encodeURIComponent(d.proposal_id); return; }
-      status.textContent = "Could not make the proposal: " + ((d && d.message) || "unknown error");
+      status.textContent = "Could not save: " + ((d && d.message) || "unknown error");
       review.disabled = false;
-    }).catch(function () { status.textContent = "Could not make the proposal: no connection"; review.disabled = false; });
+    }).catch(function () { status.textContent = "Could not save: no connection"; review.disabled = false; });
   });
 
   function pickCategory(card) {
@@ -344,7 +346,7 @@
   }
   function confirmChip(btn, question, yesLabel, onYes) {
     var old = btn.parentNode.querySelector(".confirm");
-    if (old) old.remove();
+    if (old) old.dismiss(); // one question at a time; the other button comes back
     var chip = el("span", "confirm");
     chip.setAttribute("role", "group");
     chip.appendChild(document.createTextNode(question + " "));
@@ -357,6 +359,7 @@
     btn.hidden = true;
     btn.parentNode.insertBefore(chip, btn.nextSibling);
     var restore = function () { chip.remove(); btn.hidden = false; btn.focus(); };
+    chip.dismiss = function () { chip.remove(); btn.hidden = false; };
     no.addEventListener("click", restore);
     chip.addEventListener("keydown", function (e) { if (e.key === "Escape") restore(); });
     yes.addEventListener("click", function () { chip.remove(); btn.hidden = false; onYes(); });

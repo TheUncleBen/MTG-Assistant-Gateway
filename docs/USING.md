@@ -53,8 +53,8 @@ One deck:
 - Tap a card (or a stack on a phone, which fans it out) to see it large,
   open it on Scryfall, mark it as owned, or move it to another category.
 - On your own deck, **drag a card** onto another category: with a mouse, or
-  press and hold on a touch screen and slide. The moves are collected into
-  one proposal you review.
+  press and hold on a touch screen and slide. Press **Save moves** and the
+  moves go to Archidekt at once, with a snapshot taken first.
 - **Quick add** types a card name and takes you to the editor with it
   filled in.
 - The **More** menu in the banner holds Edit deck, Deck settings, Clone, Run
@@ -64,7 +64,8 @@ One deck:
 
 The **editor** changes quantities, categories (type a new one to create it),
 foil or printing, adds cards with autocompletion, removes cards, and undoes.
-Everything becomes one proposal when you press Review.
+Press **Save changes** and they go to Archidekt straight away (a snapshot
+first, so History can undo); only a large removal asks you to confirm.
 
 ## Finding decks
 
@@ -73,8 +74,7 @@ by deck name, commander, format, colours or the person who built it,
 ordered by newest, most viewed or largest. Open any result to read it with
 the same views as your own decks; the owner's name opens their profile with
 every public deck they have. From a public deck you can run the statistics,
-export it, or clone it into your own account (a proposal, like every
-change).
+export it, or clone it into your own account.
 
 ## Scanning cards
 
@@ -92,7 +92,7 @@ the gateway.
 3. **Choose what to do with it:** save the cards to your collection (on
    Archidekt), add them to one of your decks, start a new deck from them, or
    keep the scan for later (your assistant can pick it up too). A saved scan
-   is an inbox: once its cards have gone somewhere it disappears.
+   is a draft: it stays until you send its cards somewhere or delete it.
 
 You can also type or paste names instead of using the camera, and earlier
 scans are listed under **Sessions**. The details are in
@@ -114,12 +114,12 @@ condition and count.
   public ones alike, with the number of copies Archidekt knows about.
 - **Export CSV** downloads the whole collection in the column layout
   Archidekt's own import reads.
-- A scan is an inbox: once you save its cards to the collection or a deck,
-  the scan is done with and disappears. Scans nobody touched for a month go
-  too.
+- A scan is a draft that stays as long as you like, up to a whole deck:
+  fix misread cards, printings and quantities first, then send it to your
+  collection or a deck, which removes the draft. Nothing expires by age.
 
 Your assistant can read and add to the collection too (`list_collection`,
-`add_to_collection`, `remove_from_collection`), for questions like "which
+`propose_collection_changes`, a proposal you approve), for questions like "which
 cards in this deck do I not own yet?". Adding takes about a second a card,
 because each one is written to Archidekt.
 
@@ -135,10 +135,15 @@ tool for any of them and cannot like, follow or comment for you.
 
 ## Proposals and history
 
-No deck is ever changed directly. Every edit, new deck, clone, settings
-change or restore is first saved as a **proposal**: the exact list of what
-would change. Approving happens on the review page in your browser unless
-the operator allows approving in chat.
+What you save in the app (the editor, a drag between categories, a new
+deck, clone or settings) goes to Archidekt at once: pressing Save is your
+approval, and a snapshot is taken first so History can undo it. Only a big
+removal asks you to confirm. An **assistant's** edit, new deck, clone,
+settings change, restore or collection change is first saved as a
+**proposal**: the exact list of what would change. Approve it on the card
+in the chat or on the review page, or pick an approval mode on your Account
+page (Manual, Semi-auto for small low-risk edits, Full auto) and the
+assistant applies what that mode allows, always with a snapshot.
 
 - **Proposals** lists what is waiting. Open one to read the diff and press
   **Apply** or **Reject**.
@@ -169,15 +174,17 @@ the house rules.
 The [Android app](ANDROID.md) shows these same pages as a native-feeling
 app with the phone camera built in. The app's own actions (scan with the
 phone camera, reload, open in browser, change gateway) sit in the account
-menu. On a foldable, the unfolded screen uses the same app layout as the
-folded one. No Android phone? Add the site to your home screen from the
+menu. On a foldable, the folded screen has the tabs at the bottom and the
+unfolded screen moves them to a rail down the left edge. No Android phone? Add the site to your home screen from the
 browser and it opens like an app, scanning included.
 
 ## Your account and privacy
 
 The **Account** page shows who you are signed in as and your Archidekt
 link. Unlinking removes the stored Archidekt session at once. **Sign out on
-all my devices** ends every session and assistant connection you have. Only
+all my devices** ends every browser and Android app session; connected
+assistants keep working until you disconnect them under **Connected apps**.
+Only
 you can see your decks, proposals, snapshots, scans and collection; another
 member cannot reach them, and neither can their assistant. Nothing is
 public or indexed. More in [ONBOARDING.md](ONBOARDING.md#8-privacy).

@@ -26,7 +26,7 @@ can need a change on your side.
 
 ## Staying on one version
 
-Set `MTG_TAG` to a version, for example `MTG_TAG=0.6.2`, and redeploy. You stay
+Set `MTG_TAG` to a version, for example `MTG_TAG=0.6.6`, and redeploy. You stay
 on it until you change the variable. To go back to an older version, set its
 number, but read [OPERATIONS.md](OPERATIONS.md#restart-or-update) first: a newer
 version may have upgraded the database, and an older image refuses to open it.
@@ -63,8 +63,8 @@ There is no separate release step. Every pull request:
 
 1. raises `VERSION` (one line, for example `1.1.0`), picking MAJOR, MINOR or
    PATCH as above, and changes the version in `pyproject.toml`,
-   `src/mtg_gateway/__init__.py`, the plugin manifests and the Android app to
-   match (a unit test checks they agree);
+   `src/mtg_gateway/__init__.py` and the plugin manifests to match (a unit
+   test checks they agree; the Android app reads `VERSION` on its own);
 2. adds a `## [1.1.0] - YYYY-MM-DD` section to `CHANGELOG.md`.
 
 CI refuses a pull request whose `VERSION` isn't above every released version or

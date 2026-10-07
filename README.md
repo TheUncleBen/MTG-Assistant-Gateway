@@ -158,8 +158,12 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
   - `propose_deck_changes` (edit a deck) and `propose_new_deck` (build one
     from a card list, a pasted list or a CSV) save the exact diff and a
     review link.
-  - The user says yes, either in chat (if the operator allows
-    `apply_proposal`) or with the Apply button on the review page.
+  - The user approves it: on the card the AI app shows next to the
+    proposal (Claude on the web, desktop and phones; ChatGPT), with the
+    Apply button on the review page, or, when the member chose a Semi-auto
+    or Full-auto approval mode on their Account page, the assistant applies
+    it with `apply_proposal`. The card's Approve button carries a one-time code
+    the assistant never sees, so a tricked assistant can't press it.
   - For an edit, the gateway checks the deck hasn't changed since the proposal, saves a
     snapshot, puts a private backup copy of the deck in the user's
     "MTG Gateway backups" folder on Archidekt, makes the change, then reads
@@ -178,14 +182,16 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
   view and editor behind the same sign-in: browse, search and open decks as
   text, stacks or grid (touch works: tap to fan a stack, press and hold to
   move a card between categories), see statistics, run a report, edit
-  quantities, categories and additions as one proposal, and look back over
+  quantities, categories and additions (your own saves go straight to
+  Archidekt, with a snapshot first), and look back over
   proposals, snapshots and reports. They are also the pages the Android app
   wraps.
 - **Collection.** The cards you own, which is your Collection on Archidekt
   shown and edited through the gateway (nothing about them is stored here):
   add by name or from a scan, count copies, filter, export CSV. Owned cards
-  get a green dot on every deck page. `list_collection`, `add_to_collection`
-  and `remove_from_collection` give the assistant the same.
+  get a green dot on every deck page. `list_collection` and
+  `propose_collection_changes` (a proposal, approved like a deck edit) give
+  the assistant the same.
 - **Likes, bookmarks, follows and comments.** Archidekt's social buttons on
   every deck and user page, each behind a confirmation and sent under your
   own Archidekt name. Browser-only by design: no tool can do any of it.
@@ -193,7 +199,12 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
   600 px on touch screens and in the Android app, the desktop bar in wider
   browsers; the layout follows the live window, so a foldable, split screen
   or the browser's "Desktop site" switch re-flows at once.
-- **Admin page.** Members of `MTG_ADMIN_GROUP` get `/admin`: who has signed
+- **Profile pictures.** The account icon shows each member's picture from
+  the identity provider (Gravatar, or a picture uploaded to Authentik),
+  fetched by the gateway, or their initials. See
+  [docs/IDP-AUTHENTIK.md](docs/IDP-AUTHENTIK.md#profile-pictures).
+- **Admin page.** Members of `MTG_ADMIN_GROUP` get `/admin` (they don't
+  also need `MTG_REQUIRED_GROUP`): who has signed
   in, their activity, per-day usage counts, a System card (version, database
   size and schema, newest backup), and buttons to disable or enable an
   account, revoke its tokens and sessions, unlink Archidekt, or delete
@@ -219,7 +230,7 @@ between releases ([docs/VERSIONS.md](docs/VERSIONS.md)).
 | Area | State |
 | --- | --- |
 | Sign-in, research, deck import, account linking, proposals, scanning | Built. Tested against fakes, recorded Archidekt and Scryfall responses, and a real Swarm stack with Authentik in CI |
-| Applying edits, creating decks, backups and restores on Archidekt | Built, and run live against a throwaway Archidekt account (create, add, remove, quantities, categories, commander, backup folder and copy). The code default is off (`MTG_WRITES_ENABLED=false`); the example env files turn writes on (each change is still applied only by the member's own click on the review page; in-chat applying, `MTG_APPLY_VIA_MCP`, stays off). Try your first edit on a deck you don't care about |
+| Applying edits, creating decks, backups and restores on Archidekt | Built, and run live against a throwaway Archidekt account (create, add, remove, quantities, categories, commander, backup folder and copy). The code default is off (`MTG_WRITES_ENABLED=false`); the example env files turn writes on (each change is still applied only by the member's own press, the Approve button on the in-chat card or the Apply button on the review page, unless the member chose a looser approval mode on their Account page). Try your first edit on a deck you don't care about |
 | Client and device coverage | See [docs/CONNECT.md](docs/CONNECT.md#which-apps-and-devices-work), which labels each claim as verified, reported or unverified |
 | Deck statistics, stored deck reports and history, compare, companion pages, admin page, JSON API | Built and covered by the test suite against fakes. The companion pages and admin page have not yet had the same live Swarm run-through as the rest; treat that as unverified |
 | Watchlists, price history | Not yet (Mystic Forge's own saved goldfish reports stay hidden too; the gateway's stored deck reports replace them) |

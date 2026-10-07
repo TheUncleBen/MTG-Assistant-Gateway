@@ -153,6 +153,8 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
             if not confirmed:
                 raise AdminError("invalid", "Tick the confirmation box to delete.", code="confirm_delete")
             out.update(state.db.delete_member_data(target))
+            if state.membership is not None:
+                state.membership.avatars.delete(target)
         if action != "unlink":  # the unlink wrote its own row in the member's log above
             # the member's activity log shows what an administrator did to their account
             state.db.audit(
@@ -444,6 +446,8 @@ def _overview_body(state: Any) -> str:
         + _stat("Database schema", sysd["schema_version"])
         + _stat("Database size", f"{size / 1048576:.1f} MB" if size is not None else "in memory")
         + _stat("Newest backup", backup)
+        + _stat("Default approval mode", state.settings.approval_mode_default)
+        + _stat("Highest approval mode allowed", state.settings.approval_mode_max)
         + "</dl>"
         + (
             _err(f"The last nightly backup failed ({sysd['last_backup_error']}). Check the gateway's log.")

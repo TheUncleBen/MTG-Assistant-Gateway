@@ -16,7 +16,8 @@ import pytest
 from .conftest import MCP_URL, PUBLIC_URL, Env, McpClient, browser_page, gateway_browser_sign_in
 from .test_04_operations import GATEWAY, container_of, sh
 
-# Every other page may load only the gateway's own scripts (feedback.js, the offline service worker).
+# Every other page may load only the gateway's own scripts (feedback.js, the offline service worker)
+# and its own images (the account picture, /account/avatar).
 STRICT_CSP = (
     "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; worker-src 'self'; img-src 'self'; "
     "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
