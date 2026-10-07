@@ -335,9 +335,13 @@ async def test_an_unreachable_signed_in_client_is_not_remembered_as_failed(monke
     with pytest.raises(cimdmod.CimdUnavailable):
         await f.fetch(CLIENT_URL, known=True)
     docs.addresses["client.example"] = saved
-    assert (await f.fetch(CLIENT_URL, known=True))[0]["client_name"]  # not "failed recently"
-    # A lookup that hangs is held back for a minute instead (the next test), but as
-    # "unavailable", so the caller keeps the last good copy meanwhile.
+    # Left alone for a minute, but as "unavailable" (the caller keeps the last good copy), never
+    # as "failed recently", which would refuse the client.
+    with pytest.raises(cimdmod.CimdUnavailable):
+        await f.fetch(CLIENT_URL, known=True)
+    assert docs.requests == []
+    f._known_backoff.clear()  # a minute later
+    assert (await f.fetch(CLIENT_URL, known=True))[0]["client_name"]
     await f.aclose()
 
 
@@ -433,9 +437,16 @@ async def test_a_struggling_server_keeps_the_last_good_document(tmp_path: Path, 
         h.db.mark_cimd_client_signed_in(CLIENT_URL)
         with h.db.tx() as c:
             c.execute("UPDATE cimd_clients SET expires_at = ?", (int(time.time()) - 60,))
-        docs.serve(status=status)
-        assert (await provider._cimd_client(CLIENT_URL))["client_name"] == "Example Assistant"
+        docs.serve(status=status, headers={"retry-after": "3600"})
+        sent = len(docs.requests)
+        for _ in range(20):  # anonymous lookups while it struggles: one request, not twenty
+            assert (await provider._cimd_client(CLIENT_URL))["client_name"] == "Example Assistant"
+        assert len(docs.requests) == sent + 1
+        # and no slot or lock was left behind by the lookups that were turned away
+        assert provider.cimd._known_gate._value == cimdmod.MAX_CONCURRENT_FETCHES
+        assert not provider.cimd._url_locks
         docs.serve()
+        provider.cimd._known_backoff.clear()  # a minute later
         assert (await provider._cimd_client(CLIENT_URL))["client_name"] == "Example Assistant"
         assert h.db.get_cimd_client(CLIENT_URL)  # fresh again
 

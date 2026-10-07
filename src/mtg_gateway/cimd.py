@@ -213,6 +213,13 @@ def _address_is_public(ip: str) -> bool:
     return addr.is_global and not addr.is_multicast and not addr.is_private and not addr.is_reserved
 
 
+def _retrieve(fut: asyncio.Future) -> None:
+    """Mark a lookup's outcome as seen: one that finishes after its caller gave up (shielded)
+    would otherwise be logged as an exception nobody retrieved."""
+    if not fut.cancelled():
+        fut.exception()
+
+
 async def default_resolver(host: str, executor: concurrent.futures.Executor | None = None) -> list[str]:
     loop = asyncio.get_running_loop()
     infos = await loop.run_in_executor(
@@ -410,6 +417,7 @@ class CimdFetcher:
         self._url_users: dict[str, int] = {}
         self._known_dns_failures: dict[str, float] = {}  # host -> when its lookup last timed out
         self._known_resolving: set[str] = set()  # hosts with a signed-in lookup still running
+        self._known_backoff: dict[str, float] = {}  # url -> when its server was last unreachable
 
     async def aclose(self) -> None:
         await self._http.aclose()
@@ -435,11 +443,12 @@ class CimdFetcher:
         loop = asyncio.get_running_loop()
         if self._resolver is not None:
             job: asyncio.Future = asyncio.ensure_future(self._resolver(host))
-            job.add_done_callback(lambda _: self._known_resolving.discard(host))
+            job.add_done_callback(lambda j: (self._known_resolving.discard(host), _retrieve(j)))
         else:
             cf = self._dns_known.submit(socket.getaddrinfo, host, 443, type=socket.SOCK_STREAM)
             cf.add_done_callback(lambda _: loop.call_soon_threadsafe(self._known_resolving.discard, host))
             job = asyncio.wrap_future(cf)
+            job.add_done_callback(_retrieve)
         try:
             async with asyncio.timeout(DNS_TIMEOUT):
                 result = await asyncio.shield(job)
@@ -552,6 +561,17 @@ class CimdFetcher:
     async def _fetch_known(self, url: str, now: float) -> tuple[dict[str, Any], int]:
         """Refetch the document of a client a member has signed in with: no budgets or host
         block, one fetch per URL at a time, slots of its own."""
+        host = (urlparse(url).hostname or "").lower().rstrip(".")
+        unreachable_at = self._known_backoff.get(url)
+        if unreachable_at is not None and now - unreachable_at < FAILURE_TTL:
+            # Its server was down or asked us to slow down a moment ago: don't ask again on every
+            # anonymous lookup (the caller keeps the last good copy meanwhile).
+            raise CimdUnavailable("metadata document server was unreachable recently; not retrying yet")
+        failed_at = self._known_dns_failures.get(host)
+        if failed_at is not None and now - failed_at < FAILURE_TTL:
+            # Its DNS hung a moment ago and that lookup may still hold a thread: don't start
+            # another, so one such name can't use up the lane's DNS threads.
+            raise CimdUnavailable("client metadata host did not resolve recently; not retrying yet")
         lock = self._url_locks.setdefault(url, asyncio.Lock())
         self._url_users[url] = self._url_users.get(url, 0) + 1
         try:
@@ -565,12 +585,6 @@ class CimdFetcher:
                         raise
             except TimeoutError as exc:
                 raise CimdBusy("metadata document fetcher is busy; try again shortly") from exc
-            host = (urlparse(url).hostname or "").lower().rstrip(".")
-            failed_at = self._known_dns_failures.get(host)
-            if failed_at is not None and now - failed_at < FAILURE_TTL:
-                # Its DNS hung a moment ago and that lookup may still hold a thread: don't start
-                # another, so one such name can't use up the lane's DNS threads.
-                raise CimdUnavailable("client metadata host did not resolve recently; not retrying yet")
             try:
                 async with asyncio.timeout(self.timeout):
                     return await self._fetch(url, known=True)
@@ -579,8 +593,13 @@ class CimdFetcher:
             except CimdBusy:
                 raise
             except CimdUnavailable as exc:
-                # Not remembered against the URL: an unreachable server says nothing about the
-                # document. A hung lookup is remembered against the host for the lane's DNS threads.
+                # Not a failure of the document (the caller keeps its last good copy), but its
+                # server is left alone for a minute; a hung lookup also holds back the host.
+                self._known_backoff[url] = now
+                if len(self._known_backoff) > 1000:
+                    self._known_backoff = {
+                        u: t for u, t in self._known_backoff.items() if now - t < FAILURE_TTL
+                    }
                 if isinstance(exc, CimdDnsTimeout):
                     self._known_dns_failures[host] = now
                     if len(self._known_dns_failures) > 1000:
