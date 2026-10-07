@@ -1,4 +1,4 @@
-/* Collection page. Works without this file (every control is a form); with it the plus, minus and
+/* Collection page (the member's Archidekt Collection). Works without this file (every control is a form); with it the plus, minus and
    remove buttons update a row in place through the JSON API instead of reloading, and the filter
    selects apply on change. The shared deck.js handles the autocomplete of the add box. */
 (function () {
@@ -13,12 +13,10 @@
     var live = document.getElementById("live");
     if (live) live.textContent = text;
   }
-  function showTotals(t) {
-    if (!totals || !t) return;
-    var bs = totals.querySelectorAll("b");
-    if (bs[0]) bs[0].textContent = t.cards;
-    if (bs[1]) bs[1].textContent = t.distinct;
-    if (bs[2]) bs[2].textContent = t.sets ? t.sets.length : bs[2].textContent;
+  function showTotals(delta) {
+    if (!totals) return;
+    var b = totals.querySelector("b");
+    if (b) b.textContent = Math.max(0, (parseInt(b.textContent, 10) || 0) + delta);
   }
   function request(method, url, body) {
     return fetch(url, {
@@ -48,9 +46,9 @@
       $$("button", item).forEach(function (b) { b.disabled = true; });
       p.then(function (d) {
         if (!d.ok) { say(d.message || "That did not work."); $$("button", item).forEach(function (b) { b.disabled = false; }); return; }
-        showTotals(d.totals);
         var name = item.querySelector(".name") ? item.querySelector(".name").textContent : "Card";
         if (action === "remove" || !d.row || d.row.quantity === 0) {
+          showTotals(-1);
           item.remove();
           say(name + " removed from your collection.");
           if (list.children.length === 0) location.reload();

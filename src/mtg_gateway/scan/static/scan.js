@@ -1277,11 +1277,13 @@
       if (!resolved.length) { note('error', 'No card is matched yet; fix the unresolved ones first.'); return; }
       toCollection.disabled = true;
       try {
-        const out = await api('/collection/api/add', 'POST', { items: resolved.map((it) => ({ card: it.card, quantity: it.quantity, foil: isFoil(it) })), source: 'scan' });
-        const n = (out.added || []).length ? resolved.reduce((a, it) => a + it.quantity, 0) : 0;
+        note('', 'Saving ' + plural(resolved.length, 'card') + ' to your Archidekt collection… about a second a card.');
+        const out = await api('/collection/api/add', 'POST', { items: resolved.map((it) => ({ card: it.card, quantity: it.quantity, foil: isFoil(it) })), source: 'scan', scan_session: state.sessionId || undefined });
+        const n = (out.added || []).reduce((a, r) => a + (r.quantity || 0), 0);
         msg.textContent = '';
-        msg.append(h('div', { class: 'notice ok' }, 'Added ' + plural(n, 'card') + ' to your collection. ', h('a', { href: '/collection' }, 'Open the collection'),
-          resolved.length < state.items.length ? ' Unmatched cards were left out.' : ''));
+        msg.append(h('div', { class: 'notice ok' }, 'Saved ' + plural((out.added || []).length, 'card') + ' (' + n + ' copies) to your Archidekt collection. ', h('a', { href: '/collection' }, 'Open the collection'),
+          (out.skipped || []).length || resolved.length < state.items.length ? ' Cards Archidekt could not match were left out.' : ''));
+        if (state.sessionId) { state.sessionId = null; state.sessionName = ''; state.dirty = false; saveDraft(); renderBadge(); }
         buzz(30);
       } catch (err) { note('error', 'Could not add to the collection: ' + why(err)); }
       toCollection.disabled = false;
@@ -1306,7 +1308,7 @@
     } }, 'New deck from these cards');
     return h('section', { class: 'card next', 'aria-label': 'What next' },
       h('h2', { text: 'What next?' }),
-      h('div', { class: 'nextrow' }, h('div', { class: 'what' }, h('strong', { text: 'Keep them as owned cards' }), h('small', { class: 'muted', text: 'Adds the matched cards to your collection on this gateway.' })), toCollection),
+      h('div', { class: 'nextrow' }, h('div', { class: 'what' }, h('strong', { text: 'Keep them as owned cards' }), h('small', { class: 'muted', text: 'Adds the matched cards to your Collection on Archidekt; the scan is then done with.' })), toCollection),
       h('div', { class: 'nextrow' }, h('div', { class: 'what' }, h('strong', { text: 'Add them to one of your decks' }), h('small', { class: 'muted', text: 'Opens the deck editor with these cards filled in; you review the change before it is applied.' }), deckSel), toDeck),
       h('div', { class: 'nextrow' }, h('div', { class: 'what' }, h('strong', { text: 'Start a new deck' }), h('small', { class: 'muted', text: 'Opens the new-deck form with this list as the decklist.' })), newDeck));
   }

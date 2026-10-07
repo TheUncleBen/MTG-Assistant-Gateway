@@ -90,9 +90,13 @@ else your gateway serves. A few things are native:
   the gateway's own pages the button stays out of the way of the bottom tab
   bar.
 - **Layout.** The gateway's pages know they are in the app (the app adds
-  `MTGAssistant/<version>` to the browser's user agent) and use the phone
-  layout at every width, with the bottom tab bar and no website footer; an
-  unfolded foldable gets the same app layout, wider.
+  `MTGAssistant/<version>` to the browser's user agent) and never show the
+  website footer. Navigation follows Android's window size classes: under
+  600 px wide (a phone, a folded foldable) the bottom tab bar; from 600 px (an
+  unfolded foldable, a tablet, a wide split-screen pane) a navigation rail
+  down the left edge with the same five sections. The rules track the live
+  window, so folding, rotating, split screen and pop-up windows re-flow at
+  once without a reload.
 - **Back** goes back a page; on the first page it leaves the app.
 - **Links to your gateway** from other apps open in the app: share a gateway
   link to it from the browser's share sheet, or, when the operator built the
@@ -174,7 +178,8 @@ the text it read plus the small art fingerprint that tells printings apart.
 - The app keeps the page alive across fold, unfold and rotation (no reload), and
   lets the system size it freely, so it follows the screen you're using.
 - Layout of the pages is the gateway's responsibility: they are responsive, and
-  wide screens (unfolded foldables, tablets) get the pages' wide layouts.
+  wide windows (unfolded foldables, tablets) get the navigation rail and the
+  pages' wide layouts, whatever the window's position or orientation.
 - **Half-folded postures** are detected with Jetpack WindowManager. With the
   camera open, fold the phone half way and stand it on the table (tabletop
   posture): the viewfinder moves to the upper half and the controls to the flat

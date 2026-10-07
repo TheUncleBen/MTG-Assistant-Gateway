@@ -1,10 +1,10 @@
 """The signed-in home page: a dashboard in the shape of Archidekt's landing page.
 
 Every section of the gateway is one tile (decks with their newest covers, deck search, scanning,
-the owned-cards collection, proposals, history and the guide), the top navigation stays visible
-like on every other page, and the assistant connection details sit in a collapsed panel at the
-end, where a member who only uses the pages never has to see them. The page is for signed-in
-members only; MCP clients use /mcp and the OAuth routes.
+the collection on the member's Archidekt account, proposals, history and the guide), the top
+navigation stays visible like on every other page, and the assistant connection details sit in a
+collapsed panel at the end, where a member who only uses the pages never has to see them. The page
+is for signed-in members only; MCP clients use /mcp and the OAuth routes.
 """
 
 from __future__ import annotations
@@ -80,7 +80,6 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
         who = user.get("preferred_username") or user.get("email") or "there"
         link = state.decks.status(sub)
         pending = state.db.count_pending_proposals(sub)
-        collection = state.collection.store.totals(sub) if getattr(state, "collection", None) else None
         scans = len(state.scan.list_sessions(sub)) if getattr(state, "scan", None) else 0
 
         decks: list[dict[str, Any]] | None = None
@@ -156,8 +155,7 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
                         "/collection",
                         "collection",
                         "Collection",
-                        "The cards you own. Owned cards get a green dot on every deck.",
-                        number=collection["cards"] if collection else 0,
+                        "The cards you own, on your Archidekt account; they get a green dot on every deck.",
                     ),
                     tile(
                         "/proposals",

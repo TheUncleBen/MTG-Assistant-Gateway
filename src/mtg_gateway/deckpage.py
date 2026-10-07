@@ -20,7 +20,7 @@ import time
 from collections import Counter
 from typing import Any
 
-from .archidekt import Deck, DeckCard
+from .archidekt import VOTE_UP, Deck, DeckCard
 from .deck_stats import WUBRG, colour_letter, is_land, mana_pips
 from .theme import icon
 from .views import cards_by_category
@@ -355,10 +355,68 @@ def banner_html(
         "</div>"
         f"<div class='tags'>{icon('tag')} {tags}</div>"
         f"<div class='controls'><div class='primary'>{primary}{more}</div></div>{writes_note}"
+        f"{social_html(deck, own=own) if csrf else ''}"
         "</div>"
         f"<a class='owner' href='/users/{esc(deck.owner)}' title='{esc(deck.owner)}: public decks'>"
         f"{avatar_html(deck.owner)}<span class='uname'>{esc(deck.owner or 'unknown')}</span></a>"
         "</div></div></section>"
+    )
+
+
+def social_html(deck: Deck, *, own: bool) -> str:
+    """Like, Bookmark, Follow and Comments, as Archidekt's deck page offers them. The buttons are
+    the person's own clicks: deck.js asks for a confirmation and posts to /social/api; without
+    script they are inert and the More menu's "Open on Archidekt" link is the way."""
+    did = esc(deck.id)
+    liked = deck.user_vote == VOTE_UP
+    like = (
+        f"<button type='button' class='soc{' on' if liked else ''}' data-social='vote' "
+        f"data-state='{deck.user_vote}' aria-pressed='{'true' if liked else 'false'}' "
+        f"title='{'You like this deck' if liked else 'Like this deck on Archidekt'}'>"
+        f"{icon('heart')}<b class='n'>{deck.points}</b><span>{'Liked' if liked else 'Like'}</span></button>"
+    )
+    marked = deck.bookmarked
+    bookmark = (
+        f"<button type='button' class='soc{' on' if marked else ''}' data-social='bookmark' "
+        f"data-state='{1 if marked else 0}' aria-pressed='{'true' if marked else 'false'}' "
+        f"title='{'Bookmarked on Archidekt' if marked else 'Bookmark this deck on Archidekt'}'>"
+        f"{icon('bookmark')}<span>{'Bookmarked' if marked else 'Bookmark'}</span></button>"
+    )
+    follow = (
+        f"<button type='button' class='soc' data-social='follow' data-user='{esc(deck.owner_id)}' "
+        f"data-name='{esc(deck.owner)}' data-state='unknown' title='Follow {esc(deck.owner)} on Archidekt'>"
+        f"{icon('follow')}<span>Follow {esc(deck.owner)}</span></button>"
+        if deck.owner_id and not own
+        else ""
+    )
+    comments = (
+        f"<a class='soc' href='#comments' data-social='comments'>{icon('comment')}<span>Comments</span></a>"
+    )
+    return (
+        f"<div class='social' data-deck='{did}' aria-label='Archidekt actions'>"
+        f"{like}{bookmark}{follow}{comments}</div>"
+    )
+
+
+def comments_html(deck: Deck) -> str:
+    """The deck's comment thread (loaded by deck.js when the section scrolls into view) and the
+    form to add one; a post is confirmed before it goes out, under the member's Archidekt name."""
+    did = esc(deck.id)
+    return (
+        f"<section class='panel comments' id='comments' data-deck='{did}' "
+        f"data-root='{esc(deck.comment_root or '')}'>"
+        f"<div class='panel-head'><h2>Comments</h2><span class='muted small' data-count></span></div>"
+        f"<div class='thread' data-src='/social/api/decks/{did}/comments'><p class='muted'>Comments from "
+        f"Archidekt appear here. <a href='https://archidekt.com/decks/{did}' target='_blank' "
+        "rel='noreferrer noopener'>Read the thread on Archidekt</a>.</p></div>"
+        "<form class='newcomment'><label for='ctext'>Add a comment</label>"
+        "<textarea id='ctext' name='text' rows='3' maxlength='2000' "
+        "placeholder='Say something about this deck…'></textarea>"
+        "<div class='replyto' hidden></div>"
+        f"<button type='submit' class='btn'>{icon('comment')} Post comment</button>"
+        "<p class='muted small'>Posted publicly on Archidekt under your Archidekt name, after you "
+        "confirm.</p>"
+        "</form></section>"
     )
 
 
@@ -680,6 +738,7 @@ def deck_page_html(
         + cards_html(deck, view=view, group=group, sort=sort, q=q, own=own, owned=owned)
         + stats_panel_html(deck, stats)
         + description_html(deck)
+        + (comments_html(deck) if csrf else "")
     )
 
 
@@ -829,6 +888,37 @@ DECK_CSS = """
 .banner .controls .primary{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center}
 .banner .controls .btn,.banner .controls button{margin:0}
 .banner .controls form.inline{display:contents}
+.banner .social{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.9rem}
+.banner .social .soc{display:inline-flex;align-items:center;gap:.4rem;height:34px;padding:0 .85rem;
+  border-radius:17px;border:1px solid rgba(255,255,255,.4);background:rgba(0,0,0,.28);color:#fff;
+  font-weight:700;font-size:.9rem;text-decoration:none;cursor:pointer;margin:0;line-height:1}
+.banner .social .soc:hover,.banner .social .soc:focus-visible{border-color:var(--orange);color:var(--orange)}
+.banner .social .soc.on{background:var(--orange);border-color:var(--orange);color:#fff}
+.banner .social .soc.on:hover{color:#fff;filter:brightness(1.08)}
+.banner .social .soc svg{width:18px;height:18px}
+.banner .social .soc[disabled]{opacity:.6;cursor:progress}
+.banner .social .confirm{display:inline-flex;align-items:center;gap:.4rem;background:#fff;color:#111;
+  border-radius:17px;padding:0 .35rem 0 .85rem;height:34px;font-size:.9rem;font-weight:700}
+.banner .social .confirm button{margin:0;height:26px;padding:0 .7rem;border-radius:13px;font-size:.85rem}
+.banner .social .note{flex-basis:100%;color:#ffd9b3;font-size:.9rem}
+.banner .social .note a{color:#fff}
+.comments .panel-head{display:flex;align-items:baseline;justify-content:space-between;gap:1rem}
+.comments .panel-head h2{margin:0}
+.comments .thread{margin:.75rem 0 1rem}
+.comments .cmt{border-top:1px solid var(--border);padding:.6rem 0 .4rem}
+.comments .cmt .who{display:flex;gap:.5rem;align-items:center;font-size:.85rem;color:var(--text-muted)}
+.comments .cmt .who b{color:var(--text)}
+.comments .cmt p{margin:.3rem 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.comments .cmt .replies{margin-left:1rem;border-left:2px solid var(--border);padding-left:.75rem}
+.comments .cmt .acts button{margin:0;height:28px;padding:0 .6rem;font-size:.8rem}
+.comments form.newcomment{display:flex;flex-direction:column;gap:.5rem}
+.comments form.newcomment textarea{width:100%;resize:vertical;min-height:4.5rem}
+.comments form.newcomment button{align-self:flex-start;margin:0}
+.comments form.newcomment .replyto{display:flex;gap:.5rem;align-items:center;font-size:.9rem}
+.comments form.newcomment .replyto button{margin:0;height:26px;padding:0 .6rem;font-size:.8rem}
+.comments .confirmbar{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;padding:.5rem .75rem;
+  background:var(--surface-2);border-radius:var(--radius)}
+.comments .confirmbar button{margin:0}
 .banner .owner{display:flex;flex-direction:column;align-items:center;gap:.35rem;color:#fff;
   text-decoration:none;font-weight:700;max-width:160px;flex:none}
 .banner .owner:hover{color:var(--orange)}

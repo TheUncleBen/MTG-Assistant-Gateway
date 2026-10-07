@@ -59,7 +59,14 @@ BROWSE_CSS = """
 .profile .who{display:flex;flex-direction:column;min-width:0}
 .profile .who .uname{font-size:1.5rem;font-weight:900}
 .profile .who .sub{color:var(--text-muted)}
-.profile .ext{margin-left:auto}
+.profile .social{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-left:auto}
+.profile .social .btn,.profile .social .soc{margin:0;display:inline-flex;align-items:center;gap:.4rem}
+.profile .social .soc.on{background:var(--orange);border-color:var(--orange);color:#fff}
+.profile .social .confirm{display:inline-flex;align-items:center;gap:.4rem;background:var(--surface-2);
+  border-radius:17px;padding:0 .35rem 0 .85rem;height:34px;font-size:.9rem;font-weight:700}
+.profile .social .confirm button{margin:0;height:26px;padding:0 .7rem;border-radius:13px;font-size:.85rem}
+.profile .social .note{flex-basis:100%;color:var(--text-muted);font-size:.9rem;margin:0}
+@media (max-width:600px){ .profile{flex-wrap:wrap} .profile .social{margin-left:0;flex-basis:100%} }
 .popular{display:flex;flex-wrap:wrap;gap:.4rem;margin:.5rem 0 0}
 .popular a{display:inline-flex;align-items:center;height:30px;padding:0 .7rem;border-radius:15px;
   background:var(--surface-2);color:var(--text);text-decoration:none;font-size:.9rem;
@@ -286,6 +293,15 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             )
         rows = found["decks"]
         shown = rows[0]["owner"] if rows else username
+        owner_id = rows[0].get("owner_id") if rows else None
+        link = state.db.get_link(sub) or {}
+        follow = (
+            f"<button type='button' class='btn soc' data-social='follow' data-user='{_esc(owner_id)}' "
+            f"data-name='{_esc(shown)}' data-state='unknown'>{icon('follow')}"
+            f"<span>Follow {_esc(shown)}</span></button>"
+            if owner_id and str(link.get("archidekt_user_id") or "") != str(owner_id)
+            else ""
+        )
         order_opts = "".join(
             f"<option value='{_esc(k)}'{' selected' if k == query['order_by'] else ''}>{_esc(v)}</option>"
             for k, v in SEARCH_ORDERS.items()
@@ -295,9 +311,10 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             f"<span class='uname'>{_esc(shown)}</span>"
             f"<span class='sub'>{'Public decks on Archidekt' if rows else 'No public decks, or no such user'}"
             "</span></div>"
+            f"<div class='social'>{follow}"
             f"<a class='btn ext' href='https://archidekt.com/u/{_esc(shown)}' "
             "target='_blank' rel='noreferrer noopener'>"
-            f"{icon('external')} Archidekt profile</a></section>"
+            f"{icon('external')} Archidekt profile</a></div></section>"
             f"<form method='get' class='panel listbar' id='listform'><div class='controls'>"
             f"<div class='field'><label for='f-order'>Sort by</label><span class='sel'>{icon('sort')}"
             f"<select id='f-order' name='order'>{order_opts}</select></span></div>"

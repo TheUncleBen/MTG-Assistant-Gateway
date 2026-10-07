@@ -181,10 +181,18 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
   quantities, categories and additions as one proposal, and look back over
   proposals, snapshots and reports. They are also the pages the Android app
   wraps.
-- **Collection.** The cards you own, kept on the gateway: add by name or
-  from a scan, count copies, filter, export CSV. Owned cards get a green dot
-  on every deck page. `list_collection`, `add_to_collection` and
-  `remove_from_collection` give the assistant the same.
+- **Collection.** The cards you own, which is your Collection on Archidekt
+  shown and edited through the gateway (nothing about them is stored here):
+  add by name or from a scan, count copies, filter, export CSV. Owned cards
+  get a green dot on every deck page. `list_collection`, `add_to_collection`
+  and `remove_from_collection` give the assistant the same.
+- **Likes, bookmarks, follows and comments.** Archidekt's social buttons on
+  every deck and user page, each behind a confirmation and sent under your
+  own Archidekt name. Browser-only by design: no tool can do any of it.
+- **Adaptive layout.** Bottom tab bar on phones, a navigation rail from
+  600 px on touch screens and in the Android app, the desktop bar in wider
+  browsers; the layout follows the live window, so a foldable, split screen
+  or the browser's "Desktop site" switch re-flows at once.
 - **Admin page.** Members of `MTG_ADMIN_GROUP` get `/admin`: who has signed
   in, their activity, per-day usage counts, a System card (version, database
   size and schema, newest backup), and buttons to disable or enable an

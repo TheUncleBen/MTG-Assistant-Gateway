@@ -23,6 +23,8 @@ CREATE INDEX IF NOT EXISTS scan_sessions_owner ON scan_sessions(owner_sub, updat
 """
 
 MAX_SESSIONS_PER_USER = 100
+# A scan is an inbox, not an archive: sessions nobody touched for this long are dropped.
+INBOX_DAYS = 30
 
 
 class ScanStore:
@@ -85,14 +87,19 @@ class ScanStore:
             return cur.rowcount > 0
 
     def prune(self, owner_sub: str) -> int:
-        """Keep the newest MAX_SESSIONS_PER_USER sessions for a user."""
+        """Keep the newest MAX_SESSIONS_PER_USER sessions for a user, and none older than
+        INBOX_DAYS (a scan is a short-lived inbox until its cards are saved somewhere)."""
         with self.db.tx() as c:
+            old = c.execute(
+                "DELETE FROM scan_sessions WHERE owner_sub = ? AND updated_at < ?",
+                (owner_sub, self.now() - INBOX_DAYS * 86400),
+            ).rowcount
             cur = c.execute(
                 """DELETE FROM scan_sessions WHERE owner_sub = ? AND id NOT IN (
                        SELECT id FROM scan_sessions WHERE owner_sub = ? ORDER BY updated_at DESC LIMIT ?)""",
                 (owner_sub, owner_sub, MAX_SESSIONS_PER_USER),
             )
-            return cur.rowcount
+            return cur.rowcount + old
 
     def count(self) -> int:
         with self.db.tx() as c:

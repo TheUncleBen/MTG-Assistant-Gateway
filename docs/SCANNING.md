@@ -83,8 +83,8 @@ What's on it:
 - **Type.** Card name with autocomplete, or paste a whole decklist.
 - **List.** Quantities, cards still unresolved, **Save scan** and
   **Copy decklist**, then **What next?** with the three places the cards
-  can go: **Save to collection** (your owned cards, see
-  [USING.md](USING.md#collection)), **Add to deck** (pick one of your decks;
+  can go: **Save to collection** (your Collection on Archidekt, see
+  [USING.md](USING.md#collection); the scan is removed once saved), **Add to deck** (pick one of your decks;
   the deck editor opens with the cards filled in and you review the change
   before it is applied) and **New deck from these cards** (the new-deck form
   opens with the list as its decklist). The first two save the scan on the

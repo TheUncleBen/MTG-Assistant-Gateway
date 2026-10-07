@@ -7,12 +7,15 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
-## [0.6.3] - 2026-10-07
+## [0.6.4] - 2026-10-07
 
 Archidekt parity for the pages: browse and search public decks, a home page
-with the full navigation, an owned-cards collection, a scan flow that ends
-in a collection, a deck or a new deck, stacks and grid views that work on
-touch screens, and a native-feeling layout in the Android app.
+with the full navigation, your Archidekt Collection shown and edited on the
+gateway, a scan flow that ends in the collection, a deck or a new deck,
+likes, bookmarks, follows and comments as your own buttons, stacks and grid
+views that work on touch screens, and a layout that follows the window
+(bottom bar, navigation rail or desktop bar) on the web and in the Android
+app. (0.6.3 was the sign-in release that landed in between.)
 
 ### Added
 
@@ -26,18 +29,29 @@ touch screens, and a native-feeling layout in the Android app.
   viewed, largest or bracket, with Archidekt's own paging; `/users/{name}`
   lists one person's public decks. Results open in the gateway's deck view.
   The `search_decks` and `archidekt_user` tools give the assistant the same.
-- **Collection.** `/collection` is the list of cards you own, kept on the
-  gateway: add cards by name or from a scan, count copies with plus and
-  minus, filter, sort, grid or list, export CSV. Owned cards show a green
-  dot on every deck page (Archidekt's collection mark). The tools
-  `list_collection`, `add_to_collection` and `remove_from_collection`, and
-  the JSON endpoints under `/collection/api/`, give assistants and apps the
-  same. Database schema 11 adds the `collection_cards` table.
+- **Collection.** `/collection` is the list of cards you own: your
+  Collection on Archidekt, read and written through the account you linked,
+  so what you add here is on archidekt.com at once and nothing about your
+  cards is stored on the gateway. Add cards by name or from a scan, count
+  copies with plus and minus, filter by name, sort by newest or set release,
+  grid or list, export CSV. Owned cards show a green dot on every deck page
+  with the copies Archidekt reports. The tools `list_collection`,
+  `add_to_collection` and `remove_from_collection`, and the JSON endpoints
+  under `/collection/api/`, give assistants and apps the same (each card is
+  one or two Archidekt calls, about a second).
+- **Likes, bookmarks, follows and comments.** Every deck page has
+  Archidekt's social buttons (Like with the deck's score, Bookmark, Follow
+  the owner, a Comments panel with the thread and a reply box) and user
+  pages have Follow. Each asks for a confirmation, then goes to Archidekt
+  under your own name. They are browser-only on purpose: no tool and no
+  `/api/v1` route exists for them, so an assistant can never like, follow or
+  comment for you.
 - **Scan flow.** The scan page explains its three steps on first use, and
   the list ends in **What next?**: save the cards to your collection, add
   them to one of your decks (the deck editor opens with them filled in), or
   start a new deck from them (`/decks/new?scan_session=`). "Save to gateway"
-  is now "Save scan".
+  is now "Save scan". A scan is an inbox: saving its cards to the collection
+  removes it, and scans untouched for 30 days are dropped.
 - **Guide.** `/guide` is end-user documentation inside the app: what you
   can do on each page with or without an assistant, how proposals and
   snapshots protect your decks, the Android app, privacy. Linked from the
@@ -47,13 +61,19 @@ touch screens, and a native-feeling layout in the Android app.
   category, mark as owned, Scryfall). On your own deck, cards can be dragged
   between categories with a mouse or by press-and-hold on a touch screen; the
   moves become one proposal you review.
+- **Adaptive navigation.** The layout follows Android's window size
+  classes on the web and in the app alike: under 600 px wide the bottom tab
+  bar; from 600 to 900 px on a touch screen (an unfolded foldable or a
+  tablet in a browser), and in the Android app at every width from 600 px,
+  a navigation rail down the left edge; wider browsers keep the desktop top
+  bar. The rules read the live window, so folding, rotating, split screen,
+  pop-up windows and a browser's "Desktop site" switch re-flow at once.
 - **Android app layout.** Pages rendered for the app (its user agent carries
-  `MTGAssistant/`) drop the website footer, keep the phone layout at every
-  width (an unfolded foldable included) and respect the display cut-out and
-  gesture bar. The app's own actions (scan with the phone camera, reload,
-  open in browser, change gateway) moved into the page's account menu; the
-  floating button now appears only over pages that are not the gateway's,
-  so it no longer covers the bottom tab bar.
+  `MTGAssistant/`) drop the website footer and respect the display cut-out
+  and gesture bar. The app's own actions (scan with the phone camera,
+  reload, open in browser, change gateway) moved into the page's account
+  menu; the floating button now appears only over pages that are not the
+  gateway's, so it no longer covers the bottom tab bar.
 
 ### Fixed
 
@@ -72,8 +92,11 @@ touch screens, and a native-feeling layout in the Android app.
 ### Changed
 
 - The navigation is Decks, Search, Collection, Scan, Proposals, History (and
-  Admin for admins); the phone tab bar is Decks, Search, Scan, Collection,
-  More (More opens the home page with every section).
+  Admin for admins); the phone tab bar and the rail are Decks, Search, Scan,
+  Collection, More (More opens the home page with every section).
+- A member with a linked Archidekt account now reads every deck page with
+  their own session (before, public decks were read anonymously), which is
+  how Archidekt reports the copies they own, their like and their bookmark.
 
 ## [0.6.2] - 2026-10-07
 

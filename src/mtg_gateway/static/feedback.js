@@ -56,7 +56,7 @@
     if (!(d instanceof HTMLDetailsElement) || !d.classList.contains("dd")) return;
     if (d.open) {
       closeMenus(d);
-      var phone = window.matchMedia("(max-width: 600px)").matches || window.matchMedia("(max-width: 900px) and (pointer: coarse)").matches;
+      var phone = window.matchMedia("(max-width: 599.98px)").matches || window.matchMedia("(max-width: 899.98px) and ((pointer: coarse) or (hover: none))").matches;
       if ((phone || document.body.classList.contains("app")) && !history.state?.menu) history.pushState({ menu: 1 }, "");
     } else if (history.state && history.state.menu) {
       history.back();

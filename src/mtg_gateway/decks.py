@@ -1109,16 +1109,22 @@ class DeckService:
         return deck
 
     async def get_any_deck(self, sub: str | None, deck_ref: str) -> Deck:
-        """Read a deck anonymously (public or unlisted). When that fails with
-        not-found and the user has a link, retry with their session (private decks)."""
+        """Read a deck. A member with a linked account reads with their session first, which is
+        how Archidekt reports the deck as that person sees it (private decks, the copies they own
+        of each card, their vote and bookmark); when that fails, or there is no link, the deck is
+        read anonymously (public or unlisted)."""
         deck_id = _clean_deck_id(deck_ref)
+        if sub and self.db.get_link(sub):
+            try:
+                return await self.get_deck(sub, deck_id)
+            except DeckError as exc:
+                if exc.kind not in ("not_found", "auth", "forbidden", "not_linked"):
+                    raise
         async with self.archidekt_slot(sub):
             try:
                 return await self.client.get_deck(None, deck_id)
             except ArchidektError as exc:
-                if exc.kind not in ("not_found", "auth", "forbidden") or not sub or not self.db.get_link(sub):
-                    raise DeckError(exc.kind, str(exc)) from exc
-            return await self.get_deck(sub, deck_id)
+                raise DeckError(exc.kind, str(exc)) from exc
 
     async def search_decks(self, sub: str | None, **query: Any) -> dict[str, Any]:
         """Search Archidekt's public decks anonymously (see ArchidektClient.search_decks). Counts

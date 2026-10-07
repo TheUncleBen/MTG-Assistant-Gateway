@@ -73,6 +73,7 @@ from .plugin_page import add_plugin_routes
 from .reports import ReportService
 from .scan import add_scan
 from .skill_page import add_skill_routes
+from .social import add_social_routes
 from .theme import NoSniffMiddleware, ThemeMiddleware, render
 from .views import deck_brief, deck_out
 
@@ -983,6 +984,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
     add_scan(server, state)
     add_collection(server, state)  # after add_scan: card names are resolved through the scan service
     add_browse_routes(server, state)
+    add_social_routes(server, state)
     add_browse_tools(server, state)
     add_home_routes(server, state)
     add_guide_routes(server, state)

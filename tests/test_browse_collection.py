@@ -1,4 +1,4 @@
-"""Release 0.6.3: the home dashboard with the full navigation, public deck search and user pages,
+"""Release 0.6.4: the home dashboard with the full navigation, public deck search and user pages,
 the owned-cards collection (pages, JSON API, tools, isolation), the deck page's toolbar forms,
 the guide and the Android app layout."""
 
@@ -15,13 +15,13 @@ from mtg_gateway.archidekt import ArchidektClient, Pacer
 from mtg_gateway.mf_proxy import MysticForgeProxy
 from mtg_gateway.scan.scryfall import ScryfallClient
 
-from .conftest import FakeIdP, Harness, make_settings, running
+from .conftest import FakeIdP, Harness, make_settings, running, sse_json
 from .fake_archidekt import FakeArchidekt
 from .fake_scryfall import FakeScryfall
 from .test_decks_and_proxy import Browser, call, fake_mystic_forge, mcp_token, structured
 
 NAV = {"Sec-Fetch-Mode": "navigate", "Accept": "text/html"}
-APP_UA = {"User-Agent": "Mozilla/5.0 (Linux; Android 16) Chrome/140 Mobile Safari/537.36 MTGAssistant/0.6.3"}
+APP_UA = {"User-Agent": "Mozilla/5.0 (Linux; Android 16) Chrome/140 Mobile Safari/537.36 MTGAssistant/0.6.4"}
 
 
 class Stack:
@@ -161,6 +161,8 @@ async def test_search_tool_lists_public_decks_only(stack: Stack) -> None:
 
 # -- collection ------------------------------------------------------------------------------
 async def test_collection_page_add_step_remove_and_export(stack: Stack) -> None:
+    """The collection is the linked account's Archidekt Collection: every change lands there (the
+    fake's per-user records) and the deck page's green dot is Archidekt's own ``owned`` count."""
     b = await linked(stack)
     try:
         r = await b.http.get("/collection", headers=NAV)
@@ -171,16 +173,22 @@ async def test_collection_page_add_step_remove_and_export(stack: Stack) -> None:
             data={"csrf": csrf, "action": "add", "name": "Sol Ring", "quantity": "2", "finish": "nonfoil"},
         )
         assert r.status_code == 303, r.text
+        assert [r["quantity"] for r in stack.ark.collections["alice"].values()] == [2]
         r = await b.http.get("/collection", headers=NAV)
-        assert "Sol Ring" in r.text and "<b>2</b> cards" in r.text
-        rid = re.search(r"data-id='([A-Za-z0-9_-]+)'", r.text).group(1)
+        assert "Sol Ring" in r.text and "<b>1</b> entry in your Archidekt collection" in r.text
+        rid = re.search(r"data-id='([0-9]+)'", r.text).group(1)
         r = await b.http.post("/collection", data={"csrf": csrf, "action": "inc", "id": rid})
         assert r.status_code == 303
-        r = await b.http.get("/collection", headers=NAV)
-        assert "<b>3</b> cards" in r.text
-        # the deck page marks owned cards
+        assert stack.ark.collections["alice"][int(rid)]["quantity"] == 3
+        # adding the same printing again tops up the existing record instead of duplicating it
+        r = await b.http.post(
+            "/collection", data={"csrf": csrf, "action": "add", "name": "Sol Ring", "quantity": "1"}
+        )
+        assert r.status_code == 303 and len(stack.ark.collections["alice"]) == 1
+        assert stack.ark.collections["alice"][int(rid)]["quantity"] == 4
+        # the deck page marks owned cards with Archidekt's count for the signed-in member
         r = await b.http.get("/decks/42", headers=NAV)
-        assert "class='owned'" in r.text and "You own 3" in r.text
+        assert "class='owned'" in r.text and "You own 4" in r.text
         csv = await b.http.get("/collection/export.csv")
         assert (
             csv.status_code == 200
@@ -188,14 +196,21 @@ async def test_collection_page_add_step_remove_and_export(stack: Stack) -> None:
             and csv.headers["content-type"].startswith("text/csv")
         )
         r = await b.http.post("/collection", data={"csrf": csrf, "action": "remove", "id": rid})
-        assert r.status_code == 303
+        assert r.status_code == 303 and stack.ark.collections["alice"] == {}
         r = await b.http.get("/collection", headers=NAV)
         assert "Sol Ring" not in r.text
         # a stale or missing CSRF token adds nothing and sends the member back with a notice
         r = await b.http.post("/collection", data={"csrf": "nope", "action": "add", "name": "Sol Ring"})
         assert r.status_code == 303 and r.headers["location"] == "/collection?err=expired"
-        r = await b.http.get("/collection", headers=NAV)
-        assert "Sol Ring" not in r.text and "<b>0</b> cards" in r.text
+        assert stack.ark.collections["alice"] == {}
+        # nothing about the cards is kept on the gateway
+        tables = [
+            row[0]
+            for row in stack.h.app.state.gateway.db._conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        ]
+        assert not any("collection" in t for t in tables), tables
     finally:
         await b.aclose()
 
@@ -212,11 +227,14 @@ async def test_collection_json_api_and_cross_member_isolation(stack: Stack) -> N
         )
         assert r.status_code == 200, r.text
         out = r.json()
-        # the fixture's Sol Ring printing exists in one finish only, which wins over the flag
-        assert out["ok"] and len(out["added"]) == 1 and out["added"][0]["finish"] == "nonfoil"
+        # the finish asked for is kept (Archidekt's record "modifier" is Foil); a printing that
+        # Archidekt lists in one finish only would be stored in that finish instead
+        assert out["ok"] and len(out["added"]) == 1 and out["added"][0]["finish"] == "foil"
+        assert stack.ark.collections["alice"][out["added"][0]["id"]]["modifier"] == "Foil"
         rid = out["added"][0]["id"]
         r = await api(alice, "POST", f"/collection/api/rows/{rid}", {"quantity": 4})
-        assert r.status_code == 200 and r.json()["row"]["quantity"] == 4 and r.json()["totals"]["cards"] == 4
+        assert r.status_code == 200 and r.json()["row"]["quantity"] == 4
+        assert stack.ark.collections["alice"][rid]["quantity"] == 4
         # no CSRF header: refused
         r = await alice.http.post(
             f"/collection/api/rows/{rid}",
@@ -224,7 +242,7 @@ async def test_collection_json_api_and_cross_member_isolation(stack: Stack) -> N
             headers={"Content-Type": "application/json"},
         )
         assert r.status_code == 403
-        # another member sees nothing of it and cannot touch it
+        # another member without a linked account is told to link one, and sees nothing
         stack.h.idp.user = {
             **stack.h.idp.user,
             "sub": "bob-sub",
@@ -233,15 +251,21 @@ async def test_collection_json_api_and_cross_member_isolation(stack: Stack) -> N
         }
         await bob.login("/collection")
         r = await bob.http.get("/collection", headers=NAV)
-        assert "Sol Ring" not in r.text
+        assert r.status_code == 200 and "Sol Ring" not in r.text and "Link Archidekt" in r.text
+        r = await api(bob, "POST", f"/collection/api/rows/{rid}", {"quantity": 1})
+        assert r.status_code == 409 and r.json()["error"] == "not_linked", r.text
+        # linked to a different Archidekt account, bob still cannot reach alice's record
+        r = await bob.link("amy", "pw-amy")
+        assert r.status_code == 303, r.text
         r = await api(bob, "POST", f"/collection/api/rows/{rid}", {"quantity": 1})
         assert r.status_code == 404, r.text
         r = await api(bob, "DELETE", f"/collection/api/rows/{rid}", {})
         assert r.status_code == 404
+        assert stack.ark.collections["alice"][rid]["quantity"] == 4
         r = await bob.http.get("/collection/api/summary")
-        assert r.json()["cards"] == 0
+        assert r.json()["rows"] == 0
         r = await alice.http.get("/collection/api/summary")
-        assert r.json()["cards"] == 4
+        assert r.json()["rows"] == 1 and r.json()["cards"] == 4
         # anonymous: 401 with a login hint, never data
         r = await stack.h.http.get("/collection/api/summary")
         assert r.status_code == 401 and r.json()["error"] == "unauthenticated"
@@ -251,31 +275,28 @@ async def test_collection_json_api_and_cross_member_isolation(stack: Stack) -> N
 
 
 async def test_collection_tools(stack: Stack) -> None:
-    token = await mcp_token(stack.h)
-    out = structured(
-        await call(stack.h, token, "add_to_collection", {"cards": [{"name": "Sol Ring", "quantity": 2}]})
-    )
-    assert out["ok"] is True and out["totals"]["cards"] == 2
-    out = structured(await call(stack.h, token, "list_collection", {}))
-    assert out["ok"] is True and out["totals"]["cards"] == 2 and out["cards"][0]["name"] == "Sol Ring"
-    out = structured(
-        await call(stack.h, token, "remove_from_collection", {"name": "Sol Ring", "quantity": 1})
-    )
-    assert out["ok"] is True and out["totals"]["cards"] == 1
-    # another member starts empty
-    other = Browser(stack.h)
+    b = await linked(stack)  # the tools work on the member's linked Archidekt account
     try:
-        stack.h.idp.user = {
-            **stack.h.idp.user,
-            "sub": "bob-sub",
-            "preferred_username": "bob",
-            "email": "bob@x.test",
-        }
-        await other.login("/collection")
-        r = await other.http.get("/collection/api/summary")
-        assert r.json()["cards"] == 0
+        token = await mcp_token(stack.h)
+        out = structured(
+            await call(stack.h, token, "add_to_collection", {"cards": [{"name": "Sol Ring", "quantity": 2}]})
+        )
+        assert out["ok"] is True and out["added"][0]["quantity"] == 2, out
+        out = structured(await call(stack.h, token, "list_collection", {}))
+        assert out["ok"] is True and out["count"] == 1 and out["cards"][0]["name"] == "Sol Ring"
+        out = structured(
+            await call(stack.h, token, "remove_from_collection", {"name": "Sol Ring", "quantity": 1})
+        )
+        assert out["ok"] is True and out["removed"][0]["quantity"] == 2
+        assert [r["quantity"] for r in stack.ark.collections["alice"].values()] == [1]
+        # no tool exists for social actions (likes, follows, comments are a person's own clicks)
+        listing = sse_json(await stack.h.mcp(token, "tools/list"))
+        names = {t["name"] for t in listing["result"]["tools"]}
+        assert {"list_collection", "add_to_collection", "remove_from_collection"} <= names
+        social = ("vote", "like", "follow", "comment", "bookmark")
+        assert not any(w in n for n in names for w in social), names
     finally:
-        await other.aclose()
+        await b.aclose()
 
 
 # -- guide and app layout ---------------------------------------------------------------------

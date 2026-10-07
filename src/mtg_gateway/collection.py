@@ -1,15 +1,14 @@
-"""Owned cards: a member's collection, kept in the gateway's own database.
+"""Owned cards: the member's Collection on Archidekt, shown and edited through the gateway.
 
-Archidekt has a Collection; this is the gateway's counterpart, built so a person can scan a
-pile of cards and keep what they own without depending on Archidekt. Each row is one printing
-in one finish (and language and condition) with a quantity. Rows carry the card facts Scryfall
-gave at add time (set, number, type, mana), so the page renders without any lookup, and card
-images are shown straight from Scryfall by the card's id, as the deck pages do.
+Nothing about the cards a person owns is stored on the gateway. The ``/collection`` page, its JSON
+API and the ``*_collection`` tools read and write the member's own Archidekt Collection through
+the Archidekt session they linked on the Account page (the same routes archidekt.com's collection
+page uses; see ``ArchidektClient.collection_page`` and friends). A scan is a short-lived inbox:
+once its cards are saved here or into a deck, the scan session is gone.
 
-Three front doors share one service: the ``/collection`` page and its JSON API (browser session
-plus the form token), the ``/api/v1/collection`` routes (bearer token or browser session), and the
-``*_collection`` MCP tools. Every query is scoped by the member's subject; nothing here can read
-another member's cards. Nothing here talks to Archidekt.
+Every call runs under the member's own Archidekt session, so nothing here can read another
+member's cards. Rows carry Archidekt's record id (an integer); card images come from Scryfall by
+the card's Scryfall id, as the deck pages do.
 """
 
 from __future__ import annotations
@@ -19,15 +18,14 @@ import html
 import io
 import json
 import re
-import secrets
-import time
 from typing import TYPE_CHECKING, Any
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from .db import Database
+from .archidekt import COLLECTION_PAGE_SIZE, ArchidektError
 from .deckpage import DECK_CSS, image_url, mana_html
+from .decks import DeckError
 from .pages import _csrf, _safe_next, browser_session, login_redirect, read_limited
 from .theme import icon, render
 
@@ -35,22 +33,19 @@ if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
 
     from .app import AppState
+    from .decks import DeckService
     from .scan.service import ScanService
 
-MAX_ROWS_PER_USER = 20_000
-MAX_ITEMS_PER_CALL = 500
+MAX_ITEMS_PER_CALL = 100  # each card costs one or two Archidekt calls, paced about a second apart
 MAX_QUANTITY = 9_999
-PAGE_SIZE = 60
+MAX_PAGES_FOR_EXPORT = 50  # 5,000 records
+PAGE_SIZE = COLLECTION_PAGE_SIZE
 FINISHES = ("nonfoil", "foil", "etched")
+MODIFIERS = {"nonfoil": "Normal", "foil": "Foil", "etched": "Etched"}
 CONDITIONS = ("", "NM", "LP", "MP", "HP", "DMG")
-SORTS = {
-    "added": "Recently added",
-    "name": "Name",
-    "set": "Set",
-    "mv": "Mana value",
-    "qty": "Quantity",
-    "type": "Type",
-}
+# Archidekt's own collection orderings the gateway exposes (``collectionOrderBy``; only
+# ``editionDate`` was seen in the site's requests, the default is Archidekt's newest-first).
+SORTS = {"added": "Recently added", "edition": "Set release"}
 COLLECTION_CSP = (
     "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; "
     "img-src 'self' https://cards.scryfall.io; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
@@ -59,260 +54,171 @@ _ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
 
 
 class CollectionError(Exception):
-    """User-facing failure. ``kind``: invalid, not_found, unavailable, rate_limited, busy."""
+    """User-facing failure. ``kind``: invalid, not_found, not_linked, unavailable, rate_limited,
+    busy, auth."""
 
     def __init__(self, kind: str, message: str):
         super().__init__(message)
         self.kind = kind
 
 
-def _now() -> int:
-    return int(time.time())
-
-
 def _clean(value: Any, limit: int) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()[:limit]
 
 
-# -- storage ----------------------------------------------------------------------------------------
-class CollectionStore:
-    def __init__(self, db: Database):
-        self.db = db
-
-    def upsert(
-        self,
-        sub: str,
-        card: dict[str, Any],
-        *,
-        quantity: int,
-        finish: str,
-        lang: str,
-        condition: str,
-        notes: str,
-        source: str,
-    ) -> dict[str, Any]:
-        """Add ``quantity`` copies of one printing; a row that exists gets the copies added."""
-        now = _now()
-        with self.db.tx() as c:
-            total = c.execute("SELECT COUNT(*) FROM collection_cards WHERE owner_sub = ?", (sub,)).fetchone()[
-                0
-            ]
-            row = c.execute(
-                "SELECT id, quantity FROM collection_cards WHERE owner_sub = ? AND scryfall_id = ? "
-                "AND finish = ? AND lang = ? AND condition = ?",
-                (sub, card["scryfall_id"], finish, lang, condition),
-            ).fetchone()
-            if row is None and total >= MAX_ROWS_PER_USER:
-                raise CollectionError(
-                    "invalid", f"your collection holds the most it can ({MAX_ROWS_PER_USER} rows)"
-                )
-            if row is not None:
-                qty = min(MAX_QUANTITY, int(row["quantity"]) + quantity)
-                c.execute(
-                    "UPDATE collection_cards SET quantity = ?, updated_at = ?, "
-                    "notes = CASE WHEN ? = '' THEN notes ELSE ? END WHERE id = ? AND owner_sub = ?",
-                    (qty, now, notes, notes, row["id"], sub),
-                )
-                rid = row["id"]
-            else:
-                rid = "col_" + secrets.token_urlsafe(9)
-                c.execute(
-                    """INSERT INTO collection_cards (id, owner_sub, scryfall_id, oracle_id, name, set_code,
-                       set_name,
-                       collector_number, rarity, type_line, mana_cost, mana_value, color_identity, finish,
-                         lang,
-                       condition, quantity, notes, source, added_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        rid,
-                        sub,
-                        card["scryfall_id"],
-                        _clean(card.get("oracle_id"), 60),
-                        _clean(card.get("name"), 200),
-                        _clean(card.get("set"), 10).lower(),
-                        _clean(card.get("set_name"), 120),
-                        _clean(card.get("collector_number"), 20),
-                        _clean(card.get("rarity"), 20),
-                        _clean(card.get("type_line"), 200),
-                        _clean(card.get("mana_cost"), 60),
-                        card.get("mana_value") if isinstance(card.get("mana_value"), int | float) else None,
-                        "".join(
-                            x
-                            for x in (card.get("color_identity") or [])
-                            if isinstance(x, str) and x in "WUBRG"
-                        ),
-                        finish,
-                        lang,
-                        condition,
-                        min(MAX_QUANTITY, quantity),
-                        notes,
-                        source,
-                        now,
-                        now,
-                    ),
-                )
-            r = c.execute(
-                "SELECT * FROM collection_cards WHERE id = ? AND owner_sub = ?", (rid, sub)
-            ).fetchone()
-        return _row_out(r)
-
-    def get(self, sub: str, rid: str) -> dict[str, Any] | None:
-        with self.db.tx() as c:
-            r = c.execute(
-                "SELECT * FROM collection_cards WHERE id = ? AND owner_sub = ?", (rid, sub)
-            ).fetchone()
-        return _row_out(r) if r else None
-
-    def set_quantity(self, sub: str, rid: str, quantity: int) -> dict[str, Any] | None:
-        """Set the copies of one row; 0 deletes it. Returns the row, or None when it is gone."""
-        with self.db.tx() as c:
-            if quantity <= 0:
-                c.execute("DELETE FROM collection_cards WHERE id = ? AND owner_sub = ?", (rid, sub))
-                return None
-            c.execute(
-                "UPDATE collection_cards SET quantity = ?, updated_at = ? WHERE id = ? AND owner_sub = ?",
-                (min(MAX_QUANTITY, quantity), _now(), rid, sub),
-            )
-            r = c.execute(
-                "SELECT * FROM collection_cards WHERE id = ? AND owner_sub = ?", (rid, sub)
-            ).fetchone()
-        return _row_out(r) if r else None
-
-    def update(self, sub: str, rid: str, **fields: Any) -> dict[str, Any] | None:
-        allowed = {
-            k: v for k, v in fields.items() if k in ("finish", "condition", "notes", "lang") and v is not None
-        }
-        if not allowed:
-            return self.get(sub, rid)
-        sets = ", ".join(f"{k} = ?" for k in allowed)
-        with self.db.tx() as c:
-            c.execute(
-                f"UPDATE collection_cards SET {sets}, updated_at = ? WHERE id = ? AND owner_sub = ?",
-                (*allowed.values(), _now(), rid, sub),
-            )
-            r = c.execute(
-                "SELECT * FROM collection_cards WHERE id = ? AND owner_sub = ?", (rid, sub)
-            ).fetchone()
-        return _row_out(r) if r else None
-
-    def delete(self, sub: str, rid: str) -> bool:
-        with self.db.tx() as c:
-            return (
-                c.execute("DELETE FROM collection_cards WHERE id = ? AND owner_sub = ?", (rid, sub)).rowcount
-                > 0
-            )
-
-    def list(
-        self,
-        sub: str,
-        *,
-        q: str = "",
-        set_code: str = "",
-        finish: str = "",
-        color: str = "",
-        sort: str = "added",
-        limit: int = PAGE_SIZE,
-        offset: int = 0,
-    ) -> list[dict[str, Any]]:
-        where = ["owner_sub = ?"]
-        args: list[Any] = [sub]
-        if q:
-            where.append(
-                "(name LIKE ? ESCAPE '\\' OR type_line LIKE ? ESCAPE '\\' OR set_name LIKE ? ESCAPE '\\')"
-            )
-            like = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-            args += [like, like, like]
-        if set_code:
-            where.append("set_code = ?")
-            args.append(set_code.lower())
-        if finish in FINISHES:
-            where.append("finish = ?")
-            args.append(finish)
-        if color:
-            if color == "C":
-                where.append("color_identity = ''")
-            elif color in "WUBRG":
-                where.append("instr(color_identity, ?) > 0")
-                args.append(color)
-        order = {
-            "added": "updated_at DESC, name COLLATE NOCASE",
-            "name": "name COLLATE NOCASE, set_code, collector_number",
-            "set": "set_code, collector_number, name COLLATE NOCASE",
-            "mv": "mana_value IS NULL, mana_value, name COLLATE NOCASE",
-            "qty": "quantity DESC, name COLLATE NOCASE",
-            "type": "type_line COLLATE NOCASE, name COLLATE NOCASE",
-        }.get(sort, "updated_at DESC, name COLLATE NOCASE")
-        with self.db.tx() as c:
-            rows = c.execute(
-                "SELECT * FROM collection_cards WHERE "
-                f"{' AND '.join(where)} ORDER BY {order} LIMIT ? OFFSET ?",
-                (*args, max(1, min(limit, 500)), max(0, offset)),
-            ).fetchall()
-        return [_row_out(r) for r in rows]
-
-    def totals(self, sub: str) -> dict[str, Any]:
-        with self.db.tx() as c:
-            r = c.execute(
-                "SELECT COUNT(*) AS rows_, COALESCE(SUM(quantity), 0) AS cards, "
-                "COUNT(DISTINCT CASE WHEN oracle_id = '' THEN name ELSE oracle_id END) AS distinct_ "
-                "FROM collection_cards WHERE owner_sub = ?",
-                (sub,),
-            ).fetchone()
-            sets = c.execute(
-                "SELECT set_code, set_name, SUM(quantity) AS n FROM collection_cards WHERE owner_sub = ? "
-                "GROUP BY set_code ORDER BY n DESC, set_code LIMIT 200",
-                (sub,),
-            ).fetchall()
-        return {
-            "rows": int(r["rows_"]),
-            "cards": int(r["cards"]),
-            "distinct": int(r["distinct_"]),
-            "sets": [{"code": s["set_code"], "name": s["set_name"], "cards": int(s["n"])} for s in sets],
-        }
-
-    def owned_names(self, sub: str) -> dict[str, int]:
-        """Lower-cased card name -> copies owned, for the deck page's owned marks."""
-        with self.db.tx() as c:
-            rows = c.execute(
-                "SELECT lower(name) AS n, SUM(quantity) AS q FROM "
-                "collection_cards WHERE owner_sub = ? GROUP BY n",
-                (sub,),
-            ).fetchall()
-        return {r["n"]: int(r["q"]) for r in rows}
-
-    def export_rows(self, sub: str) -> list[dict[str, Any]]:
-        return self.list(sub, sort="name", limit=MAX_ROWS_PER_USER, offset=0)
+def _wrap(exc: Exception) -> CollectionError:
+    if isinstance(exc, CollectionError):
+        return exc
+    if isinstance(exc, (DeckError, ArchidektError)):
+        kind = exc.kind
+        if kind == "not_found":
+            return CollectionError("not_found", "Archidekt has no such collection record")
+        if kind in ("auth", "forbidden"):
+            return CollectionError("auth", str(exc))
+        if kind == "contract":
+            return CollectionError("unavailable", "Archidekt answered in an unexpected way; try again")
+        return CollectionError(kind, str(exc))
+    raise exc
 
 
-def _row_out(r: Any) -> dict[str, Any]:
-    d = dict(r)
-    d["set"] = d.pop("set_code")
-    d["color_identity"] = list(d.get("color_identity") or "")
-    sid = d.get("scryfall_id") or ""
-    d["image_small"] = image_url(sid, "small")
-    d["image_normal"] = image_url(sid, "normal")
-    d.pop("owner_sub", None)
-    return d
+def _finish_of(modifier: Any) -> str:
+    m = str(modifier or "Normal").strip().lower()
+    return "foil" if m == "foil" else "etched" if m == "etched" else "nonfoil"
 
 
-# -- service ----------------------------------------------------------------------------------------
+def row_out(rec: dict[str, Any]) -> dict[str, Any]:
+    """A collection record in the gateway's flat shape. The record shape is the one Archidekt's
+    collection page reads (id, quantity, modifier, language, condition, tags, purchasePrice, card
+    with oracleCard and edition); fields the live payload leaves out stay empty."""
+    card = rec.get("card") if isinstance(rec.get("card"), dict) else {}
+    oracle = card.get("oracleCard") if isinstance(card.get("oracleCard"), dict) else {}
+    edition = card.get("edition") if isinstance(card.get("edition"), dict) else {}
+    uid = str(card.get("uid") or "")
+    types = [str(t) for t in (oracle.get("types") or []) if isinstance(t, str)]
+    subtypes = [str(t) for t in (oracle.get("subTypes") or []) if isinstance(t, str)]
+    type_line = " ".join(types) + (" — " + " ".join(subtypes) if subtypes else "")
+    cmc = oracle.get("cmc")
+    qty = rec.get("quantity")
+    return {
+        "id": rec.get("id"),
+        "archidekt_card_id": card.get("id"),
+        "name": str(oracle.get("name") or card.get("displayName") or ""),
+        "quantity": qty if isinstance(qty, int) and not isinstance(qty, bool) else 0,
+        "finish": _finish_of(rec.get("modifier")),
+        "condition": str(rec.get("condition") or ""),
+        "lang": str(rec.get("language") or ""),
+        "set": str(edition.get("editioncode") or "").lower(),
+        "set_name": str(edition.get("editionname") or ""),
+        "collector_number": str(card.get("collectorNumber") or ""),
+        "rarity": str(card.get("rarity") or ""),
+        "type_line": type_line.strip(),
+        "mana_cost": str(oracle.get("manaCost") or ""),
+        "mana_value": cmc if isinstance(cmc, (int, float)) and not isinstance(cmc, bool) else None,
+        "color_identity": [str(c) for c in (oracle.get("colorIdentity") or []) if isinstance(c, str)],
+        "scryfall_id": uid if _ID.fullmatch(uid) else "",
+        "image_small": image_url(uid, "small"),
+        "image": image_url(uid, "normal"),
+        "tags": [str(t.get("name") if isinstance(t, dict) else t) for t in (rec.get("tags") or [])],
+        "purchase_price": rec.get("purchasePrice"),
+        "added_at": str(rec.get("createdAt") or ""),
+    }
+
+
 class CollectionService:
-    def __init__(self, db: Database, scan: ScanService | None):
-        self.db = db
-        self.store = CollectionStore(db)
+    """The member's Archidekt Collection. Every method runs under the member's own Archidekt
+    session through ``DeckService._call`` (token refresh, one call at a time per member)."""
+
+    def __init__(self, decks: DeckService, scan: ScanService | None):
+        self.decks = decks
+        self.client = decks.client
         self.scan = scan
 
+    def _user_id(self, sub: str) -> str:
+        link = self.decks.db.get_link(sub)
+        if link is None:
+            raise CollectionError(
+                "not_linked", "No Archidekt account is linked. Link one on the Account page first."
+            )
+        uid = link.get("archidekt_user_id")
+        if not uid or not str(uid).isdigit():
+            raise CollectionError("not_linked", "The linked Archidekt account has no user id; relink it.")
+        return str(uid)
+
+    async def _run(self, sub: str, fn: Any) -> Any:
+        try:
+            return await self.decks._call(sub, fn)
+        except (DeckError, ArchidektError) as exc:
+            raise _wrap(exc) from exc
+
+    # -- reads -----------------------------------------------------------------------------------
+    async def page(
+        self, sub: str, *, page: int = 1, q: str = "", sort: str = "added", page_size: int = PAGE_SIZE
+    ) -> dict[str, Any]:
+        """One page of the collection as Archidekt orders and filters it (``cardName`` is a name
+        substring). Returns rows, count, page, total_pages and has_next."""
+        uid = self._user_id(sub)
+        order = "editionDate" if sort == "edition" else ""
+        body = await self._run(
+            sub,
+            lambda token: self.client.collection_page(
+                token, uid, page=page, page_size=page_size, card_name=q, order_by=order
+            ),
+        )
+        rows = [row_out(r) for r in body["results"] if isinstance(r, dict)]
+        count = body.get("count")
+        total_pages = body.get("totalPages")
+        return {
+            "rows": rows,
+            "count": count if isinstance(count, int) else len(rows),
+            "page": body.get("page") if isinstance(body.get("page"), int) else page,
+            "total_pages": total_pages if isinstance(total_pages, int) else 1,
+            "has_next": bool(body.get("next")),
+        }
+
+    async def _raw_rows(self, sub: str, *, max_pages: int) -> list[dict[str, Any]]:
+        """Archidekt's records, newest first, over up to ``max_pages`` pages."""
+        uid = self._user_id(sub)
+        rows: list[dict[str, Any]] = []
+        page = 1
+        while page <= max_pages:
+            body = await self._run(
+                sub, lambda token, page=page: self.client.collection_page(token, uid, page=page)
+            )
+            rows += [r for r in body["results"] if isinstance(r, dict)]
+            if not body.get("next"):
+                break
+            page += 1
+        return rows
+
+    async def all_rows(self, sub: str, *, max_pages: int = MAX_PAGES_FOR_EXPORT) -> list[dict[str, Any]]:
+        return [row_out(r) for r in await self._raw_rows(sub, max_pages=max_pages)]
+
+    async def summary(self, sub: str) -> dict[str, Any]:
+        """Record count from Archidekt's own listing (one call); copies are summed over the first
+        page only when the collection fits in one page, else left out."""
+        out = await self.page(sub, page=1)
+        totals: dict[str, Any] = {"rows": out["count"]}
+        if out["total_pages"] <= 1:
+            totals["cards"] = sum(int(r["quantity"]) for r in out["rows"])
+        return totals
+
+    async def find_by_name(self, sub: str, name: str) -> list[dict[str, Any]]:
+        want = _clean(name, 200).casefold()
+        out = await self.page(sub, q=want[:80], page_size=200)
+        return [r for r in out["rows"] if r["name"].casefold() == want]
+
+    # -- writes ----------------------------------------------------------------------------------
     async def add(self, sub: str, items: Any, *, source: str) -> dict[str, Any]:
-        """Add cards. Each item names a printing by ``scryfall_id`` (a scan result or a collection
-        row) or by ``name`` with optional ``set`` and ``collector_number`` (looked up on Scryfall
-        through the scan service; the best printing is taken). ``quantity``, ``finish`` (or
-        ``foil: true``), ``condition``, ``lang`` and ``notes`` are optional."""
+        """Add cards to the member's Archidekt Collection. Each item names a printing by
+        ``scryfall_id`` (a scan result) or by ``name`` with optional ``set`` and
+        ``collector_number``; ``quantity``, ``finish`` (or ``foil: true``) and ``condition`` are
+        optional. A printing already in the collection in that finish gets its copies added to the
+        existing record (as the site's own add does); otherwise a record is created."""
         if not isinstance(items, list) or not items:
             raise CollectionError("invalid", "give a non-empty list of cards")
         if len(items) > MAX_ITEMS_PER_CALL:
             raise CollectionError("invalid", f"at most {MAX_ITEMS_PER_CALL} cards per call")
-        prepared: list[tuple[dict[str, Any], dict[str, Any] | None, dict[str, Any]]] = []
-        to_resolve: list[tuple[int, dict[str, Any]]] = []
+        wanted: list[tuple[dict[str, Any], dict[str, Any]]] = []
         for i, raw in enumerate(items):
             if isinstance(raw, str):
                 raw = {"name": raw}
@@ -320,126 +226,156 @@ class CollectionService:
                 raise CollectionError("invalid", f"card {i} must be an object")
             card = raw.get("card") if isinstance(raw.get("card"), dict) else raw
             opts = _item_options(raw, i)
+            sid = str(card.get("scryfall_id") or "").strip().lower()
+            spec = {
+                "name": _clean(card.get("name"), 200),
+                "set": _clean(card.get("set") or card.get("set_code"), 10).lower(),
+                "collector_number": _clean(card.get("collector_number"), 20),
+                "scryfall_id": sid if _ID.fullmatch(sid) else "",
+            }
             if (
-                isinstance(card.get("scryfall_id"), str)
-                and _ID.fullmatch(card["scryfall_id"])
-                and card.get("name")
+                not spec["name"]
+                and not spec["scryfall_id"]
+                and not (spec["set"] and spec["collector_number"])
             ):
-                prepared.append((raw, card, opts))
-            elif _clean(card.get("name"), 200) or (
-                _clean(card.get("set"), 10) and _clean(card.get("collector_number"), 20)
-            ):
-                prepared.append((raw, None, opts))
-                to_resolve.append((len(prepared) - 1, card))
-            else:
                 raise CollectionError("invalid", f"card {i}: give a name, or a set and collector number")
-        skipped: list[dict[str, Any]] = []
-        if to_resolve:
-            if self.scan is None:
-                raise CollectionError("unavailable", "card lookups are not available on this gateway")
-            from .scan.service import ScanError, parse_cards
-
-            try:
-                inputs = parse_cards(
-                    [
-                        {
-                            "name": _clean(c.get("name"), 200),
-                            "set": _clean(c.get("set"), 10),
-                            "collector_number": _clean(c.get("collector_number"), 20),
-                        }
-                        for _idx, c in to_resolve
-                    ]
-                )
-                results = await self.scan.resolve(inputs, owner=sub)
-            except ScanError as exc:
-                raise CollectionError(exc.kind, str(exc)) from exc
-            for (idx, _c), res in zip(to_resolve, results, strict=True):
-                if res.card and res.status in ("exact", "printing", "fuzzy"):
-                    raw, _none, opts = prepared[idx]
-                    prepared[idx] = (raw, res.card, opts)
-                    if res.status == "fuzzy":
-                        opts["note"] = res.note or f"name read as {res.card.get('name')}"
-                else:
-                    skipped.append(
-                        {
-                            "input": res.input.as_dict(),
-                            "status": res.status,
-                            "suggestions": res.suggestions,
-                            "note": res.note,
-                        }
-                    )
+            if not spec["name"] and spec["scryfall_id"]:
+                spec["name"] = "?"
+            wanted.append((spec, opts))
+        self._user_id(sub)  # fail early when no account is linked
+        existing: dict[tuple[Any, str], dict[str, Any]] = {}
+        for rec in await self._raw_rows(sub, max_pages=10):
+            card = rec.get("card") if isinstance(rec.get("card"), dict) else {}
+            existing[(card.get("id"), _finish_of(rec.get("modifier")))] = rec
         added: list[dict[str, Any]] = []
-        for _raw, card, opts in prepared:
-            if card is None:
-                continue
+        skipped: list[dict[str, Any]] = []
+        for spec, opts in wanted:
+            try:
+                printing = await self._run(
+                    sub,
+                    lambda token, spec=spec: self.client.resolve_card(
+                        token,
+                        spec["name"],
+                        set_code=spec["set"] or None,
+                        collector_number=spec["collector_number"] or None,
+                        scryfall_id=spec["scryfall_id"] or None,
+                    ),
+                )
+            except CollectionError as exc:
+                if exc.kind in ("not_found", "contract", "invalid", "unavailable"):
+                    skipped.append({"input": spec, "status": "not_found", "note": str(exc)})
+                    continue
+                raise
             finish = opts["finish"]
-            finishes = [f for f in (card.get("finishes") or []) if isinstance(f, str)]
-            if finishes and finish not in finishes and len(finishes) == 1:
-                finish = finishes[0]  # a printing that exists in one finish only is that finish
-            row = self.store.upsert(
-                sub,
-                card,
-                quantity=opts["quantity"],
-                finish=finish,
-                lang=opts["lang"],
-                condition=opts["condition"],
-                notes=opts["notes"],
-                source=source,
-            )
-            if opts.get("note"):
-                row = {**row, "note": opts["note"]}
+            options = printing.get("options") or []
+            if options and MODIFIERS[finish] not in options and len(options) == 1:
+                finish = _finish_of(options[0])  # a printing sold in one finish is that finish
+            key = (printing["id"], finish)
+            have = existing.get(key)
+            if have is not None:
+                qty = min(MAX_QUANTITY, int(have.get("quantity") or 0) + opts["quantity"])
+                out = await self._run(
+                    sub,
+                    lambda token, have=have, qty=qty: self.client.collection_set(token, have, quantity=qty),
+                )
+                rec = {**have, **out, "card": have.get("card")}
+            else:
+                out = await self._run(
+                    sub,
+                    lambda token, printing=printing, finish=finish, opts=opts: self.client.collection_add(
+                        token,
+                        printing["id"],
+                        opts["quantity"],
+                        modifier=MODIFIERS[finish],
+                        condition=opts["condition"] or None,
+                    ),
+                )
+                rec = {**out, "modifier": MODIFIERS[finish], "card": self._card_stub(printing, spec, out)}
+            existing[key] = rec
+            row = row_out(rec)
+            if spec["scryfall_id"] and not row.get("scryfall_id"):
+                row["scryfall_id"] = spec["scryfall_id"]
+                row["image_small"] = image_url(spec["scryfall_id"], "small")
+                row["image"] = image_url(spec["scryfall_id"], "normal")
             added.append(row)
-        self.db.audit(
+        self.decks.db.audit(
             "collection_added",
             sub=sub,
             detail={"rows": len(added), "cards": sum(int(r["quantity"]) for r in added), "source": source},
         )
-        return {"added": added, "skipped": skipped, "totals": self.store.totals(sub)}
+        return {"added": added, "skipped": skipped}
 
-    def remove(self, sub: str, rid: str, quantity: int | None = None) -> dict[str, Any]:
-        row = self.store.get(sub, rid)
-        if row is None:
-            raise CollectionError("not_found", "no such card in your collection")
-        if quantity is None or quantity >= int(row["quantity"]):
-            self.store.delete(sub, rid)
+    @staticmethod
+    def _card_stub(printing: dict[str, Any], spec: dict[str, Any], rec: dict[str, Any]) -> dict[str, Any]:
+        """The card object for a freshly created record: Archidekt's create answer may carry only
+        the card id, so the printing we resolved fills the name, set and number."""
+        card = rec.get("card") if isinstance(rec.get("card"), dict) else {}
+        return {
+            **card,
+            "id": card.get("id") or printing["id"],
+            "uid": card.get("uid") or spec["scryfall_id"],
+            "collectorNumber": card.get("collectorNumber") or printing.get("collector_number"),
+            "edition": card.get("edition") or {"editioncode": printing.get("set_code") or ""},
+            "oracleCard": card.get("oracleCard") or {"name": printing.get("name") or spec["name"]},
+        }
+
+    async def _record(self, sub: str, rid: int) -> dict[str, Any]:
+        """The raw record for an id, found by paging the collection (Archidekt's v2 list has no
+        single-record read). Up to ten pages."""
+        uid = self._user_id(sub)
+        page = 1
+        while page <= 10:
+            body = await self._run(
+                sub, lambda token, page=page: self.client.collection_page(token, uid, page=page)
+            )
+            for rec in body["results"]:
+                if isinstance(rec, dict) and rec.get("id") == rid:
+                    return rec
+            if not body.get("next"):
+                break
+            page += 1
+        raise CollectionError("not_found", "no such card in your collection")
+
+    async def set_quantity(self, sub: str, rid: int, quantity: int) -> dict[str, Any]:
+        rec = await self._record(sub, rid)
+        if quantity <= 0:
+            await self._run(sub, lambda token: self.client.collection_delete(token, [rid]))
+            self.decks.db.audit("collection_removed", sub=sub, detail={"id": rid})
+            return {"row": None, "removed": row_out(rec)}
+        out = await self._run(sub, lambda token: self.client.collection_set(token, rec, quantity=quantity))
+        return {"row": row_out({**rec, **out, "card": rec.get("card")})}
+
+    async def update(self, sub: str, rid: int, data: dict[str, Any]) -> dict[str, Any]:
+        rec = await self._record(sub, rid)
+        opts = _item_options({k: v for k, v in data.items() if k in ("finish", "foil", "condition")}, 0)
+        changes: dict[str, Any] = {}
+        if "finish" in data or "foil" in data:
+            changes["modifier"] = MODIFIERS[opts["finish"]]
+        if "condition" in data:
+            changes["condition"] = opts["condition"] or None
+        if not changes:
+            raise CollectionError("invalid", "nothing to change: give finish or condition")
+        out = await self._run(sub, lambda token: self.client.collection_set(token, rec, **changes))
+        return {"row": row_out({**rec, **out, "card": rec.get("card")})}
+
+    async def remove(self, sub: str, rid: int, quantity: int | None = None) -> dict[str, Any]:
+        rec = await self._record(sub, rid)
+        have = int(rec.get("quantity") or 0)
+        if quantity is None or quantity >= have:
+            await self._run(sub, lambda token: self.client.collection_delete(token, [rid]))
             left = None
         else:
-            left = self.store.set_quantity(sub, rid, int(row["quantity"]) - max(1, quantity))
-        self.db.audit("collection_removed", sub=sub, detail={"id": rid, "quantity": quantity})
-        return {"removed": row, "row": left, "totals": self.store.totals(sub)}
+            out = await self._run(
+                sub, lambda token: self.client.collection_set(token, rec, quantity=have - max(1, quantity))
+            )
+            left = row_out({**rec, **out, "card": rec.get("card")})
+        self.decks.db.audit("collection_removed", sub=sub, detail={"id": rid, "quantity": quantity})
+        return {"removed": row_out(rec), "row": left}
 
-    def set_quantity(self, sub: str, rid: str, quantity: int) -> dict[str, Any]:
-        if self.store.get(sub, rid) is None:
-            raise CollectionError("not_found", "no such card in your collection")
-        row = self.store.set_quantity(sub, rid, quantity)
-        return {"row": row, "totals": self.store.totals(sub)}
-
-    def update(self, sub: str, rid: str, data: dict[str, Any]) -> dict[str, Any]:
-        if self.store.get(sub, rid) is None:
-            raise CollectionError("not_found", "no such card in your collection")
-        opts = _item_options(
-            {k: v for k, v in data.items() if k in ("finish", "foil", "condition", "notes", "lang")}, 0
-        )
-        fields: dict[str, Any] = {}
-        if "finish" in data or "foil" in data:
-            fields["finish"] = opts["finish"]
-        if "condition" in data:
-            fields["condition"] = opts["condition"]
-        if "notes" in data:
-            fields["notes"] = opts["notes"]
-        if "lang" in data:
-            fields["lang"] = opts["lang"]
-        row = self.store.update(sub, rid, **fields)
-        return {"row": row, "totals": self.store.totals(sub)}
-
-    def find_by_name(self, sub: str, name: str) -> list[dict[str, Any]]:
-        name = _clean(name, 200).lower()
-        return [r for r in self.store.list(sub, q=name, limit=200) if r["name"].lower() == name]
-
-    def export_csv(self, sub: str) -> str:
+    async def export_csv(self, sub: str) -> str:
         """The collection as CSV in the column layout Archidekt's collection import reads
         (Quantity, Name, Finish, Condition, Language, Edition code, Collector number, Scryfall ID,
-        Date added, Notes). Reported, not verified against a live import."""
+        Date added). Reported, not verified against a live import."""
         out = io.StringIO()
         w = csv.writer(out)
         w.writerow(
@@ -454,29 +390,24 @@ class CollectionService:
                 "Collector Number",
                 "Scryfall ID",
                 "Date Added",
-                "Notes",
             ]
         )
-        for r in self.store.export_rows(sub):
+        for r in await self.all_rows(sub):
             w.writerow(
                 [
                     r["quantity"],
                     r["name"],
-                    "Foil" if r["finish"] == "foil" else "Etched" if r["finish"] == "etched" else "Normal",
+                    MODIFIERS[r["finish"]],
                     r["condition"],
                     r["lang"],
                     r["set"].upper(),
                     r["set_name"],
                     r["collector_number"],
                     r["scryfall_id"],
-                    time.strftime("%Y-%m-%d", time.gmtime(r["added_at"])),
-                    r["notes"],
+                    r["added_at"][:10],
                 ]
             )
         return out.getvalue()
-
-    def summary(self, sub: str) -> dict[str, Any]:
-        return self.store.totals(sub)
 
 
 def _item_options(raw: dict[str, Any], i: int) -> dict[str, Any]:
@@ -497,21 +428,20 @@ def _item_options(raw: dict[str, Any], i: int) -> dict[str, Any]:
     condition = _clean(raw.get("condition"), 4).upper()
     if condition not in CONDITIONS:
         raise CollectionError("invalid", f"card {i}: condition must be one of NM, LP, MP, HP, DMG or empty")
-    lang = _clean(raw.get("lang"), 3).lower() or "en"
-    if not re.fullmatch(r"[a-z]{2,3}", lang):
-        raise CollectionError("invalid", f"card {i}: lang must be a two or three letter code")
-    return {
-        "quantity": qty,
-        "finish": finish,
-        "condition": condition,
-        "lang": lang,
-        "notes": _clean(raw.get("notes"), 300),
-    }
+    return {"quantity": qty, "finish": finish, "condition": condition}
 
 
 # -- browser page and JSON -----------------------------------------------------------------------------
 NO_STORE = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
-_STATUS = {"invalid": 400, "not_found": 404, "unavailable": 503, "rate_limited": 503, "busy": 429}
+_STATUS = {
+    "invalid": 400,
+    "not_found": 404,
+    "not_linked": 409,
+    "auth": 409,
+    "unavailable": 503,
+    "rate_limited": 503,
+    "busy": 429,
+}
 
 
 def _esc(v: Any) -> str:
@@ -526,6 +456,13 @@ def _fail(exc: CollectionError) -> JSONResponse:
 
 def _finish_label(f: str) -> str:
     return {"foil": "Foil", "etched": "Etched"}.get(f, "")
+
+
+def _rid(value: Any) -> int:
+    s = str(value or "").strip()
+    if not s.isdigit() or len(s) > 12:
+        raise CollectionError("invalid", "that is not a collection record id")
+    return int(s)
 
 
 def row_html(r: dict[str, Any], csrf: str, *, view: str) -> str:
@@ -575,7 +512,8 @@ def row_html(r: dict[str, Any], csrf: str, *, view: str) -> str:
             else "<span class='thumb'></span>"
         )
         + f"<span class='n'><span class='name'>{_esc(r['name'])}</span>{badges}"
-        f"<span class='meta'>{set_line} · {_esc(r.get('set_name'))}"
+        f"<span class='meta'>{set_line}"
+        + (f" · {_esc(r.get('set_name'))}" if r.get("set_name") else "")
         + (f" · {_esc(r.get('type_line'))}" if r.get("type_line") else "")
         + "</span></span>"
         f"<span class='mc'>{mana_html(r.get('mana_cost') or '')}</span>{stepper}{remove}</li>"
@@ -583,7 +521,7 @@ def row_html(r: dict[str, Any], csrf: str, *, view: str) -> str:
 
 
 COLLECTION_CSS = """
-.collbar .controls{display:grid;grid-template-columns:minmax(0,2fr) repeat(3,minmax(9rem,1fr)) auto;gap:1rem;
+.collbar .controls{display:grid;grid-template-columns:minmax(0,2fr) repeat(2,minmax(9rem,1fr)) auto;gap:1rem;
   align-items:end}
 .collbar .field .btn{margin:0}
 @media (max-width:1000px){ .collbar .controls{grid-template-columns:1fr 1fr}
@@ -592,6 +530,7 @@ COLLECTION_CSS = """
 .coll-totals{display:flex;flex-wrap:wrap;gap:1rem 1.5rem;align-items:baseline;margin:0 0 .75rem;
   color:var(--text-muted)}
 .coll-totals b{color:var(--text);font-size:1.3rem;font-variant-numeric:tabular-nums}
+.coll-totals .ext{margin-left:auto}
 .addbox form.addcard{display:grid;grid-template-columns:minmax(0,2fr) 5.5rem minmax(0,1fr) minmax(0,1fr) auto;
   gap:.5rem;align-items:end}
 .addbox form.addcard .field{margin:0} .addbox form.addcard button{margin:0;height:var(--ctl)}
@@ -635,12 +574,11 @@ ul.colllist .n .finish,ul.colllist .n .cond{margin-left:.35rem;vertical-align:mi
 .pager .btn{margin:0}
 .coll-empty{text-align:center;padding:2rem 1rem}
 .coll-empty .actions{justify-content:center}
-.sets{display:flex;flex-wrap:wrap;gap:.35rem;margin:.5rem 0 0}
 """
 
 
 def add_collection(server: MCPServer, state: AppState) -> CollectionService:
-    service = CollectionService(state.db, getattr(state, "scan", None))
+    service = CollectionService(state.decks, getattr(state, "scan", None))
     state.collection = service  # type: ignore[attr-defined]
     add_collection_routes(server, state, service)
     add_collection_tools(server, service)
@@ -732,17 +670,33 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
 
     def notice(code: str | None) -> str:
         msgs = {
-            "added": "Added to your collection.",
-            "removed": "Removed from your collection.",
+            "added": "Added to your Archidekt collection.",
+            "removed": "Removed from your Archidekt collection.",
             "nothing": "Nothing was added: no card matched. Check the name or pick a suggestion.",
             "expired": "This form expired. Reload the page and try again.",
             "invalid": "That was not a valid request.",
-            "lookup": "Card lookup is unavailable right now. Try again in a moment.",
+            "lookup": "Archidekt is not answering right now. Try again in a moment.",
+            "link": "Link your Archidekt account on the Account page first.",
         }
         if not code or code not in msgs:
             return ""
         cls = "ok" if code in ("added", "removed") else "error"
         return f"<p class='notice {cls}'>{_esc(msgs[code])}</p>"
+
+    def problem(exc: CollectionError, *, link_hint: bool) -> str:
+        if exc.kind in ("not_linked", "auth"):
+            return (
+                "<section class='panel coll-empty'><h2>Your collection lives on Archidekt</h2>"
+                "<p>The gateway shows and edits the Collection of the Archidekt account you link; nothing "
+                "about your cards is stored here. Link your account to see it.</p>"
+                f"<div class='actions'><a class='btn btn-primary' href='/account'>{icon('account')} "
+                "Link Archidekt</a></div></section>"
+            )
+        return (
+            f"<section class='panel'><p class='notice error'>{_esc(exc)}</p>"
+            "<p class='muted'>Your collection is read live from Archidekt; when Archidekt is slow or "
+            "down the page cannot show it.</p></section>"
+        )
 
     @server.custom_route("/collection", methods=["GET"], include_in_schema=False)
     async def collection_page(request: Request) -> Response:
@@ -753,33 +707,25 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         q = _clean(qp.get("q"), 80)
         sort = qp.get("sort") if qp.get("sort") in SORTS else "added"
         view = qp.get("view") if qp.get("view") in ("grid", "list") else "grid"
-        set_code = _clean(qp.get("set"), 10).lower()
-        finish = qp.get("finish") if qp.get("finish") in FINISHES else ""
-        color = qp.get("color") if qp.get("color") in ("W", "U", "B", "R", "G", "C") else ""
         try:
             page_no = max(1, min(int(qp.get("page") or 1), 10_000))
         except ValueError:
             page_no = 1
-        rows = service.store.list(
-            sub,
-            q=q,
-            set_code=set_code,
-            finish=finish,
-            color=color,
-            sort=sort,
-            limit=PAGE_SIZE + 1,
-            offset=(page_no - 1) * PAGE_SIZE,
-        )
-        more = len(rows) > PAGE_SIZE
-        rows = rows[:PAGE_SIZE]
-        totals = service.store.totals(sub)
         csrf = _csrf(s, sid) or ""
-        sets = totals["sets"]
-        set_opts = "".join(
-            f"<option value='{_esc(x['code'])}'{' selected' if x['code'] == set_code else ''}>"
-            f"{_esc((x['code'] or '?').upper())} · {_esc(x['name'] or '')} ({x['cards']})</option>"
-            for x in sets[:150]
-        )
+        try:
+            out = await service.page(sub, page=page_no, q=q, sort=sort)
+        except CollectionError as exc:
+            status = 200 if exc.kind in ("not_linked", "auth") else _STATUS.get(exc.kind, 400)
+            return page(
+                "My collection",
+                notice(qp.get("err")) + problem(exc, link_hint=True),
+                sub=sub,
+                sid=sid,
+                status=status,
+            )
+        rows = out["rows"]
+        link = state.db.get_link(sub) or {}
+        arch_user = str(link.get("archidekt_user_id") or "")
 
         def sel(name: str, options: dict[str, str], cur: str, label: str, ic: str) -> str:
             opts = "".join(
@@ -795,24 +741,10 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             "<section class='panel collbar'><form method='get' "
             "action='/collection' class='controls' id='listform'>"
             "<div class='field filter grow'><label for='q'>Filter</label><span class='search'>"
-            f"<input id='q' type='search' name='q' value='{_esc(q)}' placeholder='Card name, type or set'>"
+            f"<input id='q' type='search' name='q' value='{_esc(q)}' placeholder='Card name'>"
             f"<button type='submit' aria-label='Filter'>{icon('search')}</button></span></div>"
             + sel("view", {"grid": "Grid", "list": "List"}, view, "View as", "grid")
             + sel("sort", SORTS, sort, "Sort by", "sort")
-            + (
-                f"<div class='field'><label for='f-set'>Set</label><span class='sel'>{icon('decks')}"
-                "<select id='f-set' name='set'><option value=''>All "
-                f"sets</option>{set_opts}</select></span></div>"
-                if sets
-                else ""
-            )
-            + sel(
-                "finish",
-                {"": "Any finish", "nonfoil": "Non-foil", "foil": "Foil", "etched": "Etched"},
-                finish,
-                "Finish",
-                "layers",
-            )
             + "<div class='field'><span class='lbl'>&nbsp;</span>"
             f"<a class='btn' href='/collection/export.csv'>{icon('download')} Export CSV</a></div>"
             "<noscript><button type='submit' class='apply'>Apply</button></noscript></form></section>"
@@ -839,17 +771,25 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             "</select></span></div>"
             f"<button class='btn-primary'>{icon('plus')} Add</button></form>"
             "<p class='muted small'>Scanning a pile is quicker: open <a href='/scan'>Scan</a>, then choose "
-            "<strong>Save to collection</strong>.</p></section>"
+            "<strong>Save to collection</strong>. Everything you add lands in your Collection on "
+            "Archidekt.</p></section>"
+        )
+        arch_link = (
+            f"<a class='ext' href='https://archidekt.com/collection/v2/{_esc(arch_user)}' target='_blank' "
+            f"rel='noreferrer noopener'>{icon('external')} Open on Archidekt</a>"
+            if arch_user
+            else ""
         )
         totals_html = (
-            f"<div class='coll-totals' id='totals'><span><b>{totals['cards']}</b> cards</span>"
-            f"<span><b>{totals['distinct']}</b> distinct</span><span><b>{len(sets)}</b> sets</span></div>"
+            f"<div class='coll-totals' id='totals'><span><b>{int(out['count'])}</b> "
+            f"{'entry' if out['count'] == 1 else 'entries'} in your Archidekt collection</span>"
+            f"{arch_link}</div>"
             "<p class='sr-only' id='live' role='status' aria-live='polite'></p>"
         )
-        if not rows and not (q or set_code or finish or color):
+        if not rows and not q:
             body = (
                 "<section class='panel coll-empty'><h2>No cards yet</h2>"
-                "<p>Your collection is the list of cards you own. "
+                "<p>Your collection is the list of cards you own, kept on Archidekt. "
                 "Scan a pile with your phone, or add cards by name. "
                 "Cards you own show a green dot on every deck page.</p>"
                 "<div class='actions'><a class='btn btn-primary' "
@@ -861,31 +801,21 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         else:
             items = "".join(row_html(r, csrf, view=view) for r in rows)
             body = f"<ul class='{'collgrid' if view == 'grid' else 'colllist'}' id='cards'>{items}</ul>"
-        qs = {
-            k: v
-            for k, v in (
-                ("q", q),
-                ("sort", sort),
-                ("view", view),
-                ("set", set_code),
-                ("finish", finish),
-                ("color", color),
-            )
-            if v
-        }
         from urllib.parse import urlencode
 
-        def link(n: int) -> str:
+        qs = {k: v for k, v in (("q", q), ("sort", sort), ("view", view)) if v}
+
+        def link_to(n: int) -> str:
             return "/collection?" + urlencode({**qs, "page": n})
 
         pager = ""
-        if page_no > 1 or more:
+        if page_no > 1 or out["has_next"]:
             pager = "<nav class='pager' aria-label='Pages'>"
             if page_no > 1:
-                pager += f"<a class='btn' href='{_esc(link(page_no - 1))}'>Previous</a>"
-            pager += f"<span class='muted small'>Page {page_no}</span>"
-            if more:
-                pager += f"<a class='btn' href='{_esc(link(page_no + 1))}'>Next</a>"
+                pager += f"<a class='btn' href='{_esc(link_to(page_no - 1))}'>Previous</a>"
+            pager += f"<span class='muted small'>Page {page_no} of {int(out['total_pages'])}</span>"
+            if out["has_next"]:
+                pager += f"<a class='btn' href='{_esc(link_to(page_no + 1))}'>Next</a>"
             pager += "</nav>"
         return page(
             "My collection",
@@ -936,21 +866,24 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 )
                 code = "ok=added" if out["added"] else "err=nothing"
             elif action in ("inc", "dec", "remove"):
-                rid = _clean(data.get("id"), 40)
-                row = service.store.get(sub, rid)
-                if row is None:
-                    raise CollectionError("not_found", "no such card")
+                rid = _rid(data.get("id"))
                 if action == "remove":
-                    service.remove(sub, rid)
+                    await service.remove(sub, rid)
                     code = "ok=removed"
                 else:
+                    rec = await service._record(sub, rid)
                     delta = 1 if action == "inc" else -1
-                    service.set_quantity(sub, rid, int(row["quantity"]) + delta)
+                    await service.set_quantity(sub, rid, int(rec.get("quantity") or 0) + delta)
                     code = ""
             else:
                 code = "err=invalid"
         except CollectionError as exc:
-            code = "err=lookup" if exc.kind in ("unavailable", "rate_limited", "busy") else "err=invalid"
+            if exc.kind in ("not_linked", "auth"):
+                code = "err=link"
+            elif exc.kind in ("unavailable", "rate_limited", "busy"):
+                code = "err=lookup"
+            else:
+                code = "err=invalid"
         sep = "&" if "?" in back else "?"
         return RedirectResponse(f"{back}{sep}{code}" if code else back, status_code=303)
 
@@ -959,8 +892,15 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         sub, _sid = browser_session(state, request)
         if not sub:
             return login_redirect("/collection")
+        try:
+            text = await service.export_csv(sub)
+        except CollectionError as exc:
+            return RedirectResponse(
+                "/collection?err=" + ("link" if exc.kind in ("not_linked", "auth") else "lookup"),
+                status_code=303,
+            )
         return Response(
-            service.export_csv(sub),
+            text,
             media_type="text/csv; charset=utf-8",
             headers={
                 "Content-Disposition": 'attachment; filename="collection.csv"',
@@ -981,6 +921,9 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         source = data.get("source") if data.get("source") in ("scan", "manual", "assistant") else "manual"
         try:
             out = await service.add(who[0], data.get("items") or data.get("cards"), source=source)
+            if source == "scan" and service.scan is not None and isinstance(data.get("scan_session"), str):
+                # The scan was an inbox for these cards; saved, it has done its job.
+                service.scan.store.delete(data["scan_session"][:60], who[0])
         except CollectionError as exc:
             return _fail(exc)
         return JSONResponse({"ok": True, **out}, headers=NO_STORE)
@@ -993,15 +936,15 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         data = await json_body(request)
         if isinstance(data, Response):
             return data
-        rid = request.path_params["rid"]
         try:
+            rid = _rid(request.path_params["rid"])
             if "quantity" in data:
                 qty = data.get("quantity")
                 if not isinstance(qty, int) or isinstance(qty, bool) or qty < 0 or qty > MAX_QUANTITY:
                     raise CollectionError("invalid", "quantity must be a whole number")
-                out = service.set_quantity(who[0], rid, qty)
+                out = await service.set_quantity(who[0], rid, qty)
             else:
-                out = service.update(who[0], rid, data)
+                out = await service.update(who[0], rid, data)
         except CollectionError as exc:
             return _fail(exc)
         return JSONResponse({"ok": True, **out}, headers=NO_STORE)
@@ -1012,7 +955,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         if isinstance(who, Response):
             return who
         try:
-            out = service.remove(who[0], request.path_params["rid"])
+            out = await service.remove(who[0], _rid(request.path_params["rid"]))
         except CollectionError as exc:
             return _fail(exc)
         return JSONResponse({"ok": True, **out}, headers=NO_STORE)
@@ -1022,7 +965,11 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         who = api_user(request, write=False)
         if isinstance(who, Response):
             return who
-        return JSONResponse({"ok": True, **service.summary(who[0])}, headers=NO_STORE)
+        try:
+            out = await service.summary(who[0])
+        except CollectionError as exc:
+            return _fail(exc)
+        return JSONResponse({"ok": True, **out}, headers=NO_STORE)
 
 
 def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
@@ -1041,42 +988,37 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
         name="list_collection",
         title="List the cards I own",
         description=(
-            "The signed-in user's collection on this gateway: the cards they own, one row per printing and "
-            "finish with a quantity. Optional `query` filters by name, type or set name; `set` by set code; "
-            "`sort` is added, name, set, mv, qty or type; `limit` up to 500 (default 100), `offset` to page. "
-            "Also returns totals. Nothing here is read from Archidekt."
+            "The signed-in user's Collection on Archidekt (the account they linked): the cards they "
+            "own, one row per printing and finish with a quantity, 100 a page in Archidekt's "
+            "newest-first order. Optional `query` filters by card name; `sort` is added or edition "
+            "(set release); `page` pages. Returns cards, count and total_pages. Read-only."
         ),
-        annotations={"readOnlyHint": True, "openWorldHint": False},
+        annotations={"readOnlyHint": True, "openWorldHint": True},
     )
-    async def list_collection(
-        query: str | None = None,
-        set: str | None = None,  # noqa: A002 - the tool argument is named for the user
-        sort: str = "added",
-        limit: int = 100,
-        offset: int = 0,
-    ) -> dict[str, Any]:
+    async def list_collection(query: str | None = None, sort: str = "added", page: int = 1) -> dict[str, Any]:
         sub = _sub()
-        rows = service.store.list(
-            sub,
-            q=_clean(query, 80),
-            set_code=_clean(set, 10),
-            sort=sort if sort in SORTS else "added",
-            limit=max(1, min(int(limit or 100), 500)),
-            offset=max(0, int(offset or 0)),
-        )
-        return {"ok": True, "cards": rows, "count": len(rows), "totals": service.summary(sub)}
+        try:
+            out = await service.page(
+                sub,
+                page=max(1, min(int(page or 1), 10_000)),
+                q=_clean(query, 80),
+                sort=sort if sort in SORTS else "added",
+            )
+        except CollectionError as exc:
+            return _err(exc)
+        return {"ok": True, "cards": out["rows"], **{k: v for k, v in out.items() if k != "rows"}}
 
     @server.tool(
         name="add_to_collection",
         title="Add cards to my collection",
         description=(
-            "Record cards the user owns. Give `cards` (list of {name, set?, collector_number?, quantity?, "
-            "finish? (nonfoil|foil|etched), condition? "
-            "(NM|LP|MP|HP|DMG), notes?} or plain names), `text` (one "
-            "card per line, e.g. '2 Sol Ring (CMR) 472 *F*') or `scan_session` (the id or name of a scan "
-            "session: every resolved card in it is added). Names "
-            "are matched on Scryfall; cards that could not "
-            "be matched come back in `skipped` with suggestions. Does not touch Archidekt."
+            "Record cards the user owns in their Archidekt Collection. Give `cards` (list of {name, "
+            "set?, collector_number?, quantity?, finish? (nonfoil|foil|etched), condition? "
+            "(NM|LP|MP|HP|DMG)} or plain names), `text` (one card per line, e.g. '2 Sol Ring (CMR) "
+            "472 *F*') or `scan_session` (the id or name of a scan session: every matched card in it "
+            "is added and the session is then removed). At most 100 cards per call; each takes about "
+            "a second. Cards Archidekt cannot match come back in `skipped`. Writes to the user's own "
+            "Archidekt account."
         ),
         annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": True},
     )
@@ -1088,6 +1030,7 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
         sub = _sub()
         items: list[Any] = list(cards or [])
         source = "assistant"
+        session_id = None
         try:
             if text:
                 from .scan.service import parse_text
@@ -1117,7 +1060,10 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
                     if it.get("card")
                 ]
                 source = "scan"
+                session_id = sess.get("id")
             out = await service.add(sub, items, source=source)
+            if session_id and service.scan is not None and not out["skipped"]:
+                service.scan.store.delete(str(session_id), sub)
         except CollectionError as exc:
             return _err(exc)
         return {"ok": True, **out}
@@ -1126,25 +1072,24 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
         name="remove_from_collection",
         title="Remove cards from my collection",
         description=(
-            "Take cards out of the user's collection. Give `id` "
-            "(a collection row id from list_collection) or "
-            "`name` (every printing of that name), and optionally `quantity` to remove only some copies. "
-            "Only after the user asked for it. Does not touch Archidekt."
+            "Take cards out of the user's Archidekt Collection. Give `id` (a collection record id from "
+            "list_collection) or `name` (every printing of that name), and optionally `quantity` to remove "
+            "only some copies. Only after the user asked for it."
         ),
-        annotations={"readOnlyHint": False, "destructiveHint": True, "openWorldHint": False},
+        annotations={"readOnlyHint": False, "destructiveHint": True, "openWorldHint": True},
     )
     async def remove_from_collection(
-        id: str | None = None,  # noqa: A002 - the tool argument is named for the user
+        id: str | int | None = None,  # noqa: A002 - the tool argument is named for the user
         name: str | None = None,
         quantity: int | None = None,
     ) -> dict[str, Any]:
         sub = _sub()
         try:
-            if id:
-                return {"ok": True, **service.remove(sub, _clean(id, 40), quantity)}
+            if id is not None and str(id).strip():
+                return {"ok": True, **await service.remove(sub, _rid(id), quantity)}
             if not name:
                 raise CollectionError("invalid", "give id or name")
-            rows = service.find_by_name(sub, name)
+            rows = await service.find_by_name(sub, name)
             if not rows:
                 raise CollectionError("not_found", f"no card named '{_clean(name, 60)}' in your collection")
             removed = []
@@ -1153,9 +1098,9 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
                 if left is not None and left <= 0:
                     break
                 take = None if left is None else min(left, int(r["quantity"]))
-                removed.append(service.remove(sub, r["id"], take)["removed"])
+                removed.append((await service.remove(sub, int(r["id"]), take))["removed"])
                 if left is not None:
                     left -= take or 0
-            return {"ok": True, "removed": removed, "totals": service.summary(sub)}
+            return {"ok": True, "removed": removed}
         except CollectionError as exc:
             return _err(exc)

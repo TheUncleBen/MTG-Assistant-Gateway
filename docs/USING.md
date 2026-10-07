@@ -24,14 +24,17 @@ you the exact change first.
    as a proposal.
 
 On a phone the five tabs at the bottom are Decks, Search, Scan, Collection
-and More (More opens the home page with every section). The account menu is
-the person icon at the top right; a tap anywhere else closes it.
+and More (More opens the home page with every section). On a wider touch
+screen, such as an unfolded foldable or a tablet, and in the Android app
+from 600 px, the same five sit in a rail down the left edge; a desktop
+browser shows them in the top bar. The layout follows the window as you
+fold, rotate or split the screen. The account menu is the person icon at
+the top right; a tap anywhere else closes it.
 
 ## Home
 
 Your newest decks with their cover art, a deck search box, and one tile per
-section: Decks, Search, Scan, Collection (how many cards you own),
-Proposals (how many wait for you), History, Guide. **Connect an AI
+section: Decks, Search, Scan, Collection, Proposals (how many wait for you), History, Guide. **Connect an AI
 assistant** at the end holds the connector URL and the guided setup.
 
 ## Your decks
@@ -86,9 +89,10 @@ the gateway.
 2. **Check the list.** Fix a wrong match from the suggestions, pick the
    exact printing or foil, adjust quantities. Cards the camera could not
    read are kept with a picture of the title so you can type them.
-3. **Choose what to do with it:** save the cards to your collection, add
-   them to one of your decks, start a new deck from them, or save the scan
-   for later (your assistant can pick it up too).
+3. **Choose what to do with it:** save the cards to your collection (on
+   Archidekt), add them to one of your decks, start a new deck from them, or
+   keep the scan for later (your assistant can pick it up too). A saved scan
+   is an inbox: once its cards have gone somewhere it disappears.
 
 You can also type or paste names instead of using the camera, and earlier
 scans are listed under **Sessions**. The details are in
@@ -96,23 +100,38 @@ scans are listed under **Sessions**. The details are in
 
 ## Collection
 
-**Collection** is the list of cards you own, kept on the gateway (not on
-Archidekt). Scan a pile and save it there, add cards by name, or mark a card
-as owned from any deck page. Each card remembers its printing, finish,
+**Collection** is the list of cards you own. It is your Collection on
+Archidekt, shown and edited here through the account you linked: nothing
+about your cards is stored on the gateway, and what you add here appears on
+archidekt.com at once. Scan a pile and save it, add cards by name, or mark a
+card as owned from any deck page. Each card keeps its printing, finish,
 condition and count.
 
-- Filter by name, type or set, show it as a grid or a list, and sort by
-  name, newest, set or count. Plus and minus change the count; the cross
+- Filter by name, show it as a grid or a list, sort by newest or by set
+  release, and page through it. Plus and minus change the count; the cross
   removes a card.
 - Cards you own show a **green dot** on every deck page, your own decks and
-  public ones alike.
-- **Export CSV** downloads the whole collection in a format Archidekt and
-  other tools import.
+  public ones alike, with the number of copies Archidekt knows about.
+- **Export CSV** downloads the whole collection in the column layout
+  Archidekt's own import reads.
+- A scan is an inbox: once you save its cards to the collection or a deck,
+  the scan is done with and disappears. Scans nobody touched for a month go
+  too.
 
 Your assistant can read and add to the collection too (`list_collection`,
 `add_to_collection`, `remove_from_collection`), for questions like "which
-cards in this deck do I not own yet?". Syncing the collection to Archidekt's
-own Collection page is not built; the gateway's copy is the one that counts.
+cards in this deck do I not own yet?". Adding takes about a second a card,
+because each one is written to Archidekt.
+
+## Likes, bookmarks, follows and comments
+
+Every deck page has Archidekt's own social buttons: **Like** (with the
+deck's score), **Bookmark**, **Follow** its owner, and a **Comments** panel
+that shows the deck's thread and lets you reply or add a comment. A user
+page has the Follow button too. Each one asks you to confirm first, then
+goes to Archidekt under your Archidekt name, exactly as if you had pressed
+it on archidekt.com. These buttons are yours alone: your assistant has no
+tool for any of them and cannot like, follow or comment for you.
 
 ## Proposals and history
 

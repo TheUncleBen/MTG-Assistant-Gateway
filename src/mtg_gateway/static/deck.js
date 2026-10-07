@@ -13,6 +13,12 @@
   var $$ = function (sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); };
   var csrfInput = $("input[name=csrf]");
   var CSRF = csrfInput ? csrfInput.value : "";
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
 
   // -- forms that apply on change ----------------------------------------------------------
   $$("#viewform, #listform, #searchform").forEach(function (form) {
@@ -66,7 +72,8 @@
     });
   }
 
-  if (!cards || !cards.classList.contains("deckview")) return;
+  // -- deck page only (the social block further down runs on every deck, own or not) -------
+  if (cards && cards.classList.contains("deckview")) {
   var deckId = cards.getAttribute("data-deck");
   var own = cards.hasAttribute("data-own");
   var touch = window.matchMedia("(hover: none)").matches;
@@ -83,12 +90,6 @@
     viewer.classList.remove("open");
     viewer.textContent = "";
     if (lastFocus && lastFocus.focus) lastFocus.focus();
-  }
-  function el(tag, cls, text) {
-    var e = document.createElement(tag);
-    if (cls) e.className = cls;
-    if (text !== undefined) e.textContent = text;
-    return e;
   }
   function openViewer(card) {
     lastFocus = document.activeElement;
@@ -177,7 +178,7 @@
   });
 
   // -- own deck: drag cards between categories, moves become one proposal ---------------------
-  if (!own || !deckId) return;
+  if (own && deckId) {
   var moves = {}; // card name -> {from, to}
   var bar = document.createElement("div");
   bar.className = "movebar";
@@ -316,4 +317,244 @@
   }
   cards.addEventListener("touchend", endTouch);
   cards.addEventListener("touchcancel", endTouch);
+  } // own deck
+  } // deck view
+
+  // -- Archidekt social actions: like, bookmark, follow, comments ------------------------------------
+  // Each is the person's own click: a confirmation chip appears first, then the gateway sends the
+  // action to Archidekt under their linked session (/social/api). Nothing here is reachable by an
+  // assistant.
+  function socialRequest(method, url, body) {
+    return fetch(url, {
+      method: method, credentials: "same-origin",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": CSRF },
+      body: body === undefined ? undefined : JSON.stringify(body)
+    }).then(function (r) { return r.json().then(function (d) { d.status = r.status; return d; }); });
+  }
+  function socialProblem(d) {
+    if (d && (d.error === "not_linked" || d.error === "auth")) {
+      var a = el("a", "", "Link your Archidekt account");
+      a.href = "/account";
+      var frag = document.createDocumentFragment();
+      frag.appendChild(a);
+      frag.appendChild(document.createTextNode(" to like, bookmark, follow or comment."));
+      return frag;
+    }
+    return document.createTextNode((d && d.message) || "That did not work; try again.");
+  }
+  function confirmChip(btn, question, yesLabel, onYes) {
+    var old = btn.parentNode.querySelector(".confirm");
+    if (old) old.remove();
+    var chip = el("span", "confirm");
+    chip.setAttribute("role", "group");
+    chip.appendChild(document.createTextNode(question + " "));
+    var yes = el("button", "btn-primary", yesLabel);
+    yes.type = "button";
+    var no = el("button", "", "No");
+    no.type = "button";
+    chip.appendChild(yes);
+    chip.appendChild(no);
+    btn.hidden = true;
+    btn.parentNode.insertBefore(chip, btn.nextSibling);
+    var restore = function () { chip.remove(); btn.hidden = false; btn.focus(); };
+    no.addEventListener("click", restore);
+    chip.addEventListener("keydown", function (e) { if (e.key === "Escape") restore(); });
+    yes.addEventListener("click", function () { chip.remove(); btn.hidden = false; onYes(); });
+    yes.focus();
+  }
+  var social = $(".banner .social");
+  if (social) {
+    var noteEl = null;
+    var note = function (content) {
+      if (noteEl) noteEl.remove();
+      noteEl = el("p", "note");
+      if (typeof content === "string") noteEl.textContent = content; else noteEl.appendChild(content);
+      social.appendChild(noteEl);
+    };
+    var deck = social.getAttribute("data-deck");
+    var setLabel = function (btn, text) { var sp = btn.querySelector("span"); if (sp) sp.textContent = text; };
+    var busy = function (btn, on) { btn.disabled = on; };
+    var likeBtn = $("[data-social=vote]", social);
+    if (likeBtn) {
+      likeBtn.addEventListener("click", function () {
+        var liked = likeBtn.getAttribute("data-state") === "1";
+        confirmChip(likeBtn, liked ? "Remove your like?" : "Like this deck on Archidekt?", liked ? "Remove" : "Like", function () {
+          busy(likeBtn, true);
+          socialRequest("POST", "/social/api/decks/" + encodeURIComponent(deck) + "/vote", { vote: liked ? "none" : "up" }).then(function (d) {
+            busy(likeBtn, false);
+            if (!d.ok) { note(socialProblem(d)); return; }
+            likeBtn.setAttribute("data-state", String(d.vote));
+            likeBtn.classList.toggle("on", d.vote === 1);
+            likeBtn.setAttribute("aria-pressed", d.vote === 1 ? "true" : "false");
+            $(".n", likeBtn).textContent = d.points;
+            setLabel(likeBtn, d.vote === 1 ? "Liked" : "Like");
+            if (noteEl) noteEl.remove();
+          }).catch(function () { busy(likeBtn, false); note("No connection."); });
+        });
+      });
+    }
+    var markBtn = $("[data-social=bookmark]", social);
+    if (markBtn) {
+      markBtn.addEventListener("click", function () {
+        var on = markBtn.getAttribute("data-state") === "1";
+        confirmChip(markBtn, on ? "Remove the bookmark?" : "Bookmark this deck on Archidekt?", on ? "Remove" : "Bookmark", function () {
+          busy(markBtn, true);
+          socialRequest("POST", "/social/api/decks/" + encodeURIComponent(deck) + "/bookmark", { on: !on }).then(function (d) {
+            busy(markBtn, false);
+            if (!d.ok) { note(socialProblem(d)); return; }
+            markBtn.setAttribute("data-state", d.bookmarked ? "1" : "0");
+            markBtn.classList.toggle("on", d.bookmarked);
+            markBtn.setAttribute("aria-pressed", d.bookmarked ? "true" : "false");
+            setLabel(markBtn, d.bookmarked ? "Bookmarked" : "Bookmark");
+            if (noteEl) noteEl.remove();
+          }).catch(function () { busy(markBtn, false); note("No connection."); });
+        });
+      });
+    }
+  }
+  // Follow buttons live in the deck banner and on user pages alike.
+  $$("[data-social=follow]").forEach(function (btn) {
+    var user = btn.getAttribute("data-user");
+    var name = btn.getAttribute("data-name") || "this user";
+    var holder = btn.closest(".social") || btn.parentNode;
+    var say = function (content) {
+      var old = holder.querySelector(".note");
+      if (old) old.remove();
+      var p = el("p", "note");
+      if (typeof content === "string") p.textContent = content; else p.appendChild(content);
+      holder.appendChild(p);
+    };
+    var paint = function (following) {
+      btn.setAttribute("data-state", following ? "1" : "0");
+      btn.classList.toggle("on", following);
+      btn.setAttribute("aria-pressed", following ? "true" : "false");
+      var sp = btn.querySelector("span");
+      if (sp) sp.textContent = (following ? "Following " : "Follow ") + name;
+    };
+    socialRequest("GET", "/social/api/users/" + encodeURIComponent(user) + "/follow").then(function (d) {
+      if (d.ok && d.self) { btn.hidden = true; return; }
+      if (d.ok) paint(d.following);
+    }).catch(function () {});
+    btn.addEventListener("click", function () {
+      var on = btn.getAttribute("data-state") === "1";
+      confirmChip(btn, on ? "Stop following " + name + "?" : "Follow " + name + " on Archidekt?", on ? "Unfollow" : "Follow", function () {
+        btn.disabled = true;
+        socialRequest("POST", "/social/api/users/" + encodeURIComponent(user) + "/follow", { on: !on }).then(function (d) {
+          btn.disabled = false;
+          if (!d.ok) { say(socialProblem(d)); return; }
+          paint(d.following);
+          var old = holder.querySelector(".note");
+          if (old) old.remove();
+        }).catch(function () { btn.disabled = false; say("No connection."); });
+      });
+    });
+  });
+  // The comment thread loads when its panel comes into view; posting asks first.
+  var commentsPanel = $("#comments");
+  if (commentsPanel) {
+    var thread = $(".thread", commentsPanel);
+    var countEl = $("[data-count]", commentsPanel);
+    var form = $("form.newcomment", commentsPanel);
+    var textarea = $("textarea", form);
+    var replyTo = $(".replyto", form);
+    var parentId = null;
+    var when = function (iso) {
+      var d = new Date(iso);
+      return isNaN(d) ? "" : d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+    };
+    var render = function (c) {
+      var box = el("article", "cmt");
+      box.setAttribute("data-id", c.id);
+      var who = el("div", "who");
+      var b = el("b", "", c.owner.username || "someone");
+      who.appendChild(b);
+      who.appendChild(document.createTextNode(" · " + when(c.created_at) + (c.edited_at ? " · edited" : "")));
+      if (c.points) who.appendChild(document.createTextNode(" · " + c.points + (c.points === 1 ? " point" : " points")));
+      box.appendChild(who);
+      var p = el("p", "", c.text);
+      box.appendChild(p);
+      var acts = el("div", "acts");
+      var reply = el("button", "btn-ghost", "Reply");
+      reply.type = "button";
+      reply.addEventListener("click", function () {
+        parentId = c.id;
+        replyTo.hidden = false;
+        replyTo.textContent = "";
+        replyTo.appendChild(document.createTextNode("Replying to " + (c.owner.username || "this comment") + " "));
+        var cancel = el("button", "", "Cancel");
+        cancel.type = "button";
+        cancel.addEventListener("click", function () { parentId = null; replyTo.hidden = true; });
+        replyTo.appendChild(cancel);
+        textarea.focus();
+      });
+      acts.appendChild(reply);
+      box.appendChild(acts);
+      if (c.replies && c.replies.length) {
+        var kids = el("div", "replies");
+        c.replies.forEach(function (k) { kids.appendChild(render(k)); });
+        box.appendChild(kids);
+      }
+      return box;
+    };
+    var loaded = false;
+    var load = function () {
+      if (loaded) return;
+      loaded = true;
+      socialRequest("GET", thread.getAttribute("data-src")).then(function (d) {
+        if (!d.ok) { thread.textContent = ""; var p = el("p", "muted"); p.appendChild(socialProblem(d)); thread.appendChild(p); return; }
+        thread.textContent = "";
+        if (countEl) countEl.textContent = d.count === 1 ? "1 comment" : d.count + " comments";
+        if (!d.comments.length) { thread.appendChild(el("p", "muted", "No comments yet. Be the first.")); return; }
+        d.comments.forEach(function (c) { thread.appendChild(render(c)); });
+        if (d.has_more) {
+          var more = el("a", "muted small", "More comments on Archidekt");
+          more.href = "https://archidekt.com/decks/" + encodeURIComponent(commentsPanel.getAttribute("data-deck"));
+          more.target = "_blank"; more.rel = "noopener noreferrer";
+          thread.appendChild(more);
+        }
+      }).catch(function () { loaded = false; });
+    };
+    if ("IntersectionObserver" in window) {
+      var io = new IntersectionObserver(function (entries) {
+        if (entries.some(function (e) { return e.isIntersecting; })) { load(); io.disconnect(); }
+      }, { rootMargin: "200px" });
+      io.observe(commentsPanel);
+    } else { load(); }
+    $$("[data-social=comments]").forEach(function (a) { a.addEventListener("click", load); });
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var text = textarea.value.trim();
+      if (!text) { textarea.focus(); return; }
+      var old = $(".confirmbar", form);
+      if (old) old.remove();
+      var bar = el("div", "confirmbar");
+      bar.appendChild(document.createTextNode("Post this comment publicly on Archidekt?"));
+      var yes = el("button", "btn-primary", "Post");
+      yes.type = "button";
+      var no = el("button", "", "Cancel");
+      no.type = "button";
+      bar.appendChild(yes); bar.appendChild(no);
+      form.insertBefore(bar, form.querySelector("button[type=submit]"));
+      no.addEventListener("click", function () { bar.remove(); textarea.focus(); });
+      yes.addEventListener("click", function () {
+        yes.disabled = true;
+        socialRequest("POST", "/social/api/decks/" + encodeURIComponent(commentsPanel.getAttribute("data-deck")) + "/comments", { text: text, parent: parentId }).then(function (d) {
+          bar.remove();
+          if (!d.ok) { var p = el("p", "notice error"); p.appendChild(socialProblem(d)); form.insertBefore(p, form.firstChild); return; }
+          var old = $(".notice", form); if (old) old.remove();
+          var node = render(d.comment);
+          var parentBox = parentId ? $("[data-id='" + parentId + "']", thread) : null;
+          if (parentBox) {
+            var kids = $(".replies", parentBox) || parentBox.appendChild(el("div", "replies"));
+            kids.appendChild(node);
+          } else {
+            var empty = $("p.muted", thread); if (empty && /No comments yet/.test(empty.textContent)) empty.remove();
+            thread.insertBefore(node, thread.firstChild);
+          }
+          textarea.value = ""; parentId = null; replyTo.hidden = true;
+          if (countEl) { var n = (parseInt(countEl.textContent, 10) || 0) + 1; countEl.textContent = n === 1 ? "1 comment" : n + " comments"; }
+        }).catch(function () { bar.remove(); });
+      });
+    });
+  }
 })();

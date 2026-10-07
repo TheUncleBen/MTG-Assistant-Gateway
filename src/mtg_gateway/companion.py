@@ -446,14 +446,16 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         elif err_code in DECK_ERR_MESSAGES:
             # Only known codes; the text is fixed here, so a link cannot choose the words.
             notice = f"<p class='notice error'>{_esc(DECK_ERR_MESSAGES[err_code])}</p>"
-        collection = getattr(state, "collection", None)
+        # Archidekt marks each deck card with the copies the signed-in member owns ("owned" on the
+        # card when the deck is read with their session); the gateway's green dot is that number.
+        owned = {c.name.lower(): c.owned for c in deck.cards if c.owned} if link else None
         body = deck_page_html(
             deck,
             stats,
             own=own,
             csrf=_csrf(s, sid),
             writes_enabled=s.writes_enabled,
-            owned=collection.store.owned_names(sub) if collection is not None else None,
+            owned=owned or None,
             view=qp.get("view") or "text",
             group=qp.get("group") or "category",
             sort=qp.get("sort") or "name",

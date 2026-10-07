@@ -371,9 +371,13 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
 .home details.connect summary{cursor:pointer;font-weight:700}
 .home .panel-head{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin:0 0 .75rem}
 .home .panel-head h2{margin:0}
-/* phones: icon navbar, bottom floating toolbar (Archidekt's floatingToolbar). The same layout
-   serves phones (600px and under), touch screens up to 900px (an unfolded foldable) and the
-   Android app at every width; see _MOBILE_RULES below. */
+/* Adaptive navigation after Android's window size classes. Compact (under 600px, any device): a
+   bottom tab bar (Archidekt's floatingToolbar). Medium (600 to 899px) on a touch screen, such as
+   an unfolded foldable or a tablet in a browser, and the Android app at every width from 600px:
+   a navigation rail down the left edge. Wider browsers, or a browser whose "Desktop site" switch
+   widens the viewport past 900px: the desktop top bar. Media queries track the live viewport, so
+   folding, rotating, split screen and pop-up windows re-flow at once; see _MOBILE_RULES and
+   _RAIL_RULES below. */
 .tabbar{display:none}
 __MOBILE__
 /* search / filter rows */
@@ -392,8 +396,9 @@ footer.site .legal{color:#ababab;max-width:60rem}
 """
 )
 
-# The phone layout, written once and applied under each condition (a media query cannot see a
-# body class, so the rules are emitted three times). {b} prefixes selectors on <body>.
+# The compact layout (bottom tab bar), written once and applied under each condition (a media
+# query cannot see a body class, so the rules are emitted per condition). {b} prefixes selectors
+# on <body>.
 _MOBILE_RULES = """
   body{b} .topbar .wrap{padding:0 1rem;gap:.5rem;padding-left:max(1rem,env(safe-area-inset-left));
     padding-right:max(1rem,env(safe-area-inset-right))}
@@ -416,14 +421,39 @@ _MOBILE_RULES = """
   body{b} .tabbar a{position:relative}
   body{b} details.dd .menu{min-width:14rem}
 """
+# The medium layout: the same tabs as a navigation rail (80px wide, icon in a pill with the label
+# under it, as Material's rail draws it) fixed to the left edge; the top bar keeps the brand and
+# the account menu and loses its text links. The body is padded by the rail's width so every page
+# re-centres in the remaining space.
+_RAIL_RULES = """
+  body{b} .topbar nav.site a:not(.keep){display:none}
+  body{b}.has-tabbar{padding-left:calc(80px + env(safe-area-inset-left))}
+  body{b} .topbar .wrap{padding:0 1.25rem;padding-right:max(1.25rem,env(safe-area-inset-right))}
+  body{b} .tabbar{display:flex;flex-direction:column;align-items:stretch;gap:.25rem;position:fixed;left:0;
+    top:0;bottom:0;width:calc(80px + env(safe-area-inset-left));z-index:9;background:var(--toolbar-bg);
+    color:var(--toolbar-text);border-right:1px solid var(--border);overflow-y:auto;scrollbar-width:none;
+    padding:calc(.75rem + env(safe-area-inset-top)) 0 calc(.5rem + env(safe-area-inset-bottom))
+      env(safe-area-inset-left)}
+  body{b} .tabbar a{position:relative;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;gap:.3rem;height:64px;flex:none;color:var(--toolbar-text);text-decoration:none;
+    font-weight:700;font-size:11px;-webkit-tap-highlight-color:transparent}
+  body{b} .tabbar a svg{width:24px;height:24px;position:relative;z-index:1}
+  body{b} .tabbar a::before{content:'';position:absolute;top:7px;left:50%;width:56px;height:32px;
+    margin-left:-28px;border-radius:16px;background:transparent;transition:background .15s ease}
+  body{b} .tabbar a:hover::before,body{b} .tabbar a:focus-visible::before{background:rgba(127,127,127,.18)}
+  body{b} .tabbar a[aria-current=page]{color:var(--orange)}
+  body{b} .tabbar a[aria-current=page]::before{background:rgba(255,111,0,.22)}
+  body{b} details.dd .menu{min-width:14rem}
+"""
 CSS = CSS.replace(
     "__MOBILE__",
-    "@media (max-width:600px){ .topbar .brand .word{display:none} "
+    "@media (max-width:599.98px){ .topbar .brand .word{display:none} "
     + _MOBILE_RULES.replace("{b}", "")
-    + "}\n@media (max-width:900px) and ((pointer:coarse) or (hover:none)){"
-    + _MOBILE_RULES.replace("{b}", "")
+    + "}\n@media (min-width:600px) and (max-width:899.98px) and ((pointer:coarse) or (hover:none)){"
+    + _RAIL_RULES.replace("{b}", "")
+    + "}\n@media (min-width:600px){"
+    + _RAIL_RULES.replace("{b}", ".app")
     + "}\n"
-    + _MOBILE_RULES.replace("{b}", ".app")
     + "body.app footer.site{display:none}\n"
     + "body.app .topbar{padding-top:env(safe-area-inset-top)}\n"
     + "body.app .topbar .brand .word{display:inline}\n",
@@ -474,6 +504,10 @@ ICONS = {
     "camera": "<path d='M4 8h4l2-3h4l2 3h4v11H4z'/><circle cx='12' cy='13' r='3'/>",
     "copy": "<path d='M9 9h11v11H9z'/><path d='M4 15V4h11'/>",
     "user": "<circle cx='12' cy='8' r='4'/><path d='M4 21a8 8 0 0 1 16 0'/>",
+    "heart": "<path d='M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z'/>",
+    "bookmark": "<path d='M6 3h12v18l-6-4-6 4z'/>",
+    "comment": "<path d='M4 5h16v11H9l-5 4z'/>",
+    "follow": "<circle cx='10' cy='8' r='4'/><path d='M2 21a8 8 0 0 1 16 0'/><path d='M19 8v6M16 11h6'/>",
     "thumb": "<path d='M7 11v9H3v-9zM7 11l4-8a2 2 0 0 1 2 2v4h5a2 2 0 0 1 2 2l-1.5 7a2 2 0 0 1-2 2H7'/>",
     "chev": "<path d='M6 9l6 6 6-6'/>",
     "swap": "<path d='M4 7h13l-3-3M20 17H7l3 3'/>",
