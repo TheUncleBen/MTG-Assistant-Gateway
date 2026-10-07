@@ -211,21 +211,21 @@ so add any you want to change under the gateway's `environment:`:
 
 | Variable | Default | What it does |
 | --- | --- | --- |
-| `MTG_SCAN_FUZZY_MIN_SIMILARITY` | `0.65` | Lowest similarity at which a corrected name is accepted at all |
-| `MTG_SCAN_FUZZY_CONFIDENT_SIMILARITY` | `0.8` | Similarity accepted without a second lookup; also what "confidently" means above |
-| `MTG_SCAN_AMBIGUITY_MARGIN` | `0.05` | How close two candidates can be before the answer is `ambiguous` |
-| `MTG_SCAN_AUTO_ADD_CONFIDENCE` | `80` | Reading confidence a continuous-scan card needs to be added without a tap |
-| `MTG_SCAN_FOIL_STAR_INK_RATIO` | `0.09` | Threshold for spotting the foil star on the collector line |
-| `MTG_SCAN_GLARE_RATIO` | `0.08` | Share of blown-out pixels in the title that triggers the glare hint |
-| `MTG_SCAN_MIN_OCR_CONFIDENCE` | `50` | Continuous scan only: below this a title goes to the unidentified list without a lookup |
+| `MTG_SCAN_FUZZY_MIN_SIMILARITY` | `0.65` | Lowest similarity at which a corrected name is accepted at all. Range 0.3 to 1 |
+| `MTG_SCAN_FUZZY_CONFIDENT_SIMILARITY` | `0.8` | Similarity accepted without a second lookup; also what "confidently" means above. Range 0.3 to 1 |
+| `MTG_SCAN_AMBIGUITY_MARGIN` | `0.05` | How close two candidates can be before the answer is `ambiguous`. Range 0 to 0.5 |
+| `MTG_SCAN_AUTO_ADD_CONFIDENCE` | `80` | Reading confidence a continuous-scan card needs to be added without a tap. Range 0 to 100 |
+| `MTG_SCAN_FOIL_STAR_INK_RATIO` | `0.09` | Threshold for spotting the foil star on the collector line. Range 0.01 to 0.9 |
+| `MTG_SCAN_GLARE_RATIO` | `0.08` | Share of blown-out pixels in the title that triggers the glare hint. Range 0.005 to 0.9 |
+| `MTG_SCAN_MIN_OCR_CONFIDENCE` | `50` | Continuous scan only: below this a title goes to the unidentified list without a lookup. Range 0 to 100 |
 | `MTG_SCAN_ART_ENABLED` | `true` | Turns the artwork check on or off |
-| `MTG_SCAN_ART_MAX_DISTANCE` | `380` | Largest difference (of 1024 bits) that still counts as an artwork match |
-| `MTG_SCAN_ART_MIN_MARGIN` | `40` | Bits the best match must beat the next different artwork by. Raise to 60 for fewer wrong picks, at the cost of a few more "unsure" results |
-| `MTG_SCAN_ART_MAX_PRINTINGS` | `250` | How many of a card's newest printings are learned (basic lands have hundreds) |
-| `MTG_SCAN_ART_IMAGE_INTERVAL` | `0.1` | Seconds between image fetches from `cards.scryfall.io` |
-| `MTG_SCAN_ART_IMAGES_PER_HOUR` | `1500` | Cap on image fetches per hour (about a deck's worth of new cards). One person can use at most a quarter of it, and start learning at most `MTG_SCAN_ART_MAX_GALLERIES`/20 new cards an hour; past that their cards answer busy while other people's carry on. Past the whole cap, learning pauses until the hour rolls over and the affected cards say so |
-| `MTG_SCAN_ART_MAX_GALLERIES` | `500` | Cards whose learned printings are kept |
-| `MTG_SCAN_ART_GALLERY_IDLE_DAYS` | `180` | Days without a scan before a card's learned printings are dropped |
+| `MTG_SCAN_ART_MAX_DISTANCE` | `380` | Largest difference (of 1024 bits) that still counts as an artwork match. Range 0 to 1024 |
+| `MTG_SCAN_ART_MIN_MARGIN` | `40` | Bits the best match must beat the next different artwork by. Raise to 60 for fewer wrong picks, at the cost of a few more "unsure" results. Range 0 to 1024 |
+| `MTG_SCAN_ART_MAX_PRINTINGS` | `250` | How many of a card's newest printings are learned (basic lands have hundreds). Range 1 to 2000 |
+| `MTG_SCAN_ART_IMAGE_INTERVAL` | `0.1` | Seconds between image fetches from `cards.scryfall.io`. Range 0.05 to 5 |
+| `MTG_SCAN_ART_IMAGES_PER_HOUR` | `1500` | Cap on image fetches per hour (about a deck's worth of new cards). One person can use at most a quarter of it, and start learning at most `MTG_SCAN_ART_MAX_GALLERIES`/20 new cards an hour; past that their cards answer busy while other people's carry on. Past the whole cap, learning pauses until the hour rolls over and the affected cards say so. Range 1 to 36000 |
+| `MTG_SCAN_ART_MAX_GALLERIES` | `500` | Cards whose learned printings are kept. Range 1 to 100000 |
+| `MTG_SCAN_ART_GALLERY_IDLE_DAYS` | `180` | Days without a scan before a card's learned printings are dropped. Range 1 to 3650 |
 
 `MTG_SCRYFALL_LOOKUP_INTERVAL` (default `0.5`) is in the example stack file
 already; see [DEPLOY.md](DEPLOY.md#environment-reference).

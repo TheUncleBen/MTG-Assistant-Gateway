@@ -141,7 +141,8 @@ proposals and scan sessions.
 Membership is checked live. Before serving any request that carries a
 browser session or a gateway token, the gateway asks the identity
 provider's userinfo endpoint for the person's current groups (the answer is
-cached for `MTG_MEMBERSHIP_CHECK_TTL` seconds, 5 by default). Someone taken
+cached for `MTG_MEMBERSHIP_CHECK_TTL` seconds, 5 by default; `0` asks every
+time). Someone taken
 out of the group, or deactivated or deleted at the provider, is cut off on
 their next request. Separately, every assistant has to sign in again after
 `MTG_REAUTH_INTERVAL` (a week by default).
@@ -188,8 +189,10 @@ For the exact devices and plans tested, see
   groups, at most `MTG_MEMBERSHIP_CHECK_TTL` seconds (5) old. Removing
   someone from `MTG_REQUIRED_GROUP`, or deactivating or deleting them at the
   provider, takes effect on their next request: every gateway token,
-  browser session, stored provider token and their Archidekt link is
-  revoked. Removing someone from `MTG_ADMIN_GROUP` takes the admin page away
+  browser session and stored provider token is revoked, and a removal from
+  the group revokes their Archidekt link too (a deactivated or deleted
+  account, which the provider reports only as a refused token, keeps the
+  link until an admin deletes their data). Removing someone from `MTG_ADMIN_GROUP` takes the admin page away
   the same way. This doesn't rely on the provider revoking anything:
   Authentik, for one, keeps honouring a removed member's refresh token. If
   the provider can't be reached, requests are refused with 503 and nothing

@@ -32,7 +32,11 @@ next sign-in.
    If you set it yourself (the 0.6.0 Compose `.env.example` did, as
    `openid profile email`), add `offline_access` to it; the value is used
    exactly as set. The gateway logs a warning when the provider issues no
-   refresh token.
+   refresh token. Use the new `deploy/compose/docker-compose.yml` too: the
+   0.6.0 one fell back to `openid profile email` when `.env` didn't set the
+   scopes. The new stack and Compose files also pass
+   `MTG_OIDC_PREVIOUS_ISSUERS`, `MTG_MEMBERSHIP_CHECK_TTL` and
+   `MTG_ARCHIDEKT_CALLS_PER_10_MIN` through.
 4. The example env files now ship `MTG_APPLY_VIA_MCP=false`. Your own
    deployment keeps whatever it sets; nothing changes unless you change it.
    `false` means a change is applied only by the member's own click on the
@@ -64,7 +68,10 @@ next sign-in.
   and nothing is revoked (fail closed). Service comes back with the provider.
 - When userinfo carries no groups, they are read from a freshly refreshed ID
   token. When neither has them, the person is signed out and a warning names
-  `MTG_OIDC_GROUPS_CLAIM` (fail closed), instead of being let in.
+  `MTG_OIDC_GROUPS_CLAIM` (fail closed), instead of being let in. With
+  `MTG_ALLOW_ANY_IDP_USER=true` and no `MTG_REQUIRED_GROUP` there is no group
+  to leave, so a provider that sends no groups at all (Google, Entra ID)
+  keeps working; a disabled or deleted account is still cut off.
 - A request carrying both a browser session and a bearer token is checked
   for both people.
 - Code exchanges and token refreshes at `/token` check membership the same
@@ -107,6 +114,13 @@ next sign-in.
   document (up to a week past its expiry) while their server can't be
   reached or answers 5xx, 408 or 429 (never after the server withdraws it
   or serves one that isn't accepted).
+- Client ID Metadata Documents are checked more strictly: `grant_types` and
+  `response_types` must be lists of strings, `scope` must use the OAuth
+  scope characters, malformed optional links (`client_uri`, `logo_uri` and
+  the like) are left out, and a document the gateway couldn't turn into a
+  client is refused instead of causing server errors later. A copy cached
+  by an earlier version that no longer passes is discarded and fetched
+  afresh.
 - Archidekt: each member may start `MTG_ARCHIDEKT_CALLS_PER_10_MIN` (120)
   Archidekt calls per 10 minutes, the research tools' `archidekt_*` calls
   included. Five failed Archidekt link attempts in 15 minutes block further

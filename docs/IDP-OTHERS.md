@@ -22,7 +22,7 @@ Set up one **confidential** OIDC client (also called a "web application" or
 | Grant type | Authorization code | PKCE (`S256`) is always sent, so providers that require it are fine |
 | Client authentication | **`client_secret_post`** by default | The gateway sends the client ID and secret in the form body. For a client set to HTTP Basic, set `MTG_OIDC_TOKEN_AUTH_METHOD=client_secret_basic` |
 | Scopes | `openid profile email offline_access`, plus whatever makes your provider send groups | Set `MTG_OIDC_SCOPES` if you need more, for example `openid profile email offline_access groups`. Keep `offline_access` in it: the value is used exactly as set |
-| Userinfo endpoint | Listed as `userinfo_endpoint` in the discovery document, and its answer includes the groups claim (`MTG_OIDC_GROUPS_CLAIM`) | The gateway asks it before serving requests, to check membership live (see below). Groups only in the ID token aren't enough |
+| Userinfo endpoint | Listed as `userinfo_endpoint` in the discovery document, and its answer includes the groups claim (`MTG_OIDC_GROUPS_CLAIM`) | The gateway asks it before serving requests, to check membership live (see below). If its answer has no groups claim, the gateway refreshes the provider's tokens and reads the groups from the new ID token instead, which needs refresh tokens |
 | Refresh tokens | Issued for the `offline_access` scope | Without them people have to sign in again whenever the provider's access token runs out. Some providers need refresh tokens or `offline_access` allowed on the client first |
 | ID token signing | RS256/384/512, ES256/384/512 or PS256 | HS256 (shared-secret signing) and EdDSA are refused |
 | Issuer | HTTPS, and exactly what the provider's `/.well-known/openid-configuration` says in `issuer` | A trailing slash difference is tolerated, anything else isn't |
@@ -44,22 +44,28 @@ token when it runs out). The answer is cached for
 `MTG_MEMBERSHIP_CHECK_TTL` seconds (5 by default, 0 to ask on every
 request). So a removal from the group, or deactivating or deleting the
 account at the provider, takes effect on the person's next request: their
-gateway tokens, browser sessions, stored provider tokens and Archidekt link
-are revoked. If the provider can't be reached, requests are refused with
-503 and nothing is revoked.
+gateway tokens, browser sessions and stored provider tokens are revoked.
+A removal from the group revokes their Archidekt link too; a deactivated or
+deleted account (which the provider reports only as a refused token) keeps
+it until an admin deletes their data. If the provider can't be reached, or
+refuses the gateway itself (a wrong client secret, say), requests are
+refused with 503 and nothing is revoked.
 
 For that to work, your provider must:
 
-- have a userinfo endpoint that returns the groups claim
-  (`MTG_OIDC_GROUPS_CLAIM`). If yours only puts groups in the ID token, the
-  live check sees no groups and signs everyone out on their next request.
-  If its discovery document lists no `userinfo_endpoint` at all, every
-  signed-in request gets a 503;
+- have a userinfo endpoint, and send the groups claim
+  (`MTG_OIDC_GROUPS_CLAIM`) in its answer or, failing that, in the ID token
+  of a token refresh. If neither carries it, the live check can't see a
+  removal, so it signs the person out on their next request and logs a
+  warning naming `MTG_OIDC_GROUPS_CLAIM`. If the discovery document lists
+  no `userinfo_endpoint` at all, every signed-in request gets a 503;
 - issue a refresh token for `offline_access`. If it doesn't, nothing breaks,
   but members have to sign in again each time the provider's access token
   runs out (often an hour);
-- answer a refresh or userinfo call for a deactivated or deleted user with
-  HTTP 400 or 401 (userinfo 401 or 403). That's what standard providers do.
+- answer a refresh for a deactivated or deleted user with HTTP 400 or 401
+  and the error `invalid_grant`, and a userinfo call with 401 or 403.
+  That's what standard providers do. Any other refusal counts as the
+  provider being unavailable (503, nothing revoked).
 
 Whether a given provider reflects a group removal in userinfo at once has
 only been checked for Authentik. Check yours once: remove a test user from
@@ -191,3 +197,9 @@ different sign-in provider", instead of being handed the old account's
 decks, apps and Archidekt link. If it really is the same person, delete the
 old account's data on the admin page (**Users → Details and actions →
 Delete data**) and they can sign in fresh.
+
+Moving the same provider to a new address (a new hostname, so a new issuer
+URL, with the same `sub` values) is different: set `MTG_OIDC_ISSUER` to the
+new issuer and list the old one in `MTG_OIDC_PREVIOUS_ISSUERS`. Each member
+is moved to the new issuer at their next sign-in and keeps everything
+([DEPLOY.md](DEPLOY.md#environment-reference)).

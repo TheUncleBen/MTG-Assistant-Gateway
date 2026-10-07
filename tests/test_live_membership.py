@@ -319,3 +319,17 @@ async def test_a_provider_outage_does_not_burn_the_authorization_code(tmp_path: 
         idp.down = False
         r = await h.token(client, **form)
         assert r.status_code == 200, r.text
+
+
+async def test_any_idp_user_without_a_groups_claim_stays_signed_in(tmp_path: Path, idp: FakeIdP) -> None:
+    """MTG_ALLOW_ANY_IDP_USER with a provider that sends no groups (Google, Entra ID): there is no
+    group to leave, so a missing claim must not sign everyone out; a disabled account still is."""
+    idp.userinfo_omit = {"groups"}
+    settings = make_settings(tmp_path, required_group=None, membership_check_ttl=0)
+    async with running(Harness(settings, idp)) as h:
+        token = await mcp_token(h)
+        for _ in range(3):
+            assert (await whoami(h, token)).status_code == 200
+        idp.disabled.add(SUB)
+        idp.access_tokens.clear()
+        assert (await whoami(h, token)).status_code == 401

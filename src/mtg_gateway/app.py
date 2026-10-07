@@ -412,7 +412,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "test run the user can see later on the gateway's History page. "
             "If your app refuses, hides or blocks a tool (rather than the gateway returning an error), do "
             "not call it again in this conversation. For apply_proposal, give the user the proposal's "
-            f"review_url and ask them to press Apply there. For save_scan_session, point them to "
+            "review_url and ask them to press Apply (or Reject) there. For run_deck_report, point them to "
+            f"the deck's page under {s.public_url}/decks. For save_scan_session, point them to "
             f"{s.public_url}/scan. Never retry an install or connection step that the app or plan does not "
             "support; say once what does not work and which path does."
         ),

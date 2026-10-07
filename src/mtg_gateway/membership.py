@@ -160,6 +160,14 @@ class MembershipChecker:
             source: dict[str, Any] = info
         elif id_claims is not None and groups_claim_present(id_claims, claim):
             source = id_claims
+        elif not self.settings.required_group:
+            # MTG_ALLOW_ANY_IDP_USER with a provider that sends no groups at all (Google, Entra
+            # ID without a groups claim): there is no group to be removed from. The provider still
+            # vouched for the person just now; they hold no group, so no admin rights either.
+            if user.get("groups"):
+                self.db.set_user_groups(sub, [])
+                self.db.audit("groups_changed", sub=sub, detail={"groups": []})
+            return Membership.ALLOWED
         else:
             # Neither userinfo nor a fresh ID token says which groups the person is in: removal
             # can't be seen, so fail closed (MTG_OIDC_GROUPS_CLAIM or the provider is misconfigured).

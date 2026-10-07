@@ -73,7 +73,7 @@ logs.
 
 In Portainer: **Stacks** → `mtg` → **Update the stack**, with "Re-pull
 image" ticked. With `MTG_TAG=latest` that pulls the newest version; with a
-pinned version (for example `0.5.0`), change `MTG_TAG` first
+pinned version (for example `0.6.1`), change `MTG_TAG` first
 ([VERSIONS.md](VERSIONS.md)). Or from the command line:
 
 ```bash
@@ -219,15 +219,17 @@ page, `/install` and the plugin marketplace all read from there.
 
 **What's backed up:** the gateway's SQLite database. It holds users
 (identity provider subject, name, email, groups, disabled flag), registered
-OAuth clients, hashed tokens, Archidekt links (sessions encrypted with the
-Fernet key), proposals, deck snapshots, deck reports, scan sessions, usage
+OAuth clients, hashed tokens, the identity provider's tokens kept for the
+live membership check and Archidekt links (both encrypted with the Fernet
+key), proposals, deck snapshots, deck reports, scan sessions, usage
 counters and the audit log. Mystic Forge
 keeps nothing worth backing up.
 
 **What isn't:** the Fernet key. It's a Docker secret and stays out of the
 backup on purpose. Without it, a restored database still works for sign-in,
 proposals and the audit log, but every Archidekt link is unreadable and
-everyone has to relink. Keep your copy of the key with your other
+everyone has to relink (and sign in once more, since the stored
+identity-provider tokens are unreadable too). Keep your copy of the key with your other
 credentials.
 
 Separately, every applied edit also leaves a private backup copy of the deck
@@ -284,7 +286,7 @@ secret.
 | --- | --- |
 | `mtg_session_secret` | Safe any time. Sign-ins in progress fail once, and anyone with `/account` or a review page open has to reload it. |
 | `mtg_oidc_client_secret` | Rotate it together with the client secret on the Authentik provider. |
-| `mtg_fernet_key` | Every stored Archidekt session becomes unreadable, so everyone has to relink at `/account`. Proposals and sign-ins aren't affected. |
+| `mtg_fernet_key` | Every stored Archidekt session becomes unreadable, so everyone has to relink at `/account`. The identity-provider tokens kept for the live membership check become unreadable too, so everyone is signed out once on their next request and signs in again (their AI apps reconnect once). Proposals aren't affected. |
 
 ## Revoking access
 
@@ -294,12 +296,15 @@ secret.
    that carries a browser session or a gateway token, it asks Authentik's
    userinfo endpoint for the person's current groups (the answer is cached
    for `MTG_MEMBERSHIP_CHECK_TTL` seconds, 5 by default, so that's the worst
-   case). A removed person loses every gateway token, every browser session
-   (web pages and Android app), the Authentik tokens the gateway kept, and
-   their Archidekt link, all at once. The audit log gets a
-   `membership_revoked` row with the reason (`not_in_group`,
-   `idp_refused_refresh` for a deactivated or deleted user, and so on). A
-   new sign-in then fails at Authentik.
+   case). Someone taken out of the group loses every gateway token, every
+   browser session (web pages and Android app), the Authentik tokens the
+   gateway kept, and their Archidekt link, all at once; the audit log gets
+   a `membership_revoked` row with the reason `not_in_group`. A deactivated
+   or deleted user shows up only as a refused token, so they lose every
+   token and session but keep their Archidekt link (an admin can remove it
+   with **Delete data**); the audit log gets a `membership_unverifiable` row
+   with the reason (`idp_refused_refresh`, `idp_refused_userinfo` and so
+   on). A new sign-in then fails at Authentik.
 
    Taking someone out of `MTG_ADMIN_GROUP` works the same way: the admin
    page is gone on their next request.
@@ -435,7 +440,8 @@ and copy). Still, make your own first edit on a deck you don't care about,
 and check the result on Archidekt.
 
 **The kill switch is `MTG_WRITES_ENABLED`.** It decides whether any proposal
-can be applied. The code default is off; the example stack file turns it on.
+can be applied. The code default is off; the example env files
+(`deploy/stack.env.example`, `deploy/compose/.env.example`) turn it on.
 
 - **To turn writes on:** set it to `true` in the stack's environment
   variables in Portainer and update the stack. Any other value, or leaving it
@@ -509,13 +515,14 @@ Archidekt busy for everyone:
 
 `/admin` is a browser page for whoever runs the gateway. It exists only when
 `MTG_ADMIN_GROUP` is set to the name of a group in your identity provider
-(add it under the gateway's `environment:` in the stack file, the same way
-as the other optional settings). Members of that group who are also allowed
+(set it in the stack's environment variables or in `.env`; the stack and
+Compose files already pass it through). Members of that group who are also allowed
 to sign in (so also in `MTG_REQUIRED_GROUP`, if one is set) see it after
 signing in. For everyone else, and whenever the variable is unset, `/admin`
 and everything under it answers 404, so ordinary users can't tell the area
-exists. Group membership is whatever the gateway recorded at the person's
-last sign-in; a disabled account is never an admin.
+exists. Group membership is what the live membership check last recorded
+(at most `MTG_MEMBERSHIP_CHECK_TTL` seconds old, see
+[Revoking access](#revoking-access)); a disabled account is never an admin.
 
 What it shows:
 
@@ -542,9 +549,9 @@ The five actions, and exactly what each one does:
 
 | Button | What happens |
 | --- | --- |
-| **Disable** | Sets `disabled_at` on the user, revokes every token they hold, deletes their browser sessions and any sign-in codes in flight. From then on the gateway refuses them everywhere: a sign-in through the identity provider is rejected with "Your account has been disabled on this gateway" (audited as `login_rejected_disabled`), a token refresh fails (`refresh_rejected`, reason `disabled`), an access token that is still in someone's hands is refused on its next use and its chain revoked (`disabled_user_refused`), and a browser session cookie is treated as signed out. You can't disable your own account. |
+| **Disable** | Sets `disabled_at` on the user, revokes every token they hold, deletes their browser sessions, any sign-in codes in flight and the identity-provider tokens the gateway kept for them. From then on the gateway refuses them everywhere: a sign-in through the identity provider is rejected with "Your account has been disabled on this gateway" (audited as `login_rejected_disabled`), a token refresh fails (`refresh_rejected`, reason `disabled`), an access token that is still in someone's hands is refused on its next use and its chain revoked (`disabled_user_refused`), and a browser session cookie is treated as signed out. You can't disable your own account. |
 | **Enable** | Clears `disabled_at`. Nothing is handed back: the person signs in again and reconnects their assistant. |
-| **Revoke tokens and sessions** | The same revocation as Disable (tokens, browser sessions, pending codes) without disabling. The person can sign in again straight away. This is the button version of the SQL in [Revoking access](#revoking-access). |
+| **Revoke tokens and sessions** | The same revocation as Disable (tokens, browser sessions, pending codes, identity-provider tokens) without disabling. The person can sign in again straight away. This is the button version of the SQL in [Revoking access](#revoking-access). |
 | **Unlink Archidekt** | Marks their Archidekt link revoked and deletes the stored session, the same as their own Unlink button on `/account`. They can relink any time. |
 | **Delete data** | Deletes everything the gateway keeps about that person, the same as their own **Delete my data**: proposals, snapshots, reports, scan sessions, the remembered covers of their own decks (never a cover of someone else's deck they cloned or reported on), the Archidekt link, every app grant and browser session, the identity-provider tokens, usage counters and the user record. It needs the confirmation tick next to the button, and you can't use it on yourself (use your own Account page). Meant for former members, and for an account left over from an earlier identity provider (the gateway refuses a new provider's account whose `sub` matches an old one until the old one is deleted). Their decks on Archidekt are not touched, and the audit log keeps its rows. If they're still in the group, they can sign in again as a new, empty account. |
 

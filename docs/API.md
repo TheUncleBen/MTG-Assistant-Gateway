@@ -104,7 +104,7 @@ Nothing changes on Archidekt until the proposal is applied, and every apply take
 
 ## Companion pages
 
-Server-rendered pages behind the Authentik sign-in (and `MTG_REQUIRED_GROUP`), laid out the way
+Server-rendered pages behind the identity provider sign-in (and `MTG_REQUIRED_GROUP`), laid out the way
 Archidekt lays out its own (top bar, bottom tab bar on phones, deck banner, toolbar, text / stacks /
 grid views). Light, Dark or System is a per-browser choice in the account menu (the `mtg_theme`
 cookie, set by `POST /theme`); internal links never open a new tab.

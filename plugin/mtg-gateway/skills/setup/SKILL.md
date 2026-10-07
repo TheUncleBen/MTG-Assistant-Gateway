@@ -45,7 +45,7 @@ Signing in is a browser step the user does themselves:
 
 1. In Claude Code, run `/mcp`, select **mtg-gateway**, and choose
    **Authenticate**. A browser window opens on the owner's sign-in service
-   (Authentik). The user signs in with the account the owner gave them.
+   (for example Authentik). The user signs in with the account the owner gave them.
 2. If the gateway first shows a page titled **Connect an application**, it
    is confirming which app is asking. The user presses the approve button
    if the named app is the one they are using, otherwise Deny.
@@ -61,7 +61,8 @@ If it fails:
 | "This sign-in link has expired or was already used" | Run `/mcp` and authenticate again; links last ten minutes. |
 | "This sign-in was started in a different browser" | Retry and keep the whole sign-in in one browser window. |
 | "invalid MCP url" or the server shows "not configured" | Step 1 was skipped; the address is missing. |
-| 401 or "not authenticated" on a tool call after it used to work | The sign-in expired (by default the gateway asks for a fresh sign-in about once a week, and after about 30 days unused) or the owner revoked it. Run `/mcp` and authenticate again. |
+| 401 or "not authenticated" on a tool call after it used to work | The sign-in expired (by default the gateway asks for a fresh sign-in about once a week, and after about 30 days unused), the owner revoked it or took the user out of the gateway's group, or the owner upgraded the gateway to 0.6.1 (everyone signs in once more). Run `/mcp` and authenticate again; if the sign-in page then says the user has no access, ask the owner. |
+| HTTP 503, "The sign-in service can't be reached to confirm your access" (`idp_unavailable`) | The gateway checks with the owner's sign-in service before serving each request and couldn't reach it. Nothing was revoked; wait a minute and try again, and tell the owner if it persists. |
 
 ## Step 3: link Archidekt (optional, for the user's own decks)
 

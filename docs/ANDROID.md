@@ -104,6 +104,13 @@ else your gateway serves. A few things are native:
   stops that page and opens it in the browser, where the form's data is
   lost. If your gateway's sign-in works that way, use the gateway in the
   phone's browser instead of the app.
+- **Staying signed in.** The app's sign-in is a browser session like the
+  website's, so it ends the same way: when the browser session runs out,
+  when you use **Sign out on all my devices** on the `/logout` page, on your
+  next tap after the owner removes you from the gateway's group (the
+  gateway checks with the sign-in service every few seconds), and once
+  after the owner upgrades the gateway to 0.6.1. If the sign-in service
+  can't be reached, pages say so and ask you to try again shortly.
 - **Downloads** (CSV export, the skill zip) land in your Downloads folder. If
   your sign-in has ended in the meantime, the app says so instead of saving a
   sign-in page; reload, sign in and download again.

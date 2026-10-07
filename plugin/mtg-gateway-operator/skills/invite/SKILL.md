@@ -54,7 +54,9 @@ Code and say "install this plugin".
 Remove the user from the group (or deactivate the user) in Authentik.
 That's enough: the gateway asks Authentik on every request (cached for
 `MTG_MEMBERSHIP_CHECK_TTL` seconds, 5 by default), so on their next request
-their gateway tokens, browser sessions and Archidekt link are revoked. If
+their gateway tokens and browser sessions are revoked. Removal from the
+group also revokes their Archidekt link; a deactivated user keeps it until
+the operator uses **Delete data** on the admin page. If
 the provider is missing the `offline_access` scope mapping, fix that first
 (`docs/IDP-AUTHENTIK.md`). Details in `docs/OPERATIONS.md`, "Revoking
 access".

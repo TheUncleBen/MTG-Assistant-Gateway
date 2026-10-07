@@ -1,5 +1,5 @@
 """The shipped deployment files keep the safer settings: the example env files leave in-chat applying
-off, base images are pinned by digest, Dependabot moves the pins, the Compose services are capped,
+off, the Compose services are capped,
 and CI checks the Gradle wrapper before any Android build. Plain text checks, no YAML parser."""
 
 from __future__ import annotations

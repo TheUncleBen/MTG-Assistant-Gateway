@@ -176,9 +176,11 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
   additions as one proposal, and look back over proposals, snapshots and
   reports. They also serve as the pages an Android app can wrap.
 - **Admin page.** Members of `MTG_ADMIN_GROUP` get `/admin`: who has signed
-  in, their activity, per-day usage counts, and buttons to disable or enable
-  an account, revoke its tokens and sessions, or unlink Archidekt. Unset,
-  the page does not exist. Details in
+  in, their activity, per-day usage counts, a System card (version, database
+  size and schema, newest backup), and buttons to disable or enable an
+  account, revoke its tokens and sessions, unlink Archidekt, or delete
+  everything the gateway keeps about a person. Unset, the page does not
+  exist. Details in
   [docs/OPERATIONS.md](docs/OPERATIONS.md#the-admin-page).
 - **JSON API.** Everything the tools and pages do is also under `/api/v1`
   for app builders, with the same sign-in and the same proposal flow. See
@@ -242,9 +244,10 @@ Claude / ChatGPT / browser ──HTTPS──▶ reverse proxy ──▶ mtg-gate
 - **Membership is checked live.** Before serving a request, the gateway asks
   the identity provider whether the person is still in the group (cached
   for a few seconds, `MTG_MEMBERSHIP_CHECK_TTL`). Take someone out of the
-  group, or deactivate them, and their next request fails: their tokens,
-  sessions and Archidekt link are revoked. If the provider can't be
-  reached, requests are refused rather than let through. With Authentik
+  group, or deactivate them, and their next request fails: their tokens and
+  sessions are revoked, and a removal from the group revokes their
+  Archidekt link too. If the provider can't be reached, requests are
+  refused rather than let through. With Authentik
   this needs the `offline_access` scope mapping
   ([docs/IDP-AUTHENTIK.md](docs/IDP-AUTHENTIK.md)).
 - **Sign out on all my devices** (on the `/logout` page) ends every
@@ -284,14 +287,14 @@ Claude / ChatGPT / browser ──HTTPS──▶ reverse proxy ──▶ mtg-gate
 | `deploy/` | The Swarm stack file and its example settings; `deploy/compose/` for plain Docker Compose; `deploy/proxy/` with Caddy, Traefik and nginx examples |
 | `android/` | The Android app (Kotlin, CameraX, WindowManager) as a Gradle project with a build script that fetches the SDK; see [docs/ANDROID.md](docs/ANDROID.md) |
 | `docs/` | The guides listed under [Documentation](#documentation), plus screenshots |
-| `.github/workflows/` | Tests, end-to-end tests, container smoke test, image publishing to GHCR |
+| `.github/workflows/` | Tests, end-to-end tests, container smoke test, and the release on every merge to `main` (tag, image on GHCR, Android app, GitHub release; see [docs/VERSIONS.md](docs/VERSIONS.md)) |
 
 ## Development
 
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -c constraints.txt -e ".[dev]"
-ruff check src tests && ruff format --check src tests && pytest -q
+ruff check src tests scripts && ruff format --check src tests scripts && pytest -q
 ```
 
 Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md) and the
