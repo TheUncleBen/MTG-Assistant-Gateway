@@ -19,9 +19,21 @@ with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
   4 KB of signature and 2 MB of claims, which fits big group lists,
   avatar claims and certificate chains. The token still has to come from
   the provider's own token endpoint and pass every other check.
+- A token that big usually means a scope mapping adds far more than the
+  gateway needs, and Authentik puts the same claims in its access token,
+  which the gateway sends to Authentik's userinfo endpoint for the group
+  check. So when a sign-in brings an ID or access token over 16 KB, the log
+  now warns `identity provider issued unusually large tokens` and lists the
+  five biggest claims by name and size (never their values). If userinfo
+  then refuses the oversized request (HTTP 400, 413 or 431), the log says
+  so.
 
 ### Changed
 
+- That sign-in failure page now answers HTTP 500 instead of 502. The
+  Android app treats 502-504 as the reverse proxy's "gateway is down" page
+  and covered the real message with *Your gateway is not answering right
+  now*.
 - When sign-in fails while the gateway is collecting your identity
   provider's answer, the page now says which setting to check instead of
   only "Try again": the client ID or secret, the sign-in code (usually

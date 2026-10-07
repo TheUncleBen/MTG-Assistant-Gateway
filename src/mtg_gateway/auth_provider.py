@@ -591,7 +591,9 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             )
         except OIDCError as exc:
             logger.warning("identity provider exchange failed: %s", exc)
-            raise LoginError(EXCHANGE_FAILED.get(exc.reason, EXCHANGE_FAILED["other"]), 502) from exc
+            # 500, not 502: the Android app covers a 502-504 page with "your gateway is not
+            # answering" (meant for the reverse proxy's own page), which would hide this message.
+            raise LoginError(EXCHANGE_FAILED.get(exc.reason, EXCHANGE_FAILED["other"]), 500) from exc
 
         known = self.db.get_user(identity.sub)
         pinned = (known or {}).get("idp_issuer")

@@ -261,6 +261,7 @@ class OIDCClient:
             if exc.reason == "other":
                 exc.reason = "id_token"
             raise
+        _log_large_tokens(id_token, claims, body.get("access_token"))
 
         tokens = _token_fields(body)
         identity = Identity(
@@ -374,7 +375,13 @@ class OIDCClient:
         if resp.status_code in (401, 403):
             return None
         if resp.status_code != 200:
-            raise IdPUnavailable(f"identity provider answered userinfo with HTTP {resp.status_code}")
+            hint = (
+                f"; the access token is {len(access_token)} bytes, too big for some servers' header "
+                "limits, so trim the provider's scope mappings"
+                if resp.status_code in (400, 413, 431) and len(access_token) >= LARGE_TOKEN_BYTES
+                else ""
+            )
+            raise IdPUnavailable(f"identity provider answered userinfo with HTTP {resp.status_code}{hint}")
         try:
             info = resp.json()
         except ValueError as exc:
@@ -426,6 +433,35 @@ class OIDCClient:
             f"ID token validation failed: {type(last_exc).__name__}"
             + (f" ({str(detail)[:100]})" if detail else "")
         )
+
+
+LARGE_TOKEN_BYTES = 16 * 1024  # a typical provider's ID token is 1-4 KB
+
+
+def _safe_name(name: str) -> str:
+    """A claim name as it may appear in the log: printable ASCII, at most 40 characters."""
+    return "".join(c if 32 < ord(c) < 127 else "?" for c in name[:40])
+
+
+def _log_large_tokens(id_token: str, claims: dict[str, Any], access_token: Any) -> None:
+    """Warn when the provider's tokens are unusually big, naming the biggest claims and their
+    sizes (never their values), so the admin can find the property mapping that adds them. A big
+    access token also travels to the provider's userinfo endpoint on every membership check."""
+    access_len = len(access_token) if isinstance(access_token, str) else 0
+    if len(id_token) < LARGE_TOKEN_BYTES and access_len < LARGE_TOKEN_BYTES:
+        return
+    sizes = sorted(
+        ((len(json.dumps(v, separators=(",", ":"))), _safe_name(str(k))) for k, v in claims.items()),
+        reverse=True,
+    )
+    biggest = ", ".join(f"{name}={size} bytes" for size, name in sizes[:5])
+    logger.warning(
+        "identity provider issued unusually large tokens (ID token %d bytes, access token %d bytes); "
+        "largest ID token claims: %s. Look for the scope or property mapping that adds them",
+        len(id_token),
+        access_len,
+        biggest,
+    )
 
 
 def basic_auth_header(client_id: str, client_secret: str) -> str:
