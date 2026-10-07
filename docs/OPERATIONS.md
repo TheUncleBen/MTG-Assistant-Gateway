@@ -554,7 +554,7 @@ The five actions, and exactly what each one does:
 | **Enable** | Clears `disabled_at`. Nothing is handed back: the person signs in again and reconnects their assistant. |
 | **Revoke tokens and sessions** | The same revocation as Disable (tokens, browser sessions, pending codes, identity-provider tokens) without disabling. The person can sign in again straight away. This is the button version of the SQL in [Revoking access](#revoking-access). |
 | **Unlink Archidekt** | Marks their Archidekt link revoked and deletes the stored session, the same as their own Unlink button on `/account`. They can relink any time. |
-| **Delete data** | Deletes everything the gateway keeps about that person, the same as their own **Delete my data**: proposals, snapshots, reports, scan sessions, the remembered covers of their own decks (never a cover of someone else's deck they cloned or reported on), the Archidekt link, every app grant and browser session, the identity-provider tokens, usage counters and the user record. It needs the confirmation tick next to the button, and you can't use it on yourself (use your own Account page). Meant for former members, and for an account left over from an earlier identity provider (the gateway refuses a new provider's account whose `sub` matches an old one until the old one is deleted). Their decks on Archidekt are not touched, and the audit log keeps its rows. If they're still in the group, they can sign in again as a new, empty account. |
+| **Delete data** | Deletes everything the gateway keeps about that person, the same as their own **Delete my data**: proposals, snapshots, reports, scan sessions, the remembered covers of their own decks (never a cover of someone else's deck they cloned or reported on), the Archidekt link, every app grant and browser session, the identity-provider tokens, the copy of their profile picture, usage counters and the user record. It needs the confirmation tick next to the button, and you can't use it on yourself (use your own Account page). Meant for former members, and for an account left over from an earlier identity provider (the gateway refuses a new provider's account whose `sub` matches an old one until the old one is deleted). Their decks on Archidekt are not touched, and the audit log keeps its rows. If they're still in the group, they can sign in again as a new, empty account. |
 
 Every action writes an `admin_disable`, `admin_enable`, `admin_revoke`,
 `admin_unlink` or `admin_delete_data` row to the audit log under the admin's
@@ -598,7 +598,8 @@ rejected too.
 
 ## Looking at proposals, snapshots, links and the audit log
 
-Everything lives in `<MTG_DATA_DIR>/mtg-gateway.sqlite`. The container has
+Everything lives in `<MTG_DATA_DIR>/mtg-gateway.sqlite` (profile pictures are
+separate files under `<MTG_DATA_DIR>/avatars`, fetched again when missing). The container has
 Python but no `sqlite3` command, so run queries through Python on the
 gateway's node. For example, the latest proposals:
 
