@@ -63,8 +63,10 @@ In plain terms:
   `run_deck_report` and `save_scan_session`.
   Making a proposal only records it, so even if ChatGPT limits you to
   read-only tools you should still be able to propose changes and then press
-  Apply on the gateway's review page in your browser. Whether ChatGPT's
-  "read/fetch" limit actually follows those markings hasn't been tested yet.
+  Approve on the card ChatGPT shows with the proposal, or Apply on the
+  gateway's review page in your browser. Whether ChatGPT's "read/fetch"
+  limit actually follows those markings, and whether it shows the card for
+  a connector added in developer mode, hasn't been tested yet.
 - **On ChatGPT Plus and Android? Use Claude for deck edits.** Claude's free
   plan allows one custom connector (verified), and it works in Claude's
   Android app once added on the web. ChatGPT might still work for you in a
@@ -157,11 +159,28 @@ Android apps the next time you sign in there (verified). Anthropic calls
 adding connectors from the phone apps a beta, and its custom-connector page
 doesn't list mobile, so add it on the web or desktop.
 
+### Approving a change in the chat
+
+When the assistant proposes a deck change, Claude shows the proposal as a
+card right in the conversation: the exact change with a small picture of
+each card, and **Approve** and **Reject** buttons (Claude on the web,
+desktop, iOS and Android; Claude Code shows the text and the review link
+instead). The first time, Claude asks whether to display the app; allow it
+for this connector. Nothing reaches Archidekt until you press Approve on
+the card or Apply on the review page. The card's Approve button sends a
+one-time code the assistant never receives, and the gateway refuses that
+tool without it, so a tricked assistant can't approve its own proposal.
+That rests on Claude keeping the card's tool and code away from the model,
+as the MCP Apps standard says (reported, not yet verified in a live
+session); the review page in your browser never relies on it and is linked
+from every card.
+
 Claude lets you set each tool to always allow, needs approval, or blocked
 (verified). Keep `apply_proposal` on **needs approval**: if the owner lets
 the assistant apply changes from chat, that's the tool that actually changes
 your deck. Claude's Research mode can call connector tools without asking
-(verified). Everything except `apply_proposal`, `reject_proposal`,
+(verified). Everything except `apply_proposal`, `confirm_proposal`
+(the card's own button), `reject_proposal`,
 `run_deck_report` and `save_scan_session` only reads or records proposals. The assistant is told never to apply one you
 haven't said yes to in your own message, but the gateway can't check that
 for itself, which is why "needs approval" on `apply_proposal` is worth
@@ -203,8 +222,11 @@ and pick the MTG Assistant Gateway app (in developer mode it may be under a deve
 mode or apps entry). Then ask it to call `whoami`. (Unverified.)
 
 OpenAI says ChatGPT asks for confirmation before write actions by default,
-and may block some risky ones (reported). If ChatGPT refuses or hides
-`apply_proposal`, ask for the proposal's review link and press Apply there.
+and may block some risky ones (reported). OpenAI also says ChatGPT renders
+MCP Apps (reported), so a proposal should appear as a card with Approve and
+Reject buttons like in Claude; this hasn't been tried with ChatGPT yet. If
+no card appears and ChatGPT refuses or hides `apply_proposal`, ask for the
+proposal's review link and press Apply there.
 
 ### If ChatGPT blocks write tools
 
@@ -214,7 +236,8 @@ tool is marked read-only except four, so all of this keeps working: research
 card lookups for scanning, and making deck proposals. For the four write
 tools:
 
-- `apply_proposal`: open the proposal's review link (or **Proposals** on the
+- `apply_proposal`: press **Approve** on the proposal card if ChatGPT shows
+  one, or open the proposal's review link (or **Proposals** on the
   gateway) and press **Apply** there. Same preview, same checks.
 - `reject_proposal`: press **Reject this proposal** on the review page.
 - `run_deck_report`: press **Run deck report** on the deck's page under

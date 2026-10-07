@@ -7,6 +7,35 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.6.4] - 2026-10-07
+
+### Added
+
+- Approve or reject a proposed deck change on a card inside the chat. Every
+  proposal tool now returns the proposal as an MCP App (the
+  `io.modelcontextprotocol/ui` extension): a client that renders MCP Apps
+  (Claude on the web, desktop, iOS and Android) shows the proposal as a card
+  with the change summary, small card images from Scryfall, and **Approve**
+  and **Reject** buttons. The gateway applies the change only when the
+  button is pressed: the buttons call a tool that is marked for the app only
+  (not for the model) and that needs a one-time approval code the gateway
+  puts in the tool result's `_meta`, where the assistant never sees it. An
+  assistant that tries to approve its own proposal gets `invalid_approval`
+  and the attempt is logged. In Claude Code, which does not render apps,
+  `apply_proposal` instead asks the client to open the browser review page
+  and waits for your decision there. Everywhere else the card or the
+  assistant shows a link to the review page, as before. Turn the card and
+  the in-chat buttons off with `MTG_APPLY_IN_CHAT=false`.
+- `confirm_proposal` tool (app-only; needs the `mtg.write` scope) and the
+  `browser_pending`, `invalid_approval` and `in_chat_disabled` errors
+  ([docs/API.md](docs/API.md)).
+
+### Changed
+
+- `MTG_APPLY_VIA_MCP` keeps its default of `false`. The review page and the
+  card are the two ways to apply a change; leaving this on lets a tricked
+  assistant apply its own proposal, so the docs now say so plainly.
+
 ## [0.6.2] - 2026-10-07
 
 ### Fixed

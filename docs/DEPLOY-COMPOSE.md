@@ -100,7 +100,8 @@ Worth a look:
 | `MTG_HTTP_BIND`, `MTG_HTTP_PORT` | `127.0.0.1`, `8080` | Where the gateway listens on this machine, for a proxy on the same machine. A proxy container on the gateway's network doesn't need it (the proxy overrides remove it) |
 | `MTG_DATA_DIR`, `MTG_BACKUP_DIR` | `./data`, `./backups` | Local disk only, not NFS or SMB |
 | `MTG_WRITES_ENABLED` | `true` | `false` keeps everything review-only: proposals work, nothing is ever applied to Archidekt. If the line is missing, the gateway's own default is `false` |
-| `MTG_APPLY_VIA_MCP` | `false` | Same as the code default: only the Apply button on the review page applies a change. `true` lets the assistant apply after the person says yes in chat, which is weaker: text the assistant reads (deck descriptions, card notes) could trick it into applying its own proposal once `MTG_APPLY_MIN_AGE_SECONDS` has passed |
+| `MTG_APPLY_VIA_MCP` | `false` | Same as the code default: only the person's own press applies a change, on the card in the chat or the Apply button on the review page. `true` lets the assistant apply after the person says yes in chat, which is weaker: text the assistant reads (deck descriptions, card notes) could trick it into applying its own proposal once `MTG_APPLY_MIN_AGE_SECONDS` has passed |
+| `MTG_APPLY_IN_CHAT` | `true` | The Approve/Reject card Claude and ChatGPT show next to a proposal; only its one-time code can apply. `false` removes it, leaving the review page |
 
 Every other variable is explained in `.env` and in the
 [environment reference](DEPLOY.md#environment-reference). A setting only
