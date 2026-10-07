@@ -1,0 +1,364 @@
+"""Archidekt's social actions for the signed-in person: like a deck (a vote on its comment thread),
+bookmark it, follow its owner, read and post comments.
+
+These are a person's own clicks, so they exist only as browser routes: every write needs the
+browser session and the page's CSRF token, every call runs under that member's own linked
+Archidekt session, and no MCP tool exists for any of them. An assistant can therefore never like,
+follow or comment on anyone's behalf. The page asks for a confirmation before each write.
+
+Routes and bodies are the ones archidekt.com's own pages send (read from its bundle on
+2026-10-07; see the notes on ``ArchidektClient.vote_deck`` and friends).
+"""
+
+from __future__ import annotations
+
+import hmac
+import json
+import re
+import time
+from typing import TYPE_CHECKING, Any
+
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
+
+from .archidekt import VOTE_DOWN, VOTE_NONE, VOTE_UP, ArchidektError, Deck
+from .decks import DeckError, _clean_deck_id
+from .pages import _csrf, browser_session, read_limited
+
+if TYPE_CHECKING:
+    from mcp.server.mcpserver import MCPServer
+
+    from .app import AppState
+
+MAX_COMMENT = 2000
+MAX_THREAD_DEPTH = 6
+FOLLOWING_PAGES = 5  # how far into the member's following list the follow state is looked for
+FOLLOWING_TTL = 120.0  # seconds the following list is remembered after a read
+NO_STORE = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
+_STATUS = {
+    "csrf": 403,
+    "invalid": 400,
+    "not_found": 404,
+    "not_linked": 409,
+    "auth": 409,
+    "forbidden": 403,
+    "unavailable": 503,
+    "rate_limited": 503,
+    "busy": 429,
+    "contract": 502,
+    "writes_disabled": 403,
+}
+_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _fail(kind: str, message: str) -> JSONResponse:
+    return JSONResponse(
+        {"ok": False, "error": kind, "message": message}, _STATUS.get(kind, 400), headers=NO_STORE
+    )
+
+
+def _err(exc: Exception) -> JSONResponse:
+    if isinstance(exc, (DeckError, ArchidektError)):
+        kind = exc.kind
+        msg = str(exc)
+        if kind in ("auth", "forbidden"):
+            msg = "Archidekt did not accept your linked session; relink it on the Account page."
+        if kind == "contract":
+            msg = "Archidekt answered in an unexpected way; try again."
+        return _fail(kind, msg)
+    raise exc
+
+
+def _int(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def comment_out(c: dict[str, Any], depth: int = 0) -> dict[str, Any]:
+    """One comment of Archidekt's thread in the gateway's shape; replies nest to a depth limit."""
+    owner = c.get("owner") if isinstance(c.get("owner"), dict) else {}
+    kids = c.get("children")
+    results = kids.get("results") if isinstance(kids, dict) else kids if isinstance(kids, list) else []
+    return {
+        "id": _int(c.get("id")),
+        "text": str(c.get("text") or ""),
+        "owner": {
+            "id": _int(owner.get("id")),
+            "username": str(owner.get("username") or ""),
+        },
+        "created_at": str(c.get("createdAt") or ""),
+        "edited_at": str(c.get("editedAt") or "") or None,
+        "points": _int(c.get("points")) or 0,
+        "user_vote": _int(c.get("userInput")) or 0,
+        "archived": c.get("archived") is True,
+        "replies": [comment_out(k, depth + 1) for k in results if isinstance(k, dict)]
+        if depth < MAX_THREAD_DEPTH
+        else [],
+        "reply_count": _int(c.get("childrenCount")) or 0,
+    }
+
+
+def _ids(comments: list[dict[str, Any]]) -> set[int]:
+    out: set[int] = set()
+    for c in comments:
+        if c.get("id") is not None:
+            out.add(int(c["id"]))
+        out |= _ids(c.get("replies") or [])
+    return out
+
+
+class SocialService:
+    def __init__(self, state: AppState):
+        self.state = state
+        self.decks = state.decks
+        self.client = state.decks.client
+        self._following: dict[str, tuple[float, set[int]]] = {}
+
+    def _me(self, sub: str) -> tuple[str, str]:
+        """(Archidekt user id, username) of the member's linked account."""
+        link = self.state.db.get_link(sub)
+        if link is None:
+            raise DeckError("not_linked", "Link your Archidekt account on the Account page first.")
+        uid = str(link.get("archidekt_user_id") or "")
+        if not uid.isdigit():
+            raise DeckError("not_linked", "The linked Archidekt account has no user id; relink it.")
+        return uid, str(link.get("archidekt_username") or "")
+
+    async def deck(self, sub: str, deck_id: str) -> Deck:
+        return await self.decks.get_any_deck(sub, deck_id)
+
+    async def vote(self, sub: str, deck_id: str, want: int) -> dict[str, Any]:
+        self._me(sub)
+        deck = await self.deck(sub, deck_id)
+        if deck.comment_root is None:
+            raise DeckError("unavailable", "Archidekt reports no thread for this deck, so it cannot be liked")
+        if want == VOTE_NONE:
+            await self.decks._call(
+                sub, lambda t: self.client.vote_deck(t, deck.comment_root, up=True, remove=True)
+            )
+        else:
+            await self.decks._call(
+                sub, lambda t: self.client.vote_deck(t, deck.comment_root, up=want == VOTE_UP)
+            )
+        weight = {VOTE_UP: 1, VOTE_DOWN: -1, VOTE_NONE: 0}
+        points = deck.points - weight[deck.user_vote] + weight[want]
+        self.state.db.audit("deck_voted", sub=sub, detail={"deck_id": deck.id, "vote": want})
+        return {"vote": want, "points": points}
+
+    async def bookmark(self, sub: str, deck_id: str, on: bool) -> dict[str, Any]:
+        self._me(sub)
+        await self.decks._call(sub, lambda t: self.client.bookmark_deck(t, deck_id, on=on))
+        self.state.db.audit("deck_bookmarked", sub=sub, detail={"deck_id": deck_id, "on": on})
+        return {"bookmarked": on}
+
+    async def following(self, sub: str) -> set[int]:
+        uid, _name = self._me(sub)
+        hit = self._following.get(sub)
+        if hit and hit[0] > time.monotonic():
+            return hit[1]
+        ids: set[int] = set()
+        page = 1
+        while page <= FOLLOWING_PAGES:
+            body = await self.decks._call(sub, lambda t, page=page: self.client.following(t, uid, page))
+            for row in body["results"]:
+                if isinstance(row, dict) and _int(row.get("id")) is not None:
+                    ids.add(int(row["id"]))
+            if not body.get("next"):
+                break
+            page += 1
+        self._following[sub] = (time.monotonic() + FOLLOWING_TTL, ids)
+        return ids
+
+    async def follow_state(self, sub: str, user_id: int) -> dict[str, Any]:
+        uid, _name = self._me(sub)
+        if str(user_id) == uid:
+            return {"self": True, "following": False}
+        return {"self": False, "following": user_id in await self.following(sub)}
+
+    async def follow(self, sub: str, user_id: int, on: bool) -> dict[str, Any]:
+        uid, _name = self._me(sub)
+        if str(user_id) == uid:
+            raise DeckError("invalid", "you cannot follow yourself")
+        await self.decks._call(sub, lambda t: self.client.follow_user(t, user_id, on=on))
+        self._following.pop(sub, None)
+        self.state.db.audit("user_followed", sub=sub, detail={"user_id": user_id, "on": on})
+        return {"following": on}
+
+    async def comments(self, sub: str, deck_id: str, page: int = 1) -> dict[str, Any]:
+        deck = await self.deck(sub, deck_id)
+        if deck.comment_root is None:
+            return {"root": None, "count": 0, "comments": [], "page": 1, "has_more": False}
+        linked = self.state.db.get_link(sub) is not None
+        if linked:
+            body = await self.decks._call(
+                sub, lambda t: self.client.comment_thread(t, deck.comment_root, page=page)
+            )
+        else:
+            async with self.decks.archidekt_slot(sub):
+                body = await self.client.comment_thread(None, deck.comment_root, page=page)
+        kids = body.get("children")
+        results = kids.get("results") if isinstance(kids, dict) else kids if isinstance(kids, list) else []
+        links = kids.get("links") if isinstance(kids, dict) else {}
+        count = kids.get("count") if isinstance(kids, dict) else None
+        comments = [comment_out(c) for c in results if isinstance(c, dict)]
+        return {
+            "root": deck.comment_root,
+            "count": count if isinstance(count, int) else len(comments),
+            "comments": comments,
+            "page": page,
+            "has_more": bool(isinstance(links, dict) and links.get("next")),
+        }
+
+    async def comment(self, sub: str, deck_id: str, text: str, parent: int | None) -> dict[str, Any]:
+        _uid, name = self._me(sub)
+        text = _CONTROL.sub("", text.replace("\r\n", "\n")).strip()
+        if not text:
+            raise DeckError("invalid", "write something first")
+        if len(text) > MAX_COMMENT:
+            raise DeckError("invalid", f"a comment can be at most {MAX_COMMENT} characters")
+        thread = await self.comments(sub, deck_id)
+        root = thread["root"]
+        if root is None:
+            raise DeckError("unavailable", "Archidekt reports no thread for this deck")
+        target = root if parent is None else parent
+        if target != root and target not in _ids(thread["comments"]):
+            raise DeckError("invalid", "that comment is not in this deck's thread (or not on its first page)")
+        created = await self.decks._call(sub, lambda t: self.client.comment_create(t, target, text))
+        self.state.db.audit("deck_commented", sub=sub, detail={"deck_id": deck_id, "parent": target})
+        out = comment_out(created)
+        if not out["owner"]["username"]:
+            out["owner"]["username"] = name
+        return {"comment": out, "parent": target}
+
+
+def add_social_routes(server: MCPServer, state: AppState) -> SocialService:
+    s = state.settings
+    service = SocialService(state)
+    state.social = service  # type: ignore[attr-defined]
+
+    def who(request: Request, *, write: bool) -> str | Response:
+        sub, sid = browser_session(state, request)
+        if not sub or not sid:
+            return JSONResponse(
+                {"ok": False, "error": "unauthenticated", "login": "/login"}, 401, headers=NO_STORE
+            )
+        if write:
+            expected = _csrf(s, sid) or ""
+            given = request.headers.get("x-csrf-token", "")
+            if not expected or not hmac.compare_digest(given.encode(), expected.encode()):
+                return _fail("csrf", "Reload the page and retry.")
+        return sub
+
+    async def body(request: Request) -> dict[str, Any] | Response:
+        raw = await read_limited(request, 64_000)
+        if raw is None:
+            return _fail("invalid", "request too large")
+        try:
+            data = json.loads(raw or b"{}")
+        except (ValueError, RecursionError):
+            return _fail("invalid", "bad JSON")
+        return data if isinstance(data, dict) else _fail("invalid", "expected an object")
+
+    def deck_id(request: Request) -> str:
+        return _clean_deck_id(request.path_params["deck_id"])
+
+    def user_id(request: Request) -> int:
+        raw = str(request.path_params["user_id"])
+        if not raw.isdigit() or len(raw) > 12:
+            raise DeckError("invalid", "user id is not a number")
+        return int(raw)
+
+    @server.custom_route("/social/api/decks/{deck_id}/vote", methods=["POST"], include_in_schema=False)
+    async def vote(request: Request) -> Response:
+        sub = who(request, write=True)
+        if isinstance(sub, Response):
+            return sub
+        data = await body(request)
+        if isinstance(data, Response):
+            return data
+        want = {"up": VOTE_UP, "down": VOTE_DOWN, "none": VOTE_NONE}.get(str(data.get("vote")))
+        if want is None:
+            return _fail("invalid", "vote must be up, down or none")
+        try:
+            out = await service.vote(sub, deck_id(request), want)
+        except (DeckError, ArchidektError) as exc:
+            return _err(exc)
+        return JSONResponse({"ok": True, **out}, headers=NO_STORE)
+
+    @server.custom_route("/social/api/decks/{deck_id}/bookmark", methods=["POST"], include_in_schema=False)
+    async def bookmark(request: Request) -> Response:
+        sub = who(request, write=True)
+        if isinstance(sub, Response):
+            return sub
+        data = await body(request)
+        if isinstance(data, Response):
+            return data
+        if not isinstance(data.get("on"), bool):
+            return _fail("invalid", "on must be true or false")
+        try:
+            out = await service.bookmark(sub, deck_id(request), data["on"])
+        except (DeckError, ArchidektError) as exc:
+            return _err(exc)
+        return JSONResponse({"ok": True, **out}, headers=NO_STORE)
+
+    @server.custom_route("/social/api/users/{user_id}/follow", methods=["GET"], include_in_schema=False)
+    async def follow_state(request: Request) -> Response:
+        sub = who(request, write=False)
+        if isinstance(sub, Response):
+            return sub
+        try:
+            out = await service.follow_state(sub, user_id(request))
+        except (DeckError, ArchidektError) as exc:
+            return _err(exc)
+        return JSONResponse({"ok": True, **out}, headers=NO_STORE)
+
+    @server.custom_route("/social/api/users/{user_id}/follow", methods=["POST"], include_in_schema=False)
+    async def follow(request: Request) -> Response:
+        sub = who(request, write=True)
+        if isinstance(sub, Response):
+            return sub
+        data = await body(request)
+        if isinstance(data, Response):
+            return data
+        if not isinstance(data.get("on"), bool):
+            return _fail("invalid", "on must be true or false")
+        try:
+            out = await service.follow(sub, user_id(request), data["on"])
+        except (DeckError, ArchidektError) as exc:
+            return _err(exc)
+        return JSONResponse({"ok": True, **out}, headers=NO_STORE)
+
+    @server.custom_route("/social/api/decks/{deck_id}/comments", methods=["GET"], include_in_schema=False)
+    async def comments(request: Request) -> Response:
+        sub = who(request, write=False)
+        if isinstance(sub, Response):
+            return sub
+        try:
+            page = max(1, min(int(request.query_params.get("page") or 1), 1000))
+        except ValueError:
+            page = 1
+        try:
+            out = await service.comments(sub, deck_id(request), page)
+        except (DeckError, ArchidektError) as exc:
+            return _err(exc)
+        return JSONResponse({"ok": True, **out}, headers=NO_STORE)
+
+    @server.custom_route("/social/api/decks/{deck_id}/comments", methods=["POST"], include_in_schema=False)
+    async def comment(request: Request) -> Response:
+        sub = who(request, write=True)
+        if isinstance(sub, Response):
+            return sub
+        data = await body(request)
+        if isinstance(data, Response):
+            return data
+        parent = data.get("parent")
+        if parent is not None and _int(parent) is None:
+            return _fail("invalid", "parent must be a comment id")
+        if not isinstance(data.get("text"), str):
+            return _fail("invalid", "text must be a string")
+        try:
+            out = await service.comment(sub, deck_id(request), data["text"], parent)
+        except (DeckError, ArchidektError) as exc:
+            return _err(exc)
+        return JSONResponse({"ok": True, **out}, status_code=201, headers=NO_STORE)
+
+    return service

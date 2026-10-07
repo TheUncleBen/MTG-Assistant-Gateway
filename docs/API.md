@@ -19,7 +19,8 @@ Every `/api/v1` call needs one of:
 A bearer token whose scopes are all read-only (`mtg.read` or a bare `read`, for an app that asked
 for `scope=mtg.read`) may call every `GET` route but none of the writes: they answer `403` with
 `"error": "insufficient_scope"`. The MCP tools that change something (`propose_*`, `apply_proposal`,
-`reject_proposal`, `run_deck_report`, `save_scan_session`) refuse such a token the same way. A token
+`confirm_proposal`, `reject_proposal`, `run_deck_report`, `save_scan_session`) refuse such a token
+the same way. A token
 with the default scope `mtg`, with no scope, or with any scope that is not read-only (for example
 `read write`) has full access, as before.
 
@@ -76,6 +77,28 @@ Request bodies are JSON objects of at most 2 MB.
 | `DELETE /api/v1/reports/{rid}` | Delete a report. With a bearer token only a report that same app ran; the browser session may delete any of the member's reports |
 | `GET /api/v1/activity?limit=50` | The user's own audit trail |
 
+The collection is the member's own Archidekt Collection, read and written through their linked
+session; the gateway stores none of it. Its small JSON API serves the pages and the Android app,
+under the browser session only (cookie plus `X-CSRF-Token` on writes; a bearer token uses the
+`*_collection` tools instead): `POST /collection/api/add` with `{"items": [{"name" | "scryfall_id"
+| "card": {...}, "quantity", "finish" | "foil", "condition"}], "source": "scan" | "manual",
+"scan_session"?}` answers `added` and `skipped` (one or two Archidekt calls per card, paced about a
+second apart; at most 100 cards a call; a `scan_session` given with `source: "scan"` is deleted
+once saved); `POST /collection/api/rows/{id}` with `{"quantity": n}` (0 removes) or `finish` /
+`condition`; `DELETE /collection/api/rows/{id}`; `GET /collection/api/summary` (`rows`, and
+`cards` when the collection fits one page). Ids are Archidekt's record ids; a record that is not
+in the member's own collection answers `404`, and a member without a linked account `409`
+`not_linked`.
+
+Archidekt's social actions are browser-only too, under `/social/api`, and have no tool or `/api/v1`
+counterpart on purpose: `POST /social/api/decks/{id}/vote` `{"vote": "up" | "down" | "none"}`
+(a like is an up-vote on the deck's thread; answers the new `vote` and `points`), `POST
+/social/api/decks/{id}/bookmark` `{"on": bool}`, `GET` and `POST /social/api/users/{id}/follow`
+(`{"on": bool}`; the GET answers `following` and `self`), `GET /social/api/decks/{id}/comments?page=`
+(the thread as nested `comments`) and `POST /social/api/decks/{id}/comments` `{"text", "parent"?}`
+(`parent` must be a comment of that deck's thread). All need the session cookie and the CSRF token
+and run under the member's own Archidekt session.
+
 Admin callers (members of `MTG_ADMIN_GROUP`) also have `GET /api/v1/admin/overview`,
 `GET /api/v1/admin/users`, `GET /api/v1/admin/metrics` and
 `POST /api/v1/admin/users/{sub}` with `{"action": "disable" | "enable" | "revoke" | "unlink" | "delete_data"}`.
@@ -113,9 +136,14 @@ cookie, set by `POST /theme`); internal links never open a new tab.
 
 | Path | Page |
 |---|---|
+| `/` | Home: newest decks with covers, a deck search box, one tile per section (with the count of pending proposals), the assistant connection details |
+| `/search?name=&commander=&owner=&format=&colors=&order=&page=` | Public deck search on Archidekt (name substring, commander, owner, format, colour identity; order `-updatedAt`, `-createdAt`, `-viewCount`, `-size`, `edhBracket`; Archidekt pages of 60) |
+| `/users/{username}` | One Archidekt user's public decks |
+| `/collection?q=&sort=added|edition&view=grid|list&page=` | My collection: the member's Archidekt Collection, filtered by name, grid or list, plus and minus, remove, add by name; `/collection/export.csv` downloads it |
+| `/guide` | The in-app guide (end-user documentation) |
 | `/decks?q=&folder=&view=grid|list&order=` | My decks: filter by name or Archidekt folder, grid or list, order by updated / created / name / format, "New deck" |
 | `/decks/open?ref=` | Redirects an Archidekt link or id to its deck page |
-| `/decks/new` | New deck form (name, format, private, pasted list or CSV) that makes a `new_deck` proposal |
+| `/decks/new?scan_session=` | New deck form (name, format, private, pasted list or CSV) that makes a `new_deck` proposal; a scan session prefills the list |
 | `/decks/{id}?view=&group=&sort=&q=` | One deck: banner (art, legality, bracket, size, price, tags), toolbar (Quick add, View as text / stacks / grid, Group by, Sort by, local filter), cards, deck stats, description; owners get Edit deck, Clone deck and Deck settings |
 | `/decks/{id}/edit?scan_session=&add=` | The editor: quantities, categories (new ones by typing), finish, printing (picker over Scryfall), additions with autocomplete and Undo become one proposal; a scan session or a Quick add name prefills it |
 | `/decks/{id}/settings` | Deck settings (name, format, bracket, description, private, unlisted) as a `details` proposal |
@@ -128,6 +156,7 @@ cookie, set by `POST /theme`); internal links never open a new tab.
 | `/proposals`, `/proposals/{pid}` | Review and Apply, Reject |
 | `/scan` | The card scanner (see SCANNING.md) |
 | `/account`, `/login`, `/logout`, `/signed-out` | Account, Archidekt link, sign-in and sign-out |
+| `/account/avatar` | The signed-in member's picture (the provider's, else Gravatar, else initials) for the account menu |
 | `/app`, `/app/mtg-assistant-gateway.apk` | The Android app page and download ([ANDROID.md](ANDROID.md)) |
 | `/admin`, `/admin/users`, `/admin/activity`, `/admin/metrics` | Admin page (members of `MTG_ADMIN_GROUP`) |
 | `/app.webmanifest`, `/sw.js`, `/static/{file}` | App shell |

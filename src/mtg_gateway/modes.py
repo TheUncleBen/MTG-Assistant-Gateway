@@ -96,8 +96,8 @@ def risk_of(
         return "high", "restores a snapshot"
     if kind == "details":
         return "high", "changes the deck's details"
-    if kind != "edit":
-        return "high", "not a plain deck edit"
+    if kind not in ("edit", "collection"):
+        return "high", "not a plain deck or collection edit"
     if rows is None:  # stored before review rows existed: nothing to judge it by
         return "high", "has no review rows"
     kinds = [str(r.get("kind")) for r in rows]
@@ -117,6 +117,42 @@ def risk_of(
                 f"moves {_copies_moved(r)} copies of {r.get('name')}, more than {MAX_COPIES_PER_ROW}",
             )
     return "low", f"{len(rows)} card row{'s' if len(rows) != 1 else ''}, no commander change"
+
+
+# A hand edit in the app is the member's own approval, so it applies at once; only these get an
+# explicit confirmation first, as Archidekt itself asks before destructive steps.
+HAND_EDIT_CONFIRM_COPIES = 10  # removing more copies than this in one go
+HAND_EDIT_CONFIRM_ROWS = 8  # or removing this many distinct cards
+
+
+def hand_edit_confirm(kind: str, rows: list[dict[str, Any]] | None) -> str | None:
+    """Why a member's own edit in the app should ask "are you sure" before it is applied, or None
+    when it can go straight to Archidekt (with its snapshot, as every apply takes one)."""
+    if kind == "restore":
+        return "This replaces the whole deck with the snapshot."
+    if kind != "edit" or not rows:
+        return None
+    if any(r.get("kind") == "commander" for r in rows):
+        return "This changes the deck's commander."
+    removed_rows = [r for r in rows if r.get("kind") == "remove" or _removes(r)]
+    copies = sum(_removes(r) for r in rows)
+    if len(removed_rows) >= HAND_EDIT_CONFIRM_ROWS:
+        return f"This removes {len(removed_rows)} different cards from the deck."
+    if copies > HAND_EDIT_CONFIRM_COPIES:
+        return f"This removes {copies} cards from the deck."
+    return None
+
+
+def _removes(row: dict[str, Any]) -> int:
+    """How many copies a review row takes out of the deck (0 when it adds or only recategorises)."""
+    try:
+        if row.get("kind") == "remove":
+            return abs(int(row.get("qty") or 0))
+        if row.get("kind") == "change":
+            return max(0, int(row.get("before") or 0) - int(row.get("after") or 0))
+    except (TypeError, ValueError):
+        return HAND_EDIT_CONFIRM_COPIES + 1
+    return 0
 
 
 def _copies_moved(row: dict[str, Any]) -> int:

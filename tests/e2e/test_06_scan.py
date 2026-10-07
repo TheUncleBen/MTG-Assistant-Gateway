@@ -22,6 +22,10 @@ STRICT_CSP = (
     "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; worker-src 'self'; img-src 'self'; "
     "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
 )
+HOME_CSP = (
+    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; "
+    "img-src 'self' https://cards.scryfall.io; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+)
 STATE: dict[str, str] = {}
 
 
@@ -149,7 +153,9 @@ def test_scan_page_has_its_own_csp_and_the_rest_keep_the_strict_one(clients, env
             assert await proposals.header_value("content-security-policy") == STRICT_CSP
             landing = await page.goto(f"{PUBLIC_URL}/")
             assert landing.status == 200 and MCP_URL in await page.inner_text("body")
-            assert await landing.header_value("content-security-policy") == STRICT_CSP
+            # The home page shows deck covers from Scryfall, so it carries the deck pages' CSP: the
+            # strict one plus that single image host and connect-src 'self'.
+            assert await landing.header_value("content-security-policy") == HOME_CSP
             # the scanner's own search goes through the gateway (and so to the mock), never to Scryfall
             search = await page.request.get(f"{PUBLIC_URL}/scan/api/search?q=sol%20r")
             assert search.status == 200 and "Sol Ring" in await search.text(), await search.text()

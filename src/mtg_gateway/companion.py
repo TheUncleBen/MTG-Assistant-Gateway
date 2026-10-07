@@ -31,7 +31,16 @@ from .deckpage import (
     featured,
 )
 from .decks import DeckError, actor_label, current_client
-from .pages import BROWSER_CLIENT_ID, _badge, _csrf, _when, browser_session, login_redirect, read_limited
+from .pages import (
+    BROWSER_CLIENT_ID,
+    _badge,
+    _csrf,
+    _err_code,
+    _when,
+    browser_session,
+    login_redirect,
+    read_limited,
+)
 from .theme import icon, render
 from .views import auto_category, cards_by_category
 
@@ -172,7 +181,11 @@ def stats_strip(stats: dict[str, Any] | None) -> str:
 
 # Notices /decks/{id} shows for ?ok= and ?err=. Only these codes are accepted; anything else shows
 # nothing, so a crafted link cannot put words of its choosing in the page's notice box.
-DECK_OK_MESSAGES = {"report": "Report saved. See it under History."}
+DECK_OK_MESSAGES = {
+    "report": "Report saved. See it under History.",
+    "saved": "Saved to Archidekt. A snapshot from just before is under History if you want to undo.",
+    "created": "Created on Archidekt.",
+}
 DECK_ERR_MESSAGES = {
     "report_failed": "The deck report could not be made. Try again later.",
     "invalid": "The deck report could not be made: that request was not valid.",
@@ -188,6 +201,23 @@ DECK_ERR_MESSAGES = {
 
 def add_companion_routes(server: MCPServer, state: AppState, reports: ReportService) -> None:
     s = state.settings
+
+    async def apply_now(sub: str, pid: str, *, ok: str, deck_id: str | None = None) -> Response:
+        """A member's own action in the app (new deck, clone, settings) is their approval: the
+        proposal it made is applied at once, with its snapshot, and the deck opens with a notice.
+        When Archidekt refuses or writes are off, the proposal stays pending on its review page,
+        which says why and keeps the Apply button for later."""
+        try:
+            result = await state.decks.apply(sub, pid, via="browser")
+        except DeckError as exc:
+            code = _err_code(exc.kind)
+            return RedirectResponse(f"/proposals/{pid}?err={code}", status_code=303)
+        made = result.get("result") if isinstance(result.get("result"), dict) else {}
+        target = deck_id or str(made.get("deck_id") or result.get("deck_id") or "")
+        if not target.isdigit():
+            return RedirectResponse(f"/proposals/{pid}?ok=applied", status_code=303)
+        return RedirectResponse(f"/decks/{target}?ok={ok}", status_code=303)
+
     decks = state.decks
 
     def page(
@@ -364,8 +394,8 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             "</option></select></div>"
             f"<div class='actions'><button class='primary'>{icon('plus')} Create deck</button>"
             "<a class='btn' href='/decks'>Cancel</a></div>"
-            "<p class='muted small'>Creating makes a proposal; the deck appears on Archidekt once you "
-            "apply it on the review page.</p></form>"
+            "<p class='muted small'>The deck is created on Archidekt straight away and opens here.</p>"
+            "</form>"
         )
 
     @server.custom_route("/decks/new", methods=["GET"], include_in_schema=False)
@@ -373,9 +403,19 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         sub, sid = browser_session(state, request)
         if not sub:
             return login_redirect("/decks/new")
-        return page(
-            "New deck", new_deck_form({"csrf": _csrf(s, sid) or ""}), sub=sub, sid=sid, current="/decks"
-        )
+        values = {"csrf": _csrf(s, sid) or ""}
+        scan_ref = (request.query_params.get("scan_session") or "").strip()[:80]
+        if scan_ref and state.scan is not None:
+            # "New deck from these cards" on the scan page: the scan's list is the decklist.
+            from .scan.service import ScanError
+
+            try:
+                sess = state.scan.find_session(sub, scan_ref)
+                values["source"] = sess.get("decklist_text") or ""
+                values["name"] = str(sess.get("name") or "")[:120]
+            except ScanError:
+                pass
+        return page("New deck", new_deck_form(values), sub=sub, sid=sid, current="/decks")
 
     @server.custom_route("/decks/new", methods=["POST"], include_in_schema=False)
     async def new_deck_post(request: Request) -> Response:
@@ -402,7 +442,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             return page(
                 "New deck", new_deck_form(values, str(exc)), sub=sub, sid=sid, status=400, current="/decks"
             )
-        return RedirectResponse(f"/proposals/{p['proposal_id']}", status_code=303)
+        return await apply_now(sub, p["proposal_id"], ok="created")
 
     # -- one deck ---------------------------------------------------------------
     @server.custom_route("/decks/{deck_id}", methods=["GET"], include_in_schema=False)
@@ -436,12 +476,16 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         elif err_code in DECK_ERR_MESSAGES:
             # Only known codes; the text is fixed here, so a link cannot choose the words.
             notice = f"<p class='notice error'>{_esc(DECK_ERR_MESSAGES[err_code])}</p>"
+        # Archidekt marks each deck card with the copies the signed-in member owns ("owned" on the
+        # card when the deck is read with their session); the gateway's green dot is that number.
+        owned = {c.name.lower(): c.owned for c in deck.cards if c.owned} if link else None
         body = deck_page_html(
             deck,
             stats,
             own=own,
             csrf=_csrf(s, sid),
             writes_enabled=s.writes_enabled,
+            owned=owned or None,
             view=qp.get("view") or "text",
             group=qp.get("group") or "category",
             sort=qp.get("sort") or "name",
@@ -476,7 +520,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         except DeckError as exc:
             code = exc.kind if exc.kind in DECK_ERR_MESSAGES else "invalid"
             return RedirectResponse(f"/decks/{deck_id}?err={code}", status_code=303)
-        return RedirectResponse(f"/proposals/{p['proposal_id']}", status_code=303)
+        return await apply_now(sub, p["proposal_id"], ok="created")
 
     # -- deck settings (details proposal) ---------------------------------------
     def settings_form(
@@ -548,11 +592,10 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             + "><span class='track'></span>Unlisted <span class='muted small'>(viewable with a "
             "direct link, but "
             "not shown in lists)</span></label>"
-            f"<div class='actions'><button class='primary'>{icon('check')} Review changes</button>"
+            f"<div class='actions'><button class='primary'>{icon('check')} Save changes</button>"
             f"<a class='btn' href='/decks/{did}'>Cancel</a></div>"
-            "<p class='muted small'>Saving makes a proposal; nothing changes on Archidekt until you "
-            "apply it on "
-            "the review page.</p></form>"
+            "<p class='muted small'>Saved to Archidekt straight away; a snapshot from just before is "
+            "kept under History.</p></form>"
             "<section class='panel' id='categories'><h2>Categories</h2>"
             f"<ul class='plain plist'>{cats or '<li class=muted>No categories yet.</li>'}</ul>"
             "<p class='muted small'>Cards are moved between categories in the editor; a new category "
@@ -623,13 +666,14 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
                 status=400,
                 current="/decks",
             )
-        return RedirectResponse(f"/proposals/{p['proposal_id']}", status_code=303)
+        return await apply_now(sub, p["proposal_id"], ok="saved", deck_id=deck.id)
 
     # -- browser editor ---------------------------------------------------------
     @server.custom_route("/decks/{deck_id}/edit", methods=["GET"], include_in_schema=False)
     async def edit_page(request: Request) -> Response:
-        """The deck editor: quantities, categories, finishes, printings and additions become one
-        proposal, which the review page applies. Own decks only; the script does the work, the
+        """The deck editor: quantities, categories, finishes, printings and additions are saved to
+        Archidekt in one go (as one proposal applied at once, with its snapshot; a big removal asks
+        first). Own decks only; the script does the work, the
         server hands it the deck, the categories and anything to prefill (a scan session or a
         Quick add name)."""
         deck_id = request.path_params["deck_id"]
@@ -723,12 +767,12 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
                 ""
                 if s.writes_enabled
                 else "<p class='notice warn'>Deck writes are switched off on this gateway; "
-                "the proposal can be reviewed but not applied.</p>"
+                "your changes are kept as a proposal to apply once they are on.</p>"
             )
             + "</section>"
             "<div class='editbar' role='region' aria-label='Pending changes'>"
             "<button type='button' class='btn-primary review' disabled>"
-            f"{icon('check')} <span class='label'>Review changes</span></button>"
+            f"{icon('check')} <span class='label'>Save changes</span></button>"
             f"<button type='button' class='undo' disabled>{icon('undo')} Undo</button>"
             "<span class='count muted'>No changes yet</span>"
             "<p class='status' role='status'></p></div>"

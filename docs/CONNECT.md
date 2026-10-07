@@ -59,8 +59,9 @@ In plain terms:
   tools on the web. The help center is newer and narrower, and doesn't
   mention Plus at all.
 - **What that means for deck changes in ChatGPT.** The gateway marks every
-  tool as read-only except four: `apply_proposal`, `reject_proposal`,
-  `run_deck_report` and `save_scan_session`.
+  tool as read-only except six: `apply_proposal`, `confirm_proposal`,
+  `reject_proposal`, `run_deck_report`, `save_scan_session` and
+  `propose_collection_changes`.
   Making a proposal only records it, so even if ChatGPT limits you to
   read-only tools you should still be able to propose changes and then press
   Approve on the card ChatGPT shows with the proposal, or Apply on the
@@ -107,8 +108,9 @@ Custom connectors work on Claude's Free, Pro, Max, Team and Enterprise plans
    - You first see the gateway's **Connect an application** page. It says "An application wants to connect to your
      account", names the application (**Claude**) and the host it's
      "identified by", lists what it'll be able to do (read your decks and
-     propose deck changes, and apply them if the owner allows applying from
-     the assistant), and
+     propose deck changes, and apply them only when you approve, unless you
+     chose an approval mode on your account page that lets it apply changes
+     without asking), and
      shows "After sign-in you go to" a host. That host should be
      `claude.ai`, Claude's sign-in return address for its hosted apps
      (verified). If it all looks right, press **Approve and sign in**. If
@@ -194,7 +196,8 @@ Claude lets you set each tool to always allow, needs approval, or blocked
 that's the tool that actually changes your deck. Claude's Research mode can
 call connector tools without asking (verified). Everything except
 `apply_proposal`, `confirm_proposal` (the card's own button),
-`reject_proposal`, `run_deck_report` and `save_scan_session` only reads or
+`reject_proposal`, `run_deck_report`, `save_scan_session` and
+`propose_collection_changes` (which only records a proposal) only reads or
 records proposals.
 
 ## ChatGPT
@@ -242,10 +245,10 @@ proposal's review link and press Apply there.
 ### If ChatGPT blocks write tools
 
 OpenAI says some plans only get reading tools (reported). Every gateway
-tool is marked read-only except four, so all of this keeps working: research
+tool is marked read-only except six, so all of this keeps working: research
 (Scryfall, EDHREC, rules), goldfish simulation, reading and importing decks,
-card lookups for scanning, and making deck proposals. For the four write
-tools:
+card lookups for scanning, and making deck proposals. For the write tools
+(collection changes: add or remove cards on the `/collection` page instead):
 
 - `apply_proposal`: press **Approve** on the proposal card if ChatGPT shows
   one, or open the proposal's review link (or **Proposals** on the

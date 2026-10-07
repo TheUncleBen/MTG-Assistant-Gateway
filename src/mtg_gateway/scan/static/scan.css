@@ -335,3 +335,19 @@ body.picker-open{overflow:hidden}
 .scan .install{display:none}
 .scan .install.show{display:inline-flex}
 @media (prefers-reduced-motion:reduce){ .scan .shutter,.scan .camera .flash{transition:none} .scan .shutter.live{animation:none;box-shadow:0 0 0 6px rgba(250,137,13,.5)} }
+
+/* first-visit intro and the "what next" block of the list tab */
+.scan .intro h2,.scan .next h2{margin:0 0 .5rem;font-size:1.15rem}
+.scan .intro .steps{list-style:none;margin:0;padding:0;display:grid;gap:.5rem}
+.scan .intro .steps li{display:flex;gap:.6rem;align-items:flex-start;line-height:1.4}
+.scan .intro .num{flex:0 0 1.6rem;height:1.6rem;border-radius:50%;background:var(--s-accent);color:#fff;
+  font-weight:900;display:inline-flex;align-items:center;justify-content:center;font-size:.9rem}
+.scan .intro .list-actions{grid-template-columns:1fr}
+.scan .next .nextrow{display:flex;gap:.75rem;align-items:center;justify-content:space-between;
+  padding:.6rem 0;border-top:1px solid var(--s-border-soft)}
+.scan .next .nextrow:first-of-type{border-top:0}
+.scan .next .what{display:flex;flex-direction:column;gap:.2rem;min-width:0;flex:1 1 auto}
+.scan .next .what small{display:block}
+.scan .next select{max-width:100%;margin-top:.25rem}
+.scan .next button{flex:0 0 auto;min-height:44px}
+@media (max-width:480px){.scan .next .nextrow{flex-direction:column;align-items:stretch}}

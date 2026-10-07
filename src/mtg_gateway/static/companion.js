@@ -1,5 +1,7 @@
 /* Deck editor for the companion pages. Builds a change list in the browser and hands it to
-   /api/v1/proposals; the review page's Apply button does the write. No framework, no build step.
+   /api/v1/proposals with apply:true: the member's own save is their approval, so the gateway
+   applies it at once (snapshot first); a big removal comes back as needs_confirm and is asked
+   about here before it is applied. No framework, no build step.
    The page passes its data in <script id="editor-config" type="application/json">.
 
    One proposal holds count changes (add / remove / set_quantity), category changes
@@ -215,10 +217,10 @@
     var n = list.length;
     root.querySelector(".pendingbox .n").textContent = String(n);
     root.querySelector(".count").textContent = n ? n + " change" + (n === 1 ? "" : "s") + " pending" : "No changes yet";
-    root.querySelector("button.review .label").textContent = n ? "Review " + n + " change" + (n === 1 ? "" : "s") : "Review changes";
+    root.querySelector("button.review .label").textContent = n ? "Save " + n + " change" + (n === 1 ? "" : "s") : "Save changes";
     root.querySelector("button.review").disabled = !n || n > MAX;
     root.querySelector("button.undo").disabled = !history.length;
-    root.querySelector(".limit").textContent = n > MAX ? "A proposal holds at most " + MAX + " changes; review these first." : "";
+    root.querySelector(".limit").textContent = n > MAX ? "At most " + MAX + " changes can be saved in one go; save these first." : "";
     // added cards block
     var addedBox = root.querySelector(".added");
     addedBox.textContent = "";
@@ -249,7 +251,7 @@
       var parts = [];
       if (r.printing) parts.push("printing → " + r.printing.set_code.toUpperCase() + " " + r.printing.collector_number);
       if (r.setFinish && r.setFinish !== r.finish) parts.push("finish → " + r.setFinish);
-      if (rc.waiting.length) parts.push("the " + rc.waiting.join(" and ") + " change waits for the next proposal");
+      if (rc.waiting.length) parts.push("the " + rc.waiting.join(" and ") + " change waits for the next save");
       note.textContent = parts.join(" · ");
     });
   }
@@ -401,26 +403,53 @@
     if (changes().length && !root.dataset.leaving) { ev.preventDefault(); ev.returnValue = ""; }
   });
 
-  // review: create the proposal, then go to its review page
-  root.querySelector("button.review").addEventListener("click", function () {
-    var btn = this;
+  // save: one proposal, applied at once (apply:true); a big removal asks first
+  function save(confirmed) {
+    var btn = root.querySelector("button.review");
     btn.disabled = true;
     var status = root.querySelector(".status");
-    status.textContent = "Creating the proposal…";
+    status.textContent = confirmed ? "Saving to Archidekt…" : "Saving to Archidekt…";
     status.className = "status";
+    var old = root.querySelector(".confirmbar");
+    if (old) old.remove();
     fetch("/api/v1/proposals", {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json", "X-CSRF-Token": cfg.csrf },
-      body: JSON.stringify({ kind: "edit", deck_id: cfg.deckId, changes: changes() })
+      body: JSON.stringify({ kind: "edit", deck_id: cfg.deckId, changes: changes(), apply: true, confirmed: confirmed === true })
     })
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
       .then(function (res) {
-        if (res.ok && res.d.proposal_id) {
+        var d = res.d || {};
+        if (res.ok && d.applied) {
           root.dataset.leaving = "1";
-          window.location.href = "/proposals/" + encodeURIComponent(res.d.proposal_id);
+          window.location.href = "/decks/" + encodeURIComponent(cfg.deckId) + "?ok=saved";
+        } else if (res.ok && d.needs_confirm) {
+          // the proposal exists but nothing was sent: ask, then apply that same proposal
+          status.textContent = "";
+          var bar = el("div", { class: "confirmbar notice warn", role: "alertdialog" });
+          bar.appendChild(el("span", { text: d.why + " Save anyway?" }));
+          var yes = el("button", { type: "button", class: "btn-primary", text: "Save anyway" });
+          var no = el("button", { type: "button", text: "Keep editing" });
+          bar.appendChild(yes); bar.appendChild(no);
+          root.querySelector(".editbar").appendChild(bar);
+          yes.addEventListener("click", function () {
+            yes.disabled = true;
+            fetch("/api/v1/proposals/" + encodeURIComponent(d.proposal_id) + "/apply", {
+              method: "POST", credentials: "same-origin", headers: { "X-CSRF-Token": cfg.csrf }
+            }).then(function (r) { return r.json(); }).then(function (a) {
+              if (a.ok) { root.dataset.leaving = "1"; window.location.href = "/decks/" + encodeURIComponent(cfg.deckId) + "?ok=saved"; return; }
+              bar.remove(); status.textContent = a.message || "Archidekt refused the change; nothing was saved."; status.className = "status notice error"; btn.disabled = false;
+            }).catch(function () { bar.remove(); status.textContent = "Network error; nothing was changed."; status.className = "status notice error"; btn.disabled = false; });
+          });
+          no.addEventListener("click", function () { bar.remove(); btn.disabled = false; });
+          yes.focus();
+        } else if (res.ok && d.proposal_id) {
+          // writes are off on this gateway: the proposal is kept for later
+          root.dataset.leaving = "1";
+          window.location.href = "/proposals/" + encodeURIComponent(d.proposal_id);
         } else {
-          status.textContent = (res.d && res.d.message) || "The proposal could not be created.";
+          status.textContent = d.message || "The changes could not be saved.";
           status.className = "status notice error";
           btn.disabled = false;
         }
@@ -430,7 +459,8 @@
         status.className = "status notice error";
         btn.disabled = false;
       });
-  });
+  }
+  root.querySelector("button.review").addEventListener("click", function () { save(false); });
 
   render();
 })();

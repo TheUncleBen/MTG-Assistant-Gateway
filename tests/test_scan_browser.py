@@ -267,7 +267,7 @@ def test_scan_page_end_to_end(server: Server, tmp_path: Path) -> None:
         # Save the session and confirm it through the JSON API and the MCP-side store.
         page.get_by_role("tab", name="List").click()
         page.fill("#session-name", "Playwright binder")
-        page.get_by_role("button", name="Save to gateway").click()
+        page.get_by_role("button", name="Save scan").click()
         expect(page.locator("#list-msg .notice.ok")).to_contain_text(
             "Saved as Playwright binder", timeout=10_000
         )

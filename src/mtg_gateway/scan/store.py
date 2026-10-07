@@ -22,7 +22,10 @@ CREATE TABLE IF NOT EXISTS scan_sessions (
 CREATE INDEX IF NOT EXISTS scan_sessions_owner ON scan_sessions(owner_sub, updated_at);
 """
 
-MAX_SESSIONS_PER_USER = 100
+# Scans are drafts the member keeps for as long as they like (up to a whole deck's worth, fixed up
+# before it goes to Archidekt), so nothing expires by age; only a per-member ceiling guards the
+# database, and the oldest draft goes only when a new one arrives past it.
+MAX_SESSIONS_PER_USER = 500
 
 
 class ScanStore:
@@ -85,7 +88,7 @@ class ScanStore:
             return cur.rowcount > 0
 
     def prune(self, owner_sub: str) -> int:
-        """Keep the newest MAX_SESSIONS_PER_USER sessions for a user."""
+        """Keep the newest MAX_SESSIONS_PER_USER sessions for a user; drafts never expire by age."""
         with self.db.tx() as c:
             cur = c.execute(
                 """DELETE FROM scan_sessions WHERE owner_sub = ? AND id NOT IN (

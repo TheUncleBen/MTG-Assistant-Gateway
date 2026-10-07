@@ -159,14 +159,32 @@
   const lineKey = (x) => (x && x.card ? x.card.scryfall_id + '|' + String(isFoil(x)) : null);
 
   // ----------------------------------------------------------------- layout
+  // A first-visit explanation of the three steps; "Got it" hides it for this browser, the "How it
+  // works" link under the tabs brings it back.
+  const INTRO_KEY = 'mtg-scan-intro-seen';
+  const introSeen = () => { try { return localStorage.getItem(INTRO_KEY) === '1'; } catch (e) { return false; } };
+  function introCard() {
+    const step = (n, title, text) => h('li', null, h('span', { class: 'num', text: String(n) }), h('div', null, h('strong', { text: title }), ' ', text));
+    const box = h('section', { class: 'card intro', id: 'intro' },
+      h('h2', { text: 'How scanning works' }),
+      h('ol', { class: 'steps' },
+        step(1, 'Scan.', 'Hold a card in the frame with its title in the dashed box and tap the shutter, or switch on Auto and show cards one after another. No camera handy? Use the Type tab.'),
+        step(2, 'Check the list.', 'Fix a wrong match, pick the exact printing or foil, change quantities.'),
+        step(3, 'Choose what to do with the cards.', 'Save them to your collection, add them to one of your decks, start a new deck, or keep the scan for later (your assistant can pick it up too).')),
+      h('div', { class: 'list-actions' }, h('button', { class: 'primary', onclick: () => { try { localStorage.setItem(INTRO_KEY, '1'); } catch (e) { /* private mode */ } box.remove(); } }, 'Got it')));
+    return box;
+  }
+
   function render() {
     root.textContent = '';
+    if (!introSeen() && !state.items.length) root.append(introCard());
     const tabs = h('div', { class: 'tabs', role: 'tablist' },
       tabButton('camera', 'Camera'), tabButton('type', 'Type'), tabButton('list', 'List'), tabButton('sessions', 'Sessions'));
     root.append(tabs);
     root.append(h('div', { id: 'panel' }));
     root.append(h('p', { class: 'muted' }, 'Signed in as ', h('strong', { text: cfg.user }), '. ',
-      'Scanned cards stay on this gateway until you delete them.'));
+      'Scanned cards stay on this gateway until you delete them. ',
+      h('a', { href: '#intro', onclick: (e) => { e.preventDefault(); if (!$('#intro')) root.prepend(introCard()); window.scrollTo(0, 0); } }, 'How it works')));
     const installBtn = h('button', { class: 'secondary install', id: 'install-btn', onclick: install }, 'Add to home screen');
     root.append(installBtn);
     if (state.installPrompt) installBtn.classList.add('show');
@@ -1224,8 +1242,9 @@
           'In Claude or ChatGPT, say: “get my scan session ', h('em', { text: out.name }), '” to use these cards.'));
         buzz(30);
       } catch (err) { msg.append(h('div', { class: 'notice error', text: 'Save failed: ' + why(err) })); }
-    } }, 'Save to gateway');
+    } }, 'Save scan');
     save.classList.add('primary');
+    save.title = 'Keep this list on the gateway; your assistant can pick it up with “get my scan session”.';
     const copy = h('button', { class: 'secondary', onclick: async () => {
       const text = state.items.map((it) => it.quantity + ' ' + (it.name || '?') + (it.card && it.card.set ? ' (' + it.card.set.toUpperCase() + ') ' + it.card.collector_number : '')).join('\n');
       try { await navigator.clipboard.writeText(text); msg.textContent = ''; msg.append(h('div', { class: 'notice ok', text: 'Decklist copied.' })); }
@@ -1238,6 +1257,60 @@
     } }, 'New scan');
     panel.append(h('div', { class: 'card' }, h('label', { for: 'session-name', text: 'Scan name' }), name, summary, ul,
       h('div', { class: 'list-actions' }, save, copy, clear)), msg);
+    if (state.items.length) panel.append(whatNext(msg));
+  }
+
+  // "What next": the three places scanned cards can go. Each needs the scan saved first (the deck
+  // pages read it by id), so an unsaved list is saved on the way.
+  async function ensureSaved() {
+    if (state.sessionId && !state.dirty) return state.sessionId;
+    const payload = { name: state.sessionName, items: state.items };
+    const out = state.sessionId ? await api('/scan/api/sessions/' + encodeURIComponent(state.sessionId), 'PUT', payload)
+      : await api('/scan/api/sessions', 'POST', payload);
+    state.sessionId = out.id; state.sessionName = out.name; state.dirty = false; saveDraft();
+    return out.id;
+  }
+  function whatNext(msg) {
+    const resolved = state.items.filter((it) => it.card);
+    const note = (kind, text) => { msg.textContent = ''; msg.append(h('div', { class: 'notice ' + kind, text: text })); };
+    const toCollection = h('button', { class: 'secondary', onclick: async () => {
+      if (!resolved.length) { note('error', 'No card is matched yet; fix the unresolved ones first.'); return; }
+      toCollection.disabled = true;
+      try {
+        note('', 'Saving ' + plural(resolved.length, 'card') + ' to your Archidekt collection… about a second a card.');
+        const out = await api('/collection/api/add', 'POST', { items: resolved.map((it) => ({ card: it.card, quantity: it.quantity, foil: isFoil(it) })), source: 'scan', scan_session: state.sessionId || undefined });
+        const n = (out.added || []).reduce((a, r) => a + (r.quantity || 0), 0);
+        msg.textContent = '';
+        msg.append(h('div', { class: 'notice ok' }, 'Saved ' + plural((out.added || []).length, 'card') + ' (' + n + ' copies) to your Archidekt collection. ', h('a', { href: '/collection' }, 'Open the collection'),
+          (out.skipped || []).length || resolved.length < state.items.length ? ' Cards Archidekt could not match were left out.' : ''));
+        if (state.sessionId) { state.sessionId = null; state.sessionName = ''; state.dirty = false; saveDraft(); renderBadge(); }
+        buzz(30);
+      } catch (err) { note('error', 'Could not add to the collection: ' + why(err)); }
+      toCollection.disabled = false;
+    } }, 'Save to collection');
+    const deckSel = h('select', { id: 'deck-pick', 'aria-label': 'Deck to add the cards to' }, h('option', { value: '', text: 'Loading your decks…' }));
+    const toDeck = h('button', { class: 'secondary', disabled: true, onclick: async () => {
+      if (!deckSel.value) { note('error', 'Pick a deck first.'); return; }
+      try { const id = await ensureSaved(); location.href = '/decks/' + encodeURIComponent(deckSel.value) + '/edit?scan_session=' + encodeURIComponent(id); }
+      catch (err) { note('error', 'Could not save the scan: ' + why(err)); }
+    } }, 'Add to deck');
+    api('/api/v1/decks').then((out) => {
+      deckSel.textContent = '';
+      const decks = (out.decks || []).slice().sort((a, b) => String(a.name).localeCompare(String(b.name)));
+      if (!decks.length) { deckSel.append(h('option', { value: '', text: 'No decks on your Archidekt account yet' })); return; }
+      deckSel.append(h('option', { value: '', text: 'Choose a deck…' }));
+      decks.forEach((d) => deckSel.append(h('option', { value: String(d.id), text: d.name })));
+      toDeck.disabled = false;
+    }).catch((err) => { deckSel.textContent = ''; deckSel.append(h('option', { value: '', text: /link/i.test(String(err.message)) ? 'Link Archidekt on the Account page first' : 'Decks unavailable: ' + why(err) })); });
+    const newDeck = h('button', { class: 'secondary', onclick: async () => {
+      try { const id = await ensureSaved(); location.href = '/decks/new?scan_session=' + encodeURIComponent(id); }
+      catch (err) { note('error', 'Could not save the scan: ' + why(err)); }
+    } }, 'New deck from these cards');
+    return h('section', { class: 'card next', 'aria-label': 'What next' },
+      h('h2', { text: 'What next?' }),
+      h('div', { class: 'nextrow' }, h('div', { class: 'what' }, h('strong', { text: 'Keep them as owned cards' }), h('small', { class: 'muted', text: 'Adds the matched cards to your Collection on Archidekt; the scan is then done with.' })), toCollection),
+      h('div', { class: 'nextrow' }, h('div', { class: 'what' }, h('strong', { text: 'Add them to one of your decks' }), h('small', { class: 'muted', text: 'Opens the deck editor with these cards filled in; you review the change before it is applied.' }), deckSel), toDeck),
+      h('div', { class: 'nextrow' }, h('div', { class: 'what' }, h('strong', { text: 'Start a new deck' }), h('small', { class: 'muted', text: 'Opens the new-deck form with this list as the decklist.' })), newDeck));
   }
 
   // --------------------------------------------------------------- sessions

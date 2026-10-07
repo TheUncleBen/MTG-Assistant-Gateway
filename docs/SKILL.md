@@ -33,7 +33,8 @@ ChatGPT text to copy, built from the files above.
 - Edit decks you own, or create new ones in your account, in two steps:
   propose and show you the exact diff, then leave the decision to you: the
   Approve button on the card your app shows, the Apply button on the
-  gateway's review page, or (only if the owner allows it) your yes in chat.
+  gateway's review page, or, if you chose a looser approval mode on your
+  Account page, the assistant applies it itself.
   Then report the result with the snapshot and how to undo it.
 - Undo an edit by restoring the deck from its snapshot
   (`propose_restore_snapshot`), as a normal proposal you okay first.

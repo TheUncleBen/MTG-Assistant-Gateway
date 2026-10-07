@@ -163,7 +163,16 @@ def add_scan_routes(server: MCPServer, state: AppState, service: ScanService) ->
             f"<script src='/scan/static/scan-art.js?v={version}' defer></script>"
             f"<script src='/scan/static/scan.js?v={version}' defer></script>"
         )
-        resp = render("Scan cards", body_html, site=s.server_name, signed_in=True, csrf=_csrf(s, sid))
+        user_admin = bool(s.admin_group and s.admin_group in (user.get("groups") or []))
+        resp = render(
+            "Scan cards",
+            body_html,
+            site=s.server_name,
+            signed_in=True,
+            csrf=_csrf(s, sid),
+            current="/scan",
+            admin=user_admin,
+        )
         resp.headers["Content-Security-Policy"] = SCAN_CSP
         resp.headers["Permissions-Policy"] = "camera=(self)"
         return resp

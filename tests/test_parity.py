@@ -108,10 +108,14 @@ async def test_new_deck_settings_and_clone_forms(stack: Stack) -> None:
                 "source": "1 Sol Ring",
             },
         )
-        assert r.status_code == 303 and r.headers["location"].startswith("/proposals/"), r.text
-        review = await b.http.get(r.headers["location"], headers=NAV)
-        assert review.status_code == 200 and "Fresh brew" in review.text
-        # settings: a details proposal
+        # the member's own form is their approval: created at once, the new deck opens
+        loc = r.headers["location"]
+        assert r.status_code == 303 and loc.startswith("/decks/") and loc.endswith("?ok=created"), r.text
+        page = await b.http.get(loc, headers=NAV)
+        assert page.status_code == 200 and "Fresh brew" in page.text and "Created on Archidekt" in page.text
+        new_deck = int(loc.split("/")[2].split("?")[0])
+        assert ark.decks[new_deck]["name"] == "Fresh brew"
+        # settings: a details proposal, applied at once
         settings = await b.http.get("/decks/42/settings", headers=NAV)
         assert settings.status_code == 200 and "Unlisted" in settings.text and "Categories" in settings.text
         r = await b.http.post(
@@ -126,26 +130,31 @@ async def test_new_deck_settings_and_clone_forms(stack: Stack) -> None:
                 "unlisted": "",
             },
         )
-        assert r.status_code == 303 and r.headers["location"].startswith("/proposals/"), r.text
-        review = await b.http.get(r.headers["location"], headers=NAV)
-        assert "Now with a primer." in review.text and "bracket" in review.text
+        assert r.status_code == 303 and r.headers["location"] == "/decks/42?ok=saved", r.text
+        page = await b.http.get(r.headers["location"], headers=NAV)
+        assert "Now with a primer." in page.text and "Saved to Archidekt" in page.text
+        # recorded as an applied proposal, with its snapshot, so History can undo it
+        listed = (await b.http.get("/api/v1/proposals")).json()["proposals"]
+        assert any(x["kind"] == "details" and x["state"] == "applied" for x in listed), listed
         # nothing changed: the form comes back with the reason
         same = await b.http.post(
             "/decks/42/settings",
-            data={"csrf": csrf, "name": "Sample Commander Deck", "description": "", "edh_bracket": ""},
+            data={
+                "csrf": csrf,
+                "name": "Sample Commander Deck",
+                "deck_format": "commander",
+                "edh_bracket": "3",
+                "description": "Now with a primer.",
+                "private": "",
+                "unlisted": "",
+            },
         )
         assert same.status_code == 400 and "nothing" in same.text.lower()
-        # clone: a proposal that, applied, copies the deck into the root folder
+        # clone: copies the deck into the root folder at once and opens the copy
         r = await b.http.post("/decks/42/clone", data={"csrf": csrf})
-        assert r.status_code == 303 and r.headers["location"].startswith("/proposals/"), r.text
-        pid = r.headers["location"].rsplit("/", 1)[1]
-        review = await b.http.get(r.headers["location"], headers=NAV)
-        assert review.status_code == 200 and "Copy of - Sample Commander Deck" in review.text
-        applied = await b.http.post(f"/api/v1/proposals/{pid}/apply", headers={"X-CSRF-Token": csrf})
-        assert applied.status_code == 200, applied.text
-        a = applied.json()
-        assert a["state"] == "applied" and a["result"]["verified"] is True
-        new_id = int(a["result"]["deck_id"])
+        loc = r.headers["location"]
+        assert r.status_code == 303 and loc.startswith("/decks/") and loc.endswith("?ok=created"), r.text
+        new_id = int(loc.split("/")[2].split("?")[0])
         assert ark.decks[new_id]["name"] == "Copy of - Sample Commander Deck"
         assert len(ark.decks[new_id]["cards"]) == len(ark.decks[42]["cards"])
         # someone else's deck cannot be cloned or configured through the forms
@@ -196,7 +205,7 @@ async def test_editor_page_carries_printing_data_and_quick_add(stack: Stack) -> 
         )
         assert cfg["writesEnabled"] is True and cfg["maxChanges"] == 40
         assert "<template id='icon-swap'>" in edit.text and "class='editbar'" in edit.text
-        assert "Review changes" in edit.text and "Undo" in edit.text
+        assert "Save changes" in edit.text and "Undo" in edit.text
         # uncategorised cards sit under their auto category, never a bare "Other"
         assert [g["name"] for g in cfg["groups"]][0] == "Commander"
         assert "Other" not in [g["name"] for g in cfg["groups"]]
