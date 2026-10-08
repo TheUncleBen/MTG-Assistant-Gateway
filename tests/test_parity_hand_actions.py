@@ -160,7 +160,7 @@ def test_one_owner_per_capability() -> None:
         "precon_diff",
     }
     owners = set(OWNED_ELSEWHERE.values())
-    assert owners == {"run_deck_report", "get_deck", "list_my_decks", "deck_stats", "compare_decks"}
+    assert owners == {"run_deck_report", "get_deck", "search_decks", "deck_stats", "compare_decks"}
     assert not owners & ALLOWED_TOOLS  # every owner is a gateway tool, never another proxied one
 
 
@@ -433,10 +433,12 @@ async def test_owner_tools_carry_what_the_hidden_duplicates_had(stack: Stack) ->
     token = await mcp_token(stack.h)
     gw = stack.h.app.state.gateway
     # get_deck: rules text on request, Archidekt's import syntax always (archidekt_deck, archidekt_export)
-    plain = structured(await call(stack.h, token, "get_deck", {"deck_ref": "42"}))
+    plain = structured(await call(stack.h, token, "get_deck", {"deck_ref": "42", "view": "full"}))
     assert plain["ok"] and all("oracle_text" not in c for c in plain["cards"])
     assert "\n1x " in plain["archidekt_text"] and "[Commander{top}]" in plain["archidekt_text"]
-    full = structured(await call(stack.h, token, "get_deck", {"deck_ref": "42", "include_text": True}))
+    full = structured(
+        await call(stack.h, token, "get_deck", {"deck_ref": "42", "view": "full", "include_text": True})
+    )
     assert all("oracle_text" in c for c in full["cards"])
     # deck_stats: the structural checks validate_archidekt_deck made
     stats = structured(await call(stack.h, token, "deck_stats", {"deck_ref": "42"}))["stats"]
@@ -479,7 +481,7 @@ async def test_owner_tools_carry_what_the_hidden_duplicates_had(stack: Stack) ->
         bad = structured(
             await call(stack.h, token, "run_deck_report", {"deck_ref": "42", "options": {"nn": 5}})
         )
-        assert bad == {"ok": False, "error": "invalid", "message": "unknown simulation option(s): nn"}
+        assert bad["ok"] is False and bad["error"] == "invalid" and "options.nn" in bad["message"], bad
         # compare_decks simulate=true is the paired A/B (goldfish_ab), with its own knobs, not stored
         before = len(gw.reports.list("user-1"))
         ab = structured(
@@ -507,12 +509,15 @@ async def test_owner_tools_carry_what_the_hidden_duplicates_had(stack: Stack) ->
         assert bad["error"] == "invalid" and "opponents" in bad["message"]
     finally:
         gw.reports.mf = real
-    # without the research service the A/B says so instead of failing the comparison
+    # without the research service the A/B that was asked for fails at the top, with the reason;
+    # the comparison itself is still in the result
     gw.reports.mf = None
     try:
         out = structured(
             await call(stack.h, token, "compare_decks", {"a": "42", "b": "1 Opt", "simulate": True})
         )
-        assert out["ok"] and out["goldfish_ab"]["error"] == "unavailable"
+        assert out["ok"] is False and out["error"] == "simulation_failed", out
+        assert out["goldfish_ab"]["error"] == "unavailable" and "not configured" in out["message"]
+        assert "added" in out
     finally:
         gw.reports.mf = real

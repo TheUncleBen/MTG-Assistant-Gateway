@@ -205,7 +205,9 @@ curl -s -o /dev/null -w '%{http_code}\n' https://<gateway host>/mcp
 curl -s https://<gateway host>/plugin/marketplace.json | head -c 300
 ```
 
-Expected: `{"status":"ok",...}`; metadata JSON whose `issuer` is the public
+Expected: `{"status":"ok",...,"mystic_forge":"ok"}` (`"degraded"` with
+`"mystic_forge":"down"` means the gateway runs but Mystic Forge doesn't
+answer: check that service); metadata JSON whose `issuer` is the public
 URL; `401`; and the plugin marketplace JSON. Report each line's real
 result.
 

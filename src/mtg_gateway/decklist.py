@@ -55,6 +55,12 @@ HEADER_WORDS = {
 SIDE_ZONES = {"sideboard", "maybeboard", "considering"}
 SIDE_CATEGORY = {"sideboard": "Sideboard", "maybeboard": "Maybeboard", "considering": "Maybeboard"}
 FINISH_MARKS = {"F": "Foil", "E": "Etched"}
+# Lines that are not cards although they read like one: a footer such as "Total: 100 cards" or
+# "Cards: 99", and links. They are left out (and reported) instead of becoming a card of that name.
+NOT_A_CARD = re.compile(
+    r"^(?:total|cards?|count|deck size|main ?deck|sideboard|maybeboard)\b[^A-Za-z]*\d", re.I
+)
+LINK = re.compile(r"://|^www\.", re.I)
 MAX_LINE_CHARS = 300  # no card line is anywhere near this; it also bounds the regex work per line
 MAX_LINES = 5000
 
@@ -88,7 +94,10 @@ def _header(line: str) -> str | None:
     return None
 
 
-def parse_decklist(text: str) -> list[ListCard]:
+def parse_decklist(text: str, unread: list[str] | None = None) -> list[ListCard]:
+    """The cards of a pasted list. Lines that are clearly not cards (a "Total: 100 cards"
+    footer, a link) are skipped; pass a list as ``unread`` to collect them so the caller can say
+    which lines were not read."""
     cards: list[ListCard] = []
     section: str | None = None
     lines = text.replace("\r", "").split("\n")
@@ -112,6 +121,10 @@ def parse_decklist(text: str) -> list[ListCard]:
         if not m or not m.group("name").strip():
             raise DecklistError(f"could not read line: {line[:80]}")
         name = m.group("name").strip().rstrip(",")
+        if LINK.search(line) or (not m.group("qty") and NOT_A_CARD.match(line)):
+            if unread is not None and len(unread) < 50:
+                unread.append(line[:120])
+            continue
         qty = int(m.group("qty")) if m.group("qty") else 1
         if qty <= 0 or qty > 999:
             raise DecklistError(f"bad quantity on line: {line[:80]}")

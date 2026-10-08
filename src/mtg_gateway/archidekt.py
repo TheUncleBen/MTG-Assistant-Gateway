@@ -12,11 +12,14 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import copy
 import hashlib
 import json
 import logging
+import random
 import re
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -164,9 +167,11 @@ class ArchidektError(Exception):
     ``kind`` is one of auth, not_found, rate_limited, unavailable, contract, forbidden.
     """
 
-    def __init__(self, kind: str, message: str):
+    def __init__(self, kind: str, message: str, *, retryable: bool = False):
         super().__init__(message)
         self.kind = kind
+        # a GET that failed this way (timeout, network error, 5xx) may be retried after a backoff
+        self.retryable = retryable
 
 
 BACKUP_FOLDER_NAME = "MTG Gateway backups"
@@ -456,13 +461,18 @@ def _owned_by(owner: Any, username: str, user_id: str | None) -> bool:
 
 class Pacer:
     """Global request pacing shared by every user: one call at a time, a minimum
-    gap between calls, Retry-After respected, and a breaker that opens for a
-    minute after five consecutive failures."""
+    gap between calls, at most ``max_per_minute`` calls in any 60 seconds (0: no
+    such cap), Retry-After respected, and a breaker that opens for a minute after
+    five consecutive failures. A call past the per-minute cap waits for a slot
+    rather than failing, so a long apply slows down instead of stopping halfway."""
 
     MAX_RETRY_AFTER = 120.0  # a larger (or garbled) Retry-After must not stall every user for longer
+    WINDOW = 60.0
 
-    def __init__(self, min_interval: float):
+    def __init__(self, min_interval: float, max_per_minute: int = 0):
         self.min_interval = min_interval
+        self.max_per_minute = max(0, int(max_per_minute))
+        self._sent: deque[float] = deque()  # start times of the calls in the last WINDOW seconds
         self._lock = asyncio.Lock()
         self._next_allowed = 0.0
         self._failures = 0
@@ -484,6 +494,14 @@ class Pacer:
                 )
             if now < self._next_allowed:
                 await asyncio.sleep(self._next_allowed - now)
+            if self.max_per_minute:
+                now = time.monotonic()
+                while self._sent and now - self._sent[0] >= self.WINDOW:
+                    self._sent.popleft()
+                if len(self._sent) >= self.max_per_minute:
+                    await asyncio.sleep(self._sent[0] + self.WINDOW - now)
+                    self._sent.popleft()
+                self._sent.append(time.monotonic())
         except BaseException:
             # a cancelled or failed wait must never leave the shared lock held
             self._lock.release()
@@ -508,19 +526,101 @@ class Pacer:
             self._failures = 0
 
 
+# Read caching. Only reads that are the same for everyone are cached: the card catalogue
+# (``/cards/v2/``, whoever asks) and anonymous reads of public decks and deck searches. A read
+# made with a member's session is never cached, so proposals, applies and drift checks always
+# see the live deck. Any write the gateway sends clears the deck and search entries.
+CARD_PATH = "/cards/v2/"
+CACHE_MAX_ENTRIES = 500
+BACKOFF_CAP = 10.0  # seconds; the longest single wait between retries
+
+
 class ArchidektClient:
+    """Every Archidekt request goes through ``_request``: paced by the shared Pacer, sent with the
+    gateway's own honest User-Agent (no disguise), read caches as described above, and bounded
+    retries with jittered exponential backoff for GETs that failed on a timeout, a network error
+    or a 5xx. A 429 is never retried: its Retry-After pauses every call. Writes are never
+    retried, so a slow answer can never apply a change twice."""
+
     def __init__(
-        self, base_url: str, user_agent: str, pacer: Pacer, *, http: httpx.AsyncClient | None = None
+        self,
+        base_url: str,
+        user_agent: str,
+        pacer: Pacer,
+        *,
+        http: httpx.AsyncClient | None = None,
+        retries: int = 0,
+        backoff_base: float = 1.0,
+        cache_seconds: float = 0.0,
+        card_cache_seconds: float = 0.0,
     ):
         self.base_url = base_url.rstrip("/")
         self.user_agent = user_agent
         self.pacer = pacer
+        self.retries = max(0, int(retries))
+        self.backoff_base = max(0.0, float(backoff_base))
+        self.cache_seconds = max(0.0, float(cache_seconds))
+        self.card_cache_seconds = max(0.0, float(card_cache_seconds))
+        self._cache: dict[str, tuple[float, Any]] = {}
+        self.stats = {"requests": 0, "cache_hits": 0, "retries": 0, "rate_limited": 0, "failures": 0}
         self._http = http or httpx.AsyncClient(timeout=httpx.Timeout(20.0))
 
     async def aclose(self) -> None:
         await self._http.aclose()
 
     # -- plumbing -----------------------------------------------------------
+    def _cache_key(
+        self, method: str, path: str, token: str | None, params: dict[str, Any] | None
+    ) -> str | None:
+        """The cache key for a cacheable read, None for anything else."""
+        if method != "GET":
+            return None
+        if path.startswith(CARD_PATH):
+            ttl = self.card_cache_seconds
+        elif token is None and path.startswith("/decks/"):
+            ttl = self.cache_seconds
+        else:
+            return None
+        if ttl <= 0:
+            return None
+        return path + "?" + json.dumps(sorted((params or {}).items()), default=str)
+
+    def _cache_get(self, key: str, path: str) -> tuple[bool, Any]:
+        hit = self._cache.get(key)
+        if hit is None:
+            return False, None
+        ttl = self.card_cache_seconds if path.startswith(CARD_PATH) else self.cache_seconds
+        if time.monotonic() - hit[0] >= ttl:
+            self._cache.pop(key, None)
+            return False, None
+        return True, hit[1]
+
+    def _cache_put(self, key: str, value: Any) -> None:
+        if len(self._cache) >= CACHE_MAX_ENTRIES:
+            for old in sorted(self._cache, key=lambda k: self._cache[k][0])[: CACHE_MAX_ENTRIES // 5]:
+                self._cache.pop(old, None)
+        self._cache[key] = (time.monotonic(), value)
+
+    def forget_deck_reads(self) -> None:
+        """Drop every cached deck and search read (the card catalogue stays)."""
+        self._cache = {k: v for k, v in self._cache.items() if k.startswith(CARD_PATH)}
+
+    def limits(self) -> dict[str, Any]:
+        """The configured limits and the counters since start, for the admin page (no secrets)."""
+        return {
+            "min_interval_seconds": self.pacer.min_interval,
+            "max_per_minute": self.pacer.max_per_minute,
+            "retries": self.retries,
+            "backoff_base_seconds": self.backoff_base,
+            "cache_seconds": self.cache_seconds,
+            "card_cache_seconds": self.card_cache_seconds,
+            **self.stats,
+        }
+
+    def _backoff(self, attempt: int) -> float:
+        """Full jitter: a random wait up to base * 2**attempt, capped at BACKOFF_CAP."""
+        return random.uniform(0, min(BACKOFF_CAP, self.backoff_base * (2**attempt)))
+
     async def _request(
         self,
         method: str,
@@ -531,10 +631,53 @@ class ArchidektClient:
         json_body: Any | None = None,
         params: dict[str, Any] | None = None,
     ) -> Any:
+        key = self._cache_key(method, path, token, params)
+        if key is not None:
+            found, value = self._cache_get(key, path)
+            if found:
+                self.stats["cache_hits"] += 1
+                logger.debug("archidekt cache hit %s", path)
+                return copy.deepcopy(value)
+        if method != "GET" and not path.startswith("/rest-auth/"):
+            # cleared before the write is sent: a write that fails halfway may still have landed
+            self.forget_deck_reads()
+        attempts = 1 + (self.retries if method == "GET" else 0)
+        for attempt in range(attempts):
+            try:
+                value = await self._send(
+                    method, path, token=token, scheme=scheme, json_body=json_body, params=params
+                )
+            except ArchidektError as exc:
+                if exc.kind == "rate_limited":
+                    self.stats["rate_limited"] += 1
+                retryable = exc.kind == "unavailable" and exc.retryable
+                if not retryable or attempt + 1 >= attempts:
+                    self.stats["failures"] += 1
+                    raise
+                self.stats["retries"] += 1
+                await asyncio.sleep(self._backoff(attempt))
+                continue
+            if key is not None:
+                self._cache_put(key, copy.deepcopy(value))
+            return value
+        raise AssertionError("unreachable")  # pragma: no cover
+
+    async def _send(
+        self,
+        method: str,
+        path: str,
+        *,
+        token: str | None,
+        scheme: str,
+        json_body: Any | None,
+        params: dict[str, Any] | None,
+    ) -> Any:
+        """One request through the pacer: no retry and no cache here."""
         headers = {"Accept": "application/json", "User-Agent": self.user_agent}
         if token:
             headers["Authorization"] = f"{scheme} {token}"
         async with self.pacer:
+            self.stats["requests"] += 1
             try:
                 resp = await self._http.request(
                     method, f"{self.base_url}{path}", headers=headers, json=json_body, params=params
@@ -542,7 +685,7 @@ class ArchidektClient:
             except httpx.HTTPError as exc:
                 self.pacer.record(False)
                 raise ArchidektError(
-                    "unavailable", f"Archidekt request failed: {type(exc).__name__}"
+                    "unavailable", f"Archidekt request failed: {type(exc).__name__}", retryable=True
                 ) from exc
             if resp.status_code == 429:
                 ra = resp.headers.get("Retry-After")
@@ -559,7 +702,9 @@ class ArchidektClient:
                 raise ArchidektError("not_found", "Archidekt could not find that deck")
             if resp.status_code >= 500:
                 self.pacer.record(False)
-                raise ArchidektError("unavailable", f"Archidekt returned HTTP {resp.status_code}")
+                raise ArchidektError(
+                    "unavailable", f"Archidekt returned HTTP {resp.status_code}", retryable=True
+                )
             if resp.status_code >= 400:
                 self.pacer.record(True)
                 raise ArchidektError("contract", f"Archidekt rejected the request (HTTP {resp.status_code})")

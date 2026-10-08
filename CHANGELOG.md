@@ -7,6 +7,88 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.3] - 2026-10-08
+
+The assistant's tools made harder to misuse, Archidekt sign-ins kept away from
+everyone but their owner, and the gateway made lighter on Archidekt.
+
+### Upgrade notes
+
+- Optional new stack variables (defaults shown; nothing to set to keep them):
+  `MTG_ARCHIDEKT_MIN_INTERVAL=1.0`, `MTG_ARCHIDEKT_MAX_PER_MINUTE=40`,
+  `MTG_ARCHIDEKT_RETRIES=2`, `MTG_ARCHIDEKT_BACKOFF_BASE=1.0`,
+  `MTG_ARCHIDEKT_CACHE_SECONDS=60`, `MTG_ARCHIDEKT_CARD_CACHE_SECONDS=3600`, and
+  `MTG_BACKUP_COPY_DIR` (empty: no second copy). The stack and compose files carry them, plus one
+  new mount for the copy folder; paste the new file to pick them up.
+- Backups made from now on leave out Archidekt sessions and identity-provider tokens. After a
+  restore, people sign in again and relink Archidekt.
+- `get_my_deck` and `archidekt_user` are gone: `get_deck` reads your own decks too (check
+  `owner`) and `search_decks` takes `owner`. Old Mystic Forge `params` calls still work.
+
+### Added
+
+- A large apply no longer outlives the assistant app's wait: after 20 seconds it answers
+  `applying` with `progress` (cards looked up, changes sent) and carries on in the background.
+  `get_proposal`, the review page (refreshing itself) and the in-chat card show the progress;
+  applying again meanwhile only reports it. A restart records an unfinished apply as
+  `interrupted`.
+- `get_deck` and `get_snapshot` take `view` (`summary`, `text`, `cards`, `export`, `full`) so a
+  read costs only what it needs.
+- `search_decks` resolves a partial commander name (Scryfall, commanders only): one match is
+  searched straight away (`commander_matched`), several come back as `commander_suggestions`. The
+  web Search page does the same ("Showing decks led by…", "Did you mean"). `owner` lists one
+  user's public decks; `limit` trims the page.
+- `card_printings` filters by `set_code` and `finish`.
+- `propose_deck_details` also moves the deck to a folder, adds or takes off tags and sets the cover
+  (always high risk).
+- `propose_collection_changes` gets the in-chat Approve card, and an applied change is read back
+  from Archidekt (`verified`, `mismatches`).
+- `compare_decks` takes `a_list` / `b_list` for pasted lists; `deck_stats` and `parse_decklist`
+  return `unread_lines`; `list_my_proposals` rows carry a `summary` and `closed_at`;
+  `propose_new_deck` warns on a deck too small for its format.
+- `/healthz` reports `mystic_forge` (`ok`, `down`, `not_configured`); with it down the status is
+  `degraded` but still HTTP 200, so the container isn't restarted. The admin page shows it and the Android
+  setup screen accepts it.
+- `MTG_BACKUP_COPY_DIR`: every backup is also copied to a second folder (another disk or shared
+  storage) and pruned the same way; failures show on the admin page.
+- Linking Archidekt shows a plain note on Archidekt's terms and on who runs the gateway, and needs
+  a tick to go ahead.
+- Gentle on Archidekt: at most `MTG_ARCHIDEKT_MAX_PER_MINUTE` requests a minute for everyone
+  (extra requests wait their turn); reads that time out or get a 5xx are retried with jittered,
+  doubling waits (writes and 429s never); card lookups and anonymous deck and search reads are
+  briefly cached and cleared by any write; signed-in reads are never cached. The admin page shows
+  the limits and counts. Requests keep the gateway's own User-Agent; nothing is disguised.
+
+### Changed
+
+- Every tool schema is typed, flat and self-contained (no `$ref`), with one card spelling (`name`,
+  `set_code`, `collector_number`, `quantity`, `finish`); older spellings are still read. Wrong
+  arguments get a plain "arguments do not fit" refusal. The tool list is smaller.
+- Mystic Forge tools are listed with their own fields instead of a `params` wrapper, their texts
+  name the gateway tool that owns a hidden job, and their upstream failures are flagged as errors.
+- Every result with `ok: false` is marked `isError`.
+- The hidden `goldfish_ab` points to `compare_decks`.
+
+### Fixed
+
+- `compare_decks` refuses a reference it can't read instead of treating it as a one-card list.
+- A simulation that was asked for and didn't run (`run_deck_report`, `compare_decks` with
+  `simulate`) now fails the result (`ok: false`, `simulation_failed`, with the reason) instead of
+  reporting success with a failed part inside.
+- A card whose name a scan guessed from a misread name is flagged on every proposal that adds it
+  (`guessed_from`, `guessed_names`), on the review page and on the in-chat card.
+- Pasted lists sum duplicate lines and report what they couldn't read.
+- Collection applies in auto mode failed (no Archidekt session in context).
+- A deck-details proposal shows the new description.
+
+### Security
+
+- Nobody but the member can see their Archidekt sign-in: the password is used once and never
+  stored, only an encrypted session is kept, and no page, log, export or backup shows it.
+- Backups blank Archidekt sessions and identity-provider tokens; disabling a member deletes their
+  Archidekt session; SQLite `secure_delete` is on and the write-ahead log is flushed after an
+  unlink or deletion; secrets no longer appear in the settings' printed form.
+
 ## [0.7.2] - 2026-10-07
 
 The rest of what Archidekt's own pages offer for a member's decks, as hand

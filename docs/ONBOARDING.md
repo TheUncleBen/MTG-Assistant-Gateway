@@ -90,8 +90,13 @@ create new decks in your account.
 
 1. In a browser, open `https://mtg.example.com/account`.
 2. Sign in with the same sign-in account you used for the connector.
-3. Under **Link your Archidekt account**, enter your Archidekt username or
-   email and your Archidekt password, and press **Link account**.
+3. Under **Link your Archidekt account**, read the note first: Archidekt
+   has no official way for other apps to reach decks, so the gateway uses
+   the same requests archidekt.com's own pages use. Archidekt's terms
+   restrict automated access, so Archidekt could limit or block an account
+   used this way, and whoever runs the gateway is trusted with the link.
+   Then enter your Archidekt username or email and your Archidekt password,
+   tick the box to say you've read the note, and press **Link account**.
 4. The page now says "Linked to" and your Archidekt username. The unlink
    button is on the same page.
 
@@ -185,8 +190,9 @@ ever applies a change you didn't okay, tell the owner.
 Good to know:
 
 - Only decks your linked Archidekt account owns can be changed.
-- Edits only touch the main deck. Your maybeboard and sideboard are left
-  alone. Moving a card into the Maybeboard or Sideboard category takes it
+- Edits touch the main deck unless the proposal says otherwise: a change to
+  your maybeboard or sideboard is marked "(maybeboard/sideboard)" in the
+  review. Moving a card into the Maybeboard or Sideboard category takes it
   out of the main deck; the review shows that as "leaves the deck".
 - The review page says which app made the proposal ("browser", or the AI
   app's name). If you disconnect an app on your Account page, its pending
@@ -200,12 +206,18 @@ Good to know:
   snapshot. It proposes the restore like any other change, you okay it, and
   every card goes back as it was: same printing, foil, quantity and
   categories, including the commander, sideboard and maybeboard. The deck's
-  name, description and format aren't touched. The backup copies in your
+  name, description, format and privacy go back too, so a settings change
+  can be undone as well (folder, tags and cover stay). The backup copies in your
   "MTG Gateway backups" folder are there too if you ever want to look at or
   copy an old version yourself; they don't show up in the assistant's list
   of your decks.
-- The gateway never deletes decks. If it created a deck you don't want,
-  delete it yourself on Archidekt.
+- The assistant can't delete decks. If it created a deck you don't want,
+  delete it yourself (the deck's More menu, **Delete deck**, or on
+  Archidekt).
+- The assistant can also propose a deck's settings: name, description,
+  format, bracket, privacy, and moving it to another of your folders,
+  changing its tags or its cover. You approve those like any other change.
+  Creating or renaming folders is yours alone, on the Folders page.
 - The owner can switch applying off for everyone. While it's off you can
   still make and review proposals, and the assistant will tell you applying
   is disabled.
@@ -231,9 +243,12 @@ Good to know:
   The gateway and the AI app never see it.
 - Your Archidekt password is typed once on the `/account` page and not
   stored. The Archidekt session is stored encrypted on the owner's server.
-  Honest caveat: that encryption protects the database file and backups, not
-  against the owner, who runs the server and holds the key. Only link an
-  account if you're fine with that.
+  No page, admin tool, log or backup shows it, and the gateway's backups
+  leave it out (and the sign-in service's tokens too), so if the owner ever
+  restores a backup you sign in again and relink Archidekt. When the owner
+  disables your account, the stored session is deleted. Honest caveat: none
+  of this protects against the owner, who runs the server and holds the
+  key. Only link an account if you're fine with that.
 - To check you're still allowed in, the gateway keeps the sign-in
   service's tokens for your account (encrypted) and asks it, every few
   seconds while you use the gateway, whether you're still in the group. If
@@ -250,9 +265,10 @@ Good to know:
 - Research lookups go from the owner's server to Scryfall, EDHREC, Commander
   Spellbook, Wizards of the Coast (rules) and Archidekt's public deck pages,
   not from your device.
-- Archidekt hasn't explicitly approved automated editing by a shared service
-  like this. The gateway paces its requests and only writes after you
-  approve. If Archidekt objects, the owner may turn writes off.
+- Archidekt has no official interface for apps like this, and its terms
+  restrict automated access, so Archidekt could limit or block an account
+  used through the gateway. The gateway paces its requests and only writes
+  after you approve. If Archidekt objects, the owner may turn writes off.
 
 ## 9. Signing out and leaving
 
@@ -272,7 +288,7 @@ doesn't land in your account.
    sessions, deck covers, the stored Archidekt session, connected apps,
    the copy of your profile picture and your sign-in. Your decks on Archidekt (and the backup copies in your
    Archidekt account) stay yours. The owner's nightly database backups, if
-   they keep them, still hold a copy until they age out (14 days by default,
+   they keep them, still hold a copy (without your Archidekt session) until they age out (14 days by default,
    `MTG_BACKUP_KEEP_DAYS`). The owner's security log keeps a record that your
    account existed and was deleted until it ages out after a year. If you only want to stop
    using Archidekt through the gateway, press the unlink button instead.

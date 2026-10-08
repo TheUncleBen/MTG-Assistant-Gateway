@@ -180,7 +180,6 @@ async def test_private_deck_of_another_member_is_unreachable(stack) -> None:  # 
     ta = await mcp_token(h)
     for name, args in [
         ("get_deck", {"deck_ref": "43"}),
-        ("get_my_deck", {"deck_id": "43"}),
         ("deck_stats", {"deck_ref": "43"}),
         ("run_deck_report", {"deck_ref": "43", "games": 50}),
         ("propose_deck_changes", {"deck_id": "43", "changes": [{"action": "add", "card_name": "Opt"}]}),
@@ -227,7 +226,7 @@ async def test_public_surface(gw: Harness) -> None:  # noqa: F811
         assert r.status_code in (302, 401, 404), (path, r.status_code)
         assert "user-1" not in r.text
     h = await gw.http.get("/healthz")
-    assert set(h.json()) == {"status", "version"}
+    assert set(h.json()) == {"status", "version", "mystic_forge"}  # states only, nothing about members
     # No CORS on the cookie API: a cross-site page can't read it.
     r = await gw.http.options(
         "/api/v1/me", headers={"Origin": "https://evil.example", "Access-Control-Request-Method": "GET"}

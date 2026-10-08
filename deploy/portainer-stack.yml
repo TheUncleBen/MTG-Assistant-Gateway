@@ -61,6 +61,8 @@ services:
       MTG_SERVER_NAME: ${MTG_SERVER_NAME:-}
       MTG_DATA_DIR: /data
       MTG_BACKUP_DIR: /backups
+      # Copies every backup here too; off unless MTG_BACKUP_COPY_DIR names a host folder (below).
+      MTG_BACKUP_COPY_DIR: /backup-copy
       MTG_BACKUP_HOUR_UTC: ${MTG_BACKUP_HOUR_UTC:-3}
       MTG_BACKUP_KEEP_DAYS: ${MTG_BACKUP_KEEP_DAYS:-14}
       MTG_LOG_LEVEL: ${MTG_LOG_LEVEL:-INFO}
@@ -87,6 +89,12 @@ services:
       MTG_REAUTH_INTERVAL: ${MTG_REAUTH_INTERVAL:-604800}
       MTG_MEMBERSHIP_CHECK_TTL: ${MTG_MEMBERSHIP_CHECK_TTL:-5}
       MTG_ARCHIDEKT_CALLS_PER_10_MIN: ${MTG_ARCHIDEKT_CALLS_PER_10_MIN:-120}
+      MTG_ARCHIDEKT_MAX_PER_MINUTE: ${MTG_ARCHIDEKT_MAX_PER_MINUTE:-40}
+      MTG_ARCHIDEKT_MIN_INTERVAL: ${MTG_ARCHIDEKT_MIN_INTERVAL:-1.0}
+      MTG_ARCHIDEKT_RETRIES: ${MTG_ARCHIDEKT_RETRIES:-2}
+      MTG_ARCHIDEKT_BACKOFF_BASE: ${MTG_ARCHIDEKT_BACKOFF_BASE:-1.0}
+      MTG_ARCHIDEKT_CACHE_SECONDS: ${MTG_ARCHIDEKT_CACHE_SECONDS:-60}
+      MTG_ARCHIDEKT_CARD_CACHE_SECONDS: ${MTG_ARCHIDEKT_CARD_CACHE_SECONDS:-3600}
       # Archidekt API base. Leave the default; the end-to-end tests point it at a local mock.
       MTG_ARCHIDEKT_BASE: ${MTG_ARCHIDEKT_BASE:-https://archidekt.com/api}
       # Peers allowed to set X-Forwarded-* (your reverse proxy). Empty = private networks.
@@ -129,6 +137,11 @@ services:
       - type: bind
         source: ${MTG_BACKUP_DIR:?GATEWAY BACKUP DIRECTORY REQUIRED}
         target: /backups
+      # Optional second backup folder, for example shared storage every node mounts. Left
+      # blank, /dev/null is mounted instead and the gateway makes no copies.
+      - type: bind
+        source: ${MTG_BACKUP_COPY_DIR:-/dev/null}
+        target: /backup-copy
     deploy:
       replicas: 1
       resources:

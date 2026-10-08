@@ -121,7 +121,9 @@ a bearer token. They answer `401` without a browser session, and `404` to signed
   At most 40 changes; one card takes one kind of change (count, category or printing) per proposal.
 - `new_deck`: `{"name", "format"?, "cards"? | "decklist_text"? | "csv_text"?, "private"?}`.
 - `restore`: `{"snapshot_id"}` puts a deck back exactly as a snapshot recorded it.
-- `details`: `{"deck_id", "details": {"name"?, "description"?, "deck_format"?, "edh_bracket"?, "private"?, "unlisted"?}}`.
+- `details`: `{"deck_id", "details": {"name"?, "description"?, "deck_format"?, "edh_bracket"?, "private"?, "unlisted"?, "folder"?, "add_tags"?, "remove_tags"?, "cover"?}}`.
+  `folder` is an existing folder's name (`""` or `"top"` for the top level), the tags are lists of
+  names, `cover` is the name of a card in the deck.
 - `clone`: `{"deck_id", "name"?}` copies one of your decks into a new private deck ("Copy of - …" by
   default), the way Archidekt's Clone deck button does.
 

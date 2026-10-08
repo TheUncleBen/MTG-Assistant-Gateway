@@ -134,12 +134,16 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
     deck reports below.
 - **Deck import.** Three ways to read a deck. Counts leave out the
   maybeboard and sideboard.
-  - `get_deck` reads any public or unlisted Archidekt deck from a link;
-  - `parse_decklist` reads a pasted list;
+  - `get_deck` reads any public or unlisted Archidekt deck from a link
+    (as plain text, statistics only, card rows, Archidekt import text or
+    everything: its `view`);
+  - `parse_decklist` reads a pasted list (lines that are not cards, such as
+    a `Total: 100` footer, are skipped and listed back);
   - `parse_deck_export` reads an Archidekt CSV export.
 - **Your decks.** Link your Archidekt account once on the `/account` page.
-  After that, `list_my_decks` (filter by name, format or folder) and
-  `get_my_deck` can read your decks, private ones included. The gateway
+  After that, `list_my_decks` (filter by name, format or folder) lists your
+  decks and `get_deck` reads them, private ones included (its `owner` says
+  whose deck it is). The gateway
   refreshes the stored Archidekt session on its own when it is about to
   expire or Archidekt rejects it, so a link lasts until Archidekt refuses
   the refresh too; each refresh is audited.
@@ -163,9 +167,11 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
   the statistics, a precon-style summary (cut and added percentages, basic
   lands apart) and, on request, a paired goldfish A/B of the two.
 - **Safe writes.** Every edit starts as a proposal:
-  - `propose_deck_changes` (edit a deck) and `propose_new_deck` (build one
-    from a card list, a pasted list or a CSV) save the exact diff and a
-    review link.
+  - `propose_deck_changes` (edit a deck), `propose_new_deck` (build one
+    from a card list, a pasted list or a CSV; it warns about a deck size
+    the format does not allow) and `propose_deck_details` (name,
+    description, format, bracket, privacy, folder, tags, cover) save the
+    exact diff and a review link.
   - The user approves it: on the card the AI app shows next to the
     proposal (Claude on the web, desktop and phones; ChatGPT), with the
     Apply button on the review page, or, when the member chose a Semi-auto
@@ -200,14 +206,17 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
     `/folders` creates and renames folders; Delete deck asks you to type the
     deck's name and keeps a snapshot (and the Archidekt backup copy) first.
     `/precons` lists every preconstructed deck Archidekt knows, by set.
-    None of these is an assistant tool; they are your own buttons.
+    The assistant reaches folder, tags and cover only through a
+    `propose_deck_details` proposal you approve; deleting a deck and
+    creating or renaming folders are your own buttons alone.
 - **Collection.** The cards you own, which is your Collection on Archidekt
   shown and edited through the gateway (nothing about them is stored here):
   add by name or from a scan, count copies, set a card's finish, condition,
   language and price paid, filter, export CSV. Owned cards
   get a green dot on every deck page. `list_collection` and
-  `propose_collection_changes` (a proposal, approved like a deck edit) give
-  the assistant the same.
+  `propose_collection_changes` (a proposal, approved like a deck edit, on
+  the in-chat card too, and read back after it is applied) give the
+  assistant the same.
 - **Likes, bookmarks, follows and comments.** Archidekt's social buttons on
   every deck and user page, each behind a confirmation and sent under your
   own Archidekt name; your own comments can be edited and deleted. Browser-only
@@ -223,7 +232,8 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
 - **Admin page.** Members of `MTG_ADMIN_GROUP` get `/admin` (they don't
   also need `MTG_REQUIRED_GROUP`): who has signed
   in, their activity, per-day usage counts, a System card (version, database
-  size and schema, newest backup), and buttons to disable or enable an
+  size and schema, newest backup and newest backup copy, the research
+  service's state), and buttons to disable or enable an
   account, revoke its tokens and sessions, unlink Archidekt, or delete
   everything the gateway keeps about a person. Unset, the page does not
   exist. Details in
@@ -249,9 +259,10 @@ assistant never has to guess which one to use:
 
 | Job | The one tool | Hidden duplicates |
 | --- | --- | --- |
-| Read any Archidekt deck (rules text on request), or export it in Archidekt's import syntax | `get_deck` | `archidekt_deck`, `archidekt_export` |
-| List the signed-in member's decks | `list_my_decks` | `archidekt_user_decks` |
-| List another user's public decks | `archidekt_user` | |
+| Read any Archidekt deck, the member's own private ones included (rules text on request), or export it in Archidekt's import syntax | `get_deck` | `archidekt_deck`, `archidekt_export` |
+| List the signed-in member's decks | `list_my_decks` | |
+| Search public decks, and list one user's public decks (`owner`) | `search_decks` | `archidekt_user_decks` |
+| Change a deck's settings, folder, tags or cover | `propose_deck_details` | |
 | Legality, structural checks, bracket, curve, colours and price of a deck | `deck_stats` | `validate_archidekt_deck` |
 | Legality of a pasted list that is not a deck yet | `validate_decklist` | |
 | Cuts and adds between two decks, a precon included, with the summary and basics apart | `compare_decks` | `precon_diff` |
@@ -333,9 +344,13 @@ Claude / ChatGPT / browser ──HTTPS──▶ reverse proxy ──▶ mtg-gate
   - Clients can only register `https` return addresses, or `http` on
     localhost.
 - **Archidekt passwords** are used once to get a session and never stored.
-  - The session is encrypted with a key that lives in a Docker secret.
-  - That protects the database and backups. It doesn't protect against
-    whoever runs the server, and users are told so.
+  - The session is encrypted with a key that lives in a Docker secret, and
+    no page, admin tool or log shows it. Backups leave it out altogether
+    (and the identity provider's tokens too), so after a restore members
+    sign in again and relink Archidekt.
+  - That doesn't protect against whoever runs the server, who holds the
+    key; users are told so on the Account page, and tick a box before
+    linking.
 - **Deck changes** need the user's own yes. Text found in decks or tool
   output is never treated as an instruction to edit. Each proposal shows
   which app made it, and disconnecting an app rejects its pending
@@ -344,7 +359,9 @@ Claude / ChatGPT / browser ──HTTPS──▶ reverse proxy ──▶ mtg-gate
 - **Limits.** Sign-in attempts are limited per network, metadata-document
   fetches per site, and Archidekt calls per member
   (`MTG_ARCHIDEKT_CALLS_PER_10_MIN`), so neither a flood nor a looping
-  assistant can wear the gateway or Archidekt down.
+  assistant can wear the gateway or Archidekt down. Archidekt requests from
+  everyone together are spaced out and capped per minute, repeat reads are
+  briefly cached, and "slow down" answers are honoured.
 - **Mystic Forge** has no published ports and no login of its own. Only the
   gateway can reach it.
 

@@ -14,7 +14,12 @@ Your decks stay on Archidekt; the gateway never changes one without showing
 you the exact change first.
 
 1. **Link Archidekt** once on the Account page. The gateway then sees the
-   decks of that account, private ones included.
+   decks of that account, private ones included. Read the note above the
+   form first: Archidekt has no official way for other apps to reach decks,
+   so the gateway uses the same requests archidekt.com's own pages use, and
+   Archidekt's terms restrict automated access, so Archidekt could limit or
+   block an account used this way. Whoever runs the gateway is trusted with
+   the link. You tick a box to say you accept that before linking.
 2. **Open Decks** to browse them the way Archidekt shows them: text, stacks
    or grid, grouped and sorted how you like.
 3. **Scan** a pile of cards with your phone, add them to a deck or to your
@@ -123,9 +128,12 @@ first, so History can undo); only a large removal asks you to confirm.
 
 **Search** finds public decks on Archidekt the way the Archidekt site does:
 by deck name, commander, format, colours or the person who built it,
-ordered by newest, most viewed or largest. Open any result to read it with
-the same views as your own decks; the owner's name opens their profile with
-every public deck they have. From a public deck you can run the statistics,
+ordered by newest, most viewed or largest. Archidekt matches a commander
+by its full name only, so when part of a name ("Krenko") finds nothing, the
+gateway looks it up among cards that can be commanders: one match shows
+"Showing decks led by …", several give a "Did you mean" list to pick from.
+Open any result to read it with the same views as your own decks; the
+owner's name opens their profile with every public deck they have. From a public deck you can run the statistics,
 export it, or clone it into your own account.
 
 **Precons** (from Search or the home page) lists every preconstructed deck
@@ -180,8 +188,10 @@ condition and count.
   collection or a deck, which removes the draft. Nothing expires by age.
 
 Your assistant can read and add to the collection too (`list_collection`,
-`propose_collection_changes`, a proposal you approve), for questions like "which
-cards in this deck do I not own yet?". Adding takes about a second a card,
+`propose_collection_changes`, a proposal you approve on the card in the chat
+or the review page, like a deck edit), for questions like "which cards in
+this deck do I not own yet?". After a collection change is applied, the
+gateway reads the collection back to check every card landed. Adding takes about a second a card,
 because each one is written to Archidekt.
 
 ## Likes, bookmarks, follows and comments
@@ -229,7 +239,10 @@ search for decks with a commander; look up a card, its rulings, prices,
 combos; goldfish a deck; swap cards or build a new deck from a list (each a
 proposal with a review link); read my card photos or use my last scan;
 which cards in this deck do I own. The [assistant skill](SKILL.md) teaches
-the house rules. [CAPABILITIES.md](CAPABILITIES.md) lists every tool the
+the house rules. The assistant can also propose moving a deck to another
+folder, changing its tags or its cover (a settings change you approve);
+deleting a deck and creating or renaming folders stay yours alone.
+[CAPABILITIES.md](CAPABILITIES.md) lists every tool the
 assistant has, which one owns each job, everything you can do by hand, and
 what only one of the two paths can do.
 
@@ -251,4 +264,8 @@ assistants keep working until you disconnect them under **Connected apps**.
 Only
 you can see your decks, proposals, snapshots, scans and collection; another
 member cannot reach them, and neither can their assistant. Nothing is
-public or indexed. More in [ONBOARDING.md](ONBOARDING.md#8-privacy).
+public or indexed. Your Archidekt sign-in is stored encrypted; no page,
+admin tool, log or backup shows it, and backups leave it out, so after the
+gateway is restored from a backup you sign in again and relink Archidekt.
+Whoever runs the gateway is still trusted with it, since the server holds
+the key. More in [ONBOARDING.md](ONBOARDING.md#8-privacy).

@@ -319,6 +319,33 @@ class ScryfallClient:
         self.prints_cache.put(key, out)
         return out
 
+    async def commander_names(self, query: str, *, limit: int = 10) -> list[str]:
+        """Names of cards that can be a commander whose name contains ``query`` (Scryfall's
+        ``is:commander name:...`` search), alphabetical, at most ``limit``. Empty when none match."""
+        q = " ".join(query.replace('"', " ").split())[:120]
+        if len(q) < 2:
+            return []
+        key = f"cmd:{q.lower()}"
+        if (hit := self.names.get(key)) is not None:
+            return hit[:limit]
+        resp = await self._request(
+            "GET",
+            "/cards/search",
+            params={"q": f'is:commander name:"{q}"', "order": "name", "unique": "cards"},
+            interval=self.lookup_interval,
+        )
+        data = self._json(resp)
+        if resp.status_code == 404 or data.get("object") == "error":
+            out: list[str] = []
+        elif data.get("object") != "list" or not isinstance(data.get("data"), list):
+            raise ScryfallError("contract", "Scryfall search returned an unexpected body")
+        else:
+            out = [
+                str(c["name"]) for c in data["data"] if isinstance(c, dict) and isinstance(c.get("name"), str)
+            ]
+        self.names.put(key, out)
+        return out[:limit]
+
     async def collection(self, identifiers: list[dict[str, str]]) -> tuple[list[dict[str, Any]], list[dict]]:
         """Resolve up to 75 identifiers per request. Returns (cards, not_found identifiers)."""
         found: list[dict[str, Any]] = []

@@ -69,7 +69,7 @@ async def test_propose_details_then_apply_changes_and_verifies(stack: Stack) -> 
     snap = h.db.get_snapshot(a["snapshot_id"], "user-1")
     assert snap and snap["deck"]["name"] == "Sample Commander Deck"  # pre-change state kept
 
-    mine = structured(await call(h, token, "get_my_deck", {"deck_id": "42"}))
+    mine = structured(await call(h, token, "get_deck", {"deck_ref": "42", "view": "summary"}))
     assert mine["ok"] and mine["name"] == "Aesi Lands"
 
     # Clearing the bracket and making the deck public again is its own proposal.
@@ -85,9 +85,8 @@ async def test_propose_details_then_apply_changes_and_verifies(stack: Stack) -> 
     assert set(p2["diff"].splitlines()) == {
         "bracket: 3 -> none",
         "private: yes -> no",
-        "description: (changed, 120 chars)",
+        'description: (changed, 120 chars) "' + "x" * 120 + '"',
     }
-    assert "xxxx" not in p2["diff"]
     a2 = structured(await call(h, token, "apply_proposal", {"proposal_id": p2["proposal_id"]}))
     assert a2["ok"] and a2["result"]["verified"] is True, a2
     assert ark.decks[42]["edhBracket"] is None and ark.decks[42]["description"] == "x" * 120
@@ -106,14 +105,15 @@ async def test_details_noop_and_bad_values_are_refused(stack: Stack) -> None:
     # The deck already has this name, is public and has no bracket: nothing would change.
     msg = await refused({"name": "Sample Commander Deck", "private": False, "edh_bracket": None})
     assert "already has these details" in msg
-    assert "deck_format must be one of" in await refused({"deck_format": "cube"})
+    msg = await refused({"deck_format": "cube"})
+    assert "deck_format" in msg and "'commander'" in msg and "'oathbreaker'" in msg
     assert "edh_bracket" in await refused({"edh_bracket": 6})
     assert "edh_bracket" in await refused({"edh_bracket": True})
     assert "name must be" in await refused({"name": ""})
     assert "name must be" in await refused({"name": "n" * 201})
     assert "description" in await refused({"description": "d" * 20_001})
-    assert "private must be" in await refused({"private": "yes"})
-    assert "unknown details: colour" in await refused({"colour": "green", "name": "x"})
+    assert "private" in await refused({"private": "yes"})  # "yes" is not a boolean
+    assert "colour" in await refused({"colour": "green", "name": "x"})
     assert "non-empty object" in await refused({})
     assert ark.updates == [] and ark.patches == []
     assert structured(await call(h, token, "list_my_proposals"))["proposals"] == []
@@ -517,3 +517,29 @@ async def test_restoring_a_snapshot_puts_the_deck_details_back(stack: Stack) -> 
     # Restoring the same snapshot again changes nothing.
     again = structured(await call(h, token, "propose_restore_snapshot", {"snapshot_id": a["snapshot_id"]}))
     assert again["ok"] is False and "already matches" in again["message"], again
+
+
+async def test_restoring_the_snapshot_undoes_a_details_change(stack: Stack) -> None:
+    """R-119: undo works for details too. The snapshot an applied details proposal kept puts the
+    name, description and privacy back (the cards are untouched, so only details are sent)."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    details = {"name": "Renamed by test", "description": "test text", "private": True}
+    p = structured(await call(h, token, "propose_deck_details", {"deck_id": "42", "details": details}))
+    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert a["ok"] and a["state"] == "applied", a
+    assert ark.decks[42]["name"] == "Renamed by test" and ark.decks[42]["private"] is True
+    patches_before = len(ark.patches)
+    r = structured(await call(h, token, "propose_restore_snapshot", {"snapshot_id": a["snapshot_id"]}))
+    assert r["ok"], r
+    assert 'name: "Renamed by test" -> "Sample Commander Deck"' in r["diff"], r["diff"]
+    assert "private: yes -> no" in r["diff"], r["diff"]
+    done = structured(await call(h, token, "apply_proposal", {"proposal_id": r["proposal_id"]}))
+    assert done["ok"] and done["state"] == "applied", done
+    assert done["result"]["verified"] is True
+    assert done["result"]["restored_details"] == ["description", "name", "private"], done["result"]
+    assert ark.decks[42]["name"] == "Sample Commander Deck" and ark.decks[42]["private"] is False
+    assert len(ark.patches) == patches_before  # no card rows sent: only the details differed
+    # nothing left to restore now
+    again = structured(await call(h, token, "propose_restore_snapshot", {"snapshot_id": a["snapshot_id"]}))
+    assert again["ok"] is False and "nothing to restore" in again["message"], again

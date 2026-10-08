@@ -79,6 +79,7 @@ class Server:
                 "action": "link",
                 "archidekt_login": "alice",
                 "archidekt_password": "pw-alice",
+                "accept_risk": "1",
             },
         )
         assert r.status_code == 303, r.text

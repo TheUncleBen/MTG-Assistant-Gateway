@@ -5,7 +5,7 @@ name, commander, owner, format, colour identity and sort order, page through the
 of them on the gateway's own deck page. ``/users/{username}`` is a public profile: that person's
 public decks. Both read Archidekt anonymously (only public decks come back) through the member's
 Archidekt budget, and both need the gateway sign-in like every other page. The same search is
-offered as the ``search_decks`` and ``archidekt_user`` MCP tools and under ``/api/v1``.
+offered as the ``search_decks`` MCP tool (``owner`` for one user's public decks) and under ``/api/v1``.
 
 Deck art on the result cards is shown from Scryfall by the card's id, which Archidekt's listing
 names in its ``featured`` URL; no Archidekt image is loaded.
@@ -14,22 +14,43 @@ names in its ``featured`` URL; no Archidekt image is loaded.
 from __future__ import annotations
 
 import html
-from typing import TYPE_CHECKING, Any
+import logging
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 from urllib.parse import urlencode
 
+from pydantic import Field
 from starlette.requests import Request
 from starlette.responses import Response
 
-from .archidekt import FORMAT_NAMES, SEARCH_ORDERS, format_label, list_row
+from .archidekt import FORMAT_IDS, FORMAT_NAMES, SEARCH_ORDERS, format_label, list_row
 from .deckpage import DECK_CSS, avatar_html, covers_for, deck_list_html
 from .decks import DeckError
 from .pages import _csrf, browser_session, login_redirect
 from .theme import icon, render
 
+SearchOrder = Literal["-viewCount", "-updatedAt", "-createdAt", "-size", "edhBracket"]  # SEARCH_ORDERS
+
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
 
     from .app import AppState
+
+logger = logging.getLogger(__name__)
+
+
+async def commander_names(state: Any, text: str) -> list[str]:
+    """Cards that can be a commander whose name contains ``text`` (Scryfall), for a commander
+    search Archidekt answered with nothing: it matches only a commander's full name. Empty when
+    Scryfall is not loaded or the lookup fails (the plain empty answer then stands)."""
+    scryfall = getattr(getattr(state, "scan", None), "scryfall", None)
+    if scryfall is None:
+        return []
+    try:
+        return await scryfall.commander_names(text)
+    except Exception as exc:
+        logger.info("commander lookup failed: %s", type(exc).__name__)
+        return []
+
 
 SEARCH_CSP = (
     "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; "
@@ -246,11 +267,29 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
         )
         body = search_form_html(query)
         if asked:
+            note = ""
             try:
                 found = await decks.search_decks(sub, **query)
+                if query["commander"] and not found["decks"]:
+                    names = await commander_names(state, query["commander"])
+                    if not any(n.casefold() == query["commander"].casefold() for n in names):
+                        if len(names) == 1:
+                            query = {**query, "commander": names[0]}
+                            found = await decks.search_decks(sub, **query)
+                            note = f"<p class='notice'>Showing decks led by {_esc(names[0])}.</p>"
+                        elif names:
+                            links = ", ".join(
+                                f"<a href='{_esc(search_link(query, commander=n, page=1))}'>{_esc(n)}</a>"
+                                for n in names
+                            )
+                            note = (
+                                "<p class='notice'>No commander has exactly that name. "
+                                f"Did you mean: {links}?</p>"
+                            )
             except DeckError as exc:
                 body += problem(exc)
             else:
+                body += note
                 bits = [b for b in (query["name"], query["commander"], query["owner"]) if b]
                 heading = "Decks" + (" matching " + ", ".join(bits) if bits else "")
                 body += results_html(found, query, heading=heading)
@@ -408,39 +447,49 @@ def add_browse_tools(server: MCPServer, state: AppState) -> None:
             raise RuntimeError("no authenticated user on this request")
         return token.subject
 
+    async def _commander_names(text: str) -> list[str]:
+        return await commander_names(state, text)
+
     @server.tool(
         name="search_decks",
         title="Search public Archidekt decks",
         description=(
             "Search Archidekt's public decks the way its deck search page does. Filters, all optional: "
-            "`name` (part of the deck name), `commander` (a commander's card name), `owner` (Archidekt "
-            "username), `format` (commander, modern, standard, pauper, pioneer, legacy, vintage, brawl, "
-            "historic, oathbreaker), `colors` (letters from WUBRG: colour identity within those colours), "
-            "`order_by` (-viewCount, -updatedAt, -createdAt, "
-            "-size, edhBracket) and `page` (60 decks a page). "
-            "Each result has an id and url; read one with get_deck. Read-only."
+            "`name` (part of the deck name), `commander` (a commander's card name; a partial name is "
+            "looked up and, if several commanders match, returned as commander_suggestions), "
+            "`owner` (Archidekt username), `format` (" + ", ".join(sorted(FORMAT_IDS)) + "), "
+            "`colors` (letters from WUBRG: colour identity within those colours), "
+            "`order_by` (-viewCount, -updatedAt, -createdAt, -size, edhBracket), `page` (60 decks a "
+            "page) and `limit` (how many of the page to return, default 20). For one user's decks "
+            "(their profile), give `owner` with order_by -updatedAt. Each result has an id and url; "
+            "read one with get_deck. This is the one tool for public deck lists; list_my_decks lists "
+            "the signed-in member's own decks, private ones included. Read-only."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )
     async def search_decks(
-        name: str | None = None,
-        commander: str | None = None,
-        owner: str | None = None,
-        format: str | None = None,  # noqa: A002 - named for the user
-        colors: str | None = None,
-        order_by: str = "-viewCount",
-        page: int = 1,
+        name: Annotated[str | None, Field(description="Part of the deck name.")] = None,
+        commander: Annotated[str | None, Field(description="A commander's card name.")] = None,
+        owner: Annotated[str | None, Field(description="An Archidekt username.")] = None,
+        format: Annotated[str | None, Field(description="commander, modern, standard, ...")] = None,  # noqa: A002
+        colors: Annotated[
+            str | None, Field(description="WUBRG letters: colour identity within them.")
+        ] = None,
+        order_by: Annotated[
+            SearchOrder, Field(description="Sort order (default most viewed).")
+        ] = "-viewCount",
+        page: Annotated[int, Field(description="Page of 60 decks, from 1.")] = 1,
+        limit: Annotated[int, Field(description="How many of the page to return, 1 to 60.")] = 20,
     ) -> dict[str, Any]:
-        from .archidekt import FORMAT_IDS
-
         fmt = FORMAT_IDS.get((format or "").strip().lower()) if format else None
         if format and fmt is None and not str(format).isdigit():
             return {"ok": False, "error": "invalid", "message": f"unknown format '{format[:30]}'"}
-        try:
-            found = await decks.search_decks(
+
+        async def run(commander_name: str) -> dict[str, Any]:
+            return await decks.search_decks(
                 _sub(),
                 name=(name or "").strip(),
-                commander=(commander or "").strip(),
+                commander=commander_name,
                 owner=(owner or "").strip(),
                 deck_format=fmt
                 if fmt is not None
@@ -449,33 +498,37 @@ def add_browse_tools(server: MCPServer, state: AppState) -> None:
                 order_by=order_by if order_by in SEARCH_ORDERS else "-viewCount",
                 page=max(1, min(int(page or 1), 17)),
             )
+
+        commander = (commander or "").strip()
+        matched: str | None = None
+        try:
+            found = await run(commander)
+            if commander and not found["decks"]:
+                # Archidekt matches a commander only by its full name, so "Krenko" finds nothing.
+                # Look the name up among cards that can be commanders: one match is searched
+                # again; several come back for the assistant to pick from.
+                names = await _commander_names(commander)
+                exact = [n for n in names if n.casefold() == commander.casefold()]
+                if len(names) == 1 and not exact:
+                    matched = names[0]
+                    found = await run(matched)
+                elif len(names) > 1 and not exact:
+                    return {
+                        "ok": True,
+                        "decks": [],
+                        "count": 0,
+                        "commander_suggestions": names,
+                        "message": f"no commander is named exactly '{commander[:60]}'; search again "
+                        "with one of commander_suggestions",
+                    }
         except DeckError as exc:
             return {"ok": False, "error": exc.kind, "message": str(exc)}
+        if matched:
+            found = {**found, "commander_matched": matched}
+        shown = max(1, min(int(limit or 20), 60))
+        if len(found["decks"]) > shown:
+            found = {**found, "decks": found["decks"][:shown], "more_on_page": True}
         for d in found["decks"]:
             d["url"] = f"https://archidekt.com/decks/{d['id']}"
             d["gateway_url"] = f"{state.settings.public_url}/decks/{d['id']}"
         return {"ok": True, **found}
-
-    @server.tool(
-        name="archidekt_user",
-        title="An Archidekt user's public decks",
-        description=(
-            "The public decks of one Archidekt user by `username` (newest first; `page` for more), like "
-            "their profile page on the site. Read-only. This is the one tool for another user's deck list; "
-            "list_my_decks is for the signed-in member's own."
-        ),
-        annotations={"readOnlyHint": True, "openWorldHint": True},
-    )
-    async def archidekt_user(username: str, page: int = 1) -> dict[str, Any]:
-        try:
-            found = await decks.search_decks(
-                _sub(),
-                owner=(username or "").strip(),
-                order_by="-updatedAt",
-                page=max(1, min(int(page or 1), 17)),
-            )
-        except DeckError as exc:
-            return {"ok": False, "error": exc.kind, "message": str(exc)}
-        for d in found["decks"]:
-            d["url"] = f"https://archidekt.com/decks/{d['id']}"
-        return {"ok": True, "username": username, **found}

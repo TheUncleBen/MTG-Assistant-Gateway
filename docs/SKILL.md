@@ -25,7 +25,7 @@ ChatGPT text to copy, built from the files above.
 - Look things up with the tools instead of going from memory, and say which
   tool a fact came from.
 - Load any deck the right way: an Archidekt link with `get_deck`, your own
-  decks with `list_my_decks` and `get_my_deck`, a pasted list with
+  decks with `list_my_decks` and then `get_deck`, a pasted list with
   `parse_decklist`, or an Archidekt CSV export with `parse_deck_export`.
 - Run goldfish simulations and always report the seed, number of games,
   mulligan settings, what wasn't simulated and the confidence intervals,
