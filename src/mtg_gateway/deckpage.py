@@ -319,6 +319,14 @@ def banner_html(
             f"<form method='post' action='/decks/{did}/clone' class='inline'>{csrf_in}"
             f"<button type='submit'>{icon('clone')} Clone deck</button></form>"
         )
+    # Archidekt's own playtester (draw, mulligan, play by hand) for any deck, on archidekt.com:
+    # the gateway builds no copy of it, so a game plays the same wherever it is started. A
+    # private deck needs the person's own Archidekt sign-in in that browser.
+    primary += (
+        f"<a class='btn' href='https://archidekt.com/playtester-v2/{did}' target='_blank' "
+        f"rel='noreferrer noopener' title='Draw and play this deck by hand in Archidekt&#39;s playtester'>"
+        f"{icon('play')} Playtest</a>"
+    )
     more_items = []
     if own and csrf:
         more_items.append(f"<a href='/decks/{did}/settings'>{icon('settings')} Deck settings</a>")
@@ -329,7 +337,9 @@ def banner_html(
     if csrf:
         more_items.append(
             f"<form method='post' action='/decks/{did}/report'>{csrf_in}"
-            f"<button type='submit'>{icon('report')} Run deck report</button></form>"
+            "<button type='submit' title='Statistics, validation and the goldfish simulation, the same "
+            f"run the assistant&#39;s run_deck_report makes (300 games)'>{icon('report')} Run deck report"
+            "</button></form>"
         )
     more_items.append(f"<a href='/decks/{did}#stats'>{icon('stats')} Deck stats</a>")
     more_items.append(

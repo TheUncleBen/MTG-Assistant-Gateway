@@ -63,6 +63,15 @@ One deck:
   moves go to Archidekt at once, with a snapshot taken first.
 - **Quick add** types a card name and takes you to the editor with it
   filled in.
+- **Playtest** opens the deck in Archidekt's own playtester (draw an
+  opening hand, mulligan, play turns by hand). The gateway does not copy
+  that tool, so a game plays the same whether you start it here, in the
+  app (which opens your phone browser) or on archidekt.com; a private deck
+  needs your own Archidekt sign-in in that browser.
+- **Run deck report** (More menu) runs the statistics, the decklist
+  validation and the goldfish simulation (300 games) and files the result
+  under History. It is the same run the assistant's `run_deck_report` makes,
+  so the numbers match whichever way it is started.
 - The **More** menu in the banner holds Edit deck, Deck settings, Clone, Run
   report, Export (text, JSON or CSV), the deck's page on Archidekt and
   **Delete deck**. Deleting asks you to type the deck's name; a snapshot is

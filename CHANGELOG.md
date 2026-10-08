@@ -52,6 +52,10 @@ one owner per capability among the assistant's tools.
   `// Sideboard` headers and `SB:` rows land in Archidekt's Sideboard (or Maybeboard) category
   instead of being dropped, `^Label^` colour tags are read as labels rather than categories, and
   `#CustomCard` marks are tolerated. `propose_new_deck` rows take `finish` (normal, foil, etched).
+- Deck page: a **Playtest** button opens the deck in Archidekt's own playtester on archidekt.com (the
+  app hands it to the phone browser), so hand playtesting is the same tool everywhere; **Run deck
+  report** says that it is the same statistics, validation and 300-game simulation the assistant
+  runs.
 - Deck page statistics: **Probability of draw** (at least or exactly N cards of a category, name,
   type, subtype or mana value in the first N cards, the hypergeometric odds Archidekt's Probability
   tab shows) and **Deck checks** (the structural checks `deck_stats` returns, in words).
