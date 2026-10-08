@@ -56,16 +56,17 @@ def test_disclosure_names_what_the_operator_and_admins_can_and_cannot_do() -> No
         "Your password is not stored anywhere by the gateway.",
         "the key that opens it is on the same server",
         "act as you on Archidekt until it expires",
-        "They cannot get your password from it.",
+        "They cannot get your password from the session.",
         "They control the code this server runs.",
         "Link only if you trust the person who runs this server.",
         "cannot open your proposals",
         "The gateway never writes your password or your session to its logs.",
-        "Backups leave your session out.",
+        "The gateway's own backups leave your session out",
         "about 40 days after you link",
         "Whether the session also stops working on Archidekt's side is not known",
         "Whether changing your Archidekt password ends it is not known either.",
-        "the stored session is only deleted the next time",
+        "deleted within about an hour if the person who runs the gateway turned on its hourly clean-up",
+        "the next time you or one of your apps tries to use the gateway",
         "Archidekt's terms of service restrict automated access",
     ):
         assert must in text, must
@@ -134,17 +135,22 @@ async def test_stored_session_is_sealed_to_its_member(stack: Stack) -> None:
 
 
 async def test_session_stored_before_sealing_is_refused_until_resealed(stack: Stack) -> None:
+    """An unsealed blob (0.7.6 and earlier) is sealed at start to the row that holds it then;
+    until then it is not used. A blob sealed to someone else is never resealed."""
     h = stack.h
     token = await linked_user(stack)
     decks = _decks(stack)
     secret = _raw(stack, "user-1")
     legacy = json.dumps({"access": secret["access"], "refresh": secret["refresh"]})
     h.db.update_link_secret("user-1", decks.fernet.encrypt(legacy.encode()).decode())
-    # Moved to another member before the reseal, it is not sealed to that member either.
-    h.db.save_link("user-2", username="x", user_id="1", secret_enc=decks.fernet.encrypt(b'{"p":1}').decode())
+    foreign = h.db.get_link("user-1")["secret_enc"]
+    sealed_to_1 = decks._seal("user-1", secret["access"], secret["refresh"])
+    h.db.save_link("user-2", username="x", user_id="1", secret_enc=sealed_to_1)
     assert structured(await call(h, token, "list_my_decks"))["ok"] is False
     assert decks.reseal_legacy_links() == 1
-    assert _raw(stack, "user-1")["s"] == "user-1"
+    assert _raw(stack, "user-1")["s"] == "user-1" and h.db.get_link("user-1")["secret_enc"] != foreign
+    assert h.db.get_link("user-2")["secret_enc"] == sealed_to_1  # left alone, and still unusable
+    assert decks.status("user-2")["link_expires_at"] is None
     assert structured(await call(h, token, "list_my_decks"))["ok"] is True
     assert decks.reseal_legacy_links() == 0
 
@@ -163,7 +169,7 @@ async def test_expiry_comes_from_the_refresh_token_and_is_shown(stack: Stack) ->
     )
     assert decks.status("user-1")["link_expires_at"] == exp
     page = (await b.http.get("/account")).text
-    assert f"Archidekt's session stops working {pages._when(exp)}" in page
+    assert f"Archidekt's session stops working on {pages._when(exp)}" in page
     # without a refresh token, the access token's own expiry is the end
     h.db.update_link_secret("user-1", decks._seal("user-1", access, None))
     assert decks.status("user-1")["link_expires_at"] == access_exp

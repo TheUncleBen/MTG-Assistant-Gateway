@@ -1171,12 +1171,23 @@ class DeckService:
         # (One small lock per member who ever linked; members are a known, signed-in set.)
         async with self._link_locks.setdefault(sub, asyncio.Lock()):
             session = await self._link_attempt(sub, login, password)
-        self.db.save_link(
+        # The sign-in took a moment: an admin may have disabled the account, the member may have
+        # been removed from the group or deleted their data meanwhile. Store nothing then.
+        user = self.db.get_user(sub)
+        refused = DeckError(
+            "forbidden", "Your account can no longer link Archidekt here; nothing was stored."
+        )
+        allowed = user is not None and self.settings.grants_access(user.get("groups") or [])
+        if not allowed or user.get("disabled_at"):
+            raise refused
+        if not self.db.save_link(
             sub,
             username=session["username"],
             user_id=session.get("user_id"),
             secret_enc=self._seal(sub, session["access"], session.get("refresh")),
-        )
+            only_member=True,
+        ):
+            raise refused
         self._audit("archidekt_linked", sub=sub, detail={"archidekt_username": session["username"]})
         return self.status(sub)
 
@@ -1253,7 +1264,9 @@ class DeckService:
 
     def reseal_legacy_links(self) -> int:
         """Seal every stored session written before sealing (or by an older image after a
-        rollback) to its own member. Run at startup; returns how many were resealed."""
+        rollback) to the member whose row holds it at startup; returns how many were resealed.
+        An unsealed blob carries no owner, so this cannot tell whether it was moved between rows
+        before then: sealing protects sessions from the first start of 0.7.7 on."""
         n = 0
         for row in self.db.active_links():
             secret = self._open(row["sub"], row["secret_enc"], legacy=True)

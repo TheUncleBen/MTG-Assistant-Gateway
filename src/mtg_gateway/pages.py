@@ -242,6 +242,8 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         sub, sid = current(request)
         if not sub:
             return to_login("/account")
+        # Whatever this form does (link, unlink, ...) is the member's own browser acting.
+        current_client.set(BROWSER_CLIENT_ID)
         data = await form(request)
         if isinstance(data, Response):
             return data
@@ -649,18 +651,18 @@ def _account_body(state: Any, sub: str, csrf: str | None) -> str:
             "<span class='badge ok'>active</span></p>"
             f"<p class='muted small'>Linked {_when(info['linked_at'])}. "
             f"Last used {_when(info['last_used_at']) or 'never'}."
-            + (f" Archidekt's session stops working {expires}; then you link again." if expires else "")
+            + (f" Archidekt's session stops working on {expires}; then you link again." if expires else "")
             + "</p>"
             f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='unlink'>"
             "<button class='danger'>Unlink and delete stored session</button></form>"
             "<p class='muted small'>Unlinking deletes the gateway's copy of the session at once. "
             "Whether the session also stops working on Archidekt's side is not known.</p>"
-            f"{link_disclosure.linked_html()}</div>"
+            f"{link_disclosure.linked_html(_sweep_on(state))}</div>"
         )
     else:
         out.append(
             "<div class='card'><h2>Link your Archidekt account</h2>"
-            f"{link_disclosure.form_html()}"
+            f"{link_disclosure.form_html(_sweep_on(state))}"
             f"<form method='post' autocomplete='off'>{csrf_in}"
             "<input type='hidden' name='action' value='link'>"
             "<label for='l'>Archidekt username or email</label>"
@@ -675,6 +677,12 @@ def _account_body(state: Any, sub: str, csrf: str | None) -> str:
     s = state.settings
     out.append(_delete_card(csrf_in, s.backup_keep_days if s.backup_dir is not None else None))
     return "".join(out)
+
+
+def _sweep_on(state: Any) -> bool:
+    """Whether this gateway runs the removed-member clean-up (idp_sweep.py)."""
+    sweep = getattr(state, "sweep", None)
+    return bool(sweep is not None and sweep.enabled)
 
 
 def _mode_card(state: Any, sub: str, csrf_in: str) -> str:

@@ -79,6 +79,7 @@ from .decklist import DecklistError, ListCard, clean_text, parse_decklist, to_te
 from .decks import DeckError, DeckService, _clean_deck_id, current_client, deck_to_text, scopes_allow_writes
 from .guide import add_guide_routes
 from .home import add_home_routes
+from .idp_sweep import AuthentikSweep
 from .membership import Membership, MembershipChecker
 from .metrics import Metrics
 from .mf_proxy import ALLOWED_TOOLS, MysticForgeProxy
@@ -125,6 +126,7 @@ class AppState:
     reports: Any = None
     metrics: Metrics | None = None
     membership: MembershipChecker | None = None
+    sweep: AuthentikSweep | None = None  # removed-member clean-up (idp_sweep.py)
 
 
 def _tool_error(exc: DeckError) -> dict[str, object]:
@@ -471,11 +473,20 @@ def build_mcp_server(state: AppState) -> MCPServer:
         if interrupted:
             logger.warning("%d deck change(s) cut off by the last shutdown were marked failed", interrupted)
         await asyncio.to_thread(state.db.purge_expired)
-        resealed = await asyncio.to_thread(state.decks.reseal_legacy_links)
-        if resealed:
-            logger.info("%d stored Archidekt session(s) sealed to their member", resealed)
-        await asyncio.to_thread(state.decks.purge_expired_links)
+        try:
+            resealed = await asyncio.to_thread(state.decks.reseal_legacy_links)
+            if resealed:
+                logger.info("%d stored Archidekt session(s) sealed to their member", resealed)
+            await asyncio.to_thread(state.decks.purge_expired_links)
+        except Exception:  # never keep the gateway from starting; the hourly round tries again
+            logger.exception("sealing or purging stored Archidekt sessions failed")
         tasks = [asyncio.create_task(purge_loop(state.db, also=state.decks.purge_expired_links))]
+        if state.sweep is None:
+            state.sweep = AuthentikSweep(s, state.db, state.decks)
+        if state.sweep.enabled:
+            tasks.append(asyncio.create_task(state.sweep.loop()))
+        elif state.sweep.why_off():
+            logger.warning("%s", state.sweep.why_off())
         if s.backup_dir is not None:
             s.backup_dir.mkdir(parents=True, exist_ok=True)
             tasks.append(

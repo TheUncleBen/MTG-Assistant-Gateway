@@ -287,14 +287,14 @@ Android app, which shows the same page). You tick a box to say you have
 read it before anything is sent to Archidekt, and once you are linked it
 stays on the Account page under **What linking gives this gateway and the
 person who runs it**. Your Account page also shows the date your link stops
-working.
+working, and whether this gateway runs the hourly clean-up mentioned at the end.
 
 Linking gives this gateway a working sign-in to your Archidekt account. Read what that means for you before you link.
 
 **What linking does**
 
 - Your Archidekt username or email and password go from this server to Archidekt once, to sign you in. Your password is not stored anywhere by the gateway.
-- Archidekt answers with a sign-in session for your account: the same kind archidekt.com gets when you sign in there. Archidekt offers no limited version, so the session can do whatever your Archidekt sign-in can do.
+- Archidekt answers with a sign-in session for your account: the same kind archidekt.com gets when you sign in there. As far as we know Archidekt offers no limited version, so assume the session can do whatever your Archidekt sign-in can do.
 - The gateway keeps that session so it can work with your account without asking for your password again.
 
 **What the gateway uses it for**
@@ -307,32 +307,36 @@ Linking gives this gateway a working sign-in to your Archidekt account. Read wha
 **What is stored**
 
 - Stored, encrypted: the session (a short-lived access token and the refresh token that renews it).
-- Stored as plain text: your Archidekt username and user number, when you linked, and when the link was last used.
+- Stored as plain text: your Archidekt username and user number (if Archidekt does not send your username, what you typed to sign in, which may be your email); when you linked, when the session was last renewed and last used; and activity-log entries for each link, unlink, renewal and failed attempt.
 - Never stored: your Archidekt password.
 
 **What the person who runs this server can see and do**
 
-- The session is encrypted, but the key that opens it is on the same server. Anyone with access to the server and that key can open the session and use it to act as you on Archidekt until it expires: read, change or delete your decks and collection, or anything else your Archidekt sign-in allows. They cannot get your password from it.
+- The session is encrypted, but the key that opens it is on the same server. Anyone with access to the server and that key can open the session and use it to act as you on Archidekt until it expires: read, change or delete your decks and collection, or anything else your Archidekt sign-in allows. If Archidekt lets a session change your email or password (not known), they could use that to keep your account after the session expires. They cannot get your password from the session.
 - They can read everything else the gateway keeps about you, which is not encrypted: your Archidekt username, your proposed and applied deck changes, deck snapshots, scans, and the activity log.
 - They control the code this server runs. This gateway's code never keeps your password, but someone who changes the code could. Link only if you trust the person who runs this server.
 
 **What admins on this site can see and do**
 
-- Admins use the admin pages, not the server itself. They see your name, email, groups, your Archidekt username, and the activity log: what happened and when (a link, an unlink, a proposal made or applied, with deck and proposal numbers) and which app did it.
+- Admins use the admin pages, not the server itself. They see your name, email and groups, your Archidekt username, when you first signed in and were last seen, which apps you connected, and the activity log: what you did, when and with which app, including links and unlinks, proposals, deck and collection changes, scans, likes, bookmarks, follows and comments, with deck, proposal and comment numbers.
 - They can unlink your Archidekt account, disable your account, sign you out everywhere and delete your data.
 - They cannot see your password or your session, cannot open your proposals, and have no button that uses your link to read or change your decks. An admin who also has access to the server can do everything in the section above.
+
+**Who else can use your link**
+
+- Anyone who can sign in to this gateway as you can use your link through it, just as you can: someone holding your browser session or an assistant you connected, and the person who runs the sign-in service this gateway uses, if they can sign in as you there.
 
 **Logs and backups**
 
 - The gateway never writes your password or your session to its logs.
-- At the usual log level it writes no Archidekt addresses. If the person who runs it turns on debug logging, the logs list the Archidekt addresses it calls, which include deck numbers and usernames.
-- Backups leave your session out. They keep everything else listed above.
+- At the usual log level it writes no Archidekt addresses or usernames; a few messages include a deck number. If the person who runs it turns on debug logging, the logs list the Archidekt addresses it calls, which include deck numbers and usernames.
+- The gateway's own backups leave your session out and keep everything else listed above. A copy of the server's disk made some other way would include the session, still encrypted.
 
 **How long it lasts and how to end it**
 
 - The access token lasts about an hour; when it runs out, the gateway gets a new one with the refresh token. Archidekt's refresh token stops working about 40 days after you link (measured in October 2026; Archidekt sets this and can change it). Then you link again. Your Account page shows the date for your link.
 - Unlink on the Account page deletes the gateway's copy at once. So do Delete my data and an admin's Unlink or Disable.
-- If you are removed from this gateway's group, you lose access to the gateway at once, but the stored session is only deleted the next time you or one of your apps tries to use the gateway, when an admin presses Disable or Unlink, or when it expires.
+- If you are removed from this gateway's group, or your account at the sign-in service is deactivated or deleted, you lose access to the gateway at once. Your stored session is deleted within about an hour if the person who runs the gateway turned on its hourly clean-up (it needs an extra setting at the sign-in service). Without it, the session is deleted when an admin presses Disable or Unlink, when it expires, or (after a removal from the group) the next time you or one of your apps tries to use the gateway.
 - Unlinking deletes only the gateway's copy. Whether the session also stops working on Archidekt's side is not known, so a copy someone already took may keep working until it expires. Whether changing your Archidekt password ends it is not known either.
 
 **Archidekt's terms**

@@ -12,14 +12,19 @@ Every sentence has to stay true of the code; the source of each claim is noted b
   ``DeckService._call`` (decks, folders, tags, collection) and ``social.py`` (browser-only clicks);
 - access token about an hour, refresh token about 40 days, refresh token not rotated: Archidekt's
   own token claims, measured on a live account on 2026-10-05 (``ArchidektClient.refresh``); the
-  date shown on the Account page is read from the member's own stored token (``link_expiry``);
+  date shown on the Account page is read from the member's own stored token
+  (``DeckService._expiry``, ``link_expires_at``);
 - admins: ``admin.py`` shows the Archidekt username, the activity log and the unlink, disable,
   revoke and delete actions, and calls nothing that uses a member's session;
 - logs: no logger is given the password or a token (``tests/test_link_disclosure.py`` checks the
   DEBUG output of a link, refresh, use and unlink); httpx's request lines (Archidekt URLs) are
-  logged at DEBUG only (``__main__.py``);
+  logged at DEBUG only, httpcore (response headers) never (``__main__.py``); the Archidekt client
+  keeps no cookies (``ArchidektClient.__init__``);
+- who else: any request signed in as the member (browser session, connected app) acts with the
+  member's link; the identity provider decides who can sign in as whom;
 - backups: ``Database.backup_to`` blanks every stored session before the copy is written;
 - ending it: unlink, delete my data, admin unlink or disable blank the stored session at once;
+  the optional hourly clean-up (``idp_sweep.py``) does for members Authentik no longer lists;
   removal from the required group does so only at the member's next request (``membership.py``),
   and the hourly purge does once the stored refresh token has expired
   (``DeckService.purge_expired_links``).
@@ -45,8 +50,8 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "Your Archidekt username or email and password go from this server to Archidekt once, "
             "to sign you in. Your password is not stored anywhere by the gateway.",
             "Archidekt answers with a sign-in session for your account: the same kind archidekt.com "
-            "gets when you sign in there. Archidekt offers no limited version, so the session can "
-            "do whatever your Archidekt sign-in can do.",
+            "gets when you sign in there. As far as we know Archidekt offers no limited version, so "
+            "assume the session can do whatever your Archidekt sign-in can do.",
             "The gateway keeps that session so it can work with your account without asking for "
             "your password again.",
         ),
@@ -68,8 +73,10 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             "Stored, encrypted: the session (a short-lived access token and the refresh token "
             "that renews it).",
-            "Stored as plain text: your Archidekt username and user number, when you linked, and "
-            "when the link was last used.",
+            "Stored as plain text: your Archidekt username and user number (if Archidekt does not "
+            "send your username, what you typed to sign in, which may be your email); when you "
+            "linked, when the session was last renewed and last used; and activity-log entries for "
+            "each link, unlink, renewal and failed attempt.",
             "Never stored: your Archidekt password.",
         ),
     ),
@@ -79,7 +86,9 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "The session is encrypted, but the key that opens it is on the same server. Anyone "
             "with access to the server and that key can open the session and use it to act as you "
             "on Archidekt until it expires: read, change or delete your decks and collection, or "
-            "anything else your Archidekt sign-in allows. They cannot get your password from it.",
+            "anything else your Archidekt sign-in allows. If Archidekt lets a session change your "
+            "email or password (not known), they could use that to keep your account after the "
+            "session expires. They cannot get your password from the session.",
             "They can read everything else the gateway keeps about you, which is not encrypted: "
             "your Archidekt username, your proposed and applied deck changes, deck snapshots, "
             "scans, and the activity log.",
@@ -91,10 +100,11 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         "What admins on this site can see and do",
         (
-            "Admins use the admin pages, not the server itself. They see your name, email, "
-            "groups, your Archidekt username, and the activity log: what happened and when (a "
-            "link, an unlink, a proposal made or applied, with deck and proposal numbers) and "
-            "which app did it.",
+            "Admins use the admin pages, not the server itself. They see your name, email and "
+            "groups, your Archidekt username, when you first signed in and were last seen, which "
+            "apps you connected, and the activity log: what you did, when and with which app, "
+            "including links and unlinks, proposals, deck and collection changes, scans, likes, "
+            "bookmarks, follows and comments, with deck, proposal and comment numbers.",
             "They can unlink your Archidekt account, disable your account, sign you out "
             "everywhere and delete your data.",
             "They cannot see your password or your session, cannot open your proposals, and have "
@@ -103,13 +113,24 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
         ),
     ),
     (
+        "Who else can use your link",
+        (
+            "Anyone who can sign in to this gateway as you can use your link through it, just as "
+            "you can: someone holding your browser session or an assistant you connected, and the "
+            "person who runs the sign-in service this gateway uses, if they can sign in as you "
+            "there.",
+        ),
+    ),
+    (
         "Logs and backups",
         (
             "The gateway never writes your password or your session to its logs.",
-            "At the usual log level it writes no Archidekt addresses. If the person who runs it "
-            "turns on debug logging, the logs list the Archidekt addresses it calls, which "
-            "include deck numbers and usernames.",
-            "Backups leave your session out. They keep everything else listed above.",
+            "At the usual log level it writes no Archidekt addresses or usernames; a few messages "
+            "include a deck number. If the person who runs it turns on debug logging, the logs "
+            "list the Archidekt addresses it calls, which include deck numbers and usernames.",
+            "The gateway's own backups leave your session out and keep everything else listed "
+            "above. A copy of the server's disk made some other way would include the session, "
+            "still encrypted.",
         ),
     ),
     (
@@ -122,10 +143,13 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "Account page shows the date for your link.",
             "Unlink on the Account page deletes the gateway's copy at once. So do Delete my data "
             "and an admin's Unlink or Disable.",
-            "If you are removed from this gateway's group, you lose access to the gateway at "
-            "once, but the stored session is only deleted the next time you or one of your apps "
-            "tries to use the gateway, when an admin presses Disable or Unlink, or when it "
-            "expires.",
+            "If you are removed from this gateway's group, or your account at the sign-in service "
+            "is deactivated or deleted, you lose access to the gateway at once. Your stored "
+            "session is deleted within about an hour if the person who runs the gateway turned on "
+            "its hourly clean-up (it needs an extra setting at the sign-in service). Without it, "
+            "the session is deleted when an admin presses Disable or Unlink, when it expires, or "
+            "(after a removal from the group) the next time you or one of your apps tries to use "
+            "the gateway.",
             "Unlinking deletes only the gateway's copy. Whether the session also stops working on "
             "Archidekt's side is not known, so a copy someone already took may keep working until "
             "it expires. Whether changing your Archidekt password ends it is not known either.",
@@ -145,31 +169,38 @@ ACKNOWLEDGE = (
 )
 
 
-def body_html() -> str:
-    """The sections as HTML (headings and lists), without a wrapper."""
+SWEEP_ON = "On this gateway the hourly clean-up is on."
+SWEEP_OFF = "On this gateway the hourly clean-up is off."
+
+
+def body_html(sweep_on: bool | None = None) -> str:
+    """The sections as HTML (headings and lists), without a wrapper. ``sweep_on`` adds whether
+    this gateway runs the removed-member clean-up (idp_sweep.py) to the last section."""
     out = []
-    for heading, lines in SECTIONS:
-        items = "".join(f"<li>{html.escape(line)}</li>" for line in lines)
-        out.append(f"<h3>{html.escape(heading)}</h3><ul>{items}</ul>")
+    for i, (heading, lines) in enumerate(SECTIONS):
+        items = [html.escape(line) for line in lines]
+        if sweep_on is not None and i == len(SECTIONS) - 1:
+            items.append(html.escape(SWEEP_ON if sweep_on else SWEEP_OFF))
+        out.append(f"<h3>{html.escape(heading)}</h3><ul>{''.join(f'<li>{x}</li>' for x in items)}</ul>")
     return "".join(out)
 
 
-def form_html() -> str:
+def form_html(sweep_on: bool | None = None) -> str:
     """Above the link form: everything, open, plus Archidekt's terms."""
     return (
         "<div class='notice disclosure' id='archidekt-disclosure'>"
         f"<p><strong>Before you link.</strong> {html.escape(LEAD)}</p>"
-        f"{body_html()}"
+        f"{body_html(sweep_on)}"
         f"<h3>Archidekt's terms</h3><p>{html.escape(TERMS_NOTE)}</p></div>"
     )
 
 
-def linked_html() -> str:
+def linked_html(sweep_on: bool | None = None) -> str:
     """On the Account page once linked: the same text, folded, so it stays readable later."""
     return (
         "<details class='disclosure' id='archidekt-disclosure'>"
         "<summary>What linking gives this gateway and the person who runs it</summary>"
-        f"{body_html()}"
+        f"{body_html(sweep_on)}"
         f"<h3>Archidekt's terms</h3><p>{html.escape(TERMS_NOTE)}</p></details>"
     )
 

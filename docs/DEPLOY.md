@@ -180,6 +180,13 @@ The stack expects three Swarm secrets with exactly these names:
 | `mtg_session_secret` | A random string of 32+ characters that signs the browser sign-in cookie. No need to keep a copy |
 | `mtg_oidc_client_secret` | The Client Secret from the Authentik provider in step 3 |
 
+A fourth secret is optional: `mtg_authentik_api_token`, an Authentik API
+token that may only view groups, turns on the hourly clean-up of removed
+members' stored Archidekt sessions. Its setup, and the three stack lines to
+uncomment, are in
+[IDP-AUTHENTIK.md](IDP-AUTHENTIK.md#12-optional-removed-member-clean-up).
+Without it the gateway works the same, with the clean-up off.
+
 Make the random values on your own machine, right when you need them. They
 only ever go into the secret, never into the stack's environment variables,
 a file in this repository, or a chat with an assistant. Pick one of the two
@@ -574,6 +581,8 @@ gateway's `environment:` in the stack file, or it has no effect.
 | `MTG_REQUIRED_GROUP` | yes, *stack* | | Group a user must be in. The gateway refuses to start with it empty unless `MTG_ALLOW_ANY_IDP_USER` is `true` |
 | `MTG_ALLOW_ANY_IDP_USER` | no, *stack* | `false` | `true` lets an empty `MTG_REQUIRED_GROUP` through, so anyone your identity provider signs in gets in. Only for an identity provider that already admits nobody else |
 | `MTG_ADMIN_GROUP` | no, *stack* | empty (no admin page) | Identity-provider group whose members get the `/admin` pages and `/api/v1/admin` (users, activity, metrics; disable, enable, revoke, unlink, delete data). Checked live like `MTG_REQUIRED_GROUP`. Members of this group may sign in even when they aren't in `MTG_REQUIRED_GROUP` (since 0.6.6). Unset or empty, the admin routes answer 404 for everyone. Details in [OPERATIONS.md](OPERATIONS.md#the-admin-page) |
+| `MTG_AUTHENTIK_API_TOKEN_FILE` | no, *stack* | empty (off) | Authentik only. File holding an Authentik API token that may only view groups (`/run/secrets/mtg_authentik_api_token`, an optional secret). With it, once an hour the gateway asks Authentik who is in `MTG_REQUIRED_GROUP` and `MTG_ADMIN_GROUP` and deletes the stored Archidekt session of every linked member who is in neither or is deactivated. An answer that can't be trusted deletes nothing. A missing or unreadable file leaves the clean-up off with one warning at start. Setup: [IDP-AUTHENTIK.md](IDP-AUTHENTIK.md#12-optional-removed-member-clean-up) |
+| `MTG_AUTHENTIK_API_URL` | no, *stack* | the scheme and host of `MTG_OIDC_ISSUER` | Where the clean-up reaches Authentik's API. https only |
 | `MTG_OIDC_GROUPS_CLAIM` | no, *stack* | `groups` | Dot-path to the group list in the ID token (or userinfo) claims. Authentik: `groups`; Keycloak: `realm_access.roles`; Zitadel: `urn:zitadel:iam:org:project:roles` (a dict whose keys are the role names also works; a key whose value is empty or `false` does not count). The whole value is tried as one claim name first, so Auth0-style `https://example.com/groups` works too. Names are compared exactly, with no trimming. A missing or differently shaped claim means no groups, so `MTG_REQUIRED_GROUP` refuses the sign-in |
 | `MTG_OIDC_TOKEN_AUTH_METHOD` | no, *stack* | `client_secret_post` | How the gateway sends its client secret to the token endpoint: `client_secret_post` (in the form body) or `client_secret_basic` (HTTP Basic header). Match what the client is configured for in the identity provider |
 | `MTG_DATA_DIR` | no, *stack* | `/data` | Where the SQLite database lives. In the stack, the variable is the folder on the host, mounted at `/data` |

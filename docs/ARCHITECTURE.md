@@ -196,7 +196,11 @@ For the exact devices and plans tested, see
   browser session and stored provider token is revoked, and a removal from
   the group revokes their Archidekt link too (a deactivated or deleted
   account, which the provider reports only as a refused token, keeps the
-  link until an admin deletes their data). Removing someone from `MTG_ADMIN_GROUP` takes the admin page away
+  stored session until an admin presses Disable or Unlink, or it expires).
+  With Authentik, an optional hourly clean-up (`src/mtg_gateway/idp_sweep.py`,
+  a view-groups-only API token) asks who is in the two groups now and
+  deletes the stored session of every linked member who is in neither or is
+  deactivated; an empty, partial or failed answer deletes nothing. Removing someone from `MTG_ADMIN_GROUP` takes the admin page away
   the same way. This doesn't rely on the provider revoking anything:
   Authentik, for one, keeps honouring a removed member's refresh token. If
   the provider can't be reached, requests are refused with 503 and nothing
@@ -246,7 +250,9 @@ For the exact devices and plans tested, see
     Archidekt's terms. Linking needs a ticked box; the text stays on the
     Account page afterwards.
   - **Sealed and dated.** The encrypted blob names its purpose and the
-    member's subject and is refused under any other member's link. The
+    member's subject and is refused under any other member's link. A
+    session stored by 0.7.6 or earlier carries no owner, so at the first
+    start of 0.7.7 it is sealed to the member whose row holds it then. The
     Account page shows when the session stops working, read from the refresh
     token's own `exp` (Archidekt does not rotate it, so it is fixed at link
     time), and the hourly purge deletes sessions past that date.

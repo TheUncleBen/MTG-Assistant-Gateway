@@ -48,7 +48,10 @@ gateway tokens, browser sessions and stored provider tokens are revoked.
 A removal from the group revokes their Archidekt link too, at that next
 request (an admin's **Disable** deletes it at once); a deactivated or
 deleted account (which the provider reports only as a refused token) keeps
-it until an admin deletes their data. If the provider can't be reached, or
+its stored Archidekt session until an admin presses **Disable** or
+**Unlink**, or it expires (about 40 days after linking). The hourly
+removed-member clean-up that closes this gap needs Authentik's API, so it is
+not available with other providers. If the provider can't be reached, or
 refuses the gateway itself (a wrong client secret, say), requests are
 refused with 503 and nothing is revoked.
 

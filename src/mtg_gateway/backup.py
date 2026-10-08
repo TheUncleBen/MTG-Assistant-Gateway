@@ -174,7 +174,10 @@ async def purge_loop(
         await asyncio.sleep(interval)
         try:
             await asyncio.to_thread(db.purge_expired)
-            if also is not None:
-                await asyncio.to_thread(also)
         except Exception:
             logger.exception("database purge failed")
+        if also is not None:
+            try:
+                await asyncio.to_thread(also)
+            except Exception:
+                logger.exception("purge of expired Archidekt sessions failed")

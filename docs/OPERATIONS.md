@@ -322,8 +322,8 @@ secret.
    next request (see the note on **Disable** below); the audit log gets
    a `membership_revoked` row with the reason `not_in_group`. A deactivated
    or deleted user shows up only as a refused token, so they lose every
-   token and session but keep their Archidekt link (an admin can remove it
-   with **Delete data**); the audit log gets a `membership_unverifiable` row
+   token and session but keep their stored Archidekt session (an admin
+   removes it with **Disable**, **Unlink Archidekt** or **Delete data**); the audit log gets a `membership_unverifiable` row
    with the reason (`idp_refused_refresh`, `idp_refused_userinfo` and so
    on). A new sign-in then fails at Authentik.
 
@@ -337,7 +337,20 @@ secret.
    presses **Disable** or **Unlink Archidekt**, or until the session expires
    (about 40 days after they linked; the hourly clean-up then deletes it).
    **Disable** deletes it at once and keeps them out even if they are put
-   back in the group by mistake.
+   back in the group by mistake. The same holds for someone deactivated or
+   deleted in Authentik.
+
+   **Optional: the hourly removed-member clean-up.** With an Authentik API
+   token that may only view groups (setup in
+   [IDP-AUTHENTIK.md](IDP-AUTHENTIK.md#12-optional-removed-member-clean-up)),
+   the gateway asks Authentik once an hour who is in `MTG_REQUIRED_GROUP`
+   and `MTG_ADMIN_GROUP` and deletes the stored Archidekt session of every
+   linked member who is in neither or is deactivated (audit row
+   `archidekt_link_swept`). An answer it can't trust (an error, an empty
+   or partial answer, nobody it knows among the members) deletes nothing and
+   is logged as `removed-member clean-up skipped, nothing deleted: …`.
+   Members' Account pages say whether it is on. It doesn't replace
+   **Disable**, which also keeps the person out.
 
    If Authentik can't be reached, the gateway refuses requests with a 503
    ("The sign-in service can't be reached to confirm your access") and
@@ -458,8 +471,8 @@ along the way). Every hour the gateway deletes stored sessions past that date
 and writes an `archidekt_link_expired` audit row with the reason
 `session expired`; the member links again. Each stored session is also sealed
 to its member inside the encryption, so a session copied to another member's
-row opens nothing (sessions stored by 0.7.6 or earlier are sealed at the first
-start of 0.7.7).
+row opens nothing. A session stored by 0.7.6 or earlier carries no owner, so
+the first start of 0.7.7 seals it to whichever member's row holds it then.
 
 ## Deck writes and the kill switch
 
