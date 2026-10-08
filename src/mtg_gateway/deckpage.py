@@ -315,9 +315,13 @@ def banner_html(
     primary = ""
     if own and csrf:
         primary += f"<a class='btn btn-primary' href='/decks/{did}/edit'>{icon('edit')} Edit deck</a>"
+    if csrf:
+        # Any deck the member can read can be cloned into their own account, as on archidekt.com
+        # (its Clone button is on public decks and precons too).
         primary += (
             f"<form method='post' action='/decks/{did}/clone' class='inline'>{csrf_in}"
-            f"<button type='submit'>{icon('clone')} Clone deck</button></form>"
+            f"<button type='submit' title='Copy this deck into your own Archidekt account as a new private "
+            f"deck'>{icon('clone')} Clone deck</button></form>"
         )
     # Archidekt's own playtester (draw, mulligan, play by hand), shown inside the gateway's
     # playtest page: the gateway builds no copy of it, so a game plays the same wherever it is
@@ -1273,7 +1277,7 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
   .banner h1.deckname{font-size:24px;margin-top:.5rem}
   .banner .row{font-size:13px}
   .banner .owner{flex-direction:row;justify-content:flex-end;max-width:none;padding:.5rem 1rem 0;order:-1}
-  .banner .owner .avatar{width:80px;height:80px;font-size:2rem;margin-right:auto;margin-top:-40px;
+  .banner .owner .avatar{width:80px;height:80px;font-size:2rem;margin-right:auto;margin-top:0;
     border-width:3px;border-color:var(--bg)}
   .banner .controls .primary,.banner .controls .primary .btn,.banner .controls .primary button,
   .banner .controls details.dd{width:100%}
@@ -1497,9 +1501,12 @@ table.qty td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-
 .listbar .field.grow{min-width:12rem}
 .listbar .field .btn{margin:0}
 .listbar .apply{margin-top:.5rem}
-@media (max-width:1000px){ .listbar .controls{grid-template-columns:1fr 1fr} }
+@media (max-width:1000px){ .listbar .controls{grid-template-columns:1fr 1fr;align-items:start}
+  .listbar .field:last-of-type{grid-column:1 / -1;display:flex;flex-direction:row;flex-wrap:wrap;gap:.5rem;
+    align-items:center}
+  .listbar .field:last-of-type .lbl{margin-right:auto} }
 @media (max-width:600px){ .listbar .controls{grid-template-columns:1fr} }
-ul.decklist.grid{display:grid;grid-template-columns:repeat(5,1fr);gap:25px}
+ul.decklist.grid{display:grid;grid-template-columns:repeat(5,1fr);gap:25px;margin-bottom:1.25rem}
 @media (max-width:1500px){ ul.decklist.grid{grid-template-columns:repeat(4,1fr)} }
 @media (max-width:1200px){ ul.decklist.grid{grid-template-columns:repeat(3,1fr)} }
 @media (max-width:1000px){ ul.decklist.grid{grid-template-columns:repeat(2,1fr)} }

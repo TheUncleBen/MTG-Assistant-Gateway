@@ -547,7 +547,7 @@ async def test_parse_deck_export_tool(stack: Stack) -> None:
     csv_text = (Path(__file__).parent / "fixtures" / "sample_deck.csv").read_text(encoding="utf-8")
     out = structured(await call(h, token, "parse_deck_export", {"csv_text": csv_text}))
     assert out["ok"] and out["card_count"] == 100 and "Commander" in out["categories"]
-    assert out["decklist_text"].startswith("1 Aesi, Tyrant of Gyre Strait (cmr) 365 *F*\n")
+    assert out["decklist_text"].startswith("1 Aesi, Tyrant of Gyre Strait (cmr) 365 *F* [Commander]\n")
     assert len(out["decklist_text"].splitlines()) == 72 and out["sideboard_text"] == ""
 
 
@@ -557,7 +557,7 @@ async def test_get_deck_reads_public_decks_without_a_link(stack: Stack) -> None:
     token = await mcp_token(h)  # signed in, nothing linked
     out = structured(await call(h, token, "get_deck", {"deck_ref": "https://archidekt.com/decks/42/reap"}))
     assert out["ok"] and out["card_count"] == 100 and out["url"] == "https://archidekt.com/decks/42"
-    assert out["decklist_text"].startswith("1 Aesi, Tyrant of Gyre Strait (cmr) 365 *F*\n")
+    assert out["decklist_text"].startswith("1 Aesi, Tyrant of Gyre Strait (cmr) 365 *F* [Commander]\n")
     assert "15 Forest (cmr) 510" in out["decklist_text"] and out["sideboard_text"] == ""
     assert not any(line.split(" ", 1)[0].isalpha() for line in out["decklist_text"].splitlines())
     private = structured(await call(h, token, "get_deck", {"deck_ref": "43"}))
@@ -590,9 +590,10 @@ async def test_parse_decklist_tool(stack: Stack) -> None:
     )
     out = structured(await call(h, token, "parse_decklist", {"text": text}))
     assert out["ok"] and out["card_count"] == 17 and out["sideboard_count"] == 1
-    assert out["decklist_text"].splitlines()[0] == "1 Aesi, Tyrant of Gyre Strait"
+    # commander first, with its category so the text reads back as a Commander deck; no headers
+    assert out["decklist_text"].splitlines()[0] == "1 Aesi, Tyrant of Gyre Strait [Commander]"
     assert "Negate" not in out["decklist_text"] and out["sideboard_text"] == "1 Negate\n"
-    assert "Commander" not in out["decklist_text"] and "Sideboard" not in out["decklist_text"]
+    assert "Commander\n" not in out["decklist_text"] and "Sideboard" not in out["decklist_text"]
     names = {c["name"]: c for c in out["cards"]}
     assert names["Sol Ring"]["set_code"] == "cmr" and names["Sol Ring"]["categories"] == ["Ramp"]
     assert names["Aesi, Tyrant of Gyre Strait"]["categories"] == ["Commander"]

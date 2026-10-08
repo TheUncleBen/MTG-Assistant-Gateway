@@ -517,7 +517,13 @@
               bar.remove(); status.textContent = a.message || "Archidekt refused the change; nothing was saved."; status.className = "status notice error"; btn.disabled = false;
             }).catch(function () { bar.remove(); status.textContent = "Network error; nothing was changed."; status.className = "status notice error"; btn.disabled = false; });
           });
-          no.addEventListener("click", function () { bar.remove(); btn.disabled = false; });
+          no.addEventListener("click", function () {
+            bar.remove(); btn.disabled = false;
+            // the proposal made for the check is not wanted: reject it so Proposals stays clean
+            fetch("/api/v1/proposals/" + encodeURIComponent(d.proposal_id) + "/reject", {
+              method: "POST", credentials: "same-origin", headers: { "X-CSRF-Token": cfg.csrf }
+            }).catch(function () { /* a leftover pending proposal is harmless */ });
+          });
           yes.focus();
         } else if (res.ok && d.proposal_id) {
           // writes are off on this gateway: the proposal is kept for later

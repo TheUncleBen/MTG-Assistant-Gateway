@@ -147,7 +147,7 @@ def test_maybeboard_and_sideboard_are_not_counted() -> None:
     assert [e["deckRelationId"] for e in payload] == [3]
     text = deck_to_text(deck)
     assert text.splitlines() == [
-        "1 Aesi, Tyrant of Gyre Strait (cmr) 1",
+        "1 Aesi, Tyrant of Gyre Strait (cmr) 1 [Commander]",
         "10 Forest (cmr) 1",
         "1 Sol Ring (cmr) 1 [Ramp]",
         "1 Cultivate (cmr) 1 [Maybeboard,Ramp]",

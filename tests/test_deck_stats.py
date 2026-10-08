@@ -456,4 +456,5 @@ def test_commander_zone_is_the_premier_category_whatever_its_name() -> None:
     stats = compute(d)
     assert stats["commanders"] == ["Aesi"]
     assert stats["checks"]["commander_zone"] == {"count": 1, "ok": True}
-    assert deck_to_text(d).splitlines()[0] == "1 Aesi"  # commander first, as the simulators expect
+    first = deck_to_text(d).splitlines()[0]  # commander first, tagged Commander, as the simulators expect
+    assert first.startswith("1 Aesi [") and "Commander" in first

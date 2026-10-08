@@ -75,7 +75,10 @@ class _FakeMF:
         if self.busy:
             return _busy()
         await asyncio.sleep(0.05)
-        return types.CallToolResult(content=[types.TextContent(type="text", text='{"ok": 1}')])
+        # answers shaped like Mystic Forge's successes, so the report counts them as ok (a failed
+        # research call is never reused for a waiting request)
+        text = {"goldfish_run": "## Metrics\nok", "goldfish_ab": "## Deltas\nok"}.get(name, "Validated: ok")
+        return types.CallToolResult(content=[types.TextContent(type="text", text=text)])
 
 
 async def test_reports_count_against_the_members_mystic_forge_cap(tmp_path: Path) -> None:

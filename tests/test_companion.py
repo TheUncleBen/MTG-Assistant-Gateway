@@ -426,3 +426,87 @@ async def test_compare_page_shows_what_a_build_changed(stack: Stack) -> None:
         assert gone.status_code == 404
     finally:
         await b.aclose()
+
+
+async def test_export_import_round_trip_keeps_every_card_finish_and_commander(stack: Stack) -> None:
+    """Export → import → compare, for each export the pages offer: the plain .txt, the Archidekt
+    import text and the .csv each re-create the same deck (names, counts, finishes including
+    etched, commander category, sideboard rows) through propose_new_deck and apply."""
+    b = await linked_browser(stack)
+    try:
+        h, ark = stack.h, stack.ark
+        token = await mcp_token(h)
+        # a deck with an etched printing, a foil basic, a commander and a side row
+        p = structured(
+            await call(
+                h,
+                token,
+                "propose_deck_changes",
+                {
+                    "deck_id": "42",
+                    "changes": [
+                        {
+                            "action": "add",
+                            "card_name": "Sol Ring",
+                            "set_code": "SLD",
+                            "collector_number": "1074",
+                            "finish": "etched",
+                        },
+                        {"action": "add", "card_name": "Swamp", "quantity": 2, "foil": True},
+                    ],
+                },
+            )
+        )
+        assert p["ok"], p
+        assert structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))["ok"]
+        ark.add_side_row(42, "Opt", 2)
+
+        def shape(deck: dict) -> set[tuple]:
+            return {
+                (c["name"], c["quantity"], c["finish"], "Commander" in c["categories"], c["in_deck"])
+                for c in deck["cards"]
+            }
+
+        source = structured(await call(h, token, "get_deck", {"deck_ref": "42"}))
+        want = shape(source)
+        assert ("Sol Ring", 1, "Etched", False, True) in want and ("Swamp", 2, "Foil", False, True) in want
+        assert any(cmd for (_, _, _, cmd, _) in want) and ("Opt", 2, "Normal", False, False) in want
+        exports = {
+            "plain .txt": ("decklist_text", (await b.http.get("/decks/42/export.txt")).text),
+            "archidekt .txt": ("decklist_text", (await b.http.get("/decks/42/export.archidekt.txt")).text),
+            ".csv": ("csv_text", (await b.http.get("/decks/42/export.csv")).text),
+        }
+        assert "[Commander]" in exports["plain .txt"][1] and "*E*" in exports["plain .txt"][1]
+        for label, (field, text) in exports.items():
+            made = structured(
+                await call(h, token, "propose_new_deck", {"name": f"Round trip {label}", field: text})
+            )
+            assert made["ok"], (label, made)
+            applied = structured(await call(h, token, "apply_proposal", {"proposal_id": made["proposal_id"]}))
+            assert applied["ok"] and applied["result"]["verified"], (label, applied)
+            copy = structured(await call(h, token, "get_deck", {"deck_ref": applied["result"]["deck_id"]}))
+            got = shape(copy)
+            assert got == want, (label, sorted(want - got), sorted(got - want))
+    finally:
+        await b.aclose()
+
+
+async def test_another_persons_public_deck_can_be_cloned_but_not_edited(stack: Stack) -> None:
+    """Clone deck is on every deck the member can read, as on archidekt.com (public decks and
+    precons included); Edit deck stays the owner's. The copy lands in the member's own account."""
+    b = await linked_browser(stack)
+    try:
+        stack.ark.private.discard(43)  # Amy's deck, public for this test
+        page = await b.http.get("/decks/43", headers=NAV)
+        assert page.status_code == 200 and "Clone deck" in page.text and "Edit deck" not in page.text
+        csrf = await b.csrf("/account")
+        before = set(stack.ark.decks)
+        r = await b.http.post("/decks/43/clone", data={"csrf": csrf})
+        assert r.status_code == 303 and "ok=created" in r.headers["location"], r.headers
+        (new_id,) = set(stack.ark.decks) - before
+        copy = stack.ark.decks[new_id]
+        assert copy["owner"]["username"] == "alice" and copy["name"] == "Copy of - Amy's deck"
+        assert copy["private"] is True and len(copy["cards"]) == len(stack.ark.decks[43]["cards"])
+    finally:
+        stack.ark.private.add(43)
+        await b.aclose()

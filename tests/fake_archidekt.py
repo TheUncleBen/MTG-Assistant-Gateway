@@ -61,7 +61,17 @@ PRINTINGS = [
         "oracleCard": {"name": "Sol Ring"},
         "edition": {"editioncode": "sld"},
         "collectorNumber": "1074",
-        "options": ["Etched"],
+        "options": ["Etched"],  # an etched-only printing: a Foil row cannot move onto it
+    },
+    {
+        "id": 124027,
+        "uid": "00000000-0000-4000-8000-000000124027",  # placeholder, not the real Scryfall id
+        "oracleCard": {"name": "Sol Ring"},
+        "edition": {"editioncode": "sld"},
+        "collectorNumber": "1075",
+        # a printing in every finish, so a wrong finish choice shows up (an etched-only printing
+        # hid an etched-read-as-foil bug on the import path)
+        "options": ["Normal", "Foil", "Etched"],
     },
 ]
 
@@ -253,6 +263,20 @@ class FakeArchidekt:
         """Simulate an edit made elsewhere (changes the fingerprint)."""
         self.decks[deck_id]["cards"][0]["quantity"] += 1
         self.decks[deck_id]["updatedAt"] = "2026-10-02T00:00:00Z"
+
+    def _deck_printings(self) -> list[dict[str, Any]]:
+        """The printings the decks here hold, in the card-search result shape (``options`` as
+        the row's finish plus Normal), deduplicated by card id."""
+        seen: dict[int, dict[str, Any]] = {}
+        for d in self.decks.values():
+            for c in d["cards"]:
+                card = c["card"]
+                if card["id"] in seen or "edition" not in card:
+                    continue
+                entry = json.loads(json.dumps(card))
+                entry.setdefault("options", sorted({"Normal", c.get("modifier") or "Normal"}))
+                seen[card["id"]] = entry
+        return list(seen.values())
 
     def _listing_row(self, d: dict[str, Any]) -> dict[str, Any]:
         """One row of the ``/decks/v3/`` listing (and of the precon listing) for a stored deck."""
@@ -521,14 +545,18 @@ class FakeArchidekt:
                 number = request.url.params.get("collectorNumber")
                 hits = [
                     p
-                    for p in PRINTINGS
+                    for p in PRINTINGS + self._deck_printings()
                     if p["edition"]["editioncode"] == edition
                     and name in p["oracleCard"]["name"].lower()
                     and (number is None or p["collectorNumber"] == number)
                 ]
                 return httpx.Response(200, json={"results": hits[:page]})
             if request.url.params.get("exact") == "true":
-                hit = CARD_DB.get(name)
+                # every card some deck here holds exists on Archidekt too, so a list exported from
+                # a deck can be re-created (the live site knows every printed card)
+                hit = CARD_DB.get(name) or next(
+                    (p for p in self._deck_printings() if p["oracleCard"]["name"].lower() == name), None
+                )
                 return httpx.Response(200, json={"results": [hit] if hit else []})
             fillers = [
                 {"id": 70000 + i, "oracleCard": {"name": f"{name.title()} Lookalike {i}"}} for i in range(30)
@@ -813,5 +841,14 @@ class FakeArchidekt:
                         "card": self.printing(e["cardid"]),
                     }
                 )
+                for cat in e.get("categories") or []:
+                    if not any(c["name"] == cat for c in deck["categories"]):
+                        # A category named for the first time appears on the deck. Maybeboard is
+                        # not counted in the deck on archidekt.com (verified on existing decks
+                        # 2026-10-07); whether a brand-new deck gets that flag the same way is
+                        # not verified live.
+                        deck["categories"].append(
+                            {"name": cat, "isPremier": False, "includedInDeck": cat != "Maybeboard"}
+                        )
         deck["cards"] = [c for c in deck["cards"] if c["quantity"] > 0]
         deck["updatedAt"] = "2026-10-03T00:00:00Z"

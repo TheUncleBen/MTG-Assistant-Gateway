@@ -494,7 +494,7 @@ async def test_owner_tools_carry_what_the_hidden_duplicates_had(stack: Stack) ->
         name, args = rec.calls[-1]
         assert name == "goldfish_ab"
         assert (
-            args["deck_b"] == "1 Opt\n1 Sol Ring\n" and args["n"] == 20
+            args["deck_b"] == "1 Opt [Commander]\n1 Sol Ring [Commander]\n" and args["n"] == 20
         )  # gateway rendering, commander first
         assert args["allow_different_commanders"] is True and args["annotations_b"] == [{"card": "Opt"}]
         assert "opponents" not in args

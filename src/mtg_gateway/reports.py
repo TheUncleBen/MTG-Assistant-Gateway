@@ -116,10 +116,14 @@ class ReportService:
             async with flight.lock:
                 if flight.finished > seen and flight.report_id:
                     # A run for this deck finished while this request waited: reuse its report
-                    # instead of starting a second simulation.
+                    # instead of starting a second simulation (unless that run's research
+                    # calls failed; then this request gets its own try).
                     out = self.get(sub, flight.report_id)
-                    out["reused"] = True
-                    return out
+                    if _succeeded(
+                        {"goldfish_json": out.get("goldfish"), "validation_json": out.get("validation")}
+                    ):
+                        out["reused"] = True
+                        return out
                 out = await self._run(sub, deck_ref, simulate=simulate, games=games, options=options)
                 flight.report_id = out["report_id"]
                 flight.finished += 1
@@ -180,6 +184,7 @@ class ReportService:
             and latest is not None
             and latest["fingerprint"] == deck.fingerprint()
             and now - int(latest["taken_at"]) < self.min_interval
+            and _succeeded(latest)
         ):
             out = self.get(sub, latest["id"])
             out["reused"] = True
@@ -300,7 +305,8 @@ class ReportService:
     def _latest(self, sub: str, deck_id: str) -> dict[str, Any] | None:
         with self.db._lock:
             row = self.db._conn.execute(
-                "SELECT id, fingerprint, taken_at FROM reports WHERE owner_sub = ? AND deck_id = ? "
+                "SELECT id, fingerprint, taken_at, goldfish_json, validation_json FROM reports "
+                "WHERE owner_sub = ? AND deck_id = ? "
                 "ORDER BY taken_at DESC, rowid DESC LIMIT 1",
                 (sub, deck_id),
             ).fetchone()
@@ -356,6 +362,7 @@ class ReportService:
         stats = json.loads(d["stats_json"]) if d.get("stats_json") else {}
         metrics = {k: stats.get(k) for k in TREND_KEYS}
         goldfish = json.loads(d["goldfish_json"]) if d.get("goldfish_json") else None
+        validation = json.loads(d["validation_json"]) if d.get("validation_json") else None
         return {
             "report_id": d["id"],
             "deck_id": d["deck_id"],
@@ -365,9 +372,22 @@ class ReportService:
             "fingerprint": d["fingerprint"],
             "metrics": metrics,
             "has_goldfish": bool(goldfish and goldfish.get("ok")),
-            "has_validation": bool(d.get("validation_json")),
+            "has_validation": bool(validation and validation.get("ok")),
             "bracket_estimate": (stats.get("bracket_estimate") or {}).get("bracket"),
         }
+
+
+def _succeeded(row: dict[str, Any]) -> bool:
+    """Whether a stored report's research blocks all came back ok. A report whose simulation or
+    validation failed (the service down, a refusal) is kept as the record of that failure but
+    never reused in place of a fresh run."""
+    for key in ("goldfish_json", "validation_json"):
+        block = row.get(key)
+        if isinstance(block, str):
+            block = json.loads(block)
+        if block is not None and not block.get("ok"):
+            return False
+    return True
 
 
 # The simulator's knobs a report or an A/B passes through to the research service, which

@@ -1084,10 +1084,11 @@ def build_mcp_server(state: AppState) -> MCPServer:
         name="propose_clone_deck",
         title="Propose cloning a deck (write, two-step)",
         description=(
-            "Step 1 of copying one of the linked account's decks into a new private deck, as Archidekt's "
-            "Clone deck button does. name defaults to 'Copy of - <deck name>'. Returns the proposal (kind "
-            "'clone') and the review URL; the user confirms it and apply_proposal makes the copy, which "
-            "keeps every card, quantity, category and finish. Changes nothing on Archidekt by itself."
+            "Step 1 of copying a deck the user can read (their own, a public deck or a precon) into a new "
+            "private deck of the linked account, as Archidekt's Clone deck button does. name defaults to "
+            "'Copy of - <deck name>'. Returns the proposal (kind 'clone') and the review URL; the user "
+            "confirms it and apply_proposal makes the copy, which keeps every card, quantity, category and "
+            "finish. Changes nothing on Archidekt by itself."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
         meta=card_meta,

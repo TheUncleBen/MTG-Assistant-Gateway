@@ -93,8 +93,11 @@ deleting a deck asks for its name.
   same proposal. Reports started from a deck's More menu and from
   `run_deck_report` are the same reports on the same History page.
 - **Only the assistant does:** research lookups (Scryfall, EDHREC, combos,
-  rules), simulations and A/B comparisons, parsing pasted lists, reading
-  card photos into names, proposing changes it worked out itself.
+  rules), the paired goldfish A/B with the simulator's options, reading card
+  photos into names, proposing changes it worked out itself. The goldfish
+  simulation of one deck and the comparison of two are both paths: Run
+  simulation and Compare on the deck page for people, `run_deck_report` and
+  `compare_decks` for the assistant, same engine and settings.
 - **Only a person does:** link Archidekt and set approval modes, approve a
   high-risk proposal in manual or semi-auto mode, delete a deck, set cover,
   tags and folders, like, bookmark, follow, comment, scan with the camera,

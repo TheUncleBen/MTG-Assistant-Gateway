@@ -180,7 +180,9 @@ def to_text(cards: list[ListCard], *, with_categories: bool = True, zone: str = 
     chosen = [c for c in cards if c.zone == zone]
     commanders = [c for c in chosen if "Commander" in c.categories]
     rest = [c for c in chosen if c not in commanders]
-    lines = [_line(c, with_categories=False) for c in commanders]
+    # The commander line carries its category too (with_categories), so a plain .txt export reads
+    # back with its commander; Mystic Forge accepts the bracketed category on the first line.
+    lines = [_line(c, with_categories=with_categories) for c in commanders]
     lines += [_line(c, with_categories=with_categories) for c in rest]
     return "\n".join(lines) + ("\n" if lines else "")
 

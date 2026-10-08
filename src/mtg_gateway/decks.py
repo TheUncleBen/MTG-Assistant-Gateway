@@ -955,16 +955,30 @@ def _entry(action: str, card: Any, qty: int, categories: list[str] | None = None
     }
 
 
+def row_key(c: dict[str, Any]) -> tuple[str, str, str]:
+    """One list row's identity: name plus the printing it names, so two printings of the same
+    card (a deck's Sol Ring and its etched Sol Ring) stay two rows through a new-deck import."""
+    return (
+        str(c.get("name", "")).casefold(),
+        str(c.get("set_code") or "").casefold(),
+        str(c.get("collector_number") or ""),
+    )
+
+
 def new_deck_entries(
-    cards: list[dict[str, Any]], resolve: dict[str, int], modifiers: dict[str, str] | None = None
+    cards: list[dict[str, Any]],
+    resolve: dict[tuple[str, str, str], int],
+    modifiers: dict[tuple[str, str, str], str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Add entries for a freshly created deck (same reference shape as build_payload)."""
+    """Add entries for a freshly created deck (same reference shape as build_payload);
+    ``resolve`` and ``modifiers`` are keyed by ``row_key``."""
     out = []
     for c in cards:
+        key = row_key(c)
         out.append(
             {
                 "action": "add",
-                "cardid": resolve[c["name"]],
+                "cardid": resolve[key],
                 "patchId": uuid.uuid4().hex,
                 "categories": list(c.get("categories") or []),
                 "modifications": {
@@ -972,7 +986,7 @@ def new_deck_entries(
                     "companion": False,
                     "flippedDefault": False,
                     "modifier": (modifiers or {}).get(
-                        c["name"], c.get("finish") or ("Foil" if c.get("foil") else "Normal")
+                        key, c.get("finish") or ("Foil" if c.get("foil") else "Normal")
                     ),
                 },
             }
@@ -2035,13 +2049,15 @@ class DeckService:
         return self.describe(sub, row["id"])
 
     async def propose_clone(self, sub: str, deck_id: str, name: str | None = None) -> dict[str, Any]:
-        """A proposal (kind ``clone``) that copies one of the member's decks into a new private
-        deck in the root folder, the way Archidekt's Clone deck button does ("Copy of - " prefix
-        by default). Applied with the same copy route the backups use (verified live 2026-10-05);
-        the copy keeps every card, quantity, category and finish."""
+        """A proposal (kind ``clone``) that copies any deck the member can read (their own, a
+        public deck, a precon) into a new private deck in their root folder, the way Archidekt's
+        Clone deck button does ("Copy of - " prefix by default). Applied with the same copy route
+        the backups use (verified live 2026-10-05 on the member's own deck; a copy of someone
+        else's public deck is the same request and has not been exercised live); the copy keeps
+        every card, quantity, category and finish."""
         deck_id = _clean_deck_id(deck_id)
         self._room_for_proposal(sub)
-        deck = await self.get_own_deck(sub, deck_id)
+        deck = await self.get_any_deck(sub, deck_id)
         new_name = clean_text(name or "") or f"Copy of - {deck.name}"
         if len(new_name) > 200:
             raise DeckError("invalid", "name must be up to 200 characters")
@@ -2065,7 +2081,15 @@ class DeckService:
         return self.describe(sub, pid)
 
     async def _apply_clone(self, sub: str, row: dict[str, Any], progress: dict[str, Any]) -> dict[str, Any]:
-        deck = await self._current_deck_for(sub, row)
+        # The source may be someone else's public deck, so it is read, not owned; a change to it
+        # since the proposal still stops the copy (the review showed another list).
+        deck = await self.get_any_deck(sub, row["deck_id"])
+        if deck.fingerprint() != row["baseline_fingerprint"]:
+            raise DeckError(
+                "stale",
+                "The deck changed on Archidekt since this proposal was made. Nothing was sent. "
+                "Create a new proposal from the current deck.",
+            )
         name = clean_text(str((row.get("changes") or {}).get("name") or "")) or f"Copy of - {deck.name}"
         copy = await self._call(sub, lambda token, *_: self.client.copy_deck(token, deck, name=name))
         verified = await self.get_deck(sub, str(copy["id"]))
@@ -2133,8 +2157,8 @@ class DeckService:
                 f"{link['archidekt_username']} is linked now. Nothing was created; ask for a new "
                 "proposal if the deck should go to this account.",
             )
-        resolve: dict[str, int] = {}
-        modifiers: dict[str, str] = {}
+        resolve: dict[tuple[str, str, str], int] = {}
+        modifiers: dict[tuple[str, str, str], str] = {}
         printing_notes: list[str] = []
         for c in cards:  # resolve every printing before creating anything
             card = await self._call(
@@ -2146,8 +2170,11 @@ class DeckService:
                     collector_number=c.get("collector_number") or None,
                 ),
             )
-            resolve[c["name"]] = card["id"]
-            modifiers[c["name"]] = finish_modifier(card["options"], foil=bool(c.get("foil")))
+            resolve[row_key(c)] = card["id"]
+            finish = str(c.get("finish") or ("Foil" if c.get("foil") else ""))
+            modifiers[row_key(c)] = finish_modifier(
+                card["options"], foil=finish == "Foil", etched=finish == "Etched"
+            )
             if c.get("set_code") and not card["exact_printing"]:
                 # a list's printing that Archidekt does not have is never swapped quietly
                 wanted = f"{c['set_code'].upper()} {c.get('collector_number') or ''}".strip()
@@ -2169,10 +2196,15 @@ class DeckService:
         entries = new_deck_entries(cards, resolve, modifiers)
         await self._send(sub, created.id, entries, progress)
         verified = await self.get_deck(sub, created.id)
+        # Every row counts here, maybeboard and sideboard rows included: Archidekt keeps them
+        # outside the deck proper, and the import sent them all the same.
         want: dict[str, int] = {}
         for c in cards:
             want[c["name"]] = want.get(c["name"], 0) + int(c["quantity"])
-        mismatches = _mismatches(verified.counts_by_name(), want)
+        got: dict[str, int] = {}
+        for vc in verified.cards:
+            got[vc.name] = got.get(vc.name, 0) + vc.quantity
+        mismatches = _mismatches(got, want)
         result = {
             "deck_id": created.id,
             "deck_url": f"https://archidekt.com/decks/{created.id}",

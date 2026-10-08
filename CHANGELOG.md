@@ -60,6 +60,8 @@ one owner per capability among the assistant's tools.
   Archidekt's list, any deck link or a pasted list, with the same cards taken out, put in, changed
   counts, basic lands and statistics' differences `compare_decks` reports, each card opening the
   card viewer.
+- Clone deck on every deck you can read (public decks and precons included), as on archidekt.com;
+  `propose_clone_deck` takes any readable deck. The copy lands in your own account.
 - `run_deck_report` and `deck_stats` take a pasted decklist as `deck_ref` as well as a deck: the
   list gets the same validation and simulation (0.7.1's hidden `goldfish_run` could simulate a
   pasted list; its owner keeps that) and comes back with `stored: false`, not filed under History.
@@ -73,7 +75,18 @@ one owner per capability among the assistant's tools.
   own labels (Standard Brawl, Brawl, Pauper EDH, Duel Commander, Canadian Highlander, PreDH...).
 
 ### Fixed
-
+- Importing a list into a new deck: an etched row was created as foil (the finish was read but
+  not sent); two printings of the same card collapsed into one row; a maybeboard or sideboard
+  row made the read-back verification fail. A plain .txt export dropped the commander's category,
+  so re-importing it gave a deck with no commander. An export → import → compare test now covers
+  the plain .txt, the Archidekt text and the .csv.
+- Reports: `has_validation` is true only when the validation passed, and a report whose simulation
+  or validation failed is never reused in place of a fresh run.
+- Editor: "Keep editing" on the high-risk confirmation now rejects the proposal made for the check
+  instead of leaving it pending.
+- Readability: the Delete deck item in the dark More menu and the active tab or rail label in the
+  light theme meet WCAG AA contrast; the phone deck banner no longer runs the owner's avatar under
+  the top bar; the deck list's Order by control and buttons line up on folding screens.
 - Simulations through the gateway never ran against the pinned Mystic Forge: `run_deck_report`,
   `compare_decks simulate: true` and the report's validation sent their arguments flat, while
   Mystic Forge's tools take one `params` object, so every call came back as a validation error

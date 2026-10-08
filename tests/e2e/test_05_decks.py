@@ -159,8 +159,12 @@ def test_public_deck_reads_need_no_link_and_proposals_do(clients, env: Env):
             for block in (rep["goldfish"], rep["validation"]):
                 assert block is not None and "validation error" not in block.get("text", ""), block
                 assert "Field required" not in block.get("text", ""), block
-            if rep["goldfish"]["ok"]:
-                assert "## Metrics" in rep["goldfish"]["text"], rep["goldfish"]
+            # Deck 42 has a commander and real card names, so the real engine must simulate it:
+            # a failed or refused run is a failure of this test, not a skipped assertion.
+            assert rep["goldfish"]["ok"] is True, rep["goldfish"]
+            assert "## Metrics" in rep["goldfish"]["text"], rep["goldfish"]
+            assert rep["validation"]["ok"] is True, rep["validation"]
+            assert rep["has_goldfish"] is True and rep["has_validation"] is True, rep
             private = await c.call(s, "get_deck", {"deck_ref": "43"})
             assert private["ok"] is False, private
             unlinked = await c.call(

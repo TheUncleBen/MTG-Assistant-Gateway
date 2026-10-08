@@ -67,10 +67,12 @@ CSS = (
   --banner-a:rgba(14,14,14,.82); --banner-b:rgba(14,14,14,.5);
   --orange:#fa890d; --green:#1ebb6c; --red:#ff555b; --blue:#4286f4; --purple:#6435c9; --pink:#e03997;
   --orange-text:#fa890d; --green-text:#1ebb6c; --red-text:#ff555b; --blue-text:#7fb0ff;
+  --danger-text:#ff8086; --toolbar-active:#fa890d;
   --on-color:#ffffff;
   /* Text on the orange and green fills, and the red used as a fill: WCAG AA (4.5:1) for bold 16px
      labels. White on Archidekt's orange is 2.4:1 and on its red 3.1:1, so those labels were hard to read. */
-  --on-orange:#111111; --on-green:#111111; --danger-fill:#c0182b;
+  --on-orange:#111111; --on-green:#111111; --danger-fill:#c0182b; --danger-text:#b3262e;
+  --toolbar-active:#8a4600;
   --orange-tint:rgba(250,137,13,.14); --green-tint:rgba(30,187,108,.14);
   --red-tint:rgba(255,85,91,.14); --blue-tint:rgba(66,134,244,.14);
   --orange-select:rgba(250,137,13,.3);
@@ -135,7 +137,7 @@ details.dd .menu a,details.dd .menu button,details.dd .menu .item{display:flex;a
 details.dd .menu a:hover,details.dd .menu button:hover,details.dd .menu a:focus-visible{
   background:var(--border);color:var(--text)}
 details.dd .menu .sep{height:1px;background:var(--border);margin:.25rem 0}
-details.dd .menu a.danger{color:var(--danger-fill)}
+details.dd .menu a.danger{color:var(--danger-text)}
 details.dd .menu .head{padding:.4rem 1rem .2rem;font-size:.8rem;font-weight:700;color:var(--text-muted);
   text-transform:uppercase;letter-spacing:.04em}
 details.dd .menu form{margin:0;display:contents}
@@ -435,7 +437,7 @@ _MOBILE_RULES = """
   body{b} .tabbar > a svg{width:22px;height:22px;transition:transform .15s ease}
   body{b} .tabbar > a:active svg{transform:scale(.92)}
   body{b} .tabbar > a:hover,body{b} .tabbar > a:focus-visible,
-  body{b} .tabbar > a[aria-current=page]{color:var(--orange)}
+  body{b} .tabbar > a[aria-current=page]{color:var(--toolbar-active)}
   body{b} .tabbar > a[aria-current=page]::before{content:'';position:absolute;top:0;width:2.5rem;height:3px;
     background:var(--orange);border-radius:0 0 3px 3px}
   body{b} .tabbar > a{position:relative}
@@ -443,7 +445,8 @@ _MOBILE_RULES = """
     justify-content:center;gap:.2rem;height:56px;color:var(--toolbar-text);font-weight:700;font-size:11px;
     position:relative;-webkit-tap-highlight-color:transparent}
   body{b} .tabbar details.more summary svg{width:22px;height:22px}
-  body{b} .tabbar details.more summary.on,body{b} .tabbar details.more[open] summary{color:var(--orange)}
+  body{b} .tabbar details.more summary.on,
+  body{b} .tabbar details.more[open] summary{color:var(--toolbar-active)}
   body{b} details.dd .menu{min-width:14rem}
 """
 # The medium layout: the same tabs as a navigation rail (80px wide, icon in a pill with the label
@@ -467,7 +470,7 @@ _RAIL_RULES = """
     margin-left:-28px;border-radius:16px;background:transparent;transition:background .15s ease}
   body{b} .tabbar > a:hover::before,
   body{b} .tabbar > a:focus-visible::before{background:rgba(127,127,127,.18)}
-  body{b} .tabbar > a[aria-current=page]{color:var(--orange)}
+  body{b} .tabbar > a[aria-current=page]{color:var(--toolbar-active)}
   body{b} .tabbar > a[aria-current=page]::before{background:rgba(255,111,0,.22)}
   body{b} .tabbar details.more summary{position:relative;display:flex;flex-direction:column;
     align-items:center;justify-content:center;gap:.3rem;height:64px;flex:none;color:var(--toolbar-text);
@@ -476,7 +479,8 @@ _RAIL_RULES = """
   body{b} .tabbar details.more summary svg{width:24px;height:24px;position:relative;z-index:1}
   body{b} .tabbar details.more summary::before{content:'';position:absolute;top:7px;left:50%;width:56px;
     height:32px;margin-left:-28px;border-radius:16px;background:transparent}
-  body{b} .tabbar details.more summary.on,body{b} .tabbar details.more[open] summary{color:var(--orange)}
+  body{b} .tabbar details.more summary.on,
+  body{b} .tabbar details.more[open] summary{color:var(--toolbar-active)}
   body{b} .tabbar details.more[open] summary::before{background:rgba(255,111,0,.22)}
   body{b} .tabbar details.more .menu.sheet{left:calc(84px + env(safe-area-inset-left));transform:none;
     bottom:auto;top:calc(7rem + env(safe-area-inset-top) + 4 * 64px)}
