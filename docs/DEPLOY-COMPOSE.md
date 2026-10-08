@@ -90,7 +90,7 @@ Edit `.env`. The lines marked **REQUIRED**:
 | `MTG_OIDC_ISSUER` | The issuer URL from step 1 |
 | `MTG_OIDC_CLIENT_ID` | The client ID from step 1 |
 | `MTG_REQUIRED_GROUP` | The group from step 1, exactly as your provider sends it. Required unless you set `MTG_ALLOW_ANY_IDP_USER=true` (see [IDP-OTHERS.md](IDP-OTHERS.md#about-the-group-check)) |
-| `MTG_TAG` | `latest` to follow every new version, or one version to stay on it, for example `0.7.7` ([VERSIONS.md](VERSIONS.md)) |
+| `MTG_TAG` | `latest` to follow every new version, or one version to stay on it, for example `0.7.8` ([VERSIONS.md](VERSIONS.md)) |
 
 Worth a look:
 
@@ -194,7 +194,7 @@ docker compose logs -f gateway
 
 ```bash
 curl -s https://mtg.example.com/healthz
-# {"status":"ok","version":"0.7.7","mystic_forge":"ok"}
+# {"status":"ok","version":"0.7.8","mystic_forge":"ok"}
 # ("degraded" with "mystic_forge":"down": the gateway works, the research
 #  service doesn't answer; see docker compose logs mysticforge)
 

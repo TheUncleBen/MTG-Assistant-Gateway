@@ -9,7 +9,14 @@ Every sentence has to stay true of the code; the source of each claim is noted b
 - password sent once, never stored: ``ArchidektClient.login``, ``DeckService.link`` (the stored
   blob holds the two tokens and the member's subject only);
 - what the session is used for: the ``ArchidektClient`` methods reached through
-  ``DeckService._call`` (decks, folders, tags, collection) and ``social.py`` (browser-only clicks);
+  ``DeckService._call`` (decks, folders, tags, collection, deletes, backup copies when
+  ``MTG_ARCHIDEKT_BACKUPS``), ``DeckService.get_any_deck`` (other people's decks read as the
+  member), card lookups (``/cards/v2/``, sent with the member's session) and ``social.py``
+  (comment threads, the following list, browser-only clicks);
+- what the operator can read: every table in ``db.py`` keyed by the member, the pictures under
+  ``<data dir>/avatars`` (``avatars.py``) and ``idp_grants`` (Fernet, same key);
+- what admins see: ``admin.py`` user detail (name, email, subject, groups, sign-in times,
+  Archidekt username, apps, token and session counts, disabled date) and the activity log;
 - access token about an hour, refresh token about 40 days, refresh token not rotated: Archidekt's
   own token claims, measured on a live account on 2026-10-05 (``ArchidektClient.refresh``); the
   date shown on the Account page is read from the member's own stored token
@@ -62,8 +69,13 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "What the gateway uses it for",
         (
             "Reading your decks (private ones included), folders, tags and collection.",
-            "Making the deck and collection changes you approve, or that your approval mode lets "
-            "your assistant make.",
+            "Reading, as you, the other people's decks, comment threads and card searches you or "
+            "your assistant look at, and the list of people you follow, so they show as Archidekt "
+            "shows them to you.",
+            "Making the deck, folder, tag and collection changes you make yourself on these pages "
+            "or approve, or that your approval mode lets your assistant make, including deleting "
+            "a deck when you ask. Before it changes a deck it may first save a copy of it in a "
+            "backup folder on your Archidekt account (the person who runs it can turn that off).",
             "The likes, bookmarks, follows and comments you make yourself on these pages. No "
             "assistant can do those.",
             "It uses the session only when you, or an assistant you connected, ask for something. "
@@ -96,8 +108,13 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "email or password (not known), they could use that to keep your account after the "
             "session expires. They cannot get your password from the session.",
             "They can read everything else the gateway keeps about you, which is not encrypted: "
-            "your Archidekt username, your proposed and applied deck changes, deck snapshots, "
-            "scans, and the activity log.",
+            "your name, email, username and groups at the sign-in service, your profile picture "
+            "(if the sign-in service sends one), "
+            "your Archidekt username and user number, your proposed and applied deck and "
+            "collection changes, deck snapshots, deck reports and covers, scans, which apps you "
+            "connected, usage counts, and the activity log. The sign-in service's tokens the "
+            "gateway keeps to check your groups are encrypted with the same key, so they can open "
+            "those too.",
             "They control the code this server runs. This gateway's code never keeps your "
             "password, but someone who changes the code could. Link only if you trust the person "
             "who runs this server.",
@@ -106,13 +123,15 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         "What admins on this site can see and do",
         (
-            "Admins use the admin pages, not the server itself. They see your name, email and "
-            "groups, your Archidekt username, when you first signed in and were last seen, which "
-            "apps you connected, and the activity log: what you did, when and with which app, "
+            "Admins use the admin pages, not the server itself. They see your name, email, "
+            "username and groups at the sign-in service, your gateway user ID, your Archidekt "
+            "username, when you first signed in and were last seen, which apps you connected, how "
+            "many app tokens and browser sessions you have open, whether and when you were "
+            "disabled, and the activity log: what you did, when and with which app, "
             "including links and unlinks, proposals, deck and collection changes, scans, likes, "
             "bookmarks, follows and comments, with deck, proposal and comment numbers.",
-            "They can unlink your Archidekt account, disable your account, sign you out "
-            "everywhere and delete your data.",
+            "They can unlink your Archidekt account, disable and enable your account, sign you "
+            "out everywhere and delete your data.",
             "They cannot see your password or your session, cannot open your proposals, and have "
             "no button that uses your link to read or change your decks. An admin who also has "
             "access to the server can do everything in the section above.",

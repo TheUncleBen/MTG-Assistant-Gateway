@@ -68,6 +68,22 @@ def test_disclosure_names_what_the_operator_and_admins_can_and_cannot_do() -> No
         "deleted within about an hour if the person who runs the gateway turned on its hourly clean-up",
         "the next time you or one of your apps tries to use the gateway",
         "Archidekt's terms of service restrict automated access",
+        # what the session reads beyond your own decks, and the writes and backup copies
+        "other people's decks, comment threads and card searches",
+        "the list of people you follow",
+        "including deleting a deck when you ask",
+        "backup folder on your Archidekt account",
+        # everything else the operator can read, and the sign-in service's tokens
+        "your name, email, username and groups at the sign-in service",
+        "your profile picture",
+        "deck and collection changes",
+        "which apps you connected, usage counts",
+        "encrypted with the same key, so they can open those too",
+        # everything admins see and do
+        "your gateway user ID",
+        "how many app tokens and browser sessions you have open",
+        "whether and when you were disabled",
+        "disable and enable your account",
     ):
         assert must in text, must
     # never claims what is not backed by code and tests

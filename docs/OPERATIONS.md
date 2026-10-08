@@ -344,8 +344,11 @@ secret.
    deleted in Authentik.
 
    **Optional: the hourly removed-member clean-up.** With an Authentik API
-   token that may only view groups (setup in
-   [IDP-AUTHENTIK.md](IDP-AUTHENTIK.md#12-optional-removed-member-clean-up)),
+   token that may only view the two gateway groups (setup in
+   [IDP-AUTHENTIK.md](IDP-AUTHENTIK.md#12-optional-removed-member-clean-up);
+   the token can read those groups' members' usernames, names and emails,
+   and the service account can make itself new tokens, so to cut it off,
+   deactivate the service account),
    the gateway asks Authentik once an hour who is in `MTG_REQUIRED_GROUP`
    and `MTG_ADMIN_GROUP` and deletes the stored Archidekt session of every
    linked member who is in neither or is deactivated (audit row
