@@ -28,7 +28,9 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
+from collections import OrderedDict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
@@ -125,6 +127,13 @@ def _origin(url: str) -> str:
     return f"{u.scheme}://{u.netloc}"
 
 
+LINK_CONTEXT = "card-link"  # tag inside every token, so no other use of the key accepts one
+# A link may be fetched this many times (a card reloading, a retry); more is a replay, and the answer
+# of the first fetch is kept for the link's lifetime so replays never reach Archidekt or Scryfall.
+LINK_MAX_USES = 20
+LINK_CACHE_SIZE = 512
+
+
 class CardLinks:
     """Issues and opens the signed links cards fetch their data through."""
 
@@ -132,13 +141,45 @@ class CardLinks:
         self.fernet = Fernet(secret_key.encode())
         self.public_url = public_url.rstrip("/")
         self.ttl = ttl
+        self._uses: OrderedDict[str, tuple[int, float]] = OrderedDict()  # token -> (uses, first use)
+        self._cache: OrderedDict[str, tuple[dict[str, Any], float]] = OrderedDict()  # token -> (data, at)
+        self._lock = threading.Lock()
+
+    def use(self, token: str) -> bool:
+        """Counts one fetch of ``token``; False once it has been used more than LINK_MAX_USES times
+        within its lifetime."""
+        now = time.time()
+        with self._lock:
+            uses, first = self._uses.get(token, (0, now))
+            if now - first > self.ttl:
+                uses, first = 0, now
+            self._uses[token] = (uses + 1, first)
+            self._uses.move_to_end(token)
+            while len(self._uses) > LINK_CACHE_SIZE:
+                self._uses.popitem(last=False)
+            return uses < LINK_MAX_USES
+
+    def cached(self, token: str) -> dict[str, Any] | None:
+        with self._lock:
+            hit = self._cache.get(token)
+            if hit is None or time.time() - hit[1] > self.ttl:
+                return None
+            return hit[0]
+
+    def remember(self, token: str, data: dict[str, Any]) -> None:
+        with self._lock:
+            self._cache[token] = (data, time.time())
+            self._cache.move_to_end(token)
+            while len(self._cache) > LINK_CACHE_SIZE:
+                self._cache.popitem(last=False)
 
     def issue(self, sub: str, kind: str, ref: str) -> str:
         """A URL only this member's card can use for ``ttl`` seconds to read one object."""
         if kind not in LINK_KINDS:
             raise ValueError(f"unknown link kind {kind!r}")
         payload = json.dumps(
-            {"s": sub, "k": kind, "r": str(ref), "t": int(time.time())}, separators=(",", ":")
+            {"c": LINK_CONTEXT, "s": sub, "k": kind, "r": str(ref), "t": int(time.time())},
+            separators=(",", ":"),
         )
         token = self.fernet.encrypt(payload.encode()).decode()
         return f"{self.public_url}{LINK_PATH}{token}"
@@ -152,7 +193,7 @@ class CardLinks:
             data = json.loads(raw)
         except (InvalidToken, ValueError, TypeError):
             return None
-        if not isinstance(data, dict) or data.get("k") not in LINK_KINDS:
+        if not isinstance(data, dict) or data.get("c") != LINK_CONTEXT or data.get("k") not in LINK_KINDS:
             return None
         sub, ref = data.get("s"), data.get("r")
         if not isinstance(sub, str) or not isinstance(ref, str) or not sub or not ref:
@@ -238,6 +279,21 @@ def deck_card_data(deck: Deck, *, public_url: str, snapshot: dict[str, Any] | No
     return out
 
 
+# The endpoint answers with its own words, never with Archidekt's or Scryfall's.
+FIXED_MESSAGES = {
+    "not_found": "The deck, snapshot or card behind this link no longer exists.",
+    "invalid": "The deck, snapshot or card behind this link no longer exists.",
+    "forbidden": "The deck behind this link is not yours to read.",
+    "not_linked": "No Archidekt account is linked; link one on the Account page.",
+    "rate_limited": "The gateway is busy for this account; try again in a minute.",
+    "unavailable": "The data behind this link could not be loaded right now.",
+}
+
+
+def _status(kind: str) -> int:
+    return 404 if kind in ("not_found", "forbidden", "invalid") else 429 if kind == "rate_limited" else 503
+
+
 def add_card_routes(server: MCPServer, state: AppState, links: CardLinks) -> None:
     """``GET /cards/data/<token>``: the data behind a signed link, as JSON, for the card that holds
     the link. No cookie or bearer token is read; the token is the whole proof. Answered with an
@@ -261,9 +317,12 @@ def add_card_routes(server: MCPServer, state: AppState, links: CardLinks) -> Non
     async def card_data(request: Request) -> Response:
         if request.method == "OPTIONS":
             return Response(status_code=204, headers=headers)
-        link = links.open(request.path_params.get("token", ""))
+        token = request.path_params.get("token", "")
+        link = links.open(token)
         if link is None:
             return fail("expired", "This card's link is no longer valid; ask for the data again.", 404)
+        if not links.use(token):
+            return fail("expired", "This card's link has been used up; ask for the data again.", 404)
         sub = link["sub"]
         user = state.db.get_user(sub)
         if user is None or user.get("disabled_at"):
@@ -275,6 +334,9 @@ def add_card_routes(server: MCPServer, state: AppState, links: CardLinks) -> Non
                 return fail("forbidden", "This member can no longer use the gateway.", 403)
         if state.metrics is not None:
             state.metrics.record("card", link["kind"], sub)
+        cached = links.cached(token)
+        if cached is not None:
+            return JSONResponse({"ok": True, **cached}, headers=headers)
         from .decks import DeckError
 
         try:
@@ -297,11 +359,13 @@ def add_card_routes(server: MCPServer, state: AppState, links: CardLinks) -> Non
                 try:
                     out = await scan.printings(link["ref"], owner=sub)
                 except Exception as exc:  # ScanError: the kind is on the exception
-                    kind = getattr(exc, "kind", "unavailable")
-                    return fail(str(kind), str(exc), 503 if kind in ("unavailable", "rate_limited") else 404)
+                    kind = str(getattr(exc, "kind", "unavailable"))
+                    return fail(kind, FIXED_MESSAGES.get(kind, FIXED_MESSAGES["unavailable"]), _status(kind))
                 data = {"oracle_id": link["ref"], **out}
         except DeckError as exc:
-            return fail(exc.kind, str(exc), 404 if exc.kind in ("not_found", "forbidden") else 503)
+            message = FIXED_MESSAGES.get(exc.kind, FIXED_MESSAGES["unavailable"])
+            return fail(exc.kind, message, _status(exc.kind))
+        links.remember(token, data)
         return JSONResponse({"ok": True, **data}, headers=headers)
 
 

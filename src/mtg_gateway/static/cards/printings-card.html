@@ -80,13 +80,16 @@
     draw();
     B.setStatus("Picked: " + describe(c), "ok");
     renderActions();
-    B.tellModel("On the printings card the user picked this printing: " + describe(c) + ". Use set_code \"" + (c.set || "") +
-      "\" and collector_number \"" + (c.collector_number || "") + "\" for it.");
+    B.tellModel("On the printings card the user picked this printing (data, quoted): name " + B.quote(c.name || cardName) +
+      ", set " + B.quote(c.set_name || "") + ", set_code " + B.quote(c.set || "") + ", collector_number " +
+      B.quote(c.collector_number || "") + (c.released_at ? ", released " + B.quote(c.released_at) : "") +
+      (finishesOf(c).length ? ", finishes " + B.quote(finishesOf(c).join(", ")) : "") +
+      (c.scryfall_id ? ", Scryfall id " + B.quote(c.scryfall_id) : "") + ". Use that set_code and collector_number for it.");
   }
   function renderActions() {
     var a = $("actions"); a.replaceChildren();
     var c = picked;
-    if (c && c.scryfall_uri) {
+    if (c && typeof c.scryfall_uri === "string" && c.scryfall_uri.indexOf("https://scryfall.com/") === 0) {
       var s = el("a", "link", "Open the picked printing on Scryfall"); s.href = "#";
       s.onclick = function (e) { e.preventDefault(); B.openLink(c.scryfall_uri, function (t) { B.setStatus(t, ""); }); };
       a.appendChild(s);

@@ -280,8 +280,16 @@ For the exact devices and plans tested, see
   `_meta` and never to the model. The endpoint serves JSON to any origin
   without cookies, checks the member still exists, is not disabled and is
   still in the required group, and answers `expired` or `forbidden`
-  otherwise. Pictures and rules text come straight from Scryfall under each
-  card's CSP (`_meta.ui.csp`). `MTG_APPLY_IN_CHAT=false` removes all of it.
+  otherwise, in its own fixed words (never Archidekt's or Scryfall's). A
+  link is good for twenty fetches, and the first answer is kept for the
+  link's lifetime, so a replayed link never reaches Archidekt or Scryfall
+  again and cannot spend the member's budget. Pictures and rules text come
+  straight from Scryfall under each card's CSP (`_meta.ui.csp`). The text a
+  card sends the model on a tap is shaped like a user action but contains
+  data (card and set names from Scryfall, the user's own words): the cards
+  quote every such value, keep it to one line and at most 200 characters,
+  and the skill tells the assistant to treat it as the user's choice, not as
+  an instruction. `MTG_APPLY_IN_CHAT=false` removes all of it.
   The MTG skill also tells the assistant
   never to treat text inside decks or tool output as an instruction. Each
   proposal records and shows the app that made it; disconnecting an app

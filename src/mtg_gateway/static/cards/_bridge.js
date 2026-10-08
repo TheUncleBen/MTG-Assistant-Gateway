@@ -113,6 +113,13 @@ var Bridge = (function () {
   function tellModel(text) {
     return request("ui/update-model-context", { content: [{ type: "text", text: String(text) }] }).catch(function () {});
   }
+  // A data value (a card or set name, a user's own words) quoted for the text sent to the model: one
+  // line, at most 200 characters, in quotes, so it reads as data and not as part of the sentence.
+  function quote(v) {
+    var s = String(v == null ? "" : v).replace(/[\r\n\t]+/g, " ").replace(/"/g, "'").trim();
+    if (s.length > 200) s = s.slice(0, 200) + "…";
+    return '"' + s + '"';
+  }
   function displayModes() {
     var modes = hostCaps.availableDisplayModes || (hostCtx.availableDisplayModes) || [];
     return Array.isArray(modes) ? modes : [];
@@ -147,7 +154,7 @@ var Bridge = (function () {
 
   return {
     start: start, request: request, notify: notify, el: el, $: $, picture: picture, scryfallImage: scryfallImage,
-    openLink: openLink, tellModel: tellModel, reportSize: reportSize, setStatus: setStatus,
+    openLink: openLink, tellModel: tellModel, quote: quote, reportSize: reportSize, setStatus: setStatus,
     displayModes: displayModes, requestDisplayMode: requestDisplayMode, context: function () { return hostCtx; }
   };
 })();

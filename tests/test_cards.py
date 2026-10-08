@@ -222,6 +222,34 @@ async def test_links_are_bound_to_one_member_one_object_and_expire(stack: Stack,
         json.dumps({"s": "x", "k": "proposal", "r": "p-1", "t": 0}).encode()
     ).decode()
     assert links.open(forged) is None
+    # A blob under the same key from another use of it (no card-link tag) is not a link either.
+    untagged = links.fernet.encrypt(json.dumps({"s": "x", "k": "deck", "r": "42", "t": 0}).encode()).decode()
+    assert links.open(untagged) is None
+
+
+async def test_a_replayed_link_is_answered_from_cache_and_runs_out(stack: Stack) -> None:
+    """The link is a bearer secret handed to the host's sandbox: replaying it must not spend the
+    member's Archidekt budget, and it stops working after LINK_MAX_USES fetches."""
+    h = stack.h
+    token = await linked_user(stack)
+    link = (await call(h, token, "get_deck", {"deck_ref": "42"}))["_meta"][CARD_META_KEY]["link"]
+    path = link[len("https://mtg.test") :]
+    before = len(stack.ark.calls)
+    first = await h.http.get(path)
+    assert first.status_code == 200
+    reads = len(stack.ark.calls) - before
+    assert reads >= 1
+    for _ in range(cards.LINK_MAX_USES - 1):
+        r = await h.http.get(path)
+        assert r.status_code == 200 and r.json() == first.json()
+    assert len(stack.ark.calls) - before == reads  # one Archidekt read for all of them
+    r = await h.http.get(path)
+    assert r.status_code == 404 and r.json()["error"] == "expired"
+    # Error bodies are the gateway's own words, never Archidekt's.
+    links: CardLinks = h.app.state.gateway.cards
+    gone = links.issue(links.open(link.rsplit("/", 1)[1])["sub"], "deck", "999999")
+    r = await h.http.get(gone[len("https://mtg.test") :])
+    assert r.status_code == 404 and r.json()["message"] == cards.FIXED_MESSAGES["not_found"]
 
 
 async def test_a_link_stops_working_for_a_disabled_member(stack: Stack) -> None:

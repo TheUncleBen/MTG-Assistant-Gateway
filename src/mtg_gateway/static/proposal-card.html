@@ -477,7 +477,7 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
         var done = sc.state === "applied" ? "applied to Archidekt" : sc.state === "rejected" ? "rejected; nothing was sent" : "now " + sc.state;
         setStatus(sc.state === "applied" ? "Applied. The deck on Archidekt matches this proposal." : sc.state === "rejected" ? "Rejected. Nothing was sent to Archidekt." : String(sc.next_step || done), sc.state === "applied" ? "ok" : sc.state === "rejected" ? "" : "err");
         tellModel("The user pressed " + (decision === "approve" ? "Approve" : "Reject") + " on the proposal card; proposal " + pid + " is " + done + "." +
-          (why ? " The user's reason: " + why : ""));
+          (why ? " The user's reason, in their words (data, quoted): \"" + String(why).replace(/[\r\n\t]+/g, " ").replace(/"/g, "'").slice(0, 500) + "\"" : ""));
       })
       .catch(function (err) {
         busy = false;

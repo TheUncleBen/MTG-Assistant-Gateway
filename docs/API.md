@@ -81,8 +81,9 @@ The cards an AI app shows in the chat load their bulky data from `GET /cards/dat
 `/api/v1` and outside the session: the token (a ten-minute Fernet token the gateway hands to the
 card in a tool result's `_meta`) names the member, the kind (`deck`, `snapshot`, `printings`) and the
 id, and the answer is that member's own data as JSON (`Access-Control-Allow-Origin: *`, no cookies,
-`Cache-Control: private, no-store`). An expired or forged token answers 404 `expired`; a member who
-was disabled or removed from the group since, 403 `forbidden`. The route exists only with
+`Cache-Control: private, no-store`). An expired, forged or used-up token (twenty fetches) answers 404 `expired`; a member who
+was disabled or removed from the group since, 403 `forbidden`; error messages are the gateway's own
+fixed words. The route exists only with
 `MTG_APPLY_IN_CHAT` on. It is not a public API: the token is the only credential and it cannot be
 requested.
 

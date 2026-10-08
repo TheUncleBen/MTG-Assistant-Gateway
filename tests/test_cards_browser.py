@@ -400,8 +400,9 @@ def test_picker_card_keeps_drops_and_picks_then_tells_the_assistant() -> None:
                 "() => window.log.some(m => m.method === 'ui/update-model-context')", timeout=5_000
             )
             told = _calls(page, "ui/update-model-context")[-1]["params"]["content"][0]["text"]
-            assert "2 Sol Ring (CMM) 411" in told and "1 Cultivate" in told and "Left out: Island" in told
-            assert "“Cultivatz” is Cultivate" in told
+            assert '2 "Sol Ring" ("CMM") "411"' in told and '1 "Cultivate"' in told
+            assert 'Left out: "Island"' in told
+            assert 'the name read as "Cultivatz" is "Cultivate"' in told
             assert card.locator("#use").count() == 0  # confirmed once; the assistant has the list
             assert card.locator("input.check").first.is_disabled()
             assert not errors, errors

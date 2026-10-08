@@ -39,8 +39,10 @@ before.
   the reason goes back to the assistant with the outcome.
 - Cards fetch bulky data (a deck's rows, a card's printings) through a signed
   link to `GET /cards/data/{token}` that is tied to the member and expires
-  after ten minutes; the link is handed to the card only, never to the model.
-  Pictures and rules text come straight from Scryfall.
+  after ten minutes and twenty fetches; the link is handed to the card only,
+  never to the model, and a replayed link is answered from a cache instead
+  of reaching Archidekt or Scryfall again. Pictures and rules text come
+  straight from Scryfall.
 
 ### Changed
 
