@@ -303,6 +303,36 @@ async def test_health_probes_mystic_forge_once_for_many_callers():
     assert all(results) and len(probes) == 1
 
 
+async def test_health_retries_a_failed_probe_sooner_than_a_good_one(monkeypatch):
+    """Mystic Forge starts after the gateway: a "down" answer is held for a few seconds only,
+    an "ok" answer for the usual half minute."""
+    import contextlib
+
+    from mtg_gateway import mf_proxy as mod
+
+    up = {"x": False}
+    probes = []
+
+    class Client:
+        async def list_tools(self):
+            if not up["x"]:
+                raise ConnectionError("not yet")
+
+    @contextlib.asynccontextmanager
+    async def factory():
+        probes.append(1)
+        yield Client()
+
+    monkeypatch.setattr(mod, "HEALTH_DOWN_CACHE_SECONDS", 0.05)
+    proxy = mod.MysticForgeProxy("http://mf.test/mcp", client_factory=factory)
+    assert await proxy.healthy() is False and await proxy.healthy() is False and len(probes) == 1
+    up["x"] = True
+    await asyncio.sleep(0.06)
+    assert await proxy.healthy() is True and len(probes) == 2  # probed again once the short hold passed
+    up["x"] = False
+    assert await proxy.healthy() is True and len(probes) == 2  # a good answer is held the full window
+
+
 def test_backup_is_written_in_a_private_folder_and_leaves_nothing_behind(tmp_path: Path, monkeypatch):
     from mtg_gateway import backup as backup_module
 

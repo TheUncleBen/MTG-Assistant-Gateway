@@ -62,6 +62,8 @@ before.
   banned (it was only checked for rarity).
 - The rate-limit message says "Archidekt actions", which is what the
   per-member budget counts.
+- `/healthz` reports Mystic Forge `ok` within seconds of it starting: a
+  failed probe is now held for five seconds, not thirty.
 
 ### Security
 
