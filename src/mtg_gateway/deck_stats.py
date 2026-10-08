@@ -349,7 +349,10 @@ def deck_checks(deck: Deck, cards: list[DeckCard], commanders: list[DeckCard], q
         elif zone["count"] > 2:
             zone["ok"] = False
             problems.append(f"{zone['count']} cards in the Commander category (expected 1 or 2)")
-        not_commanders = [c.name for c in commanders if not _can_lead(c, fmt)]
+        # A Background (a legendary enchantment) may sit in the zone only beside a "Choose a
+        # Background" commander: it is checked as half of that pair, not as a commander itself.
+        paired = {c.name for c in commanders} if len(commanders) == 2 and _pair_ok(*commanders) else set()
+        not_commanders = [c.name for c in commanders if not _can_lead(c, fmt) and c.name not in paired]
         if not_commanders:
             zone["ok"] = False
             zone["cannot_command"] = not_commanders

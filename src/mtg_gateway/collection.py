@@ -163,7 +163,7 @@ def parse_collection_import(text: str) -> list[dict[str, Any]]:
             if not name:
                 raise CollectionError("invalid", f"line {n}: no card name")
             qty = cell(row, "quantity") or "1"
-            if not qty.isdigit():
+            if not qty.isascii() or not qty.isdigit():  # str.isdigit alone accepts "²" and int() then fails
                 raise CollectionError("invalid", f"line {n}: quantity {qty!r} is not a number")
             finish_raw = cell(row, "finish").lower()
             finish = {"foil": "foil", "etched": "etched", "true": "foil", "yes": "foil"}.get(

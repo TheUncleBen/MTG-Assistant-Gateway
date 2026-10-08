@@ -226,7 +226,7 @@ async def test_collection_import_from_csv_and_plain_list(stack: Stack) -> None:
     """Import a list on the Collection page: the page's own Export CSV round-trips (same printings,
     finishes and counts), a CSV with Archidekt's column names and a plain card list work too,
     and an oversized or unreadable paste adds nothing and says why."""
-    from mtg_gateway.collection import parse_collection_import
+    from mtg_gateway.collection import CollectionError, parse_collection_import
 
     b = await linked(stack)
     try:
@@ -269,6 +269,13 @@ async def test_collection_import_from_csv_and_plain_list(stack: Stack) -> None:
         assert sum(c["quantity"] for c in stack.ark.collections["alice"].values()) == 9
         items = parse_collection_import("Quantity,Name,Finish\n1,Sol Ring,Etched\n")
         assert items[0]["finish"] == "etched" and items[0]["quantity"] == 1
+        for bad in (
+            "Quantity,Name\n²,Sol Ring\n",
+            "Quantity,Name\n٣,Sol Ring\n",
+            "Quantity,Name\n1.5,Sol Ring\n",
+        ):
+            with pytest.raises(CollectionError):  # a count that is not a plain number is refused, not a crash
+                parse_collection_import(bad)
     finally:
         await b.aclose()
 

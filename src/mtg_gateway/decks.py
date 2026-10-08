@@ -3055,6 +3055,11 @@ def cards_from_json(text: str) -> list[dict[str, Any]]:
         cats_raw = row.get("categories") or []
         if not isinstance(cats_raw, list) or not all(isinstance(c, str) for c in cats_raw):
             raise DeckError("invalid", f"card {i}: categories must be a list of names")
+        name_len = len(str(row.get("name") or ""))
+        if name_len > 200 or len(cats_raw) > 10 or any(len(c) > MAX_CATEGORY for c in cats_raw):
+            raise DeckError(
+                "invalid", f"card {i}: name (200), categories (10 of up to {MAX_CATEGORY}) too long"
+            )
         finish = str(row.get("finish") or "").strip().capitalize()
         set_code = str(row.get("set") or row.get("set_code") or "").strip().lower()
         number = str(row.get("collector_number") or "").strip()

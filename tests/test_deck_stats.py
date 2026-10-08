@@ -518,7 +518,15 @@ def test_two_commanders_need_a_partner_ability() -> None:
     background = deck([_cmdr("Wilson", "Choose a Background"),
                        _cmdr("Raised by Giants", types=["Enchantment"], subtypes=["Background"]),
                        islands], categories=cat)  # fmt: skip
-    assert compute(background)["checks"]["commander_zone"]["pairing"] == "partners"
+    bg = compute(background)["checks"]
+    assert bg["commander_zone"]["pairing"] == "partners" and bg["commander_zone"]["ok"] is True
+    assert bg["ok"] is True and "cannot_command" not in bg["commander_zone"], (
+        bg
+    )  # the Background may sit there
+    alone = deck(
+        [_cmdr("Raised by Giants", types=["Enchantment"], subtypes=["Background"]), islands], categories=cat
+    )
+    assert compute(alone)["checks"]["commander_zone"]["cannot_command"] == ["Raised by Giants"]
     plain = deck([_cmdr("Aesi"), _cmdr("Krenko"), islands], categories=cat)
     assert compute(plain)["checks"]["commander_zone"]["pairing"] == "invalid"
 
