@@ -268,13 +268,33 @@ def test_a_used_up_link_stays_used_up_when_its_counter_is_crowded_out(monkeypatc
     assert busy not in links._uses  # crowded out of the counters
     assert not links.use(busy)  # still refused: its cached answer shows it was counted before
     # Expired counters go first: an old entry is dropped, a live one survives the squeeze.
-    links._uses.clear()
+    links = CardLinks(Fernet.generate_key().decode(), "https://mtg.test")
     links._uses["stale"] = (1, time.time() - cards.LINK_TTL - 5)
     live = links.issue("amy", "deck", "live").rsplit("/", 1)[1]
     links.use(live)
     for n in range(cards.LINK_USES_SIZE - 1):  # fills the table to one over its size
         links.use(links.issue("amy", "deck", f"x{n}").rsplit("/", 1)[1])
     assert "stale" not in links._uses and live in links._uses
+
+
+def test_a_used_up_link_stays_used_up_when_its_counter_and_answer_are_both_crowded_out(monkeypatch) -> None:
+    """Even with its counter AND its cached answer gone (more than LINK_USES_SIZE other links within
+    the lifetime), a used-up link does not get a fresh budget; links issued after the squeeze work."""
+    clock = [1_800_000_000.0]
+    monkeypatch.setattr(cards.time, "time", lambda: clock[0])
+    links = CardLinks(Fernet.generate_key().decode(), "https://mtg.test")
+    busy = links.issue("alice", "deck", "42").rsplit("/", 1)[1]
+    for _ in range(cards.LINK_MAX_USES):
+        assert links.use(busy)
+    assert not links.use(busy)
+    clock[0] += 1
+    for n in range(cards.LINK_USES_SIZE + 10):
+        links.use(links.issue("amy", "deck", str(n)).rsplit("/", 1)[1])
+    assert busy not in links._uses and links.cached(busy) is None  # nothing left that remembers it
+    assert not links.use(busy)  # still refused
+    clock[0] += 1
+    fresh = links.issue("alice", "deck", "42").rsplit("/", 1)[1]
+    assert links.use(fresh)  # a link issued after the squeeze has its own budget
 
 
 async def test_a_link_stops_working_for_a_disabled_member(stack: Stack) -> None:

@@ -9,19 +9,19 @@
 :root{
   color-scheme:light dark;
   --bg:var(--color-background-primary,#ffffff);--bg2:var(--color-background-secondary,#f5f4ed);
-  --text:var(--color-text-primary,#141413);--muted:var(--color-text-tertiary,#73726c);
+  --text:var(--color-text-primary,#141413);--muted:var(--color-text-secondary,#62615b);
   --border:var(--color-border-tertiary,rgba(31,30,29,.15));--radius:var(--border-radius-md,8px);
   --green:var(--color-text-success,#265b19);--green-bg:var(--color-background-success,#e9f1dc);
   --red:var(--color-text-danger,#7f2c28);--red-bg:var(--color-background-danger,#f7ecec);
   --amber:var(--color-text-warning,#5a4815);--amber-bg:var(--color-background-warning,#f6eedf);
-  --blue:var(--color-text-info,#3266ad);--blue-bg:var(--color-background-info,#d6e4f6);
+  --blue:var(--color-text-info,#2b5a9c);--blue-bg:var(--color-background-info,#d6e4f6);
   --btn-bg:var(--color-background-inverse,#141413);--btn-text:var(--color-text-inverse,#ffffff);
   --font:var(--font-sans,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif);
   --pad:12px;--inset-top:0px;--inset-right:0px;--inset-bottom:0px;--inset-left:0px;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme=light]){
   --bg:var(--color-background-primary,#30302e);--bg2:var(--color-background-secondary,#262624);
-  --text:var(--color-text-primary,#faf9f5);--muted:var(--color-text-tertiary,#9c9a92);
+  --text:var(--color-text-primary,#faf9f5);--muted:var(--color-text-secondary,#b0aea6);
   --border:var(--color-border-tertiary,rgba(222,220,209,.15));
   --green:var(--color-text-success,#7ab948);--green-bg:var(--color-background-success,#1b4614);
   --red:var(--color-text-danger,#ee8884);--red-bg:var(--color-background-danger,#602a28);
@@ -31,7 +31,7 @@
 }}
 :root[data-theme=dark]{
   --bg:var(--color-background-primary,#30302e);--bg2:var(--color-background-secondary,#262624);
-  --text:var(--color-text-primary,#faf9f5);--muted:var(--color-text-tertiary,#9c9a92);
+  --text:var(--color-text-primary,#faf9f5);--muted:var(--color-text-secondary,#b0aea6);
   --border:var(--color-border-tertiary,rgba(222,220,209,.15));
   --green:var(--color-text-success,#7ab948);--green-bg:var(--color-background-success,#1b4614);
   --red:var(--color-text-danger,#ee8884);--red-bg:var(--color-background-danger,#602a28);
@@ -48,7 +48,7 @@ body{font-family:var(--font);font-size:var(--font-text-sm-size,14px);line-height
 .head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:6px}
 h1{font-size:var(--font-heading-md-size,16px);font-weight:600;margin:0;line-height:1.3;overflow-wrap:anywhere}
 .badge{flex:none;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;border-radius:999px;
-  padding:3px 9px;background:var(--bg2);color:var(--muted);border:1px solid var(--border)}
+  padding:3px 9px;background:var(--bg2);color:var(--muted);border:1px solid var(--border);white-space:nowrap}
 .badge.pending{background:var(--amber-bg);color:var(--amber)}
 .badge.applying{background:var(--amber-bg);color:var(--amber)}
 .badge.applied{background:var(--green-bg);color:var(--green)}
@@ -67,13 +67,17 @@ ul.changes li.detail,ul.changes li.description{border-left-color:var(--blue)}
 li.add .act{color:var(--green)} li.remove .act{color:var(--red)}
 .name{display:block;overflow-wrap:anywhere}
 .qty{font-variant-numeric:tabular-nums;font-weight:600;white-space:nowrap;font-size:13px;color:var(--muted)}
+/* A change's text (Main → Maybeboard) may wrap, so on a narrow card it never squeezes the card name to a letter a line. */
+ul.changes li .qty{white-space:normal;text-align:right;overflow-wrap:anywhere;max-width:min(20em,32vw)}
+@media (max-width:420px){ul.changes li:not(.add):not(.remove) .qty{grid-column:2;text-align:left;max-width:none}}
 li.add .qty{color:var(--green)} li.remove .qty{color:var(--red)}
 ul.changes li.group{display:block;padding:5px 10px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
   color:var(--muted);background:var(--bg2);border-left-color:var(--border)}
 .more{display:block;width:100%;min-height:40px;padding:6px 10px;font-size:13px;font-weight:600;color:var(--text);
   border:0;border-top:1px solid var(--border);border-radius:0;background:var(--bg2);text-align:left}
 ul.changes li.more-row{display:block;padding:0;border-left-color:var(--border)}
-.badge.risk{margin-left:6px}
+/* The state and risk badges stay whole: on a narrow card the risk badge moves under the state one. */
+.badges{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;min-width:0}
 .badge.risk.high{background:var(--amber-bg);color:var(--amber)}
 .note{margin:8px 0 0;font-size:13px;color:var(--muted);overflow-wrap:anywhere}
 .foot{margin:10px 0 0;font-size:12px;color:var(--muted);overflow-wrap:anywhere}
@@ -97,7 +101,7 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
 </head>
 <body>
 <div class="card" id="card">
-  <div class="head"><h1 id="title">Deck change proposal</h1><span><span class="badge" id="state"></span><span class="badge risk hidden" id="risk"></span></span></div>
+  <div class="head"><h1 id="title">Deck change proposal</h1><span class="badges"><span class="badge" id="state"></span><span class="badge risk hidden" id="risk"></span></span></div>
   <p class="sum" id="summary">Waiting for the proposal…</p>
   <ul class="changes" id="rows" aria-label="Changes"></ul>
   <p class="note hidden" id="note"></p>

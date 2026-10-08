@@ -1113,7 +1113,7 @@ class DeckService:
         if self._archidekt_in_flight.get(sub, 0) >= self.max_archidekt_per_user:
             raise DeckError(
                 "rate_limited",
-                f"{self.max_archidekt_per_user} Archidekt requests for your account are still running "
+                f"{self.max_archidekt_per_user} Archidekt actions for your account are still running "
                 "or waiting their turn; wait for them to finish and try again.",
             )
         refused = self.budget_refusal(sub)

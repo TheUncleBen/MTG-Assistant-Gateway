@@ -935,13 +935,43 @@ def _detail_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, int
 
 
 def _page_step(p: dict[str, Any]) -> str:
-    """next_step speaks to the assistant; while applying, the page says it for a person."""
-    if p.get("state") == "applying":
+    """What happens next, said to the person reading the review page. next_step speaks to the
+    assistant (call this tool, do not call that one), so the page words it on its own."""
+    state = p.get("state")
+    result = p.get("result") if isinstance(p.get("result"), dict) else {}
+    if state == "pending" and not p.get("writes_enabled"):
+        return "Review only: deck writes are turned off on this gateway, so this can't be applied yet."
+    if state == "pending":
+        retry = (
+            "The last try stopped before anything changed, because Archidekt's backup copy couldn't be made. "
+            if result.get("error") == "backup_failed"
+            else ""
+        )
+        if p.get("assistant_may_apply"):
+            return retry + (
+                "Your approval mode lets your assistant apply this one itself. You can also apply or "
+                "reject it here."
+            )
+        return retry + "Nothing changes on Archidekt until you apply it. You can apply or reject it here."
+    if state == "applying":
         return (
             "Archidekt is being updated a step at a time to stay within its limits. You can leave "
             "this page; it refreshes by itself until the change is done."
         )
-    return str(p["next_step"])
+    if state == "applied":
+        return "Done. Archidekt matches this proposal."
+    if state == "failed" and result.get("sent_entries"):
+        return (
+            "Part of this change reached Archidekt before it stopped. Check the deck; the snapshot "
+            "taken just before it can be restored from History."
+        )
+    if state == "failed":
+        return (
+            "Nothing else was changed. Ask your assistant for a new proposal if you still want these edits."
+        )
+    if state == "rejected":
+        return "This proposal was rejected. Nothing was changed."
+    return "This proposal can no longer be applied."
 
 
 def _progress_html(p: dict[str, Any]) -> str:

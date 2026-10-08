@@ -7,6 +7,43 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.5] - 2026-10-08
+
+Small fixes from the acceptance check of 0.7.4: text that was too faint to
+read comfortably, a badge that broke in two on phones, and a few wording
+slips. Nothing to change in the stack, the settings or the secrets.
+
+### Fixed
+
+- **Dark theme, Delete-deck page:** the heading used the red meant for button
+  backgrounds (2.55:1 on the dark panel); it now uses the red meant for text.
+  A comment's Delete link had the same colour and is fixed too.
+- **Light theme, secondary text** (deck facts such as "Deck size" and
+  "Lands", Compare captions, code samples) was 3.58:1 on grey panels; it is
+  darker now and passes 4.5:1. The chosen theme in the account menu
+  ("Light theme") was 4.01:1 and now passes too.
+- **In-chat cards:** small muted text (counts, group headers, years, the
+  account card's "ready" pill) measured 3.9 to 4.5:1. The cards now take the
+  app's secondary text colour, and their own defaults pass 4.5:1 on every
+  card background. The "ready" pill keeps its green.
+- **Approve card:** the "LOW RISK" badge no longer breaks across two lines on
+  a narrow card; it moves under the state badge whole. A long change on a
+  narrow card ("Main → Maybeboard (leaves the deck, −1)") no longer squeezes
+  the card's name to one letter a line; it wraps under the name instead.
+- **Proposal review page:** it showed the note written for the assistant
+  ("do not call apply_proposal…"). It now says what happens next in words
+  for the person reading it.
+- **Card data links:** a used-up link could work again if more than 8192 other
+  links were fetched within its 10 minutes. A link whose counter had to be
+  dropped is now refused; links issued after that work as usual.
+- **Deck stats for Pauper Commander:** `legality_problems` no longer lists an
+  uncommon commander as not legal (the deck checks already passed it); a
+  banned commander is still listed.
+- Wording: "Archidekt actions" in the README, the operations guide and the
+  "still running" refusal; the shutdown comment now says 200 s; the
+  capabilities page says the proposal card's Reject acts too, not only
+  Approve.
+
 ## [0.7.4] - 2026-10-08
 
 Interactive cards in the chat wherever a person has to pick or press, built

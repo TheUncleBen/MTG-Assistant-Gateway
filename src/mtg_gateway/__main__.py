@@ -9,7 +9,9 @@ import sys
 
 from .config import ConfigError, load_settings
 
-# Matches stop_grace_period (120 s) in deploy/portainer-stack.yml and deploy/compose, minus a margin.
+# Requests already running get this long on a stop; a background apply then gets up to 90 s more
+# (decks.SHUTDOWN_GRACE_SECONDS). Together they fit inside stop_grace_period (200 s) in
+# deploy/portainer-stack.yml and deploy/compose.
 GRACEFUL_SHUTDOWN_SECONDS = 100
 
 

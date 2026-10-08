@@ -171,6 +171,10 @@ def compute(deck: Deck) -> dict[str, Any]:
     if deck.format:
         for c in cards:
             status = c.legalities.get(deck.format)
+            if deck.format == "paupercommander" and deck.is_commander(c) and status != "banned":
+                # An uncommon leader is "not_legal" in Pauper Commander's per-card flag (that flag is
+                # for the 99); deck_checks judges the commander, so only a banned one is listed here.
+                continue
             if status is None:
                 unknown += 1
             elif status != "legal":

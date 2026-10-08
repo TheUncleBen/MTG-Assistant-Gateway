@@ -145,16 +145,20 @@ class CardLinks:
         self.ttl = ttl
         self._uses: OrderedDict[str, tuple[int, float]] = OrderedDict()  # token -> (uses, first use)
         self._cache: OrderedDict[str, tuple[dict[str, Any], float]] = OrderedDict()  # token -> (data, at)
+        # Issue time of the newest link whose live counter had to be dropped. A link with no counter
+        # issued at or before it may have been counted already, so it is refused rather than given a
+        # fresh budget (links issued later have never been dropped and count as usual).
+        self._dropped_upto = 0
         self._lock = threading.Lock()
 
     def use(self, token: str) -> bool:
         """Counts one fetch of ``token``; False once it has been used more than LINK_MAX_USES times
-        within its lifetime."""
+        within its lifetime, and False for a link whose counter may have been dropped."""
         now = time.time()
         with self._lock:
             entry = self._uses.get(token)
-            if entry is None and token in self._cache:
-                # counted before, but its counter was dropped: a link this busy is used up
+            if entry is None and (token in self._cache or self._issued(token) <= self._dropped_upto):
+                # counted before (or possibly so), but its counter was dropped: a link this busy is used up
                 return False
             uses, first = entry or (0, now)
             if now - first > self.ttl:
@@ -162,12 +166,21 @@ class CardLinks:
             self._uses[token] = (uses + 1, first)
             self._uses.move_to_end(token)
             if len(self._uses) > LINK_USES_SIZE:
-                # expired counters first (oldest first use at the front), then the oldest
+                # expired counters first (oldest first use at the front), then the oldest live ones,
+                # remembering how recent a dropped live link was
                 for old in [t for t, (_, at) in self._uses.items() if now - at > self.ttl]:
                     self._uses.pop(old, None)
                 while len(self._uses) > LINK_USES_SIZE:
-                    self._uses.popitem(last=False)
+                    old, _ = self._uses.popitem(last=False)
+                    self._dropped_upto = max(self._dropped_upto, self._issued(old))
             return uses < LINK_MAX_USES
+
+    def _issued(self, token: str) -> int:
+        """When ``token`` was issued (its signed Fernet timestamp); 0 when it cannot be read."""
+        try:
+            return self.fernet.extract_timestamp(token)
+        except (InvalidToken, ValueError, TypeError):
+            return 0
 
     def cached(self, token: str) -> dict[str, Any] | None:
         with self._lock:
