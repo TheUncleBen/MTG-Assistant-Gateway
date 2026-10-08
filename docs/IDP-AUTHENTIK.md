@@ -335,6 +335,7 @@ http = request.http_request
 if http is not None and http.GET.get("mtg_picture") == "1":
     return {"mtg_picture": avatar}
 from hashlib import sha256
+
 return {"mtg_picture_version": sha256(avatar.encode()).hexdigest()[:16]}
 ```
 <!-- /uploaded-picture-mapping -->

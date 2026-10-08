@@ -28,6 +28,11 @@
 
   if (list) {
     list.addEventListener("click", function (e) {
+      var show = e.target.closest(".thumbbtn");
+      if (show && window.MtgCardView) {
+        var card = show.closest("[data-card]");
+        if (card) { e.preventDefault(); window.MtgCardView.open(window.MtgCardView.fromElement(card), []); return; }
+      }
       var btn = e.target.closest("button[name=action]");
       if (!btn) return;
       var form = btn.form;
@@ -62,6 +67,38 @@
         say("No connection; reloading the page.");
         form.submit();
       });
+    });
+  }
+
+  // the row details menu saves through the JSON API and updates the row's badges in place
+  if (list) {
+    list.addEventListener("submit", function (e) {
+      var form = e.target.closest("form.detailsform");
+      if (!form) return;
+      e.preventDefault();
+      var id = form.getAttribute("data-id");
+      var item = form.closest("[data-id]");
+      var btn = form.querySelector("button");
+      var body = {
+        finish: form.elements.finish.value,
+        condition: form.elements.condition.value,
+        language: form.elements.language.value,
+        purchase_price: form.elements.purchase_price.value
+      };
+      btn.disabled = true;
+      request("POST", "/collection/api/rows/" + encodeURIComponent(id), body).then(function (d) {
+        btn.disabled = false;
+        if (!d.ok) { say(d.message || "That did not work."); return; }
+        var row = d.row || {};
+        var cond = item ? item.querySelector(".cond") : null;
+        if (cond) { if (row.condition) cond.textContent = row.condition; else cond.remove(); }
+        var fin = item ? item.querySelector(".finish") : null;
+        var label = row.finish === "foil" ? "Foil" : row.finish === "etched" ? "Etched" : "";
+        if (fin) { if (label) { fin.textContent = label.charAt(0); fin.title = label; } else fin.remove(); }
+        var dd = form.closest("details");
+        if (dd) dd.removeAttribute("open");
+        say((row.name || "Card") + ": details saved.");
+      }).catch(function () { btn.disabled = false; say("No connection; try again."); });
     });
   }
 

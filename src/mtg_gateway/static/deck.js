@@ -27,6 +27,49 @@
     });
   });
 
+  // -- Probability of draw (hypergeometric, like Archidekt's stats tab) --------------------------
+  var oddsBox = $("#odds");
+  var oddsData = $("#odds-data");
+  if (oddsBox && oddsData) {
+    var odds;
+    try { odds = JSON.parse(oddsData.textContent); } catch (e) { odds = null; }
+    if (odds && odds.size) {
+      var lf = [0];
+      for (var i = 1; i <= odds.size; i++) lf.push(lf[i - 1] + Math.log(i));
+      var lchoose = function (a, b) { return b < 0 || b > a ? -Infinity : lf[a] - lf[b] - lf[a - b]; };
+      var pExact = function (N, K, n, k) {
+        if (k > K || k > n || n - k > N - K) return 0;
+        return Math.exp(lchoose(K, k) + lchoose(N - K, n - k) - lchoose(N, n));
+      };
+      var pAtLeast = function (N, K, n, k) {
+        var p = 0;
+        for (var j = k; j <= Math.min(K, n); j++) p += pExact(N, K, n, j);
+        return p;
+      };
+      var form = $(".oddsform", oddsBox);
+      var tbody = $("tbody", oddsBox);
+      var render = function () {
+        var mode = form.elements.mode.value;
+        var k = Math.max(0, parseInt(form.elements.k.value, 10) || 0);
+        var n = Math.min(odds.size, Math.max(1, parseInt(form.elements.n.value, 10) || 7));
+        var group = odds.groups[form.elements.by.value] || {};
+        tbody.textContent = "";
+        Object.keys(group).forEach(function (name) {
+          var K = group[name];
+          var p = mode === "exact" ? pExact(odds.size, K, n, k) : pAtLeast(odds.size, K, n, k);
+          var tr = el("tr");
+          tr.appendChild(el("td", null, name));
+          tr.appendChild(el("td", null, String(K)));
+          tr.appendChild(el("td", null, (p >= 0.995 && p < 1 ? ">99" : Math.round(p * 100)) + "%"));
+          tbody.appendChild(tr);
+        });
+      };
+      form.addEventListener("input", render);
+      form.addEventListener("change", render);
+      render();
+    }
+  }
+
   // -- live local filter over the rendered cards (rows and image cards carry data-name) ----------
   var q = $("#q");
   var cards = $("#cards");
@@ -78,48 +121,23 @@
   var own = cards.hasAttribute("data-own");
   var touch = window.matchMedia("(hover: none)").matches;
 
-  // -- card viewer -----------------------------------------------------------------------------
-  var viewer = document.createElement("div");
-  viewer.className = "cardview";
-  viewer.setAttribute("role", "dialog");
-  viewer.setAttribute("aria-modal", "true");
-  viewer.setAttribute("aria-label", "Card");
-  document.body.appendChild(viewer);
-  var lastFocus = null;
-  function closeViewer() {
-    viewer.classList.remove("open");
-    viewer.textContent = "";
-    if (lastFocus && lastFocus.focus) lastFocus.focus();
-  }
+  // -- card viewer (static/cardview.js shows the whole card; this adds the deck's actions) -------
+  var CardView = window.MtgCardView;
+  function closeViewer() { if (CardView) CardView.close(); }
   function openViewer(card) {
-    lastFocus = document.activeElement;
-    viewer.textContent = "";
-    var box = el("div", "box");
+    if (!CardView) return;
     var name = card.getAttribute("data-card") || "";
-    var img = card.getAttribute("data-img");
-    var pic;
-    if (img) {
-      pic = el("img");
-      pic.src = img.replace("/small/", "/normal/");
-      pic.alt = name;
-    } else {
-      pic = el("div", "ph", name);
-    }
-    var side = el("div");
-    side.appendChild(el("h3", null, name));
-    var meta = [card.getAttribute("data-set"), card.getAttribute("data-type")].filter(Boolean).join(" · ");
-    side.appendChild(el("p", "meta", meta));
-    var acts = el("div", "acts");
+    var acts = [];
     var group = card.closest(".stack");
     if (own && deckId) {
       var edit = el("a", "btn btn-primary", "Edit in deck editor");
       edit.href = "/decks/" + encodeURIComponent(deckId) + "/edit#card-" + encodeURIComponent(name);
-      acts.appendChild(edit);
+      acts.push(edit);
       if (group && cards.hasAttribute("data-own")) {
         var move = el("button", "btn", "Move to another category…");
         move.type = "button";
         move.addEventListener("click", function () { closeViewer(); pickCategory(card); });
-        acts.appendChild(move);
+        acts.push(move);
       }
     }
     var ownBtn = el("button", "btn", "I own this card");
@@ -135,26 +153,14 @@
         ownBtn.textContent = d.ok && d.added && d.added.length ? "Added to your collection" : "Could not add (" + ((d && d.message) || "lookup failed") + ")";
       }).catch(function () { ownBtn.textContent = "Could not add: no connection"; });
     });
-    acts.appendChild(ownBtn);
+    acts.push(ownBtn);
     var scry = el("a", "btn", "Open on Scryfall");
     scry.href = "https://scryfall.com/search?q=" + encodeURIComponent("!\"" + name + "\"");
     scry.target = "_blank";
     scry.rel = "noopener noreferrer";
-    acts.appendChild(scry);
-    side.appendChild(acts);
-    var close = el("button", "btn close", "Close");
-    close.type = "button";
-    close.setAttribute("aria-label", "Close");
-    close.addEventListener("click", closeViewer);
-    box.appendChild(pic);
-    box.appendChild(side);
-    box.appendChild(close);
-    viewer.appendChild(box);
-    viewer.classList.add("open");
-    close.focus();
+    acts.push(scry);
+    CardView.open(CardView.fromElement(card), acts);
   }
-  viewer.addEventListener("click", function (e) { if (e.target === viewer) closeViewer(); });
-  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && viewer.classList.contains("open")) closeViewer(); });
 
   // -- stacks and grid: tap to fan out, tap a card to open it ----------------------------------
   var isStacks = cards.classList.contains("stacks");
@@ -461,6 +467,8 @@
     var textarea = $("textarea", form);
     var replyTo = $(".replyto", form);
     var parentId = null;
+    var me = null;  // the member's Archidekt user id, from the thread load; own comments get Edit and Delete
+    var deckUrl = "/social/api/decks/" + encodeURIComponent(commentsPanel.getAttribute("data-deck")) + "/comments";
     var when = function (iso) {
       var d = new Date(iso);
       return isNaN(d) ? "" : d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
@@ -491,6 +499,60 @@
         textarea.focus();
       });
       acts.appendChild(reply);
+      if (me !== null && c.owner && c.owner.id === me) {
+        var edit = el("button", "btn-ghost", "Edit");
+        edit.type = "button";
+        edit.addEventListener("click", function () {
+          if ($("form.editcomment", box)) return;
+          var f = el("form", "editcomment");
+          var ta = document.createElement("textarea");
+          ta.value = c.text; ta.rows = 3; ta.maxLength = 2000; ta.setAttribute("aria-label", "Edit your comment");
+          var save = el("button", "btn-primary", "Save");
+          var cancel = el("button", "", "Cancel"); cancel.type = "button";
+          var note = el("span", "muted small", "");
+          f.appendChild(ta); f.appendChild(save); f.appendChild(cancel); f.appendChild(note);
+          cancel.addEventListener("click", function () { f.remove(); p.hidden = false; });
+          f.addEventListener("submit", function (ev) {
+            ev.preventDefault();
+            var text = ta.value.trim();
+            if (!text) { ta.focus(); return; }
+            save.disabled = true; note.textContent = "Saving…";
+            socialRequest("PATCH", deckUrl + "/" + encodeURIComponent(c.id), { text: text }).then(function (d) {
+              if (!d.ok) { save.disabled = false; note.textContent = ""; note.appendChild(socialProblem(d)); return; }
+              c.text = d.comment.text; p.textContent = c.text; p.hidden = false; f.remove();
+              if (!/edited/.test(who.textContent)) who.appendChild(document.createTextNode(" · edited"));
+            }).catch(function () { save.disabled = false; note.textContent = "Network error; nothing was changed."; });
+          });
+          p.hidden = true;
+          box.insertBefore(f, acts);
+          ta.focus();
+        });
+        acts.appendChild(edit);
+        var del = el("button", "btn-ghost del", "Delete");
+        del.type = "button";
+        del.addEventListener("click", function () {
+          if ($(".confirmbar", box)) return;
+          var bar = el("div", "confirmbar notice warn");
+          bar.setAttribute("role", "alertdialog");
+          bar.appendChild(document.createTextNode("Delete this comment on Archidekt? "));
+          var yes = el("button", "btn-danger", "Delete"); yes.type = "button";
+          var no = el("button", "", "Keep"); no.type = "button";
+          bar.appendChild(yes); bar.appendChild(no);
+          no.addEventListener("click", function () { bar.remove(); });
+          yes.addEventListener("click", function () {
+            yes.disabled = true;
+            socialRequest("DELETE", deckUrl + "/" + encodeURIComponent(c.id)).then(function (d) {
+              if (!d.ok) { yes.disabled = false; bar.textContent = ""; bar.appendChild(socialProblem(d)); bar.appendChild(no); return; }
+              box.remove();
+              if (countEl) countEl.textContent = d.count === 1 ? "1 comment" : d.count + " comments";
+              if (!$(".cmt", thread)) thread.appendChild(el("p", "muted", "No comments yet. Be the first."));
+            }).catch(function () { yes.disabled = false; bar.textContent = "Network error; nothing was changed."; });
+          });
+          box.insertBefore(bar, acts.nextSibling);
+          yes.focus();
+        });
+        acts.appendChild(del);
+      }
       box.appendChild(acts);
       if (c.replies && c.replies.length) {
         var kids = el("div", "replies");
@@ -506,6 +568,7 @@
       socialRequest("GET", thread.getAttribute("data-src")).then(function (d) {
         if (!d.ok) { thread.textContent = ""; var p = el("p", "muted"); p.appendChild(socialProblem(d)); thread.appendChild(p); return; }
         thread.textContent = "";
+        me = typeof d.me === "number" ? d.me : null;
         if (countEl) countEl.textContent = d.count === 1 ? "1 comment" : d.count + " comments";
         if (!d.comments.length) { thread.appendChild(el("p", "muted", "No comments yet. Be the first.")); return; }
         d.comments.forEach(function (c) { thread.appendChild(render(c)); });

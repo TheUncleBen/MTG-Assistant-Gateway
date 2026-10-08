@@ -12,6 +12,7 @@ import httpx
 import pytest
 from mcp import Client
 from mcp.server.mcpserver import MCPServer
+from pydantic import BaseModel, ConfigDict, Field
 
 from mtg_gateway.archidekt import ArchidektClient, Pacer
 from mtg_gateway.mf_proxy import MysticForgeProxy
@@ -20,12 +21,65 @@ from .conftest import GATEWAY, FakeIdP, Harness, make_settings, running, sse_jso
 from .fake_archidekt import FakeArchidekt
 
 
+class _GoldfishRunInput(BaseModel):
+    """The shape of Mystic Forge's goldfish_run input (server.py GoldfishRunInput, extra forbidden):
+    one ``params`` object. A flat call fails validation exactly as it does against the real service."""
+
+    model_config = ConfigDict(extra="forbid")
+    deck: str = Field(min_length=1)
+    n: int = Field(default=300, ge=1, le=5000)
+    seed: int | None = None
+    until_turn: int = Field(default=10, ge=1, le=30)
+    opponents: int = Field(default=1, ge=1, le=5)
+    mulligan: dict[str, object] | None = None
+    annotations: list[dict[str, object]] | None = None
+    combos: list[object] | None = None
+
+
+class _GoldfishAbInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    deck_a: str = Field(min_length=1)
+    deck_b: str = Field(min_length=1)
+    n: int = Field(default=300, ge=1, le=5000)
+    seed: int | None = None
+    until_turn: int = Field(default=10, ge=1, le=30)
+    annotations: list[dict[str, object]] | None = None
+    annotations_a: list[dict[str, object]] | None = None
+    annotations_b: list[dict[str, object]] | None = None
+    combos: list[object] | None = None
+    allow_different_commanders: bool = False
+
+
+class _ValidateDecklistInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    decklist: str = Field(min_length=1)
+    commander: str | None = None
+
+
 def fake_mystic_forge() -> MCPServer:
     mf = MCPServer(name="mystic-forge-fake")
 
     @mf.tool(name="scryfall_named", description="Look up a card by name")
     async def scryfall_named(name: str) -> dict[str, object]:
         return {"name": name, "oracle_text": "fake oracle text"}
+
+    # The simulators, with Mystic Forge's one-model signature and its renderers' headings. A
+    # commander the fake does not know is answered the way Mystic Forge does: a sentence, not an
+    # error.
+    @mf.tool(name="goldfish_run", description="goldfish simulation")
+    async def goldfish_run(params: _GoldfishRunInput) -> str:
+        first = params.deck.strip().splitlines()[0]
+        if "Unknown" in first:
+            return f"Commander '{first}' was not recognized by Scryfall; fix the name and rerun."
+        return f"# Goldfish run\nCommander: {first} | {params.n} games\n\n## Metrics\n```json\n{{}}\n```"
+
+    @mf.tool(name="goldfish_ab", description="paired goldfish A/B")
+    async def goldfish_ab(params: _GoldfishAbInput) -> str:
+        return f"# Goldfish A/B\n{params.n} paired games\n\n## Deltas (A − B)\n(none)"
+
+    @mf.tool(name="validate_decklist", description="validate a decklist")
+    async def validate_decklist(params: _ValidateDecklistInput) -> str:
+        return f"Validated {len(params.decklist.splitlines())} lines"
 
     @mf.tool(name="watchlist_list", description="stateful, must stay hidden")
     async def watchlist_list() -> list[str]:
@@ -493,7 +547,7 @@ async def test_parse_deck_export_tool(stack: Stack) -> None:
     csv_text = (Path(__file__).parent / "fixtures" / "sample_deck.csv").read_text(encoding="utf-8")
     out = structured(await call(h, token, "parse_deck_export", {"csv_text": csv_text}))
     assert out["ok"] and out["card_count"] == 100 and "Commander" in out["categories"]
-    assert out["decklist_text"].startswith("1 Aesi, Tyrant of Gyre Strait (cmr) 365 *F*\n")
+    assert out["decklist_text"].startswith("1 Aesi, Tyrant of Gyre Strait (cmr) 365 *F* [Commander]\n")
     assert len(out["decklist_text"].splitlines()) == 72 and out["sideboard_text"] == ""
 
 
@@ -503,7 +557,7 @@ async def test_get_deck_reads_public_decks_without_a_link(stack: Stack) -> None:
     token = await mcp_token(h)  # signed in, nothing linked
     out = structured(await call(h, token, "get_deck", {"deck_ref": "https://archidekt.com/decks/42/reap"}))
     assert out["ok"] and out["card_count"] == 100 and out["url"] == "https://archidekt.com/decks/42"
-    assert out["decklist_text"].startswith("1 Aesi, Tyrant of Gyre Strait (cmr) 365 *F*\n")
+    assert out["decklist_text"].startswith("1 Aesi, Tyrant of Gyre Strait (cmr) 365 *F* [Commander]\n")
     assert "15 Forest (cmr) 510" in out["decklist_text"] and out["sideboard_text"] == ""
     assert not any(line.split(" ", 1)[0].isalpha() for line in out["decklist_text"].splitlines())
     private = structured(await call(h, token, "get_deck", {"deck_ref": "43"}))
@@ -536,9 +590,10 @@ async def test_parse_decklist_tool(stack: Stack) -> None:
     )
     out = structured(await call(h, token, "parse_decklist", {"text": text}))
     assert out["ok"] and out["card_count"] == 17 and out["sideboard_count"] == 1
-    assert out["decklist_text"].splitlines()[0] == "1 Aesi, Tyrant of Gyre Strait"
+    # commander first, with its category so the text reads back as a Commander deck; no headers
+    assert out["decklist_text"].splitlines()[0] == "1 Aesi, Tyrant of Gyre Strait [Commander]"
     assert "Negate" not in out["decklist_text"] and out["sideboard_text"] == "1 Negate\n"
-    assert "Commander" not in out["decklist_text"] and "Sideboard" not in out["decklist_text"]
+    assert "Commander\n" not in out["decklist_text"] and "Sideboard" not in out["decklist_text"]
     names = {c["name"]: c for c in out["cards"]}
     assert names["Sol Ring"]["set_code"] == "cmr" and names["Sol Ring"]["categories"] == ["Ramp"]
     assert names["Aesi, Tyrant of Gyre Strait"]["categories"] == ["Commander"]
@@ -559,8 +614,8 @@ async def test_propose_new_deck_from_decklist_and_apply(stack: Stack) -> None:
         )
     )
     assert p["ok"] and p["kind"] == "create_deck" and p["deck_id"] == "new" and p["state"] == "pending"
-    assert p["diff"].splitlines()[0] == "New commander deck 'Test import' (4 cards, private)"
-    assert "+1 Sol Ring [Ramp]" in p["diff"]
+    assert p["diff"].splitlines()[0] == "New commander deck 'Test import' (5 cards, private)"
+    assert "+1 Sol Ring [Ramp]" in p["diff"] and "+1 Island [Sideboard]" in p["diff"]
     assert len(ark.decks) == 2  # nothing created yet
     a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     assert a["ok"], a
@@ -570,9 +625,12 @@ async def test_propose_new_deck_from_decklist_and_apply(stack: Stack) -> None:
     deck = ark.decks[new_id]
     assert deck["name"] == "Test import" and deck["deckFormat"] == 3 and deck["private"] is True
     counts = {c["card"]["oracleCard"]["name"]: c["quantity"] for c in deck["cards"]}
-    assert counts == {"Aesi, Tyrant of Gyre Strait": 1, "Forest": 2, "Sol Ring": 1}  # sideboard left out
+    # the SB: row lands in Archidekt's Sideboard category instead of being dropped
+    assert counts == {"Aesi, Tyrant of Gyre Strait": 1, "Forest": 2, "Sol Ring": 1, "Island": 1}
     sol = next(c for c in deck["cards"] if c["card"]["oracleCard"]["name"] == "Sol Ring")
     assert sol["categories"] == ["Ramp"]
+    island = next(c for c in deck["cards"] if c["card"]["oracleCard"]["name"] == "Island")
+    assert island["categories"] == ["Sideboard"]
     # the review page shows the new deck link
     b = Browser(h)
     await b.login()
@@ -1256,3 +1314,124 @@ async def test_new_deck_says_when_a_listed_printing_was_not_found(stack: Stack) 
     assert a["result"]["printing_notes"] == [
         "Swamp: XYZ 9 not found on Archidekt, added its default printing instead"
     ]
+
+
+async def test_new_deck_verify_fails_when_a_finish_or_printing_is_lost(stack: Stack) -> None:
+    """The read-back after a new deck is created compares printing ids and finishes as well as
+    names and counts: a Foil row stored as Normal, or a pinned printing stored as another one,
+    fails the verify instead of passing because the names and counts agree."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    text = "1 Sol Ring (sld) 1075 *F*\n1 Swamp (m21) 267\n1 Forest\n"
+
+    async def create() -> dict:
+        p = structured(await call(h, token, "propose_new_deck", {"name": "Finishes", "decklist_text": text}))
+        assert p["ok"], p
+        return structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+
+    good = await create()
+    assert good["ok"] and good["result"]["verified"] is True, good
+    ark.add_rows_lose_finish = True
+    lost = await create()
+    assert lost["ok"] is False and lost["error"] == "verify_mismatch", lost
+    assert "Sol Ring (printing or finish)" in lost["message"] and "Swamp" not in lost["message"], lost
+    ark.add_rows_lose_finish = False
+    ark.add_rows_swap_printing = {87176: 9008}  # Swamp M21 267 stored as the default Swamp
+    swapped = await create()
+    assert swapped["ok"] is False and swapped["error"] == "verify_mismatch", swapped
+    assert "Swamp (printing or finish)" in swapped["message"] and "Sol Ring" not in swapped["message"]
+    ark.add_rows_swap_printing = {}
+
+
+async def test_simulation_calls_take_the_shape_mystic_forge_accepts(stack: Stack) -> None:
+    """The fake's goldfish_run, goldfish_ab and validate_decklist take one pydantic ``params``
+    model like the real Mystic Forge, so a flat call would fail validation here as it does live.
+    Deck 42 has a Commander category, so its report carries a goldfish block with the Metrics."""
+    h = stack.h
+    token = await linked_user(stack)
+    rep = structured(
+        await call(h, token, "run_deck_report", {"deck_ref": "42", "games": 20, "options": {"seed": 1}})
+    )
+    assert rep["ok"], rep
+    gf, val = rep["goldfish"], rep["validation"]
+    assert gf["ok"] is True and "## Metrics" in gf["text"] and "validation error" not in gf["text"], gf
+    assert val["ok"] is True and val["text"].startswith("Validated"), val
+    # A/B of two pasted lists: the simulator gets the gateway's rendering (commander first, no
+    # headers, sideboard left out), not the raw paste, and the deltas come back.
+    text_a = "Commander\n1 Aesi, Tyrant of Gyre Strait\n\n// Lands\n30 Island\nSideboard\n1 Negate\n"
+    text_b = text_a.replace("30 Island", "29 Island\n1 Forest")
+    out = structured(
+        await call(h, token, "compare_decks", {"a": text_a, "b": text_b, "simulate": True, "games": 20})
+    )
+    assert out["ok"], out
+    assert out["goldfish_ab"]["ok"] is True and "## Deltas" in out["goldfish_ab"]["text"], out["goldfish_ab"]
+    # A list with no commander is not simulated: Mystic Forge would silently take the first line
+    # as the commander and simulate a 59-card deck.
+    plain = "24 Forest\n36 Grizzly Bears\n"
+    out = structured(
+        await call(h, token, "compare_decks", {"a": plain, "b": plain, "simulate": True, "games": 20})
+    )
+    assert out["ok"] and out["goldfish_ab"]["ok"] is False and "Commander" in out["goldfish_ab"]["text"], out
+    # Mystic Forge answers an unknown commander with a sentence, not a tool error; the report
+    # records that as a failed simulation rather than a successful one.
+    unknown = "Commander\n1 Unknown Card\n\n99 Island\n"
+    out = structured(
+        await call(h, token, "compare_decks", {"a": unknown, "b": unknown, "simulate": True, "games": 20})
+    )
+    assert out["ok"] and out["goldfish_ab"]["ok"] is True  # the A/B fake does not refuse; run does:
+    bad = structured(
+        await call(h, token, "run_deck_report", {"deck_ref": "42", "games": 20, "options": {"opponents": 9}})
+    )
+    assert bad["ok"] is False and "opponents" in bad["message"], bad
+
+
+async def test_another_users_decks_are_the_public_listing_only(stack: Stack) -> None:
+    """archidekt_user is Archidekt's public profile listing, fetched without any member's token:
+    Amy's private deck 43 never appears, whoever asks, and the request itself is anonymous."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)  # alice, linked
+    ark.list_auth_schemes.clear()
+    out = structured(await call(h, token, "archidekt_user", {"username": "amy"}))
+    assert out["ok"], out
+    assert [d["id"] for d in out["decks"]] == [] or all(str(d["id"]) != "43" for d in out["decks"]), out
+    assert "Amy's deck" not in json.dumps(out)
+    assert ark.list_auth_schemes and set(ark.list_auth_schemes) == {""}, ark.list_auth_schemes
+    # The same tool on her own name lists only what Archidekt shows anonymously as well.
+    mine = structured(await call(h, token, "archidekt_user", {"username": "alice"}))
+    assert mine["ok"] and any(str(d["id"]) == "42" for d in mine["decks"]), mine
+    assert set(ark.list_auth_schemes) == {""}
+
+
+async def test_pasted_lists_are_reported_but_not_stored(stack: Stack) -> None:
+    """run_deck_report and deck_stats take a pasted list as well as a deck: the list gets the same
+    validation and goldfish run and comes back with stored=false, and History stays as it was
+    (0.7.1's goldfish_run could simulate a pasted list; its owner keeps that)."""
+    h = stack.h
+    token = await linked_user(stack)
+    before = structured(await call(h, token, "list_deck_reports", {}))["reports"]
+    text = "Commander\n1 Aesi, Tyrant of Gyre Strait\n\n// Lands\n99 Island\n"
+    rep = structured(await call(h, token, "run_deck_report", {"deck_ref": text, "games": 20}))
+    assert rep["ok"] and rep["stored"] is False and rep["deck"]["id"] is None, rep
+    assert rep["goldfish"]["ok"] is True and "## Metrics" in rep["goldfish"]["text"], rep["goldfish"]
+    assert rep["validation"]["ok"] is True, rep["validation"]
+    assert rep["stats"]["card_count"] == 100 and rep["stats"]["card_data"] == "unavailable"
+    after = structured(await call(h, token, "list_deck_reports", {}))["reports"]
+    assert len(after) == len(before)
+    # No commander: the structural checks still come back, the simulation is refused as such.
+    plain = structured(await call(h, token, "run_deck_report", {"deck_ref": "24 Forest\n36 Grizzly Bears\n"}))
+    assert plain["ok"] and plain["goldfish"]["ok"] is False and "Commander" in plain["goldfish"]["text"], (
+        plain
+    )
+    stats = structured(
+        await call(
+            h,
+            token,
+            "deck_stats",
+            {"deck_ref": "Commander\n1 Aesi, Tyrant of Gyre Strait\n\n// Main\n2 Opt\n97 Island\n"},
+        )
+    )
+    assert stats["ok"] and stats["deck"]["id"] is None, stats
+    checks = stats["stats"]["checks"]
+    assert checks["singleton_violations"] == [{"name": "Opt", "quantity": 2}] and checks["ok"] is False
+    bad = structured(await call(h, token, "deck_stats", {"deck_ref": "not a list at all"}))
+    assert bad["ok"] is False, bad

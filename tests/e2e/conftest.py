@@ -317,7 +317,7 @@ class McpClient:
         await callback.start()
         try:
             async with httpx2.AsyncClient(
-                auth=self.oauth(callback), verify=self.env.ssl_context, trust_env=False, timeout=120
+                auth=self.oauth(callback), verify=self.env.ssl_context, trust_env=False, timeout=600
             ) as hc:
                 async with streamable_http_client(MCP_URL, http_client=hc) as (read, write):
                     async with ClientSession(read, write) as session:

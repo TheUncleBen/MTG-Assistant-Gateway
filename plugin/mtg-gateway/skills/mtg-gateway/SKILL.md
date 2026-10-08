@@ -75,15 +75,20 @@ the user can confirm it is the right one.
 **Card counts.** Take counts from the gateway tools: `card_count` is the
 deck proper and `side_count` the maybeboard and sideboard (cards whose only
 categories are ones the deck excludes); each card also carries `in_deck`.
-Mystic Forge's `archidekt_deck` lists a card once under each of its
-categories, so a card with two categories appears twice and its "Total in
-deck" can be too high (seen on a live deck: 136 shown, 103 real). Use
-`archidekt_deck` for reading and analysis, not for counting.
 
-**Simulation and validation input.** `goldfish_*`, `validate_decklist` and
-`scryfall_price_list` take decklist text; pass the `decklist_text` from the
-ingest tool. Mystic Forge reads only public Archidekt decks by id, so for a
-private deck always pass text, never the id.
+**One tool per job.** Every capability has exactly one tool, so there is
+never a choice to make: `get_deck` reads any Archidekt deck (and gives the
+export text), `list_my_decks` lists the member's decks and `archidekt_user`
+another user's, `deck_stats` checks an Archidekt deck's legality and
+structure, `validate_decklist` checks a pasted list that is not a deck yet,
+`compare_decks` diffs decks and precons, `run_deck_report` runs goldfish
+games, `resolve_cards` turns names into exact printings. Mystic Forge's
+duplicates of these are not offered; a call to one answers with the name of
+the tool that owns the job.
+
+**Simulation and validation input.** `goldfish_annotate`, `validate_decklist`
+and `scryfall_price_list` take decklist text; pass the `decklist_text` from
+the ingest tool, never a private deck's id.
 
 ## Checking a deck
 
@@ -132,8 +137,10 @@ Choose the narrowest tool:
   `edhrec_top_cards`, `edhrec_salt`, `edhrec_combos`.
 - Combos: `spellbook_card_combos` (one card) or `spellbook_combos` (cards
   together).
-- Precon upgrades: `edhrec_precon_upgrade`, `precon_diff`.
-- Legality and structure: `validate_decklist` or `validate_archidekt_deck`.
+- Precon upgrades: `edhrec_precon_upgrade`, then `compare_decks` between the
+  precon (`precon_decklist` text or its Archidekt deck) and the build.
+- Legality and structure: `deck_stats` for an Archidekt deck,
+  `validate_decklist` for a pasted list.
 
 When recommending cuts and adds, show the reasoning per card and keep exact
 card names. Check that a suggested card is in the commander's colour identity
@@ -148,24 +155,32 @@ cannot value interaction, removal, politics or an opponent's deck.
 
 1. For draw odds only ("chance of a 2-drop in my opening hand"), use
    `goldfish_odds`. It is exact maths, no simulation.
-2. Before a simulation, run `goldfish_annotate` on the deck. It reports which
-   cards the engine models and which it cannot.
-3. Run `goldfish_run`. To compare two versions of a deck, use `goldfish_ab`,
-   which plays both under identical seeds; prefer it over comparing two
-   separate runs.
+2. Before a simulation, run `goldfish_annotate` on the deck's `decklist_text`.
+   It reports which cards the engine models and which it cannot.
+3. Run `run_deck_report` (the one simulation tool for a deck: it validates
+   the deck, plays `games` goldfish games and stores the report for the
+   user). Pass what `goldfish_annotate` asked for as `options.annotations`;
+   `options` also takes `combos`, `seed`, `until_turn`, `opponents` and
+   `mulligan`. To compare two versions of a deck, call `compare_decks` with
+   `simulate: true` (a snapshot id or decklist text on either side): both are
+   played game for game under the same seeds and the deltas come back with
+   confidence intervals and significance, which two separate reports cannot
+   give.
 4. Report, every time:
-   - the seed, number of games (`n`), turns simulated and mulligan settings;
-   - the `run_id` the tool returns, and which deck version you used (for an
-     Archidekt deck, its `updated_at` from `get_my_deck`);
+   - the number of games, turns simulated and mulligan settings from the
+     report's `goldfish` section;
+   - the `report_id`, and which deck version you used (for an Archidekt deck,
+     its `updated_at` from `get_my_deck`);
    - which cards or mechanics were not simulated, and how much of the deck
-     that is (from the tool's honesty report);
+     that is (from the honesty report);
    - the confidence intervals, and that differences inside them are noise.
 5. Never call a goldfish number "the win rate".
 
 Mystic Forge's own stored reports and step-by-step games (`goldfish_report`,
 `goldfish_start`, `goldfish_step`, `goldfish_state`), watchlists and price
-history are switched off on this gateway. Do not offer them. To keep a
-result, use the gateway's `run_deck_report` (see "Checking a deck").
+history are switched off on this gateway, and so are its `goldfish_run` and
+`goldfish_ab` (`run_deck_report` owns the simulation of one deck,
+`compare_decks` the paired A/B). Do not offer them.
 
 ## Changing or creating a deck: propose, review, apply
 

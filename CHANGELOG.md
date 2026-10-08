@@ -7,6 +7,156 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.2] - 2026-10-07
+
+The rest of what Archidekt's own pages offer for a member's decks, as hand
+actions in the app and on the web (none of them is an assistant tool), and
+one owner per capability among the assistant's tools.
+
+### Added
+
+- Delete a deck from its More menu: type the deck's name, a snapshot is kept (and the Archidekt
+  backup copy when backups are on), the deletion is verified by reading the deck back.
+- Deck settings: the cover image (any card of the deck, or Archidekt's automatic pick), the deck's
+  tags (Archidekt's public tags, reused or created) and the folder it sits in. A Folders page under
+  My decks creates and renames folders. Deck lists and the banner show the cover chosen on Archidekt.
+- Editor: maybeboard and sideboard rows are edited like deck rows (count, category) and new cards
+  can be added to the maybeboard; a list can be pasted into an existing deck. Proposals take a
+  `zone` of `main` or `side` per change; the review shows side rows as such.
+- Comments: edit and delete your own, on the deck page.
+- Collection: a details menu per row sets finish, condition, language and price paid.
+- Precons page: every preconstructed deck Archidekt lists, by set, with a filter; linked from Search
+  and the home page.
+- `get_deck` and `get_my_deck`: `include_text` adds each card's rules text; every deck read carries
+  `archidekt_text`, the deck in Archidekt's import syntax (finishes, categories with their flags,
+  labels) so it pastes back as the same deck.
+- `deck_stats`: structural `checks` (deck size for the format, commander zone and whether each card
+  may command, colour identity violations, singleton violations, uncategorised rows).
+- `compare_decks`: names matched by front face and case, a `summary` with cut and added
+  percentages and the basic-land changes apart, and `simulate: true` for a paired goldfish A/B of
+  the two sides (same seeds game for game, deltas with confidence intervals), with its options.
+- `run_deck_report`: `options` passes the simulator's knobs through (annotations, combos, seed,
+  until_turn, opponents, mulligan rules).
+- docs/CAPABILITIES.md: the capability map, by path (assistant, pages and app) and how they relate.
+- The whole card, everywhere: tapping a card on the deck page, a thumbnail in the editor or in the
+  collection opens one shared viewer with the image, every face's name, mana cost, type line, rules
+  text, power and toughness or loyalty, flavour text, printing, rarity, artist, price, salt score,
+  EDHREC rank and the formats the card is legal in. Deck reads carry `type_line`, `power`,
+  `toughness` and `loyalty` per card, and `include_text` adds `oracle_text`, `faces`,
+  `flavor_text` and `artist`.
+- Export page: the deck as Archidekt import text (every row with printing, finish, categories with
+  their flags and labels), the plain decklist and the sideboard list, each with a Copy button, and
+  a new "Download Archidekt .txt" (`/decks/{id}/export.archidekt.txt`). docs/EXPORT-IMPORT.md says
+  what survives in every direction between archidekt.com, the pages, the app and the assistant.
+- Import keeps more: `*E*` is the etched finish (it used to be read as foil), `# Sideboard` and
+  `// Sideboard` headers and `SB:` rows land in Archidekt's Sideboard (or Maybeboard) category
+  instead of being dropped, `^Label^` colour tags are read as labels rather than categories, and
+  `#CustomCard` marks are tolerated. `propose_new_deck` rows take `finish` (normal, foil, etched).
+- Deck page: **Playtest** shows Archidekt's own playtester on a gateway page (`/decks/{id}/playtest`
+  frames archidekt.com's playtester; the app shows it in place), with an Open on Archidekt button
+  as the fallback for private decks; **Run simulation** in the banner runs the same statistics,
+  validation and 300-game goldfish run as `run_deck_report` and opens the report; **Compare with
+  another deck…** (`/decks/{id}/compare`) pits the deck against a preconstructed deck from
+  Archidekt's list, any deck link or a pasted list, with the same cards taken out, put in, changed
+  counts, basic lands and statistics' differences `compare_decks` reports, each card opening the
+  card viewer.
+- Clone deck on every deck you can read (public decks and precons included), as on archidekt.com;
+  `propose_clone_deck` takes any readable deck. The copy lands in your own account.
+- `run_deck_report` and `deck_stats` take a pasted decklist as `deck_ref` as well as a deck: the
+  list gets the same validation and simulation (0.7.1's hidden `goldfish_run` could simulate a
+  pasted list; its owner keeps that) and comes back with `stored: false`, not filed under History.
+- Deck page statistics: **Probability of draw** (at least or exactly N cards of a category, name,
+  type, subtype or mana value in the first N cards, the hypergeometric odds Archidekt's Probability
+  tab shows) and **Deck checks** (the structural checks `deck_stats` returns, in words).
+- `deck_stats` checks for constructed formats: at least 60 cards, at most four copies of a card
+  (basic lands and "any number" cards aside), a sideboard of up to 15 (`copy_limit_violations`,
+  `sideboard`); the commander-style formats keep their exact size and singleton checks.
+- Archidekt's full format list (`deck_format`): every slug Archidekt uses, shown with Archidekt's
+  own labels (Standard Brawl, Brawl, Pauper EDH, Duel Commander, Canadian Highlander, PreDH...).
+- Deck checks for every Archidekt format (`deck_stats` `checks`, the deck page's Deck checks): card
+  legality for the deck's format from Archidekt's own per-card data (`banned`, `not_legal`,
+  restricted cards over one copy), so a deck with a banned card is never reported fine; the command
+  zone knows Partner, Partner with, Friends forever, Choose a Background and Doctor's companion
+  pairs, Oathbreaker's planeswalker plus signature spell, Tiny Leaders' mana value cap and Pauper
+  Commander's uncommon leader, and formats without a commander (Canadian Highlander, Gladiator);
+  companion rows; the bracket set on the deck against the estimate.
+- Undo restores the deck's own details too: a snapshot restore puts back the name, description,
+  format, bracket, private and unlisted settings the snapshot recorded (`result.restored_details`),
+  besides every card row.
+- Export: the gateway's .json is an import format as well (New deck > "a gateway .json export",
+  `propose_new_deck(json_text)`), covered by the export → import → compare test with the plain
+  .txt, the Archidekt text and the .csv; new one-way downloads Arena .txt, MTGO .dek and a
+  printable PDF (written without a PDF library). docs/EXPORT-IMPORT.md lists each with its label.
+- Import from a file: the New deck page and the Collection page take a .txt, .csv or .json file
+  (read in the browser into the text box; the gateway handles no uploads).
+- Collection: **Import a list** adds cards from the page's own Export CSV (a round trip), a CSV
+  with Archidekt's collection column names or a plain card list, up to 100 rows at a time.
+- The Android app page on a gateway that ships no app file is a plain page saying so and what to
+  do instead, not a "not found" error.
+
+### Fixed
+- Importing a list into a new deck: an etched row was created as foil (the finish was read but
+  not sent); two printings of the same card collapsed into one row; a maybeboard or sideboard
+  row made the read-back verification fail. A plain .txt export dropped the commander's category,
+  so re-importing it gave a deck with no commander. An export → import → compare test now covers
+  the plain .txt, the Archidekt text and the .csv.
+- Reports: `has_validation` is true only when the validation passed, and a report whose simulation
+  or validation failed is never reused in place of a fresh run.
+- Editor: "Keep editing" on the high-risk confirmation now rejects the proposal made for the check
+  instead of leaving it pending.
+- Readability: the Delete deck item in the dark More menu, the active tab or rail label in the
+  light theme and the headings inside menus ("App", "Site theme") meet WCAG AA contrast (4.5:1 or
+  better); the phone deck banner no longer runs the owner's avatar under the top bar; the deck
+  list's Order by control and buttons line up on folding screens. A test now resolves the colour
+  tokens the way each theme does, so a light value left in the dark set cannot come back.
+- Compare: "taken out" and "put in" count cards and give each as a share of the deck it left or
+  joined (a 5-card list upgraded into a 67-card deck reads 97%, not 1300%); basic lands are listed
+  once, under Basic lands, so the list counts match the tiles.
+- New deck: when a card or printing in the list does not exist on Archidekt, the review page says
+  that (and the result names the card) instead of "No such proposal for your account". The
+  read-back after a new deck is created compares printings and finishes too, not only names and
+  counts, so a lost foil or a swapped printing fails the verification.
+- The card viewer adds a history entry while it is open, so Back (the Android button, or the
+  browser's) closes the card instead of leaving the deck page.
+- The Install page shows the member's navigation (tab bar, rail, account menu) like every other
+  signed-in page; in the Android app it had none.
+- Deck checks: Pauper Commander accepts a non-legendary uncommon creature as the commander and no
+  longer counts the commander against the commons rule. A row's first category decides whether it
+  is in the deck (Archidekt's primary category), so a 60-card Oathbreaker deck whose rows also
+  carry excluded categories is 60 cards, not 63.
+- Arena export leaves the Maybeboard out (Arena has no maybeboard); the Sideboard still goes.
+- Simulations through the gateway never ran against the pinned Mystic Forge: `run_deck_report`,
+  `compare_decks simulate: true` and the report's validation sent their arguments flat, while
+  Mystic Forge's tools take one `params` object, so every call came back as a validation error
+  recorded as a failed block. The gateway now sends `{"params": {...}}`; the unit tests' Mystic
+  Forge double takes the same one-model signature so the shape is tested, and the end-to-end suite
+  runs a report against the real service. Found by an independent review of the simulation path.
+- Mystic Forge's refusals ("Commander '...' was not recognized", "No cards found") were stored as
+  successful simulations; a run without its Metrics block (or an A/B without its Deltas) is now
+  recorded as failed with that sentence.
+- A deck with no commander was simulated with its first card as the commander and a 59-card
+  library; such decks (and pasted lists without a Commander line) are now refused with a plain
+  reason instead of being simulated wrongly.
+- `compare_decks simulate: true` sent a pasted list to the simulator raw, headers and sideboard
+  included; it now sends the same rendering the statistics use (commander first, mainboard only).
+- The commander zone is Archidekt's premier category whatever it is named, as Archidekt and the
+  export text already treated it; statistics and the simulators' text agree with them.
+- Archidekt format ids 7 to 10 were mapped to the wrong formats (pioneer, brawl, historic and
+  oathbreaker created Custom, Frontier, Future Standard and Penny Dreadful decks and were shown
+  under the wrong name). The map is now Archidekt's own, read from its client code.
+- The Archidekt export text is sorted by card name (it was sorted by the whole line, so "15x"
+  came before "1x").
+
+### Changed
+
+- One tool per job. Mystic Forge's `archidekt_deck`, `archidekt_export`, `archidekt_user_decks`,
+  `validate_archidekt_deck`, `precon_diff`, `goldfish_run` and `goldfish_ab` are hidden because
+  `get_deck`, `list_my_decks`, `deck_stats`, `compare_decks` and `run_deck_report` do the same job;
+  an assistant that calls one is told which tool owns it. The tool descriptions and server
+  instructions state the owners; a test pins the list. Each owner carries every input and output
+  of the tool it hides (the additions above close the gaps there were), and `run_deck_report`
+  still runs the simulation through the research service.
+
 ## [0.7.1] - 2026-10-07
 
 ### Fixed

@@ -445,3 +445,75 @@ def test_category_plan_uses_relation_ids() -> None:
     with pytest.raises(DeckError, match="not in the deck"):
         change = {"action": "set_category", "card_name": "Sol Ring", "category": "Ramp"}
         category_plan(maybe_only, parse_changes([change]))
+
+
+async def test_restoring_a_snapshot_puts_the_deck_details_back(stack: Stack) -> None:
+    """Undo covers the deck's own settings: a snapshot taken before a details change restores the
+    name, description, format, bracket and privacy, through the ordinary restore proposal."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    # The fixture deck has no format; give it one first so the restore has a format to go back to.
+    p0 = structured(
+        await call(
+            h, token, "propose_deck_details", {"deck_id": "42", "details": {"deck_format": "commander"}}
+        )
+    )
+    assert structured(await call(h, token, "apply_proposal", {"proposal_id": p0["proposal_id"]}))["ok"]
+    details = {"name": "Aesi Lands", "description": "new text", "deck_format": "modern", "edh_bracket": 3}
+    details["private"] = True
+    p = structured(await call(h, token, "propose_deck_details", {"deck_id": "42", "details": details}))
+    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert a["ok"] and a["result"]["verified"] is True, a
+    assert ark.decks[42]["name"] == "Aesi Lands" and ark.decks[42]["private"] is True
+
+    r = structured(await call(h, token, "propose_restore_snapshot", {"snapshot_id": a["snapshot_id"]}))
+    assert r["ok"] and r["kind"] == "restore", r
+    lines = r["diff"].splitlines()
+    assert lines[0].startswith(f"Restore to snapshot {a['snapshot_id']} taken ")
+    assert set(lines[1:]) == {
+        'name: "Aesi Lands" -> "Sample Commander Deck"',
+        "description: (cleared)",
+        "format: modern -> commander",
+        "bracket: 3 -> none",
+        "private: yes -> no",
+    }, lines
+    assert r["changes"]["details"] == {
+        "name": "Sample Commander Deck",
+        "description": "",
+        "deck_format": "commander",
+        "edh_bracket": None,
+        "private": False,
+    }
+    before = len(ark.updates)
+    a2 = structured(await call(h, token, "apply_proposal", {"proposal_id": r["proposal_id"]}))
+    assert a2["ok"] and a2["state"] == "applied" and a2["result"]["verified"] is True, a2
+    assert a2["result"]["restored_details"] == [
+        "deck_format",
+        "description",
+        "edh_bracket",
+        "name",
+        "private",
+    ]
+    assert a2["result"]["sent_entries"] == 0 and ark.patches == []  # no card rows changed
+    sent = [u for u in ark.updates[before:] if u["deck_id"] == 42]
+    assert sent == [
+        {
+            "deck_id": 42,
+            "name": "Sample Commander Deck",
+            "description": "",
+            "deckFormat": 3,
+            "edhBracket": None,
+            "private": False,
+        }
+    ], sent
+    deck = ark.decks[42]
+    assert deck["name"] == "Sample Commander Deck" and deck["edhBracket"] is None
+    assert (
+        deck["deckFormat"] == 3
+        and deck["private"] is False
+        and 42 not in ark.private
+        and deck["description"] == ""
+    )
+    # Restoring the same snapshot again changes nothing.
+    again = structured(await call(h, token, "propose_restore_snapshot", {"snapshot_id": a["snapshot_id"]}))
+    assert again["ok"] is False and "already matches" in again["message"], again

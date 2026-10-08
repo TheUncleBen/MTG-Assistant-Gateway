@@ -20,6 +20,7 @@ from typing import Any
 from . import deck_stats
 from .archidekt import Deck
 from .db import Database
+from .decklist import DecklistError, parse_decklist, to_text
 from .decks import DeckError, DeckService, _clean_deck_id, current_client, deck_to_text
 from .mf_proxy import MysticForgeProxy, is_busy
 
@@ -92,13 +93,21 @@ class ReportService:
 
     # -- running --------------------------------------------------------------
     async def run(
-        self, sub: str, deck_ref: str, *, simulate: bool = True, games: int = DEFAULT_GAMES
+        self,
+        sub: str,
+        deck_ref: str,
+        *,
+        simulate: bool = True,
+        games: int = DEFAULT_GAMES,
+        options: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Read the deck, compute its statistics, optionally simulate and validate it, store
         the result and return it. Refuses a second report of an unchanged deck within
-        ``min_interval`` seconds (returns the existing one instead)."""
+        ``min_interval`` seconds (returns the existing one instead) unless ``options`` (the
+        simulator's knobs, see ``sim_options``) are given, since they change the simulation."""
         if not isinstance(games, int) or isinstance(games, bool) or games < 10 or games > MAX_GAMES:
             raise DeckError("invalid", f"games must be an integer from 10 to {MAX_GAMES}")
+        options = sim_options(options)
         key = (sub, _clean_deck_id(deck_ref))
         flight = self._runs.setdefault(key, _Flight())
         flight.users += 1
@@ -107,11 +116,15 @@ class ReportService:
             async with flight.lock:
                 if flight.finished > seen and flight.report_id:
                     # A run for this deck finished while this request waited: reuse its report
-                    # instead of starting a second simulation.
+                    # instead of starting a second simulation (unless that run's research
+                    # calls failed; then this request gets its own try).
                     out = self.get(sub, flight.report_id)
-                    out["reused"] = True
-                    return out
-                out = await self._run(sub, deck_ref, simulate=simulate, games=games)
+                    if _succeeded(
+                        {"goldfish_json": out.get("goldfish"), "validation_json": out.get("validation")}
+                    ):
+                        out["reused"] = True
+                        return out
+                out = await self._run(sub, deck_ref, simulate=simulate, games=games, options=options)
                 flight.report_id = out["report_id"]
                 flight.finished += 1
                 return out
@@ -120,14 +133,58 @@ class ReportService:
             if flight.users <= 0:
                 self._runs.pop(key, None)
 
-    async def _run(self, sub: str, deck_ref: str, *, simulate: bool, games: int) -> dict[str, Any]:
+    async def run_text(
+        self,
+        sub: str,
+        text: str,
+        *,
+        simulate: bool = True,
+        games: int = DEFAULT_GAMES,
+        options: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """The same validation and simulation for a pasted or hypothetical list. Returned, never
+        stored: reports are filed under an Archidekt deck, and a list has none to compare over
+        time (clone or create the deck to keep its reports)."""
+        if not isinstance(games, int) or isinstance(games, bool) or games < 10 or games > MAX_GAMES:
+            raise DeckError("invalid", f"games must be an integer from 10 to {MAX_GAMES}")
+        options = sim_options(options)
+        try:
+            cards = parse_decklist(text)
+        except DecklistError as exc:
+            raise DeckError("invalid", f"decklist could not be read: {exc}") from exc
+        stats = deck_stats.compute_from_text(cards)
+        main = to_text(cards)
+        commander = (stats.get("commanders") or [None])[0]
+        goldfish: dict[str, Any] | None = None
+        validation: dict[str, Any] | None = None
+        if self.mf is not None:
+            validation = await self._mf(sub, "validate_decklist", {"decklist": main, "commander": commander})
+            if simulate and commander is None:
+                goldfish = {"tool": "goldfish_run", "ok": False, "text": NO_COMMANDER_TEXT}
+            elif simulate:
+                goldfish = await self._mf(sub, "goldfish_run", {"deck": main, "n": games, **options})
+        return {
+            "stored": False,
+            "deck": {"id": None, "name": "pasted list", "card_count": stats["card_count"]},
+            "stats": stats,
+            "goldfish": goldfish,
+            "validation": validation,
+            "has_goldfish": bool(goldfish and goldfish.get("ok")),
+            "decklist_text": main,
+        }
+
+    async def _run(
+        self, sub: str, deck_ref: str, *, simulate: bool, games: int, options: dict[str, Any]
+    ) -> dict[str, Any]:
         deck = await self.decks.get_any_deck(sub, deck_ref)
         latest = self._latest(sub, deck.id)
         now = int(time.time())
         if (
-            latest is not None
+            not options
+            and latest is not None
             and latest["fingerprint"] == deck.fingerprint()
             and now - int(latest["taken_at"]) < self.min_interval
+            and _succeeded(latest)
         ):
             out = self.get(sub, latest["id"])
             out["reused"] = True
@@ -139,8 +196,12 @@ class ReportService:
             text = deck_to_text(deck)
             commander = (stats.get("commanders") or [None])[0]
             validation = await self._mf(sub, "validate_decklist", {"decklist": text, "commander": commander})
-            if simulate:
-                goldfish = await self._mf(sub, "goldfish_run", {"deck": text, "n": games})
+            if simulate and commander is None:
+                # Mystic Forge's text path would take the first line as the commander and
+                # simulate a 59-card deck; refuse plainly instead.
+                goldfish = {"tool": "goldfish_run", "ok": False, "text": NO_COMMANDER_TEXT}
+            elif simulate:
+                goldfish = await self._mf(sub, "goldfish_run", {"deck": text, "n": games, **options})
         rid = "rep_" + secrets.token_urlsafe(9)
         with self.db.tx() as c:
             # Stored only while the member exists: a report still running when they deleted
@@ -175,6 +236,31 @@ class ReportService:
         self.db.audit("report_created", sub=sub, detail={"report_id": rid, "deck_id": deck.id})
         return self.get(sub, rid)
 
+    async def ab(
+        self,
+        sub: str,
+        text_a: str,
+        text_b: str,
+        *,
+        games: int = DEFAULT_GAMES,
+        options: dict[str, Any] | None = None,
+        commanders: tuple[bool, bool] = (True, True),
+    ) -> dict[str, Any] | None:
+        """A paired goldfish A/B of two decklists (game for game under the same seeds, with the
+        deltas' confidence intervals and significance), as the research service reports it.
+        Not stored: it is a comparison, not a report of one deck. None without the service.
+        ``commanders`` says whether each list has a known commander; without one the simulator
+        would take the first line as the commander, so the A/B is refused instead."""
+        if self.mf is None:
+            return None
+        if not isinstance(games, int) or isinstance(games, bool) or games < 10 or games > MAX_GAMES:
+            raise DeckError("invalid", f"games must be an integer from 10 to {MAX_GAMES}")
+        opts = sim_options(options, ab=True)
+        if not all(commanders):
+            return {"tool": "goldfish_ab", "ok": False, "text": NO_COMMANDER_TEXT}
+        args = {"deck_a": text_a, "deck_b": text_b, "n": games, **opts}
+        return await self._mf(sub, "goldfish_ab", args)
+
     async def _mf(self, sub: str, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """One Mystic Forge call, recorded as it came back: structured content when the tool
         gives it, else its text. Failures are recorded, never raised, so a report still holds
@@ -182,7 +268,10 @@ class ReportService:
         member's own Mystic Forge cap like an interactive one; past it the report is refused
         (rate_limited) and nothing is stored."""
         assert self.mf is not None
-        result = await self.mf.call(tool, {k: v for k, v in arguments.items() if v is not None}, owner=sub)
+        # Mystic Forge's tools take one ``params`` object (pydantic models, published as
+        # {"params": {...}} in its tool list); flat arguments are refused before the tool runs.
+        params = {k: v for k, v in arguments.items() if v is not None}
+        result = await self.mf.call(tool, {"params": params}, owner=sub, internal=True)
         if is_busy(result):
             raise DeckError(
                 "rate_limited",
@@ -203,13 +292,21 @@ class ReportService:
                         out["data"] = parsed
                 except ValueError:
                     pass
+            # The simulators answer a refusal ("Commander '...' was not recognized", "No cards
+            # found") as plain text, not as a tool error; a run without its results block failed.
+            marker = SIM_RESULT_MARKERS.get(tool)
+            if marker and marker not in text:
+                out["ok"] = False
+        elif tool in SIM_RESULT_MARKERS:
+            out["ok"] = False
         return out
 
     # -- reading --------------------------------------------------------------
     def _latest(self, sub: str, deck_id: str) -> dict[str, Any] | None:
         with self.db._lock:
             row = self.db._conn.execute(
-                "SELECT id, fingerprint, taken_at FROM reports WHERE owner_sub = ? AND deck_id = ? "
+                "SELECT id, fingerprint, taken_at, goldfish_json, validation_json FROM reports "
+                "WHERE owner_sub = ? AND deck_id = ? "
                 "ORDER BY taken_at DESC, rowid DESC LIMIT 1",
                 (sub, deck_id),
             ).fetchone()
@@ -265,6 +362,7 @@ class ReportService:
         stats = json.loads(d["stats_json"]) if d.get("stats_json") else {}
         metrics = {k: stats.get(k) for k in TREND_KEYS}
         goldfish = json.loads(d["goldfish_json"]) if d.get("goldfish_json") else None
+        validation = json.loads(d["validation_json"]) if d.get("validation_json") else None
         return {
             "report_id": d["id"],
             "deck_id": d["deck_id"],
@@ -274,9 +372,65 @@ class ReportService:
             "fingerprint": d["fingerprint"],
             "metrics": metrics,
             "has_goldfish": bool(goldfish and goldfish.get("ok")),
-            "has_validation": bool(d.get("validation_json")),
+            "has_validation": bool(validation and validation.get("ok")),
             "bracket_estimate": (stats.get("bracket_estimate") or {}).get("bracket"),
         }
+
+
+def _succeeded(row: dict[str, Any]) -> bool:
+    """Whether a stored report's research blocks all came back ok. A report whose simulation or
+    validation failed (the service down, a refusal) is kept as the record of that failure but
+    never reused in place of a fresh run."""
+    for key in ("goldfish_json", "validation_json"):
+        block = row.get(key)
+        if isinstance(block, str):
+            block = json.loads(block)
+        if block is not None and not block.get("ok"):
+            return False
+    return True
+
+
+# The simulator's knobs a report or an A/B passes through to the research service, which
+# validates their values (the proxy already bounds n and until_turn). Unknown keys are refused
+# here so a typo never silently runs the default simulation.
+RUN_OPTIONS = ("annotations", "combos", "seed", "until_turn", "opponents", "mulligan")
+AB_OPTIONS = ("annotations", "annotations_a", "annotations_b", "combos", "seed", "until_turn")
+AB_FLAGS = ("allow_different_commanders",)
+
+
+# What a successful simulation's text always contains (Mystic Forge's renderers).
+SIM_RESULT_MARKERS = {"goldfish_run": "## Metrics", "goldfish_ab": "## Deltas"}
+NO_COMMANDER_TEXT = (
+    "Not simulated: the goldfish simulator models Commander decks and needs one card in the "
+    "deck's Commander (premier) category. Put the commander in that category and run again."
+)
+
+
+def sim_options(options: dict[str, Any] | None, *, ab: bool = False) -> dict[str, Any]:
+    """The given simulator options with unset ones dropped; refuses keys the simulation does
+    not take (``invalid``)."""
+    if not options:
+        return {}
+    if not isinstance(options, dict):
+        raise DeckError("invalid", "simulation options must be an object")
+    allowed = (*AB_OPTIONS, *AB_FLAGS) if ab else RUN_OPTIONS
+    out = {k: v for k, v in options.items() if v is not None and v != [] and v != {}}
+    unknown = sorted(k for k in out if k not in allowed)
+    if unknown:
+        raise DeckError("invalid", f"unknown simulation option(s): {', '.join(unknown)}")
+    if len(json.dumps(out)) > 60_000:
+        raise DeckError("too_large", "simulation options larger than 60 kB")
+    for key, low, high in (("opponents", 1, 5), ("until_turn", 1, 30), ("seed", -(2**63), 2**63 - 1)):
+        if key in out and (not isinstance(out[key], int) or isinstance(out[key], bool)):
+            raise DeckError("invalid", f"simulation option {key} must be an integer")
+        if key in out and not low <= out[key] <= high:
+            raise DeckError("invalid", f"simulation option {key} must be from {low} to {high}")
+    for key in ("annotations", "annotations_a", "annotations_b", "combos"):
+        if key in out and not isinstance(out[key], list):
+            raise DeckError("invalid", f"simulation option {key} must be a list")
+    if "mulligan" in out and not isinstance(out["mulligan"], dict):
+        raise DeckError("invalid", "simulation option mulligan must be an object")
+    return out
 
 
 def deck_summary_for(deck: Deck) -> dict[str, Any]:
@@ -290,4 +444,4 @@ def deck_summary_for(deck: Deck) -> dict[str, Any]:
     }
 
 
-__all__ = ["ReportService", "TREND_KEYS", "deck_summary_for"]
+__all__ = ["ReportService", "TREND_KEYS", "deck_summary_for", "sim_options"]

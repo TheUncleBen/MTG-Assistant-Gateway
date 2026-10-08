@@ -28,7 +28,7 @@ LINE = re.compile(
     r"(?:\s+\((?P<set>[A-Za-z0-9]{2,6})\)(?:\s+(?P<num>[A-Za-z0-9★-]+))?)?"
     r"(?:\s+\*(?P<foil>[FfEe])\*)?"
     r"(?:\s+\[(?P<cats>[^\]]*)\])?"
-    r"(?:\s+\^(?P<caret>[^^]*)\^)?\s*$"
+    r"(?:\s+\^(?P<caret>[^^]*)\^)?(?:\s+#CustomCard)?\s*$"
 )
 HEADER_WORDS = {
     "commander",
@@ -53,6 +53,8 @@ HEADER_WORDS = {
     "considering",
 }
 SIDE_ZONES = {"sideboard", "maybeboard", "considering"}
+SIDE_CATEGORY = {"sideboard": "Sideboard", "maybeboard": "Maybeboard", "considering": "Maybeboard"}
+FINISH_MARKS = {"F": "Foil", "E": "Etched"}
 MAX_LINE_CHARS = 300  # no card line is anywhere near this; it also bounds the regex work per line
 MAX_LINES = 5000
 
@@ -70,11 +72,14 @@ class ListCard:
     categories: list[str] = field(default_factory=list)
     foil: bool = False
     zone: str = "main"
+    finish: str = ""  # "Foil", "Etched" or "" (normal); ``foil`` is True for either premium finish
+    label: str = ""  # Archidekt's ^label^ (a note with a colour), kept apart from the categories
+    board: str = ""  # for zone "side": the Archidekt category it came from, "Sideboard" or "Maybeboard"
 
 
 def _header(line: str) -> str | None:
     s = line.strip().strip(":").strip()
-    s = re.sub(r"^//\s*", "", s)
+    s = re.sub(r"^(?://|#)\s*", "", s)  # "// Lands" and Archidekt's "# Sideboard" headers
     s = re.sub(r"\s*\(\d+\)$", "", s)
     if s.lower() in HEADER_WORDS:
         return s
@@ -95,14 +100,14 @@ def parse_decklist(text: str) -> list[ListCard]:
         # Collapse whitespace runs: they are the input that made the line pattern backtrack
         # quadratically, and they carry no meaning in a card line.
         line = " ".join(raw.split())
-        if not line or line.startswith("#"):
+        if not line:
             continue
-        header = _header(line)
+        header = _header(line)  # "Sideboard", "// Lands", Archidekt's "# Sideboard"
         if header is not None:
             section = header
             continue
-        if line.startswith("//"):
-            continue
+        if line.startswith("#") or line.startswith("//"):
+            continue  # a comment
         m = LINE.match(line)
         if not m or not m.group("name").strip():
             raise DecklistError(f"could not read line: {line[:80]}")
@@ -114,11 +119,13 @@ def parse_decklist(text: str) -> list[ListCard]:
         if m.group("cats"):
             cats = [re.sub(r"\{.*?\}", "", c).strip() for c in m.group("cats").split(",")]
             cats = [c for c in cats if c]
-        if m.group("caret"):
-            cats = [m.group("caret").strip(), *cats]
+        label = (m.group("caret") or "").strip()
+        board = ""
+        finish = FINISH_MARKS.get((m.group("foil") or "").upper(), "")
         zone = "main"
         if m.group("sb") or (section and section.lower() in SIDE_ZONES):
             zone = "side"
+            board = SIDE_CATEGORY.get((section or "").lower(), "Sideboard")
         elif section and section.lower() not in ("deck", "main", "mainboard", "maindeck") and not cats:
             cats = [section]
             if section.lower() in ("commander", "commanders"):
@@ -130,8 +137,11 @@ def parse_decklist(text: str) -> list[ListCard]:
                 set_code=(m.group("set") or "").lower(),
                 collector_number=m.group("num") or "",
                 categories=cats,
-                foil=bool(m.group("foil")),
+                foil=bool(finish),
                 zone=zone,
+                finish=finish,
+                label=label,
+                board=board,
             )
         )
     if not cards:
@@ -170,7 +180,9 @@ def to_text(cards: list[ListCard], *, with_categories: bool = True, zone: str = 
     chosen = [c for c in cards if c.zone == zone]
     commanders = [c for c in chosen if "Commander" in c.categories]
     rest = [c for c in chosen if c not in commanders]
-    lines = [_line(c, with_categories=False) for c in commanders]
+    # The commander line carries its category too (with_categories), so a plain .txt export reads
+    # back with its commander; Mystic Forge accepts the bracketed category on the first line.
+    lines = [_line(c, with_categories=with_categories) for c in commanders]
     lines += [_line(c, with_categories=with_categories) for c in rest]
     return "\n".join(lines) + ("\n" if lines else "")
 
@@ -196,7 +208,9 @@ def _line(c: ListCard, *, with_categories: bool) -> str:
         s += f" ({clean_text(c.set_code)})"
         if c.collector_number:
             s += f" {clean_text(c.collector_number)}"
-    if c.foil:
+    if c.finish == "Etched":
+        s += " *E*"
+    elif c.foil:
         s += " *F*"
     cats = [x for x in (clean_category(cat) for cat in c.categories) if x] if with_categories else []
     if cats:

@@ -40,9 +40,12 @@ assistant** at the end holds the connector URL and the guided setup.
 ## Your decks
 
 **Decks** lists the decks of your linked Archidekt account with their cover
-art. Filter by name or folder, grid or list, sort by last updated, created,
-name or format. **New deck** creates one from a name, a pasted list, a CSV
-export or a scan.
+art (the image you chose on Archidekt, else the commander). Filter by name or
+folder, grid or list, sort by last updated, created, name or format. **New
+deck** creates one from a name, a pasted list, a CSV export, the gateway's
+own .json export, a file you choose (.txt, .csv or .json) or a scan.
+**Folders** creates and renames your Archidekt folders; a deck is moved
+between them from its settings page.
 
 One deck:
 
@@ -50,20 +53,69 @@ One deck:
   colour or none; **Sort by** name, mana value, price and more. The page
   updates as soon as you change a choice.
 - **Filter** narrows the cards on the page as you type.
-- Tap a card (or a stack on a phone, which fans it out) to see it large,
-  open it on Scryfall, mark it as owned, or move it to another category.
+- Tap a card (or a stack on a phone, which fans it out) to read the whole
+  card: the image, every face with its mana cost, type line, rules text,
+  power and toughness or loyalty, flavour text, the printing, rarity,
+  artist, price, salt score and the formats it is legal in; from there open
+  it on Scryfall, mark it as owned, or move it to another category. The same
+  viewer opens from a thumbnail in the editor and in the collection.
 - On your own deck, **drag a card** onto another category: with a mouse, or
   press and hold on a touch screen and slide. Press **Save moves** and the
   moves go to Archidekt at once, with a snapshot taken first.
 - **Quick add** types a card name and takes you to the editor with it
   filled in.
-- The **More** menu in the banner holds Edit deck, Deck settings, Clone, Run
-  report, Export (text, JSON or CSV) and the deck's page on Archidekt.
-- Below the cards: statistics (mana curve, colours, types, prices,
-  legality, bracket estimate) and the description.
+- **Playtest** shows the deck in Archidekt's own playtester (draw an
+  opening hand, mulligan, play turns by hand) on a gateway page, in the
+  app as on the web. The gateway does not copy that tool: the page frames
+  archidekt.com's playtester, so a game plays the same as on the site. A
+  private deck shows only when that browser is signed in to Archidekt; the
+  page keeps an **Open on Archidekt** button for that case.
+- **Run simulation** runs the statistics, the decklist validation and the
+  goldfish simulation (300 games) and opens the result, filed under
+  History. It is the same run the assistant's `run_deck_report` makes, so
+  the numbers match whichever way it is started.
+- **Compare with another deck…** (More menu) pits the deck against a
+  preconstructed deck (pick one from Archidekt's list), any deck id or
+  link, or a pasted list: what the build took out of the other deck, what
+  it put in, changed counts, basic lands, and the statistics' differences.
+  Tap a card name for the whole card. The assistant's `compare_decks` makes
+  the same comparison.
+- The **More** menu in the banner holds Deck settings, Export (text, JSON or
+  CSV), History and snapshots, Compare, Deck stats, the deck's page on
+  Archidekt and **Delete deck**. Deleting asks you to type the deck's name; a snapshot is
+  kept under History and, when backups are on, a copy in your backup folder
+  on Archidekt. Archidekt itself has no undo for a deleted deck.
+- **Deck settings** holds the name, format, bracket, description and
+  privacy, and also the **cover image** (any card of the deck, or Archidekt's
+  automatic pick), the deck's **tags** (Archidekt's public deck tags) and the
+  **folder** it sits in. Each saves to Archidekt at once; cover and tag
+  changes take a snapshot first.
+- Below the cards: statistics (mana curve, colours, types, rarities,
+  prices, legality), **Probability of draw** (the chance of at least or
+  exactly N cards of a category, name, type, subtype or mana value in your
+  first N cards, like Archidekt's Probability tab), **Deck checks** for
+  every Archidekt format (deck size, the command zone and whether each card
+  may lead it, partner and background pairing, colour identity, singleton or
+  the four-copies limit, restricted cards, companion, sideboard size, cards
+  banned or not legal in the format, the bracket you set against the
+  estimate, uncategorised cards; a deck with a banned card is never reported
+  fine), the bracket estimate and the description.
+- **Export** (More menu) shows the deck as Archidekt import text (every row
+  with printing, finish, categories and labels; paste it into Archidekt's
+  Import dialog or the gateway's New deck page), as a plain decklist and as
+  the sideboard list, each with a **Copy** button, plus downloads as
+  Archidekt .txt, plain .txt, .csv and .json (each imports back here or into
+  Archidekt), and Arena .txt, MTGO .dek and PDF (one-way). See
+  [EXPORT-IMPORT.md](EXPORT-IMPORT.md) for what survives in each direction.
 
 The **editor** changes quantities, categories (type a new one to create it),
 foil or printing, adds cards with autocompletion, removes cards, and undoes.
+Maybeboard and sideboard rows are edited the same way (count and category;
+they never count toward the deck), and **Add to** sends a new card to the
+deck or to the maybeboard. **Paste a list** adds many cards at once, one per
+line with a count in front (Archidekt's own export syntax is understood:
+printing, `*F*` and `*E*` finishes, `[Category]`, `# Sideboard` headers);
+names the gateway cannot match stay in the box.
 Press **Save changes** and they go to Archidekt straight away (a snapshot
 first, so History can undo); only a large removal asks you to confirm.
 
@@ -75,6 +127,11 @@ ordered by newest, most viewed or largest. Open any result to read it with
 the same views as your own decks; the owner's name opens their profile with
 every public deck they have. From a public deck you can run the statistics,
 export it, or clone it into your own account.
+
+**Precons** (from Search or the home page) lists every preconstructed deck
+Archidekt knows, newest set first, with a filter by set or deck name. Each
+opens like any public deck, so you can clone it or compare it with your own
+build.
 
 ## Scanning cards
 
@@ -109,11 +166,15 @@ condition and count.
 
 - Filter by name, show it as a grid or a list, sort by newest or by set
   release, and page through it. Plus and minus change the count; the cross
-  removes a card.
+  removes a card; the dots open the card's details: finish, condition,
+  language and the price you paid, saved to Archidekt on **Save** (its tags
+  are shown as Archidekt holds them).
 - Cards you own show a **green dot** on every deck page, your own decks and
   public ones alike, with the number of copies Archidekt knows about.
 - **Export CSV** downloads the whole collection in the column layout
-  Archidekt's own import reads.
+  Archidekt's own import reads. **Import a list** adds cards from that CSV,
+  from a CSV with Archidekt's column names or from a plain card list, pasted
+  or chosen as a file, up to 100 rows at a time.
 - A scan is a draft that stays as long as you like, up to a whole deck:
   fix misread cards, printings and quantities first, then send it to your
   collection or a deck, which removes the draft. Nothing expires by age.
@@ -127,8 +188,8 @@ because each one is written to Archidekt.
 
 Every deck page has Archidekt's own social buttons: **Like** (with the
 deck's score), **Bookmark**, **Follow** its owner, and a **Comments** panel
-that shows the deck's thread and lets you reply or add a comment. A user
-page has the Follow button too. Each one asks you to confirm first, then
+that shows the deck's thread and lets you reply or add a comment, and edit
+or delete your own comments. A user page has the Follow button too. Each one asks you to confirm first, then
 goes to Archidekt under your Archidekt name, exactly as if you had pressed
 it on archidekt.com. These buttons are yours alone: your assistant has no
 tool for any of them and cannot like, follow or comment for you.
@@ -152,7 +213,8 @@ assistant applies what that mode allows, always with a snapshot.
   an "MTG Gateway backups" folder on your Archidekt account, then reads the
   deck back to confirm.
 - **History** shows proposals, snapshots and deck reports over time.
-  **Restore** puts a deck back exactly as a snapshot had it (another
+  **Restore** puts a deck back exactly as a snapshot had it, cards and the
+  deck's own name, description, format, bracket and privacy alike (another
   proposal you approve).
 - **Reports** store a deck's statistics, a legality check and a goldfish
   simulation so you can follow how it develops.
@@ -167,7 +229,9 @@ search for decks with a commander; look up a card, its rulings, prices,
 combos; goldfish a deck; swap cards or build a new deck from a list (each a
 proposal with a review link); read my card photos or use my last scan;
 which cards in this deck do I own. The [assistant skill](SKILL.md) teaches
-the house rules.
+the house rules. [CAPABILITIES.md](CAPABILITIES.md) lists every tool the
+assistant has, which one owns each job, everything you can do by hand, and
+what only one of the two paths can do.
 
 ## The Android app
 

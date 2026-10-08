@@ -97,6 +97,16 @@ def comment_out(c: dict[str, Any], depth: int = 0) -> dict[str, Any]:
     }
 
 
+def _find(comments: list[dict[str, Any]], comment_id: int) -> dict[str, Any] | None:
+    for c in comments:
+        if c.get("id") == comment_id:
+            return c
+        hit = _find(c.get("replies") or [], comment_id)
+        if hit is not None:
+            return hit
+    return None
+
+
 def _ids(comments: list[dict[str, Any]]) -> set[int]:
     out: set[int] = set()
     for c in comments:
@@ -200,13 +210,70 @@ class SocialService:
         links = kids.get("links") if isinstance(kids, dict) else {}
         count = kids.get("count") if isinstance(kids, dict) else None
         comments = [comment_out(c) for c in results if isinstance(c, dict)]
+        link = self.state.db.get_link(sub) if linked else None
+        raw_me = str((link or {}).get("archidekt_user_id") or "")
+        me = int(raw_me) if raw_me.isdigit() else None
         return {
             "root": deck.comment_root,
             "count": count if isinstance(count, int) else len(comments),
             "comments": comments,
             "page": page,
             "has_more": bool(isinstance(links, dict) and links.get("next")),
+            # the member's own Archidekt user id, so the page can offer Edit and Delete on their comments
+            "me": me,
         }
+
+    def _own_comment(self, sub: str, thread: dict[str, Any], comment_id: int) -> dict[str, Any]:
+        """The member's own comment ``comment_id`` from the thread's first page, else a refusal."""
+        uid, _name = self._me(sub)
+        found = _find(thread["comments"], comment_id)
+        if found is None:
+            raise DeckError(
+                "not_found", "that comment is not in this deck's thread (or not on its first page)"
+            )
+        if str(found["owner"]["id"]) != uid:
+            raise DeckError("forbidden", "only your own comments can be edited or deleted here")
+        return found
+
+    async def edit_comment(self, sub: str, deck_id: str, comment_id: int, text: str) -> dict[str, Any]:
+        """Change the text of one of the member's own comments (Archidekt's edit); verified by
+        re-reading the thread."""
+        text = _CONTROL.sub("", text.replace("\r\n", "\n")).strip()
+        if not text:
+            raise DeckError("invalid", "write something first")
+        if len(text) > MAX_COMMENT:
+            raise DeckError("invalid", f"a comment can be at most {MAX_COMMENT} characters")
+        thread = await self.comments(sub, deck_id)
+        self._own_comment(sub, thread, comment_id)
+        await self.decks._call(sub, lambda t: self.client.comment_update(t, comment_id, text))
+        after = _find((await self.comments(sub, deck_id))["comments"], comment_id)
+        ok = after is not None and after["text"] == text
+        self.state.db.audit(
+            "deck_comment_edited", sub=sub, detail={"deck_id": deck_id, "comment": comment_id, "verified": ok}
+        )
+        if not ok:
+            raise DeckError(
+                "verify_mismatch", "Archidekt accepted the edit but the thread does not show it yet"
+            )
+        return {"comment": after}
+
+    async def delete_comment(self, sub: str, deck_id: str, comment_id: int) -> dict[str, Any]:
+        """Delete one of the member's own comments; verified by re-reading the thread."""
+        thread = await self.comments(sub, deck_id)
+        self._own_comment(sub, thread, comment_id)
+        await self.decks._call(sub, lambda t: self.client.comment_delete(t, comment_id))
+        after = await self.comments(sub, deck_id)
+        gone = _find(after["comments"], comment_id) is None
+        self.state.db.audit(
+            "deck_comment_deleted",
+            sub=sub,
+            detail={"deck_id": deck_id, "comment": comment_id, "verified": gone},
+        )
+        if not gone:
+            raise DeckError(
+                "verify_mismatch", "Archidekt accepted the request but the comment is still there"
+            )
+        return {"deleted": comment_id, "count": after["count"]}
 
     async def comment(self, sub: str, deck_id: str, text: str, parent: int | None) -> dict[str, Any]:
         _uid, name = self._me(sub)
@@ -360,5 +427,46 @@ def add_social_routes(server: MCPServer, state: AppState) -> SocialService:
         except (DeckError, ArchidektError) as exc:
             return _err(exc)
         return JSONResponse({"ok": True, **out}, status_code=201, headers=NO_STORE)
+
+    def comment_id(request: Request) -> int | None:
+        raw = str(request.path_params.get("comment_id") or "")
+        return int(raw) if raw.isdigit() and len(raw) <= 12 else None
+
+    @server.custom_route(
+        "/social/api/decks/{deck_id}/comments/{comment_id}", methods=["PATCH"], include_in_schema=False
+    )
+    async def edit_comment(request: Request) -> Response:
+        sub = who(request, write=True)
+        if isinstance(sub, Response):
+            return sub
+        cid = comment_id(request)
+        if cid is None:
+            return _fail("invalid", "comment id must be a number")
+        data = await body(request)
+        if isinstance(data, Response):
+            return data
+        if not isinstance(data.get("text"), str):
+            return _fail("invalid", "text must be a string")
+        try:
+            out = await service.edit_comment(sub, deck_id(request), cid, data["text"])
+        except (DeckError, ArchidektError) as exc:
+            return _err(exc)
+        return JSONResponse({"ok": True, **out}, headers=NO_STORE)
+
+    @server.custom_route(
+        "/social/api/decks/{deck_id}/comments/{comment_id}", methods=["DELETE"], include_in_schema=False
+    )
+    async def delete_comment(request: Request) -> Response:
+        sub = who(request, write=True)
+        if isinstance(sub, Response):
+            return sub
+        cid = comment_id(request)
+        if cid is None:
+            return _fail("invalid", "comment id must be a number")
+        try:
+            out = await service.delete_comment(sub, deck_id(request), cid)
+        except (DeckError, ArchidektError) as exc:
+            return _err(exc)
+        return JSONResponse({"ok": True, **out}, headers=NO_STORE)
 
     return service

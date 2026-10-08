@@ -103,15 +103,17 @@ def test_tool_surface_includes_deck_and_proxied_research_tools(clients):
             "parse_deck_export", "propose_new_deck", "propose_deck_changes", "list_my_proposals",
             "get_proposal", "apply_proposal",
         } <= names, names  # fmt: skip
-        # research tools proxied from Mystic Forge (allow-list), nothing from its block-list
+        # research tools proxied from Mystic Forge (allow-list), nothing from its block-list, and none
+        # of the duplicates a gateway tool owns (one tool per job)
         assert {
             "scryfall_named",
-            "goldfish_run",
+            "goldfish_annotate",
             "validate_decklist",
-            "archidekt_deck",
+            "precon_search",
             "rules_search",
         } <= names
         assert not names & {"goldfish_start", "goldfish_state", "watchlist_list", "price_history"}, names
+        assert not names & {"goldfish_run", "goldfish_ab", "archidekt_deck", "precon_diff"}, names
 
     run(go())
 
@@ -150,6 +152,19 @@ def test_public_deck_reads_need_no_link_and_proposals_do(clients, env: Env):
                 s, "get_deck", {"deck_ref": "https://archidekt.com/decks/42/sample_commander_deck"}
             )
             assert by_url["ok"] and by_url["id"] == "42", by_url
+            # The report's simulation reaches the real Mystic Forge in the stack with the argument
+            # shape its tools take; a shape error would come back as a pydantic "validation error".
+            rep = await c.call(s, "run_deck_report", {"deck_ref": "42", "games": 20})
+            assert rep["ok"], rep
+            for block in (rep["goldfish"], rep["validation"]):
+                assert block is not None and "validation error" not in block.get("text", ""), block
+                assert "Field required" not in block.get("text", ""), block
+            # Deck 42 has a commander and real card names, so the real engine must simulate it:
+            # a failed or refused run is a failure of this test, not a skipped assertion.
+            assert rep["goldfish"]["ok"] is True, rep["goldfish"]
+            assert "## Metrics" in rep["goldfish"]["text"], rep["goldfish"]
+            assert rep["validation"]["ok"] is True, rep["validation"]
+            assert rep["has_goldfish"] is True and rep["has_validation"] is True, rep
             private = await c.call(s, "get_deck", {"deck_ref": "43"})
             assert private["ok"] is False, private
             unlinked = await c.call(
@@ -370,14 +385,13 @@ def test_apply_over_mcp_only_in_auto_mode(clients):
             assert p["approval_mode"] == "auto" and p["assistant_may_apply"] is True, p
             applied = await c.call(s, "apply_proposal", {"proposal_id": p["proposal_id"]})
             assert applied["ok"] and applied["state"] == "applied" and applied["result"]["verified"], applied
+            # The CSV deck (72 rows) is created in full: every printing it names exists on the mock
+            # (its decks' printings count as known cards), each row goes as one paced request, and
+            # the deck is read back and checked by name, count, printing and finish. At the default
+            # one-second pacing this is the longest call of the suite (a few minutes).
             create = await c.call(s, "apply_proposal", {"proposal_id": STATE["create"]})
-            # the CSV deck has cards the mock's card database does not know: created, then reported
-            assert create["ok"] is False and create["error"] in (
-                "not_found",
-                "verify_mismatch",
-                "invalid",
-                "contract",
-            ), create
+            assert create["ok"] is True and create["state"] == "applied", create
+            assert create["result"]["verified"] is True and create["result"]["sent_entries"] == 72, create
 
     run(go())
     set_switches(writes="false", mode="manual")

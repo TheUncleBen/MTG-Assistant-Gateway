@@ -4,6 +4,7 @@ reports, exports and the app shell. Writes go through proposals exactly as the t
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -172,8 +173,10 @@ async def test_reports_are_stored_and_listed(stack: Stack) -> None:
         assert r.status_code == 201, r.text
         rep = r.json()
         assert rep["stats"]["card_count"] > 0 and rep["metrics"]["card_count"] == rep["stats"]["card_count"]
-        # the fake research service has no goldfish tool: recorded as a failed call, not an error
-        assert rep["goldfish"]["ok"] is False and rep["validation"]["ok"] is False
+        # the fake research service answers like Mystic Forge: the simulation and the validation
+        # are recorded as they came back
+        assert rep["goldfish"]["ok"] is True and "## Metrics" in rep["goldfish"]["text"]
+        assert rep["validation"]["ok"] is True
         again = await h.http.post("/api/v1/reports", json={"deck_id": "42"}, headers=auth)
         assert again.status_code == 201 and again.json()["report_id"] == rep["report_id"]
         assert again.json()["reused"] is True
@@ -272,7 +275,7 @@ async def test_deck_pages(stack: Stack) -> None:
         assert "target='_blank'" not in lst.text.split("<main")[1].split("Open on Archidekt")[0]
         deck = await b.http.get("/decks/42", headers=NAV)
         assert deck.status_code == 200
-        assert "Mana curve" in deck.text and "Run deck report" in deck.text and "Edit deck" in deck.text
+        assert "Mana curve" in deck.text and "Run simulation" in deck.text and "Edit deck" in deck.text
         assert "Open on Archidekt" in deck.text  # the one external link may open a new tab
         missing = await b.http.get("/decks/999999", headers=NAV)
         assert missing.status_code == 404
@@ -286,7 +289,9 @@ async def test_deck_pages(stack: Stack) -> None:
         assert js.status_code == 200 and js.json()["id"] == "42"
         csrf = await b.csrf("/account")
         ran = await b.http.post("/decks/42/report", data={"csrf": csrf})
-        assert ran.status_code == 303 and ran.headers["location"] == "/history?deck_id=42"
+        assert ran.status_code == 303 and ran.headers["location"].startswith("/history/reports/")
+        shown = await b.http.get(ran.headers["location"], headers=NAV)
+        assert shown.status_code == 200 and "Goldfish simulation" in shown.text and "## Metrics" in shown.text
         hist = await b.http.get("/history", headers=NAV)
         assert hist.status_code == 200 and "Report:" in hist.text
         act = await b.http.get("/activity", headers=NAV)
@@ -363,4 +368,244 @@ async def test_deck_editor_page(stack: Stack) -> None:
         anon = await h.http.get("/decks/42/edit", headers=NAV)
         assert anon.status_code == 302
     finally:
+        await b.aclose()
+
+
+async def test_playtest_page_frames_archidekts_playtester(stack: Stack) -> None:
+    """The playtest page is Archidekt's own playtester in a frame (the only origin the page's CSP
+    lets it frame), with the deck's name, a way back and the plain link as a fallback. Missing
+    decks and anonymous visitors are handled like the deck page."""
+    b = await linked_browser(stack)
+    try:
+        r = await b.http.get("/decks/42/playtest", headers=NAV)
+        assert r.status_code == 200
+        assert "<iframe class='playframe' src='https://archidekt.com/playtester-v2/42'" in r.text
+        assert "sandbox='allow-scripts allow-same-origin" in r.text
+        assert "href='https://archidekt.com/playtester-v2/42' target='_blank'" in r.text  # fallback
+        assert "href='/decks/42'" in r.text and "Sample Commander Deck" in r.text
+        csp = r.headers["content-security-policy"]
+        assert "frame-src https://archidekt.com;" in csp and "frame-ancestors 'none'" in csp
+        assert "script-src 'self'" in csp and "img-src 'self'" in csp  # the shell's own script and avatar
+        assert "cards.scryfall.io" not in csp
+        missing = await b.http.get("/decks/999999/playtest", headers=NAV)
+        assert missing.status_code == 404
+        anon = await stack.h.http.get("/decks/42/playtest", headers=NAV)
+        assert anon.status_code == 302 and anon.headers["location"].startswith("/login?next=")
+    finally:
+        await b.aclose()
+
+
+async def test_compare_page_shows_what_a_build_changed(stack: Stack) -> None:
+    """The compare view pits this deck against a precon (offered from Archidekt's listing), any
+    deck id or link, or a pasted list, with the assistant's compare_decks numbers: taken out,
+    put in, changed counts and the statistics' differences."""
+    b = await linked_browser(stack)
+    try:
+        empty = await b.http.get("/decks/42/compare", headers=NAV)
+        assert empty.status_code == 200 and "<datalist id='preconlist'>" in empty.text
+        assert "<option value='42'>" in empty.text  # the fake's precon listing carries deck 42
+        assert "Taken out of" not in empty.text
+        # against itself: nothing changes
+        same = await b.http.get("/decks/42/compare?with=https://archidekt.com/decks/42/sample", headers=NAV)
+        assert same.status_code == 200 and "Taken out of Sample Commander Deck" in same.text
+        assert "<li class='muted'>None</li>" in same.text and "No difference" in same.text
+        # against a pasted list: the paste is the "before", this deck the "after"
+        paste = "1 Sol Ring\n4 Lightning Bolt\n3 Island\n"
+        r = await b.http.get("/decks/42/compare", params={"paste": paste}, headers=NAV)
+        assert r.status_code == 200 and "Taken out of the pasted list" in r.text
+        assert "Lightning Bolt" in r.text and "class='cardlink'" in r.text  # a card the deck holds opens
+        assert "compare.js" in r.text and "cardview.js" in r.text
+        # the tool's view of the same comparison agrees with the page's tiles
+        token = await mcp_token(stack.h)
+        tool = structured(await call(stack.h, token, "compare_decks", {"a": paste, "b": "42"}))
+        sm = tool["summary"]
+        out_tile = f"<b>{sm['cut']}</b><span>cards taken out ({sm['cut_pct']}% of the pasted list)</span>"
+        in_tile = f"<b>{sm['added']}</b><span>cards put in ({sm['added_pct']}% of Sample Commander Deck)"
+        assert out_tile in r.text and in_tile in r.text
+        # the lists under the tiles leave basic lands to their own list, so their counts match the tiles
+        added_rows = [a for a in tool["added"] if a["name"] not in ("Island", "Forest")]
+        assert f"Put into Sample Commander Deck <span class='count'>{len(added_rows)}</span>" in r.text
+        assert len(added_rows) < len(tool["added"])  # the deck's Forests are only under Basic lands
+        bad = await b.http.get("/decks/42/compare?with=https://evil.example/decks/1", headers=NAV)
+        assert bad.status_code == 400 and "could not be read" in bad.text
+        gone = await b.http.get("/decks/42/compare?with=999999", headers=NAV)
+        assert gone.status_code == 404
+    finally:
+        await b.aclose()
+
+
+async def test_export_import_round_trip_keeps_every_card_finish_and_commander(stack: Stack) -> None:
+    """Export → import → compare, for each export the pages offer: the plain .txt, the Archidekt
+    import text and the .csv each re-create the same deck (names, counts, finishes including
+    etched, commander category, sideboard rows) through propose_new_deck and apply."""
+    b = await linked_browser(stack)
+    try:
+        h, ark = stack.h, stack.ark
+        token = await mcp_token(h)
+        # a deck with an etched printing, a foil basic, a commander and a side row
+        p = structured(
+            await call(
+                h,
+                token,
+                "propose_deck_changes",
+                {
+                    "deck_id": "42",
+                    "changes": [
+                        {
+                            "action": "add",
+                            "card_name": "Sol Ring",
+                            "set_code": "SLD",
+                            "collector_number": "1074",
+                            "finish": "etched",
+                        },
+                        {"action": "add", "card_name": "Swamp", "quantity": 2, "foil": True},
+                    ],
+                },
+            )
+        )
+        assert p["ok"], p
+        assert structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))["ok"]
+        ark.add_side_row(42, "Opt", 2)
+
+        def shape(deck: dict) -> set[tuple]:
+            return {
+                (c["name"], c["quantity"], c["finish"], "Commander" in c["categories"], c["in_deck"])
+                for c in deck["cards"]
+            }
+
+        source = structured(await call(h, token, "get_deck", {"deck_ref": "42"}))
+        want = shape(source)
+        assert ("Sol Ring", 1, "Etched", False, True) in want and ("Swamp", 2, "Foil", False, True) in want
+        assert any(cmd for (_, _, _, cmd, _) in want) and ("Opt", 2, "Normal", False, False) in want
+        exports = {
+            "plain .txt": ("decklist_text", (await b.http.get("/decks/42/export.txt")).text),
+            "archidekt .txt": ("decklist_text", (await b.http.get("/decks/42/export.archidekt.txt")).text),
+            ".csv": ("csv_text", (await b.http.get("/decks/42/export.csv")).text),
+            ".json": ("json_text", (await b.http.get("/decks/42/export.json")).text),
+        }
+        assert "[Commander]" in exports["plain .txt"][1] and "*E*" in exports["plain .txt"][1]
+        assert json.loads(exports[".json"][1])["id"] == "42"  # the gateway's own deck JSON, as is
+        for label, (field, text) in exports.items():
+            made = structured(
+                await call(h, token, "propose_new_deck", {"name": f"Round trip {label}", field: text})
+            )
+            assert made["ok"], (label, made)
+            applied = structured(await call(h, token, "apply_proposal", {"proposal_id": made["proposal_id"]}))
+            assert applied["ok"] and applied["result"]["verified"], (label, applied)
+            copy = structured(await call(h, token, "get_deck", {"deck_ref": applied["result"]["deck_id"]}))
+            got = shape(copy)
+            assert got == want, (label, sorted(want - got), sorted(got - want))
+        # The New deck page takes the same JSON (pasted, or read from a file by the page's script).
+        csrf = await b.csrf("/account")
+        r = await b.http.post(
+            "/decks/new",
+            data={
+                "csrf": csrf,
+                "name": "From the page",
+                "format": "commander",
+                "kind": "json",
+                "source": exports[".json"][1],
+            },
+        )
+        assert r.status_code == 303, r.text
+        page = await b.http.get("/decks/new", headers=NAV)
+        assert (
+            "type='file'" in page.text and "filepick.js" in page.text and "gateway .json export" in page.text
+        )
+        made_ids = [d for d in ark.decks if ark.decks[d]["name"] == "From the page"]
+        assert (
+            len(made_ids) == 1
+            and shape(structured(await call(h, token, "get_deck", {"deck_ref": str(made_ids[0])}))) == want
+        )
+        bad = structured(await call(h, token, "propose_new_deck", {"name": "x", "json_text": '{"cards": 3}'}))
+        assert bad["ok"] is False and "cards list" in bad["message"], bad
+    finally:
+        await b.aclose()
+
+
+async def test_new_deck_page_says_which_card_was_not_found(stack: Stack) -> None:
+    """A New deck list with a card Archidekt does not know fails at apply time. The review page
+    then says something the proposal needs was not found and shows the card's name in the result,
+    instead of "No such proposal for your account" (the proposal does exist)."""
+    b = await linked_browser(stack)
+    try:
+        csrf = await b.csrf("/account")
+        r = await b.http.post(
+            "/decks/new",
+            data={
+                "csrf": csrf,
+                "name": "Typo deck",
+                "format": "commander",
+                "kind": "list",
+                "source": "1 Sol Ring\n1 Definitely Not A Card Zzz\n",
+            },
+        )
+        assert r.status_code == 303 and "?err=missing" in r.headers["location"], (r.status_code, r.headers)
+        page = await b.http.get(r.headers["location"], headers=NAV)
+        assert page.status_code == 200
+        assert "was not found on Archidekt" in page.text and "No such proposal" not in page.text
+        assert "Definitely Not A Card Zzz" in page.text  # the result names the card
+        # the code for a proposal that really does not exist is unchanged
+        gone = await b.http.get("/proposals/nope?err=not_found", headers=NAV)
+        assert "No such proposal" in gone.text
+    finally:
+        await b.aclose()
+
+
+async def test_export_only_formats_arena_mtgo_and_pdf(stack: Stack) -> None:
+    """Arena text, an MTGO .dek and a PDF download for any deck the member can read. They are
+    one-way (nothing imports them back); each names every card with its count and keeps the
+    commander and sideboard apart. The PDF is read back with its own stream decoding."""
+    import zlib
+
+    b = await linked_browser(stack)
+    try:
+        stack.ark.add_side_row(42, "Opt", 2, category="Sideboard")
+        stack.ark.add_side_row(42, "Delver of Secrets // Insectile Aberration", 1)  # Maybeboard: left out
+        arena = await b.http.get("/decks/42/export.arena.txt")
+        assert arena.status_code == 200 and arena.headers["content-disposition"].endswith('.arena.txt"')
+        blocks = arena.text.strip().split("\n\n")
+        assert [blk.splitlines()[0] for blk in blocks] == ["Commander", "Deck", "Sideboard"]
+        assert blocks[0].splitlines()[1] == "1 Aesi, Tyrant of Gyre Strait (CMR) 365"
+        assert blocks[2].splitlines()[1].startswith("2 Opt") and "1 Sol Ring (CMR) 472" in blocks[1]
+        assert "Delver of Secrets" not in arena.text  # Arena has no maybeboard
+        dek = await b.http.get("/decks/42/export.dek")
+        assert dek.status_code == 200 and dek.headers["content-type"].startswith("application/xml")
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(dek.text)
+        rows = {(c.get("Name"), c.get("Quantity"), c.get("Sideboard")) for c in root.iter("Cards")}
+        assert ("Opt", "2", "true") in rows and ("Sol Ring", "1", "false") in rows and len(rows) >= 50
+        pdf = await b.http.get("/decks/42/export.pdf")
+        assert pdf.status_code == 200 and pdf.headers["content-type"] == "application/pdf"
+        assert pdf.content.startswith(b"%PDF-1.4") and pdf.content.rstrip().endswith(b"%%EOF")
+        streams = re.findall(rb"stream\n(.*?)\nendstream", pdf.content, re.S)
+        text = b"".join(zlib.decompress(x) for x in streams).decode("cp1252")
+        assert "Sample Commander Deck" in text and "Aesi, Tyrant of Gyre Strait" in text and "Opt" in text
+        assert b"/Type /Catalog" in pdf.content and b"/Count 2" in pdf.content  # 100 rows need two pages
+        for path in ("/decks/43/export.arena.txt", "/decks/43/export.dek", "/decks/43/export.pdf"):
+            r = await b.http.get(path)  # Amy's private deck: not readable, nothing leaks
+            assert r.status_code == 404 and "Amy" not in r.text, path
+    finally:
+        await b.aclose()
+
+
+async def test_another_persons_public_deck_can_be_cloned_but_not_edited(stack: Stack) -> None:
+    """Clone deck is on every deck the member can read, as on archidekt.com (public decks and
+    precons included); Edit deck stays the owner's. The copy lands in the member's own account."""
+    b = await linked_browser(stack)
+    try:
+        stack.ark.private.discard(43)  # Amy's deck, public for this test
+        page = await b.http.get("/decks/43", headers=NAV)
+        assert page.status_code == 200 and "Clone deck" in page.text and "Edit deck" not in page.text
+        csrf = await b.csrf("/account")
+        before = set(stack.ark.decks)
+        r = await b.http.post("/decks/43/clone", data={"csrf": csrf})
+        assert r.status_code == 303 and "ok=created" in r.headers["location"], r.headers
+        (new_id,) = set(stack.ark.decks) - before
+        copy = stack.ark.decks[new_id]
+        assert copy["owner"]["username"] == "alice" and copy["name"] == "Copy of - Amy's deck"
+        assert copy["private"] is True and len(copy["cards"]) == len(stack.ark.decks[43]["cards"])
+    finally:
+        stack.ark.private.add(43)
         await b.aclose()

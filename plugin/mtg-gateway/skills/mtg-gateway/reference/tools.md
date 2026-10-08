@@ -14,25 +14,25 @@ JSON with `"ok": true` or `"ok": false` plus `error` and `message`.
 | `whoami` | none | The signed-in identity: `name`, `preferred_username`, `email`, `groups`, plus the token's client and expiry and the `gateway_version`. |
 | `account_status` | none | `linked`, `archidekt_username`, `linked_at`, `last_used_at`, `writes_enabled`, `account_page` (the URL where the user links Archidekt). |
 | `list_my_decks` | `name_contains`, `deck_format`, `folder` (all optional) | Up to 50 decks owned by the linked Archidekt account, most recently updated first, each with its `url`, plus `count`. `name_contains` keeps decks whose name contains the text (case-insensitive), `deck_format` keeps one format name (`commander`, `modern`...), `folder` keeps one folder name exactly. Filters apply after the read, so they never widen it. |
-| `get_my_deck` | `deck_id` | One deck owned by the linked account (private decks included); refused with `forbidden` for anyone else's deck. `deck_id` may be the number or the full Archidekt deck URL. Returns the deck fields listed under "Deck results" below. |
-| `get_deck` | `deck_ref` | Any public or unlisted Archidekt deck by id or URL, without a linked account; falls back to the user's linked account for their own private decks. Same deck fields as `get_my_deck`. |
-| `parse_decklist` | `text` | Parses pasted decklist text (`1 Sol Ring`, `1x Sol Ring (cmr) 436 [Ramp]`, section headers, `SB:` lines; up to 200 kB) into `cards`, `card_count`, `sideboard_count`, a normalised `decklist_text` and a `sideboard_text`. Contacts no service. |
+| `get_my_deck` | `deck_id`, `include_text` (default false) | One deck owned by the linked account (private decks included); refused with `forbidden` for anyone else's deck. `deck_id` may be the number or the full Archidekt deck URL. Returns the deck fields listed under "Deck results" below; `include_text` adds each card's `oracle_text`. |
+| `get_deck` | `deck_ref`, `include_text` (default false) | Any public or unlisted Archidekt deck by id or URL, without a linked account; falls back to the user's linked account for their own private decks. Same deck fields as `get_my_deck`: the cards, `decklist_text` (plain), `sideboard_text` and `archidekt_text` (Archidekt's import syntax, `1x Name (set) 123 *F* [Category{top}] ^Label,#hex^`, which pastes back into Archidekt as the same deck). Every card row carries `type_line`, `power`/`toughness` or `loyalty` besides its mana cost and types. `include_text: true` adds every card's rules text as `oracle_text` (faces joined with `//`), `faces` (per face: name, mana cost, type line, text, power, toughness, loyalty), `flavor_text` and `artist`; set it when you will discuss what cards do. The one tool that reads or exports an Archidekt deck. |
+| `parse_decklist` | `text` | Parses pasted decklist text in Archidekt's syntax and the common variants (`1 Sol Ring`, `1x Sol Ring (cmr) 436 *F* [Ramp{top}] ^Label,#hex^`, `*E*` for etched, `# Sideboard` / `// Lands` section headers, `SB:` lines; up to 200 kB) into `cards`, `card_count`, `sideboard_count`, a normalised `decklist_text` and a `sideboard_text`. Category flags are stripped, labels are kept apart from categories, sideboard rows remember whether they came from a Sideboard or Maybeboard section. Contacts no service. |
 | `parse_deck_export` | `csv_text` | Parses the text of an Archidekt CSV export (any column selection, up to 2 MB) into cards with quantity, name, set, collector number, categories, mana cost, mana value, types, price and owned flag, plus `card_count` (deck proper), `side_count` (rows in the Maybeboard or Sideboard category), `distinct`, `categories`, `decklist_text` and `sideboard_text`. Does not contact Archidekt. |
 | `propose_deck_changes` | `deck_id`, `changes`, `scan_session` (optional) | Step 1 of an edit, for decks the linked account owns (`forbidden` otherwise). Stores a proposal against the deck's current state and returns `proposal_id`, `kind`, `diff`, `state`, `review_url`, `writes_enabled`, `next_step`. `scan_session` (a scan session id or name) appends every resolved card of that session as `add` changes, after any `changes` given. Changes nothing on Archidekt. |
-| `propose_new_deck` | `name`, `deck_format`, `private`, and one of `cards`, `decklist_text`, `csv_text`, `scan_session` | Step 1 of creating a deck in the linked account. `scan_session` (id or name) uses that scan session's `decklist_text` as the source. Same return fields as `propose_deck_changes`. Creates nothing on Archidekt. |
+| `propose_new_deck` | `name`, `deck_format`, `private`, and one of `cards`, `decklist_text`, `csv_text`, `json_text`, `scan_session` | Step 1 of creating a deck in the linked account. `json_text` is a deck as `get_deck` returns it (or the Export page's .json), as a string or the object itself; only each card's `name`, `quantity`, `categories`, `set`, `collector_number` and `finish` are read. `decklist_text`, `csv_text` and `json_text` keep every row: printing, finish (`*F*`, `*E*`, or the CSV Finish column), categories, and sideboard rows under Archidekt's Sideboard or Maybeboard category. `cards` rows take `card_name`, `quantity`, `category`, `set_code`, `collector_number` and `finish` (normal, foil, etched). `scan_session` (id or name) uses that scan session's `decklist_text` as the source. Same return fields as `propose_deck_changes`. Creates nothing on Archidekt. |
 | `list_my_proposals` | none | This user's recent proposals with their states and review links. |
 | `get_proposal` | `proposal_id` | One proposal: diff, state, result, snapshot id, review link. |
 | `reject_proposal` | `proposal_id` | Closes one of the user's own `pending` proposals without applying it; nothing is sent to Archidekt. Only a proposal this app made can be rejected here; any other answers `other_client` with the `review_url`, where the user can reject it. Returns the proposal as `get_proposal` would, now `rejected`. A proposal that is no longer pending answers `not_pending` with its current state. Only the user's own message can ask for this. |
 | `list_snapshots` | none | The snapshots kept of this user's decks (one before every applied edit), newest first: `snapshot_id`, `deck_id`, `deck_name`, `proposal_id`, `taken_at`, `card_count`, and `backup_deck_id` / `backup_url` of the readable backup copy kept in the user's Archidekt backup folder (null when the gateway runs without backups). |
 | `get_snapshot` | `snapshot_id` | One snapshot in full: the deck fields of `get_deck` as the snapshot recorded them, plus `snapshot_id`, `proposal_id`, `taken_at` and `backup_url`. Contacts nothing; the snapshot is read from the gateway's database. Its id (`snap_...`) is also accepted by `deck_stats` and `compare_decks`. |
-| `propose_restore_snapshot` | `snapshot_id` | Step 1 of an undo: a proposal (`kind` `restore`) that puts every deck row back as the snapshot recorded it: printing, foil or etched finish, quantity and categories (so commander, sideboard and maybeboard too). Deck name, description, format and custom-category settings are not touched. Same return fields as `propose_deck_changes`; the user confirms, then `apply_proposal` applies it like any other proposal. Changes nothing on Archidekt. |
+| `propose_restore_snapshot` | `snapshot_id` | Step 1 of an undo: a proposal (`kind` `restore`) that puts every deck row back as the snapshot recorded it: printing, foil or etched finish, quantity and categories (so commander, sideboard and maybeboard too), and the deck's own details the snapshot recorded (name, description, format, bracket, private, unlisted) when they differ; `result.restored_details` lists the ones sent. Custom-category settings, tags, cover and folder are not touched. Same return fields as `propose_deck_changes`; the user confirms, then `apply_proposal` applies it like any other proposal. Changes nothing on Archidekt. |
 | `propose_deck_details` | `deck_id`, `details` | Step 1 of changing a deck's own settings rather than its cards, for decks the linked account owns. `details` is an object with any of `name` (1 to 200 characters), `description` (plain text, up to 20000 characters), `deck_format` (the same names as `propose_new_deck`), `edh_bracket` (1 to 5, or `null` to clear it), `private` and `unlisted` (booleans). Fields the deck already has that way are dropped; a proposal that would change nothing is refused with `invalid`. Returns the same fields as `propose_deck_changes` with `kind` `details` and a before/after diff (`name: "Old" -> "New"`, `format: commander -> modern`, `description: (changed, 120 chars)`; the description text itself is never printed). The user confirms, then `apply_proposal` applies it like any other proposal: snapshot and backup first, one update call, then the deck is re-read and every field checked. Changes nothing on Archidekt. |
 | `propose_clone_deck` | `deck_id`, `name` (optional) | Step 1 of copying one of the linked account's decks into a new private deck, as Archidekt's Clone deck button does; `name` defaults to `Copy of - <deck name>`. Returns the same fields as `propose_deck_changes` with `kind` `clone`. After the user confirms, `apply_proposal` makes the copy (every card, quantity, category and finish) and returns the new deck's `deck_id` and `deck_url`. Creates nothing on Archidekt by itself. |
 | `apply_proposal` | `proposal_id` | Step 2: **writes to Archidekt.** Call it only when the proposal's `assistant_may_apply` is true: the user's own approval mode (chosen on their account page: `manual`, `semi` or `auto`) lets the assistant apply this proposal itself. Otherwise it answers `browser_required` with the `review_url`, `approval_mode` and `risk`: the user presses Approve on the card or Apply on the review page. Refused while writes are disabled. In an app with URL elicitation (Claude Code) it may instead ask the user to open the review page and wait briefly for their Apply, answering the proposal's state or `browser_pending`. A proposal another app (or the browser) made answers `other_client` with the `review_url`. Otherwise: For an edit it re-checks the deck is unchanged, snapshots it, applies, re-reads and verifies. For a new deck it creates the deck, adds the cards, re-reads and verifies, and returns `deck_id`, `deck_url` and `printing_notes` (a line per listed printing Archidekt did not have, which was added by name instead; tell the user) in `result`. A pinned printing on an edit that Archidekt does not have, or that is another card, refuses the whole proposal with `not_found`; nothing is changed. |
 | `confirm_proposal` | `proposal_id`, `approval`, `decision` (`approve` or `reject`) | **For the proposal card's buttons only, never for the assistant.** Applies (`approve`) or rejects a pending proposal when `approval` is the one-time code the gateway handed the card in the proposal result's `_meta` (bound to that proposal, this app and this user). Any other call answers `invalid_approval`, is logged as `approval_refused`, and sends nothing. Answers `in_chat_disabled` where the owner turned the card off (`MTG_APPLY_IN_CHAT=false`). Returns the proposal as `get_proposal` would. |
-| `deck_stats` | `deck_ref` | Statistics for one deck (the deck proper only): `card_count`, `distinct`, `land_count`, `nonland_count`, `average_mana_value`, `mana_curve` (buckets `0` to `6` and `7+`, nonlands), `colour_pips` against `mana_sources`, `type_counts`, `rarity_counts`, `price_total` and `priced_cards`, `format` with `legality_problems` and `legality_unknown`, `game_changers`, `tutors`, `extra_turns`, `mass_land_denial`, `salt_total`, `commanders`, `colour_identity`, `archidekt_bracket` (the bracket set on the deck, if any) and `bracket_estimate` (`bracket` 2 to 4 or null, `kind: "estimate"`, `basis`). The estimate comes only from Archidekt's own card flags: mass land denial or two or more extra-turn cards means 4, more than three game changers means 4, one to three game changers or a two-card combo means 3, otherwise 2; bracket 5 is never estimated. It is an estimate, not an official bracket; say so. Prices, salt and the flags are Archidekt's figures, not checked by the gateway. `deck_ref` is an Archidekt id or URL (read like `get_deck`) or a snapshot id. Returns `deck` (brief) and `stats`. Reads Archidekt only; no Mystic Forge call. |
-| `compare_decks` | `a`, `b` | Cards `added`, `removed` and `changed` (with `before` and `after` counts) going from `a` to `b`. Each side is an Archidekt deck id or URL, a snapshot id (`snap_...`) or pasted decklist text (one card per line; main zone only). When both sides are decks or snapshots, also `stats_delta` (b minus a) for the numeric statistics of `deck_stats` and the `a` and `b` deck briefs. Reads Archidekt for deck references; contacts nothing else. |
-| `run_deck_report` | `deck_ref`, `games` (default 300, 10 to 2000), `simulate` (default true) | Reads the deck, computes `deck_stats` and, when the research service is configured, runs `validate_decklist` and (with `simulate`) a `goldfish_run` of `games` games, then stores the whole thing as a report for the user. Returns the report as `get_deck_report` does. A research call that fails is recorded in the report (`ok: false`), not raised. A second run of an unchanged deck within ten minutes returns the existing report with `reused: true`. The gateway keeps the newest 200 reports per user. Reports also appear on the gateway's History page. Changes nothing on Archidekt. |
+| `deck_stats` | `deck_ref` | Statistics for one deck (the deck proper only): `card_count`, `distinct`, `land_count`, `nonland_count`, `average_mana_value`, `mana_curve` (buckets `0` to `6` and `7+`, nonlands), `colour_pips` against `mana_sources`, `type_counts`, `rarity_counts`, `price_total` and `priced_cards`, `format` with `legality_problems` and `legality_unknown`, `game_changers`, `tutors`, `extra_turns`, `mass_land_denial`, `salt_total`, `commanders`, `colour_identity`, `archidekt_bracket` (the bracket set on the deck, if any), `bracket_estimate` (`bracket` 2 to 4 or null, `kind: "estimate"`, `basis`) and `checks` (structural: `deck_size` with `actual` and `ok`, plus `expected` for the commander-style formats or `minimum` 60 for constructed ones; `commander_zone` with `count`, `ok` and `cannot_command` (the zone is Archidekt's premier category, whatever its name); `colour_identity_violations` and `singleton_violations` for the singleton formats; `copy_limit_violations` (more than four copies, basic lands and "any number" cards aside) and `sideboard` (`count`, `maximum` 15, `ok`) for constructed formats; `legality` (`banned`, `not_legal`, `restricted_violations` with name and quantity from Archidekt's per-card legalities for the deck's format, `unknown` count, `ok`); `companion` (`count`, `ok`); `bracket` (`set`, `estimate`, `ok`: false when the set bracket is below the estimate); `uncategorised`; `problems` in plain words; `ok`, false when any check failed, a banned card included). The command zone check knows Partner, Partner with, Friends forever, Choose a Background and Doctor's companion pairs, Oathbreaker's planeswalker plus signature spell, Tiny Leaders' mana value cap and Pauper Commander's uncommon leader; formats without a commander (Canadian Highlander, Gladiator) flag a command zone. The estimate comes only from Archidekt's own card flags: mass land denial or two or more extra-turn cards means 4, more than three game changers means 4, one to three game changers or a two-card combo means 3, otherwise 2; bracket 5 is never estimated. It is an estimate, not an official bracket; say so. Prices, salt and the flags are Archidekt's figures, not checked by the gateway. `deck_ref` is an Archidekt id or URL (read like `get_deck`), a snapshot id, or a pasted decklist (then only `card_count`, `distinct`, `sideboard_count`, `commanders`, `card_data: "unavailable"` and the size, commander-zone, singleton and uncategorised `checks`; `validate_decklist` checks a list card by card). Returns `deck` (brief; `id` null for a list) and `stats`. Reads Archidekt only; no Mystic Forge call. |
+| `compare_decks` | `a`, `b`, `simulate` (default false), `games` (default 300, 10 to 2000), `options` | Cards `added`, `removed` and `changed` (with `before` and `after` counts) going from `a` to `b`, names matched case-insensitively and by front face. Each side is an Archidekt deck id or URL, a snapshot id (`snap_...`) or pasted decklist text (Archidekt's syntax; main zone only, so a `# Sideboard` section is left out), such as `precon_decklist`'s list for a precon upgrade. `summary` gives `before_size`, `after_size`, `cut` and `added` (cards, basic lands left out), `kept` (cards in both, at `b`'s counts), `cut_pct` (share of `a`'s cards) and `added_pct` (share of `b`'s cards) and `basic_land_changes`. When both sides are decks or snapshots, also `stats_delta` (b minus a) for the numeric statistics of `deck_stats` and the `a` and `b` deck briefs. `simulate: true` adds `goldfish_ab`: the research service plays both decks game for game under the same seeds and reports the per-metric deltas with confidence intervals and significance, verbatim in `goldfish_ab.text` (`ok: false` with the reason when it is not configured, refuses, or when either side has no commander: the simulator models Commander decks and a pasted list needs its commander under a `Commander` header or category). `options` for the A/B: `annotations`, `annotations_a`, `annotations_b`, `combos`, `seed`, `until_turn`, `allow_different_commanders`; anything else is refused (`invalid`). The A/B is not stored. Reads Archidekt for deck references. |
+| `run_deck_report` | `deck_ref` (deck id or URL, snapshot id, or pasted decklist), `games` (default 300, 10 to 2000), `simulate` (default true), `options` | Reads the deck, computes `deck_stats` and, when the research service is configured, runs `validate_decklist` and (with `simulate`) a `goldfish_run` of `games` games, then stores the whole thing as a report for the user. `options` passes the simulator's knobs through unchanged: `annotations` (from `goldfish_annotate`), `combos`, `seed`, `until_turn` (1 to 30), `opponents` (1 to 5), `mulligan` (`min_sources`, `max_sources`, `lands_only`, `free_first`, `min_real_lands`); an unknown key is refused (`invalid`), and a run with options is never reused from the ten-minute cache. Returns the report as `get_deck_report` does. A research call that fails is recorded in the report (`ok: false`), not raised; so is a simulator refusal such as an unrecognised commander, and a deck with no commander is not simulated at all (`goldfish.ok: false` with the reason), since the simulator models Commander decks only. A second run of an unchanged deck within ten minutes returns the existing report with `reused: true`. The gateway keeps the newest 200 reports per user. Reports also appear on the gateway's History page. A pasted decklist gets the same validation and simulation (its commander under a `Commander` header or category) and comes back with `stored: false`, `deck.id` null and `decklist_text`; it is not filed under History, so clone or create the deck to keep reports over time. Changes nothing on Archidekt. |
 | `list_deck_reports` | `deck_id` (optional) | The user's stored reports, newest first (up to 20): `report_id`, `deck_id`, `deck_name`, `deck_url`, `taken_at`, `metrics` (`card_count`, `average_mana_value`, `land_count`, `price_total`, `salt_total`), `has_goldfish`, `has_validation`, `bracket_estimate`. Contacts nothing. |
 | `get_deck_report` | `report_id` | One report in full: the summary fields of `list_deck_reports` plus `stats` (as `deck_stats`), `goldfish` and `validation` (each `null` when not run, otherwise `tool`, `ok`, `data` and/or `text` as the research service answered). Contacts nothing. |
 | `resolve_cards` | `cards` or `text` | Turns card names (from the user's photos, or a pasted list; `cards` items are `{name, set?, collector_number?, quantity?}` or plain lines) into exact Scryfall cards. Each result has `status`: `exact`, `printing` (matched by set and number), `fuzzy` (name corrected; confirm with the user), `ambiguous` or `not_found` (with `suggestions`). Returns `cards`, `needs_review`, `decklist_text` (for `propose_new_deck`) and `changes` (adds for `propose_deck_changes`). Contacts Scryfall only. |
@@ -66,6 +66,7 @@ A list of 1 to 40 objects:
 | `category` | for `set_category` | For `add`: the category a card new to the deck is filed under (cards already in the deck keep their categories). For `set_category`: the one category every deck-proper row of that card is moved to (maybeboard and sideboard rows are left alone) (up to 60 characters). |
 | `set_code`, `collector_number` | no, together | For `add`: pin the exact printing (as `resolve_cards` and `get_deck` report them). The printing must exist on Archidekt and be this card, or `apply_proposal` refuses the proposal with `not_found` and changes nothing. A pinned add goes in as its own deck row unless the deck already has that printing and finish. |
 | `finish` | no | For `add`: `normal`, `foil` or `etched` (`foil: true` also works). A finish the printing does not come in falls back to what Archidekt offers. For `set_finish` (required) and `set_printing` (optional): the finish every copy already in the deck gets. |
+| `zone` | no | `main` (default: the deck proper) or `side` (the maybeboard and sideboard rows, which do not count toward the deck). With `side`, `add`, `remove`, `set_quantity` and `set_category` work on those rows; `set_commander`, `set_finish`, `set_printing` and a pinned printing are for the deck proper only. A side add is filed under the deck's Maybeboard (or its first uncounted category). Diff lines for side rows end in "(maybeboard/sideboard)". |
 
 `set_category` and `set_commander` take only `card_name` (plus `category` for
 `set_category`): no quantity or printing. The card must already be in the deck.
@@ -87,23 +88,25 @@ per proposal, and not also a count or category change. Diff lines read
 Diff lines read `+1 Card` (added), `-1 Card` (removed), `4 -> 6 Card`
 (quantity changed), `Sol Ring: category Ramp -> Artifacts` and
 `Commander: Old Name -> New Name`; an add with a pinned printing or finish shows it, as in
-`+1 Sol Ring (SLD 1074, Etched)`. Counts compare and change only the deck proper
-(maybeboard and sideboard rows are left alone); `set_category` and
-`set_commander` touch every deck-proper row of the named card.
+`+1 Sol Ring (SLD 1074, Etched)`. Counts compare and change the deck proper unless a
+change says `zone: side` (then its maybeboard and sideboard rows, counted
+separately); `set_category` and `set_commander` touch every deck-proper row
+of the named card.
 
 ### `propose_new_deck` arguments
 
 | Argument | Notes |
 | --- | --- |
 | `name` | Required, up to 120 characters. |
-| `deck_format` | `commander` (default; `edh` also accepted), `standard`, `modern`, `legacy`, `vintage`, `pauper`, `pioneer`, `brawl`, `historic` or `oathbreaker`. |
+| `deck_format` | An Archidekt format slug (the same words as a card's `legalities` keys): `commander` (default; `edh` also accepted), `standard`, `modern`, `legacy`, `vintage`, `pauper`, `pioneer`, `historic`, `alchemy`, `timeless`, `premodern`, `brawl` (Standard Brawl), `historicbrawl` (Brawl), `competitivebrawl`, `oathbreaker`, `duel`, `1v1`, `paupercommander`, `predh`, `canlander`, `gladiator`, `tlr`, `penny`, `future`, `frontier`, `custom`. |
 | `private` | Default `true`. |
 | `cards` | List of `{card_name, quantity, category?, set_code?, collector_number?, foil?}`, quantity 1 to 99. A set code and collector number pick that printing when Archidekt has it, else the card's default printing. |
 | `decklist_text` | Pasted list; sideboard lines are left out. |
 | `csv_text` | An Archidekt CSV export. |
+| `json_text` | The gateway's own deck JSON (a `get_deck` answer or the Export page's .json): an object with a `cards` list, as a string or the object. |
 | `scan_session` | The id or name of one of the user's scan sessions; its `decklist_text` becomes the list. |
 
-Give exactly one of `cards`, `decklist_text`, `csv_text` or `scan_session`
+Give exactly one of `cards`, `decklist_text`, `csv_text`, `json_text` or `scan_session`
 (the scan session's `decklist_text` is used). At most 300 rows
 and 400 cards. The account must be linked before the proposal is stored.
 
@@ -161,23 +164,21 @@ tool's schema for the rest.
 | `precon_search` | `query`, `commander_only` | Find a preconstructed deck. |
 | `precon_decklist` | `file_name` | Its official list. |
 | `precon_export` | `file_name` | The list in Archidekt import format. |
-| `precon_diff` | `file_name`, `deck` or `decklist` | Exact cuts and adds between a precon and an upgraded deck. |
 
-### Archidekt public decks and formatting
+### Formatting
 
 | Tool | Main arguments | Use |
 | --- | --- | --- |
-| `archidekt_deck` | `deck` (id or URL), `include_text` | Read any public deck. Lists a card once per category, so its total can be too high for multi-category cards; count with `get_deck` instead. |
-| `archidekt_user_decks` | `username` | A user's public decks. |
-| `archidekt_export` | `deck` | A public deck in Archidekt import format. |
 | `format_archidekt` | `cards`, `include_set_codes` | Turns a card list into Archidekt import text. Use it whenever you output a list for import. |
+
+Reading Archidekt decks is the gateway's job: `get_deck` (any deck, with `decklist_text` as the
+export), `list_my_decks` (the member's) and `archidekt_user` (another user's public decks).
 
 ### Validation
 
 | Tool | Main arguments | Use |
 | --- | --- | --- |
-| `validate_decklist` | `decklist`, `commander` | Card names, deck size and colour identity for pasted text. |
-| `validate_archidekt_deck` | `deck` | The same plus category structure, for a public Archidekt deck. |
+| `validate_decklist` | `decklist`, `commander` | Card names, deck size and colour identity for pasted text that is not a deck yet. For an Archidekt deck use `deck_stats`. |
 
 ### Simulation (goldfish)
 
@@ -185,23 +186,38 @@ tool's schema for the rest.
 | --- | --- | --- |
 | `goldfish_odds` | `deck_size`, `draws`, `copies`, `min_successes` | Exact draw odds; no simulation. |
 | `goldfish_annotate` | `deck` | What the engine models for this deck and which cards it cannot. Run first. |
-| `goldfish_run` | `deck`, `n`, `seed`, `until_turn`, `mulligan`, `annotations`, `combos` | Simulate `n` games (default 1000, seed 42, 10 turns) with confidence intervals and an honesty report. |
-| `goldfish_ab` | `deck_a`, `deck_b`, `n`, `seed`, `until_turn` | Paired comparison of two decks under identical seeds. |
 
-`deck` arguments accept an Archidekt id or URL (public decks only) or
-decklist text with one `1 Card Name` per line, commander first or marked with
-a trailing ` *CMDR*`.
+The simulation itself is `run_deck_report` (gateway tools above): it plays the
+games and stores the result. To compare two versions, run a report of each.
 
-The gateway refuses, before forwarding, a goldfish `n` above 2000, an
-`until_turn` above 30, `goldfish_odds` sizes above 1000, and any text argument
-over 200 kB. The `archidekt_*` tools (and a `deck` given as an Archidekt id or
-URL) count against the user's Archidekt budget; past it they answer that the
-budget is used up for a few minutes.
+`deck` arguments take decklist text with one `1 Card Name` per line,
+commander first or marked with a trailing ` *CMDR*`: pass the `decklist_text`
+a gateway tool returned. (An Archidekt id or URL works for public decks but
+counts against the user's Archidekt budget; `get_deck` is the deck reader.)
+
+The gateway refuses, before forwarding, `goldfish_odds` sizes above 1000 and
+any text argument over 200 kB.
 
 ## Not available on this gateway
 
 Hidden on purpose until the gateway can record who owns them:
 `goldfish_report`, `goldfish_start`, `goldfish_step`, `goldfish_state`,
-every `watchlist_*` tool and `price_history`. The gateway's own stored
-reports (`run_deck_report`) cover the saved-report case. There is no tool to
-delete a deck.
+every `watchlist_*` tool and `price_history`.
+
+Hidden because a gateway tool owns the job (one tool per capability; calling
+one of these answers with the owner's name):
+
+| Hidden Mystic Forge tool | Owner |
+| --- | --- |
+| `archidekt_deck` | `get_deck` (`include_text` for the rules text) |
+| `archidekt_export` | `get_deck` (`archidekt_text`) |
+| `archidekt_user_decks` | `list_my_decks` (the member) and `archidekt_user` (anyone else) |
+| `validate_archidekt_deck` | `deck_stats` (`stats.checks`) |
+| `precon_diff` | `compare_decks` (`summary`; `precon_decklist` gives the precon side) |
+| `goldfish_run` | `run_deck_report` (`options` carries the simulator's knobs) |
+| `goldfish_ab` | `compare_decks` with `simulate: true` |
+
+Each owner carries every input and output of the tool it hides; the mapping is in [docs/CAPABILITIES.md](../../../../../docs/CAPABILITIES.md).
+
+There is no tool to delete a deck, set its cover, move it, tag it, or edit a
+comment: those are buttons on the gateway's pages for the member alone.

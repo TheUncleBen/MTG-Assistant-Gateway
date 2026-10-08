@@ -83,8 +83,8 @@ async def test_gateway_without_the_app(tmp_path: Path, idp: FakeIdP, monkeypatch
         try:
             await b.login("/app")
             page = await b.http.get("/app")
-            assert page.status_code == 404
-            assert "does not ship the app" in page.text
+            assert page.status_code == 200  # a friendly page, not an error (Q18)
+            assert "No app file on this gateway" in page.text and "phone's browser" in page.text
             r = await b.http.get("/app/mtg-assistant-gateway.apk")
             assert r.status_code == 404
         finally:
