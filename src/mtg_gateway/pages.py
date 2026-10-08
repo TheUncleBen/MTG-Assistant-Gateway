@@ -49,6 +49,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         sub: str | None = None,
         sid: str | None = None,
         scripts: bool = False,
+        head_extra: str = "",
     ) -> Response:
         return render(
             title,
@@ -58,6 +59,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             signed_in=sub is not None,
             csrf=_csrf(s, sid),
             scripts=scripts,
+            head_extra=head_extra,
         )
 
     def current(request: Request) -> tuple[str | None, str | None]:
@@ -303,6 +305,15 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         if action == "link":
             login_name = data.get("archidekt_login", "").strip()
             password = data.get("archidekt_password", "")
+            if data.get("accept_risk") != "1":
+                return page(
+                    "Account",
+                    _err("Tick the box to confirm you have read the note about linking Archidekt.")
+                    + _account_body(state, sub, _csrf(s, sid)),
+                    status=400,
+                    sub=sub,
+                    sid=sid,
+                )
             if not login_name or not password:
                 return page(
                     "Account",
@@ -377,6 +388,8 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             sub=sub,
             sid=sid,
             scripts=True,  # the click guard on Apply (clickguard.py)
+            # While a long apply runs in the background the page reloads itself to show progress.
+            head_extra="<meta http-equiv='refresh' content='5'>" if p["state"] == "applying" else "",
         )
 
     @server.custom_route("/proposals/{pid}", methods=["POST"], include_in_schema=False)
@@ -408,15 +421,18 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             if action == "reject":
                 state.decks.reject(sub, pid)
             else:
-                await state.decks.apply(sub, pid, via="browser")
+                result = await state.decks.apply(sub, pid, via="browser")
         except DeckError as exc:
             # Only a code goes in the URL; _notice maps it to fixed text, so a crafted link cannot
             # put words of its choosing in the page's error box. Failure details are in the result.
             code = _err_code(exc.kind, proposal_exists=state.db.get_proposal(pid, sub) is not None)
             return RedirectResponse(f"/proposals/{pid}?err={code}", status_code=303)
-        return RedirectResponse(
-            f"/proposals/{pid}?ok={'rejected' if action == 'reject' else 'applied'}", status_code=303
-        )
+        if action == "reject":
+            ok = "rejected"
+        else:
+            # A large apply keeps running in the background; the page then shows its progress.
+            ok = "applying" if result.get("state") == "applying" else "applied"
+        return RedirectResponse(f"/proposals/{pid}?ok={ok}", status_code=303)
 
     # -- completion of the browser sign-in (called from /auth/callback) ----
     async def finish_browser_login(request: Request) -> Response:
@@ -506,6 +522,8 @@ OK_MESSAGES = {
     "deleted. The gateway has no way to sign that session out at Archidekt, so Archidekt keeps "
     "accepting it until it expires. If you think it was exposed, change your Archidekt password.",
     "applied": "Applied. Archidekt now matches this proposal.",
+    "applying": "Applying. This is a large change, so Archidekt is updated a step at a time to stay "
+    "within its limits. You can leave this page; the progress below refreshes by itself.",
     "rejected": "Rejected. Nothing was sent to Archidekt.",
     "disconnected": "Disconnected. That app has to be connected and approved again to use your account. "
     "Its pending proposals were rejected.",
@@ -634,6 +652,7 @@ def _account_body(state: Any, sub: str, csrf: str | None) -> str:
             "<div class='card'><h2>Link your Archidekt account</h2>"
             "<p>Your password is sent to Archidekt once to obtain a session and is not stored. "
             "Only the resulting session token is kept, encrypted.</p>"
+            f"{LINK_WARNING_HTML}"
             f"<form method='post' autocomplete='off'>{csrf_in}"
             "<input type='hidden' name='action' value='link'>"
             "<label for='l'>Archidekt username or email</label>"
@@ -641,11 +660,32 @@ def _account_body(state: Any, sub: str, csrf: str | None) -> str:
             "<label for='p'>Archidekt password</label>"
             "<input id='p' type='password' name='archidekt_password' required "
             "autocomplete='current-password'>"
+            "<label class='check'><input type='checkbox' name='accept_risk' value='1' required> "
+            "<span>I have read the note above and want to link my account.</span></label>"
             "<button class='primary'>Link account</button></form></div>"
         )
     s = state.settings
     out.append(_delete_card(csrf_in, s.backup_keep_days if s.backup_dir is not None else None))
     return "".join(out)
+
+
+# Shown above the link form, and acknowledged with a required tick before linking. Archidekt has
+# no official interface for other apps, so the gateway uses the requests archidekt.com's own pages
+# make; its terms restrict automated access. The trust sentence says plainly what the encryption
+# cannot change: the server holds the key that opens the stored session.
+LINK_TRUST_NOTE = (
+    "Whoever runs this gateway is trusted with this link: the session is stored encrypted, and "
+    "no page, admin tool, log or backup shows it, but the server holds the key that opens it."
+)
+SHOW_LINK_TRUST_NOTE = True
+LINK_WARNING_HTML = (
+    "<div class='notice'><p><strong>Before you link:</strong> Archidekt has no official way for "
+    "other apps to read or change decks, so this gateway signs in as you and uses the same requests "
+    "archidekt.com's own pages use. Archidekt's terms of service restrict automated access, so "
+    "Archidekt could limit or block an account used this way. Link only if you accept that risk.</p>"
+    + (f"<p>{html.escape(LINK_TRUST_NOTE)}</p>" if SHOW_LINK_TRUST_NOTE else "")
+    + "</div>"
+)
 
 
 def _mode_card(state: Any, sub: str, csrf_in: str) -> str:
@@ -889,6 +929,20 @@ def _detail_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, int
     return "".join(items), len(items)
 
 
+def _progress_html(p: dict[str, Any]) -> str:
+    """How far a large apply running in the background got (the page refreshes itself)."""
+    if p.get("state") != "applying":
+        return ""
+    g = p.get("progress") or {}
+    bits = []
+    if g.get("of_cards"):
+        bits.append(f"looked up {int(g.get('resolved_cards') or 0)} of {int(g['of_cards'])} cards")
+    if g.get("of_entries"):
+        bits.append(f"sent {int(g.get('sent_entries') or 0)} of {int(g['of_entries'])} changes")
+    text = "Applying to Archidekt" + (": " + ", ".join(bits) if bits else "") + "."
+    return f"<p class='notice warn' role='status'>{html.escape(text)}</p>"
+
+
 def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str = "") -> str:
     if p.get("kind") == "details":
         rows, total = _detail_rows(p.get("rows"), p["diff"])
@@ -942,7 +996,7 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str = "") -> str:
         f"<div class='summary'>{''.join(summary)}</div>"
         f"<ul class='changes' aria-label='{aria}'>{rows}</ul>"
         f"<details class='raw'><summary>Plain-text diff</summary>{raw}</details>"
-        f"<p class='muted'>{html.escape(p['next_step'])}</p>"
+        f"<p class='muted'>{html.escape(p['next_step'])}</p>" + _progress_html(p)
     )
     if p["state"] == "pending" and p["writes_enabled"]:
         body += (

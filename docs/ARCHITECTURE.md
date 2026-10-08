@@ -151,8 +151,10 @@ their next request. Separately, every assistant has to sign in again after
 
 The assistant never changes a deck directly:
 
-1. It calls `propose_deck_changes` or `propose_new_deck`. The gateway saves
-   the exact change and returns a review link.
+1. It calls `propose_deck_changes`, `propose_new_deck` or another
+   `propose_*` tool (a deck's settings, folder, tags and cover go through
+   `propose_deck_details`). The gateway saves the exact change and returns a
+   review link.
 2. The person approves it: with **Approve** on the card the AI app shows
    next to the proposal (an MCP App, see below) or on the review page with
    **Apply**. A person who chose a looser **approval mode** on their Account
@@ -225,9 +227,22 @@ For the exact devices and plans tested, see
   site ([OPERATIONS.md](OPERATIONS.md)). Every response carries
   `Strict-Transport-Security` when the public URL is https.
 - **Archidekt passwords** are used once to get a session and never stored.
-  The session is encrypted with the `mtg_fernet_key` secret, which protects
-  the database and its backups. It doesn't protect against whoever runs the
-  server, and users are told that.
+  The session is encrypted with the `mtg_fernet_key` secret.
+  - **Who can see a sign-in.** No other member, and no admin: no page, admin
+    tool, log or backup shows a stored Archidekt session. Backups don't
+    contain it at all: the copy has every Archidekt session and the identity
+    provider's tokens blanked before it is written, so after a restore
+    members sign in again and relink Archidekt. An admin's **disable** also
+    deletes the member's stored Archidekt session. Deleted or blanked
+    sign-ins are overwritten on disk (SQLite `secure_delete`, and the
+    write-ahead log is flushed after an unlink), not just marked free.
+  - **Who is trusted.** The server holds the key that opens the session, so
+    whoever runs the server can read it. The Account page says so ("Whoever
+    runs this gateway is trusted with this link…") next to a note that
+    Archidekt has no official interface for other apps (the gateway uses the
+    same requests archidekt.com's own pages use) and that Archidekt's terms
+    restrict automated access, so an account could be limited or blocked;
+    linking needs a ticked box.
 - **Deck changes** need the person's own yes, unless they chose otherwise.
   The code enforces it: changes are proposals until applied with the review
   page's Apply button or the in-chat card's Approve button. Each person has
@@ -261,10 +276,18 @@ For the exact devices and plans tested, see
   proposals per member.
 - **Archidekt load** is capped per member: `MTG_ARCHIDEKT_CALLS_PER_10_MIN`
   calls (120 by default) and three at a time, so a looping assistant can't
-  hammer Archidekt or starve other members. Five failed Archidekt link
-  attempts in 15 minutes block further tries for a while.
+  hammer Archidekt or starve other members. Across everyone, requests go one
+  at a time, at least a second apart and at most 40 a minute; 429s pause
+  every request, only reads are retried (with jittered backoff), and
+  anonymous reads and card lookups are briefly cached (OPERATIONS.md,
+  "Archidekt rate limiting"). Requests carry the gateway's own User-Agent and
+  are never disguised. Five failed Archidekt link attempts in 15 minutes block
+  further tries for a while.
 - **Mystic Forge** is only reachable from the gateway, and only tools on an
-  allowlist are passed through.
+  allowlist are passed through. Its failure texts (an upstream error, a
+  timeout, a rate limit) are flagged as errors on the way back, and every
+  refusal from the gateway's own tools carries the error flag too, so an
+  assistant doesn't read a failure as an answer.
 - **Nothing site-specific is in the code.** Everything that differs between
   deployments is an environment variable or a Docker secret.
 

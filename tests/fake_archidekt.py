@@ -102,6 +102,9 @@ class FakeArchidekt:
             ),
         }
         self.calls: list[tuple[str, str]] = []
+        # Answers given before the normal handling, one per request, in order: an int status (with
+        # an optional Retry-After) or an exception to raise, e.g. httpx.ReadTimeout.
+        self.inject: list[tuple[int | Exception, str | None]] = []
         self.patches: list[dict[str, Any]] = []
         self.fail_patch_silently = False
         # Faults a verify must catch: added rows stored without their finish, or with another
@@ -306,6 +309,12 @@ class FakeArchidekt:
     def handle(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
         self.calls.append((request.method, path))
+        if self.inject:
+            answer, retry_after = self.inject.pop(0)
+            if isinstance(answer, Exception):
+                raise answer
+            headers = {"Retry-After": retry_after} if retry_after else {}
+            return httpx.Response(answer, json={"detail": "injected"}, headers=headers)
         if path == "/api/rest-auth/login/":
             body = json.loads(request.content)
             name = body.get("username") or body.get("email", "").split("@")[0]
@@ -532,6 +541,22 @@ class FakeArchidekt:
             fmt = request.url.params.get("deckFormat")
             if fmt is not None:
                 chosen = [d for d in chosen if str(3) == fmt]
+            # commanderName matches only a commander's full name: a part of it ("Krenko") finds
+            # nothing, answered with count -1 (seen live 2026-10-08).
+            commander = request.url.params.get("commanderName")
+            if commander is not None:
+                chosen = [
+                    d
+                    for d in chosen
+                    if any(
+                        "Commander" in (c.get("categories") or [])
+                        and c["card"]["oracleCard"]["name"].lower() == commander.lower()
+                        for c in d["cards"]
+                    )
+                ]
+                if not chosen:
+                    self.search_params.append(dict(request.url.params))
+                    return httpx.Response(200, json={"count": -1, "results": []})
             self.search_params.append(dict(request.url.params))
             results = [self._listing_row(d) for d in chosen]
             return httpx.Response(200, json={"count": len(results), "results": results})

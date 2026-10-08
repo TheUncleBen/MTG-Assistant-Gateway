@@ -52,6 +52,9 @@ class FakeScryfall:
             "sol r": _load("autocomplete_sol_r.json"),
             "sol rng": _load("autocomplete_sol_rng.json"),
         }
+        # Answers for the is:commander name search that the fixtures cannot give (several
+        # commanders sharing a name part), set by a test: query text -> card names.
+        self.commanders: dict[str, list[str]] = {}
         self.requests: list[tuple[str, str]] = []
         self.fail_with: int | None = None
 
@@ -116,6 +119,28 @@ class FakeScryfall:
         if m:
             card = self.by_print(m.group(1), m.group(2))
             return httpx.Response(200, json=card) if card else self.not_found("No card found")
+        if path == "/cards/search" and q.get("q", "").startswith("is:commander "):
+            m3 = re.fullmatch(r'is:commander name:"([^"]+)"', q["q"])
+            if not m3:
+                return httpx.Response(400, json={"object": "error", "details": "unsupported query"})
+            text = m3.group(1).lower()
+            names = self.commanders.get(text)
+            if names is None:
+                names = sorted(
+                    {
+                        c["name"]
+                        for c in self.cards
+                        if text in c["name"].lower()
+                        and "Legendary" in (c.get("type_line") or "")
+                        and "Creature" in (c.get("type_line") or "")
+                    }
+                )
+            if not names:
+                return self.not_found("Your query didn’t match any cards.")
+            data = [{"object": "card", "name": n} for n in names]
+            return httpx.Response(
+                200, json={"object": "list", "total_cards": len(data), "has_more": False, "data": data}
+            )
         if path == "/cards/search":
             m2 = re.fullmatch(r"oracleid:([0-9a-f-]+)", q.get("q", ""))
             if not m2:

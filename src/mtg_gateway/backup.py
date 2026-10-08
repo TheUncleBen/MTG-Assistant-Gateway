@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import shutil
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -27,7 +28,10 @@ PREFIX = "mtg-gateway-"
 SUFFIX = ".sqlite"
 
 
-def export_now(db: Database, backup_dir: Path, keep_days: int) -> Path:
+def export_now(db: Database, backup_dir: Path, keep_days: int, copy_dir: Path | None = None) -> Path:
+    """Write a backup to ``backup_dir`` and, when ``copy_dir`` is set (``MTG_BACKUP_COPY_DIR``,
+    say a network share), a second copy there, pruned the same way. A failed copy is logged and
+    recorded in ``last_run["copy_error"]``; the main backup still counts as written."""
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     dest = backup_dir / f"{PREFIX}{stamp}{SUFFIX}"
     tmp = dest.with_suffix(".tmp")
@@ -41,6 +45,29 @@ def export_now(db: Database, backup_dir: Path, keep_days: int) -> Path:
     tmp.replace(dest)
     removed = prune(backup_dir, keep_days)
     logger.info("backup written to %s (%d old copies removed)", dest, removed)
+    last_run["copy_error"] = None
+    if copy_dir is not None:
+        try:
+            copy_backup(dest, copy_dir, keep_days)
+        except OSError as exc:
+            last_run["copy_error"] = type(exc).__name__
+            logger.error("backup copy to %s failed: %s", copy_dir, type(exc).__name__)
+    return dest
+
+
+def copy_backup(src: Path, copy_dir: Path, keep_days: int) -> Path:
+    """Copy one backup file into ``copy_dir`` owner-only (via a temporary name, so a half-written
+    copy never looks like a backup) and prune old copies there."""
+    copy_dir.mkdir(parents=True, exist_ok=True)
+    dest = copy_dir / src.name
+    tmp = dest.with_suffix(".tmp")
+    tmp.unlink(missing_ok=True)
+    os.close(os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
+    shutil.copyfile(src, tmp)
+    os.chmod(tmp, 0o600)
+    tmp.replace(dest)
+    removed = prune(copy_dir, keep_days)
+    logger.info("backup copied to %s (%d old copies removed)", dest, removed)
     return dest
 
 
@@ -82,11 +109,13 @@ def newest_backup(backup_dir: Path) -> tuple[Path, float] | None:
     return best
 
 
-async def nightly_loop(db: Database, backup_dir: Path, hour_utc: int, keep_days: int) -> None:
+async def nightly_loop(
+    db: Database, backup_dir: Path, hour_utc: int, keep_days: int, copy_dir: Path | None = None
+) -> None:
     while True:
         await asyncio.sleep(seconds_until(hour_utc))
         try:
-            dest = await asyncio.to_thread(export_now, db, backup_dir, keep_days)
+            dest = await asyncio.to_thread(export_now, db, backup_dir, keep_days, copy_dir)
             last_run.update(ok=True, at=int(time.time()), file=dest.name, error=None)
         except Exception as exc:
             last_run.update(ok=False, at=int(time.time()), error=type(exc).__name__)

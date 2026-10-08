@@ -12,6 +12,41 @@ from mtg_gateway.config import ConfigError, load_settings
 from mtg_gateway.db import Database
 
 
+def test_backup_is_also_copied_to_the_copy_folder(tmp_path: Path):
+    """MTG_BACKUP_COPY_DIR (a network share, say): every backup lands there too, owner-only, and
+    old copies are pruned there as well. A copy folder that cannot be written does not cost the
+    main backup; the failure is recorded for the admin page."""
+    from mtg_gateway import backup as backup_mod
+
+    db = Database(tmp_path / "d" / "g.sqlite")
+    db.upsert_user("u1", email=None, name="x", preferred_username=None, groups=[])
+    old = tmp_path / "copies" / "mtg-gateway-20000101T000000Z.sqlite"
+    old.parent.mkdir()
+    old.write_bytes(b"x")
+    os.utime(old, (0, 0))
+    out = export_now(db, tmp_path / "b", keep_days=14, copy_dir=tmp_path / "copies")
+    copied = tmp_path / "copies" / out.name
+    assert copied.read_bytes() == out.read_bytes()
+    assert (copied.stat().st_mode & 0o777) == 0o600
+    assert not old.exists() and backup_mod.last_run["copy_error"] is None
+    blocked = tmp_path / "not-a-folder"
+    blocked.write_text("a file where the folder should be")
+    out2 = export_now(db, tmp_path / "b", keep_days=14, copy_dir=blocked)
+    assert out2.exists() and backup_mod.last_run["copy_error"]
+    db.close()
+
+
+def test_backup_copy_dir_setting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    _write_secrets(tmp_path, monkeypatch)
+    monkeypatch.setenv("MTG_BACKUP_COPY_DIR", "/copies")
+    monkeypatch.delenv("MTG_BACKUP_DIR", raising=False)
+    assert load_settings().backup_copy_dir is None  # no backups, so nothing to copy
+    monkeypatch.setenv("MTG_BACKUP_DIR", "/backups")
+    assert load_settings().backup_copy_dir == Path("/copies")
+    monkeypatch.delenv("MTG_BACKUP_COPY_DIR")
+    assert load_settings().backup_copy_dir is None
+
+
 def test_backup_export_and_prune(tmp_path: Path):
     db = Database(tmp_path / "d" / "g.sqlite")
     db.upsert_user("u1", email=None, name="x", preferred_username=None, groups=[])

@@ -50,11 +50,16 @@ docker service logs -f mtg_mtg-assistant-mysticforge
 curl -s https://mtg.example.com/healthz
 ```
 
-`/healthz` returns `{"status":"ok","version":"..."}` when the gateway is up
-and its database answers, and HTTP 503 with `"detail":"database unavailable"`
-otherwise (the reason is in the gateway's log, never in the reply). The admin
-page's **System** card shows the version, database size and schema, and when
-the newest backup was written.
+`/healthz` returns `{"status":"ok","version":"...","mystic_forge":"ok"}` when
+the gateway is up and its database answers, and HTTP 503 with
+`"detail":"database unavailable"` otherwise (the reason is in the gateway's
+log, never in the reply). `mystic_forge` is `ok`, `down` or `not_configured`.
+When Mystic Forge is down, `status` is `"degraded"` but the reply is still
+HTTP 200: the gateway's own pages and Archidekt tools keep working without
+it, so the container is not restarted for it; only research and simulations
+fail. The admin page's **System** card shows the version, database size and
+schema, when the newest backup (and the newest backup copy) was written, and
+the research service's state as the health check last found it.
 
 The gateway logs one line per notable event to standard output (`MTG_LOG_LEVEL`,
 default `INFO`). An unexpected error is logged with its full traceback, counted
@@ -219,18 +224,17 @@ page, `/install` and the plugin marketplace all read from there.
 
 **What's backed up:** the gateway's SQLite database. It holds users
 (identity provider subject, name, email, groups, disabled flag), registered
-OAuth clients, hashed tokens, the identity provider's tokens kept for the
-live membership check and Archidekt links (both encrypted with the Fernet
-key), proposals, deck snapshots, deck reports, scan sessions, usage
-counters and the audit log. Mystic Forge
-keeps nothing worth backing up.
+OAuth clients, hashed tokens, which Archidekt account each member linked,
+proposals, deck snapshots, deck reports, scan sessions, usage counters and
+the audit log. Mystic Forge keeps nothing worth backing up.
 
-**What isn't:** the Fernet key. It's a Docker secret and stays out of the
-backup on purpose. Without it, a restored database still works for sign-in,
-proposals and the audit log, but every Archidekt link is unreadable and
-everyone has to relink (and sign in once more, since the stored
-identity-provider tokens are unreadable too). Keep your copy of the key with your other
-credentials.
+**What isn't:** anyone's sign-in. Every member's stored Archidekt session
+and the identity provider's tokens kept for the live membership check are
+blanked in the copy before it is written (the live database keeps them), so
+a backup file never holds a way into someone's Archidekt account. After a
+restore, everyone signs in again and relinks Archidekt on `/account`. The
+Fernet key isn't in the backup either: it's a Docker secret and stays out on
+purpose. Keep your copy of the key with your other credentials.
 
 Separately, every applied edit also leaves a private backup copy of the deck
 in the user's own Archidekt account (see
@@ -244,6 +248,19 @@ not in your backups.
   copy that fails is not kept, the failure is logged and the admin page says
   so. The copy is read through its own connection, so the gateway keeps
   answering while it runs.
+- **A second copy:** set `MTG_BACKUP_COPY_DIR` to another folder on the host
+  (a second disk, or shared or network storage; only the live database needs
+  local disk) and every backup, nightly or run by hand,
+  is also copied there, owner-only, and pruned after the same
+  `MTG_BACKUP_KEEP_DAYS`. It needs `MTG_BACKUP_DIR` as well. A failed copy
+  is logged and shown on the admin page; the backup in `MTG_BACKUP_DIR`
+  still counts. The stack and compose files mount the folder at
+  `/backup-copy`; it must already exist on the node that runs the gateway
+  (on Swarm, the `MTG_NODE` node). With the variable left out they mount
+  `/dev/null` there instead, which the gateway reads as "no copies". The
+  gateway's data folder stays on that node's local disk: on Swarm it is not
+  shared between nodes, so the copy folder is the one that can be on
+  storage every node sees.
 - **Back up right now:**
 
   ```bash
@@ -255,9 +272,10 @@ not in your backups.
   the stack.
 
   A restore also undoes every revocation made after the backup was taken:
-  tokens you revoked, browser sessions people logged out of, and Archidekt
-  accounts that were unlinked come back, and accounts you disabled on the
-  admin page are enabled again (disable them again after the restore). Before you start the stack again,
+  tokens you revoked and browser sessions people logged out of come back,
+  and accounts you disabled on the admin page are enabled again (disable
+  them again after the restore). Archidekt links don't come back: the
+  backup holds none, so everyone relinks. Before you start the stack again,
   end every session in the restored file so everyone signs in once more
   (which re-checks their Authentik groups). On the gateway's node, as the
   `PUID` user (`1000` here):
@@ -269,9 +287,8 @@ not in your backups.
   c.execute('DELETE FROM auth_codes'); c.execute('DELETE FROM login_sessions'); c.commit(); c.close()"
   ```
 
-  Everyone then reconnects their assistant and signs in to `/account` again.
-  If you unlinked anyone's Archidekt account after the backup was taken,
-  unlink it again ([Archidekt links](#archidekt-links-and-relinking)).
+  Everyone then reconnects their assistant, signs in to `/account` again and
+  relinks Archidekt there.
 
 ## Rotating secrets
 
@@ -379,7 +396,8 @@ still sees the snapshots and reports taken before (they are the member's own
 backups); they age out with the limits above or go with **Delete my data**.
 "Delete my data" removes a member's rows from the live database; the nightly
 backups in `MTG_BACKUP_DIR` keep a copy until they age out after
-`MTG_BACKUP_KEEP_DAYS`, including the member's encrypted Archidekt session. A flood of sign-up attempts can therefore cost a connector that was
+`MTG_BACKUP_KEEP_DAYS` (never the member's Archidekt session, which backups
+leave out). A flood of sign-up attempts can therefore cost a connector that was
 registered but not used yet; that client just registers again. To slow
 floods down at the proxy, see the optional rate limit in
 [DEPLOY.md](DEPLOY.md#7-reverse-proxy).
@@ -495,7 +513,7 @@ on what the review page would show, not on what the assistant says:
 | Tier | Proposals |
 |---|---|
 | Low | An edit to an existing deck with at most `MTG_AUTO_APPLY_MAX_ROWS` rows (default 5), each a card add, remove, quantity change, category move, finish or printing change, no row moving more than four copies, none touching the commander. Cloning a deck (a copy; nothing that exists changes). |
-| High | Everything else: more rows than that, any commander change, creating a new deck, restoring a snapshot, and deck details (name, format, description, visibility). |
+| High | Everything else: more rows than that, any commander change, creating a new deck, restoring a snapshot, and deck details (name, format, description, visibility, and the folder, tags and cover). |
 
 Every proposal result carries `approval_mode`, `risk`, `risk_reason` and
 `assistant_may_apply`, and `next_step` tells the assistant whether to call
@@ -538,10 +556,45 @@ collection changes), apply, confirm, reject, run reports or save scans
 
 ### Archidekt rate limiting
 
-The gateway paces its own Archidekt requests. If Archidekt says "slow down"
-(HTTP 429) it waits as asked. After repeated failures it pauses all
-Archidekt requests for a while, and users see "Archidekt requests are paused
-after repeated failures; try later". It clears on its own.
+The gateway is built to be light on Archidekt. For everyone together:
+
+- one Archidekt request at a time, at least `MTG_ARCHIDEKT_MIN_INTERVAL`
+  (1 second) apart, and at most `MTG_ARCHIDEKT_MAX_PER_MINUTE` (40) in any
+  minute. A request past that waits its turn, so a long apply slows down
+  instead of stopping halfway;
+- if Archidekt says "slow down" (HTTP 429), every request stops for the time
+  it asks (at most 2 minutes), and nothing is retried meanwhile;
+- a read that times out or gets a server error is retried at most
+  `MTG_ARCHIDEKT_RETRIES` (2) times, after a random wait that doubles each
+  time (`MTG_ARCHIDEKT_BACKOFF_BASE`, 1 second, capped at 10). Writes are
+  never retried, so a change can't land twice;
+- after five failures in a row all requests pause for a minute, and users see
+  "Archidekt requests are paused after repeated failures; try later". It
+  clears on its own;
+- card lookups are reused for `MTG_ARCHIDEKT_CARD_CACHE_SECONDS` (an hour),
+  and anonymous public deck reads and deck searches for
+  `MTG_ARCHIDEKT_CACHE_SECONDS` (a minute). Anything the gateway sends to
+  Archidekt clears the deck and search copies. Reads made with a member's
+  own sign-in are never reused, so a proposal or apply always sees the live
+  deck. The precon list is kept for an hour;
+- searches fetch one page per call, and a collection export stops at 50
+  pages.
+
+Because of this pacing a large apply takes minutes: about 70 seconds for a
+40-change edit and 4 to 5 minutes for a new 100-card deck (one lookup and one
+write per card). An assistant app doesn't wait that long for one tool call,
+so after 20 seconds the apply answers "applying" with how far it got and
+carries on in the background. `get_proposal`, the proposal's review page
+(which refreshes itself) and the in-chat card all show its progress until it
+ends. Restarting the gateway mid-apply gives it 5 seconds to finish, then
+stops it and records the proposal as failed ("interrupted") with what had
+already been sent; the snapshot taken before it is kept for an undo.
+
+Requests go out under the gateway's own name (its User-Agent links to this
+project) from your server's address. The gateway doesn't hide or disguise
+where they come from. The admin page's System card shows these limits and
+how many requests were sent, answered from the cache, retried and slowed
+down since the gateway started.
 
 Each member also has their own limits, so one looping assistant can't keep
 Archidekt busy for everyone:
@@ -576,7 +629,10 @@ What it shows:
   many are disabled and how many have linked Archidekt; proposals by state,
   applies, tool calls and errors over the last 30 days, with a line per
   counter kind by day; and a **System** card with the version, database
-  schema and size, and the newest backup (or the last backup's failure).
+  schema and size, the newest backup (or the last backup's failure), the
+  newest copy in `MTG_BACKUP_COPY_DIR` when it is set (or the last copy's
+  failure), and the research service (Mystic Forge) as answering, not
+  answering, not checked yet or not configured.
 - **Users** (`/admin/users`): every account the identity provider has ever
   signed in, newest sign-in first, with name, email, subject, groups, first
   and last seen, Archidekt username, the AI clients connected, live token
@@ -595,7 +651,7 @@ The five actions, and exactly what each one does:
 
 | Button | What happens |
 | --- | --- |
-| **Disable** | Sets `disabled_at` on the user, revokes every token they hold, deletes their browser sessions, any sign-in codes in flight and the identity-provider tokens the gateway kept for them. From then on the gateway refuses them everywhere: a sign-in through the identity provider is rejected with "Your account has been disabled on this gateway" (audited as `login_rejected_disabled`), a token refresh fails (`refresh_rejected`, reason `disabled`), an access token that is still in someone's hands is refused on its next use and its chain revoked (`disabled_user_refused`), and a browser session cookie is treated as signed out. You can't disable your own account. |
+| **Disable** | Sets `disabled_at` on the user, revokes every token they hold, deletes their browser sessions, any sign-in codes in flight and the identity-provider tokens the gateway kept for them, and deletes their stored Archidekt session (a disabled account can't sign in, so its link isn't kept either; they relink after **Enable**). From then on the gateway refuses them everywhere: a sign-in through the identity provider is rejected with "Your account has been disabled on this gateway" (audited as `login_rejected_disabled`), a token refresh fails (`refresh_rejected`, reason `disabled`), an access token that is still in someone's hands is refused on its next use and its chain revoked (`disabled_user_refused`), and a browser session cookie is treated as signed out. You can't disable your own account. |
 | **Enable** | Clears `disabled_at`. Nothing is handed back: the person signs in again and reconnects their assistant. |
 | **Revoke tokens and sessions** | The same revocation as Disable (tokens, browser sessions, pending codes, identity-provider tokens) without disabling. The person can sign in again straight away. This is the button version of the SQL in [Revoking access](#revoking-access). |
 | **Unlink Archidekt** | Marks their Archidekt link revoked and deletes the stored session, the same as their own Unlink button on `/account`. They can relink any time. |
@@ -684,7 +740,9 @@ from the snapshot taken before the edit (`list_snapshots`, then
 `propose_restore_snapshot`). That's a normal proposal, okayed and applied
 like any other, and it puts every card back with the same printing, finish,
 quantity and categories, commander, sideboard and maybeboard included. It
-leaves the deck's name, description and format alone. Their Archidekt backup
+also puts back the deck's name, description, format, bracket and visibility,
+so a settings change can be undone too; folder, tags and cover stay as they
+are. Their Archidekt backup
 folder also holds a full copy from just before each edit.
 
 A wrongly created deck is deleted by its owner on Archidekt. If a create

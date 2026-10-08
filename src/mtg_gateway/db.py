@@ -344,6 +344,9 @@ class Database:
                 self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA foreign_keys=ON")
             self._conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+            # Deleted or blanked rows (an unlinked Archidekt session) are overwritten on disk, not
+            # just marked free; SQLite's default for this depends on how it was built.
+            self._conn.execute("PRAGMA secure_delete=ON")
             try:
                 self._migrate()
             except Exception:
@@ -1141,6 +1144,7 @@ class Database:
                 "INSERT INTO audit_log (at, sub, client_id, event, detail_json) VALUES (?, ?, NULL, ?, ?)",
                 (int(time.time()), sub, "member_data_deleted", json.dumps(out)),
             )
+        self.flush_wal()
         return out
 
     def drop_member(self, sub: str, groups: list[str]) -> int:
@@ -1152,6 +1156,7 @@ class Database:
             # Their Archidekt session goes too: someone who is no longer a member should not
             # leave a usable Archidekt login behind on this server.
             c.execute("UPDATE archidekt_links SET status = 'revoked', secret_enc = '' WHERE sub = ?", (sub,))
+        self.flush_wal()
         return sum(self.revoke_all_for_user(sub).values())
 
     def set_user_issuer(self, sub: str, issuer: str) -> None:
@@ -1226,7 +1231,21 @@ class Database:
             sql += " AND status = 'active' AND secret_enc = ?"
             args += (only_secret,)
         with self.tx() as c:
-            return c.execute(sql, args).rowcount > 0
+            changed = c.execute(sql, args).rowcount > 0
+        if changed:
+            self.flush_wal()
+        return changed
+
+    def flush_wal(self) -> None:
+        """Write the WAL back into the database file and truncate it, so an old copy of a row just
+        blanked (an Archidekt session) does not linger in the -wal file. Cheap on a small file."""
+        if str(self.path) == ":memory:":
+            return
+        with self._lock:
+            try:
+                self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except sqlite3.Error:  # busy readers: the next checkpoint catches up
+                pass
 
     # proposals and snapshots -----------------------------------------------
     def save_proposal(
@@ -1346,7 +1365,8 @@ class Database:
         with self._lock:
             rows = self._conn.execute(
                 "SELECT id, kind, deck_id, deck_name, state, created_at, expires_at, applied_at, "
-                "created_by_client FROM proposals WHERE owner_sub = ? ORDER BY created_at DESC LIMIT ?",
+                "created_by_client, diff_text FROM proposals WHERE owner_sub = ? "
+                "ORDER BY created_at DESC LIMIT ?",
                 (owner_sub, limit),
             ).fetchall()
         return [dict(r) for r in rows]
@@ -1526,6 +1546,16 @@ class Database:
                     source.close()
             # The copy must not need the WAL beside it: make it a plain rollback-journal file.
             target.execute("PRAGMA journal_mode=DELETE")
+            # No sign-in leaves the server in a backup: every member's Archidekt session and the
+            # identity provider's tokens are blanked in the copy (and VACUUM leaves no freed page
+            # holding them). A restored backup therefore asks members to sign in and relink.
+            target.execute("PRAGMA secure_delete=ON")
+            target.execute(
+                "UPDATE archidekt_links SET secret_enc = '', status = 'revoked' WHERE secret_enc != ''"
+            )
+            target.execute("UPDATE idp_grants SET refresh_enc = '', access_enc = ''")
+            target.commit()
+            target.execute("VACUUM")
             result = target.execute("PRAGMA quick_check").fetchone()[0]
             if result != "ok":
                 raise RuntimeError(f"backup copy failed its integrity check: {result}")

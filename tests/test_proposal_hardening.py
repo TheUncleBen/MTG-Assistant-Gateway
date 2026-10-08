@@ -191,11 +191,17 @@ async def test_cancelled_apply_is_recorded_not_left_applying(stack: Stack) -> No
         return orig(req)
 
     ark.transport.handler = slow
-    task = asyncio.create_task(h.app.state.gateway.decks.apply("user-1", p["proposal_id"], via="browser"))
+    decks = h.app.state.gateway.decks
+    task = asyncio.create_task(decks.apply("user-1", p["proposal_id"], via="browser"))
     await asyncio.wait_for(gate.wait(), 5)
+    # The caller giving up (an app's timeout, a closed tab) does not stop the apply halfway...
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
+    assert h.db.get_proposal(p["proposal_id"], "user-1")["state"] == "applying"
+    assert p["proposal_id"] in decks._running
+    # ...only shutting the gateway down does, and then the apply is recorded, not left applying.
+    await decks.aclose(grace=0.1)
     row = h.db.get_proposal(p["proposal_id"], "user-1")
     assert row["state"] == "failed" and row["result"]["error"] == "interrupted"
     assert row["result"]["sent_entries"] == 1

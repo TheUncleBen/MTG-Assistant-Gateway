@@ -12,7 +12,7 @@ import secrets
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any
+from typing import Annotated, Any, Literal
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 import mcp_types as types
@@ -33,6 +33,7 @@ from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, Re
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp_types import CallToolResult, TextContent
+from pydantic import Field
 from starlette.applications import Starlette
 from starlette.datastructures import Headers
 from starlette.requests import Request
@@ -52,6 +53,7 @@ from .approve import (
     CONFIRM_TOOL_META,
     apply_on_review_page,
     apps_extension,
+    proposal_tool_result,
 )
 from .archidekt import ArchidektClient, Pacer, parse_deck
 from .archidekt_csv import CsvError, parse_export
@@ -72,7 +74,7 @@ from .collection import add_collection
 from .companion import add_companion_routes
 from .config import Settings
 from .db import Database
-from .decklist import DecklistError, ListCard, parse_decklist, to_text
+from .decklist import DecklistError, ListCard, clean_text, parse_decklist, to_text
 from .decks import DeckError, DeckService, _clean_deck_id, current_client, deck_to_text, scopes_allow_writes
 from .guide import add_guide_routes
 from .home import add_home_routes
@@ -84,11 +86,26 @@ from .pages import BROWSER_CLIENT_ID, SESSION_COOKIE, add_browser_routes
 from .plugin_page import add_plugin_routes
 from .reports import ReportService
 from .scan import add_scan
+from .schemas import (
+    AbOptions,
+    DeckChange,
+    DeckDetails,
+    DeckFormat,
+    NewDeckCard,
+    RunOptions,
+    compact_schema,
+    deck_change_for_service,
+    dumped,
+    inline_refs,
+    new_deck_card_for_service,
+)
 from .skill_page import add_skill_routes
 from .social import add_social_routes
 from .theme import NoSniffMiddleware, ThemeMiddleware, render
 from .views import deck_brief, deck_out
 
+DeckView = Literal["text", "summary", "cards", "export", "full"]
+# Cards a deck of each format holds: (count, True when it is a minimum rather than an exact size).
 logger = logging.getLogger(__name__)
 
 
@@ -161,6 +178,66 @@ def scope_guard_middleware():
                     isError=True,
                 ).model_dump(by_alias=True, exclude_none=True, mode="json")
         return await call_next(ctx)
+
+    return _mw
+
+
+_VALIDATION_HEAD = re.compile(r"^Error executing tool (\w+): \d+ validation errors? for \w+\n")
+
+
+def _schema_problems(text: str) -> str | None:
+    """'changes.0.action: Input should be 'add', ...; ...' from the framework's text for arguments
+    the tool's input schema refused, or None when ``text`` is not that."""
+    m = _VALIDATION_HEAD.match(text)
+    if not m:
+        return None
+    problems: list[str] = []
+    field: str | None = None
+    for line in text[m.end() :].splitlines():
+        if line.startswith("    For further information"):
+            continue
+        if line.startswith("  ") and field is not None:
+            reason = re.sub(r"\s*\[type=.*$", "", line.strip())
+            problems.append(f"{field}: {reason}" if field else reason)
+            field = None
+        elif not line.startswith(" "):
+            field = line.strip()
+    return "; ".join(problems)[:1500] or None
+
+
+def schema_error_middleware():
+    """MCP middleware for tool errors. Arguments the input schema refused get the same answer as
+    any other refusal: ok false, error invalid, and a message naming each field and what it takes.
+    And every refusal (ok false) carries the error flag, so an assistant reads it as a failure
+    rather than an answer (the result itself is unchanged)."""
+
+    async def _mw(ctx: Any, call_next: Any) -> Any:
+        result = await call_next(ctx)
+        if ctx.method != "tools/call":
+            return result
+        data = (
+            result.model_dump(by_alias=True, exclude_none=True, mode="json")
+            if hasattr(result, "model_dump")
+            else result
+        )
+        if not isinstance(data, dict):
+            return result
+        structured = data.get("structuredContent")
+        if isinstance(structured, dict) and structured.get("ok") is False and not data.get("isError"):
+            return {**data, "isError": True}
+        if not data.get("isError") or structured:
+            return result
+        content = data.get("content") or []
+        text = content[0].get("text", "") if content and isinstance(content[0], dict) else ""
+        problems = _schema_problems(str(text))
+        if problems is None:
+            return result
+        out = {"ok": False, "error": "invalid", "message": f"the arguments do not fit the tool: {problems}"}
+        return types.CallToolResult(
+            content=[types.TextContent(type="text", text=pydantic_core.to_json(out, indent=2).decode())],
+            structuredContent=out,
+            isError=True,
+        ).model_dump(by_alias=True, exclude_none=True, mode="json")
 
     return _mw
 
@@ -397,7 +474,9 @@ def build_mcp_server(state: AppState) -> MCPServer:
             s.backup_dir.mkdir(parents=True, exist_ok=True)
             tasks.append(
                 asyncio.create_task(
-                    nightly_loop(state.db, s.backup_dir, s.backup_hour_utc, s.backup_keep_days)
+                    nightly_loop(
+                        state.db, s.backup_dir, s.backup_hour_utc, s.backup_keep_days, s.backup_copy_dir
+                    )
                 )
             )
         try:
@@ -408,6 +487,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
             for task in tasks:
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
+            await state.decks.aclose()  # an apply still running is given a moment, then recorded
             await state.oidc.aclose()
             await state.provider.cimd.aclose()
             await state.archidekt.aclose()
@@ -495,19 +575,14 @@ def build_mcp_server(state: AppState) -> MCPServer:
     # a pending proposal's result carries the card's one-time code. Off with MTG_APPLY_IN_CHAT.
     card_meta = dict(CARD_TOOL_META) if s.apply_in_chat else None
 
+    def _closed_at(p: dict[str, Any]) -> dict[str, Any]:
+        """A rejected proposal's closing time is kept in applied_at; show it as closed_at."""
+        if p.get("state") == "rejected" and "applied_at" in p:
+            p = {**p, "closed_at": p.get("applied_at"), "applied_at": None}
+        return p
+
     def _proposal(data: dict[str, object]) -> CallToolResult:
-        approval = None
-        if (
-            s.apply_in_chat
-            and data.get("ok")
-            and data.get("state") == "pending"
-            and data.get("proposal_id")
-            and not data.get("assistant_may_apply")  # the assistant applies it: no buttons to press
-        ):
-            row = state.db.get_proposal(str(data["proposal_id"]), _sub())
-            if row is not None:
-                approval = state.decks.approval_for(_sub(), row)
-        return _card_result(data, approval)
+        return proposal_tool_result(data, decks=state.decks, sub=_sub(), in_chat=s.apply_in_chat)
 
     @server.tool(
         name="account_status",
@@ -527,7 +602,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
         description=(
             "List the decks owned by the linked Archidekt account (most recently updated first). Optional "
             "filters: name_contains, deck_format (commander, modern...), folder. This is the one tool for "
-            "the member's deck list; archidekt_user lists another user's public decks."
+            "the member's deck list; search_decks with owner lists another user's public decks."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )
@@ -550,61 +625,66 @@ def build_mcp_server(state: AppState) -> MCPServer:
         return {"ok": True, "decks": rows, "count": len(rows)}
 
     @server.tool(
-        name="get_my_deck",
-        title="Get one of my decks",
-        description=(
-            "Fetch a deck from the linked Archidekt account by its numeric deck id (from the deck URL). "
-            "Same fields and include_text option as get_deck."
-        ),
-        annotations={"readOnlyHint": True, "openWorldHint": True},
-    )
-    async def get_my_deck(deck_id: str, include_text: bool = False) -> dict[str, object]:
-        try:
-            deck = await state.decks.get_own_deck(_sub(), deck_id)
-        except DeckError as exc:
-            return _tool_error(exc)
-        return deck_out(deck, include_text=bool(include_text))
-
-    @server.tool(
         name="get_deck",
         title="Get any Archidekt deck",
         description=(
-            "Fetch any public or unlisted Archidekt deck by id or URL, without needing a linked account. "
-            "If it is private and you have linked your account, your own private decks are fetched too. "
-            "Returns the cards (set, collector number, finish, categories, in_deck, oracle fields), "
-            "decklist_text (plain, for validate_decklist, goldfish_annotate or compare_decks), "
-            "sideboard_text and archidekt_text (Archidekt's own import syntax with finishes, "
-            "categories and labels, which pastes back into Archidekt as the same deck). include_text=true "
-            "adds each card's rules text (oracle_text): set it whenever you will discuss what cards do. "
-            "This is the one tool that reads or exports an Archidekt deck."
+            "Read an Archidekt deck by id or URL: any public or unlisted deck, and the member's own "
+            "private decks once their account is linked. Every view returns the deck's name, owner "
+            "(compare it with account_status to tell whether the deck is the member's), format, "
+            "bracket, counts and commanders. view picks the rest: 'text' (default: statistics plus "
+            "decklist_text, one card per line with its categories, for the research and simulation "
+            "tools, and sideboard_text), 'summary' (statistics only), 'cards' (statistics plus one row "
+            "per card: set, collector number, finish, categories, in_deck, mana cost, types, price), "
+            "'export' (archidekt_text: Archidekt's own import syntax with finishes, categories and "
+            "labels, which pastes back into Archidekt as the same deck) or 'full' (everything; large). "
+            "include_text=true adds each card's rules text (oracle_text) to the card rows: set it "
+            "whenever you will discuss what cards do. This is the one tool that reads or exports an "
+            "Archidekt deck."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )
-    async def get_deck(deck_ref: str, include_text: bool = False) -> dict[str, object]:
+    async def get_deck(
+        deck_ref: Annotated[
+            str, Field(description="Archidekt deck id (the number in the deck URL) or the URL.")
+        ],
+        view: Annotated[
+            DeckView, Field(description="What to return besides the header (see above).")
+        ] = "text",
+        include_text: Annotated[
+            bool, Field(description="Add each card's rules text to the card rows.")
+        ] = False,
+    ) -> dict[str, object]:
         try:
             deck = await state.decks.get_any_deck(_sub(), deck_ref)
         except DeckError as exc:
             return _tool_error(exc)
-        return deck_out(deck, include_text=bool(include_text))
+        return deck_out(deck, include_text=bool(include_text), view=view)
 
     @server.tool(
         name="parse_decklist",
         title="Parse a pasted decklist",
         description=(
             'Parse plain decklist text ("1 Sol Ring", "1x Sol Ring (cmr) 436 [Ramp]", section headers, '
-            "SB: lines) into cards plus a normalised decklist_text. Does not contact any service."
+            "SB: lines) into cards plus a normalised decklist_text. Repeated lines for a card are added "
+            "together. Lines that are not cards (a 'Total: 100 cards' footer, a link) are skipped and "
+            "listed in unread_lines: tell the user. Card names are not checked against any database; "
+            "validate_decklist does that. Does not contact any service."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": False},
     )
-    async def parse_decklist_tool(text: str) -> dict[str, object]:
+    async def parse_decklist_tool(
+        text: Annotated[str, Field(description="The pasted decklist, one card per line.")],
+    ) -> dict[str, object]:
         if len(text) > 200_000:
             return {"ok": False, "error": "too_large", "message": "decklist larger than 200 kB"}
+        unread: list[str] = []
         try:
-            cards = parse_decklist(text)
+            cards = parse_decklist(text, unread)
         except DecklistError as exc:
             return {"ok": False, "error": "invalid", "message": str(exc)}
         return {
             "ok": True,
+            "unread_lines": unread,
             "card_count": sum(c.quantity for c in cards if c.zone == "main"),
             "sideboard_count": sum(c.quantity for c in cards if c.zone == "side"),
             "cards": [c.__dict__ for c in cards],
@@ -612,48 +692,70 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "sideboard_text": to_text(cards, zone="side"),
         }
 
+    def _scan_warnings(session: dict[str, Any]) -> list[str]:
+        """The scan session's cards that were matched by a corrected name: the user confirms them."""
+        out = []
+        for it in session.get("items", []):
+            card = it.get("card") or {}
+            if card and it.get("status") == "fuzzy":
+                note = it.get("note") or f"'{card.get('name')}' was matched from a misspelt name"
+                out.append(f"{note}; confirm it with the user")
+        return out
+
     @server.tool(
         name="propose_new_deck",
         title="Propose a new Archidekt deck (write, two-step)",
         description=(
             "Step 1 of creating a deck in the user's linked Archidekt account. Give the name, the format "
-            "(commander, standard, modern, legacy, vintage, pauper, pioneer, brawl, historic, oathbreaker) "
-            "and exactly one of: cards (list of {card_name, quantity, category?, set_code?, "
-            "collector_number?, foil?}), decklist_text (pasted "
-            "list), csv_text (an Archidekt CSV export), json_text (a deck as get_deck or the Export page's "
-            ".json returns it: an object with a cards list) or scan_session (the id or name of a scan "
-            "session). Returns the proposal and a review URL; nothing is "
-            "created until the user confirms with apply_proposal or on the review page."
+            "and exactly one of: cards (list of {name, quantity, category?, set_code?, collector_number?, "
+            "finish?}), decklist_text (a pasted list), csv_text (an Archidekt CSV export), json_text (a "
+            "deck as get_deck or the Export page's .json returns it: an object with a cards list) or "
+            "scan_session (the id or name of a scan session). Returns the proposal, a review URL and "
+            "warnings (a deck size the format does not allow, scan cards matched from a misspelt name): "
+            "tell the user about each. Nothing is created until the user confirms (or you apply it when "
+            "assistant_may_apply is true)."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
         meta=card_meta,
     )
     async def propose_new_deck(
-        name: str,
-        deck_format: str = "commander",
-        cards: list[dict[str, object]] | None = None,
-        decklist_text: str | None = None,
-        csv_text: str | None = None,
-        json_text: str | dict[str, object] | None = None,
-        private: bool = True,
-        scan_session: str | None = None,
+        name: Annotated[str, Field(description="The new deck's name.")],
+        deck_format: Annotated[DeckFormat, Field(description="The deck's format.")] = "commander",
+        cards: Annotated[list[NewDeckCard] | None, Field(description="The cards, as a list.")] = None,
+        decklist_text: Annotated[
+            str | None, Field(description="Or a pasted list, one card per line.")
+        ] = None,
+        csv_text: Annotated[str | None, Field(description="Or the text of an Archidekt CSV export.")] = None,
+        json_text: Annotated[
+            str | dict[str, Any] | None,
+            Field(description="Or a deck as JSON (get_deck's or the Export page's .json), text or object."),
+        ] = None,
+        private: Annotated[bool, Field(description="Make the deck private (default true).")] = True,
+        scan_session: Annotated[str | None, Field(description="Or a scan session's id or name.")] = None,
     ) -> CallToolResult:
+        warnings: list[str] = []
         try:
             if scan_session:
-                decklist_text = _scan_session(_sub(), scan_session)["decklist_text"]
+                session = _scan_session(_sub(), scan_session)
+                decklist_text = session["decklist_text"]
+                warnings += _scan_warnings(session)
             if isinstance(json_text, dict):  # an assistant may pass the deck object itself
                 json_text = json.dumps(json_text)
             made = await state.decks.propose_new_deck(
                 _sub(),
                 name=name,
                 deck_format=deck_format,
-                cards=cards,
+                cards=[new_deck_card_for_service(c) for c in cards] if cards else cards,
                 decklist_text=decklist_text,
                 csv_text=csv_text,
                 json_text=json_text,
                 private=private,
             )
-            return _proposal({"ok": True, **made})
+            size = sum(int(r.get("qty") or 0) for r in made.get("rows", []) if r.get("kind") == "add")
+            problem = deck_stats.size_problem(str(deck_format).lower(), size)
+            if problem:
+                warnings.append(problem)
+            return _proposal({"ok": True, **made, "warnings": warnings})
         except DeckError as exc:
             return _proposal(_tool_error(exc))
 
@@ -662,51 +764,70 @@ def build_mcp_server(state: AppState) -> MCPServer:
         title="Propose deck changes (write, two-step)",
         description=(
             "Step 1 of editing a deck. Records a proposal with a diff against the deck's current state and "
-            "returns a review URL. Nothing is sent to Archidekt until the user confirms, on the review page "
-            "or with apply_proposal. changes: list of {action: add|remove|set_quantity|set_category|"
-            "set_commander|set_finish|set_printing, card_name, quantity?, category?, set_code?, "
-            "collector_number?, finish?}. An add may pin the exact printing with set_code plus "
-            "collector_number (as resolve_cards returns them) and name the finish (normal, foil, etched); "
-            "a pinned printing must exist on Archidekt and be that card, or applying refuses with "
-            "not_found and changes nothing. set_category / set_commander move every copy of a card to a "
-            "category; set_finish changes the finish of the copies already in the deck; set_printing swaps "
-            "them for the printing set_code + collector_number (optionally with a finish). One card takes "
-            "one kind of change per proposal. zone: main (default, the deck proper) or side (the maybeboard "
-            "and sideboard rows, counted separately; add, remove, set_quantity and set_category only). "
-            "scan_session (id or name) adds every resolved card of that scan session as add actions."
+            "returns a review URL. Nothing is sent to Archidekt until the user confirms (or you apply it "
+            "when assistant_may_apply is true). changes: a list of {action, name, quantity?, category?, "
+            "set_code?, collector_number?, finish?, zone?}. add may pin the exact printing with set_code "
+            "plus collector_number (as resolve_cards returns them) and a finish; a pinned printing must "
+            "exist on Archidekt and be that card, or applying refuses with not_found and changes nothing. "
+            "To add a card in a particular printing or finish, put those on the add itself: set_finish "
+            "and set_printing change copies already in the deck. set_category and set_commander move "
+            "every copy of a card (set_category creates the category if the deck has none of that name). "
+            "One card takes one kind of change per proposal; a pending proposal is replaced by rejecting "
+            "it and proposing again. zone side means the maybeboard and sideboard rows (add, remove, "
+            "set_quantity and set_category only). scan_session (id or name) adds every resolved card of "
+            "that scan session; warnings lists scan cards matched from a misspelt name."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
         meta=card_meta,
     )
     async def propose_deck_changes(
-        deck_id: str, changes: list[dict[str, object]] | None = None, scan_session: str | None = None
+        deck_id: Annotated[
+            str, Field(description="The Archidekt deck id (the number in the deck URL) or URL.")
+        ],
+        changes: Annotated[
+            list[DeckChange] | None, Field(description="The changes, all in one proposal.")
+        ] = None,
+        scan_session: Annotated[str | None, Field(description="A scan session's id or name to add.")] = None,
     ) -> CallToolResult:
+        warnings: list[str] = []
         try:
+            raw = [deck_change_for_service(c) for c in changes or []]
             if scan_session:
-                changes = list(changes or []) + list(_scan_session(_sub(), scan_session)["changes"])
-            return _proposal({"ok": True, **(await state.decks.propose(_sub(), deck_id, changes))})
+                session = _scan_session(_sub(), scan_session)
+                raw += [deck_change_for_service(c) for c in session["changes"]]
+                warnings += _scan_warnings(session)
+            made = await state.decks.propose(_sub(), deck_id, raw or None)
+            return _proposal({"ok": True, **made, **({"warnings": warnings} if warnings else {})})
         except DeckError as exc:
             return _proposal(_tool_error(exc))
 
     @server.tool(
         name="list_my_proposals",
         title="List my proposals",
-        description="List this user's recent deck-change proposals and their states.",
+        description=(
+            "The user's 20 most recent proposals, newest first: kind, deck, state (pending, applied, "
+            "rejected, expired, failed), a one-line summary of the change, created_at and, for applied "
+            "ones, applied_at (for rejected ones closed_at), as Unix times. get_proposal shows one in full."
+        ),
         annotations={"readOnlyHint": True, "openWorldHint": False},
     )
     async def list_my_proposals() -> dict[str, object]:
-        return {"ok": True, "proposals": state.decks.list_proposals(_sub())}
+        return {"ok": True, "proposals": [_closed_at(p) for p in state.decks.list_proposals(_sub())]}
 
     @server.tool(
         name="get_proposal",
         title="Get a proposal",
-        description="Show one proposal (diff, state, review URL) belonging to the signed-in user.",
+        description=(
+            "Show one proposal (diff, state, review URL) belonging to the signed-in user. While a large "
+            "apply is still running its state is 'applying' and 'progress' shows how far it got."
+        ),
         annotations={"readOnlyHint": True, "openWorldHint": False},
-        meta=card_meta,
+        # the card reads a running apply's progress with it (ChatGPT needs widgetAccessible for that)
+        meta={**card_meta, "openai/widgetAccessible": True} if card_meta else None,
     )
     async def get_proposal(proposal_id: str) -> CallToolResult:
         try:
-            return _proposal({"ok": True, **state.decks.describe(_sub(), proposal_id)})
+            return _proposal({"ok": True, **_closed_at(state.decks.describe(_sub(), proposal_id))})
         except DeckError as exc:
             return _proposal(_tool_error(exc))
 
@@ -729,7 +850,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
         description=(
             "Step 1 of undoing an edit: a proposal that puts every deck row back as the snapshot "
             "recorded it (printing, foil or etched finish, quantity and categories, so commander, "
-            "sideboard and maybeboard too; deck name, description and format are not touched). "
+            "sideboard and maybeboard too) and the deck's name, description, format, bracket and "
+            "visibility as they were, so a details change can be undone too (folder, tags and cover stay). "
             "Returns the same fields as "
             "propose_deck_changes, including the diff and review URL; the user confirms it and then it "
             "is applied with apply_proposal like any other proposal, which keeps a new snapshot first. "
@@ -845,7 +967,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
     )
     async def reject_proposal(proposal_id: str) -> dict[str, object]:
         try:
-            return {"ok": True, **state.decks.reject(_sub(), proposal_id)}
+            return {"ok": True, **_closed_at(state.decks.reject(_sub(), proposal_id))}
         except DeckError as exc:
             return _tool_error(exc)
 
@@ -853,20 +975,22 @@ def build_mcp_server(state: AppState) -> MCPServer:
         name="get_snapshot",
         title="Get a deck snapshot",
         description=(
-            "The full deck as a snapshot recorded it (same fields as "
-            "get_deck, plus snapshot_id, taken_at and "
-            "the Archidekt backup link). Use it to show what a deck looked like before an edit, or pass its "
-            "snapshot_id to compare_decks."
+            "The deck as a snapshot recorded it (the same views as get_deck, default 'text', plus "
+            "snapshot_id, taken_at and the Archidekt backup link). Use it to show what a deck looked "
+            "like before an edit, or pass its snapshot_id to compare_decks."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": False},
     )
-    async def get_snapshot(snapshot_id: str) -> dict[str, object]:
+    async def get_snapshot(
+        snapshot_id: Annotated[str, Field(description="The snapshot id from list_snapshots.")],
+        view: Annotated[DeckView, Field(description="What to return, as get_deck's view.")] = "text",
+    ) -> dict[str, object]:
         try:
             snap = state.decks.snapshot(_sub(), snapshot_id)
         except DeckError as exc:
             return _tool_error(exc)
         return {
-            **deck_out(parse_deck(snap["deck"])),
+            **deck_out(parse_deck(snap["deck"]), view=view),
             "snapshot_id": snap["id"],
             "proposal_id": snap.get("proposal_id"),
             "taken_at": snap["taken_at"],
@@ -884,31 +1008,50 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "and whether each card may command, colour identity violations, singleton violations, "
             "uncategorised rows: stats.checks), all from Archidekt's own card data in one read (no Mystic "
             "Forge call). deck_ref is an Archidekt id or URL, a snapshot id, or a pasted decklist (then "
-            "only counts and structural checks: no card data). Say 'estimate' when you quote the bracket. "
-            "This is the one tool for an Archidekt deck's legality and structure; validate_decklist "
-            "checks a pasted list card by card."
+            "only counts and structural checks: no card data; lines that are not cards are listed in "
+            "unread_lines). Say 'estimate' when you quote the bracket. This is the one tool for an "
+            "Archidekt deck's legality and structure; validate_decklist checks a pasted list card by card."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )
-    async def deck_stats_tool(deck_ref: str) -> dict[str, object]:
+    async def deck_stats_tool(
+        deck_ref: Annotated[
+            str, Field(description="Archidekt deck id or URL, a snapshot id, or pasted decklist text.")
+        ],
+    ) -> dict[str, object]:
         if _looks_like_list(deck_ref):
+            missed: list[str] = []
             try:
-                cards = parse_decklist(deck_ref)
+                cards = parse_decklist(deck_ref, missed)
             except DecklistError as exc:
                 return {"ok": False, "error": "invalid", "message": f"decklist could not be read: {exc}"}
             stats = deck_stats.compute_from_text(cards)
-            return {
+            out: dict[str, object] = {
                 "ok": True,
                 "deck": {"id": None, "name": "pasted list", "card_count": stats["card_count"]},
                 "stats": stats,
                 "note": "A pasted list has names and counts only; for card-level checks use "
                 "validate_decklist, or read an Archidekt deck.",
             }
+            if missed:
+                out["unread_lines"] = missed
+            return out
         try:
             deck = await _deck_or_snapshot(_sub(), deck_ref)
         except DeckError as exc:
             return _tool_error(exc)
         return {"ok": True, "deck": deck_brief(deck), "stats": deck_stats.compute(deck)}
+
+    _KEPT = "The deck statistics in this result are still valid."
+
+    def _simulation_failure(goldfish: Any) -> str | None:
+        """Why a goldfish run or A/B that was asked for did not give results, or None when it did."""
+        if isinstance(goldfish, dict) and goldfish.get("ok"):
+            return None
+        if not isinstance(goldfish, dict):
+            return "the research service is not configured on this gateway"
+        reason = str(goldfish.get("message") or goldfish.get("text") or goldfish.get("error") or "it failed")
+        return clean_text(reason)[:300].rstrip(". ")
 
     def _looks_like_list(ref: str) -> bool:
         """A pasted decklist rather than a deck id, URL or snapshot id: more than one line, or a
@@ -938,46 +1081,82 @@ def build_mcp_server(state: AppState) -> MCPServer:
         name="compare_decks",
         title="Compare two decks",
         description=(
-            "Cards added, removed and changed between two decks (names matched by front face, case "
-            "aside), a summary with cut and added percentages and the basic-land changes apart, plus the "
-            "difference in their statistics. "
-            "Each of a and b is an Archidekt deck id or URL, a snapshot id from list_snapshots, or "
-            "decklist text (one card per line, such as precon_decklist's). Use it for 'what changed since "
-            "this snapshot', 'my deck versus the EDHREC average deck' or 'this precon versus my build'. "
-            "simulate=true adds a paired goldfish A/B from the research service (both decks played game "
-            "for game under the same seeds; per-metric deltas with confidence intervals and significance; "
-            "games, default 300; options: annotations, annotations_a, annotations_b, combos, seed, "
-            "until_turn, allow_different_commanders) as goldfish_ab, not stored. Does not touch Archidekt "
-            "beyond reading the decks. This is the one tool for deck differences, precon upgrades and "
-            "A/B simulations included."
+            "Cards added, removed and changed from deck a to deck b (names matched by front face, case "
+            "aside), a summary with cut and added percentages and the basic-land changes apart, and, when "
+            "both sides are Archidekt decks or snapshots, stats_delta (the difference in their "
+            "statistics; a pasted list has no card data for it). Give each side once: a or b is an "
+            "Archidekt deck id or URL, or a snapshot id from list_snapshots; a_list or b_list is pasted "
+            "decklist text (one card per line, such as precon_decklist's or edhrec_average_deck's). A "
+            "reference that is none of those is refused rather than guessed. Lines of a list that are not "
+            "cards (a 'Total: 100' footer, a link) are skipped and listed in unread_lines: tell the user. "
+            "Use it for 'what changed since this snapshot', 'my deck versus the EDHREC average deck' or "
+            "'this precon versus my build'. simulate=true adds a paired goldfish A/B from the research "
+            "service (both decks played game for game under the same seeds; per-metric deltas with "
+            "confidence intervals and significance), not stored. Does not touch Archidekt beyond reading "
+            "the decks. This is the one tool for deck differences, precon upgrades and A/B simulations."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )
     async def compare_decks(
-        a: str,
-        b: str,
-        simulate: bool = False,
-        games: int = 300,
-        options: dict[str, Any] | None = None,
+        a: Annotated[
+            str | None, Field(description="Deck a: Archidekt deck id or URL, or snapshot id.")
+        ] = None,
+        b: Annotated[
+            str | None, Field(description="Deck b: Archidekt deck id or URL, or snapshot id.")
+        ] = None,
+        a_list: Annotated[str | None, Field(description="Or deck a as pasted decklist text.")] = None,
+        b_list: Annotated[str | None, Field(description="Or deck b as pasted decklist text.")] = None,
+        simulate: Annotated[
+            bool, Field(description="Also run a paired goldfish A/B of the two decks.")
+        ] = False,
+        games: Annotated[int, Field(description="Games per deck for the A/B (10 to 2000).")] = 300,
+        options: Annotated[AbOptions | None, Field(description="Simulator options for the A/B.")] = None,
     ) -> dict[str, object]:
-        async def load(ref: str) -> tuple[Any, str, bool]:
-            """The deck (or the pasted list's counts), the mainboard text the simulators read
-            (commander first, no headers, sideboard left out) and whether a commander is known."""
+        unread: dict[str, list[str]] = {}
+
+        def as_list(side: str, text: str) -> tuple[Any, str, bool]:
+            """The pasted list's counts, the mainboard text the simulators read (commander first,
+            no headers, sideboard left out) and whether it names a commander."""
+            missed: list[str] = []
+            cards = parse_decklist(text, missed)
+            if missed:
+                unread[side] = missed
+            counts: dict[str, int] = {}
+            for c in cards:
+                if c.zone == "main":  # one name over several printings counts once, summed
+                    counts[c.name] = counts.get(c.name, 0) + c.quantity
+            has_commander = any("Commander" in c.categories for c in cards if c.zone == "main")
+            return counts, to_text(cards), has_commander
+
+        async def load(side: str, ref: str | None, text: str | None) -> tuple[Any, str, bool]:
+            if ref and text:
+                raise DeckError("invalid", f"give {side} or {side}_list, not both")
+            if text:
+                return as_list(side, text)
             ref = str(ref or "").strip()
+            if not ref:
+                raise DeckError("invalid", f"give {side} (a deck id, link or snapshot id) or {side}_list")
             snap = _own_snapshot(_sub(), ref)
             if snap is not None:
                 return snap, deck_to_text(snap), bool(deck_stats.compute(snap)["commanders"])
             try:
                 deck_id = _clean_deck_id(ref)
-            except DeckError:
-                cards = parse_decklist(ref)
-                has_commander = any("Commander" in c.categories for c in cards if c.zone == "main")
-                return {c.name: c.quantity for c in cards if c.zone == "main"}, to_text(cards), has_commander
+            except DeckError as exc:
+                # Earlier descriptions let a pasted list go in a or b: a multi-line text, or a line
+                # that starts with a quantity, is still read as one. Anything else is refused.
+                if _looks_like_list(ref):
+                    return as_list(side, ref)
+                raise DeckError(
+                    "invalid",
+                    f"{side} is not an Archidekt deck id or archidekt.com link, nor one of your snapshot "
+                    f"ids; pass a pasted list as {side}_list",
+                ) from exc
             deck = await state.decks.get_any_deck(_sub(), deck_id)
             return deck, deck_to_text(deck), bool(deck_stats.compute(deck)["commanders"])
 
         try:
-            (deck_a, text_a, cmd_a), (deck_b, text_b, cmd_b) = await load(a), await load(b)
+            deck_a, text_a, cmd_a = await load("a", a, a_list)
+            deck_b, text_b, cmd_b = await load("b", b, b_list)
         except (DeckError, DecklistError) as exc:
             kind = exc.kind if isinstance(exc, DeckError) else "invalid"
             return {"ok": False, "error": kind, "message": str(exc)}
@@ -986,10 +1165,12 @@ def build_mcp_server(state: AppState) -> MCPServer:
             out["a"] = deck_brief(deck_a)
         if not isinstance(deck_b, dict):
             out["b"] = deck_brief(deck_b)
+        if unread:
+            out["unread_lines"] = unread
         if simulate:
             try:
                 ab = await state.reports.ab(
-                    _sub(), text_a, text_b, games=games, options=options, commanders=(cmd_a, cmd_b)
+                    _sub(), text_a, text_b, games=games, options=dumped(options), commanders=(cmd_a, cmd_b)
                 )
             except DeckError as exc:
                 return _tool_error(exc)
@@ -998,6 +1179,11 @@ def build_mcp_server(state: AppState) -> MCPServer:
                 "error": "unavailable",
                 "message": "the research service is not configured on this gateway",
             }
+            failed = _simulation_failure(out["goldfish_ab"])
+            if failed:
+                # the A/B was asked for and did not run: the result says so at the top
+                message = f"The A/B did not run: {failed}. {_KEPT}"
+                out.update(ok=False, error="simulation_failed", message=message)
         return out
 
     @server.tool(
@@ -1011,17 +1197,22 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "pasted list is simulated the same way but returned with stored=false and not kept. "
             "Reads the deck; changes nothing on Archidekt. A report of an unchanged deck within ten minutes "
             "returns the existing one (not when options are given). options passes the simulator's knobs "
-            "through: annotations (goldfish_annotate's output, for cards the engine cannot derive), combos "
-            "(lists of card names, or {cards, wins}), seed, until_turn (1-30), opponents (1-5), mulligan "
-            "(min_sources, max_sources, lands_only, free_first, min_real_lands). This is the one tool that "
+            "through (annotations from goldfish_annotate, combos, seed, until_turn, opponents, mulligan). "
+            "This is the one tool that "
             "runs goldfish games of one deck; compare_decks with simulate=true is the paired A/B of two. "
             "goldfish_odds (draw odds) and goldfish_annotate (card roles) stay separate."
         ),
         annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": True},
     )
     async def run_deck_report(
-        deck_ref: str, games: int = 300, simulate: bool = True, options: dict[str, Any] | None = None
+        deck_ref: Annotated[
+            str, Field(description="Archidekt deck id or URL, a snapshot id, or pasted decklist text.")
+        ],
+        games: Annotated[int, Field(description="Games to simulate (10 to 2000).")] = 300,
+        simulate: Annotated[bool, Field(description="Run the goldfish simulation.")] = True,
+        options: Annotated[RunOptions | None, Field(description="Simulator options.")] = None,
     ) -> dict[str, object]:
+        options = dumped(options)
         try:
             if _looks_like_list(deck_ref):
                 report = await state.reports.run_text(
@@ -1031,6 +1222,15 @@ def build_mcp_server(state: AppState) -> MCPServer:
                 report = await state.reports.run(
                     _sub(), deck_ref, simulate=simulate, games=games, options=options
                 )
+            failed = _simulation_failure(report.get("goldfish")) if simulate else None
+            if failed:
+                # the simulation was asked for and did not run: the result says so at the top
+                return {
+                    **report,
+                    "ok": False,
+                    "error": "simulation_failed",
+                    "message": f"The simulation did not run: {failed}. {_KEPT}",
+                }
             return {"ok": True, **report}
         except DeckError as exc:
             return _tool_error(exc)
@@ -1064,13 +1264,13 @@ def build_mcp_server(state: AppState) -> MCPServer:
         title="Propose deck detail changes (write, two-step)",
         description=(
             "Step 1 of changing a deck's own settings rather than its cards, for decks the linked account "
-            "owns. details is an object with any of: name (1-200 characters), description (plain text, up "
-            "to 20000 characters), deck_format (an Archidekt format slug: commander, standard, modern, "
-            "legacy, vintage, pauper, pioneer, historic, alchemy, timeless, premodern, brawl, historicbrawl, "
-            "oathbreaker, duel, 1v1, paupercommander, predh, canlander, gladiator, tlr, penny, custom...), "
-            "edh_bracket (1 to 5, or null to clear it), private "
-            "and unlisted (booleans). Fields already set that way are dropped and a proposal that would "
-            "change nothing is refused. Returns the same fields as propose_deck_changes (kind 'details', "
+            "owns. details holds only the settings to change: name, description, deck_format, "
+            "edh_bracket (null clears it), private, unlisted, and its organisation: folder (an existing "
+            "folder's name, as list_my_decks shows them), add_tags, remove_tags, cover (a card in the "
+            "deck). This is the one tool for those; nothing else moves, tags or re-covers a deck. "
+            "Fields already set that way are dropped "
+            "and a proposal that would change nothing is refused. Returns the same fields as "
+            "propose_deck_changes (kind 'details', "
             "a before/after diff and the review URL); the user confirms it and then it is applied with "
             "apply_proposal like any other proposal, which keeps a snapshot first. Changes nothing on "
             "Archidekt."
@@ -1078,10 +1278,18 @@ def build_mcp_server(state: AppState) -> MCPServer:
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
         meta=card_meta,
     )
-    async def propose_deck_details(deck_id: str, details: dict[str, object]) -> CallToolResult:
+    async def propose_deck_details(
+        deck_id: Annotated[
+            str, Field(description="The Archidekt deck id (the number in the deck URL) or URL.")
+        ],
+        details: Annotated[DeckDetails, Field(description="Only the settings to change.")],
+    ) -> CallToolResult:
         try:
             return _proposal(
-                {"ok": True, **(await state.decks.propose_deck_details(_sub(), deck_id, details))}
+                {
+                    "ok": True,
+                    **(await state.decks.propose_deck_details(_sub(), deck_id, dumped(details, unset=True))),
+                }
             )
         except DeckError as exc:
             return _proposal(_tool_error(exc))
@@ -1174,6 +1382,11 @@ def build_mcp_server(state: AppState) -> MCPServer:
     add_api_routes(server, state, state.reports)
     add_companion_routes(server, state, state.reports)
     add_admin_routes(server, state)
+    # Every tool's input schema self-contained: nested shapes (a deck change, the simulator's
+    # options) are written out where the parameter is, not behind a $ref an app might not follow;
+    # and without the generated titles and null branches, which only cost tokens.
+    for tool in server._tool_manager.list_tools():
+        tool.parameters = compact_schema(inline_refs(tool.parameters))
 
     @server.custom_route(CONSENT_PATH, methods=["GET"], include_in_schema=False)
     async def consent(request: Request) -> Response:
@@ -1300,7 +1513,15 @@ def build_mcp_server(state: AppState) -> MCPServer:
         except Exception:  # only on a broken database file; the detail stays in the log
             logger.exception("health check: database unavailable")
             return JSONResponse({"status": "error", "detail": "database unavailable"}, status_code=503)
-        return JSONResponse({"status": "ok", "version": __version__})
+        # The research service (simulations, card research) is reported, not required: the
+        # gateway's own pages and Archidekt tools still work without it, so a Mystic Forge outage
+        # makes the status "degraded" (still HTTP 200, so the container is not restarted for it).
+        if state.mf_proxy is None:
+            mf = "not_configured"
+        else:
+            mf = "ok" if await state.mf_proxy.healthy() else "down"
+        status = "degraded" if mf == "down" else "ok"
+        return JSONResponse({"status": status, "version": __version__, "mystic_forge": mf})
 
     @server.custom_route(APP_CONFIG_PATH, methods=["GET"], include_in_schema=False)
     async def app_config(_request: Request) -> Response:
@@ -1337,7 +1558,13 @@ def create_app(
     membership = MembershipChecker(settings, db, oidc)
     provider = GatewayAuthProvider(settings, db, oidc, cimd=cimd, membership=membership)
     archidekt = archidekt or ArchidektClient(
-        settings.archidekt_base, settings.archidekt_user_agent, Pacer(settings.archidekt_min_interval)
+        settings.archidekt_base,
+        settings.archidekt_user_agent,
+        Pacer(settings.archidekt_min_interval, settings.archidekt_max_per_minute),
+        retries=settings.archidekt_retries,
+        backoff_base=settings.archidekt_backoff_base,
+        cache_seconds=settings.archidekt_cache_seconds,
+        card_cache_seconds=settings.archidekt_card_cache_seconds,
     )
     if mf_proxy is None and settings.mystic_forge_url:
         mf_proxy = MysticForgeProxy(settings.mystic_forge_url)
@@ -1357,6 +1584,7 @@ def create_app(
     server = build_mcp_server(state)
     server.middleware.append(state.metrics.mcp_middleware())  # before the proxy, so its calls count too
     server.middleware.append(scope_guard_middleware())
+    server.middleware.append(schema_error_middleware())
     if mf_proxy is not None:
         # proxied archidekt_* research calls draw on the member's Archidekt budget too
         mf_proxy.archidekt_budget = state.decks.budget_refusal

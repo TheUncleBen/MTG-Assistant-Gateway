@@ -191,11 +191,13 @@ def test_link_archidekt_account_in_the_browser(clients, env: Env, user: str, arc
             # a wrong password is refused by Archidekt (the mock) and shown on the page
             await page.fill("input[name=archidekt_login]", archidekt_user)
             await page.fill("input[name=archidekt_password]", "wrong")
+            await page.check("input[name=accept_risk]")
             await page.click("text=Link account")
             await page.wait_for_load_state("domcontentloaded")
             assert "did not accept" in await page.inner_text("body")
             await page.fill("input[name=archidekt_login]", archidekt_user)
             await page.fill("input[name=archidekt_password]", f"pw-{archidekt_user}")
+            await page.check("input[name=accept_risk]")
             await page.click("text=Link account")
             await page.wait_for_url(f"{PUBLIC_URL}/account?ok=linked", timeout=30_000)
             text = await page.inner_text("body")

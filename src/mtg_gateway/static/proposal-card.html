@@ -50,6 +50,7 @@ h1{font-size:var(--font-heading-md-size,16px);font-weight:600;margin:0;line-heig
 .badge{flex:none;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;border-radius:999px;
   padding:3px 9px;background:var(--bg2);color:var(--muted);border:1px solid var(--border)}
 .badge.pending{background:var(--amber-bg);color:var(--amber)}
+.badge.applying{background:var(--amber-bg);color:var(--amber)}
 .badge.applied{background:var(--green-bg);color:var(--green)}
 .badge.rejected,.badge.failed,.badge.expired{background:var(--red-bg);color:var(--red)}
 .sum{color:var(--muted);font-size:13px;margin:0 0 10px;overflow-wrap:anywhere}
@@ -190,9 +191,16 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
     var l = r.name == null ? "" : String(r.name);
     if (r.printing) l += " " + r.printing;
     if (r.category) l += " [" + r.category + "]";
+    if (r.guessed_from) l += " (name guessed from '" + r.guessed_from + "'; check it)";
     return l;
   }
   function arrow(a, b) { return String(a) + " → " + String(b); }
+  // The new description as the user will approve it: its first 300 characters on one line.
+  function excerpt(text, len) {
+    var t = String(text == null ? "" : text).replace(/\s+/g, " ").trim();
+    if (!t) return "changed, " + len + " chars";
+    return "“" + (t.length > 300 ? t.slice(0, 299) + "…" : t) + "”";
+  }
   function describeRow(r) {
     switch (r.kind) {
       case "add": return ["Add", label(r), "+" + r.qty];
@@ -205,7 +213,7 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
       case "clone": return ["Copy", "'" + r.source + "' (" + r.cards + " cards) as '" + r.name + "'", ""];
       case "new_deck": return ["New deck", r.name + " (" + r.format + ", " + r.cards + " cards, " + (r.private ? "private" : "public") + ")", ""];
       case "restore": return ["Restore", "snapshot " + r.snapshot_id + " taken " + r.taken + " (" + r.rows + " rows)", ""];
-      case "description": return ["Description", r.after_len ? "changed, " + r.after_len + " chars" : "cleared", ""];
+      case "description": return ["Description", r.after_len ? excerpt(r.after_text, r.after_len) : "cleared", ""];
       case "detail": return [String(r.field || "Setting"), arrow(r.before, r.after), ""];
       default: return ["Change", r.text || "", ""];
     }
@@ -224,6 +232,7 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
     if (p.kind === "clone") return "Copy of " + name;
     if (p.kind === "restore") return "Restore " + name;
     if (p.kind === "details") return "Settings of " + name;
+    if (p.kind === "collection") return "Your collection";
     return "Change to " + name;
   }
   // Rows are shown grouped by what they do, in this order, so a big edit reads as a summary.
@@ -309,7 +318,39 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
     }
     $("foot").textContent = foot.join(" · ");
     renderActions();
-    setStatus("", "");
+    if (sc.state === "applying") { setStatus(progressText(sc), ""); pollApplying(sc.proposal_id); }
+    else setStatus("", "");
+  }
+
+  // A large apply keeps running on the gateway after the Approve press answers; the card reads
+  // its progress with get_proposal (read-only) until it ends.
+  function progressText(p) {
+    var g = p.progress || {}, bits = [];
+    if (g.of_cards) bits.push("looked up " + (g.resolved_cards || 0) + " of " + g.of_cards + " cards");
+    if (g.of_entries) bits.push("sent " + (g.sent_entries || 0) + " of " + g.of_entries + " changes");
+    return "Applying to Archidekt" + (bits.length ? ": " + bits.join(", ") : "") +
+      ". A large change takes a few minutes because the gateway paces its requests.";
+  }
+  var polls = 0, pollTimer = null;
+  function pollApplying(pid) {
+    if (pollTimer || polls >= 120) return;
+    pollTimer = setTimeout(function () {
+      pollTimer = null; polls += 1;
+      request("tools/call", { name: "get_proposal", arguments: { proposal_id: pid } })
+        .then(function (res) {
+          var sc = (res && res.structuredContent) || {};
+          if (sc.ok === false || (res && res.isError)) return;
+          render({ structuredContent: sc, _meta: {} });
+          if (sc.state === "applied") {
+            setStatus("Applied. The deck on Archidekt matches this proposal.", "ok");
+            tellModel("Proposal " + pid + " finished applying to Archidekt.");
+          } else if (sc.state !== "applying") {
+            setStatus(String(sc.next_step || ("Now " + sc.state)), "err");
+            tellModel("Proposal " + pid + " stopped applying: it is now " + sc.state + ".");
+          }
+        })
+        .catch(function () { pollApplying(pid); });
+    }, 5000);
   }
 
   function renderRows(list, rows, limit) {
@@ -407,6 +448,10 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
         }
         approval = null; busy = false;
         render({ structuredContent: Object.assign({}, proposal, sc), _meta: {} });
+        if (sc.state === "applying") {
+          tellModel("The user pressed Approve on the proposal card; proposal " + pid + " is still being applied to Archidekt (large change). The card shows its progress.");
+          return;
+        }
         var done = sc.state === "applied" ? "applied to Archidekt" : sc.state === "rejected" ? "rejected; nothing was sent" : "now " + sc.state;
         setStatus(sc.state === "applied" ? "Applied. The deck on Archidekt matches this proposal." : sc.state === "rejected" ? "Rejected. Nothing was sent to Archidekt." : String(sc.next_step || done), sc.state === "applied" ? "ok" : sc.state === "rejected" ? "" : "err");
         tellModel("The user pressed " + (decision === "approve" ? "Approve" : "Reject") + " on the proposal card; proposal " + pid + " is " + done + ".");

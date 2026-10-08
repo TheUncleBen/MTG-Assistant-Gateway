@@ -23,7 +23,7 @@ import re
 import secrets
 import time
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -69,10 +69,18 @@ DETAIL_FIELDS = {
     "unlisted": "unlisted",
 }
 MAX_DESCRIPTION = 20_000
+# Deck organisation propose_deck_details may also change, resolved against the member's account
+# when the proposal is made: the folder the deck sits in, its tags and its cover card.
+ORGANISE_FIELDS = ("folder", "add_tags", "remove_tags", "cover")
 # The OAuth client (or "__browser__") acting on the current request, recorded in the audit log.
 # Set by the MCP tool layer and the browser pages; None when the actor is not known.
 current_client: ContextVar[str | None] = ContextVar("current_client", default=None)
 MAX_CHANGES = 40
+# How long an apply call waits for the apply to finish before it answers "applying". The apply
+# itself carries on in the background (a 100-card new deck is a few hundred paced requests, longer
+# than an assistant app waits for one tool call); get_proposal and the review page show its
+# progress until it ends.
+APPLY_WAIT_SECONDS = 20.0
 BROWSER_CLIENT = "__browser__"  # the same value as pages.BROWSER_CLIENT_ID
 # An administrator acting on a member's account from the admin pages (unlink): recorded in the
 # member's own activity log as done by an administrator, never as the member's browser.
@@ -177,13 +185,19 @@ def _printing_label(item: dict[str, Any]) -> str | None:
 
 
 def row_label(r: dict[str, Any]) -> str:
-    """'Sol Ring (CMR 1, Foil) [Ramp]': a row's card, printing and category."""
+    """'Sol Ring (CMR 1, Foil) [Ramp]': a row's card, printing and category, and a warning when
+    a scan guessed the name from what it misread."""
     label = str(r.get("name", ""))
     if r.get("printing"):
         label += f" {r['printing']}"
     if r.get("category"):
         label += f" [{r['category']}]"
+    if r.get("guessed_from"):
+        label += f" (name guessed from '{r['guessed_from']}'; check it)"
     return label
+
+
+DESCRIPTION_EXCERPT = 300  # characters of a new deck description shown on its diff line
 
 
 def row_line(r: dict[str, Any]) -> str:
@@ -219,7 +233,17 @@ def row_line(r: dict[str, Any]) -> str:
         return f"Restore to snapshot {r['snapshot_id']} taken {r['taken']} ({r['rows']} rows)"
     if kind == "description":
         after_len = int(r.get("after_len") or 0)
-        return f"description: ({f'changed, {after_len} chars' if after_len else 'cleared'})"
+        if not after_len:
+            return "description: (cleared)"
+        # The new text on the one diff line, so the user approves words they can read (in full on
+        # the review page). clean_text keeps it to one line: it can never pose as another row.
+        text = clean_text(r.get("after_text") or "")
+        shown = text if len(text) <= DESCRIPTION_EXCERPT else text[: DESCRIPTION_EXCERPT - 1] + "…"
+        return (
+            f'description: (changed, {after_len} chars) "{shown}"'
+            if shown
+            else (f"description: (changed, {after_len} chars)")
+        )
     if kind == "detail":
         return f"{r['field']}: {r['before']} -> {r['after']}"
     return str(r.get("text", ""))
@@ -1057,10 +1081,15 @@ class DeckService:
         self.client = client
         self.fernet = Fernet(settings.fernet_key.encode())
         self._deck_locks: dict[str, asyncio.Lock] = {}
+        # Applies running in the background (proposal id -> task) and what each got done so far.
+        self._running: dict[str, asyncio.Task[Any]] = {}
+        self._progress: dict[str, dict[str, Any]] = {}
         self._archidekt_in_flight: dict[str, int] = {}
         self._link_locks: dict[str, asyncio.Lock] = {}
         self.max_archidekt_per_user = MAX_ARCHIDEKT_PER_USER
         self.archidekt_budget = RateBudget(settings.archidekt_calls_per_10_min)
+        # sub -> {matched card name (lower case): what the scan read}; set when scanning is on
+        self.guessed_names: Callable[[str], dict[str, str]] | None = None
         # Set by collection.py: applies a ``collection`` proposal's stored changes against the
         # member's Archidekt Collection and returns the result rows (DeckService itself knows only
         # decks). None while the collection pages are not loaded.
@@ -1459,10 +1488,28 @@ class DeckService:
             "diff": row["diff_text"],
             # The structured rows the review page renders (None for proposals stored before them).
             "rows": row.get("rows"),
+            # cards whose name a scan guessed from a misread name: confirm each with the user
+            **(
+                {
+                    "guessed_names": [
+                        {"name": r["name"], "read_as": r["guessed_from"]}
+                        for r in row["rows"]
+                        if r.get("guessed_from")
+                    ]
+                }
+                if any(r.get("guessed_from") for r in row.get("rows") or [])
+                else {}
+            ),
             "changes": row["changes"],
             "created_at": row["created_at"],
             "expires_at": row["expires_at"],
             "applied_at": row["applied_at"],
+            # while an apply runs in the background: how far it got (see APPLY_WAIT_SECONDS)
+            **(
+                {"progress": _progress_view(self._progress[row["id"]])}
+                if state == "applying" and row["id"] in self._progress
+                else {}
+            ),
             "snapshot_id": row["snapshot_id"],
             "result": row["result"],
             "review_url": f"{self.settings.public_url}/proposals/{row['id']}",
@@ -1514,7 +1561,18 @@ class DeckService:
 
     def _save_proposal(self, row: dict[str, Any], rows: list[dict[str, Any]]) -> None:
         """Store a proposal with its review rows, its text diff (made from the rows), its expiry
-        and the app that made it; refused past the member's pending cap."""
+        and the app that made it; refused past the member's pending cap. An added card that one
+        of the member's scans matched from a misread name (a new row, or more copies) is marked
+        (``guessed_from``), so the
+        review page, the in-chat card and the diff all say the name was a guess."""
+        guesses = self.guessed_names(row["owner_sub"]) if self.guessed_names else {}
+        for r in rows:
+            adds = r.get("kind") == "add" or (
+                r.get("kind") == "change" and int(r.get("after") or 0) > int(r.get("before") or 0)
+            )
+            read = guesses.get(str(r.get("name", "")).lower()) if adds else None
+            if read and not r.get("guessed_from"):
+                r["guessed_from"] = clean_text(read)[:120]
         saved = self.db.save_proposal(
             {
                 **row,
@@ -1536,9 +1594,12 @@ class DeckService:
         out = []
         for r in self.db.list_proposals(sub):
             state = "expired" if r["state"] == "pending" and r["expires_at"] < now else r["state"]
+            lines = str(r.pop("diff_text", None) or "").splitlines()
+            summary = "; ".join(lines[:3]) + (f" (+{len(lines) - 3} more)" if len(lines) > 3 else "")
             out.append(
                 {
                     **r,
+                    "summary": summary[:400],
                     "state": state,
                     "created_by": self._creator_label(r.get("created_by_client")),
                     "review_url": f"{self.settings.public_url}/proposals/{r['id']}",
@@ -1630,8 +1691,42 @@ class DeckService:
                 "here. The user can press Apply on the review page. Nothing was sent to Archidekt.",
                 review_url=f"{self.settings.public_url}/proposals/{proposal_id}",
             )
-        async with self.archidekt_slot(sub):  # refused before the claim, so nothing is sent
-            return await self._apply_slotted(sub, proposal_id, row, via=via)
+        if proposal_id in self._running:  # already under way: report it, never start it twice
+            return self.describe(sub, proposal_id)
+
+        async def run() -> dict[str, Any]:
+            async with self.archidekt_slot(sub):  # refused before the claim, so nothing is sent
+                return await self._apply_slotted(sub, proposal_id, row, via=via)
+
+        # The apply runs as its own task: a caller that gives up (an app's tool timeout, a closed
+        # browser tab) cannot cancel it halfway. The caller waits up to APPLY_WAIT_SECONDS for the
+        # outcome, then gets the proposal as it stands ("applying", with progress).
+        task = asyncio.create_task(run())
+        self._running[proposal_id] = task
+
+        def done(t: asyncio.Task[Any]) -> None:
+            self._running.pop(proposal_id, None)
+            self._progress.pop(proposal_id, None)
+            if not t.cancelled():
+                t.exception()  # retrieved here; the apply already recorded it on the proposal
+
+        task.add_done_callback(done)
+        try:
+            return await asyncio.wait_for(asyncio.shield(task), timeout=APPLY_WAIT_SECONDS)
+        except TimeoutError:
+            return self.describe(sub, proposal_id)
+
+    async def aclose(self, grace: float = 5.0) -> None:
+        """At shutdown: give running applies ``grace`` seconds to finish, then cancel the rest,
+        which records each as failed ("interrupted", with what it had sent) before the database
+        closes."""
+        running = list(self._running.values())
+        if not running:
+            return
+        _done, pending = await asyncio.wait(running, timeout=grace)
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
 
     async def _apply_slotted(
         self, sub: str, proposal_id: str, row: dict[str, Any], *, via: str
@@ -1640,8 +1735,10 @@ class DeckService:
             raise DeckError("not_pending", f"This proposal is {row['state']} and cannot be applied.")
         lock = self._deck_locks.setdefault(f"{sub}:{row['deck_id']}", asyncio.Lock())
         # What the apply got done so far (snapshot, backup, entries sent of how many, the verify
-        # result), kept in the proposal's result whichever way the apply ends.
+        # result), kept in the proposal's result whichever way the apply ends, and shown by
+        # describe() while it runs.
         progress: dict[str, Any] = {}
+        self._progress[proposal_id] = progress
         async with lock:
             try:
                 result = await self._apply_claimed(sub, row, progress)
@@ -2041,11 +2138,9 @@ class DeckService:
         if self.collection_apply is None:
             raise DeckError("unavailable", "the collection pages are not loaded on this gateway")
         changes = row.get("changes") or {}
-        result = {
-            **(await self.collection_apply(sub, changes, progress)),
-            "verified": True,
-            "snapshot_id": None,
-        }
+        applied = await self.collection_apply(sub, changes, progress)
+        # verified comes from collection_apply's read-back of the records it touched
+        result = {**applied, "verified": applied.get("verified") is True, "snapshot_id": None}
         self.db.finish_proposal(row["id"], state="applied", result=result)
         return self.describe(sub, row["id"])
 
@@ -2171,6 +2266,7 @@ class DeckService:
         resolve: dict[tuple[str, str, str], int] = {}
         modifiers: dict[tuple[str, str, str], str] = {}
         printing_notes: list[str] = []
+        progress["resolved_cards"], progress["of_cards"] = 0, len(cards)
         for c in cards:  # resolve every printing before creating anything
             card = await self._call(
                 sub,
@@ -2182,6 +2278,7 @@ class DeckService:
                 ),
             )
             resolve[row_key(c)] = card["id"]
+            progress["resolved_cards"] += 1
             finish = str(c.get("finish") or ("Foil" if c.get("foil") else ""))
             modifiers[row_key(c)] = finish_modifier(
                 card["options"], foil=finish == "Foil", etched=finish == "Etched"
@@ -2325,10 +2422,16 @@ class DeckService:
         /decks/{id}/update/ (verified live for description; the other fields are what Archidekt's
         site sends on that route, unverified) and checked by re-reading the deck."""
         deck_id = _clean_deck_id(deck_id)
-        wanted = parse_details(details)
+        raw = dict(details) if isinstance(details, dict) else details
+        organise_raw = {k: raw.pop(k) for k in ORGANISE_FIELDS if k in raw} if isinstance(raw, dict) else {}
+        wanted = parse_details(raw) if raw or not organise_raw else {}
         self._room_for_proposal(sub)
         deck = await self.get_own_deck(sub, deck_id)
         changes, rows = details_rows(deck, wanted)
+        organise, organise_rows = await self._organise_plan(sub, deck, organise_raw)
+        if organise:
+            changes = {**changes, "organise": organise}
+            rows = [*rows, *organise_rows]
         if not changes:
             raise DeckError("invalid", "The deck already has these details; nothing would change.")
         pid = secrets.token_urlsafe(12)
@@ -2352,11 +2455,98 @@ class DeckService:
         )
         return self.describe(sub, pid)
 
+    async def _organise_plan(
+        self, sub: str, deck: Deck, raw: dict[str, Any]
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        """Resolve the organisation fields of a details proposal against the account now: the
+        folder by name (an existing folder; "" for the top level), tags to add (names) and to take
+        off (names of tags on the deck), and the cover (a card in the deck). Returns the
+        stored plan and its review rows; what is already that way is left out."""
+        plan: dict[str, Any] = {}
+        rows: list[dict[str, Any]] = []
+        if not raw:
+            return plan, rows
+        if "folder" in raw:
+            want = clean_text(str(raw["folder"] or "")).casefold()
+            info = await self.folders(sub)
+            root = int(info["root_id"])
+            by_id = {f["id"]: f for f in info["folders"]}
+            if not want or want in ("top", "top level", "none"):
+                target = by_id[root]
+            else:
+                hits = [f for f in info["folders"] if f["depth"] > 0 and f["name"].casefold() == want]
+                if len(hits) != 1:
+                    names = ", ".join(sorted({f["name"] for f in info["folders"] if f["depth"] > 0})[:30])
+                    what = "No folder" if not hits else "More than one folder"
+                    raise DeckError("invalid", f"{what} is called '{raw['folder']}'. Your folders: {names}")
+                target = hits[0]
+            current = deck.parent_folder if deck.parent_folder is not None else root
+            if target["id"] != current:
+                plan["folder_id"] = target["id"]
+                before = by_id.get(current, {}).get("name", "unknown")
+                rows.append(_row("detail", field="folder", before=before, after=target["name"]))
+        on_deck = {str(r.get("name") or "").casefold(): r for r in deck.tag_relations}
+        add = [self._tag_name(n) for n in _names(raw.get("add_tags"), "add_tags")]
+        add = [n for n in dict.fromkeys(add) if n.casefold() not in on_deck]
+        remove = []
+        for name in _names(raw.get("remove_tags"), "remove_tags"):
+            rel = on_deck.get(self._tag_name(name).casefold())
+            if rel is None:
+                raise DeckError("invalid", f"The deck has no tag '{name}'.")
+            remove.append({"id": int(rel["id"]), "name": str(rel.get("name") or name)})
+        if len(deck.tag_relations) - len(remove) + len(add) > self.MAX_TAGS:
+            raise DeckError("invalid", f"A deck has at most {self.MAX_TAGS} tags here.")
+        if add:
+            plan["add_tags"] = add
+        if remove:
+            plan["remove_tags"] = remove
+        if add or remove:
+            before = [str(r.get("name") or "") for r in deck.tag_relations]
+            gone = {r["name"].casefold() for r in remove}
+            after = [n for n in before if n.casefold() not in gone] + add
+            rows.append(
+                _row(
+                    "detail",
+                    field="tags",
+                    before=", ".join(before) or "none",
+                    after=", ".join(after) or "none",
+                )
+            )
+        if "cover" in raw:
+            pick = clean_text(str(raw["cover"] or "")).casefold()
+            card = next((c for c in deck.cards if c.name.casefold() == pick and c.scryfall_uid), None)
+            if card is None:
+                raise DeckError("invalid", f"'{raw['cover']}' is not a card in this deck.")
+            if card.scryfall_uid.lower() not in str(deck.raw.get("featured") or "").lower():
+                plan["cover_uid"] = card.scryfall_uid
+                rows.append(_row("detail", field="cover", before="current", after=card.name))
+        return plan, rows
+
+    async def _apply_organise(self, sub: str, deck_id: str, plan: dict[str, Any]) -> list[str]:
+        """Carry out a details proposal's organisation plan with the same verified calls as the
+        deck page's own buttons; each re-reads the deck. Returns the fields done."""
+        done: list[str] = []
+        if "folder_id" in plan:
+            await self.move_deck(sub, deck_id, int(plan["folder_id"]))
+            done.append("folder")
+        for name in plan.get("add_tags") or []:
+            await self.add_tag(sub, deck_id, name)
+            done.append(f"tag +{name}")
+        for rel in plan.get("remove_tags") or []:
+            await self.remove_tag(sub, deck_id, int(rel["id"]))
+            done.append(f"tag -{rel['name']}")
+        if "cover_uid" in plan:
+            await self.set_cover(sub, deck_id, plan["cover_uid"])
+            done.append("cover")
+        return done
+
     async def _apply_details(self, sub: str, row: dict[str, Any], progress: dict[str, Any]) -> dict[str, Any]:
-        wanted = parse_details(row["changes"])
+        stored = dict(row["changes"])
+        organise = stored.pop("organise", None) or {}
+        wanted = parse_details(stored) if stored else {}
         deck = await self._current_deck_for(sub, row)
         changes, _lines = details_diff(deck, wanted)
-        if not changes:
+        if not changes and not organise:
             raise DeckError("invalid", "The deck already has these details; nothing was sent.")
         snapshot_id = self._take_snapshot(sub, row, deck)
         progress["snapshot_id"] = snapshot_id
@@ -2371,15 +2561,26 @@ class DeckService:
                 "The deck's details changed on Archidekt while this change was being prepared. "
                 "Nothing was sent. Create a new proposal from the current deck.",
             )
-        fields = details_payload(changes)
-        await self._call(sub, self.client.update_deck, deck.id, fields)
+        if changes:
+            await self._call(sub, self.client.update_deck, deck.id, details_payload(changes))
         verified = await self.get_deck(sub, deck.id)
         still, _lines = details_diff(verified, wanted)
         mismatches = sorted(still)
+        organised: list[str] = []
+        if organise and not mismatches:
+            try:
+                organised = await self._apply_organise(sub, deck.id, organise)
+            except DeckError as exc:
+                progress.update({"snapshot_id": snapshot_id, **backup, "fields": sorted(changes)})
+                raise DeckError(
+                    exc.kind,
+                    f"{exc} The deck's other details were applied. A snapshot ({snapshot_id}) of the "
+                    "deck before the change was kept.",
+                ) from exc
         result = {
             "snapshot_id": snapshot_id,
             **backup,
-            "fields": sorted(changes),
+            "fields": sorted(changes) + organised,
             "verified": not mismatches,
             "mismatched_fields": mismatches,
         }
@@ -2394,7 +2595,8 @@ class DeckService:
         self.db.finish_proposal(row["id"], state="applied", result=result)
         return self.describe(sub, row["id"])
 
-    # -- hand actions (the member's own browser; never offered as assistant tools) ---------------
+    # -- hand actions (the member's own browser; the assistant reaches folder, tag and cover only
+    # through a details proposal, which calls these after the member approves) ----------------
     # Deleting a deck, picking its cover, moving it between folders and tagging it are done on the
     # web pages only, like Archidekt's own buttons. Each takes a gateway snapshot first (deletion
     # also keeps the Archidekt backup copy when backups are on) and re-reads to verify.
@@ -2717,7 +2919,8 @@ def parse_details(raw: Any) -> dict[str, Any]:
         )
     unknown = sorted(str(k) for k in raw if k not in DETAIL_FIELDS)
     if unknown:
-        raise DeckError("invalid", f"unknown details: {', '.join(unknown)}; use {', '.join(DETAIL_FIELDS)}")
+        known = ", ".join([*DETAIL_FIELDS, *ORGANISE_FIELDS])
+        raise DeckError("invalid", f"unknown details: {', '.join(unknown)}; use {known}")
     out: dict[str, Any] = {}
     for key, value in raw.items():
         if key == "name":
@@ -2747,6 +2950,17 @@ def parse_details(raw: Any) -> dict[str, Any]:
                 raise DeckError("invalid", f"{key} must be true or false")
             out[key] = value
     return out
+
+
+def _names(value: Any, field: str) -> list[str]:
+    """A list of tag names from a details field (a list of strings, or one string)."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list) or len(value) > 20 or not all(isinstance(v, str) for v in value):
+        raise DeckError("invalid", f"{field} must be a list of up to 20 tag names")
+    return value
 
 
 def _current_detail(deck: Deck, key: str) -> Any:
@@ -2917,6 +3131,12 @@ def _sent(progress: dict[str, Any]) -> dict[str, Any]:
     return {k: progress[k] for k in ("sent_entries", "of_entries", "snapshot_id", "deck_id") if k in progress}
 
 
+def _progress_view(progress: dict[str, Any]) -> dict[str, Any]:
+    """What a running apply has done so far, for get_proposal and the review page."""
+    keys = ("resolved_cards", "of_cards", "sent_entries", "of_entries", "snapshot_id", "deck_id", "deck_url")
+    return {k: progress[k] for k in keys if k in progress}
+
+
 def _partial_note(progress: dict[str, Any]) -> str:
     """What a failed apply had already changed on Archidekt, for the message the user sees."""
     sent = int(progress.get("sent_entries") or 0)
@@ -2957,10 +3177,16 @@ def _mismatches(got: dict[str, int], want: dict[str, int]) -> list[str]:
     return sorted(out)
 
 
+# Said by every tool that takes a deck id or a deck reference, so it names neither parameter.
+NOT_A_DECK_ID = (
+    "that is not an Archidekt deck: give the deck's number from its URL, or its archidekt.com link"
+)
+
+
 def _clean_deck_id(deck_id: Any) -> str:
     raw = str(deck_id).strip()
     if len(raw) > 2000:
-        raise DeckError("invalid", "deck_id must be the numeric id from the Archidekt deck URL")
+        raise DeckError("invalid", NOT_A_DECK_ID)
     first = raw.split("/", 1)[0]
     if "://" in raw or "." in first or ":" in first:
         # Anything that names a host (with or without a scheme) must name Archidekt.
@@ -2977,7 +3203,7 @@ def _clean_deck_id(deck_id: Any) -> str:
         raw = parts[-1]
     raw = raw.split("?", 1)[0].split("#", 1)[0]
     if not (raw.isascii() and raw.isdigit()) or len(raw) > 12:
-        raise DeckError("invalid", "deck_id must be the numeric id from the Archidekt deck URL")
+        raise DeckError("invalid", NOT_A_DECK_ID)
     return raw
 
 
@@ -3036,6 +3262,12 @@ def _next_step(
         return (
             f"{card} the user {what} and the review link: they confirm on the review page (Apply). "
             "Do not call apply_proposal: the user's approval mode asks them every time."
+        )
+    if state == "applying":
+        return (
+            "Archidekt is still being updated (progress shows how far it got; a large change takes a "
+            "few minutes because the gateway paces its requests). Tell the user it is under way and "
+            "check again with get_proposal in a minute. Do not apply it again or make a new proposal."
         )
     if state == "applied" and kind == "details":
         return "Done. The deck's details on Archidekt match this proposal."

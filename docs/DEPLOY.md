@@ -284,7 +284,7 @@ If the packages are public you can skip this step.
 
    | Variable | What to put |
    | --- | --- |
-   | `MTG_IMAGE`, `MTG_TAG` | `ghcr.io/<owner>/mtg-assistant-gateway` and `latest` to follow every new version, or one version to stay on it, for example `0.7.2` ([VERSIONS.md](VERSIONS.md)) |
+   | `MTG_IMAGE`, `MTG_TAG` | `ghcr.io/<owner>/mtg-assistant-gateway` and `latest` to follow every new version, or one version to stay on it, for example `0.7.3` ([VERSIONS.md](VERSIONS.md)) |
    | `MTG_PUBLIC_URL` | `https://mtg.example.com` |
    | `MTG_OIDC_ISSUER` | the issuer URL from step 3 |
    | `MTG_OIDC_CLIENT_ID` | the Client ID from step 3 |
@@ -445,7 +445,9 @@ From any machine:
 
 ```bash
 curl -s https://mtg.example.com/healthz
-# {"status":"ok","version":"0.7.2"}
+# {"status":"ok","version":"0.7.3","mystic_forge":"ok"}
+# ("degraded" with "mystic_forge":"down" means the gateway works but the
+#  research service doesn't answer: check the Mystic Forge service)
 
 curl -s https://mtg.example.com/.well-known/oauth-authorization-server | head -c 300
 # JSON with "issuer":"https://mtg.example.com", "authorization_endpoint", ...
@@ -578,6 +580,7 @@ gateway's `environment:` in the stack file, or it has no effect.
 | `MTG_BACKUP_DIR` | no, *stack* | `/backups` in the image | Where nightly backups go; empty turns them off. In the stack, the folder on the host, mounted at `/backups` |
 | `MTG_BACKUP_HOUR_UTC` | no, *stack* | `3` | Hour (UTC) of the nightly backup, 0 to 23 |
 | `MTG_BACKUP_KEEP_DAYS` | no, *stack* | `14` | How many days of backups to keep, 1 to 3650 |
+| `MTG_BACKUP_COPY_DIR` | no, *stack* | empty (no second copy) | A host folder (another disk, or storage every node mounts at the same path) that every backup is also copied to and pruned the same way. It must already exist on `MTG_NODE`. The stack mounts it at `/backup-copy`; left empty it mounts `/dev/null` there and nothing is copied. A failed copy is logged and shown on the admin page. See [OPERATIONS.md](OPERATIONS.md#backups) |
 | `MTG_ALLOWED_HOSTS` | no, *stack* | worked out from the public URL | `Host` headers accepted on `/mcp` |
 | `MTG_ACCESS_TOKEN_TTL` | no, *stack* | `3600` | Access token lifetime, seconds (60 to 86400) |
 | `MTG_REFRESH_TOKEN_TTL` | no, *stack* | `2592000` | Refresh token lifetime, seconds (30 days; 3600 to 31536000) |
@@ -592,6 +595,12 @@ gateway's `environment:` in the stack file, or it has no effect.
 | `MTG_AUTO_APPLY_MAX_ROWS` | no, *stack* | `5` | How many review rows an edit may have and still count as low risk in `semi` mode (1 to 100) |
 | `MTG_APPLY_IN_CHAT` | no, *stack* | `true` | The Approve/Reject card an AI app that renders MCP Apps shows next to a proposal. Its Approve button calls `confirm_proposal` with a one-time code the assistant never sees; `false` removes the card and the tool, leaving the review page (and `apply_proposal` where the member's approval mode allows it) |
 | `MTG_ARCHIDEKT_CALLS_PER_10_MIN` | no, *stack* | `120` | Archidekt work one member may start per 10 minutes (a deck read, a proposal, an apply, a link, and the proxied `archidekt_*` research tools), refilled evenly; past it the member gets `rate_limited` for a few minutes. Stops a looping assistant from keeping a steady stream of requests on Archidekt. 10 to 100000 |
+| `MTG_ARCHIDEKT_MIN_INTERVAL` | no, *stack* | `1.0` | Seconds between two Archidekt requests, for everyone together (0.25 to 10). See [OPERATIONS.md](OPERATIONS.md#archidekt-rate-limiting) |
+| `MTG_ARCHIDEKT_MAX_PER_MINUTE` | no, *stack* | `40` | Archidekt requests in any 60 seconds, for everyone together; past it requests wait their turn (1 to 120) |
+| `MTG_ARCHIDEKT_RETRIES` | no, *stack* | `2` | Retries for a read that timed out or got a server error (0 to 4). Writes and "slow down" answers are never retried |
+| `MTG_ARCHIDEKT_BACKOFF_BASE` | no, *stack* | `1.0` | Seconds; a retry waits a random time up to this x 2, 4... (capped at 10) (0.1 to 10) |
+| `MTG_ARCHIDEKT_CACHE_SECONDS` | no, *stack* | `60` | How long anonymous public deck reads and deck searches are reused; cleared by any write the gateway sends (0 turns it off, up to 900) |
+| `MTG_ARCHIDEKT_CARD_CACHE_SECONDS` | no, *stack* | `3600` | How long card lookups are reused (0 to 86400) |
 | `MTG_ARCHIDEKT_BACKUPS` | no, *stack* | `true` | Before every applied edit or restore, copy the deck as a private deck into the user's backup folder on Archidekt (using Archidekt's own copy feature, so printings, finishes and categories are kept). If the copy fails, nothing changes and the proposal stays pending |
 | `MTG_ARCHIDEKT_BACKUP_FOLDER` | no, *stack* | `MTG Gateway backups` | Name of that folder (at most 100 characters), created in the account's root folder the first time. Decks in it are left out of the assistant's deck list |
 | `MTG_BROWSER_SESSION_TTL` | no, *stack* | `7200` | Browser session lifetime for `/account` and review pages, seconds (300 to 86400) |
