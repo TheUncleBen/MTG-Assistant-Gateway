@@ -304,14 +304,18 @@ def test_consent_unlocking_tap_is_swallowed_even_when_its_click_comes_late(serve
             page.goto(server.authorize_url())
             page.wait_for_selector(APPROVE)
             page.wait_for_timeout(1000)
-            # The touch by itself, then its click 600 ms later (longer than data-settle).
+            # The touch by itself, then its click a second later (longer than data-settle). The
+            # guard is re-locked first, in the same script so nothing can slip in between: a
+            # loaded headless Chromium can emit a mouse move of its own after a late layout, and
+            # that would count as the unlocking interaction instead of the touch (seen in CI).
             page.evaluate(
-                "(sel) => { const b = document.querySelector(sel);"
+                "(sel) => { window.dispatchEvent(new Event('blur'));"
+                " const b = document.querySelector(sel);"
                 " for (const t of ['touchstart', 'touchend'])"
                 " b.dispatchEvent(new TouchEvent(t, {bubbles: true, cancelable: true})); }",
                 APPROVE,
             )
-            page.wait_for_timeout(600)
+            page.wait_for_timeout(1000)  # past the dwell time again after the re-lock
             expect(page.locator(APPROVE)).to_be_enabled()
             page.evaluate("(sel) => document.querySelector(sel).click()", APPROVE)
             page.wait_for_timeout(300)

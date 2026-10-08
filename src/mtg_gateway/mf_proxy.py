@@ -188,6 +188,9 @@ LIST_DEADLINE_SECONDS = 10.0
 LIST_RETRY_SECONDS = 60.0
 HEALTH_DEADLINE_SECONDS = 3.0  # the health check's own probe: short, so /healthz stays quick
 HEALTH_CACHE_SECONDS = 30.0  # one probe per half minute at most, however often /healthz is asked
+# A failed probe is held for a few seconds only, so a Mystic Forge that was still starting (it
+# comes up after the gateway) is reported "ok" as soon as it answers, not half a minute later.
+HEALTH_DOWN_CACHE_SECONDS = 5.0
 
 
 # Bounds on the arguments of proxied calls, checked before anything is forwarded. Numbers of the
@@ -306,6 +309,10 @@ def is_busy(result: types.CallToolResult) -> bool:
     return getattr(first, "type", "") == "text" and str(getattr(first, "text", "")).startswith(BUSY_PREFIX)
 
 
+def _health_window(ok: bool) -> float:
+    return HEALTH_CACHE_SECONDS if ok else HEALTH_DOWN_CACHE_SECONDS
+
+
 class MysticForgeProxy:
     def __init__(
         self,
@@ -340,11 +347,11 @@ class MysticForgeProxy:
         """Whether Mystic Forge answers a tool listing now (within a few seconds), for the health
         check. Probed at most every HEALTH_CACHE_SECONDS; a failure is logged once per probe."""
         at, ok = self._health
-        if time.time() - at < HEALTH_CACHE_SECONDS:
+        if time.time() - at < _health_window(ok):
             return ok
         async with self._health_lock:
             at, ok = self._health  # another caller may have probed while this one waited
-            if time.time() - at < HEALTH_CACHE_SECONDS:
+            if time.time() - at < _health_window(ok):
                 return ok
             try:
                 with anyio.fail_after(HEALTH_DEADLINE_SECONDS):

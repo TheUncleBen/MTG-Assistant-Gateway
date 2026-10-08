@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Printings of a card</title>
+<style>
+/*@BASE@*/
+</style>
+</head>
+<body>
+<div class="card" id="card">
+  <div class="head"><h1 id="title">Printings</h1><span class="badge info" id="count"></span></div>
+  <p class="sum" id="summary">Loading the printings…</p>
+  <div class="toolbar" id="toolbar">
+    <input type="search" id="filter" placeholder="Filter by set name or code" aria-label="Filter printings" autocomplete="off">
+    <select id="finish" aria-label="Finish"><option value="">Any finish</option><option value="foil">Foil</option><option value="nonfoil">Non-foil</option><option value="etched">Etched</option></select>
+    <button type="button" class="small hidden" id="expand">Expand</button>
+  </div>
+  <div class="scroll"><div class="grid" id="grid" role="list"></div></div>
+  <p class="note hidden" id="note"></p>
+  <div class="actions" id="actions"></div>
+  <div class="status hidden" id="status" role="status" aria-live="polite"></div>
+</div>
+<script>
+/*@BRIDGE@*/
+(function () {
+  "use strict";
+  var B = Bridge, el = B.el, $ = B.$;
+  var MAX_TILES = 400;
+  var all = [], picked = null, cardName = "", oracleId = "", link = "";
+
+  function caption(c) {
+    var bits = [];
+    bits.push((c.set || "").toUpperCase() + (c.collector_number ? " #" + c.collector_number : ""));
+    if (c.released_at) bits.push(String(c.released_at).slice(0, 4));
+    var fin = finishesOf(c);
+    if (fin.length === 1 && fin[0] === "foil") bits.push("foil only");
+    else if (fin.indexOf("etched") >= 0) bits.push("etched");
+    if (c.lang && c.lang !== "en") bits.push(c.lang);
+    return bits.join(" · ");
+  }
+  function finishesOf(c) { return Array.isArray(c.finishes) ? c.finishes : []; }
+  function matches(c, q, fin) {
+    if (fin && finishesOf(c).indexOf(fin) < 0) return false;
+    if (!q) return true;
+    return (String(c.set_name || "") + " " + String(c.set || "") + " " + String(c.collector_number || "")).toLowerCase().indexOf(q) >= 0;
+  }
+  function describe(c) {
+    var fin = finishesOf(c);
+    return (c.name || cardName) + " — " + (c.set_name || "") + " (" + String(c.set || "").toUpperCase() + ") #" + (c.collector_number || "") +
+      (c.released_at ? ", released " + c.released_at : "") + (fin.length ? ", finishes: " + fin.join(", ") : "") +
+      (c.scryfall_id ? " (Scryfall id " + c.scryfall_id + ")" : "");
+  }
+  function draw() {
+    var q = String($("filter").value || "").trim().toLowerCase(), fin = $("finish").value;
+    var grid = $("grid"); grid.replaceChildren();
+    var shown = 0;
+    all.forEach(function (c) {
+      if (!matches(c, q, fin) || shown >= MAX_TILES) return;
+      shown++;
+      var t = el("button", "tile" + (picked === c ? " picked" : "")); t.type = "button"; t.setAttribute("role", "listitem");
+      t.setAttribute("aria-label", describe(c));
+      t.appendChild(B.picture(c.image_small || B.scryfallImage(c.scryfall_id, c.name), ""));
+      var cap = el("span", "cap"); var b = el("b", "", (c.set || "").toUpperCase() + (c.collector_number ? " #" + c.collector_number : ""));
+      cap.appendChild(b); cap.appendChild(el("span", "", " " + caption(c).replace(/^[^·]*·?\s*/, "")));
+      t.appendChild(cap); t.appendChild(el("span", "tick", "✓"));
+      t.onclick = function () { pick(c); };
+      grid.appendChild(t);
+    });
+    var note = $("note");
+    if (!shown) { note.textContent = all.length ? "No printing matches that filter." : ""; note.className = "note"; }
+    else if (shown < all.length) { note.textContent = shown + " of " + all.length + " printings shown."; note.className = "note"; }
+    else note.className = "note hidden";
+    B.reportSize();
+  }
+  function pick(c) {
+    picked = c;
+    draw();
+    B.setStatus("Picked: " + describe(c), "ok");
+    renderActions();
+    B.tellModel("On the printings card the user picked this printing (data, quoted): name " + B.quote(c.name || cardName) +
+      ", set " + B.quote(c.set_name || "") + ", set_code " + B.quote(c.set || "") + ", collector_number " +
+      B.quote(c.collector_number || "") + (c.released_at ? ", released " + B.quote(c.released_at) : "") +
+      (finishesOf(c).length ? ", finishes " + B.quote(finishesOf(c).join(", ")) : "") +
+      (c.scryfall_id ? ", Scryfall id " + B.quote(c.scryfall_id) : "") + ". Use that set_code and collector_number for it.");
+  }
+  function renderActions() {
+    var a = $("actions"); a.replaceChildren();
+    var c = picked;
+    if (c && typeof c.scryfall_uri === "string" && c.scryfall_uri.indexOf("https://scryfall.com/") === 0) {
+      var s = el("a", "link", "Open the picked printing on Scryfall"); s.href = "#";
+      s.onclick = function (e) { e.preventDefault(); B.openLink(c.scryfall_uri, function (t) { B.setStatus(t, ""); }); };
+      a.appendChild(s);
+    }
+    B.reportSize();
+  }
+  function load(result) {
+    var sc = result.structuredContent || {}, meta = (result._meta || {})["mtg/card"] || {};
+    cardName = String(sc.name || meta.name || "");
+    oracleId = String(sc.oracle_id || meta.oracle_id || "");
+    link = typeof meta.link === "string" ? meta.link : "";
+    $("title").textContent = cardName ? "Printings of " + cardName : "Printings";
+    if (sc.ok === false || result.isError) {
+      $("summary").textContent = "";
+      B.setStatus(String(sc.message || (result.content && result.content[0] && result.content[0].text) || "The printings could not be read."), "err");
+      return;
+    }
+    var total = Number(sc.total_cards || meta.total || 0);
+    $("count").textContent = total ? total + " printing" + (total === 1 ? "" : "s") : "";
+    $("summary").textContent = "Tap the printing you mean; your assistant will use it.";
+    if (!link) { B.setStatus("The list is in the assistant's message.", ""); return; }
+    fetch(link, { credentials: "omit", headers: { Accept: "application/json" } })
+      .then(function (r) { return r.json().then(function (j) { return [r.status, j]; }); })
+      .then(function (pair) {
+        var j = pair[1] || {};
+        if (pair[0] !== 200 || j.ok === false) { B.setStatus(String(j.message || "The printings could not be loaded; ask again."), "err"); return; }
+        all = Array.isArray(j.cards) ? j.cards : [];
+        if (j.has_more) { $("summary").textContent = "The newest " + all.length + " of " + (j.total_cards || "many") + " printings. Tap the one you mean."; }
+        draw();
+      })
+      .catch(function () { B.setStatus("The printings could not be loaded (no connection to the gateway). The newest sets are in the assistant's message.", "err"); });
+  }
+  $("filter").addEventListener("input", draw);
+  $("finish").addEventListener("change", draw);
+  B.start("MTG Assistant Gateway printings card", load, {
+    displayModes: ["inline", "fullscreen"],
+    onContext: function () {
+      var modes = B.displayModes();
+      var btn = $("expand");
+      if (modes.indexOf("fullscreen") >= 0) {
+        btn.className = "small";
+        var full = B.context().displayMode === "fullscreen";
+        btn.textContent = full ? "Back to chat size" : "Expand";
+        btn.onclick = function () { B.requestDisplayMode(full ? "inline" : "fullscreen"); };
+      }
+    }
+  });
+})();
+</script>
+</body>
+</html>

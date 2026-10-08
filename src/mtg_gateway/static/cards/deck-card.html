@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Deck</title>
+<style>
+/*@BASE@*/
+.row.cardrow{cursor:pointer}
+.row.cardrow:hover,.row.cardrow:focus-visible{background:var(--bg2);outline:none}
+.grid .tile .cap .q{color:var(--text);font-weight:600}
+.view .tile{cursor:pointer}
+.gh{grid-column:1 / -1;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);padding:6px 2px 0}
+</style>
+</head>
+<body>
+<div class="card" id="card">
+  <div class="head"><h1 id="title">Deck</h1><span class="badge info" id="count"></span></div>
+  <p class="sum" id="summary">Loading the deck…</p>
+  <div class="stat" id="stat"></div>
+  <div class="toolbar">
+    <input type="search" id="filter" placeholder="Find a card" aria-label="Find a card in the deck" autocomplete="off">
+    <button type="button" class="small" id="viewbtn">Pictures</button>
+    <button type="button" class="small hidden" id="expand">Expand</button>
+  </div>
+  <div class="scroll" id="scroll"><div id="list" role="list"></div><div class="grid view hidden" id="grid" role="list"></div></div>
+  <div class="actions" id="actions"></div>
+  <div class="status hidden" id="status" role="status" aria-live="polite"></div>
+</div>
+<div class="detail hidden" id="detail" role="dialog" aria-modal="true" aria-labelledby="dname">
+  <div class="top"><h1 id="dname"></h1><button type="button" class="small" id="close">Close</button></div>
+  <div class="body">
+    <img class="big" id="dimg" alt="">
+    <div><p class="meta" id="dmeta"></p><div class="text" id="dtext">Loading the rules text…</div><div class="actions" id="dactions"></div></div>
+  </div>
+</div>
+<script>
+/*@BRIDGE@*/
+(function () {
+  "use strict";
+  var B = Bridge, el = B.el, $ = B.$;
+  var MAX_IMAGES = 160;
+  var deck = null, open = {}, pictures = false, textCache = {};
+
+  function pips(colours) {
+    var p = el("span", "pips");
+    (colours && colours.length ? colours : ["C"]).forEach(function (c) { p.appendChild(el("span", c)); });
+    return p;
+  }
+  function drawStats(d) {
+    var s = $("stat"); s.replaceChildren();
+    var fmt = el("span"); fmt.appendChild(el("b", "", d.format || "deck")); s.appendChild(fmt);
+    if (d.commanders && d.commanders.length) { var c = el("span", "", "Commander: "); c.appendChild(el("b", "", d.commanders.join(" / "))); s.appendChild(c); }
+    var ci = el("span", "", "Colours "); ci.appendChild(pips(d.colour_identity)); s.appendChild(ci);
+    var curve = d.curve || {}, keys = ["0", "1", "2", "3", "4", "5", "6", "7+"], max = 1;
+    keys.forEach(function (k) { max = Math.max(max, Number(curve[k]) || 0); });
+    var cv = el("span", "curve"); cv.setAttribute("aria-label", "Mana curve");
+    keys.forEach(function (k) { var bar = el("span"); bar.style.height = Math.max(2, Math.round(28 * (Number(curve[k]) || 0) / max)) + "px"; bar.title = k + ": " + (curve[k] || 0); bar.appendChild(el("i", "", k)); cv.appendChild(bar); });
+    s.appendChild(cv);
+  }
+  function rowMatches(r, q) { return !q || String(r.name).toLowerCase().indexOf(q) >= 0 || String(r.type || "").toLowerCase().indexOf(q) >= 0; }
+  function draw() {
+    if (!deck) return;
+    var q = String($("filter").value || "").trim().toLowerCase();
+    var list = $("list"), grid = $("grid"); list.replaceChildren(); grid.replaceChildren();
+    list.className = pictures ? "hidden" : ""; grid.className = pictures ? "grid view" : "grid view hidden";
+    $("viewbtn").textContent = pictures ? "List" : "Pictures";
+    var images = 0;
+    (deck.categories || []).forEach(function (cat) {
+      var cards = (cat.cards || []).filter(function (r) { return rowMatches(r, q); });
+      if (!cards.length) return;
+      var isOpen = q ? true : (open[cat.name] !== false);
+      if (pictures) {
+        grid.appendChild(el("div", "gh", cat.name + " (" + cat.count + ")" + (cat.in_deck ? "" : " · not in the deck")));
+        if (!isOpen && !q) return;
+        cards.forEach(function (r) {
+          var t = el("button", "tile"); t.type = "button"; t.setAttribute("role", "listitem"); t.setAttribute("aria-label", r.qty + " " + r.name);
+          if (images < MAX_IMAGES) { t.appendChild(B.picture(B.scryfallImage(r.uid, r.name), "")); images++; }
+          var cap = el("span", "cap"); cap.appendChild(el("span", "q", r.qty + "× ")); cap.appendChild(el("b", "", r.name)); t.appendChild(cap);
+          t.onclick = function () { showDetail(r); };
+          grid.appendChild(t);
+        });
+        return;
+      }
+      var g = el("div", "row group"); g.setAttribute("role", "button"); g.tabIndex = 0;
+      g.appendChild(el("span", "", (isOpen ? "▾ " : "▸ ") + cat.name + (cat.in_deck ? "" : " (not in the deck)")));
+      g.appendChild(el("span", "n", String(cat.count)));
+      g.onclick = function () { open[cat.name] = !isOpen; draw(); };
+      g.onkeydown = function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); g.onclick(); } };
+      list.appendChild(g);
+      if (!isOpen) return;
+      cards.forEach(function (r) {
+        var li = el("div", "row cardrow"); li.setAttribute("role", "listitem"); li.tabIndex = 0;
+        if (images < MAX_IMAGES) { li.appendChild(B.picture(B.scryfallImage(r.uid, r.name))); images++; } else li.appendChild(el("span", "pic none"));
+        var n = el("span"); n.appendChild(el("span", "name", r.name));
+        var sub = [];
+        if (r.mana) sub.push(r.mana); if (r.type) sub.push(r.type);
+        if (r.set) sub.push(String(r.set).toUpperCase() + (r.cn ? " #" + r.cn : "")); if (r.finish) sub.push(r.finish);
+        n.appendChild(el("span", "sub", sub.join(" · ")));
+        li.appendChild(n); li.appendChild(el("span", "qty", "×" + r.qty));
+        li.onclick = function () { showDetail(r); };
+        li.onkeydown = function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); showDetail(r); } };
+        list.appendChild(li);
+      });
+    });
+    B.reportSize();
+  }
+  function showDetail(r) {
+    var d = $("detail"); d.className = "detail";
+    $("dname").textContent = r.qty + "× " + r.name;
+    $("dimg").src = B.scryfallImage(r.uid, r.name, "normal");
+    $("dmeta").textContent = [r.mana, r.type, r.set ? String(r.set).toUpperCase() + (r.cn ? " #" + r.cn : "") : "", r.finish, r.price != null ? "$" + r.price : ""].filter(Boolean).join(" · ");
+    var t = $("dtext"); t.textContent = "Loading the rules text…";
+    var key = r.uid || ("name:" + r.name);
+    var da = $("dactions"); da.replaceChildren();
+    var sl = el("a", "link", "Open on Scryfall"); sl.href = "#";
+    sl.onclick = function (e) { e.preventDefault(); B.openLink(r.uid ? "https://scryfall.com/card/" + encodeURIComponent(r.uid) : "https://scryfall.com/search?q=" + encodeURIComponent("!\"" + r.name + "\""), function (m) { B.setStatus(m, ""); }); };
+    da.appendChild(sl);
+    if (textCache[key]) { t.textContent = textCache[key]; return; }
+    var url = r.uid ? "https://api.scryfall.com/cards/" + encodeURIComponent(r.uid) : "https://api.scryfall.com/cards/named?exact=" + encodeURIComponent(r.name);
+    fetch(url, { credentials: "omit", headers: { Accept: "application/json" } })
+      .then(function (res) { return res.json(); })
+      .then(function (j) {
+        var faces = Array.isArray(j.card_faces) && j.card_faces.length ? j.card_faces : [j];
+        var text = faces.map(function (f) {
+          var head = (f.name || "") + (f.mana_cost ? "  " + f.mana_cost : "") + "\n" + (f.type_line || "");
+          var body = f.oracle_text || "";
+          var pt = f.power != null ? "\n" + f.power + "/" + f.toughness : (f.loyalty != null ? "\nLoyalty " + f.loyalty : "");
+          return head + "\n\n" + body + pt;
+        }).join("\n\n— — —\n\n");
+        if (j.object === "error") text = String(j.details || "Scryfall has no text for this card.");
+        textCache[key] = text; t.textContent = text;
+      })
+      .catch(function () { t.textContent = "The rules text could not be loaded (no connection to Scryfall)."; });
+  }
+  function closeDetail() { $("detail").className = "detail hidden"; }
+  function renderActions(d) {
+    var a = $("actions"); a.replaceChildren();
+    if (d.url) { var ar = el("a", "link", "Open on Archidekt"); ar.href = "#"; ar.onclick = function (e) { e.preventDefault(); B.openLink(d.url, function (m) { B.setStatus(m, ""); }); }; a.appendChild(ar); }
+    if (d.gateway_url) { var gw = el("a", "link", "Open in the app"); gw.href = "#"; gw.onclick = function (e) { e.preventDefault(); B.openLink(d.gateway_url, function (m) { B.setStatus(m, ""); }); }; a.appendChild(gw); }
+  }
+  function load(result) {
+    var sc = result.structuredContent || {}, meta = (result._meta || {})["mtg/card"] || {};
+    $("title").textContent = String(sc.name || meta.name || "Deck");
+    if (sc.ok === false || result.isError) {
+      $("summary").textContent = "";
+      B.setStatus(String(sc.message || (result.content && result.content[0] && result.content[0].text) || "The deck could not be read."), "err");
+      return;
+    }
+    var link = typeof meta.link === "string" ? meta.link : "";
+    if (!link) { $("summary").textContent = "The deck is in the assistant's message."; return; }
+    fetch(link, { credentials: "omit", headers: { Accept: "application/json" } })
+      .then(function (r) { return r.json().then(function (j) { return [r.status, j]; }); })
+      .then(function (pair) {
+        var j = pair[1] || {};
+        if (pair[0] !== 200 || j.ok === false) { B.setStatus(String(j.message || "The deck could not be loaded; ask again."), "err"); return; }
+        deck = j;
+        $("title").textContent = j.name || "Deck";
+        $("count").textContent = (j.card_count || 0) + " cards" + (j.side_count ? " + " + j.side_count + " aside" : "");
+        $("summary").textContent = (j.owner ? "by " + j.owner + " · " : "") + "tap a card for its picture and rules text." + (j.snapshot ? " Snapshot taken " + j.snapshot.taken_at + "." : "");
+        drawStats(j);
+        renderActions(j);
+        draw();
+      })
+      .catch(function () { B.setStatus("The deck could not be loaded (no connection to the gateway). The list is in the assistant's message.", "err"); });
+  }
+  $("filter").addEventListener("input", draw);
+  $("viewbtn").onclick = function () { pictures = !pictures; draw(); };
+  $("close").onclick = closeDetail;
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeDetail(); });
+  B.start("MTG Assistant Gateway deck card", load, {
+    displayModes: ["inline", "fullscreen"],
+    onContext: function () {
+      var btn = $("expand");
+      if (B.displayModes().indexOf("fullscreen") >= 0) {
+        btn.className = "small";
+        var full = B.context().displayMode === "fullscreen";
+        btn.textContent = full ? "Back to chat size" : "Expand";
+        btn.onclick = function () { B.requestDisplayMode(full ? "inline" : "fullscreen"); };
+      }
+    }
+  });
+})();
+</script>
+</body>
+</html>

@@ -169,7 +169,10 @@ first, with finishes; `set_code`, `finish` and `limit` (default 25) narrow
 it, `matching` and `truncated` say how many matched and whether more did
 than came back, and `has_more` says Scryfall has more than the 175 newest
 printings. The page uses the same list at `/scan/api/prints`, cached as
-summaries, with the art images the assistant's answer leaves out.
+summaries, with the art images the assistant's answer leaves out. In an app that shows cards, the
+user sees every printing's picture on a card in the chat and taps the one
+they mean, which reaches the assistant as text; the assistant's own answer
+also carries `sets`, one row per set, and a `note`.
 
 **On the page.** Before reading, the page looks for the card's four edges
 and straightens the card (perspective correction in `geometry.js`, no

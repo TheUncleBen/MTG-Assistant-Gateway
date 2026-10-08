@@ -44,7 +44,10 @@ ChatGPT text to copy, built from the files above.
   applied and verified.
 - Never ask for a password.
 - Read physical cards from photos with `resolve_cards`, or pick up a scan
-  made on the gateway's `/scan` page with `get_scan_session`.
+  made on the gateway's `/scan` page with `get_scan_session`. In an app that
+  shows cards, you keep, drop or pick the recognised cards on a card in the
+  chat, and pick a printing by its picture; your tap reaches the assistant
+  as text and it goes on from there.
 
 ## Claude
 

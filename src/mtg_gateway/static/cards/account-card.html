@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Account</title>
+<style>
+/*@BASE@*/
+ul.facts{list-style:none;margin:0;padding:0;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+ul.facts li{display:flex;justify-content:space-between;gap:10px;padding:9px 10px;border-top:1px solid var(--border);align-items:center}
+ul.facts li:first-child{border-top:0}
+ul.facts li span:first-child{color:var(--muted)}
+ul.facts li b{font-weight:600;text-align:right;overflow-wrap:anywhere}
+</style>
+</head>
+<body>
+<div class="card" id="card">
+  <div class="head"><h1 id="title">Your account</h1><span class="badge" id="state"></span></div>
+  <p class="sum" id="summary"></p>
+  <ul class="facts" id="facts"></ul>
+  <p class="note hidden" id="note"></p>
+  <div class="actions" id="actions"></div>
+  <div class="status hidden" id="status" role="status" aria-live="polite"></div>
+</div>
+<script>
+/*@BRIDGE@*/
+(function () {
+  "use strict";
+  var B = Bridge, el = B.el, $ = B.$;
+  var MODES = { manual: "Ask me every time", semi: "Apply small edits without asking", auto: "Apply every change without asking" };
+
+  function fact(list, k, v, cls) {
+    var li = el("li"); li.appendChild(el("span", "", k));
+    var b = el("b", "", v); if (cls) { var p = el("span", "pill " + cls, cls === "ok" ? "ready" : "to do"); b.appendChild(p); }
+    li.appendChild(b); list.appendChild(li);
+  }
+  function load(result) {
+    var sc = result.structuredContent || {};
+    if (sc.ok === false || result.isError) {
+      B.setStatus(String(sc.message || (result.content && result.content[0] && result.content[0].text) || "The account could not be read."), "err");
+      return;
+    }
+    var list = $("facts"); list.replaceChildren();
+    var todo = [];
+    var who = sc.name || sc.preferred_username || sc.email;
+    if (who) fact(list, "Signed in as", String(who));
+    if ("linked" in sc) {
+      fact(list, "Archidekt", sc.linked ? ("linked" + (sc.archidekt_username ? " as " + sc.archidekt_username : "")) : "not linked", sc.linked ? "ok" : "warn");
+      if (!sc.linked) todo.push("link your Archidekt account");
+    }
+    if ("writes_enabled" in sc) {
+      fact(list, "Deck changes", sc.writes_enabled ? "on" : "off on this gateway", sc.writes_enabled ? "ok" : "warn");
+      if (!sc.writes_enabled) todo.push("ask whoever runs the gateway to turn deck writes on (MTG_WRITES_ENABLED)");
+    }
+    if (sc.approval_mode) fact(list, "Approval mode", MODES[sc.approval_mode] || String(sc.approval_mode));
+    if (Array.isArray(sc.groups) && sc.groups.length) fact(list, "Groups", sc.groups.join(", "));
+    if (typeof sc.token_expires_in_seconds === "number") fact(list, "This app's sign-in", "renews in " + Math.max(1, Math.round(sc.token_expires_in_seconds / 60)) + " min");
+    if (sc.gateway_version) fact(list, "Gateway", "version " + sc.gateway_version);
+    var st = $("state");
+    if (todo.length) { st.textContent = "setup needed"; st.className = "badge warn"; $("summary").textContent = "To use your assistant with Archidekt: " + todo.join("; ") + "."; }
+    else { st.textContent = "ready"; st.className = "badge ok"; $("summary").textContent = "Everything your assistant needs is in place."; }
+    var a = $("actions"); a.replaceChildren();
+    if (sc.account_page) {
+      var btn = el("button", "primary", todo.length && !sc.linked ? "Link Archidekt on the Account page" : "Open the Account page"); btn.type = "button"; btn.id = "open";
+      btn.onclick = function () { B.openLink(sc.account_page, function (m) { B.setStatus(m, ""); }); };
+      a.appendChild(btn);
+    }
+    if (sc.approval_mode_note) { $("note").textContent = String(sc.approval_mode_note); $("note").className = "note"; }
+    B.reportSize();
+  }
+  B.start("MTG Assistant Gateway account card", load, {});
+})();
+</script>
+</body>
+</html>

@@ -269,7 +269,28 @@ For the exact devices and plans tested, see
   a person's press from a message the host sends on its own; what it can
   check is that the caller holds the code, which a prompt-injected
   assistant does not in a host that follows the standard. `MTG_APPLY_IN_CHAT=false`
-  removes the card, the code and the tool. The MTG skill also tells the assistant
+  removes the card, the code and the tool.
+  The other cards (`src/mtg_gateway/cards.py`, HTML in `static/cards/`:
+  printings, picker, deck, account) only show and relay: a tap sends the
+  pick to the assistant as text through the host (`ui/update-model-context`),
+  and nothing on them calls a tool. A card that needs more data than the tool
+  result carries (a deck's rows, a card's printings) gets a link to
+  `GET /cards/data/{token}`: a Fernet token under `mtg_fernet_key` naming the
+  member, the kind and the id, valid ten minutes, handed to the card in
+  `_meta` and never to the model. The endpoint serves JSON to any origin
+  without cookies, checks the member still exists, is not disabled and is
+  still in the required group, and answers `expired` or `forbidden`
+  otherwise, in its own fixed words (never Archidekt's or Scryfall's). A
+  link is good for twenty fetches, and the first answer is kept for the
+  link's lifetime, so a replayed link never reaches Archidekt or Scryfall
+  again and cannot spend the member's budget. Pictures and rules text come
+  straight from Scryfall under each card's CSP (`_meta.ui.csp`). The text a
+  card sends the model on a tap is shaped like a user action but contains
+  data (card and set names from Scryfall, the user's own words): the cards
+  quote every such value, keep it to one line and at most 200 characters (a typed reject reason, 500),
+  and the skill tells the assistant to treat it as the user's choice, not as
+  an instruction. `MTG_APPLY_IN_CHAT=false` removes all of it.
+  The MTG skill also tells the assistant
   never to treat text inside decks or tool output as an instruction. Each
   proposal records and shows the app that made it; disconnecting an app
   rejects its pending proposals, and one app may hold at most 30 pending

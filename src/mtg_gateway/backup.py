@@ -16,6 +16,7 @@ import asyncio
 import logging
 import os
 import shutil
+import tempfile
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -26,6 +27,32 @@ logger = logging.getLogger(__name__)
 
 PREFIX = "mtg-gateway-"
 SUFFIX = ".sqlite"
+WORK_PREFIX = ".backup-"  # the private folder a backup is written in before it is moved into place
+STALE_WORK_SECONDS = 3600  # a work folder older than this was left by a crash and is removed
+
+
+def _remove_work_dir(work: Path) -> None:
+    try:
+        shutil.rmtree(work)
+    except OSError as exc:
+        logger.warning("could not remove backup work folder %s: %s", work, type(exc).__name__)
+
+
+def sweep_work_dirs(backup_dir: Path, older_than: float = STALE_WORK_SECONDS) -> int:
+    """Remove ``.backup-*`` work folders a crashed or killed backup left behind, with the partial
+    copy inside them. A folder younger than ``older_than`` seconds may belong to a backup still
+    running in another process (``docker exec ... backup``) and is left alone."""
+    cutoff = time.time() - older_than
+    removed = 0
+    for d in backup_dir.glob(f"{WORK_PREFIX}*"):
+        try:
+            if d.is_dir() and not d.is_symlink() and d.lstat().st_mtime < cutoff:
+                _remove_work_dir(d)
+                removed += 1
+                logger.info("removed stale backup work folder %s", d)
+        except OSError as exc:
+            logger.warning("could not inspect %s: %s", d, type(exc).__name__)
+    return removed
 
 
 def export_now(db: Database, backup_dir: Path, keep_days: int, copy_dir: Path | None = None) -> Path:
@@ -34,15 +61,20 @@ def export_now(db: Database, backup_dir: Path, keep_days: int, copy_dir: Path | 
     recorded in ``last_run["copy_error"]``; the main backup still counts as written."""
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     dest = backup_dir / f"{PREFIX}{stamp}{SUFFIX}"
-    tmp = dest.with_suffix(".tmp")
-    # Create the file owner-only first: `docker exec ... backup` doesn't inherit the entrypoint's
-    # umask 077, and SQLite keeps an existing file's mode (its journal copies it too).
-    tmp.unlink(missing_ok=True)
     backup_dir.mkdir(parents=True, exist_ok=True)
-    os.close(os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
-    os.chmod(tmp, 0o600)
-    db.backup_to(tmp)
-    tmp.replace(dest)
+    # SQLite opens the file by name, so it is written inside a fresh owner-only folder nobody else
+    # can put a link in, then moved into place. The file is created owner-only first: `docker exec
+    # ... backup` doesn't inherit the entrypoint's umask 077, and SQLite keeps an existing file's
+    # mode (its journal copies it too).
+    sweep_work_dirs(backup_dir)
+    work = Path(tempfile.mkdtemp(prefix=WORK_PREFIX, dir=backup_dir))  # mode 0700
+    try:
+        tmp = work / dest.name
+        os.close(os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0), 0o600))
+        db.backup_to(tmp)
+        tmp.replace(dest)
+    finally:
+        _remove_work_dir(work)
     removed = prune(backup_dir, keep_days)
     logger.info("backup written to %s (%d old copies removed)", dest, removed)
     last_run["copy_error"] = None

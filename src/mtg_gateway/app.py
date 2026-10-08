@@ -68,6 +68,7 @@ from .auth_provider import (
 )
 from .backup import nightly_loop, purge_loop
 from .browse import add_browse_routes, add_browse_tools
+from .cards import ACCOUNT_CARD_URI, DECK_CARD_URI, CardLinks, add_card_routes, tool_meta, with_card
 from .cimd import CimdFetcher
 from .clickguard import form_stamp, guarded_form, submitted_too_soon
 from .collection import add_collection
@@ -118,6 +119,7 @@ class AppState:
     archidekt: ArchidektClient
     decks: DeckService
     mf_proxy: MysticForgeProxy | None = None
+    cards: CardLinks | None = None  # signed links the in-chat cards fetch their data through
     scan: Any = None
     collection: Any = None
     reports: Any = None
@@ -536,7 +538,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
         ),
         auth_server_provider=state.provider,
         # The in-chat proposal card (MCP Apps, approve.py): the ui:// resource and the capability.
-        extensions=[apps_extension()] if s.apply_in_chat else None,
+        extensions=[apps_extension(s.public_url)] if s.apply_in_chat else None,
         auth=auth,
         lifespan=lifespan,
     )
@@ -546,6 +548,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
         title="Who am I",
         description="Return the signed-in user's identity as the gateway sees it.",
         annotations={"readOnlyHint": True, "openWorldHint": False},
+        meta=tool_meta(ACCOUNT_CARD_URI) if s.apply_in_chat else None,
     )
     async def whoami() -> dict[str, object]:
         token = get_access_token()
@@ -562,6 +565,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "scopes": token.scopes,
             "token_expires_in_seconds": max(0, (token.expires_at or 0) - int(time.time())),
             "gateway_version": __version__,
+            "account_page": f"{s.public_url}/account",
         }
 
     def _sub() -> str:
@@ -574,6 +578,19 @@ def build_mcp_server(state: AppState) -> MCPServer:
     # The in-chat card (approve.py): proposal tools carry its ui:// resource in their _meta, and
     # a pending proposal's result carries the card's one-time code. Off with MTG_APPLY_IN_CHAT.
     card_meta = dict(CARD_TOOL_META) if s.apply_in_chat else None
+    # The other in-chat cards (cards.py) ride on the same switch: a deck read, a card's printings
+    # and the account status carry their card, and the deck card fetches the deck through a
+    # signed link the result carries in _meta.
+    state.cards = CardLinks(s.fernet_key, s.public_url) if s.apply_in_chat else None
+    deck_card_meta = tool_meta(DECK_CARD_URI) if s.apply_in_chat else None
+    account_card_meta = tool_meta(ACCOUNT_CARD_URI) if s.apply_in_chat else None
+
+    def _deck_card(data: dict[str, object], kind: str, ref: str) -> CallToolResult:
+        """A deck read as the assistant gets it, plus the deck card's signed link in _meta."""
+        card = None
+        if state.cards is not None and data.get("ok"):
+            card = {"link": state.cards.issue(_sub(), kind, ref), "name": data.get("name")}
+        return with_card(data, card)
 
     def _closed_at(p: dict[str, Any]) -> dict[str, Any]:
         """A rejected proposal's closing time is kept in applied_at; show it as closed_at."""
@@ -592,6 +609,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "are enabled on this gateway. Linking happens in the browser at the account page."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": False},
+        meta=account_card_meta,
     )
     async def account_status() -> dict[str, object]:
         return state.decks.status(_sub())
@@ -642,6 +660,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "Archidekt deck."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
+        meta=deck_card_meta,
     )
     async def get_deck(
         deck_ref: Annotated[
@@ -653,12 +672,12 @@ def build_mcp_server(state: AppState) -> MCPServer:
         include_text: Annotated[
             bool, Field(description="Add each card's rules text to the card rows.")
         ] = False,
-    ) -> dict[str, object]:
+    ) -> CallToolResult:
         try:
             deck = await state.decks.get_any_deck(_sub(), deck_ref)
         except DeckError as exc:
-            return _tool_error(exc)
-        return deck_out(deck, include_text=bool(include_text), view=view)
+            return with_card(_tool_error(exc), None)
+        return _deck_card(deck_out(deck, include_text=bool(include_text), view=view), "deck", str(deck.id))
 
     @server.tool(
         name="parse_decklist",
@@ -980,22 +999,24 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "like before an edit, or pass its snapshot_id to compare_decks."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": False},
+        meta=deck_card_meta,
     )
     async def get_snapshot(
         snapshot_id: Annotated[str, Field(description="The snapshot id from list_snapshots.")],
         view: Annotated[DeckView, Field(description="What to return, as get_deck's view.")] = "text",
-    ) -> dict[str, object]:
+    ) -> CallToolResult:
         try:
             snap = state.decks.snapshot(_sub(), snapshot_id)
         except DeckError as exc:
-            return _tool_error(exc)
-        return {
+            return with_card(_tool_error(exc), None)
+        data = {
             **deck_out(parse_deck(snap["deck"]), view=view),
             "snapshot_id": snap["id"],
             "proposal_id": snap.get("proposal_id"),
             "taken_at": snap["taken_at"],
             "backup_url": snap.get("backup_url"),
         }
+        return _deck_card(data, "snapshot", str(snap["id"]))
 
     @server.tool(
         name="deck_stats",
@@ -1374,6 +1395,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
     add_app_routes(server, state)
     add_plugin_routes(server, state)
     add_scan(server, state)
+    if state.cards is not None:
+        add_card_routes(server, state, state.cards)
     add_collection(server, state)  # after add_scan: card names are resolved through the scan service
     add_browse_routes(server, state)
     add_social_routes(server, state)
@@ -1622,7 +1645,16 @@ def create_app(
 
 
 # Paths answered for programs (assistants, the OAuth flow, the JSON API): errors there stay JSON.
-_MACHINE_PREFIXES = ("/api/", "/mcp", "/.well-known/", "/token", "/register", "/revoke", "/scan/api/")
+_MACHINE_PREFIXES = (
+    "/api/",
+    "/mcp",
+    "/.well-known/",
+    "/token",
+    "/register",
+    "/revoke",
+    "/scan/api/",
+    "/cards/",
+)
 
 
 def _wants_page(request: Request) -> bool:

@@ -582,6 +582,13 @@ def test_format_specific_command_zones() -> None:
     not_creature = _cmdr("Opt", types=["Instant"], rarity="uncommon", supertypes=[])
     bad = compute(deck([not_creature, commons], format_id=17, categories=cat))["checks"]
     assert bad["commander_zone"]["cannot_command"] == ["Opt"]
+    # A commander on the format's banned list fails even though it is uncommon.
+    banned = _cmdr(
+        "Banned Leader", rarity="uncommon", supertypes=[], legalities={"paupercommander": "banned"}
+    )
+    out = compute(deck([banned, commons], format_id=17, categories=cat))["checks"]
+    assert out["ok"] is False and out["legality"]["banned"] == ["Banned Leader"], out
+    assert any("banned" in p for p in out["problems"])
 
 
 def test_the_first_category_decides_whether_a_row_is_in_the_deck() -> None:

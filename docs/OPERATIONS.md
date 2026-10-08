@@ -87,9 +87,9 @@ docker service update --image ghcr.io/<owner>/mtg-assistant-gateway:<tag> mtg_mt
 ```
 
 Updates are `stop-first`, so expect a few seconds of downtime. On a stop the
-gateway finishes requests already running (such as a deck apply) for up to
-100 seconds; the stack gives it 120 (`stop_grace_period`) before Docker kills
-it. An apply that a crash or a kill still cuts off is marked failed when the
+gateway finishes requests already running for up to 100 seconds, then lets a
+deck apply running in the background go on for up to 90 seconds more; the
+stack gives it 200 (`stop_grace_period`) before Docker kills it. An apply that a crash or a kill still cuts off is marked failed when the
 gateway starts again, with a pointer to the snapshot taken before it. A failed
 update is not rolled back automatically on purpose: a new version may have
 upgraded the database, and the old image refuses to start on it (below).
@@ -497,6 +497,29 @@ An app that cannot show the card (Claude Code, older clients) sees the text
 and the review link as before; Claude Code can also open the review page
 for the member when the assistant calls `apply_proposal`.
 
+### The other cards in the chat
+
+The same switch covers the cards that show and relay rather than apply:
+the printings of a card (`card_printings`), the cards read from photos or a
+list (`resolve_cards`), a deck by category (`get_deck`,
+`get_snapshot`) and the account's setup (`whoami`, `account_status`). A tap
+on them reaches the assistant as plain text; they call no tool. A deck's
+rows or a card's printings are too big for a tool result, so the card gets
+a signed link to `GET /cards/data/<token>`: the token names the member, what
+it is for and which deck, snapshot or card, and expires after ten minutes
+(`mtg_fernet_key` signs it). The endpoint serves the member's own data only,
+to a member who still exists, is enabled and still in the required group,
+without cookies; an expired, forged or used-up token (twenty fetches)
+answers 404 `expired`, a removed member 403 `forbidden`, a deck or card
+that is gone or not theirs 404 `not_found`, an exhausted Archidekt budget
+429 `rate_limited`, an unreachable Archidekt or Scryfall 503 `unavailable`,
+and each hit is a `card` metric. The first answer is kept for the link's lifetime, so a
+replayed link costs no Archidekt or Scryfall call. The token is the URL's
+last path segment: if your reverse proxy logs request paths, exclude
+`/cards/data/` from its access log (the gateway's own access log is off). The AI app loads
+each card's pictures and rules text from Scryfall directly, never through
+the gateway. `MTG_APPLY_IN_CHAT=false` removes every card and this endpoint.
+
 ### Approval modes: when the assistant may apply by itself
 
 Each member picks an **approval mode** on their own Account page. It is
@@ -575,12 +598,13 @@ The gateway is built to be light on Archidekt. For everyone together:
 - after five failures in a row all requests pause for a minute, and users see
   "Archidekt requests are paused after repeated failures; try later". It
   clears on its own;
-- card lookups are reused for `MTG_ARCHIDEKT_CARD_CACHE_SECONDS` (an hour),
-  and anonymous public deck reads and deck searches for
+- a member's card lookups are reused for that member for
+  `MTG_ARCHIDEKT_CARD_CACHE_SECONDS` (an hour; an answer fetched with one
+  member's sign-in is never served to another), and anonymous public deck reads and deck searches for
   `MTG_ARCHIDEKT_CACHE_SECONDS` (a minute). Anything the gateway sends to
-  Archidekt clears the deck and search copies. Reads made with a member's
-  own sign-in are never reused, so a proposal or apply always sees the live
-  deck. The precon list is kept for an hour;
+  Archidekt clears the deck and search copies. Reads of decks made with a
+  member's own sign-in are never reused, so a proposal or apply always sees
+  the live deck. The precon list is kept for an hour;
 - searches fetch one page per call, and a collection export stops at 50
   pages.
 
@@ -590,7 +614,7 @@ write per card). An assistant app doesn't wait that long for one tool call,
 so after 20 seconds the apply answers "applying" with how far it got and
 carries on in the background. `get_proposal`, the proposal's review page
 (which refreshes itself) and the in-chat card all show its progress until it
-ends. Restarting the gateway mid-apply gives it 5 seconds to finish, then
+ends. Restarting the gateway mid-apply gives it 90 seconds to finish, then
 stops it and records the proposal as failed ("interrupted") with what had
 already been sent; the snapshot taken before it is kept for an undo.
 

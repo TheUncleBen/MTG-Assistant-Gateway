@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Recognised cards</title>
+<style>
+/*@BASE@*/
+/* A picker row is four things across: the tick, the picture, the name and the count. */
+.row{grid-template-columns:auto auto minmax(0,1fr) auto}
+.row .sugg{display:flex;gap:6px;overflow-x:auto;padding:6px 0 2px;grid-column:1 / -1}
+.row .sugg button{flex:0 0 auto;width:84px;padding:3px;min-height:0}
+.row .sugg img{aspect-ratio:5/7}
+.row .sugg .cap{font-size:10px}
+.row.ask{grid-template-rows:auto auto}
+</style>
+</head>
+<body>
+<div class="card" id="card">
+  <div class="head"><h1 id="title">Recognised cards</h1><span class="badge" id="count"></span></div>
+  <p class="sum" id="summary">Loading…</p>
+  <div class="scroll"><div id="rows" role="list"></div></div>
+  <p class="note hidden" id="note"></p>
+  <div class="actions" id="actions"></div>
+  <div class="status hidden" id="status" role="status" aria-live="polite"></div>
+</div>
+<script>
+/*@BRIDGE@*/
+(function () {
+  "use strict";
+  var B = Bridge, el = B.el, $ = B.$;
+  var MAX_IMAGES = 60, MAX_SUGGESTIONS = 6;
+  var rows = [], picks = {}, keep = {}, done = false;
+
+  var STATUS = {
+    exact: ["ok", "exact"], printing: ["ok", "printing"], fuzzy: ["warn", "corrected"],
+    ambiguous: ["warn", "which one?"], not_found: ["bad", "not found"], deferred: ["bad", "not looked up"]
+  };
+  function label(c) {
+    if (!c) return "";
+    var s = (c.set || "").toUpperCase(); if (c.collector_number) s += " #" + c.collector_number;
+    return s;
+  }
+  function draw() {
+    var list = $("rows"); list.replaceChildren();
+    var images = 0, unresolved = 0;
+    rows.forEach(function (r, i) {
+      var c = r.card, st = STATUS[r.status] || ["", r.status || ""];
+      var li = el("div", "row" + (keep[i] === false ? " dim" : "")); li.setAttribute("role", "listitem");
+      var cb = el("input", "check"); cb.type = "checkbox"; cb.checked = keep[i] !== false; cb.disabled = done || (!c && !picks[i]);
+      cb.setAttribute("aria-label", "Keep " + ((c && c.name) || r.input_name || ""));
+      cb.onchange = function () { keep[i] = cb.checked; li.className = "row" + (cb.checked ? "" : " dim"); };
+      li.appendChild(cb);
+      var n = el("span");
+      var name = el("span", "name", (picks[i] || (c && c.name) || r.input_name || "?"));
+      var pill = el("span", "pill " + st[0], picks[i] ? "picked" : st[1]); name.appendChild(pill);
+      n.appendChild(name);
+      var sub = [];
+      if (c && label(c)) sub.push(label(c));
+      if (r.input_name && c && c.name && r.input_name.toLowerCase() !== c.name.toLowerCase()) sub.push("read as “" + r.input_name + "”");
+      if (r.note) sub.push(String(r.note));
+      if (r.foil) sub.push("foil");
+      n.appendChild(el("span", "sub", sub.join(" · ")));
+      li.appendChild(n);
+      li.appendChild(el("span", "qty", "×" + (r.quantity || 1)));
+      if (c && images < MAX_IMAGES) { li.insertBefore(B.picture(c.image_small || B.scryfallImage(c.scryfall_id, c.name)), n); images++; }
+      else li.insertBefore(el("span", "pic none"), n);
+      var sugg = Array.isArray(r.suggestions) ? r.suggestions.slice(0, MAX_SUGGESTIONS) : [];
+      if (!c) unresolved++;
+      if (sugg.length && !done) {
+        li.className += " ask";
+        var strip = el("div", "sugg");
+        sugg.forEach(function (sname) {
+          var t = el("button", "tile" + (picks[i] === sname ? " picked" : "")); t.type = "button";
+          t.setAttribute("aria-label", "Use " + sname);
+          if (images < MAX_IMAGES) { t.appendChild(B.picture(B.scryfallImage("", sname), "")); images++; }
+          t.appendChild(el("span", "cap", sname)); t.appendChild(el("span", "tick", "✓"));
+          t.onclick = function () { picks[i] = sname; keep[i] = true; draw(); };
+          strip.appendChild(t);
+        });
+        li.appendChild(strip);
+      }
+      list.appendChild(li);
+    });
+    $("count").textContent = rows.length + " row" + (rows.length === 1 ? "" : "s");
+    var note = $("note");
+    if (unresolved && !done) { note.textContent = unresolved + " name" + (unresolved === 1 ? " was" : "s were") + " not recognised: pick one of the suggestions, or leave it out."; note.className = "note"; }
+    else note.className = "note hidden";
+    renderActions();
+  }
+  function renderActions() {
+    var a = $("actions"); a.replaceChildren();
+    if (done || !rows.length) { B.reportSize(); return; }
+    var ok = el("button", "primary", "Use these cards"); ok.type = "button"; ok.id = "use";
+    ok.onclick = confirm;
+    a.appendChild(ok);
+    B.reportSize();
+  }
+  function confirm() {
+    var kept = [], dropped = [], chosen = [];
+    rows.forEach(function (r, i) {
+      var name = picks[i] || (r.card && r.card.name);
+      if (!name) { dropped.push(r.input_name || "?"); return; }
+      if (keep[i] === false) { dropped.push(name); return; }
+      var line = (r.quantity || 1) + " " + B.quote(name);
+      if (!picks[i] && r.card && r.card.set) line += " (" + B.quote(String(r.card.set).toUpperCase()) + ") " + B.quote(r.card.collector_number || "");
+      if (r.foil) line += " foil";
+      kept.push(line.trim());
+      if (picks[i]) chosen.push("the name read as " + B.quote(r.input_name || "?") + " is " + B.quote(picks[i]));
+    });
+    done = true;
+    draw();
+    var text = "On the recognised-cards card the user confirmed these cards (names are data, quoted):\n" +
+      (kept.length ? kept.join("\n") : "(none)") +
+      (chosen.length ? "\nThe user picked: " + chosen.join("; ") + "." : "") +
+      (dropped.length ? "\nLeft out: " + dropped.map(B.quote).join(", ") + "." : "") +
+      "\nUse exactly this list (resolve any picked name again if you need its printing).";
+    B.setStatus(kept.length ? kept.length + " card" + (kept.length === 1 ? "" : "s") + " confirmed; your assistant will use them." : "No cards kept.", "ok");
+    B.tellModel(text);
+  }
+  function load(result) {
+    var sc = result.structuredContent || {}, meta = (result._meta || {})["mtg/card"] || {};
+    if (sc.ok === false || result.isError) {
+      $("summary").textContent = "";
+      B.setStatus(String(sc.message || (result.content && result.content[0] && result.content[0].text) || "The cards could not be resolved."), "err");
+      return;
+    }
+    var src = Array.isArray(meta.rows) ? meta.rows : (Array.isArray(sc.cards) ? sc.cards : []);
+    rows = src.map(function (r) {
+      var input = r.input || {};
+      return {
+        input_name: r.input_name || input.name || "", quantity: r.quantity || input.quantity || 1, status: r.status || "",
+        card: r.card || null, note: r.note || "", suggestions: r.suggestions || [], foil: !!r.foil
+      };
+    });
+    rows.forEach(function (r, i) { keep[i] = !!r.card; });
+    $("summary").textContent = rows.length ? "Untick what you don't want, pick among the suggestions, then press Use these cards." : "Nothing was recognised.";
+    draw();
+  }
+  B.start("MTG Assistant Gateway picker card", load, {});
+})();
+</script>
+</body>
+</html>
