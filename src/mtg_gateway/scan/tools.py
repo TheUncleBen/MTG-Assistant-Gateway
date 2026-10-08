@@ -178,6 +178,8 @@ def add_scan_tools(server: MCPServer, service: ScanService, *, links: CardLinks 
             return results
         out = list(results)
         for (i, _inp), res in zip(redo, fresh, strict=True):
+            if res.status == "deferred":  # Scryfall is backing off: keep the row with its suggestions
+                continue
             original = results[i].input
             picked_note = f"picked from the suggestions for '{original.name}'"
             res = replace(res, input=original, note=f"{res.note}; {picked_note}" if res.note else picked_note)

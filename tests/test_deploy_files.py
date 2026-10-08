@@ -58,3 +58,40 @@ def test_ci_validates_gradle_wrapper_before_android_builds():
         build = body.find("run: |")  # the first script step, the build
         assert 0 <= check < build, job
         assert re.search(r"wrapper-validation@[0-9a-f]{40} ", body), job
+
+
+def test_every_static_file_is_shipped_in_the_package() -> None:
+    """The image installs the wheel, so a static file the package-data globs miss (a card page, a
+    script) is absent at runtime and the gateway fails to start; CI's smoke job caught exactly that
+    for `static/cards/` once."""
+    import tomllib
+
+    root = Path(__file__).resolve().parents[1]
+    data = tomllib.loads((root / "pyproject.toml").read_text())["tool"]["setuptools"]["package-data"]
+    src = root / "src"
+    missing = []
+    for pkg, patterns in data.items():
+        pkg_dir = src / pkg.replace(".", "/")
+        for f in pkg_dir.rglob("*"):
+            if not f.is_file() or "__pycache__" in f.parts or f.suffix == ".py":
+                continue
+            rel = f.relative_to(pkg_dir).as_posix()
+            if not rel.startswith("static/"):
+                continue
+            if rel.startswith("static/vendor/"):
+                continue  # covered by the recursive vendor glob of the scan package
+            sub = [p for p in data if p != pkg and p.startswith(pkg + ".")]
+            if any(rel.startswith(s2.split(".", 1)[1].replace(".", "/") + "/") for s2 in sub):
+                continue
+            if not any(_glob_match(rel, pat) for pat in patterns):
+                missing.append(f"{pkg}: {rel}")
+    assert not missing, missing
+
+
+def _glob_match(rel: str, pattern: str) -> bool:
+    import fnmatch
+
+    if "**" in pattern:
+        return fnmatch.fnmatch(rel, pattern.replace("**/", "*"))
+    # a single * never crosses a folder boundary, as in setuptools
+    return rel.count("/") == pattern.count("/") and fnmatch.fnmatch(rel, pattern)

@@ -53,10 +53,25 @@ before.
 - `whoami` carries `account_page`; `MTG_APPLY_IN_CHAT=false` now removes
   every card and the data link endpoint, not only the Approve card.
 
+- A gateway restart gives a background apply 90 seconds to finish (was 5)
+  before recording it as interrupted; the stack's stop grace is 120 seconds.
+
+### Fixed
+
+- Pauper Commander: a commander on the format's banned list is reported as
+  banned (it was only checked for rarity).
+- The rate-limit message says "Archidekt actions", which is what the
+  per-member budget counts.
+
 ### Security
 
 - A database backup is written inside a fresh owner-only folder under the backup directory and
   moved into place once complete, so nothing else can swap a link in while SQLite writes it.
+  Work folders a crashed backup left behind are removed by the next backup.
+- Card lookups are cached per member: an answer fetched with one member's
+  Archidekt sign-in is reused for that member only, never served to another.
+- A card data link's replay budget cannot be reset by issuing many other
+  links.
 
 ### Documentation
 

@@ -28,7 +28,7 @@ services:
   # The gateway: OAuth server for AI clients, MCP endpoint and browser pages.
   gateway:
     image: ${MTG_IMAGE:-ghcr.io/theuncleben/mtg-assistant-gateway}:${MTG_TAG:-latest}
-    # A redeploy waits for a running deck apply to finish (the gateway allows 100 s) before
+    # A redeploy waits for a running deck apply to finish (the gateway allows 90 s) before
     # Docker kills the container; the default is 10 s.
     stop_grace_period: 120s
     restart: unless-stopped

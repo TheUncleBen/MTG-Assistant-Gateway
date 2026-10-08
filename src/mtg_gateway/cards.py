@@ -133,6 +133,7 @@ LINK_CONTEXT = "card-link"  # tag inside every token, so no other use of the key
 # of the first fetch is kept for the link's lifetime so replays never reach Archidekt or Scryfall.
 LINK_MAX_USES = 20
 LINK_CACHE_SIZE = 512
+LINK_USES_SIZE = 8192  # replay counters kept; far more than ten minutes of tool calls can issue
 
 
 class CardLinks:
@@ -151,13 +152,21 @@ class CardLinks:
         within its lifetime."""
         now = time.time()
         with self._lock:
-            uses, first = self._uses.get(token, (0, now))
+            entry = self._uses.get(token)
+            if entry is None and token in self._cache:
+                # counted before, but its counter was dropped: a link this busy is used up
+                return False
+            uses, first = entry or (0, now)
             if now - first > self.ttl:
                 uses, first = 0, now
             self._uses[token] = (uses + 1, first)
             self._uses.move_to_end(token)
-            while len(self._uses) > LINK_CACHE_SIZE:
-                self._uses.popitem(last=False)
+            if len(self._uses) > LINK_USES_SIZE:
+                # expired counters first (oldest first use at the front), then the oldest
+                for old in [t for t, (_, at) in self._uses.items() if now - at > self.ttl]:
+                    self._uses.pop(old, None)
+                while len(self._uses) > LINK_USES_SIZE:
+                    self._uses.popitem(last=False)
             return uses < LINK_MAX_USES
 
     def cached(self, token: str) -> dict[str, Any] | None:
@@ -270,7 +279,7 @@ def deck_card_data(deck: Deck, *, public_url: str, snapshot: dict[str, Any] | No
         "gateway_url": f"{public_url}/decks/{deck.id}",
         "card_count": sum(c.quantity for c in deck.main_cards),
         "side_count": sum(c.quantity for c in deck.side_cards),
-        "commanders": [c.name for c in deck.cards if "Commander" in c.categories],
+        "commanders": [c.name for c in deck.cards if deck.is_commander(c)],
         "colour_identity": sorted({col for c in deck.main_cards for col in (c.color_identity or [])}),
         "curve": curve,
         "categories": categories,

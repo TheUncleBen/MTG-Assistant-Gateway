@@ -33,7 +33,7 @@ mtg-gateway = "mtg_gateway.__main__:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"mtg_gateway" = ["static/*"]  # companion.js and clickguard.js (the consent page needs it)
+"mtg_gateway" = ["static/*", "static/cards/*"]  # companion.js, clickguard.js, the cards
 "mtg_gateway.scan" = ["static/*", "static/vendor/**/*"]
 
 [tool.pytest.ini_options]

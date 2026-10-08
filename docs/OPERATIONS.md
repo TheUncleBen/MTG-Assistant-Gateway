@@ -598,8 +598,9 @@ The gateway is built to be light on Archidekt. For everyone together:
 - after five failures in a row all requests pause for a minute, and users see
   "Archidekt requests are paused after repeated failures; try later". It
   clears on its own;
-- card lookups are reused for `MTG_ARCHIDEKT_CARD_CACHE_SECONDS` (an hour),
-  and anonymous public deck reads and deck searches for
+- a member's card lookups are reused for that member for
+  `MTG_ARCHIDEKT_CARD_CACHE_SECONDS` (an hour; an answer fetched with one
+  member's sign-in is never served to another), and anonymous public deck reads and deck searches for
   `MTG_ARCHIDEKT_CACHE_SECONDS` (a minute). Anything the gateway sends to
   Archidekt clears the deck and search copies. Reads made with a member's
   own sign-in are never reused, so a proposal or apply always sees the live
@@ -613,7 +614,7 @@ write per card). An assistant app doesn't wait that long for one tool call,
 so after 20 seconds the apply answers "applying" with how far it got and
 carries on in the background. `get_proposal`, the proposal's review page
 (which refreshes itself) and the in-chat card all show its progress until it
-ends. Restarting the gateway mid-apply gives it 5 seconds to finish, then
+ends. Restarting the gateway mid-apply gives it 90 seconds to finish, then
 stops it and records the proposal as failed ("interrupted") with what had
 already been sent; the snapshot taken before it is kept for an undo.
 

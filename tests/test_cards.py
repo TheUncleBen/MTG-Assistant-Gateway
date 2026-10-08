@@ -9,6 +9,7 @@ import time
 from types import SimpleNamespace
 
 import pytest
+from cryptography.fernet import Fernet
 
 from mtg_gateway import cards
 from mtg_gateway.cards import (
@@ -250,6 +251,30 @@ async def test_a_replayed_link_is_answered_from_cache_and_runs_out(stack: Stack)
     gone = links.issue(links.open(link.rsplit("/", 1)[1])["sub"], "deck", "999999")
     r = await h.http.get(gone[len("https://mtg.test") :])
     assert r.status_code == 404 and r.json()["message"] == cards.FIXED_MESSAGES["not_found"]
+
+
+def test_a_used_up_link_stays_used_up_when_its_counter_is_crowded_out(monkeypatch) -> None:
+    """Issuing thousands of other links must not reset a used-up link's replay budget: a link
+    whose counter was dropped but whose answer is still cached is refused, and expired counters
+    are dropped before live ones."""
+    links = CardLinks(Fernet.generate_key().decode(), "https://mtg.test")
+    busy = links.issue("alice", "deck", "42").rsplit("/", 1)[1]
+    for _ in range(cards.LINK_MAX_USES):
+        assert links.use(busy)
+    assert not links.use(busy)
+    links.remember(busy, {"ok": True})
+    for n in range(cards.LINK_USES_SIZE + 10):
+        links.use(links.issue("amy", "deck", str(n)).rsplit("/", 1)[1])
+    assert busy not in links._uses  # crowded out of the counters
+    assert not links.use(busy)  # still refused: its cached answer shows it was counted before
+    # Expired counters go first: an old entry is dropped, a live one survives the squeeze.
+    links._uses.clear()
+    links._uses["stale"] = (1, time.time() - cards.LINK_TTL - 5)
+    live = links.issue("amy", "deck", "live").rsplit("/", 1)[1]
+    links.use(live)
+    for n in range(cards.LINK_USES_SIZE - 1):  # fills the table to one over its size
+        links.use(links.issue("amy", "deck", f"x{n}").rsplit("/", 1)[1])
+    assert "stale" not in links._uses and live in links._uses
 
 
 async def test_a_link_stops_working_for_a_disabled_member(stack: Stack) -> None:

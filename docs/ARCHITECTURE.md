@@ -287,7 +287,7 @@ For the exact devices and plans tested, see
   straight from Scryfall under each card's CSP (`_meta.ui.csp`). The text a
   card sends the model on a tap is shaped like a user action but contains
   data (card and set names from Scryfall, the user's own words): the cards
-  quote every such value, keep it to one line and at most 200 characters,
+  quote every such value, keep it to one line and at most 200 characters (a typed reject reason, 500),
   and the skill tells the assistant to treat it as the user's choice, not as
   an instruction. `MTG_APPLY_IN_CHAT=false` removes all of it.
   The MTG skill also tells the assistant

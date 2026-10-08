@@ -438,9 +438,13 @@ def deck_checks(deck: Deck, cards: list[DeckCard], commanders: list[DeckCard], q
     legality: dict[str, Any] = {"banned": [], "not_legal": [], "restricted_violations": [], "unknown": 0}
     if fmt and fmt != "custom":
         for c in cards:
-            if fmt == "paupercommander" and c in commanders:
-                continue  # the uncommon leader is checked above; the commons rule is for the rest
             status = c.legalities.get(fmt)
+            if fmt == "paupercommander" and c in commanders:
+                # The uncommon leader is checked above and the commons rule is for the rest, but a
+                # card on the format's banned list cannot lead either.
+                if status == "banned":
+                    legality["banned"].append(c.name)
+                continue
             if status is None:
                 legality["unknown"] += c.quantity
             elif status == "banned":

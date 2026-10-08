@@ -81,6 +81,10 @@ MAX_CHANGES = 40
 # than an assistant app waits for one tool call); get_proposal and the review page show its
 # progress until it ends.
 APPLY_WAIT_SECONDS = 20.0
+# At shutdown (a redeploy), how long a running apply may go on before it is cut off and recorded
+# as interrupted: long enough for a paced 100-card apply, and under the stack's stop_grace_period
+# (120 s), after which Docker kills the container with nothing recorded.
+SHUTDOWN_GRACE_SECONDS = 90.0
 BROWSER_CLIENT = "__browser__"  # the same value as pages.BROWSER_CLIENT_ID
 # An administrator acting on a member's account from the admin pages (unlink): recorded in the
 # member's own activity log as done by an administrator, never as the member's browser.
@@ -1133,7 +1137,7 @@ class DeckService:
         if self.archidekt_budget.take(sub):
             return None
         return (
-            f"Your account has used its {self.archidekt_budget.per_window} Archidekt requests for "
+            f"Your account has used its {self.archidekt_budget.per_window} Archidekt actions for "
             f"the last {ARCHIDEKT_BUDGET_WINDOW // 60} minutes; wait a few minutes and try again."
         )
 
@@ -1727,7 +1731,7 @@ class DeckService:
         except TimeoutError:
             return self.describe(sub, proposal_id)
 
-    async def aclose(self, grace: float = 5.0) -> None:
+    async def aclose(self, grace: float = SHUTDOWN_GRACE_SECONDS) -> None:
         """At shutdown: give running applies ``grace`` seconds to finish, then cancel the rest,
         which records each as failed ("interrupted", with what it had sent) before the database
         closes."""

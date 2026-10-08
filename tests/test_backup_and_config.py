@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from cryptography.fernet import Fernet
 
-from mtg_gateway.backup import export_now, prune, seconds_until
+from mtg_gateway.backup import export_now, prune, seconds_until, sweep_work_dirs
 from mtg_gateway.config import ConfigError, load_settings
 from mtg_gateway.db import Database
 
@@ -321,3 +322,32 @@ def test_backup_is_written_in_a_private_folder_and_leaves_nothing_behind(tmp_pat
     assert dest.exists() and oct(dest.stat().st_mode & 0o777) == "0o600"
     assert [p.name for p in backup_dir.iterdir()] == [dest.name]
     db.close()
+
+
+def test_stale_work_folders_from_a_crashed_backup_are_swept(tmp_path: Path, caplog):
+    """A backup killed mid-write leaves its private `.backup-*` folder behind; the next backup
+    removes such folders (older than an hour) with the partial copy inside, leaves a young one
+    (another backup may still be writing in it), and never follows a link by that name."""
+    db = Database(tmp_path / "g.sqlite")
+    b = tmp_path / "b"
+    b.mkdir()
+    stale = b / ".backup-old"
+    stale.mkdir(mode=0o700)
+    (stale / "mtg-gateway-partial.sqlite").write_bytes(b"partial")
+    old = time.time() - 7200
+    os.utime(stale, (old, old))
+    young = b / ".backup-young"
+    young.mkdir(mode=0o700)
+    (young / "mtg-gateway-partial.sqlite").write_bytes(b"partial")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "keep.txt").write_text("keep")
+    link = b / ".backup-link"
+    link.symlink_to(elsewhere, target_is_directory=True)
+    os.utime(link, (old, old), follow_symlinks=False)
+    with caplog.at_level("INFO", logger="mtg_gateway.backup"):
+        out = export_now(db, b, keep_days=14)
+    assert out.exists() and not stale.exists() and young.exists()
+    assert (elsewhere / "keep.txt").exists() and link.is_symlink()
+    assert sorted(p.name for p in b.iterdir() if not p.name.startswith(".backup-")) == [out.name]
+    assert sweep_work_dirs(b, older_than=0) == 1 and not young.exists()  # the young one, when old enough
