@@ -23,7 +23,7 @@ before.
   collector number as text; only then does it propose. The model's own copy
   of the result is small (the sets and the newest printings), so a card with
   hundreds of printings no longer fills the chat.
-- **Picker card** on `resolve_cards` (and the scan path): the recognised
+- **Picker card** on `resolve_cards`: the recognised
   cards with pictures and status, a tick per row to leave one out, suggestion
   tiles for ambiguous or unknown names, **Use these cards** sends the kept
   rows back to the assistant as text. In an app that offers form questions

@@ -436,3 +436,55 @@ async def test_resolve_cards_asks_a_form_for_ambiguous_names_where_it_can(stack:
         and row["quantity"] == 3
         and row["status"] == "exact"
     )
+    # The row still says what was read, and that the user picked the name from the suggestions.
+    assert (
+        row["input"]["name"] == "Cultivatz" and "picked from the suggestions for 'Cultivatz'" in row["note"]
+    )
+    # A failed second pass keeps the first pass (its suggestions reach the assistant as before).
+    service = h.app.state.gateway.scan
+
+    async def boom(inputs, *, owner=None):
+        from mtg_gateway.scan.service import ScanError
+
+        raise ScanError("rate_limited", "busy")
+
+    real = service.resolve
+    monkeypatch.setattr(service, "resolve", real)
+    calls = {"n": 0}
+
+    async def second_fails(inputs, *, owner=None):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            return await boom(inputs, owner=owner)
+        return await real(inputs, owner=owner)
+
+    monkeypatch.setattr(service, "resolve", second_fails)
+    out = structured(await call(h, token, "resolve_cards", {"cards": [{"name": "Cultivatz"}]}))
+    assert out["ok"] is True and out["cards"][0]["status"] == "ambiguous" and calls["n"] == 2
+
+
+def test_no_form_where_the_client_renders_cards() -> None:
+    """A host that draws the picker card must not also get a form for the same names."""
+    caps = _Caps(form=True)
+    caps.extensions = {cards.UI_EXTENSION: {}}
+    assert cards.client_elicits_forms(SimpleNamespace(client_capabilities=caps)) is False
+    caps.extensions = {}
+    assert cards.client_elicits_forms(SimpleNamespace(client_capabilities=caps)) is True
+
+
+async def test_a_link_stops_working_for_a_member_who_left_the_group(stack: Stack, monkeypatch) -> None:
+    from mtg_gateway.membership import Membership
+
+    h = stack.h
+    token = await linked_user(stack)
+    link = (await call(h, token, "get_deck", {"deck_ref": "42"}))["_meta"][CARD_META_KEY]["link"]
+    path = link[len("https://mtg.test") :]
+    checker = h.app.state.gateway.membership
+    assert checker is not None and (await h.http.get(path)).status_code == 200
+
+    async def revoked(sub):
+        return Membership.REVOKED
+
+    monkeypatch.setattr(checker, "check", revoked)
+    r = await h.http.get(path)
+    assert r.status_code == 403 and r.json()["error"] == "forbidden"

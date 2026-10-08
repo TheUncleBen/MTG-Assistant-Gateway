@@ -510,8 +510,10 @@ it is for and which deck, snapshot or card, and expires after ten minutes
 (`mtg_fernet_key` signs it). The endpoint serves the member's own data only,
 to a member who still exists, is enabled and still in the required group,
 without cookies; an expired, forged or used-up token (twenty fetches)
-answers 404 `expired`, a removed member 403 `forbidden`, and each hit is a
-`card` metric. The first answer is kept for the link's lifetime, so a
+answers 404 `expired`, a removed member 403 `forbidden`, a deck or card
+that is gone or not theirs 404 `not_found`, an exhausted Archidekt budget
+429 `rate_limited`, an unreachable Archidekt or Scryfall 503 `unavailable`,
+and each hit is a `card` metric. The first answer is kept for the link's lifetime, so a
 replayed link costs no Archidekt or Scryfall call. The token is the URL's
 last path segment: if your reverse proxy logs request paths, exclude
 `/cards/data/` from its access log (the gateway's own access log is off). The AI app loads

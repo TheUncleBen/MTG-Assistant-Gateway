@@ -82,8 +82,10 @@ The cards an AI app shows in the chat load their bulky data from `GET /cards/dat
 card in a tool result's `_meta`) names the member, the kind (`deck`, `snapshot`, `printings`) and the
 id, and the answer is that member's own data as JSON (`Access-Control-Allow-Origin: *`, no cookies,
 `Cache-Control: private, no-store`). An expired, forged or used-up token (twenty fetches) answers 404 `expired`; a member who
-was disabled or removed from the group since, 403 `forbidden`; error messages are the gateway's own
-fixed words. The route exists only with
+was disabled or removed from the group since, 403 `forbidden`; a deck, snapshot or card that no longer
+exists or is not that member's, 404 `not_found`; the member's Archidekt budget used up, 429
+`rate_limited`; Archidekt or Scryfall unreachable, 503 `unavailable` (503 `not_linked` when the link
+needs an Archidekt account that was unlinked since). Error messages are the gateway's own fixed words. The route exists only with
 `MTG_APPLY_IN_CHAT` on. It is not a public API: the token is the only credential and it cannot be
 requested.
 

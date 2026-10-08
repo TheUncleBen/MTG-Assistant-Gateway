@@ -127,6 +127,7 @@ def _origin(url: str) -> str:
     return f"{u.scheme}://{u.netloc}"
 
 
+UI_EXTENSION = "io.modelcontextprotocol/ui"  # what a client that renders cards declares
 LINK_CONTEXT = "card-link"  # tag inside every token, so no other use of the key accepts one
 # A link may be fetched this many times (a card reloading, a retry); more is a replay, and the answer
 # of the first fetch is kept for the link's lifetime so replays never reach Archidekt or Scryfall.
@@ -283,7 +284,6 @@ def deck_card_data(deck: Deck, *, public_url: str, snapshot: dict[str, Any] | No
 FIXED_MESSAGES = {
     "not_found": "The deck, snapshot or card behind this link no longer exists.",
     "invalid": "The deck, snapshot or card behind this link no longer exists.",
-    "forbidden": "The deck behind this link is not yours to read.",
     "not_linked": "No Archidekt account is linked; link one on the Account page.",
     "rate_limited": "The gateway is busy for this account; try again in a minute.",
     "unavailable": "The data behind this link could not be loaded right now.",
@@ -307,7 +307,6 @@ def add_card_routes(server: MCPServer, state: AppState, links: CardLinks) -> Non
         "Access-Control-Max-Age": "600",
         "Cache-Control": "private, no-store",
         "X-Content-Type-Options": "nosniff",
-        "Vary": "Origin",
     }
 
     def fail(error: str, message: str, status: int) -> Response:
@@ -356,15 +355,17 @@ def add_card_routes(server: MCPServer, state: AppState, links: CardLinks) -> Non
                 scan = state.scan
                 if scan is None:
                     return fail("unavailable", "Card lookups are not available on this gateway.", 503)
+                from .scan.service import ScanError
+
                 try:
                     out = await scan.printings(link["ref"], owner=sub)
-                except Exception as exc:  # ScanError: the kind is on the exception
-                    kind = str(getattr(exc, "kind", "unavailable"))
+                except ScanError as exc:
+                    kind = str(exc.kind)
                     return fail(kind, FIXED_MESSAGES.get(kind, FIXED_MESSAGES["unavailable"]), _status(kind))
                 data = {"oracle_id": link["ref"], **out}
         except DeckError as exc:
-            message = FIXED_MESSAGES.get(exc.kind, FIXED_MESSAGES["unavailable"])
-            return fail(exc.kind, message, _status(exc.kind))
+            kind = "not_found" if exc.kind == "forbidden" else exc.kind  # forbidden means "member gone" here
+            return fail(kind, FIXED_MESSAGES.get(kind, FIXED_MESSAGES["unavailable"]), _status(kind))
         links.remember(token, data)
         return JSONResponse({"ok": True, **data}, headers=headers)
 
@@ -380,6 +381,10 @@ def client_elicits_forms(ctx: Any) -> bool:
         return False
     # The capability object has a ``form`` member on the 2026 protocol; older clients that declare
     # elicitation at all declared the form kind implicitly.
+    # A client that renders MCP Apps gets the picker card instead of a form (never both).
+    extensions = getattr(caps, "extensions", None) or {}
+    if isinstance(extensions, dict) and UI_EXTENSION in extensions:
+        return False
     form = getattr(elicitation, "form", None)
     url = getattr(elicitation, "url", None)
     return form is not None or url is None

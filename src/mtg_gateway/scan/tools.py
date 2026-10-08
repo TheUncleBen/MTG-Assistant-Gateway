@@ -169,12 +169,18 @@ def add_scan_tools(server: MCPServer, service: ScanService, *, links: CardLinks 
         for i, r in asks:
             picked = answers.get(f"q{i}")
             if picked:
-                redo.append((i, replace(r.input, name=picked, set_code="", collector_number="", art_hash="")))
+                redo.append((i, replace(r.input, name=picked, art_hash="")))
         if not redo:
             return results
-        fresh = await service.resolve([inp for _, inp in redo], owner=_sub())
+        try:
+            fresh = await service.resolve([inp for _, inp in redo], owner=_sub())
+        except ScanError:  # the first pass stands; its suggestions still reach the assistant
+            return results
         out = list(results)
-        for (i, _), res in zip(redo, fresh, strict=True):
+        for (i, _inp), res in zip(redo, fresh, strict=True):
+            original = results[i].input
+            picked_note = f"picked from the suggestions for '{original.name}'"
+            res = replace(res, input=original, note=f"{res.note}; {picked_note}" if res.note else picked_note)
             out[i] = res
         return out
 
