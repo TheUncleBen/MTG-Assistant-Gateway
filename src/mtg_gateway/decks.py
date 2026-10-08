@@ -60,6 +60,7 @@ PRINTING_ACTIONS = ("set_finish", "set_printing")
 COMMANDER = "Commander"
 # The purpose named inside every stored Archidekt session (see DeckService._seal).
 SESSION_PURPOSE = "archidekt_session"
+SEALED_MARKER = "archidekt_sessions_sealed"  # audit event: the one-time reseal has run
 MAX_CATEGORY = 60
 # Deck details propose_deck_details may change, with their Archidekt field names.
 DETAIL_FIELDS = {
@@ -1263,21 +1264,33 @@ class DeckService:
         return jwt_exp(access) if isinstance(access, str) else None
 
     def reseal_legacy_links(self) -> int:
-        """Seal every stored session written before sealing (or by an older image after a
-        rollback) to the member whose row holds it at startup; returns how many were resealed.
-        An unsealed blob carries no owner, so this cannot tell whether it was moved between rows
-        before then: sealing protects sessions from the first start of 0.7.7 on."""
-        n = 0
+        """At the first start of a sealing gateway, seal every stored session written before
+        sealing to the member whose row holds it then; returns how many were resealed. An
+        unsealed blob carries no owner, so this cannot tell whether it was moved between rows
+        before that start. It runs once (an ``archidekt_sessions_sealed`` audit entry marks it):
+        an unsealed blob found at any later start (copied in from an old disk image, or written
+        by an older image after a rollback) is not trusted and is deleted, and that member links
+        again."""
+        first = not self.db.audit_seen(SEALED_MARKER)
+        n = dropped = 0
         for row in self.db.active_links():
             secret = self._open(row["sub"], row["secret_enc"], legacy=True)
             if secret is None or "p" in secret:
                 continue
             access, refresh = secret.get("access"), secret.get("refresh")
-            if not isinstance(access, str) or not access:
-                continue
-            sealed = self._seal(row["sub"], access, refresh if isinstance(refresh, str) else None)
-            if self.db.update_link_secret(row["sub"], sealed, only_secret=row["secret_enc"]):
-                n += 1
+            if first and isinstance(access, str) and access:
+                sealed = self._seal(row["sub"], access, refresh if isinstance(refresh, str) else None)
+                if self.db.update_link_secret(row["sub"], sealed, only_secret=row["secret_enc"]):
+                    n += 1
+            elif self.db.revoke_link(row["sub"], only_secret=row["secret_enc"]):
+                self.db.audit(
+                    "archidekt_link_unsealed", sub=row["sub"], detail={"reason": "session not sealed"}
+                )
+                dropped += 1
+        if first:
+            self.db.audit(SEALED_MARKER, detail={"resealed": n})
+        if dropped:
+            logger.warning("%d stored Archidekt session(s) were not sealed and were deleted", dropped)
         return n
 
     def purge_expired_links(self, now: float | None = None) -> int:

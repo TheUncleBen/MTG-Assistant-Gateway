@@ -24,8 +24,9 @@ Archidekt sessions (an optional secret, `mtg_authentik_api_token`, and
   `MTG_ADMIN_GROUP` and deletes the stored Archidekt session of every linked
   member who is in neither or is deactivated, with an `archidekt_link_swept`
   audit row. It deletes nothing when Authentik's answer can't be trusted
-  (unreachable, an error, empty, partial, split into pages, malformed, or
-  naming nobody the gateway knows) and waits longer before the next try.
+  (unreachable, an error, empty, partial, split into pages, malformed,
+  naming nobody the gateway knows, or removing more than three links and
+  more than a quarter of them in one round) and waits longer before the next try.
   Off unless `MTG_AUTHENTIK_API_TOKEN_FILE` names a readable token file; an
   unreadable one leaves it off with one warning. Setup:
   [IDP-AUTHENTIK.md](docs/IDP-AUTHENTIK.md#12-optional-removed-member-clean-up).
@@ -55,7 +56,9 @@ Archidekt sessions (an optional secret, `mtg_authentik_api_token`, and
 - The stored Archidekt session is sealed to its member inside the
   encryption, so a session copied into another member's row opens nothing.
   A session stored by 0.7.6 or earlier carries no owner, so the first start
-  seals it to whichever member's row holds it then.
+  seals it to whichever member's row holds it then. Only that first start
+  does: after it, an unsealed session (copied in from an old disk image, or
+  written by 0.7.6 after a rollback) is deleted and that member links again.
 - Every hour the gateway deletes stored sessions that have expired, instead
   of keeping them until the member next uses the gateway.
 - Relinking replaces the old session at once on disk (the write-ahead log is

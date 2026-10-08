@@ -484,6 +484,11 @@ def build_mcp_server(state: AppState) -> MCPServer:
         if state.sweep is None:
             state.sweep = AuthentikSweep(s, state.db, state.decks)
         if state.sweep.enabled:
+            logger.info(
+                "removed-member clean-up is on: hourly, asking %s about %s",
+                state.sweep.api,
+                ", ".join(state.sweep.groups),
+            )
             tasks.append(asyncio.create_task(state.sweep.loop()))
         elif state.sweep.why_off():
             logger.warning("%s", state.sweep.why_off())

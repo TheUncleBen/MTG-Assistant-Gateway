@@ -456,13 +456,20 @@ adding anyone to a group and changing a group (HTTP 403).
 for each of the two groups, using each member's `uid` (the `sub` Authentik
 gives the gateway in the default **Based on the User's hashed ID** subject
 mode) and `is_active`. Only direct members count, the same as the `groups`
-claim people sign in with.
+claim people sign in with in Authentik's default `profile` mapping. If you
+changed that mapping to also list parent groups, people who get in only
+through a child group look removed to the clean-up and lose their stored
+session every hour: keep the default mapping, or add them to the group
+directly.
 
 **When it deletes nothing.** Authentik can't be reached, answers with an
 error or a redirect, the answer is split into pages, a group isn't found by
 its exact name, a member entry is malformed, both groups come back empty, or
 nobody the gateway knows is among the members (a different subject mode or a
-wrong group name would otherwise make everyone look removed). Each of those
+wrong group name would otherwise make everyone look removed), or the round
+would delete more than three stored sessions and more than a quarter of
+them at once (press **Disable** on the admin page for people you removed in
+bulk). Each of those
 logs `removed-member clean-up skipped, nothing deleted: …` and the next try
 waits longer (one hour, then two, four, up to six). The token is never
 logged.
@@ -512,8 +519,10 @@ below are reported, not re-checked; the API names are given beside them.
 
    Redeploy.
 
-**Check it.** The gateway's log shows no `removed-member clean-up is off`
-warning at start. About two minutes after start, then hourly, it runs; a
+**Check it.** At start the gateway's log says `removed-member clean-up is
+on: hourly, asking https://auth.example.com about …` with your two group
+names. If that line is missing, `MTG_AUTHENTIK_API_TOKEN_FILE` is empty; a
+`removed-member clean-up is off` warning says what else is wrong. About two minutes after start, then hourly, it runs; a
 round that removed sessions logs `removed-member clean-up deleted N stored
 Archidekt session(s)`, and a refused one logs why with `nothing deleted`.
 Members' Account pages say *On this gateway the hourly clean-up is on.*

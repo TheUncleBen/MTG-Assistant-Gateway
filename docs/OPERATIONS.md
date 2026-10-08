@@ -228,6 +228,9 @@ OAuth clients, hashed tokens, which Archidekt account each member linked,
 proposals, deck snapshots, deck reports, scan sessions, usage counters and
 the audit log. Mystic Forge keeps nothing worth backing up.
 
+The copy is cleaned in memory before it is written, so a backup briefly
+needs about as much free memory as the database file is large.
+
 **What isn't:** anyone's sign-in. Every member's stored Archidekt session
 and the identity provider's tokens kept for the live membership check are
 blanked in the copy before it is written (the live database keeps them), so
@@ -335,7 +338,7 @@ secret.
    stored Archidekt session is only deleted when they next try to use the
    gateway. If they never come back, it stays on the server until an admin
    presses **Disable** or **Unlink Archidekt**, or until the session expires
-   (about 40 days after they linked; the hourly clean-up then deletes it).
+   (about 40 days after they linked; the hourly expiry purge then deletes it).
    **Disable** deletes it at once and keeps them out even if they are put
    back in the group by mistake. The same holds for someone deactivated or
    deleted in Authentik.
@@ -347,7 +350,8 @@ secret.
    and `MTG_ADMIN_GROUP` and deletes the stored Archidekt session of every
    linked member who is in neither or is deactivated (audit row
    `archidekt_link_swept`). An answer it can't trust (an error, an empty
-   or partial answer, nobody it knows among the members) deletes nothing and
+   or partial answer, nobody it knows among the members, more than three
+   and more than a quarter of the links at once) deletes nothing and
    is logged as `removed-member clean-up skipped, nothing deleted: …`.
    Members' Account pages say whether it is on. It doesn't replace
    **Disable**, which also keeps the person out.
@@ -472,7 +476,7 @@ and writes an `archidekt_link_expired` audit row with the reason
 `session expired`; the member links again. Each stored session is also sealed
 to its member inside the encryption, so a session copied to another member's
 row opens nothing. A session stored by 0.7.6 or earlier carries no owner, so
-the first start of 0.7.7 seals it to whichever member's row holds it then.
+the first start of 0.7.7 seals it to whichever member's row holds it then. Only that first start does: an unsealed session found at a later start (copied in from an old disk image, or written by an older version after a rollback) is deleted, with an `archidekt_link_unsealed` audit row, and that member links again.
 
 ## Deck writes and the kill switch
 

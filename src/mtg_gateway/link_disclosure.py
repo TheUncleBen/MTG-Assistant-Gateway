@@ -22,6 +22,8 @@ Every sentence has to stay true of the code; the source of each claim is noted b
   keeps no cookies (``ArchidektClient.__init__``);
 - who else: any request signed in as the member (browser session, connected app) acts with the
   member's link; the identity provider decides who can sign in as whom;
+- kept after unlink: ``Database.revoke_link`` blanks only the session; ``delete_member_data``
+  removes the row; the audit log is kept for ``AUDIT_RETENTION_SECONDS`` (a year);
 - backups: ``Database.backup_to`` blanks every stored session before the copy is written;
 - ending it: unlink, delete my data, admin unlink or disable blank the stored session at once;
   the optional hourly clean-up (``idp_sweep.py``) does for members Authentik no longer lists;
@@ -78,6 +80,10 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "linked, when the session was last renewed and last used; and activity-log entries for "
             "each link, unlink, renewal and failed attempt.",
             "Never stored: your Archidekt password.",
+            "After an unlink, the gateway keeps your Archidekt username and user number (not the "
+            "session) until you or an admin delete your data. Activity-log entries, including the "
+            "Archidekt username noted when you linked, are kept for a year, even after your data "
+            "is deleted.",
         ),
     ),
     (
@@ -145,8 +151,9 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "and an admin's Unlink or Disable.",
             "If you are removed from this gateway's group, or your account at the sign-in service "
             "is deactivated or deleted, you lose access to the gateway at once. Your stored "
-            "session is deleted within about an hour if the person who runs the gateway turned on "
-            "its hourly clean-up (it needs an extra setting at the sign-in service). Without it, "
+            "session is usually deleted within about an hour if the person who runs the gateway "
+            "turned on its hourly clean-up (it needs an extra setting at the sign-in service), "
+            "later while it cannot get a clear answer from the sign-in service. Without it, "
             "the session is deleted when an admin presses Disable or Unlink, when it expires, or "
             "(after a removal from the group) the next time you or one of your apps tries to use "
             "the gateway.",

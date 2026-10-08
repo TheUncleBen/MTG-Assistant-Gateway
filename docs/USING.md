@@ -309,6 +309,7 @@ Linking gives this gateway a working sign-in to your Archidekt account. Read wha
 - Stored, encrypted: the session (a short-lived access token and the refresh token that renews it).
 - Stored as plain text: your Archidekt username and user number (if Archidekt does not send your username, what you typed to sign in, which may be your email); when you linked, when the session was last renewed and last used; and activity-log entries for each link, unlink, renewal and failed attempt.
 - Never stored: your Archidekt password.
+- After an unlink, the gateway keeps your Archidekt username and user number (not the session) until you or an admin delete your data. Activity-log entries, including the Archidekt username noted when you linked, are kept for a year, even after your data is deleted.
 
 **What the person who runs this server can see and do**
 
@@ -336,7 +337,7 @@ Linking gives this gateway a working sign-in to your Archidekt account. Read wha
 
 - The access token lasts about an hour; when it runs out, the gateway gets a new one with the refresh token. Archidekt's refresh token stops working about 40 days after you link (measured in October 2026; Archidekt sets this and can change it). Then you link again. Your Account page shows the date for your link.
 - Unlink on the Account page deletes the gateway's copy at once. So do Delete my data and an admin's Unlink or Disable.
-- If you are removed from this gateway's group, or your account at the sign-in service is deactivated or deleted, you lose access to the gateway at once. Your stored session is deleted within about an hour if the person who runs the gateway turned on its hourly clean-up (it needs an extra setting at the sign-in service). Without it, the session is deleted when an admin presses Disable or Unlink, when it expires, or (after a removal from the group) the next time you or one of your apps tries to use the gateway.
+- If you are removed from this gateway's group, or your account at the sign-in service is deactivated or deleted, you lose access to the gateway at once. Your stored session is usually deleted within about an hour if the person who runs the gateway turned on its hourly clean-up (it needs an extra setting at the sign-in service), later while it cannot get a clear answer from the sign-in service. Without it, the session is deleted when an admin presses Disable or Unlink, when it expires, or (after a removal from the group) the next time you or one of your apps tries to use the gateway.
 - Unlinking deletes only the gateway's copy. Whether the session also stops working on Archidekt's side is not known, so a copy someone already took may keep working until it expires. Whether changing your Archidekt password ends it is not known either.
 
 **Archidekt's terms**

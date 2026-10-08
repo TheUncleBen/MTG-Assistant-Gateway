@@ -142,6 +142,8 @@ async def test_session_stored_before_sealing_is_refused_until_resealed(stack: St
     decks = _decks(stack)
     secret = _raw(stack, "user-1")
     legacy = json.dumps({"access": secret["access"], "refresh": secret["refresh"]})
+    # as on a database from 0.7.6, before the first start of a sealing gateway
+    h.db._conn.execute("DELETE FROM audit_log WHERE event = 'archidekt_sessions_sealed'")
     h.db.update_link_secret("user-1", decks.fernet.encrypt(legacy.encode()).decode())
     foreign = h.db.get_link("user-1")["secret_enc"]
     sealed_to_1 = decks._seal("user-1", secret["access"], secret["refresh"])
@@ -153,6 +155,13 @@ async def test_session_stored_before_sealing_is_refused_until_resealed(stack: St
     assert decks.status("user-2")["link_expires_at"] is None
     assert structured(await call(h, token, "list_my_decks"))["ok"] is True
     assert decks.reseal_legacy_links() == 0
+    # Only the first start reseals: an unsealed blob found later is deleted, not trusted.
+    h.db.update_link_secret("user-1", decks.fernet.encrypt(legacy.encode()).decode())
+    assert decks.reseal_legacy_links() == 0
+    assert h.db.get_link("user-1") is None
+    assert h.db.get_link("user-2")["secret_enc"] == sealed_to_1  # sealed blobs are left alone
+    events = [r[0] for r in h.db._conn.execute("SELECT event FROM audit_log").fetchall()]
+    assert events.count("archidekt_sessions_sealed") == 1 and "archidekt_link_unsealed" in events
 
 
 async def test_expiry_comes_from_the_refresh_token_and_is_shown(stack: Stack) -> None:

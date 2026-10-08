@@ -252,7 +252,8 @@ For the exact devices and plans tested, see
   - **Sealed and dated.** The encrypted blob names its purpose and the
     member's subject and is refused under any other member's link. A
     session stored by 0.7.6 or earlier carries no owner, so at the first
-    start of 0.7.7 it is sealed to the member whose row holds it then. The
+    start of 0.7.7 it is sealed to the member whose row holds it then;
+    an unsealed session found at any later start is deleted. The
     Account page shows when the session stops working, read from the refresh
     token's own `exp` (Archidekt does not rotate it, so it is fixed at link
     time), and the hourly purge deletes sessions past that date.

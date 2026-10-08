@@ -221,6 +221,12 @@ def _string_active() -> dict:
     return b
 
 
+def _admins_no_uid() -> dict:
+    b = json.loads(_recorded("groups-mtg-gateway-admins.json"))
+    del b["results"][0]["users_obj"][0]["uid"]
+    return b
+
+
 def _twice() -> dict:
     b = _users_body()
     b["results"].append(b["results"][0])
@@ -241,6 +247,9 @@ REFUSED = {
     "a member without uid": {USERS: _resp(_no_uid())},
     "is_active not a bool": {USERS: _resp(_string_active())},
     "the group twice": {USERS: _resp(_twice())},
+    # only the admins group's answer is bad: still nothing, or admins would lose their links
+    "admins timed out": {ADMINS: httpx.ReadTimeout("slow")},
+    "admins member without uid": {ADMINS: _resp(_admins_no_uid())},
     "wrong shape": {USERS: _resp(["not", "a", "dict"])},
     "a timeout": {USERS: httpx.ReadTimeout("slow")},
     "unreachable": {USERS: httpx.ConnectError("no route")},
@@ -281,6 +290,24 @@ async def test_an_answer_naming_nobody_the_gateway_knows_deletes_nothing(
         with pytest.raises(SweepRefused, match="subject mode"):
             await AuthentikSweep(_settings(), db, None, http=http).run_once()
     assert len(_linked(db)) == 4
+
+
+def test_plan_refuses_to_remove_many_links_at_once() -> None:
+    """One member still matching (say after a subject-mode change) must not let every other
+    link go."""
+    groups = {USERS: [{"uid": ALICE, "is_active": True}]}
+    others = [f"sub-{i}" for i in range(49)]
+    with pytest.raises(SweepRefused, match="49 of 50"):
+        plan(groups, [ALICE, *others], [ALICE, *others])
+    with pytest.raises(SweepRefused):
+        plan(groups, [ALICE, *others[:9]], [ALICE])  # 9 of 10
+    with pytest.raises(SweepRefused):
+        plan(groups, [ALICE, *others[:4]], [ALICE])  # 4 of 5
+    # a few at a time, or a small share, still go
+    assert len(plan(groups, [ALICE, *others[:3]], [ALICE]).remove) == 3
+    keep = [{"uid": f"k-{i}", "is_active": True} for i in range(16)]
+    many = [ALICE, *[f"k-{i}" for i in range(16)], *others[:4]]
+    assert len(plan({USERS: [groups[USERS][0], *keep]}, many, [ALICE]).remove) == 4  # 4 of 21
 
 
 def test_plan_refuses_an_empty_allowed_set_even_with_groups_found() -> None:

@@ -8,7 +8,12 @@ neither, or whose Authentik user is deactivated or gone.
 
 It is optional. It needs an Authentik API token (MTG_AUTHENTIK_API_TOKEN_FILE, a Docker secret)
 whose user may only view groups (``authentik_core.view_group``); docs/IDP-AUTHENTIK.md has the
-steps. Without one it stays off, with a single warning at start.
+steps. Without one it stays off; an unreadable token file gives a single warning at start, and
+a working setup logs one line saying it is on.
+
+Only direct members count, as in Authentik's default groups claim. A custom scope mapping that
+puts inherited (parent) groups in the claim would let in people this sweep does not see as
+members; docs/IDP-AUTHENTIK.md warns about that.
 
 Authentik's answer (``GET /api/v3/core/groups/?name=...``, verified against Authentik 2026.8.3,
 recorded in tests/fixtures/authentik-2026.8.3/): each group carries ``users_obj``, its direct members, each
@@ -17,9 +22,10 @@ mode) and ``is_active``. Direct membership is also what the groups claim the gat
 in with lists, so both agree.
 
 It deletes nothing unless the answer is whole and makes sense (``plan``): every group found by
-its exact name, every member entry well formed, and at least one person the gateway knows found
+its exact name, every member entry well formed, at least one person the gateway knows found
 among the allowed members (else the subject mode, the token's rights or the group names are wrong,
-and every link would look removed). An error, a timeout or a refused token deletes nothing,
+and every link would look removed), and no more than a few links, or a quarter of them, to go in
+one round. An error, a timeout or a refused token deletes nothing,
 and the next try waits longer.
 """
 
@@ -40,6 +46,10 @@ MAX_BACKOFF = 6 * 3600.0  # the longest wait after failures in a row
 FIRST_DELAY = 120.0  # the first sweep after start, once the gateway is up
 TIMEOUT = 20.0
 MAX_GROUPS_PAGE = 20
+# A round that would remove more than this many links AND more than this share of them is refused:
+# more likely a changed subject mode or group name than that many removals at once.
+MAX_REMOVALS_ANYWAY = 3
+MAX_REMOVED_SHARE = 0.25
 
 
 class SweepRefused(Exception):
@@ -92,6 +102,12 @@ def plan(groups: dict[str, list[dict[str, Any]]], linked: list[str], known: list
             "provider's subject mode is 'Based on the User's hashed ID' and the group names"
         )
     remove = sorted(sub for sub in linked if sub not in allowed)
+    if len(remove) > MAX_REMOVALS_ANYWAY and len(remove) > MAX_REMOVED_SHARE * len(linked):
+        raise SweepRefused(
+            f"it would delete {len(remove)} of {len(linked)} stored Archidekt sessions at once; "
+            "check the provider's subject mode and the group names, and use Disable on the admin "
+            "page for people you removed"
+        )
     return Plan(remove=remove, allowed=len(allowed), linked=len(linked))
 
 
@@ -165,8 +181,9 @@ class AuthentikSweep:
         removed: list[str] = []
         for sub in p.remove:
             # only_secret: a member who relinked meanwhile is left alone (seen next round)
-            if self.db.revoke_link(sub, only_secret=by_sub[sub]):
-                self.db.audit(
+            if await asyncio.to_thread(self.db.revoke_link, sub, only_secret=by_sub[sub]):
+                await asyncio.to_thread(
+                    self.db.audit,
                     "archidekt_link_swept",
                     sub=sub,
                     detail={"reason": "not in the required or admin group at the identity provider"},

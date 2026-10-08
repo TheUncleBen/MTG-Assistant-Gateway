@@ -1216,6 +1216,14 @@ class Database:
             self.flush_wal()
         return stored
 
+    def audit_seen(self, event: str) -> bool:
+        """Whether the audit log holds any entry of ``event`` (a one-time marker)."""
+        with self._lock:
+            return (
+                self._conn.execute("SELECT 1 FROM audit_log WHERE event = ? LIMIT 1", (event,)).fetchone()
+                is not None
+            )
+
     def all_user_subs(self) -> list[str]:
         """Every member's subject (for the removed-member clean-up's sanity check)."""
         with self._lock:

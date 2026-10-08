@@ -228,6 +228,11 @@ async def test_start_up_seals_old_sessions_and_deletes_expired_ones(
         assert sealed["p"] == "archidekt_session" and sealed["s"] == "old"
         assert h.db.get_link("expired") is None
     assert "2 stored Archidekt session(s) sealed" in caplog.text
+    assert (
+        "removed-member clean-up is on: hourly, asking https://idp.test about mtg-gateway-users"
+        in caplog.text
+    )
+    assert "tok" not in caplog.text.replace("token", "")
 
 
 async def test_start_up_warns_once_when_the_sweep_token_cannot_be_read(
