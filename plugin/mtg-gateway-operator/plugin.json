@@ -1,6 +1,6 @@
 {
   "name": "mtg-gateway-operator",
-  "version": "0.7.7",
+  "version": "0.7.8",
   "description": "For the person who runs an MTG Assistant Gateway: a guided deploy to Docker Swarm with Portainer, Authentik and Nginx Proxy Manager, and a guided way to invite a user. Secrets are created as Docker secrets, never typed into chat.",
   "author": { "name": "MTG Assistant Gateway" },
   "homepage": "https://github.com/TheUncleBen/MTG-Assistant-Gateway",
