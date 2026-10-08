@@ -52,9 +52,10 @@ before.
   card it narrows with `set_code` as before.
 - `whoami` carries `account_page`; `MTG_APPLY_IN_CHAT=false` now removes
   every card and the data link endpoint, not only the Approve card.
-
 - A gateway restart gives a background apply 90 seconds to finish (was 5)
-  before recording it as interrupted; the stack's stop grace is 120 seconds.
+  before recording it as interrupted, after the usual 100 seconds for running
+  requests; the stack's `stop_grace_period` rises from 120 to 200 seconds so
+  Docker allows both (an optional stack change; nothing else to set).
 
 ### Fixed
 

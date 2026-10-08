@@ -245,7 +245,7 @@ def deck_card_data(deck: Deck, *, public_url: str, snapshot: dict[str, Any] | No
                 "type": ", ".join(c.types) if c.types else "",
                 "price": c.price,
                 "in_deck": deck.in_deck(c),
-                "commander": deck.is_commander(c) if hasattr(deck, "is_commander") else False,
+                "commander": deck.is_commander(c),
             }
         )
     for name in groups:

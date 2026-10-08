@@ -19,9 +19,9 @@ services:
   # The gateway's SQLite database lives on the node named by MTG_NODE.
   mtg-assistant-gateway:
     image: ${MTG_IMAGE:-ghcr.io/theuncleben/mtg-assistant-gateway}:${MTG_TAG:-latest}
-    # A redeploy waits for a running deck apply to finish (the gateway allows 90 s) before
-    # Docker kills the container; the default is 10 s.
-    stop_grace_period: 120s
+    # A redeploy lets requests already running finish (up to 100 s), then a running deck apply
+    # (up to 90 s more), before Docker kills the container; the default is 10 s.
+    stop_grace_period: 200s
     # Docker keeps container logs forever by default (json-file max-size -1); cap them so a
     # small disk (a Raspberry Pi SD card) can't fill up.
     logging:

@@ -82,8 +82,9 @@ MAX_CHANGES = 40
 # progress until it ends.
 APPLY_WAIT_SECONDS = 20.0
 # At shutdown (a redeploy), how long a running apply may go on before it is cut off and recorded
-# as interrupted: long enough for a paced 100-card apply, and under the stack's stop_grace_period
-# (120 s), after which Docker kills the container with nothing recorded.
+# as interrupted: long enough for a paced 100-card apply. It runs after the server's own graceful
+# wait for requests (GRACEFUL_SHUTDOWN_SECONDS in __main__), and the two together stay under the
+# stack's stop_grace_period, after which Docker kills the container with nothing recorded.
 SHUTDOWN_GRACE_SECONDS = 90.0
 BROWSER_CLIENT = "__browser__"  # the same value as pages.BROWSER_CLIENT_ID
 # An administrator acting on a member's account from the admin pages (unlink): recorded in the

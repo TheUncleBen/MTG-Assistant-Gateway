@@ -151,14 +151,19 @@ def test_shutdown_grace_outlasts_a_paced_apply_and_fits_the_stack() -> None:
     import re
     from pathlib import Path
 
+    from mtg_gateway.__main__ import GRACEFUL_SHUTDOWN_SECONDS
+
     grace = decks_mod.SHUTDOWN_GRACE_SECONDS
     assert grace >= 60
     assert inspect.signature(decks_mod.DeckService.aclose).parameters["grace"].default == grace
+    # uvicorn first waits for running requests, then runs the lifespan shutdown where the apply
+    # grace is spent: Docker must allow both, one after the other.
+    worst = GRACEFUL_SHUTDOWN_SECONDS + grace
     for stack_file in ("deploy/portainer-stack.yml", "deploy/compose/docker-compose.yml"):
         text = (Path(__file__).resolve().parent.parent / stack_file).read_text(encoding="utf-8")
         found = re.findall(r"stop_grace_period:\s*(\d+)s", text)
         assert found, stack_file
-        assert all(int(s) > grace for s in found), stack_file
+        assert all(int(s) > worst for s in found), (stack_file, found, worst)
 
 
 async def test_shutdown_lets_an_apply_finish_within_the_grace(stack: Stack) -> None:

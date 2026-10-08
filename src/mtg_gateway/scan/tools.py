@@ -177,8 +177,11 @@ def add_scan_tools(server: MCPServer, service: ScanService, *, links: CardLinks 
         except ScanError:  # the first pass stands; its suggestions still reach the assistant
             return results
         out = list(results)
-        for (i, _inp), res in zip(redo, fresh, strict=True):
+        for (i, inp), res in zip(redo, fresh, strict=True):
             if res.status == "deferred":  # Scryfall is backing off: keep the row with its suggestions
+                kept = out[i]
+                note = f"the pick '{inp.name}' could not be checked yet; ask again"
+                out[i] = replace(kept, note=f"{kept.note}; {note}" if kept.note else note)
                 continue
             original = results[i].input
             picked_note = f"picked from the suggestions for '{original.name}'"
