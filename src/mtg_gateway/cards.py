@@ -143,8 +143,9 @@ class CardLinks:
         self.fernet = Fernet(secret_key.encode())
         self.public_url = public_url.rstrip("/")
         self.ttl = ttl
-        # token -> (uses, first use, member), least recently fetched first
-        self._uses: OrderedDict[str, tuple[int, float, str]] = OrderedDict()
+        # token -> (uses, issued, member), least recently fetched first. A counter lives exactly as long
+        # as its link: until ``issued + ttl`` in whole seconds, the rule Fernet's own expiry check uses.
+        self._uses: OrderedDict[str, tuple[int, int, str]] = OrderedDict()
         self._cache: OrderedDict[str, tuple[dict[str, Any], float]] = OrderedDict()  # token -> (data, at)
         # Per member, the issue time of their newest link whose live counter had to be dropped. Their
         # link with no counter issued at or before it may have been counted already, so it is refused
@@ -165,12 +166,12 @@ class CardLinks:
             ):
                 # counted before (or possibly so), but its counter was dropped: a link this busy is used up
                 return False
-            uses, first, _ = entry or (0, now, sub)
-            if uses >= LINK_MAX_USES and now - first <= self.ttl:
-                return False  # used up; a refused fetch does not refresh the counter's place
-            if now - first > self.ttl:
-                uses, first = 0, now
-            self._uses[token] = (uses + 1, first, sub)
+            uses, issued, _ = entry or (0, self._issued(token), sub)
+            if uses >= LINK_MAX_USES:
+                # used up for good: the budget is never reset, so it cannot come back before the link
+                # expires; a refused fetch does not refresh the counter's place
+                return False
+            self._uses[token] = (uses + 1, issued, sub)
             self._uses.move_to_end(token)
             if len(self._uses) > LINK_USES_SIZE:
                 self._squeeze(now)
@@ -179,7 +180,7 @@ class CardLinks:
     def _squeeze(self, now: float) -> None:
         """Brings the counters back to LINK_USES_SIZE: expired ones first, then the oldest live ones
         of the member holding the most, remembering how recent a link of theirs was dropped."""
-        for old in [t for t, (_, at, _s) in self._uses.items() if now - at > self.ttl]:
+        for old in [t for t, (_, at, _s) in self._uses.items() if self._expired(at, now)]:
             self._uses.pop(old, None)
         horizon = int(now) - self.ttl - 1  # links issued before this have expired anyway
         self._dropped_upto = {s: t for s, t in self._dropped_upto.items() if t >= horizon}
@@ -188,6 +189,11 @@ class CardLinks:
             old = next(t for t, (_, _, s) in self._uses.items() if s == busiest)
             del self._uses[old]
             self._dropped_upto[busiest] = max(self._dropped_upto.get(busiest, 0), self._issued(old))
+
+    def _expired(self, issued: int, now: float) -> bool:
+        """Whether a link issued at ``issued`` has expired at ``now``, by the same whole-second rule
+        Fernet applies in open(), so a counter is never dropped while its link still opens."""
+        return issued + self.ttl < int(now)
 
     def _issued(self, token: str) -> int:
         """When ``token`` was issued (its signed Fernet timestamp); 0 when it cannot be read."""

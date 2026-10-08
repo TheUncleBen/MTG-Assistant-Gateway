@@ -284,7 +284,7 @@ If the packages are public you can skip this step.
 
    | Variable | What to put |
    | --- | --- |
-   | `MTG_IMAGE`, `MTG_TAG` | `ghcr.io/<owner>/mtg-assistant-gateway` and `latest` to follow every new version, or one version to stay on it, for example `0.7.5` ([VERSIONS.md](VERSIONS.md)) |
+   | `MTG_IMAGE`, `MTG_TAG` | `ghcr.io/<owner>/mtg-assistant-gateway` and `latest` to follow every new version, or one version to stay on it, for example `0.7.6` ([VERSIONS.md](VERSIONS.md)) |
    | `MTG_PUBLIC_URL` | `https://mtg.example.com` |
    | `MTG_OIDC_ISSUER` | the issuer URL from step 3 |
    | `MTG_OIDC_CLIENT_ID` | the Client ID from step 3 |
@@ -445,7 +445,7 @@ From any machine:
 
 ```bash
 curl -s https://mtg.example.com/healthz
-# {"status":"ok","version":"0.7.5","mystic_forge":"ok"}
+# {"status":"ok","version":"0.7.6","mystic_forge":"ok"}
 # ("degraded" with "mystic_forge":"down" means the gateway works but the
 #  research service doesn't answer: check the Mystic Forge service)
 
