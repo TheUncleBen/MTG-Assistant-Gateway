@@ -73,9 +73,20 @@ def deck_out(
     }
     if with_cards:
         cards = [card_out(deck, c) for c in deck.cards]
-        if include_text:
-            for row, c in zip(cards, deck.cards, strict=True):
+        for row, c in zip(cards, deck.cards, strict=True):
+            row["type_line"] = c.type_line
+            if c.power or c.toughness:
+                row["power"], row["toughness"] = c.power, c.toughness
+            if c.loyalty:
+                row["loyalty"] = c.loyalty
+            if include_text:
                 row["oracle_text"] = c.oracle_text
+                if c.faces:
+                    row["faces"] = c.faces
+                if c.flavor:
+                    row["flavor_text"] = c.flavor
+                if c.artist:
+                    row["artist"] = c.artist
         out["cards"] = cards
         out["decklist_text"] = deck_to_text(deck)
         out["sideboard_text"] = deck_to_text(deck, zone="side")

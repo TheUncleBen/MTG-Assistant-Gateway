@@ -150,7 +150,11 @@ class ReportService:
             text = deck_to_text(deck)
             commander = (stats.get("commanders") or [None])[0]
             validation = await self._mf(sub, "validate_decklist", {"decklist": text, "commander": commander})
-            if simulate:
+            if simulate and commander is None:
+                # Mystic Forge's text path would take the first line as the commander and
+                # simulate a 59-card deck; refuse plainly instead.
+                goldfish = {"tool": "goldfish_run", "ok": False, "text": NO_COMMANDER_TEXT}
+            elif simulate:
                 goldfish = await self._mf(sub, "goldfish_run", {"deck": text, "n": games, **options})
         rid = "rep_" + secrets.token_urlsafe(9)
         with self.db.tx() as c:
@@ -194,15 +198,21 @@ class ReportService:
         *,
         games: int = DEFAULT_GAMES,
         options: dict[str, Any] | None = None,
+        commanders: tuple[bool, bool] = (True, True),
     ) -> dict[str, Any] | None:
         """A paired goldfish A/B of two decklists (game for game under the same seeds, with the
         deltas' confidence intervals and significance), as the research service reports it.
-        Not stored: it is a comparison, not a report of one deck. None without the service."""
+        Not stored: it is a comparison, not a report of one deck. None without the service.
+        ``commanders`` says whether each list has a known commander; without one the simulator
+        would take the first line as the commander, so the A/B is refused instead."""
         if self.mf is None:
             return None
         if not isinstance(games, int) or isinstance(games, bool) or games < 10 or games > MAX_GAMES:
             raise DeckError("invalid", f"games must be an integer from 10 to {MAX_GAMES}")
-        args = {"deck_a": text_a, "deck_b": text_b, "n": games, **sim_options(options, ab=True)}
+        opts = sim_options(options, ab=True)
+        if not all(commanders):
+            return {"tool": "goldfish_ab", "ok": False, "text": NO_COMMANDER_TEXT}
+        args = {"deck_a": text_a, "deck_b": text_b, "n": games, **opts}
         return await self._mf(sub, "goldfish_ab", args)
 
     async def _mf(self, sub: str, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -212,9 +222,10 @@ class ReportService:
         member's own Mystic Forge cap like an interactive one; past it the report is refused
         (rate_limited) and nothing is stored."""
         assert self.mf is not None
-        result = await self.mf.call(
-            tool, {k: v for k, v in arguments.items() if v is not None}, owner=sub, internal=True
-        )
+        # Mystic Forge's tools take one ``params`` object (pydantic models, published as
+        # {"params": {...}} in its tool list); flat arguments are refused before the tool runs.
+        params = {k: v for k, v in arguments.items() if v is not None}
+        result = await self.mf.call(tool, {"params": params}, owner=sub, internal=True)
         if is_busy(result):
             raise DeckError(
                 "rate_limited",
@@ -235,6 +246,13 @@ class ReportService:
                         out["data"] = parsed
                 except ValueError:
                     pass
+            # The simulators answer a refusal ("Commander '...' was not recognized", "No cards
+            # found") as plain text, not as a tool error; a run without its results block failed.
+            marker = SIM_RESULT_MARKERS.get(tool)
+            if marker and marker not in text:
+                out["ok"] = False
+        elif tool in SIM_RESULT_MARKERS:
+            out["ok"] = False
         return out
 
     # -- reading --------------------------------------------------------------
@@ -319,6 +337,14 @@ AB_OPTIONS = ("annotations", "annotations_a", "annotations_b", "combos", "seed",
 AB_FLAGS = ("allow_different_commanders",)
 
 
+# What a successful simulation's text always contains (Mystic Forge's renderers).
+SIM_RESULT_MARKERS = {"goldfish_run": "## Metrics", "goldfish_ab": "## Deltas"}
+NO_COMMANDER_TEXT = (
+    "Not simulated: the goldfish simulator models Commander decks and needs one card in the "
+    "deck's Commander (premier) category. Put the commander in that category and run again."
+)
+
+
 def sim_options(options: dict[str, Any] | None, *, ab: bool = False) -> dict[str, Any]:
     """The given simulator options with unset ones dropped; refuses keys the simulation does
     not take (``invalid``)."""
@@ -333,6 +359,16 @@ def sim_options(options: dict[str, Any] | None, *, ab: bool = False) -> dict[str
         raise DeckError("invalid", f"unknown simulation option(s): {', '.join(unknown)}")
     if len(json.dumps(out)) > 60_000:
         raise DeckError("too_large", "simulation options larger than 60 kB")
+    for key, low, high in (("opponents", 1, 5), ("until_turn", 1, 30), ("seed", -(2**63), 2**63 - 1)):
+        if key in out and (not isinstance(out[key], int) or isinstance(out[key], bool)):
+            raise DeckError("invalid", f"simulation option {key} must be an integer")
+        if key in out and not low <= out[key] <= high:
+            raise DeckError("invalid", f"simulation option {key} must be from {low} to {high}")
+    for key in ("annotations", "annotations_a", "annotations_b", "combos"):
+        if key in out and not isinstance(out[key], list):
+            raise DeckError("invalid", f"simulation option {key} must be a list")
+    if "mulligan" in out and not isinstance(out["mulligan"], dict):
+        raise DeckError("invalid", "simulation option mulligan must be an object")
     return out
 
 

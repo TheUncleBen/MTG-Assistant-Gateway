@@ -15,12 +15,13 @@ from __future__ import annotations
 
 import calendar
 import html
+import json
 import re
 import time
 from collections import Counter
 from typing import Any
 
-from .archidekt import VOTE_UP, Deck, DeckCard, featured_scryfall_id
+from .archidekt import VOTE_UP, Deck, DeckCard, featured_scryfall_id, format_label
 from .deck_stats import WUBRG, colour_letter, is_land, mana_pips
 from .theme import icon
 from .views import cards_by_category
@@ -355,7 +356,7 @@ def banner_html(
         + (f"<span>{esc(ago(deck.updated_at))}</span>" if ago(deck.updated_at) else "")
         + f"<span>{stats.get('distinct', 0)} distinct cards</span>"
         "</div><div class='row'>"
-        f"<span>{esc((deck.format or 'custom').capitalize())}</span>{legality}{own_bracket}{est_bracket}"
+        f"<span>{esc(format_label(deck.format))}</span>{legality}{own_bracket}{est_bracket}"
         "</div><div class='row'>"
         f"<span>Size: {stats.get('card_count', sum(c.quantity for c in deck.main_cards))}</span>"
         f"<span>Est cost: <b class='orange'>{money(stats.get('price_total'))}</b></span>"
@@ -519,14 +520,46 @@ def text_row(card: DeckCard, *, deck: Deck, owned: dict[str, int] | None = None)
     )
 
 
-def _card_data(card: DeckCard) -> str:
-    """Data attributes the page script reads for the card viewer and for dragging between stacks."""
-    img = card_image(card)
+def card_view_attrs(card: DeckCard, *, img: str | None = None) -> str:
+    """Data attributes ``static/cardview.js`` reads to show the whole card: image, printing,
+    finish, mana cost, type line, rules text, power and toughness or loyalty, and every face."""
+    pt = f"{card.power}/{card.toughness}" if card.power or card.toughness else ""
+    faces = [
+        {
+            "name": f["name"],
+            "mana": f["mana_cost"],
+            "type": f["type_line"],
+            "text": f["text"],
+            "pt": f"{f['power']}/{f['toughness']}" if f["power"] or f["toughness"] else "",
+            "loyalty": f["loyalty"],
+        }
+        for f in card.faces
+    ]
+    legal = ",".join(sorted(k for k, v in card.legalities.items() if v == "legal"))
     return (
         (f" data-img='{esc(img)}'" if img else "")
         + f" data-set='{esc(card.set_code.upper())} {esc(card.collector_number)}'"
-        f" data-type='{esc(' '.join(card.types))}'"
+        f" data-type='{esc(card.type_line)}'"
+        f" data-mana='{esc(card.mana_cost)}'"
+        f" data-finish='{esc(card.modifier)}'"
+        + (f" data-text='{esc(card.oracle_text)}'" if card.oracle_text else "")
+        + (f" data-pt='{esc(pt)}'" if pt else "")
+        + (f" data-loyalty='{esc(card.loyalty)}'" if card.loyalty else "")
+        + (f" data-faces='{esc(json.dumps(faces, separators=(',', ':')))}'" if faces else "")
+        + (f" data-rarity='{esc(card.rarity)}'" if card.rarity else "")
+        + (f" data-price='{card.price:.2f}'" if card.price is not None else "")
+        + (f" data-artist='{esc(card.artist)}'" if card.artist else "")
+        + (f" data-flavor='{esc(card.flavor)}'" if card.flavor else "")
+        + (f" data-salt='{card.salt:g}'" if card.salt is not None else "")
+        + (f" data-rank='{card.edhrec_rank}'" if card.edhrec_rank is not None else "")
+        + (f" data-legal='{esc(legal)}'" if card.legalities else "")
+        + (" data-gc='1'" if card.game_changer else "")
     )
+
+
+def _card_data(card: DeckCard) -> str:
+    """Data attributes the page script reads for the card viewer and for dragging between stacks."""
+    return card_view_attrs(card, img=card_image(card))
 
 
 def image_card(card: DeckCard, *, owned: dict[str, int] | None = None) -> str:
@@ -610,6 +643,55 @@ def _bar(parts: dict[str, float], *, label: str) -> str:
     return f"<div class='cbar' role='img' aria-label='{esc(label)}'>{segs}</div>"
 
 
+def _odds_groups(cards: list[DeckCard]) -> dict[str, dict[str, int]]:
+    """Card counts per group, the way Archidekt's "Probability of draw" tab groups them."""
+    groups: dict[str, Counter] = {
+        "Categories": Counter(),
+        "Primary category": Counter(),
+        "Card name": Counter(),
+        "Types": Counter(),
+        "Sub types": Counter(),
+        "Mana value": Counter(),
+    }
+    for c in cards:
+        for cat in c.categories or ["Uncategorized"]:
+            groups["Categories"][cat] += c.quantity
+        groups["Primary category"][(c.categories or ["Uncategorized"])[0]] += c.quantity
+        groups["Card name"][c.name] += c.quantity
+        for t in c.types or ["Other"]:
+            groups["Types"][t] += c.quantity
+        for t in c.subtypes:
+            groups["Sub types"][t] += c.quantity
+        if c.cmc is not None and not is_land(c):
+            groups["Mana value"][f"{c.cmc:g}"] += c.quantity
+    return {k: dict(sorted(v.items(), key=lambda kv: (-kv[1], kv[0]))) for k, v in groups.items() if v}
+
+
+def _odds_html(deck: Deck, cards: list[DeckCard]) -> str:
+    """The "Probability of draw" calculator: a form plus the counts as a JSON data block the page
+    script reads (a data block is not executed, so the page's script policy allows it)."""
+    size = sum(c.quantity for c in cards)
+    if not size:
+        return ""
+    groups = _odds_groups(cards)
+    data = json.dumps({"size": size, "groups": groups}, separators=(",", ":")).replace("</", "<\\/")
+    options = "".join(f"<option value='{esc(k)}'>{esc(k)}</option>" for k in groups)
+    return (
+        "<div class='odds' id='odds'><h3>Probability of draw</h3>"
+        "<form class='oddsform' onsubmit='return false'>"
+        "<select name='mode' aria-label='At least or exactly'><option value='atleast'>At least</option>"
+        "<option value='exact'>Exactly</option></select>"
+        "<input type='number' name='k' value='1' min='0' max='99' aria-label='How many'> card(s) by "
+        f"<select name='by' aria-label='Group by'>{options}</select> having drawn "
+        f"<input type='number' name='n' value='7' min='1' max='{size}' aria-label='Cards drawn'> card(s)"
+        "</form>"
+        "<table class='qty oddstable'><thead><tr><th>Group</th><th>Qty</th><th>Odds</th></tr></thead>"
+        "<tbody><tr><td class='muted' colspan='3'>Turn on scripts to see the odds.</td></tr></tbody></table>"
+        f"<script type='application/json' id='odds-data'>{data}</script>"
+        "</div>"
+    )
+
+
 def stats_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
     if not stats:
         return ""
@@ -667,11 +749,73 @@ def stats_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
         if problems
         else (
             f"<div class='legality'><h3>Legality</h3><p class='ok'>{icon('check')} Legal in "
-            f"{esc(deck.format.capitalize())}</p></div>"
+            f"{esc(format_label(deck.format))}</p></div>"
             if deck.format
             else ""
         )
     )
+    odds_html = _odds_html(deck, cards)
+    checks = stats.get("checks") or {}
+    if checks:
+        size = checks.get("deck_size") or {}
+        zone = checks.get("commander_zone") or {}
+        rows = [
+            (
+                "Deck size",
+                f"{size.get('actual', 0)}"
+                + (f" of {size['expected']}" if size.get("expected") else "")
+                + (" cards" if not size.get("expected") else ""),
+                size.get("ok", True),
+            )
+        ]
+        if deck.format in ("commander", "brawl", "oathbreaker"):
+            rows.append(
+                ("Commander", f"{zone.get('count', 0)} in the Commander category", zone.get("ok", True))
+            )
+            outside = checks.get("colour_identity_violations") or []
+            rows.append(
+                (
+                    "Colour identity",
+                    "all cards inside"
+                    if not outside
+                    else ", ".join(esc(x["name"]) for x in outside[:6]) + ("…" if len(outside) > 6 else ""),
+                    not outside,
+                )
+            )
+            dupes = checks.get("singleton_violations") or []
+            rows.append(
+                (
+                    "Singleton",
+                    "no duplicates"
+                    if not dupes
+                    else ", ".join(f"{esc(x['name'])} ×{x['quantity']}" for x in dupes[:6])
+                    + ("…" if len(dupes) > 6 else ""),
+                    not dupes,
+                )
+            )
+        uncat = checks.get("uncategorised") or []
+        rows.append(
+            (
+                "Categories",
+                "every card has one"
+                if not uncat
+                else f"{len(uncat)} without: "
+                + ", ".join(esc(x) for x in uncat[:6])
+                + ("…" if len(uncat) > 6 else ""),
+                not uncat,
+            )
+        )
+        checks_html = (
+            "<div class='checks'><h3>Deck checks</h3><ul>"
+            + "".join(
+                f"<li class='{'ok' if ok else 'bad'}'>{icon('check' if ok else 'x')} <b>{label}</b> "
+                f"<span>{value}</span></li>"
+                for label, value, ok in rows
+            )
+            + "</ul></div>"
+        )
+    else:
+        checks_html = ""
     bracket = stats.get("bracket_estimate") or {}
     basis = bracket.get("basis") or []
     avg_mv = stats.get("average_mana_value") if stats.get("average_mana_value") is not None else "–"
@@ -698,6 +842,7 @@ def stats_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
         f"<p class='avg'><b>Avg Mana Value: {esc(avg_mv)}</b>"
         f"<br><span class='small'>Total Mana Value: {mv_total:.2f}</span></p>"
         f"<div class='curve' role='img' aria-label='Mana curve'>{bars}</div>"
+        f"{odds_html}"
         "</div><div class='side'>"
         f"<div class='tiles'><div class='tile'><b>{stats.get('card_count', 0)}</b>"
         "<span>Deck size</span></div>"
@@ -706,6 +851,7 @@ def stats_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
         f"<div class='tile'><b>{stats.get('priced_cards', 0)}</b><span>Priced cards</span></div></div>"
         f"<h3>Quantity of types</h3><table class='qty'><tbody>{type_rows or no_types}</tbody></table>"
         + (f"<h3>Rarity</h3><table class='qty'><tbody>{rarity_rows}</tbody></table>" if rarity_rows else "")
+        + checks_html
         + problems_html
         + bracket_html
         + "</div></div></section>"
@@ -1089,16 +1235,28 @@ ul.rows .hover img{width:100%;height:100%;display:block}
 .cardview img{width:100%;aspect-ratio:5/7;border-radius:4.5%;object-fit:cover;background:var(--surface-2)}
 .cardview .ph{display:flex;align-items:center;justify-content:center;aspect-ratio:5/7;border-radius:4.5%;
   background:var(--surface-2);color:var(--text-muted);padding:1rem;text-align:center;font-weight:700}
-.cardview h3{margin:0 0 .25rem;font-size:1.2rem}
-.cardview .meta{color:var(--text-muted);font-size:.9rem;margin:0 0 .75rem}
+.cardview h3{margin:0 0 .25rem;font-size:1.2rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.cardview h4{margin:.75rem 0 .15rem;font-size:1rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.cardview .face:first-child h4{margin-top:.25rem}
+.cardview .meta{color:var(--text-muted);font-size:.9rem;margin:0 0 .5rem}
+.cardview .rules{white-space:pre-line;font-size:.95rem;line-height:1.45;margin:0 0 .75rem}
+.cardview .cardtext{max-height:40vh;overflow:auto;padding-right:.25rem}
+.cardview .printing{margin:.25rem 0 .25rem}
+.cardview .flavor{font-style:italic;color:var(--text-muted);font-size:.9rem;white-space:pre-line;
+  margin:0 0 .75rem}
+.cardview .facts{margin:0 0 .25rem} .cardview .legal{margin:0 0 .75rem;font-size:.85rem;line-height:1.4}
+.cardview .legal b{font-weight:600;color:var(--text)}
+.cardview .info{min-width:0}
 .cardview .acts{display:flex;flex-direction:column;gap:.5rem}
 .cardview .acts .btn,.cardview .acts button{margin:0;width:100%}
-.cardview .close{position:absolute;top:.75rem;right:.75rem}
+.cardview .box{position:relative} .cardview .close{position:absolute;top:.6rem;right:.6rem}
+@media (min-width:601px){ .cardview .info h3{padding-right:5.5rem} }
 @media (max-width:600px){ .cardview{padding:0;align-items:flex-end}
   .cardview .box{grid-template-columns:1fr;max-height:92vh;
     border-radius:var(--radius-panel) var(--radius-panel) 0 0;
     padding:.75rem .75rem calc(.75rem + env(safe-area-inset-bottom))}
-  .cardview img,.cardview .ph{max-width:52vw;margin:0 auto} }
+  .cardview img,.cardview .ph{max-width:52vw;margin:0 auto}
+  .cardview .cardtext{max-height:none} }
 /* pending category moves (own deck, stacks or grid): a bar like the editor's */
 .movebar{position:sticky;bottom:0;z-index:20;display:none;align-items:center;gap:.5rem;flex-wrap:wrap;
   background:var(--toolbar-bg);color:var(--toolbar-text);padding:.5rem 1rem;margin:1rem -1rem 0;
@@ -1151,6 +1309,22 @@ table.qty{width:100%;border-collapse:collapse;font-size:.93rem}
 table.qty td{padding:.3rem .25rem;border-top:1px solid var(--surface-2)}
 table.qty td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-weight:700}
 .legality ul{margin:.25rem 0 0;padding-left:1.2rem} .legality .ok{color:var(--green-text);font-weight:700}
+.odds{margin-top:1.25rem} .odds h3{margin:0 0 .4rem}
+.odds .oddsform{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;font-size:.9rem;
+  color:var(--text-muted)}
+.odds .oddsform select,.odds .oddsform input{height:2rem;padding:0 .4rem;font-size:.9rem;width:auto;
+  min-width:6rem;flex:none}
+.odds .oddsform input{width:4rem;min-width:4rem}
+.odds .oddstable{margin-top:.5rem;max-height:16rem;overflow:auto;display:block;width:100%}
+.odds .oddstable td:nth-child(2),.odds .oddstable td:nth-child(3){text-align:right;white-space:nowrap}
+.odds .oddstable td:first-child{width:100%}
+.odds .oddstable th{text-align:left;font-weight:600;color:var(--text-muted);font-size:.8rem}
+.odds .oddstable th:last-child{text-align:right}
+.checks ul{list-style:none;margin:.25rem 0 0;padding:0} .checks li{display:flex;gap:.4rem;
+  align-items:baseline;
+  padding:.2rem 0;border-top:1px solid var(--border)} .checks li:first-child{border-top:0}
+.checks li b{flex:none} .checks li span{color:var(--muted);overflow-wrap:anywhere}
+.checks li.ok svg{color:var(--green-text)} .checks li.bad svg{color:var(--red-text,#d33)}
 @media (max-width:1000px){ .stats .grid{grid-template-columns:1fr} }
 
 .description{font-size:16px} .description .empty{color:var(--text-muted)}

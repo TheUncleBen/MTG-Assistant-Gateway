@@ -20,7 +20,7 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, RedirectResponse, Response
 
 from . import deck_stats
-from .archidekt import FORMAT_NAMES, Deck, featured_scryfall_id, parse_deck
+from .archidekt import FORMAT_NAMES, Deck, featured_scryfall_id, format_label, parse_deck
 from .deckpage import (
     DECK_CSS,
     LIST_ORDERS,
@@ -60,7 +60,7 @@ DECK_CSP = (
     "img-src 'self' https://cards.scryfall.io; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 )
 # Format names the settings and new-deck forms offer, one per Archidekt format id.
-FORMAT_CHOICES = [FORMAT_NAMES[i] for i in sorted(FORMAT_NAMES)]
+FORMAT_CHOICES = sorted({FORMAT_NAMES[i] for i in FORMAT_NAMES}, key=lambda n: format_label(n).lower())
 EDITOR_CSP = (
     "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; "
     "img-src 'self' https://cards.scryfall.io; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
@@ -250,6 +250,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         scripts: bool = False,
         heading: bool = True,
         deck_css: bool = False,
+        extra_scripts: tuple[str, ...] = (),
     ) -> Response:
         user = state.db.get_user(sub) or {}
         admin = bool(s.admin_group and s.admin_group in (user.get("groups") or []))
@@ -262,11 +263,17 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             csrf=_csrf(s, sid),
             admin=admin,
             wide=two_pane,
-            scripts=scripts,
+            scripts=scripts or bool(extra_scripts),
             current=current,
             heading=heading,
             head_extra=(f"<style>{DECK_CSS}</style>" if deck_css else "")
-            + ("<script src='/static/deck.js' defer></script>" if scripts else ""),
+            + (
+                "<script src='/static/cardview.js' defer></script>"
+                "<script src='/static/deck.js' defer></script>"
+                if scripts
+                else ""
+            )
+            + "".join(f"<script src='/static/{name}' defer></script>" for name in extra_scripts),
         )
         if csp:
             resp.headers["Content-Security-Policy"] = csp
@@ -383,7 +390,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
     def new_deck_form(values: dict[str, str], error: str = "") -> str:
         fmt_opts = "".join(
             f"<option value='{_esc(n)}'{' selected' if values.get('format', 'commander') == n else ''}>"
-            f"{_esc(n.capitalize())}</option>"
+            f"{_esc(format_label(n))}</option>"
             for n in FORMAT_CHOICES
         )
         return (
@@ -559,7 +566,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             return " selected" if flag else ""
 
         fmt_opts = "".join(
-            f"<option value='{_esc(n)}'{sel(fmt_current == n)}>{_esc(n.capitalize())}</option>"
+            f"<option value='{_esc(n)}'{sel(fmt_current == n)}>{_esc(format_label(n))}</option>"
             for n in FORMAT_CHOICES
         )
         bracket_current = v.get("edh_bracket", str(deck.edh_bracket or ""))
@@ -1090,6 +1097,21 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
                 "image": card_image(c, "small"),
                 "mana_cost": c.mana_cost,
                 "price": c.price,
+                "type_line": c.type_line,
+                "oracle_text": c.oracle_text,
+                "pt": f"{c.power}/{c.toughness}" if c.power or c.toughness else "",
+                "loyalty": c.loyalty,
+                "faces": [
+                    {
+                        "name": f["name"],
+                        "mana": f["mana_cost"],
+                        "type": f["type_line"],
+                        "text": f["text"],
+                        "pt": f"{f['power']}/{f['toughness']}" if f["power"] or f["toughness"] else "",
+                        "loyalty": f["loyalty"],
+                    }
+                    for f in c.faces
+                ],
                 "in_deck": deck.in_deck(c),
                 "zone": "main" if deck.in_deck(c) else "side",
                 "auto_category": auto_category(c),
@@ -1199,6 +1221,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
                 f"<template id='icon-{n}'>{icon(n)}</template>"
                 for n in ("minus", "plus", "more", "x", "swap")
             )
+            + "<script src='/static/cardview.js' defer></script>"
             + "<script src='/static/companion.js' defer></script>"
         )
         return page(
@@ -1215,7 +1238,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
 
     @server.custom_route("/decks/{deck_id}/export", methods=["GET"], include_in_schema=False)
     async def export_page(request: Request) -> Response:
-        from .decks import deck_to_text
+        from .decks import deck_to_archidekt_text, deck_to_text
 
         deck_id = request.path_params["deck_id"]
         sub, sid = browser_session(state, request)
@@ -1229,23 +1252,81 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             )
         main = deck_to_text(deck)
         side = deck_to_text(deck, zone="side")
+        arch = deck_to_archidekt_text(deck)
+        did = _esc(deck.id)
+
+        def block(key: str, title: str, blurb: str, text: str, rows: int) -> str:
+            return (
+                f"<div class='exportblock'><div class='head'><h2>{title}</h2>"
+                f"<button type='button' class='btn small copybtn' data-copy='{key}'>"
+                f"{icon('copy')} Copy</button></div>"
+                f"<p class='muted small'>{blurb}</p>"
+                f"<textarea id='{key}' rows='{rows}' readonly>{_esc(text)}</textarea></div>"
+            )
+
         body = (
-            f"<div class='card'><p><a href='/decks/{_esc(deck.id)}'>← {_esc(deck.name)}</a></p>"
-            "<h2>Decklist</h2><p class='muted small'>Plain text, commander first. Paste it into Moxfield, "
-            "MTGO, Arena or your assistant.</p>"
-            f"<textarea rows='{min(60, main.count(chr(10)) + 2)}' readonly>{_esc(main)}</textarea>"
+            f"<div class='card'><p><a href='/decks/{did}'>← {_esc(deck.name)}</a></p>"
+            "<p class='muted small'>Copy a list below or download a file. The file buttons save to your "
+            "Downloads folder in the app and in a browser.</p>"
+            + block(
+                "exp-arch",
+                "Archidekt import text",
+                "Every row with its printing, finish, categories and labels. Paste into Archidekt's "
+                "Import dialog, or into the gateway's New deck page, to get the same deck back "
+                "(sideboard and maybeboard included).",
+                arch,
+                min(40, arch.count(chr(10)) + 2),
+            )
+            + block(
+                "exp-main",
+                "Plain decklist",
+                "Mainboard only, commander first. For Moxfield, MTGO, Arena or your assistant.",
+                main,
+                min(40, main.count(chr(10)) + 2),
+            )
             + (
-                f"<h2>Sideboard and maybeboard</h2><textarea rows='8' readonly>{_esc(side)}</textarea>"
+                block(
+                    "exp-side",
+                    "Sideboard and maybeboard",
+                    "Rows Archidekt keeps outside the deck.",
+                    side,
+                    min(12, side.count(chr(10)) + 2),
+                )
                 if side
                 else ""
             )
             + "<div class='actions'>"
-            f"<a class='btn' href='/decks/{_esc(deck.id)}/export.txt' download>Download .txt</a>"
-            f"<a class='btn' href='/decks/{_esc(deck.id)}/export.json' download>Download .json</a>"
-            f"<a class='btn' href='/decks/{_esc(deck.id)}/export.csv' download>Download .csv</a>"
+            f"<a class='btn' href='/decks/{did}/export.archidekt.txt' download>Download Archidekt .txt</a>"
+            f"<a class='btn' href='/decks/{did}/export.txt' download>Download plain .txt</a>"
+            f"<a class='btn' href='/decks/{did}/export.csv' download>Download .csv</a>"
+            f"<a class='btn' href='/decks/{did}/export.json' download>Download .json</a>"
             "</div></div>"
         )
-        return page(f"Export: {deck.name}", body, sub=sub, sid=sid)
+        return page(f"Export: {deck.name}", body, sub=sub, sid=sid, extra_scripts=("export.js",))
+
+    @server.custom_route("/decks/{deck_id}/export.archidekt.txt", methods=["GET"], include_in_schema=False)
+    async def export_archidekt_txt(request: Request) -> Response:
+        """The deck in Archidekt's own import syntax (printing, finish, categories with their
+        flags, labels, sideboard rows), for Archidekt's Import dialog or the gateway's New deck."""
+        from .decks import deck_to_archidekt_text
+
+        sub, _sid = browser_session(state, request)
+        if not sub:
+            return login_redirect("/decks")
+        try:
+            deck = await decks.get_any_deck(sub, request.path_params["deck_id"])
+        except DeckError as exc:
+            return Response(str(exc), 404)
+        name = re.sub(r"[^A-Za-z0-9._-]+", "_", deck.name or deck.id)[:60]
+        return Response(
+            deck_to_archidekt_text(deck) + "\n",
+            media_type="text/plain; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="{name}.archidekt.txt"',
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
 
     @server.custom_route("/decks/{deck_id}/export.txt", methods=["GET"], include_in_schema=False)
     async def export_txt(request: Request) -> Response:

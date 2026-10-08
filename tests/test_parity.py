@@ -73,10 +73,11 @@ async def test_deck_list_controls_and_views(stack: Stack) -> None:
             assert r.status_code == 200 and f"deckview {view}" in r.text, view
             assert "Creature" in r.text and "Land" in r.text
         filtered = await b.http.get("/decks/42?q=sol+ring", headers=NAV)
+        # the card rows are filtered; the stats panel's draw-odds data still names every card
         assert (
             filtered.status_code == 200
-            and "Sol Ring" in filtered.text
-            and "Acidic Slime" not in filtered.text
+            and "data-card='Sol Ring'" in filtered.text
+            and "data-card='Acidic Slime'" not in filtered.text
         )
         bad = await b.http.get("/decks/42?view=nope&group=nope&sort=nope", headers=NAV)
         assert bad.status_code == 200  # unknown choices fall back to the defaults

@@ -38,12 +38,12 @@ snapshot first and is read back to verify.
 | List my decks (private included), filter by name, format, folder | `list_my_decks` | no | |
 | List another user's public decks | `archidekt_user` | no | |
 | Search public decks (name, commander, format, colours, owner) | `search_decks` | no | |
-| Read any deck: cards, zones, stats, plain list, Archidekt import text, rules text on request | `get_deck` (`get_my_deck` for an own deck by id) | no | hides Mystic Forge `archidekt_deck`, `archidekt_export` |
+| Read any deck: cards (type line, power/toughness, loyalty), zones, stats, plain list, Archidekt import text; rules text, faces, flavour and artist on request | `get_deck` (`get_my_deck` for an own deck by id) | no | hides Mystic Forge `archidekt_deck`, `archidekt_export` |
 | Read a pasted list or an Archidekt CSV export | `parse_decklist`, `parse_deck_export` | no | |
 | Statistics, legality, structural checks, bracket estimate | `deck_stats` | no | hides `validate_archidekt_deck` |
 | Diff two decks, snapshots or lists (precon upgrades included), with an optional paired goldfish A/B | `compare_decks` | no | hides `precon_diff`, `goldfish_ab` |
 | Goldfish simulation of one deck, stored with its stats and validation | `run_deck_report` (+ `list_deck_reports`, `get_deck_report`) | stores a report | hides `goldfish_run`; takes the simulator's options |
-| Draw odds; what the engine models for a deck | `goldfish_odds`, `goldfish_annotate` (Mystic Forge) | no | annotations feed `run_deck_report` |
+| Draw odds; what the engine models for a deck | `goldfish_odds`, `goldfish_annotate` (Mystic Forge) | no | annotations feed `run_deck_report`; the deck page's Probability of draw is the hand path to the same odds |
 | Validate a pasted list that is not a deck yet | `validate_decklist` (Mystic Forge) | no | an Archidekt deck's checks are in `deck_stats` |
 | Card lookups, rulings, prices, rules, EDHREC, combos, precon lists | the Mystic Forge research tools | no | the full list is in the tool reference |
 | Turn names or card photos into exact printings | `resolve_cards`, `card_printings` | no | |
@@ -73,12 +73,12 @@ deleting a deck asks for its name.
 | --- | --- |
 | Home | newest decks with covers, search, tiles to every section |
 | Decks | the linked account's decks (grid or list, filter, sort), New deck (name, pasted list, CSV, scan), Folders (create, rename) |
-| One deck | views (text, stacks, grid), grouping, sorting, filter, card detail (large image, Scryfall, mark owned, move category), drag cards between categories and Save moves, Quick add, statistics, description, comments (post, edit and delete your own), like, bookmark, follow the owner; More: Edit, Settings, Clone, Run report, Export (text, JSON, CSV), Open on Archidekt, Delete deck |
-| Editor | quantities, categories, finish, printing, add cards (deck or maybeboard), maybeboard and sideboard rows, paste a list, remove, undo, Save changes |
+| One deck | views (text, stacks, grid), grouping, sorting, filter, the whole card on tap (image, every face's mana cost, type line, rules text, power/toughness or loyalty, flavour, printing, rarity, artist, price, salt, legal formats; Scryfall, mark owned, move category), drag cards between categories and Save moves, Quick add, statistics with Probability of draw and Deck checks, description, comments (post, edit and delete your own), like, bookmark, follow the owner; More: Edit, Settings, Clone, Run report, Export (Archidekt import text, plain text, sideboard, each with Copy; downloads as Archidekt .txt, plain .txt, .csv, .json; see [EXPORT-IMPORT.md](EXPORT-IMPORT.md)), Open on Archidekt, Delete deck |
+| Editor | quantities, categories, finish, printing, add cards (deck or maybeboard), maybeboard and sideboard rows, paste a list (Archidekt's syntax: printing, `*F*`/`*E*`, `[Category]`, `# Sideboard`), the whole card from a thumbnail, remove, undo, Save changes |
 | Deck settings | name, format, bracket, description, private, unlisted; cover image; tags; folder; Delete this deck |
 | Search | public decks by name, commander, format, colours, owner; a user's profile page; Precons by set |
 | Scan | phone camera or photos to a draft; set lock, foil, printing picker; save as a new deck, into a deck, or to the collection |
-| Collection | the Archidekt Collection: filter, sort, grid or list, add, quantity, per-row details (finish, condition, language, price paid), remove, CSV export |
+| Collection | the Archidekt Collection: filter, sort, grid or list, add, quantity, per-row details (finish, condition, language, price paid), the whole card from a thumbnail, remove, CSV export |
 | Proposals | review page with Approve, Apply, Reject; the in-chat card opens the same proposal |
 | History | proposals, snapshots (Restore), reports (open one in full) |
 | Account | link or unlink Archidekt, approval mode, hand-edit confirmation, theme, sign out, delete my data |

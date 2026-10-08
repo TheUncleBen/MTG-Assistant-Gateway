@@ -423,5 +423,37 @@ def test_checks_cover_what_the_archidekt_validator_checked() -> None:
     ]
     assert checks["singleton_violations"] == [{"name": "Opt", "quantity": 2}]  # the Rats may repeat
     assert checks["uncategorised"] == ["Lightning Bolt"]
-    # a 60-card format has no commander checks and no size rule the deck would fail
-    assert compute(deck([card("Opt", 4)], format_id=1))["checks"]["ok"]
+    # a constructed format: no commander checks; at least 60 cards, at most 4 copies, sideboard 15
+    small = compute(deck([card("Opt", 4)], format_id=1))["checks"]
+    assert small["singleton_violations"] == [] and small["copy_limit_violations"] == []
+    assert (
+        small["deck_size"] == {"actual": 4, "minimum": 60, "ok": False}
+        and "at least 60" in small["problems"][0]
+    )
+    assert small["commander_zone"] == {"count": 0, "ok": True} and small["sideboard"]["ok"]
+    sixty = compute(
+        deck([card("Opt", 5), card("Island", 55, types=["Land"], supertypes=["Basic"])], format_id=1)
+    )
+    assert sixty["checks"]["deck_size"]["ok"] and sixty["checks"]["copy_limit_violations"] == [
+        {"name": "Opt", "quantity": 5}
+    ]
+
+
+def test_commander_zone_is_the_premier_category_whatever_its_name() -> None:
+    """Archidekt marks the commander zone with isPremier; a deck whose premier category is not
+    literally named "Commander" still has its commander found, and the simulators' text gets the
+    Commander marker for it (Mystic Forge finds the commander by that word)."""
+    from mtg_gateway.decks import deck_to_text
+
+    d = deck(
+        [
+            card("Aesi", 1, categories=["Leaders"], types=["Creature"], supertypes=["Legendary"],
+                 color_identity=["G", "U"]),
+            card("Island", 99, types=["Land"], supertypes=["Basic"], color_identity=["U"]),
+        ],
+        categories=[{"name": "Leaders", "isPremier": True, "includedInDeck": True}],
+    )  # fmt: skip
+    stats = compute(d)
+    assert stats["commanders"] == ["Aesi"]
+    assert stats["checks"]["commander_zone"] == {"count": 1, "ok": True}
+    assert deck_to_text(d).splitlines()[0] == "1 Aesi"  # commander first, as the simulators expect

@@ -971,7 +971,9 @@ def new_deck_entries(
                     "quantity": int(c["quantity"]),
                     "companion": False,
                     "flippedDefault": False,
-                    "modifier": (modifiers or {}).get(c["name"], "Foil" if c.get("foil") else "Normal"),
+                    "modifier": (modifiers or {}).get(
+                        c["name"], c.get("finish") or ("Foil" if c.get("foil") else "Normal")
+                    ),
                 },
             }
         )
@@ -986,8 +988,12 @@ def deck_to_text(deck: Deck, *, zone: str = "main") -> str:
             name=c.name,
             set_code=c.set_code,
             collector_number=c.collector_number,
-            categories=list(c.categories),
-            foil=c.modifier.lower() == "foil",
+            # the simulators find the commander by the literal "Commander" category, so a
+            # premier category with another name is written as Commander as well
+            categories=list(c.categories)
+            + (["Commander"] if deck.is_commander(c) and "Commander" not in c.categories else []),
+            foil=c.modifier.lower() in ("foil", "etched"),
+            finish=c.modifier.capitalize() if c.modifier.lower() in ("foil", "etched") else "",
             zone="main" if deck.in_deck(c) else "side",
         )
         for c in deck.cards
@@ -1007,7 +1013,7 @@ def deck_to_archidekt_text(deck: Deck) -> str:
         str(c.get("name")) for c in deck.categories if isinstance(c.get("name"), str) and c.get("isPremier")
     }
     excluded = deck.excluded_categories()
-    lines: list[str] = []
+    lines: list[tuple[str, str, str, str]] = []  # sorted by card name, as Archidekt's export is
     for c in deck.cards:
         line = f"{c.quantity}x {clean_text(c.name.replace(chr(94), chr(32)))}"  # ^ would open a label
         if c.set_code:
@@ -1027,9 +1033,9 @@ def deck_to_archidekt_text(deck: Deck) -> str:
         label = clean_text(c.label).replace("^", " ").strip()
         if label and not label.startswith(","):  # Archidekt stores labels as "name,#colour"
             line += f" ^{label}^"
-        lines.append(line)
+        lines.append((c.name.casefold(), c.set_code, c.collector_number, line))
     lines.sort()
-    return "\n".join(lines) + ("\n" if lines else "")
+    return "\n".join(line for *_, line in lines) + ("\n" if lines else "")
 
 
 class DeckService:
@@ -2963,7 +2969,9 @@ def _next_step(
 def normalise_cards(
     *, cards: Any = None, decklist_text: str | None = None, csv_text: str | None = None
 ) -> list[dict[str, Any]]:
-    """Turn any of the accepted inputs into [{name, quantity, categories, foil}], main deck only."""
+    """Turn any of the accepted inputs into [{name, quantity, categories, foil, finish, ...}].
+    Sideboard and maybeboard rows are kept under their category (Archidekt stores them as
+    categories outside the deck), so a pasted list or CSV round-trips whole."""
     for label, value in (("decklist_text", decklist_text), ("csv_text", csv_text)):
         if value is not None and not isinstance(value, str):
             raise DeckError("invalid", f"{label} must be a string")
@@ -2983,7 +2991,8 @@ def normalise_cards(
                         "name": c.name,
                         "quantity": c.quantity,
                         "categories": c.categories,
-                        "foil": c.finish == "Foil",
+                        "foil": c.finish in ("Foil", "Etched"),
+                        "finish": c.finish if c.finish in ("Foil", "Etched") else "",
                         "set_code": c.set_code,
                         "collector_number": c.collector_number,
                     }
@@ -2993,17 +3002,19 @@ def normalise_cards(
     elif decklist_text:
         try:
             for c in parse_decklist(decklist_text):
-                if c.zone == "main":
-                    out.append(
-                        {
-                            "name": c.name,
-                            "quantity": c.quantity,
-                            "categories": c.categories,
-                            "foil": c.foil,
-                            "set_code": c.set_code,
-                            "collector_number": c.collector_number,
-                        }
-                    )
+                out.append(
+                    {
+                        "name": c.name,
+                        "quantity": c.quantity,
+                        # a sideboard row without a category of its own goes to Archidekt's
+                        # Sideboard or Maybeboard category, as its section header said
+                        "categories": c.categories or ([c.board] if c.zone == "side" and c.board else []),
+                        "foil": c.foil,
+                        "finish": c.finish,
+                        "set_code": c.set_code,
+                        "collector_number": c.collector_number,
+                    }
+                )
         except DecklistError as exc:
             raise DeckError("invalid", f"decklist could not be read: {exc}") from exc
     else:
@@ -3025,12 +3036,17 @@ def normalise_cards(
                 number and not _COLLECTOR_NUMBER.fullmatch(number)
             ):
                 raise DeckError("invalid", f"card {i}: set_code or collector_number looks wrong")
+            finish_raw = str(item.get("finish") or "").strip().lower()
+            if finish_raw and finish_raw not in FINISHES:
+                raise DeckError("invalid", f"card {i}: finish must be normal, foil or etched")
+            finish = FINISHES.get(finish_raw, "")
             out.append(
                 {
                     "name": name,
                     "quantity": qty,
                     "categories": [cat] if cat else [],
-                    "foil": item.get("foil") is True,
+                    "foil": item.get("foil") is True or finish in ("Foil", "Etched"),
+                    "finish": finish if finish != "Normal" else "",
                     "set_code": set_code,
                     "collector_number": number,
                 }

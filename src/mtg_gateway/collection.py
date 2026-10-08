@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from .archidekt import COLLECTION_PAGE_SIZE, ArchidektError
+from .archidekt import COLLECTION_PAGE_SIZE, ArchidektError, _faces, _oracle_text, _pt
 from .deckpage import DECK_CSS, image_url, mana_html
 from .decks import DeckError
 from .pages import _csrf, _safe_next, browser_session, login_redirect, read_limited
@@ -143,6 +143,11 @@ def row_out(rec: dict[str, Any]) -> dict[str, Any]:
         "collector_number": str(card.get("collectorNumber") or ""),
         "rarity": str(card.get("rarity") or ""),
         "type_line": type_line.strip(),
+        "oracle_text": _oracle_text(oracle),
+        "power": _pt(oracle.get("power")),
+        "toughness": _pt(oracle.get("toughness")),
+        "loyalty": _pt(oracle.get("loyalty")),
+        "faces": _faces(oracle),
         "mana_cost": str(oracle.get("manaCost") or ""),
         "mana_value": cmc if isinstance(cmc, (int, float)) and not isinstance(cmc, bool) else None,
         "color_identity": [str(c) for c in (oracle.get("colorIdentity") or []) if isinstance(c, str)],
@@ -520,9 +525,39 @@ def _rid(value: Any) -> int:
     return int(s)
 
 
+def _view_attrs(r: dict[str, Any]) -> str:
+    """The data attributes ``static/cardview.js`` reads, from a collection row."""
+    pt = f"{r.get('power') or ''}/{r.get('toughness') or ''}" if r.get("power") or r.get("toughness") else ""
+    faces = [
+        {
+            "name": f["name"],
+            "mana": f["mana_cost"],
+            "type": f["type_line"],
+            "text": f["text"],
+            "pt": f"{f['power']}/{f['toughness']}" if f["power"] or f["toughness"] else "",
+            "loyalty": f["loyalty"],
+        }
+        for f in r.get("faces") or []
+    ]
+    return (
+        f" data-card='{_esc(r['name'])}'"
+        + (f" data-img='{_esc(r['image_small'])}'" if r.get("image_small") else "")
+        + f" data-set='{_esc((r.get('set') or '').upper())} {_esc(r.get('collector_number'))}'"
+        f" data-type='{_esc(r.get('type_line') or '')}' data-mana='{_esc(r.get('mana_cost') or '')}'"
+        f" data-finish='{_esc(_finish_label(r.get('finish')))}'"
+        + (f" data-text='{_esc(r['oracle_text'])}'" if r.get("oracle_text") else "")
+        + (f" data-pt='{_esc(pt)}'" if pt else "")
+        + (f" data-loyalty='{_esc(r['loyalty'])}'" if r.get("loyalty") else "")
+        + (f" data-faces='{_esc(json.dumps(faces, separators=(',', ':')))}'" if faces else "")
+        + (f" data-rarity='{_esc(r['rarity'])}'" if r.get("rarity") else "")
+        + (f" data-price='{float(r['price']):.2f}'" if isinstance(r.get("price"), (int, float)) else "")
+    )
+
+
 def row_html(r: dict[str, Any], csrf: str, *, view: str) -> str:
     img = r.get("image_small") or ""
     rid = _esc(r["id"])
+    attrs = _view_attrs(r)
     finish = _finish_label(r["finish"])
     badges = (f"<span class='finish' title='{_esc(finish)}'>{finish[:1]}</span>" if finish else "") + (
         f"<span class='pill cond'>{_esc(r['condition'])}</span>" if r.get("condition") else ""
@@ -554,19 +589,22 @@ def row_html(r: dict[str, Any], csrf: str, *, view: str) -> str:
             else f"<span class='ph'><span class='t'><span class='nm'>{_esc(r['name'])}</span></span></span>"
         )
         return (
-            f"<li class='c col' data-name='{_esc(r['name'].lower())}' data-id='{rid}'>"
-            f"<div class='pic'>{body}<span class='qty'>{int(r['quantity'])}</span>{badges}</div>"
+            f"<li class='c col' data-name='{_esc(r['name'].lower())}' data-id='{rid}'{attrs}>"
+            f"<button type='button' class='pic thumbbtn' aria-label='Show {_esc(r['name'])}'>{body}"
+            f"<span class='qty'>{int(r['quantity'])}</span>{badges}</button>"
             f"<div class='cap'><span class='name'>{_esc(r['name'])}</span><span "
             f"class='set'>{set_line}</span></div>"
             f"<div class='act'>{stepper}{details}{remove}</div></li>"
         )
     return (
-        f"<li class='row col' data-name='{_esc(r['name'].lower())}' data-id='{rid}'>"
+        f"<li class='row col' data-name='{_esc(r['name'].lower())}' data-id='{rid}'{attrs}>"
+        f"<button type='button' class='thumbbtn' aria-label='Show {_esc(r['name'])}'>"
         + (
             f"<img class='thumb' src='{_esc(img)}' alt='' loading='lazy'>"
             if img
             else "<span class='thumb'></span>"
         )
+        + "</button>"
         + f"<span class='n'><span class='name'>{_esc(r['name'])}</span>{badges}"
         f"<span class='meta'>{set_line}"
         + (f" · {_esc(r.get('set_name'))}" if r.get("set_name") else "")
@@ -720,6 +758,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             scripts=scripts,
             head_extra=f"<style>{DECK_CSS}{COLLECTION_CSS}</style>"
             + (
+                "<script src='/static/cardview.js' defer></script>"
                 "<script src='/static/deck.js' defer></script><script "
                 "src='/static/collection.js' defer></script>"
                 if scripts

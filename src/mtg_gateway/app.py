@@ -932,21 +932,24 @@ def build_mcp_server(state: AppState) -> MCPServer:
         games: int = 300,
         options: dict[str, Any] | None = None,
     ) -> dict[str, object]:
-        async def load(ref: str) -> tuple[Any, str]:
+        async def load(ref: str) -> tuple[Any, str, bool]:
+            """The deck (or the pasted list's counts), the mainboard text the simulators read
+            (commander first, no headers, sideboard left out) and whether a commander is known."""
             ref = str(ref or "").strip()
             snap = _own_snapshot(_sub(), ref)
             if snap is not None:
-                return snap, deck_to_text(snap)
+                return snap, deck_to_text(snap), bool(deck_stats.compute(snap)["commanders"])
             try:
                 deck_id = _clean_deck_id(ref)
             except DeckError:
                 cards = parse_decklist(ref)
-                return {c.name: c.quantity for c in cards if c.zone == "main"}, ref
+                has_commander = any("Commander" in c.categories for c in cards if c.zone == "main")
+                return {c.name: c.quantity for c in cards if c.zone == "main"}, to_text(cards), has_commander
             deck = await state.decks.get_any_deck(_sub(), deck_id)
-            return deck, deck_to_text(deck)
+            return deck, deck_to_text(deck), bool(deck_stats.compute(deck)["commanders"])
 
         try:
-            (deck_a, text_a), (deck_b, text_b) = await load(a), await load(b)
+            (deck_a, text_a, cmd_a), (deck_b, text_b, cmd_b) = await load(a), await load(b)
         except (DeckError, DecklistError) as exc:
             kind = exc.kind if isinstance(exc, DeckError) else "invalid"
             return {"ok": False, "error": kind, "message": str(exc)}
@@ -957,7 +960,9 @@ def build_mcp_server(state: AppState) -> MCPServer:
             out["b"] = deck_brief(deck_b)
         if simulate:
             try:
-                ab = await state.reports.ab(_sub(), text_a, text_b, games=games, options=options)
+                ab = await state.reports.ab(
+                    _sub(), text_a, text_b, games=games, options=options, commanders=(cmd_a, cmd_b)
+                )
             except DeckError as exc:
                 return _tool_error(exc)
             out["goldfish_ab"] = ab or {
@@ -1027,8 +1032,10 @@ def build_mcp_server(state: AppState) -> MCPServer:
         description=(
             "Step 1 of changing a deck's own settings rather than its cards, for decks the linked account "
             "owns. details is an object with any of: name (1-200 characters), description (plain text, up "
-            "to 20000 characters), deck_format (commander, standard, modern, legacy, vintage, pauper, "
-            "pioneer, brawl, historic, oathbreaker), edh_bracket (1 to 5, or null to clear it), private "
+            "to 20000 characters), deck_format (an Archidekt format slug: commander, standard, modern, "
+            "legacy, vintage, pauper, pioneer, historic, alchemy, timeless, premodern, brawl, historicbrawl, "
+            "oathbreaker, duel, 1v1, paupercommander, predh, canlander, gladiator, tlr, penny, custom...), "
+            "edh_bracket (1 to 5, or null to clear it), private "
             "and unlisted (booleans). Fields already set that way are dropped and a proposal that would "
             "change nothing is refused. Returns the same fields as propose_deck_changes (kind 'details', "
             "a before/after diff and the review URL); the user confirms it and then it is applied with "

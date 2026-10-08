@@ -176,7 +176,7 @@ def compute(deck: Deck) -> dict[str, Any]:
             elif status != "legal":
                 problems.append({"name": c.name, "status": status})
 
-    commanders = [c for c in cards if "Commander" in c.categories]
+    commanders = [c for c in cards if deck.is_commander(c)]
     return {
         "card_count": qty,
         "distinct": len({c.name for c in cards}),
@@ -206,8 +206,54 @@ def compute(deck: Deck) -> dict[str, Any]:
     }
 
 
-_SINGLETON_FORMATS = {"commander", "brawl", "oathbreaker"}
-_DECK_SIZES = {"commander": 100, "brawl": 100, "oathbreaker": 60}
+# Formats with one copy per card and an exact deck size (commander-style), by Archidekt slug.
+_SINGLETON_FORMATS = {
+    "commander",
+    "1v1",
+    "duel",
+    "paupercommander",
+    "predh",
+    "historicbrawl",
+    "canlander",
+    "gladiator",
+    "brawl",
+    "oathbreaker",
+    "tlr",
+    "competitivebrawl",
+}
+_DECK_SIZES = {
+    "commander": 100,
+    "1v1": 100,
+    "duel": 100,
+    "paupercommander": 100,
+    "predh": 100,
+    "historicbrawl": 100,
+    "canlander": 100,
+    "gladiator": 100,
+    "brawl": 60,
+    "oathbreaker": 60,
+    "tlr": 50,
+    "competitivebrawl": 60,
+}
+# Constructed formats: at least 60 cards, at most 4 copies of a card, a sideboard of up to 15.
+_CONSTRUCTED_FORMATS = {
+    "standard",
+    "modern",
+    "legacy",
+    "vintage",
+    "pauper",
+    "pioneer",
+    "historic",
+    "alchemy",
+    "timeless",
+    "premodern",
+    "future",
+    "frontier",
+    "penny",
+}
+_MIN_SIZE = 60
+_MAX_COPIES = 4
+_SIDEBOARD_MAX = 15
 _ANY_NUMBER = "any number of cards named"
 
 
@@ -218,15 +264,22 @@ def _can_command(card: DeckCard) -> bool:
 
 
 def deck_checks(deck: Deck, cards: list[DeckCard], commanders: list[DeckCard], qty: int) -> dict[str, Any]:
-    """Structural checks from the deck's own data: deck size for the format, commander zone
-    (count and whether each card may command), colour identity against the commanders,
-    singleton rule, uncategorised rows. Each entry says what was checked; ``problems`` lists
-    the failures in plain words. Card legality by format is ``legality_problems``."""
+    """Structural checks from the deck's own data: deck size for the format (exact for the
+    commander-style formats, at least 60 for constructed ones), commander zone (count and
+    whether each card may command), colour identity against the commanders, singleton rule or
+    the four-copies limit, sideboard size (constructed), uncategorised rows. Each entry says what
+    was checked; ``problems`` lists the failures in plain words. Card legality by format is
+    ``legality_problems``."""
     problems: list[str] = []
-    expected = _DECK_SIZES.get(deck.format or "")
+    fmt = deck.format or ""
+    expected = _DECK_SIZES.get(fmt)
     size: dict[str, Any] = {"actual": qty, "expected": expected, "ok": expected is None or qty == expected}
-    if not size["ok"]:
-        problems.append(f"deck has {qty} cards; {deck.format} wants {expected}")
+    if fmt in _CONSTRUCTED_FORMATS:
+        size = {"actual": qty, "minimum": _MIN_SIZE, "ok": qty >= _MIN_SIZE}
+        if not size["ok"]:
+            problems.append(f"deck has {qty} cards; {fmt} wants at least {_MIN_SIZE}")
+    elif not size["ok"]:
+        problems.append(f"deck has {qty} cards; {fmt} wants {expected}")
     zone: dict[str, Any] = {"count": sum(c.quantity for c in commanders), "ok": True}
     if deck.format in _SINGLETON_FORMATS:
         if not commanders:
@@ -258,16 +311,33 @@ def deck_checks(deck: Deck, cards: list[DeckCard], commanders: list[DeckCard], q
                 singleton.append({"name": c.name, "quantity": c.quantity})
         if singleton:
             problems.append(f"{len(singleton)} card(s) with more than one copy")
+    copies: list[dict[str, Any]] = []
+    sideboard: dict[str, Any] | None = None
+    if fmt in _CONSTRUCTED_FORMATS:
+        for c in cards:
+            basic = is_land(c) and "basic" in [t.lower() for t in c.supertypes]
+            if c.quantity > _MAX_COPIES and not basic and _ANY_NUMBER not in c.oracle_text.lower():
+                copies.append({"name": c.name, "quantity": c.quantity})
+        if copies:
+            problems.append(f"{len(copies)} card(s) with more than {_MAX_COPIES} copies")
+        side_qty = sum(c.quantity for c in deck.side_cards if "Sideboard" in c.categories)
+        sideboard = {"count": side_qty, "maximum": _SIDEBOARD_MAX, "ok": side_qty <= _SIDEBOARD_MAX}
+        if not sideboard["ok"]:
+            problems.append(f"sideboard has {side_qty} cards; at most {_SIDEBOARD_MAX}")
     uncategorised = sorted({c.name for c in cards if not c.categories})
-    return {
+    out = {
         "deck_size": size,
         "commander_zone": zone,
         "colour_identity_violations": identity,
         "singleton_violations": singleton,
+        "copy_limit_violations": copies,
         "uncategorised": uncategorised,
         "problems": problems,
         "ok": not problems,
     }
+    if sideboard is not None:
+        out["sideboard"] = sideboard
+    return out
 
 
 def counts_from_text(cards: list[ListCard]) -> dict[str, int]:

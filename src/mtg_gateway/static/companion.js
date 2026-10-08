@@ -30,13 +30,25 @@
         name: c.name, zone: zone, before: 0, after: 0, categories: c.categories || [], autoCategory: c.auto_category || "", setCategory: null,
         finish: (c.modifier || "Normal").toLowerCase(), setFinish: null, printing: null,
         set: c.set_code || "", number: c.collector_number || "", image: c.image || null, mana: c.mana_cost || "",
-        price: c.price
+        price: c.price,
+        type: c.type_line || "", text: c.oracle_text || "", pt: c.pt || "", loyalty: c.loyalty || "", faces: c.faces || []
       };
     }
     rows[key].before += c.quantity;
     rows[key].after += c.quantity;
   });
   var added = {}; // key -> {name, zone, quantity, category, set_code, collector_number, foil}
+  /* the row's thumbnail (or its placeholder) opens the shared viewer with the whole card */
+  function thumb(r, name) {
+    var node = r.image ? el("img", { class: "thumb", src: r.image, alt: "", loading: "lazy" }) : el("span", { class: "thumb ph" });
+    if (!window.MtgCardView) return node;
+    var btn = el("button", { type: "button", class: "thumbbtn", "aria-label": "Show " + name, onclick: function () {
+      var finish = r.setFinish || r.finish;
+      window.MtgCardView.open({ name: name, img: r.image || "", set: r.set ? r.set.toUpperCase() + " " + r.number : "",
+        type: r.type, mana: r.mana, text: r.text, pt: r.pt, loyalty: r.loyalty, finish: finish, faces: r.faces }, []);
+    } }, [node]);
+    return btn;
+  }
   var rowEls = {}; // lower name -> the <li> of an existing card
   var history = []; // snapshots for Undo
 
@@ -329,7 +341,7 @@
       if (zone === "side") {
         if (rowEls[key]) return;  // the same side card listed twice: one row
         var sideLi = el("li", { class: "erow side", "data-row": key }, [
-          r.image ? el("img", { class: "thumb", src: r.image, alt: "", loading: "lazy" }) : el("span", { class: "thumb ph" }),
+          thumb(r, c.name),
           el("span", { class: "main" }, [
             el("span", { class: "name", text: c.name }),
             el("span", { class: "meta", text: (r.set ? r.set.toUpperCase() + " " + r.number : "") + (r.finish !== "normal" ? " · " + r.finish : "") + " · not in the deck's count" }),
@@ -359,7 +371,7 @@
         ])
       ]);
       var li = el("li", { class: "erow" + (c.in_deck ? "" : " side"), "data-row": key }, [
-        r.image ? el("img", { class: "thumb", src: r.image, alt: "", loading: "lazy" }) : el("span", { class: "thumb ph" }),
+        thumb(r, c.name),
         el("span", { class: "main" }, [
           el("span", { class: "name", text: c.name }),
           el("span", { class: "meta", text: (r.set ? r.set.toUpperCase() + " " + r.number : "") + (r.finish !== "normal" ? " · " + r.finish : "") + (r.price != null ? " · $" + Number(r.price).toFixed(2) : "") }),

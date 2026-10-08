@@ -28,6 +28,11 @@
 
   if (list) {
     list.addEventListener("click", function (e) {
+      var show = e.target.closest(".thumbbtn");
+      if (show && window.MtgCardView) {
+        var card = show.closest("[data-card]");
+        if (card) { e.preventDefault(); window.MtgCardView.open(window.MtgCardView.fromElement(card), []); return; }
+      }
       var btn = e.target.closest("button[name=action]");
       if (!btn) return;
       var form = btn.form;

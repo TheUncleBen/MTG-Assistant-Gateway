@@ -172,8 +172,10 @@ async def test_reports_are_stored_and_listed(stack: Stack) -> None:
         assert r.status_code == 201, r.text
         rep = r.json()
         assert rep["stats"]["card_count"] > 0 and rep["metrics"]["card_count"] == rep["stats"]["card_count"]
-        # the fake research service has no goldfish tool: recorded as a failed call, not an error
-        assert rep["goldfish"]["ok"] is False and rep["validation"]["ok"] is False
+        # the fake research service answers like Mystic Forge: the simulation and the validation
+        # are recorded as they came back
+        assert rep["goldfish"]["ok"] is True and "## Metrics" in rep["goldfish"]["text"]
+        assert rep["validation"]["ok"] is True
         again = await h.http.post("/api/v1/reports", json={"deck_id": "42"}, headers=auth)
         assert again.status_code == 201 and again.json()["report_id"] == rep["report_id"]
         assert again.json()["reused"] is True

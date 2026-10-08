@@ -195,8 +195,11 @@ def reads_archidekt(name: str, arguments: dict[str, Any] | None) -> bool:
     """Whether proxied tool ``name`` reaches Archidekt with these arguments."""
     if name in ARCHIDEKT_TOOLS:
         return True
+    given = arguments or {}
+    if isinstance(given.get("params"), dict):  # the gateway's own calls wrap the tool's model
+        given = {**given["params"], **{k: v for k, v in given.items() if k != "params"}}
     for key in DECK_ARGUMENTS:
-        value = (arguments or {}).get(key)
+        value = given.get(key)
         if isinstance(value, int) and not isinstance(value, bool):
             return True
         if isinstance(value, str) and (value.strip().isdigit() or "archidekt.com" in value.lower()):

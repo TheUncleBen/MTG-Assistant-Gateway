@@ -152,6 +152,15 @@ def test_public_deck_reads_need_no_link_and_proposals_do(clients, env: Env):
                 s, "get_deck", {"deck_ref": "https://archidekt.com/decks/42/sample_commander_deck"}
             )
             assert by_url["ok"] and by_url["id"] == "42", by_url
+            # The report's simulation reaches the real Mystic Forge in the stack with the argument
+            # shape its tools take; a shape error would come back as a pydantic "validation error".
+            rep = await c.call(s, "run_deck_report", {"deck_ref": "42", "games": 20})
+            assert rep["ok"], rep
+            for block in (rep["goldfish"], rep["validation"]):
+                assert block is not None and "validation error" not in block.get("text", ""), block
+                assert "Field required" not in block.get("text", ""), block
+            if rep["goldfish"]["ok"]:
+                assert "## Metrics" in rep["goldfish"]["text"], rep["goldfish"]
             private = await c.call(s, "get_deck", {"deck_ref": "43"})
             assert private["ok"] is False, private
             unlinked = await c.call(

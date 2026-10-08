@@ -52,8 +52,12 @@ One deck:
   colour or none; **Sort by** name, mana value, price and more. The page
   updates as soon as you change a choice.
 - **Filter** narrows the cards on the page as you type.
-- Tap a card (or a stack on a phone, which fans it out) to see it large,
-  open it on Scryfall, mark it as owned, or move it to another category.
+- Tap a card (or a stack on a phone, which fans it out) to read the whole
+  card: the image, every face with its mana cost, type line, rules text,
+  power and toughness or loyalty, flavour text, the printing, rarity,
+  artist, price, salt score and the formats it is legal in; from there open
+  it on Scryfall, mark it as owned, or move it to another category. The same
+  viewer opens from a thumbnail in the editor and in the collection.
 - On your own deck, **drag a card** onto another category: with a mouse, or
   press and hold on a touch screen and slide. Press **Save moves** and the
   moves go to Archidekt at once, with a snapshot taken first.
@@ -69,15 +73,28 @@ One deck:
   automatic pick), the deck's **tags** (Archidekt's public deck tags) and the
   **folder** it sits in. Each saves to Archidekt at once; cover and tag
   changes take a snapshot first.
-- Below the cards: statistics (mana curve, colours, types, prices,
-  legality, bracket estimate) and the description.
+- Below the cards: statistics (mana curve, colours, types, rarities,
+  prices, legality), **Probability of draw** (the chance of at least or
+  exactly N cards of a category, name, type, subtype or mana value in your
+  first N cards, like Archidekt's Probability tab), **Deck checks** (deck
+  size for the format, commander zone, colour identity, singleton or the
+  four-copies limit, sideboard size, uncategorised cards), the bracket
+  estimate and the description.
+- **Export** (More menu) shows the deck as Archidekt import text (every row
+  with printing, finish, categories and labels; paste it into Archidekt's
+  Import dialog or the gateway's New deck page), as a plain decklist and as
+  the sideboard list, each with a **Copy** button, plus downloads as
+  Archidekt .txt, plain .txt, .csv and .json. See
+  [EXPORT-IMPORT.md](EXPORT-IMPORT.md) for what survives in each direction.
 
 The **editor** changes quantities, categories (type a new one to create it),
 foil or printing, adds cards with autocompletion, removes cards, and undoes.
 Maybeboard and sideboard rows are edited the same way (count and category;
 they never count toward the deck), and **Add to** sends a new card to the
 deck or to the maybeboard. **Paste a list** adds many cards at once, one per
-line with a count in front; names the gateway cannot match stay in the box.
+line with a count in front (Archidekt's own export syntax is understood:
+printing, `*F*` and `*E*` finishes, `[Category]`, `# Sideboard` headers);
+names the gateway cannot match stay in the box.
 Press **Save changes** and they go to Archidekt straight away (a snapshot
 first, so History can undo); only a large removal asks you to confirm.
 

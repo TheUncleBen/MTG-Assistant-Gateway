@@ -38,6 +38,52 @@ one owner per capability among the assistant's tools.
 - `run_deck_report`: `options` passes the simulator's knobs through (annotations, combos, seed,
   until_turn, opponents, mulligan rules).
 - docs/CAPABILITIES.md: the capability map, by path (assistant, pages and app) and how they relate.
+- The whole card, everywhere: tapping a card on the deck page, a thumbnail in the editor or in the
+  collection opens one shared viewer with the image, every face's name, mana cost, type line, rules
+  text, power and toughness or loyalty, flavour text, printing, rarity, artist, price, salt score,
+  EDHREC rank and the formats the card is legal in. Deck reads carry `type_line`, `power`,
+  `toughness` and `loyalty` per card, and `include_text` adds `oracle_text`, `faces`,
+  `flavor_text` and `artist`.
+- Export page: the deck as Archidekt import text (every row with printing, finish, categories with
+  their flags and labels), the plain decklist and the sideboard list, each with a Copy button, and
+  a new "Download Archidekt .txt" (`/decks/{id}/export.archidekt.txt`). docs/EXPORT-IMPORT.md says
+  what survives in every direction between archidekt.com, the pages, the app and the assistant.
+- Import keeps more: `*E*` is the etched finish (it used to be read as foil), `# Sideboard` and
+  `// Sideboard` headers and `SB:` rows land in Archidekt's Sideboard (or Maybeboard) category
+  instead of being dropped, `^Label^` colour tags are read as labels rather than categories, and
+  `#CustomCard` marks are tolerated. `propose_new_deck` rows take `finish` (normal, foil, etched).
+- Deck page statistics: **Probability of draw** (at least or exactly N cards of a category, name,
+  type, subtype or mana value in the first N cards, the hypergeometric odds Archidekt's Probability
+  tab shows) and **Deck checks** (the structural checks `deck_stats` returns, in words).
+- `deck_stats` checks for constructed formats: at least 60 cards, at most four copies of a card
+  (basic lands and "any number" cards aside), a sideboard of up to 15 (`copy_limit_violations`,
+  `sideboard`); the commander-style formats keep their exact size and singleton checks.
+- Archidekt's full format list (`deck_format`): every slug Archidekt uses, shown with Archidekt's
+  own labels (Standard Brawl, Brawl, Pauper EDH, Duel Commander, Canadian Highlander, PreDH...).
+
+### Fixed
+
+- Simulations through the gateway never ran against the pinned Mystic Forge: `run_deck_report`,
+  `compare_decks simulate: true` and the report's validation sent their arguments flat, while
+  Mystic Forge's tools take one `params` object, so every call came back as a validation error
+  recorded as a failed block. The gateway now sends `{"params": {...}}`; the unit tests' Mystic
+  Forge double takes the same one-model signature so the shape is tested, and the end-to-end suite
+  runs a report against the real service. Found by an independent review of the simulation path.
+- Mystic Forge's refusals ("Commander '...' was not recognized", "No cards found") were stored as
+  successful simulations; a run without its Metrics block (or an A/B without its Deltas) is now
+  recorded as failed with that sentence.
+- A deck with no commander was simulated with its first card as the commander and a 59-card
+  library; such decks (and pasted lists without a Commander line) are now refused with a plain
+  reason instead of being simulated wrongly.
+- `compare_decks simulate: true` sent a pasted list to the simulator raw, headers and sideboard
+  included; it now sends the same rendering the statistics use (commander first, mainboard only).
+- The commander zone is Archidekt's premier category whatever it is named, as Archidekt and the
+  export text already treated it; statistics and the simulators' text agree with them.
+- Archidekt format ids 7 to 10 were mapped to the wrong formats (pioneer, brawl, historic and
+  oathbreaker created Custom, Frontier, Future Standard and Penny Dreadful decks and were shown
+  under the wrong name). The map is now Archidekt's own, read from its client code.
+- The Archidekt export text is sorted by card name (it was sorted by the whole line, so "15x"
+  came before "1x").
 
 ### Changed
 

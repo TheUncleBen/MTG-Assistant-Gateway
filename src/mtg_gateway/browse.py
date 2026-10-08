@@ -20,7 +20,7 @@ from urllib.parse import urlencode
 from starlette.requests import Request
 from starlette.responses import Response
 
-from .archidekt import FORMAT_NAMES, SEARCH_ORDERS, list_row
+from .archidekt import FORMAT_NAMES, SEARCH_ORDERS, format_label, list_row
 from .deckpage import DECK_CSS, avatar_html, covers_for, deck_list_html
 from .decks import DeckError
 from .pages import _csrf, browser_session, login_redirect
@@ -36,7 +36,9 @@ SEARCH_CSP = (
     "img-src 'self' https://cards.scryfall.io; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 )
 COLOURS = (("W", "White"), ("U", "Blue"), ("B", "Black"), ("R", "Red"), ("G", "Green"))
-FORMAT_OPTIONS = [(str(i), FORMAT_NAMES[i].capitalize()) for i in sorted(FORMAT_NAMES)]
+FORMAT_OPTIONS = sorted(
+    ((str(i), format_label(FORMAT_NAMES[i])) for i in sorted(FORMAT_NAMES)), key=lambda kv: kv[1].lower()
+)
 BROWSE_CSS = """
 .searchbar .controls{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,2fr) minmax(0,
   1.5fr) minmax(8rem,1fr) minmax(8rem,1fr);

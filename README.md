@@ -101,6 +101,7 @@ identity provider you control (Authentik, Keycloak, Authelia, ...).
 | [SCANNING.md](docs/SCANNING.md) | Users and operators | Turning a pile of physical cards into a decklist, a deck or your collection with your phone camera or a photo |
 | [USING.md](docs/USING.md) | Users | What the pages do: home, decks, search, scan, collection, proposals and history, the guide; the same text the in-app Guide shows |
 | [CAPABILITIES.md](docs/CAPABILITIES.md) | Everyone | The capability map: every assistant tool and who owns each job, every hand action on the pages and in the app, and how the two paths relate |
+| [EXPORT-IMPORT.md](docs/EXPORT-IMPORT.md) | Users | Which decklist formats go where between archidekt.com, the gateway's pages, the app and the assistant, and what survives each trip |
 | [ANDROID.md](docs/ANDROID.md) | Users and operators | The Android app: getting it from your gateway, the phone-camera scan screen, fold postures, App Links, building, signing and distributing it without an app store |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Everyone | How the pieces fit, what you can swap, how sign-in and deck edits work, the security model |
 | [DEPLOY-COMPOSE.md](docs/DEPLOY-COMPOSE.md) | Operators | A full deploy on one machine with Docker Compose |

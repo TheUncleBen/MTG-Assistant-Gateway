@@ -236,6 +236,11 @@ button.mini{width:2.25rem;min-width:2.25rem;height:2.25rem;padding:0;font-size:1
 button.icon-only{width:var(--ctl);padding:0}
 form{margin:0}
 form > button,form .btn{margin-top:1rem}
+button.thumbbtn{all:unset;display:block;cursor:pointer;line-height:0;border-radius:3px}
+.exportblock .head{display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-top:1.25rem}
+.exportblock .head h2{margin:0} .exportblock textarea{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:.85rem}
+button.thumbbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .choice{display:flex;flex-direction:column;gap:.6rem;margin-top:1rem}
 .choice button,.choice .btn{margin-top:0;width:100%}
 @media (min-width:600px){ .choice{flex-direction:row;align-items:center;flex-wrap:wrap}

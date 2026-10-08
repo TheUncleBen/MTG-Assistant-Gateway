@@ -374,8 +374,11 @@ class _RecordingMF:
     async def call(self, name: str, arguments: dict, *, owner=None, internal: bool = False):
         import mcp_types as types
 
-        self.calls.append((name, dict(arguments)))
-        return types.CallToolResult(content=[types.TextContent(type="text", text=f"# {name} ran")])
+        # Mystic Forge's tools take one pydantic model: {"params": {...}} is the only shape it accepts
+        assert set(arguments) == {"params"} and isinstance(arguments["params"], dict), (name, arguments)
+        self.calls.append((name, dict(arguments["params"])))
+        marker = {"goldfish_run": "## Metrics", "goldfish_ab": "## Deltas (A − B)"}.get(name, "")
+        return types.CallToolResult(content=[types.TextContent(type="text", text=f"# {name} ran\n{marker}")])
 
 
 def test_parse_deck_carries_rules_text_and_the_archidekt_import_syntax() -> None:
@@ -388,7 +391,8 @@ def test_parse_deck_carries_rules_text_and_the_archidekt_import_syntax() -> None
     deck = parse_deck(json.loads(sample.read_text(encoding="utf-8")))
     assert all(c.oracle_text for c in deck.cards)  # the live payload has text for every card
     text = deck_to_archidekt_text(deck)
-    assert "[Commander{top}]" in text and text.splitlines() == sorted(text.splitlines())
+    names = [line.split(" ", 1)[1].split(" (")[0].casefold() for line in text.splitlines()]
+    assert "[Commander{top}]" in text and names == sorted(names)  # by card name, like Archidekt's export
 
     def card(name: str, qty: int, **over) -> DeckCard:
         base = dict(
@@ -419,10 +423,10 @@ def test_parse_deck_carries_rules_text_and_the_archidekt_import_syntax() -> None
     )  # fmt: skip
     assert deck_to_archidekt_text(deck).splitlines() == [
         "1x Aesi, Tyrant of Gyre Strait *E* [Commander{top}]",
+        "2x Opt [Maybeboard{noDeck}{noPrice}]",
         "1x Sol Ring (cmr) 1 *F* [Ramp] ^Upgrade,#ff0000^",
         "1x Weird Name [x] [A b]",
-        "2x Opt [Maybeboard{noDeck}{noPrice}]",
-    ]
+    ]  # sorted by card name, as Archidekt's own export is
 
 
 async def test_owner_tools_carry_what_the_hidden_duplicates_had(stack: Stack) -> None:
@@ -438,9 +442,9 @@ async def test_owner_tools_carry_what_the_hidden_duplicates_had(stack: Stack) ->
     stats = structured(await call(stack.h, token, "deck_stats", {"deck_ref": "42"}))["stats"]
     checks = stats["checks"]
     assert set(checks) == {
-        "deck_size", "commander_zone", "colour_identity_violations", "singleton_violations",
-        "uncategorised", "problems", "ok",
-    }  # fmt: skip
+            "deck_size", "commander_zone", "colour_identity_violations", "singleton_violations",
+            "copy_limit_violations", "uncategorised", "problems", "ok",
+        }  # fmt: skip
     assert checks["deck_size"]["actual"] == plain["card_count"] and checks["commander_zone"]["count"] == 1
     # compare_decks: a precon-style summary with the basics apart (precon_diff)
     cmp_ = structured(await call(stack.h, token, "compare_decks", {"a": "42", "b": "1 Sol Ring\n1 Opt"}))
@@ -482,14 +486,16 @@ async def test_owner_tools_carry_what_the_hidden_duplicates_had(stack: Stack) ->
                 stack.h,
                 token,
                 "compare_decks",
-                {"a": "42", "b": "1 Sol Ring\n1 Opt", "simulate": True, "games": 20,
+                {"a": "42", "b": "Commander\n1 Opt\n\n1 Sol Ring", "simulate": True, "games": 20,
                  "options": {"allow_different_commanders": True, "annotations_b": [{"card": "Opt"}]}},
             )
         )  # fmt: skip
         assert ab["ok"] and ab["goldfish_ab"]["ok"] and "goldfish_ab ran" in ab["goldfish_ab"]["text"]
         name, args = rec.calls[-1]
         assert name == "goldfish_ab"
-        assert args["deck_b"] == "1 Sol Ring\n1 Opt" and args["n"] == 20
+        assert (
+            args["deck_b"] == "1 Opt\n1 Sol Ring\n" and args["n"] == 20
+        )  # gateway rendering, commander first
         assert args["allow_different_commanders"] is True and args["annotations_b"] == [{"card": "Opt"}]
         assert "opponents" not in args
         assert len(gw.reports.list("user-1")) == before  # an A/B is not a stored report

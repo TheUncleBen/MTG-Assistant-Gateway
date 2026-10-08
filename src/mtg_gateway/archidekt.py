@@ -32,6 +32,8 @@ VOTE_NONE, VOTE_UP, VOTE_DOWN = 0, 1, 2
 COLLECTION_PAGE_SIZE = 100
 
 # Archidekt's numeric deck formats as observed by the nccurry/mtg-mcp reference (reported, not verified).
+# Archidekt's deckFormat ids, read from the site's own client code on 2026-10-08 (its format
+# slugs are the keys; they are also the keys of each card's ``legalities``). "edh" is an alias.
 FORMAT_IDS = {
     "standard": 1,
     "modern": 2,
@@ -40,15 +42,57 @@ FORMAT_IDS = {
     "legacy": 4,
     "vintage": 5,
     "pauper": 6,
-    "pioneer": 7,
-    "brawl": 8,
-    "historic": 9,
-    "oathbreaker": 10,
+    "custom": 7,
+    "frontier": 8,
+    "future": 9,
+    "penny": 10,
+    "1v1": 11,
+    "duel": 12,
+    "brawl": 13,
+    "oathbreaker": 14,
+    "pioneer": 15,
+    "historic": 16,
+    "paupercommander": 17,
+    "alchemy": 18,
+    "historicbrawl": 20,
+    "gladiator": 21,
+    "premodern": 22,
+    "predh": 23,
+    "timeless": 24,
+    "canlander": 25,
+    "competitivebrawl": 26,
+    "tlr": 27,
 }
+# What Archidekt calls each format on screen (its own labels).
+FORMAT_LABELS = {
+    "commander": "Commander",
+    "edh": "Commander",
+    "1v1": "1v1 Commander",
+    "duel": "Duel Commander",
+    "brawl": "Standard Brawl",
+    "historicbrawl": "Brawl",
+    "competitivebrawl": "Competitive Brawl",
+    "paupercommander": "Pauper EDH",
+    "penny": "Penny Dreadful",
+    "future": "Future Standard",
+    "canlander": "Canadian Highlander",
+    "predh": "PreDH",
+    "tlr": "Tiny Leaders Reborn",
+}
+
+
+def format_label(slug: str | None) -> str:
+    """The on-screen name of a format slug ("historicbrawl" -> "Brawl"); unknown -> "Custom"."""
+    if not slug:
+        return "Custom"
+    return FORMAT_LABELS.get(slug) or slug.capitalize()
+
+
 # Reverse map, one name per id (3 reads back as "commander", not "edh").
 FORMAT_NAMES: dict[int, str] = {}
 for _name, _fid in FORMAT_IDS.items():
     FORMAT_NAMES.setdefault(_fid, _name)
+FORMAT_NAMES[19] = "pioneer"  # Explorer, folded into Pioneer by Archidekt
 REFRESH_FIELDS = ("refresh_token", "refresh")
 # Sort orders archidekt.com/search/decks offers (its Updated At, Created At, Views, Size, EDH Bracket menu).
 SEARCH_ORDERS = {
@@ -172,6 +216,19 @@ class DeckCard:
     scryfall_uid: str = ""
     default_category: str = ""  # Archidekt's auto category for cards with categories null
     oracle_text: str = ""  # rules text, faces joined with " // "; empty when Archidekt sent none
+    power: str = ""
+    toughness: str = ""
+    loyalty: str = ""
+    faces: list[dict[str, str]] = field(default_factory=list)  # per face: name, mana_cost, type_line, text...
+    artist: str = ""
+    flavor: str = ""
+
+    @property
+    def type_line(self) -> str:
+        """``Legendary Creature — Serpent`` from the super, card and sub types."""
+        head = " ".join([*self.supertypes, *self.types]).strip()
+        return head + (" — " + " ".join(self.subtypes) if self.subtypes else "")
+
     # Copies of this printing in the signed-in member's Archidekt Collection ("owned" on each
     # deck card when the deck is read with the member's session; 0 otherwise).
     owned: int = 0
@@ -235,6 +292,22 @@ class Deck:
             for c in self.categories
             if isinstance(c.get("name"), str) and c.get("includedInDeck") is False
         }
+
+    def premier_categories(self) -> set[str]:
+        """Category names Archidekt marks premier (its commander zone), plus the literal
+        "Commander" the gateway's parsers write."""
+        names = {
+            str(c.get("name"))
+            for c in self.categories
+            if isinstance(c.get("name"), str) and c.get("isPremier")
+        }
+        names.add("Commander")
+        return names
+
+    def is_commander(self, card: DeckCard) -> bool:
+        """Whether the card sits in the deck's commander zone (a premier category)."""
+        premier = self.premier_categories()
+        return any(cat in premier for cat in card.categories)
 
     def in_deck(self, card: DeckCard) -> bool:
         """A card counts as in the deck unless every one of its categories is excluded.
@@ -1261,6 +1334,38 @@ def _mana_production(value: Any) -> dict[str, int] | None:
     return out or None
 
 
+def _pt(value: Any) -> str:
+    """Power, toughness or loyalty as Archidekt sends it ('' or None when absent)."""
+    return "" if value is None or isinstance(value, bool) else str(value).strip()
+
+
+def _type_line_of(face: dict[str, Any]) -> str:
+    head = " ".join([*_str_list(face.get("superTypes")), *_str_list(face.get("types"))]).strip()
+    subs = _str_list(face.get("subTypes"))
+    return head + (" — " + " ".join(subs) if subs else "")
+
+
+def _faces(oracle: dict[str, Any]) -> list[dict[str, str]]:
+    """Each face of a multi-faced card as the pages show it; [] for a one-faced card."""
+    faces = oracle.get("faces")
+    out: list[dict[str, str]] = []
+    for face in faces if isinstance(faces, list) else []:
+        if not isinstance(face, dict):
+            continue
+        out.append(
+            {
+                "name": str(face.get("name") or ""),
+                "mana_cost": str(face.get("manaCost") or ""),
+                "type_line": _type_line_of(face),
+                "text": str(face.get("text") or "").strip(),
+                "power": _pt(face.get("power")),
+                "toughness": _pt(face.get("toughness")),
+                "loyalty": _pt(face.get("loyalty")),
+            }
+        )
+    return out
+
+
 def _oracle_text(oracle: dict[str, Any]) -> str:
     """The card's rules text as Archidekt carries it: ``text`` for one-faced cards, else each
     face's name, mana cost and text joined with ``//`` (multi-faced cards have empty top-level
@@ -1334,6 +1439,12 @@ def parse_deck(body: Any) -> Deck:
                 scryfall_uid=str(card.get("uid") or ""),
                 default_category=str(oracle.get("defaultCategory") or ""),
                 oracle_text=_oracle_text(oracle),
+                power=_pt(oracle.get("power")),
+                toughness=_pt(oracle.get("toughness")),
+                loyalty=_pt(oracle.get("loyalty")),
+                faces=_faces(oracle),
+                artist=str(card.get("artist") or ""),
+                flavor=str(card.get("flavor") or ""),
                 owned=_int(card.get("owned")),
             )
         )
