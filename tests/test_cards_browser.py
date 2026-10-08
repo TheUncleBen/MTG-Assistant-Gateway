@@ -385,6 +385,13 @@ def test_picker_card_keeps_drops_and_picks_then_tells_the_assistant() -> None:
             assert "Islnad <img src=x onerror=alert(1)>" in rows.nth(2).inner_text()  # text, not markup
             assert "corrected" in rows.nth(2).inner_text() and "foil" in rows.nth(2).inner_text()
             assert "which one?" in rows.nth(1).inner_text()
+            # Four things across one line: the tick, the picture, the name and the count (the count
+            # must not wrap under the tick).
+            tick, qty = (
+                rows.nth(0).locator("input.check").bounding_box(),
+                rows.nth(0).locator(".qty").bounding_box(),
+            )
+            assert tick and qty and qty["x"] > tick["x"] and abs(qty["y"] - tick["y"]) < tick["height"]
             assert rows.nth(1).locator(".sugg .tile").count() == 2
             assert rows.nth(1).locator("input.check").is_disabled()  # nothing to keep until a pick
             assert "not recognised" in card.locator("#note").inner_text()

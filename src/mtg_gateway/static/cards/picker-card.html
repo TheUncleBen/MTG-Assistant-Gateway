@@ -7,6 +7,8 @@
 <title>Recognised cards</title>
 <style>
 /*@BASE@*/
+/* A picker row is four things across: the tick, the picture, the name and the count. */
+.row{grid-template-columns:auto auto minmax(0,1fr) auto}
 .row .sugg{display:flex;gap:6px;overflow-x:auto;padding:6px 0 2px;grid-column:1 / -1}
 .row .sugg button{flex:0 0 auto;width:84px;padding:3px;min-height:0}
 .row .sugg img{aspect-ratio:5/7}
