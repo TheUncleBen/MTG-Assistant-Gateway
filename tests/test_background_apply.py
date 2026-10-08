@@ -143,6 +143,45 @@ async def test_shutdown_records_an_apply_that_had_to_be_cut_off(stack: Stack) ->
     assert row["result"]["sent_entries"] == 1
 
 
+def test_shutdown_grace_outlasts_a_paced_apply_and_fits_the_stack() -> None:
+    """A redeploy must not cut a running apply off after a few seconds: the gateway waits
+    SHUTDOWN_GRACE_SECONDS by default, and the stack and compose files give Docker longer than
+    that before it kills the container."""
+    import inspect
+    import re
+    from pathlib import Path
+
+    from mtg_gateway.__main__ import GRACEFUL_SHUTDOWN_SECONDS
+
+    grace = decks_mod.SHUTDOWN_GRACE_SECONDS
+    assert grace >= 60
+    assert inspect.signature(decks_mod.DeckService.aclose).parameters["grace"].default == grace
+    # uvicorn first waits for running requests, then runs the lifespan shutdown where the apply
+    # grace is spent: Docker must allow both, one after the other.
+    worst = GRACEFUL_SHUTDOWN_SECONDS + grace
+    for stack_file in ("deploy/portainer-stack.yml", "deploy/compose/docker-compose.yml"):
+        text = (Path(__file__).resolve().parent.parent / stack_file).read_text(encoding="utf-8")
+        found = re.findall(r"stop_grace_period:\s*(\d+)s", text)
+        assert found, stack_file
+        assert all(int(s) > worst for s in found), (stack_file, found, worst)
+
+
+async def test_shutdown_lets_an_apply_finish_within_the_grace(stack: Stack) -> None:
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": THREE}))
+    release = _hold(ark, lambda r: r.method == "PATCH" and len(ark.patches) >= 1)
+    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert out["state"] == "applying", out
+    closing = asyncio.ensure_future(h.app.state.gateway.decks.aclose())  # the default grace
+    await asyncio.sleep(0.2)
+    assert not closing.done()  # still waiting for the apply, not cutting it off
+    release.set()
+    await asyncio.wait_for(closing, timeout=10)
+    row = h.db.get_proposal(p["proposal_id"], "user-1")
+    assert row["state"] == "applied", row
+
+
 async def test_a_member_s_own_large_new_deck_opens_its_progress_not_applied(stack: Stack) -> None:
     h, ark = stack.h, stack.ark
     await linked_user(stack)

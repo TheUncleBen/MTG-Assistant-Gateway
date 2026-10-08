@@ -199,8 +199,8 @@ def test_big_edit_shows_a_summary_first_and_the_auto_modes_hide_the_buttons() ->
             card.locator("#title").wait_for()
             page.wait_for_timeout(900)
             assert "assistant applies this itself" in card.locator("#note").inner_text()
-            assert card.locator("button").count() == 0
-            assert card.locator("a.link", has_text="Review in browser").count() == 1
+            assert card.locator("button:visible").count() == 0
+            assert card.locator("a.link", has_text="Open in the app or browser").count() == 1
             assert not errors, errors
         finally:
             browser.close()
@@ -237,17 +237,23 @@ def test_card_without_a_code_only_offers_the_review_page() -> None:
             card.locator("#reject").wait_for()
             page.wait_for_timeout(900)
             card.locator("#reject").click()
+            # Reject first asks why (optional), so the assistant can do better; nothing is sent yet.
+            card.locator("#why:not(.hidden)").wait_for(timeout=5_000)
+            assert _calls(page, "tools/call") == []
+            card.locator("#reason").fill("keep the Islands")
+            card.locator("#reject-go").click()
             card.locator("#status.err").wait_for(timeout=5_000)
             assert "does not belong" in card.locator("#status").inner_text()
             assert _calls(page, "tools/call")[0]["params"]["arguments"]["decision"] == "reject"
             assert card.locator("#reject").is_enabled()  # the person may try the other button or the page
+            assert card.locator("#why").get_attribute("class") == "why hidden"
             # An error result (the proposal could not be made) shows the message and no buttons.
             card = _open(
                 page, {"structuredContent": {"ok": False, "error": "invalid", "message": "bad change"}}
             )
             card.locator("#status.err").wait_for(timeout=5_000)
             assert "bad change" in card.locator("#status").inner_text()
-            assert card.locator("button").count() == 0
+            assert card.locator("button:visible").count() == 0
             assert json.loads(json.dumps(PROPOSAL))["state"] == "pending"
         finally:
             browser.close()

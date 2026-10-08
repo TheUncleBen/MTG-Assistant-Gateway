@@ -109,9 +109,10 @@ def card_html() -> str:
     return CARD_PATH.read_text(encoding="utf-8")
 
 
-def apps_extension() -> Apps:
-    """The MCP Apps extension carrying the proposal card resource. Passing it to MCPServer
-    advertises ``io.modelcontextprotocol/ui`` in the server's capabilities."""
+def apps_extension(public_url: str | None = None) -> Apps:
+    """The MCP Apps extension carrying the proposal card resource and, with ``public_url``, the
+    other in-chat cards (cards.py). Passing it to MCPServer advertises
+    ``io.modelcontextprotocol/ui`` in the server's capabilities."""
     apps = Apps()
     apps.add_html_resource(
         CARD_URI,
@@ -122,6 +123,10 @@ def apps_extension() -> Apps:
         csp=ResourceCsp(resource_domains=list(CARD_IMAGE_HOSTS)),
         prefers_border=True,
     )
+    if public_url:
+        from .cards import add_card_resources
+
+        add_card_resources(apps, public_url)
     return apps
 
 

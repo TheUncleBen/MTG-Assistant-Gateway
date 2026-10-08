@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from cryptography.fernet import Fernet
 
-from mtg_gateway.backup import export_now, prune, seconds_until
+from mtg_gateway.backup import export_now, prune, seconds_until, sweep_work_dirs
 from mtg_gateway.config import ConfigError, load_settings
 from mtg_gateway.db import Database
 
@@ -300,3 +301,83 @@ async def test_health_probes_mystic_forge_once_for_many_callers():
     proxy = MysticForgeProxy("http://mf.test/mcp", client_factory=factory)
     results = await asyncio.gather(*[proxy.healthy() for _ in range(20)])
     assert all(results) and len(probes) == 1
+
+
+async def test_health_retries_a_failed_probe_sooner_than_a_good_one(monkeypatch):
+    """Mystic Forge starts after the gateway: a "down" answer is held for a few seconds only,
+    an "ok" answer for the usual half minute."""
+    import contextlib
+
+    from mtg_gateway import mf_proxy as mod
+
+    up = {"x": False}
+    probes = []
+
+    class Client:
+        async def list_tools(self):
+            if not up["x"]:
+                raise ConnectionError("not yet")
+
+    @contextlib.asynccontextmanager
+    async def factory():
+        probes.append(1)
+        yield Client()
+
+    monkeypatch.setattr(mod, "HEALTH_DOWN_CACHE_SECONDS", 0.05)
+    proxy = mod.MysticForgeProxy("http://mf.test/mcp", client_factory=factory)
+    assert await proxy.healthy() is False and await proxy.healthy() is False and len(probes) == 1
+    up["x"] = True
+    await asyncio.sleep(0.06)
+    assert await proxy.healthy() is True and len(probes) == 2  # probed again once the short hold passed
+    up["x"] = False
+    assert await proxy.healthy() is True and len(probes) == 2  # a good answer is held the full window
+
+
+def test_backup_is_written_in_a_private_folder_and_leaves_nothing_behind(tmp_path: Path, monkeypatch):
+    from mtg_gateway import backup as backup_module
+
+    db = Database(tmp_path / "gw.sqlite")
+    seen: list[Path] = []
+    real = db.backup_to
+
+    def spy(target: Path) -> None:
+        seen.append(target)
+        real(target)
+
+    monkeypatch.setattr(db, "backup_to", spy)
+    backup_dir = tmp_path / "backups"
+    dest = backup_module.export_now(db, backup_dir, 30)
+    # SQLite wrote inside a fresh owner-only folder, where nobody else can swap a link in
+    assert seen[0].parent != backup_dir and seen[0].parent.parent == backup_dir
+    assert dest.exists() and oct(dest.stat().st_mode & 0o777) == "0o600"
+    assert [p.name for p in backup_dir.iterdir()] == [dest.name]
+    db.close()
+
+
+def test_stale_work_folders_from_a_crashed_backup_are_swept(tmp_path: Path, caplog):
+    """A backup killed mid-write leaves its private `.backup-*` folder behind; the next backup
+    removes such folders (older than an hour) with the partial copy inside, leaves a young one
+    (another backup may still be writing in it), and never follows a link by that name."""
+    db = Database(tmp_path / "g.sqlite")
+    b = tmp_path / "b"
+    b.mkdir()
+    stale = b / ".backup-old"
+    stale.mkdir(mode=0o700)
+    (stale / "mtg-gateway-partial.sqlite").write_bytes(b"partial")
+    old = time.time() - 7200
+    os.utime(stale, (old, old))
+    young = b / ".backup-young"
+    young.mkdir(mode=0o700)
+    (young / "mtg-gateway-partial.sqlite").write_bytes(b"partial")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "keep.txt").write_text("keep")
+    link = b / ".backup-link"
+    link.symlink_to(elsewhere, target_is_directory=True)
+    os.utime(link, (old, old), follow_symlinks=False)
+    with caplog.at_level("INFO", logger="mtg_gateway.backup"):
+        out = export_now(db, b, keep_days=14)
+    assert out.exists() and not stale.exists() and young.exists()
+    assert (elsewhere / "keep.txt").exists() and link.is_symlink()
+    assert sorted(p.name for p in b.iterdir() if not p.name.startswith(".backup-")) == [out.name]
+    assert sweep_work_dirs(b, older_than=0) == 1 and not young.exists()  # the young one, when old enough

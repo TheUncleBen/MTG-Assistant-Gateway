@@ -178,6 +178,23 @@ as the MCP Apps standard says (reported, not yet verified in a live
 session); the review page in your browser never relies on it and is linked
 from every card.
 
+### The other cards in the chat
+
+The same mechanism shows a card wherever you have something to pick: the
+**printings** of a card as pictures in a grid (tap the one you mean, filter by
+set or finish, expand it), the **cards read from your photos or list** with a
+tick per row and suggestions for names it was unsure about (press **Use these
+cards** when the list is right), a **deck** by category with pictures and
+rules text when you tap a card, and your **account** with what still needs
+setting up. A tap on these cards is sent to the assistant as plain text and
+it carries on from there, with a proposal if anything is to change; none of
+them changes anything by itself. The pictures and rules text come from
+Scryfall; the deck rows and printings come from the gateway through a link
+that is yours alone and expires after ten minutes. All of this is verified
+in a browser test against the cards themselves, not yet in a live Claude
+session; Claude Code shows the text instead and asks about unsure names with
+a form.
+
 **Your approval mode.** On the gateway's Account page you choose how much
 your assistant may do without asking: *Ask me every time* (the default),
 *Apply small, low-risk edits without asking* (a few cards added, removed,
@@ -240,7 +257,11 @@ and may block some risky ones (reported). OpenAI also says ChatGPT renders
 MCP Apps (reported), so a proposal should appear as a card with Approve and
 Reject buttons like in Claude; this hasn't been tried with ChatGPT yet. If
 no card appears and ChatGPT refuses or hides `apply_proposal`, ask for the
-proposal's review link and press Apply there.
+proposal's review link and press Apply there. The other cards (printings,
+recognised cards, a deck, the account) follow the same standard and should
+appear the same way (reported, not yet tried); without them, the assistant's
+text has everything, and it asks which set you mean instead of showing the
+pictures.
 
 ### If ChatGPT blocks write tools
 

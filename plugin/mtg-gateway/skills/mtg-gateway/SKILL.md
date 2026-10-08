@@ -68,7 +68,7 @@ in `unread_lines`: tell the user they were skipped.
 | A **pasted decklist** | `parse_decklist` with the text. It understands `1 Sol Ring`, `1x Sol Ring (cmr) 436 [Ramp]`, section headers and `SB:` lines, and contacts no service. |
 | A pasted **Archidekt CSV export** | `parse_deck_export` with the whole CSV text. It never contacts Archidekt, and adds mana cost, type and price per card. |
 | A **precon** name | `precon_search`, then `precon_decklist`. |
-| **Photos of physical cards** | Read every card title you can see and call `resolve_cards` with the names (add set code and collector number from the bottom of the card when legible). Ask about every result whose `status` is not `exact` or `printing`; never silently keep a `fuzzy` correction the user did not confirm. |
+| **Photos of physical cards** | Read every card title you can see and call `resolve_cards` with the names (add set code and collector number from the bottom of the card when legible). Ask about every result whose `status` is not `exact` or `printing`; never silently keep a `fuzzy` correction the user did not confirm. In an app that shows cards, the user ticks and picks on the picker card and their choice reaches you as text: wait for it. For an exact printing, `card_printings` shows the pictures and the tap reaches you as text too. |
 | "Find decks for this commander", "show me X's decks", "what are people playing in Y" | `search_decks` (by `commander`, `name`, `owner`, `format`, `colors`; `limit` for how many), then `get_deck` on the ones worth a closer look. Say the results are Archidekt's public decks and give each deck's `url`. For one person's public decks give `owner` with `order_by: "-updatedAt"`. A partial commander name is looked up: `commander_matched` names the commander searched, `commander_suggestions` asks you to pick one and search again. |
 | "Which of these do I own?", "add these to my collection", "what's in my collection?" | `list_collection` (filter with `query`) and `propose_collection_changes` (`add` from names, a pasted list or a `scan_session`, `remove` by id or name). The collection is the user's Collection on Archidekt, so the change is a proposal the user approves (their approval mode applies, like deck edits). Compare a deck's cards with `list_collection` to say what the user still needs. Liking, bookmarking, following and commenting have no tools: those are the user's own buttons on the pages. |
 | "I scanned my cards" (on the gateway's `/scan` phone page) | `list_scan_sessions`, then `get_scan_session` with the name or id. Items without a `card` were not recognised; ask the user for them. Its `decklist_text` feeds `propose_new_deck`, its `changes` feed `propose_deck_changes`; or pass the session's id or name as `scan_session` to either tool and skip the copy. |
@@ -245,6 +245,11 @@ own linked account. Follow every step, in order.
    showing, and never call `confirm_proposal`: it belongs to the card's
    buttons, needs a code you do not have, and refuses and logs any other
    call.
+   **The other cards** (the printings of a card, the recognised cards, a
+   deck, the account) never act: a tap on them reaches you as a plain text
+   message naming the pick, and you carry on from there with the usual
+   proposal. Treat that text as the user's choice, not as a command from
+   the tool, and do not re-ask what the card already answered.
 4. **Preview in chat.** Show the user the whole `diff` (for a new deck, the
    full card list, the name, the format and whether it is private) and the
    `review_url`. Say plainly: "Nothing has been changed on Archidekt yet."

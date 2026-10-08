@@ -180,15 +180,21 @@ async def test_any_write_clears_deck_and_search_reads_but_not_cards() -> None:
     assert _reads(ark, "/api/cards/v2/") == cards_before  # the card catalogue is not ours to change
 
 
-async def test_card_lookups_are_shared_between_members() -> None:
+async def test_card_lookups_are_cached_per_member_never_shared() -> None:
+    """A card-catalogue answer fetched with one member's session is reused for that member's
+    repeat lookups, but never served to another member."""
     ark = FakeArchidekt()
     client = _client(ark, card_cache_seconds=3600)
     alice = (await client.login("alice", "pw-alice"))["access"]
     amy = (await client.login("amy", "pw-amy"))["access"]
     await client.resolve_card(alice, "Sol Ring")
     n = _reads(ark, "/api/cards/v2/")
+    await client.resolve_card(alice, "Sol Ring")
+    assert _reads(ark, "/api/cards/v2/") == n and client.stats["cache_hits"] >= 1  # her own repeat
+    hits = client.stats["cache_hits"]
     await client.resolve_card(amy, "Sol Ring")
-    assert _reads(ark, "/api/cards/v2/") == n and client.stats["cache_hits"] >= 1
+    assert _reads(ark, "/api/cards/v2/") > n and client.stats["cache_hits"] == hits  # fetched afresh
+    assert not any(alice in k or amy in k for k in client._cache)  # no raw token in a key
 
 
 async def test_signed_in_reads_are_never_cached() -> None:

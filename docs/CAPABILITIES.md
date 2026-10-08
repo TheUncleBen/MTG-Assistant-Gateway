@@ -34,10 +34,10 @@ snapshot first and is read back to verify.
 
 | Capability | The one tool | Writes? | Notes |
 | --- | --- | --- | --- |
-| Who is signed in; is Archidekt linked, are writes on | `whoami`, `account_status` | no | linking itself happens only in the browser (Account page) |
+| Who is signed in; is Archidekt linked, are writes on | `whoami`, `account_status` | no | linking itself happens only in the browser (Account page); the account card in the chat shows what is missing and opens that page |
 | List my decks (private included), filter by name, format, folder | `list_my_decks` | no | |
 | Search public decks (name, commander, partial commander names, format, colours, owner), and one user's public decks (`owner`, newest first) | `search_decks` | no | hides Mystic Forge `archidekt_user_decks`; the web profile page `/users/<name>` is the hand path |
-| Read any deck, the member's own private ones included: cards (type line, power/toughness, loyalty), zones, stats, plain list, Archidekt import text, picked with `view`; rules text, faces, flavour and artist on request | `get_deck` | no | hides Mystic Forge `archidekt_deck`, `archidekt_export`; `owner` says whose deck it is |
+| Read any deck, the member's own private ones included: cards (type line, power/toughness, loyalty), zones, stats, plain list, Archidekt import text, picked with `view`; rules text, faces, flavour and artist on request | `get_deck` | no | the deck card in the chat shows the deck by category with pictures and rules text; hides Mystic Forge `archidekt_deck`, `archidekt_export`; `owner` says whose deck it is |
 | Read a pasted list or an Archidekt CSV export | `parse_decklist`, `parse_deck_export` | no | |
 | Statistics, legality, structural checks, bracket estimate | `deck_stats` | no | hides `validate_archidekt_deck` |
 | Diff two decks, snapshots or lists (precon upgrades included), with an optional paired goldfish A/B | `compare_decks` | no | hides `precon_diff`, `goldfish_ab`; the deck page's Compare view is the hand path |
@@ -45,7 +45,7 @@ snapshot first and is read back to verify.
 | Draw odds; what the engine models for a deck | `goldfish_odds`, `goldfish_annotate` (Mystic Forge) | no | annotations feed `run_deck_report`; the deck page's Probability of draw is the hand path to the same odds |
 | Validate a pasted list that is not a deck yet | `validate_decklist` (Mystic Forge) | no | an Archidekt deck's checks are in `deck_stats` |
 | Card lookups, rulings, prices, rules, EDHREC, combos, precon lists | the Mystic Forge research tools | no | the full list is in the tool reference |
-| Turn names or card photos into exact printings | `resolve_cards`, `card_printings` | no | |
+| Turn names or card photos into exact printings | `resolve_cards`, `card_printings` | no | the picker card lets the person keep, drop or pick among suggestions; the printings card shows every printing's picture to tap (a form question in an app without cards) |
 | Scan sessions (the Scan page's drafts) | `list_scan_sessions`, `get_scan_session`, `save_scan_session` | saves a draft | drafts stay in the gateway until used |
 | Edit a deck's cards (main or maybeboard) | `propose_deck_changes` | proposal | |
 | Create a deck from cards, a list, a CSV, the gateway's JSON or a scan | `propose_new_deck` | proposal (high) | |
@@ -53,7 +53,7 @@ snapshot first and is read back to verify.
 | Change a deck's name, description, format, bracket, privacy; move it to a folder, add or remove tags, set its cover | `propose_deck_details` | proposal (high) | applied with the same verified calls as the deck settings page |
 | Undo: snapshots and restore (cards and the deck's name, description, format, bracket, privacy) | `list_snapshots`, `get_snapshot`, `propose_restore_snapshot` | proposal (high) | |
 | My collection: read; add or remove cards | `list_collection`, `propose_collection_changes` | proposal | in-chat card like a deck proposal; read back after applying |
-| Proposals: list, read, approve with the card's code, reject, apply | `list_my_proposals`, `get_proposal`, `confirm_proposal`, `reject_proposal`, `apply_proposal` | apply writes | `apply_proposal` succeeds only when the mode allows |
+| Proposals: list, read, approve with the card's code, reject (with a reason on the card), apply | `list_my_proposals`, `get_proposal`, `confirm_proposal`, `reject_proposal`, `apply_proposal` | apply writes | `apply_proposal` succeeds only when the mode allows |
 
 **No assistant tool exists for:** deleting a deck, creating or renaming
 folders, liking, bookmarking, following, commenting, editing a comment,
@@ -85,6 +85,17 @@ deleting a deck asks for its name.
 | Guide | this map in the user's words, section by section |
 
 ## C. How the two paths relate
+
+The assistant's path has **cards in the chat** wherever the person has to
+pick or press (MCP Apps: Claude on the web, desktop and phones; ChatGPT as
+reported): the proposal (Approve, Reject with a reason), the printings of a
+card, the cards read from photos or a list, a deck by category, the account's
+setup. Every pick on a card reaches the assistant as plain text, and the
+assistant then proposes as usual; the only card that acts by itself is the
+proposal card's Approve, with its one-time code. Display-only cards are kept
+to the deck read, where pictures and rules text would otherwise fill the chat.
+An app without cards (Claude Code, older clients) gets the same text results,
+and a form question for ambiguous names.
 
 - **Shared backend, one set of rules.** A hand save and an applied proposal
   travel the same path: a proposal record, a snapshot, the Archidekt write,

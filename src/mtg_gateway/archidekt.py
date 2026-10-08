@@ -526,10 +526,11 @@ class Pacer:
             self._failures = 0
 
 
-# Read caching. Only reads that are the same for everyone are cached: the card catalogue
-# (``/cards/v2/``, whoever asks) and anonymous reads of public decks and deck searches. A read
-# made with a member's session is never cached, so proposals, applies and drift checks always
-# see the live deck. Any write the gateway sends clears the deck and search entries.
+# Read caching. Anonymous reads of public decks and deck searches are cached for everyone.
+# Card-catalogue reads (``/cards/v2/``) are sent with the member's session, so each one is cached
+# for that member only: an answer fetched with one member's token is never served to another.
+# A member's reads of decks are never cached, so proposals, applies and drift checks always see
+# the live deck. Any write the gateway sends clears the deck and search entries.
 CARD_PATH = "/cards/v2/"
 CACHE_MAX_ENTRIES = 500
 BACKOFF_CAP = 10.0  # seconds; the longest single wait between retries
@@ -583,7 +584,11 @@ class ArchidektClient:
             return None
         if ttl <= 0:
             return None
-        return path + "?" + json.dumps(sorted((params or {}).items()), default=str)
+        key = path + "?" + json.dumps(sorted((params or {}).items()), default=str)
+        if token is not None:
+            # keyed by a fingerprint of the session, never the token itself
+            key += "#" + hashlib.sha256(token.encode()).hexdigest()[:32]
+        return key
 
     def _cache_get(self, key: str, path: str) -> tuple[bool, Any]:
         hit = self._cache.get(key)
