@@ -69,7 +69,7 @@ li.add .act{color:var(--green)} li.remove .act{color:var(--red)}
 .qty{font-variant-numeric:tabular-nums;font-weight:600;white-space:nowrap;font-size:13px;color:var(--muted)}
 /* A change's text (Main → Maybeboard) may wrap, so on a narrow card it never squeezes the card name to a letter a line. */
 ul.changes li .qty{white-space:normal;text-align:right;overflow-wrap:anywhere;max-width:min(20em,32vw)}
-@media (max-width:420px){ul.changes li:not(.add):not(.remove) .qty{grid-column:2;text-align:left;max-width:none}}
+@media (max-width:420px){ul.changes li:not(.add):not(.remove) .qty:not(:empty){grid-column:2;text-align:left;max-width:none}}
 li.add .qty{color:var(--green)} li.remove .qty{color:var(--red)}
 ul.changes li.group{display:block;padding:5px 10px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
   color:var(--muted);background:var(--bg2);border-left-color:var(--border)}
@@ -77,7 +77,7 @@ ul.changes li.group{display:block;padding:5px 10px;font-size:11px;font-weight:70
   border:0;border-top:1px solid var(--border);border-radius:0;background:var(--bg2);text-align:left}
 ul.changes li.more-row{display:block;padding:0;border-left-color:var(--border)}
 /* The state and risk badges stay whole: on a narrow card the risk badge moves under the state one. */
-.badges{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;min-width:0}
+.badges{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;flex:0 1 auto;min-width:min-content}
 .badge.risk.high{background:var(--amber-bg);color:var(--amber)}
 .note{margin:8px 0 0;font-size:13px;color:var(--muted);overflow-wrap:anywhere}
 .foot{margin:10px 0 0;font-size:12px;color:var(--muted);overflow-wrap:anywhere}

@@ -35,7 +35,10 @@ slips. Nothing to change in the stack, the settings or the secrets.
   for the person reading it.
 - **Card data links:** a used-up link could work again if more than 8192 other
   links were fetched within its 10 minutes. A link whose counter had to be
-  dropped is now refused; links issued after that work as usual.
+  dropped is now refused; links issued after that work as usual. When the
+  counters fill up, the member holding the most loses their own oldest
+  counters, so one member fetching thousands of links can't use up anyone
+  else's.
 - **Deck stats for Pauper Commander:** `legality_problems` no longer lists an
   uncommon commander as not legal (the deck checks already passed it); a
   banned commander is still listed.

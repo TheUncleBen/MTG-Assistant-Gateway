@@ -960,11 +960,19 @@ def _page_step(p: dict[str, Any]) -> str:
         )
     if state == "applied":
         return "Done. Archidekt matches this proposal."
-    if state == "failed" and result.get("sent_entries"):
+    if state == "failed" and p.get("kind") in ("create_deck", "clone") and result.get("deck_id"):
         return (
-            "Part of this change reached Archidekt before it stopped. Check the deck; the snapshot "
-            "taken just before it can be restored from History."
+            "A new deck was made on Archidekt before this stopped, so it may not match the proposal. "
+            "Check it, and delete it from its deck page if you don't want it."
         )
+    if state == "failed" and result.get("sent_entries"):
+        where = "your collection" if p.get("kind") == "collection" else "the deck"
+        undo = (
+            "; the snapshot taken just before it can be restored from History."
+            if result.get("snapshot_id")
+            else "."
+        )
+        return f"Part of this change reached Archidekt before it stopped. Check {where}{undo}"
     if state == "failed":
         return (
             "Nothing else was changed. Ask your assistant for a new proposal if you still want these edits."

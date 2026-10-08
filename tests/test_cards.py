@@ -269,7 +269,7 @@ def test_a_used_up_link_stays_used_up_when_its_counter_is_crowded_out(monkeypatc
     assert not links.use(busy)  # still refused: its cached answer shows it was counted before
     # Expired counters go first: an old entry is dropped, a live one survives the squeeze.
     links = CardLinks(Fernet.generate_key().decode(), "https://mtg.test")
-    links._uses["stale"] = (1, time.time() - cards.LINK_TTL - 5)
+    links._uses["stale"] = (1, time.time() - cards.LINK_TTL - 5, "")
     live = links.issue("amy", "deck", "live").rsplit("/", 1)[1]
     links.use(live)
     for n in range(cards.LINK_USES_SIZE - 1):  # fills the table to one over its size
@@ -295,6 +295,28 @@ def test_a_used_up_link_stays_used_up_when_its_counter_and_answer_are_both_crowd
     clock[0] += 1
     fresh = links.issue("alice", "deck", "42").rsplit("/", 1)[1]
     assert links.use(fresh)  # a link issued after the squeeze has its own budget
+
+
+def test_one_member_filling_the_link_counters_only_crowds_out_their_own(monkeypatch) -> None:
+    """A member fetching thousands of links drops their own counters, never another member's: the
+    other member's live link keeps its count and their unfetched link still works."""
+    clock = [1_800_000_000.0]
+    monkeypatch.setattr(cards.time, "time", lambda: clock[0])
+    links = CardLinks(Fernet.generate_key().decode(), "https://mtg.test")
+
+    def tok(sub: str, ref: str) -> str:
+        return links.issue(sub, "deck", ref).rsplit("/", 1)[1]
+
+    fetched, unfetched = tok("alice", "42"), tok("alice", "43")
+    assert links.use(fetched, "alice")
+    clock[0] += 1
+    for n in range(cards.LINK_USES_SIZE + 10):
+        links.use(tok("mallory", str(n)), "mallory")
+    assert fetched in links._uses and links._uses[fetched][0] == 1
+    assert "alice" not in links._dropped_upto
+    assert links.use(unfetched, "alice")
+    # mallory's own oldest links were the ones dropped, and those stay refused
+    assert links._dropped_upto["mallory"] >= 1_800_000_001
 
 
 async def test_a_link_stops_working_for_a_disabled_member(stack: Stack) -> None:

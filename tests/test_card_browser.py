@@ -257,3 +257,48 @@ def test_card_without_a_code_only_offers_the_review_page() -> None:
             assert json.loads(json.dumps(PROPOSAL))["state"] == "pending"
         finally:
             browser.close()
+
+
+def test_narrow_card_keeps_badges_whole_and_names_readable() -> None:
+    """At phone widths the state and risk badges stay one line each and clear of the title, and a
+    long change ("Main → Maybeboard (leaves the deck, −1)") wraps under the card name instead of
+    squeezing it to a letter a line."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    long_name = {
+        **PROPOSAL,
+        "deck_name": "A very long deck name that goes on " * 2,
+        "risk": "low",
+        "risk_reason": "3 rows",
+    }
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            for width in (320, 360, 420):
+                page = browser.new_page(viewport={"width": width + 20, "height": 900})
+                page.set_content(HOST.replace("width:600px", f"width:{width}px"))
+                page.evaluate(
+                    "(r) => { window.toolResult = r; }",
+                    {"structuredContent": long_name, "_meta": {APPROVAL_META_KEY: "c"}},
+                )
+                page.evaluate("(html) => { document.getElementById('f').srcdoc = html; }", card_html())
+                page.wait_for_function(
+                    "() => window.log.some(m => m.method === 'ui/notifications/initialized')", timeout=10_000
+                )
+                card = page.frame_locator("#f")
+                card.locator("#risk").wait_for()
+                geo = page.frames[1].evaluate(
+                    """() => {
+  const h = document.getElementById('title').getBoundingClientRect();
+  const b = [...document.querySelectorAll('.badges .badge')].map(e => e.getBoundingClientRect());
+  const n = document.querySelector('ul.changes li.category .name').getBoundingClientRect();
+  return {titleRight: h.right, badges: b.map(r => [r.left, r.height]), nameWidth: n.width};
+}"""
+                )
+                assert all(h <= 26 for _, h in geo["badges"]), (width, geo)
+                assert all(left >= geo["titleRight"] for left, _ in geo["badges"]), (width, geo)
+                assert geo["nameWidth"] > 80, (width, geo)
+                page.close()
+        finally:
+            browser.close()
