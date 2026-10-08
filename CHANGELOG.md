@@ -11,7 +11,9 @@ with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 
 Wording fixes from the acceptance check of 0.7.7, and a narrower Authentik
 permission for the optional clean-up. No code behaviour changes; nothing to
-change in the stack, the settings or the secrets.
+change in the stack or the settings. The only secret to replace is the
+optional clean-up's token, and only if you set it up with 0.7.7's steps
+(see below).
 
 ### Changed
 
@@ -32,9 +34,10 @@ change in the stack, the settings or the secrets.
   object permission), checked on Authentik 2026.8.3 to be enough; with it
   the token sees no other group. The docs now say what the token can read
   (those groups' members' usernames, names and emails) and that to cut it
-  off you deactivate or delete the service account, because it can make
-  itself new tokens. If you set it up with 0.7.7's steps, swap the global
-  permission for the two object permissions.
+  off you delete the service account (deactivating lasts only until it is
+  reactivated), because it can make itself new tokens. If you set it up
+  with 0.7.7's steps (a global permission), delete that service account
+  and follow the new steps with a new account, token and secret.
 
 ## [0.7.7] - 2026-10-08
 
