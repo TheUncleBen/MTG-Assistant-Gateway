@@ -198,7 +198,7 @@ For the exact devices and plans tested, see
   account, which the provider reports only as a refused token, keeps the
   stored session until an admin presses Disable or Unlink, or it expires).
   With Authentik, an optional hourly clean-up (`src/mtg_gateway/idp_sweep.py`,
-  an API token that may only view the two gateway groups) asks who is in the two groups now and
+  an API token that may only view the gateway's groups and its own tokens) asks who is in the two groups now and
   deletes the stored session of every linked member who is in neither or is
   deactivated; an empty, partial or failed answer deletes nothing. Removing someone from `MTG_ADMIN_GROUP` takes the admin page away
   the same way. This doesn't rely on the provider revoking anything:

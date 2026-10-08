@@ -11,8 +11,9 @@ Every sentence has to stay true of the code; the source of each claim is noted b
 - what the session is used for: the ``ArchidektClient`` methods reached through
   ``DeckService._call`` (decks, folders, tags, collection, deletes, backup copies when
   ``MTG_ARCHIDEKT_BACKUPS``), ``DeckService.get_any_deck`` (other people's decks read as the
-  member), card lookups (``/cards/v2/``, sent with the member's session) and ``social.py``
-  (comment threads, the following list, browser-only clicks);
+  member), card lookups while building or applying changes (``/cards/v2/`` in ``_resolve_adds``,
+  ``_printing_entries``, ``_apply_create``, ``collection.py``, sent with the member's session)
+  and ``social.py`` (comment threads, the following list, browser-only clicks);
 - what the operator can read: every table in ``db.py`` keyed by the member, the pictures under
   ``<data dir>/avatars`` (``avatars.py``) and ``idp_grants`` (Fernet, same key);
 - what admins see: ``admin.py`` user detail (name, email, subject, groups, sign-in times,
@@ -22,7 +23,7 @@ Every sentence has to stay true of the code; the source of each claim is noted b
   date shown on the Account page is read from the member's own stored token
   (``DeckService._expiry``, ``link_expires_at``);
 - admins: ``admin.py`` shows the Archidekt username, the activity log and the unlink, disable,
-  revoke and delete actions, and calls nothing that uses a member's session;
+  enable, revoke and delete actions, and calls nothing that uses a member's session;
 - logs: no logger is given the password or a token (``tests/test_link_disclosure.py`` checks the
   DEBUG output of a link, refresh, use and unlink); httpx's request lines (Archidekt URLs) are
   logged at DEBUG only, httpcore (response headers) never (``__main__.py``); the Archidekt client
@@ -69,9 +70,9 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "What the gateway uses it for",
         (
             "Reading your decks (private ones included), folders, tags and collection.",
-            "Reading, as you, the other people's decks, comment threads and card searches you or "
-            "your assistant look at, and the list of people you follow, so they show as Archidekt "
-            "shows them to you.",
+            "Reading, as you, the other people's decks and comment threads you or your assistant "
+            "look at and the list of people you follow, so they show as Archidekt shows them to "
+            "you, and looking up the cards in the changes you make.",
             "Making the deck, folder, tag and collection changes you make yourself on these pages "
             "or approve, or that your approval mode lets your assistant make, including deleting "
             "a deck when you ask. Before it changes a deck it may first save a copy of it in a "
@@ -109,7 +110,8 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "session expires. They cannot get your password from the session.",
             "They can read everything else the gateway keeps about you, which is not encrypted: "
             "your name, email, username and groups at the sign-in service, your profile picture "
-            "(if the sign-in service sends one), "
+            "(if the sign-in service sends one), when you signed in and were last seen, your "
+            "approval mode, "
             "your Archidekt username and user number, your proposed and applied deck and "
             "collection changes, deck snapshots, deck reports and covers, scans, which apps you "
             "connected, usage counts, and the activity log. The sign-in service's tokens the "
@@ -124,7 +126,7 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "What admins on this site can see and do",
         (
             "Admins use the admin pages, not the server itself. They see your name, email, "
-            "username and groups at the sign-in service, your gateway user ID, your Archidekt "
+            "username, groups and user ID at the sign-in service, your Archidekt "
             "username, when you first signed in and were last seen, which apps you connected, how "
             "many app tokens and browser sessions you have open, whether and when you were "
             "disabled, and the activity log: what you did, when and with which app, "

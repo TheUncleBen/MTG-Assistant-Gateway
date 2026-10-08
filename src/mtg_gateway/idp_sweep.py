@@ -7,9 +7,9 @@ it expires. This sweep closes that gap: every hour it asks Authentik who is in M
 neither, or whose Authentik user is deactivated or gone.
 
 It is optional. It needs an Authentik API token (MTG_AUTHENTIK_API_TOKEN_FILE, a Docker secret)
-whose user may only view the two gateway groups (``authentik_core.view_group`` granted on those
-groups alone, not globally); docs/IDP-AUTHENTIK.md has the
-steps. Without one it stays off; an unreadable token file gives a single warning at start, and
+whose user may only view the gateway's groups and its own tokens (``authentik_core.view_group``
+granted on those groups alone, not globally); docs/IDP-AUTHENTIK.md has the steps.
+Without one it stays off; an unreadable token file gives a single warning at start, and
 a working setup logs one line saying it is on.
 
 Only direct members count, as in Authentik's default groups claim. A custom scope mapping that

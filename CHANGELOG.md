@@ -16,15 +16,16 @@ change in the stack, the settings or the secrets.
 ### Changed
 
 - **Linking Archidekt:** the disclosure now also says that the session is
-  used to read, as the member, other people's decks, comment threads and
-  card searches they look at and the list of people they follow; that deck,
+  used to read, as the member, other people's decks and comment threads
+  they look at and the list of people they follow, and to look up the
+  cards in their changes; that deck,
   folder and tag changes, deck deletes and backup copies on the member's
   Archidekt account go through it; everything else the person who runs the
   server can read (name, email, username and groups at the sign-in service,
-  profile picture, collection changes, deck reports and covers, connected
+  profile picture, sign-in times, approval mode, collection changes, deck reports and covers, connected
   apps, usage counts) and that the sign-in service's tokens kept for the
   group check are encrypted with the same key; and everything admins see
-  (sign-in username, gateway user ID, open token and session counts, the
+  (username and user ID at the sign-in service, open token and session counts, the
   disabled date) and that they can also enable an account.
 - **Removed-member clean-up setup** ([IDP-AUTHENTIK.md](docs/IDP-AUTHENTIK.md#12-optional-removed-member-clean-up)):
   give the token **Can view Group** on the two gateway groups only (an

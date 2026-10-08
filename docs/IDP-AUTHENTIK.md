@@ -448,24 +448,27 @@ whose account is deactivated, with an `archidekt_link_swept` entry in the
 activity log. Members are told on the Account page whether it is on.
 
 It is off unless you give the gateway an Authentik API token. Give that
-token's user only **Can view Group** on the two gateway groups themselves (an
+token's user only **Can view Group** on the gateway's groups themselves (an
 object permission), not on all groups. Checked on a real Authentik 2026.8.3:
 with that grant the token lists those two groups and nothing else (another
-group, including `authentik Admins`, comes back as not found), and Authentik
+group, including `authentik Admins`, isn't listed), and Authentik
 refuses it the user list (HTTP 403). It can't add anyone to a group or
 change a group.
 
-What the token can still read: the two gateway groups and, for each member,
-their username, name, email, attributes and whether they are active, which is
-what the groups API returns. If you grant **Can view Group** for all groups
+What the token can still read: those groups and, for each member,
+their username, name, email, attributes, Authentik user ID and `uid`, last
+sign-in and whether they are active, which is what the groups API returns;
+its own user (`/core/users/me/`); and its own tokens. If you grant **Can view Group** for all groups
 instead (a global permission on the role), the token reads the same details
 for every member of every group in your Authentik, admins included; avoid
 that.
 
 The service account can also create more API tokens
 for itself and read their keys (checked: HTTP 201 and 200). So deleting the
-token is not enough to cut it off: deactivate or delete the service account
-(checked: its token then gets HTTP 403).
+token is not enough to cut it off. Delete the service account (or, to keep
+it, delete every token it holds under **Tokens and App passwords** before you
+activate it again: deactivating stops its tokens, checked HTTP 403, but
+activating it again brings them all back, checked HTTP 200).
 
 **What it reads.** `GET /api/v3/core/groups/?name=<group>&include_users=true`
 for each of the two groups, using each member's `uid` (the `sub` Authentik
@@ -502,8 +505,8 @@ marked *(seen)* were seen on 2026.8.3; the others are reported, not checked.
 2. **A role with no permissions of its own.** **Directory → Roles**
    *(seen)* → create one, for example `mtg-gateway-sweep`. Give it no
    global permissions.
-3. **View permission on the two gateway groups only.** Open each of the two
-   groups (`MTG_REQUIRED_GROUP` and `MTG_ADMIN_GROUP`) under
+3. **View permission on the gateway's groups only.** Open each gateway group
+   (`MTG_REQUIRED_GROUP`, and `MTG_ADMIN_GROUP` if you set it) under
    **Directory → Groups** *(seen)*, and on its **Permissions** tab give the
    role **Can view Group** for that group. Through the API (checked), with an
    admin token in `$A`, for each group's ID (the UUID in the group's page
@@ -554,10 +557,13 @@ Members' Account pages say *On this gateway the hourly clean-up is on.*
 
 If the token file can't be read, the gateway still starts, with the clean-up
 off and one warning saying why. To turn it off again, empty
-`MTG_AUTHENTIK_API_TOKEN_FILE` and redeploy, then deactivate or delete the
-service account in Authentik (deleting only the token leaves the account able
-to make another).
+`MTG_AUTHENTIK_API_TOKEN_FILE` and redeploy, then delete the service account
+in Authentik (deleting only the token leaves the account able
+to make another, and deactivating it lasts only until someone activates it).
 
 If you set the clean-up up with 0.7.7's steps (Can view Group as a global
-permission on the role), remove that global permission and give the two
-object permissions in step 3 instead.
+permission on the role), that token could read every group, and the account
+could have made itself more tokens. Delete that service account and follow
+the steps above with a new one and a new token (then replace the
+`mtg_authentik_api_token` secret: Docker secrets can't be edited, so create
+it under a new name and map it, as for the client secret in section 7).

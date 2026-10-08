@@ -239,7 +239,8 @@ class Settings:
     log_level: str = "INFO"
     server_name: str = "MTG Assistant Gateway"
     # Optional hourly clean-up of removed members' Archidekt sessions (idp_sweep.py): an Authentik
-    # API token that may only view the two gateway groups, and the Authentik address (empty = the issuer's).
+    # API token that may only view the gateway's groups and its own tokens, and the Authentik
+    # address (empty = the issuer's).
     authentik_api_token: str | None = field(default=None, repr=False)
     authentik_api_token_problem: str | None = None
     authentik_api_url: str | None = None
