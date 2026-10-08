@@ -157,6 +157,8 @@ so:
      **Approve** and **Reject** buttons. Press Approve and the gateway
      applies it and tells the assistant how it went. The first time, Claude
      asks whether to show the app; allow it.
+   - **Reject** on the same card asks for a reason (optional) and passes it
+     to the assistant with the outcome.
    - **The review page in the browser** (every app, and always available):
      the assistant gives you the review link. Open it, check the change,
      press **Apply these changes to Archidekt**, then tell the assistant you

@@ -77,6 +77,15 @@ Request bodies are JSON objects of at most 2 MB.
 | `DELETE /api/v1/reports/{rid}` | Delete a report. With a bearer token only a report that same app ran; the browser session may delete any of the member's reports |
 | `GET /api/v1/activity?limit=50` | The user's own audit trail |
 
+The cards an AI app shows in the chat load their bulky data from `GET /cards/data/{token}`, outside
+`/api/v1` and outside the session: the token (a ten-minute Fernet token the gateway hands to the
+card in a tool result's `_meta`) names the member, the kind (`deck`, `snapshot`, `printings`) and the
+id, and the answer is that member's own data as JSON (`Access-Control-Allow-Origin: *`, no cookies,
+`Cache-Control: private, no-store`). An expired or forged token answers 404 `expired`; a member who
+was disabled or removed from the group since, 403 `forbidden`. The route exists only with
+`MTG_APPLY_IN_CHAT` on. It is not a public API: the token is the only credential and it cannot be
+requested.
+
 The collection is the member's own Archidekt Collection, read and written through their linked
 session; the gateway stores none of it. Its small JSON API serves the pages and the Android app,
 under the browser session only (cookie plus `X-CSRF-Token` on writes; a bearer token uses the

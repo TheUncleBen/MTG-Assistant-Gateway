@@ -241,6 +241,14 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
 - **JSON API.** Everything the tools and pages do is also under `/api/v1`
   for app builders, with the same sign-in and the same proposal flow. See
   [docs/API.md](docs/API.md).
+- **Cards in the chat.** Where a person has to pick or press, the tool result
+  comes with an interactive card (MCP Apps; Claude on the web, desktop and
+  phones, ChatGPT as reported): the printings of a card as pictures to tap,
+  the cards read from photos or a list to keep or drop, a deck by category
+  with pictures and rules text, the account's setup, and the proposal with
+  Approve and Reject. A pick on a card goes back to the assistant as plain
+  text; it never changes anything by itself. Bulky data reaches the card
+  through a ten-minute signed link, not through the model.
 - **Card scanning.** The `/scan` page reads physical cards with your phone
   camera. Text recognition runs on the phone, no third-party app needed.
   The scanned list goes into your collection, into one of your decks or

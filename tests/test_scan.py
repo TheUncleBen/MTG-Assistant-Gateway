@@ -909,15 +909,25 @@ async def test_truncated_title_check_sees_all_completions(stack: Stack) -> None:
 
 # -- printings -------------------------------------------------------------------
 async def test_printings_by_oracle_id_and_by_name(stack: Stack) -> None:
-    """The picker's list: every printing of a card, newest first, with finishes and art images."""
+    """The assistant's copy of a card's printings: the sets and the newest printings, newest first,
+    with finishes but no pictures (those are the printings card's, through its signed link)."""
     aesi_oracle = "6511f317-bd38-46d0-b800-7125a3f420da"
     token = await mcp_token(stack.h)
-    out = (await call(stack.h, token, "card_printings", {"oracle_id": aesi_oracle}))["structuredContent"]
+    result = await call(stack.h, token, "card_printings", {"oracle_id": aesi_oracle})
+    out = result["structuredContent"]
     assert out["ok"] is True and [c["set"] for c in out["cards"]] == ["sld", "dsc", "plst", "cmr"]
     assert out["has_more"] is False and out["total_cards"] == 4
     assert out["cards"][-1]["finishes"] == ["foil"]
-    # The assistant gets no image links (the page shows the pictures; links only cost tokens).
+    # The assistant gets no image links (the page and the card show the pictures; links only cost tokens).
     assert not any(k.startswith("image") for c in out["cards"] for k in c)
+    assert [r["set"] for r in out["sets"]] == ["sld", "dsc", "plst", "cmr"]
+    assert out["sets"][0]["printings"] == 1
+    assert "card" in out["note"]
+    # The card's link rides in _meta, never in the text or structured content.
+    assert (
+        result["_meta"]["mtg/card"]["link"].startswith("https://")
+        and "mtg/card" not in result["content"][0]["text"]
+    )
     # Printings are cached as summaries in a cache of their own, not as raw Scryfall records.
     cached = stack.h.app.state.gateway.scan.scryfall.prints_cache.get(aesi_oracle)
     assert cached is not None and set(out["cards"][0]) < set(cached["cards"][0])
@@ -927,6 +937,10 @@ async def test_printings_by_oracle_id_and_by_name(stack: Stack) -> None:
         "structuredContent"
     ]
     assert by_name["oracle_id"] == aesi_oracle and len(by_name["cards"]) == 4
+    one_set = (await call(stack.h, token, "card_printings", {"oracle_id": aesi_oracle, "set_code": "CMR"}))[
+        "structuredContent"
+    ]
+    assert [c["set"] for c in one_set["cards"]] == ["cmr"] and "cmr" in one_set["note"]
     bad = (await call(stack.h, token, "card_printings", {"oracle_id": "not-an-id"}))["structuredContent"]
     assert bad["ok"] is False and bad["error"] == "invalid"
     none = (await call(stack.h, token, "card_printings", {}))["structuredContent"]

@@ -102,7 +102,7 @@ Worth a look:
 | `MTG_WRITES_ENABLED` | `true` | `false` keeps everything review-only: proposals work, nothing is ever applied to Archidekt. If the line is missing, the gateway's own default is `false` |
 | `MTG_APPROVAL_MODE_DEFAULT` | `manual` | Same as the code default: a person who has not chosen an approval mode has every change wait for their own press, on the card in the chat or the Apply button on the review page. Each person picks their own mode (`manual`, `semi`: small low-risk edits apply without asking, `auto`: every change) on their Account page |
 | `MTG_APPROVAL_MODE_MAX` | `auto` | No cap on what people may choose; `semi` or `manual` caps it. `MTG_AUTO_APPLY_MAX_ROWS` (`5`) is the row limit of a low-risk edit |
-| `MTG_APPLY_IN_CHAT` | `true` | The Approve/Reject card Claude and ChatGPT show next to a proposal; only its one-time code can apply. `false` removes it, leaving the review page |
+| `MTG_APPLY_IN_CHAT` | `true` | The Approve/Reject card Claude and ChatGPT show next to a proposal (only its one-time code can apply) and the other cards in the chat: printings, recognised cards, a deck, the account. `false` removes them all, leaving the review page |
 
 Every other variable is explained in `.env` and in the
 [environment reference](DEPLOY.md#environment-reference). A setting only

@@ -238,7 +238,13 @@ Things to ask it: show my decks; open a deck and tell me its mana curve;
 search for decks with a commander; look up a card, its rulings, prices,
 combos; goldfish a deck; swap cards or build a new deck from a list (each a
 proposal with a review link); read my card photos or use my last scan;
-which cards in this deck do I own. The [assistant skill](SKILL.md) teaches
+which cards in this deck do I own. In Claude on the web, desktop and
+phones (and ChatGPT, as reported), the things you have to pick or press come
+as cards in the chat: a proposal with Approve and Reject, the printings of a
+card as pictures to tap, the cards read from your photos to keep or drop, a
+deck by category with pictures and rules text, and your account's setup.
+A tap is passed to the assistant as text; nothing changes until a proposal
+you approve. The [assistant skill](SKILL.md) teaches
 the house rules. The assistant can also propose moving a deck to another
 folder, changing its tags or its cover (a settings change you approve);
 deleting a deck and creating or renaming folders stay yours alone.

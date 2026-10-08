@@ -497,6 +497,23 @@ An app that cannot show the card (Claude Code, older clients) sees the text
 and the review link as before; Claude Code can also open the review page
 for the member when the assistant calls `apply_proposal`.
 
+### The other cards in the chat
+
+The same switch covers the cards that show and relay rather than apply:
+the printings of a card (`card_printings`), the cards read from photos or a
+list (`resolve_cards`), a deck by category (`get_deck`,
+`get_snapshot`) and the account's setup (`whoami`, `account_status`). A tap
+on them reaches the assistant as plain text; they call no tool. A deck's
+rows or a card's printings are too big for a tool result, so the card gets
+a signed link to `GET /cards/data/<token>`: the token names the member, what
+it is for and which deck, snapshot or card, and expires after ten minutes
+(`mtg_fernet_key` signs it). The endpoint serves the member's own data only,
+to a member who still exists, is enabled and still in the required group,
+without cookies; an expired or forged token answers 404 `expired`, a removed
+member 403 `forbidden`, and each hit is a `card` metric. The AI app loads
+each card's pictures and rules text from Scryfall directly, never through
+the gateway. `MTG_APPLY_IN_CHAT=false` removes every card and this endpoint.
+
 ### Approval modes: when the assistant may apply by itself
 
 Each member picks an **approval mode** on their own Account page. It is

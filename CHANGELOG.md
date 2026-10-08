@@ -7,6 +7,56 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.4] - 2026-10-08
+
+Interactive cards in the chat wherever a person has to pick or press, built
+on the open MCP Apps standard the Approve card already used (Claude on the
+web, desktop and phones; ChatGPT as reported by OpenAI, to be confirmed).
+An app without cards (Claude Code, older clients) gets the same text as
+before.
+
+### Added
+
+- **Printings card** on `card_printings`: every printing with its picture
+  in a scrolling grid, a set filter, a finish filter, Expand to full screen
+  where the app offers it. Tapping a printing tells the assistant the set and
+  collector number as text; only then does it propose. The model's own copy
+  of the result is small (the sets and the newest printings), so a card with
+  hundreds of printings no longer fills the chat.
+- **Picker card** on `resolve_cards` (and the scan path): the recognised
+  cards with pictures and status, a tick per row to leave one out, suggestion
+  tiles for ambiguous or unknown names, **Use these cards** sends the kept
+  rows back to the assistant as text. In an app that offers form questions
+  but no cards (Claude Code), the assistant asks about ambiguous names with a
+  form instead.
+- **Deck card** on `get_deck` and `get_snapshot`: the deck by
+  category with the commander, colours and mana curve, list or picture view,
+  a filter, tap a card for its picture and rules text, links to Archidekt and
+  to the deck in the app. The assistant's text is unchanged.
+- **Account card** on `whoami` and `account_status`: what is set up and what
+  is not, with a button to the Account page (where Archidekt is linked).
+- **Reject with a reason** on the Approve card: Reject asks why (optional);
+  the reason goes back to the assistant with the outcome.
+- Cards fetch bulky data (a deck's rows, a card's printings) through a signed
+  link to `GET /cards/data/{token}` that is tied to the member and expires
+  after ten minutes; the link is handed to the card only, never to the model.
+  Pictures and rules text come straight from Scryfall.
+
+### Changed
+
+- `card_printings` adds `sets` (one row per set: code, name, count, newest
+  release, finishes) and a `note` beside its `cards` rows, so the assistant
+  can name the sets without listing every printing; in an app without the
+  card it narrows with `set_code` as before.
+- `whoami` carries `account_page`; `MTG_APPLY_IN_CHAT=false` now removes
+  every card and the data link endpoint, not only the Approve card.
+
+### Documentation
+
+- CONNECT, ONBOARDING, USING and the in-app Guide: what each card does and
+  that a pick is always relayed to the assistant as text. API: the data link
+  endpoint. OPERATIONS and ARCHITECTURE: the signed links.
+
 ## [0.7.3] - 2026-10-08
 
 The assistant's tools made harder to misuse, Archidekt sign-ins kept away from
