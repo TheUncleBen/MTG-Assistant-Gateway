@@ -185,6 +185,8 @@ class ReportService:
             and latest["fingerprint"] == deck.fingerprint()
             and now - int(latest["taken_at"]) < self.min_interval
             and _succeeded(latest)
+            # a run that asks to simulate never reuses one made without a simulation
+            and not (simulate and self.mf is not None and latest.get("goldfish_json") is None)
         ):
             out = self.get(sub, latest["id"])
             out["reused"] = True

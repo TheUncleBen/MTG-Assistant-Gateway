@@ -268,7 +268,8 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                 if why and data.get("confirmed") is not True:
                     return ok({**p, "applied": False, "needs_confirm": True, "why": why}, 201)
                 result = await decks.apply(who.sub, p["proposal_id"], via="browser")
-                return ok({**p, "applied": True, "result": result}, 201)
+                # a large edit may still be running ("applying"); result carries its progress
+                return ok({**p, "applied": result.get("state") == "applied", "result": result}, 201)
             return ok(p, 201)
         if kind == "new_deck":
             return ok(

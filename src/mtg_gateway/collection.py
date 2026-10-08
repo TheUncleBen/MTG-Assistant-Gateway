@@ -18,15 +18,18 @@ import html
 import io
 import json
 import re
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
+from pydantic import Field
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
+from .approve import CARD_TOOL_META, proposal_tool_result
 from .archidekt import COLLECTION_PAGE_SIZE, ArchidektError, _faces, _oracle_text, _pt
 from .deckpage import DECK_CSS, image_url, mana_html
-from .decks import DeckError
+from .decks import DeckError, current_client
 from .pages import _csrf, _safe_next, browser_session, login_redirect, read_limited
+from .schemas import CollectionAdd, CollectionRemove, card_aliases, dumped
 from .theme import icon, render
 
 if TYPE_CHECKING:
@@ -1267,6 +1270,9 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
         token = get_access_token()
         if token is None or not token.subject:
             raise RuntimeError("no authenticated user on this request")
+        # The proposing client is recorded on the proposal, and only that client may apply it
+        # over MCP: without this the assistant could never apply its own collection proposal.
+        current_client.set(token.client_id)
         return token.subject
 
     def _err(exc: CollectionError) -> dict[str, Any]:
@@ -1349,11 +1355,14 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
         removed once every card went in. Called by DeckService under its Archidekt slot."""
         adds = changes.get("add") or []
         result: dict[str, Any] = {"added": [], "skipped": [], "removed": []}
+        expected: dict[Any, int | None] = {}  # record id -> copies it should now hold (None: gone)
         try:
             if adds:
                 source = str(changes.get("source") or "assistant")
                 out = await service.add(sub, adds, source=source)
                 result["added"], result["skipped"] = out["added"], out["skipped"]
+                for row in out["added"]:
+                    expected[row["id"]] = int(row["quantity"])
                 progress["sent_entries"] = len(out["added"])
                 session_id = changes.get("scan_session_id")
                 if session_id and service.scan is not None and not out["skipped"]:
@@ -1361,12 +1370,45 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
             for r in changes.get("remove") or []:
                 gone = await service.remove(sub, _rid(r["id"]), int(r["quantity"]))
                 result["removed"].append(gone["removed"])
+                expected[_rid(r["id"])] = int(gone["row"]["quantity"]) if gone.get("row") else None
                 progress["sent_entries"] = int(progress.get("sent_entries") or 0) + 1
         except CollectionError as exc:
             raise DeckError(exc.kind, str(exc)) from exc
+        result["verified"], result["mismatches"] = await _read_back(sub, expected)
         return result
 
+    async def _read_back(sub: str, expected: dict[Any, int | None]) -> tuple[bool, list[str]]:
+        """Read the collection again, as every deck apply reads its deck again, and compare each
+        record the apply touched with the copies it should now hold. Not verified when the
+        re-read fails or a record is out of reach (past the pages read)."""
+        if not expected:
+            return True, []
+        try:
+            rows = await service._raw_rows(sub, max_pages=10)
+        except CollectionError as exc:
+            return False, [f"could not read the collection back: {exc}"]
+        have = {r.get("id"): r for r in rows}
+        all_read = len(rows) < 10 * COLLECTION_PAGE_SIZE  # else a missing record may sit further on
+        wrong: list[str] = []
+        for rid, want in expected.items():
+            rec = have.get(rid)
+            if rec is None and not all_read:
+                wrong.append(f"record {rid}: past the first 10 pages, not read back")
+                continue
+            got = int(rec.get("quantity") or 0) if rec is not None else None
+            if got != want:
+                name = row_out(rec)["name"] if rec is not None else f"record {rid}"
+                wrong.append(
+                    f"{name}: expected {want if want is not None else 'gone'}, found {got or 'none'}"
+                )
+        return not wrong, wrong
+
     service.decks.collection_apply = apply_changes
+
+    in_chat = bool(getattr(service.decks.settings, "apply_in_chat", False))
+
+    def _result(data: dict[str, Any]) -> Any:
+        return proposal_tool_result(data, decks=service.decks, sub=_sub(), in_chat=in_chat)
 
     @server.tool(
         name="propose_collection_changes",
@@ -1374,26 +1416,32 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
         description=(
             "Propose adding cards to, or removing cards from, the user's Archidekt Collection. Like a "
             "deck edit this is a proposal: show its diff and review_url; it is applied by the user "
-            "(Approve on the card or the review page) or by you when assistant_may_apply is true, with "
-            "apply_proposal. `add`: list of {name, set?, collector_number?, quantity?, finish? "
-            "(nonfoil|foil|etched), condition? (NM|LP|MP|HP|DMG)} or plain names; `text`: one card per "
-            "line, e.g. '2 Sol Ring (CMR) 472 *F*'; `scan_session`: the id or name of a scan session, "
-            "every matched card in it is added and the session is removed once applied; `remove`: list "
-            "of {id (from list_collection) | name, quantity?} (no quantity removes every copy). At most "
-            "100 cards each way per proposal."
+            "(Approve on the proposal card or the review page) or by you when assistant_may_apply is "
+            "true, with apply_proposal. add: a list of {name, set_code?, collector_number?, quantity?, "
+            "finish?, condition?} or plain names (a card named without set_code and collector_number is "
+            "added in a printing Archidekt picks, as a nonfoil unless finish says otherwise); text: one "
+            "card per line, e.g. '2 Sol Ring (CMR) 472 *F*'; scan_session: the id or name of a scan "
+            "session, every matched card in it is added and the session is removed once applied; remove: "
+            "a list of {id (from list_collection) | name, quantity?} (no quantity removes every copy). At "
+            "most 100 cards each way per proposal."
         ),
-        annotations={"readOnlyHint": False, "destructiveHint": True, "openWorldHint": True},
+        annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
+        meta=dict(CARD_TOOL_META) if in_chat else None,
     )
     async def propose_collection_changes(
-        add: list[dict[str, Any] | str] | None = None,
-        text: str | None = None,
-        scan_session: str | None = None,
-        remove: list[dict[str, Any] | str] | None = None,
-    ) -> dict[str, Any]:
+        add: Annotated[list[CollectionAdd | str] | None, Field(description="Cards to add.")] = None,
+        text: Annotated[str | None, Field(description="Or cards to add as text, one per line.")] = None,
+        scan_session: Annotated[
+            str | None, Field(description="Or a scan session's id or name to add.")
+        ] = None,
+        remove: Annotated[list[CollectionRemove | str] | None, Field(description="Cards to remove.")] = None,
+    ) -> Any:
         sub = _sub()
-        items: list[Any] = list(add or [])
+        items: list[Any] = [card_aliases(dumped(a)) for a in add or []]
+        remove = [dumped(r) for r in remove] if remove is not None else None
         source = "assistant"
         session_id = None
+        warnings: list[str] = []
         try:
             if text:
                 from .scan.service import parse_text
@@ -1422,17 +1470,22 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
                     for it in sess.get("items", [])
                     if it.get("card")
                 ]
+                warnings += [
+                    f"{it.get('note') or it['card'].get('name')}; confirm it with the user"
+                    for it in sess.get("items", [])
+                    if it.get("card") and it.get("status") == "fuzzy"
+                ]
                 source = "scan"
                 session_id = sess.get("id")
             adds = normalise_items(items) if items else []
             removals = await _removals(sub, remove)
         except CollectionError as exc:
-            return _err(exc)
+            return _result(_err(exc))
         try:
             # the source and scan id travel with the proposal so the apply can drop the scan
             p = await service.decks.propose_collection(
                 sub, adds, removals, extra={"source": source, "scan_session_id": session_id}
             )
         except DeckError as exc:
-            return {"ok": False, "error": exc.kind, "message": str(exc), **exc.extra}
-        return {"ok": True, **p}
+            return _result({"ok": False, "error": exc.kind, "message": str(exc), **exc.extra})
+        return _result({"ok": True, **p, **({"warnings": warnings} if warnings else {})})

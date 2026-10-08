@@ -64,6 +64,32 @@ CONFIRM_TOOL_META: dict[str, Any] = {
 APPLY_TOOL_META: dict[str, Any] = {"anthropic/requiresUserInteraction": True}
 
 
+def proposal_tool_result(data: dict[str, Any], *, decks: Any, sub: str, in_chat: bool) -> Any:
+    """A propose_* tool's result: the JSON as text and structured content, plus, for a pending
+    proposal the member decides on, the in-chat card's one-time approval code in ``_meta`` (kept
+    out of the text and structured content, so not in the model's context)."""
+    import pydantic_core
+    from mcp_types import CallToolResult, TextContent
+
+    approval = None
+    if (
+        in_chat
+        and data.get("ok")
+        and data.get("state") == "pending"
+        and data.get("proposal_id")
+        and not data.get("assistant_may_apply")  # the assistant applies it: no buttons to press
+    ):
+        row = decks.db.get_proposal(str(data["proposal_id"]), sub)
+        if row is not None:
+            approval = decks.approval_for(sub, row)
+    meta = {APPROVAL_META_KEY: approval} if approval else None
+    return CallToolResult(
+        content=[TextContent(type="text", text=pydantic_core.to_json(data, fallback=str, indent=2).decode())],
+        structured_content=data,
+        _meta=meta,
+    )
+
+
 def approval_code(secret: str, *, proposal_id: str, sub: str, client_id: str, created_at: int) -> str:
     """The one-time code for one proposal: 192 bits of HMAC-SHA256 over the proposal, its owner,
     the app that made it and when, keyed with the gateway's session secret."""

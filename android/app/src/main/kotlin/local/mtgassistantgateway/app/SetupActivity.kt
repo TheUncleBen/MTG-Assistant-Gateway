@@ -69,7 +69,7 @@ class SetupActivity : Activity() {
         view.setTextColor(getColor(if (error) R.color.danger else R.color.text_muted))
     }
 
-    /** Null when `GET origin/healthz` returns JSON with `"status": "ok"`, else a message for the person. */
+    /** Null when `GET origin/healthz` returns JSON with `"status"` "ok" or "degraded", else a message for the person. */
     private fun checkHealth(origin: String): String? {
         val conn = try {
             URL(GatewayUrl.join(origin, "/healthz")).openConnection() as HttpURLConnection
@@ -85,7 +85,8 @@ class SetupActivity : Activity() {
             if (code != 200) return getString(R.string.setup_not_gateway, code)
             val body = conn.inputStream.bufferedReader().use { it.readText() }
             val ok = try {
-                JSONObject(body).optString("status") == "ok"
+                // "degraded" is still a gateway: only its research service is down
+                JSONObject(body).optString("status") in setOf("ok", "degraded")
             } catch (e: Exception) {
                 false
             }

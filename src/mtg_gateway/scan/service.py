@@ -895,6 +895,19 @@ class ScanService:
     def list_sessions(self, sub: str) -> list[dict[str, Any]]:
         return self.store.list(sub)
 
+    def guessed_names(self, sub: str) -> dict[str, str]:
+        """Card names this member's scans matched from a misread name: matched name (lower case)
+        -> what was read. A proposal adding one of these cards says the name was guessed."""
+        out: dict[str, str] = {}
+        for listed in self.store.list(sub):
+            row = self.store.get(listed["id"], sub)
+            for it in (row or {}).get("items", []):
+                card = it.get("card") or {}
+                read = str((it.get("input") or {}).get("name") or "")
+                if it.get("status") == "fuzzy" and card.get("name") and read:
+                    out.setdefault(str(card["name"]).lower(), read)
+        return out
+
     @staticmethod
     def describe_session(row: dict[str, Any]) -> dict[str, Any]:
         items = row["items"]

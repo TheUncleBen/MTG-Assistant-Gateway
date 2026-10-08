@@ -238,6 +238,8 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         except DeckError as exc:
             code = _err_code(exc.kind, proposal_exists=state.db.get_proposal(pid, sub) is not None)
             return RedirectResponse(f"/proposals/{pid}?err={code}", status_code=303)
+        if result.get("state") == "applying":  # a large one carries on; its page shows the progress
+            return RedirectResponse(f"/proposals/{pid}?ok=applying", status_code=303)
         made = result.get("result") if isinstance(result.get("result"), dict) else {}
         target = deck_id or str(made.get("deck_id") or result.get("deck_id") or "")
         if not target.isdigit():

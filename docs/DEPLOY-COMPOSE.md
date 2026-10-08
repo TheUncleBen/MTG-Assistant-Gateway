@@ -90,7 +90,7 @@ Edit `.env`. The lines marked **REQUIRED**:
 | `MTG_OIDC_ISSUER` | The issuer URL from step 1 |
 | `MTG_OIDC_CLIENT_ID` | The client ID from step 1 |
 | `MTG_REQUIRED_GROUP` | The group from step 1, exactly as your provider sends it. Required unless you set `MTG_ALLOW_ANY_IDP_USER=true` (see [IDP-OTHERS.md](IDP-OTHERS.md#about-the-group-check)) |
-| `MTG_TAG` | `latest` to follow every new version, or one version to stay on it, for example `0.7.2` ([VERSIONS.md](VERSIONS.md)) |
+| `MTG_TAG` | `latest` to follow every new version, or one version to stay on it, for example `0.7.3` ([VERSIONS.md](VERSIONS.md)) |
 
 Worth a look:
 
@@ -194,7 +194,9 @@ docker compose logs -f gateway
 
 ```bash
 curl -s https://mtg.example.com/healthz
-# {"status":"ok","version":"0.7.2"}
+# {"status":"ok","version":"0.7.3","mystic_forge":"ok"}
+# ("degraded" with "mystic_forge":"down": the gateway works, the research
+#  service doesn't answer; see docker compose logs mysticforge)
 
 curl -s https://mtg.example.com/.well-known/oauth-authorization-server | head -c 300
 # JSON with "issuer":"https://mtg.example.com", ...
@@ -236,6 +238,13 @@ the old image on that; don't run an old image on an upgraded database.
   that folder off the machine with whatever you use for the rest.
 - For a copy right now (use your `PUID:PGID`):
   `docker compose exec --user 1000:1000 gateway mtg-gateway backup`.
+- For a second copy of every backup on another disk or a network mount, set
+  `MTG_BACKUP_COPY_DIR` in `.env` to that folder on this machine (create it
+  first). The compose file mounts it into the gateway; left out, nothing is
+  copied. Copies are pruned after the same number of days.
+- Backups leave out everyone's Archidekt session and the identity
+  provider's tokens, so after a restore people sign in again and relink
+  Archidekt.
 - Keep the Fernet key (`secrets/mtg_fernet_key.txt`) somewhere safe as well.
   It isn't in the backups, on purpose.
 - Don't copy `data/` while the gateway runs; use the backup files.

@@ -123,6 +123,7 @@ async def test_admin_sees_the_pages_and_the_api(gw: Harness) -> None:
         r = await b.http.get("/admin", headers=NAVIGATE)
         assert r.status_code == 200 and "Signed in at least once" in r.text and "<svg" in r.text
         assert "default-src 'none'" in r.headers["content-security-policy"]
+        assert "Archidekt request limits" in r.text and "answered from cache" in r.text
         users = await b.http.get("/admin/users", headers=NAVIGATE)
         assert users.status_code == 200 and "user-2" in users.text and "root" in users.text
         assert "value='disable'" in users.text and "name='csrf'" in users.text
@@ -152,6 +153,24 @@ async def test_admin_sees_the_pages_and_the_api(gw: Harness) -> None:
 
 
 # -- actions --------------------------------------------------------------------------
+async def test_disabling_a_member_drops_their_archidekt_session(gw: Harness) -> None:
+    """A disabled account cannot sign in, so the server keeps no Archidekt sign-in for it."""
+    await member_token(gw)
+    gw.db.save_link("user-2", username="amy", user_id="2", secret_enc="gAAAAA-marker")
+    b = await admin_browser(gw)
+    try:
+        csrf = await b.csrf("/admin/users")
+        r = await b.http.post("/admin/users/user-2", data={"csrf": csrf, "action": "disable"})
+        assert r.status_code == 303
+        assert gw.db.get_link("user-2") is None
+        row = gw.db._conn.execute(
+            "SELECT status, secret_enc FROM archidekt_links WHERE sub = 'user-2'"
+        ).fetchone()
+        assert tuple(row) == ("revoked", "")
+    finally:
+        await b.aclose()
+
+
 async def test_disable_cuts_off_tokens_refresh_and_sign_in_until_enabled(gw: Harness) -> None:
     client, tokens = await member_token(gw)
     assert (await whoami(gw, tokens["access_token"])).status_code == 200

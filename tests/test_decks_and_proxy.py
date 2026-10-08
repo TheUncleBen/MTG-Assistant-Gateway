@@ -169,7 +169,13 @@ class Browser:
         csrf = csrf if csrf is not None else await self.csrf()
         return await self.http.post(
             "/account",
-            data={"csrf": csrf, "action": "link", "archidekt_login": login, "archidekt_password": password},
+            data={
+                "csrf": csrf,
+                "action": "link",
+                "archidekt_login": login,
+                "archidekt_password": password,
+                "accept_risk": "1",
+            },
         )
 
     async def aclose(self) -> None:
@@ -237,7 +243,7 @@ async def test_browser_login_link_status_unlink(stack: Stack) -> None:
 
     decks = structured(await call(h, token, "list_my_decks"))
     assert decks["ok"] and [d["id"] for d in decks["decks"]] == ["42"]
-    deck = structured(await call(h, token, "get_my_deck", {"deck_id": "https://archidekt.com/decks/42/reap"}))
+    deck = structured(await call(h, token, "get_deck", {"deck_ref": "https://archidekt.com/decks/42/reap"}))
     assert deck["ok"] and deck["card_count"] == 100 and deck["name"] == "Sample Commander Deck"
 
     unlink = await b.http.post("/account", data={"csrf": await b.csrf(), "action": "unlink"})
@@ -379,15 +385,14 @@ async def test_invalid_changes_are_rejected_before_any_fetch(stack: Stack) -> No
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     before = len(ark.calls)
-    out = structured(
-        await call(
-            h,
-            token,
-            "propose_deck_changes",
-            {"deck_id": "42", "changes": [{"action": "explode", "card_name": "x"}]},
-        )
+    # An action outside the schema's list is refused by the input schema itself.
+    out = await call(
+        h,
+        token,
+        "propose_deck_changes",
+        {"deck_id": "42", "changes": [{"action": "explode", "card_name": "x"}]},
     )
-    assert out["ok"] is False and out["error"] == "invalid"
+    assert out.get("isError") and "action" in out["content"][0]["text"]
     assert len(ark.calls) == before
     out = structured(
         await call(
@@ -521,9 +526,10 @@ async def test_users_are_isolated(stack: Stack) -> None:
     assert out["ok"] is False and ark.patches == []
     decks = structured(await call(h, token_b, "list_my_decks"))
     assert [d["id"] for d in decks["decks"]] == ["43"]
-    deck = structured(await call(h, token_b, "get_my_deck", {"deck_id": "42"}))
-    assert deck["ok"] is False and deck["error"] == "forbidden"  # Alice's deck is public but not Amy's
-    assert structured(await call(h, token_b, "get_deck", {"deck_ref": "42"}))["ok"]  # readable as public
+    # Alice's deck is public, so Amy can read it; its owner field says it is not hers.
+    deck = structured(await call(h, token_b, "get_deck", {"deck_ref": "42"}))
+    assert deck["ok"] and deck["owner"] == "alice"
+    assert structured(await call(h, token_b, "account_status"))["archidekt_username"] == "amy"
     # Amy's browser cannot open Alice's proposal page
     b = Browser(h)
     await b.login()
@@ -737,8 +743,6 @@ async def test_propose_refuses_decks_the_linked_account_does_not_own(stack: Stac
         )
     )
     assert out["ok"] is False and out["error"] == "forbidden" and "amy" in out["message"]
-    mine = structured(await call(h, token, "get_my_deck", {"deck_id": "43"}))
-    assert mine["ok"] is False and mine["error"] == "forbidden"
     assert structured(await call(h, token, "list_my_proposals"))["proposals"] == []
 
 
@@ -1258,7 +1262,7 @@ async def test_printing_fields_are_validated_on_the_change(stack: Stack) -> None
     bad = [
         ([{"action": "add", "card_name": "Swamp", "set_code": "m21"}], "go together"),
         ([{"action": "remove", "card_name": "Swamp", "finish": "foil"}], "apply to add only"),
-        ([{"action": "add", "card_name": "Swamp", "finish": "glossy"}], "normal, foil or etched"),
+        ([{"action": "add", "card_name": "Swamp", "finish": "glossy"}], "'nonfoil', 'foil' or 'etched'"),
         ([{"action": "add", "card_name": "Swamp", "set_code": "m21!", "collector_number": "1"}], "set code"),
         (
             [
@@ -1371,7 +1375,9 @@ async def test_simulation_calls_take_the_shape_mystic_forge_accepts(stack: Stack
     out = structured(
         await call(h, token, "compare_decks", {"a": plain, "b": plain, "simulate": True, "games": 20})
     )
-    assert out["ok"] and out["goldfish_ab"]["ok"] is False and "Commander" in out["goldfish_ab"]["text"], out
+    # the A/B was asked for and refused, so the result fails at the top (the diff is still there)
+    assert out["ok"] is False and out["error"] == "simulation_failed" and "Commander" in out["message"], out
+    assert out["goldfish_ab"]["ok"] is False and "added" in out, out
     # Mystic Forge answers an unknown commander with a sentence, not a tool error; the report
     # records that as a failed simulation rather than a successful one.
     unknown = "Commander\n1 Unknown Card\n\n99 Island\n"
@@ -1386,18 +1392,18 @@ async def test_simulation_calls_take_the_shape_mystic_forge_accepts(stack: Stack
 
 
 async def test_another_users_decks_are_the_public_listing_only(stack: Stack) -> None:
-    """archidekt_user is Archidekt's public profile listing, fetched without any member's token:
+    """search_decks by owner is Archidekt's public listing, fetched without any member's token:
     Amy's private deck 43 never appears, whoever asks, and the request itself is anonymous."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)  # alice, linked
     ark.list_auth_schemes.clear()
-    out = structured(await call(h, token, "archidekt_user", {"username": "amy"}))
+    out = structured(await call(h, token, "search_decks", {"owner": "amy", "order_by": "-updatedAt"}))
     assert out["ok"], out
     assert [d["id"] for d in out["decks"]] == [] or all(str(d["id"]) != "43" for d in out["decks"]), out
     assert "Amy's deck" not in json.dumps(out)
     assert ark.list_auth_schemes and set(ark.list_auth_schemes) == {""}, ark.list_auth_schemes
     # The same tool on her own name lists only what Archidekt shows anonymously as well.
-    mine = structured(await call(h, token, "archidekt_user", {"username": "alice"}))
+    mine = structured(await call(h, token, "search_decks", {"owner": "alice", "order_by": "-updatedAt"}))
     assert mine["ok"] and any(str(d["id"]) == "42" for d in mine["decks"]), mine
     assert set(ark.list_auth_schemes) == {""}
 
@@ -1419,9 +1425,9 @@ async def test_pasted_lists_are_reported_but_not_stored(stack: Stack) -> None:
     assert len(after) == len(before)
     # No commander: the structural checks still come back, the simulation is refused as such.
     plain = structured(await call(h, token, "run_deck_report", {"deck_ref": "24 Forest\n36 Grizzly Bears\n"}))
-    assert plain["ok"] and plain["goldfish"]["ok"] is False and "Commander" in plain["goldfish"]["text"], (
-        plain
-    )
+    assert plain["ok"] is False and plain["error"] == "simulation_failed", plain
+    assert "Commander" in plain["message"] and plain["stats"]["checks"], plain
+    assert plain["goldfish"]["ok"] is False and "Commander" in plain["goldfish"]["text"], plain
     stats = structured(
         await call(
             h,

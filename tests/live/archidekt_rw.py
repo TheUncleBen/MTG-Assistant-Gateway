@@ -184,7 +184,13 @@ class Run:
         csrf = await self.csrf("/account")
         r = await self.browser.post(
             "/account",
-            data={"csrf": csrf, "action": "link", "archidekt_login": login, "archidekt_password": password},
+            data={
+                "csrf": csrf,
+                "action": "link",
+                "archidekt_login": login,
+                "archidekt_password": password,
+                "accept_risk": "1",
+            },
         )
         linked = r.status_code == 303 and r.headers.get("location") == "/account?ok=linked"
         detail = {

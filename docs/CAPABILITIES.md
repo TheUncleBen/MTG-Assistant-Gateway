@@ -36,9 +36,8 @@ snapshot first and is read back to verify.
 | --- | --- | --- | --- |
 | Who is signed in; is Archidekt linked, are writes on | `whoami`, `account_status` | no | linking itself happens only in the browser (Account page) |
 | List my decks (private included), filter by name, format, folder | `list_my_decks` | no | |
-| List another user's public decks | `archidekt_user` | no | |
-| Search public decks (name, commander, format, colours, owner) | `search_decks` | no | |
-| Read any deck: cards (type line, power/toughness, loyalty), zones, stats, plain list, Archidekt import text; rules text, faces, flavour and artist on request | `get_deck` (`get_my_deck` for an own deck by id) | no | hides Mystic Forge `archidekt_deck`, `archidekt_export` |
+| Search public decks (name, commander, partial commander names, format, colours, owner), and one user's public decks (`owner`, newest first) | `search_decks` | no | hides Mystic Forge `archidekt_user_decks`; the web profile page `/users/<name>` is the hand path |
+| Read any deck, the member's own private ones included: cards (type line, power/toughness, loyalty), zones, stats, plain list, Archidekt import text, picked with `view`; rules text, faces, flavour and artist on request | `get_deck` | no | hides Mystic Forge `archidekt_deck`, `archidekt_export`; `owner` says whose deck it is |
 | Read a pasted list or an Archidekt CSV export | `parse_decklist`, `parse_deck_export` | no | |
 | Statistics, legality, structural checks, bracket estimate | `deck_stats` | no | hides `validate_archidekt_deck` |
 | Diff two decks, snapshots or lists (precon upgrades included), with an optional paired goldfish A/B | `compare_decks` | no | hides `precon_diff`, `goldfish_ab`; the deck page's Compare view is the hand path |
@@ -51,14 +50,14 @@ snapshot first and is read back to verify.
 | Edit a deck's cards (main or maybeboard) | `propose_deck_changes` | proposal | |
 | Create a deck from cards, a list, a CSV, the gateway's JSON or a scan | `propose_new_deck` | proposal (high) | |
 | Clone a deck | `propose_clone_deck` | proposal (low) | |
-| Change a deck's name, description, format, bracket, privacy | `propose_deck_details` | proposal (high) | |
+| Change a deck's name, description, format, bracket, privacy; move it to a folder, add or remove tags, set its cover | `propose_deck_details` | proposal (high) | applied with the same verified calls as the deck settings page |
 | Undo: snapshots and restore (cards and the deck's name, description, format, bracket, privacy) | `list_snapshots`, `get_snapshot`, `propose_restore_snapshot` | proposal (high) | |
-| My collection: read; add or remove cards | `list_collection`, `propose_collection_changes` | proposal | |
+| My collection: read; add or remove cards | `list_collection`, `propose_collection_changes` | proposal | in-chat card like a deck proposal; read back after applying |
 | Proposals: list, read, approve with the card's code, reject, apply | `list_my_proposals`, `get_proposal`, `confirm_proposal`, `reject_proposal`, `apply_proposal` | apply writes | `apply_proposal` succeeds only when the mode allows |
 
-**No assistant tool exists for:** deleting a deck, cover image, folders, tags,
-liking, bookmarking, following, commenting, editing a comment, linking or
-unlinking Archidekt, approval modes, admin. Those are hand actions (below) by
+**No assistant tool exists for:** deleting a deck, creating or renaming
+folders, liking, bookmarking, following, commenting, editing a comment,
+linking or unlinking Archidekt, approval modes, admin. Those are hand actions (below) by
 design: either social (a person speaks for themselves) or destructive.
 
 ## B. What a person does by hand (web pages and the Android app)
@@ -82,7 +81,7 @@ deleting a deck asks for its name.
 | Proposals | review page with Approve, Apply, Reject; the in-chat card opens the same proposal |
 | History | proposals, snapshots (Restore), reports (open one in full) |
 | Account | link or unlink Archidekt, approval mode, hand-edit confirmation, theme, sign out, delete my data |
-| Admin (admin group only) | members, activity, metrics |
+| Admin (admin group only) | members (disable, revoke, unlink, delete data), activity, metrics; System card with the newest backup and backup copy and the research service's state |
 | Guide | this map in the user's words, section by section |
 
 ## C. How the two paths relate
@@ -99,16 +98,17 @@ deleting a deck asks for its name.
   simulation and Compare on the deck page for people, `run_deck_report` and
   `compare_decks` for the assistant, same engine and settings.
 - **Only a person does:** link Archidekt and set approval modes, approve a
-  high-risk proposal in manual or semi-auto mode, delete a deck, set cover,
-  tags and folders, like, bookmark, follow, comment, scan with the camera,
+  high-risk proposal in manual or semi-auto mode, delete a deck, create and
+  rename folders, like, bookmark, follow, comment, scan with the camera,
   administer members.
 - **Both reach:** reading decks and collections, statistics, creating and
-  editing decks, cloning, restoring snapshots, collection changes, scan
-  drafts. The person's path applies at once; the assistant's path is a
+  editing decks, deck settings (folder, tags and cover included), cloning,
+  restoring snapshots, collection changes, scan drafts. The person's path applies at once; the assistant's path is a
   proposal under the member's mode.
 
 Nothing was orphaned by hiding the Mystic Forge duplicates: each hidden tool's
 inputs and outputs are carried by its owner (0.7.2 added the simulator's
 options, the paired A/B, rules text and Archidekt import text on a deck read,
 structural checks in the statistics, and the precon-style summary in the
-comparison so that this holds).
+comparison so that this holds; 0.7.3 folded the separate own-deck reader into
+`get_deck` and the separate profile tool into `search_decks`).

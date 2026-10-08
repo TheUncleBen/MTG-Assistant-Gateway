@@ -222,7 +222,7 @@ async def test_new_tools_are_listed_and_work(stack: Stack) -> None:
         } <= names
         stats = structured(await call(h, token, "deck_stats", {"deck_ref": "42"}))
         assert stats["ok"] and stats["deck"]["id"] == "42" and "mana_curve" in stats["stats"]
-        deck = structured(await call(h, token, "get_my_deck", {"deck_id": "42"}))
+        deck = structured(await call(h, token, "get_deck", {"deck_ref": "42"}))
         assert deck["ok"] and "stats" in deck and "commanders" in deck
         listed = structured(await call(h, token, "list_my_decks", {"name_contains": "zzz-no-such"}))
         assert listed["ok"] and listed["decks"] == []
@@ -473,7 +473,7 @@ async def test_export_import_round_trip_keeps_every_card_finish_and_commander(st
                 for c in deck["cards"]
             }
 
-        source = structured(await call(h, token, "get_deck", {"deck_ref": "42"}))
+        source = structured(await call(h, token, "get_deck", {"deck_ref": "42", "view": "cards"}))
         want = shape(source)
         assert ("Sol Ring", 1, "Etched", False, True) in want and ("Swamp", 2, "Foil", False, True) in want
         assert any(cmd for (_, _, _, cmd, _) in want) and ("Opt", 2, "Normal", False, False) in want
@@ -492,7 +492,9 @@ async def test_export_import_round_trip_keeps_every_card_finish_and_commander(st
             assert made["ok"], (label, made)
             applied = structured(await call(h, token, "apply_proposal", {"proposal_id": made["proposal_id"]}))
             assert applied["ok"] and applied["result"]["verified"], (label, applied)
-            copy = structured(await call(h, token, "get_deck", {"deck_ref": applied["result"]["deck_id"]}))
+            copy = structured(
+                await call(h, token, "get_deck", {"deck_ref": applied["result"]["deck_id"], "view": "cards"})
+            )
             got = shape(copy)
             assert got == want, (label, sorted(want - got), sorted(got - want))
         # The New deck page takes the same JSON (pasted, or read from a file by the page's script).
@@ -515,7 +517,10 @@ async def test_export_import_round_trip_keeps_every_card_finish_and_commander(st
         made_ids = [d for d in ark.decks if ark.decks[d]["name"] == "From the page"]
         assert (
             len(made_ids) == 1
-            and shape(structured(await call(h, token, "get_deck", {"deck_ref": str(made_ids[0])}))) == want
+            and shape(
+                structured(await call(h, token, "get_deck", {"deck_ref": str(made_ids[0]), "view": "cards"}))
+            )
+            == want
         )
         bad = structured(await call(h, token, "propose_new_deck", {"name": "x", "json_text": '{"cards": 3}'}))
         assert bad["ok"] is False and "cards list" in bad["message"], bad

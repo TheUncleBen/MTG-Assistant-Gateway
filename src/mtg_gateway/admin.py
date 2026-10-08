@@ -139,6 +139,8 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
                 raise AdminError("invalid", "You cannot disable your own account.", code="self_disable")
             state.db.set_user_disabled(target, True)
             out.update(state.db.revoke_all_for_user(target))
+            # A disabled account cannot sign in, so its Archidekt session is not kept either.
+            state.decks.unlink(target)
         elif action == "enable":
             state.db.set_user_disabled(target, False)
         elif action == "revoke":
@@ -354,7 +356,42 @@ def system_data(state: Any) -> dict[str, Any]:
         if backup_mod.last_run.get("ok") is False:
             out["last_backup_error"] = backup_mod.last_run.get("error")
             out["last_backup_error_at"] = backup_mod.last_run.get("at")
+    # The research service as the health check last found it (Docker probes /healthz regularly).
+    proxy = getattr(state, "mf_proxy", None)
+    if proxy is None:
+        out["mystic_forge"] = "not configured"
+    else:
+        at, ok = getattr(proxy, "_health", (0.0, False))
+        out["mystic_forge"] = ("answering" if ok else "NOT answering") if at else "not checked yet"
+    copy_dir = getattr(settings, "backup_copy_dir", None)
+    out["backup_copies_enabled"] = copy_dir is not None
+    if copy_dir is not None:
+        out["last_backup_copy_error"] = backup_mod.last_run.get("copy_error")
+        newest = backup_mod.newest_backup(copy_dir) if copy_dir.is_dir() else None
+        out["last_backup_copy_at"] = int(newest[1]) if newest else None
+    # The Archidekt request limits in force and the counters since the gateway started.
+    client = getattr(state, "archidekt", None)
+    limits = getattr(client, "limits", None)
+    if callable(limits):
+        out["archidekt"] = {
+            **limits(),
+            "calls_per_member_per_10_min": getattr(settings, "archidekt_calls_per_10_min", None),
+        }
     return out
+
+
+def _archidekt_stats(a: dict[str, Any] | None) -> str:
+    if not a:
+        return ""
+    limits = (
+        f"{a['max_per_minute']} a minute for everyone, at least {a['min_interval_seconds']:g} s apart; "
+        f"{a['calls_per_member_per_10_min']} per member every 10 minutes"
+    )
+    counts = (
+        f"{a['requests']} sent, {a['cache_hits']} answered from cache, {a['retries']} retried, "
+        f"{a['rate_limited']} slowed down by Archidekt"
+    )
+    return _stat("Archidekt request limits", limits) + _stat("Archidekt requests since start", counts)
 
 
 def users_data(state: Any) -> list[dict[str, Any]]:
@@ -439,6 +476,12 @@ def _overview_body(state: Any) -> str:
         backup = _when(sysd["last_backup_at"])
     else:
         backup = "none yet"
+    if not sysd["backup_copies_enabled"]:
+        copies = "off (MTG_BACKUP_COPY_DIR not set)"
+    elif sysd["last_backup_copy_at"]:
+        copies = _when(sysd["last_backup_copy_at"])
+    else:
+        copies = "none yet"
     size = sysd["database_bytes"]
     cards.append(
         "<div class='card'><h2>System</h2><dl class='meta'>"
@@ -446,12 +489,20 @@ def _overview_body(state: Any) -> str:
         + _stat("Database schema", sysd["schema_version"])
         + _stat("Database size", f"{size / 1048576:.1f} MB" if size is not None else "in memory")
         + _stat("Newest backup", backup)
+        + _stat("Newest backup copy", copies)
+        + _stat("Research service (Mystic Forge)", sysd["mystic_forge"])
+        + _archidekt_stats(sysd.get("archidekt"))
         + _stat("Default approval mode", state.settings.approval_mode_default)
         + _stat("Highest approval mode allowed", state.settings.approval_mode_max)
         + "</dl>"
         + (
             _err(f"The last nightly backup failed ({sysd['last_backup_error']}). Check the gateway's log.")
             if sysd["last_backup_error"]
+            else ""
+        )
+        + (
+            _err(f"The last backup copy failed ({sysd['last_backup_copy_error']}). Check the copy folder.")
+            if sysd.get("last_backup_copy_error")
             else ""
         )
         + "</div>"

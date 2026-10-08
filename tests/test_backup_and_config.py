@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from datetime import UTC, datetime
 from pathlib import Path
@@ -10,6 +11,41 @@ from cryptography.fernet import Fernet
 from mtg_gateway.backup import export_now, prune, seconds_until
 from mtg_gateway.config import ConfigError, load_settings
 from mtg_gateway.db import Database
+
+
+def test_backup_is_also_copied_to_the_copy_folder(tmp_path: Path):
+    """MTG_BACKUP_COPY_DIR (a network share, say): every backup lands there too, owner-only, and
+    old copies are pruned there as well. A copy folder that cannot be written does not cost the
+    main backup; the failure is recorded for the admin page."""
+    from mtg_gateway import backup as backup_mod
+
+    db = Database(tmp_path / "d" / "g.sqlite")
+    db.upsert_user("u1", email=None, name="x", preferred_username=None, groups=[])
+    old = tmp_path / "copies" / "mtg-gateway-20000101T000000Z.sqlite"
+    old.parent.mkdir()
+    old.write_bytes(b"x")
+    os.utime(old, (0, 0))
+    out = export_now(db, tmp_path / "b", keep_days=14, copy_dir=tmp_path / "copies")
+    copied = tmp_path / "copies" / out.name
+    assert copied.read_bytes() == out.read_bytes()
+    assert (copied.stat().st_mode & 0o777) == 0o600
+    assert not old.exists() and backup_mod.last_run["copy_error"] is None
+    blocked = tmp_path / "not-a-folder"
+    blocked.write_text("a file where the folder should be")
+    out2 = export_now(db, tmp_path / "b", keep_days=14, copy_dir=blocked)
+    assert out2.exists() and backup_mod.last_run["copy_error"]
+    db.close()
+
+
+def test_backup_copy_dir_setting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    _write_secrets(tmp_path, monkeypatch)
+    monkeypatch.setenv("MTG_BACKUP_COPY_DIR", "/copies")
+    monkeypatch.delenv("MTG_BACKUP_DIR", raising=False)
+    assert load_settings().backup_copy_dir is None  # no backups, so nothing to copy
+    monkeypatch.setenv("MTG_BACKUP_DIR", "/backups")
+    assert load_settings().backup_copy_dir == Path("/copies")
+    monkeypatch.delenv("MTG_BACKUP_COPY_DIR")
+    assert load_settings().backup_copy_dir is None
 
 
 def test_backup_export_and_prune(tmp_path: Path):
@@ -152,7 +188,11 @@ def test_stuck_applying_proposals_are_failed_by_purge(tmp_path) -> None:
     db.purge_expired()
     assert db.get_proposal("p1", "u")["state"] == "applying"  # old proposal, but the apply just started
     with db.tx() as c:
-        c.execute("UPDATE proposals SET applied_at = ? WHERE id = 'p1'", (int(time.time()) - 7200,))
+        c.execute("UPDATE proposals SET applied_at = ? WHERE id = 'p1'", (int(time.time()) - 2 * 3600,))
+    db.purge_expired()
+    assert db.get_proposal("p1", "u")["state"] == "applying"  # a long background apply may still run
+    with db.tx() as c:
+        c.execute("UPDATE proposals SET applied_at = ? WHERE id = 'p1'", (int(time.time()) - 7 * 3600,))
     db.purge_expired()
     row = db.get_proposal("p1", "u")
     assert row["state"] == "failed" and row["result"]["error"] == "interrupted"
@@ -213,3 +253,50 @@ def test_backup_is_owner_only_even_with_a_loose_umask(tmp_path: Path):
         os.umask(old)
     assert out.stat().st_mode & 0o777 == 0o600
     db.close()
+
+
+def test_backup_copy_never_writes_through_a_link_at_its_temporary_name(tmp_path: Path, monkeypatch):
+    from mtg_gateway import backup as backup_module
+
+    src = tmp_path / "mtg-gateway-20260101T000000Z.sqlite"
+    src.write_bytes(b"backup")
+    victim = tmp_path / "victim"
+    victim.write_bytes(b"keep me")
+    copy_dir = tmp_path / "copies"
+    copy_dir.mkdir()
+    real_open = os.open
+
+    def open_then_swap(path, flags, mode=0o777):
+        fd = real_open(path, flags, mode)
+        # someone with write access to a shared copy folder swaps a link in at the temporary name
+        if str(path).endswith(".tmp"):
+            Path(path).unlink()
+            Path(path).symlink_to(victim)
+        return fd
+
+    monkeypatch.setattr(backup_module.os, "open", open_then_swap)
+    with pytest.raises(OSError):
+        backup_module.copy_backup(src, copy_dir, 30)
+    assert victim.read_bytes() == b"keep me"
+    assert not (copy_dir / src.name).exists()  # no link left behind as a backup
+
+
+async def test_health_probes_mystic_forge_once_for_many_callers():
+    import contextlib
+
+    from mtg_gateway.mf_proxy import MysticForgeProxy
+
+    probes = []
+
+    class Client:
+        async def list_tools(self):
+            await asyncio.sleep(0.05)
+
+    @contextlib.asynccontextmanager
+    async def factory():
+        probes.append(1)
+        yield Client()
+
+    proxy = MysticForgeProxy("http://mf.test/mcp", client_factory=factory)
+    results = await asyncio.gather(*[proxy.healthy() for _ in range(20)])
+    assert all(results) and len(probes) == 1

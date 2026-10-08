@@ -70,8 +70,8 @@ def test_resolve_cards_matches_by_identifier_not_position(clients):
         assert cards[3]["status"] != "exact", cards[3]  # OCR noise is never silently accepted
         assert {2, 3} <= set(out["needs_review"]), out["needs_review"]
         assert out["status_counts"]["exact"] == 1 and out["status_counts"]["printing"] == 1
-        assert {"action": "add", "card_name": "Sol Ring", "quantity": 2} in [
-            {k: ch[k] for k in ("action", "card_name", "quantity")} for ch in out["changes"]
+        assert {"action": "add", "name": "Sol Ring", "quantity": 2} in [
+            {k: ch[k] for k in ("action", "name", "quantity")} for ch in out["changes"]
         ], out["changes"]
         assert "2 Sol Ring" in out["decklist_text"]
 
@@ -102,7 +102,7 @@ def test_scan_sessions_are_saved_listed_and_fetched_by_id_or_name(clients):
             assert (
                 "2 Sol Ring" in got["decklist_text"] and "Aesi, Tyrant of Gyre Strait" in got["decklist_text"]
             )
-            assert {ch["card_name"] for ch in got["changes"]} == {"Sol Ring", "Aesi, Tyrant of Gyre Strait"}
+            assert {ch["name"] for ch in got["changes"]} == {"Sol Ring", "Aesi, Tyrant of Gyre Strait"}
 
     run(go())
 

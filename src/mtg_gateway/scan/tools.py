@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from mcp.server.auth.middleware.auth_context import get_access_token
+from pydantic import Field
 
+from ..schemas import change_for_assistant
 from .service import ScanError, ScanService, parse_cards, parse_text
 
 if TYPE_CHECKING:
@@ -21,6 +23,34 @@ def _sub() -> str:
 
 def _err(exc: ScanError) -> dict[str, Any]:
     return {"ok": False, "error": exc.kind, "message": str(exc)}
+
+
+# Card fields the Scan page draws with (image links, the Scryfall page) and the assistant has no
+# use for: left out of what the tools return, which keeps a card's printings list small.
+_PAGE_ONLY = ("image_small", "image_normal", "image_art", "image_large", "scryfall_uri")
+
+
+def _slim(card: Any) -> Any:
+    if isinstance(card, dict):
+        return {k: v for k, v in card.items() if k not in _PAGE_ONLY}
+    return card
+
+
+def _for_assistant(out: dict[str, Any]) -> dict[str, Any]:
+    """A resolve or scan-session result in the assistant's shape: cards without the page-only
+    fields, and ``changes`` in the documented spelling (name, set_code, finish)."""
+    out = dict(out)
+    for key in ("cards", "items"):
+        if isinstance(out.get(key), list):
+            out[key] = [
+                {**it, "card": _slim(it.get("card"))} if isinstance(it, dict) and "card" in it else _slim(it)
+                for it in out[key]
+            ]
+    if isinstance(out.get("changes"), list):
+        out["changes"] = [change_for_assistant(c) for c in out["changes"]]
+    if isinstance(out.get("change_batches"), list):
+        out["change_batches"] = [[change_for_assistant(c) for c in b] for b in out["change_batches"]]
+    return out
 
 
 def add_scan_tools(server: MCPServer, service: ScanService) -> None:
@@ -47,20 +77,29 @@ def add_scan_tools(server: MCPServer, service: ScanService) -> None:
             results = await service.resolve(inputs, owner=_sub())
         except ScanError as exc:
             return _err(exc)
-        return {"ok": True, **service.describe(results)}
+        return {"ok": True, **_for_assistant(service.describe(results))}
 
     @server.tool(
         name="card_printings",
         title="List the printings of a card",
         description=(
-            "Every printing of one Magic card (set, collector number, release date, finishes, images), "
-            "newest first, from Scryfall (`has_more` when the card has more than the 175 shown). "
-            "Give `oracle_id` from a resolve_cards result, or `name`. Use it "
-            "to pick an exact printing or to tell foil-only printings apart. Does not touch Archidekt."
+            "The printings of one Magic card (set, set name, collector number, release date, rarity, "
+            "finishes), newest first, from Scryfall. Give `oracle_id` from a resolve_cards result, or "
+            "`name`. Narrow it with `set_code` (e.g. cmr) and `finish` (foil or etched: printings that "
+            "come in it); `limit` caps the rows (default 25; `matching` says how many matched). Use it to "
+            "pick an exact printing or to tell foil-only printings apart. Does not touch Archidekt."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )
-    async def card_printings(oracle_id: str | None = None, name: str | None = None) -> dict[str, Any]:
+    async def card_printings(
+        oracle_id: Annotated[str | None, Field(description="The card's Scryfall oracle id.")] = None,
+        name: Annotated[str | None, Field(description="Or the card's name.")] = None,
+        set_code: Annotated[str | None, Field(description="Only printings from this set, e.g. cmr.")] = None,
+        finish: Annotated[
+            Literal["nonfoil", "foil", "etched"] | None, Field(description="Only printings that come in it.")
+        ] = None,
+        limit: Annotated[int, Field(description="Rows to return, 1 to 175.")] = 25,
+    ) -> dict[str, Any]:
         try:
             if not oracle_id:
                 if not name:
@@ -73,7 +112,23 @@ def add_scan_tools(server: MCPServer, service: ScanService) -> None:
             out = await service.printings(oracle_id, owner=_sub())
         except ScanError as exc:
             return _err(exc)
-        return {"ok": True, "oracle_id": oracle_id, **out}
+        cards = [c for c in out.get("cards", []) if isinstance(c, dict)]
+        if set_code:
+            want = set_code.strip().lower()
+            cards = [c for c in cards if str(c.get("set") or "").lower() == want]
+        if finish:
+            cards = [c for c in cards if finish in (c.get("finishes") or [])]
+        shown = max(1, min(int(limit or 25), 175))
+        return {
+            "ok": True,
+            "oracle_id": oracle_id,
+            "matching": len(cards),
+            "cards": [_slim(c) for c in cards[:shown]],
+            "truncated": len(cards) > shown,
+            # Scryfall shows 175 printings a page; past that, filters only see the newest 175
+            "has_more": bool(out.get("has_more")),
+            "total_cards": out.get("total_cards"),
+        }
 
     @server.tool(
         name="save_scan_session",
@@ -106,7 +161,7 @@ def add_scan_tools(server: MCPServer, service: ScanService) -> None:
             session = service.new_session(_sub(), name, items, source="assistant")
         except ScanError as exc:
             return _err(exc)
-        return {"ok": True, **session}
+        return {"ok": True, **_for_assistant(session)}
 
     @server.tool(
         name="list_scan_sessions",
@@ -133,6 +188,6 @@ def add_scan_tools(server: MCPServer, service: ScanService) -> None:
     )
     async def get_scan_session(session: str) -> dict[str, Any]:
         try:
-            return {"ok": True, **service.find_session(_sub(), session)}
+            return {"ok": True, **_for_assistant(service.find_session(_sub(), session))}
         except ScanError as exc:
             return _err(exc)

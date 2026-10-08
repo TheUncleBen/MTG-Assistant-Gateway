@@ -145,8 +145,10 @@ async def test_search_and_user_pages_are_gated_and_list_public_decks(stack: Stac
         assert stack.ark.search_params[-1]["name"] == "Sample"
         assert stack.ark.search_params[-1]["orderBy"] == "-viewCount"
         r = await b.http.get("/search?commander=Aesi", headers=NAV)
-        assert stack.ark.search_params[-1]["commanderName"] == "Aesi"
-        assert stack.ark.search_params[-1]["deckFormat"] == "3"
+        assert stack.ark.search_params[-2]["commanderName"] == "Aesi"
+        assert stack.ark.search_params[-2]["deckFormat"] == "3"
+        # Archidekt matches a commander only by its full name: the part is looked up and searched again
+        assert stack.ark.search_params[-1]["commanderName"] == "Aesi, Tyrant of Gyre Strait"
         r = await b.http.get("/users/alice", headers=NAV)
         assert r.status_code == 200 and "Sample Commander Deck" in r.text
         r = await b.http.get("/users/amy", headers=NAV)

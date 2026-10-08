@@ -33,6 +33,7 @@ connecting an assistant in [CONNECT.md](CONNECT.md#if-sign-in-fails).
 | Certificate errors | Fix the proxy's certificate. Claude and ChatGPT refuse self-signed certificates |
 | Android app: *No connection to your gateway. Check that the phone is online, then tap Retry.* | The phone couldn't reach the address at all (no signal, DNS, or a typo in the gateway address). It often clears by itself after a moment; tap Retry. If it doesn't, open the same address in the phone's browser. *Your gateway is not answering right now* instead means the proxy answered but the gateway didn't (502 to 504): see the `502 Bad Gateway` row |
 | `/healthz` returns `503` | The database can't be opened. Check the log, the data folder's ownership, and that it's on local disk, not NFS or SMB |
+| `/healthz` says `"status":"degraded"`, `"mystic_forge":"down"` | The gateway works (still HTTP 200, so it isn't restarted) but the research service doesn't answer: card research and simulations fail. Check the Mystic Forge service's state and log, and that `MTG_MYSTIC_FORGE_URL` points at it. The admin page's System card shows the same |
 | The gateway is under a path (`https://host/mtg/`) and nothing works | Not supported. Give it its own hostname |
 
 ## Signing in fails

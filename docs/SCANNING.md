@@ -158,12 +158,18 @@ printing (title and collector line agreed, or picked by hand), each `add`
 change also names `set_code` and `collector_number`, and `foil` when the
 finish is known. An unknown finish is left out rather than sent as "not
 foil". A printing that only exists in one finish (CMR 365 Aesi is foil only)
-sets `foil` by itself and beats a misread star.
+sets `foil` by itself and beats a misread star. The assistant's tools
+(`resolve_cards`, `get_scan_session`, `save_scan_session`) return those
+changes in the one card spelling the tools share: `name`, `set_code`,
+`collector_number`, `quantity` and `finish` (`foil` or `nonfoil`), without
+image links.
 
-`card_printings(oracle_id | name)` lists every printing of a card, newest
-first, with finishes and art images (`has_more` when a card has more than
-the 175 shown). The page uses the same list at `/scan/api/prints`, cached as
-summaries.
+`card_printings(oracle_id | name)` lists the printings of a card, newest
+first, with finishes; `set_code`, `finish` and `limit` (default 25) narrow
+it, `matching` and `truncated` say how many matched and whether more did
+than came back, and `has_more` says Scryfall has more than the 175 newest
+printings. The page uses the same list at `/scan/api/prints`, cached as
+summaries, with the art images the assistant's answer leaves out.
 
 **On the page.** Before reading, the page looks for the card's four edges
 and straightens the card (perspective correction in `geometry.js`, no

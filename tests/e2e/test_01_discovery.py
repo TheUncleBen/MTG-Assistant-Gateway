@@ -79,7 +79,8 @@ def test_anonymous_surface_is_only_what_the_docs_promise(http: httpx.Client):
 
 
 def test_health_and_landing_page_leak_nothing(http: httpx.Client):
-    assert http.get("/healthz").json() == {"status": "ok", "version": VERSION}
+    # The deployed stack runs Mystic Forge next to the gateway, so the research service is up too.
+    assert http.get("/healthz").json() == {"status": "ok", "version": VERSION, "mystic_forge": "ok"}
     landing = http.get("/")
     assert landing.status_code == 302 and landing.headers["location"] == "/login?next=/"
     assert "auth.e2e.test" not in landing.text  # the identity provider is not advertised

@@ -104,7 +104,7 @@ async def test_resolve_cards_statuses(stack: Stack) -> None:
     assert body["needs_review"] == [2, 3, 4, 5]
     assert body["card_count"] == 2 + 1 + 1 + 1 and body["distinct"] == 4
     assert body["decklist_text"].splitlines()[0].startswith("2 Sol Ring (")
-    assert {"action": "add", "card_name": "Sol Ring", "quantity": 2} in body["changes"]
+    assert {"action": "add", "name": "Sol Ring", "quantity": 2} in body["changes"]
     # One batched collection call for the exact pass, then per-card fallbacks only for the misses.
     posts = [u for m, u in stack.sf.requests if m == "POST"]
     assert len(posts) == 1
@@ -154,8 +154,8 @@ async def test_save_list_get_scan_session_tools(stack: Stack) -> None:
     got = (await call(h, token, "get_scan_session", {"session": "binder page 1"}))["structuredContent"]
     assert got["id"] == saved["id"]
     assert got["changes"] == [
-        {"action": "add", "card_name": "Sol Ring", "quantity": 2},
-        {"action": "add", "card_name": "Aesi, Tyrant of Gyre Strait", "quantity": 1},
+        {"action": "add", "name": "Sol Ring", "quantity": 2},
+        {"action": "add", "name": "Aesi, Tyrant of Gyre Strait", "quantity": 1},
     ]
     missing = (await call(h, token, "get_scan_session", {"session": "scan_nope"}))["structuredContent"]
     assert missing["ok"] is False and missing["error"] == "not_found"
@@ -915,10 +915,13 @@ async def test_printings_by_oracle_id_and_by_name(stack: Stack) -> None:
     out = (await call(stack.h, token, "card_printings", {"oracle_id": aesi_oracle}))["structuredContent"]
     assert out["ok"] is True and [c["set"] for c in out["cards"]] == ["sld", "dsc", "plst", "cmr"]
     assert out["has_more"] is False and out["total_cards"] == 4
-    assert out["cards"][-1]["finishes"] == ["foil"] and out["cards"][-1]["image_art"].startswith("https://")
+    assert out["cards"][-1]["finishes"] == ["foil"]
+    # The assistant gets no image links (the page shows the pictures; links only cost tokens).
+    assert not any(k.startswith("image") for c in out["cards"] for k in c)
     # Printings are cached as summaries in a cache of their own, not as raw Scryfall records.
     cached = stack.h.app.state.gateway.scan.scryfall.prints_cache.get(aesi_oracle)
-    assert cached is not None and set(cached["cards"][0]) == set(out["cards"][0])
+    assert cached is not None and set(out["cards"][0]) < set(cached["cards"][0])
+    assert cached["cards"][-1]["image_art"].startswith("https://")
     assert "prints" not in str(stack.h.app.state.gateway.scan.scryfall.names._items.keys())
     by_name = (await call(stack.h, token, "card_printings", {"name": "Aesi, Tyrant of Gyre Strait"}))[
         "structuredContent"
@@ -933,6 +936,7 @@ async def test_printings_by_oracle_id_and_by_name(stack: Stack) -> None:
     await b.login()
     r = await b.http.get(f"/scan/api/prints?oracle_id={aesi_oracle}")
     assert r.status_code == 200 and len(r.json()["cards"]) == 4
+    assert r.json()["cards"][-1]["image_art"].startswith("https://")  # the picker keeps its art
     assert "private" in r.headers["cache-control"]
     r = await b.http.get("/scan/api/prints?oracle_id=00000000-0000-0000-0000-000000000000")
     assert r.status_code == 404
@@ -968,22 +972,22 @@ async def test_foil_follows_a_single_finish_and_changes_carry_the_printing(stack
     # A star read on a nonfoil-only printing names a finish that does not exist: the printing wins.
     assert cards[5]["foil"] is False and "only exists non-foil; the foil read was ignored" in cards[5]["note"]
     assert out["decklist_text"].splitlines()[0].endswith("*F*")
-    changes = {c["card_name"]: c for c in out["changes"]}
+    changes = {c["name"]: c for c in out["changes"]}
     # One agreed printing in one finish: the addition names it. Sol Ring, with one copy matched by
     # name only (the fixtures have no CMR 472): by name only.
     assert changes["Aesi, Tyrant of Gyre Strait"] == {
         "action": "add",
-        "card_name": "Aesi, Tyrant of Gyre Strait",
+        "name": "Aesi, Tyrant of Gyre Strait",
         "quantity": 2,
         "set_code": "cmr",
         "collector_number": "365",
-        "foil": True,
+        "finish": "foil",
     }
-    assert changes["Sol Ring"] == {"action": "add", "card_name": "Sol Ring", "quantity": 3}
+    assert changes["Sol Ring"] == {"action": "add", "name": "Sol Ring", "quantity": 3}
     # An unknown finish is not a claim of "not foil": the printing goes along, foil stays out.
     assert changes["Cultivate"] == {
         "action": "add",
-        "card_name": "Cultivate",
+        "name": "Cultivate",
         "quantity": 1,
         "set_code": "msc",
         "collector_number": "172",

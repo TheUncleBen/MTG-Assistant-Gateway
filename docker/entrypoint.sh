@@ -10,7 +10,8 @@ PGID="${PGID:-1000}"
 if [ "$(id -u)" = "0" ]; then
   if [ "$PGID" != "$(id -g mtg)" ]; then groupmod -o -g "$PGID" mtg; fi
   if [ "$PUID" != "$(id -u mtg)" ]; then usermod -o -u "$PUID" mtg; fi
-  for d in "${MTG_DATA_DIR:-/data}" "${MTG_BACKUP_DIR:-/backups}"; do
+  # the copy folder only when it is a real folder (it is /dev/null when copies are off)
+  for d in "${MTG_DATA_DIR:-/data}" "${MTG_BACKUP_DIR:-/backups}" "${MTG_BACKUP_COPY_DIR:-}"; do
     [ -d "$d" ] && chown "$PUID:$PGID" "$d" || true
   done
   exec setpriv --reuid="$PUID" --regid="$PGID" --init-groups --no-new-privs "$@"

@@ -49,11 +49,31 @@ def card_out(deck: Deck, c: DeckCard) -> dict[str, Any]:
     return out
 
 
+# What each get_deck ``view`` returns besides the deck's header (name, owner, format, counts...).
+DECK_VIEWS = ("summary", "text", "cards", "export", "full")
+# Card fields an assistant rarely needs (images, ids, the label colour, ranking numbers): left out
+# of the compact "cards" view, kept in "full" for the web pages and the API.
+_FULL_ONLY_CARD_FIELDS = ("image_hash", "scryfall_uid", "label", "edhrec_rank", "salt", "colors")
+
+
 def deck_out(
-    deck: Deck, *, with_cards: bool = True, with_stats: bool = True, include_text: bool = False
+    deck: Deck,
+    *,
+    with_cards: bool = True,
+    with_stats: bool = True,
+    include_text: bool = False,
+    view: str = "full",
 ) -> dict[str, Any]:
-    """The full deck as the tools and API return it. ``include_text`` adds each card's rules
-    text (``oracle_text``), which is left out by default to keep a deck read small."""
+    """The deck as the tools and API return it. ``view`` picks the body: ``summary`` (statistics
+    only), ``text`` (statistics plus the plain decklist_text and sideboard_text), ``cards``
+    (statistics plus one compact row per card), ``export`` (archidekt_text, Archidekt's own import
+    syntax) or ``full`` (all of them, every card field). ``include_text`` adds each card's rules
+    text (``oracle_text``) and so needs card rows: with ``summary``, ``text`` or ``export`` it
+    switches to ``cards``."""
+    if view not in DECK_VIEWS:
+        view = "full"
+    if include_text and view in ("summary", "text", "export"):
+        view = "cards"
     out: dict[str, Any] = {
         "ok": True,
         "id": deck.id,
@@ -71,7 +91,9 @@ def deck_out(
         "commanders": [c.name for c in deck.cards if "Commander" in c.categories],
         "categories": [c.get("name") for c in deck.categories if isinstance(c.get("name"), str)],
     }
-    if with_cards:
+    if view != "full":
+        out["view"] = view
+    if with_cards and view in ("cards", "full"):
         cards = [card_out(deck, c) for c in deck.cards]
         for row, c in zip(cards, deck.cards, strict=True):
             row["type_line"] = c.type_line
@@ -87,11 +109,15 @@ def deck_out(
                     row["flavor_text"] = c.flavor
                 if c.artist:
                     row["artist"] = c.artist
+        if view == "cards":
+            cards = [{k: v for k, v in row.items() if k not in _FULL_ONLY_CARD_FIELDS} for row in cards]
         out["cards"] = cards
+    if with_cards and view in ("text", "full"):
         out["decklist_text"] = deck_to_text(deck)
         out["sideboard_text"] = deck_to_text(deck, zone="side")
+    if with_cards and view in ("export", "full"):
         out["archidekt_text"] = deck_to_archidekt_text(deck)
-    if with_stats:
+    if with_stats and view != "export":
         try:
             out["stats"] = deck_stats.compute(deck)
         except Exception:  # pragma: no cover - statistics must never break a deck read
@@ -145,4 +171,4 @@ def cards_by_category(deck: Deck) -> list[tuple[str, list[DeckCard]]]:
     return [(name, sorted(groups[name], key=lambda c: c.name.lower())) for name in sorted(groups, key=key)]
 
 
-__all__ = ["auto_category", "card_out", "cards_by_category", "deck_brief", "deck_out"]
+__all__ = ["DECK_VIEWS", "auto_category", "card_out", "cards_by_category", "deck_brief", "deck_out"]

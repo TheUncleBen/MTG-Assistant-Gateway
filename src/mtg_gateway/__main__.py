@@ -42,6 +42,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  OIDC redirect   : {settings.callback_url}")
         print(f"  database        : {settings.db_path}")
         print(f"  backups         : {settings.backup_dir or '(disabled)'}")
+        print(f"  backup copies   : {settings.backup_copy_dir or '(none)'}")
         print(f"  required group  : {settings.required_group or '(none; identity provider policy decides)'}")
         return 0
 
@@ -55,7 +56,7 @@ def main(argv: list[str] | None = None) -> int:
         settings.backup_dir.mkdir(parents=True, exist_ok=True)
         db = Database(settings.db_path)
         try:
-            dest = export_now(db, settings.backup_dir, settings.backup_keep_days)
+            dest = export_now(db, settings.backup_dir, settings.backup_keep_days, settings.backup_copy_dir)
         finally:
             db.close()
         print(f"backup written: {dest}")

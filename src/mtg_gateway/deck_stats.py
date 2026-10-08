@@ -279,6 +279,16 @@ _PARTNER_RE = re.compile(r"(?<![a-z])partner(?!\s+with)", re.IGNORECASE)
 _PARTNER_WITH_RE = re.compile(r"partner with ([^\n(]+?)(?:\s*\(|\n|$)", re.IGNORECASE)
 
 
+def size_problem(fmt: str, qty: int) -> str | None:
+    """The deck-size problem ``deck_checks`` would report for ``qty`` cards in format ``fmt`` (the
+    deck proper), in the same words; None when the size fits or the format sets none."""
+    fmt = "commander" if fmt == "edh" else fmt
+    if fmt in _CONSTRUCTED_FORMATS:
+        return None if qty >= _MIN_SIZE else f"deck has {qty} cards; {fmt} wants at least {_MIN_SIZE}"
+    expected = _DECK_SIZES.get(fmt)
+    return None if expected is None or qty == expected else f"deck has {qty} cards; {fmt} wants {expected}"
+
+
 def _can_command(card: DeckCard) -> bool:
     legendary = any(t.lower() == "legendary" for t in card.supertypes + card.types)
     creature = any(t.lower() == "creature" for t in card.types)

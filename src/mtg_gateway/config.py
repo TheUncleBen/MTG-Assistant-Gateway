@@ -133,11 +133,13 @@ class Settings:
     public_url: str
     oidc_issuer: str
     oidc_client_id: str
-    oidc_client_secret: str
+    # The three secrets are left out of repr(), so a settings object printed or logged by mistake
+    # cannot show them.
+    oidc_client_secret: str = field(repr=False)
     oidc_scopes: str
     required_group: str | None
-    session_secret: str
-    fernet_key: str
+    session_secret: str = field(repr=False)
+    fernet_key: str = field(repr=False)
     data_dir: Path
     backup_dir: Path | None
     backup_hour_utc: int
@@ -172,11 +174,24 @@ class Settings:
     auto_apply_max_rows: int = 5
     archidekt_base: str = "https://archidekt.com/api"
     archidekt_backups: bool = True
+    # A second folder every database backup is also copied to (another disk or a network share).
+    backup_copy_dir: Path | None = None
     archidekt_backup_folder: str = "MTG Gateway backups"
     archidekt_user_agent: str = (
         "mtg-assistant-gateway/0.1 (+https://github.com/TheUncleBen/MTG-Assistant-Gateway)"
     )
+    # Gentle on Archidekt (docs/DEPLOY.md "Archidekt request limits"): every request, whoever
+    # asks, waits at least archidekt_min_interval after the previous one, and no more than
+    # archidekt_max_per_minute go out in any 60 seconds.
     archidekt_min_interval: float = 1.0
+    archidekt_max_per_minute: int = 40
+    # GETs that time out or get a 5xx are retried this many times, after a random wait of up to
+    # archidekt_backoff_base * 2**attempt seconds (capped at 10). Writes and 429s are never retried.
+    archidekt_retries: int = 2
+    archidekt_backoff_base: float = 1.0
+    # How long anonymous public deck and search reads, and card catalogue lookups, are reused.
+    archidekt_cache_seconds: int = 60
+    archidekt_card_cache_seconds: int = 3600
     # Archidekt work one member may start per 10 minutes (decks.RateBudget), proxied archidekt_*
     # research calls included.
     archidekt_calls_per_10_min: int = 120
@@ -268,6 +283,12 @@ def load_settings() -> Settings:
     data_dir = Path(_env("MTG_DATA_DIR", "/data") or "/data")
     backup_raw = _env("MTG_BACKUP_DIR", "")
     backup_dir = Path(backup_raw) if backup_raw else None
+    copy_raw = _env("MTG_BACKUP_COPY_DIR", "")
+    backup_copy_dir = Path(copy_raw) if copy_raw and backup_dir is not None else None
+    if backup_copy_dir is not None and backup_copy_dir.is_char_device():
+        # The stack files mount /dev/null there when no copy folder is set (docker stack deploy
+        # has no "only when set" syntax for a mount), which means copies are off.
+        backup_copy_dir = None
 
     allowed_hosts_raw = _env("MTG_ALLOWED_HOSTS", "")
     if allowed_hosts_raw:
@@ -330,6 +351,7 @@ def load_settings() -> Settings:
         backup_dir=backup_dir,
         backup_hour_utc=_int_env("MTG_BACKUP_HOUR_UTC", 3, lo=0, hi=23),
         backup_keep_days=_int_env("MTG_BACKUP_KEEP_DAYS", 14, lo=1, hi=3650),
+        backup_copy_dir=backup_copy_dir,
         allowed_hosts=allowed_hosts,
         mystic_forge_url=(_env("MTG_MYSTIC_FORGE_URL", "") or None),
         cimd_enabled=_bool_env("MTG_CIMD_ENABLED", True),
@@ -345,6 +367,12 @@ def load_settings() -> Settings:
         archidekt_base=(_env("MTG_ARCHIDEKT_BASE", "https://archidekt.com/api") or "").rstrip("/"),
         archidekt_backups=_bool_env("MTG_ARCHIDEKT_BACKUPS", True),
         archidekt_calls_per_10_min=_int_env("MTG_ARCHIDEKT_CALLS_PER_10_MIN", 120, lo=10, hi=100_000),
+        archidekt_min_interval=_float_env("MTG_ARCHIDEKT_MIN_INTERVAL", 1.0, lo=0.25, hi=10.0),
+        archidekt_max_per_minute=_int_env("MTG_ARCHIDEKT_MAX_PER_MINUTE", 40, lo=1, hi=120),
+        archidekt_retries=_int_env("MTG_ARCHIDEKT_RETRIES", 2, lo=0, hi=4),
+        archidekt_backoff_base=_float_env("MTG_ARCHIDEKT_BACKOFF_BASE", 1.0, lo=0.1, hi=10.0),
+        archidekt_cache_seconds=_int_env("MTG_ARCHIDEKT_CACHE_SECONDS", 60, lo=0, hi=900),
+        archidekt_card_cache_seconds=_int_env("MTG_ARCHIDEKT_CARD_CACHE_SECONDS", 3600, lo=0, hi=86400),
         archidekt_backup_folder=(_env("MTG_ARCHIDEKT_BACKUP_FOLDER", "MTG Gateway backups") or "").strip()[
             :100
         ]
