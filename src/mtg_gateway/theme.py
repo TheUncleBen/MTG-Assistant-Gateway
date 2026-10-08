@@ -45,8 +45,10 @@ APP_UA_MARK = "MTGAssistant/"
 _LIGHT = """
     --bg:#f9fafb; --surface:#fafafa; --surface-2:#dedede; --surface-3:#c1c1c1;
     --border:#bababa; --border-soft:#d4d4d4; --card-border:#5b5b5b;
-    --text:#383838; --text-muted:#727272; --link:#2a66c9; /* Archidekt's #4183c4 is 3.8:1 */
-    --menu-head:#595959; /* 5.2:1 on --surface-2; --text-muted would be 3.6:1 there */
+    --text:#383838; --link:#2a66c9; /* Archidekt's #4183c4 is 3.8:1 */
+    /* 4.8:1 on --surface-2 and 6.2:1 on --bg; Archidekt's #727272 is 3.6:1 on --surface-2 */
+    --text-muted:#5e5e5e;
+    --menu-head:#595959; /* 5.2:1 on --surface-2 */
     --toolbar-bg:#dcdcdc; --toolbar-text:#383838;
     --navbar-bg:#313131; --navbar-text:#ffffff; --navbar-muted:#d6d6d6;
     --banner-a:rgba(40,40,40,.82); --banner-b:rgba(40,40,40,.5);
@@ -143,7 +145,8 @@ details.dd .menu a.danger{color:var(--danger-text)}
 details.dd .menu .head{padding:.4rem 1rem .2rem;font-size:.8rem;font-weight:700;color:var(--menu-head);
   text-transform:uppercase;letter-spacing:.04em}
 details.dd .menu form{margin:0;display:contents}
-details.dd .menu .on{color:var(--orange-text);font-weight:700}
+/* the chosen theme: --orange-text would be 4.0:1 on the light menu */
+details.dd .menu .on{color:var(--toolbar-active);font-weight:700}
 /* a dropdown trigger styled like phatDropdown: bordered, 39px, orange chevron, label floating above */
 .field{position:relative;display:flex;flex-direction:column;gap:.3rem;min-width:0}
 .field > label,.field > .lbl{font-weight:700;margin:0;font-size:1rem}

@@ -627,7 +627,7 @@ down since the gateway started.
 Each member also has their own limits, so one looping assistant can't keep
 Archidekt busy for everyone:
 
-- at most three Archidekt requests running or waiting at once;
+- at most three Archidekt actions running or waiting at once;
 - at most `MTG_ARCHIDEKT_CALLS_PER_10_MIN` (120 by default) started per 10
   minutes, refilled evenly. Deck reads, proposals, applies, links and the
   research tools' `archidekt_*` calls all count. Past it the member gets

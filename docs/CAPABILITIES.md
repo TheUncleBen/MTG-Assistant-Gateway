@@ -92,8 +92,9 @@ reported): the proposal (Approve, Reject with a reason), the printings of a
 card, the cards read from photos or a list, a deck by category, the account's
 setup. Every pick on a card reaches the assistant as plain text, and the
 assistant then proposes as usual; the only card that acts by itself is the
-proposal card's Approve, with its one-time code. Display-only cards are kept
-to the deck read, where pictures and rules text would otherwise fill the chat.
+proposal card, whose Approve and Reject (with an optional reason) both use its
+one-time code. Display-only cards are kept to the deck read, where pictures
+and rules text would otherwise fill the chat.
 An app without cards (Claude Code, older clients) gets the same text results,
 and a form question for ambiguous names.
 

@@ -1317,7 +1317,7 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .comments .cmt .who b{color:var(--text)}
 .comments .cmt p{margin:.3rem 0;white-space:pre-wrap;overflow-wrap:anywhere}
 .comments .cmt .replies{margin-left:1rem;border-left:2px solid var(--border);padding-left:.75rem}
-.comments .cmt .acts .del{color:var(--danger-fill)}
+.comments .cmt .acts .del{color:var(--danger-text)}
 .comments .cmt form.editcomment{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.3rem 0}
 .comments .cmt form.editcomment textarea{flex:1 1 100%;min-height:4rem}
 .comments .cmt .confirmbar{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.3rem 0}
@@ -1673,7 +1673,8 @@ ul.erows{list-style:none;margin:.5rem 0 0;padding:0}
 .folderform .row{display:flex;flex-wrap:wrap;gap:.75rem}
 .folderform .row .field{margin:0}
 .panel.danger{border-color:var(--danger-fill)}
-.panel.danger h2{color:var(--danger-fill)}
+/* --danger-fill is for button backgrounds: as text on the dark panel it is 2.55:1 */
+.panel.danger h2{color:var(--danger-text)}
 .pastebox{margin:.75rem 0 0}
 .pastebox summary{cursor:pointer;font-weight:700;padding:.4rem 0}
 .pastebox textarea{width:100%;font-family:ui-monospace,monospace;margin:.5rem 0}
