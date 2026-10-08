@@ -1395,6 +1395,7 @@ class DeckService:
         cards: Any = None,
         decklist_text: str | None = None,
         csv_text: str | None = None,
+        json_text: str | None = None,
         private: bool = True,
     ) -> dict[str, Any]:
         name = clean_text(name or "")
@@ -1403,7 +1404,9 @@ class DeckService:
         fmt = str(deck_format or "commander").strip().lower()
         if fmt not in FORMAT_IDS:
             raise DeckError("invalid", f"deck_format must be one of: {', '.join(sorted(FORMAT_IDS))}")
-        entries = normalise_cards(cards=cards, decklist_text=decklist_text, csv_text=csv_text)
+        entries = normalise_cards(
+            cards=cards, decklist_text=decklist_text, csv_text=csv_text, json_text=json_text
+        )
         _token, link = self._token(sub)  # must be linked before we store a proposal that needs it
         self._room_for_proposal(sub)
         total = sum(c["quantity"] for c in entries)
@@ -2124,14 +2127,24 @@ class DeckService:
         backup = await self._backup_on_archidekt(sub, row, deck, snapshot_id)
         progress.update(backup)
         await self._rows_unchanged(sub, deck)  # the backup takes a while: check again before writing
-        await self._send(sub, deck.id, payload, progress)
+        if payload:
+            await self._send(sub, deck.id, payload, progress)
+        # The deck's own details as the snapshot recorded them (name, description, format, bracket,
+        # private, unlisted), re-derived from the current deck so a detail changed back by hand
+        # since the proposal is not sent again.
+        details, _lines = details_rows(deck, snapshot_details(wanted))
+        if details:
+            await self._call(sub, self.client.update_deck, deck.id, details_payload(details))
         verified = await self.get_deck(sub, deck.id)
         _left, mismatches = restore_steps(wanted, verified)
+        still, _lines = details_rows(verified, snapshot_details(wanted)) if details else ({}, [])
+        mismatches += [f"{k} (deck detail)" for k in sorted(still)]
         result = {
             "snapshot_id": snapshot_id,
             **backup,
             "restored_snapshot_id": snap["id"],
             "sent_entries": len(payload),
+            "restored_details": sorted(details),
             "verified": not mismatches,
             "mismatched_cards": mismatches,
         }
@@ -2264,14 +2277,17 @@ class DeckService:
         the same printings, finishes (foil, etched), categories (so the commander, sideboard and
         maybeboard too) and quantities. It is an ordinary proposal: reviewed, confirmed and
         applied like any other (which takes a fresh snapshot first), so a restore can itself be
-        undone. Not restored: the deck's own category definitions (a custom category's
-        'counts toward the deck' setting), name, description and format."""
+        undone. The deck's own details (name, description, format, bracket, private, unlisted)
+        go back too when the snapshot recorded them differently. Not restored: the deck's own
+        category definitions (a custom category's 'counts toward the deck' setting)."""
         snap = self.snapshot(sub, str(snapshot_id or "").strip())
         wanted = parse_deck(snap["deck"])
         self._room_for_proposal(sub)
         deck = await self.get_own_deck(sub, snap["deck_id"])
         payload, lines = restore_rows(wanted, deck)
-        if not payload:
+        details, detail_lines = details_rows(deck, snapshot_details(wanted))
+        lines += detail_lines
+        if not payload and not details:
             raise DeckError("invalid", "The deck already matches this snapshot; nothing to restore.")
         if len(payload) > MAX_RESTORE_ENTRIES:
             raise DeckError(
@@ -2290,7 +2306,7 @@ class DeckService:
                 "deck_id": deck.id,
                 "deck_name": deck.name,
                 "baseline_fingerprint": deck.fingerprint(),
-                "changes": {"snapshot_id": snap["id"]},
+                "changes": {"snapshot_id": snap["id"], "details": details},
             },
             [_row("restore", snapshot_id=snap["id"], taken=taken, rows=len(payload)), *lines],
         )
@@ -2803,6 +2819,21 @@ def details_rows(deck: Deck, wanted: dict[str, Any]) -> tuple[dict[str, Any], li
     return changes, lines
 
 
+def snapshot_details(snapshot: Deck) -> dict[str, Any]:
+    """The deck details a snapshot recorded, in the shape ``details_rows`` compares: name,
+    description, format (as its FORMAT_IDS key, when known), bracket, private and unlisted."""
+    out: dict[str, Any] = {
+        "name": snapshot.name,
+        "description": snapshot.description or "",
+        "edh_bracket": snapshot.edh_bracket,
+        "private": bool(snapshot.private),
+        "unlisted": bool(snapshot.unlisted),
+    }
+    if snapshot.format in FORMAT_IDS:
+        out["deck_format"] = snapshot.format
+    return out
+
+
 def details_payload(changes: dict[str, Any]) -> dict[str, Any]:
     """The PATCH /decks/{id}/update/ body for validated detail changes (Archidekt's field names)."""
     out: dict[str, Any] = {}
@@ -2998,24 +3029,77 @@ def _next_step(
     return "This proposal is no longer actionable."
 
 
+def cards_from_json(text: str) -> list[dict[str, Any]]:
+    """Rows from the gateway's own deck JSON (what get_deck returns and the Export page's .json
+    download holds): an object with ``cards`` (or a bare list), each ``{name, quantity, categories,
+    set, collector_number, finish}``. Only those six fields are read; the rest of a deck read
+    (stats, prices, text) is ignored. Raises DeckError when the text is not that shape."""
+    if len(text) > 4_000_000:
+        raise DeckError("invalid", "deck JSON larger than 4 MB")
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        raise DeckError("invalid", f"deck JSON could not be read: {exc}") from exc
+    rows = data.get("cards") if isinstance(data, dict) else data
+    if not isinstance(rows, list):
+        raise DeckError(
+            "invalid", "deck JSON must be an object with a cards list (the gateway's .json export)"
+        )
+    out: list[dict[str, Any]] = []
+    for i, row in enumerate(rows):
+        if not isinstance(row, dict):
+            raise DeckError("invalid", f"card {i} in the deck JSON must be an object")
+        qty = row.get("quantity", 1)
+        if not isinstance(qty, int) or isinstance(qty, bool) or qty < 1 or qty > 99:
+            raise DeckError("invalid", f"card {i}: quantity must be a whole number from 1 to 99")
+        cats_raw = row.get("categories") or []
+        if not isinstance(cats_raw, list) or not all(isinstance(c, str) for c in cats_raw):
+            raise DeckError("invalid", f"card {i}: categories must be a list of names")
+        finish = str(row.get("finish") or "").strip().capitalize()
+        set_code = str(row.get("set") or row.get("set_code") or "").strip().lower()
+        number = str(row.get("collector_number") or "").strip()
+        if (set_code and not _SET_CODE.fullmatch(set_code)) or (
+            number and not _COLLECTOR_NUMBER.fullmatch(number)
+        ):
+            raise DeckError("invalid", f"card {i}: set or collector_number looks wrong")
+        out.append(
+            {
+                "name": str(row.get("name") or ""),
+                "quantity": qty,
+                "categories": [str(c) for c in cats_raw],
+                "foil": finish in ("Foil", "Etched"),
+                "finish": finish if finish in ("Foil", "Etched") else "",
+                "set_code": set_code,
+                "collector_number": number,
+            }
+        )
+    return out
+
+
 def normalise_cards(
-    *, cards: Any = None, decklist_text: str | None = None, csv_text: str | None = None
+    *,
+    cards: Any = None,
+    decklist_text: str | None = None,
+    csv_text: str | None = None,
+    json_text: str | None = None,
 ) -> list[dict[str, Any]]:
     """Turn any of the accepted inputs into [{name, quantity, categories, foil, finish, ...}].
     Sideboard and maybeboard rows are kept under their category (Archidekt stores them as
-    categories outside the deck), so a pasted list or CSV round-trips whole."""
-    for label, value in (("decklist_text", decklist_text), ("csv_text", csv_text)):
+    categories outside the deck), so a pasted list, CSV or the gateway's JSON round-trips whole."""
+    for label, value in (("decklist_text", decklist_text), ("csv_text", csv_text), ("json_text", json_text)):
         if value is not None and not isinstance(value, str):
             raise DeckError("invalid", f"{label} must be a string")
-    given = [x is not None and x != "" and x != [] for x in (cards, decklist_text, csv_text)]
+    given = [x is not None and x != "" and x != [] for x in (cards, decklist_text, csv_text, json_text)]
     if sum(given) != 1:
-        raise DeckError("invalid", "give exactly one of cards, decklist_text or csv_text")
+        raise DeckError("invalid", "give exactly one of cards, decklist_text, csv_text or json_text")
     if csv_text and len(csv_text) > 2_000_000:
         raise DeckError("invalid", "CSV export larger than 2 MB")
     if decklist_text and len(decklist_text) > 200_000:
         raise DeckError("invalid", "decklist larger than 200 kB")
     out: list[dict[str, Any]] = []
-    if csv_text:
+    if json_text:
+        out = cards_from_json(json_text)
+    elif csv_text:
         try:
             for c in parse_export(csv_text):
                 out.append(

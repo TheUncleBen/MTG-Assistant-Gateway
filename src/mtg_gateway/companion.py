@@ -397,6 +397,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
 
     # -- new deck -------------------------------------------------------------
     def new_deck_form(values: dict[str, str], error: str = "") -> str:
+        kind = values.get("kind") if values.get("kind") in ("csv", "json") else "list"
         fmt_opts = "".join(
             f"<option value='{_esc(n)}'{' selected' if values.get('format', 'commander') == n else ''}>"
             f"{_esc(format_label(n))}</option>"
@@ -419,14 +420,18 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             "<label for='source'>Cards</label>"
             "<p class='muted small'>Paste a decklist (<code>1 Sol Ring</code>, <code>2x Opt (cmr) "
             "[Ramp]</code>, "
-            "a <code># Sideboard</code> header) or an Archidekt CSV export. Leave it empty for an "
-            "empty deck.</p>"
+            "a <code># Sideboard</code> header), an Archidekt CSV export or this gateway's .json export, "
+            "or choose a file (.txt, .csv or .json). Leave it empty for an empty deck.</p>"
+            "<div class='field filepick'><label for='file'>From a file</label>"
+            "<input id='file' type='file' accept='.txt,.csv,.json,text/plain,text/csv,application/json' "
+            "data-fill='source' data-kind='kind'></div>"
             f"<textarea id='source' name='source' rows='12' placeholder='1 Sol Ring&#10;1 Arcane Signet'>"
             f"{_esc(values.get('source', ''))}</textarea>"
             "<div class='field'><label for='kind'>The text above is</label><select id='kind' name='kind'>"
-            f"<option value='list'{' selected' if values.get('kind') != 'csv' else ''}>a decklist</option>"
-            f"<option value='csv'{' selected' if values.get('kind') == 'csv' else ''}>an Archidekt CSV export"
-            "</option></select></div>"
+            f"<option value='list'{' selected' if kind == 'list' else ''}>a decklist</option>"
+            f"<option value='csv'{' selected' if kind == 'csv' else ''}>an Archidekt CSV export</option>"
+            f"<option value='json'{' selected' if kind == 'json' else ''}>a gateway .json export</option>"
+            "</select></div>"
             f"<div class='actions'><button class='primary'>{icon('plus')} Create deck</button>"
             "<a class='btn' href='/decks'>Cancel</a></div>"
             "<p class='muted small'>The deck is created on Archidekt straight away and opens here.</p>"
@@ -450,14 +455,21 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
                 values["name"] = str(sess.get("name") or "")[:120]
             except ScanError:
                 pass
-        return page("New deck", new_deck_form(values), sub=sub, sid=sid, current="/decks")
+        return page(
+            "New deck",
+            new_deck_form(values),
+            sub=sub,
+            sid=sid,
+            current="/decks",
+            extra_scripts=("filepick.js",),
+        )
 
     @server.custom_route("/decks/new", methods=["POST"], include_in_schema=False)
     async def new_deck_post(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
             return login_redirect("/decks/new")
-        data = await form(request, limit=600_000)
+        data = await form(request, limit=4_200_000)  # a deck .json export can reach a few MB
         if not check_csrf(sid, data):
             return page("New deck", EXPIRED, sub=sub, sid=sid, status=403)
         values = {**data, "csrf": _csrf(s, sid) or ""}
@@ -469,13 +481,20 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
                 name=data.get("name", ""),
                 deck_format=data.get("format", "commander"),
                 cards=[] if not source else None,
-                decklist_text=source if source and data.get("kind") != "csv" else None,
+                decklist_text=source if source and data.get("kind") not in ("csv", "json") else None,
                 csv_text=source if source and data.get("kind") == "csv" else None,
+                json_text=source if source and data.get("kind") == "json" else None,
                 private=bool(data.get("private")),
             )
         except DeckError as exc:
             return page(
-                "New deck", new_deck_form(values, str(exc)), sub=sub, sid=sid, status=400, current="/decks"
+                "New deck",
+                new_deck_form(values, str(exc)),
+                sub=sub,
+                sid=sid,
+                status=400,
+                current="/decks",
+                extra_scripts=("filepick.js",),
             )
         return await apply_now(sub, p["proposal_id"], ok="created")
 
@@ -1304,11 +1323,17 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
                 if side
                 else ""
             )
-            + "<div class='actions'>"
-            f"<a class='btn' href='/decks/{did}/export.archidekt.txt' download>Download Archidekt .txt</a>"
-            f"<a class='btn' href='/decks/{did}/export.txt' download>Download plain .txt</a>"
-            f"<a class='btn' href='/decks/{did}/export.csv' download>Download .csv</a>"
-            f"<a class='btn' href='/decks/{did}/export.json' download>Download .json</a>"
+            + "<h2>Download</h2>"
+            "<p class='muted small'>Archidekt text, CSV and the gateway's JSON import back here (New deck "
+            "&rarr; from a file) or into Archidekt; Arena, MTGO and PDF are one-way.</p>"
+            "<div class='actions'>"
+            f"<a class='btn' href='/decks/{did}/export.archidekt.txt' download>Archidekt .txt</a>"
+            f"<a class='btn' href='/decks/{did}/export.txt' download>Plain .txt</a>"
+            f"<a class='btn' href='/decks/{did}/export.csv' download>.csv</a>"
+            f"<a class='btn' href='/decks/{did}/export.json' download>.json</a>"
+            f"<a class='btn' href='/decks/{did}/export.arena.txt' download>Arena .txt</a>"
+            f"<a class='btn' href='/decks/{did}/export.dek' download>MTGO .dek</a>"
+            f"<a class='btn' href='/decks/{did}/export.pdf' download>PDF</a>"
             "</div></div>"
         )
         return page(f"Export: {deck.name}", body, sub=sub, sid=sid, extra_scripts=("export.js",))
@@ -1362,6 +1387,48 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
                 "X-Content-Type-Options": "nosniff",
             },
         )
+
+    async def _download(request: Request, ext: str, make: Any, media_type: str) -> Response:
+        """One export-only file for a deck the member may read: ``make(deck)`` gives the body."""
+        sub, _sid = browser_session(state, request)
+        if not sub:
+            return login_redirect("/decks")
+        try:
+            deck = await decks.get_any_deck(sub, request.path_params["deck_id"])
+        except DeckError as exc:
+            return Response(str(exc), 404)
+        name = re.sub(r"[^A-Za-z0-9._-]+", "_", deck.name or deck.id)[:60]
+        body = make(deck)
+        return Response(
+            body,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{name}{ext}"',
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+
+    @server.custom_route("/decks/{deck_id}/export.arena.txt", methods=["GET"], include_in_schema=False)
+    async def export_arena(request: Request) -> Response:
+        """Arena import text (export only: Arena imports it; the gateway does not read it back)."""
+        from .export_formats import to_arena
+
+        return await _download(request, ".arena.txt", to_arena, "text/plain; charset=utf-8")
+
+    @server.custom_route("/decks/{deck_id}/export.dek", methods=["GET"], include_in_schema=False)
+    async def export_dek(request: Request) -> Response:
+        """An MTGO .dek file (export only)."""
+        from .export_formats import to_mtgo_dek
+
+        return await _download(request, ".dek", to_mtgo_dek, "application/xml; charset=utf-8")
+
+    @server.custom_route("/decks/{deck_id}/export.pdf", methods=["GET"], include_in_schema=False)
+    async def export_pdf(request: Request) -> Response:
+        """A printable PDF of the deck (export only)."""
+        from .export_formats import to_pdf
+
+        return await _download(request, ".pdf", to_pdf, "application/pdf")
 
     @server.custom_route("/decks/{deck_id}/export.json", methods=["GET"], include_in_schema=False)
     async def export_json(request: Request) -> Response:

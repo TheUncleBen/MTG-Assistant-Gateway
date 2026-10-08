@@ -49,10 +49,10 @@ snapshot first and is read back to verify.
 | Turn names or card photos into exact printings | `resolve_cards`, `card_printings` | no | |
 | Scan sessions (the Scan page's drafts) | `list_scan_sessions`, `get_scan_session`, `save_scan_session` | saves a draft | drafts stay in the gateway until used |
 | Edit a deck's cards (main or maybeboard) | `propose_deck_changes` | proposal | |
-| Create a deck from cards, a list, a CSV or a scan | `propose_new_deck` | proposal (high) | |
+| Create a deck from cards, a list, a CSV, the gateway's JSON or a scan | `propose_new_deck` | proposal (high) | |
 | Clone a deck | `propose_clone_deck` | proposal (low) | |
 | Change a deck's name, description, format, bracket, privacy | `propose_deck_details` | proposal (high) | |
-| Undo: snapshots and restore | `list_snapshots`, `get_snapshot`, `propose_restore_snapshot` | proposal (high) | |
+| Undo: snapshots and restore (cards and the deck's name, description, format, bracket, privacy) | `list_snapshots`, `get_snapshot`, `propose_restore_snapshot` | proposal (high) | |
 | My collection: read; add or remove cards | `list_collection`, `propose_collection_changes` | proposal | |
 | Proposals: list, read, approve with the card's code, reject, apply | `list_my_proposals`, `get_proposal`, `confirm_proposal`, `reject_proposal`, `apply_proposal` | apply writes | `apply_proposal` succeeds only when the mode allows |
 
@@ -72,13 +72,13 @@ deleting a deck asks for its name.
 | Page | Actions |
 | --- | --- |
 | Home | newest decks with covers, search, tiles to every section |
-| Decks | the linked account's decks (grid or list, filter, sort), New deck (name, pasted list, CSV, scan), Folders (create, rename) |
-| One deck | views (text, stacks, grid), grouping, sorting, filter, the whole card on tap (image, every face's mana cost, type line, rules text, power/toughness or loyalty, flavour, printing, rarity, artist, price, salt, legal formats; Scryfall, mark owned, move category), drag cards between categories and Save moves, Quick add, Playtest (Archidekt's own playtester framed on a gateway page, web and app alike, with an Open on Archidekt fallback), Run simulation (the same statistics, validation and 300-game goldfish run as `run_deck_report`, opened and filed under History), statistics with Probability of draw and Deck checks, description, comments (post, edit and delete your own), like, bookmark, follow the owner; More: Settings, Compare with another deck (a precon from Archidekt's list, any deck or a pasted list; the same comparison as `compare_decks`), Export (Archidekt import text, plain text, sideboard, each with Copy; downloads as Archidekt .txt, plain .txt, .csv, .json; see [EXPORT-IMPORT.md](EXPORT-IMPORT.md)), Open on Archidekt, Delete deck |
+| Decks | the linked account's decks (grid or list, filter, sort), New deck (name, pasted list, CSV, the gateway's .json, a chosen file, scan), Folders (create, rename) |
+| One deck | views (text, stacks, grid), grouping, sorting, filter, the whole card on tap (image, every face's mana cost, type line, rules text, power/toughness or loyalty, flavour, printing, rarity, artist, price, salt, legal formats; Scryfall, mark owned, move category), drag cards between categories and Save moves, Quick add, Playtest (Archidekt's own playtester framed on a gateway page, web and app alike, with an Open on Archidekt fallback), Run simulation (the same statistics, validation and 300-game goldfish run as `run_deck_report`, opened and filed under History), statistics with Probability of draw and Deck checks, description, comments (post, edit and delete your own), like, bookmark, follow the owner; More: Settings, Compare with another deck (a precon from Archidekt's list, any deck or a pasted list; the same comparison as `compare_decks`), Export (Archidekt import text, plain text, sideboard, each with Copy; downloads as Archidekt .txt, plain .txt, .csv, .json, and one-way Arena .txt, MTGO .dek, PDF; see [EXPORT-IMPORT.md](EXPORT-IMPORT.md)), Open on Archidekt, Delete deck |
 | Editor | quantities, categories, finish, printing, add cards (deck or maybeboard), maybeboard and sideboard rows, paste a list (Archidekt's syntax: printing, `*F*`/`*E*`, `[Category]`, `# Sideboard`), the whole card from a thumbnail, remove, undo, Save changes |
 | Deck settings | name, format, bracket, description, private, unlisted; cover image; tags; folder; Delete this deck |
 | Search | public decks by name, commander, format, colours, owner; a user's profile page; Precons by set |
 | Scan | phone camera or photos to a draft; set lock, foil, printing picker; save as a new deck, into a deck, or to the collection |
-| Collection | the Archidekt Collection: filter, sort, grid or list, add, quantity, per-row details (finish, condition, language, price paid), the whole card from a thumbnail, remove, CSV export |
+| Collection | the Archidekt Collection: filter, sort, grid or list, add, quantity, per-row details (finish, condition, language, price paid), the whole card from a thumbnail, remove, CSV export, import from a CSV or a card list (pasted or a file) |
 | Proposals | review page with Approve, Apply, Reject; the in-chat card opens the same proposal |
 | History | proposals, snapshots (Restore), reports (open one in full) |
 | Account | link or unlink Archidekt, approval mode, hand-edit confirmation, theme, sign out, delete my data |

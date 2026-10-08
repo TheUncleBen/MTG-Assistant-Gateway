@@ -222,6 +222,57 @@ async def test_collection_page_add_step_remove_and_export(stack: Stack) -> None:
         await b.aclose()
 
 
+async def test_collection_import_from_csv_and_plain_list(stack: Stack) -> None:
+    """Import a list on the Collection page: the page's own Export CSV round-trips (same printings,
+    finishes and counts), a CSV with Archidekt's column names and a plain card list work too,
+    and an oversized or unreadable paste adds nothing and says why."""
+    from mtg_gateway.collection import parse_collection_import
+
+    b = await linked(stack)
+    try:
+        csrf = await b.csrf("/collection")
+        page = await b.http.get("/collection", headers=NAV)
+        assert "Import a list" in page.text and "importfile" in page.text and "filepick.js" in page.text
+        plain = "2 Sol Ring (CMR) 436\n1 Opt *F*\n"
+        r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": plain})
+        assert r.status_code == 303 and r.headers["location"] == "/collection?ok=imported", r.headers
+        rows = {
+            (c["card"]["oracleCard"]["name"], c["modifier"]): c["quantity"]
+            for c in stack.ark.collections["alice"].values()
+        }
+        assert rows == {("Sol Ring", "Normal"): 2, ("Opt", "Foil"): 1}, rows
+        exported = (await b.http.get("/collection/export.csv")).text
+        assert exported.splitlines()[0].startswith("Quantity,Name,Finish,Condition")
+        # the export imports back: the same printings in the same finishes get their copies topped up
+        r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": exported})
+        assert r.status_code == 303 and "ok=imported" in r.headers["location"]
+        rows = {
+            (c["card"]["oracleCard"]["name"], c["modifier"]): c["quantity"]
+            for c in stack.ark.collections["alice"].values()
+        }
+        assert rows == {("Sol Ring", "Normal"): 4, ("Opt", "Foil"): 2}, rows
+        # Archidekt's own column names, extra columns ignored, header order free
+        arch = "Name,Set Code,Collector Number,Quantity,Foil,Condition,Price\nSol Ring,cmr,436,3,,NM,1.20\n"
+        r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": arch})
+        assert "ok=imported" in r.headers["location"]
+        assert [
+            c["quantity"]
+            for c in stack.ark.collections["alice"].values()
+            if c["card"]["oracleCard"]["name"] == "Sol Ring"
+        ] == [7]
+        # refusals: too many rows, nothing readable
+        many = "\n".join(f"1 Card {i}" for i in range(101))
+        r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": many})
+        assert r.headers["location"] == "/collection?err=toomany"
+        r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": "   "})
+        assert r.headers["location"] == "/collection?err=unreadable"
+        assert sum(c["quantity"] for c in stack.ark.collections["alice"].values()) == 9
+        items = parse_collection_import("Quantity,Name,Finish\n1,Sol Ring,Etched\n")
+        assert items[0]["finish"] == "etched" and items[0]["quantity"] == 1
+    finally:
+        await b.aclose()
+
+
 async def test_collection_json_api_and_cross_member_isolation(stack: Stack) -> None:
     alice = await linked(stack)
     bob = Browser(stack.h)

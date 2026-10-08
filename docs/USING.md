@@ -42,7 +42,8 @@ assistant** at the end holds the connector URL and the guided setup.
 **Decks** lists the decks of your linked Archidekt account with their cover
 art (the image you chose on Archidekt, else the commander). Filter by name or
 folder, grid or list, sort by last updated, created, name or format. **New
-deck** creates one from a name, a pasted list, a CSV export or a scan.
+deck** creates one from a name, a pasted list, a CSV export, the gateway's
+own .json export, a file you choose (.txt, .csv or .json) or a scan.
 **Folders** creates and renames your Archidekt folders; a deck is moved
 between them from its settings page.
 
@@ -92,15 +93,19 @@ One deck:
 - Below the cards: statistics (mana curve, colours, types, rarities,
   prices, legality), **Probability of draw** (the chance of at least or
   exactly N cards of a category, name, type, subtype or mana value in your
-  first N cards, like Archidekt's Probability tab), **Deck checks** (deck
-  size for the format, commander zone, colour identity, singleton or the
-  four-copies limit, sideboard size, uncategorised cards), the bracket
-  estimate and the description.
+  first N cards, like Archidekt's Probability tab), **Deck checks** for
+  every Archidekt format (deck size, the command zone and whether each card
+  may lead it, partner and background pairing, colour identity, singleton or
+  the four-copies limit, restricted cards, companion, sideboard size, cards
+  banned or not legal in the format, the bracket you set against the
+  estimate, uncategorised cards; a deck with a banned card is never reported
+  fine), the bracket estimate and the description.
 - **Export** (More menu) shows the deck as Archidekt import text (every row
   with printing, finish, categories and labels; paste it into Archidekt's
   Import dialog or the gateway's New deck page), as a plain decklist and as
   the sideboard list, each with a **Copy** button, plus downloads as
-  Archidekt .txt, plain .txt, .csv and .json. See
+  Archidekt .txt, plain .txt, .csv and .json (each imports back here or into
+  Archidekt), and Arena .txt, MTGO .dek and PDF (one-way). See
   [EXPORT-IMPORT.md](EXPORT-IMPORT.md) for what survives in each direction.
 
 The **editor** changes quantities, categories (type a new one to create it),
@@ -167,7 +172,9 @@ condition and count.
 - Cards you own show a **green dot** on every deck page, your own decks and
   public ones alike, with the number of copies Archidekt knows about.
 - **Export CSV** downloads the whole collection in the column layout
-  Archidekt's own import reads.
+  Archidekt's own import reads. **Import a list** adds cards from that CSV,
+  from a CSV with Archidekt's column names or from a plain card list, pasted
+  or chosen as a file, up to 100 rows at a time.
 - A scan is a draft that stays as long as you like, up to a whole deck:
   fix misread cards, printings and quantities first, then send it to your
   collection or a deck, which removes the draft. Nothing expires by age.
@@ -206,7 +213,8 @@ assistant applies what that mode allows, always with a snapshot.
   an "MTG Gateway backups" folder on your Archidekt account, then reads the
   deck back to confirm.
 - **History** shows proposals, snapshots and deck reports over time.
-  **Restore** puts a deck back exactly as a snapshot had it (another
+  **Restore** puts a deck back exactly as a snapshot had it, cards and the
+  deck's own name, description, format, bracket and privacy alike (another
   proposal you approve).
 - **Reports** store a deck's statistics, a legality check and a goldfish
   simulation so you can follow how it develops.

@@ -73,6 +73,26 @@ one owner per capability among the assistant's tools.
   `sideboard`); the commander-style formats keep their exact size and singleton checks.
 - Archidekt's full format list (`deck_format`): every slug Archidekt uses, shown with Archidekt's
   own labels (Standard Brawl, Brawl, Pauper EDH, Duel Commander, Canadian Highlander, PreDH...).
+- Deck checks for every Archidekt format (`deck_stats` `checks`, the deck page's Deck checks): card
+  legality for the deck's format from Archidekt's own per-card data (`banned`, `not_legal`,
+  restricted cards over one copy), so a deck with a banned card is never reported fine; the command
+  zone knows Partner, Partner with, Friends forever, Choose a Background and Doctor's companion
+  pairs, Oathbreaker's planeswalker plus signature spell, Tiny Leaders' mana value cap and Pauper
+  Commander's uncommon leader, and formats without a commander (Canadian Highlander, Gladiator);
+  companion rows; the bracket set on the deck against the estimate.
+- Undo restores the deck's own details too: a snapshot restore puts back the name, description,
+  format, bracket, private and unlisted settings the snapshot recorded (`result.restored_details`),
+  besides every card row.
+- Export: the gateway's .json is an import format as well (New deck > "a gateway .json export",
+  `propose_new_deck(json_text)`), covered by the export → import → compare test with the plain
+  .txt, the Archidekt text and the .csv; new one-way downloads Arena .txt, MTGO .dek and a
+  printable PDF (written without a PDF library). docs/EXPORT-IMPORT.md lists each with its label.
+- Import from a file: the New deck page and the Collection page take a .txt, .csv or .json file
+  (read in the browser into the text box; the gateway handles no uploads).
+- Collection: **Import a list** adds cards from the page's own Export CSV (a round trip), a CSV
+  with Archidekt's collection column names or a plain card list, up to 100 rows at a time.
+- The Android app page on a gateway that ships no app file is a plain page saying so and what to
+  do instead, not a "not found" error.
 
 ### Fixed
 - Importing a list into a new deck: an etched row was created as foil (the finish was read but
@@ -84,9 +104,10 @@ one owner per capability among the assistant's tools.
   or validation failed is never reused in place of a fresh run.
 - Editor: "Keep editing" on the high-risk confirmation now rejects the proposal made for the check
   instead of leaving it pending.
-- Readability: the Delete deck item in the dark More menu and the active tab or rail label in the
-  light theme meet WCAG AA contrast; the phone deck banner no longer runs the owner's avatar under
-  the top bar; the deck list's Order by control and buttons line up on folding screens.
+- Readability: the Delete deck item in the dark More menu, the active tab or rail label in the
+  light theme and the headings inside menus ("App", "Site theme") meet WCAG AA contrast (4.5:1 or
+  better); the phone deck banner no longer runs the owner's avatar under the top bar; the deck
+  list's Order by control and buttons line up on folding screens.
 - Simulations through the gateway never ran against the pinned Mystic Forge: `run_deck_report`,
   `compare_decks simulate: true` and the report's validation sent their arguments flat, while
   Mystic Forge's tools take one `params` object, so every call came back as a validation error

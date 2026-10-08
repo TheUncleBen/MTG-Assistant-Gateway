@@ -4,6 +4,7 @@ reports, exports and the app shell. Writes go through proposals exactly as the t
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -475,8 +476,10 @@ async def test_export_import_round_trip_keeps_every_card_finish_and_commander(st
             "plain .txt": ("decklist_text", (await b.http.get("/decks/42/export.txt")).text),
             "archidekt .txt": ("decklist_text", (await b.http.get("/decks/42/export.archidekt.txt")).text),
             ".csv": ("csv_text", (await b.http.get("/decks/42/export.csv")).text),
+            ".json": ("json_text", (await b.http.get("/decks/42/export.json")).text),
         }
         assert "[Commander]" in exports["plain .txt"][1] and "*E*" in exports["plain .txt"][1]
+        assert json.loads(exports[".json"][1])["id"] == "42"  # the gateway's own deck JSON, as is
         for label, (field, text) in exports.items():
             made = structured(
                 await call(h, token, "propose_new_deck", {"name": f"Round trip {label}", field: text})
@@ -487,6 +490,66 @@ async def test_export_import_round_trip_keeps_every_card_finish_and_commander(st
             copy = structured(await call(h, token, "get_deck", {"deck_ref": applied["result"]["deck_id"]}))
             got = shape(copy)
             assert got == want, (label, sorted(want - got), sorted(got - want))
+        # The New deck page takes the same JSON (pasted, or read from a file by the page's script).
+        csrf = await b.csrf("/account")
+        r = await b.http.post(
+            "/decks/new",
+            data={
+                "csrf": csrf,
+                "name": "From the page",
+                "format": "commander",
+                "kind": "json",
+                "source": exports[".json"][1],
+            },
+        )
+        assert r.status_code == 303, r.text
+        page = await b.http.get("/decks/new", headers=NAV)
+        assert (
+            "type='file'" in page.text and "filepick.js" in page.text and "gateway .json export" in page.text
+        )
+        made_ids = [d for d in ark.decks if ark.decks[d]["name"] == "From the page"]
+        assert (
+            len(made_ids) == 1
+            and shape(structured(await call(h, token, "get_deck", {"deck_ref": str(made_ids[0])}))) == want
+        )
+        bad = structured(await call(h, token, "propose_new_deck", {"name": "x", "json_text": '{"cards": 3}'}))
+        assert bad["ok"] is False and "cards list" in bad["message"], bad
+    finally:
+        await b.aclose()
+
+
+async def test_export_only_formats_arena_mtgo_and_pdf(stack: Stack) -> None:
+    """Arena text, an MTGO .dek and a PDF download for any deck the member can read. They are
+    one-way (nothing imports them back); each names every card with its count and keeps the
+    commander and sideboard apart. The PDF is read back with its own stream decoding."""
+    import zlib
+
+    b = await linked_browser(stack)
+    try:
+        stack.ark.add_side_row(42, "Opt", 2)
+        arena = await b.http.get("/decks/42/export.arena.txt")
+        assert arena.status_code == 200 and arena.headers["content-disposition"].endswith('.arena.txt"')
+        blocks = arena.text.strip().split("\n\n")
+        assert [blk.splitlines()[0] for blk in blocks] == ["Commander", "Deck", "Sideboard"]
+        assert blocks[0].splitlines()[1] == "1 Aesi, Tyrant of Gyre Strait (CMR) 365"
+        assert blocks[2].splitlines()[1].startswith("2 Opt") and "1 Sol Ring (CMR) 472" in blocks[1]
+        dek = await b.http.get("/decks/42/export.dek")
+        assert dek.status_code == 200 and dek.headers["content-type"].startswith("application/xml")
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(dek.text)
+        rows = {(c.get("Name"), c.get("Quantity"), c.get("Sideboard")) for c in root.iter("Cards")}
+        assert ("Opt", "2", "true") in rows and ("Sol Ring", "1", "false") in rows and len(rows) >= 50
+        pdf = await b.http.get("/decks/42/export.pdf")
+        assert pdf.status_code == 200 and pdf.headers["content-type"] == "application/pdf"
+        assert pdf.content.startswith(b"%PDF-1.4") and pdf.content.rstrip().endswith(b"%%EOF")
+        streams = re.findall(rb"stream\n(.*?)\nendstream", pdf.content, re.S)
+        text = b"".join(zlib.decompress(x) for x in streams).decode("cp1252")
+        assert "Sample Commander Deck" in text and "Aesi, Tyrant of Gyre Strait" in text and "Opt" in text
+        assert b"/Type /Catalog" in pdf.content and b"/Count 2" in pdf.content  # 100 rows need two pages
+        for path in ("/decks/43/export.arena.txt", "/decks/43/export.dek", "/decks/43/export.pdf"):
+            r = await b.http.get(path)  # Amy's private deck: not readable, nothing leaks
+            assert r.status_code == 404 and "Amy" not in r.text, path
     finally:
         await b.aclose()
 

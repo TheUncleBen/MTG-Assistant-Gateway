@@ -458,3 +458,112 @@ def test_commander_zone_is_the_premier_category_whatever_its_name() -> None:
     assert stats["checks"]["commander_zone"] == {"count": 1, "ok": True}
     first = deck_to_text(d).splitlines()[0]  # commander first, tagged Commander, as the simulators expect
     assert first.startswith("1 Aesi [") and "Commander" in first
+
+
+def _cmdr(name: str, text: str = "", **over) -> DeckCard:
+    base = dict(types=["Creature"], supertypes=["Legendary"], categories=["Commander"], oracle_text=text)
+    base.update(over)
+    return card(name, 1, **base)
+
+
+def test_checks_fail_on_banned_not_legal_and_restricted_cards() -> None:
+    """A deck is never "fine" with banned cards in it: legality is part of checks.ok. A restricted
+    card (Vintage) passes as one copy and fails as two."""
+    d = deck(
+        [
+            _cmdr("Aesi", color_identity=["G", "U"], legalities={"commander": "legal"}),
+            card("Flash", 1, legalities={"commander": "banned"}),
+            card("Opt", 1, legalities={"commander": "legal"}),
+            card("Island", 98, types=["Land"], supertypes=["Basic"], legalities={"commander": "legal"}),
+        ],
+        categories=[{"name": "Commander", "isPremier": True, "includedInDeck": True}],
+    )
+    checks = compute(d)["checks"]
+    assert checks["legality"]["banned"] == ["Flash"] and checks["legality"]["ok"] is False
+    assert checks["ok"] is False and any("banned" in p for p in checks["problems"])
+    v = deck(
+        [
+            card("Black Lotus", 2, legalities={"vintage": "restricted"}),
+            card("Mental Misstep", 1, legalities={"vintage": "banned"}),
+            card("Island", 57, types=["Land"], supertypes=["Basic"], legalities={"vintage": "legal"}),
+        ],
+        format_id=5,
+    )
+    checks = compute(v)["checks"]
+    assert checks["legality"]["restricted_violations"] == [{"name": "Black Lotus", "quantity": 2}]
+    assert checks["legality"]["banned"] == ["Mental Misstep"] and checks["ok"] is False
+    one = deck(
+        [
+            card("Black Lotus", 1, legalities={"vintage": "restricted"}),
+            card("Island", 59, types=["Land"], supertypes=["Basic"], legalities={"vintage": "legal"}),
+        ],
+        format_id=5,
+    )
+    assert compute(one)["checks"]["ok"] is True
+
+
+def test_two_commanders_need_a_partner_ability() -> None:
+    islands = card("Island", 98, types=["Land"], supertypes=["Basic"])
+    cat = [{"name": "Commander", "isPremier": True, "includedInDeck": True}]
+    partners = deck([_cmdr("Thrasios", "Partner (You can have two commanders...)"),
+                     _cmdr("Tymna", "Partner"), islands], categories=cat)  # fmt: skip
+    assert compute(partners)["checks"]["commander_zone"]["pairing"] == "partners"
+    assert compute(partners)["checks"]["ok"] is True
+    named = deck([_cmdr("Pir", "Partner with Toothy (When this...)"),
+                  _cmdr("Toothy", "Partner with Pir (When this...)"), islands], categories=cat)  # fmt: skip
+    assert compute(named)["checks"]["commander_zone"]["pairing"] == "partners"
+    wrong = deck([_cmdr("Pir", "Partner with Toothy"), _cmdr("Tymna", "Partner"), islands], categories=cat)
+    checks = compute(wrong)["checks"]
+    assert checks["commander_zone"]["pairing"] == "invalid" and checks["ok"] is False
+    background = deck([_cmdr("Wilson", "Choose a Background"),
+                       _cmdr("Raised by Giants", types=["Enchantment"], subtypes=["Background"]),
+                       islands], categories=cat)  # fmt: skip
+    assert compute(background)["checks"]["commander_zone"]["pairing"] == "partners"
+    plain = deck([_cmdr("Aesi"), _cmdr("Krenko"), islands], categories=cat)
+    assert compute(plain)["checks"]["commander_zone"]["pairing"] == "invalid"
+
+
+def test_format_specific_command_zones() -> None:
+    cat = [{"name": "Commander", "isPremier": True, "includedInDeck": True}]
+    # Oathbreaker: a planeswalker and an instant or sorcery, 60 cards
+    isl = card("Island", 58, types=["Land"], supertypes=["Basic"])
+    ob = deck([_cmdr("Saheeli", types=["Planeswalker"]), _cmdr("Opt", types=["Instant"], supertypes=[]), isl],
+              format_id=14, categories=cat)  # fmt: skip
+    checks = compute(ob)["checks"]
+    assert checks["commander_zone"]["pairing"] == "oathbreaker and signature spell" and checks["ok"], checks
+    isl59 = card("Island", 59, types=["Land"], supertypes=["Basic"])
+    lone = deck([_cmdr("Saheeli", types=["Planeswalker"]), isl59], format_id=14, categories=cat)
+    assert compute(lone)["checks"]["ok"] is False
+    # Canadian Highlander: 100 singleton, no command zone at all
+    can = deck([card("Island", 100, types=["Land"], supertypes=["Basic"])], format_id=25)
+    assert compute(can)["checks"]["ok"] is True
+    can_cmd = deck([_cmdr("Aesi"), card("Island", 99, types=["Land"], supertypes=["Basic"])],
+                   format_id=25, categories=cat)  # fmt: skip
+    assert any("no command zone" in p for p in compute(can_cmd)["checks"]["problems"])
+    # Tiny Leaders: 50 cards, commander at mana value 3 or less
+    tiny = deck([_cmdr("Aesi", cmc=6.0), card("Island", 49, types=["Land"], supertypes=["Basic"])],
+                format_id=27, categories=cat)  # fmt: skip
+    assert any("Tiny Leaders" in p for p in compute(tiny)["checks"]["problems"])
+    # Pauper Commander: an uncommon commander
+    pdh = deck([_cmdr("Aesi", rarity="mythic"), card("Island", 99, types=["Land"], supertypes=["Basic"])],
+               format_id=17, categories=cat)  # fmt: skip
+    assert any("uncommon" in p for p in compute(pdh)["checks"]["problems"])
+
+
+def test_companion_and_bracket_mismatch_checks() -> None:
+    cat = [{"name": "Commander", "isPremier": True, "includedInDeck": True}]
+    islands = card("Island", 99, types=["Land"], supertypes=["Basic"])
+    ok = deck([_cmdr("Aesi"), islands, card("Lurrus", 1, companion=True, oracle_text="Companion — Each...")],
+              categories=cat)  # fmt: skip
+    assert compute(ok)["checks"]["companion"] == {"count": 1, "ok": True}
+    bad = deck([_cmdr("Aesi"), islands, card("Opt", 1, companion=True, oracle_text="Scry 1. Draw a card.")],
+               categories=cat)  # fmt: skip
+    checks = compute(bad)["checks"]
+    assert checks["companion"]["ok"] is False and checks["companion"]["not_companions"] == ["Opt"]
+    low = deck([_cmdr("Aesi"), card("Island", 97, types=["Land"], supertypes=["Basic"]),
+                card("Time Warp", 1, extra_turns=True), card("Temporal Mastery", 1, extra_turns=True)],
+               categories=cat)  # fmt: skip
+    low.edh_bracket = 2
+    checks = compute(low)["checks"]
+    assert checks["bracket"] == {"set": 2, "estimate": 4, "ok": False} and checks["ok"] is False
+    assert any("bracket set to 2" in p for p in checks["problems"])

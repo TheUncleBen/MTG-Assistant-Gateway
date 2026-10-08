@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import html
+import json
 import logging
 import re
 import secrets
@@ -619,8 +620,9 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "(commander, standard, modern, legacy, vintage, pauper, pioneer, brawl, historic, oathbreaker) "
             "and exactly one of: cards (list of {card_name, quantity, category?, set_code?, "
             "collector_number?, foil?}), decklist_text (pasted "
-            "list), csv_text (an Archidekt CSV export) or scan_session (the id or name of a scan session). "
-            "Returns the proposal and a review URL; nothing is "
+            "list), csv_text (an Archidekt CSV export), json_text (a deck as get_deck or the Export page's "
+            ".json returns it: an object with a cards list) or scan_session (the id or name of a scan "
+            "session). Returns the proposal and a review URL; nothing is "
             "created until the user confirms with apply_proposal or on the review page."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
@@ -632,12 +634,15 @@ def build_mcp_server(state: AppState) -> MCPServer:
         cards: list[dict[str, object]] | None = None,
         decklist_text: str | None = None,
         csv_text: str | None = None,
+        json_text: str | dict[str, object] | None = None,
         private: bool = True,
         scan_session: str | None = None,
     ) -> CallToolResult:
         try:
             if scan_session:
                 decklist_text = _scan_session(_sub(), scan_session)["decklist_text"]
+            if isinstance(json_text, dict):  # an assistant may pass the deck object itself
+                json_text = json.dumps(json_text)
             made = await state.decks.propose_new_deck(
                 _sub(),
                 name=name,
@@ -645,6 +650,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
                 cards=cards,
                 decklist_text=decklist_text,
                 csv_text=csv_text,
+                json_text=json_text,
                 private=private,
             )
             return _proposal({"ok": True, **made})

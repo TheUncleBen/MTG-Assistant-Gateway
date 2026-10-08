@@ -177,7 +177,7 @@ def compute(deck: Deck) -> dict[str, Any]:
                 problems.append({"name": c.name, "status": status})
 
     commanders = [c for c in cards if deck.is_commander(c)]
-    return {
+    out: dict[str, Any] = {
         "card_count": qty,
         "distinct": len({c.name for c in cards}),
         "land_count": sum(c.quantity for c in lands),
@@ -204,9 +204,23 @@ def compute(deck: Deck) -> dict[str, Any]:
         "archidekt_bracket": deck.edh_bracket,
         "checks": deck_checks(deck, cards, commanders, qty),
     }
+    # Bracket mismatch, as archidekt.com flags it: the bracket set on the deck sits below what
+    # its own cards suggest (the estimate is from Archidekt's card flags; see bracket_estimate).
+    estimate = out["bracket_estimate"].get("bracket")
+    bracket: dict[str, Any] = {"set": deck.edh_bracket, "estimate": estimate, "ok": True}
+    if deck.edh_bracket and estimate and estimate > deck.edh_bracket:
+        bracket["ok"] = False
+        out["checks"]["problems"].append(
+            f"bracket set to {deck.edh_bracket} but the cards suggest at least {estimate} (estimate)"
+        )
+        out["checks"]["ok"] = False
+    out["checks"]["bracket"] = bracket
+    return out
 
 
-# Formats with one copy per card and an exact deck size (commander-style), by Archidekt slug.
+# Archidekt's formats (FORMAT_IDS), by family. Singleton formats have a commander zone unless
+# listed in _NO_COMMANDER; the exact deck size and other rules per format follow the formats'
+# own rules as archidekt.com's deck checks apply them (reported from its client code 2026-10-07).
 _SINGLETON_FORMATS = {
     "commander",
     "1v1",
@@ -221,6 +235,8 @@ _SINGLETON_FORMATS = {
     "tlr",
     "competitivebrawl",
 }
+# Singleton formats without a commander zone (Canadian Highlander, Gladiator).
+_NO_COMMANDER = {"canlander", "gladiator"}
 _DECK_SIZES = {
     "commander": 100,
     "1v1": 100,
@@ -251,10 +267,16 @@ _CONSTRUCTED_FORMATS = {
     "frontier",
     "penny",
 }
+# "custom" (Archidekt's free format) gets the shared checks only (legality has no list for it).
 _MIN_SIZE = 60
 _MAX_COPIES = 4
 _SIDEBOARD_MAX = 15
 _ANY_NUMBER = "any number of cards named"
+_TINY_LEADERS_MAX_MV = 3
+# Two-commander abilities: plain Partner, "Partner with <name>", Friends forever, Choose a
+# Background (with a Background enchantment), Doctor's companion (with a Time Lord Doctor).
+_PARTNER_RE = re.compile(r"(?<![a-z])partner(?!\s+with)", re.IGNORECASE)
+_PARTNER_WITH_RE = re.compile(r"partner with ([^\n(]+?)(?:\s*\(|\n|$)", re.IGNORECASE)
 
 
 def _can_command(card: DeckCard) -> bool:
@@ -263,13 +285,51 @@ def _can_command(card: DeckCard) -> bool:
     return (legendary and creature) or "can be your commander" in card.oracle_text.lower()
 
 
+def _is_type(card: DeckCard, *names: str) -> bool:
+    have = {t.lower() for t in card.types + card.subtypes + card.supertypes}
+    return any(n in have for n in names)
+
+
+def _can_lead(card: DeckCard, fmt: str) -> bool:
+    """Whether the card may sit in the format's command zone (the commander-style formats)."""
+    if fmt == "oathbreaker":
+        return _is_type(card, "planeswalker") or _is_type(card, "instant", "sorcery")
+    if fmt in ("brawl", "historicbrawl", "competitivebrawl"):
+        legendary = _is_type(card, "legendary")
+        return legendary and (_is_type(card, "creature", "planeswalker")) or _can_command(card)
+    return _can_command(card)
+
+
+def _pair_ok(a: DeckCard, b: DeckCard) -> bool:
+    """Whether two commanders may be paired: both have Partner, each names the other with
+    Partner with, both have Friends forever, a Choose a Background card with a Background, or a
+    Doctor's companion with a Time Lord Doctor."""
+    ta, tb = a.oracle_text.lower(), b.oracle_text.lower()
+    if _PARTNER_RE.search(ta) and _PARTNER_RE.search(tb):
+        return True
+    ma, mb = _PARTNER_WITH_RE.search(a.oracle_text), _PARTNER_WITH_RE.search(b.oracle_text)
+    if ma and mb and ma.group(1).strip().casefold() == b.name.casefold():
+        return mb.group(1).strip().casefold() == a.name.casefold()
+    if "friends forever" in ta and "friends forever" in tb:
+        return True
+    for lead, other in ((a, b), (b, a)):
+        if "choose a background" in lead.oracle_text.lower() and _is_type(other, "background"):
+            return True
+        if "doctor's companion" in lead.oracle_text.lower() and _is_type(other, "time lord", "doctor"):
+            return True
+    return False
+
+
 def deck_checks(deck: Deck, cards: list[DeckCard], commanders: list[DeckCard], qty: int) -> dict[str, Any]:
-    """Structural checks from the deck's own data: deck size for the format (exact for the
-    commander-style formats, at least 60 for constructed ones), commander zone (count and
-    whether each card may command), colour identity against the commanders, singleton rule or
-    the four-copies limit, sideboard size (constructed), uncategorised rows. Each entry says what
-    was checked; ``problems`` lists the failures in plain words. Card legality by format is
-    ``legality_problems``."""
+    """Structural checks from the deck's own data, for every Archidekt format: deck size (exact
+    for the commander-style formats, at least 60 for constructed ones), the command zone (count,
+    whether each card may lead, partner pairing, Oathbreaker's planeswalker plus signature spell,
+    Tiny Leaders' mana value cap, Pauper Commander's uncommon leader), colour identity against the
+    commanders, singleton rule or the four-copies limit, restricted cards (one copy), companion
+    rows, sideboard size (constructed), card legality for the format (banned, not legal), the set
+    bracket against the estimate, and uncategorised rows. Each entry says what was checked;
+    ``problems`` lists the failures in plain words and ``ok`` is false when any check failed,
+    legality included."""
     problems: list[str] = []
     fmt = deck.format or ""
     expected = _DECK_SIZES.get(fmt)
@@ -281,20 +341,52 @@ def deck_checks(deck: Deck, cards: list[DeckCard], commanders: list[DeckCard], q
     elif not size["ok"]:
         problems.append(f"deck has {qty} cards; {fmt} wants {expected}")
     zone: dict[str, Any] = {"count": sum(c.quantity for c in commanders), "ok": True}
-    if deck.format in _SINGLETON_FORMATS:
+    has_zone = fmt in _SINGLETON_FORMATS and fmt not in _NO_COMMANDER
+    if has_zone:
         if not commanders:
             zone["ok"] = False
             problems.append("no card in the Commander category")
         elif zone["count"] > 2:
             zone["ok"] = False
             problems.append(f"{zone['count']} cards in the Commander category (expected 1 or 2)")
-        not_commanders = [c.name for c in commanders if not _can_command(c)]
+        not_commanders = [c.name for c in commanders if not _can_lead(c, fmt)]
         if not_commanders:
             zone["ok"] = False
             zone["cannot_command"] = not_commanders
             problems.append("not a legal commander: " + ", ".join(not_commanders))
+        if len(commanders) == 2 and zone["count"] == 2:
+            a, b = commanders
+            if fmt == "oathbreaker":
+                pw = [c for c in (a, b) if _is_type(c, "planeswalker")]
+                spell = [c for c in (a, b) if _is_type(c, "instant", "sorcery")]
+                zone["pairing"] = "oathbreaker and signature spell" if pw and spell else "invalid"
+                if not (pw and spell):
+                    zone["ok"] = False
+                    problems.append("Oathbreaker wants one planeswalker and one instant or sorcery")
+            elif _pair_ok(a, b):
+                zone["pairing"] = "partners"
+            else:
+                zone["ok"] = False
+                zone["pairing"] = "invalid"
+                problems.append(f"{a.name} and {b.name} cannot be commanders together (no partner ability)")
+        elif fmt == "oathbreaker" and commanders:
+            zone["ok"] = False
+            problems.append("Oathbreaker wants an oathbreaker and a signature spell in the command zone")
+        if fmt == "tlr":
+            big = [c.name for c in commanders if (c.cmc or 0) > _TINY_LEADERS_MAX_MV]
+            if big:
+                zone["ok"] = False
+                problems.append("Tiny Leaders commander above mana value 3: " + ", ".join(big))
+        if fmt == "paupercommander":
+            not_unc = [c.name for c in commanders if c.rarity and c.rarity.lower() != "uncommon"]
+            if not_unc:
+                zone["ok"] = False
+                problems.append("Pauper Commander wants an uncommon commander: " + ", ".join(not_unc))
+    elif fmt in _NO_COMMANDER and commanders:
+        zone["ok"] = False
+        problems.append(f"{fmt} has no command zone; {zone['count']} card(s) sit in the Commander category")
     identity: list[dict[str, Any]] = []
-    if commanders and deck.format in _SINGLETON_FORMATS:
+    if commanders and has_zone:
         allowed = {x for c in commanders for x in c.color_identity}
         for c in cards:
             outside = sorted(set(c.color_identity) - allowed)
@@ -303,7 +395,7 @@ def deck_checks(deck: Deck, cards: list[DeckCard], commanders: list[DeckCard], q
         if identity:
             problems.append(f"{len(identity)} card(s) outside the commander's colour identity")
     singleton: list[dict[str, Any]] = []
-    if deck.format in _SINGLETON_FORMATS:
+    if fmt in _SINGLETON_FORMATS:
         for c in cards:
             if c.quantity > 1 and not is_land(c) and _ANY_NUMBER not in c.oracle_text.lower():
                 singleton.append({"name": c.name, "quantity": c.quantity})
@@ -324,13 +416,60 @@ def deck_checks(deck: Deck, cards: list[DeckCard], commanders: list[DeckCard], q
         sideboard = {"count": side_qty, "maximum": _SIDEBOARD_MAX, "ok": side_qty <= _SIDEBOARD_MAX}
         if not sideboard["ok"]:
             problems.append(f"sideboard has {side_qty} cards; at most {_SIDEBOARD_MAX}")
+    # Card legality for the format, from Archidekt's own legality flags per card: banned and not
+    # legal cards are failures; a restricted card is allowed as a single copy.
+    legality: dict[str, Any] = {"banned": [], "not_legal": [], "restricted_violations": [], "unknown": 0}
+    if fmt and fmt != "custom":
+        for c in cards:
+            status = c.legalities.get(fmt)
+            if status is None:
+                legality["unknown"] += c.quantity
+            elif status == "banned":
+                legality["banned"].append(c.name)
+            elif status == "restricted":
+                if c.quantity > 1:
+                    legality["restricted_violations"].append({"name": c.name, "quantity": c.quantity})
+            elif status != "legal":
+                legality["not_legal"].append(c.name)
+        if legality["banned"]:
+            problems.append(f"{len(legality['banned'])} banned card(s): " + ", ".join(legality["banned"][:5]))
+        if legality["not_legal"]:
+            problems.append(f"{len(legality['not_legal'])} card(s) not legal in {fmt}")
+        if legality["restricted_violations"]:
+            problems.append(
+                f"{len(legality['restricted_violations'])} restricted card(s) with more than one copy"
+            )
+    legality["ok"] = not (legality["banned"] or legality["not_legal"] or legality["restricted_violations"])
+    # Companion: at most one, flagged as such on Archidekt, with the Companion ability.
+    companions = [c for c in deck.cards if c.companion]
+    companion: dict[str, Any] = {"count": len(companions), "ok": True}
+    if len(companions) > 1:
+        companion["ok"] = False
+        problems.append(f"{len(companions)} companions; at most one")
+    not_companions = [c.name for c in companions if "companion" not in c.oracle_text.lower()]
+    if not_companions:
+        companion["ok"] = False
+        companion["not_companions"] = not_companions
+        problems.append("marked as companion without the Companion ability: " + ", ".join(not_companions))
     uncategorised = sorted({c.name for c in cards if not c.categories})
+    family = (
+        "commander"
+        if has_zone
+        else "highlander"
+        if fmt in _NO_COMMANDER
+        else "constructed"
+        if fmt in _CONSTRUCTED_FORMATS
+        else "custom"
+    )
     out = {
+        "format_family": family,
         "deck_size": size,
         "commander_zone": zone,
         "colour_identity_violations": identity,
         "singleton_violations": singleton,
         "copy_limit_violations": copies,
+        "legality": legality,
+        "companion": companion,
         "uncategorised": uncategorised,
         "problems": problems,
         "ok": not problems,

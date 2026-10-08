@@ -784,29 +784,96 @@ def stats_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
                 size.get("ok", True),
             )
         ]
-        if deck.format in ("commander", "brawl", "oathbreaker"):
+        family = checks.get("format_family") or "custom"
+
+        def names(items: list[Any], key: str = "name", qty: str | None = None) -> str:
+            shown = [
+                esc(x[key] if isinstance(x, dict) else x)
+                + (f" ×{x[qty]}" if qty and isinstance(x, dict) else "")
+                for x in items[:6]
+            ]
+            return ", ".join(shown) + ("…" if len(items) > 6 else "")
+
+        if family == "commander":
+            pairing = zone.get("pairing")
             rows.append(
-                ("Commander", f"{zone.get('count', 0)} in the Commander category", zone.get("ok", True))
+                (
+                    "Commander",
+                    f"{zone.get('count', 0)} in the Commander category"
+                    + (f" ({esc(pairing)})" if pairing else "")
+                    + (
+                        " · cannot command: " + names(zone["cannot_command"])
+                        if zone.get("cannot_command")
+                        else ""
+                    ),
+                    zone.get("ok", True),
+                )
             )
             outside = checks.get("colour_identity_violations") or []
             rows.append(
-                (
-                    "Colour identity",
-                    "all cards inside"
-                    if not outside
-                    else ", ".join(esc(x["name"]) for x in outside[:6]) + ("…" if len(outside) > 6 else ""),
-                    not outside,
-                )
+                ("Colour identity", "all cards inside" if not outside else names(outside), not outside)
             )
+        elif family == "highlander" and not zone.get("ok", True):
+            rows.append(
+                ("Command zone", f"{zone.get('count', 0)} in the Commander category; none expected", False)
+            )
+        if family in ("commander", "highlander"):
             dupes = checks.get("singleton_violations") or []
             rows.append(
+                ("Singleton", "no duplicates" if not dupes else names(dupes, qty="quantity"), not dupes)
+            )
+        if family == "constructed":
+            copies = checks.get("copy_limit_violations") or []
+            rows.append(
                 (
-                    "Singleton",
-                    "no duplicates"
-                    if not dupes
-                    else ", ".join(f"{esc(x['name'])} ×{x['quantity']}" for x in dupes[:6])
-                    + ("…" if len(dupes) > 6 else ""),
-                    not dupes,
+                    "Copies",
+                    "at most four of each" if not copies else names(copies, qty="quantity"),
+                    not copies,
+                )
+            )
+            side = checks.get("sideboard") or {}
+            rows.append(
+                (
+                    "Sideboard",
+                    f"{side.get('count', 0)} of at most {side.get('maximum', 15)}",
+                    side.get("ok", True),
+                )
+            )
+        legal = checks.get("legality") or {}
+        if deck.format and deck.format != "custom":
+            bad = [f"banned: {names(legal['banned'])}"] if legal.get("banned") else []
+            if legal.get("not_legal"):
+                bad.append(f"not legal: {names(legal['not_legal'])}")
+            if legal.get("restricted_violations"):
+                bad.append(
+                    f"restricted, more than one copy: {names(legal['restricted_violations'], qty='quantity')}"
+                )
+            text = "every card legal" if legal.get("ok", True) else "; ".join(bad)
+            if legal.get("unknown"):
+                text += f" ({legal['unknown']} card(s) without legality data)"
+            rows.append((f"Legal in {esc(format_label(deck.format))}", text, legal.get("ok", True)))
+        comp = checks.get("companion") or {}
+        if comp.get("count"):
+            rows.append(
+                (
+                    "Companion",
+                    f"{comp['count']} marked"
+                    + (
+                        " · without the ability: " + names(comp["not_companions"])
+                        if comp.get("not_companions")
+                        else ""
+                    ),
+                    comp.get("ok", True),
+                )
+            )
+        br = checks.get("bracket") or {}
+        if br.get("set"):
+            rows.append(
+                (
+                    "Bracket",
+                    f"set to {br['set']}"
+                    + (f", cards suggest {br['estimate']} (estimate)" if br.get("estimate") else ""),
+                    br.get("ok", True),
                 )
             )
         uncat = checks.get("uncategorised") or []

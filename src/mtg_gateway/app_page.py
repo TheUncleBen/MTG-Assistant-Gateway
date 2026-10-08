@@ -105,14 +105,19 @@ def add_app_routes(server: MCPServer, state: AppState) -> None:
             "gateway's address.</p></div>"
         )
         if base is None:
+            # No APK is bundled on this gateway: a normal page that says so, not an error page.
             body = (
-                intro
-                + "<div class='card'><p>This gateway does not ship the app. Ask the owner, or build it from "
-                f"the <a href='{PROJECT_URL}' rel='noopener'>project repository</a> "
-                "(docs/ANDROID.md).</p></div>"
+                intro + "<div class='card'><h2>No app file on this gateway</h2>"
+                "<p>Whoever runs this gateway has not added the Android app file yet, so there is nothing "
+                "to download here. Everything works in your phone's browser in the meantime: open this "
+                "address and add it to your home screen.</p>"
+                "<p>If you run the gateway: build the app from the "
+                f"<a href='{PROJECT_URL}' rel='noopener'>project repository</a> (docs/ANDROID.md) and put "
+                "the file where docs/DEPLOY.md describes; this page then offers it.</p>"
+                "<div class='actions'><a class='btn' href='/decks'>Back to decks</a></div></div>"
             )
             return render(
-                "Android app", body, site=s.server_name, status=404, signed_in=True, csrf=_csrf(s, sid)
+                "Android app", body, site=s.server_name, status=200, signed_in=True, csrf=_csrf(s, sid)
             )
         meta = app_meta(base)
         version = meta.get("version_name")

@@ -117,6 +117,98 @@ def normalise_items(items: Any) -> list[dict[str, Any]]:
     return out
 
 
+MAX_IMPORT_ROWS = MAX_ITEMS_PER_CALL  # one import is one add call; Archidekt is written a card at a time
+_IMPORT_COLUMNS = {
+    "quantity": ("quantity", "count", "qty"),
+    "name": ("name", "card name", "card"),
+    "finish": ("finish", "modifier", "foil"),
+    "condition": ("condition",),
+    "set": ("edition code", "set code", "set", "edition"),
+    "collector_number": ("collector number", "collector_number", "number"),
+    "scryfall_id": ("scryfall id", "scryfall_id", "scryfall uuid"),
+}
+
+
+def parse_collection_import(text: str) -> list[dict[str, Any]]:
+    """Cards to add from pasted or uploaded text: the gateway's own collection CSV (the Export CSV
+    button), a CSV with Archidekt's collection column names (Quantity, Name, Finish, Condition,
+    Edition Code, Collector Number, Scryfall ID; headers are matched by name, extra columns are
+    ignored) or a plain list (``2 Sol Ring (CMR) 436 *F*``). Returns items for ``add``. Raises
+    CollectionError when nothing usable is found or there are more than MAX_IMPORT_ROWS rows."""
+    text = text.lstrip("\ufeff").strip()
+    if not text:
+        raise CollectionError("invalid", "paste or choose a CSV or a card list first")
+    if len(text) > 2_000_000:
+        raise CollectionError("invalid", "that file is larger than 2 MB")
+    lines = text.splitlines()
+    items: list[dict[str, Any]] = []
+    first = [c.strip().lower() for c in next(csv.reader([lines[0]]), [])]
+    if "name" in first or "card name" in first:
+        keys: dict[str, int] = {}
+        for key, names in _IMPORT_COLUMNS.items():
+            for n in names:
+                if n in first and key not in keys:
+                    keys[key] = first.index(n)
+        if "name" not in keys:
+            raise CollectionError("invalid", "the CSV needs a Name column")
+
+        def cell(row: list[str], key: str) -> str:
+            i = keys.get(key)
+            return row[i].strip() if i is not None and i < len(row) else ""
+
+        for n, row in enumerate(csv.reader(lines[1:]), start=2):
+            if not any(c.strip() for c in row):
+                continue
+            name = cell(row, "name")
+            if not name:
+                raise CollectionError("invalid", f"line {n}: no card name")
+            qty = cell(row, "quantity") or "1"
+            if not qty.isdigit():
+                raise CollectionError("invalid", f"line {n}: quantity {qty!r} is not a number")
+            finish_raw = cell(row, "finish").lower()
+            finish = {"foil": "foil", "etched": "etched", "true": "foil", "yes": "foil"}.get(
+                finish_raw, "nonfoil"
+            )
+            items.append(
+                {
+                    "name": name,
+                    "set": cell(row, "set").lower(),
+                    "collector_number": cell(row, "collector_number"),
+                    "scryfall_id": cell(row, "scryfall_id"),
+                    "quantity": int(qty),
+                    "finish": finish,
+                    "condition": cell(row, "condition").upper(),
+                }
+            )
+    else:
+        from .decklist import DecklistError, parse_decklist
+
+        try:
+            parsed = parse_decklist(text)
+        except DecklistError as exc:
+            raise CollectionError("invalid", f"the list could not be read: {exc}") from exc
+        for c in parsed:
+            items.append(
+                {
+                    "name": c.name,
+                    "set": c.set_code.lower(),
+                    "collector_number": c.collector_number,
+                    "quantity": c.quantity,
+                    "finish": c.finish.lower() if c.finish else "nonfoil",
+                    "condition": "",
+                }
+            )
+    if not items:
+        raise CollectionError("invalid", "no cards were found in that text")
+    if len(items) > MAX_IMPORT_ROWS:
+        raise CollectionError(
+            "invalid",
+            f"that is {len(items)} rows; an import adds at most {MAX_IMPORT_ROWS} at a time "
+            "(Archidekt is written one card at a time). Split the file and import the rest after.",
+        )
+    return normalise_items(items)
+
+
 def row_out(rec: dict[str, Any]) -> dict[str, Any]:
     """A collection record in the gateway's flat shape. The record shape is the one Archidekt's
     collection page reads (id, quantity, modifier, language, condition, tags, purchasePrice, card
@@ -674,6 +766,8 @@ COLLECTION_CSS = """
 .addbox form.addcard{display:grid;grid-template-columns:minmax(0,2fr) 5.5rem minmax(0,1fr) minmax(0,1fr) auto;
   gap:.5rem;align-items:end}
 .addbox form.addcard .field{margin:0} .addbox form.addcard button{margin:0;height:var(--ctl)}
+.importbox textarea{width:100%;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.9rem}
+.importbox .actions{margin-top:.5rem}
 @media (max-width:600px){ .addbox form.addcard{grid-template-columns:1fr 1fr}
   .addbox form.addcard .grow,.addbox form.addcard button{grid-column:1 / -1} }
 ul.collgrid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:1rem}
@@ -761,6 +855,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 "<script src='/static/cardview.js' defer></script>"
                 "<script src='/static/deck.js' defer></script><script "
                 "src='/static/collection.js' defer></script>"
+                "<script src='/static/filepick.js' defer></script>"
                 if scripts
                 else ""
             ),
@@ -771,7 +866,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
     async def form(request: Request) -> dict[str, str]:
         from urllib.parse import parse_qs
 
-        raw = await read_limited(request, 64_000)
+        raw = await read_limited(request, 400_000)  # an import pastes a CSV of up to 100 rows
         if raw is None:
             return {}
         return {k: v[0] for k, v in parse_qs(raw.decode("utf-8", "replace"), keep_blank_values=True).items()}
@@ -827,6 +922,10 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             "removed": "Removed from your Archidekt collection.",
             "updated": "Card details saved to your Archidekt collection.",
             "nothing": "Nothing was added: no card matched. Check the name or pick a suggestion.",
+            "imported": "Imported into your Archidekt collection.",
+            "toomany": f"An import adds at most {MAX_IMPORT_ROWS} rows at a time. Split the file and "
+            "import the rest after.",
+            "unreadable": "That text is not a collection CSV or a card list the gateway can read.",
             "expired": "This form expired. Reload the page and try again.",
             "invalid": "That was not a valid request.",
             "lookup": "Archidekt is not answering right now. Try again in a moment.",
@@ -834,7 +933,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         }
         if not code or code not in msgs:
             return ""
-        cls = "ok" if code in ("added", "removed", "updated") else "error"
+        cls = "ok" if code in ("added", "removed", "updated", "imported") else "error"
         return f"<p class='notice {cls}'>{_esc(msgs[code])}</p>"
 
     def problem(exc: CollectionError, *, link_hint: bool) -> str:
@@ -927,6 +1026,20 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             "<p class='muted small'>Scanning a pile is quicker: open <a href='/scan'>Scan</a>, then choose "
             "<strong>Save to collection</strong>. Everything you add lands in your Collection on "
             "Archidekt.</p></section>"
+            "<section class='panel addbox importbox'><h2>Import a list</h2>"
+            "<form method='post' action='/collection' class='importform'><input "
+            f"type='hidden' name='csrf' value='{_esc(csrf)}'>"
+            "<input type='hidden' name='action' value='import'>"
+            "<p class='muted small'>A collection CSV (this page's Export CSV, or one with Archidekt's "
+            f"column names) or a card list, one card per line, up to {MAX_IMPORT_ROWS} rows at a time. "
+            "Copies of a printing you already own in that finish are added to it.</p>"
+            "<div class='field filepick'><label for='importfile'>From a file</label>"
+            "<input id='importfile' type='file' accept='.csv,.txt,text/csv,text/plain' "
+            "data-fill='importtext'></div>"
+            "<textarea id='importtext' name='text' rows='6' placeholder='Quantity,Name,Finish,Edition Code,"
+            "Collector Number&#10;2,Card name,Normal,SET,123'></textarea>"
+            f"<div class='actions'><button class='btn-primary'>{icon('plus')} Import</button></div></form>"
+            "</section>"
         )
         arch_link = (
             f"<a class='ext' href='https://archidekt.com/collection/v2/{_esc(arch_user)}' target='_blank' "
@@ -1019,6 +1132,14 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                     source="manual",
                 )
                 code = "ok=added" if out["added"] else "err=nothing"
+            elif action == "import":
+                try:
+                    items = parse_collection_import(data.get("text", ""))
+                except CollectionError as exc:
+                    code = "err=toomany" if "at most" in str(exc) else "err=unreadable"
+                    return RedirectResponse(f"{back}{'&' if '?' in back else '?'}{code}", status_code=303)
+                out = await service.add(sub, items, source="manual")
+                code = "ok=imported" if out["added"] else "err=nothing"
             elif action == "details":
                 rid = _rid(data.get("id"))
                 await service.update(

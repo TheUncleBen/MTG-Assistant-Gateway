@@ -46,6 +46,7 @@ _LIGHT = """
     --bg:#f9fafb; --surface:#fafafa; --surface-2:#dedede; --surface-3:#c1c1c1;
     --border:#bababa; --border-soft:#d4d4d4; --card-border:#5b5b5b;
     --text:#383838; --text-muted:#727272; --link:#2a66c9; /* Archidekt's #4183c4 is 3.8:1 */
+    --menu-head:#595959; /* 5.2:1 on --surface-2; --text-muted would be 3.6:1 there */
     --toolbar-bg:#dcdcdc; --toolbar-text:#383838;
     --navbar-bg:#313131; --navbar-text:#ffffff; --navbar-muted:#d6d6d6;
     --banner-a:rgba(40,40,40,.82); --banner-b:rgba(40,40,40,.5);
@@ -62,6 +63,7 @@ CSS = (
   --bg:#181818; --surface:#232323; --surface-2:#383838; --surface-3:#4b4b4b;
   --border:#5f5f5f; --border-soft:#323232; --card-border:#525252;
   --text:#e3e3e3; --text-muted:#a8a8a8; --link:#73a8dc;
+  --menu-head:#b0b0b0; /* 5.4:1 on --surface-2 */
   --toolbar-bg:#2e2d2d; --toolbar-text:#f5f5f5;
   --navbar-bg:#111111; --navbar-text:#ffffff; --navbar-muted:#e3e3e3;
   --banner-a:rgba(14,14,14,.82); --banner-b:rgba(14,14,14,.5);
@@ -138,7 +140,7 @@ details.dd .menu a:hover,details.dd .menu button:hover,details.dd .menu a:focus-
   background:var(--border);color:var(--text)}
 details.dd .menu .sep{height:1px;background:var(--border);margin:.25rem 0}
 details.dd .menu a.danger{color:var(--danger-text)}
-details.dd .menu .head{padding:.4rem 1rem .2rem;font-size:.8rem;font-weight:700;color:var(--text-muted);
+details.dd .menu .head{padding:.4rem 1rem .2rem;font-size:.8rem;font-weight:700;color:var(--menu-head);
   text-transform:uppercase;letter-spacing:.04em}
 details.dd .menu form{margin:0;display:contents}
 details.dd .menu .on{color:var(--orange-text);font-weight:700}
