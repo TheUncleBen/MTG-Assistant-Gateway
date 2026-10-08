@@ -76,7 +76,7 @@ def members(body: Any, name: str) -> list[dict[str, Any]]:
     found = [g for g in body["results"] if isinstance(g, dict) and g.get("name") == name]
     if len(found) != 1:
         raise SweepRefused(
-            f"group {name!r} found {len(found)} times (is the name right, and may the token view groups?)"
+            f"group {name!r} found {len(found)} times (is the name right, and may the token view that group?)"
         )
     users = found[0].get("users_obj")
     if not isinstance(users, list):

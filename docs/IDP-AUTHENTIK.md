@@ -494,36 +494,41 @@ logged.
 
 ### Set it up
 
-Checked on Authentik 2026.8.3 through its API. The admin-interface labels
-marked *(seen)* were seen on 2026.8.3; the others are reported, not checked.
+Checked on Authentik 2026.8.3: the objects through its API, the labels below
+in its admin interface.
 
-1. **A service account.** **Directory → Users** *(seen)* → **New User**
-   *(seen)* → **Service Account** *(seen)*, for example `mtg-gateway-sweep`.
-   Turn **Create group** off *(seen)* and **Expiring** off *(seen; it is on
-   by default)*. Ignore the password it shows: it is an app password, and
-   Authentik refuses it as an API token (checked: HTTP 403).
-2. **A role with no permissions of its own.** **Directory → Roles**
-   *(seen)* → create one, for example `mtg-gateway-sweep`. Give it no
-   global permissions.
-3. **View permission on the gateway's groups only.** Open each gateway group
-   (`MTG_REQUIRED_GROUP`, and `MTG_ADMIN_GROUP` if you set it) under
-   **Directory → Groups** *(seen)*, and on its **Permissions** tab give the
-   role **Can view Group** for that group. Through the API (checked), with an
-   admin token in `$A`, for each group's ID (the UUID in the group's page
-   address):
+1. **A service account.** **Directory → Users → New User → Service
+   Account → Next**. Username `mtg-gateway-sweep`; **Create group** off;
+   **Expiring** off (it is on by default). **Next → Review Credentials →
+   Close**. Ignore the password it shows: it is an app password, and
+   Authentik refuses it as an API token.
+2. **A role with no global permission.** **Directory → Roles → New Role**,
+   Role Name `mtg-gateway-sweep` → **Create Role**. Add nothing under its
+   **Permissions** tab.
+3. **Give the role to the service account.** **Directory → Groups → New
+   Group**: Group Name `mtg-gateway-sweep`, move the role to **Selected
+   Roles** → **Create Group**. Open it → **Users → Add Existing User → +**,
+   select the service account → **Confirm → Assign**. The group's user list
+   hides service accounts by default, so it may still say *No objects
+   found*; the service account's own **Groups** tab shows it. Don't bind
+   this group to the gateway's application.
+4. **Let the role see only the gateway's groups.** **Directory → Groups**,
+   open the group in `MTG_REQUIRED_GROUP` → **Permissions → Assign Role
+   Object Permission** → Role `mtg-gateway-sweep`, switch on **Can view
+   Group** only → **Assign Role Object Permission**. Repeat for the group in
+   `MTG_ADMIN_GROUP` if you set one. The same through the API, with an admin
+   token in `$A` and each group's UUID (from its page address):
 
    ```bash
    curl -sS -X POST -H "Authorization: Bearer $A" -H 'Content-Type: application/json' \
      https://auth.example.com/api/v3/rbac/permissions/assigned_by_roles/<role-uuid>/assign/ \
      -d '{"permissions":["authentik_core.view_group"],"model":"authentik_core.group","object_pk":"<group-uuid>"}'
    ```
-4. **A group holding the role.** **Directory → Groups** *(seen)* → create
-   one, for example `mtg-gateway-sweep`, give it the role and add the
-   service account. Don't bind this group to the gateway's application.
-5. **An API token for the service account.** **Directory → Tokens and App
-   passwords** *(seen)* → create one: user `mtg-gateway-sweep`, intent
-   **API**, **Expiring** off (an expired token just stops the clean-up, with
-   a warning each round). Copy its key.
+5. **The token.** **Directory → Tokens and App passwords → New Token**:
+   Identifier `mtg-gateway-sweep-api`, User `mtg-gateway-sweep`, Intent
+   **API Token**, **Expiring** off (it is on by default; an expired token
+   just stops the clean-up, with a warning each round) → **Create Token**.
+   Copy it with the row action **Copy token**.
 6. **The Docker secret**, on a Swarm manager. This reads the token without
    showing it: paste, press Enter.
 
