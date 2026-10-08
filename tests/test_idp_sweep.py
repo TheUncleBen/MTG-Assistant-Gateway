@@ -1,7 +1,8 @@
 """The hourly removed-member clean-up (idp_sweep.py), against Authentik's real answers.
 
 tests/fixtures/authentik-2026.8.3/ holds answers recorded from a real Authentik 2026.8.3, asked
-with a token whose user holds only ``authentik_core.view_group``: the two groups, a group name
+with a token whose user holds only ``authentik_core.view_group`` (granted globally, as 0.7.7's
+steps said; 0.7.8's per-group grant was checked live separately): the two groups, a group name
 that does not exist, and the answer without that permission. In it alice is an active member of
 the users group, bob a deactivated one, carol an active admin, and dave (not recorded) is in no
 group. The fake below serves those files unchanged; the first test proves it."""

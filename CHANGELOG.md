@@ -7,6 +7,38 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.8] - 2026-10-08
+
+Wording fixes from the acceptance check of 0.7.7, and a narrower Authentik
+permission for the optional clean-up. No code behaviour changes; nothing to
+change in the stack or the settings. The only secret to replace is the
+optional clean-up's token, and only if you set it up with 0.7.7's steps
+(see below).
+
+### Changed
+
+- **Linking Archidekt:** the disclosure now also says that the session is
+  used to read, as the member, other people's decks and comment threads
+  they look at and the list of people they follow, and to look up the
+  cards in their changes; that deck,
+  folder and tag changes, deck deletes and backup copies on the member's
+  Archidekt account go through it; everything else the person who runs the
+  server can read (name, email, username and groups at the sign-in service,
+  profile picture, sign-in times, approval mode, collection changes, deck reports and covers, connected
+  apps, usage counts) and that the sign-in service's tokens kept for the
+  group check are encrypted with the same key; and everything admins see
+  (username and user ID at the sign-in service, open token and session counts, the
+  disabled date) and that they can also enable an account.
+- **Removed-member clean-up setup** ([IDP-AUTHENTIK.md](docs/IDP-AUTHENTIK.md#12-optional-removed-member-clean-up)):
+  give the token **Can view Group** on the two gateway groups only (an
+  object permission), checked on Authentik 2026.8.3 to be enough; with it
+  the token sees no other group. The docs now say what the token can read
+  (those groups' members' usernames, names and emails) and that to cut it
+  off you delete the service account (deactivating lasts only until it is
+  reactivated), because it can make itself new tokens. If you set it up
+  with 0.7.7's steps (a global permission), delete that service account
+  and follow the new steps with a new account, token and secret.
+
 ## [0.7.7] - 2026-10-08
 
 Members now see exactly what linking their Archidekt account gives the
