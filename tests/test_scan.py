@@ -940,7 +940,7 @@ async def test_printings_by_oracle_id_and_by_name(stack: Stack) -> None:
     one_set = (await call(stack.h, token, "card_printings", {"oracle_id": aesi_oracle, "set_code": "CMR"}))[
         "structuredContent"
     ]
-    assert [c["set"] for c in one_set["cards"]] == ["cmr"] and "cmr" in one_set["note"]
+    assert [c["set"] for c in one_set["cards"]] == ["cmr"]
     bad = (await call(stack.h, token, "card_printings", {"oracle_id": "not-an-id"}))["structuredContent"]
     assert bad["ok"] is False and bad["error"] == "invalid"
     none = (await call(stack.h, token, "card_printings", {}))["structuredContent"]

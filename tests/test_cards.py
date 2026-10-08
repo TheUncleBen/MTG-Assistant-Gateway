@@ -152,10 +152,10 @@ def test_every_card_is_one_self_contained_document() -> None:
 
 async def test_deck_reads_keep_their_text_and_carry_a_signed_link_only_in_meta(stack: Stack) -> None:
     token = await linked_user(stack)
-    for tool, args in (("get_deck", {"deck_ref": "42"}), ("get_deck", {"deck_ref": "42", "view": "cards"})):
-        result = await call(stack.h, token, tool, args)
+    for view, key in (("text", "decklist_text"), ("cards", "cards"), ("summary", "stats")):
+        result = await call(stack.h, token, "get_deck", {"deck_ref": "42", "view": view})
         sc = result["structuredContent"]
-        assert sc["ok"] and sc["cards"] and sc["decklist_text"]
+        assert sc["ok"] and sc[key]  # each view keeps its own text; the card is the same
         card = result["_meta"][CARD_META_KEY]
         assert card["name"] == sc["name"] and card["link"].startswith("https://mtg.test" + LINK_PATH)
         assert LINK_PATH not in result["content"][0]["text"] and LINK_PATH not in json.dumps(sc)
