@@ -610,11 +610,10 @@ def category_plan_rows(
 def leaving_deck(deck: Deck, recategorise: dict[int, list[str]]) -> dict[str, int]:
     """Copies per card name that ``recategorise`` (from ``category_plan``) moves out of the deck
     proper: rows counted in the deck now whose new categories are all ones the deck excludes."""
-    excluded = deck.excluded_categories()
     out: dict[str, int] = {}
     for c in deck.main_cards:
         cats = recategorise.get(c.relation_id) if c.relation_id is not None else None
-        if cats and all(cat in excluded for cat in cats):
+        if cats and not deck.categories_count(cats):
             out[c.name] = out.get(c.name, 0) + c.quantity
     return out
 
@@ -622,11 +621,10 @@ def leaving_deck(deck: Deck, recategorise: dict[int, list[str]]) -> dict[str, in
 def entering_deck(deck: Deck, recategorise: dict[int, list[str]]) -> dict[str, int]:
     """The mirror of ``leaving_deck``: copies per card name that ``recategorise`` moves from the
     maybeboard or sideboard into the deck proper (a side row given a category the deck counts)."""
-    excluded = deck.excluded_categories()
     out: dict[str, int] = {}
     for c in deck.side_cards:
         cats = recategorise.get(c.relation_id) if c.relation_id is not None else None
-        if cats and any(cat not in excluded for cat in cats):
+        if cats and deck.categories_count(cats):
             out[c.name] = out.get(c.name, 0) + c.quantity
     return out
 
@@ -2217,7 +2215,7 @@ class DeckService:
         got: dict[str, int] = {}
         for vc in verified.cards:
             got[vc.name] = got.get(vc.name, 0) + vc.quantity
-        mismatches = _mismatches(got, want)
+        mismatches = _mismatches(got, want) + _new_deck_printing_mismatches(verified, cards, entries)
         result = {
             "deck_id": created.id,
             "deck_url": f"https://archidekt.com/decks/{created.id}",
@@ -2839,6 +2837,34 @@ def details_payload(changes: dict[str, Any]) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for key, value in changes.items():
         out[DETAIL_FIELDS[key]] = FORMAT_IDS[value] if key == "deck_format" else value
+    return out
+
+
+def _new_deck_printing_mismatches(
+    verified: Deck, cards: list[dict[str, Any]], entries: list[dict[str, Any]]
+) -> list[str]:
+    """Names (with "printing or finish") whose rows on the re-read new deck do not carry the
+    printing id and finish the import sent, every zone counted. Counts are compared per printing
+    and finish, so a Foil row that came back Normal, or a pinned printing swapped for another, is
+    reported instead of passing on name and quantity alone."""
+    want: dict[tuple[int, str], int] = {}
+    names: dict[tuple[int, str], str] = {}
+    for c, e in zip(cards, entries, strict=True):
+        key = (int(e["cardid"]), str(e["modifications"].get("modifier") or "Normal"))
+        want[key] = want.get(key, 0) + int(e["modifications"]["quantity"])
+        names.setdefault(key, str(c["name"]))
+    got: dict[tuple[int, str], int] = {}
+    for vc in verified.cards:
+        if vc.card_id is None:
+            continue
+        key = (int(vc.card_id), vc.modifier or "Normal")
+        got[key] = got.get(key, 0) + vc.quantity
+    out: list[str] = []
+    for key, qty in want.items():
+        if got.get(key, 0) != qty:
+            label = f"{names[key]} (printing or finish)"
+            if label not in out:
+                out.append(label)
     return out
 
 

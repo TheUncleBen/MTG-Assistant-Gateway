@@ -294,6 +294,10 @@ def _can_lead(card: DeckCard, fmt: str) -> bool:
     """Whether the card may sit in the format's command zone (the commander-style formats)."""
     if fmt == "oathbreaker":
         return _is_type(card, "planeswalker") or _is_type(card, "instant", "sorcery")
+    if fmt == "paupercommander":
+        # Pauper Commander: any creature printed at uncommon leads; it need not be legendary (the
+        # rarity is checked separately). Not verified against the format's rules page from here.
+        return _is_type(card, "creature", "background")
     if fmt in ("brawl", "historicbrawl", "competitivebrawl"):
         legendary = _is_type(card, "legendary")
         return legendary and (_is_type(card, "creature", "planeswalker")) or _can_command(card)
@@ -424,6 +428,8 @@ def deck_checks(deck: Deck, cards: list[DeckCard], commanders: list[DeckCard], q
     legality: dict[str, Any] = {"banned": [], "not_legal": [], "restricted_violations": [], "unknown": 0}
     if fmt and fmt != "custom":
         for c in cards:
+            if fmt == "paupercommander" and c in commanders:
+                continue  # the uncommon leader is checked above; the commons rule is for the rest
             status = c.legalities.get(fmt)
             if status is None:
                 legality["unknown"] += c.quantity
@@ -551,6 +557,11 @@ def _match_key(name: str) -> str:
     return name.split(" // ", 1)[0].strip().casefold()
 
 
+def is_basic_land(name: str) -> bool:
+    """True for the basic lands (snow-covered and Wastes included), matched by front face."""
+    return _match_key(name) in _BASIC_KEYS
+
+
 def compare(before: Deck | dict[str, int], after: Deck | dict[str, int]) -> dict[str, Any]:
     """Card-level differences between two decks (or name -> count maps): ``added``, ``removed``
     and ``changed`` rows, and when both sides are decks, ``stats_delta`` (after minus before)
@@ -568,18 +579,22 @@ def compare(before: Deck | dict[str, int], after: Deck | dict[str, int]) -> dict
         if k in kb and a[ka[k]] != b[kb[k]]
     ]
     out: dict[str, Any] = {"added": added, "removed": removed, "changed": changed}
-    basic = lambda row: _match_key(row["name"]) in _BASIC_KEYS  # noqa: E731
     before_size, after_size = sum(a.values()), sum(b.values())
-    cut, add = [r for r in removed if not basic(r)], [r for r in added if not basic(r)]
-    pct = lambda n: round(n / before_size * 100) if before_size else 0  # noqa: E731
+    cut = [r for r in removed if not is_basic_land(r["name"])]
+    add = [r for r in added if not is_basic_land(r["name"])]
+    # Cards (not rows), basics left out: what was taken out as a share of the deck it came from
+    # and what was put in as a share of the deck it went into, so a 5-card list upgraded to a
+    # 67-card deck reads "65 put in (97%)", not "1300%".
+    cut_cards, add_cards = sum(r["quantity"] for r in cut), sum(r["quantity"] for r in add)
+    pct = lambda n, size: round(n / size * 100) if size else 0  # noqa: E731
     out["summary"] = {
         "before_size": before_size,
         "after_size": after_size,
-        "cut": len(cut),
-        "added": len(add),
-        "kept": len([k for k in ka if k in kb and k not in _BASIC_KEYS]),
-        "cut_pct": pct(len(cut)),
-        "added_pct": pct(len(add)),
+        "cut": cut_cards,
+        "added": add_cards,
+        "kept": sum(b[kb[k]] for k in ka if k in kb and k not in _BASIC_KEYS),  # cards too
+        "cut_pct": pct(cut_cards, before_size),
+        "added_pct": pct(add_cards, after_size),
         "basic_land_changes": [
             {
                 "name": (kb.get(k) or ka[k]),

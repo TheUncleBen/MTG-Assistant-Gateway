@@ -53,6 +53,7 @@ _LIGHT = """
     --orange-text:#a65400; --green-text:#117a45; --red-text:#b3262e; --blue-text:#2a66c9;
     --orange-tint:rgba(250,137,13,.16); --green-tint:rgba(30,187,108,.16);
     --red-tint:rgba(255,85,91,.16); --blue-tint:rgba(66,134,244,.14);
+    --danger-text:#b3262e; --toolbar-active:#8a4600; /* dark values: #ff8086 and #fa890d */
     --shadow:0 3px 6px rgba(0,0,0,.25); --scrim:rgba(0,0,0,.4);
 """
 
@@ -73,8 +74,7 @@ CSS = (
   --on-color:#ffffff;
   /* Text on the orange and green fills, and the red used as a fill: WCAG AA (4.5:1) for bold 16px
      labels. White on Archidekt's orange is 2.4:1 and on its red 3.1:1, so those labels were hard to read. */
-  --on-orange:#111111; --on-green:#111111; --danger-fill:#c0182b; --danger-text:#b3262e;
-  --toolbar-active:#8a4600;
+  --on-orange:#111111; --on-green:#111111; --danger-fill:#c0182b;
   --orange-tint:rgba(250,137,13,.14); --green-tint:rgba(30,187,108,.14);
   --red-tint:rgba(255,85,91,.14); --blue-tint:rgba(66,134,244,.14);
   --orange-select:rgba(250,137,13,.3);

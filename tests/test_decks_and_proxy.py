@@ -1316,6 +1316,33 @@ async def test_new_deck_says_when_a_listed_printing_was_not_found(stack: Stack) 
     ]
 
 
+async def test_new_deck_verify_fails_when_a_finish_or_printing_is_lost(stack: Stack) -> None:
+    """The read-back after a new deck is created compares printing ids and finishes as well as
+    names and counts: a Foil row stored as Normal, or a pinned printing stored as another one,
+    fails the verify instead of passing because the names and counts agree."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    text = "1 Sol Ring (sld) 1075 *F*\n1 Swamp (m21) 267\n1 Forest\n"
+
+    async def create() -> dict:
+        p = structured(await call(h, token, "propose_new_deck", {"name": "Finishes", "decklist_text": text}))
+        assert p["ok"], p
+        return structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+
+    good = await create()
+    assert good["ok"] and good["result"]["verified"] is True, good
+    ark.add_rows_lose_finish = True
+    lost = await create()
+    assert lost["ok"] is False and lost["error"] == "verify_mismatch", lost
+    assert "Sol Ring (printing or finish)" in lost["message"] and "Swamp" not in lost["message"], lost
+    ark.add_rows_lose_finish = False
+    ark.add_rows_swap_printing = {87176: 9008}  # Swamp M21 267 stored as the default Swamp
+    swapped = await create()
+    assert swapped["ok"] is False and swapped["error"] == "verify_mismatch", swapped
+    assert "Swamp (printing or finish)" in swapped["message"] and "Sol Ring" not in swapped["message"]
+    ark.add_rows_swap_printing = {}
+
+
 async def test_simulation_calls_take_the_shape_mystic_forge_accepts(stack: Stack) -> None:
     """The fake's goldfish_run, goldfish_ab and validate_decklist take one pydantic ``params``
     model like the real Mystic Forge, so a flat call would fail validation here as it does live.

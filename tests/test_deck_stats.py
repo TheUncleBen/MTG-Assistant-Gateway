@@ -58,10 +58,10 @@ def deck(cards: list[DeckCard], *, format_id: int | None = 3, categories: list[d
 
 
 def test_parse_deck_reads_oracle_fields_from_live_payload() -> None:
-    d = live("365563")
+    d = live("blink_sample")
     assert d.format_id == 3 and d.format == "commander"
     assert d.private is False and d.unlisted is False and d.edh_bracket is None
-    assert d.created_at.startswith("2020-01-21") and d.tags == []
+    assert d.created_at.startswith("2026-01-21") and d.tags == []
     assert d.description.startswith('{"ops"')  # Quill JSON, kept as the user's own text
     pact = next(c for c in d.cards if c.name == "Pact of Negation")
     assert pact.oracle_name == "Pact of Negation" and pact.cmc == 0.0 and pact.mana_cost == "{0}"
@@ -81,7 +81,7 @@ def test_parse_deck_reads_oracle_fields_from_live_payload() -> None:
 
 
 def test_parse_deck_fingerprint_ignores_the_new_fields() -> None:
-    body = json.loads((LIVE / "archidekt_deck_365563.json").read_text(encoding="utf-8"))
+    body = json.loads((LIVE / "archidekt_deck_blink_sample.json").read_text(encoding="utf-8"))
     before = parse_deck(body).fingerprint()
     for entry in body["cards"]:
         entry["card"]["prices"] = None
@@ -149,8 +149,8 @@ def test_format_names_reverse_format_ids() -> None:
 # -- compute over live fixtures -----------------------------------------------
 
 
-def test_compute_brago_deck() -> None:
-    s = compute(live("365563"))
+def test_compute_blink_deck() -> None:
+    s = compute(live("blink_sample"))
     assert s["card_count"] == 103 and s["distinct"] == 95
     assert s["land_count"] == 34 and s["nonland_count"] == 69
     assert s["average_mana_value"] == 2.57
@@ -320,9 +320,9 @@ def test_compare_dicts_and_decks() -> None:
             "after_size": 14,
             "cut": 1,
             "added": 1,
-            "kept": 1,
-            "cut_pct": 8,
-            "added_pct": 8,
+            "kept": 3,  # cards kept, at the after count: the three Opt
+            "cut_pct": 8,  # 1 of 13
+            "added_pct": 7,  # 1 of 14
             "basic_land_changes": [],
         },
     }
@@ -378,12 +378,25 @@ def test_compare_matches_faces_and_case_and_summarises_like_a_precon_diff() -> N
         "before_size": 43,
         "after_size": 42,
         "cut": 1,
-        "added": 1,
+        "added": 2,  # cards, not rows: both copies of New
         "kept": 2,
-        "cut_pct": 2,
-        "added_pct": 2,
+        "cut_pct": 2,  # of the precon's 43 cards
+        "added_pct": 5,  # of the build's 42 cards
         "basic_land_changes": [{"name": "Island", "before": 30, "after": 28}],
     }
+
+
+def test_compare_percentages_are_shares_of_each_deck() -> None:
+    # A 5-card list upgraded into a 67-card deck: 65 cards put in is 97% of the new deck, not 1300%
+    # of the old one; the two basics stay out of the cut and add counts.
+    short = {f"Old {i}": 1 for i in range(5)}
+    big = {f"New {i}": 1 for i in range(65)}
+    big.update({"Island": 1, "Forest": 1})
+    sm = compare(short, big)["summary"]
+    assert sm["before_size"] == 5 and sm["after_size"] == 67
+    assert sm["cut"] == 5 and sm["cut_pct"] == 100
+    assert sm["added"] == 65 and sm["added_pct"] == 97
+    assert len(compare(short, big)["added"]) == 67  # the rows still list the basics
 
 
 def test_checks_cover_what_the_archidekt_validator_checked() -> None:
@@ -556,6 +569,42 @@ def test_format_specific_command_zones() -> None:
     pdh = deck([_cmdr("Aesi", rarity="mythic"), card("Island", 99, types=["Land"], supertypes=["Basic"])],
                format_id=17, categories=cat)  # fmt: skip
     assert any("uncommon" in p for p in compute(pdh)["checks"]["problems"])
+    # ... which need not be legendary, and is not held to the commons rule the other 99 follow
+    # (Archidekt flags the uncommon leader itself as not legal in paupercommander).
+    legal = {"paupercommander": "legal"}
+    commons = card("Island", 99, types=["Land"], supertypes=["Basic"], legalities=legal)
+    leader = _cmdr(
+        "Third Path Iconoclast", rarity="uncommon", supertypes=[], legalities={"paupercommander": "not_legal"}
+    )
+    good = compute(deck([leader, commons], format_id=17, categories=cat))["checks"]
+    assert good["ok"] is True and good["commander_zone"]["ok"] is True, good
+    assert good["legality"]["not_legal"] == []
+    not_creature = _cmdr("Opt", types=["Instant"], rarity="uncommon", supertypes=[])
+    bad = compute(deck([not_creature, commons], format_id=17, categories=cat))["checks"]
+    assert bad["commander_zone"]["cannot_command"] == ["Opt"]
+
+
+def test_the_first_category_decides_whether_a_row_is_in_the_deck() -> None:
+    """Archidekt's primary category for a row is its first one. A card filed under Creature then
+    an excluded Stax counts in the deck; one filed under 1v1 Sideboard then Creature does not. A
+    live 60-card Oathbreaker deck with rows like these came to 60 this way (63 under "any included
+    category")."""
+    cats = [
+        {"name": "Creature", "includedInDeck": True},
+        {"name": "Stax", "includedInDeck": False},
+        {"name": "1v1 Sideboard", "includedInDeck": False},
+    ]
+    d = deck(
+        [
+            card("Strict Proctor", 1, categories=["Creature", "Stax"]),
+            card("Rug of Smothering", 1, categories=["1v1 Sideboard", "Creature", "Stax"]),
+            card("Opt", 1, categories=[]),
+        ],
+        categories=cats,
+    )
+    assert [c.name for c in d.main_cards] == ["Strict Proctor", "Opt"]
+    assert [c.name for c in d.side_cards] == ["Rug of Smothering"]
+    assert d.categories_count(["Stax", "Creature"]) is False and d.categories_count(None) is True
 
 
 def test_companion_and_bracket_mismatch_checks() -> None:

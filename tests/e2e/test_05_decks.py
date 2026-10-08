@@ -385,14 +385,13 @@ def test_apply_over_mcp_only_in_auto_mode(clients):
             assert p["approval_mode"] == "auto" and p["assistant_may_apply"] is True, p
             applied = await c.call(s, "apply_proposal", {"proposal_id": p["proposal_id"]})
             assert applied["ok"] and applied["state"] == "applied" and applied["result"]["verified"], applied
+            # The CSV deck (72 rows) is created in full: every printing it names exists on the mock
+            # (its decks' printings count as known cards), each row goes as one paced request, and
+            # the deck is read back and checked by name, count, printing and finish. At the default
+            # one-second pacing this is the longest call of the suite (a few minutes).
             create = await c.call(s, "apply_proposal", {"proposal_id": STATE["create"]})
-            # the CSV deck has cards the mock's card database does not know: created, then reported
-            assert create["ok"] is False and create["error"] in (
-                "not_found",
-                "verify_mismatch",
-                "invalid",
-                "contract",
-            ), create
+            assert create["ok"] is True and create["state"] == "applied", create
+            assert create["result"]["verified"] is True and create["result"]["sent_entries"] == 72, create
 
     run(go())
     set_switches(writes="false", mode="manual")

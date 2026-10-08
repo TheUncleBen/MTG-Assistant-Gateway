@@ -29,11 +29,12 @@ def _arena_line(c: DeckCard) -> str:
 def to_arena(deck: Deck) -> str:
     """Arena's import text: ``1 Name (SET) 123`` under ``Commander``, ``Companion``, ``Deck`` and
     ``Sideboard`` headings (the headings Arena's own export writes). Cards with the Archidekt
-    category ``Companion`` go under Companion; other rows kept outside the deck are the sideboard."""
+    category ``Companion`` go under Companion; other rows kept outside the deck are the sideboard,
+    except the Maybeboard, which is left out (Arena has no maybeboard)."""
     commanders = [c for c in deck.main_cards if deck.is_commander(c)]
     companions = [c for c in deck.cards if "Companion" in c.categories and not deck.is_commander(c)]
     main = [c for c in deck.main_cards if c not in commanders and c not in companions]
-    side = [c for c in deck.side_cards if c not in companions]
+    side = [c for c in deck.side_cards if c not in companions and "Maybeboard" not in c.categories]
     blocks: list[str] = []
     for title, rows in (
         ("Commander", commanders),

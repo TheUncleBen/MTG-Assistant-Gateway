@@ -46,12 +46,26 @@
     document.addEventListener("keydown", function (e) { if (e.key === "Escape" && viewer.classList.contains("open")) close(); });
     return viewer;
   }
-  function close() {
+  /* Opening pushes a history entry so the phone's Back button (and the browser's) closes the
+     viewer instead of leaving the page; closing from the page goes back over that entry. */
+  var pushed = false;
+  function hide() {
     if (!viewer) return;
     viewer.classList.remove("open");
     viewer.textContent = "";
     if (lastFocus && lastFocus.focus) lastFocus.focus();
   }
+  function close() {
+    if (!viewer || !viewer.classList.contains("open")) return;
+    if (pushed) { pushed = false; history.back(); return; }
+    hide();
+  }
+  window.addEventListener("popstate", function () {
+    // Back over the viewer's own entry closes it; Back over an entry pushed on top of it (a menu
+    // opened while the card is up) leaves the viewer and its entry in place.
+    if (history.state && history.state.cardview) return;
+    if (viewer && viewer.classList.contains("open")) { pushed = false; hide(); }
+  });
   function faceBlock(face, isOnly) {
     var block = el("div", "face");
     if (!isOnly) {
@@ -117,6 +131,9 @@
     box.appendChild(closeBtn);
     v.appendChild(box);
     v.classList.add("open");
+    if (!pushed) {
+      try { history.pushState({ cardview: 1 }, ""); pushed = true; } catch (e) { pushed = false; }
+    }
     closeBtn.focus();
   }
   /* Reads the data-* attributes the server puts on card rows and image cards. */

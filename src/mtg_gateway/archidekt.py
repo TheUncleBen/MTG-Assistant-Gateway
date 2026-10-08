@@ -310,12 +310,19 @@ class Deck:
         return any(cat in premier for cat in card.categories)
 
     def in_deck(self, card: DeckCard) -> bool:
-        """A card counts as in the deck unless every one of its categories is excluded.
-        Uncategorized cards count as in the deck (as Mystic Forge does)."""
-        if not card.categories:
+        """Whether a card counts as in the deck: its first category (Archidekt's primary category
+        for the row) decides. Uncategorized cards count as in the deck (as Mystic Forge does)."""
+        return self.categories_count(card.categories)
+
+    def categories_count(self, categories: list[str] | None) -> bool:
+        """Whether a row with these categories counts as in the deck. The first category is the
+        row's primary one and decides on its own: a row filed under an excluded category first and
+        an included one second sits outside the deck, the other way round it is in. This is how a
+        live 60-card Oathbreaker deck with rows in several categories comes to 60 (inferred from
+        the deck's data on 2026-10-08; the "any included category" rule gave 63)."""
+        if not categories:
             return True
-        excluded = self.excluded_categories()
-        return any(cat not in excluded for cat in card.categories)
+        return categories[0] not in self.excluded_categories()
 
     @property
     def main_cards(self) -> list[DeckCard]:

@@ -22,7 +22,7 @@ from collections import Counter
 from typing import Any
 
 from .archidekt import VOTE_UP, Deck, DeckCard, featured_scryfall_id, format_label
-from .deck_stats import WUBRG, colour_letter, is_land, mana_pips
+from .deck_stats import WUBRG, colour_letter, is_basic_land, is_land, mana_pips
 from .theme import icon
 from .views import cards_by_category
 
@@ -1062,13 +1062,17 @@ def compare_page_html(
     tiles = [
         (f"{sm['before_size']}", f"cards in {other_name}"),
         (f"{sm['after_size']}", f"cards in {deck.name or 'this deck'}"),
-        (f"{sm['cut']}", f"taken out ({sm['cut_pct']}%)"),
-        (f"{sm['added']}", f"put in ({sm['added_pct']}%)"),
-        (f"{sm['kept']}", "kept (basics aside)"),
+        (f"{sm['cut']}", f"cards taken out ({sm['cut_pct']}% of {other_name})"),
+        (f"{sm['added']}", f"cards put in ({sm['added_pct']}% of {deck.name or 'this deck'})"),
+        (f"{sm['kept']}", "cards kept (basics aside)"),
     ]
     tile_html = "".join(f"<div class='tile'><b>{esc(v)}</b><span>{esc(k)}</span></div>" for v, k in tiles)
-    removed = "".join(_compare_row(r["name"], f"{r['quantity']}x", cards) for r in result["removed"])
-    added = "".join(_compare_row(r["name"], f"{r['quantity']}x", cards) for r in result["added"])
+    # Basic lands are listed once, under "Basic lands", so the two card lists and their counts
+    # agree with the tiles above them.
+    removed_rows = [r for r in result["removed"] if not is_basic_land(r["name"])]
+    added_rows = [r for r in result["added"] if not is_basic_land(r["name"])]
+    removed = "".join(_compare_row(r["name"], f"{r['quantity']}x", cards) for r in removed_rows)
+    added = "".join(_compare_row(r["name"], f"{r['quantity']}x", cards) for r in added_rows)
     changed = "".join(
         _compare_row(r["name"], f"{r['before']}→{r['after']}", cards) for r in result["changed"]
     )
@@ -1078,9 +1082,9 @@ def compare_page_html(
     empty = "<li class='muted'>None</li>"
     lists = (
         "<div class='comparecols'>"
-        f"<section class='panel'><h3>Taken out of {oname} <span class='count'>{len(result['removed'])}</span>"
+        f"<section class='panel'><h3>Taken out of {oname} <span class='count'>{len(removed_rows)}</span>"
         f"</h3><ul class='comparelist'>{removed or empty}</ul></section>"
-        f"<section class='panel'><h3>Put into {name} <span class='count'>{len(result['added'])}</span></h3>"
+        f"<section class='panel'><h3>Put into {name} <span class='count'>{len(added_rows)}</span></h3>"
         f"<ul class='comparelist'>{added or empty}</ul></section>"
         f"<section class='panel'><h3>Changed counts <span class='count'>{len(result['changed'])}</span></h3>"
         f"<ul class='comparelist'>{changed or empty}</ul>"

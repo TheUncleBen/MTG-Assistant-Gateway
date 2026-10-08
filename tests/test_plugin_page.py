@@ -106,7 +106,11 @@ async def _check_install_pages(harness: Harness, b: Browser) -> None:
     for key in plugin_page.CLIENTS:
         assert f"href='/install?for={key}'" in picker.text
     assert "claude plugin install" not in picker.text  # steps only after a client is picked
-    assert "Sign out" not in picker.text
+    # A signed-in page: the member's navigation is on it (tab bar on phones and in the app, rail,
+    # account menu with Sign out), like every other page of the site.
+    assert "<nav class='tabbar'" in picker.text and "Sign out" in picker.text
+    in_app = await b.http.get("/install", headers={"User-Agent": "Mozilla/5.0 MTGAssistant/1.0"})
+    assert in_app.status_code == 200 and "<nav class='tabbar'" in in_app.text
 
     page = await b.http.get("/install?for=claude-code")
     assert page.status_code == 200
@@ -118,7 +122,7 @@ async def _check_install_pages(harness: Harness, b: Browser) -> None:
     assert "modal=add-custom-connector" in page.text
     assert "connectorUrl=https%3A%2F%2Fmtg.test%2Fmcp" in page.text
     assert "default-src 'none'" in page.headers["content-security-policy"]
-    assert "Sign out" not in page.text
+    assert "Sign out" in page.text
 
     md = await harness.http.get("/install.md")
     assert md.status_code == 200

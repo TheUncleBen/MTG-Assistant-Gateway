@@ -107,7 +107,24 @@ one owner per capability among the assistant's tools.
 - Readability: the Delete deck item in the dark More menu, the active tab or rail label in the
   light theme and the headings inside menus ("App", "Site theme") meet WCAG AA contrast (4.5:1 or
   better); the phone deck banner no longer runs the owner's avatar under the top bar; the deck
-  list's Order by control and buttons line up on folding screens.
+  list's Order by control and buttons line up on folding screens. A test now resolves the colour
+  tokens the way each theme does, so a light value left in the dark set cannot come back.
+- Compare: "taken out" and "put in" count cards and give each as a share of the deck it left or
+  joined (a 5-card list upgraded into a 67-card deck reads 97%, not 1300%); basic lands are listed
+  once, under Basic lands, so the list counts match the tiles.
+- New deck: when a card or printing in the list does not exist on Archidekt, the review page says
+  that (and the result names the card) instead of "No such proposal for your account". The
+  read-back after a new deck is created compares printings and finishes too, not only names and
+  counts, so a lost foil or a swapped printing fails the verification.
+- The card viewer adds a history entry while it is open, so Back (the Android button, or the
+  browser's) closes the card instead of leaving the deck page.
+- The Install page shows the member's navigation (tab bar, rail, account menu) like every other
+  signed-in page; in the Android app it had none.
+- Deck checks: Pauper Commander accepts a non-legendary uncommon creature as the commander and no
+  longer counts the commander against the commons rule. A row's first category decides whether it
+  is in the deck (Archidekt's primary category), so a 60-card Oathbreaker deck whose rows also
+  carry excluded categories is 60 cards, not 63.
+- Arena export leaves the Maybeboard out (Arena has no maybeboard); the Sideboard still goes.
 - Simulations through the gateway never ran against the pinned Mystic Forge: `run_deck_report`,
   `compare_decks simulate: true` and the report's validation sent their arguments flat, while
   Mystic Forge's tools take one `params` object, so every call came back as a validation error

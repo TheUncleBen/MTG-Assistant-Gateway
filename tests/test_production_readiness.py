@@ -4,6 +4,7 @@ transactional migrations and the indexes the purge and lists rely on."""
 from __future__ import annotations
 
 import asyncio
+import re
 import sqlite3
 import time
 from pathlib import Path
@@ -337,6 +338,20 @@ def test_button_text_contrast_meets_wcag_aa():
     assert ratio("#1ebb6c", "#111111") >= 4.5  # success buttons, ok badges
     assert ratio("#c0182b", "#ffffff") >= 4.5  # danger buttons and badges
     assert ratio("#2a66c9", "#ffffff") >= 4.5  # info badges
+
+    # The tokens as each theme resolves them: the dark set is the :root block, the light set is
+    # that block with _LIGHT laid over it. A token declared twice in one block takes its last value
+    # (that is how the dark Delete item once ended up with the light red, 1.8:1 on the dark menu).
+    def tokens(block: str) -> dict[str, str]:
+        return dict(re.findall(r"(--[a-z0-9-]+):\s*(#[0-9a-fA-F]{6})", block))
+
+    dark = tokens(css.split(":root{", 1)[1].split("}", 1)[0])
+    light = {**dark, **tokens(theme._LIGHT)}
+    for name, t in (("dark", dark), ("light", light)):
+        assert ratio(t["--danger-text"], t["--surface-2"]) >= 4.5, name  # Delete in the More menu
+        assert ratio(t["--toolbar-active"], t["--toolbar-bg"]) >= 4.5, name  # active tab or rail label
+        assert ratio(t["--menu-head"], t["--surface-2"]) >= 4.5, name  # headings inside menus
+        assert ratio(t["--text"], t["--bg"]) >= 4.5 and ratio(t["--link"], t["--surface"]) >= 4.5, name
 
 
 async def test_member_can_delete_their_data_from_the_account_page(gw: Harness) -> None:  # noqa: F811

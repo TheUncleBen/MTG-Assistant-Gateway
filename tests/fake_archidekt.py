@@ -104,6 +104,10 @@ class FakeArchidekt:
         self.calls: list[tuple[str, str]] = []
         self.patches: list[dict[str, Any]] = []
         self.fail_patch_silently = False
+        # Faults a verify must catch: added rows stored without their finish, or with another
+        # printing of the same card (card id -> card id to store instead).
+        self.add_rows_lose_finish = False
+        self.add_rows_swap_printing: dict[int, int] = {}
         self.create_returns_full_deck = True  # live Archidekt does not (verified 2026-10-05)
         self.fail_deck_reads = False  # signed-in deck reads answer 503
         self.next_rel_id = 2000
@@ -837,8 +841,10 @@ class FakeArchidekt:
                         "id": self.next_rel_id,
                         "quantity": qty,
                         "categories": e.get("categories") or None,
-                        "modifier": e["modifications"].get("modifier", "Normal"),
-                        "card": self.printing(e["cardid"]),
+                        "modifier": "Normal"
+                        if self.add_rows_lose_finish
+                        else e["modifications"].get("modifier", "Normal"),
+                        "card": self.printing(self.add_rows_swap_printing.get(e["cardid"], e["cardid"])),
                     }
                 )
                 for cat in e.get("categories") or []:

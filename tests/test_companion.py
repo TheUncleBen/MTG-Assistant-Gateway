@@ -419,8 +419,13 @@ async def test_compare_page_shows_what_a_build_changed(stack: Stack) -> None:
         token = await mcp_token(stack.h)
         tool = structured(await call(stack.h, token, "compare_decks", {"a": paste, "b": "42"}))
         sm = tool["summary"]
-        assert f"<b>{sm['cut']}</b><span>taken out ({sm['cut_pct']}%)</span>" in r.text
-        assert f"<b>{sm['added']}</b><span>put in ({sm['added_pct']}%)</span>" in r.text
+        out_tile = f"<b>{sm['cut']}</b><span>cards taken out ({sm['cut_pct']}% of the pasted list)</span>"
+        in_tile = f"<b>{sm['added']}</b><span>cards put in ({sm['added_pct']}% of Sample Commander Deck)"
+        assert out_tile in r.text and in_tile in r.text
+        # the lists under the tiles leave basic lands to their own list, so their counts match the tiles
+        added_rows = [a for a in tool["added"] if a["name"] not in ("Island", "Forest")]
+        assert f"Put into Sample Commander Deck <span class='count'>{len(added_rows)}</span>" in r.text
+        assert len(added_rows) < len(tool["added"])  # the deck's Forests are only under Basic lands
         bad = await b.http.get("/decks/42/compare?with=https://evil.example/decks/1", headers=NAV)
         assert bad.status_code == 400 and "could not be read" in bad.text
         gone = await b.http.get("/decks/42/compare?with=999999", headers=NAV)
@@ -518,6 +523,35 @@ async def test_export_import_round_trip_keeps_every_card_finish_and_commander(st
         await b.aclose()
 
 
+async def test_new_deck_page_says_which_card_was_not_found(stack: Stack) -> None:
+    """A New deck list with a card Archidekt does not know fails at apply time. The review page
+    then says something the proposal needs was not found and shows the card's name in the result,
+    instead of "No such proposal for your account" (the proposal does exist)."""
+    b = await linked_browser(stack)
+    try:
+        csrf = await b.csrf("/account")
+        r = await b.http.post(
+            "/decks/new",
+            data={
+                "csrf": csrf,
+                "name": "Typo deck",
+                "format": "commander",
+                "kind": "list",
+                "source": "1 Sol Ring\n1 Definitely Not A Card Zzz\n",
+            },
+        )
+        assert r.status_code == 303 and "?err=missing" in r.headers["location"], (r.status_code, r.headers)
+        page = await b.http.get(r.headers["location"], headers=NAV)
+        assert page.status_code == 200
+        assert "was not found on Archidekt" in page.text and "No such proposal" not in page.text
+        assert "Definitely Not A Card Zzz" in page.text  # the result names the card
+        # the code for a proposal that really does not exist is unchanged
+        gone = await b.http.get("/proposals/nope?err=not_found", headers=NAV)
+        assert "No such proposal" in gone.text
+    finally:
+        await b.aclose()
+
+
 async def test_export_only_formats_arena_mtgo_and_pdf(stack: Stack) -> None:
     """Arena text, an MTGO .dek and a PDF download for any deck the member can read. They are
     one-way (nothing imports them back); each names every card with its count and keeps the
@@ -526,13 +560,15 @@ async def test_export_only_formats_arena_mtgo_and_pdf(stack: Stack) -> None:
 
     b = await linked_browser(stack)
     try:
-        stack.ark.add_side_row(42, "Opt", 2)
+        stack.ark.add_side_row(42, "Opt", 2, category="Sideboard")
+        stack.ark.add_side_row(42, "Delver of Secrets // Insectile Aberration", 1)  # Maybeboard: left out
         arena = await b.http.get("/decks/42/export.arena.txt")
         assert arena.status_code == 200 and arena.headers["content-disposition"].endswith('.arena.txt"')
         blocks = arena.text.strip().split("\n\n")
         assert [blk.splitlines()[0] for blk in blocks] == ["Commander", "Deck", "Sideboard"]
         assert blocks[0].splitlines()[1] == "1 Aesi, Tyrant of Gyre Strait (CMR) 365"
         assert blocks[2].splitlines()[1].startswith("2 Opt") and "1 Sol Ring (CMR) 472" in blocks[1]
+        assert "Delver of Secrets" not in arena.text  # Arena has no maybeboard
         dek = await b.http.get("/decks/42/export.dek")
         assert dek.status_code == 200 and dek.headers["content-type"].startswith("application/xml")
         import xml.etree.ElementTree as ET
