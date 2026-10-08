@@ -337,7 +337,9 @@ Claude / ChatGPT / browser ──HTTPS──▶ reverse proxy ──▶ mtg-gate
   for a few seconds, `MTG_MEMBERSHIP_CHECK_TTL`). Take someone out of the
   group, or deactivate them, and their next request fails: their tokens and
   sessions are revoked, and a removal from the group revokes their
-  Archidekt link too. If the provider can't be reached, requests are
+  Archidekt link too (at that next request; press **Disable** on the admin
+  page as well to delete it at once,
+  [docs/OPERATIONS.md](docs/OPERATIONS.md#revoking-access)). If the provider can't be reached, requests are
   refused rather than let through. With Authentik
   this needs the `offline_access` scope mapping
   ([docs/IDP-AUTHENTIK.md](docs/IDP-AUTHENTIK.md)).

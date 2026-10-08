@@ -237,12 +237,19 @@ For the exact devices and plans tested, see
     sign-ins are overwritten on disk (SQLite `secure_delete`, and the
     write-ahead log is flushed after an unlink), not just marked free.
   - **Who is trusted.** The server holds the key that opens the session, so
-    whoever runs the server can read it. The Account page says so ("Whoever
-    runs this gateway is trusted with this link…") next to a note that
-    Archidekt has no official interface for other apps (the gateway uses the
-    same requests archidekt.com's own pages use) and that Archidekt's terms
-    restrict automated access, so an account could be limited or blocked;
-    linking needs a ticked box.
+    whoever runs the server can open it and act as the member on Archidekt
+    until it expires. The link form says so in a fixed disclosure
+    (`src/mtg_gateway/link_disclosure.py`, no setting turns it off): what
+    linking gives the gateway, what is stored and never stored, what the
+    person who runs the server and the site's admins can and cannot see or
+    do, logs, backups, how long the session lasts and how to end it, and
+    Archidekt's terms. Linking needs a ticked box; the text stays on the
+    Account page afterwards.
+  - **Sealed and dated.** The encrypted blob names its purpose and the
+    member's subject and is refused under any other member's link. The
+    Account page shows when the session stops working, read from the refresh
+    token's own `exp` (Archidekt does not rotate it, so it is fixed at link
+    time), and the hourly purge deletes sessions past that date.
 - **Deck changes** need the person's own yes, unless they chose otherwise.
   The code enforces it: changes are proposals until applied with the review
   page's Apply button or the in-chat card's Approve button. Each person has

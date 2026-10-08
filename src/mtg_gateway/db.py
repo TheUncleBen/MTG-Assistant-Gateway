@@ -1188,16 +1188,33 @@ class Database:
 
     # archidekt links -------------------------------------------------------
     def save_link(self, sub: str, *, username: str, user_id: str | None, secret_enc: str) -> None:
+        """Store a new link. A relink replaces the old row whole: its dates start again, and the
+        session it held is flushed from the write-ahead log at once (as an unlink does)."""
         now = int(time.time())
         with self.tx() as c:
+            replaced = c.execute(
+                "SELECT 1 FROM archidekt_links WHERE sub = ? AND secret_enc != ''", (sub,)
+            ).fetchone()
             c.execute(
                 """INSERT INTO archidekt_links (sub, archidekt_username, archidekt_user_id, secret_enc,
                    status, created_at, refreshed_at) VALUES (?, ?, ?, ?, 'active', ?, ?)
                    ON CONFLICT(sub) DO UPDATE SET archidekt_username=excluded.archidekt_username,
                      archidekt_user_id=excluded.archidekt_user_id, secret_enc=excluded.secret_enc,
-                     status='active', refreshed_at=excluded.refreshed_at""",
+                     status='active', created_at=excluded.created_at,
+                     refreshed_at=excluded.refreshed_at, last_used_at=NULL""",
                 (sub, username, user_id, secret_enc, now, now),
             )
+        if replaced:
+            self.flush_wal()
+
+    def active_links(self) -> list[dict[str, Any]]:
+        """``sub`` and ``secret_enc`` of every active link (for the startup reseal and the hourly
+        expiry sweep)."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT sub, secret_enc FROM archidekt_links WHERE status = 'active' AND secret_enc != ''"
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def update_link_secret(self, sub: str, secret_enc: str, *, only_secret: str | None = None) -> bool:
         """Replace the stored session of an *active* link. False when the link was revoked or

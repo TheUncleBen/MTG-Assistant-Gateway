@@ -318,7 +318,8 @@ secret.
    for `MTG_MEMBERSHIP_CHECK_TTL` seconds, 5 by default, so that's the worst
    case). Someone taken out of the group loses every gateway token, every
    browser session (web pages and Android app), the Authentik tokens the
-   gateway kept, and their Archidekt link, all at once; the audit log gets
+   gateway kept, and their stored Archidekt session, all at once on that
+   next request (see the note on **Disable** below); the audit log gets
    a `membership_revoked` row with the reason `not_in_group`. A deactivated
    or deleted user shows up only as a refused token, so they lose every
    token and session but keep their Archidekt link (an admin can remove it
@@ -328,6 +329,15 @@ secret.
 
    Taking someone out of `MTG_ADMIN_GROUP` works the same way: the admin
    page is gone on their next request.
+
+   **Also press Disable on `/admin/users` when you remove someone.** Taking
+   them out of the group cuts their access to the gateway at once, but their
+   stored Archidekt session is only deleted when they next try to use the
+   gateway. If they never come back, it stays on the server until an admin
+   presses **Disable** or **Unlink Archidekt**, or until the session expires
+   (about 40 days after they linked; the hourly clean-up then deletes it).
+   **Disable** deletes it at once and keeps them out even if they are put
+   back in the group by mistake.
 
    If Authentik can't be reached, the gateway refuses requests with a 503
    ("The sign-in service can't be reached to confirm your access") and
@@ -423,9 +433,33 @@ docker exec -it --user 1000:1000 $(docker ps -q -f name=mtg_mtg-assistant-gatewa
   print(c.execute(\"UPDATE archidekt_links SET status='revoked', secret_enc='' WHERE sub=(SELECT sub FROM users WHERE email=?)\", ('person@example.com',)).rowcount); c.commit()"
 ```
 
-That doesn't end the session on Archidekt's side, and whether Archidekt
-offers a way to do that for API sessions is unknown. If they want the old
-session dead for sure, they should change their Archidekt password.
+That deletes only the gateway's copy. Whether the session also stops working
+on Archidekt's side, and whether changing the Archidekt password ends it, is
+not known; nobody has tested either.
+
+### What members are told before they link
+
+The link form shows a fixed disclosure that no setting turns off (the text is
+in `src/mtg_gateway/link_disclosure.py` and in
+[USING.md](USING.md#what-linking-archidekt-gives-the-gateway)). It tells
+members plainly that whoever has access to the server and the
+`mtg_fernet_key` secret can open their stored Archidekt session and act as
+them on Archidekt until it expires, that you can read everything else the
+gateway keeps about them, and that you control the code. Members tick a box
+to say they have read it. Keep it true: if you change what the gateway stores,
+logs or backs up, change the disclosure too.
+
+### When a link stops working
+
+The Account page shows each member the date their link stops working, read
+from the expiry Archidekt wrote into their own stored refresh token (about 40
+days after linking, measured on 2026-10-05; the refresh token is not renewed
+along the way). Every hour the gateway deletes stored sessions past that date
+and writes an `archidekt_link_expired` audit row with the reason
+`session expired`; the member links again. Each stored session is also sealed
+to its member inside the encryption, so a session copied to another member's
+row opens nothing (sessions stored by 0.7.6 or earlier are sealed at the first
+start of 0.7.7).
 
 ## Deck writes and the kill switch
 

@@ -7,6 +7,47 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.7] - 2026-10-08
+
+Members now see exactly what linking their Archidekt account gives the
+gateway and the person who runs it, and the stored Archidekt session is
+handled more strictly. Nothing to change in the stack, the settings or the
+secrets.
+
+### Changed
+
+- **Linking Archidekt:** the one-line trust note above the link form is
+  replaced by a full, fixed disclosure: what linking does and what the
+  gateway uses the session for; what is stored and never stored; what the
+  person who runs the server can see and do (with the server and its key
+  they can open the session and act as the member on Archidekt until it
+  expires, and they control the code); what the site's admins can and
+  cannot see or do; logs and backups; how long the session lasts and how to
+  end it, including what is not known. Members tick a box to say they have
+  read it, and it stays on the Account page after linking. No setting turns
+  it off (the old switch was a constant in the code, not a stack setting).
+- **Account page:** shows the date the stored Archidekt session stops
+  working, read from the member's own refresh token (about 40 days after
+  linking). `account_status` returns it as `link_expires_at`.
+- **Wording:** the unlink message and the docs no longer say that Archidekt
+  keeps accepting an unlinked session or that changing the Archidekt
+  password ends it; neither is known.
+
+### Security
+
+- The stored Archidekt session is sealed to its member inside the
+  encryption, so a session copied into another member's row opens nothing.
+  Sessions stored by 0.7.6 or earlier are sealed at the first start.
+- Every hour the gateway deletes stored sessions that have expired, instead
+  of keeping them until the member next uses the gateway.
+- Relinking replaces the old session at once on disk (the write-ahead log is
+  flushed, as for an unlink) and restarts the link's dates.
+- A new test checks that no password or Archidekt token reaches the logs at
+  any level while linking, using, refreshing and unlinking.
+- Operator docs: when you remove someone from the group, also press
+  **Disable**; otherwise their stored Archidekt session is only deleted when
+  they next use the gateway or when it expires.
+
 ## [0.7.6] - 2026-10-08
 
 One small security fix from the acceptance check of 0.7.5. Nothing to change

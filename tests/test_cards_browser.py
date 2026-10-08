@@ -546,14 +546,14 @@ def test_account_card_points_at_what_is_missing() -> None:
                 "name": "Alice",
                 "groups": ["mtg-gateway-users"],
                 "token_expires_in_seconds": 3000,
-                "gateway_version": "0.7.6",
+                "gateway_version": "0.7.7",
                 "account_page": "https://mtg.test/account",
             }
             card = _open(page, "account-card", {"structuredContent": who})
             card.locator("#open").wait_for()
             assert (
                 "mtg-gateway-users" in card.locator("#facts").inner_text()
-                and "version 0.7.6" in card.locator("#facts").inner_text()
+                and "version 0.7.7" in card.locator("#facts").inner_text()
             )
             assert not errors, errors
         finally:

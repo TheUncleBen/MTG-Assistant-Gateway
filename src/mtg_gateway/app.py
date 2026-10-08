@@ -471,7 +471,11 @@ def build_mcp_server(state: AppState) -> MCPServer:
         if interrupted:
             logger.warning("%d deck change(s) cut off by the last shutdown were marked failed", interrupted)
         await asyncio.to_thread(state.db.purge_expired)
-        tasks = [asyncio.create_task(purge_loop(state.db))]
+        resealed = await asyncio.to_thread(state.decks.reseal_legacy_links)
+        if resealed:
+            logger.info("%d stored Archidekt session(s) sealed to their member", resealed)
+        await asyncio.to_thread(state.decks.purge_expired_links)
+        tasks = [asyncio.create_task(purge_loop(state.db, also=state.decks.purge_expired_links))]
         if s.backup_dir is not None:
             s.backup_dir.mkdir(parents=True, exist_ok=True)
             tasks.append(
