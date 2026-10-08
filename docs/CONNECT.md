@@ -256,7 +256,7 @@ card lookups for scanning, and making deck proposals. For the write tools
   chose an auto approval mode on your Account page, the assistant applies
   what the mode allows itself.
 - `reject_proposal`: press **Reject this proposal** on the review page.
-- `run_deck_report`: press **Run deck report** on the deck's page under
+- `run_deck_report`: press **Run simulation** on the deck's page under
   **Decks** on the gateway.
 - `save_scan_session`: scan on the gateway's `/scan` page in your browser
   instead.

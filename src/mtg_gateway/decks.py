@@ -16,6 +16,7 @@ source reading and is not verified against Archidekt (see ``build_payload``).
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import logging
 import re
@@ -38,6 +39,7 @@ from .archidekt import (
     ArchidektClient,
     ArchidektError,
     Deck,
+    art_url,
     finish_modifier,
     front_face,
     jwt_exp,
@@ -46,7 +48,7 @@ from .archidekt import (
 from .archidekt_csv import CsvError, parse_export
 from .config import Settings
 from .db import Database
-from .decklist import DecklistError, ListCard, clean_text, parse_decklist, to_text
+from .decklist import DecklistError, ListCard, clean_category, clean_text, parse_decklist, to_text
 
 logger = logging.getLogger(__name__)
 
@@ -188,16 +190,19 @@ def row_line(r: dict[str, Any]) -> str:
     """The plain-text diff line for one review row."""
     kind = r.get("kind")
     label = row_label(r)
+    side = " (maybeboard/sideboard)" if r.get("zone") == "side" else ""
     if kind == "add":
-        return f"+{r['qty']} {label}"
+        return f"+{r['qty']} {label}{side}"
     if kind == "remove":
-        return f"-{r['qty']} {label}"
+        return f"-{r['qty']} {label}{side}"
     if kind == "change":
-        return f"{r['before']} -> {r['after']} {label}"
+        return f"{r['before']} -> {r['after']} {label}{side}"
     if kind == "category":
         line = f"{r['name']}: category {r['before']} -> {r['after']}"
         if r.get("leaves"):  # moved into a category the deck does not count (Maybeboard...)
             line += f" (leaves the deck, -{r['leaves']})"
+        if r.get("enters"):  # a maybeboard or sideboard row moved into the deck proper
+            line += f" (enters the deck, +{r['enters']})"
         return line
     if kind == "finish":
         return f"{r['name']}: finish {r['before']} -> {r['after']}"
@@ -257,6 +262,9 @@ class Change:
     set_code: str | None = None
     collector_number: str | None = None
     finish: str | None = None
+    # "main" (the deck proper) or "side": the maybeboard and sideboard rows, which count
+    # separately. A count or category change names the zone its rows are in.
+    zone: str = "main"
 
     @property
     def pinned(self) -> bool:
@@ -283,9 +291,12 @@ class Change:
             d["collector_number"] = self.collector_number
         if self.finish:
             d["finish"] = self.finish
+        if self.zone == "side":
+            d["zone"] = "side"
         return d
 
 
+ZONES = ("main", "side")
 _SET_CODE = re.compile(r"[A-Za-z0-9]{2,6}")
 _COLLECTOR_NUMBER = re.compile(r"[A-Za-z0-9★†\-]{1,10}")
 FINISHES = {"normal": "Normal", "foil": "Foil", "etched": "Etched"}
@@ -306,10 +317,20 @@ def parse_changes(raw: Any) -> list[Change]:
         name = clean_text(item.get("card_name", ""))
         if not name or len(name) > 200:
             raise DeckError("invalid", f"change {i}: card_name is required")
+        zone = str(item.get("zone") or "main").strip().lower()
+        if zone not in ZONES:
+            raise DeckError("invalid", f"change {i}: zone must be main or side")
         if action in CATEGORY_ACTIONS:
-            out.append(_parse_category_change(i, action, name, item))
+            ch = _parse_category_change(i, action, name, item)
+            if zone == "side" and action == "set_commander":
+                raise DeckError(
+                    "invalid", f"change {i}: set_commander works on the deck proper, not zone side"
+                )
+            out.append(dataclasses.replace(ch, zone=zone))
             continue
         if action in PRINTING_ACTIONS:
+            if zone == "side":
+                raise DeckError("invalid", f"change {i}: {action} works on the deck proper, not zone side")
             out.append(_parse_printing_change(i, action, name, item))
             continue
         qty = item.get("quantity")
@@ -341,7 +362,11 @@ def parse_changes(raw: Any) -> list[Change]:
             raise DeckError("invalid", f"change {i}: set_code must be a set code such as cmr")
         if number and not _COLLECTOR_NUMBER.fullmatch(number):
             raise DeckError("invalid", f"change {i}: collector_number looks wrong")
-        out.append(Change(action, name, qty, cat, set_code, number, finish))
+        if zone == "side" and set_code:
+            raise DeckError(
+                "invalid", f"change {i}: a pinned printing is added to the deck proper, not zone side"
+            )
+        out.append(Change(action, name, qty, cat, set_code, number, finish, zone=zone))
     pinned = [ch.card_name.lower() for ch in out if ch.pinned]
     if len(pinned) != len(set(pinned)):
         raise DeckError("invalid", "one pinned printing per card name per proposal")
@@ -355,14 +380,19 @@ def parse_changes(raw: Any) -> list[Change]:
                 f"'{ch.card_name}' has a pinned printing added and is also removed or set in the same "
                 "proposal; propose the removal and the pinned add separately",
             )
+
     # Names compare by front face, as the plans match them, so "Fire" and "Fire // Ice" clash.
-    categorised = [front_face(ch.card_name).lower() for ch in out if ch.action in CATEGORY_ACTIONS]
+    # The zone is part of the key: a maybeboard row and a deck row of the same card are two rows.
+    def key(ch: Change) -> str:
+        return front_face(ch.card_name).lower() + ("" if ch.zone == "main" else " (side)")
+
+    categorised = [key(ch) for ch in out if ch.action in CATEGORY_ACTIONS]
     if len(categorised) != len(set(categorised)):
         raise DeckError("invalid", "one set_category or set_commander per card name per proposal")
-    reprinted = [front_face(ch.card_name).lower() for ch in out if ch.action in PRINTING_ACTIONS]
+    reprinted = [key(ch) for ch in out if ch.action in PRINTING_ACTIONS]
     if len(reprinted) != len(set(reprinted)):
         raise DeckError("invalid", "one set_finish or set_printing per card name per proposal")
-    counted = {front_face(ch.card_name).lower() for ch in out if ch.action in COUNT_ACTIONS}
+    counted = {key(ch) for ch in out if ch.action in COUNT_ACTIONS}
     clash = sorted((set(categorised) | set(reprinted)) & counted)
     if clash:
         raise DeckError(
@@ -520,17 +550,22 @@ def category_plan_rows(
     cat_changes = [ch for ch in changes if ch.action in CATEGORY_ACTIONS]
     if not cat_changes:
         return {}, []
-    rows_by_name: dict[str, list[Any]] = {}
-    for c in deck.main_cards:  # maybeboard and sideboard rows are never pulled into the deck
-        rows_by_name.setdefault(c.name.lower(), []).append(c)
-        rows_by_name.setdefault(front_face(c.name).lower(), []).append(c)
+    # A change names the zone of the rows it moves: "main" rows are the deck proper, "side" rows
+    # the maybeboard and sideboard. Moving a side row into a counted category pulls it into the
+    # deck (``entering_deck``); moving a deck row into an excluded one takes it out (``leaving_deck``).
+    rows_by_zone: dict[str, dict[str, list[Any]]] = {"main": {}, "side": {}}
+    for zone in ZONES:
+        for c in deck.cards_in(zone):
+            rows_by_zone[zone].setdefault(c.name.lower(), []).append(c)
+            rows_by_zone[zone].setdefault(front_face(c.name).lower(), []).append(c)
     want: dict[int, list[str]] = {}
     lines: list[dict[str, Any]] = []
     new_commanders: list[str] = []
     for ch in cat_changes:
-        rows = rows_by_name.get(ch.card_name.lower())
+        rows = rows_by_zone[ch.zone].get(ch.card_name.lower())
         if not rows:
-            raise DeckError("invalid", f"'{ch.card_name}' is not in the deck, so its category cannot be set")
+            where = "the deck" if ch.zone == "main" else "the maybeboard or sideboard"
+            raise DeckError("invalid", f"'{ch.card_name}' is not in {where}, so its category cannot be set")
         rows = list({r.relation_id: r for r in rows}.values())
         if any(r.relation_id is None for r in rows):
             raise DeckError("contract", f"Archidekt did not number the deck rows of '{ch.card_name}'.")
@@ -542,7 +577,15 @@ def category_plan_rows(
             want[r.relation_id] = new
         if ch.action == "set_category" and changed:
             old = sorted({", ".join(sorted(clean_text(c) for c in r.categories)) or "(none)" for r in rows})
-            lines.append(_row("category", name=rows[0].name, before=" / ".join(old), after=new[0]))
+            lines.append(
+                _row(
+                    "category",
+                    name=rows[0].name,
+                    before=" / ".join(old),
+                    after=new[0],
+                    zone="side" if ch.zone == "side" else None,
+                )
+            )
     if new_commanders:
         wanted_lower = {n.lower() for n in new_commanders}
         old_commanders: list[str] = []
@@ -567,13 +610,31 @@ def category_plan_rows(
 def leaving_deck(deck: Deck, recategorise: dict[int, list[str]]) -> dict[str, int]:
     """Copies per card name that ``recategorise`` (from ``category_plan``) moves out of the deck
     proper: rows counted in the deck now whose new categories are all ones the deck excludes."""
-    excluded = deck.excluded_categories()
     out: dict[str, int] = {}
     for c in deck.main_cards:
         cats = recategorise.get(c.relation_id) if c.relation_id is not None else None
-        if cats and all(cat in excluded for cat in cats):
+        if cats and not deck.categories_count(cats):
             out[c.name] = out.get(c.name, 0) + c.quantity
     return out
+
+
+def entering_deck(deck: Deck, recategorise: dict[int, list[str]]) -> dict[str, int]:
+    """The mirror of ``leaving_deck``: copies per card name that ``recategorise`` moves from the
+    maybeboard or sideboard into the deck proper (a side row given a category the deck counts)."""
+    out: dict[str, int] = {}
+    for c in deck.side_cards:
+        cats = recategorise.get(c.relation_id) if c.relation_id is not None else None
+        if cats and deck.categories_count(cats):
+            out[c.name] = out.get(c.name, 0) + c.quantity
+    return out
+
+
+def side_category_for(deck: Deck, ch: Change) -> str:
+    """The category a maybeboard add goes in: the change's own category when the deck excludes
+    it, else the deck's maybeboard category."""
+    if ch.category and ch.category in deck.excluded_categories():
+        return ch.category
+    return deck.side_category()
 
 
 def plan(deck: Deck, changes: list[Change]) -> tuple[dict[str, int], dict[str, int], list[str]]:
@@ -589,63 +650,94 @@ def plan_rows(
     deck: Deck, changes: list[Change]
 ) -> tuple[dict[str, int], dict[str, int], list[dict[str, Any]]]:
     """``plan`` with structured review rows in place of the text lines."""
+    before, after, rows, _before_side, _after_side = plan_zones(deck, changes)
+    return before, after, rows
+
+
+def plan_zones(
+    deck: Deck, changes: list[Change]
+) -> tuple[dict[str, int], dict[str, int], list[dict[str, Any]], dict[str, int], dict[str, int]]:
+    """(before, after, rows, before_side, after_side): the deck proper's counts before and after the
+    count changes of zone main, the review rows of every change, and the same counts for the
+    maybeboard and sideboard rows (zone side). Category moves between the zones are not in the
+    counts (``leaving_deck`` and ``entering_deck`` have them); the rows say what they do."""
     before = deck.counts_by_name()
-    lookup = {n.lower(): n for n in before}
-    for n in before:  # a double-faced card is also found by its front face
-        lookup.setdefault(front_face(n).lower(), n)
+    before_side = deck.side_counts_by_name()
+    lookups: dict[str, dict[str, str]] = {}
+    for zone, counts in (("main", before), ("side", before_side)):
+        lookup = {n.lower(): n for n in counts}
+        for n in counts:  # a double-faced card is also found by its front face
+            lookup.setdefault(front_face(n).lower(), n)
+        lookups[zone] = lookup
     after = dict(before)
+    after_side = dict(before_side)
     cats_want, cat_lines = category_plan_rows(deck, changes)
     # A set_category into a category the deck does not count (Maybeboard, Sideboard...) takes
-    # those copies out of the deck proper: the review says so, and counts them as removed.
+    # those copies out of the deck proper: the review says so, and counts them as removed. The
+    # other way round, a side row given a counted category enters the deck.
     leaving = leaving_deck(deck, cats_want)
+    entering = entering_deck(deck, cats_want)
     for r in cat_lines:
-        if r.get("kind") == "category" and r.get("name") in leaving:
+        if r.get("kind") != "category":
+            continue
+        if r.get("name") in leaving and r.get("zone") != "side":
             r["leaves"] = leaving.pop(r["name"])
+        if r.get("name") in entering and r.get("zone") == "side":
+            r["enters"] = entering.pop(r["name"])
     cat_lines += [_row("remove", name=name, qty=qty) for name, qty in leaving.items()]
+    cat_lines += [_row("add", name=name, qty=qty) for name, qty in entering.items()]
     _specs, print_lines = printing_plan_rows(deck, changes)
     cat_lines = cat_lines + print_lines
     for ch in changes:
         if ch.action in CATEGORY_ACTIONS or ch.action in PRINTING_ACTIONS:
             continue
+        target = after_side if ch.zone == "side" else after
+        lookup = lookups[ch.zone]
         key = lookup.get(ch.card_name.lower(), ch.card_name)
-        cur = after.get(key, 0)
+        cur = target.get(key, 0)
         if ch.action == "add":
-            after[key] = cur + (ch.quantity or 1)
+            target[key] = cur + (ch.quantity or 1)
         elif ch.action == "remove":
             if cur == 0:
-                raise DeckError("invalid", f"'{ch.card_name}' is not in the deck, so it cannot be removed")
-            after[key] = max(0, cur - ch.quantity) if ch.quantity else 0
+                where = "the deck" if ch.zone == "main" else "the maybeboard or sideboard"
+                raise DeckError("invalid", f"'{ch.card_name}' is not in {where}, so it cannot be removed")
+            target[key] = max(0, cur - ch.quantity) if ch.quantity else 0
         else:
-            after[key] = ch.quantity or 0
+            target[key] = ch.quantity or 0
         lookup.setdefault(key.lower(), key)
-    adds_by_name: dict[str, list[Change]] = {}
-    for ch in changes:
-        if ch.action == "add":
-            adds_by_name.setdefault(ch.card_name.lower(), []).append(ch)
-    # the printing shows on the line only when every added copy of that card is that printing
-    labels = {n: chs[0].printing_label() for n, chs in adds_by_name.items() if len(chs) == 1}
-    # the category an add puts a new row in (Commander, Maybeboard...) is part of what is reviewed
-    cats = {n: next((c.category for c in chs if c.category), None) for n, chs in adds_by_name.items()}
-    pinned_names = {n for n, chs in adds_by_name.items() if any(c.pinned for c in chs)}
     lines: list[dict[str, Any]] = []
-    for name in sorted(set(before) | set(after), key=str.lower):
-        b, a = before.get(name, 0), after.get(name, 0)
-        if a == b:
-            continue
-        printing = labels.get(name.lower()) or None
-        cat = cats.get(name.lower())
-        if not (cat and (b == 0 or name.lower() in pinned_names)):  # a new row is made in that category
-            cat = None
-        if b == 0:
-            lines.append(_row("add", name=name, qty=a, printing=printing, category=cat))
-        elif a == 0:
-            lines.append(_row("remove", name=name, qty=b))
+    for zone, b_counts, a_counts in (("main", before, after), ("side", before_side, after_side)):
+        adds_by_name: dict[str, list[Change]] = {}
+        for ch in changes:
+            if ch.action == "add" and ch.zone == zone:
+                adds_by_name.setdefault(ch.card_name.lower(), []).append(ch)
+        # the printing shows on the line only when every added copy of that card is that printing
+        labels = {n: chs[0].printing_label() for n, chs in adds_by_name.items() if len(chs) == 1}
+        # the category an add puts a new row in (Commander, Maybeboard...) is part of what is reviewed
+        if zone == "main":
+            cats = {n: next((c.category for c in chs if c.category), None) for n, chs in adds_by_name.items()}
         else:
-            lines.append(_row("change", name=name, before=b, after=a, printing=printing, category=cat))
+            cats = {n: side_category_for(deck, chs[0]) for n, chs in adds_by_name.items()}
+        pinned_names = {n for n, chs in adds_by_name.items() if any(c.pinned for c in chs)}
+        side = "side" if zone == "side" else None
+        for name in sorted(set(b_counts) | set(a_counts), key=str.lower):
+            b, a = b_counts.get(name, 0), a_counts.get(name, 0)
+            if a == b:
+                continue
+            printing = labels.get(name.lower()) or None
+            cat = cats.get(name.lower())
+            if not (cat and (b == 0 or name.lower() in pinned_names)):  # a new row is made in that category
+                cat = None
+            if b == 0:
+                lines.append(_row("add", name=name, qty=a, printing=printing, category=cat, zone=side))
+            elif a == 0:
+                lines.append(_row("remove", name=name, qty=b, zone=side))
+            else:
+                lines.append(_row("change", name=name, before=b, after=a, printing=printing, zone=side))
     lines.extend(cat_lines)
     if not lines:
         raise DeckError("invalid", "these changes would leave the deck exactly as it is")
-    return before, after, lines
+    return before, after, lines, before_side, after_side
 
 
 MAX_RESTORE_ENTRIES = 150
@@ -733,8 +825,15 @@ def build_payload(
     modifiers: dict[str, str] | None = None,
     pinned: dict[str, dict[str, Any]] | None = None,
     recategorise: dict[int, list[str]] | None = None,
+    after_side: dict[str, int] | None = None,
+    side_categories: dict[str, list[str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Per-card entries for PATCH modifyCards/v2, one entry per request.
+
+    ``after_side`` are the maybeboard and sideboard counts after the zone-side changes (as
+    ``plan_zones`` returns them); those rows are modified, removed or added (in
+    ``side_categories[name]``) the same way, by themselves, never mixed with the deck proper's rows
+    of the same card.
 
     ``recategorise`` (from ``category_plan``) maps a relation id to the categories that row
     should have: it becomes a ``modify`` entry with the quantity unchanged and ``categories``
@@ -796,6 +895,26 @@ def build_payload(
                     resolve[name], qty, (categories or {}).get(name), (modifiers or {}).get(name, "Normal")
                 )
             )
+    side_by_name: dict[str, list[Any]] = {}
+    for c in deck.side_cards:
+        side_by_name.setdefault(c.name.lower(), []).append(c)
+    for name, qty in (after_side or {}).items():
+        existing = side_by_name.get(name.lower(), [])
+        if qty == sum(c.quantity for c in existing):
+            continue
+        if existing:
+            primary, extras = existing[0], existing[1:]
+            payload.append(_entry("modify" if qty > 0 else "remove", primary, qty))
+            payload.extend(_entry("remove", extra, 0) for extra in extras)
+        else:
+            payload.append(
+                _add_entry(
+                    resolve[name],
+                    qty,
+                    (side_categories or {}).get(name) or [deck.side_category()],
+                    (modifiers or {}).get(name, "Normal"),
+                )
+            )
     for card in deck.cards:
         if card.relation_id in (recategorise or {}):
             payload.append(_entry("modify", card, card.quantity, categories=recategorise[card.relation_id]))
@@ -834,23 +953,39 @@ def _entry(action: str, card: Any, qty: int, categories: list[str] | None = None
     }
 
 
+def row_key(c: dict[str, Any]) -> tuple[str, str, str]:
+    """One list row's identity: name plus the printing it names, so two printings of the same
+    card (a deck's Sol Ring and its etched Sol Ring) stay two rows through a new-deck import."""
+    return (
+        str(c.get("name", "")).casefold(),
+        str(c.get("set_code") or "").casefold(),
+        str(c.get("collector_number") or ""),
+    )
+
+
 def new_deck_entries(
-    cards: list[dict[str, Any]], resolve: dict[str, int], modifiers: dict[str, str] | None = None
+    cards: list[dict[str, Any]],
+    resolve: dict[tuple[str, str, str], int],
+    modifiers: dict[tuple[str, str, str], str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Add entries for a freshly created deck (same reference shape as build_payload)."""
+    """Add entries for a freshly created deck (same reference shape as build_payload);
+    ``resolve`` and ``modifiers`` are keyed by ``row_key``."""
     out = []
     for c in cards:
+        key = row_key(c)
         out.append(
             {
                 "action": "add",
-                "cardid": resolve[c["name"]],
+                "cardid": resolve[key],
                 "patchId": uuid.uuid4().hex,
                 "categories": list(c.get("categories") or []),
                 "modifications": {
                     "quantity": int(c["quantity"]),
                     "companion": False,
                     "flippedDefault": False,
-                    "modifier": (modifiers or {}).get(c["name"], "Foil" if c.get("foil") else "Normal"),
+                    "modifier": (modifiers or {}).get(
+                        key, c.get("finish") or ("Foil" if c.get("foil") else "Normal")
+                    ),
                 },
             }
         )
@@ -865,13 +1000,54 @@ def deck_to_text(deck: Deck, *, zone: str = "main") -> str:
             name=c.name,
             set_code=c.set_code,
             collector_number=c.collector_number,
-            categories=list(c.categories),
-            foil=c.modifier.lower() == "foil",
+            # the simulators find the commander by the literal "Commander" category, so a
+            # premier category with another name is written as Commander as well
+            categories=list(c.categories)
+            + (["Commander"] if deck.is_commander(c) and "Commander" not in c.categories else []),
+            foil=c.modifier.lower() in ("foil", "etched"),
+            finish=c.modifier.capitalize() if c.modifier.lower() in ("foil", "etched") else "",
             zone="main" if deck.in_deck(c) else "side",
         )
         for c in deck.cards
     ]
     return to_text(cards, zone=zone)
+
+
+_FINISH_MARKS = {"foil": " *F*", "etched": " *E*"}
+
+
+def deck_to_archidekt_text(deck: Deck) -> str:
+    """The deck in Archidekt's own import syntax, one line per row, sorted:
+    ``1x Name (set) 123 *F* [Category{top}] ^Label,#hex^``. ``{top}`` marks the commander
+    (premier) category, ``{noDeck}{noPrice}`` a category outside the deck (maybeboard), so the
+    text pastes back into Archidekt's import dialog as the same deck, finishes and labels kept."""
+    premier = {
+        str(c.get("name")) for c in deck.categories if isinstance(c.get("name"), str) and c.get("isPremier")
+    }
+    excluded = deck.excluded_categories()
+    lines: list[tuple[str, str, str, str]] = []  # sorted by card name, as Archidekt's export is
+    for c in deck.cards:
+        line = f"{c.quantity}x {clean_text(c.name.replace(chr(94), chr(32)))}"  # ^ would open a label
+        if c.set_code:
+            line += f" ({clean_text(c.set_code)})"
+            if c.collector_number:
+                line += f" {clean_text(c.collector_number)}"
+        line += _FINISH_MARKS.get(c.modifier.lower(), "")
+        cats = []
+        for cat in c.categories:
+            name = clean_category(cat)
+            if not name:
+                continue
+            flags = "{top}" if cat in premier else "{noDeck}{noPrice}" if cat in excluded else ""
+            cats.append(name + flags)
+        if cats:
+            line += " [" + ",".join(cats) + "]"
+        label = clean_text(c.label).replace("^", " ").strip()
+        if label and not label.startswith(","):  # Archidekt stores labels as "name,#colour"
+            line += f" ^{label}^"
+        lines.append((c.name.casefold(), c.set_code, c.collector_number, line))
+    lines.sort()
+    return "\n".join(line for *_, line in lines) + ("\n" if lines else "")
 
 
 class DeckService:
@@ -889,6 +1065,7 @@ class DeckService:
         # member's Archidekt Collection and returns the result rows (DeckService itself knows only
         # decks). None while the collection pages are not loaded.
         self.collection_apply: Any = None
+        self._precon_cache: tuple[float, dict[str, list[dict[str, Any]]]] | None = None
 
     @asynccontextmanager
     async def archidekt_slot(self, sub: str | None) -> AsyncIterator[None]:
@@ -1216,6 +1393,7 @@ class DeckService:
         cards: Any = None,
         decklist_text: str | None = None,
         csv_text: str | None = None,
+        json_text: str | None = None,
         private: bool = True,
     ) -> dict[str, Any]:
         name = clean_text(name or "")
@@ -1224,7 +1402,9 @@ class DeckService:
         fmt = str(deck_format or "commander").strip().lower()
         if fmt not in FORMAT_IDS:
             raise DeckError("invalid", f"deck_format must be one of: {', '.join(sorted(FORMAT_IDS))}")
-        entries = normalise_cards(cards=cards, decklist_text=decklist_text, csv_text=csv_text)
+        entries = normalise_cards(
+            cards=cards, decklist_text=decklist_text, csv_text=csv_text, json_text=json_text
+        )
         _token, link = self._token(sub)  # must be linked before we store a proposal that needs it
         self._room_for_proposal(sub)
         total = sum(c["quantity"] for c in entries)
@@ -1513,12 +1693,16 @@ class DeckService:
             return await self._apply_collection(sub, row, progress)
         changes = parse_changes(row["changes"])
         deck = await self._current_deck_for(sub, row)
-        _before, after, _lines = plan(deck, changes)
+        _before, after, _lines, _before_side, after_side = plan_zones(deck, changes)
         recategorise, _cat_lines = category_plan(deck, changes)
         # Every printing is looked up before anything is written or backed up, so a printing
         # that does not exist (or is another card) refuses the proposal with nothing changed.
-        resolve, modifiers, pinned, new_cats = await self._resolve_adds(sub, deck, changes, after)
-        payload = build_payload(deck, after, resolve, new_cats, modifiers, pinned, recategorise)
+        resolve, modifiers, pinned, new_cats, side_cats = await self._resolve_adds(
+            sub, deck, changes, after, after_side
+        )
+        payload = build_payload(
+            deck, after, resolve, new_cats, modifiers, pinned, recategorise, after_side, side_cats
+        )
         specs, _print_lines = printing_plan_rows(deck, changes)
         payload += await self._printing_entries(sub, deck, specs)
         snapshot_id = self._take_snapshot(sub, row, deck)
@@ -1528,12 +1712,22 @@ class DeckService:
         await self._rows_unchanged(sub, deck)  # lookups and backup take a while: check again
         await self._send(sub, deck.id, payload, progress)
         verified = await self.get_deck(sub, deck.id)
-        expected = dict(after)  # the counts after the count changes, less what leaves the deck
+        # The counts after the count changes, less what a category move takes out of the deck
+        # proper (into the maybeboard) and plus what it brings in; the side counts the other way.
+        expected = dict(after)
+        expected_side = dict(after_side)
         for name, qty in leaving_deck(deck, recategorise).items():
             expected[name] = expected.get(name, 0) - qty
+            expected_side[name] = expected_side.get(name, 0) + qty
+        for name, qty in entering_deck(deck, recategorise).items():
+            expected[name] = expected.get(name, 0) + qty
+            expected_side[name] = expected_side.get(name, 0) - qty
         mismatches = _mismatches(verified.counts_by_name(), {n: q for n, q in expected.items() if q > 0})
         mismatches = sorted(
             set(mismatches)
+            | set(
+                _mismatches(verified.side_counts_by_name(), {n: q for n, q in expected_side.items() if q > 0})
+            )
             | set(_category_mismatches(verified, recategorise))
             | set(_printing_mismatches(verified, specs))
         )
@@ -1556,24 +1750,48 @@ class DeckService:
         return self.describe(sub, row["id"])
 
     async def _resolve_adds(
-        self, sub: str, deck: Deck, changes: list[Change], after: dict[str, int]
-    ) -> tuple[dict[str, int], dict[str, str], dict[str, dict[str, Any]], dict[str, list[str]]]:
+        self,
+        sub: str,
+        deck: Deck,
+        changes: list[Change],
+        after: dict[str, int],
+        after_side: dict[str, int] | None = None,
+    ) -> tuple[
+        dict[str, int], dict[str, str], dict[str, dict[str, Any]], dict[str, list[str]], dict[str, list[str]]
+    ]:
         """Printing ids and finishes for the cards an edit adds, keyed by the spelling used in
-        ``after``. A pinned printing (set code + collector number) is required to exist and to be
+        ``after`` (and ``after_side`` for maybeboard adds, whose categories come back as the fifth
+        value). A pinned printing (set code + collector number) is required to exist and to be
         that card: the client raises ``not_found`` otherwise and nothing is added."""
+        after_side = after_side or {}
 
-        def key_for(name: str) -> str:
-            return next((k for k in after if k.lower() == name.lower()), name)
+        def key_for(name: str, counts: dict[str, int]) -> str:
+            return next((k for k in counts if k.lower() == name.lower()), name)
 
         have = {c.name.lower() for c in deck.main_cards}
+        have_side = {c.name.lower() for c in deck.side_cards}
         adds: dict[str, list[Change]] = {}
+        side_adds: dict[str, list[Change]] = {}
         for ch in changes:
-            if ch.action == "add":
-                adds.setdefault(key_for(ch.card_name), []).append(ch)
+            if ch.action == "add" and ch.zone == "side":
+                side_adds.setdefault(key_for(ch.card_name, after_side), []).append(ch)
+            elif ch.action == "add":
+                adds.setdefault(key_for(ch.card_name, after), []).append(ch)
         resolve: dict[str, int] = {}
         modifiers: dict[str, str] = {}
         pinned: dict[str, dict[str, Any]] = {}
         new_cats: dict[str, list[str]] = {}
+        side_cats: dict[str, list[str]] = {}
+        for key, chs in side_adds.items():
+            side_cats[key] = [side_category_for(deck, chs[0])]
+            if after_side.get(key, 0) > 0 and key.lower() not in have_side:
+                card = await self._call(sub, self.client.resolve_card, key)
+                resolve[key] = card["id"]
+                finish = next((c.finish for c in chs if c.finish), None)
+                if finish:
+                    modifiers[key] = finish_modifier(
+                        card["options"], foil=finish == "Foil", etched=finish == "Etched"
+                    )
         for key, chs in adds.items():
             cat = next((c.category for c in chs if c.category), None)
             if cat:
@@ -1607,7 +1825,7 @@ class DeckService:
                     modifiers[name] = finish_modifier(
                         card["options"], foil=finish == "Foil", etched=finish == "Etched"
                     )
-        return resolve, modifiers, pinned, new_cats
+        return resolve, modifiers, pinned, new_cats, side_cats
 
     async def _printing_entries(
         self, sub: str, deck: Deck, specs: list[dict[str, Any]]
@@ -1725,27 +1943,9 @@ class DeckService:
         made the edit does not proceed: the proposal goes back to pending so the user can retry."""
         if not self.settings.archidekt_backups:
             return {}
-        when = time.gmtime()
-        name = f"{deck.name} (backup {time.strftime('%Y-%m-%d %H:%M UTC', when)})"[:200]
-        description = (
-            f"Automatic backup made by the MTG Assistant Gateway before proposal {row['id']} changed this "
-            f"deck ({row.get('kind') or 'edit'}). Gateway snapshot {snapshot_id}. To undo the change, ask "
-            f"the assistant to restore snapshot {snapshot_id}, or copy this deck back by hand. "
-            f"Original deck: https://archidekt.com/decks/{deck.id}"
-        )
+        reason = f"before proposal {row['id']} changed this deck ({row.get('kind') or 'edit'})"
         try:
-            folder = await self._call(
-                sub,
-                lambda token, *_: self.client.ensure_folder(
-                    token, name=self.settings.archidekt_backup_folder
-                ),
-            )
-            copy = await self._call(
-                sub,
-                lambda token, *_: self.client.backup_deck(
-                    token, deck, name=name, folder_id=str(folder["id"]), description=description
-                ),
-            )
+            return await self._backup_copy(sub, deck, snapshot_id, reason=reason)
         except DeckError as exc:
             self.db.finish_proposal(row["id"], state="pending")
             self._audit(
@@ -1759,6 +1959,27 @@ class DeckService:
                 "changed; the proposal is still pending, so it can be applied again once Archidekt "
                 "answers.",
             ) from exc
+
+    async def _backup_copy(self, sub: str, deck: Deck, snapshot_id: str, *, reason: str) -> dict[str, Any]:
+        """Copy ``deck`` into the backup folder and record the copy on the snapshot. Raises the
+        Archidekt error as a DeckError; callers decide what that means for their write."""
+        when = time.gmtime()
+        name = f"{deck.name} (backup {time.strftime('%Y-%m-%d %H:%M UTC', when)})"[:200]
+        description = (
+            f"Automatic backup made by the MTG Assistant Gateway {reason}. Gateway snapshot "
+            f"{snapshot_id}. To undo the change, ask the assistant to restore snapshot {snapshot_id}, or "
+            f"copy this deck back by hand. Original deck: https://archidekt.com/decks/{deck.id}"
+        )
+        folder = await self._call(
+            sub,
+            lambda token, *_: self.client.ensure_folder(token, name=self.settings.archidekt_backup_folder),
+        )
+        copy = await self._call(
+            sub,
+            lambda token, *_: self.client.backup_deck(
+                token, deck, name=name, folder_id=str(folder["id"]), description=description
+            ),
+        )
         backup = {"backup_deck_id": str(copy["id"]), "backup_url": str(copy.get("url") or "")}
         self.db.set_snapshot_backup(snapshot_id, **backup)
         return backup
@@ -1829,13 +2050,15 @@ class DeckService:
         return self.describe(sub, row["id"])
 
     async def propose_clone(self, sub: str, deck_id: str, name: str | None = None) -> dict[str, Any]:
-        """A proposal (kind ``clone``) that copies one of the member's decks into a new private
-        deck in the root folder, the way Archidekt's Clone deck button does ("Copy of - " prefix
-        by default). Applied with the same copy route the backups use (verified live 2026-10-05);
-        the copy keeps every card, quantity, category and finish."""
+        """A proposal (kind ``clone``) that copies any deck the member can read (their own, a
+        public deck, a precon) into a new private deck in their root folder, the way Archidekt's
+        Clone deck button does ("Copy of - " prefix by default). Applied with the same copy route
+        the backups use (verified live 2026-10-05 on the member's own deck; a copy of someone
+        else's public deck is the same request and has not been exercised live); the copy keeps
+        every card, quantity, category and finish."""
         deck_id = _clean_deck_id(deck_id)
         self._room_for_proposal(sub)
-        deck = await self.get_own_deck(sub, deck_id)
+        deck = await self.get_any_deck(sub, deck_id)
         new_name = clean_text(name or "") or f"Copy of - {deck.name}"
         if len(new_name) > 200:
             raise DeckError("invalid", "name must be up to 200 characters")
@@ -1859,7 +2082,15 @@ class DeckService:
         return self.describe(sub, pid)
 
     async def _apply_clone(self, sub: str, row: dict[str, Any], progress: dict[str, Any]) -> dict[str, Any]:
-        deck = await self._current_deck_for(sub, row)
+        # The source may be someone else's public deck, so it is read, not owned; a change to it
+        # since the proposal still stops the copy (the review showed another list).
+        deck = await self.get_any_deck(sub, row["deck_id"])
+        if deck.fingerprint() != row["baseline_fingerprint"]:
+            raise DeckError(
+                "stale",
+                "The deck changed on Archidekt since this proposal was made. Nothing was sent. "
+                "Create a new proposal from the current deck.",
+            )
         name = clean_text(str((row.get("changes") or {}).get("name") or "")) or f"Copy of - {deck.name}"
         copy = await self._call(sub, lambda token, *_: self.client.copy_deck(token, deck, name=name))
         verified = await self.get_deck(sub, str(copy["id"]))
@@ -1894,14 +2125,24 @@ class DeckService:
         backup = await self._backup_on_archidekt(sub, row, deck, snapshot_id)
         progress.update(backup)
         await self._rows_unchanged(sub, deck)  # the backup takes a while: check again before writing
-        await self._send(sub, deck.id, payload, progress)
+        if payload:
+            await self._send(sub, deck.id, payload, progress)
+        # The deck's own details as the snapshot recorded them (name, description, format, bracket,
+        # private, unlisted), re-derived from the current deck so a detail changed back by hand
+        # since the proposal is not sent again.
+        details, _lines = details_rows(deck, snapshot_details(wanted))
+        if details:
+            await self._call(sub, self.client.update_deck, deck.id, details_payload(details))
         verified = await self.get_deck(sub, deck.id)
         _left, mismatches = restore_steps(wanted, verified)
+        still, _lines = details_rows(verified, snapshot_details(wanted)) if details else ({}, [])
+        mismatches += [f"{k} (deck detail)" for k in sorted(still)]
         result = {
             "snapshot_id": snapshot_id,
             **backup,
             "restored_snapshot_id": snap["id"],
             "sent_entries": len(payload),
+            "restored_details": sorted(details),
             "verified": not mismatches,
             "mismatched_cards": mismatches,
         }
@@ -1927,8 +2168,8 @@ class DeckService:
                 f"{link['archidekt_username']} is linked now. Nothing was created; ask for a new "
                 "proposal if the deck should go to this account.",
             )
-        resolve: dict[str, int] = {}
-        modifiers: dict[str, str] = {}
+        resolve: dict[tuple[str, str, str], int] = {}
+        modifiers: dict[tuple[str, str, str], str] = {}
         printing_notes: list[str] = []
         for c in cards:  # resolve every printing before creating anything
             card = await self._call(
@@ -1940,8 +2181,11 @@ class DeckService:
                     collector_number=c.get("collector_number") or None,
                 ),
             )
-            resolve[c["name"]] = card["id"]
-            modifiers[c["name"]] = finish_modifier(card["options"], foil=bool(c.get("foil")))
+            resolve[row_key(c)] = card["id"]
+            finish = str(c.get("finish") or ("Foil" if c.get("foil") else ""))
+            modifiers[row_key(c)] = finish_modifier(
+                card["options"], foil=finish == "Foil", etched=finish == "Etched"
+            )
             if c.get("set_code") and not card["exact_printing"]:
                 # a list's printing that Archidekt does not have is never swapped quietly
                 wanted = f"{c['set_code'].upper()} {c.get('collector_number') or ''}".strip()
@@ -1963,10 +2207,15 @@ class DeckService:
         entries = new_deck_entries(cards, resolve, modifiers)
         await self._send(sub, created.id, entries, progress)
         verified = await self.get_deck(sub, created.id)
+        # Every row counts here, maybeboard and sideboard rows included: Archidekt keeps them
+        # outside the deck proper, and the import sent them all the same.
         want: dict[str, int] = {}
         for c in cards:
             want[c["name"]] = want.get(c["name"], 0) + int(c["quantity"])
-        mismatches = _mismatches(verified.counts_by_name(), want)
+        got: dict[str, int] = {}
+        for vc in verified.cards:
+            got[vc.name] = got.get(vc.name, 0) + vc.quantity
+        mismatches = _mismatches(got, want) + _new_deck_printing_mismatches(verified, cards, entries)
         result = {
             "deck_id": created.id,
             "deck_url": f"https://archidekt.com/decks/{created.id}",
@@ -2026,14 +2275,17 @@ class DeckService:
         the same printings, finishes (foil, etched), categories (so the commander, sideboard and
         maybeboard too) and quantities. It is an ordinary proposal: reviewed, confirmed and
         applied like any other (which takes a fresh snapshot first), so a restore can itself be
-        undone. Not restored: the deck's own category definitions (a custom category's
-        'counts toward the deck' setting), name, description and format."""
+        undone. The deck's own details (name, description, format, bracket, private, unlisted)
+        go back too when the snapshot recorded them differently. Not restored: the deck's own
+        category definitions (a custom category's 'counts toward the deck' setting)."""
         snap = self.snapshot(sub, str(snapshot_id or "").strip())
         wanted = parse_deck(snap["deck"])
         self._room_for_proposal(sub)
         deck = await self.get_own_deck(sub, snap["deck_id"])
         payload, lines = restore_rows(wanted, deck)
-        if not payload:
+        details, detail_lines = details_rows(deck, snapshot_details(wanted))
+        lines += detail_lines
+        if not payload and not details:
             raise DeckError("invalid", "The deck already matches this snapshot; nothing to restore.")
         if len(payload) > MAX_RESTORE_ENTRIES:
             raise DeckError(
@@ -2052,7 +2304,7 @@ class DeckService:
                 "deck_id": deck.id,
                 "deck_name": deck.name,
                 "baseline_fingerprint": deck.fingerprint(),
-                "changes": {"snapshot_id": snap["id"]},
+                "changes": {"snapshot_id": snap["id"], "details": details},
             },
             [_row("restore", snapshot_id=snap["id"], taken=taken, rows=len(payload)), *lines],
         )
@@ -2141,6 +2393,319 @@ class DeckService:
             )
         self.db.finish_proposal(row["id"], state="applied", result=result)
         return self.describe(sub, row["id"])
+
+    # -- hand actions (the member's own browser; never offered as assistant tools) ---------------
+    # Deleting a deck, picking its cover, moving it between folders and tagging it are done on the
+    # web pages only, like Archidekt's own buttons. Each takes a gateway snapshot first (deletion
+    # also keeps the Archidekt backup copy when backups are on) and re-reads to verify.
+
+    MAX_TAGS = 20
+    MAX_FOLDERS = 200
+
+    def _hand_snapshot(self, sub: str, deck: Deck) -> str:
+        snapshot_id = secrets.token_urlsafe(12)
+        if not self.db.save_snapshot(
+            snapshot_id,
+            owner_sub=sub,
+            deck_id=deck.id,
+            proposal_id=None,
+            fingerprint=deck.fingerprint(),
+            deck=deck.raw,
+        ):
+            raise DeckError("unavailable", "The snapshot could not be stored; nothing was sent to Archidekt.")
+        return snapshot_id
+
+    async def delete_deck(self, sub: str, deck_id: str, typed_name: str) -> dict[str, Any]:
+        """Delete one of the member's own decks after they typed its exact name. A snapshot is kept
+        in the gateway and, when backups are on, a copy in the backup folder on Archidekt; the
+        deletion is verified by reading the deck back (it must be gone)."""
+        deck = await self.get_own_deck(sub, deck_id)
+        if clean_text(typed_name).casefold() != clean_text(deck.name).casefold():
+            raise DeckError(
+                "invalid", "The name you typed does not match the deck's name. Nothing was deleted."
+            )
+        snapshot_id = self._hand_snapshot(sub, deck)
+        backup: dict[str, Any] = {}
+        if self.settings.archidekt_backups:
+            try:
+                backup = await self._backup_copy(sub, deck, snapshot_id, reason="before it was deleted")
+            except DeckError as exc:
+                self._audit(
+                    "backup_failed", sub=sub, detail={"deck_id": deck.id, "error": exc.kind, "hand": "delete"}
+                )
+                raise DeckError(
+                    "backup_failed",
+                    f"The backup copy of '{deck.name}' could not be made on Archidekt ({exc}). The deck was "
+                    "not deleted.",
+                ) from exc
+        await self._call(sub, self.client.delete_deck, deck.id)
+        gone = False
+        try:
+            await self.get_deck(sub, deck.id)
+        except DeckError as exc:
+            gone = exc.kind in ("not_found", "forbidden")
+        self._audit(
+            "deck_deleted",
+            sub=sub,
+            detail={"deck_id": deck.id, "snapshot_id": snapshot_id, "verified": gone, **backup},
+        )
+        if not gone:
+            raise DeckError(
+                "verify_mismatch",
+                f"Archidekt accepted the request but '{deck.name}' can still be read. Check it on Archidekt.",
+            )
+        return {"deck_id": deck.id, "name": deck.name, "snapshot_id": snapshot_id, **backup}
+
+    async def set_cover(self, sub: str, deck_id: str, scryfall_uid: str | None) -> dict[str, Any]:
+        """Set the deck's cover image to the art of one of its cards (any zone), or back to
+        Archidekt's automatic pick with ``None``. Verified by re-reading the deck."""
+        deck = await self.get_own_deck(sub, deck_id)
+        uid = str(scryfall_uid or "").strip().lower()
+        if uid:
+            if not any(c.scryfall_uid.lower() == uid for c in deck.cards):
+                raise DeckError("invalid", "Pick a card that is in this deck for its cover.")
+            try:
+                url = art_url(uid)
+            except ArchidektError as exc:
+                raise DeckError("invalid", "That card has no usable art id.") from exc
+            fields = {"featured": url, "customFeatured": ""}
+        else:
+            url = ""
+            fields = {"customFeatured": ""}
+        if (deck.raw.get("featured") or "") == url and not (deck.raw.get("customFeatured") or ""):
+            return {"deck_id": deck.id, "featured": deck.featured, "changed": False}
+        snapshot_id = self._hand_snapshot(sub, deck)
+        await self._call(sub, self.client.update_deck, deck.id, fields)
+        verified = await self.get_deck(sub, deck.id)
+        ok = (
+            (verified.raw.get("featured") or "") == url
+            if uid
+            else not (verified.raw.get("customFeatured") or "")
+        )
+        self._audit(
+            "deck_cover_changed",
+            sub=sub,
+            detail={"deck_id": deck.id, "snapshot_id": snapshot_id, "auto": not uid, "verified": ok},
+        )
+        if not ok:
+            raise DeckError(
+                "verify_mismatch",
+                "Archidekt accepted the request but the deck's cover did not change as asked. "
+                f"A snapshot ({snapshot_id}) from before was kept.",
+            )
+        return {
+            "deck_id": deck.id,
+            "featured": verified.featured,
+            "changed": True,
+            "snapshot_id": snapshot_id,
+        }
+
+    # Folders -----------------------------------------------------------------------------------
+    async def folders(self, sub: str) -> dict[str, Any]:
+        """The member's folder tree flattened, root first: ``{root_id, folders: [{id, name, depth,
+        parent, private}]}``. The gateway's backup folder is listed like any other."""
+        tree = await self._call(sub, self.client.folder_tree)
+        out: list[dict[str, Any]] = []
+
+        def walk(node: dict[str, Any], depth: int, parent: int | None) -> None:
+            if len(out) >= self.MAX_FOLDERS or not isinstance(node.get("id"), int):
+                return
+            out.append(
+                {
+                    "id": node["id"],
+                    # Archidekt's top-level folder has a technical name; the pages call it by what it is
+                    "name": "Top level (no folder)"
+                    if depth == 0
+                    else clean_text(str(node.get("name") or "")) or "Folder",
+                    "depth": depth,
+                    "parent": parent,
+                    "private": bool(node.get("private")),
+                }
+            )
+            children = node.get("children") or []
+            for child in sorted(
+                (c for c in children if isinstance(c, dict)), key=lambda c: str(c.get("name") or "").lower()
+            ):
+                walk(child, depth + 1, node["id"])
+
+        walk(tree, 0, None)
+        return {"root_id": tree["id"], "folders": out}
+
+    async def _folder_in(self, sub: str, folder_id: int) -> tuple[dict[str, Any], dict[str, Any]]:
+        info = await self.folders(sub)
+        for f in info["folders"]:
+            if f["id"] == folder_id:
+                return info, f
+        raise DeckError("not_found", "That folder is not in your Archidekt account.")
+
+    @staticmethod
+    def _folder_name(name: Any) -> str:
+        clean = clean_text(str(name or ""))
+        if not clean or len(clean) > 100:
+            raise DeckError("invalid", "A folder name is 1 to 100 characters.")
+        return clean
+
+    async def create_folder(self, sub: str, name: str, parent_id: int | None = None) -> dict[str, Any]:
+        name = self._folder_name(name)
+        info = await self.folders(sub)
+        parent = int(parent_id) if parent_id is not None else int(info["root_id"])
+        if parent not in {f["id"] for f in info["folders"]}:
+            raise DeckError("not_found", "That parent folder is not in your Archidekt account.")
+        if any(f["parent"] == parent and f["name"].casefold() == name.casefold() for f in info["folders"]):
+            raise DeckError("invalid", f"There is already a folder called '{name}' there.")
+        made = await self._call(sub, lambda token, *_: self.client.create_folder(token, name, parent))
+        after, folder = await self._folder_in(sub, int(made["id"]))
+        self._audit("folder_created", sub=sub, detail={"folder_id": folder["id"], "parent": parent})
+        return folder
+
+    async def rename_folder(self, sub: str, folder_id: int, name: str) -> dict[str, Any]:
+        name = self._folder_name(name)
+        info, folder = await self._folder_in(sub, int(folder_id))
+        if folder["depth"] == 0:
+            raise DeckError("invalid", "The top-level folder cannot be renamed.")
+        if folder["name"] == name:
+            return folder
+        await self._call(
+            sub,
+            lambda token, *_: self.client.mass_update(
+                token, [{"id": folder["id"], "type": "folder", "patch": {"name": name}}]
+            ),
+        )
+        _after, now = await self._folder_in(sub, folder["id"])
+        self._audit(
+            "folder_renamed", sub=sub, detail={"folder_id": folder["id"], "verified": now["name"] == name}
+        )
+        if now["name"] != name:
+            raise DeckError(
+                "verify_mismatch", "Archidekt accepted the request but the folder's name did not change."
+            )
+        return now
+
+    async def move_deck(self, sub: str, deck_id: str, folder_id: int | None) -> dict[str, Any]:
+        """Move one of the member's decks into a folder (``None`` = the top-level folder); verified
+        by re-reading the deck's ``parentFolder``."""
+        deck = await self.get_own_deck(sub, deck_id)
+        info = await self.folders(sub)
+        root = int(info["root_id"])
+        target = int(folder_id) if folder_id is not None else root
+        if target not in {f["id"] for f in info["folders"]}:
+            raise DeckError("not_found", "That folder is not in your Archidekt account.")
+        current = deck.parent_folder if deck.parent_folder is not None else root
+        if current == target:
+            return {"deck_id": deck.id, "folder_id": target, "changed": False}
+        await self._call(
+            sub,
+            lambda token, *_: self.client.mass_update(
+                token,
+                [
+                    {
+                        "id": int(deck.id),
+                        "type": "deck",
+                        "patch": {"parentFolder": target},
+                        "parentFolderId": current,
+                    }
+                ],
+            ),
+        )
+        verified = await self.get_deck(sub, deck.id)
+        now = verified.parent_folder if verified.parent_folder is not None else root
+        self._audit(
+            "deck_moved", sub=sub, detail={"deck_id": deck.id, "folder_id": target, "verified": now == target}
+        )
+        if now != target:
+            raise DeckError(
+                "verify_mismatch", "Archidekt accepted the request but the deck is not in that folder."
+            )
+        return {"deck_id": deck.id, "folder_id": target, "changed": True}
+
+    # Tags --------------------------------------------------------------------------------------
+    @staticmethod
+    def _tag_name(name: Any) -> str:
+        clean = clean_text(str(name or "")).strip("#").strip()
+        if not clean or len(clean) > 40:
+            raise DeckError("invalid", "A tag is 1 to 40 characters.")
+        return clean
+
+    async def add_tag(self, sub: str, deck_id: str, name: str) -> dict[str, Any]:
+        """Tag one of the member's decks: an existing Archidekt tag of that exact name is reused,
+        else one is created. Verified by re-reading the deck's tags."""
+        name = self._tag_name(name)
+        deck = await self.get_own_deck(sub, deck_id)
+        if any(str(r.get("name") or "").casefold() == name.casefold() for r in deck.tag_relations):
+            raise DeckError("invalid", f"This deck already has the tag '{name}'.")
+        if len(deck.tag_relations) >= self.MAX_TAGS:
+            raise DeckError("invalid", f"A deck has at most {self.MAX_TAGS} tags here.")
+        found = await self._call(sub, lambda token, *_: self.client.search_tags(token, name))
+        tag_id = next(
+            (
+                t["id"]
+                for t in found
+                if str(t.get("name") or "").casefold() == name.casefold() and isinstance(t.get("id"), int)
+            ),
+            None,
+        )
+        snapshot_id = self._hand_snapshot(sub, deck)
+        if tag_id is None:
+            tag_id = int((await self._call(sub, lambda token, *_: self.client.create_tag(token, name)))["id"])
+        position = f"M-{500000 + 10000 * len(deck.tag_relations)}"
+        await self._call(sub, lambda token, *_: self.client.add_deck_tag(token, deck.id, tag_id, position))
+        verified = await self.get_deck(sub, deck.id)
+        ok = any(str(r.get("name") or "").casefold() == name.casefold() for r in verified.tag_relations)
+        self._audit(
+            "deck_tag_added",
+            sub=sub,
+            detail={"deck_id": deck.id, "tag_id": tag_id, "snapshot_id": snapshot_id, "verified": ok},
+        )
+        if not ok:
+            raise DeckError(
+                "verify_mismatch", "Archidekt accepted the request but the tag is not on the deck."
+            )
+        return {"deck_id": deck.id, "tags": verified.tag_relations, "snapshot_id": snapshot_id}
+
+    async def remove_tag(self, sub: str, deck_id: str, relation_id: int) -> dict[str, Any]:
+        deck = await self.get_own_deck(sub, deck_id)
+        rel = next((r for r in deck.tag_relations if r.get("id") == int(relation_id)), None)
+        if rel is None:
+            raise DeckError("not_found", "That tag is not on this deck.")
+        snapshot_id = self._hand_snapshot(sub, deck)
+        await self._call(sub, lambda token, *_: self.client.remove_deck_tag(token, int(relation_id)))
+        verified = await self.get_deck(sub, deck.id)
+        ok = all(r.get("id") != int(relation_id) for r in verified.tag_relations)
+        self._audit(
+            "deck_tag_removed",
+            sub=sub,
+            detail={
+                "deck_id": deck.id,
+                "relation_id": int(relation_id),
+                "snapshot_id": snapshot_id,
+                "verified": ok,
+            },
+        )
+        if not ok:
+            raise DeckError(
+                "verify_mismatch", "Archidekt accepted the request but the tag is still on the deck."
+            )
+        return {"deck_id": deck.id, "tags": verified.tag_relations, "snapshot_id": snapshot_id}
+
+    # Precons -----------------------------------------------------------------------------------
+    PRECON_TTL = 3600.0
+
+    async def precons(self, sub: str | None) -> dict[str, list[dict[str, Any]]]:
+        """Archidekt's preconstructed deck listing, grouped by set, cached for an hour (it changes
+        a few times a year). Anonymous: the listing is public."""
+        now = time.monotonic()
+        cached = self._precon_cache
+        if cached and now - cached[0] < self.PRECON_TTL:
+            return cached[1]
+        async with self.archidekt_slot(sub):
+            try:
+                listing = await self.client.precons()
+            except ArchidektError as exc:
+                if cached:
+                    return cached[1]
+                raise DeckError(exc.kind, str(exc)) from exc
+        self._precon_cache = (now, listing)
+        return listing
 
 
 def parse_details(raw: Any) -> dict[str, Any]:
@@ -2252,11 +2817,54 @@ def details_rows(deck: Deck, wanted: dict[str, Any]) -> tuple[dict[str, Any], li
     return changes, lines
 
 
+def snapshot_details(snapshot: Deck) -> dict[str, Any]:
+    """The deck details a snapshot recorded, in the shape ``details_rows`` compares: name,
+    description, format (as its FORMAT_IDS key, when known), bracket, private and unlisted."""
+    out: dict[str, Any] = {
+        "name": snapshot.name,
+        "description": snapshot.description or "",
+        "edh_bracket": snapshot.edh_bracket,
+        "private": bool(snapshot.private),
+        "unlisted": bool(snapshot.unlisted),
+    }
+    if snapshot.format in FORMAT_IDS:
+        out["deck_format"] = snapshot.format
+    return out
+
+
 def details_payload(changes: dict[str, Any]) -> dict[str, Any]:
     """The PATCH /decks/{id}/update/ body for validated detail changes (Archidekt's field names)."""
     out: dict[str, Any] = {}
     for key, value in changes.items():
         out[DETAIL_FIELDS[key]] = FORMAT_IDS[value] if key == "deck_format" else value
+    return out
+
+
+def _new_deck_printing_mismatches(
+    verified: Deck, cards: list[dict[str, Any]], entries: list[dict[str, Any]]
+) -> list[str]:
+    """Names (with "printing or finish") whose rows on the re-read new deck do not carry the
+    printing id and finish the import sent, every zone counted. Counts are compared per printing
+    and finish, so a Foil row that came back Normal, or a pinned printing swapped for another, is
+    reported instead of passing on name and quantity alone."""
+    want: dict[tuple[int, str], int] = {}
+    names: dict[tuple[int, str], str] = {}
+    for c, e in zip(cards, entries, strict=True):
+        key = (int(e["cardid"]), str(e["modifications"].get("modifier") or "Normal"))
+        want[key] = want.get(key, 0) + int(e["modifications"]["quantity"])
+        names.setdefault(key, str(c["name"]))
+    got: dict[tuple[int, str], int] = {}
+    for vc in verified.cards:
+        if vc.card_id is None:
+            continue
+        key = (int(vc.card_id), vc.modifier or "Normal")
+        got[key] = got.get(key, 0) + vc.quantity
+    out: list[str] = []
+    for key, qty in want.items():
+        if got.get(key, 0) != qty:
+            label = f"{names[key]} (printing or finish)"
+            if label not in out:
+                out.append(label)
     return out
 
 
@@ -2447,22 +3055,82 @@ def _next_step(
     return "This proposal is no longer actionable."
 
 
+def cards_from_json(text: str) -> list[dict[str, Any]]:
+    """Rows from the gateway's own deck JSON (what get_deck returns and the Export page's .json
+    download holds): an object with ``cards`` (or a bare list), each ``{name, quantity, categories,
+    set, collector_number, finish}``. Only those six fields are read; the rest of a deck read
+    (stats, prices, text) is ignored. Raises DeckError when the text is not that shape."""
+    if len(text) > 4_000_000:
+        raise DeckError("invalid", "deck JSON larger than 4 MB")
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        raise DeckError("invalid", f"deck JSON could not be read: {exc}") from exc
+    rows = data.get("cards") if isinstance(data, dict) else data
+    if not isinstance(rows, list):
+        raise DeckError(
+            "invalid", "deck JSON must be an object with a cards list (the gateway's .json export)"
+        )
+    out: list[dict[str, Any]] = []
+    for i, row in enumerate(rows):
+        if not isinstance(row, dict):
+            raise DeckError("invalid", f"card {i} in the deck JSON must be an object")
+        qty = row.get("quantity", 1)
+        if not isinstance(qty, int) or isinstance(qty, bool) or qty < 1 or qty > 99:
+            raise DeckError("invalid", f"card {i}: quantity must be a whole number from 1 to 99")
+        cats_raw = row.get("categories") or []
+        if not isinstance(cats_raw, list) or not all(isinstance(c, str) for c in cats_raw):
+            raise DeckError("invalid", f"card {i}: categories must be a list of names")
+        name_len = len(str(row.get("name") or ""))
+        if name_len > 200 or len(cats_raw) > 10 or any(len(c) > MAX_CATEGORY for c in cats_raw):
+            raise DeckError(
+                "invalid", f"card {i}: name (200), categories (10 of up to {MAX_CATEGORY}) too long"
+            )
+        finish = str(row.get("finish") or "").strip().capitalize()
+        set_code = str(row.get("set") or row.get("set_code") or "").strip().lower()
+        number = str(row.get("collector_number") or "").strip()
+        if (set_code and not _SET_CODE.fullmatch(set_code)) or (
+            number and not _COLLECTOR_NUMBER.fullmatch(number)
+        ):
+            raise DeckError("invalid", f"card {i}: set or collector_number looks wrong")
+        out.append(
+            {
+                "name": str(row.get("name") or ""),
+                "quantity": qty,
+                "categories": [str(c) for c in cats_raw],
+                "foil": finish in ("Foil", "Etched"),
+                "finish": finish if finish in ("Foil", "Etched") else "",
+                "set_code": set_code,
+                "collector_number": number,
+            }
+        )
+    return out
+
+
 def normalise_cards(
-    *, cards: Any = None, decklist_text: str | None = None, csv_text: str | None = None
+    *,
+    cards: Any = None,
+    decklist_text: str | None = None,
+    csv_text: str | None = None,
+    json_text: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Turn any of the accepted inputs into [{name, quantity, categories, foil}], main deck only."""
-    for label, value in (("decklist_text", decklist_text), ("csv_text", csv_text)):
+    """Turn any of the accepted inputs into [{name, quantity, categories, foil, finish, ...}].
+    Sideboard and maybeboard rows are kept under their category (Archidekt stores them as
+    categories outside the deck), so a pasted list, CSV or the gateway's JSON round-trips whole."""
+    for label, value in (("decklist_text", decklist_text), ("csv_text", csv_text), ("json_text", json_text)):
         if value is not None and not isinstance(value, str):
             raise DeckError("invalid", f"{label} must be a string")
-    given = [x is not None and x != "" and x != [] for x in (cards, decklist_text, csv_text)]
+    given = [x is not None and x != "" and x != [] for x in (cards, decklist_text, csv_text, json_text)]
     if sum(given) != 1:
-        raise DeckError("invalid", "give exactly one of cards, decklist_text or csv_text")
+        raise DeckError("invalid", "give exactly one of cards, decklist_text, csv_text or json_text")
     if csv_text and len(csv_text) > 2_000_000:
         raise DeckError("invalid", "CSV export larger than 2 MB")
     if decklist_text and len(decklist_text) > 200_000:
         raise DeckError("invalid", "decklist larger than 200 kB")
     out: list[dict[str, Any]] = []
-    if csv_text:
+    if json_text:
+        out = cards_from_json(json_text)
+    elif csv_text:
         try:
             for c in parse_export(csv_text):
                 out.append(
@@ -2470,7 +3138,8 @@ def normalise_cards(
                         "name": c.name,
                         "quantity": c.quantity,
                         "categories": c.categories,
-                        "foil": c.finish == "Foil",
+                        "foil": c.finish in ("Foil", "Etched"),
+                        "finish": c.finish if c.finish in ("Foil", "Etched") else "",
                         "set_code": c.set_code,
                         "collector_number": c.collector_number,
                     }
@@ -2480,17 +3149,19 @@ def normalise_cards(
     elif decklist_text:
         try:
             for c in parse_decklist(decklist_text):
-                if c.zone == "main":
-                    out.append(
-                        {
-                            "name": c.name,
-                            "quantity": c.quantity,
-                            "categories": c.categories,
-                            "foil": c.foil,
-                            "set_code": c.set_code,
-                            "collector_number": c.collector_number,
-                        }
-                    )
+                out.append(
+                    {
+                        "name": c.name,
+                        "quantity": c.quantity,
+                        # a sideboard row without a category of its own goes to Archidekt's
+                        # Sideboard or Maybeboard category, as its section header said
+                        "categories": c.categories or ([c.board] if c.zone == "side" and c.board else []),
+                        "foil": c.foil,
+                        "finish": c.finish,
+                        "set_code": c.set_code,
+                        "collector_number": c.collector_number,
+                    }
+                )
         except DecklistError as exc:
             raise DeckError("invalid", f"decklist could not be read: {exc}") from exc
     else:
@@ -2512,12 +3183,17 @@ def normalise_cards(
                 number and not _COLLECTOR_NUMBER.fullmatch(number)
             ):
                 raise DeckError("invalid", f"card {i}: set_code or collector_number looks wrong")
+            finish_raw = str(item.get("finish") or "").strip().lower()
+            if finish_raw and finish_raw not in FINISHES:
+                raise DeckError("invalid", f"card {i}: finish must be normal, foil or etched")
+            finish = FINISHES.get(finish_raw, "")
             out.append(
                 {
                     "name": name,
                     "quantity": qty,
                     "categories": [cat] if cat else [],
-                    "foil": item.get("foil") is True,
+                    "foil": item.get("foil") is True or finish in ("Foil", "Etched"),
+                    "finish": finish if finish != "Normal" else "",
                     "set_code": set_code,
                     "collector_number": number,
                 }

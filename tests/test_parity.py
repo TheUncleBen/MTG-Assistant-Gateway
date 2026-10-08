@@ -66,6 +66,10 @@ async def test_deck_list_controls_and_views(stack: Stack) -> None:
         deck = await b.http.get("/decks/42", headers=NAV)
         assert deck.status_code == 200
         assert "class='banner'" in deck.text and "Quick add" in deck.text and "Clone deck" in deck.text
+        # Archidekt's own playtester framed on the gateway's playtest page; the simulation (the
+        # same run as run_deck_report) is one click; the compare view is under More
+        assert "href='/decks/42/playtest'" in deck.text and "Run simulation" in deck.text
+        assert "href='/decks/42/compare'" in deck.text and "Run deck report" not in deck.text
         assert "/decks/42/settings" in deck.text and "Deck stats" in deck.text
         assert "cards.scryfall.io" in deck.headers["content-security-policy"]
         for view in ("stacks", "grid"):
@@ -73,10 +77,11 @@ async def test_deck_list_controls_and_views(stack: Stack) -> None:
             assert r.status_code == 200 and f"deckview {view}" in r.text, view
             assert "Creature" in r.text and "Land" in r.text
         filtered = await b.http.get("/decks/42?q=sol+ring", headers=NAV)
+        # the card rows are filtered; the stats panel's draw-odds data still names every card
         assert (
             filtered.status_code == 200
-            and "Sol Ring" in filtered.text
-            and "Acidic Slime" not in filtered.text
+            and "data-card='Sol Ring'" in filtered.text
+            and "data-card='Acidic Slime'" not in filtered.text
         )
         bad = await b.http.get("/decks/42?view=nope&group=nope&sort=nope", headers=NAV)
         assert bad.status_code == 200  # unknown choices fall back to the defaults

@@ -87,14 +87,19 @@ async def test_cross_user_objects(stack) -> None:  # noqa: F811
         ("propose_new_deck", {"name": "x", "scan_session": scan_id}),
         ("propose_deck_changes", {"deck_id": "42", "changes": [{"action": "add", "card_name": "Opt"}]}),
         ("propose_deck_details", {"deck_id": "42", "details": {"name": "pwned"}}),
-        ("propose_clone_deck", {"deck_id": "42"}),
     ]:
         out = await call(h, tb, name, args)
         sc_ = out.get("structuredContent") or {}
         assert out.get("isError") or sc_.get("ok") is False, (name, out)
+    # Alice's deck 42 is public, so Bob may clone it, as on archidekt.com: the proposal is his, the
+    # copy would land in his own account, and Alice's deck is only read.
+    clone = structured(await call(h, tb, "propose_clone_deck", {"deck_id": "42"}))
+    assert clone["ok"] and clone["kind"] == "clone" and clone["deck_id"] == "42", clone
+    assert structured(await call(h, tb, "reject_proposal", {"proposal_id": clone["proposal_id"]}))["ok"]
     cmp_ = structured(await call(h, tb, "compare_decks", {"a": snap_id, "b": "42"}))
     assert "a" not in cmp_  # snapshot id is not resolved (ids lack the snap_ prefix): parsed as decklist text
-    assert structured(await call(h, tb, "list_my_proposals"))["proposals"] == []
+    mine = structured(await call(h, tb, "list_my_proposals"))["proposals"]
+    assert [p["kind"] for p in mine] == ["clone"] and mine[0]["state"] == "rejected", mine
     assert structured(await call(h, tb, "list_snapshots"))["snapshots"] == []
     assert structured(await call(h, tb, "list_deck_reports"))["reports"] == []
     assert structured(await call(h, tb, "list_scan_sessions"))["sessions"] == []
@@ -120,7 +125,9 @@ async def test_cross_user_objects(stack) -> None:  # noqa: F811
         r = await bb.http.request(method, url, headers={"X-CSRF-Token": csrf_b}, **kw)
         assert r.status_code in (403, 404), ("cookie", method, url, r.status_code, r.text)
     hist = (await h.http.get("/api/v1/decks/42/history", headers=auth_b)).json()
-    assert hist["proposals"] == [] and hist["snapshots"] == [] and hist["reports"] == []
+    # Bob's history of deck 42 holds only his own rejected clone proposal, nothing of Alice's
+    assert [p["kind"] for p in hist["proposals"]] == ["clone"]
+    assert hist["snapshots"] == [] and hist["reports"] == []
     acts = (await h.http.get("/api/v1/activity", headers=auth_b)).json()["events"]
     assert all(e.get("sub") in (None, "user-2") for e in acts)
 

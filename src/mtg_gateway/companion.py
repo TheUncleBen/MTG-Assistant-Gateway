@@ -20,11 +20,14 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, RedirectResponse, Response
 
 from . import deck_stats
-from .archidekt import FORMAT_NAMES, Deck, parse_deck
+from .archidekt import FORMAT_NAMES, Deck, featured_scryfall_id, format_label, parse_deck
+from .decklist import DecklistError, parse_decklist
 from .deckpage import (
     DECK_CSS,
     LIST_ORDERS,
     card_image,
+    compare_page_html,
+    covers_for,
     deck_list_controls_html,
     deck_list_html,
     deck_page_html,
@@ -58,8 +61,15 @@ DECK_CSP = (
     "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; "
     "img-src 'self' https://cards.scryfall.io; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 )
+# The playtest page frames Archidekt's own playtester (archidekt.com sends no frame-ancestors or
+# X-Frame-Options; checked live 2026-10-08) and nothing else; the gateway's pages themselves
+# still refuse to be framed.
+PLAYTEST_CSP = (
+    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; worker-src 'self'; img-src 'self'; "
+    "frame-src https://archidekt.com; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+)
 # Format names the settings and new-deck forms offer, one per Archidekt format id.
-FORMAT_CHOICES = [FORMAT_NAMES[i] for i in sorted(FORMAT_NAMES)]
+FORMAT_CHOICES = sorted({FORMAT_NAMES[i] for i in FORMAT_NAMES}, key=lambda n: format_label(n).lower())
 EDITOR_CSP = (
     "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; "
     "img-src 'self' https://cards.scryfall.io; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
@@ -186,6 +196,22 @@ DECK_OK_MESSAGES = {
     "saved": "Saved to Archidekt. A snapshot from just before is under History if you want to undo.",
     "created": "Created on Archidekt.",
 }
+INDENT = "\u2003"  # an em space per folder level in folder pickers
+# Notices the settings page shows after one of its hand actions (?ok=).
+SETTINGS_OK_MESSAGES = {
+    "cover": "Cover image saved to Archidekt. A snapshot from just before is under History.",
+    "cover_auto": "Archidekt picks the cover image again. A snapshot from just before is under History.",
+    "tag_added": "Tag added on Archidekt.",
+    "tag_removed": "Tag removed on Archidekt.",
+    "moved": "Deck moved to that folder on Archidekt.",
+}
+# Notices My decks shows (?ok=).
+LIST_OK_MESSAGES = {
+    "deleted": "Deck deleted on Archidekt. Its last snapshot is under History; when backups are on, a copy "
+    "is in your backup folder.",
+    "folder_created": "Folder created on Archidekt.",
+    "folder_renamed": "Folder renamed on Archidekt.",
+}
 DECK_ERR_MESSAGES = {
     "report_failed": "The deck report could not be made. Try again later.",
     "invalid": "The deck report could not be made: that request was not valid.",
@@ -210,7 +236,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         try:
             result = await state.decks.apply(sub, pid, via="browser")
         except DeckError as exc:
-            code = _err_code(exc.kind)
+            code = _err_code(exc.kind, proposal_exists=state.db.get_proposal(pid, sub) is not None)
             return RedirectResponse(f"/proposals/{pid}?err={code}", status_code=303)
         made = result.get("result") if isinstance(result.get("result"), dict) else {}
         target = deck_id or str(made.get("deck_id") or result.get("deck_id") or "")
@@ -233,6 +259,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         scripts: bool = False,
         heading: bool = True,
         deck_css: bool = False,
+        extra_scripts: tuple[str, ...] = (),
     ) -> Response:
         user = state.db.get_user(sub) or {}
         admin = bool(s.admin_group and s.admin_group in (user.get("groups") or []))
@@ -245,11 +272,17 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             csrf=_csrf(s, sid),
             admin=admin,
             wide=two_pane,
-            scripts=scripts,
+            scripts=scripts or bool(extra_scripts),
             current=current,
             heading=heading,
             head_extra=(f"<style>{DECK_CSS}</style>" if deck_css else "")
-            + ("<script src='/static/deck.js' defer></script>" if scripts else ""),
+            + (
+                "<script src='/static/cardview.js' defer></script>"
+                "<script src='/static/deck.js' defer></script>"
+                if scripts
+                else ""
+            )
+            + "".join(f"<script src='/static/{name}' defer></script>" for name in extra_scripts),
         )
         if csp:
             resp.headers["Content-Security-Policy"] = csp
@@ -321,10 +354,12 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         notice = ""
         if qp.get("err") == "bad_ref":
             notice = "<p class='notice error'>That is not an Archidekt deck link or id.</p>"
+        if qp.get("ok") in LIST_OK_MESSAGES:
+            notice = f"<p class='notice ok'>{_esc(LIST_OK_MESSAGES[qp['ok']])}</p>"
         if problem == "not_linked":
             body = link_prompt() + f"<div class='panel'>{open_form}</div>"
             return page("My decks", notice + body, sub=sub, sid=sid, current="/decks")
-        covers = state.db.deck_covers([str(d["id"]) for d in rows])
+        covers = covers_for(rows, state.db.deck_covers([str(d["id"]) for d in rows]))
         body = (
             notice
             + deck_list_controls_html(
@@ -362,9 +397,10 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
 
     # -- new deck -------------------------------------------------------------
     def new_deck_form(values: dict[str, str], error: str = "") -> str:
+        kind = values.get("kind") if values.get("kind") in ("csv", "json") else "list"
         fmt_opts = "".join(
             f"<option value='{_esc(n)}'{' selected' if values.get('format', 'commander') == n else ''}>"
-            f"{_esc(n.capitalize())}</option>"
+            f"{_esc(format_label(n))}</option>"
             for n in FORMAT_CHOICES
         )
         return (
@@ -384,14 +420,18 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             "<label for='source'>Cards</label>"
             "<p class='muted small'>Paste a decklist (<code>1 Sol Ring</code>, <code>2x Opt (cmr) "
             "[Ramp]</code>, "
-            "a <code># Sideboard</code> header) or an Archidekt CSV export. Leave it empty for an "
-            "empty deck.</p>"
+            "a <code># Sideboard</code> header), an Archidekt CSV export or this gateway's .json export, "
+            "or choose a file (.txt, .csv or .json). Leave it empty for an empty deck.</p>"
+            "<div class='field filepick'><label for='file'>From a file</label>"
+            "<input id='file' type='file' accept='.txt,.csv,.json,text/plain,text/csv,application/json' "
+            "data-fill='source' data-kind='kind'></div>"
             f"<textarea id='source' name='source' rows='12' placeholder='1 Sol Ring&#10;1 Arcane Signet'>"
             f"{_esc(values.get('source', ''))}</textarea>"
             "<div class='field'><label for='kind'>The text above is</label><select id='kind' name='kind'>"
-            f"<option value='list'{' selected' if values.get('kind') != 'csv' else ''}>a decklist</option>"
-            f"<option value='csv'{' selected' if values.get('kind') == 'csv' else ''}>an Archidekt CSV export"
-            "</option></select></div>"
+            f"<option value='list'{' selected' if kind == 'list' else ''}>a decklist</option>"
+            f"<option value='csv'{' selected' if kind == 'csv' else ''}>an Archidekt CSV export</option>"
+            f"<option value='json'{' selected' if kind == 'json' else ''}>a gateway .json export</option>"
+            "</select></div>"
             f"<div class='actions'><button class='primary'>{icon('plus')} Create deck</button>"
             "<a class='btn' href='/decks'>Cancel</a></div>"
             "<p class='muted small'>The deck is created on Archidekt straight away and opens here.</p>"
@@ -415,14 +455,21 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
                 values["name"] = str(sess.get("name") or "")[:120]
             except ScanError:
                 pass
-        return page("New deck", new_deck_form(values), sub=sub, sid=sid, current="/decks")
+        return page(
+            "New deck",
+            new_deck_form(values),
+            sub=sub,
+            sid=sid,
+            current="/decks",
+            extra_scripts=("filepick.js",),
+        )
 
     @server.custom_route("/decks/new", methods=["POST"], include_in_schema=False)
     async def new_deck_post(request: Request) -> Response:
         sub, sid = browser_session(state, request)
         if not sub:
             return login_redirect("/decks/new")
-        data = await form(request, limit=600_000)
+        data = await form(request, limit=4_200_000)  # a deck .json export can reach a few MB
         if not check_csrf(sid, data):
             return page("New deck", EXPIRED, sub=sub, sid=sid, status=403)
         values = {**data, "csrf": _csrf(s, sid) or ""}
@@ -434,13 +481,20 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
                 name=data.get("name", ""),
                 deck_format=data.get("format", "commander"),
                 cards=[] if not source else None,
-                decklist_text=source if source and data.get("kind") != "csv" else None,
+                decklist_text=source if source and data.get("kind") not in ("csv", "json") else None,
                 csv_text=source if source and data.get("kind") == "csv" else None,
+                json_text=source if source and data.get("kind") == "json" else None,
                 private=bool(data.get("private")),
             )
         except DeckError as exc:
             return page(
-                "New deck", new_deck_form(values, str(exc)), sub=sub, sid=sid, status=400, current="/decks"
+                "New deck",
+                new_deck_form(values, str(exc)),
+                sub=sub,
+                sid=sid,
+                status=400,
+                current="/decks",
+                extra_scripts=("filepick.js",),
             )
         return await apply_now(sub, p["proposal_id"], ok="created")
 
@@ -524,7 +578,13 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
 
     # -- deck settings (details proposal) ---------------------------------------
     def settings_form(
-        deck: Deck, csrf: str | None, values: dict[str, str] | None = None, error: str = ""
+        deck: Deck,
+        csrf: str | None,
+        values: dict[str, str] | None = None,
+        error: str = "",
+        *,
+        folders: dict[str, Any] | None = None,
+        ok: str = "",
     ) -> str:
         v = values or {}
         fmt_current = v.get("deck_format", deck.format or "")
@@ -534,7 +594,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             return " selected" if flag else ""
 
         fmt_opts = "".join(
-            f"<option value='{_esc(n)}'{sel(fmt_current == n)}>{_esc(n.capitalize())}</option>"
+            f"<option value='{_esc(n)}'{sel(fmt_current == n)}>{_esc(format_label(n))}</option>"
             for n in FORMAT_CHOICES
         )
         bracket_current = v.get("edh_bracket", str(deck.edh_bracket or ""))
@@ -565,6 +625,11 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         )
         return (
             (f"<p class='notice error'>{_esc(error)}</p>" if error else "")
+            + (
+                f"<p class='notice ok'>{_esc(SETTINGS_OK_MESSAGES[ok])}</p>"
+                if ok in SETTINGS_OK_MESSAGES
+                else ""
+            )
             + f"<form method='post' action='/decks/{did}/settings' class='panel settings'>"
             f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
             "<h2>Main settings</h2>"
@@ -602,6 +667,118 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             "is created "
             "by typing its name there. Renaming, deleting and the premier / in-deck / in-price flags are not "
             "available through the gateway yet.</p></section>"
+            + cover_section(deck, csrf)
+            + tags_section(deck, csrf)
+            + folder_section(deck, csrf, folders)
+            + "<section class='panel danger' id='delete'><h2>Delete this deck</h2>"
+            "<p class='muted small'>Deletes the deck on Archidekt after you type its name. A snapshot is "
+            "kept under History"
+            + (", and a copy in your backup folder on Archidekt" if s.archidekt_backups else "")
+            + ".</p>"
+            f"<a class='btn btn-danger' href='/decks/{did}/delete'>{icon('trash')} Delete deck…</a></section>"
+        )
+
+    def cover_section(deck: Deck, csrf: str | None) -> str:
+        """Pick the deck's cover image from its cards (Archidekt's "deck image"), or let Archidekt pick."""
+        did = _esc(deck.id)
+        chosen = (featured_scryfall_id(deck.featured) or "").lower()
+        current = next((c for c in deck.cards if c.scryfall_uid.lower() == chosen), None) if chosen else None
+        preview = card_image(current, "art_crop") if current else None
+        seen: set[str] = set()
+        options = []
+        for c in sorted(deck.cards, key=lambda c: ("Commander" not in c.categories, c.name.lower())):
+            uid = c.scryfall_uid.lower()
+            if not uid or uid in seen or not card_image(c):
+                continue
+            seen.add(uid)
+            label = c.name + (" (commander)" if "Commander" in c.categories else "")
+            options.append(
+                f"<option value='{_esc(uid)}'{' selected' if uid == chosen else ''}>{_esc(label)}</option>"
+            )
+        return (
+            "<section class='panel coverbox' id='cover'><h2>Cover image</h2>"
+            f"<form method='post' action='/decks/{did}/cover' class='coverform'>"
+            f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
+            + (
+                f"<img class='coverart' src='{_esc(preview)}' alt='Current cover: {_esc(current.name)}'>"
+                if preview and current
+                else "<div class='coverart none'><span class='muted small'>Archidekt picks the image"
+                "</span></div>"
+            )
+            + "<div class='field grow'><label for='cover_card'>Card whose art fronts the deck</label>"
+            "<span class='sel'><select id='cover_card' name='card'>"
+            f"<option value=''{'' if chosen else ' selected'}>Automatic (Archidekt picks)</option>"
+            + "".join(options)
+            + "</select></span></div>"
+            f"<button class='primary'>{icon('image')} Set cover</button></form>"
+            "<p class='muted small'>Shown on the deck page, in your deck lists and on Archidekt.</p>"
+            "</section>"
+        )
+
+    def tags_section(deck: Deck, csrf: str | None) -> str:
+        did = _esc(deck.id)
+        csrf_in = f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
+        items = "".join(
+            f"<li><span class='pill'>{_esc(r.get('name'))}</span>"
+            f"<form method='post' action='/decks/{did}/tags' class='inline'>{csrf_in}"
+            "<input type='hidden' name='action' value='remove'>"
+            f"<input type='hidden' name='relation_id' value='{int(r['id'])}'>"
+            f"<button class='mini' aria-label='Remove tag {_esc(r.get('name'))}'>{icon('x')}</button>"
+            "</form></li>"
+            for r in deck.tag_relations
+            if isinstance(r.get("id"), int) and r.get("name")
+        )
+        return (
+            f"<section class='panel tagbox' id='tags'><h2>Deck tags</h2>"
+            f"<ul class='plain taglist'>{items or '<li class=muted>No deck tags yet.</li>'}</ul>"
+            f"<form method='post' action='/decks/{did}/tags' class='addtag'>{csrf_in}"
+            "<input type='hidden' name='action' value='add'>"
+            "<div class='field grow'><label for='tagname'>Add a tag</label>"
+            "<input id='tagname' type='text' name='name' maxlength='40' placeholder='Example: budget' "
+            "required>"
+            f"</div><button>{icon('tag')} Add tag</button></form>"
+            "<p class='muted small'>Tags are Archidekt's public deck tags: an existing tag of that name is "
+            "reused, otherwise it is created.</p></section>"
+        )
+
+    def folder_section(deck: Deck, csrf: str | None, folders: dict[str, Any] | None) -> str:
+        did = _esc(deck.id)
+        if not folders:
+            return (
+                "<section class='panel' id='folder'><h2>Folder</h2><p class='muted'>Your folders could not "
+                "be read from Archidekt right now.</p></section>"
+            )
+        current = deck.parent_folder if deck.parent_folder is not None else folders["root_id"]
+        opts = "".join(
+            f"<option value='{f['id']}'{' selected' if f['id'] == current else ''}>"
+            f"{_esc(INDENT * f['depth'] + f['name'])}</option>"
+            for f in folders["folders"]
+        )
+        return (
+            f"<section class='panel folderbox' id='folder'><h2>Folder</h2>"
+            f"<form method='post' action='/decks/{did}/move' class='moveform'>"
+            f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
+            "<div class='field grow'><label for='folder_id'>This deck sits in</label>"
+            f"<span class='sel'><select id='folder_id' name='folder_id'>{opts}</select></span></div>"
+            f"<button>{icon('folder')} Move</button></form>"
+            "<p class='muted small'>Folders are created and renamed from <a href='/folders'>My decks "
+            "› Folders</a>.</p></section>"
+        )
+
+    async def folders_or_none(sub: str) -> dict[str, Any] | None:
+        try:
+            return await decks.folders(sub)
+        except DeckError:
+            return None
+
+    def settings_problem(deck_id: str, exc: DeckError, sub: str, sid: str | None) -> Response:
+        return page(
+            "Cannot edit this deck",
+            f"<div class='panel'><p>{_esc(exc)}</p>"
+            f"<a class='btn' href='/decks/{_esc(deck_id)}'>Back</a></div>",
+            sub=sub,
+            sid=sid,
+            status={"not_found": 404, "forbidden": 403}.get(exc.kind, 400),
         )
 
     @server.custom_route("/decks/{deck_id}/settings", methods=["GET"], include_in_schema=False)
@@ -613,21 +790,265 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         try:
             deck = await decks.get_own_deck(sub, deck_id)
         except DeckError as exc:
-            return page(
-                "Cannot edit this deck",
-                f"<div class='panel'><p>{_esc(exc)}</p>"
-                f"<a class='btn' href='/decks/{_esc(deck_id)}'>Back</a></div>",
-                sub=sub,
-                sid=sid,
-                status={"not_found": 404, "forbidden": 403}.get(exc.kind, 400),
-            )
+            return settings_problem(deck_id, exc, sub, sid)
+        ok = request.query_params.get("ok") or ""
         return page(
             f"Deck settings: {deck.name}",
-            settings_form(deck, _csrf(s, sid)),
+            settings_form(deck, _csrf(s, sid), folders=await folders_or_none(sub), ok=ok),
             sub=sub,
             sid=sid,
             current="/decks",
+            csp=DECK_CSP,
+            deck_css=True,
         )
+
+    async def hand_action(request: Request, deck_id: str, run: Any, *, ok: str, anchor: str) -> Response:
+        """One of the settings page's own forms (cover, tags, folder): the member's click is the
+        approval. On success the settings page reopens with a notice; a refusal re-renders it with
+        the message next to the form."""
+        sub, sid = browser_session(state, request)
+        if not sub:
+            return login_redirect(f"/decks/{deck_id}/settings")
+        data = await form(request)
+        if not check_csrf(sid, data):
+            return page("Deck settings", EXPIRED, sub=sub, sid=sid, status=403)
+        current_client.set(BROWSER_CLIENT_ID)
+        try:
+            code = await run(sub, data) or ok
+        except DeckError as exc:
+            try:
+                deck = await decks.get_own_deck(sub, deck_id)
+            except DeckError as again:
+                return settings_problem(deck_id, again, sub, sid)
+            return page(
+                f"Deck settings: {deck.name}",
+                settings_form(deck, _csrf(s, sid), error=str(exc), folders=await folders_or_none(sub)),
+                sub=sub,
+                sid=sid,
+                status=400,
+                current="/decks",
+                csp=DECK_CSP,
+                deck_css=True,
+            )
+        return RedirectResponse(f"/decks/{_esc(deck_id)}/settings?ok={code}#{anchor}", status_code=303)
+
+    @server.custom_route("/decks/{deck_id}/cover", methods=["POST"], include_in_schema=False)
+    async def cover_post(request: Request) -> Response:
+        deck_id = request.path_params["deck_id"]
+
+        async def run(sub: str, data: dict[str, str]) -> str:
+            uid = (data.get("card") or "").strip() or None
+            await decks.set_cover(sub, deck_id, uid)
+            if uid:
+                deck = await decks.get_deck(sub, deck_id)
+                card = next((c for c in deck.cards if c.scryfall_uid.lower() == uid.lower()), None)
+                state.db.save_deck_cover(deck.id, uid.lower(), card.name if card else "", owner_sub=sub)
+            return "cover" if uid else "cover_auto"
+
+        return await hand_action(request, deck_id, run, ok="cover", anchor="cover")
+
+    @server.custom_route("/decks/{deck_id}/tags", methods=["POST"], include_in_schema=False)
+    async def tags_post(request: Request) -> Response:
+        deck_id = request.path_params["deck_id"]
+
+        async def run(sub: str, data: dict[str, str]) -> str:
+            if data.get("action") == "remove":
+                rid = data.get("relation_id") or ""
+                if not re.fullmatch(r"[0-9]{1,12}", rid):
+                    raise DeckError("invalid", "That tag could not be identified.")
+                await decks.remove_tag(sub, deck_id, int(rid))
+                return "tag_removed"
+            await decks.add_tag(sub, deck_id, data.get("name") or "")
+            return "tag_added"
+
+        return await hand_action(request, deck_id, run, ok="tag_added", anchor="tags")
+
+    @server.custom_route("/decks/{deck_id}/move", methods=["POST"], include_in_schema=False)
+    async def move_post(request: Request) -> Response:
+        deck_id = request.path_params["deck_id"]
+
+        async def run(sub: str, data: dict[str, str]) -> str:
+            fid = (data.get("folder_id") or "").strip()
+            if not re.fullmatch(r"[0-9]{1,12}", fid):
+                raise DeckError("invalid", "Pick a folder.")
+            await decks.move_deck(sub, deck_id, int(fid))
+            return "moved"
+
+        return await hand_action(request, deck_id, run, ok="moved", anchor="folder")
+
+    # -- delete a deck (hand action, typed-name confirmation) -----------------------------------
+    def delete_form(deck: Deck, csrf: str | None, error: str = "") -> str:
+        did = _esc(deck.id)
+        n = sum(c.quantity for c in deck.cards if deck.in_deck(c))
+        undo = (
+            "A snapshot of the deck is kept under History"
+            + (
+                ", and a private copy is made in your backup folder on Archidekt first"
+                if s.archidekt_backups
+                else ""
+            )
+            + ". Archidekt itself has no undo for a deleted deck."
+        )
+        return (
+            (f"<p class='notice error'>{_esc(error)}</p>" if error else "")
+            + f"<form method='post' action='/decks/{did}/delete' class='panel danger deleteform'>"
+            f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
+            f"<h2>Delete “{_esc(deck.name)}”?</h2>"
+            f"<p>This deletes the deck ({n} cards) from your Archidekt account. {undo}</p>"
+            "<label for='typed'>Type the deck's name to confirm</label>"
+            f"<input id='typed' type='text' name='name' autocomplete='off' required maxlength='200' "
+            f"placeholder='{_esc(deck.name)}'>"
+            f"<div class='actions'><button class='danger'>{icon('trash')} Delete this deck</button>"
+            f"<a class='btn' href='/decks/{did}'>Keep it</a></div></form>"
+        )
+
+    @server.custom_route("/decks/{deck_id}/delete", methods=["GET"], include_in_schema=False)
+    async def delete_page(request: Request) -> Response:
+        deck_id = request.path_params["deck_id"]
+        sub, sid = browser_session(state, request)
+        if not sub:
+            return login_redirect(f"/decks/{deck_id}/delete")
+        try:
+            deck = await decks.get_own_deck(sub, deck_id)
+        except DeckError as exc:
+            return settings_problem(deck_id, exc, sub, sid)
+        return page(
+            f"Delete {deck.name}",
+            delete_form(deck, _csrf(s, sid)),
+            sub=sub,
+            sid=sid,
+            current="/decks",
+            deck_css=True,
+        )
+
+    @server.custom_route("/decks/{deck_id}/delete", methods=["POST"], include_in_schema=False)
+    async def delete_post(request: Request) -> Response:
+        deck_id = request.path_params["deck_id"]
+        sub, sid = browser_session(state, request)
+        if not sub:
+            return login_redirect(f"/decks/{deck_id}/delete")
+        data = await form(request)
+        if not check_csrf(sid, data):
+            return page("Delete deck", EXPIRED, sub=sub, sid=sid, status=403)
+        current_client.set(BROWSER_CLIENT_ID)
+        try:
+            await decks.delete_deck(sub, deck_id, data.get("name") or "")
+        except DeckError as exc:
+            try:
+                deck = await decks.get_own_deck(sub, deck_id)
+            except DeckError as again:
+                return settings_problem(deck_id, again, sub, sid)
+            return page(
+                f"Delete {deck.name}",
+                delete_form(deck, _csrf(s, sid), str(exc)),
+                sub=sub,
+                sid=sid,
+                status=400,
+                current="/decks",
+                deck_css=True,
+            )
+        return RedirectResponse("/decks?ok=deleted", status_code=303)
+
+    # -- folders (create, rename) ---------------------------------------------------------------
+    def folders_form(folders: dict[str, Any] | None, csrf: str | None, error: str = "", ok: str = "") -> str:
+        csrf_in = f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
+        if not folders:
+            return (
+                "<div class='panel'><p>Your folders could not be read from Archidekt right now.</p>"
+                "<a class='btn' href='/decks'>Back to My decks</a></div>"
+            )
+        rows = folders["folders"]
+        tree = "".join(
+            f"<li style='--depth:{f['depth']}'><span class='name'>{icon('folder')} {_esc(f['name'])}</span>"
+            + ("<span class='badge'>private</span>" if f["private"] else "")
+            + (f"<a class='btn' href='/decks?folder={_esc(f['name'])}'>Show decks</a>" if f["depth"] else "")
+            + "</li>"
+            for f in rows
+        )
+        parent_opts = "".join(
+            f"<option value='{f['id']}'>{_esc(INDENT * f['depth'] + f['name'])}</option>" for f in rows
+        )
+        rename_opts = "".join(
+            f"<option value='{f['id']}'>{_esc(INDENT * (f['depth'] - 1) + f['name'])}</option>"
+            for f in rows
+            if f["depth"]
+        )
+        return (
+            (f"<p class='notice error'>{_esc(error)}</p>" if error else "")
+            + (f"<p class='notice ok'>{_esc(LIST_OK_MESSAGES[ok])}</p>" if ok in LIST_OK_MESSAGES else "")
+            + f"<section class='panel'><h2>Your folders</h2><ul class='plain plist foldertree'>{tree}</ul>"
+            "<p class='muted small'>A deck is moved between folders from its settings page.</p></section>"
+            f"<form method='post' action='/folders' class='panel folderform'>{csrf_in}"
+            "<input type='hidden' name='action' value='create'><h2>New folder</h2>"
+            "<div class='row'><div class='field grow'><label for='fname'>Name</label>"
+            "<input id='fname' type='text' name='name' maxlength='100' required></div>"
+            "<div class='field'><label for='fparent'>Inside</label><span class='sel'>"
+            f"<select id='fparent' name='parent_id'>{parent_opts}</select></span></div></div>"
+            f"<div class='actions'><button class='primary'>{icon('plus')} Create folder</button></div></form>"
+            + (
+                f"<form method='post' action='/folders' class='panel folderform'>{csrf_in}"
+                "<input type='hidden' name='action' value='rename'><h2>Rename a folder</h2>"
+                "<div class='row'><div class='field'><label for='rfolder'>Folder</label><span class='sel'>"
+                f"<select id='rfolder' name='folder_id'>{rename_opts}</select></span></div>"
+                "<div class='field grow'><label for='rname'>New name</label>"
+                "<input id='rname' type='text' name='name' maxlength='100' required></div></div>"
+                f"<div class='actions'><button>{icon('edit')} Rename</button></div></form>"
+                if rename_opts
+                else ""
+            )
+            + "<p class='muted small'>Folders live on Archidekt; deleting one is done there.</p>"
+        )
+
+    @server.custom_route("/folders", methods=["GET"], include_in_schema=False)
+    async def folders_page(request: Request) -> Response:
+        sub, sid = browser_session(state, request)
+        if not sub:
+            return login_redirect("/folders")
+        _rows, problem = await my_decks(sub)
+        if problem == "not_linked":
+            return page("Folders", link_prompt(), sub=sub, sid=sid, current="/decks")
+        ok = request.query_params.get("ok") or ""
+        return page(
+            "Folders",
+            folders_form(await folders_or_none(sub), _csrf(s, sid), ok=ok),
+            sub=sub,
+            sid=sid,
+            current="/decks",
+            deck_css=True,
+        )
+
+    @server.custom_route("/folders", methods=["POST"], include_in_schema=False)
+    async def folders_post(request: Request) -> Response:
+        sub, sid = browser_session(state, request)
+        if not sub:
+            return login_redirect("/folders")
+        data = await form(request)
+        if not check_csrf(sid, data):
+            return page("Folders", EXPIRED, sub=sub, sid=sid, status=403)
+        current_client.set(BROWSER_CLIENT_ID)
+        try:
+            if data.get("action") == "rename":
+                fid = (data.get("folder_id") or "").strip()
+                if not re.fullmatch(r"[0-9]{1,12}", fid):
+                    raise DeckError("invalid", "Pick a folder to rename.")
+                await decks.rename_folder(sub, int(fid), data.get("name") or "")
+                ok = "folder_renamed"
+            else:
+                pid = (data.get("parent_id") or "").strip()
+                parent = int(pid) if re.fullmatch(r"[0-9]{1,12}", pid) else None
+                await decks.create_folder(sub, data.get("name") or "", parent)
+                ok = "folder_created"
+        except DeckError as exc:
+            return page(
+                "Folders",
+                folders_form(await folders_or_none(sub), _csrf(s, sid), error=str(exc)),
+                sub=sub,
+                sid=sid,
+                status=400,
+                current="/decks",
+                deck_css=True,
+            )
+        return RedirectResponse(f"/folders?ok={ok}", status_code=303)
 
     @server.custom_route("/decks/{deck_id}/settings", methods=["POST"], include_in_schema=False)
     async def settings_post(request: Request) -> Response:
@@ -665,6 +1086,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
                 sid=sid,
                 status=400,
                 current="/decks",
+                deck_css=True,
             )
         return await apply_now(sub, p["proposal_id"], ok="saved", deck_id=deck.id)
 
@@ -703,7 +1125,23 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
                 "image": card_image(c, "small"),
                 "mana_cost": c.mana_cost,
                 "price": c.price,
+                "type_line": c.type_line,
+                "oracle_text": c.oracle_text,
+                "pt": f"{c.power}/{c.toughness}" if c.power or c.toughness else "",
+                "loyalty": c.loyalty,
+                "faces": [
+                    {
+                        "name": f["name"],
+                        "mana": f["mana_cost"],
+                        "type": f["type_line"],
+                        "text": f["text"],
+                        "pt": f"{f['power']}/{f['toughness']}" if f["power"] or f["toughness"] else "",
+                        "loyalty": f["loyalty"],
+                    }
+                    for f in c.faces
+                ],
                 "in_deck": deck.in_deck(c),
+                "zone": "main" if deck.in_deck(c) else "side",
                 "auto_category": auto_category(c),
             }
 
@@ -755,7 +1193,9 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             "canCategorise": True,
             "writesEnabled": s.writes_enabled,
             "maxChanges": 40,
+            "sideCategory": deck.side_category(),
         }
+        side_name = _esc(deck.side_category())
         cat_opts = "".join(f"<option value='{_esc(c)}'>{_esc(c)}</option>" for c in categories)
         body = (
             f"<script id='editor-config' type='application/json'>{_json_for_html(config)}</script>"
@@ -790,7 +1230,17 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             "<div class='field'><label for='addfinish'>Finish</label><span class='sel'>"
             "<select id='addfinish' name='addfinish'><option value=''>Normal</option>"
             "<option value='foil'>Foil</option></select></span></div>"
+            "<div class='field'><label for='addzone'>Add to</label><span class='sel'>"
+            f"<select id='addzone' name='addzone'><option value='main'>Deck</option>"
+            f"<option value='side'>{side_name}</option></select></span></div>"
             f"<button class='btn-primary'>{icon('plus')} Add</button></form>"
+            "<details class='pastebox'><summary>Paste a list</summary>"
+            "<form class='pastelist'><label for='pastetext'>One card per line, with a count in front "
+            "(“2 Lightning Bolt”)</label>"
+            "<textarea id='pastetext' name='text' rows='6' maxlength='20000' "
+            "placeholder='4 Lightning Bolt&#10;1 Sol Ring'></textarea>"
+            f"<div class='actions'><button class='btn-primary'>{icon('plus')} Add these cards</button>"
+            "<span class='pastestatus muted small' role='status'></span></div></form></details>"
             "<ul class='erows added'></ul></section>"
             "<div class='cats existing'></div>"
             "<div class='picker' hidden></div>"
@@ -799,6 +1249,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
                 f"<template id='icon-{n}'>{icon(n)}</template>"
                 for n in ("minus", "plus", "more", "x", "swap")
             )
+            + "<script src='/static/cardview.js' defer></script>"
             + "<script src='/static/companion.js' defer></script>"
         )
         return page(
@@ -815,7 +1266,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
 
     @server.custom_route("/decks/{deck_id}/export", methods=["GET"], include_in_schema=False)
     async def export_page(request: Request) -> Response:
-        from .decks import deck_to_text
+        from .decks import deck_to_archidekt_text, deck_to_text
 
         deck_id = request.path_params["deck_id"]
         sub, sid = browser_session(state, request)
@@ -829,23 +1280,87 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             )
         main = deck_to_text(deck)
         side = deck_to_text(deck, zone="side")
+        arch = deck_to_archidekt_text(deck)
+        did = _esc(deck.id)
+
+        def block(key: str, title: str, blurb: str, text: str, rows: int) -> str:
+            return (
+                f"<div class='exportblock'><div class='head'><h2>{title}</h2>"
+                f"<button type='button' class='btn small copybtn' data-copy='{key}'>"
+                f"{icon('copy')} Copy</button></div>"
+                f"<p class='muted small'>{blurb}</p>"
+                f"<textarea id='{key}' rows='{rows}' readonly>{_esc(text)}</textarea></div>"
+            )
+
         body = (
-            f"<div class='card'><p><a href='/decks/{_esc(deck.id)}'>← {_esc(deck.name)}</a></p>"
-            "<h2>Decklist</h2><p class='muted small'>Plain text, commander first. Paste it into Moxfield, "
-            "MTGO, Arena or your assistant.</p>"
-            f"<textarea rows='{min(60, main.count(chr(10)) + 2)}' readonly>{_esc(main)}</textarea>"
+            f"<div class='card'><p><a href='/decks/{did}'>← {_esc(deck.name)}</a></p>"
+            "<p class='muted small'>Copy a list below or download a file. The file buttons save to your "
+            "Downloads folder in the app and in a browser.</p>"
+            + block(
+                "exp-arch",
+                "Archidekt import text",
+                "Every row with its printing, finish, categories and labels. Paste into Archidekt's "
+                "Import dialog, or into the gateway's New deck page, to get the same deck back "
+                "(sideboard and maybeboard included).",
+                arch,
+                min(40, arch.count(chr(10)) + 2),
+            )
+            + block(
+                "exp-main",
+                "Plain decklist",
+                "Mainboard only, commander first. For Moxfield, MTGO, Arena or your assistant.",
+                main,
+                min(40, main.count(chr(10)) + 2),
+            )
             + (
-                f"<h2>Sideboard and maybeboard</h2><textarea rows='8' readonly>{_esc(side)}</textarea>"
+                block(
+                    "exp-side",
+                    "Sideboard and maybeboard",
+                    "Rows Archidekt keeps outside the deck.",
+                    side,
+                    min(12, side.count(chr(10)) + 2),
+                )
                 if side
                 else ""
             )
-            + "<div class='actions'>"
-            f"<a class='btn' href='/decks/{_esc(deck.id)}/export.txt' download>Download .txt</a>"
-            f"<a class='btn' href='/decks/{_esc(deck.id)}/export.json' download>Download .json</a>"
-            f"<a class='btn' href='/decks/{_esc(deck.id)}/export.csv' download>Download .csv</a>"
+            + "<h2>Download</h2>"
+            "<p class='muted small'>Archidekt text, CSV and the gateway's JSON import back here (New deck "
+            "&rarr; from a file) or into Archidekt; Arena, MTGO and PDF are one-way.</p>"
+            "<div class='actions'>"
+            f"<a class='btn' href='/decks/{did}/export.archidekt.txt' download>Archidekt .txt</a>"
+            f"<a class='btn' href='/decks/{did}/export.txt' download>Plain .txt</a>"
+            f"<a class='btn' href='/decks/{did}/export.csv' download>.csv</a>"
+            f"<a class='btn' href='/decks/{did}/export.json' download>.json</a>"
+            f"<a class='btn' href='/decks/{did}/export.arena.txt' download>Arena .txt</a>"
+            f"<a class='btn' href='/decks/{did}/export.dek' download>MTGO .dek</a>"
+            f"<a class='btn' href='/decks/{did}/export.pdf' download>PDF</a>"
             "</div></div>"
         )
-        return page(f"Export: {deck.name}", body, sub=sub, sid=sid)
+        return page(f"Export: {deck.name}", body, sub=sub, sid=sid, extra_scripts=("export.js",))
+
+    @server.custom_route("/decks/{deck_id}/export.archidekt.txt", methods=["GET"], include_in_schema=False)
+    async def export_archidekt_txt(request: Request) -> Response:
+        """The deck in Archidekt's own import syntax (printing, finish, categories with their
+        flags, labels, sideboard rows), for Archidekt's Import dialog or the gateway's New deck."""
+        from .decks import deck_to_archidekt_text
+
+        sub, _sid = browser_session(state, request)
+        if not sub:
+            return login_redirect("/decks")
+        try:
+            deck = await decks.get_any_deck(sub, request.path_params["deck_id"])
+        except DeckError as exc:
+            return Response(str(exc), 404)
+        name = re.sub(r"[^A-Za-z0-9._-]+", "_", deck.name or deck.id)[:60]
+        return Response(
+            deck_to_archidekt_text(deck) + "\n",
+            media_type="text/plain; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="{name}.archidekt.txt"',
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
 
     @server.custom_route("/decks/{deck_id}/export.txt", methods=["GET"], include_in_schema=False)
     async def export_txt(request: Request) -> Response:
@@ -872,6 +1387,48 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
                 "X-Content-Type-Options": "nosniff",
             },
         )
+
+    async def _download(request: Request, ext: str, make: Any, media_type: str) -> Response:
+        """One export-only file for a deck the member may read: ``make(deck)`` gives the body."""
+        sub, _sid = browser_session(state, request)
+        if not sub:
+            return login_redirect("/decks")
+        try:
+            deck = await decks.get_any_deck(sub, request.path_params["deck_id"])
+        except DeckError as exc:
+            return Response(str(exc), 404)
+        name = re.sub(r"[^A-Za-z0-9._-]+", "_", deck.name or deck.id)[:60]
+        body = make(deck)
+        return Response(
+            body,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{name}{ext}"',
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+
+    @server.custom_route("/decks/{deck_id}/export.arena.txt", methods=["GET"], include_in_schema=False)
+    async def export_arena(request: Request) -> Response:
+        """Arena import text (export only: Arena imports it; the gateway does not read it back)."""
+        from .export_formats import to_arena
+
+        return await _download(request, ".arena.txt", to_arena, "text/plain; charset=utf-8")
+
+    @server.custom_route("/decks/{deck_id}/export.dek", methods=["GET"], include_in_schema=False)
+    async def export_dek(request: Request) -> Response:
+        """An MTGO .dek file (export only)."""
+        from .export_formats import to_mtgo_dek
+
+        return await _download(request, ".dek", to_mtgo_dek, "application/xml; charset=utf-8")
+
+    @server.custom_route("/decks/{deck_id}/export.pdf", methods=["GET"], include_in_schema=False)
+    async def export_pdf(request: Request) -> Response:
+        """A printable PDF of the deck (export only)."""
+        from .export_formats import to_pdf
+
+        return await _download(request, ".pdf", to_pdf, "application/pdf")
 
     @server.custom_route("/decks/{deck_id}/export.json", methods=["GET"], include_in_schema=False)
     async def export_json(request: Request) -> Response:
@@ -982,11 +1539,132 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             )
         current_client.set(BROWSER_CLIENT_ID)
         try:
-            await reports.run(sub, deck_id)
+            report = await reports.run(sub, deck_id)
         except DeckError as exc:
             code = exc.kind if exc.kind in DECK_ERR_MESSAGES else "report_failed"
             return RedirectResponse(f"/decks/{deck_id}?err={code}", status_code=303)
-        return RedirectResponse(f"/history?deck_id={deck_id}", status_code=303)
+        return RedirectResponse(f"/history/reports/{_esc(report['report_id'])}", status_code=303)
+
+    @server.custom_route("/decks/{deck_id}/playtest", methods=["GET"], include_in_schema=False)
+    async def playtest_page(request: Request) -> Response:
+        """Archidekt's own playtester for this deck, inside the gateway (web and the app's
+        WebView alike; the app loads frames in place). The gateway builds no playtester of its
+        own, so a game here is the same game as on archidekt.com."""
+        deck_id = request.path_params["deck_id"]
+        sub, sid = browser_session(state, request)
+        if not sub:
+            return login_redirect(f"/decks/{deck_id}/playtest")
+        try:
+            deck = await decks.get_any_deck(sub, deck_id)
+        except DeckError as exc:
+            return page(
+                "Deck not found",
+                f"<div class='panel'><p>{_esc(exc)}</p>"
+                "<a class='btn' href='/decks'>Back to my decks</a></div>",
+                sub=sub,
+                sid=sid,
+                status=404 if exc.kind == "not_found" else 400,
+            )
+        did = _esc(deck.id)
+        src = f"https://archidekt.com/playtester-v2/{did}"
+        body = (
+            "<section class='panel playhead'>"
+            f"<div><a href='/decks/{did}'>← {_esc(deck.name or f'Deck {deck.id}')}</a>"
+            "<span class='muted small'> · Archidekt's playtester, shown here</span></div>"
+            f"<a class='btn' href='{src}' target='_blank' rel='noreferrer noopener'>{icon('external')} "
+            "Open on Archidekt</a></section>"
+            f"<iframe class='playframe' src='{src}' title='Archidekt playtester' allow='fullscreen' "
+            "referrerpolicy='no-referrer' sandbox='allow-scripts allow-same-origin allow-forms allow-popups "
+            "allow-popups-to-escape-sandbox'></iframe>"
+            "<p class='muted small playnote'>The playtester runs on archidekt.com. A private deck shows only "
+            "when this browser is signed in to Archidekt; if the frame stays empty, use Open on "
+            "Archidekt.</p>"
+        )
+        return page(
+            f"Playtest: {deck.name or deck.id}",
+            body,
+            sub=sub,
+            sid=sid,
+            two_pane=True,
+            current="/decks",
+            csp=PLAYTEST_CSP,
+            heading=False,
+            deck_css=True,
+        )
+
+    @server.custom_route("/decks/{deck_id}/compare", methods=["GET"], include_in_schema=False)
+    async def compare_page(request: Request) -> Response:
+        """This deck against another: a preconstructed deck (the picker lists Archidekt's), any
+        deck id or link, or a pasted list. The same comparison the assistant's compare_decks
+        makes: what was taken out of the other deck, what was put in, what changed count, and
+        the statistics' differences."""
+        deck_id = request.path_params["deck_id"]
+        sub, sid = browser_session(state, request)
+        if not sub:
+            return login_redirect(f"/decks/{deck_id}/compare")
+        try:
+            deck = await decks.get_any_deck(sub, deck_id)
+        except DeckError as exc:
+            return page(
+                "Deck not found",
+                f"<div class='panel'><p>{_esc(exc)}</p>"
+                "<a class='btn' href='/decks'>Back to my decks</a></div>",
+                sub=sub,
+                sid=sid,
+                status=404 if exc.kind == "not_found" else 400,
+            )
+        qp = request.query_params
+        other_ref = (qp.get("with") or "").strip()[:2000]
+        paste = (qp.get("paste") or "").strip()[:20000]
+        try:
+            precons = await decks.precons(sub)
+        except DeckError:
+            precons = {}
+        other: Deck | dict[str, int] | None = None
+        other_name = ""
+        error = ""
+        status = 200
+        if paste:
+            try:
+                cards = parse_decklist(paste)
+                other = {c.name: c.quantity for c in cards if c.zone == "main"}
+                other_name = "the pasted list"
+            except DecklistError as exc:
+                error, status = f"The pasted list could not be read: {_esc(exc)}", 400
+        elif other_ref:
+            try:
+                other = await decks.get_any_deck(sub, other_ref)
+                other_name = other.name or f"deck {other.id}"
+            except DeckError as exc:
+                error, status = (
+                    f"That deck could not be read: {_esc(exc)}",
+                    400 if exc.kind != "not_found" else 404,
+                )
+        result = deck_stats.compare(other, deck) if other is not None else None
+        body = compare_page_html(
+            deck,
+            other=other,
+            other_name=other_name,
+            other_ref=other_ref,
+            paste=paste,
+            result=result,
+            precons=precons,
+            error=error,
+        )
+        return page(
+            f"Compare: {deck.name or deck.id}",
+            body,
+            sub=sub,
+            sid=sid,
+            status=status,
+            two_pane=True,
+            current="/decks",
+            csp=DECK_CSP,
+            scripts=True,
+            heading=False,
+            deck_css=True,
+            extra_scripts=("compare.js",),
+        )
 
     # -- history --------------------------------------------------------------
     @server.custom_route("/history", methods=["GET"], include_in_schema=False)

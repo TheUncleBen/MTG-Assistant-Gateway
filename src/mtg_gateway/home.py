@@ -18,7 +18,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from .companion import DECK_CSP
-from .deckpage import image_url
+from .deckpage import covers_for, image_url
 from .decks import DeckError
 from .pages import _csrf, browser_session, login_redirect
 from .theme import icon, render
@@ -85,7 +85,7 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
         decks: list[dict[str, Any]] | None = None
         if link["linked"]:
             decks = await recent_decks(state, sub)
-        covers = state.db.deck_covers([str(d["id"]) for d in decks]) if decks else {}
+        covers = covers_for(decks, state.db.deck_covers([str(d["id"]) for d in decks])) if decks else {}
 
         hero = (
             f"<div class='hero'><div><h1>Hi {_esc(who)}</h1>"
@@ -144,6 +144,7 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
                         "Your decks as stacks, grid or text, with stats and edits.",
                     ),
                     tile("/search", "search", "Search", "Public decks by name, commander, format or owner."),
+                    tile("/precons", "box", "Precons", "Every preconstructed deck Archidekt lists, by set."),
                     tile(
                         "/scan",
                         "camera",

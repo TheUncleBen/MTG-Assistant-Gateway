@@ -136,3 +136,43 @@ def test_like_on_someone_elses_deck_confirms_then_votes(server: Server) -> None:
         assert server.ark.follows == {"alice": {78}}
         assert errors == []
         browser.close()
+
+
+def test_back_closes_the_card_viewer_instead_of_leaving_the_deck(server: Server) -> None:
+    """Opening a card pushes a history entry, so the Android Back button (which the app turns
+    into history.back() while the page can go back) and the browser's Back close the viewer and
+    stay on the deck page. Closing from the page goes back over that entry, so a later Back leaves
+    the deck page as it would have before the card was opened."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": 412, "height": 915}, is_mobile=True, has_touch=True)
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        errors: list[str] = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(f"{server.base}/decks", wait_until="networkidle")
+        page.goto(f"{server.base}/decks/42", wait_until="networkidle")
+        depth = page.evaluate("() => history.length")
+        page.locator("[data-card]").first.click()
+        viewer = page.locator(".cardview.open")
+        viewer.wait_for(timeout=5000)
+        assert page.evaluate("() => history.length") == depth + 1
+        page.go_back()
+        page.wait_for_function("() => !document.querySelector('.cardview.open')")
+        assert page.url == f"{server.base}/decks/42"  # still on the deck
+        # Close from the page: the entry is used up, so Back now leaves the deck page.
+        page.locator("[data-card]").first.click()
+        viewer.wait_for(timeout=5000)
+        page.locator(".cardview .close").click()
+        page.wait_for_function("() => !document.querySelector('.cardview.open')")
+        assert page.url == f"{server.base}/decks/42"
+        page.go_back()
+        page.wait_for_url(f"{server.base}/decks")
+        assert errors == []
+        browser.close()

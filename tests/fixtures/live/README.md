@@ -20,7 +20,7 @@ pinned in `docker/mystic-forge/Dockerfile`).
 | File | Request | HTTP status |
 | --- | --- | --- |
 | `archidekt_deck_sample.json` | `https://archidekt.com/api/decks/<id>/` | 200 |
-| `archidekt_deck_365563.json` | `https://archidekt.com/api/decks/365563/` | 200 |
+| `archidekt_deck_blink_sample.json` | `https://archidekt.com/api/decks/<id>/` | 200 |
 | `scryfall_named_aesi.json` | `/cards/named?exact=Aesi, Tyrant of Gyre Strait` | 200 |
 | `scryfall_named_fuzzy_aesi.json` | `/cards/named?fuzzy=aesi tyrant` | 200 |
 | `scryfall_card_aesi_cmr_365.json` | `/cards/d607b003-6b48-429c-a7fd-45b8dd1bb4f9` | 200 |
@@ -63,20 +63,23 @@ Things in the live JSON worth knowing:
 
 ## Decks with a maybeboard
 
-Another public Commander deck, recorded because it has a `Maybeboard`
+Another public Commander deck (a blink deck), recorded because it has a `Maybeboard`
 category marked `"includedInDeck": false`, which the deck above does not:
 
 | File | Deck | Entries | Copies in total | Copies in the deck |
 | --- | --- | --- | --- | --- |
-| `archidekt_deck_365563.json` | "Brago Blink" (the example deck in Mystic Forge's docs) | 109 | 117 | 103 |
+| `archidekt_deck_blink_sample.json` | "Sample Blink Deck" | 109 | 117 | 103 |
 
-"In the deck" counts every entry with no category or with at least one
-category whose `includedInDeck` is not `false`. The deck has categories on
-every card, and some cards sit in two or three categories. It belongs to
-another Archidekt user, so its owner block was replaced with placeholders
-after capture (`owner.id` 1, `owner.username` `example-owner`, a placeholder
-avatar URL), and `parentFolder` and `commentRoot` were set to 1. Everything
-else is as received, re-serialised compactly.
+"In the deck" counts every entry with no category or whose first category
+(the row's primary category) has `includedInDeck` not `false`. The deck has categories on
+every card, and some cards sit in two or three categories. It belonged to
+another Archidekt user, so everything that identifies the deck or its owner
+was replaced after capture: deck id, name, description (a short synthetic
+primer in the same Quill JSON shape), timestamps, view count and points,
+owner (`sample-user`), folder, comment root, tags, and the per-card and
+per-category record ids and timestamps. Every card record (`cards[].card`),
+quantity, finish, label and category is otherwise exactly as received,
+re-serialised compactly.
 
 Prices, `viewCount`, `updatedAt`, EDHREC ranks and similar fields change over
 time, so do not assert on their exact values. Refresh these files by repeating

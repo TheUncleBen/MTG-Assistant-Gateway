@@ -123,7 +123,8 @@ def _deck_with_maybeboard() -> dict:
             entry(3, "Sol Ring", 1, ["Ramp"]),
             entry(4, "Sol Ring", 1, ["Maybeboard"]),
             entry(5, "Negate", 2, ["Sideboard"]),
-            entry(6, "Cultivate", 1, ["Maybeboard", "Ramp"]),
+            entry(6, "Cultivate", 1, ["Ramp", "Maybeboard"]),  # first category Ramp: in the deck
+            entry(7, "Harmonize", 1, ["Maybeboard", "Ramp"]),  # first category Maybeboard: out
         ],
     }
 
@@ -132,8 +133,9 @@ def test_maybeboard_and_sideboard_are_not_counted() -> None:
     from mtg_gateway.decks import Change, build_payload, deck_to_text, plan
 
     deck = parse_deck(_deck_with_maybeboard())
+    # A row's first category decides (Archidekt's primary category): Cultivate is in, Harmonize out.
     assert sum(c.quantity for c in deck.main_cards) == 13
-    assert sum(c.quantity for c in deck.side_cards) == 3
+    assert sum(c.quantity for c in deck.side_cards) == 4
     assert deck.counts_by_name() == {
         "Aesi, Tyrant of Gyre Strait": 1,
         "Forest": 10,
@@ -147,14 +149,15 @@ def test_maybeboard_and_sideboard_are_not_counted() -> None:
     assert [e["deckRelationId"] for e in payload] == [3]
     text = deck_to_text(deck)
     assert text.splitlines() == [
-        "1 Aesi, Tyrant of Gyre Strait (cmr) 1",
+        "1 Aesi, Tyrant of Gyre Strait (cmr) 1 [Commander]",
         "10 Forest (cmr) 1",
         "1 Sol Ring (cmr) 1 [Ramp]",
-        "1 Cultivate (cmr) 1 [Maybeboard,Ramp]",
+        "1 Cultivate (cmr) 1 [Ramp,Maybeboard]",
     ]
     assert deck_to_text(deck, zone="side").splitlines() == [
         "1 Sol Ring (cmr) 1 [Maybeboard]",
         "2 Negate (cmr) 1 [Sideboard]",
+        "1 Harmonize (cmr) 1 [Maybeboard,Ramp]",
     ]
 
 

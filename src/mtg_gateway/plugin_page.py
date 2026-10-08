@@ -34,7 +34,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse, Response
 
 from . import __version__
-from .pages import browser_user, login_redirect
+from .pages import _csrf, browser_session, login_redirect
 from .theme import render
 
 if TYPE_CHECKING:
@@ -360,7 +360,8 @@ def add_plugin_routes(server: MCPServer, state: AppState) -> None:
     @server.custom_route("/install", methods=["GET"], include_in_schema=False)
     async def install(request: Request) -> Response:
         client = pick_client(request.query_params.get("for"))
-        if not browser_user(state, request):
+        _sub, sid = browser_session(state, request)
+        if _sub is None:
             # A person's browser signs in first. An AI agent handed this address ("install this
             # plugin") gets the same public steps as /install.md: browsers mark page loads with
             # Sec-Fetch-Mode: navigate, HTTP clients and agent fetchers don't.
@@ -408,7 +409,18 @@ def add_plugin_routes(server: MCPServer, state: AppState) -> None:
                 f"<div class='card'><p class='muted small'>Other apps:</p><div class='actions'>{picker}"
                 "</div></div>"
             )
-        resp = render("Install the assistant plugin", body, site=s.server_name)
+        # Signed in, so the page gets the member's navigation (tab bar, rail, account menu).
+        user = state.db.get_user(_sub) or {}
+        admin = bool(s.admin_group and s.admin_group in (user.get("groups") or []))
+        resp = render(
+            "Install the assistant plugin",
+            body,
+            site=s.server_name,
+            signed_in=True,
+            csrf=_csrf(s, sid),
+            admin=admin,
+            current="/install",
+        )
         resp.headers["Cache-Control"] = "no-store"
         return resp
 

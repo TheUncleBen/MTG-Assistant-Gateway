@@ -249,7 +249,14 @@ def to_deck_json(
                     "id": 5000 + i,
                     "collectorNumber": card.collector_number,
                     "edition": {"editioncode": card.set_code, "editionname": card.set_code},
-                    "oracleCard": {"name": card.name, "manaCost": card.mana_cost, "types": [card.types]},
+                    "rarity": card.rarity,
+                    "oracleCard": {
+                        "name": card.name,
+                        "manaCost": card.mana_cost,
+                        "types": [card.types],
+                        "text": card.card_text,
+                        "cmc": card.mana_value,
+                    },
                 },
             }
             for i, card in enumerate(cards)

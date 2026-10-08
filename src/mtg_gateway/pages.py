@@ -412,7 +412,8 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         except DeckError as exc:
             # Only a code goes in the URL; _notice maps it to fixed text, so a crafted link cannot
             # put words of its choosing in the page's error box. Failure details are in the result.
-            return RedirectResponse(f"/proposals/{pid}?err={_err_code(exc.kind)}", status_code=303)
+            code = _err_code(exc.kind, proposal_exists=state.db.get_proposal(pid, sub) is not None)
+            return RedirectResponse(f"/proposals/{pid}?err={code}", status_code=303)
         return RedirectResponse(
             f"/proposals/{pid}?ok={'rejected' if action == 'reject' else 'applied'}", status_code=303
         )
@@ -523,6 +524,8 @@ ERR_MESSAGES = {
     "writes_disabled": "Deck writes are switched off on this gateway. The proposal is kept for review; "
     "nothing was sent to Archidekt.",
     "not_found": "No such proposal for your account.",
+    "missing": "Something this proposal needs was not found on Archidekt: a card, a printing, a deck or "
+    "a snapshot. Nothing more was changed. The result below names it.",
     "already_applied": "This proposal was already applied; nothing was sent again.",
     "not_pending": "This proposal is no longer pending, so nothing was done.",
     "stale": "The deck changed on Archidekt since this proposal was made. Nothing was sent. "
@@ -553,7 +556,11 @@ async def read_limited(request: Request, limit: int) -> bytes | None:
     return bytes(buf)
 
 
-def _err_code(kind: str) -> str:
+def _err_code(kind: str, *, proposal_exists: bool = False) -> str:
+    """The notice code for a failed apply. ``not_found`` from an apply of a proposal that does exist
+    means a card, printing, deck or snapshot was missing on Archidekt, not the proposal itself."""
+    if kind == "not_found" and proposal_exists:
+        return "missing"
     return kind if kind in ERR_MESSAGES else "failed"
 
 

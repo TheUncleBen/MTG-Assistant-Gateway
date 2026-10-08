@@ -46,12 +46,14 @@ _LIGHT = """
     --bg:#f9fafb; --surface:#fafafa; --surface-2:#dedede; --surface-3:#c1c1c1;
     --border:#bababa; --border-soft:#d4d4d4; --card-border:#5b5b5b;
     --text:#383838; --text-muted:#727272; --link:#2a66c9; /* Archidekt's #4183c4 is 3.8:1 */
+    --menu-head:#595959; /* 5.2:1 on --surface-2; --text-muted would be 3.6:1 there */
     --toolbar-bg:#dcdcdc; --toolbar-text:#383838;
     --navbar-bg:#313131; --navbar-text:#ffffff; --navbar-muted:#d6d6d6;
     --banner-a:rgba(40,40,40,.82); --banner-b:rgba(40,40,40,.5);
     --orange-text:#a65400; --green-text:#117a45; --red-text:#b3262e; --blue-text:#2a66c9;
     --orange-tint:rgba(250,137,13,.16); --green-tint:rgba(30,187,108,.16);
     --red-tint:rgba(255,85,91,.16); --blue-tint:rgba(66,134,244,.14);
+    --danger-text:#b3262e; --toolbar-active:#8a4600; /* dark values: #ff8086 and #fa890d */
     --shadow:0 3px 6px rgba(0,0,0,.25); --scrim:rgba(0,0,0,.4);
 """
 
@@ -62,11 +64,13 @@ CSS = (
   --bg:#181818; --surface:#232323; --surface-2:#383838; --surface-3:#4b4b4b;
   --border:#5f5f5f; --border-soft:#323232; --card-border:#525252;
   --text:#e3e3e3; --text-muted:#a8a8a8; --link:#73a8dc;
+  --menu-head:#b0b0b0; /* 5.4:1 on --surface-2 */
   --toolbar-bg:#2e2d2d; --toolbar-text:#f5f5f5;
   --navbar-bg:#111111; --navbar-text:#ffffff; --navbar-muted:#e3e3e3;
   --banner-a:rgba(14,14,14,.82); --banner-b:rgba(14,14,14,.5);
   --orange:#fa890d; --green:#1ebb6c; --red:#ff555b; --blue:#4286f4; --purple:#6435c9; --pink:#e03997;
   --orange-text:#fa890d; --green-text:#1ebb6c; --red-text:#ff555b; --blue-text:#7fb0ff;
+  --danger-text:#ff8086; --toolbar-active:#fa890d;
   --on-color:#ffffff;
   /* Text on the orange and green fills, and the red used as a fill: WCAG AA (4.5:1) for bold 16px
      labels. White on Archidekt's orange is 2.4:1 and on its red 3.1:1, so those labels were hard to read. */
@@ -135,7 +139,8 @@ details.dd .menu a,details.dd .menu button,details.dd .menu .item{display:flex;a
 details.dd .menu a:hover,details.dd .menu button:hover,details.dd .menu a:focus-visible{
   background:var(--border);color:var(--text)}
 details.dd .menu .sep{height:1px;background:var(--border);margin:.25rem 0}
-details.dd .menu .head{padding:.4rem 1rem .2rem;font-size:.8rem;font-weight:700;color:var(--text-muted);
+details.dd .menu a.danger{color:var(--danger-text)}
+details.dd .menu .head{padding:.4rem 1rem .2rem;font-size:.8rem;font-weight:700;color:var(--menu-head);
   text-transform:uppercase;letter-spacing:.04em}
 details.dd .menu form{margin:0;display:contents}
 details.dd .menu .on{color:var(--orange-text);font-weight:700}
@@ -235,6 +240,11 @@ button.mini{width:2.25rem;min-width:2.25rem;height:2.25rem;padding:0;font-size:1
 button.icon-only{width:var(--ctl);padding:0}
 form{margin:0}
 form > button,form .btn{margin-top:1rem}
+button.thumbbtn{all:unset;display:block;cursor:pointer;line-height:0;border-radius:3px}
+.exportblock .head{display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-top:1.25rem}
+.exportblock .head h2{margin:0} .exportblock textarea{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:.85rem}
+button.thumbbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .choice{display:flex;flex-direction:column;gap:.6rem;margin-top:1rem}
 .choice button,.choice .btn{margin-top:0;width:100%}
 @media (min-width:600px){ .choice{flex-direction:row;align-items:center;flex-wrap:wrap}
@@ -429,7 +439,7 @@ _MOBILE_RULES = """
   body{b} .tabbar > a svg{width:22px;height:22px;transition:transform .15s ease}
   body{b} .tabbar > a:active svg{transform:scale(.92)}
   body{b} .tabbar > a:hover,body{b} .tabbar > a:focus-visible,
-  body{b} .tabbar > a[aria-current=page]{color:var(--orange)}
+  body{b} .tabbar > a[aria-current=page]{color:var(--toolbar-active)}
   body{b} .tabbar > a[aria-current=page]::before{content:'';position:absolute;top:0;width:2.5rem;height:3px;
     background:var(--orange);border-radius:0 0 3px 3px}
   body{b} .tabbar > a{position:relative}
@@ -437,7 +447,8 @@ _MOBILE_RULES = """
     justify-content:center;gap:.2rem;height:56px;color:var(--toolbar-text);font-weight:700;font-size:11px;
     position:relative;-webkit-tap-highlight-color:transparent}
   body{b} .tabbar details.more summary svg{width:22px;height:22px}
-  body{b} .tabbar details.more summary.on,body{b} .tabbar details.more[open] summary{color:var(--orange)}
+  body{b} .tabbar details.more summary.on,
+  body{b} .tabbar details.more[open] summary{color:var(--toolbar-active)}
   body{b} details.dd .menu{min-width:14rem}
 """
 # The medium layout: the same tabs as a navigation rail (80px wide, icon in a pill with the label
@@ -461,7 +472,7 @@ _RAIL_RULES = """
     margin-left:-28px;border-radius:16px;background:transparent;transition:background .15s ease}
   body{b} .tabbar > a:hover::before,
   body{b} .tabbar > a:focus-visible::before{background:rgba(127,127,127,.18)}
-  body{b} .tabbar > a[aria-current=page]{color:var(--orange)}
+  body{b} .tabbar > a[aria-current=page]{color:var(--toolbar-active)}
   body{b} .tabbar > a[aria-current=page]::before{background:rgba(255,111,0,.22)}
   body{b} .tabbar details.more summary{position:relative;display:flex;flex-direction:column;
     align-items:center;justify-content:center;gap:.3rem;height:64px;flex:none;color:var(--toolbar-text);
@@ -470,7 +481,8 @@ _RAIL_RULES = """
   body{b} .tabbar details.more summary svg{width:24px;height:24px;position:relative;z-index:1}
   body{b} .tabbar details.more summary::before{content:'';position:absolute;top:7px;left:50%;width:56px;
     height:32px;margin-left:-28px;border-radius:16px;background:transparent}
-  body{b} .tabbar details.more summary.on,body{b} .tabbar details.more[open] summary{color:var(--orange)}
+  body{b} .tabbar details.more summary.on,
+  body{b} .tabbar details.more[open] summary{color:var(--toolbar-active)}
   body{b} .tabbar details.more[open] summary::before{background:rgba(255,111,0,.22)}
   body{b} .tabbar details.more .menu.sheet{left:calc(84px + env(safe-area-inset-left));transform:none;
     bottom:auto;top:calc(7rem + env(safe-area-inset-top) + 4 * 64px)}
@@ -517,6 +529,10 @@ ICONS = {
     "<circle cx='4' cy='12' r='1' fill='currentColor'/><circle cx='4' cy='18' r='1' fill='currentColor'/>",
     "sort": "<path d='M4 6h10M4 12h7M4 18h4'/><path d='M17 8v10M14 15l3 3 3-3'/>",
     "tag": "<path d='M3 12V4h8l9 9-8 8z'/><circle cx='7' cy='8' r='1.2' fill='currentColor'/>",
+    "trash": "<path d='M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13'/><path d='M10 11v6M14 11v6'/>",
+    "folder": "<path d='M3 6h6l2 2h10v11H3z'/>",
+    "image": "<path d='M4 5h16v14H4z'/><circle cx='9' cy='10' r='1.5'/><path d='M4 17l5-5 4 4 3-3 4 4'/>",
+    "box": "<path d='M3 8l9-5 9 5-9 5z'/><path d='M3 8v8l9 5 9-5V8'/><path d='M12 13v8'/>",
     "play": "<circle cx='12' cy='12' r='9'/><path d='M10 8l6 4-6 4z' fill='currentColor'/>",
     "plus": "<path d='M12 5v14M5 12h14'/>",
     "minus": "<path d='M5 12h14'/>",

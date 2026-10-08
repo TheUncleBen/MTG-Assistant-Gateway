@@ -485,10 +485,12 @@ async def test_proxy_refuses_unbounded_simulation_arguments() -> None:
         ("goldfish_odds", {"params": {"deck_size": 10**9, "draws": 7, "copies": 1, "min_successes": 1}}),
         ("validate_decklist", {"decklist": "1 Island\n" * 100_000}),
     ):
-        out = await proxy.call(name, args, owner="a")
+        out = await proxy.call(name, args, owner="a", internal=True)
         assert out.is_error and "at most" in out.content[0].text, (name, out)
     assert seen == []
-    out = await proxy.call("goldfish_run", {"deck": "1 Island", "n": 300, "until_turn": 8}, owner="a")
+    out = await proxy.call(
+        "goldfish_run", {"deck": "1 Island", "n": 300, "until_turn": 8}, owner="a", internal=True
+    )
     assert not out.is_error
     assert seen == [("goldfish_run", {"deck": "1 Island", "n": 300, "until_turn": 8})]
 
@@ -507,8 +509,8 @@ async def test_archidekt_calls_have_a_per_member_budget(tmp_path: Path, idp: Fak
         results = [structured(await call(h, token, "list_my_decks")) for _ in range(6)]
         assert [r["ok"] for r in results] == [True] * 4 + [False] * 2, results
         assert results[-1]["error"] == "rate_limited"
-        # proxied Archidekt tools draw on the same budget
-        res = await call(h, token, "archidekt_deck", {"deck": "42"})
+        # proxied tools given an Archidekt deck draw on the same budget
+        res = await call(h, token, "goldfish_annotate", {"deck": "https://archidekt.com/decks/42"})
         assert res.get("isError") and "Archidekt" in json.dumps(res), res
         assert seen == []
         # other research tools are not limited by it

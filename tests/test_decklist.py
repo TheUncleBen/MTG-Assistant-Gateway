@@ -66,3 +66,35 @@ def test_hostile_lines_are_rejected_quickly():
         parse_decklist("\n".join(["1 Sol Ring"] * 5001))
     # Ordinary spacing is still accepted.
     assert parse_decklist("1   Sol   Ring  (c21)   123")[0].name == "Sol Ring"
+
+
+def test_archidekt_syntax_round_trips_through_the_parser() -> None:
+    """Archidekt's own export syntax (verified from its import dialog and exporter) comes back
+    whole: quantities, printing, both finishes, categories with their flags stripped, the label
+    kept apart, section headers as zones, and a custom-card mark tolerated."""
+    text = (
+        "1x Aesi, Tyrant of Gyre Strait (cmr) 365 *F* [Commander{top}]\n"
+        "2x Sol Ring (cmr) 1 *E* [Ramp,Artifact] ^Upgrade,#ff0000^\n"
+        "1x Opt [Maybeboard{noDeck}{noPrice}]\n"
+        "# Sideboard\n"
+        "1 Negate\n"
+        "1x My Own Card [Custom] #CustomCard\n"
+    )
+    cards = {c.name: c for c in parse_decklist(text)}
+    aesi, sol, opt, negate, custom = (
+        cards[n] for n in ("Aesi, Tyrant of Gyre Strait", "Sol Ring", "Opt", "Negate", "My Own Card")
+    )
+    assert aesi.categories == ["Commander"] and aesi.finish == "Foil" and aesi.foil and aesi.set_code == "cmr"
+    assert aesi.collector_number == "365" and aesi.zone == "main"
+    assert (
+        sol.quantity == 2 and sol.finish == "Etched" and sol.foil and sol.categories == ["Ramp", "Artifact"]
+    )
+    assert sol.label == "Upgrade,#ff0000"
+    assert (
+        opt.categories == ["Maybeboard"] and opt.zone == "main"
+    )  # a category row: Archidekt decides the zone
+    assert negate.zone == "side" and negate.board == "Sideboard" and negate.categories == []
+    assert custom.categories == ["Custom"] and custom.zone == "side" and custom.board == "Sideboard"
+    # rendering the parsed list keeps both finish marks
+    rendered = to_text(parse_decklist(text))
+    assert "1 Aesi, Tyrant of Gyre Strait (cmr) 365 *F*" in rendered and "2 Sol Ring (cmr) 1 *E*" in rendered

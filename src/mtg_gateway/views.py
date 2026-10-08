@@ -11,7 +11,7 @@ from typing import Any
 
 from . import deck_stats
 from .archidekt import Deck, DeckCard
-from .decks import deck_to_text
+from .decks import deck_to_archidekt_text, deck_to_text
 
 
 def card_out(deck: Deck, c: DeckCard) -> dict[str, Any]:
@@ -49,8 +49,11 @@ def card_out(deck: Deck, c: DeckCard) -> dict[str, Any]:
     return out
 
 
-def deck_out(deck: Deck, *, with_cards: bool = True, with_stats: bool = True) -> dict[str, Any]:
-    """The full deck as the tools and API return it."""
+def deck_out(
+    deck: Deck, *, with_cards: bool = True, with_stats: bool = True, include_text: bool = False
+) -> dict[str, Any]:
+    """The full deck as the tools and API return it. ``include_text`` adds each card's rules
+    text (``oracle_text``), which is left out by default to keep a deck read small."""
     out: dict[str, Any] = {
         "ok": True,
         "id": deck.id,
@@ -69,9 +72,25 @@ def deck_out(deck: Deck, *, with_cards: bool = True, with_stats: bool = True) ->
         "categories": [c.get("name") for c in deck.categories if isinstance(c.get("name"), str)],
     }
     if with_cards:
-        out["cards"] = [card_out(deck, c) for c in deck.cards]
+        cards = [card_out(deck, c) for c in deck.cards]
+        for row, c in zip(cards, deck.cards, strict=True):
+            row["type_line"] = c.type_line
+            if c.power or c.toughness:
+                row["power"], row["toughness"] = c.power, c.toughness
+            if c.loyalty:
+                row["loyalty"] = c.loyalty
+            if include_text:
+                row["oracle_text"] = c.oracle_text
+                if c.faces:
+                    row["faces"] = c.faces
+                if c.flavor:
+                    row["flavor_text"] = c.flavor
+                if c.artist:
+                    row["artist"] = c.artist
+        out["cards"] = cards
         out["decklist_text"] = deck_to_text(deck)
         out["sideboard_text"] = deck_to_text(deck, zone="side")
+        out["archidekt_text"] = deck_to_archidekt_text(deck)
     if with_stats:
         try:
             out["stats"] = deck_stats.compute(deck)

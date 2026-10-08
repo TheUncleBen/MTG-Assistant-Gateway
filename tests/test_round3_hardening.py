@@ -68,12 +68,17 @@ class _FakeMF:
         self.calls: list[tuple[str, str | None]] = []
         self.busy = busy
 
-    async def call(self, name: str, arguments: Any, *, owner: str | None = None) -> types.CallToolResult:
+    async def call(
+        self, name: str, arguments: Any, *, owner: str | None = None, internal: bool = False
+    ) -> types.CallToolResult:
         self.calls.append((name, owner))
         if self.busy:
             return _busy()
         await asyncio.sleep(0.05)
-        return types.CallToolResult(content=[types.TextContent(type="text", text='{"ok": 1}')])
+        # answers shaped like Mystic Forge's successes, so the report counts them as ok (a failed
+        # research call is never reused for a waiting request)
+        text = {"goldfish_run": "## Metrics\nok", "goldfish_ab": "## Deltas\nok"}.get(name, "Validated: ok")
+        return types.CallToolResult(content=[types.TextContent(type="text", text=text)])
 
 
 async def test_reports_count_against_the_members_mystic_forge_cap(tmp_path: Path) -> None:

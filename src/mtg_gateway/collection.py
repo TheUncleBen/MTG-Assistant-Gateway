@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from .archidekt import COLLECTION_PAGE_SIZE, ArchidektError
+from .archidekt import COLLECTION_PAGE_SIZE, ArchidektError, _faces, _oracle_text, _pt
 from .deckpage import DECK_CSS, image_url, mana_html
 from .decks import DeckError
 from .pages import _csrf, _safe_next, browser_session, login_redirect, read_limited
@@ -117,6 +117,98 @@ def normalise_items(items: Any) -> list[dict[str, Any]]:
     return out
 
 
+MAX_IMPORT_ROWS = MAX_ITEMS_PER_CALL  # one import is one add call; Archidekt is written a card at a time
+_IMPORT_COLUMNS = {
+    "quantity": ("quantity", "count", "qty"),
+    "name": ("name", "card name", "card"),
+    "finish": ("finish", "modifier", "foil"),
+    "condition": ("condition",),
+    "set": ("edition code", "set code", "set", "edition"),
+    "collector_number": ("collector number", "collector_number", "number"),
+    "scryfall_id": ("scryfall id", "scryfall_id", "scryfall uuid"),
+}
+
+
+def parse_collection_import(text: str) -> list[dict[str, Any]]:
+    """Cards to add from pasted or uploaded text: the gateway's own collection CSV (the Export CSV
+    button), a CSV with Archidekt's collection column names (Quantity, Name, Finish, Condition,
+    Edition Code, Collector Number, Scryfall ID; headers are matched by name, extra columns are
+    ignored) or a plain list (``2 Sol Ring (CMR) 436 *F*``). Returns items for ``add``. Raises
+    CollectionError when nothing usable is found or there are more than MAX_IMPORT_ROWS rows."""
+    text = text.lstrip("\ufeff").strip()
+    if not text:
+        raise CollectionError("invalid", "paste or choose a CSV or a card list first")
+    if len(text) > 2_000_000:
+        raise CollectionError("invalid", "that file is larger than 2 MB")
+    lines = text.splitlines()
+    items: list[dict[str, Any]] = []
+    first = [c.strip().lower() for c in next(csv.reader([lines[0]]), [])]
+    if "name" in first or "card name" in first:
+        keys: dict[str, int] = {}
+        for key, names in _IMPORT_COLUMNS.items():
+            for n in names:
+                if n in first and key not in keys:
+                    keys[key] = first.index(n)
+        if "name" not in keys:
+            raise CollectionError("invalid", "the CSV needs a Name column")
+
+        def cell(row: list[str], key: str) -> str:
+            i = keys.get(key)
+            return row[i].strip() if i is not None and i < len(row) else ""
+
+        for n, row in enumerate(csv.reader(lines[1:]), start=2):
+            if not any(c.strip() for c in row):
+                continue
+            name = cell(row, "name")
+            if not name:
+                raise CollectionError("invalid", f"line {n}: no card name")
+            qty = cell(row, "quantity") or "1"
+            if not qty.isascii() or not qty.isdigit():  # str.isdigit alone accepts "²" and int() then fails
+                raise CollectionError("invalid", f"line {n}: quantity {qty!r} is not a number")
+            finish_raw = cell(row, "finish").lower()
+            finish = {"foil": "foil", "etched": "etched", "true": "foil", "yes": "foil"}.get(
+                finish_raw, "nonfoil"
+            )
+            items.append(
+                {
+                    "name": name,
+                    "set": cell(row, "set").lower(),
+                    "collector_number": cell(row, "collector_number"),
+                    "scryfall_id": cell(row, "scryfall_id"),
+                    "quantity": int(qty),
+                    "finish": finish,
+                    "condition": cell(row, "condition").upper(),
+                }
+            )
+    else:
+        from .decklist import DecklistError, parse_decklist
+
+        try:
+            parsed = parse_decklist(text)
+        except DecklistError as exc:
+            raise CollectionError("invalid", f"the list could not be read: {exc}") from exc
+        for c in parsed:
+            items.append(
+                {
+                    "name": c.name,
+                    "set": c.set_code.lower(),
+                    "collector_number": c.collector_number,
+                    "quantity": c.quantity,
+                    "finish": c.finish.lower() if c.finish else "nonfoil",
+                    "condition": "",
+                }
+            )
+    if not items:
+        raise CollectionError("invalid", "no cards were found in that text")
+    if len(items) > MAX_IMPORT_ROWS:
+        raise CollectionError(
+            "invalid",
+            f"that is {len(items)} rows; an import adds at most {MAX_IMPORT_ROWS} at a time "
+            "(Archidekt is written one card at a time). Split the file and import the rest after.",
+        )
+    return normalise_items(items)
+
+
 def row_out(rec: dict[str, Any]) -> dict[str, Any]:
     """A collection record in the gateway's flat shape. The record shape is the one Archidekt's
     collection page reads (id, quantity, modifier, language, condition, tags, purchasePrice, card
@@ -143,6 +235,11 @@ def row_out(rec: dict[str, Any]) -> dict[str, Any]:
         "collector_number": str(card.get("collectorNumber") or ""),
         "rarity": str(card.get("rarity") or ""),
         "type_line": type_line.strip(),
+        "oracle_text": _oracle_text(oracle),
+        "power": _pt(oracle.get("power")),
+        "toughness": _pt(oracle.get("toughness")),
+        "loyalty": _pt(oracle.get("loyalty")),
+        "faces": _faces(oracle),
         "mana_cost": str(oracle.get("manaCost") or ""),
         "mana_value": cmc if isinstance(cmc, (int, float)) and not isinstance(cmc, bool) else None,
         "color_identity": [str(c) for c in (oracle.get("colorIdentity") or []) if isinstance(c, str)],
@@ -352,6 +449,8 @@ class CollectionService:
         return {"row": row_out({**rec, **out, "card": rec.get("card")})}
 
     async def update(self, sub: str, rid: int, data: dict[str, Any]) -> dict[str, Any]:
+        """Change a record's details: finish, condition, language and price paid (the fields
+        Archidekt's own row editor offers; tags are read-only here)."""
         rec = await self._record(sub, rid)
         opts = _item_options({k: v for k, v in data.items() if k in ("finish", "foil", "condition")}, 0)
         changes: dict[str, Any] = {}
@@ -359,10 +458,30 @@ class CollectionService:
             changes["modifier"] = MODIFIERS[opts["finish"]]
         if "condition" in data:
             changes["condition"] = opts["condition"] or None
+        if "language" in data or "lang" in data:
+            changes["language"] = _language(data.get("language", data.get("lang")))
+        if "purchase_price" in data:
+            changes["purchasePrice"] = _price(data["purchase_price"])
         if not changes:
-            raise CollectionError("invalid", "nothing to change: give finish or condition")
+            raise CollectionError("invalid", "nothing to change: give finish, condition, language or price")
         out = await self._run(sub, lambda token: self.client.collection_set(token, rec, **changes))
-        return {"row": row_out({**rec, **out, "card": rec.get("card")})}
+        row = row_out({**rec, **out, "card": rec.get("card")})
+        wrong = [
+            k
+            for k, want in changes.items()
+            if (out.get(k) if k != "purchasePrice" else _price(out.get(k))) != want
+        ]
+        self.decks.db.audit(
+            "collection_updated",
+            sub=sub,
+            detail={"id": rid, "fields": sorted(changes), "verified": not wrong},
+        )
+        if wrong:
+            raise CollectionError(
+                "unavailable",
+                "Archidekt accepted the change but answered with other values for: " + ", ".join(wrong),
+            )
+        return {"row": row}
 
     async def remove(self, sub: str, rid: int, quantity: int | None = None) -> dict[str, Any]:
         rec = await self._record(sub, rid)
@@ -437,6 +556,33 @@ def _item_options(raw: dict[str, Any], i: int) -> dict[str, Any]:
     return {"quantity": qty, "finish": finish, "condition": condition}
 
 
+# Language codes as Archidekt's collection shows them (reported from its row editor, not verified
+# against a list it publishes); the gateway accepts any two- or three-letter code.
+LANGUAGES = ("EN", "ES", "FR", "DE", "IT", "PT", "JA", "KO", "RU", "ZHS", "ZHT", "PH")
+MAX_PRICE = 99999.0
+
+
+def _language(value: Any) -> str:
+    code = _clean(value, 3).upper()
+    if not code or len(code) < 2 or not code.isalpha():
+        raise CollectionError("invalid", "language must be a two- or three-letter code such as EN")
+    return code
+
+
+def _price(value: Any) -> float | None:
+    """The price paid, as Archidekt stores it (a number or null). Accepts "", None, a number or a
+    numeric string, with at most two decimals kept."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    try:
+        price = round(float(str(value).strip().lstrip("$").replace(",", ".")), 2)
+    except ValueError as exc:
+        raise CollectionError("invalid", "price paid must be a number") from exc
+    if price < 0 or price > MAX_PRICE or price != price:
+        raise CollectionError("invalid", f"price paid must be between 0 and {int(MAX_PRICE)}")
+    return price
+
+
 # -- browser page and JSON -----------------------------------------------------------------------------
 NO_STORE = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
 _STATUS = {
@@ -471,9 +617,39 @@ def _rid(value: Any) -> int:
     return int(s)
 
 
+def _view_attrs(r: dict[str, Any]) -> str:
+    """The data attributes ``static/cardview.js`` reads, from a collection row."""
+    pt = f"{r.get('power') or ''}/{r.get('toughness') or ''}" if r.get("power") or r.get("toughness") else ""
+    faces = [
+        {
+            "name": f["name"],
+            "mana": f["mana_cost"],
+            "type": f["type_line"],
+            "text": f["text"],
+            "pt": f"{f['power']}/{f['toughness']}" if f["power"] or f["toughness"] else "",
+            "loyalty": f["loyalty"],
+        }
+        for f in r.get("faces") or []
+    ]
+    return (
+        f" data-card='{_esc(r['name'])}'"
+        + (f" data-img='{_esc(r['image_small'])}'" if r.get("image_small") else "")
+        + f" data-set='{_esc((r.get('set') or '').upper())} {_esc(r.get('collector_number'))}'"
+        f" data-type='{_esc(r.get('type_line') or '')}' data-mana='{_esc(r.get('mana_cost') or '')}'"
+        f" data-finish='{_esc(_finish_label(r.get('finish')))}'"
+        + (f" data-text='{_esc(r['oracle_text'])}'" if r.get("oracle_text") else "")
+        + (f" data-pt='{_esc(pt)}'" if pt else "")
+        + (f" data-loyalty='{_esc(r['loyalty'])}'" if r.get("loyalty") else "")
+        + (f" data-faces='{_esc(json.dumps(faces, separators=(',', ':')))}'" if faces else "")
+        + (f" data-rarity='{_esc(r['rarity'])}'" if r.get("rarity") else "")
+        + (f" data-price='{float(r['price']):.2f}'" if isinstance(r.get("price"), (int, float)) else "")
+    )
+
+
 def row_html(r: dict[str, Any], csrf: str, *, view: str) -> str:
     img = r.get("image_small") or ""
     rid = _esc(r["id"])
+    attrs = _view_attrs(r)
     finish = _finish_label(r["finish"])
     badges = (f"<span class='finish' title='{_esc(finish)}'>{finish[:1]}</span>" if finish else "") + (
         f"<span class='pill cond'>{_esc(r['condition'])}</span>" if r.get("condition") else ""
@@ -497,6 +673,7 @@ def row_html(r: dict[str, Any], csrf: str, *, view: str) -> str:
         f"collection' title='Remove'>{icon('x')}</button></form>"
     )
     set_line = f"{_esc((r.get('set') or '').upper())} {_esc(r.get('collector_number'))}"
+    details = details_html(r, csrf_in)
     if view == "grid":
         body = (
             f"<img src='{_esc(img)}' alt='{_esc(r['name'])}' loading='lazy'>"
@@ -504,25 +681,74 @@ def row_html(r: dict[str, Any], csrf: str, *, view: str) -> str:
             else f"<span class='ph'><span class='t'><span class='nm'>{_esc(r['name'])}</span></span></span>"
         )
         return (
-            f"<li class='c col' data-name='{_esc(r['name'].lower())}' data-id='{rid}'>"
-            f"<div class='pic'>{body}<span class='qty'>{int(r['quantity'])}</span>{badges}</div>"
+            f"<li class='c col' data-name='{_esc(r['name'].lower())}' data-id='{rid}'{attrs}>"
+            f"<button type='button' class='pic thumbbtn' aria-label='Show {_esc(r['name'])}'>{body}"
+            f"<span class='qty'>{int(r['quantity'])}</span>{badges}</button>"
             f"<div class='cap'><span class='name'>{_esc(r['name'])}</span><span "
             f"class='set'>{set_line}</span></div>"
-            f"<div class='act'>{stepper}{remove}</div></li>"
+            f"<div class='act'>{stepper}{details}{remove}</div></li>"
         )
     return (
-        f"<li class='row col' data-name='{_esc(r['name'].lower())}' data-id='{rid}'>"
+        f"<li class='row col' data-name='{_esc(r['name'].lower())}' data-id='{rid}'{attrs}>"
+        f"<button type='button' class='thumbbtn' aria-label='Show {_esc(r['name'])}'>"
         + (
             f"<img class='thumb' src='{_esc(img)}' alt='' loading='lazy'>"
             if img
             else "<span class='thumb'></span>"
         )
+        + "</button>"
         + f"<span class='n'><span class='name'>{_esc(r['name'])}</span>{badges}"
         f"<span class='meta'>{set_line}"
         + (f" · {_esc(r.get('set_name'))}" if r.get("set_name") else "")
         + (f" · {_esc(r.get('type_line'))}" if r.get("type_line") else "")
         + "</span></span>"
-        f"<span class='mc'>{mana_html(r.get('mana_cost') or '')}</span>{stepper}{remove}</li>"
+        f"<span class='mc'>{mana_html(r.get('mana_cost') or '')}</span>{stepper}{details}{remove}</li>"
+    )
+
+
+def details_html(r: dict[str, Any], csrf_in: str) -> str:
+    """A row's details menu: the finish, condition, language and price paid, saved to Archidekt
+    on the member's click (tags are shown as Archidekt holds them)."""
+    rid = _esc(r["id"])
+    finish = r.get("finish") or "nonfoil"
+    cond = (r.get("condition") or "").upper()
+    lang = (r.get("lang") or "").upper()
+    price = r.get("purchase_price")
+    price_val = (
+        "" if price is None else f"{float(price):.2f}" if isinstance(price, (int, float)) else _esc(price)
+    )
+
+    def opts(values: tuple[str, ...], current: str, labels: dict[str, str] | None = None) -> str:
+        return "".join(
+            f"<option value='{_esc(v)}'{' selected' if v == current else ''}>{_esc((labels or {}).get(v, v))}"
+            "</option>"
+            for v in values
+        )
+
+    langs = LANGUAGES if not lang or lang in LANGUAGES else (lang, *LANGUAGES)
+    tags = "".join(f"<span class='pill'>{_esc(t)}</span>" for t in (r.get("tags") or [])[:8])
+    return (
+        f"<details class='dd rowmenu details'><summary class='mini' aria-label='Details of "
+        f"{_esc(r['name'])}'>{icon('more')}</summary>"
+        f"<form method='post' action='/collection' class='menu detailsform' data-id='{rid}'>"
+        f"{csrf_in}<input type='hidden' name='action' value='details'>"
+        f"<div class='head'>{_esc(r['name'])}</div>"
+        f"<label class='field'><span>Finish</span><select name='finish'>"
+        f"{opts(FINISHES, finish, {'nonfoil': 'Normal', 'foil': 'Foil', 'etched': 'Etched'})}</select>"
+        "</label>"
+        f"<label class='field'><span>Condition</span><select name='condition'>"
+        f"{opts(CONDITIONS, cond, {'': 'Not set'})}</select></label>"
+        f"<label class='field'><span>Language</span><select name='language'>{opts(langs, lang or 'EN')}"
+        "</select></label>"
+        f"<label class='field'><span>Price paid</span><input type='number' name='purchase_price' min='0' "
+        f"max='{int(MAX_PRICE)}' step='0.01' inputmode='decimal' value='{price_val}' placeholder='none'>"
+        "</label>"
+        + (
+            f"<div class='field tags'><span>Tags</span><span class='tagline'>{tags}</span></div>"
+            if tags
+            else ""
+        )
+        + f"<div class='actions'><button class='primary'>{icon('check')} Save</button></div></form></details>"
     )
 
 
@@ -540,6 +766,8 @@ COLLECTION_CSS = """
 .addbox form.addcard{display:grid;grid-template-columns:minmax(0,2fr) 5.5rem minmax(0,1fr) minmax(0,1fr) auto;
   gap:.5rem;align-items:end}
 .addbox form.addcard .field{margin:0} .addbox form.addcard button{margin:0;height:var(--ctl)}
+.importbox textarea{width:100%;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.9rem}
+.importbox .actions{margin-top:.5rem}
 @media (max-width:600px){ .addbox form.addcard{grid-template-columns:1fr 1fr}
   .addbox form.addcard .grow,.addbox form.addcard button{grid-column:1 / -1} }
 ul.collgrid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:1rem}
@@ -565,7 +793,7 @@ form.qty button.mini,form.rm button.mini{margin:0;width:2.25rem;height:2.25rem;p
 form.qty output{min-width:2rem;text-align:center;font-weight:700;font-variant-numeric:tabular-nums}
 form.rm{display:inline;margin:0 0 0 auto}
 ul.colllist{list-style:none;margin:0;padding:0}
-ul.colllist .row{display:grid;grid-template-columns:34px minmax(0,1fr) auto auto auto;gap:.6rem;
+ul.colllist .row{display:grid;grid-template-columns:34px minmax(0,1fr) auto auto auto auto;gap:.6rem;
   align-items:center;
   padding:.4rem 0;border-top:1px solid var(--border)}
 ul.colllist .thumb{width:34px;height:48px;border-radius:3px;object-fit:cover;background:var(--surface-3);
@@ -574,11 +802,20 @@ ul.colllist .n{display:flex;flex-direction:column;min-width:0}
 ul.colllist .n .name{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 ul.colllist .n .meta{font-size:.8rem;color:var(--text-muted);white-space:nowrap;overflow:hidden;
   text-overflow:ellipsis}
-ul.colllist .n .finish,ul.colllist .n .cond{margin-left:.35rem;vertical-align:middle}
+ul.colllist .n .finish,ul.colllist .n .cond{margin-left:.35rem;vertical-align:middle;align-self:flex-start}
+ul.colllist details.rowmenu summary.mini,ul.collgrid details.rowmenu summary.mini{display:inline-flex;
+  align-items:center;justify-content:center;width:2.25rem;height:2.25rem;margin:0;padding:0}
+details.rowmenu.details .menu{min-width:14rem;padding:.4rem 0 .6rem}
+details.rowmenu.details .menu .field{display:flex;flex-direction:column;gap:.25rem;padding:.35rem .9rem}
+details.rowmenu.details .menu .field select,details.rowmenu.details .menu .field input{margin:0}
+details.rowmenu.details .menu .tags .tagline{display:flex;flex-wrap:wrap;gap:.3rem}
+details.rowmenu.details .menu .actions{margin:.4rem .9rem 0}
+details.rowmenu.details .menu .actions button{width:100%;margin:0}
 @media (max-width:600px){ ul.colllist .row{grid-template-columns:34px minmax(0,
-  1fr) auto} ul.colllist .mc{display:none}
-  ul.colllist form.rm{grid-column:3;grid-row:2;justify-self:end} ul.colllist form.qty{grid-column:2;
-    grid-row:2} }
+  1fr) auto auto} ul.colllist .mc{display:none}
+  ul.colllist form.rm{grid-column:4;grid-row:2;justify-self:end}
+  ul.colllist details.rowmenu{grid-column:3;grid-row:2;justify-self:end}
+  ul.colllist form.qty{grid-column:2;grid-row:2} ul.colllist .n{grid-column:2 / span 3} }
 .pager{display:flex;justify-content:center;gap:.5rem;margin:1rem 0}
 .pager .btn{margin:0}
 .coll-empty{text-align:center;padding:2rem 1rem}
@@ -615,8 +852,10 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             scripts=scripts,
             head_extra=f"<style>{DECK_CSS}{COLLECTION_CSS}</style>"
             + (
+                "<script src='/static/cardview.js' defer></script>"
                 "<script src='/static/deck.js' defer></script><script "
                 "src='/static/collection.js' defer></script>"
+                "<script src='/static/filepick.js' defer></script>"
                 if scripts
                 else ""
             ),
@@ -627,7 +866,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
     async def form(request: Request) -> dict[str, str]:
         from urllib.parse import parse_qs
 
-        raw = await read_limited(request, 64_000)
+        raw = await read_limited(request, 400_000)  # an import pastes a CSV of up to 100 rows
         if raw is None:
             return {}
         return {k: v[0] for k, v in parse_qs(raw.decode("utf-8", "replace"), keep_blank_values=True).items()}
@@ -681,7 +920,12 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         msgs = {
             "added": "Added to your Archidekt collection.",
             "removed": "Removed from your Archidekt collection.",
+            "updated": "Card details saved to your Archidekt collection.",
             "nothing": "Nothing was added: no card matched. Check the name or pick a suggestion.",
+            "imported": "Imported into your Archidekt collection.",
+            "toomany": f"An import adds at most {MAX_IMPORT_ROWS} rows at a time. Split the file and "
+            "import the rest after.",
+            "unreadable": "That text is not a collection CSV or a card list the gateway can read.",
             "expired": "This form expired. Reload the page and try again.",
             "invalid": "That was not a valid request.",
             "lookup": "Archidekt is not answering right now. Try again in a moment.",
@@ -689,7 +933,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         }
         if not code or code not in msgs:
             return ""
-        cls = "ok" if code in ("added", "removed") else "error"
+        cls = "ok" if code in ("added", "removed", "updated", "imported") else "error"
         return f"<p class='notice {cls}'>{_esc(msgs[code])}</p>"
 
     def problem(exc: CollectionError, *, link_hint: bool) -> str:
@@ -782,6 +1026,20 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             "<p class='muted small'>Scanning a pile is quicker: open <a href='/scan'>Scan</a>, then choose "
             "<strong>Save to collection</strong>. Everything you add lands in your Collection on "
             "Archidekt.</p></section>"
+            "<section class='panel addbox importbox'><h2>Import a list</h2>"
+            "<form method='post' action='/collection' class='importform'><input "
+            f"type='hidden' name='csrf' value='{_esc(csrf)}'>"
+            "<input type='hidden' name='action' value='import'>"
+            "<p class='muted small'>A collection CSV (this page's Export CSV, or one with Archidekt's "
+            f"column names) or a card list, one card per line, up to {MAX_IMPORT_ROWS} rows at a time. "
+            "Copies of a printing you already own in that finish are added to it.</p>"
+            "<div class='field filepick'><label for='importfile'>From a file</label>"
+            "<input id='importfile' type='file' accept='.csv,.txt,text/csv,text/plain' "
+            "data-fill='importtext'></div>"
+            "<textarea id='importtext' name='text' rows='6' placeholder='Quantity,Name,Finish,Edition Code,"
+            "Collector Number&#10;2,Card name,Normal,SET,123'></textarea>"
+            f"<div class='actions'><button class='btn-primary'>{icon('plus')} Import</button></div></form>"
+            "</section>"
         )
         arch_link = (
             f"<a class='ext' href='https://archidekt.com/collection/v2/{_esc(arch_user)}' target='_blank' "
@@ -874,6 +1132,27 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                     source="manual",
                 )
                 code = "ok=added" if out["added"] else "err=nothing"
+            elif action == "import":
+                try:
+                    items = parse_collection_import(data.get("text", ""))
+                except CollectionError as exc:
+                    code = "err=toomany" if "at most" in str(exc) else "err=unreadable"
+                    return RedirectResponse(f"{back}{'&' if '?' in back else '?'}{code}", status_code=303)
+                out = await service.add(sub, items, source="manual")
+                code = "ok=imported" if out["added"] else "err=nothing"
+            elif action == "details":
+                rid = _rid(data.get("id"))
+                await service.update(
+                    sub,
+                    rid,
+                    {
+                        "finish": data.get("finish", "nonfoil"),
+                        "condition": data.get("condition", ""),
+                        "language": data.get("language", "EN"),
+                        "purchase_price": data.get("purchase_price", ""),
+                    },
+                )
+                code = "ok=updated"
             elif action in ("inc", "dec", "remove"):
                 rid = _rid(data.get("id"))
                 if action == "remove":

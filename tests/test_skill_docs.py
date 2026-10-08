@@ -40,6 +40,7 @@ NOT_TOOLS = {
     "apply_needs_user",
     "price_total",
     "archidekt_bracket",
+    "archidekt_text",
     "archidekt_session_refreshed",
     "archidekt_link_expired",
 }
