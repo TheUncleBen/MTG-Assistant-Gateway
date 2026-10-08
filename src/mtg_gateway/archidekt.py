@@ -14,6 +14,7 @@ import asyncio
 import base64
 import copy
 import hashlib
+import http.cookiejar
 import json
 import logging
 import random
@@ -366,6 +367,13 @@ class Deck:
         return sorted(excluded)[0]
 
 
+class _NoCookies(http.cookiejar.CookieJar):
+    """A cookie jar that never keeps a cookie (see ``ArchidektClient.__init__``)."""
+
+    def __init__(self) -> None:
+        super().__init__(policy=http.cookiejar.DefaultCookiePolicy(allowed_domains=[]))
+
+
 def jwt_exp(token: str) -> int | None:
     """The ``exp`` claim of a JWT, read without verifying the signature (we only use it to
     decide when to refresh; Archidekt verifies the token). None when anything is off."""
@@ -378,9 +386,11 @@ def jwt_exp(token: str) -> int | None:
         exp = claims.get("exp") if isinstance(claims, dict) else None
         if isinstance(exp, bool) or not isinstance(exp, (int, float)):
             return None
-        return int(exp)
-    except (ValueError, TypeError, UnicodeDecodeError):
+        exp = int(exp)
+    except (ValueError, TypeError, UnicodeDecodeError, OverflowError):
         return None
+    # Anything outside 2000..2200 is not a real expiry (and would overflow date formatting).
+    return exp if 946_684_800 <= exp <= 7_258_118_400 else None
 
 
 def front_face(name: str) -> str:
@@ -564,7 +574,10 @@ class ArchidektClient:
         self.card_cache_seconds = max(0.0, float(card_cache_seconds))
         self._cache: dict[str, tuple[float, Any]] = {}
         self.stats = {"requests": 0, "cache_hits": 0, "retries": 0, "rate_limited": 0, "failures": 0}
-        self._http = http or httpx.AsyncClient(timeout=httpx.Timeout(20.0))
+        # No cookie jar: the client is shared by every member and by anonymous reads, so a cookie
+        # Archidekt set for one member's sign-in must never ride along on anyone else's request
+        # (or outlive an unlink). Each request carries only its own member's bearer token.
+        self._http = http or httpx.AsyncClient(timeout=httpx.Timeout(20.0), cookies=_NoCookies())
 
     async def aclose(self) -> None:
         await self._http.aclose()

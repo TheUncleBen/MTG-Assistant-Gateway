@@ -196,7 +196,11 @@ For the exact devices and plans tested, see
   browser session and stored provider token is revoked, and a removal from
   the group revokes their Archidekt link too (a deactivated or deleted
   account, which the provider reports only as a refused token, keeps the
-  link until an admin deletes their data). Removing someone from `MTG_ADMIN_GROUP` takes the admin page away
+  stored session until an admin presses Disable or Unlink, or it expires).
+  With Authentik, an optional hourly clean-up (`src/mtg_gateway/idp_sweep.py`,
+  a view-groups-only API token) asks who is in the two groups now and
+  deletes the stored session of every linked member who is in neither or is
+  deactivated; an empty, partial or failed answer deletes nothing. Removing someone from `MTG_ADMIN_GROUP` takes the admin page away
   the same way. This doesn't rely on the provider revoking anything:
   Authentik, for one, keeps honouring a removed member's refresh token. If
   the provider can't be reached, requests are refused with 503 and nothing
@@ -237,12 +241,22 @@ For the exact devices and plans tested, see
     sign-ins are overwritten on disk (SQLite `secure_delete`, and the
     write-ahead log is flushed after an unlink), not just marked free.
   - **Who is trusted.** The server holds the key that opens the session, so
-    whoever runs the server can read it. The Account page says so ("Whoever
-    runs this gateway is trusted with this link…") next to a note that
-    Archidekt has no official interface for other apps (the gateway uses the
-    same requests archidekt.com's own pages use) and that Archidekt's terms
-    restrict automated access, so an account could be limited or blocked;
-    linking needs a ticked box.
+    whoever runs the server can open it and act as the member on Archidekt
+    until it expires. The link form says so in a fixed disclosure
+    (`src/mtg_gateway/link_disclosure.py`, no setting turns it off): what
+    linking gives the gateway, what is stored and never stored, what the
+    person who runs the server and the site's admins can and cannot see or
+    do, logs, backups, how long the session lasts and how to end it, and
+    Archidekt's terms. Linking needs a ticked box; the text stays on the
+    Account page afterwards.
+  - **Sealed and dated.** The encrypted blob names its purpose and the
+    member's subject and is refused under any other member's link. A
+    session stored by 0.7.6 or earlier carries no owner, so at the first
+    start of 0.7.7 it is sealed to the member whose row holds it then;
+    an unsealed session found at any later start is deleted. The
+    Account page shows when the session stops working, read from the refresh
+    token's own `exp` (Archidekt does not rotate it, so it is fixed at link
+    time), and the hourly purge deletes sessions past that date.
 - **Deck changes** need the person's own yes, unless they chose otherwise.
   The code enforces it: changes are proposals until applied with the review
   page's Apply button or the in-chat card's Approve button. Each person has

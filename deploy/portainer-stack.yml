@@ -14,6 +14,11 @@ secrets:
     external: true
   mtg_oidc_client_secret:
     external: true
+  # Optional: the Authentik API token for the hourly removed-member clean-up
+  # (docs/IDP-AUTHENTIK.md, "Optional: removed-member clean-up"). After creating the secret,
+  # remove the "# " from the next two lines and from "# - mtg_authentik_api_token" below.
+  # mtg_authentik_api_token:
+  #   external: true
 
 services:
   # The gateway's SQLite database lives on the node named by MTG_NODE.
@@ -41,6 +46,7 @@ services:
       - mtg_fernet_key
       - mtg_session_secret
       - mtg_oidc_client_secret
+      # - mtg_authentik_api_token
     environment:
       MTG_PUBLIC_URL: ${MTG_PUBLIC_URL:?PUBLIC HTTPS URL REQUIRED e.g. https://mtg.example.com}
       MTG_OIDC_ISSUER: ${MTG_OIDC_ISSUER:?OIDC ISSUER URL REQUIRED}
@@ -59,6 +65,10 @@ services:
       MTG_OIDC_SCOPES: ${MTG_OIDC_SCOPES:-openid profile email offline_access}
       MTG_OIDC_TOKEN_AUTH_METHOD: ${MTG_OIDC_TOKEN_AUTH_METHOD:-}
       MTG_SERVER_NAME: ${MTG_SERVER_NAME:-}
+      # Optional removed-member clean-up: /run/secrets/mtg_authentik_api_token once that secret
+      # is created and listed above. Empty = off. The API URL defaults to the issuer's address.
+      MTG_AUTHENTIK_API_TOKEN_FILE: ${MTG_AUTHENTIK_API_TOKEN_FILE:-}
+      MTG_AUTHENTIK_API_URL: ${MTG_AUTHENTIK_API_URL:-}
       MTG_DATA_DIR: /data
       MTG_BACKUP_DIR: /backups
       # Copies every backup here too; off unless MTG_BACKUP_COPY_DIR names a host folder (below).

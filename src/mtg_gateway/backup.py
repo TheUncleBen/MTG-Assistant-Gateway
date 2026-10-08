@@ -18,6 +18,7 @@ import os
 import shutil
 import tempfile
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -163,12 +164,20 @@ async def nightly_loop(
 PURGE_INTERVAL_SECONDS = 3600
 
 
-async def purge_loop(db: Database, interval: float = PURGE_INTERVAL_SECONDS) -> None:
+async def purge_loop(
+    db: Database, interval: float = PURGE_INTERVAL_SECONDS, also: Callable[[], object] | None = None
+) -> None:
     """Expire tokens, sessions and proposals and apply the retention caps every hour, whether or
-    not backups are configured. A failure is logged and retried on the next round."""
+    not backups are configured; ``also`` runs after each round (the expired Archidekt sessions).
+    A failure is logged and retried on the next round."""
     while True:
         await asyncio.sleep(interval)
         try:
             await asyncio.to_thread(db.purge_expired)
         except Exception:
             logger.exception("database purge failed")
+        if also is not None:
+            try:
+                await asyncio.to_thread(also)
+            except Exception:
+                logger.exception("purge of expired Archidekt sessions failed")

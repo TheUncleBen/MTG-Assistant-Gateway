@@ -281,6 +281,15 @@ button.thumbbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px
   background:var(--orange);color:var(--on-orange)}
 .notice.strong .lead{font-weight:900;color:var(--orange-text);font-size:1.1rem;margin:0}
 .notice.strong p{margin:0}
+.notice.disclosure{font-weight:400;color:var(--text);border-left-color:var(--orange)}
+.disclosure h3{font-size:1rem;margin:.9rem 0 .3rem}
+.disclosure ul{margin:0 0 .4rem;padding-left:1.25rem}
+.disclosure li{margin:.2rem 0;line-height:1.45}
+.disclosure p{margin:0 0 .4rem}
+details.disclosure{margin:.75rem 0 0;border-top:1px solid var(--border);padding-top:.6rem}
+details.disclosure > summary{cursor:pointer;font-weight:700;min-height:2rem;display:flex;align-items:center}
+details.disclosure > summary::before{content:'\\25B8';margin-right:.5rem}
+details.disclosure[open] > summary::before{content:'\\25BE'}
 .toast{position:fixed;right:2rem;bottom:2rem;z-index:20;width:350px;max-width:calc(100% - 2rem);
   border:1px solid var(--border);border-radius:var(--radius-sheet);background:var(--surface);padding:1rem;
   box-shadow:var(--shadow)}

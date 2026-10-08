@@ -23,6 +23,11 @@ secrets:
     file: ${MTG_SECRETS_DIR:-./secrets}/mtg_session_secret.txt
   mtg_oidc_client_secret:
     file: ${MTG_SECRETS_DIR:-./secrets}/mtg_oidc_client_secret.txt
+  # Optional: the Authentik API token for the hourly removed-member clean-up
+  # (docs/IDP-AUTHENTIK.md, "Optional: removed-member clean-up"). After writing the file,
+  # remove the "# " from the next two lines and from "# - mtg_authentik_api_token" below.
+  # mtg_authentik_api_token:
+  #   file: ${MTG_SECRETS_DIR:-./secrets}/mtg_authentik_api_token.txt
 
 services:
   # The gateway: OAuth server for AI clients, MCP endpoint and browser pages.
@@ -51,6 +56,7 @@ services:
       - mtg_fernet_key
       - mtg_session_secret
       - mtg_oidc_client_secret
+      # - mtg_authentik_api_token
     environment:
       MTG_PUBLIC_URL: ${MTG_PUBLIC_URL:?PUBLIC HTTPS URL REQUIRED e.g. https://mtg.example.com}
       MTG_OIDC_ISSUER: ${MTG_OIDC_ISSUER:?OIDC ISSUER URL REQUIRED}
@@ -67,6 +73,10 @@ services:
       MTG_OIDC_PREVIOUS_ISSUERS: ${MTG_OIDC_PREVIOUS_ISSUERS:-}
       MTG_OIDC_TOKEN_AUTH_METHOD: ${MTG_OIDC_TOKEN_AUTH_METHOD:-}
       MTG_SERVER_NAME: ${MTG_SERVER_NAME:-}
+      # Optional removed-member clean-up: /run/secrets/mtg_authentik_api_token once that secret
+      # is listed above. Empty = off. The API URL defaults to the issuer's address.
+      MTG_AUTHENTIK_API_TOKEN_FILE: ${MTG_AUTHENTIK_API_TOKEN_FILE:-}
+      MTG_AUTHENTIK_API_URL: ${MTG_AUTHENTIK_API_URL:-}
       MTG_DATA_DIR: /data
       MTG_BACKUP_DIR: /backups
       # Copies every backup here too; off unless MTG_BACKUP_COPY_DIR names a host folder (below).
