@@ -322,9 +322,7 @@ def test_writes_on_apply_is_browser_only_and_the_review_page_applies(clients, en
             await click_guarded(page, "form.guarded button[value=apply]")
             await page.wait_for_url(f"{PUBLIC_URL}/proposals/{pid}?ok=applied", timeout=60_000)
             text = await page.inner_text("body")
-            assert (
-                "applied" in text.lower() and "Done. The deck on Archidekt matches this proposal." in text
-            ), text
+            assert "applied" in text.lower() and "Done. Archidekt matches this proposal." in text, text
         async with c.session() as s:
             p = await c.call(s, "get_proposal", {"proposal_id": pid})
             assert p["state"] == "applied" and p["result"]["verified"] is True and p["snapshot_id"], p

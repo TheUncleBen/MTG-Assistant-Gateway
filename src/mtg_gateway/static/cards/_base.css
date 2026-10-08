@@ -1,21 +1,23 @@
 /* Shared look of the in-chat cards: the host's theme variables with the gateway's defaults,
-   phone-sized tap targets, light and dark. Inlined by cards.card_html(). */
+   phone-sized tap targets, light and dark. Inlined by cards.card_html(). Muted text takes the host's
+   secondary text colour (its tertiary one and the old defaults measured 3.9-4.5:1 on these 11-13 px labels);
+   the defaults pass 4.5:1 on every card background. */
 :root{
   color-scheme:light dark;
   --bg:var(--color-background-primary,#ffffff);--bg2:var(--color-background-secondary,#f5f4ed);
-  --text:var(--color-text-primary,#141413);--muted:var(--color-text-tertiary,#73726c);
+  --text:var(--color-text-primary,#141413);--muted:var(--color-text-secondary,#62615b);
   --border:var(--color-border-tertiary,rgba(31,30,29,.15));--radius:var(--border-radius-md,8px);
   --green:var(--color-text-success,#265b19);--green-bg:var(--color-background-success,#e9f1dc);
   --red:var(--color-text-danger,#7f2c28);--red-bg:var(--color-background-danger,#f7ecec);
   --amber:var(--color-text-warning,#5a4815);--amber-bg:var(--color-background-warning,#f6eedf);
-  --blue:var(--color-text-info,#3266ad);--blue-bg:var(--color-background-info,#d6e4f6);
+  --blue:var(--color-text-info,#2b5a9c);--blue-bg:var(--color-background-info,#d6e4f6);
   --btn-bg:var(--color-background-inverse,#141413);--btn-text:var(--color-text-inverse,#ffffff);
   --font:var(--font-sans,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif);
   --pad:12px;--inset-top:0px;--inset-right:0px;--inset-bottom:0px;--inset-left:0px;--max-h:70vh;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme=light]){
   --bg:var(--color-background-primary,#30302e);--bg2:var(--color-background-secondary,#262624);
-  --text:var(--color-text-primary,#faf9f5);--muted:var(--color-text-tertiary,#9c9a92);
+  --text:var(--color-text-primary,#faf9f5);--muted:var(--color-text-secondary,#b0aea6);
   --border:var(--color-border-tertiary,rgba(222,220,209,.15));
   --green:var(--color-text-success,#7ab948);--green-bg:var(--color-background-success,#1b4614);
   --red:var(--color-text-danger,#ee8884);--red-bg:var(--color-background-danger,#602a28);
@@ -25,7 +27,7 @@
 }}
 :root[data-theme=dark]{
   --bg:var(--color-background-primary,#30302e);--bg2:var(--color-background-secondary,#262624);
-  --text:var(--color-text-primary,#faf9f5);--muted:var(--color-text-tertiary,#9c9a92);
+  --text:var(--color-text-primary,#faf9f5);--muted:var(--color-text-secondary,#b0aea6);
   --border:var(--color-border-tertiary,rgba(222,220,209,.15));
   --green:var(--color-text-success,#7ab948);--green-bg:var(--color-background-success,#1b4614);
   --red:var(--color-text-danger,#ee8884);--red-bg:var(--color-background-danger,#602a28);

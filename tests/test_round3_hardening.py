@@ -292,6 +292,25 @@ async def test_review_page_shows_the_proposed_description(stack: Stack) -> None:
     assert "Current description" in page
 
 
+# -- 20b: the review page speaks to the person, not the assistant ---------------------------------
+async def test_review_page_does_not_show_the_assistant_instructions(stack: Stack) -> None:
+    """next_step tells the assistant which tools to call; the review page words the next step for
+    the person reading it instead."""
+    h = stack.h
+    token = await linked_user(stack)
+    change = {"action": "add", "card_name": "Sol Ring", "quantity": 1}
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": [change]}))
+    assert p["ok"] and "apply_proposal" in p["next_step"], p
+    b = Browser(h)
+    await b.login()
+    page = (await b.http.get(f"/proposals/{p['proposal_id']}")).text
+    await b.aclose()
+    assert "apply_proposal" not in page and "do not apply it yourself" not in page
+    may_apply = p["assistant_may_apply"]
+    assert ("lets your assistant apply this one itself" in page) is may_apply
+    assert ("Nothing changes on Archidekt until you apply it." in page) is not may_apply
+
+
 # -- 21: review rows come from structured data and cannot be forged -----------------------------
 def _acts(page: str) -> list[str]:
     return re.findall(r"<span class='act'>(.*?)</span>", page)
@@ -419,3 +438,31 @@ async def test_bad_inputs_are_400_not_500(stack: Stack) -> None:
     await b.aclose()
     with pytest.raises(DeckError):
         decks_mod._clean_deck_id("٤٢")  # non-ASCII digits are not a deck id
+
+
+def test_review_page_next_step_never_names_a_tool() -> None:
+    """Every state the review page can show words its next step for a person."""
+    from mtg_gateway.pages import _page_step
+
+    cases = [
+        {"state": "pending", "writes_enabled": False},
+        {"state": "pending", "writes_enabled": True, "assistant_may_apply": False},
+        {"state": "pending", "writes_enabled": True, "assistant_may_apply": True},
+        {"state": "pending", "writes_enabled": True, "result": {"error": "backup_failed"}},
+        {"state": "applying"},
+        {"state": "applied"},
+        {"state": "failed", "result": {"sent_entries": 3, "snapshot_id": "s-1"}},
+        {"state": "failed", "result": {"sent_entries": 3}},
+        {"state": "failed", "kind": "collection", "result": {"sent_entries": 3}},
+        {"state": "failed", "kind": "create_deck", "result": {"deck_id": "7", "sent_entries": 3}},
+        {"state": "failed", "result": None},
+        {"state": "rejected"},
+        {"state": "expired"},
+    ]
+    texts = [_page_step({**c, "next_step": "call apply_proposal now"}) for c in cases]
+    assert all(t and "apply_proposal" not in t and "_" not in t for t in texts), texts
+    assert len(set(texts)) == len(texts)
+    assert "Nothing changes on Archidekt until you apply it." in texts[1]
+    assert texts[3].startswith("The last try stopped before anything changed")
+    assert "History" in texts[6] and "History" not in texts[7] and "your collection" in texts[8]
+    assert texts[9].startswith("A new deck was made on Archidekt")

@@ -576,9 +576,11 @@ def test_format_specific_command_zones() -> None:
     leader = _cmdr(
         "Third Path Iconoclast", rarity="uncommon", supertypes=[], legalities={"paupercommander": "not_legal"}
     )
-    good = compute(deck([leader, commons], format_id=17, categories=cat))["checks"]
+    good_stats = compute(deck([leader, commons], format_id=17, categories=cat))
+    good = good_stats["checks"]
     assert good["ok"] is True and good["commander_zone"]["ok"] is True, good
     assert good["legality"]["not_legal"] == []
+    assert good_stats["legality_problems"] == []  # the stats list agrees with the checks
     not_creature = _cmdr("Opt", types=["Instant"], rarity="uncommon", supertypes=[])
     bad = compute(deck([not_creature, commons], format_id=17, categories=cat))["checks"]
     assert bad["commander_zone"]["cannot_command"] == ["Opt"]
@@ -586,8 +588,10 @@ def test_format_specific_command_zones() -> None:
     banned = _cmdr(
         "Banned Leader", rarity="uncommon", supertypes=[], legalities={"paupercommander": "banned"}
     )
-    out = compute(deck([banned, commons], format_id=17, categories=cat))["checks"]
+    banned_stats = compute(deck([banned, commons], format_id=17, categories=cat))
+    out = banned_stats["checks"]
     assert out["ok"] is False and out["legality"]["banned"] == ["Banned Leader"], out
+    assert banned_stats["legality_problems"] == [{"name": "Banned Leader", "status": "banned"}]
     assert any("banned" in p for p in out["problems"])
 
 

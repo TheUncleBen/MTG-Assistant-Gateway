@@ -365,7 +365,7 @@ Claude / ChatGPT / browser ──HTTPS──▶ reverse proxy ──▶ mtg-gate
   proposals. An app connected with the read-only scope `mtg.read` can't
   change anything.
 - **Limits.** Sign-in attempts are limited per network, metadata-document
-  fetches per site, and Archidekt calls per member
+  fetches per site, and Archidekt actions per member
   (`MTG_ARCHIDEKT_CALLS_PER_10_MIN`), so neither a flood nor a looping
   assistant can wear the gateway or Archidekt down. Archidekt requests from
   everyone together are spaced out and capped per minute, repeat reads are
