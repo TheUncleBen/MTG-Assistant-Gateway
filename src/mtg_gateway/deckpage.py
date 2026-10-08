@@ -319,14 +319,22 @@ def banner_html(
             f"<form method='post' action='/decks/{did}/clone' class='inline'>{csrf_in}"
             f"<button type='submit'>{icon('clone')} Clone deck</button></form>"
         )
-    # Archidekt's own playtester (draw, mulligan, play by hand) for any deck, on archidekt.com:
-    # the gateway builds no copy of it, so a game plays the same wherever it is started. A
-    # private deck needs the person's own Archidekt sign-in in that browser.
+    # Archidekt's own playtester (draw, mulligan, play by hand), shown inside the gateway's
+    # playtest page: the gateway builds no copy of it, so a game plays the same wherever it is
+    # started. A private deck needs the person's own Archidekt sign-in in that browser.
     primary += (
-        f"<a class='btn' href='https://archidekt.com/playtester-v2/{did}' target='_blank' "
-        f"rel='noreferrer noopener' title='Draw and play this deck by hand in Archidekt&#39;s playtester'>"
-        f"{icon('play')} Playtest</a>"
+        f"<a class='btn' href='/decks/{did}/playtest' "
+        f"title='Draw and play this deck by hand in Archidekt&#39;s playtester'>{icon('play')} Playtest</a>"
     )
+    if csrf:
+        # The same run as the assistant's run_deck_report: statistics, validation and 300
+        # goldfish games on the research service, stored under History.
+        primary += (
+            f"<form method='post' action='/decks/{did}/report' class='inline'>{csrf_in}"
+            "<button type='submit' title='Goldfish simulation (300 games), validation and statistics; the "
+            f"same run the assistant&#39;s run_deck_report makes. Saved under History.'>{icon('stats')} "
+            "Run simulation</button></form>"
+        )
     more_items = []
     if own and csrf:
         more_items.append(f"<a href='/decks/{did}/settings'>{icon('settings')} Deck settings</a>")
@@ -334,14 +342,8 @@ def banner_html(
     more_items.append(f"<a href='/history?deck_id={did}'>{icon('history')} History and snapshots</a>")
     if own and csrf:
         more_items.append(f"<a class='danger' href='/decks/{did}/delete'>{icon('trash')} Delete deck…</a>")
-    if csrf:
-        more_items.append(
-            f"<form method='post' action='/decks/{did}/report'>{csrf_in}"
-            "<button type='submit' title='Statistics, validation and the goldfish simulation, the same "
-            f"run the assistant&#39;s run_deck_report makes (300 games)'>{icon('report')} Run deck report"
-            "</button></form>"
-        )
-    more_items.append(f"<a href='/decks/{did}#stats'>{icon('stats')} Deck stats</a>")
+    more_items.append(f"<a href='/decks/{did}/compare'>{icon('swap')} Compare with another deck…</a>")
+    more_items.append(f"<a href='/decks/{did}#stats'>{icon('report')} Deck stats</a>")
     more_items.append(
         f"<a href='https://archidekt.com/decks/{did}' target='_blank' rel='noreferrer noopener'>"
         f"{icon('external')} Open on Archidekt</a>"
@@ -906,6 +908,131 @@ def deck_page_html(
     )
 
 
+# -- compare page ---------------------------------------------------------------------------------
+
+STAT_LABELS = {
+    "card_count": "Cards",
+    "distinct": "Distinct cards",
+    "land_count": "Lands",
+    "nonland_count": "Nonlands",
+    "average_mana_value": "Average mana value",
+    "price_total": "Price",
+    "priced_cards": "Priced cards",
+    "tutors": "Tutors",
+    "extra_turns": "Extra turns",
+    "mass_land_denial": "Mass land denial",
+    "salt_total": "Salt",
+}
+
+
+def _compare_row(name: str, qty_text: str, cards: dict[str, DeckCard]) -> str:
+    """One card of a comparison list; when either deck holds the card the row opens the card
+    viewer (``static/compare.js``), else it is plain text."""
+    card = cards.get(name.split(" // ", 1)[0].strip().casefold())
+    if card is None:
+        return f"<li><b>{esc(qty_text)}</b> {esc(name)}</li>"
+    return (
+        f"<li><b>{esc(qty_text)}</b> <button type='button' class='cardlink' data-card='{esc(card.name)}'"
+        f"{card_view_attrs(card, img=card_image(card))}>{esc(name)}</button></li>"
+    )
+
+
+def compare_page_html(
+    deck: Deck,
+    *,
+    other: Deck | dict[str, int] | None,
+    other_name: str,
+    other_ref: str,
+    paste: str,
+    result: dict[str, Any] | None,
+    precons: dict[str, list[dict[str, Any]]],
+    error: str = "",
+) -> str:
+    """The deck page's compare view: a form to pick the other deck (Archidekt's preconstructed
+    decks are offered as suggestions, any deck id or link and a pasted list work too) and, once
+    chosen, what this build took out of it, put in and changed, with the statistics' differences
+    when both are Archidekt decks."""
+    did = esc(deck.id)
+    name = esc(deck.name or f"Deck {deck.id}")
+    options = "".join(
+        f"<option value='{esc(d.get('id'))}'>{esc(d.get('name'))} ({esc(set_name)})</option>"
+        for set_name, rows in precons.items()
+        for d in rows
+        if d.get("id") and d.get("name")
+    )
+    form = (
+        "<section class='panel comparehead'>"
+        f"<div><a href='/decks/{did}'>← {name}</a>"
+        "<span class='muted small'> · compare with another deck</span></div>"
+        f"<form method='get' action='/decks/{did}/compare' class='compareform'>"
+        "<label class='field'><span>Other deck: a preconstructed deck from the list, or any Archidekt deck "
+        "id or link</span>"
+        f"<input name='with' list='preconlist' value='{esc(other_ref)}' placeholder='Start typing a precon "
+        "name, or paste a deck link' autocomplete='off'></label>"
+        f"<datalist id='preconlist'>{options}</datalist>"
+        "<label class='field'><span>…or paste a decklist (one card per line, Archidekt's export text works)"
+        f"</span><textarea name='paste' rows='4' placeholder='1 Sol Ring&#10;1 Arcane Signet'>{esc(paste)}"
+        "</textarea></label>"
+        f"<button type='submit' class='btn-primary'>{icon('swap')} Compare</button></form>"
+        "<p class='muted small'>Reads both decks; changes nothing on Archidekt. The assistant's "
+        "compare_decks tool makes the same comparison, and can add a paired goldfish A/B when asked.</p>"
+        "</section>"
+    )
+    if error:
+        return form + f"<p class='notice error'>{error}</p>"
+    if result is None or other is None:
+        return form
+    cards: dict[str, DeckCard] = {}
+    if isinstance(other, Deck):
+        cards.update({front_name(c.name).casefold(): c for c in other.cards})
+    cards.update({front_name(c.name).casefold(): c for c in deck.cards})
+    sm = result["summary"]
+    oname = esc(other_name)
+    tiles = [
+        (f"{sm['before_size']}", f"cards in {other_name}"),
+        (f"{sm['after_size']}", f"cards in {deck.name or 'this deck'}"),
+        (f"{sm['cut']}", f"taken out ({sm['cut_pct']}%)"),
+        (f"{sm['added']}", f"put in ({sm['added_pct']}%)"),
+        (f"{sm['kept']}", "kept (basics aside)"),
+    ]
+    tile_html = "".join(f"<div class='tile'><b>{esc(v)}</b><span>{esc(k)}</span></div>" for v, k in tiles)
+    removed = "".join(_compare_row(r["name"], f"{r['quantity']}x", cards) for r in result["removed"])
+    added = "".join(_compare_row(r["name"], f"{r['quantity']}x", cards) for r in result["added"])
+    changed = "".join(
+        _compare_row(r["name"], f"{r['before']}→{r['after']}", cards) for r in result["changed"]
+    )
+    basics = "".join(
+        f"<li><b>{b['before']}→{b['after']}</b> {esc(b['name'])}</li>" for b in sm["basic_land_changes"]
+    )
+    empty = "<li class='muted'>None</li>"
+    lists = (
+        "<div class='comparecols'>"
+        f"<section class='panel'><h3>Taken out of {oname} <span class='count'>{len(result['removed'])}</span>"
+        f"</h3><ul class='comparelist'>{removed or empty}</ul></section>"
+        f"<section class='panel'><h3>Put into {name} <span class='count'>{len(result['added'])}</span></h3>"
+        f"<ul class='comparelist'>{added or empty}</ul></section>"
+        f"<section class='panel'><h3>Changed counts <span class='count'>{len(result['changed'])}</span></h3>"
+        f"<ul class='comparelist'>{changed or empty}</ul>"
+        f"<h3>Basic lands</h3><ul class='comparelist'>{basics or empty}</ul></section></div>"
+    )
+    delta_html = ""
+    delta = result.get("stats_delta")
+    if delta:
+        rows = "".join(
+            f"<tr><th>{esc(STAT_LABELS.get(k, k))}</th><td>{'+' if v > 0 else ''}{esc(v)}</td></tr>"
+            for k, v in delta.items()
+            if isinstance(v, (int, float)) and v != 0
+        )
+        delta_html = (
+            "<section class='panel'><h3>Statistics: this deck minus "
+            f"{oname}</h3><table class='deltatable'>{rows or '<tr><td class=muted>No difference</td></tr>'}"
+            "</table></section>"
+        )
+    return (
+        form + f"<section class='panel'><div class='tiles'>{tile_html}</div></section>" + lists + delta_html
+    )
+
+
 # -- deck list ------------------------------------------------------------------------------------
 
 LIST_ORDERS = {"updated": "Updated at", "created": "Created at", "name": "Name", "format": "Deck format"}
@@ -1066,6 +1193,31 @@ DECK_CSS = """
 .banner .controls .primary{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center}
 .banner .controls .btn,.banner .controls button{margin:0}
 .banner .controls form.inline{display:contents}
+/* playtest page: Archidekt's playtester framed below a one-line header */
+.playhead,.comparehead{display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap}
+.playframe{display:block;width:100%;height:calc(100dvh - 11rem);min-height:480px;
+  border:1px solid var(--border);border-radius:var(--radius);background:#111}
+.playnote{margin:.5rem 0 0}
+/* compare page */
+.comparehead{flex-direction:column;align-items:stretch}
+.compareform{display:grid;gap:.75rem}
+.compareform .field span{display:block;font-size:.85rem;color:var(--text-muted);margin-bottom:.25rem}
+.compareform input,.compareform textarea{width:100%}
+.compareform button{justify-self:start}
+.comparecols{display:grid;grid-template-columns:repeat(auto-fit,minmax(18rem,1fr));gap:1rem;margin-top:1rem}
+.comparehead,.comparetiles{margin-bottom:1rem}
+.comparecols .panel{margin:0}
+.comparelist{list-style:none;margin:0;padding:0}
+.comparelist li{display:flex;gap:.6rem;align-items:baseline;padding:.3rem 0;
+  border-bottom:1px solid var(--border)}
+.comparelist li:last-child{border-bottom:0}
+.comparelist b{flex:0 0 3.2rem;color:var(--text-muted);font-variant-numeric:tabular-nums}
+.cardlink{background:none;border:0;padding:0;margin:0;color:var(--link);cursor:pointer;font:inherit;text-align:left}
+.cardlink:hover{text-decoration:underline}
+h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
+.deltatable{border-collapse:collapse}
+.deltatable th{text-align:left;font-weight:500;padding:.3rem 1rem .3rem 0}
+.deltatable td{text-align:right;font-variant-numeric:tabular-nums}
 .banner .social{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.9rem}
 .banner .social .soc{display:inline-flex;align-items:center;gap:.4rem;height:34px;padding:0 .85rem;
   border-radius:17px;border:1px solid rgba(255,255,255,.4);background:rgba(0,0,0,.28);color:#fff;
@@ -1333,7 +1485,7 @@ table.qty td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-
 .checks ul{list-style:none;margin:.25rem 0 0;padding:0} .checks li{display:flex;gap:.4rem;
   align-items:baseline;
   padding:.2rem 0;border-top:1px solid var(--border)} .checks li:first-child{border-top:0}
-.checks li b{flex:none} .checks li span{color:var(--muted);overflow-wrap:anywhere}
+.checks li b{flex:none} .checks li span{color:var(--text-muted);overflow-wrap:anywhere}
 .checks li.ok svg{color:var(--green-text)} .checks li.bad svg{color:var(--red-text,#d33)}
 @media (max-width:1000px){ .stats .grid{grid-template-columns:1fr} }
 

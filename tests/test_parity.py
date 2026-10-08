@@ -66,8 +66,10 @@ async def test_deck_list_controls_and_views(stack: Stack) -> None:
         deck = await b.http.get("/decks/42", headers=NAV)
         assert deck.status_code == 200
         assert "class='banner'" in deck.text and "Quick add" in deck.text and "Clone deck" in deck.text
-        # Archidekt's own playtester, opened on archidekt.com (the app hands other origins to the browser)
-        assert "href='https://archidekt.com/playtester-v2/42'" in deck.text and "Run deck report" in deck.text
+        # Archidekt's own playtester framed on the gateway's playtest page; the simulation (the
+        # same run as run_deck_report) is one click; the compare view is under More
+        assert "href='/decks/42/playtest'" in deck.text and "Run simulation" in deck.text
+        assert "href='/decks/42/compare'" in deck.text and "Run deck report" not in deck.text
         assert "/decks/42/settings" in deck.text and "Deck stats" in deck.text
         assert "cards.scryfall.io" in deck.headers["content-security-policy"]
         for view in ("stacks", "grid"):

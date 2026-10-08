@@ -340,6 +340,48 @@ def deck_checks(deck: Deck, cards: list[DeckCard], commanders: list[DeckCard], q
     return out
 
 
+def compute_from_text(cards: list[ListCard]) -> dict[str, Any]:
+    """What can be said about a pasted list from its names and counts alone (no card data):
+    sizes, the commander by its Commander category, singleton and uncategorised checks, and
+    ``card_data: "unavailable"`` so a reader knows why the rest of ``compute`` is missing."""
+    main = [c for c in cards if c.zone == "main"]
+    side = [c for c in cards if c.zone != "main"]
+    commanders = [c.name for c in main if "Commander" in c.categories]
+    qty = sum(c.quantity for c in main)
+    problems: list[str] = []
+    dupes = [
+        {"name": c.name, "quantity": c.quantity}
+        for c in main
+        if c.quantity > 1 and _match_key(c.name) not in _BASIC_KEYS and "Commander" not in c.categories
+    ]
+    if commanders and dupes:
+        problems.append(f"{len(dupes)} card(s) with more than one copy")
+    if commanders and qty != 100:
+        problems.append(f"deck has {qty} cards; a Commander deck wants 100")
+    if len(commanders) > 2:
+        problems.append(f"{len(commanders)} cards under Commander; a deck has one or two")
+    uncategorised = sorted({c.name for c in main if not c.categories})
+    return {
+        "card_count": qty,
+        "distinct": len({c.name for c in main}),
+        "sideboard_count": sum(c.quantity for c in side),
+        "commanders": commanders,
+        "card_data": "unavailable",
+        "checks": {
+            "deck_size": {
+                "actual": qty,
+                "expected": 100 if commanders else None,
+                "ok": not commanders or qty == 100,
+            },
+            "commander_zone": {"count": len(commanders), "ok": len(commanders) <= 2},
+            "singleton_violations": dupes if commanders else [],
+            "uncategorised": uncategorised,
+            "problems": problems,
+            "ok": not problems,
+        },
+    }
+
+
 def counts_from_text(cards: list[ListCard]) -> dict[str, int]:
     """Card counts by name for the main zone of a parsed decklist."""
     out: dict[str, int] = {}

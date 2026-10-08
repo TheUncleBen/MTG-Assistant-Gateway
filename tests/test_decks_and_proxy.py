@@ -1372,3 +1372,38 @@ async def test_another_users_decks_are_the_public_listing_only(stack: Stack) -> 
     mine = structured(await call(h, token, "archidekt_user", {"username": "alice"}))
     assert mine["ok"] and any(str(d["id"]) == "42" for d in mine["decks"]), mine
     assert set(ark.list_auth_schemes) == {""}
+
+
+async def test_pasted_lists_are_reported_but_not_stored(stack: Stack) -> None:
+    """run_deck_report and deck_stats take a pasted list as well as a deck: the list gets the same
+    validation and goldfish run and comes back with stored=false, and History stays as it was
+    (0.7.1's goldfish_run could simulate a pasted list; its owner keeps that)."""
+    h = stack.h
+    token = await linked_user(stack)
+    before = structured(await call(h, token, "list_deck_reports", {}))["reports"]
+    text = "Commander\n1 Aesi, Tyrant of Gyre Strait\n\n// Lands\n99 Island\n"
+    rep = structured(await call(h, token, "run_deck_report", {"deck_ref": text, "games": 20}))
+    assert rep["ok"] and rep["stored"] is False and rep["deck"]["id"] is None, rep
+    assert rep["goldfish"]["ok"] is True and "## Metrics" in rep["goldfish"]["text"], rep["goldfish"]
+    assert rep["validation"]["ok"] is True, rep["validation"]
+    assert rep["stats"]["card_count"] == 100 and rep["stats"]["card_data"] == "unavailable"
+    after = structured(await call(h, token, "list_deck_reports", {}))["reports"]
+    assert len(after) == len(before)
+    # No commander: the structural checks still come back, the simulation is refused as such.
+    plain = structured(await call(h, token, "run_deck_report", {"deck_ref": "24 Forest\n36 Grizzly Bears\n"}))
+    assert plain["ok"] and plain["goldfish"]["ok"] is False and "Commander" in plain["goldfish"]["text"], (
+        plain
+    )
+    stats = structured(
+        await call(
+            h,
+            token,
+            "deck_stats",
+            {"deck_ref": "Commander\n1 Aesi, Tyrant of Gyre Strait\n\n// Main\n2 Opt\n97 Island\n"},
+        )
+    )
+    assert stats["ok"] and stats["deck"]["id"] is None, stats
+    checks = stats["stats"]["checks"]
+    assert checks["singleton_violations"] == [{"name": "Opt", "quantity": 2}] and checks["ok"] is False
+    bad = structured(await call(h, token, "deck_stats", {"deck_ref": "not a list at all"}))
+    assert bad["ok"] is False, bad

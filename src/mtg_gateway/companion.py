@@ -21,10 +21,12 @@ from starlette.responses import FileResponse, JSONResponse, RedirectResponse, Re
 
 from . import deck_stats
 from .archidekt import FORMAT_NAMES, Deck, featured_scryfall_id, format_label, parse_deck
+from .decklist import DecklistError, parse_decklist
 from .deckpage import (
     DECK_CSS,
     LIST_ORDERS,
     card_image,
+    compare_page_html,
     covers_for,
     deck_list_controls_html,
     deck_list_html,
@@ -58,6 +60,13 @@ STATIC_DIR = Path(__file__).parent / "static"
 DECK_CSP = (
     "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; "
     "img-src 'self' https://cards.scryfall.io; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+)
+# The playtest page frames Archidekt's own playtester (archidekt.com sends no frame-ancestors or
+# X-Frame-Options; checked live 2026-10-08) and nothing else; the gateway's pages themselves
+# still refuse to be framed.
+PLAYTEST_CSP = (
+    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; worker-src 'self'; img-src 'self'; "
+    "frame-src https://archidekt.com; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 )
 # Format names the settings and new-deck forms offer, one per Archidekt format id.
 FORMAT_CHOICES = sorted({FORMAT_NAMES[i] for i in FORMAT_NAMES}, key=lambda n: format_label(n).lower())
@@ -1463,11 +1472,132 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             )
         current_client.set(BROWSER_CLIENT_ID)
         try:
-            await reports.run(sub, deck_id)
+            report = await reports.run(sub, deck_id)
         except DeckError as exc:
             code = exc.kind if exc.kind in DECK_ERR_MESSAGES else "report_failed"
             return RedirectResponse(f"/decks/{deck_id}?err={code}", status_code=303)
-        return RedirectResponse(f"/history?deck_id={deck_id}", status_code=303)
+        return RedirectResponse(f"/history/reports/{_esc(report['report_id'])}", status_code=303)
+
+    @server.custom_route("/decks/{deck_id}/playtest", methods=["GET"], include_in_schema=False)
+    async def playtest_page(request: Request) -> Response:
+        """Archidekt's own playtester for this deck, inside the gateway (web and the app's
+        WebView alike; the app loads frames in place). The gateway builds no playtester of its
+        own, so a game here is the same game as on archidekt.com."""
+        deck_id = request.path_params["deck_id"]
+        sub, sid = browser_session(state, request)
+        if not sub:
+            return login_redirect(f"/decks/{deck_id}/playtest")
+        try:
+            deck = await decks.get_any_deck(sub, deck_id)
+        except DeckError as exc:
+            return page(
+                "Deck not found",
+                f"<div class='panel'><p>{_esc(exc)}</p>"
+                "<a class='btn' href='/decks'>Back to my decks</a></div>",
+                sub=sub,
+                sid=sid,
+                status=404 if exc.kind == "not_found" else 400,
+            )
+        did = _esc(deck.id)
+        src = f"https://archidekt.com/playtester-v2/{did}"
+        body = (
+            "<section class='panel playhead'>"
+            f"<div><a href='/decks/{did}'>← {_esc(deck.name or f'Deck {deck.id}')}</a>"
+            "<span class='muted small'> · Archidekt's playtester, shown here</span></div>"
+            f"<a class='btn' href='{src}' target='_blank' rel='noreferrer noopener'>{icon('external')} "
+            "Open on Archidekt</a></section>"
+            f"<iframe class='playframe' src='{src}' title='Archidekt playtester' allow='fullscreen' "
+            "referrerpolicy='no-referrer' sandbox='allow-scripts allow-same-origin allow-forms allow-popups "
+            "allow-popups-to-escape-sandbox'></iframe>"
+            "<p class='muted small playnote'>The playtester runs on archidekt.com. A private deck shows only "
+            "when this browser is signed in to Archidekt; if the frame stays empty, use Open on "
+            "Archidekt.</p>"
+        )
+        return page(
+            f"Playtest: {deck.name or deck.id}",
+            body,
+            sub=sub,
+            sid=sid,
+            two_pane=True,
+            current="/decks",
+            csp=PLAYTEST_CSP,
+            heading=False,
+            deck_css=True,
+        )
+
+    @server.custom_route("/decks/{deck_id}/compare", methods=["GET"], include_in_schema=False)
+    async def compare_page(request: Request) -> Response:
+        """This deck against another: a preconstructed deck (the picker lists Archidekt's), any
+        deck id or link, or a pasted list. The same comparison the assistant's compare_decks
+        makes: what was taken out of the other deck, what was put in, what changed count, and
+        the statistics' differences."""
+        deck_id = request.path_params["deck_id"]
+        sub, sid = browser_session(state, request)
+        if not sub:
+            return login_redirect(f"/decks/{deck_id}/compare")
+        try:
+            deck = await decks.get_any_deck(sub, deck_id)
+        except DeckError as exc:
+            return page(
+                "Deck not found",
+                f"<div class='panel'><p>{_esc(exc)}</p>"
+                "<a class='btn' href='/decks'>Back to my decks</a></div>",
+                sub=sub,
+                sid=sid,
+                status=404 if exc.kind == "not_found" else 400,
+            )
+        qp = request.query_params
+        other_ref = (qp.get("with") or "").strip()[:2000]
+        paste = (qp.get("paste") or "").strip()[:20000]
+        try:
+            precons = await decks.precons(sub)
+        except DeckError:
+            precons = {}
+        other: Deck | dict[str, int] | None = None
+        other_name = ""
+        error = ""
+        status = 200
+        if paste:
+            try:
+                cards = parse_decklist(paste)
+                other = {c.name: c.quantity for c in cards if c.zone == "main"}
+                other_name = "the pasted list"
+            except DecklistError as exc:
+                error, status = f"The pasted list could not be read: {_esc(exc)}", 400
+        elif other_ref:
+            try:
+                other = await decks.get_any_deck(sub, other_ref)
+                other_name = other.name or f"deck {other.id}"
+            except DeckError as exc:
+                error, status = (
+                    f"That deck could not be read: {_esc(exc)}",
+                    400 if exc.kind != "not_found" else 404,
+                )
+        result = deck_stats.compare(other, deck) if other is not None else None
+        body = compare_page_html(
+            deck,
+            other=other,
+            other_name=other_name,
+            other_ref=other_ref,
+            paste=paste,
+            result=result,
+            precons=precons,
+            error=error,
+        )
+        return page(
+            f"Compare: {deck.name or deck.id}",
+            body,
+            sub=sub,
+            sid=sid,
+            status=status,
+            two_pane=True,
+            current="/decks",
+            csp=DECK_CSP,
+            scripts=True,
+            heading=False,
+            deck_css=True,
+            extra_scripts=("compare.js",),
+        )
 
     # -- history --------------------------------------------------------------
     @server.custom_route("/history", methods=["GET"], include_in_schema=False)

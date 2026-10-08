@@ -877,18 +877,40 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "Commander bracket ESTIMATE and structural checks (deck size for the format, commander zone "
             "and whether each card may command, colour identity violations, singleton violations, "
             "uncategorised rows: stats.checks), all from Archidekt's own card data in one read (no Mystic "
-            "Forge call). deck_ref is an Archidekt id or URL, or a snapshot id. Say 'estimate' when you "
-            "quote the bracket. This is the one tool for an Archidekt deck's legality and structure; "
-            "validate_decklist is for pasted lists only."
+            "Forge call). deck_ref is an Archidekt id or URL, a snapshot id, or a pasted decklist (then "
+            "only counts and structural checks: no card data). Say 'estimate' when you quote the bracket. "
+            "This is the one tool for an Archidekt deck's legality and structure; validate_decklist "
+            "checks a pasted list card by card."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )
     async def deck_stats_tool(deck_ref: str) -> dict[str, object]:
+        if _looks_like_list(deck_ref):
+            try:
+                cards = parse_decklist(deck_ref)
+            except DecklistError as exc:
+                return {"ok": False, "error": "invalid", "message": f"decklist could not be read: {exc}"}
+            stats = deck_stats.compute_from_text(cards)
+            return {
+                "ok": True,
+                "deck": {"id": None, "name": "pasted list", "card_count": stats["card_count"]},
+                "stats": stats,
+                "note": "A pasted list has names and counts only; for card-level checks use "
+                "validate_decklist, or read an Archidekt deck.",
+            }
         try:
             deck = await _deck_or_snapshot(_sub(), deck_ref)
         except DeckError as exc:
             return _tool_error(exc)
         return {"ok": True, "deck": deck_brief(deck), "stats": deck_stats.compute(deck)}
+
+    def _looks_like_list(ref: str) -> bool:
+        """A pasted decklist rather than a deck id, URL or snapshot id: more than one line, or a
+        count in front of a name."""
+        ref = str(ref or "").strip()
+        if not ref or ref.isdigit() or ref.startswith("snap_") or "archidekt.com" in ref.lower():
+            return False
+        return "\n" in ref or bool(re.match(r"\d+x?\s", ref))
 
     def _own_snapshot(sub: str, ref: str) -> Any | None:
         """The member's own snapshot named by ``ref`` (as list_snapshots returns it, with or without
@@ -977,10 +999,10 @@ def build_mcp_server(state: AppState) -> MCPServer:
         title="Run and store a deck report",
         description=(
             "Test a deck and keep the numbers: deck_stats plus, when the research service is available, a "
-            "goldfish simulation (games, default 300) and a decklist "
-            "validation. The report is stored for the "
-            "user (see list_deck_reports and the gateway's History "
-            "page) so results can be compared over time. "
+            "goldfish simulation (games, default 300) and a decklist validation. deck_ref is an Archidekt "
+            "id or URL, a snapshot id, or a pasted decklist. A deck's report is stored for the user (see "
+            "list_deck_reports and the gateway's History page) so results can be compared over time; a "
+            "pasted list is simulated the same way but returned with stored=false and not kept. "
             "Reads the deck; changes nothing on Archidekt. A report of an unchanged deck within ten minutes "
             "returns the existing one (not when options are given). options passes the simulator's knobs "
             "through: annotations (goldfish_annotate's output, for cards the engine cannot derive), combos "
@@ -995,9 +1017,14 @@ def build_mcp_server(state: AppState) -> MCPServer:
         deck_ref: str, games: int = 300, simulate: bool = True, options: dict[str, Any] | None = None
     ) -> dict[str, object]:
         try:
-            report = await state.reports.run(
-                _sub(), deck_ref, simulate=simulate, games=games, options=options
-            )
+            if _looks_like_list(deck_ref):
+                report = await state.reports.run_text(
+                    _sub(), deck_ref, simulate=simulate, games=games, options=options
+                )
+            else:
+                report = await state.reports.run(
+                    _sub(), deck_ref, simulate=simulate, games=games, options=options
+                )
             return {"ok": True, **report}
         except DeckError as exc:
             return _tool_error(exc)

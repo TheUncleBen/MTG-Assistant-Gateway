@@ -274,7 +274,7 @@ async def test_deck_pages(stack: Stack) -> None:
         assert "target='_blank'" not in lst.text.split("<main")[1].split("Open on Archidekt")[0]
         deck = await b.http.get("/decks/42", headers=NAV)
         assert deck.status_code == 200
-        assert "Mana curve" in deck.text and "Run deck report" in deck.text and "Edit deck" in deck.text
+        assert "Mana curve" in deck.text and "Run simulation" in deck.text and "Edit deck" in deck.text
         assert "Open on Archidekt" in deck.text  # the one external link may open a new tab
         missing = await b.http.get("/decks/999999", headers=NAV)
         assert missing.status_code == 404
@@ -288,7 +288,9 @@ async def test_deck_pages(stack: Stack) -> None:
         assert js.status_code == 200 and js.json()["id"] == "42"
         csrf = await b.csrf("/account")
         ran = await b.http.post("/decks/42/report", data={"csrf": csrf})
-        assert ran.status_code == 303 and ran.headers["location"] == "/history?deck_id=42"
+        assert ran.status_code == 303 and ran.headers["location"].startswith("/history/reports/")
+        shown = await b.http.get(ran.headers["location"], headers=NAV)
+        assert shown.status_code == 200 and "Goldfish simulation" in shown.text and "## Metrics" in shown.text
         hist = await b.http.get("/history", headers=NAV)
         assert hist.status_code == 200 and "Report:" in hist.text
         act = await b.http.get("/activity", headers=NAV)
@@ -364,5 +366,63 @@ async def test_deck_editor_page(stack: Stack) -> None:
         assert js.status_code == 200 and "editor-config" in js.text
         anon = await h.http.get("/decks/42/edit", headers=NAV)
         assert anon.status_code == 302
+    finally:
+        await b.aclose()
+
+
+async def test_playtest_page_frames_archidekts_playtester(stack: Stack) -> None:
+    """The playtest page is Archidekt's own playtester in a frame (the only origin the page's CSP
+    lets it frame), with the deck's name, a way back and the plain link as a fallback. Missing
+    decks and anonymous visitors are handled like the deck page."""
+    b = await linked_browser(stack)
+    try:
+        r = await b.http.get("/decks/42/playtest", headers=NAV)
+        assert r.status_code == 200
+        assert "<iframe class='playframe' src='https://archidekt.com/playtester-v2/42'" in r.text
+        assert "sandbox='allow-scripts allow-same-origin" in r.text
+        assert "href='https://archidekt.com/playtester-v2/42' target='_blank'" in r.text  # fallback
+        assert "href='/decks/42'" in r.text and "Sample Commander Deck" in r.text
+        csp = r.headers["content-security-policy"]
+        assert "frame-src https://archidekt.com;" in csp and "frame-ancestors 'none'" in csp
+        assert "script-src 'self'" in csp and "img-src 'self'" in csp  # the shell's own script and avatar
+        assert "cards.scryfall.io" not in csp
+        missing = await b.http.get("/decks/999999/playtest", headers=NAV)
+        assert missing.status_code == 404
+        anon = await stack.h.http.get("/decks/42/playtest", headers=NAV)
+        assert anon.status_code == 302 and anon.headers["location"].startswith("/login?next=")
+    finally:
+        await b.aclose()
+
+
+async def test_compare_page_shows_what_a_build_changed(stack: Stack) -> None:
+    """The compare view pits this deck against a precon (offered from Archidekt's listing), any
+    deck id or link, or a pasted list, with the assistant's compare_decks numbers: taken out,
+    put in, changed counts and the statistics' differences."""
+    b = await linked_browser(stack)
+    try:
+        empty = await b.http.get("/decks/42/compare", headers=NAV)
+        assert empty.status_code == 200 and "<datalist id='preconlist'>" in empty.text
+        assert "<option value='42'>" in empty.text  # the fake's precon listing carries deck 42
+        assert "Taken out of" not in empty.text
+        # against itself: nothing changes
+        same = await b.http.get("/decks/42/compare?with=https://archidekt.com/decks/42/sample", headers=NAV)
+        assert same.status_code == 200 and "Taken out of Sample Commander Deck" in same.text
+        assert "<li class='muted'>None</li>" in same.text and "No difference" in same.text
+        # against a pasted list: the paste is the "before", this deck the "after"
+        paste = "1 Sol Ring\n4 Lightning Bolt\n3 Island\n"
+        r = await b.http.get("/decks/42/compare", params={"paste": paste}, headers=NAV)
+        assert r.status_code == 200 and "Taken out of the pasted list" in r.text
+        assert "Lightning Bolt" in r.text and "class='cardlink'" in r.text  # a card the deck holds opens
+        assert "compare.js" in r.text and "cardview.js" in r.text
+        # the tool's view of the same comparison agrees with the page's tiles
+        token = await mcp_token(stack.h)
+        tool = structured(await call(stack.h, token, "compare_decks", {"a": paste, "b": "42"}))
+        sm = tool["summary"]
+        assert f"<b>{sm['cut']}</b><span>taken out ({sm['cut_pct']}%)</span>" in r.text
+        assert f"<b>{sm['added']}</b><span>put in ({sm['added_pct']}%)</span>" in r.text
+        bad = await b.http.get("/decks/42/compare?with=https://evil.example/decks/1", headers=NAV)
+        assert bad.status_code == 400 and "could not be read" in bad.text
+        gone = await b.http.get("/decks/42/compare?with=999999", headers=NAV)
+        assert gone.status_code == 404
     finally:
         await b.aclose()

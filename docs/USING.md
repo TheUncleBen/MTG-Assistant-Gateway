@@ -63,18 +63,25 @@ One deck:
   moves go to Archidekt at once, with a snapshot taken first.
 - **Quick add** types a card name and takes you to the editor with it
   filled in.
-- **Playtest** opens the deck in Archidekt's own playtester (draw an
-  opening hand, mulligan, play turns by hand). The gateway does not copy
-  that tool, so a game plays the same whether you start it here, in the
-  app (which opens your phone browser) or on archidekt.com; a private deck
-  needs your own Archidekt sign-in in that browser.
-- **Run deck report** (More menu) runs the statistics, the decklist
-  validation and the goldfish simulation (300 games) and files the result
-  under History. It is the same run the assistant's `run_deck_report` makes,
-  so the numbers match whichever way it is started.
-- The **More** menu in the banner holds Edit deck, Deck settings, Clone, Run
-  report, Export (text, JSON or CSV), the deck's page on Archidekt and
-  **Delete deck**. Deleting asks you to type the deck's name; a snapshot is
+- **Playtest** shows the deck in Archidekt's own playtester (draw an
+  opening hand, mulligan, play turns by hand) on a gateway page, in the
+  app as on the web. The gateway does not copy that tool: the page frames
+  archidekt.com's playtester, so a game plays the same as on the site. A
+  private deck shows only when that browser is signed in to Archidekt; the
+  page keeps an **Open on Archidekt** button for that case.
+- **Run simulation** runs the statistics, the decklist validation and the
+  goldfish simulation (300 games) and opens the result, filed under
+  History. It is the same run the assistant's `run_deck_report` makes, so
+  the numbers match whichever way it is started.
+- **Compare with another deck…** (More menu) pits the deck against a
+  preconstructed deck (pick one from Archidekt's list), any deck id or
+  link, or a pasted list: what the build took out of the other deck, what
+  it put in, changed counts, basic lands, and the statistics' differences.
+  Tap a card name for the whole card. The assistant's `compare_decks` makes
+  the same comparison.
+- The **More** menu in the banner holds Deck settings, Export (text, JSON or
+  CSV), History and snapshots, Compare, Deck stats, the deck's page on
+  Archidekt and **Delete deck**. Deleting asks you to type the deck's name; a snapshot is
   kept under History and, when backups are on, a copy in your backup folder
   on Archidekt. Archidekt itself has no undo for a deleted deck.
 - **Deck settings** holds the name, format, bracket, description and

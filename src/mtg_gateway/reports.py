@@ -20,6 +20,7 @@ from typing import Any
 from . import deck_stats
 from .archidekt import Deck
 from .db import Database
+from .decklist import DecklistError, parse_decklist, to_text
 from .decks import DeckError, DeckService, _clean_deck_id, current_client, deck_to_text
 from .mf_proxy import MysticForgeProxy, is_busy
 
@@ -127,6 +128,46 @@ class ReportService:
             flight.users -= 1
             if flight.users <= 0:
                 self._runs.pop(key, None)
+
+    async def run_text(
+        self,
+        sub: str,
+        text: str,
+        *,
+        simulate: bool = True,
+        games: int = DEFAULT_GAMES,
+        options: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """The same validation and simulation for a pasted or hypothetical list. Returned, never
+        stored: reports are filed under an Archidekt deck, and a list has none to compare over
+        time (clone or create the deck to keep its reports)."""
+        if not isinstance(games, int) or isinstance(games, bool) or games < 10 or games > MAX_GAMES:
+            raise DeckError("invalid", f"games must be an integer from 10 to {MAX_GAMES}")
+        options = sim_options(options)
+        try:
+            cards = parse_decklist(text)
+        except DecklistError as exc:
+            raise DeckError("invalid", f"decklist could not be read: {exc}") from exc
+        stats = deck_stats.compute_from_text(cards)
+        main = to_text(cards)
+        commander = (stats.get("commanders") or [None])[0]
+        goldfish: dict[str, Any] | None = None
+        validation: dict[str, Any] | None = None
+        if self.mf is not None:
+            validation = await self._mf(sub, "validate_decklist", {"decklist": main, "commander": commander})
+            if simulate and commander is None:
+                goldfish = {"tool": "goldfish_run", "ok": False, "text": NO_COMMANDER_TEXT}
+            elif simulate:
+                goldfish = await self._mf(sub, "goldfish_run", {"deck": main, "n": games, **options})
+        return {
+            "stored": False,
+            "deck": {"id": None, "name": "pasted list", "card_count": stats["card_count"]},
+            "stats": stats,
+            "goldfish": goldfish,
+            "validation": validation,
+            "has_goldfish": bool(goldfish and goldfish.get("ok")),
+            "decklist_text": main,
+        }
 
     async def _run(
         self, sub: str, deck_ref: str, *, simulate: bool, games: int, options: dict[str, Any]

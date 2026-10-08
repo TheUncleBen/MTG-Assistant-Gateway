@@ -52,10 +52,17 @@ one owner per capability among the assistant's tools.
   `// Sideboard` headers and `SB:` rows land in Archidekt's Sideboard (or Maybeboard) category
   instead of being dropped, `^Label^` colour tags are read as labels rather than categories, and
   `#CustomCard` marks are tolerated. `propose_new_deck` rows take `finish` (normal, foil, etched).
-- Deck page: a **Playtest** button opens the deck in Archidekt's own playtester on archidekt.com (the
-  app hands it to the phone browser), so hand playtesting is the same tool everywhere; **Run deck
-  report** says that it is the same statistics, validation and 300-game simulation the assistant
-  runs.
+- Deck page: **Playtest** shows Archidekt's own playtester on a gateway page (`/decks/{id}/playtest`
+  frames archidekt.com's playtester; the app shows it in place), with an Open on Archidekt button
+  as the fallback for private decks; **Run simulation** in the banner runs the same statistics,
+  validation and 300-game goldfish run as `run_deck_report` and opens the report; **Compare with
+  another deck…** (`/decks/{id}/compare`) pits the deck against a preconstructed deck from
+  Archidekt's list, any deck link or a pasted list, with the same cards taken out, put in, changed
+  counts, basic lands and statistics' differences `compare_decks` reports, each card opening the
+  card viewer.
+- `run_deck_report` and `deck_stats` take a pasted decklist as `deck_ref` as well as a deck: the
+  list gets the same validation and simulation (0.7.1's hidden `goldfish_run` could simulate a
+  pasted list; its owner keeps that) and comes back with `stored: false`, not filed under History.
 - Deck page statistics: **Probability of draw** (at least or exactly N cards of a category, name,
   type, subtype or mana value in the first N cards, the hypergeometric odds Archidekt's Probability
   tab shows) and **Deck checks** (the structural checks `deck_stats` returns, in words).
