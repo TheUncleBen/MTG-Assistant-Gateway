@@ -300,3 +300,24 @@ async def test_health_probes_mystic_forge_once_for_many_callers():
     proxy = MysticForgeProxy("http://mf.test/mcp", client_factory=factory)
     results = await asyncio.gather(*[proxy.healthy() for _ in range(20)])
     assert all(results) and len(probes) == 1
+
+
+def test_backup_is_written_in_a_private_folder_and_leaves_nothing_behind(tmp_path: Path, monkeypatch):
+    from mtg_gateway import backup as backup_module
+
+    db = Database(tmp_path / "gw.sqlite")
+    seen: list[Path] = []
+    real = db.backup_to
+
+    def spy(target: Path) -> None:
+        seen.append(target)
+        real(target)
+
+    monkeypatch.setattr(db, "backup_to", spy)
+    backup_dir = tmp_path / "backups"
+    dest = backup_module.export_now(db, backup_dir, 30)
+    # SQLite wrote inside a fresh owner-only folder, where nobody else can swap a link in
+    assert seen[0].parent != backup_dir and seen[0].parent.parent == backup_dir
+    assert dest.exists() and oct(dest.stat().st_mode & 0o777) == "0o600"
+    assert [p.name for p in backup_dir.iterdir()] == [dest.name]
+    db.close()

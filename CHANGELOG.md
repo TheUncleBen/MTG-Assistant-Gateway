@@ -53,6 +53,11 @@ before.
 - `whoami` carries `account_page`; `MTG_APPLY_IN_CHAT=false` now removes
   every card and the data link endpoint, not only the Approve card.
 
+### Security
+
+- A database backup is written inside a fresh owner-only folder under the backup directory and
+  moved into place once complete, so nothing else can swap a link in while SQLite writes it.
+
 ### Documentation
 
 - CONNECT, ONBOARDING, USING and the in-app Guide: what each card does and

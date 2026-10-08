@@ -16,6 +16,7 @@ import asyncio
 import logging
 import os
 import shutil
+import tempfile
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -34,15 +35,19 @@ def export_now(db: Database, backup_dir: Path, keep_days: int, copy_dir: Path | 
     recorded in ``last_run["copy_error"]``; the main backup still counts as written."""
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     dest = backup_dir / f"{PREFIX}{stamp}{SUFFIX}"
-    tmp = dest.with_suffix(".tmp")
-    # Create the file owner-only first: `docker exec ... backup` doesn't inherit the entrypoint's
-    # umask 077, and SQLite keeps an existing file's mode (its journal copies it too).
-    tmp.unlink(missing_ok=True)
     backup_dir.mkdir(parents=True, exist_ok=True)
-    os.close(os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
-    os.chmod(tmp, 0o600)
-    db.backup_to(tmp)
-    tmp.replace(dest)
+    # SQLite opens the file by name, so it is written inside a fresh owner-only folder nobody else
+    # can put a link in, then moved into place. The file is created owner-only first: `docker exec
+    # ... backup` doesn't inherit the entrypoint's umask 077, and SQLite keeps an existing file's
+    # mode (its journal copies it too).
+    work = Path(tempfile.mkdtemp(prefix=".backup-", dir=backup_dir))  # mode 0700
+    try:
+        tmp = work / dest.name
+        os.close(os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0), 0o600))
+        db.backup_to(tmp)
+        tmp.replace(dest)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
     removed = prune(backup_dir, keep_days)
     logger.info("backup written to %s (%d old copies removed)", dest, removed)
     last_run["copy_error"] = None
