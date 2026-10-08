@@ -334,6 +334,7 @@ class MysticForgeProxy:
         # text when it is used up (None to go ahead).
         self.archidekt_budget: Any = None
         self._health: tuple[float, bool] = (0.0, False)
+        self._health_lock = anyio.Lock()  # one probe at a time, however many /healthz calls wait
 
     async def healthy(self) -> bool:
         """Whether Mystic Forge answers a tool listing now (within a few seconds), for the health
@@ -341,16 +342,20 @@ class MysticForgeProxy:
         at, ok = self._health
         if time.time() - at < HEALTH_CACHE_SECONDS:
             return ok
-        try:
-            with anyio.fail_after(HEALTH_DEADLINE_SECONDS):
-                async with self._client_factory() as client:
-                    await client.list_tools()
-            ok = True
-        except Exception as exc:
-            logger.warning("health check: Mystic Forge is not answering: %s", type(exc).__name__)
-            ok = False
-        self._health = (time.time(), ok)
-        return ok
+        async with self._health_lock:
+            at, ok = self._health  # another caller may have probed while this one waited
+            if time.time() - at < HEALTH_CACHE_SECONDS:
+                return ok
+            try:
+                with anyio.fail_after(HEALTH_DEADLINE_SECONDS):
+                    async with self._client_factory() as client:
+                        await client.list_tools()
+                ok = True
+            except Exception as exc:
+                logger.warning("health check: Mystic Forge is not answering: %s", type(exc).__name__)
+                ok = False
+            self._health = (time.time(), ok)
+            return ok
 
     async def tools(self, *, force: bool = False) -> list[dict[str, Any]]:
         if self._tools and not force and time.time() - self._tools_at < self.cache_ttl:

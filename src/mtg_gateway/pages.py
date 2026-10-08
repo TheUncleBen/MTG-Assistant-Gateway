@@ -14,7 +14,7 @@ import html
 import secrets
 import time
 from typing import TYPE_CHECKING, Any
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, quote
 
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
@@ -389,7 +389,12 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             sid=sid,
             scripts=True,  # the click guard on Apply (clickguard.py)
             # While a long apply runs in the background the page reloads itself to show progress.
-            head_extra="<meta http-equiv='refresh' content='5'>" if p["state"] == "applying" else "",
+            # It reloads the plain page, so the "Applying" notice of ?ok=applying goes once it ends.
+            head_extra=(
+                f"<meta http-equiv='refresh' content='5;url=/proposals/{quote(pid, safe='')}'>"
+                if p["state"] == "applying"
+                else ""
+            ),
         )
 
     @server.custom_route("/proposals/{pid}", methods=["POST"], include_in_schema=False)
@@ -929,6 +934,16 @@ def _detail_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, int
     return "".join(items), len(items)
 
 
+def _page_step(p: dict[str, Any]) -> str:
+    """next_step speaks to the assistant; while applying, the page says it for a person."""
+    if p.get("state") == "applying":
+        return (
+            "Archidekt is being updated a step at a time to stay within its limits. You can leave "
+            "this page; it refreshes by itself until the change is done."
+        )
+    return str(p["next_step"])
+
+
 def _progress_html(p: dict[str, Any]) -> str:
     """How far a large apply running in the background got (the page refreshes itself)."""
     if p.get("state") != "applying":
@@ -996,7 +1011,7 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str = "") -> str:
         f"<div class='summary'>{''.join(summary)}</div>"
         f"<ul class='changes' aria-label='{aria}'>{rows}</ul>"
         f"<details class='raw'><summary>Plain-text diff</summary>{raw}</details>"
-        f"<p class='muted'>{html.escape(p['next_step'])}</p>" + _progress_html(p)
+        f"<p class='muted'>{html.escape(_page_step(p))}</p>" + _progress_html(p)
     )
     if p["state"] == "pending" and p["writes_enabled"]:
         body += (

@@ -62,9 +62,15 @@ def copy_backup(src: Path, copy_dir: Path, keep_days: int) -> Path:
     dest = copy_dir / src.name
     tmp = dest.with_suffix(".tmp")
     tmp.unlink(missing_ok=True)
-    os.close(os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
-    shutil.copyfile(src, tmp)
-    os.chmod(tmp, 0o600)
+    # The copy folder may be shared storage others can write to: the temporary file is opened once,
+    # never through a symlink, and written through that handle, so nothing swapped in at its name
+    # can redirect the write.
+    fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    with os.fdopen(fd, "wb") as out, open(src, "rb") as data:
+        shutil.copyfileobj(data, out)
+        os.fchmod(out.fileno(), 0o600)
+        if not os.path.samestat(os.fstat(out.fileno()), os.lstat(tmp)):
+            raise OSError("the temporary backup copy was replaced while it was written")
     tmp.replace(dest)
     removed = prune(copy_dir, keep_days)
     logger.info("backup copied to %s (%d old copies removed)", dest, removed)

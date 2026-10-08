@@ -339,7 +339,10 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
       request("tools/call", { name: "get_proposal", arguments: { proposal_id: pid } })
         .then(function (res) {
           var sc = (res && res.structuredContent) || {};
-          if (sc.ok === false || (res && res.isError)) return;
+          if (sc.ok === false || (res && res.isError)) {
+            setStatus("Still applying, but the card can't read its progress (" + String(sc.message || "the gateway refused") + "). Open the review page to follow it.", "err");
+            return;
+          }
           render({ structuredContent: sc, _meta: {} });
           if (sc.state === "applied") {
             setStatus("Applied. The deck on Archidekt matches this proposal.", "ok");

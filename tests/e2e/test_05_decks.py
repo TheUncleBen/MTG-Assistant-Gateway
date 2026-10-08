@@ -99,7 +99,7 @@ def test_tool_surface_includes_deck_and_proxied_research_tools(clients):
         async with clients["alice-test"].session() as s:
             names = {t.name for t in (await s.list_tools()).tools}
         assert {
-            "whoami", "account_status", "list_my_decks", "get_my_deck", "get_deck", "parse_decklist",
+            "whoami", "account_status", "list_my_decks", "get_deck", "parse_decklist",
             "parse_deck_export", "propose_new_deck", "propose_deck_changes", "list_my_proposals",
             "get_proposal", "apply_proposal",
         } <= names, names  # fmt: skip
@@ -145,7 +145,7 @@ def test_public_deck_reads_need_no_link_and_proposals_do(clients, env: Env):
             status = await c.call(s, "account_status")
             assert status["linked"] is False and status["writes_enabled"] is False, status
             assert status["account_page"] == f"{PUBLIC_URL}/account"
-            deck = await c.call(s, "get_deck", {"deck_ref": "42"})
+            deck = await c.call(s, "get_deck", {"deck_ref": "42", "view": "cards"})
             assert deck["ok"] and deck["name"] == "Sample Commander Deck", deck
             assert sum(card["quantity"] for card in deck["cards"]) == 100
             by_url = await c.call(
@@ -282,8 +282,8 @@ def test_users_cannot_see_or_touch_each_others_decks_and_proposals(clients, env:
                 "not_found",
             )
             assert (await f.call(s, "list_my_proposals"))["proposals"] == []
-            own = await f.call(s, "get_my_deck", {"deck_id": "42"})
-            assert own["ok"] is False and own["error"] == "forbidden", own  # public, but not Amy's
+            own = await f.call(s, "get_deck", {"deck_ref": "42"})
+            assert own["ok"] and own["owner"] == "alice", own  # public, readable, but not Amy's
             change = await f.call(
                 s,
                 "propose_deck_changes",
@@ -291,8 +291,8 @@ def test_users_cannot_see_or_touch_each_others_decks_and_proposals(clients, env:
             )
             assert change["ok"] is False and change["error"] == "forbidden", change
             assert (await f.call(s, "get_deck", {"deck_ref": "42"}))["ok"]  # readable, as anyone can
-            amy = await f.call(s, "get_my_deck", {"deck_id": "43"})
-            assert amy["ok"] and amy["name"] == "Amy's deck", amy
+            amy = await f.call(s, "get_deck", {"deck_ref": "43"})  # private: read with her own sign-in
+            assert amy["ok"] and amy["name"] == "Amy's deck" and amy["owner"] == "amy", amy
         async with browser_page() as page:
             await gateway_browser_sign_in(page, env, "bob-test", f"/proposals/{STATE['edit']}")
             assert "No such proposal for your account" in await page.inner_text("body")
@@ -328,7 +328,7 @@ def test_writes_on_apply_is_browser_only_and_the_review_page_applies(clients, en
         async with c.session() as s:
             p = await c.call(s, "get_proposal", {"proposal_id": pid})
             assert p["state"] == "applied" and p["result"]["verified"] is True and p["snapshot_id"], p
-            deck = await c.call(s, "get_my_deck", {"deck_id": "42"})
+            deck = await c.call(s, "get_deck", {"deck_ref": "42", "view": "cards"})
             names = {card["name"] for card in deck["cards"]}
             assert "Arcane Signet" in names and "Rampant Growth" not in names, sorted(names)
             twice = await c.call(s, "apply_proposal", {"proposal_id": pid})
@@ -390,9 +390,19 @@ def test_apply_over_mcp_only_in_auto_mode(clients):
             # The CSV deck (72 rows) is created in full: every printing it names exists on the mock
             # (its decks' printings count as known cards), each row goes as one paced request, and
             # the deck is read back and checked by name, count, printing and finish. At the default
-            # one-second pacing this is the longest call of the suite (a few minutes).
+            # pacing (one second apart, 40 a minute) that takes a few minutes, so the call answers
+            # "applying" with its progress and the apply finishes in the background.
             create = await c.call(s, "apply_proposal", {"proposal_id": STATE["create"]})
-            assert create["ok"] is True and create["state"] == "applied", create
+            assert create["ok"] is True and create["state"] in ("applying", "applied"), create
+            if create["state"] == "applying":
+                assert create["progress"]["of_cards"] == 72, create
+            again = await c.call(s, "apply_proposal", {"proposal_id": STATE["create"]})
+            assert again["state"] in ("applying", "applied"), again  # never started twice
+            deadline = time.monotonic() + 600
+            while create["state"] == "applying" and time.monotonic() < deadline:
+                await asyncio.sleep(5)
+                create = await c.call(s, "get_proposal", {"proposal_id": STATE["create"]})
+            assert create["state"] == "applied", create
             assert create["result"]["verified"] is True and create["result"]["sent_entries"] == 72, create
 
     run(go())

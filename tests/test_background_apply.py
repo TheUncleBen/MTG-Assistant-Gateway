@@ -119,7 +119,9 @@ async def test_the_review_page_shows_progress_and_refreshes_while_applying(stack
     page = await b.http.get(r.headers["location"])
     assert "Applying. This is a large change" in page.text
     assert "sent 1 of 3 changes" in page.text
-    assert "http-equiv='refresh'" in page.text
+    # the refresh reloads the plain page, so the "Applying" notice does not outlive the apply
+    assert f"content='5;url=/proposals/{p['proposal_id']}'" in page.text
+    assert "check again with get_proposal" not in page.text  # the page speaks to a person
     assert "Apply to Archidekt?" not in page.text  # no second Apply button while it runs
     release.set()
     await _until(lambda: h.db.get_proposal(p["proposal_id"], "user-1")["state"] == "applied")
@@ -139,3 +141,45 @@ async def test_shutdown_records_an_apply_that_had_to_be_cut_off(stack: Stack) ->
     row = h.db.get_proposal(p["proposal_id"], "user-1")
     assert row["state"] == "failed" and row["result"]["error"] == "interrupted"
     assert row["result"]["sent_entries"] == 1
+
+
+async def test_a_member_s_own_large_new_deck_opens_its_progress_not_applied(stack: Stack) -> None:
+    h, ark = stack.h, stack.ark
+    await linked_user(stack)
+    b = Browser(h)
+    await b.login()
+    release = _hold(ark, lambda r: r.url.path.startswith("/api/cards/v2/"))
+    r = await b.http.post(
+        "/decks/new",
+        data={
+            "csrf": await b.csrf("/account"),
+            "name": "Slow",
+            "format": "commander",
+            "source": "1 Sol Ring\n1 Island",
+        },
+    )
+    assert r.status_code == 303 and r.headers["location"].endswith("?ok=applying"), r.headers
+    release.set()
+    pid = r.headers["location"].split("/proposals/")[1].split("?")[0]
+    await _until(lambda: h.db.get_proposal(pid, "user-1")["state"] == "applied")
+    await b.aclose()
+
+
+async def test_a_backup_that_fails_after_the_answer_is_explained(stack: Stack, monkeypatch) -> None:
+    h = stack.h
+    token = await linked_user(stack)
+    svc = h.app.state.gateway.decks
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": THREE}))
+
+    async def slow_fail(*a, **k):
+        await asyncio.sleep(0.5)
+        raise decks_mod.DeckError("unavailable", "Archidekt did not answer")
+
+    monkeypatch.setattr(svc, "_backup_copy", slow_fail)
+    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert out["state"] == "applying", out
+    await _until(lambda: h.db.get_proposal(p["proposal_id"], "user-1")["state"] == "pending")
+    got = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
+    assert got["result"]["error"] == "backup_failed", got
+    assert got["next_step"].startswith("The last attempt to apply this stopped before anything changed")
+    assert stack.ark.patches == []

@@ -1522,7 +1522,14 @@ class DeckService:
             "risk": risk,
             "risk_reason": why,
             "assistant_may_apply": may_apply,
-            "next_step": _next_step(
+            "next_step": (
+                # an apply that stopped at the backup (possibly after its caller had its answer)
+                "The last attempt to apply this stopped before anything changed: the backup copy "
+                "could not be made on Archidekt. "
+                if state == "pending" and (row["result"] or {}).get("error") == "backup_failed"
+                else ""
+            )
+            + _next_step(
                 state,
                 self.settings.writes_enabled,
                 may_apply=may_apply,
@@ -1565,7 +1572,11 @@ class DeckService:
         of the member's scans matched from a misread name (a new row, or more copies) is marked
         (``guessed_from``), so the
         review page, the in-chat card and the diff all say the name was a guess."""
-        guesses = self.guessed_names(row["owner_sub"]) if self.guessed_names else {}
+        try:  # only a warning: a scan store that fails must not stop the proposal
+            guesses = self.guessed_names(row["owner_sub"]) if self.guessed_names else {}
+        except Exception:
+            logger.exception("reading scan guesses failed")
+            guesses = {}
         for r in rows:
             adds = r.get("kind") == "add" or (
                 r.get("kind") == "change" and int(r.get("after") or 0) > int(r.get("before") or 0)
@@ -1739,7 +1750,12 @@ class DeckService:
         # describe() while it runs.
         progress: dict[str, Any] = {}
         self._progress[proposal_id] = progress
-        async with lock:
+        try:
+            await lock.acquire()  # another apply on this deck may hold it
+        except BaseException:  # cancelled while waiting (shutdown): never leave it in applying
+            self.db.finish_proposal(proposal_id, state="failed", result={"error": "interrupted"})
+            raise
+        try:
             try:
                 result = await self._apply_claimed(sub, row, progress)
             except DeckError as exc:
@@ -1774,6 +1790,8 @@ class DeckService:
                 raise DeckError(
                     "internal", f"Applying failed unexpectedly. {_partial_note(progress)}"
                 ) from exc
+        finally:
+            lock.release()
         self._audit("proposal_applied", sub=sub, detail={"proposal_id": proposal_id, "via": via})
         return result
 
@@ -2044,7 +2062,11 @@ class DeckService:
         try:
             return await self._backup_copy(sub, deck, snapshot_id, reason=reason)
         except DeckError as exc:
-            self.db.finish_proposal(row["id"], state="pending")
+            # Kept on the proposal so get_proposal and the review page say why it is pending again,
+            # also when the apply was answered "applying" before the backup failed.
+            self.db.finish_proposal(
+                row["id"], state="pending", result={"error": "backup_failed", "detail": str(exc)}
+            )
             self._audit(
                 "backup_failed",
                 sub=sub,

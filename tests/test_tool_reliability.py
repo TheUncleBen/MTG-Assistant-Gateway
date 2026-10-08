@@ -669,3 +669,21 @@ async def test_with_mystic_forge_down_a_requested_simulation_fails_at_the_top(st
         assert cmp["ok"] is True, cmp
     finally:
         gw.reports.mf = real
+
+
+async def test_a_report_without_a_simulation_is_not_reused_for_one_that_asks(stack: Stack) -> None:
+    token = await linked_user(stack)
+    gw = stack.h.app.state.gateway
+    ran: list[str] = []
+
+    async def fake_mf(sub, tool, args):
+        ran.append(tool)
+        return {"tool": tool, "ok": True, "text": "## Metrics\nok"}
+
+    gw.reports._mf = fake_mf
+    first = structured(await call(stack.h, token, "run_deck_report", {"deck_ref": "42", "simulate": False}))
+    assert first["ok"] is True and "goldfish_run" not in ran, first
+    second = structured(await call(stack.h, token, "run_deck_report", {"deck_ref": "42", "simulate": True}))
+    # the earlier report had no simulation, so this one runs it instead of reporting a failure
+    assert second.get("reused") is not True and "goldfish_run" in ran, second
+    assert second.get("error") != "simulation_failed", second

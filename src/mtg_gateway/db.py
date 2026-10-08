@@ -832,15 +832,17 @@ class Database:
                 "DELETE FROM proposals WHERE state = 'applied' AND COALESCE(applied_at, created_at) < ?",
                 (now - APPLIED_PROPOSAL_RETENTION_SECONDS,),
             ).rowcount
-            # An apply interrupted by a restart leaves 'applying' behind; an hour after it started treat
-            # it as failed and point at the snapshot (and the created deck id) in the result.
+            # A restart already fails every unfinished apply (fail_interrupted_applies); this is a
+            # backstop for one left behind otherwise. Applies run in the background and a large one
+            # under a busy pacer takes many minutes, so only one started six hours ago counts as
+            # stuck: mark it failed and point at the snapshot (and the created deck id).
             n += c.execute(
                 """UPDATE proposals SET state = 'failed',
                    result_json = COALESCE(result_json, json_object('error', 'interrupted',
                        'detail', 'the apply did not finish; check the snapshot and the deck on Archidekt',
                        'snapshot_id', snapshot_id, 'deck_id', deck_id))
                    WHERE state = 'applying' AND COALESCE(applied_at, created_at) < ?""",
-                (now - 3600,),
+                (now - 6 * 3600,),
             ).rowcount
         return n
 

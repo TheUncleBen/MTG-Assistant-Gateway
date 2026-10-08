@@ -257,7 +257,10 @@ not in your backups.
   still counts. The stack and compose files mount the folder at
   `/backup-copy`; it must already exist on the node that runs the gateway
   (on Swarm, the `MTG_NODE` node). With the variable left out they mount
-  `/dev/null` there instead, which the gateway reads as "no copies". The
+  `/dev/null` there instead, which the gateway reads as "no copies". At
+  start the gateway makes the folder itself (not what is in it) owned by its
+  `PUID`/`PGID`. On a network share the owner-only permissions hold only if
+  the share keeps them, so give the share itself restricted access. The
   gateway's data folder stays on that node's local disk: on Swarm it is not
   shared between nodes, so the copy folder is the one that can be on
   storage every node sees.
@@ -450,9 +453,10 @@ Applying an edit or restore:
 
 Applying a new deck creates it (private unless the user asked otherwise),
 adds the cards and verifies the same way. Proposals expire after 24 hours.
-The gateway never deletes a deck. A proposal stuck in `applying` for over an
-hour (say, after a restart mid-apply) is marked `failed` at startup and
-nightly, with the snapshot and deck ids in its result.
+The gateway never deletes a deck. A proposal left in `applying` by a restart
+mid-apply is marked `failed` at startup, with the snapshot and deck ids in
+its result; one somehow still `applying` six hours after it started is marked
+the same way by the regular clean-up.
 
 Writes have been run live against a throwaway Archidekt account (create,
 add, remove, quantity changes, categories, commander, and the backup folder

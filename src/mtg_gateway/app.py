@@ -1049,7 +1049,9 @@ def build_mcp_server(state: AppState) -> MCPServer:
         if isinstance(goldfish, dict) and goldfish.get("ok"):
             return None
         if not isinstance(goldfish, dict):
-            return "the research service is not configured on this gateway"
+            if state.mf_proxy is None:
+                return "the research service is not configured on this gateway"
+            return "no simulation result came back"
         reason = str(goldfish.get("message") or goldfish.get("text") or goldfish.get("error") or "it failed")
         return clean_text(reason)[:300].rstrip(". ")
 

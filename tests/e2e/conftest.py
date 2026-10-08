@@ -335,6 +335,13 @@ class McpClient:
         result = await session.call_tool(name, arguments or {})
         text = result.content[0].text if result.content else ""
         if result.is_error:
+            # a refusal is the tool's own JSON ({"ok": false, "error": ...}), marked isError
+            try:
+                data = json.loads(text)
+            except ValueError:
+                data = None
+            if isinstance(data, dict) and data.get("ok") is False:
+                return data
             return {"ok": False, "error": "tool_error", "message": text}
         return json.loads(text)
 
