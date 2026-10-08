@@ -143,7 +143,7 @@ class CardLinks:
         self.fernet = Fernet(secret_key.encode())
         self.public_url = public_url.rstrip("/")
         self.ttl = ttl
-        # token -> (uses, first use, member); oldest first use at the front
+        # token -> (uses, first use, member), least recently fetched first
         self._uses: OrderedDict[str, tuple[int, float, str]] = OrderedDict()
         self._cache: OrderedDict[str, tuple[dict[str, Any], float]] = OrderedDict()  # token -> (data, at)
         # Per member, the issue time of their newest link whose live counter had to be dropped. Their
