@@ -7,6 +7,20 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.6] - 2026-10-08
+
+One small security fix from the acceptance check of 0.7.5. Nothing to change
+in the stack, the settings or the secrets.
+
+### Security
+
+- **In-chat card links:** a card link that had used up its 20 fetches could
+  be fetched up to 20 more times in the last second of its 10 minutes,
+  because its fetch count restarted 10 minutes after the first fetch instead
+  of when the link was issued. The count is never restarted now, and it is kept for
+  exactly as long as the link opens. The link only ever showed the member's
+  own data.
+
 ## [0.7.5] - 2026-10-08
 
 Small fixes from the acceptance check of 0.7.4: text that was too faint to

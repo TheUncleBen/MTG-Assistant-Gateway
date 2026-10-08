@@ -297,6 +297,28 @@ def test_a_used_up_link_stays_used_up_when_its_counter_and_answer_are_both_crowd
     assert links.use(fresh)  # a link issued after the squeeze has its own budget
 
 
+def test_a_used_up_link_stays_used_up_to_the_last_second_of_its_life(monkeypatch) -> None:
+    """The link's expiry counts whole seconds from issue (Fernet), so it still opens for up to a
+    second past ``ttl`` after its first fetch. A used-up link must stay refused through that window,
+    and its counter must not be dropped as expired while the link still opens."""
+    clock = [1_800_000_000.0]
+    monkeypatch.setattr(cards.time, "time", lambda: clock[0])
+    links = CardLinks(Fernet.generate_key().decode(), "https://mtg.test")
+    busy = links.issue("alice", "deck", "42").rsplit("/", 1)[1]
+    clock[0] += 0.1  # first fetch a moment after issue
+    for _ in range(cards.LINK_MAX_USES):
+        assert links.use(busy, "alice")
+    assert not links.use(busy, "alice")
+    clock[0] = 1_800_000_000.0 + cards.LINK_TTL + 0.5  # past ttl since the first fetch, link still valid
+    assert links.open(busy) is not None
+    assert not links.use(busy, "alice")
+    for n in range(cards.LINK_USES_SIZE + 10):  # a squeeze at that moment keeps the live counter
+        links.use(links.issue("amy", "deck", str(n)).rsplit("/", 1)[1], "amy")
+    assert busy in links._uses and not links.use(busy, "alice")
+    clock[0] = 1_800_000_000.0 + cards.LINK_TTL + 1  # whole seconds past ttl: the link has expired
+    assert links.open(busy) is None
+
+
 def test_one_member_filling_the_link_counters_only_crowds_out_their_own(monkeypatch) -> None:
     """A member fetching thousands of links drops their own counters, never another member's: the
     other member's live link keeps its count and their unfetched link still works."""
