@@ -1187,17 +1187,56 @@ class Database:
         return dict(row) if row else None
 
     # archidekt links -------------------------------------------------------
-    def save_link(self, sub: str, *, username: str, user_id: str | None, secret_enc: str) -> None:
+    def save_link(
+        self, sub: str, *, username: str, user_id: str | None, secret_enc: str, only_member: bool = False
+    ) -> bool:
+        """Store a new link. A relink replaces the old row whole: its dates start again, and the
+        session it held is flushed from the write-ahead log at once (as an unlink does). With
+        ``only_member``, only while ``sub`` is a known user who is not disabled, so a link that
+        finishes after the account was disabled or its data deleted stores nothing. True when
+        stored."""
         now = int(time.time())
         with self.tx() as c:
-            c.execute(
+            replaced = c.execute(
+                "SELECT 1 FROM archidekt_links WHERE sub = ? AND secret_enc != ''", (sub,)
+            ).fetchone()
+            cur = c.execute(
                 """INSERT INTO archidekt_links (sub, archidekt_username, archidekt_user_id, secret_enc,
-                   status, created_at, refreshed_at) VALUES (?, ?, ?, ?, 'active', ?, ?)
+                   status, created_at, refreshed_at)
+                   SELECT ?, ?, ?, ?, 'active', ?, ? WHERE ? = 0
+                     OR EXISTS (SELECT 1 FROM users WHERE sub = ? AND disabled_at IS NULL)
                    ON CONFLICT(sub) DO UPDATE SET archidekt_username=excluded.archidekt_username,
                      archidekt_user_id=excluded.archidekt_user_id, secret_enc=excluded.secret_enc,
-                     status='active', refreshed_at=excluded.refreshed_at""",
-                (sub, username, user_id, secret_enc, now, now),
+                     status='active', created_at=excluded.created_at,
+                     refreshed_at=excluded.refreshed_at, last_used_at=NULL""",
+                (sub, username, user_id, secret_enc, now, now, 1 if only_member else 0, sub),
             )
+            stored = cur.rowcount > 0
+        if replaced:
+            self.flush_wal()
+        return stored
+
+    def audit_seen(self, event: str) -> bool:
+        """Whether the audit log holds any entry of ``event`` (a one-time marker)."""
+        with self._lock:
+            return (
+                self._conn.execute("SELECT 1 FROM audit_log WHERE event = ? LIMIT 1", (event,)).fetchone()
+                is not None
+            )
+
+    def all_user_subs(self) -> list[str]:
+        """Every member's subject (for the removed-member clean-up's sanity check)."""
+        with self._lock:
+            return [r[0] for r in self._conn.execute("SELECT sub FROM users").fetchall()]
+
+    def active_links(self) -> list[dict[str, Any]]:
+        """``sub`` and ``secret_enc`` of every active link (for the startup reseal and the hourly
+        expiry sweep)."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT sub, secret_enc FROM archidekt_links WHERE status = 'active' AND secret_enc != ''"
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def update_link_secret(self, sub: str, secret_enc: str, *, only_secret: str | None = None) -> bool:
         """Replace the stored session of an *active* link. False when the link was revoked or
@@ -1534,35 +1573,42 @@ class Database:
         every request waiting on it) for the whole copy. Raises if the copy fails its integrity check.
         """
         dest.parent.mkdir(parents=True, exist_ok=True)
-        target = sqlite3.connect(str(dest))
+        # The copy is made and cleaned in memory first, so no file ever holds a sign-in, not even
+        # for a moment (a crash mid-backup leaves nothing in the backup folder that has one).
+        mem = sqlite3.connect(":memory:")
         try:
             if str(self.path) == ":memory:":
                 with self._lock:
-                    self._conn.backup(target)
+                    self._conn.backup(mem)
             else:
                 source = sqlite3.connect(str(self.path))
                 try:
                     source.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
-                    source.backup(target)
+                    source.backup(mem)
                 finally:
                     source.close()
-            # The copy must not need the WAL beside it: make it a plain rollback-journal file.
-            target.execute("PRAGMA journal_mode=DELETE")
             # No sign-in leaves the server in a backup: every member's Archidekt session and the
             # identity provider's tokens are blanked in the copy (and VACUUM leaves no freed page
             # holding them). A restored backup therefore asks members to sign in and relink.
-            target.execute("PRAGMA secure_delete=ON")
-            target.execute(
+            mem.execute("PRAGMA secure_delete=ON")
+            mem.execute(
                 "UPDATE archidekt_links SET secret_enc = '', status = 'revoked' WHERE secret_enc != ''"
             )
-            target.execute("UPDATE idp_grants SET refresh_enc = '', access_enc = ''")
-            target.commit()
-            target.execute("VACUUM")
-            result = target.execute("PRAGMA quick_check").fetchone()[0]
-            if result != "ok":
-                raise RuntimeError(f"backup copy failed its integrity check: {result}")
+            mem.execute("UPDATE idp_grants SET refresh_enc = '', access_enc = ''")
+            mem.commit()
+            mem.execute("VACUUM")
+            target = sqlite3.connect(str(dest))
+            try:
+                mem.backup(target)
+                # The copy must not need a WAL beside it: a plain rollback-journal file.
+                target.execute("PRAGMA journal_mode=DELETE")
+                result = target.execute("PRAGMA quick_check").fetchone()[0]
+                if result != "ok":
+                    raise RuntimeError(f"backup copy failed its integrity check: {result}")
+            finally:
+                target.close()
         finally:
-            target.close()
+            mem.close()
 
     def integrity_ok(self) -> bool:
         """PRAGMA quick_check on the live database (read-only, cheap on a small file)."""

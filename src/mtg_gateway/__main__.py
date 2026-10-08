@@ -33,8 +33,9 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=settings.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     if settings.log_level != "DEBUG":
         # httpx logs every outbound request URL at INFO; keep that for DEBUG only.
-        for name in ("httpx", "httpcore"):
-            logging.getLogger(name).setLevel(logging.WARNING)
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+    # httpcore's DEBUG lines carry response headers (Set-Cookie among them): never log them.
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
     if command == "check-config":
         print("configuration ok")

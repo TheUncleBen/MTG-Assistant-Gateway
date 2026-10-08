@@ -43,6 +43,9 @@ NOT_TOOLS = {
     "archidekt_text",
     "archidekt_session_refreshed",
     "archidekt_link_expired",
+    "archidekt_link_swept",
+    "archidekt_link_unsealed",
+    "archidekt_sessions_sealed",
 }
 
 

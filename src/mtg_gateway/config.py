@@ -54,6 +54,18 @@ def _read_secret(env_name: str, *, required: bool = True) -> str | None:
     return value
 
 
+def _authentik_api_url(issuer: str) -> str | None:
+    """MTG_AUTHENTIK_API_URL, or the scheme and host of the issuer (Authentik serves its API on
+    the same address as its OpenID endpoints)."""
+    raw = (_env("MTG_AUTHENTIK_API_URL", "") or "").strip().rstrip("/")
+    if raw:
+        if not raw.startswith("https://"):
+            raise ConfigError("MTG_AUTHENTIK_API_URL must be an https URL such as https://auth.example.com")
+        return raw
+    parsed = urlparse(issuer)
+    return f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else None
+
+
 def _bool_env(name: str, default: bool) -> bool:
     """1/true/yes (any case) is True, anything else False; unset or empty is ``default``."""
     raw = _env(name)
@@ -226,6 +238,11 @@ class Settings:
     listen_port: int = 8080
     log_level: str = "INFO"
     server_name: str = "MTG Assistant Gateway"
+    # Optional hourly clean-up of removed members' Archidekt sessions (idp_sweep.py): an Authentik
+    # API token that may only view groups, and the Authentik address (empty = the issuer's).
+    authentik_api_token: str | None = field(default=None, repr=False)
+    authentik_api_token_problem: str | None = None
+    authentik_api_url: str | None = None
 
     def grants_access(self, groups: list[str] | None) -> bool:
         """May someone in ``groups`` use the gateway? Members of MTG_REQUIRED_GROUP may, and so
@@ -277,6 +294,14 @@ def load_settings() -> Settings:
         ) from exc
 
     session_secret = _read_secret("MTG_SESSION_SECRET_FILE") or ""
+    # Optional: a missing or unreadable token file turns the sweep off (with one warning at start)
+    # instead of stopping the gateway.
+    sweep_token: str | None = None
+    sweep_problem: str | None = None
+    try:
+        sweep_token = _read_secret("MTG_AUTHENTIK_API_TOKEN_FILE", required=False)
+    except ConfigError as exc:
+        sweep_problem = str(exc)
     if len(session_secret) < 32:
         raise ConfigError("MTG_SESSION_SECRET_FILE must contain at least 32 characters")
 
@@ -385,6 +410,9 @@ def load_settings() -> Settings:
         listen_port=_int_env("MTG_LISTEN_PORT", 8080, lo=1, hi=65535),
         log_level=(_env("MTG_LOG_LEVEL", "INFO") or "INFO").upper(),
         server_name=_env("MTG_SERVER_NAME", "MTG Assistant Gateway") or "MTG Assistant Gateway",
+        authentik_api_token=sweep_token,
+        authentik_api_token_problem=sweep_problem,
+        authentik_api_url=_authentik_api_url(oidc_issuer),
         scryfall_lookup_interval=_float_env("MTG_SCRYFALL_LOOKUP_INTERVAL", 0.5, lo=0.1, hi=5.0),
         scan_fuzzy_min_similarity=_float_env("MTG_SCAN_FUZZY_MIN_SIMILARITY", 0.65, lo=0.3, hi=1.0),
         scan_fuzzy_confident_similarity=_float_env(

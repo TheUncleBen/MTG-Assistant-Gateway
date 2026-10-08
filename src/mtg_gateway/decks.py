@@ -58,6 +58,9 @@ CATEGORY_ACTIONS = ("set_category", "set_commander")
 # Changes to how a card already in the deck is printed: its finish, or the printing itself.
 PRINTING_ACTIONS = ("set_finish", "set_printing")
 COMMANDER = "Commander"
+# The purpose named inside every stored Archidekt session (see DeckService._seal).
+SESSION_PURPOSE = "archidekt_session"
+SEALED_MARKER = "archidekt_sessions_sealed"  # audit event: the one-time reseal has run
 MAX_CATEGORY = 60
 # Deck details propose_deck_details may change, with their Archidekt field names.
 DETAIL_FIELDS = {
@@ -1169,13 +1172,23 @@ class DeckService:
         # (One small lock per member who ever linked; members are a known, signed-in set.)
         async with self._link_locks.setdefault(sub, asyncio.Lock()):
             session = await self._link_attempt(sub, login, password)
-        secret = json.dumps({"access": session["access"], "refresh": session.get("refresh")})
-        self.db.save_link(
+        # The sign-in took a moment: an admin may have disabled the account, the member may have
+        # been removed from the group or deleted their data meanwhile. Store nothing then.
+        user = self.db.get_user(sub)
+        refused = DeckError(
+            "forbidden", "Your account can no longer link Archidekt here; nothing was stored."
+        )
+        allowed = user is not None and self.settings.grants_access(user.get("groups") or [])
+        if not allowed or user.get("disabled_at"):
+            raise refused
+        if not self.db.save_link(
             sub,
             username=session["username"],
             user_id=session.get("user_id"),
-            secret_enc=self.fernet.encrypt(secret.encode()).decode(),
-        )
+            secret_enc=self._seal(sub, session["access"], session.get("refresh")),
+            only_member=True,
+        ):
+            raise refused
         self._audit("archidekt_linked", sub=sub, detail={"archidekt_username": session["username"]})
         return self.status(sub)
 
@@ -1190,6 +1203,7 @@ class DeckService:
             "archidekt_username": row["archidekt_username"] if row else None,
             "linked_at": row["created_at"] if row else None,
             "last_used_at": row["last_used_at"] if row else None,
+            "link_expires_at": self._expiry(sub, row["secret_enc"]) if row else None,
             "writes_enabled": self.settings.writes_enabled,
             "account_page": f"{self.settings.public_url}/account",
             **self.mode_info(sub),
@@ -1214,6 +1228,87 @@ class DeckService:
             "approval_mode_note": modes.MODE_HELP[mode] + " Change it on the account page.",
         }
 
+    # The stored session is sealed to the member it belongs to: the encrypted blob names its
+    # purpose and the member's subject, and is refused under any other member's link, so a
+    # ciphertext copied between rows (or any other value sealed with the same key) opens nothing.
+    def _seal(self, sub: str, access: str, refresh: str | None) -> str:
+        blob = {"p": SESSION_PURPOSE, "s": sub, "access": access, "refresh": refresh}
+        return self.fernet.encrypt(json.dumps(blob).encode()).decode()
+
+    def _open(self, sub: str, secret_enc: str, *, legacy: bool = False) -> dict[str, Any] | None:
+        """The stored session of ``sub`` (``{"access", "refresh", ...}``), or None when it cannot
+        be read or was not sealed to ``sub``. ``legacy`` also accepts a blob from before sealing
+        (no purpose or subject), for ``reseal_legacy_links`` only."""
+        try:
+            secret = json.loads(self.fernet.decrypt(secret_enc.encode()).decode())
+        except (InvalidToken, ValueError, TypeError, UnicodeDecodeError):
+            return None
+        if not isinstance(secret, dict):
+            return None
+        sealed = secret.get("p") == SESSION_PURPOSE and secret.get("s") == sub
+        is_legacy = "p" not in secret and "s" not in secret
+        if not (sealed or (legacy and is_legacy)):
+            return None
+        return secret
+
+    def _expiry(self, sub: str, secret_enc: str) -> int | None:
+        """When the stored session stops working: the refresh token's own ``exp`` (Archidekt's
+        refresh token is not rotated, so this is fixed at link time), or the access token's when
+        no refresh token is stored. None when unknown."""
+        secret = self._open(sub, secret_enc)
+        if secret is None:
+            return None
+        refresh, access = secret.get("refresh"), secret.get("access")
+        if isinstance(refresh, str) and refresh:
+            return jwt_exp(refresh)
+        return jwt_exp(access) if isinstance(access, str) else None
+
+    def reseal_legacy_links(self) -> int:
+        """At the first start of a sealing gateway, seal every stored session written before
+        sealing to the member whose row holds it then; returns how many were resealed. An
+        unsealed blob carries no owner, so this cannot tell whether it was moved between rows
+        before that start. It runs once (an ``archidekt_sessions_sealed`` audit entry marks it):
+        an unsealed blob found at any later start (copied in from an old disk image, or written
+        by an older image after a rollback) is not trusted and is deleted, and that member links
+        again."""
+        first = not self.db.audit_seen(SEALED_MARKER)
+        n = dropped = 0
+        for row in self.db.active_links():
+            secret = self._open(row["sub"], row["secret_enc"], legacy=True)
+            if secret is None or "p" in secret:
+                continue
+            access, refresh = secret.get("access"), secret.get("refresh")
+            if first and isinstance(access, str) and access:
+                sealed = self._seal(row["sub"], access, refresh if isinstance(refresh, str) else None)
+                if self.db.update_link_secret(row["sub"], sealed, only_secret=row["secret_enc"]):
+                    n += 1
+            elif self.db.revoke_link(row["sub"], only_secret=row["secret_enc"]):
+                self.db.audit(
+                    "archidekt_link_unsealed", sub=row["sub"], detail={"reason": "session not sealed"}
+                )
+                dropped += 1
+        if first:
+            self.db.audit(SEALED_MARKER, detail={"resealed": n})
+        if dropped:
+            logger.warning("%d stored Archidekt session(s) were not sealed and were deleted", dropped)
+        return n
+
+    def purge_expired_links(self, now: float | None = None) -> int:
+        """Delete stored sessions that can no longer work (their refresh token has expired), so
+        nothing usable or not lingers on the server past that date. Run with the hourly purge."""
+        now = time.time() if now is None else now
+        n = 0
+        for row in self.db.active_links():
+            exp = self._expiry(row["sub"], row["secret_enc"])
+            if (
+                exp is not None
+                and exp < now
+                and self.db.revoke_link(row["sub"], only_secret=row["secret_enc"])
+            ):
+                self.db.audit("archidekt_link_expired", sub=row["sub"], detail={"reason": "session expired"})
+                n += 1
+        return n
+
     def _token(self, sub: str) -> tuple[str, dict[str, Any]]:
         """The stored access token and the link row. The row carries the decrypted session as
         ``row["_secret"]`` (``{"access", "refresh"}``) for _call's refresh path; it is never
@@ -1224,11 +1319,8 @@ class DeckService:
                 "not_linked",
                 f"No Archidekt account is linked. Sign in at {self.settings.public_url}/account to link one.",
             )
-        try:
-            secret = json.loads(self.fernet.decrypt(row["secret_enc"].encode()).decode())
-            access = secret["access"]
-        except (InvalidToken, ValueError, KeyError, TypeError) as exc:
-            raise DeckError("not_linked", "The stored Archidekt session could not be read. Relink.") from exc
+        secret = self._open(sub, row["secret_enc"])
+        access = secret.get("access") if secret is not None else None
         if not isinstance(access, str) or not access:
             raise DeckError("not_linked", "The stored Archidekt session could not be read. Relink.")
         row["_secret"] = secret
@@ -1270,8 +1362,7 @@ class DeckService:
                 if exc.kind == "auth":
                     raise expire(f"{reason}, refresh rejected") from exc
                 raise DeckError(exc.kind, str(exc)) from exc
-            blob = json.dumps({"access": access, "refresh": refresh})
-            new_enc = self.fernet.encrypt(blob.encode()).decode()
+            new_enc = self._seal(sub, access, refresh)
             if not self.db.update_link_secret(sub, new_enc, only_secret=stored["secret_enc"]):
                 # Unlinked, revoked or relinked while the refresh was in flight: never resurrect
                 # the old link or overwrite a newer one with this session. A link to the same

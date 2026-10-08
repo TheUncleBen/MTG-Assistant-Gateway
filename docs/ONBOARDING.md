@@ -90,15 +90,20 @@ create new decks in your account.
 
 1. In a browser, open `https://mtg.example.com/account`.
 2. Sign in with the same sign-in account you used for the connector.
-3. Under **Link your Archidekt account**, read the note first: Archidekt
-   has no official way for other apps to reach decks, so the gateway uses
-   the same requests archidekt.com's own pages use. Archidekt's terms
-   restrict automated access, so Archidekt could limit or block an account
-   used this way, and whoever runs the gateway is trusted with the link.
+3. Under **Link your Archidekt account**, read the note first. It says
+   exactly what linking gives the gateway and what it doesn't. Most
+   important: the key that opens your stored Archidekt session is on the
+   same server, so whoever runs the server can use that session to act as
+   you on Archidekt until it expires (about 40 days after you link). Link
+   only if you trust them. It also says Archidekt's terms restrict
+   automated access, so Archidekt could limit or block an account used this
+   way. The full text is in
+   [USING.md](USING.md#what-linking-archidekt-gives-the-gateway).
    Then enter your Archidekt username or email and your Archidekt password,
    tick the box to say you've read the note, and press **Link account**.
-4. The page now says "Linked to" and your Archidekt username. The unlink
-   button is on the same page.
+4. The page now says "Linked to" and your Archidekt username, and the date
+   your link stops working. The unlink button and the note are on the same
+   page.
 
 What happens to your password: the gateway sends it to Archidekt once to get
 a login session, keeps only that session (encrypted), and throws the
@@ -250,7 +255,10 @@ Good to know:
   restores a backup you sign in again and relink Archidekt. When the owner
   disables your account, the stored session is deleted. Honest caveat: none
   of this protects against the owner, who runs the server and holds the
-  key. Only link an account if you're fine with that.
+  key: they can open the session and act as you on Archidekt until it
+  expires, and they control the code. Only link an account if you're fine
+  with that. The link form spells this out in full
+  ([USING.md](USING.md#what-linking-archidekt-gives-the-gateway)).
 - To check you're still allowed in, the gateway keeps the sign-in
   service's tokens for your account (encrypted) and asks it, every few
   seconds while you use the gateway, whether you're still in the group. If
@@ -294,7 +302,9 @@ doesn't land in your account.
    `MTG_BACKUP_KEEP_DAYS`). The owner's security log keeps a record that your
    account existed and was deleted until it ages out after a year. If you only want to stop
    using Archidekt through the gateway, press the unlink button instead.
-2. To be sure the old Archidekt session is dead on Archidekt's side too,
-   change your Archidekt password.
+2. Unlinking and deleting your data delete the gateway's copy of your
+   Archidekt session. Whether a copy stops working on Archidekt's side
+   before it expires, even if you change your Archidekt password, is not
+   known.
 3. Remove the connector in your AI app's connector settings.
 4. Ask the owner to remove your sign-in access.

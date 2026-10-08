@@ -19,7 +19,7 @@ from urllib.parse import parse_qs, quote
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from . import modes
+from . import link_disclosure, modes
 from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
 from .avatars import initials_svg
 from .clickguard import form_stamp, guarded_form, submitted_too_soon
@@ -242,6 +242,8 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         sub, sid = current(request)
         if not sub:
             return to_login("/account")
+        # Whatever this form does (link, unlink, ...) is the member's own browser acting.
+        current_client.set(BROWSER_CLIENT_ID)
         data = await form(request)
         if isinstance(data, Response):
             return data
@@ -308,7 +310,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             if data.get("accept_risk") != "1":
                 return page(
                     "Account",
-                    _err("Tick the box to confirm you have read the note about linking Archidekt.")
+                    _err("Tick the box to confirm you have read what linking Archidekt gives this gateway.")
                     + _account_body(state, sub, _csrf(s, sid)),
                     status=400,
                     sub=sub,
@@ -524,8 +526,9 @@ MAX_FORM = 16_384
 OK_MESSAGES = {
     "linked": "Archidekt account linked. Your assistant can now read your decks.",
     "unlinked": "Archidekt account unlinked. The gateway's copy of your Archidekt session was "
-    "deleted. The gateway has no way to sign that session out at Archidekt, so Archidekt keeps "
-    "accepting it until it expires. If you think it was exposed, change your Archidekt password.",
+    "deleted. The gateway cannot sign that session out on Archidekt's side; whether Archidekt "
+    "keeps accepting a copy until it expires, and whether changing your Archidekt password ends "
+    "it, is not known.",
     "applied": "Applied. Archidekt now matches this proposal.",
     "applying": "Applying. This is a large change, so Archidekt is updated a step at a time to stay "
     "within its limits. You can leave this page; the progress below refreshes by itself.",
@@ -641,23 +644,25 @@ def _account_body(state: Any, sub: str, csrf: str | None) -> str:
     out.append(_mode_card(state, sub, csrf_in))
     out.append(_apps_card(state, sub, csrf_in))
     if info["linked"]:
+        expires = _when(info.get("link_expires_at"))
         out.append(
             "<div class='card'><h2>Archidekt</h2>"
             f"<p>Linked to <strong>{html.escape(info['archidekt_username'] or '')}</strong> "
             "<span class='badge ok'>active</span></p>"
             f"<p class='muted small'>Linked {_when(info['linked_at'])}. "
-            f"Last used {_when(info['last_used_at']) or 'never'}.</p>"
+            f"Last used {_when(info['last_used_at']) or 'never'}."
+            + (f" Archidekt's session stops working on {expires}; then you link again." if expires else "")
+            + "</p>"
             f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='unlink'>"
             "<button class='danger'>Unlink and delete stored session</button></form>"
-            "<p class='muted small'>Unlinking deletes the gateway's copy of the session. Archidekt "
-            "keeps accepting that session until it expires; the gateway cannot sign it out there.</p></div>"
+            "<p class='muted small'>Unlinking deletes the gateway's copy of the session at once. "
+            "Whether the session also stops working on Archidekt's side is not known.</p>"
+            f"{link_disclosure.linked_html(_sweep_on(state))}</div>"
         )
     else:
         out.append(
             "<div class='card'><h2>Link your Archidekt account</h2>"
-            "<p>Your password is sent to Archidekt once to obtain a session and is not stored. "
-            "Only the resulting session token is kept, encrypted.</p>"
-            f"{LINK_WARNING_HTML}"
+            f"{link_disclosure.form_html(_sweep_on(state))}"
             f"<form method='post' autocomplete='off'>{csrf_in}"
             "<input type='hidden' name='action' value='link'>"
             "<label for='l'>Archidekt username or email</label>"
@@ -666,7 +671,7 @@ def _account_body(state: Any, sub: str, csrf: str | None) -> str:
             "<input id='p' type='password' name='archidekt_password' required "
             "autocomplete='current-password'>"
             "<label class='check'><input type='checkbox' name='accept_risk' value='1' required> "
-            "<span>I have read the note above and want to link my account.</span></label>"
+            f"<span>{html.escape(link_disclosure.ACKNOWLEDGE)}</span></label>"
             "<button class='primary'>Link account</button></form></div>"
         )
     s = state.settings
@@ -674,23 +679,10 @@ def _account_body(state: Any, sub: str, csrf: str | None) -> str:
     return "".join(out)
 
 
-# Shown above the link form, and acknowledged with a required tick before linking. Archidekt has
-# no official interface for other apps, so the gateway uses the requests archidekt.com's own pages
-# make; its terms restrict automated access. The trust sentence says plainly what the encryption
-# cannot change: the server holds the key that opens the stored session.
-LINK_TRUST_NOTE = (
-    "Whoever runs this gateway is trusted with this link: the session is stored encrypted, and "
-    "no page, admin tool, log or backup shows it, but the server holds the key that opens it."
-)
-SHOW_LINK_TRUST_NOTE = True
-LINK_WARNING_HTML = (
-    "<div class='notice'><p><strong>Before you link:</strong> Archidekt has no official way for "
-    "other apps to read or change decks, so this gateway signs in as you and uses the same requests "
-    "archidekt.com's own pages use. Archidekt's terms of service restrict automated access, so "
-    "Archidekt could limit or block an account used this way. Link only if you accept that risk.</p>"
-    + (f"<p>{html.escape(LINK_TRUST_NOTE)}</p>" if SHOW_LINK_TRUST_NOTE else "")
-    + "</div>"
-)
+def _sweep_on(state: Any) -> bool:
+    """Whether this gateway runs the removed-member clean-up (idp_sweep.py)."""
+    sweep = getattr(state, "sweep", None)
+    return bool(sweep is not None and sweep.enabled)
 
 
 def _mode_card(state: Any, sub: str, csrf_in: str) -> str:

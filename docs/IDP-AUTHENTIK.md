@@ -30,6 +30,7 @@ Placeholders:
 9. [Check the sign-in](#9-check-the-sign-in)
 10. [Troubleshooting](#10-troubleshooting)
 11. [Versions tested and how](#11-versions-tested-and-how)
+12. [Optional: removed-member clean-up](#12-optional-removed-member-clean-up)
 
 ## 1. What the gateway needs from Authentik
 
@@ -48,7 +49,7 @@ up.
 | Stable identity | Stores people by `sub`. Linked Archidekt accounts, proposals and tokens all hang off it | Provider → **Subject mode**: `Based on the User's hashed ID` (the default). Change it after people have signed in and everyone becomes a new, empty user |
 | Who gets in, first gate | Nothing. Authentik decides before the gateway ever sees the person | Application → **Policy / Group / User Bindings**: bind `MTG Assistant Gateway Users` |
 | Who gets in, second gate | Anyone whose `groups` claim includes neither `MTG_REQUIRED_GROUP` nor `MTG_ADMIN_GROUP` (exactly) gets HTTP 403, and any gateway browser sessions they had are closed. The gateway won't start with it empty unless `MTG_ALLOW_ANY_IDP_USER=true` | The same group name in `MTG_REQUIRED_GROUP`. Exact, case-sensitive match |
-| Live membership | Before serving any request that carries a browser session or a gateway token, asks Authentik's `/userinfo` for the person's groups as they are now, renewing Authentik's access token with its refresh token when needed. The answer is cached for `MTG_MEMBERSHIP_CHECK_TTL` seconds (5 by default; `0` asks every time). Someone taken out of the group loses every gateway token and session and their Archidekt link on their next request; someone deactivated or deleted loses every token and session (their Archidekt link stays until an admin deletes their data). If Authentik can't be reached (a dropped connection is tried once more first), requests get a 503 and nothing is revoked | The `offline_access` scope mapping (above). Nothing else |
+| Live membership | Before serving any request that carries a browser session or a gateway token, asks Authentik's `/userinfo` for the person's groups as they are now, renewing Authentik's access token with its refresh token when needed. The answer is cached for `MTG_MEMBERSHIP_CHECK_TTL` seconds (5 by default; `0` asks every time). Someone taken out of the group loses every gateway token and session and their Archidekt link on their next request; someone deactivated or deleted loses every token and session, but their stored Archidekt session stays until an admin presses Disable or Unlink, it expires (about 40 days after linking), or the optional hourly clean-up in section 12 deletes it. If Authentik can't be reached (a dropped connection is tried once more first), requests get a 503 and nothing is revoked | The `offline_access` scope mapping (above). Nothing else |
 | Sign-out | The gateway's **Sign out** button ends its own browser session (with `Clear-Site-Data`); **Sign out on all my devices** (on the `/logout` page) ends every browser and Android app session of that person. It doesn't call Authentik's end-session endpoint, so the Authentik session stays, but for the next hour a sign-in to the gateway's pages in that browser or app asks Authentik for the password again (`prompt=login`), so the next person on a shared device isn't signed straight back in | Provider → **Invalidation flow**: Authentik requires one, so use the default. Nothing else |
 | Refresh at the provider | Keeps Authentik's access and refresh token from each sign-in, encrypted with the `mtg_fernet_key` secret, and uses them only for the live membership check. AI clients still get the gateway's own tokens, never Authentik's | Provider token lifetimes can stay at their defaults. Keep the refresh token validity at least as long as `MTG_REFRESH_TOKEN_TTL` (both 30 days by default): when Authentik refuses an expired refresh token the gateway can't tell that from a deactivated account, so it signs the person out everywhere (tokens and sessions revoked, Archidekt link kept) and they sign in again |
 
@@ -433,3 +434,100 @@ gets the member's own picture, nothing more.
 - **Not covered:** a private CA on Authentik, the explicit-consent
   authorization flow, and Authentik sources (social logins). The gateway
   code doesn't treat any of those differently.
+
+## 12. Optional: removed-member clean-up
+
+The live membership check above deletes a removed member's stored Archidekt
+session the next time they (or one of their apps) reach the gateway. Someone
+who never comes back, or whose Authentik account was deactivated or deleted,
+would keep it on the server until an admin presses **Disable** or **Unlink**
+or it expires. The clean-up closes that gap: once an hour it asks Authentik
+who is in `MTG_REQUIRED_GROUP` and `MTG_ADMIN_GROUP` right now and deletes
+the stored Archidekt session of every linked member who is in neither, or
+whose account is deactivated, with an `archidekt_link_swept` entry in the
+activity log. Members are told on the Account page whether it is on.
+
+It is off unless you give the gateway an Authentik API token. That token only
+needs to read groups and who is in them. It deletes nothing in Authentik and
+can't: with only the permission below, Authentik refuses it the user list,
+adding anyone to a group and changing a group (HTTP 403).
+
+**What it reads.** `GET /api/v3/core/groups/?name=<group>&include_users=true`
+for each of the two groups, using each member's `uid` (the `sub` Authentik
+gives the gateway in the default **Based on the User's hashed ID** subject
+mode) and `is_active`. Only direct members count, the same as the `groups`
+claim people sign in with in Authentik's default `profile` mapping. If you
+changed that mapping to also list parent groups, people who get in only
+through a child group look removed to the clean-up and lose their stored
+session every hour: keep the default mapping, or add them to the group
+directly.
+
+**When it deletes nothing.** Authentik can't be reached, answers with an
+error or a redirect, the answer is split into pages, a group isn't found by
+its exact name, a member entry is malformed, both groups come back empty, or
+nobody the gateway knows is among the members (a different subject mode or a
+wrong group name would otherwise make everyone look removed), or the round
+would delete more than three stored sessions and more than a quarter of
+them at once (press **Disable** on the admin page for people you removed in
+bulk). Each of those
+logs `removed-member clean-up skipped, nothing deleted: …` and the next try
+waits longer (one hour, then two, four, up to six). The token is never
+logged.
+
+### Set it up
+
+These are the objects the clean-up was checked against on Authentik
+2026.8.3, created through Authentik's API. The admin-interface menu names
+below are reported, not re-checked; the API names are given beside them.
+
+1. **A service account.** **Directory → Users → Create Service account**,
+   for example `mtg-gateway-sweep`. Untick **Create group** if offered; it
+   needs no group but the one in step 3. (Ignore the token or app password
+   this step shows: it is an app password, and Authentik refuses it as an
+   API token.)
+2. **A role that may only view groups.** **Directory → Roles → Create**,
+   for example `mtg-gateway-sweep`, then on the role's **Permissions** tab
+   assign **Can view Group** (`authentik_core.view_group`) and nothing else.
+3. **A group holding the role.** **Directory → Groups → Create**, for
+   example `mtg-gateway-sweep`, give it the role (the group's **Roles**
+   tab), and add the service account to it. Don't bind this group to the
+   gateway's application.
+4. **An API token for the service account.** **Directory → Tokens and App
+   passwords → Create**: user `mtg-gateway-sweep`, intent **API**, and
+   **Expiring** off (an expired token just stops the clean-up, with a
+   warning each round). Copy its key.
+5. **The Docker secret**, on a Swarm manager. This reads the token without
+   showing it: paste, press Enter.
+
+   ```bash
+   read -rs T && printf %s "$T" | docker secret create mtg_authentik_api_token - ; unset T
+   ```
+
+   With plain Docker Compose, write it to
+   `secrets/mtg_authentik_api_token.txt` next to `docker-compose.yml`
+   instead.
+6. **The stack.** In `deploy/portainer-stack.yml` (or
+   `deploy/compose/docker-compose.yml`), remove the `# ` in front of the
+   three `mtg_authentik_api_token` lines: the two under the top-level
+   `secrets:` and the one in the gateway's `secrets:` list. Then set the
+   stack variable:
+
+   | Variable | Value |
+   | --- | --- |
+   | `MTG_AUTHENTIK_API_TOKEN_FILE` | `/run/secrets/mtg_authentik_api_token` |
+   | `MTG_AUTHENTIK_API_URL` | leave empty: the issuer's address (`https://auth.example.com`) is used. Set it only if the gateway must reach Authentik's API at another https address |
+
+   Redeploy.
+
+**Check it.** At start the gateway's log says `removed-member clean-up is
+on: hourly, asking https://auth.example.com about …` with your two group
+names. If that line is missing, `MTG_AUTHENTIK_API_TOKEN_FILE` is empty; a
+`removed-member clean-up is off` warning says what else is wrong. About two minutes after start, then hourly, it runs; a
+round that removed sessions logs `removed-member clean-up deleted N stored
+Archidekt session(s)`, and a refused one logs why with `nothing deleted`.
+Members' Account pages say *On this gateway the hourly clean-up is on.*
+
+If the token file can't be read, the gateway still starts, with the clean-up
+off and one warning saying why. To turn it off again, empty
+`MTG_AUTHENTIK_API_TOKEN_FILE` and redeploy, then delete the token in
+Authentik.

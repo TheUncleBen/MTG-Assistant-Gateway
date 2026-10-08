@@ -7,6 +7,80 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.7] - 2026-10-08
+
+Members now see exactly what linking their Archidekt account gives the
+gateway and the person who runs it, and the stored Archidekt session is
+handled more strictly. Nothing has to change in the stack, the settings or
+the secrets. One optional addition: with Authentik, an API token that may
+only view groups turns on an hourly clean-up of removed members' stored
+Archidekt sessions (an optional secret, `mtg_authentik_api_token`, and
+`MTG_AUTHENTIK_API_TOKEN_FILE`; three commented lines in the stack file).
+
+### Added
+
+- **Removed-member clean-up (optional, Authentik only):** once an hour the
+  gateway asks Authentik who is in `MTG_REQUIRED_GROUP` and
+  `MTG_ADMIN_GROUP` and deletes the stored Archidekt session of every linked
+  member who is in neither or is deactivated, with an `archidekt_link_swept`
+  audit row. It deletes nothing when Authentik's answer can't be trusted
+  (unreachable, an error, empty, partial, split into pages, malformed,
+  naming nobody the gateway knows, or removing more than three links and
+  more than a quarter of them in one round) and waits longer before the next try.
+  Off unless `MTG_AUTHENTIK_API_TOKEN_FILE` names a readable token file; an
+  unreadable one leaves it off with one warning. Setup:
+  [IDP-AUTHENTIK.md](docs/IDP-AUTHENTIK.md#12-optional-removed-member-clean-up).
+  New settings `MTG_AUTHENTIK_API_TOKEN_FILE` and `MTG_AUTHENTIK_API_URL`.
+
+### Changed
+
+- **Linking Archidekt:** the one-line trust note above the link form is
+  replaced by a full, fixed disclosure: what linking does and what the
+  gateway uses the session for; what is stored and never stored; what the
+  person who runs the server can see and do (with the server and its key
+  they can open the session and act as the member on Archidekt until it
+  expires, and they control the code); what the site's admins can and
+  cannot see or do; logs and backups; how long the session lasts and how to
+  end it, including what is not known. Members tick a box to say they have
+  read it, and it stays on the Account page after linking. No setting turns
+  it off (the old switch was a constant in the code, not a stack setting).
+- **Account page:** shows the date the stored Archidekt session stops
+  working, read from the member's own refresh token (about 40 days after
+  linking). `account_status` returns it as `link_expires_at`.
+- **Wording:** the unlink message and the docs no longer say that Archidekt
+  keeps accepting an unlinked session or that changing the Archidekt
+  password ends it; neither is known.
+
+### Security
+
+- The stored Archidekt session is sealed to its member inside the
+  encryption, so a session copied into another member's row opens nothing.
+  A session stored by 0.7.6 or earlier carries no owner, so the first start
+  seals it to whichever member's row holds it then. Only that first start
+  does: after it, an unsealed session (copied in from an old disk image, or
+  written by 0.7.6 after a rollback) is deleted and that member links again.
+- Every hour the gateway deletes stored sessions that have expired, instead
+  of keeping them until the member next uses the gateway.
+- Relinking replaces the old session at once on disk (the write-ahead log is
+  flushed, as for an unlink) and restarts the link's dates.
+- A new test checks that no password or Archidekt token reaches the logs at
+  any level while linking, using, refreshing and unlinking.
+- The Archidekt client keeps no cookies, so a cookie Archidekt sets during
+  one member's sign-in is never sent with anyone else's request.
+- `httpcore` is never logged below WARNING (its debug lines carry response
+  headers); `httpx` request lines only at DEBUG.
+- A link that finishes after the account was disabled, removed from the
+  group or deleted stores nothing.
+- Backups are cleaned in memory before anything is written, so no backup
+  file ever holds a stored session, even for a moment.
+- Links made on the Account page are logged as made in the browser.
+- Operator docs: when you remove someone from the group, also press
+  **Disable**; otherwise, without the clean-up above, their stored
+  Archidekt session is only deleted when they next use the gateway or when
+  it expires. The same goes for someone deactivated or deleted at the
+  identity provider, whose session the docs used to say stays until an
+  admin deletes their data.
+
 ## [0.7.6] - 2026-10-08
 
 One small security fix from the acceptance check of 0.7.5. Nothing to change

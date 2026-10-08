@@ -122,7 +122,9 @@ async def test_unreadable_access_token_is_refreshed_before_use(stack: Stack) -> 
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     row = h.db.get_link("user-1")
-    blob = json.dumps({"access": "opaque-not-a-jwt", "refresh": "ref-alice"})
+    blob = json.dumps(
+        {"p": "archidekt_session", "s": "user-1", "access": "opaque-not-a-jwt", "refresh": "ref-alice"}
+    )
     h.db.save_link(
         "user-1",
         username=row["archidekt_username"],
