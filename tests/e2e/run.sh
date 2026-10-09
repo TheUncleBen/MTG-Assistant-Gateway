@@ -13,7 +13,7 @@
 # Usage:  tests/e2e/run.sh up      build images, deploy everything, configure Authentik
 #         tests/e2e/run.sh test    run the pytest suite against the deployed stack
 #         tests/e2e/run.sh down    remove stacks, secrets and generated files
-#         tests/e2e/run.sh all     up + test + down (what CI runs)
+#         tests/e2e/run.sh all     up + test + down in one go (CI runs the three separately, down always)
 #
 # Environment knobs (all optional):
 #   MTG_IMAGE/MTG_TAG, MF_IMAGE/MF_TAG   images to deploy (default: build locally as mtg-gateway:e2e, mtg-assistant-mysticforge:e2e)

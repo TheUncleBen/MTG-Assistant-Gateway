@@ -394,8 +394,14 @@ Claude / ChatGPT / browser ──HTTPS──▶ reverse proxy ──▶ mtg-gate
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -c constraints.txt -e ".[dev]"
+python scripts/fetch_ocr_assets.py                 # the /scan page's OCR files
+python -m playwright install --with-deps chromium  # the browser tests
 ruff check src tests scripts && ruff format --check src tests scripts && pytest -q
 ```
+
+Without the OCR files or a Chromium the tests that need them are skipped, not
+failed, so a local run can pass where CI fails. [CONTRIBUTING.md](CONTRIBUTING.md)
+has the details and the end-to-end suite.
 
 Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md) and the
 [code of conduct](CODE_OF_CONDUCT.md). Please report security problems

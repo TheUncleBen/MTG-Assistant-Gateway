@@ -7,8 +7,8 @@ name: End-to-end
 # What runs where (Actions minutes are paid for): a pull request runs the suite once, against the
 # current Authentik release, and only when its diff touches what the suite exercises (the gateway
 # server, auth and OAuth code, the stack and Docker files, the suite itself); changes under the
-# scan subpackage (its routes, service and UI alike), skill, plugin and documentation skip it, as do drafts. Pushes to main run nothing. A manual run covers
-# both Authentik versions (or the one chosen) and is the way to re-check main.
+# scan subpackage (its routes, service and UI alike), the plugin (with its skills) and documentation skip it, as do drafts. Pushes to main run nothing. A manual run
+# covers Authentik 2025.6.4 and 2026.8.3 by default, or the one version chosen, and is the way to re-check main.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -51,7 +51,7 @@ jobs:
             files=$(git diff --name-only --no-renames "$BASE" "$HEAD")
             printf '%s\n' "$files"
             # The suite deploys the stack and drives sign-in, OAuth, decks, scan tools and CIMD through
-            # the gateway, so these paths matter: the gateway package except its scan UI subpackage,
+            # the gateway, so these paths matter: the gateway package except its scan subpackage,
             # the stack and Docker files, the suite and its mocks, dependencies, and this workflow.
             # An empty diff counts as relevant (fail safe).
             hits=$(printf '%s\n' "$files" | grep -E '^(src/mtg_gateway/|deploy/|docker/|Dockerfile|tests/e2e/|tests/fake_|pyproject\.toml|constraints\.txt|\.github/workflows/e2e\.yml)' | grep -vE '^src/mtg_gateway/scan/' || true)
