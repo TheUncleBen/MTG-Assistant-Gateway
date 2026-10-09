@@ -7,6 +7,22 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.10] - 2026-10-09
+
+The 0.7.9 code with a release build that cannot be stopped by Docker Hub's
+rate limit. 0.7.9 itself is a tag without an image: its release build failed
+twice while fetching the base image.
+
+### Fixed
+
+- **Release builds no longer depend on Docker Hub's anonymous pull limit.**
+  The base images and the Dockerfile frontend of the gateway and of Mystic
+  Forge come from Google's public mirror of Docker Hub (`mirror.gcr.io`, the
+  same images and digests). As a fallback,
+  the image jobs sign in to Docker Hub when the repository secrets
+  `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` exist, and skip the sign-in
+  otherwise ([DEPLOY.md](docs/DEPLOY.md)).
+
 ## [0.7.9] - 2026-10-09
 
 Everything the owner's test round raised, in one update: the held work
