@@ -62,10 +62,12 @@ Request bodies are JSON objects of at most 2 MB.
 | `GET /api/v1/decks?q=&format=&folder=` | The linked account's decks (`decks`, `count`), filtered by name substring, format name or folder |
 | `GET /api/v1/decks/{id}?cards=0` | One deck (own or public) with cards, categories, format, description, bracket, commanders and `stats`; `cards=0` leaves the card list out |
 | `GET /api/v1/decks/{id}/stats` | `deck` brief plus `stats` (curve, pips, types, lands, prices, salt, bracket estimate) |
+| `GET /api/decks/mine` | Browser session only: the signed-in member's deck list as server-rendered HTML for the Home and My decks pages while a cold list loads (`no-store`; backup copies left out) |
+| `POST /api/v1/decks/{id}/edit` | Browser session only (CSRF header): the deck page's own save. `{"changes": [...], "confirmed": false}` proposes, applies with a snapshot and answers the touched rows, fresh checks and the re-rendered Legality chip and Deck checks panel; a big removal answers `needs_confirm` with `proposal_id`, and `{"proposal_id": ...}` applies it (a cancelled confirmation rejects it). `{"refresh": true, "names": [...]}` reads the deck again, writing nothing |
 | `GET /api/v1/decks/{id}/history` | Everything stored about one deck: `proposals`, `snapshots`, `reports` and a `series` of report metrics over time |
 | `GET /api/v1/compare?a=&b=` | Differences between two decks; each side is a deck id or link, or a snapshot id |
 | `GET /api/v1/proposals?state=` | The user's proposals, optionally filtered by state |
-| `POST /api/v1/proposals` | Create a proposal (see kinds below). Answers `201` with the proposal, its `diff` and `review_url` |
+| `POST /api/v1/proposals` | Create a proposal (see kinds below). Answers `201` with the proposal, its `diff` and `review_url`. The browser session may add `apply: true` and `archidekt_backup: false` (skip the extra backup copy on Archidekt for that save; the gateway's own snapshot is always kept) |
 | `GET /api/v1/proposals/{pid}` | One proposal with `state`, `diff`, `changes`, `snapshot_id`, `result`, `next_step` |
 | `POST /api/v1/proposals/{pid}/apply` | Apply it: snapshot, Archidekt backup copy, write, re-read verification. A bearer caller applies only what the member's approval mode allows (`manual`: nothing, `browser_required`; `semi`: low-risk proposals; `auto`: everything), judged inside the apply; the in-chat card uses the `confirm_proposal` MCP tool instead, not this route |
 | `POST /api/v1/proposals/{pid}/reject` | Mark a pending proposal rejected. A bearer caller can reject only proposals its own app made; others answer `other_client` |
@@ -171,7 +173,8 @@ cookie, set by `POST /theme`); internal links never open a new tab.
 | `/decks/{id}/report` (POST) | Run a deck report and open it |
 | `/decks/{id}/export`, `.txt`, `.json`, `.csv` | Export as text, JSON or an Archidekt-style CSV |
 | `/history?deck_id=` | Proposals, snapshots and reports over time, with restore |
-| `/history/reports/{rid}` | One report |
+| `/history/reports/{rid}` | One report, designed: headline tiles, trends, the research service's text; `/history/reports/{rid}/export.md` and `.html` download it, and Copy puts the Markdown on the clipboard |
+| `POST /layout` | Browser session (CSRF): the "Desktop layout" / "Fit the screen" switch, remembered per device in a cookie |
 | `/activity` | My activity |
 | `/proposals`, `/proposals/{pid}` | Review and Apply, Reject |
 | `/scan` | The card scanner (see SCANNING.md) |

@@ -1601,6 +1601,7 @@ html.cardview-open{overflow:hidden}
 .deck-toast{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;padding:.75rem 1rem;z-index:59;
   border-left:4px solid var(--blue);color:var(--text)}
 .deck-toast.error{border-left-color:var(--red)} .deck-toast.warn{border-left-color:var(--orange)}
+.deck-toast[role=alertdialog]{z-index:66}  /* a question ("Save anyway?") sits above the viewer */
 .deck-toast .msg{flex:1 1 10rem;min-width:0;overflow-wrap:anywhere}
 .deck-toast .acts{display:inline-flex;align-items:center;gap:.5rem;flex-wrap:wrap}
 .deck-toast .acts button,.deck-toast .acts .btn{margin:0;min-height:34px;padding:0 .75rem}

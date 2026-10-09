@@ -70,9 +70,8 @@ catalog). Back up the database before you update, as always.
   site switch. "Fit the screen" goes back to the adaptive layout.
 - **Sign-out acts on the first click.** The button says "Signing out…"
   and locks at once, both account-page buttons post straight away
-  (no confirmation detour for "all my devices"), and the browser is no
-  longer asked to clear its cache on the way out, which held the
-  sign-out for seconds in Chromium.
+  (no confirmation detour for "all my devices"); the cache clearing is
+  gone too (see "Sign-out took seconds" under Fixed).
 - **A deck report is a page to read, with exports.** "Run simulation" used
   to dump the research service's raw text. The report page now opens with
   the deck, its commander, the games run and when; shows the headline

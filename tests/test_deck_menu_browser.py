@@ -399,3 +399,62 @@ def test_press_and_hold_opens_the_menu_on_touch(server: Server) -> None:
         assert page.locator(".ctxmenu").count() == 0
         assert errors == []
         browser.close()
+
+
+def test_a_declined_confirmation_rejects_the_proposal_it_made(server: Server) -> None:
+    """The edit endpoint makes the proposal before it asks "Save anyway?"; saying no (Cancel or the
+    dialog's close button) rejects that proposal, so it never waits pending until it expires."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1366)
+        asked = {
+            "ok": True,
+            "applied": False,
+            "needs_confirm": True,
+            "why": "This removes 9 cards.",
+            "proposal_id": "prop_decline",
+        }
+        page.route(EDIT_URL, lambda route: route.fulfill(status=201, json=asked))
+        rejected: list[str] = []
+        page.route(
+            re.compile(r"/api/v1/proposals/prop_decline/reject$"),
+            lambda route: (
+                rejected.append(route.request.method),
+                route.fulfill(status=200, json={"ok": True}),
+            ),
+        )
+        page.goto(f"{server.base}/decks/42?view=grid", wait_until="networkidle")
+        for close in ("Cancel", "Dismiss", "viewer"):
+            card = page.locator(".deckview .c[data-card='Cultivate']").first
+            card.scroll_into_view_if_needed()
+            if close == "viewer":
+                # asked from the card viewer (a commander removal does this): the question must sit
+                # above the viewer's backdrop, or it could not be answered
+                card.click()
+                page.wait_for_selector(".cardview.open", timeout=3000)
+                page.locator(".cardview .acts button", has_text="Remove from deck").click()
+            else:
+                card.click(button="right")
+                menu = page.locator(".ctxmenu[role=menu]")
+                menu.wait_for(timeout=3000)
+                menu.locator("[role=menuitem]", has_text="Remove from deck").click()
+            dialog = page.locator(".deck-toast[role='alertdialog']")
+            dialog.wait_for(timeout=5000)
+            assert "Save anyway?" in dialog.inner_text()
+            if close == "Dismiss":
+                dialog.locator("button[aria-label='Dismiss']").click()
+            else:
+                dialog.locator("button", has_text="Cancel").click(timeout=3000)
+            gone = "() => !document.querySelector('.deck-toast[role=alertdialog]')"
+            page.wait_for_function(gone, timeout=3000)
+            page.wait_for_timeout(200)
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(200)
+        assert rejected == ["POST"] * 3  # one reject per declined question, never two
+        assert page.locator(".deckview .c[data-card='Cultivate']").count() == 1  # nothing changed
+        assert server.quantity("Cultivate") == 1
+        assert errors == []
+        browser.close()

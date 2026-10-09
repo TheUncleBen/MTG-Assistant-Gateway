@@ -159,13 +159,17 @@
       var no = el("button", "", "Cancel");
       no.type = "button";
       var done = function (v) { dismissToast(); resolve(v); };
-      yes.addEventListener("click", function () { done(true); });
-      no.addEventListener("click", function () {
-        // the proposal made for the check is not wanted: reject it so Proposals stays clean
+      var declined = false;
+      var decline = function () {
+        // the proposal made for the check is not wanted (Cancel, Escape or the toast closed):
+        // reject it so Proposals stays clean and it does not count toward the pending cap
+        if (declined) return;
+        declined = true;
         api("/api/v1/proposals/" + enc(pid) + "/reject", {}).catch(function () { /* a leftover pending proposal is harmless */ });
-        done(false);
-      });
-      toast(why + " Save anyway?", { warn: true, dialog: true, sticky: true, actions: [yes, no], onDismiss: function () { resolve(false); } });
+      };
+      yes.addEventListener("click", function () { done(true); });
+      no.addEventListener("click", function () { decline(); done(false); });
+      toast(why + " Save anyway?", { warn: true, dialog: true, sticky: true, actions: [yes, no], onDismiss: function () { decline(); resolve(false); } });
       yes.focus();
     });
   }
