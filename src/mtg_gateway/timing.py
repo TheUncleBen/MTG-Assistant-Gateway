@@ -15,6 +15,7 @@ counted against the request that started it.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from contextvars import ContextVar
 
@@ -63,7 +64,8 @@ class TimingMiddleware:
         try:
             await self.app(scope, receive, send_wrapper)
         finally:
-            path = scope.get("path", "")
+            # the decoded path is a client's string: one line per request, whatever it holds
+            path = re.sub(r"[\x00-\x1f\x7f]", "?", str(scope.get("path", "")))[:300]
             if not path.startswith(_QUIET_PREFIXES):
                 log.info(
                     "%s %s %d %.0fms archidekt=%.0fms idp=%.0fms",

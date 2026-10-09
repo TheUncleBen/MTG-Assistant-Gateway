@@ -325,7 +325,7 @@ class ReportService:
     ) -> list[dict[str, Any]]:
         """Newest first, with the trend numbers but not the full report. ``search`` matches the
         deck name, case-insensitively."""
-        limit = max(1, min(int(limit), 400))
+        limit = max(1, min(int(limit), 2100))  # the History page reads up to its last page plus one
         sql = "SELECT * FROM reports WHERE owner_sub = ?"
         args: list[Any] = [sub]
         if deck_id:

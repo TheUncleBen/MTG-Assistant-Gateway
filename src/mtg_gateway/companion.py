@@ -365,6 +365,8 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             f"<ul class='plain decklist {_esc(view)} skeleton' aria-hidden='true'>"
             + "<li></li>" * 6
             + "</ul><p class='sr-only' role='status'>Loading your decks</p>"
+            "<noscript><p class='muted'><a href='/decks'>Reload</a> to see your decks (this page fills "
+            "itself with scripts on).</p></noscript>"
         )
 
     def link_prompt() -> str:

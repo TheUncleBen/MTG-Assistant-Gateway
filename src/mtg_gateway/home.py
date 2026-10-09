@@ -88,6 +88,8 @@ def recent_skeleton() -> str:
         "<div class='panel-head'><h2>My decks</h2><a class='btn' href='/decks'>All decks</a></div>"
         "<div class='recent skeleton' aria-hidden='true'>" + "<span></span>" * RECENT + "</div>"
         "<p class='sr-only' role='status'>Loading your decks</p>"
+        "<noscript><p class='muted'><a href='/'>Reload</a> to see your decks (this page fills itself "
+        "with scripts on).</p></noscript>"
     )
 
 

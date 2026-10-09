@@ -200,7 +200,7 @@ details.dd .menu.left{left:0;right:auto}
   color:var(--text);text-decoration:none;font:inherit;font-weight:400;font-size:1rem;cursor:pointer;
   text-align:left;white-space:nowrap;justify-content:flex-start}
 .menu a:hover,.menu button:hover,.menu a:focus-visible,.menu button:focus-visible{
-  background:var(--border);color:var(--text);outline:none}
+  background:var(--border);color:var(--text)}
 .menu button:disabled{color:var(--text-muted);cursor:default;background:transparent}
 .menu .sep{height:1px;background:var(--border);margin:.25rem 0}
 .menu a.danger,.menu button.danger{color:var(--danger-text);background:transparent;border:0}

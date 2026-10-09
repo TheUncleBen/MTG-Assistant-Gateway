@@ -301,6 +301,21 @@ def test_drag_between_stacks_saves_set_category_with_the_zone(server: Server) ->
         page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
         url = page.url
         source = ".deckview .row[data-card='Sol Ring'][data-zone='side']"
+        # text rows take focus, Enter opens the viewer and Shift+F10 the menu, as grid cards do
+        row = page.locator(".deckview .row[data-card='Cultivate']").first
+        row.focus()
+        page.keyboard.press("Enter")
+        page.wait_for_selector(".cardview.open", timeout=3000)
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(200)
+        row.focus()
+        page.keyboard.press("Shift+F10")
+        page.wait_for_selector(".ctxmenu", timeout=3000)
+        assert page.evaluate("document.activeElement.closest('.ctxmenu') !== null")
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(100)
+        assert page.locator(".ctxmenu").count() == 0
+        assert page.evaluate("document.activeElement.getAttribute('data-card')") == "Cultivate"
         target = page.locator(".stack[data-group='Commander']")
         assert page.locator(source).count() == 1
         page.drag_and_drop(source, ".stack[data-group='Commander'] .stackhead")

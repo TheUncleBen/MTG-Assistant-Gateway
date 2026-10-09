@@ -686,6 +686,11 @@ class ArchidektClient:
                 continue
             if key is not None:
                 self._cache_put(key, copy.deepcopy(value))
+            elif method != "GET" and not path.startswith("/rest-auth/"):
+                # and again once the write has landed: a list fetched while it was under way could
+                # otherwise be kept as fresh with the old rows
+                for listener in self.write_listeners:
+                    listener(path)
             return value
         raise AssertionError("unreachable")  # pragma: no cover
 

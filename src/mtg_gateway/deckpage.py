@@ -514,8 +514,8 @@ def text_row(card: DeckCard, *, deck: Deck, owned: dict[str, int] | None = None)
     hover = f"<span class='hover'><img src='{esc(img)}' alt='' loading='lazy'></span>" if img else ""
     cls = " side" if not deck.in_deck(card) else ""
     return (
-        f"<li class='row{cls}' data-name='{esc(card.name.lower())}' data-card='{esc(card.name)}'"
-        f"{_card_data(card, deck)}>"
+        f"<li class='row{cls}' tabindex='0' role='button' data-name='{esc(card.name.lower())}' "
+        f"data-card='{esc(card.name)}'{_card_data(card, deck)}>"
         f"<span class='q'>{card.quantity}</span>"
         f"<span class='n'>{_label_dot(card)}{_owned_dot(card, owned)}<span "
         f"class='name'>{esc(card.name)}</span>"

@@ -183,7 +183,7 @@ class MemberCache:
         self.fresh = fresh
         self.stale = stale
         self._entries: dict[str, tuple[float, float, Any]] = {}  # sub -> (monotonic, wall, value)
-        self._refreshing: dict[str, asyncio.Task[Any]] = {}
+        self._refreshing: dict[str, tuple[asyncio.Task[Any], float]] = {}  # task, when it started
         self._dropped: dict[str, float] = {}
 
     def peek(self, sub: str) -> tuple[Any, str]:
@@ -215,10 +215,12 @@ class MemberCache:
         return sub in self._refreshing
 
     def _refresh(self, sub: str, fetch: Callable[[], Awaitable[Any]]) -> asyncio.Task[Any]:
-        task = self._refreshing.get(sub)
-        if task is not None:
-            return task
+        running = self._refreshing.get(sub)
         started = time.monotonic()
+        # A fetch that started before the last drop is not shared with a reader arriving after it:
+        # it may carry the pre-write list. That fetch still finishes (and stores nothing).
+        if running is not None and self._dropped.get(sub, 0.0) <= running[1]:
+            return running[0]
 
         async def run() -> Any:
             value = await fetch()
@@ -227,13 +229,14 @@ class MemberCache:
             return value
 
         def done(t: asyncio.Task[Any]) -> None:
-            self._refreshing.pop(sub, None)
+            if self._refreshing.get(sub, (None,))[0] is t:  # only its own entry, never a newer fetch
+                self._refreshing.pop(sub, None)
             if not t.cancelled() and t.exception() is not None:
                 logger.debug("member cache refresh failed for a member: %r", t.exception())
 
         task = asyncio.create_task(run())
         task.add_done_callback(done)
-        self._refreshing[sub] = task
+        self._refreshing[sub] = (task, started)
         if len(self._entries) > 10_000:
             self._entries.clear()
             self._dropped.clear()
@@ -266,9 +269,10 @@ class MemberCache:
             add_time(archidekt_time, time.perf_counter() - started)
 
     async def aclose(self) -> None:
-        for task in list(self._refreshing.values()):
+        tasks = [task for task, _started in self._refreshing.values()]
+        for task in tasks:
             task.cancel()
-        await asyncio.gather(*self._refreshing.values(), return_exceptions=True)
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 # -- review rows ----------------------------------------------------------------

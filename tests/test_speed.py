@@ -39,7 +39,7 @@ async def _linked(stack: Stack, path: str = "/") -> Browser:
 # -- the cache itself ----------------------------------------------------------------------------
 async def test_member_cache_fresh_stale_and_drop() -> None:
     cache = MemberCache(fresh=60, stale=600)
-    answers = [["a"], ["b"], ["c"]]
+    answers = [["a"], ["b"], ["c"], ["c"]]
     calls = 0
 
     async def fetch() -> list[str]:
@@ -74,6 +74,14 @@ async def test_member_cache_fresh_stale_and_drop() -> None:
     await started.wait()
     cache.drop("u1")
     assert await task == ["old"] and cache.peek("u1") == (None, "miss")
+    # a reader arriving after the drop does not share the fetch that started before it
+    started.clear()
+    task = asyncio.ensure_future(cache.get("u1", slow))
+    await started.wait()
+    cache.drop("u1")
+    fresh = asyncio.ensure_future(cache.get("u1", fetch))  # fetch() answers ["c"] again: calls == 4
+    assert await task == ["old"]
+    assert await fresh == answers[2] and calls == 4 and cache.peek("u1") == (answers[2], "fresh")
     await cache.aclose()
 
 
@@ -280,6 +288,13 @@ async def test_request_log_line_has_no_query_string(stack: Stack, caplog: pytest
         lines = [rec.getMessage() for rec in caplog.records if rec.name == "mtg_gateway.requests"]
         assert any(re.match(r"GET /decks 200 \d+ms archidekt=\d+ms idp=\d+ms$", ln) for ln in lines), lines
         assert not any("secret-name" in ln or "user-1" in ln for ln in lines)
+        # a path with a line break in it cannot forge a second log line
+        with caplog.at_level("INFO", logger="mtg_gateway.requests"):
+            r = await b.http.get("/decks/%0AGET%20/admin%20200%0A", headers=NAV)
+            assert r.status_code in (302, 303, 404), r.status_code
+        lines = [rec.getMessage() for rec in caplog.records if rec.name == "mtg_gateway.requests"]
+        assert all("\n" not in ln for ln in lines), lines
+        assert any("/decks/?GET /admin 200?" in ln for ln in lines), lines
     finally:
         await b.aclose()
 

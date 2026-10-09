@@ -504,11 +504,11 @@
   // -- card menu: right-click, press and hold, Shift+F10 or the Menu key on a focused card -------
   // A themed menu (the shared .menu styling) in place of the browser's; Escape, a click or tap
   // outside, scrolling and the phone's Back button close it, and focus goes back to the card.
-  var menu = null, menuCard = null, menuPushed = false, menuFocusBack = false, ignorePop = false;
+  var menu = null, menuCard = null, menuStack = null, menuPushed = false, menuFocusBack = false, ignorePop = false;
   function closeMenu(fromHistory) {
     if (!menu) return;
-    var m = menu, card = menuCard, back = menuFocusBack;
-    menu = null; menuCard = null; menuFocusBack = false;
+    var m = menu, card = menuCard, stack = menuStack, back = menuFocusBack;
+    menu = null; menuCard = null; menuStack = null; menuFocusBack = false;
     m.remove();
     if (menuPushed && !fromHistory) {
       // going back over the menu's entry fires popstate later; that one is ours, not a Back press
@@ -517,7 +517,11 @@
       try { history.back(); } catch (e) { ignorePop = false; }
     }
     menuPushed = false;
-    if (back && card && card.isConnected && card.focus) card.focus();
+    if (!back) return;
+    if (card && card.isConnected) { card.focus(); return; }
+    // the card was removed: the next card of its stack, else any card, keeps the keyboard on the page
+    var next = (stack && stack.isConnected && $(".c, .row", stack)) || $(".c, .row", cards);
+    if (next) next.focus();
   }
   function menuItem(text, ic, onClick, cls) {
     var b = el("button", cls || "", "");
@@ -631,6 +635,7 @@
     m.addEventListener("contextmenu", function (e) { e.preventDefault(); });
     menu = m;
     menuCard = card;
+    menuStack = card.closest(".stack");
     menuFocusBack = true;
     menuScroll = [window.scrollX, window.scrollY];
     m.style.visibility = "hidden";
@@ -710,7 +715,7 @@
     openViewer(card);
   });
   cards.addEventListener("keydown", function (e) {
-    if ((e.key === "Enter" || e.key === " ") && e.target.classList && e.target.classList.contains("c")) {
+    if ((e.key === "Enter" || e.key === " ") && e.target.matches && e.target.matches(".c, .row")) {
       e.preventDefault();
       openViewer(e.target);
     }
