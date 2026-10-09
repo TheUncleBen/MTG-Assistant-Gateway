@@ -12,12 +12,42 @@
   "use strict";
   var RESET_MS = 10000; // a download or a slow answer: allow another press after this long
 
+  function unbusy(button) {
+    button.removeAttribute("aria-busy");
+    if (button.dataset.busyRestore !== undefined) {
+      button.disabled = false;
+      var label = button.querySelector(".busy-label");
+      if (label) label.textContent = button.dataset.busyRestore;
+      delete button.dataset.busyRestore;
+    }
+  }
   function clear(form) {
     delete form.dataset.sending;
     var busy = form.querySelectorAll("[aria-busy=true]");
-    for (var i = 0; i < busy.length; i++) busy[i].removeAttribute("aria-busy");
+    for (var i = 0; i < busy.length; i++) unbusy(busy[i]);
     var outside = form.id ? document.querySelectorAll("[form='" + form.id + "'][aria-busy=true]") : [];
-    for (var j = 0; j < outside.length; j++) outside[j].removeAttribute("aria-busy");
+    for (var j = 0; j < outside.length; j++) unbusy(outside[j]);
+  }
+  // A button with data-busy-text says what it is doing ("Signing out…") and locks itself after the
+  // form has been handed to the browser (next tick, so its own name=value still posts).
+  function busyText(button) {
+    var text = button.getAttribute("data-busy-text");
+    if (!text) return;
+    var label = null;
+    for (var i = 0; i < button.childNodes.length; i++) {
+      var node = button.childNodes[i];
+      if (node.nodeType === 3 && node.textContent.trim()) {
+        label = document.createElement("span");
+        label.className = "busy-label";
+        label.textContent = node.textContent;
+        button.replaceChild(label, node);
+        break;
+      }
+    }
+    if (!label) return;
+    button.dataset.busyRestore = label.textContent;
+    label.textContent = text;
+    setTimeout(function () { button.disabled = true; }, 0);
   }
 
   document.addEventListener("submit", function (e) {
@@ -29,7 +59,7 @@
     }
     form.dataset.sending = "1";
     var button = e.submitter;
-    if (button && button.tagName === "BUTTON") button.setAttribute("aria-busy", "true");
+    if (button && button.tagName === "BUTTON") { button.setAttribute("aria-busy", "true"); busyText(button); }
     setTimeout(function () { clear(form); }, RESET_MS);
   });
 

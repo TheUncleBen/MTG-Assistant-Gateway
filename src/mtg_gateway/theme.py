@@ -762,7 +762,8 @@ def render(
             f"<input type='hidden' name='next' value='{html.escape(current_path())}'>"
             f"{theme_items}</form>"
             "<div class='sep'></div>"
-            f"<form method='post' action='/logout'>{csrf_in}<button>{icon('x')}Sign out</button></form>"
+            f"<form method='post' action='/logout'>{csrf_in}"
+            f"<button data-busy-text='Signing out…'>{icon('x')}Sign out</button></form>"
             "</div></details>"
         )
         nav = (

@@ -111,8 +111,10 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             "<p class='muted small'>Unsaved scan drafts on this device are cleared too.</p>"
             "<form method='post' action='/logout'>"
             f"<input type='hidden' name='csrf' value='{html.escape(_csrf(s, sid) or '')}'>"
-            "<div class='actions'><button class='primary'>Sign out</button>"
-            "<button name='everywhere' value='1'>Sign out on all my devices</button></div></form>"
+            "<div class='form-actions'>"
+            "<button class='primary' data-busy-text='Signing out…'>Sign out</button>"
+            "<button name='everywhere' value='1' data-busy-text='Signing out…'>"
+            "Sign out on all my devices</button></div></form>"
             "<p class='muted small'>All devices signs out every browser and the Android app. "
             "Connected AI apps keep working; disconnect them on your Account page.</p></div>",
             sub=sub,
@@ -138,8 +140,9 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         # Not "/": the dashboard needs a session, so it would send the browser straight to sign-in.
         resp = RedirectResponse("/signed-out", status_code=303)
         resp.delete_cookie(session_cookie, path="/", secure=secure, httponly=True, samesite="lax")
-        # Ask the browser to drop cached pages and site storage (scan drafts and the like) too.
-        resp.headers["Clear-Site-Data"] = '"cache", "storage"'
+        # Ask the browser to drop site storage (scan drafts and the like) too. Not "cache": the pages
+        # are already no-store, and clearing the cache held sign-out for seconds in Chromium.
+        resp.headers["Clear-Site-Data"] = '"storage"'
         resp.set_cookie(
             fresh_cookie, "1", max_age=3600, path="/", secure=secure, httponly=True, samesite="lax"
         )
@@ -639,8 +642,9 @@ def _account_body(state: Any, sub: str, csrf: str | None) -> str:
         "<a class='btn' href='/skill'>Get the assistant skill for Claude or ChatGPT</a>"
         "<a class='btn' href='/app'>Get the Android app</a>"
         f"<form method='post' action='/logout'>{csrf_in}"
-        "<button class='inline'>Sign out</button></form></div>"
-        "<p class='small'><a href='/logout'>Sign out on all my devices</a></p></div>"
+        "<button class='inline' data-busy-text='Signing out…'>Sign out</button>"
+        "<button class='inline' name='everywhere' value='1' data-busy-text='Signing out…'>"
+        "Sign out on all my devices</button></form></div></div>"
     ]
     out.append(_mode_card(state, sub, csrf_in))
     out.append(_apps_card(state, sub, csrf_in))

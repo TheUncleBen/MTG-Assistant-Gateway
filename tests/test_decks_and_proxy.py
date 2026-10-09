@@ -257,7 +257,7 @@ async def test_browser_login_link_status_unlink(stack: Stack) -> None:
     # Logout ends the session and tells the browser to drop cached pages and site storage.
     out_resp = await b.http.post("/logout", data={"csrf": await b.csrf()})
     assert out_resp.status_code == 303
-    assert out_resp.headers["clear-site-data"] == '"cache", "storage"'
+    assert out_resp.headers["clear-site-data"] == '"storage"'
     assert out_resp.headers["location"] == "/signed-out"
     signed_out = await b.http.get("/signed-out")
     assert signed_out.status_code == 200 and "Sign out" not in signed_out.text

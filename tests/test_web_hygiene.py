@@ -43,13 +43,25 @@ async def test_logout_without_form_token_clears_nothing(h: Harness) -> None:
         r = await b.http.post("/logout", data={})
         assert r.status_code == 303 and r.headers["location"] == "/logout"
         assert "set-cookie" not in r.headers and "clear-site-data" not in r.headers
-        assert (await b.http.get("/account")).status_code == 200
+        account = await b.http.get("/account")
+        assert account.status_code == 200
+        # Sign-out acts on the first click: both account-page buttons post, none is a GET link, and
+        # they say what they are doing while the browser waits (feedback.js reads data-busy-text).
+        assert "href='/logout'" not in account.text
+        assert "name='everywhere' value='1' data-busy-text='Signing out…'" in account.text
+        assert "data-busy-text='Signing out…'>" in account.text  # the menu's Sign out too
+        js = await b.http.get("/static/feedback.js")
+        assert "data-busy-text" in js.text and "busyRestore" in js.text
+        # The service worker leaves POST navigations (sign-out) alone: the 'storage' clearing that
+        # the answer carries unregisters the worker, which must not be mid-way through serving it.
+        sw = await b.http.get("/sw.js")
+        assert "e.request.method!=='GET'" in sw.text
         # The confirm page offers a real sign-out button.
         page = await b.http.get("/logout")
         assert page.status_code == 200 and "action='/logout'" in page.text
         r = await b.http.post("/logout", data={"csrf": await b.csrf("/logout")})
         assert r.status_code == 303 and r.headers["location"] == "/signed-out"
-        assert r.headers["clear-site-data"] == '"cache", "storage"'
+        assert r.headers["clear-site-data"] == '"storage"'
         assert (await b.http.get("/account")).status_code == 302
     finally:
         await b.aclose()

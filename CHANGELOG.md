@@ -16,6 +16,11 @@ extra outbound request a day to Scryfall (the card-name catalog).
 
 ### Changed
 
+- **Sign-out acts on the first click.** The button says "Signing out…"
+  and locks at once, both account-page buttons post straight away
+  (no confirmation detour for "all my devices"), and the browser is no
+  longer asked to clear its cache on the way out, which held the
+  sign-out for seconds in Chromium.
 - **Typed card names suggest instantly.** The gateway downloads Scryfall's
   card-name catalog once a day (about 700 KB) and answers suggestions from
   memory, so a name list appears within about a hundred milliseconds of a

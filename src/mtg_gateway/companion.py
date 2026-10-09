@@ -1877,7 +1877,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             "self.addEventListener('install',()=>self.skipWaiting());"
             "self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));"
             "self.addEventListener('fetch',e=>{"
-            "if(e.request.mode!=='navigate')return;"
+            "if(e.request.mode!=='navigate'||e.request.method!=='GET')return;"
             "e.respondWith(fetch(e.request).catch(()=>new Response(" + json.dumps(OFFLINE_PAGE) + ","
             "{status:503,headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store',"
             "'Content-Security-Policy':\"default-src 'none'; style-src 'unsafe-inline'; "
