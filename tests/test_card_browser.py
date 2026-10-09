@@ -109,6 +109,10 @@ def test_card_renders_and_approve_calls_confirm_with_the_code() -> None:
             )
             # Drawn from the fields, never as markup: the hostile names appear as text.
             card.locator("#title").wait_for()
+            # The buttons start disabled for a moment after drawing (ARM_DELAY_MS): read that first,
+            # before the other assertions, so a slow machine cannot run past the arming delay.
+            approve = card.locator("#approve")
+            assert approve.is_disabled() and card.locator("#reject").is_disabled()
             assert card.locator("#title").inner_text() == "Change to Sample <b>Deck</b>"
             assert card.locator("#state").inner_text().lower() == "pending"
             rows = card.locator("ul.changes li:not(.group)")
@@ -125,11 +129,9 @@ def test_card_renders_and_approve_calls_confirm_with_the_code() -> None:
             # The host's theme and style variables were applied.
             assert page.frame_locator("#f").locator("html").get_attribute("data-theme") == "dark"
             assert card.locator("#title").evaluate("e => getComputedStyle(e).color") == "rgb(1, 2, 3)"
-            # Buttons: Approve and Reject, disabled for a moment after drawing, then live.
-            approve = card.locator("#approve")
-            assert approve.is_disabled() and card.locator("#reject").is_disabled()
-            page.wait_for_timeout(900)
-            assert approve.is_enabled()
+            # Buttons: Approve and Reject come live once the arming delay has passed.
+            card.locator("#approve:enabled").wait_for(timeout=5_000)
+            assert approve.is_enabled() and card.locator("#reject").is_enabled()
             assert _calls(page, "tools/call") == []  # nothing was called by itself
             assert _calls(page, "ui/notifications/size-changed"), "the card reports its size"
             # Press Approve: one confirm_proposal call with the proposal id and the code.

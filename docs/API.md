@@ -62,10 +62,12 @@ Request bodies are JSON objects of at most 2 MB.
 | `GET /api/v1/decks?q=&format=&folder=` | The linked account's decks (`decks`, `count`), filtered by name substring, format name or folder |
 | `GET /api/v1/decks/{id}?cards=0` | One deck (own or public) with cards, categories, format, description, bracket, commanders and `stats`; `cards=0` leaves the card list out |
 | `GET /api/v1/decks/{id}/stats` | `deck` brief plus `stats` (curve, pips, types, lands, prices, salt, bracket estimate) |
+| `GET /api/decks/mine` | Browser session only: the signed-in member's deck list as server-rendered HTML for the Home and My decks pages while a cold list loads (`no-store`; backup copies left out) |
+| `POST /api/v1/decks/{id}/edit` | Browser session only (CSRF header): the deck page's own save. `{"changes": [...], "confirmed": false}` proposes, applies with a snapshot and answers the touched rows, fresh checks and the re-rendered Legality chip and Deck checks panel; a big removal answers `needs_confirm` with `proposal_id`, and `{"proposal_id": ...}` applies it (a cancelled confirmation rejects it; only a pending proposal this endpoint made is accepted, never an assistant's). `{"refresh": true, "names": [...]}` reads the deck again, writing nothing |
 | `GET /api/v1/decks/{id}/history` | Everything stored about one deck: `proposals`, `snapshots`, `reports` and a `series` of report metrics over time |
 | `GET /api/v1/compare?a=&b=` | Differences between two decks; each side is a deck id or link, or a snapshot id |
 | `GET /api/v1/proposals?state=` | The user's proposals, optionally filtered by state |
-| `POST /api/v1/proposals` | Create a proposal (see kinds below). Answers `201` with the proposal, its `diff` and `review_url` |
+| `POST /api/v1/proposals` | Create a proposal (see kinds below). Answers `201` with the proposal, its `diff` and `review_url`. The browser session may add `apply: true` and `archidekt_backup: false` (skip the extra backup copy on Archidekt for that save; the gateway's own snapshot is always kept) |
 | `GET /api/v1/proposals/{pid}` | One proposal with `state`, `diff`, `changes`, `snapshot_id`, `result`, `next_step` |
 | `POST /api/v1/proposals/{pid}/apply` | Apply it: snapshot, Archidekt backup copy, write, re-read verification. A bearer caller applies only what the member's approval mode allows (`manual`: nothing, `browser_required`; `semi`: low-risk proposals; `auto`: everything), judged inside the apply; the in-chat card uses the `confirm_proposal` MCP tool instead, not this route |
 | `POST /api/v1/proposals/{pid}/reject` | Mark a pending proposal rejected. A bearer caller can reject only proposals its own app made; others answer `other_client` |
@@ -161,7 +163,7 @@ cookie, set by `POST /theme`); internal links never open a new tab.
 | `/decks/open?ref=` | Redirects an Archidekt link or id to its deck page |
 | `/decks/new?scan_session=` | New deck form (name, format, private, pasted list or CSV) that makes a `new_deck` proposal; a scan session prefills the list |
 | `/decks/{id}?view=&group=&sort=&q=` | One deck: banner (art, legality, bracket, size, price, tags), toolbar (Quick add, View as text / stacks / grid, Group by, Sort by, local filter), cards, deck stats, description; owners get Edit deck, Clone deck and Deck settings |
-| `/decks/{id}/edit?scan_session=&add=` | The editor: quantities, categories (new ones by typing), finish, printing (picker over Scryfall), additions with autocomplete and Undo become one proposal; a scan session or a Quick add name prefills it |
+| `/decks/{id}/edit?scan_session=&add=` | The editor: quantities, categories (new ones by typing), finish, printing (picker over Scryfall), additions with instant suggestions (picture, mana cost, type) and Undo become one proposal; a scan session or a Quick add name prefills it |
 | `/decks/{id}/settings` | Deck settings (name, format, bracket, description, private, unlisted) as a `details` proposal, plus the hand actions below |
 | `/decks/{id}/cover` (POST `card`) | Set the cover image to a card of the deck (its Scryfall id) or back to Archidekt's automatic pick (empty); snapshot first, verified by re-reading |
 | `/decks/{id}/tags` (POST `action=add name=` or `action=remove relation_id=`) | Add an Archidekt deck tag (reused if it exists, else created) or remove one; snapshot first, verified |
@@ -170,12 +172,14 @@ cookie, set by `POST /theme`); internal links never open a new tab.
 | `/decks/{id}/clone` (POST) | A `clone` proposal for the deck |
 | `/decks/{id}/report` (POST) | Run a deck report and open it |
 | `/decks/{id}/export`, `.txt`, `.json`, `.csv` | Export as text, JSON or an Archidekt-style CSV |
-| `/history?deck_id=` | Proposals, snapshots and reports over time, with restore |
-| `/history/reports/{rid}` | One report |
+| `/history?deck_id=` | Proposals, snapshots and reports over time, with restore; `type=`, `state=`, `q=`, `when=` (today, 7d, 30d, 90d, year: UTC days) and `group=` (day or deck) narrow and arrange the page, `offset=` pages it |
+| `/history/reports/{rid}` | One report, designed: headline tiles, trends, the research service's text; `/history/reports/{rid}/export.md` and `.html` download it, and Copy puts the Markdown on the clipboard |
+| `POST /layout` | Browser session (CSRF): the "Desktop layout" / "Fit the screen" switch, remembered per device in a cookie |
 | `/activity` | My activity |
 | `/proposals`, `/proposals/{pid}` | Review and Apply, Reject |
 | `/scan` | The card scanner (see SCANNING.md) |
 | `/account`, `/login`, `/logout`, `/signed-out` | Account, Archidekt link, sign-in and sign-out |
+| `POST /login/app` | The Android app finishing a sign-in made in the phone's browser: a one-time code and the app's secret ([ANDROID.md](ANDROID.md#13-privacy-and-security-notes)) |
 | `/account/avatar` | The signed-in member's picture (the provider's, else Gravatar, else initials) for the account menu |
 | `/app`, `/app/mtg-assistant-gateway.apk` | The Android app page and download ([ANDROID.md](ANDROID.md)) |
 | `/admin`, `/admin/users`, `/admin/activity`, `/admin/metrics` | Admin page (members of `MTG_ADMIN_GROUP`) |

@@ -11,7 +11,7 @@ import re
 import secrets
 import time
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Annotated, Any, Literal
 from urllib.parse import parse_qs, urlencode, urlsplit
 
@@ -45,6 +45,7 @@ from . import __version__, deck_stats
 from .admin import add_admin_routes
 from .api import add_api_routes
 from .app_page import add_app_routes
+from .app_signin import AppSignins
 from .approve import (
     APPLY_TOOL_META,
     APPROVAL_META_KEY,
@@ -104,6 +105,7 @@ from .schemas import (
 from .skill_page import add_skill_routes
 from .social import add_social_routes
 from .theme import NoSniffMiddleware, ThemeMiddleware, render
+from .timing import TimingMiddleware
 from .views import deck_brief, deck_out
 
 DeckView = Literal["text", "summary", "cards", "export", "full"]
@@ -127,6 +129,7 @@ class AppState:
     metrics: Metrics | None = None
     membership: MembershipChecker | None = None
     sweep: AuthentikSweep | None = None  # removed-member clean-up (idp_sweep.py)
+    app_signins: AppSignins = field(default_factory=AppSignins)  # the Android app's browser sign-in
 
 
 def _tool_error(exc: DeckError) -> dict[str, object]:
@@ -481,6 +484,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
         except Exception:  # never keep the gateway from starting; the hourly round tries again
             logger.exception("sealing or purging stored Archidekt sessions failed")
         tasks = [asyncio.create_task(purge_loop(state.db, also=state.decks.purge_expired_links))]
+        if state.scan is not None:
+            state.scan.names.ensure()  # card-name catalog for typed suggestions, in the background
         if state.sweep is None:
             state.sweep = AuthentikSweep(s, state.db, state.decks)
         if state.sweep.enabled:
@@ -514,6 +519,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
             await state.provider.cimd.aclose()
             await state.archidekt.aclose()
             if state.scan is not None:
+                state.scan.names.close()
                 await state.scan.scryfall.aclose()
             state.db.close()
 
@@ -640,7 +646,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
         description=(
             "List the decks owned by the linked Archidekt account (most recently updated first). Optional "
             "filters: name_contains, deck_format (commander, modern...), folder. This is the one tool for "
-            "the member's deck list; search_decks with owner lists another user's public decks."
+            "the member's deck list; search_decks with owner lists another user's public decks. The "
+            "gateway's own backup copies are left out (each snapshot in list_snapshots links its copy)."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )
@@ -1561,12 +1568,10 @@ def build_mcp_server(state: AppState) -> MCPServer:
         # The research service (simulations, card research) is reported, not required: the
         # gateway's own pages and Archidekt tools still work without it, so a Mystic Forge outage
         # makes the status "degraded" (still HTTP 200, so the container is not restarted for it).
-        if state.mf_proxy is None:
-            mf = "not_configured"
-        else:
-            mf = "ok" if await state.mf_proxy.healthy() else "down"
-        status = "degraded" if mf == "down" else "ok"
-        return JSONResponse({"status": status, "version": __version__, "mystic_forge": mf})
+        # Only the status: anyone can ask, and the version and the research service's name would
+        # tell a stranger which project this is. The admin page's System card shows both.
+        down = state.mf_proxy is not None and not await state.mf_proxy.healthy()
+        return JSONResponse({"status": "degraded" if down else "ok"})
 
     @server.custom_route(APP_CONFIG_PATH, methods=["GET"], include_in_schema=False)
     async def app_config(_request: Request) -> Response:
@@ -1661,6 +1666,8 @@ def create_app(
     # Outermost, so the responses of the middlewares above (413, 503, sign-in error pages) get
     # nosniff and HSTS too.
     app.add_middleware(NoSniffMiddleware, hsts=settings.public_url.startswith("https://"))
+    # Outermost of all: the request log line and Server-Timing cover every layer above.
+    app.add_middleware(TimingMiddleware)
     return app
 
 

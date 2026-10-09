@@ -7,6 +7,367 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.9] - 2026-10-09
+
+Everything the owner's test round raised, in one update: the held work
+(the shorter Archidekt disclosure, the Android app's sign-in through the
+phone's browser, the faster and themed pages, the owner's own name on the
+public files) and the fixes below. Nothing to change in the stack or the
+settings unless you want the new optional `MTG_ANDROID_PACKAGE`; the
+gateway makes one extra outbound request a day to Scryfall (the card-name
+catalog). Back up the database before you update, as always.
+
+### Changed
+
+- **Connecting from outside:** CONNECT.md now starts with a check from
+  mobile data (the AI service reaches the gateway from the internet, not
+  from your network), and TROUBLESHOOTING.md has a row for "couldn't reach
+  this address" with the proxy, access-list, certificate and router checks.
+- **The request log names the route, not the request.** Each request's log
+  line now reads `GET /decks/{deck_id} 200 41ms …` instead of the path
+  itself, so deck numbers, Archidekt usernames, signed-link tokens and member
+  IDs stay out of the gateway's log at the default level, as the Archidekt
+  link disclosure says. A request no page answers is logged as its first
+  path segment only.
+- **Top bar in a narrow window with a mouse** (600 to 800 px, an open Fold's
+  browser or a half-width desktop window): the brand's word steps aside so
+  the section links end before the account button and the page needs no
+  sideways scroll.
+- **Android app: sign-in opens in your phone's browser**, where passkeys
+  (Bitwarden and the like) and password managers work, and comes back to
+  the app signed in. The gateway's sign-in page inside the app hands off to
+  the browser; the browser hands back a one-time code that only the app can
+  redeem (`POST /login/app`, new). The browser itself is not signed in to
+  the gateway afterwards, and after a sign-out the next sign-in asks for
+  credentials again. Older apps keep the in-app sign-in. New optional
+  `MTG_ANDROID_PACKAGE`, only if you build the app with another package ID.
+  Install the new app over the old one; it needs this gateway version for
+  the browser sign-in and signs in as before on an older one.
+- **Linking Archidekt:** the disclosure above the link form is shorter and
+  plainer. A four-line summary now comes first and is always open. The full
+  detail keeps every fact it had, reworded with less repetition, and is
+  folded: the tick box stays disabled until the member opens it. With
+  JavaScript off the detail shows open and the box works, and the server
+  still refuses a link without the tick. The list of what the person who runs
+  the server can read now also names the member's user ID at the sign-in
+  service. Pressing Link before opening the detail sends nothing and points
+  at the detail. After a failed link the form comes back with the detail open.
+  docs/USING.md carries the same text.
+- **The Guide is a handbook in four parts.** Tutorials take a new member
+  through linking Archidekt, connecting an assistant, a first deck edit and a
+  first simulation step by step; how-to guides give one recipe per task (add
+  cards, approve a proposal, restore a snapshot, compare with a precon, export
+  and import, scan, the collection, playtest, theme and layout, sign out
+  everywhere); the reference lists what the assistant can do tool by tool,
+  every page and its address, the approval modes and risk levels, the
+  keyboard shortcuts (the deck page's card menu on Shift+F10, Enter to open a
+  card) and the editor's search bar syntax ("3 sol ring", the chips); the
+  explanation covers how approvals, snapshots and the per-save backup copy
+  work, how lists stay fresh, privacy, and why Playtest opens Archidekt in a
+  new tab. A contents rail (a drawer on phones) follows the reader and marks
+  the section in view, every heading has its own link, a search box filters
+  the sections and the rail as you type (Escape clears), and "Back to top"
+  appears once you have scrolled. Text that had gone stale (Playtest in a
+  frame, one sign-out button) is corrected.
+- **Adding cards is one search bar.** In the deck editor, chips above the
+  box say where a card goes (Auto, a category, the maybeboard), Enter
+  adds the highlighted card and keeps the cursor in the box, "3 sol ring"
+  adds three, and on wide screens the printings of the highlighted card
+  show as pictures beside the list: the set used last on this deck is
+  pre-selected, and a click adds that printing. Enter pressed while the
+  list is still catching up takes the first answer when it arrives.
+- **Playtest opens Archidekt's playtester in its own tab** (in the app: the
+  phone's browser), where your Archidekt sign-in lives, so private decks
+  play too. The gateway no longer frames it; old links are sent on.
+- **"Desktop layout" switch** in the account menu, remembered per device:
+  a phone or the app shows the computer layout, like a browser's Desktop
+  site switch. "Fit the screen" goes back to the adaptive layout.
+- **Sign-out acts on the first click.** The button says "Signing out…"
+  and locks at once, both account-page buttons post straight away
+  (no confirmation detour for "all my devices"); the cache clearing is
+  gone too (see "Sign-out took seconds" under Fixed).
+- **A deck report is a page to read, with exports.** "Run simulation" used
+  to dump the research service's raw text. The report page now opens with
+  the deck, its commander, the games run and when; shows the headline
+  numbers as tiles with their 95% intervals (turn the commander lands,
+  chance of 40 damage or a lethal board by the last turn, mulligans, land
+  drops); draws four small charts (milestones reached by turn, the turn the
+  commander was cast, mana available and damage per turn) in the site's
+  colours without any script; explains in plain words what the simulation
+  could not model (cards it does not recognise, removal and other
+  interaction it cannot value, cards that never mattered, and the shortcuts
+  it takes) with each group's share of the deck; and gives the validation
+  verdict as a badge with the problems listed. Double-faced cards show their
+  front face. The raw output stays, folded away at the end. The page has no
+  assistant tool names on it. Buttons download the report as Markdown or as
+  a self-contained HTML page (no scripts, light and dark) and copy the
+  Markdown to the clipboard. The deck page's button says the run takes up
+  to a minute and shows "Simulating…" while it does; a report reused
+  because the deck had not changed says so.
+- **History is a timeline, not a log.** Entries are grouped by day under
+  headings that stay in view while scrolling; each row shows what it is
+  (edit, new deck, restore, snapshot, report) with an icon, the deck as a
+  link, a one-line summary of the change, who made it (you or the
+  assistant), the time, and its details folded away. Snapshot rows link to
+  the change they were taken before and keep their "Restore (review first)"
+  button. A filter bar narrows the page by deck, type, state and a search
+  over deck names and change text, a "When" preset (Today, Last 7, 30 or 90
+  days, This year: UTC calendar days, as every time on the site, chosen from
+  a themed list rather than a native date picker) and "Older" pages through
+  the rest 25 at a time. "Group by" switches the timeline from days to
+  decks: each deck a section headed by its name, linked to the deck and to
+  its own history, decks in the order of their newest entry and each one's
+  rows newest first, with the filters, folded details, Restore and paging
+  unchanged. Every filter and the grouping sit in the address bar, so a
+  view can be bookmarked. The "Backup copies on Archidekt" panel no longer
+  touches the "Older" button. The per-deck trend tiles are styled like the
+  rest of the site.
+
+- **Home, My decks and the collection open at once.** With an Archidekt
+  account linked, the member's deck list is kept in memory for a minute and a
+  half after Archidekt answered and served from there by Home, My decks, the
+  deck tools and the JSON API; for a quarter of an hour more a slightly older
+  list is shown while one refresh runs in the background. Every change the
+  gateway sends to Archidekt for that member (a new deck, an applied proposal,
+  a deleted deck, a folder, a tag, a cover) drops the list first, so the next
+  view is live again. The listing itself is one Archidekt request (by the
+  account's id, where before it was one by name and one by id, each waiting its
+  turn in the shared queue), following up to four pages of fifty decks. The
+  collection's unfiltered first page is kept for a minute per sort and dropped
+  by every collection add, change or removal. When the list is cold and
+  Archidekt has not answered within a second and a half, Home and My decks go
+  out at once with a grey placeholder that the page fills from
+  `/api/decks/mine` (same markup, rendered by the gateway; no change without
+  script, where a reload shows the list). Every response now carries a
+  `Server-Timing` header (total, Archidekt and sign-in-provider time) and the
+  log has one line per request (method, path, status, milliseconds; no query
+  string or member id). The link's "last used" time is written at most once a
+  minute instead of on every Archidekt call.
+- **Edit a deck straight from its page.** On your own deck a right-click on a
+  card (a press and hold on a phone, Shift+F10 or the Menu key on a focused
+  card) opens the site's own card menu in place of the browser's: open the
+  card, one more or one fewer copy, move it to a category or the maybeboard,
+  remove it, or jump to the editor. The card viewer has the same quantity
+  buttons and Remove. Each change is saved at once as one proposal with its
+  snapshot (the same path as the editor, with the same "are you sure" for a
+  big removal), and the page redraws in place: the card's count and the
+  stack totals, the Size line, the Legality chip, the Legality and Deck
+  checks panels, all from a fresh read of the deck, with a toast offering
+  Undo. Dragging cards between categories now saves correctly (its
+  request named the wrong field, so nothing was moved) and Undo all puts
+  the cards back without reloading. On someone else's deck the menu offers
+  Open card and Open on Scryfall.
+- **Backup copies stay out of your deck lists.** The copies the gateway
+  makes on Archidekt before a change (in the backup folder, or named
+  "… (backup date UTC)") no longer appear on Home, My decks, the assistant's
+  deck list or the deck API. History shows them in a "Backup copies on
+  Archidekt" panel, each linked to Archidekt and to the deck it copied; a
+  deck's own history lists only its copies. My decks says how many are kept
+  out and where to find them.
+- **Typed card names suggest instantly.** The gateway downloads Scryfall's
+  card-name catalog once a day (about 700 KB) and answers suggestions from
+  memory, so a name list appears within about a hundred milliseconds of a
+  pause in typing instead of after a paced Scryfall round trip per
+  keystroke. Until the catalog has loaded (the first minute after a start,
+  or while Scryfall is unreachable) suggestions come from Scryfall as
+  before.
+- **Suggestion lists are the site's own.** Every card-name box (deck search,
+  home, Quick add, the deck editor, the collection) and the compare page's
+  precon box show a themed, keyboard- and screen-reader-accessible list
+  instead of the browser's built-in datalist. Down and Up move, Enter
+  picks, Escape closes; the match is underlined.
+- **Deck editor, adding a card.** Suggestions show the card's picture, mana
+  cost and type line; Enter adds the card and keeps the box focused for the
+  next one; a new row shows its picture and mana cost. The add form's
+  controls share one row on desktop and fold onto two or three rows on a
+  phone (no stray full-width button). Categories sit side by side on wide
+  screens. The printing picker opens as a dialog over the page.
+- **Card viewer.** Mana costs and the symbols in rules text ({T}, {B}, hybrid,
+  Phyrexian, snow, energy, numbers) are drawn as the gateway's own glyphs on
+  coloured discs, in the viewer and in every card row. The viewer is a
+  proper dialog: a blurred, darkened page behind it, a header with the name
+  and cost, the type line, rules and flavour text, a facts table (printing,
+  artist, price, salt, EDHREC rank) and legality chips, an actions row, a
+  focus trap, Escape and the phone's Back button to close, a bottom sheet
+  on phones; it never scrolls sideways.
+- **Forms and buttons.** A form's buttons sit together in one row at one
+  height (the Search decks page's Search and Clear buttons no longer sit
+  mid-form at different sizes; the Account page's buttons are one row). On
+  phones they stack full width.
+- **Your own name hides this project on your gateway's public files.** With
+  `MTG_SERVER_NAME` set, the plugin's short name follows it (`Deck Helper`
+  becomes `deck-helper`): the install pages, `/plugin/marketplace.json` and
+  the plugin download (now `/plugin/<name>.zip`) use it for the plugin, its
+  connector and its skills, and the download no longer carries this project's
+  name or a link to its repository. Anyone who installed the plugin under the
+  old name installs it again from `/install`. Without `MTG_SERVER_NAME`
+  nothing changes.
+- **`/healthz` answers only `{"status": ...}`.** Anyone can ask it, and the
+  version and the research service's name told a stranger which project the
+  gateway runs. The System card on the admin page still shows both.
+- **Dropdown lists are the site's own.** Every dropdown (the filters on
+  Decks, Search, Collection and History, the deck page's views and odds,
+  the editor's category and finish per row, deck settings, New deck,
+  folders, the profile) opens the gateway's themed list instead of the
+  browser's pop-up, on the website and in the Android app alike. It works
+  from the keyboard (Enter, Space or an arrow opens it; arrows, Home, End
+  and the first letters move; Enter picks; Escape closes) and on phones
+  and touch screens it is a bottom sheet with finger-sized rows. The
+  underlying form controls are unchanged, so filters still apply as soon as
+  a choice is made, and a page with many dropdowns (the editor) builds a
+  list only when it opens.
+- The file pickers on Collection (Import a list) and New deck are themed
+  controls (a Choose a file button and the chosen name), the editor's row
+  category no longer clips its text, and the editor's two Maybeboard chips
+  (the category and the zone) are told apart by their names.
+
+### Added
+
+- **The backup copy on Archidekt is a tick box per save.** The deck
+  editor's save bar has "Also keep a backup copy on Archidekt", on by
+  default; unticking it skips only that extra copy for that save. The
+  gateway's own snapshot (Restore under History) is always kept, and the
+  assistant's applies always make the copy. `POST /api/v1/proposals`
+  takes `archidekt_backup: false` for the same choice (browser session,
+  with `apply: true`). Quick edits from the deck page's card menu keep the
+  gateway snapshot only.
+- `POST /api/v1/decks/{id}/edit` (browser session only): the deck page's own
+  save. Runs the proposals path exactly (propose, hand-edit confirmation,
+  apply with a snapshot), reads the deck again from Archidekt and answers
+  with the touched rows, the freshly computed checks and the re-rendered
+  Legality chip and Deck checks panel; a read that still lags the write is
+  retried once and marked `stale`, and `{refresh: true, names}` reads again.
+- `GET /scan/api/peek?names=a|b|c` (browser session only): mana cost, type
+  line, small picture and default printing for up to twenty exact card
+  names, from one batched, cached Scryfall lookup; the suggestion lists use
+  it to decorate their rows.
+
+### Fixed
+
+- **Touch dropdowns:** the tap that closes a dropdown's bottom sheet no
+  longer also lands on what is under the finger (a link, a remove button).
+  The printings card in the chat picks a finish with the card's own chips
+  instead of the browser's list. A card's Details menu in the collection
+  grid opens inside the window instead of 50 px off its left edge; any
+  dropdown panel near a window edge is shifted back inside, whichever
+  edge it hangs from (the deck page's More menu stuck out on the right
+  at 720 px). On touch
+  screens History's Details, a report's folded sections and the deck's
+  text rows are 40 px tall. The review page's third choice is "Not now",
+  and the editor shows one Maybeboard chip (the zone's), not two.
+- **No sideways scrolling:** a deck with a long name ("Copy of - Sample
+  Commander Deck", or longer) no longer widens My decks, a profile's
+  decks or the precons grid past the window; the name ellipsises in its
+  tile. A collection card's controls row (minus, count, plus, Details,
+  remove) fits inside its card instead of touching the next card. The
+  review page's three choices sit in one row only from 800 px wide and
+  stack below that, so "Not now" never sits alone on a second line.
+  Inside a collection row's Details menu the Finish, Condition and
+  Language pickers and the Save button keep their borders and colour.
+  A browser test now lays out every page at 18 widths from 320 to 1400
+  px, with a mouse and on a touch screen, with long deck, card and
+  member names, a full collection, history and a pending proposal, and
+  fails on any sideways scroll, clipped or overlapping control, or
+  dropdown panel outside the window. Its data is hostile: a 40-character
+  unbroken username and deck name, long folder and tag names.
+- **Phone menus and Back:** one history entry stands for "a menu is
+  open", with one owner in the page script: opening a second menu
+  straight from the first, or right after closing it, keeps that entry,
+  so Back closes the menu and never leaves the page (gate R4-1), and
+  never goes back twice. Three browser tests tap real menus on a phone
+  and press Back.
+- **Long names in controls:** the Follow button on a member's profile
+  and on a deck page, the editor's category chips and the follow
+  confirmation shrink and ellipsise inside their row, with the whole
+  name in the control's title, instead of widening the page (a
+  40-character username made a profile 163 px too wide at 320 px). In
+  the My decks list view on a phone the tags sit under the row instead
+  of squeezing the deck name to 44 px, and a collection card's picture
+  fills its tile (a card with no image no longer collapses to a dot).
+  The follow question on a profile grows with its text, so a long name
+  wraps and its Follow and No buttons stay inside the chip instead of
+  dropping under the Archidekt profile link (gate R5-1); the profile
+  header puts the social row under a long name rather than squeezing
+  either, a profile is found for usernames over 60 characters, the
+  deck page's follow question wraps a long name too, and a long
+  unbroken category name wraps in the editor's category heading and
+  in the deck page's stats tables (gate R5-2, R5-3).
+- **Touch screens:** the small controls a mouse never minds are at least
+  40 px tall on a phone or tablet: the editor's add-to chips, the deck page's
+  category button and odds form, folded Details, footer links, the brand
+  mark, History and Proposals list links, report crumbs and Search's popular
+  chips. The proposal review's three choices sit at one height, the deck
+  banner's Comments link matches its Like and Bookmark buttons, and an
+  admin's top bar keeps the Admin link on every page (it was missing on
+  Proposals, Account, the sign-out, Assistant skill and Android app pages).
+- **A used-up Archidekt budget no longer looks like a missing deck.** When a
+  member's Archidekt budget (`MTG_ARCHIDEKT_CALLS_PER_10_MIN`) is spent, the
+  deck, grid, export, compare, editor, settings, delete, folders, My decks,
+  collection, search, precon and profile pages all answered differently
+  ("Deck not found", "Cannot edit this deck", 200, 400, 404, 502 or 503).
+  They now share one page, *Archidekt is busy*, with HTTP 429, a
+  `Retry-After` header from the budget, `Cache-Control: no-store` and a
+  *Try again* link to the same address; an unreachable Archidekt gets the
+  same treatment as *Archidekt can't be reached right now* (503). Deck
+  exports answer the same status as plain text or JSON. "Deck not found"
+  (404) is kept for a deck that is really not there. The JSON API already
+  answered 429 and is unchanged.
+- **Deck page save:** the one-click save's follow-up (the "Save anyway"
+  after a confirmation question) now answers only the question the page
+  itself asked. A pending proposal an assistant made is refused there with
+  a pointer to its review page, so it keeps its Approve step and its backup
+  copy. An already-answered question cannot be answered twice.
+- **Account menu on the light theme:** its links were white on the light
+  menu (and bold, at the bar's height); they are the menu's own colour and
+  weight again.
+- **Simulations lost double-faced cards.** Archidekt names a transforming or
+  modal card with both faces (`Enduring Angel // Angelic Enforcer`); the
+  research service looks names up through Scryfall's collection endpoint,
+  which knows only the front face, so such cards were dropped as "not
+  recognized by Scryfall" and the deck ran short. The gateway now sends front
+  faces to the simulator and the validator. Your own lists and exports keep
+  both faces.
+- **The commander was listed as an unrecognised card.** The simulation's
+  honesty report filed the commander under "unrecognized, drawn 0%" because
+  it is cast from the command zone. It is now set aside with one sentence
+  saying its abilities beyond combat are not modelled, in the numbers and in
+  the text. A result no longer points at `goldfish_report`, a tool the
+  gateway hides.
+- **Pauper Commander leaders in another printing.** The format lets any
+  creature ever printed at uncommon lead, whichever printing the deck uses.
+  A deck's data names only the chosen printing's rarity, so a rare or mythic
+  printing of such a card used to fail the deck check; it is now reported
+  as "not verified" with the reason, and the deck passes.
+- **No profile picture, and no way to tell why.** The Authentik guide makes
+  selecting the uploaded-picture mapping on the provider an explicit second
+  step (creating the mapping alone sends nothing, and with an uploaded
+  picture first in Avatars no Gravatar is sent either), the troubleshooting
+  table says so, and with `MTG_LOG_LEVEL=DEBUG` the gateway logs which
+  picture claims arrived, by kind only (never the address or the image).
+- **Nginx Proxy Manager snippets that took the site offline.** DEPLOY.md step
+  7 now puts the two rate-limit pieces in their two places (`limit_req_zone`
+  only in `/data/nginx/custom/http_top.conf`, never in a proxy host's
+  Advanced tab) and says what the wrong place does; the troubleshooting
+  table has the symptom and the way back. The optional `location
+  /cards/data/` block from 0.7.4 is withdrawn: the link's token lives ten
+  minutes and returns only the member's own data, so it is harmless in a log.
+- **Sign-out took seconds.** The sign-out response (and *Delete my data*)
+  asked the browser to clear its whole HTTP cache as well as the site's
+  storage; clearing the cache is the likely slow part in Chrome (inferred, not
+  measured). Every gateway page is already sent with
+  `Cache-Control: no-store`, so only the storage is cleared now.
+- **Release notes carry the app files' checksums.** A release that ships the
+  Android app lists the SHA-256 of the APK and AAB next to the signing
+  certificate, so a download can be checked against the notes.
+- **A deck's history lost older entries.** The page filtered the account's
+  newest 20 proposals and snapshots down to one deck, so a deck's own
+  history page (and the deck's API listing) stopped short whenever other
+  decks had been busier. The deck, type, state, search and page are now
+  applied in the database query.
+- **Trend tiles and sparklines on the history and report pages were
+  unstyled.** Their styles lived in the deck page's stylesheet only; they
+  are now part of the site theme.
+
 ## [0.7.8] - 2026-10-08
 
 Wording fixes from the acceptance check of 0.7.7, and a narrower Authentik

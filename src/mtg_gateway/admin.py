@@ -155,6 +155,7 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
             if not confirmed:
                 raise AdminError("invalid", "Tick the confirmation box to delete.", code="confirm_delete")
             out.update(state.db.delete_member_data(target))
+            state.decks.forget_member(target)
             if state.membership is not None:
                 state.membership.avatars.delete(target)
         if action != "unlink":  # the unlink wrote its own row in the member's log above

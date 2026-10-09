@@ -10,6 +10,7 @@ from __future__ import annotations
 import ipaddress
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -87,6 +88,17 @@ def _assetlinks_env(name: str) -> str | None:
     if not isinstance(parsed, list):
         raise ConfigError(f"{name} must be a JSON list (the assetlinks.json statement list)")
     return json.dumps(parsed, separators=(",", ":"))
+
+
+_PACKAGE_ID = re.compile(r"[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+")
+
+
+def _package_env(name: str, default: str) -> str:
+    """An Android package ID (``com.example.app``): the app the browser sign-in hands back to."""
+    raw = _env(name, default) or default
+    if len(raw) > 200 or not _PACKAGE_ID.fullmatch(raw):
+        raise ConfigError(f"{name} must be an Android package ID such as local.mtgassistantgateway.app")
+    return raw
 
 
 def _groups_claim_env(name: str, default: str) -> str:
@@ -171,6 +183,8 @@ class Settings:
     oidc_token_auth_method: str = "client_secret_post"
     # JSON statement list for /.well-known/assetlinks.json (Android App Links); unset: not served.
     android_assetlinks: str | None = None
+    # The Android app's package ID: the app the browser sign-in hands back to (app_signin.py).
+    android_package: str = "local.mtgassistantgateway.app"
     mystic_forge_url: str | None = None
     cimd_enabled: bool = True
     cimd_allowed_hosts: list[str] = field(default_factory=list)
@@ -371,6 +385,7 @@ def load_settings() -> Settings:
         oidc_groups_claim=_groups_claim_env("MTG_OIDC_GROUPS_CLAIM", "groups"),
         oidc_token_auth_method=_token_auth_method_env("MTG_OIDC_TOKEN_AUTH_METHOD", "client_secret_post"),
         android_assetlinks=_assetlinks_env("MTG_ANDROID_ASSETLINKS"),
+        android_package=_package_env("MTG_ANDROID_PACKAGE", "local.mtgassistantgateway.app"),
         session_secret=session_secret,
         fernet_key=fernet_key,
         data_dir=data_dir,

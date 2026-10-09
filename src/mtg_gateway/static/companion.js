@@ -77,6 +77,7 @@
     render();
   }
 
+  var known = {}; // lower name -> card summary from the suggestion list (picture, mana, type)
   function addCard(name, qty, category, printing, finish, zone) {
     zone = zone === "side" ? "side" : "main";
     var key = keyFor(name, zone);
@@ -86,6 +87,8 @@
       added[key].quantity = Math.min(99, added[key].quantity + qty);
     } else {
       added[key] = { name: name, zone: zone, quantity: qty, category: category || null };
+      var k = known[name.toLowerCase()];
+      if (k) { added[key].image = k.image_small || null; added[key].mana = k.mana_cost || ""; added[key].type = k.type_line || ""; }
       // a pinned printing or a foil goes to the deck proper only (the gateway refuses them for zone side)
       if (zone === "main" && printing && printing.set_code && printing.collector_number) {
         added[key].set_code = printing.set_code;
@@ -184,7 +187,7 @@
     sel.addEventListener("change", function () {
       if (sel.value === "\u0000new") {
         var name = (window.prompt("New category name") || "").trim().slice(0, 60);
-        if (!name) { sel.value = current || ""; return; }
+        if (!name) { sel.value = current || ""; if (window.MtgSelect) window.MtgSelect.refresh(sel); return; }
         if (cfg.categories.indexOf(name) < 0) cfg.categories.push(name);
         onchange(name);
         return;
@@ -248,11 +251,13 @@
     addedBox.textContent = "";
     Object.keys(added).forEach(function (k) {
       var a = added[k];
+      var nameEl = el("span", { class: "name", text: a.name });
+      if (a.mana && window.MtgMana) nameEl.appendChild(window.MtgMana.mana(a.mana));
       addedBox.appendChild(el("li", { class: "erow new" }, [
-        el("span", { class: "thumb ph" }, [svg("plus")]),
+        a.image ? el("img", { class: "thumb", src: a.image, alt: "", loading: "lazy" }) : el("span", { class: "thumb ph" }, [svg("plus")]),
         el("span", { class: "main" }, [
-          el("span", { class: "name", text: a.name }),
-          el("span", { class: "meta", text: (a.set_code ? a.set_code.toUpperCase() + " " + a.collector_number + " · " : "") + (a.foil ? "foil · " : "") + (a.zone === "side" ? "new " + (cfg.sideCategory || "maybeboard").toLowerCase() + " card" : "new card") })
+          nameEl,
+          el("span", { class: "meta", text: [a.type || "", a.set_code ? a.set_code.toUpperCase() + " " + a.collector_number : "", a.foil ? "foil" : "", a.zone === "side" ? "new " + (cfg.sideCategory || "maybeboard").toLowerCase() + " card" : "new card"].filter(Boolean).join(" · ") })
         ]),
         qtyControls(function () { return a.quantity; }, function (v) { mutate(function () { if (v === 0) delete added[k]; else a.quantity = v; }); }),
         a.zone === "side" ? el("span", { class: "s muted small", text: cfg.sideCategory || "Maybeboard" }) : categorySelect(a.category || "", function (v) { mutate(function () { a.category = v || null; }); }, true),
@@ -280,19 +285,27 @@
 
   // printing picker: one card's printings from Scryfall through the gateway
   var picker = root.querySelector(".picker");
+  picker.setAttribute("role", "dialog");
+  picker.setAttribute("aria-modal", "true");
+  picker.setAttribute("aria-label", "Printings");
+  picker.addEventListener("click", function (e) { if (e.target === picker) closePicker(); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !picker.hidden) { e.preventDefault(); closePicker(); } });
+  var pickerFocus = null;
   function openPicker(r) {
+    pickerFocus = document.activeElement;
     picker.hidden = false;
     picker.textContent = "";
-    var box = el("div", { class: "panel pickbox" }, [
+    var closeBtn = el("button", { type: "button", class: "close icon-only", "aria-label": "Close", onclick: closePicker }, [el("span", { class: "x", text: "\u00d7" })]);
+    var box = el("div", { class: "pickbox" }, [
       el("div", { class: "head" }, [
         el("h2", { text: "Printings of " + r.name }),
-        el("button", { type: "button", class: "mini", "aria-label": "close", onclick: closePicker }, [svg("x")])
+        closeBtn
       ]),
       el("p", { class: "muted small status", text: "Looking up printings…" }),
       el("div", { class: "prints" })
     ]);
     picker.appendChild(box);
-    box.scrollIntoView({ block: "nearest" });
+    closeBtn.focus();
     var status = box.querySelector(".status");
     fetch("/scan/api/resolve", {
       method: "POST", credentials: "same-origin",
@@ -325,7 +338,11 @@
       })
       .catch(function (e) { status.textContent = "Printings could not be loaded: " + (e && e.message ? e.message : "network error"); status.className = "notice error"; });
   }
-  function closePicker() { picker.hidden = true; picker.textContent = ""; }
+  function closePicker() {
+    picker.hidden = true;
+    picker.textContent = "";
+    if (pickerFocus && pickerFocus.focus) pickerFocus.focus();
+  }
 
   // existing cards, by category
   var existing = root.querySelector(".existing");
@@ -370,10 +387,12 @@
           el("button", { type: "button", onclick: function () { more.removeAttribute("open"); mutate(function () { r.after = 0; }); } }, [svg("x"), el("span", { text: " Remove from deck" })])
         ])
       ]);
+      var nameEl = el("span", { class: "name", text: c.name });
+      if (r.mana && window.MtgMana) nameEl.appendChild(window.MtgMana.mana(r.mana));
       var li = el("li", { class: "erow" + (c.in_deck ? "" : " side"), "data-row": key }, [
         thumb(r, c.name),
         el("span", { class: "main" }, [
-          el("span", { class: "name", text: c.name }),
+          nameEl,
           el("span", { class: "meta", text: (r.set ? r.set.toUpperCase() + " " + r.number : "") + (r.finish !== "normal" ? " · " + r.finish : "") + (r.price != null ? " · $" + Number(r.price).toFixed(2) : "") }),
           el("span", { class: "note muted small" })
         ]),
@@ -388,36 +407,110 @@
     existing.appendChild(det);
   });
 
-  // add a card by name (Scryfall autocomplete through the gateway's scan API)
+  // add a card: one search bar (static/suggest.js lists the names; Enter picks and submits here).
+  // Chips above it say where the card goes; "3 sol ring" adds three; the printings of the
+  // highlighted name show beside the list on wide screens, and a click on one adds that printing.
+  var addForm = root.querySelector("form.addcard");
   var input = root.querySelector("input[name=card]");
-  var datalist = root.querySelector("datalist");
-  var timer = null;
-  input.addEventListener("input", function () {
-    clearTimeout(timer);
-    var q = input.value.trim();
-    if (q.length < 3) return;
-    timer = setTimeout(function () {
-      fetch("/scan/api/search?q=" + encodeURIComponent(q), { credentials: "same-origin" })
-        .then(function (r) { return r.ok ? r.json() : { names: [] }; })
-        .then(function (d) {
-          datalist.textContent = "";
-          (d.names || []).slice(0, 12).forEach(function (n) { datalist.appendChild(el("option", { value: n })); });
-        })
-        .catch(function () {});
-    }, 250);
+  var catIn = root.querySelector("input[name=addcat]"), zoneIn = root.querySelector("input[name=addzone]");
+  var foilIn = root.querySelector("input[name=foil]");
+  var addStatus = root.querySelector(".addstatus");
+  input.addEventListener("suggest:pick", function (ev) {
+    if (ev.detail && ev.detail.card) known[ev.detail.name.toLowerCase()] = ev.detail.card;
   });
-  root.querySelector("form.addcard").addEventListener("submit", function (ev) {
-    ev.preventDefault();
-    var name = input.value.trim();
-    if (!name) return;
-    var qty = parseInt(root.querySelector("input[name=qty]").value, 10) || 1;
-    var cat = root.querySelector("select[name=addcat]").value || null;
-    var finish = root.querySelector("select[name=addfinish]").value || null;
-    var zone = root.querySelector("select[name=addzone]").value || "main";
-    mutate(function () { addCard(name, qty, cat, null, finish, zone); });
+  Array.prototype.forEach.call(root.querySelectorAll(".targets .tchip"), function (chip) {
+    chip.addEventListener("click", function () {
+      Array.prototype.forEach.call(root.querySelectorAll(".targets .tchip"), function (c) {
+        c.classList.toggle("on", c === chip);
+        c.setAttribute("aria-pressed", c === chip ? "true" : "false");
+      });
+      catIn.value = chip.getAttribute("data-cat") || "";
+      zoneIn.value = chip.getAttribute("data-zone") || "main";
+      input.focus();
+    });
+  });
+  function splitQty(raw) {
+    var m = /^\s*(\d{1,2})\s*[xX]?\s+(.+)$/.exec(raw);
+    return m ? { qty: Math.max(1, Math.min(99, parseInt(m[1], 10))), name: m[2].trim() } : { qty: 1, name: raw.trim() };
+  }
+  var lastSetKey = "mtg-lastset-" + cfg.deckId;
+  function lastSet() { try { return localStorage.getItem(lastSetKey) || ""; } catch (e) { return ""; } }
+  function rememberSet(code) { try { localStorage.setItem(lastSetKey, code); } catch (e) { /* private window */ } }
+  function addTyped(raw, printing, pickedName) {
+    var parts = splitQty(raw);
+    if (pickedName) parts.name = pickedName;  // a printing was clicked: that card, with the typed count
+    if (!parts.name) return;
+    var zone = zoneIn.value === "side" ? "side" : "main";
+    var finish = foilIn && foilIn.checked ? "foil" : null;
+    mutate(function () { addCard(parts.name, parts.qty, catIn.value || null, printing || null, finish, zone); });
+    var where = zone === "side" ? cfg.sideCategory || "Maybeboard" : (catIn.value || "the deck");
+    var print = printing && printing.set_code ? " (" + printing.set_code.toUpperCase() + " " + printing.collector_number + ")" : "";
+    if (addStatus) addStatus.textContent = "Added " + parts.qty + " × " + parts.name + print + " to " + where + ". Type the next card, or save.";
     input.value = "";
+    hidePrints();
     input.focus();
+  }
+  addForm.addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    addTyped(input.value, pendingPrint());
   });
+
+  // printings beside the suggestion list (wide screens): the highlighted card's printings as
+  // pictures; the set used last on this deck is pre-selected and goes with Enter; a click adds
+  var printsBox = root.querySelector(".addprints");
+  var printsFor = "", printsCache = {}, printsSeq = 0, chosenPrint = null;
+  function wideEnough() { return window.matchMedia && window.matchMedia("(min-width: 900px)").matches; }
+  function hidePrints() { if (printsBox) { printsBox.hidden = true; printsBox.textContent = ""; } printsFor = ""; chosenPrint = null; }
+  function pendingPrint() { return chosenPrint; }
+  function showPrints(name, list, hasMore) {
+    printsBox.textContent = "";
+    chosenPrint = null;
+    var remembered = lastSet().toLowerCase();
+    var head = el("div", { class: "head" }, [
+      el("b", { text: name }),
+      el("span", { class: "muted small", text: list.length + " printing" + (list.length === 1 ? "" : "s") + (hasMore ? ", newest shown" : "") })
+    ]);
+    printsBox.appendChild(head);
+    var grid = el("div", { class: "pgrid" });
+    list.slice(0, 12).forEach(function (p) {
+      var printing = { set_code: p.set, collector_number: String(p.collector_number) };
+      var pre = remembered && p.set && p.set.toLowerCase() === remembered;
+      if (pre && !chosenPrint) chosenPrint = printing;
+      var b = el("button", { type: "button", class: "print" + (pre ? " current" : ""), tabindex: "-1",
+        title: (p.set_name || "") + " " + (p.collector_number || "") + ": click to add this printing",
+        onclick: function () { rememberSet(p.set || ""); addTyped(input.value, printing, name); } }, [
+        p.image_small ? el("img", { src: p.image_small, alt: "", loading: "lazy" }) : el("span", { class: "ph", text: p.name }),
+        el("span", { class: "cap", text: (p.set || "").toUpperCase() + " " + (p.collector_number || "") })
+      ]);
+      grid.appendChild(b);
+    });
+    printsBox.appendChild(grid);
+    printsBox.appendChild(el("p", { class: "muted small hint", text: chosenPrint ? "Enter adds the " + chosenPrint.set_code.toUpperCase() + " printing (used last here); click another to add that one." : "Enter adds the newest printing; click a picture to add that one." }));
+    printsBox.hidden = false;
+  }
+  input.addEventListener("suggest:active", function (ev) {
+    if (!printsBox || !wideEnough()) return;
+    var d = ev.detail || {};
+    if (!d.name || !d.card || !d.card.oracle_id) { if (d.name !== printsFor) hidePrints(); return; }
+    if (d.name === printsFor) return;
+    printsFor = d.name;
+    var mine = ++printsSeq;
+    var cached = printsCache[d.card.oracle_id];
+    if (cached) { showPrints(d.name, cached.cards, cached.has_more); return; }
+    printsBox.hidden = false;
+    printsBox.textContent = "";
+    printsBox.appendChild(el("p", { class: "muted small", text: "Printings of " + d.name + "…" }));
+    fetch("/scan/api/prints?oracle_id=" + encodeURIComponent(d.card.oracle_id), { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (res) {
+        if (!res || !res.cards || !res.cards.length) { if (mine === printsSeq) hidePrints(); return; }
+        printsCache[d.card.oracle_id] = res;
+        if (mine === printsSeq && printsFor === d.name) showPrints(d.name, res.cards, res.has_more);
+      })
+      .catch(function () { if (mine === printsSeq) hidePrints(); });
+  });
+  input.addEventListener("suggest:close", function () { setTimeout(function () { if (document.activeElement !== input || !input.value) hidePrints(); }, 150); });
+  printsBox.addEventListener("mousedown", function (e) { e.preventDefault(); });  // keep the focus in the box
 
   // paste a list: "2 Lightning Bolt" per line, names checked through the gateway's card lookup,
   // then added like typed cards (to the zone picked in the add form)
@@ -447,7 +540,7 @@
     })
       .then(function (res) { return res.json(); })
       .then(function (d) {
-        var zone = root.querySelector("select[name=addzone]").value || "main";
+        var zone = zoneIn.value === "side" ? "side" : "main";
         var missed = [];
         var found = 0;
         mutate(function () {
@@ -478,7 +571,9 @@
     if (changes().length && !root.dataset.leaving) { ev.preventDefault(); ev.returnValue = ""; }
   });
 
-  // save: one proposal, applied at once (apply:true); a big removal asks first
+  // save: one proposal, applied at once (apply:true); a big removal asks first. The tick box says
+  // whether Archidekt also gets a backup copy (the gateway's snapshot is kept either way).
+  var backupBox = root.querySelector("input[name=archidekt_backup]");
   function save(confirmed) {
     var btn = root.querySelector("button.review");
     btn.disabled = true;
@@ -491,7 +586,8 @@
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json", "X-CSRF-Token": cfg.csrf },
-      body: JSON.stringify({ kind: "edit", deck_id: cfg.deckId, changes: changes(), apply: true, confirmed: confirmed === true })
+      body: JSON.stringify({ kind: "edit", deck_id: cfg.deckId, changes: changes(), apply: true, confirmed: confirmed === true,
+        archidekt_backup: !(backupBox && !backupBox.checked) })
     })
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
       .then(function (res) {

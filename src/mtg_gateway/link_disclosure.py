@@ -1,8 +1,11 @@
 """What linking an Archidekt account gives this gateway and the person who runs it.
 
-Shown in full above the link form, where a required tick acknowledges it before anything is sent
-to Archidekt, and kept readable afterwards on the Account page. It is always shown: no setting
-turns it off, because it is there to protect the member, not the operator.
+Shown above the link form, where a required tick acknowledges it before anything is sent to
+Archidekt, and kept readable afterwards on the Account page. A short summary is always open; the
+full detail is folded, and the tick box stays disabled until the member opens it
+(``static/disclosure.js``; without JavaScript the detail shows open and the box works). The
+server refuses a link without the tick either way. It is always shown: no setting turns it off,
+because it is there to protect the member, not the operator.
 
 Every sentence has to stay true of the code; the source of each claim is noted beside it:
 
@@ -14,7 +17,8 @@ Every sentence has to stay true of the code; the source of each claim is noted b
   member), card lookups while building or applying changes (``/cards/v2/`` in ``_resolve_adds``,
   ``_printing_entries``, ``_apply_create``, ``collection.py``, sent with the member's session)
   and ``social.py`` (comment threads, the following list, browser-only clicks);
-- what the operator can read: every table in ``db.py`` keyed by the member, the pictures under
+- what the operator can read: every table in ``db.py`` keyed by the member (``users.sub`` is the
+  sign-in service's user ID), the pictures under
   ``<data dir>/avatars`` (``avatars.py``) and ``idp_grants`` (Fernet, same key);
 - what admins see: ``admin.py`` user detail (name, email, subject, groups, sign-in times,
   Archidekt username, apps, token and session counts, disabled date) and the activity log;
@@ -47,147 +51,142 @@ from __future__ import annotations
 
 import html
 
-LEAD = (
-    "Linking gives this gateway a working sign-in to your Archidekt account. Read what that means "
-    "for you before you link."
+# Shown first, always open: the few things a member most needs to know.
+SUMMARY: tuple[str, ...] = (
+    "The gateway sends your Archidekt password to Archidekt once and never stores it. It keeps "
+    "the sign-in session Archidekt returns, encrypted. Assume that session can do anything your "
+    "Archidekt sign-in can.",
+    "The person who runs this server holds the key, so they could use the session to act as you "
+    "on Archidekt until it expires (about 40 days after you link), and they can read everything "
+    "else the gateway keeps about you. Link only if you trust them.",
+    "Admins can see your account details and activity log, but not your password or session, and "
+    "nothing on the admin pages uses your link. An admin who also has access to the server can do "
+    "what the person who runs it can.",
+    "You can unlink at any time. Whether Archidekt itself ends the session when you unlink or "
+    "change your password is not known.",
 )
 
 # (heading, [lines]); each line is plain text, escaped when rendered.
 SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
-        "What linking does",
+        "How linking works",
         (
             "Your Archidekt username or email and password go from this server to Archidekt once, "
-            "to sign you in. Your password is not stored anywhere by the gateway.",
-            "Archidekt answers with a sign-in session for your account: the same kind archidekt.com "
-            "gets when you sign in there. As far as we know Archidekt offers no limited version, so "
-            "assume the session can do whatever your Archidekt sign-in can do.",
-            "The gateway keeps that session so it can work with your account without asking for "
-            "your password again.",
+            "to sign you in. The gateway never stores your password.",
+            "Archidekt returns a sign-in session, the same kind archidekt.com gets. We know of no "
+            "limited version, so assume it can do whatever your Archidekt sign-in can. The gateway "
+            "keeps it so it doesn't need your password again.",
         ),
     ),
     (
-        "What the gateway uses it for",
+        "What it uses the session for",
         (
+            "Only when you, or an assistant you connected, ask for something. A big change you "
+            "approved may finish in the background.",
             "Reading your decks (private ones included), folders, tags and collection.",
-            "Reading, as you, the other people's decks and comment threads you or your assistant "
-            "look at and the list of people you follow, so they show as Archidekt shows them to "
-            "you, and looking up the cards in the changes you make.",
-            "Making the deck, folder, tag and collection changes you make yourself on these pages "
-            "or approve, or that your approval mode lets your assistant make, including deleting "
-            "a deck when you ask. Before it changes a deck it may first save a copy of it in a "
-            "backup folder on your Archidekt account (the person who runs it can turn that off).",
+            "Reading, as you, other people's decks and comment threads you or your assistant look "
+            "at and the list of people you follow, and looking up the cards in the changes you make.",
+            "Making the deck, folder, tag and collection changes you make yourself, approve, or let "
+            "your assistant make through your approval mode, including deleting a deck when you "
+            "ask. It may first save a copy of the deck in a backup folder on your Archidekt account "
+            "(the person who runs the server can turn that off).",
             "The likes, bookmarks, follows and comments you make yourself on these pages. No "
             "assistant can do those.",
-            "It uses the session only when you, or an assistant you connected, ask for something. "
-            "A big change you approved may finish in the background.",
         ),
     ),
     (
         "What is stored",
         (
-            "Stored, encrypted: the session (a short-lived access token and the refresh token "
-            "that renews it).",
-            "Stored as plain text: your Archidekt username and user number (if Archidekt does not "
-            "send your username, what you typed to sign in, which may be your email); when you "
-            "linked, when the session was last renewed and last used; and activity-log entries for "
-            "each link, unlink, renewal and failed attempt.",
-            "Never stored: your Archidekt password.",
-            "After an unlink, the gateway keeps your Archidekt username and user number (not the "
-            "session) until you or an admin delete your data. Activity-log entries, including the "
-            "Archidekt username noted when you linked, are kept for a year, even after your data "
-            "is deleted.",
+            "Encrypted: the session (an access token and the refresh token that renews it).",
+            "Plain text: your Archidekt username and user number (if Archidekt sends no username, "
+            "what you typed to sign in, which may be your email); when you linked and when the "
+            "session was last renewed and used; activity-log entries for each link, unlink, "
+            "renewal and failed attempt.",
+            "Never stored: your password.",
+            "After an unlink, your Archidekt username and user number stay until you or an admin "
+            "delete your data. Activity-log entries, including the Archidekt username noted when "
+            "you linked, are kept for a year, even after your data is deleted.",
         ),
     ),
     (
-        "What the person who runs this server can see and do",
+        "What the person who runs this server can do",
         (
-            "The session is encrypted, but the key that opens it is on the same server. Anyone "
-            "with access to the server and that key can open the session and use it to act as you "
-            "on Archidekt until it expires: read, change or delete your decks and collection, or "
-            "anything else your Archidekt sign-in allows. If Archidekt lets a session change your "
-            "email or password (not known), they could use that to keep your account after the "
-            "session expires. They cannot get your password from the session.",
-            "They can read everything else the gateway keeps about you, which is not encrypted: "
-            "your name, email, username and groups at the sign-in service, your profile picture "
-            "(if the sign-in service sends one), when you signed in and were last seen, your "
-            "approval mode, "
-            "your Archidekt username and user number, your proposed and applied deck and "
-            "collection changes, deck snapshots, deck reports and covers, scans, which apps you "
-            "connected, usage counts, and the activity log. The sign-in service's tokens the "
-            "gateway keeps to check your groups are encrypted with the same key, so they can open "
-            "those too.",
+            "The key that opens the session is on the same server. Anyone with access to the "
+            "server, including the person who runs it, can use the session to act as you on "
+            "Archidekt until it expires: read, change or "
+            "delete your decks and collection, or anything else your sign-in allows. If Archidekt "
+            "lets a session change your email or password (not known), they could use that to "
+            "keep your account. They cannot get your password from the session.",
+            "They can read everything else the gateway keeps about you, unencrypted: your name, "
+            "email, username, user ID and groups at the sign-in service, profile picture (if "
+            "sent), sign-in and last-seen times, approval mode, Archidekt username and user "
+            "number, proposed and applied deck and collection changes, deck snapshots, reports and "
+            "covers, scans, connected apps, usage counts and the activity log. The sign-in "
+            "service's tokens the gateway keeps to check your groups use the same key, so they can "
+            "open those too.",
             "They control the code this server runs. This gateway's code never keeps your "
-            "password, but someone who changes the code could. Link only if you trust the person "
-            "who runs this server.",
+            "password, but changed code could.",
         ),
     ),
     (
-        "What admins on this site can see and do",
+        "What admins on this site can do",
         (
-            "Admins use the admin pages, not the server itself. They see your name, email, "
-            "username, groups and user ID at the sign-in service, your Archidekt "
-            "username, when you first signed in and were last seen, which apps you connected, how "
-            "many app tokens and browser sessions you have open, whether and when you were "
-            "disabled, and the activity log: what you did, when and with which app, "
-            "including links and unlinks, proposals, deck and collection changes, scans, likes, "
-            "bookmarks, follows and comments, with deck, proposal and comment numbers.",
+            "On the admin pages they see your name, email, username, groups and user ID at the "
+            "sign-in service, your Archidekt username, first sign-in and last seen, connected "
+            "apps, how many app tokens and browser sessions you have open, whether and when you "
+            "were disabled, and the activity log: what you did, when and with which app (links, "
+            "unlinks, proposals, deck and collection changes, scans, likes, bookmarks, follows and "
+            "comments, with deck, proposal and comment numbers).",
             "They can unlink your Archidekt account, disable and enable your account, sign you "
             "out everywhere and delete your data.",
-            "They cannot see your password or your session, cannot open your proposals, and have "
-            "no button that uses your link to read or change your decks. An admin who also has "
-            "access to the server can do everything in the section above.",
+            "They cannot see your password or session, cannot open your proposals, and have no "
+            "button that uses your link. An admin who also has server access can do everything in "
+            "the section above.",
         ),
     ),
     (
         "Who else can use your link",
         (
-            "Anyone who can sign in to this gateway as you can use your link through it, just as "
-            "you can: someone holding your browser session or an assistant you connected, and the "
-            "person who runs the sign-in service this gateway uses, if they can sign in as you "
-            "there.",
+            "Anyone who can sign in here as you: someone holding your browser session, an "
+            "assistant you connected, or whoever runs the sign-in service, if they can sign in as "
+            "you there.",
         ),
     ),
     (
         "Logs and backups",
         (
-            "The gateway never writes your password or your session to its logs.",
-            "At the usual log level it writes no Archidekt addresses or usernames; a few messages "
-            "include a deck number. If the person who runs it turns on debug logging, the logs "
-            "list the Archidekt addresses it calls, which include deck numbers and usernames.",
-            "The gateway's own backups leave your session out and keep everything else listed "
-            "above. A copy of the server's disk made some other way would include the session, "
-            "still encrypted.",
+            "Logs never contain your password or session. At the usual log level they hold no "
+            "Archidekt addresses or usernames: the request log names the kind of page, not the "
+            "deck or the person (/decks/{deck_id}, /users/{username}), and a few other messages "
+            "may include a deck number. With debug logging on, they list the Archidekt addresses "
+            "called, which include deck numbers and usernames.",
+            "The gateway's own backups leave out the session and keep everything else above. A "
+            "copy of the server's disk made another way includes the session, still encrypted.",
         ),
     ),
     (
         "How long it lasts and how to end it",
         (
-            "The access token lasts about an hour; when it runs out, the gateway gets a new one "
-            "with the refresh token. Archidekt's refresh token stops working about 40 days "
-            "after you link (measured in October 2026; Archidekt sets this and can change it). "
-            "Then you link again. Your "
-            "Account page shows the date for your link.",
-            "Unlink on the Account page deletes the gateway's copy at once. So do Delete my data "
-            "and an admin's Unlink or Disable.",
-            "If you are removed from this gateway's group, or your account at the sign-in service "
-            "is deactivated or deleted, you lose access to the gateway at once. Your stored "
-            "session is usually deleted within about an hour if the person who runs the gateway "
-            "turned on its hourly clean-up (it needs an extra setting at the sign-in service), "
-            "later while it cannot get a clear answer from the sign-in service. Without it, "
-            "the session is deleted when an admin presses Disable or Unlink, when it expires, or "
-            "(after a removal from the group) the next time you or one of your apps tries to use "
-            "the gateway.",
-            "Unlinking deletes only the gateway's copy. Whether the session also stops working on "
-            "Archidekt's side is not known, so a copy someone already took may keep working until "
-            "it expires. Whether changing your Archidekt password ends it is not known either.",
+            "The access token lasts about an hour and is renewed with the refresh token. The "
+            "refresh token stops working about 40 days after you link (measured October 2026; "
+            "Archidekt can change this). Then you link again. Your Account page shows your date.",
+            "Unlink, Delete my data, or an admin's Unlink or Disable deletes the gateway's copy at once.",
+            "If you're removed from this gateway's group, or your sign-in account is deactivated "
+            "or deleted, you lose access at once. If the hourly clean-up is on (it needs an extra "
+            "setting at the sign-in service), your stored session is usually deleted within about "
+            "an hour, later while the sign-in service gives no clear answer. Without it, the "
+            "session is deleted when an admin presses Disable or Unlink, when it expires, or "
+            "(after a group removal) the next time you or one of your apps uses the gateway.",
+            "Unlinking deletes only the gateway's copy. Whether the session also stops working at "
+            "Archidekt, or ends when you change your Archidekt password, is not known, so a copy "
+            "someone already took may keep working until it expires.",
         ),
     ),
 )
 
 # Archidekt's own position on apps like this one: shown with the disclosure, same tick.
 TERMS_NOTE = (
-    "Archidekt has no official way for other apps to read or change decks, so this gateway uses "
+    "Archidekt has no official way for other apps to read or change decks, so the gateway uses "
     "the same requests archidekt.com's own pages use. Archidekt's terms of service restrict "
     "automated access, so Archidekt could limit or block an account used this way."
 )
@@ -197,13 +196,24 @@ ACKNOWLEDGE = (
 )
 
 
+TITLE = "Before you link your Archidekt account"
+DETAIL_SUMMARY = "Full detail (open it to tick the box below)"
+DETAIL_ID = "archidekt-disclosure-detail"
+# Folds the detail and unlocks the tick box once it is opened (script-src 'self', no inline).
+SCRIPT = "/static/disclosure.js"
+TICK_HINT = "Open the full detail above to tick this box."
+
 SWEEP_ON = "On this gateway the hourly clean-up is on."
 SWEEP_OFF = "On this gateway the hourly clean-up is off."
 
 
+def _summary_html() -> str:
+    return "<h3>In short</h3><ul>" + "".join(f"<li>{html.escape(x)}</li>" for x in SUMMARY) + "</ul>"
+
+
 def body_html(sweep_on: bool | None = None) -> str:
-    """The sections as HTML (headings and lists), without a wrapper. ``sweep_on`` adds whether
-    this gateway runs the removed-member clean-up (idp_sweep.py) to the last section."""
+    """The detail sections as HTML (headings and lists), without a wrapper. ``sweep_on`` adds
+    whether this gateway runs the removed-member clean-up (idp_sweep.py) to the last section."""
     out = []
     for i, (heading, lines) in enumerate(SECTIONS):
         items = [html.escape(line) for line in lines]
@@ -213,13 +223,26 @@ def body_html(sweep_on: bool | None = None) -> str:
     return "".join(out)
 
 
-def form_html(sweep_on: bool | None = None) -> str:
-    """Above the link form: everything, open, plus Archidekt's terms."""
+def _terms_html() -> str:
+    return f"<h3>Archidekt's terms</h3><p>{html.escape(TERMS_NOTE)}</p>"
+
+
+def form_html(sweep_on: bool | None = None, *, read: bool = False) -> str:
+    """Above the link form: the summary, then the full detail.
+
+    The detail is rendered open and the tick box usable, so without JavaScript everything shows
+    and nobody is locked out. ``static/disclosure.js`` folds it and keeps the tick box disabled
+    until the member opens it (``data-must-open``). ``read`` (the form came back after a failed
+    link the member had already ticked) leaves it open and unlocked."""
+    must = "" if read else " data-must-open"
     return (
         "<div class='notice disclosure' id='archidekt-disclosure'>"
-        f"<p><strong>Before you link.</strong> {html.escape(LEAD)}</p>"
-        f"{body_html(sweep_on)}"
-        f"<h3>Archidekt's terms</h3><p>{html.escape(TERMS_NOTE)}</p></div>"
+        f"<p><strong>{html.escape(TITLE)}</strong></p>"
+        f"{_summary_html()}"
+        f"<details class='disclosure-detail' id='{DETAIL_ID}' open{must}>"
+        f"<summary>{html.escape(DETAIL_SUMMARY)}</summary>"
+        f"{body_html(sweep_on)}{_terms_html()}</details></div>"
+        f"<script src='{SCRIPT}' defer></script>"
     )
 
 
@@ -228,14 +251,15 @@ def linked_html(sweep_on: bool | None = None) -> str:
     return (
         "<details class='disclosure' id='archidekt-disclosure'>"
         "<summary>What linking gives this gateway and the person who runs it</summary>"
-        f"{body_html(sweep_on)}"
-        f"<h3>Archidekt's terms</h3><p>{html.escape(TERMS_NOTE)}</p></details>"
+        f"{_summary_html()}{body_html(sweep_on)}{_terms_html()}</details>"
     )
 
 
 def plain_text() -> str:
     """The disclosure as plain text (for docs and review)."""
-    parts = [LEAD, ""]
+    parts = [TITLE, "", "In short"]
+    parts.extend(f"- {line}" for line in SUMMARY)
+    parts += ["", DETAIL_SUMMARY, ""]
     for heading, lines in SECTIONS:
         parts.append(heading)
         parts.extend(f"- {line}" for line in lines)

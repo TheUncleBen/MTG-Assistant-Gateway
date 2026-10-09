@@ -15,7 +15,7 @@
   <p class="sum" id="summary">Loading the printings…</p>
   <div class="toolbar" id="toolbar">
     <input type="search" id="filter" placeholder="Filter by set name or code" aria-label="Filter printings" autocomplete="off">
-    <select id="finish" aria-label="Finish"><option value="">Any finish</option><option value="foil">Foil</option><option value="nonfoil">Non-foil</option><option value="etched">Etched</option></select>
+    <div class="chips finish" id="finish" role="group" aria-label="Finish"><button type="button" class="on" data-finish="" aria-pressed="true">Any finish</button><button type="button" data-finish="foil" aria-pressed="false">Foil</button><button type="button" data-finish="nonfoil" aria-pressed="false">Non-foil</button><button type="button" data-finish="etched" aria-pressed="false">Etched</button></div>
     <button type="button" class="small hidden" id="expand">Expand</button>
   </div>
   <div class="scroll"><div class="grid" id="grid" role="list"></div></div>
@@ -54,7 +54,7 @@
       (c.scryfall_id ? " (Scryfall id " + c.scryfall_id + ")" : "");
   }
   function draw() {
-    var q = String($("filter").value || "").trim().toLowerCase(), fin = $("finish").value;
+    var q = String($("filter").value || "").trim().toLowerCase(), fin = finishWanted();
     var grid = $("grid"); grid.replaceChildren();
     var shown = 0;
     all.forEach(function (c) {
@@ -123,7 +123,21 @@
       .catch(function () { B.setStatus("The printings could not be loaded (no connection to the gateway). The newest sets are in the assistant's message.", "err"); });
   }
   $("filter").addEventListener("input", draw);
-  $("finish").addEventListener("change", draw);
+  // The finish filter is a row of the card's own chips, not the host browser's list (R-131).
+  function finishWanted() {
+    var on = $("finish").querySelector("button.on");
+    return on ? on.getAttribute("data-finish") || "" : "";
+  }
+  $("finish").addEventListener("click", function (e) {
+    var b = e.target.closest ? e.target.closest("button[data-finish]") : null;
+    if (!b) return;
+    Array.prototype.forEach.call($("finish").querySelectorAll("button"), function (x) {
+      var on = x === b;
+      x.classList.toggle("on", on);
+      x.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+    draw();
+  });
   B.start("MTG Assistant Gateway printings card", load, {
     displayModes: ["inline", "fullscreen"],
     onContext: function () {

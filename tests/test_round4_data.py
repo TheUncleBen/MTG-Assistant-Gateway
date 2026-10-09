@@ -506,7 +506,10 @@ async def test_archidekt_calls_have_a_per_member_budget(tmp_path: Path, idp: Fak
     async with running(Harness(settings, idp, archidekt=_client(settings, ark), mf_proxy=proxy)) as h:
         st = Stack(h, ark)
         token = await linked_user(st)  # the link itself is one call
-        results = [structured(await call(h, token, "list_my_decks")) for _ in range(6)]
+        results = []
+        for _ in range(6):
+            h.app.state.gateway.decks.deck_lists.drop("user-1")  # a cached list costs nothing
+            results.append(structured(await call(h, token, "list_my_decks")))
         assert [r["ok"] for r in results] == [True] * 4 + [False] * 2, results
         assert results[-1]["error"] == "rate_limited"
         # proxied tools given an Archidekt deck draw on the same budget
@@ -535,6 +538,12 @@ def test_budget_refills_over_time(monkeypatch: pytest.MonkeyPatch) -> None:
     assert budget.take("u") and budget.take("u") and not budget.take("u")
     now[0] += 300  # half a window refills one call
     assert budget.take("u") and not budget.take("u")
+    # Retry-After: whole seconds until the next call may go (a full bucket says 1)
+    assert budget.retry_after("u") == 300 and budget.retry_after("fresh") == 1
+    now[0] += 100
+    assert budget.retry_after("u") == 200
+    now[0] += 200
+    assert budget.retry_after("u") == 1 and budget.take("u")
 
 
 # -- E-7: per-app pending cap; report deletes from apps are limited to their own reports --------
@@ -591,7 +600,8 @@ async def test_concurrent_refreshes_of_one_link_both_succeed(stack: Stack) -> No
         return await real(rt)
 
     gw.archidekt.refresh = slow_refresh
-    tasks = [asyncio.create_task(call(h, token, "list_my_decks")) for _ in range(2)]
+    # two reads that each go to Archidekt (a deck list would be one shared, cached read)
+    tasks = [asyncio.create_task(call(h, token, "get_deck", {"deck_ref": "42"})) for _ in range(2)]
     while entered < 2:
         await asyncio.sleep(0.01)
     gate.set()

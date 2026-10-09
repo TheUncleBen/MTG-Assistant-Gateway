@@ -44,7 +44,8 @@ person has said yes to the exact change.
   plus any MCP client that does OAuth.
   What works where, and the limits, are in [docs/CONNECT.md](docs/CONNECT.md).
 - **On a phone:** the pages work in any browser. There is also an Android app
-  that each gateway hands out itself, adding a camera scan screen with torch
+  that each gateway can hand out itself (on its `/app` page, once the app file
+  is in the image or added by the operator), adding a camera scan screen with torch
   brightness that lays itself out around a foldable's hinge
   ([docs/ANDROID.md](docs/ANDROID.md)).
 - **What it talks to:** Archidekt for decks, Scryfall for cards, and a

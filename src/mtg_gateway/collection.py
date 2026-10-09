@@ -18,6 +18,7 @@ import html
 import io
 import json
 import re
+import time
 from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import Field
@@ -26,6 +27,7 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from .approve import CARD_TOOL_META, proposal_tool_result
 from .archidekt import COLLECTION_PAGE_SIZE, ArchidektError, _faces, _oracle_text, _pt
+from .busy import busy_response
 from .deckpage import DECK_CSS, image_url, mana_html
 from .decks import DeckError, current_client
 from .pages import _csrf, _safe_next, browser_session, login_redirect, read_limited
@@ -43,6 +45,7 @@ MAX_ITEMS_PER_CALL = 100  # each card costs one or two Archidekt calls, paced ab
 MAX_QUANTITY = 9_999
 MAX_PAGES_FOR_EXPORT = 50  # 5,000 records
 PAGE_SIZE = COLLECTION_PAGE_SIZE
+FIRST_PAGE_TTL = 60.0  # seconds the unfiltered first page is served from memory
 FINISHES = ("nonfoil", "foil", "etched")
 MODIFIERS = {"nonfoil": "Normal", "foil": "Foil", "etched": "Etched"}
 CONDITIONS = ("", "NM", "LP", "MP", "HP", "DMG")
@@ -58,11 +61,12 @@ _ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
 
 class CollectionError(Exception):
     """User-facing failure. ``kind``: invalid, not_found, not_linked, unavailable, rate_limited,
-    busy, auth."""
+    busy, auth. ``retry_after`` copies DeckError's (seconds to wait, when known)."""
 
-    def __init__(self, kind: str, message: str):
+    def __init__(self, kind: str, message: str, *, retry_after: int | None = None):
         super().__init__(message)
         self.kind = kind
+        self.retry_after = retry_after
 
 
 def _clean(value: Any, limit: int) -> str:
@@ -80,7 +84,7 @@ def _wrap(exc: Exception) -> CollectionError:
             return CollectionError("auth", str(exc))
         if kind == "contract":
             return CollectionError("unavailable", "Archidekt answered in an unexpected way; try again")
-        return CollectionError(kind, str(exc))
+        return CollectionError(kind, str(exc), retry_after=getattr(exc, "retry_after", None))
     raise exc
 
 
@@ -263,6 +267,19 @@ class CollectionService:
         self.decks = decks
         self.client = decks.client
         self.scan = scan
+        # The unfiltered first page per member and sort, kept FIRST_PAGE_TTL seconds: the page
+        # most views of /collection show (view changes never reach Archidekt). Any collection
+        # write the gateway sends for the member drops it (decks.write_hooks).
+        self._first_pages: dict[str, dict[str, tuple[float, dict[str, Any]]]] = {}
+        self.first_page_ttl = FIRST_PAGE_TTL
+        decks.write_hooks.append(self._on_write)
+
+    def _on_write(self, sub: str, path: str) -> None:
+        if not path or path.startswith("/collection"):
+            self._first_pages.pop(sub, None)
+
+    def forget(self, sub: str) -> None:
+        self._first_pages.pop(sub, None)
 
     def _user_id(self, sub: str) -> str:
         link = self.decks.db.get_link(sub)
@@ -288,6 +305,11 @@ class CollectionService:
         """One page of the collection as Archidekt orders and filters it (``cardName`` is a name
         substring). Returns rows, count, page, total_pages and has_next."""
         uid = self._user_id(sub)
+        cacheable = page == 1 and not q and page_size == PAGE_SIZE and self.first_page_ttl > 0
+        if cacheable:
+            hit = self._first_pages.get(sub, {}).get(sort)
+            if hit is not None and time.monotonic() - hit[0] < self.first_page_ttl:
+                return {**hit[1], "rows": list(hit[1]["rows"])}
         order = "editionDate" if sort == "edition" else ""
         body = await self._run(
             sub,
@@ -298,13 +320,19 @@ class CollectionService:
         rows = [row_out(r) for r in body["results"] if isinstance(r, dict)]
         count = body.get("count")
         total_pages = body.get("totalPages")
-        return {
+        out = {
             "rows": rows,
             "count": count if isinstance(count, int) else len(rows),
             "page": body.get("page") if isinstance(body.get("page"), int) else page,
             "total_pages": total_pages if isinstance(total_pages, int) else 1,
             "has_next": bool(body.get("next")),
         }
+        if cacheable:
+            if len(self._first_pages) > 10_000:
+                self._first_pages.clear()
+            self._first_pages.setdefault(sub, {})[sort] = (time.monotonic(), out)
+            return {**out, "rows": list(rows)}
+        return out
 
     async def _raw_rows(self, sub: str, *, max_pages: int) -> list[dict[str, Any]]:
         """Archidekt's records, newest first, over up to ``max_pages`` pages."""
@@ -773,8 +801,12 @@ COLLECTION_CSS = """
 .importbox .actions{margin-top:.5rem}
 @media (max-width:600px){ .addbox form.addcard{grid-template-columns:1fr 1fr}
   .addbox form.addcard .grow,.addbox form.addcard button{grid-column:1 / -1} }
-ul.collgrid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:1rem}
-ul.collgrid .col .pic{position:relative;aspect-ratio:5/7;border-radius:4.5%;overflow:hidden;
+/* A card is at least 170px wide so its controls row (minus, count, plus, Details, remove:
+   about 158px) always fits inside it instead of touching the next card. */
+ul.collgrid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:1rem}
+ul.collgrid .col .pic{position:relative;display:block;width:100%;box-sizing:border-box;aspect-ratio:5/7;
+  border-radius:4.5%;
+  overflow:hidden;
   background:var(--surface-2);
   border:2px solid var(--card-border)}
 ul.collgrid .col .pic img{width:100%;height:100%;display:block;object-fit:cover}
@@ -789,11 +821,11 @@ ul.collgrid .col .pic .cond{position:absolute;left:6px;bottom:6px;font-size:.7re
 ul.collgrid .col .cap{display:flex;flex-direction:column;margin:.35rem 0 .25rem;min-width:0}
 ul.collgrid .col .cap .name{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 ul.collgrid .col .cap .set{font-size:.8rem;color:var(--text-muted)}
-ul.collgrid .col .act,ul.colllist .act{display:flex;align-items:center;gap:.35rem}
+ul.collgrid .col .act,ul.colllist .act{display:flex;align-items:center;gap:.25rem;min-width:0}
 form.qty{display:inline-flex;align-items:center;gap:.15rem;margin:0}
 form.qty button.mini,form.rm button.mini{margin:0;width:2.25rem;height:2.25rem;padding:0;display:inline-flex;
   align-items:center;justify-content:center}
-form.qty output{min-width:2rem;text-align:center;font-weight:700;font-variant-numeric:tabular-nums}
+form.qty output{min-width:1.5rem;text-align:center;font-weight:700;font-variant-numeric:tabular-nums}
 form.rm{display:inline;margin:0 0 0 auto}
 ul.colllist{list-style:none;margin:0;padding:0}
 ul.colllist .row{display:grid;grid-template-columns:34px minmax(0,1fr) auto auto auto auto;gap:.6rem;
@@ -971,6 +1003,8 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         try:
             out = await service.page(sub, page=page_no, q=q, sort=sort)
         except CollectionError as exc:
+            if busy := busy_response(exc, request, page, sub=sub, sid=sid):
+                return busy
             status = 200 if exc.kind in ("not_linked", "auth") else _STATUS.get(exc.kind, 400)
             return page(
                 "My collection",
@@ -1011,9 +1045,9 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             f"type='hidden' name='csrf' value='{_esc(csrf)}'>"
             "<input type='hidden' name='action' value='add'>"
             "<div class='field grow'><label for='addname'>Card name</label>"
-            "<input id='addname' type='text' name='name' list='cardnames' "
+            "<input id='addname' type='text' name='name' data-suggest='cards' "
             "placeholder='Card name, or “name (SET) 123” for one printing' "
-            "autocomplete='off' required><datalist id='cardnames'></datalist></div>"
+            "autocomplete='off' required></div>"
             "<div class='field'><label for='addqty'>Copies</label><input id='addqty' "
             "type='number' name='quantity' value='1' min='1' max='999'></div>"
             "<div class='field'><label for='addfinish'>Finish</label><span "
@@ -1036,9 +1070,10 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             "<p class='muted small'>A collection CSV (this page's Export CSV, or one with Archidekt's "
             f"column names) or a card list, one card per line, up to {MAX_IMPORT_ROWS} rows at a time. "
             "Copies of a printing you already own in that finish are added to it.</p>"
-            "<div class='field filepick'><label for='importfile'>From a file</label>"
+            "<div class='field filepick'><span class='lbl'>From a file</span><label class='filebtn'>"
             "<input id='importfile' type='file' accept='.csv,.txt,text/csv,text/plain' "
-            "data-fill='importtext'></div>"
+            "data-fill='importtext'><span class='btn'>Choose a file</span></label>"
+            "<span class='fname' aria-live='polite'>No file chosen</span></div>"
             "<textarea id='importtext' name='text' rows='6' placeholder='Quantity,Name,Finish,Edition Code,"
             "Collector Number&#10;2,Card name,Normal,SET,123'></textarea>"
             f"<div class='actions'><button class='btn-primary'>{icon('plus')} Import</button></div></form>"

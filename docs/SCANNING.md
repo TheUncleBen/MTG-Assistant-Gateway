@@ -80,7 +80,7 @@ What's on it:
   finishes and art, so you can pick the exact one by hand.
 - **Photo.** Uses your camera app or gallery instead, for browsers that
   can't stream video. It does the same edge-finding over the whole picture.
-- **Type.** Card name with autocomplete, or paste a whole decklist.
+- **Type.** Card name with instant suggestions as you type, or paste a whole decklist.
 - **List.** Quantities, cards still unresolved, **Save scan** and
   **Copy decklist**, then **What next?** with the three places the cards
   can go: **Save to collection** (your Collection on Archidekt, see

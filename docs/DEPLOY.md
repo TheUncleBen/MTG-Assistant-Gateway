@@ -291,7 +291,7 @@ If the packages are public you can skip this step.
 
    | Variable | What to put |
    | --- | --- |
-   | `MTG_IMAGE`, `MTG_TAG` | `ghcr.io/<owner>/mtg-assistant-gateway` and `latest` to follow every new version, or one version to stay on it, for example `0.7.8` ([VERSIONS.md](VERSIONS.md)) |
+   | `MTG_IMAGE`, `MTG_TAG` | `ghcr.io/<owner>/mtg-assistant-gateway` and `latest` to follow every new version, or one version to stay on it, for example `0.7.9` ([VERSIONS.md](VERSIONS.md)) |
    | `MTG_PUBLIC_URL` | `https://mtg.example.com` |
    | `MTG_OIDC_ISSUER` | the issuer URL from step 3 |
    | `MTG_OIDC_CLIENT_ID` | the Client ID from step 3 |
@@ -420,25 +420,38 @@ redeploy, since a Swarm task can come back with a new address.
 **Rate limiting (optional).** `/register`, `/authorize`, `/token` and `/login`
 answer anyone. The gateway trims abandoned sign-ins and anonymous log rows as
 they pile up, but it doesn't slow the requests down. To slow down
-scripted floods, add one line to NPM's `/data/nginx/custom/http_top.conf`
-(create the file in NPM's data folder, then restart NPM):
+scripted floods you need two pieces in two different places. They are not
+interchangeable: Nginx accepts `limit_req_zone` only at its top level, and
+NPM's Advanced tab is inside a `server` block, so pasting it there makes
+Nginx reject the whole proxy host and the site goes offline (a certificate
+or connection error in the browser, `nginx: [emerg]` in NPM's log) until
+you take the line out again.
 
-```nginx
-limit_req_zone $binary_remote_addr zone=mtg_oauth:10m rate=30r/m;
-```
+1. The zone, in a file on the NPM host, **never in the Advanced tab**:
+   `/data/nginx/custom/http_top.conf` inside NPM's data folder (the folder
+   you mounted at `/data`; create the `custom` folder and the file if they
+   don't exist), then restart the NPM container:
 
-and this to the gateway proxy host's Advanced tab, under the lines above:
+   ```nginx
+   limit_req_zone $binary_remote_addr zone=mtg_oauth:10m rate=30r/m;
+   ```
 
-```nginx
-location ~ ^/(register|authorize|token|login)$ {
-  limit_req zone=mtg_oauth burst=30 nodelay;
-  include conf.d/include/proxy.conf;
-}
-```
+2. The limit, in the gateway proxy host's **Advanced** tab, under the
+   lines above (this part belongs there, and only works once step 1 is in
+   place; without it NPM rejects the host too):
+
+   ```nginx
+   location ~ ^/(register|authorize|token|login)$ {
+     limit_req zone=mtg_oauth burst=30 nodelay;
+     include conf.d/include/proxy.conf;
+   }
+   ```
 
 A normal connection makes a handful of these calls, so these numbers never
 get in a real person's way. Leave it out if you'd rather not maintain custom
-NPM files.
+NPM files. If the site is offline after any change to the Advanced tab,
+remove what you pasted and save: NPM goes back to the last configuration
+that worked (see [TROUBLESHOOTING.md](TROUBLESHOOTING.md#the-site-doesnt-load)).
 
 A `502 Bad Gateway` from NPM means it can't reach the gateway. Check that
 NPM's stack has the network from step 1 (exact name) and was redeployed
@@ -452,9 +465,10 @@ From any machine:
 
 ```bash
 curl -s https://mtg.example.com/healthz
-# {"status":"ok","version":"0.7.8","mystic_forge":"ok"}
-# ("degraded" with "mystic_forge":"down" means the gateway works but the
-#  research service doesn't answer: check the Mystic Forge service)
+# {"status":"ok"}
+# ("degraded" means the gateway works but the research service doesn't
+#  answer: check the Mystic Forge service. The admin page's System
+#  card shows the version and whether the research service answers.)
 
 curl -s https://mtg.example.com/.well-known/oauth-authorization-server | head -c 300
 # JSON with "issuer":"https://mtg.example.com", "authorization_endpoint", ...
@@ -469,6 +483,12 @@ and the plugin files) sends you to Authentik first, and only members of
 `MTG_REQUIRED_GROUP` get in. Signing in proves the Authentik side works.
 Then connect your assistant: [CONNECT.md](CONNECT.md). To invite people, see
 [ONBOARDING.md](ONBOARDING.md#for-the-owner).
+
+**Android app (optional).** Signed in, open `/app`. If it offers a download,
+the app is in your image and there is nothing to do. If it says there is no
+app file, your image was built without one; add it as described in
+[ANDROID.md](ANDROID.md#adding-the-app-to-a-gateway). Everything works in a
+phone's browser without it.
 
 The repository's end-to-end test runs these same steps automatically on a
 single-node Swarm with a real Authentik: [tests/e2e/README.md](../tests/e2e/README.md).
@@ -595,7 +615,7 @@ gateway's `environment:` in the stack file, or it has no effect.
 | `MTG_REFRESH_TOKEN_TTL` | no, *stack* | `2592000` | Refresh token lifetime, seconds (30 days; 3600 to 31536000) |
 | `MTG_REAUTH_INTERVAL` | no, *stack* | `604800` | How long (seconds, default a week) after signing in an assistant can keep refreshing its tokens without a fresh sign-in (3600 to 31536000). Once this runs out the next refresh is refused and the person signs in again (and sees the gateway's consent page). Group membership doesn't wait for this: it is checked live with the identity provider on every request (`MTG_MEMBERSHIP_CHECK_TTL`) |
 | `MTG_LOG_LEVEL` | no, *stack* | `INFO` | Logging level |
-| `MTG_SERVER_NAME` | no, *stack* | `MTG Assistant Gateway` | Name shown on the gateway's pages, the install page and to assistants |
+| `MTG_SERVER_NAME` | no, *stack* | `MTG Assistant Gateway` | Name shown on the gateway's pages, the install page and to assistants. Set your own and the plugin's short name follows it (`Deck Helper` → `deck-helper`), and the public plugin files no longer name this project or link to its repository. Anyone who installed the plugin under the old short name installs it again from `/install` |
 | `MTG_LISTEN_HOST`, `MTG_LISTEN_PORT` | no | `0.0.0.0`, `8080` | Address and port inside the container. Leave them; the stack, Compose file and health checks expect 8080 |
 | `MTG_MYSTIC_FORGE_URL` | no, *stack* | empty (no research tools) | Internal Mystic Forge MCP URL; the stack sets `http://mtg-assistant-mysticforge:8000/mcp` |
 | `MTG_WRITES_ENABLED` | no, *stack* | `false` | `true` lets approved proposals be applied to Archidekt |
@@ -618,9 +638,11 @@ gateway's `environment:` in the stack file, or it has no effect.
 | `MTG_CIMD_ENABLED` | no, *stack* | `true` | Accept clients that identify themselves with a Client ID Metadata Document URL (Claude's "Use Claude's published identity" and, reportedly, ChatGPT). `false` leaves only automatic registration |
 | `MTG_CIMD_ALLOWED_HOSTS` | no, *stack* | empty (any https host) | Comma-separated hostnames whose metadata documents are accepted, subdomains included. **Leave it empty** unless you know every client's host: listing only Claude's can lock ChatGPT out. Details in [OPERATIONS.md](OPERATIONS.md#which-ai-clients-may-connect) |
 | `MTG_SCRYFALL_LOOKUP_INTERVAL` | no, *stack* | `0.5` | Seconds between single-card Scryfall lookups for card scanning, 0.1 to 5 |
+| *(no setting)* | — | — | Typed card-name suggestions come from Scryfall's card-name catalog (`GET https://api.scryfall.com/catalog/card-names`, about 700 KB), downloaded in the background at start-up and again once a day, and kept in memory (a few MB). Until it has loaded, or if Scryfall is unreachable, suggestions fall back to Scryfall's autocomplete at the interval above; nothing else changes |
 | `MTG_PLUGIN_DIR` | no | `/usr/share/mtg-gateway/plugin` | Folder holding the assistant plugin shipped in the image; serves `/skill`, `/install` and `/plugin/` |
 | `MTG_APP_DIR` | no | `/usr/share/mtg-gateway/app` | Folder holding the Android app (`mtg-assistant-gateway.apk` and `mtg-assistant-gateway.json`) that `/app` hands out; the release build puts it in the image, see [ANDROID.md](ANDROID.md) |
 | `MTG_ANDROID_ASSETLINKS` | no | empty (an empty list is served) | The Android App Links statement list served at `/.well-known/assetlinks.json`, as one JSON list (the whole `assetlinks.json` content, starting with `[`). Anything that isn't valid JSON, or isn't a list, stops the gateway at startup with a config error. Only needed if you build the app's App Links flavor for this gateway ([ANDROID.md](ANDROID.md#12-app-links-opening-gateway-links-in-the-app)) |
+| `MTG_ANDROID_PACKAGE` | no | `local.mtgassistantgateway.app` | The Android app's package ID, which the browser sign-in hands back to ([ANDROID.md](ANDROID.md#13-privacy-and-security-notes)). Change it only if you build the app with another package ID ([ANDROID.md](ANDROID.md#11-the-package-id)); anything that isn't a package ID stops the gateway at startup with a config error |
 | `PUID`, `PGID` | yes, *stack* | | User and group the process runs as |
 
 The card scanning settings (`MTG_SCAN_*`) are listed in

@@ -43,6 +43,14 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- The phone's browser handing a sign-in back (BrowserSignIn.kt). The gateway's page
+                 opens it through an intent: link naming this app's package. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="mtgassistant-signin" android:host="signin" />
+            </intent-filter>
             <!-- A gateway link shared to the app (from the browser's share sheet, say) opens there. -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />

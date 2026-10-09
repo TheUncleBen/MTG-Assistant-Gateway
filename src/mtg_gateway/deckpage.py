@@ -23,6 +23,7 @@ from typing import Any
 
 from .archidekt import VOTE_UP, Deck, DeckCard, featured_scryfall_id, format_label
 from .deck_stats import WUBRG, colour_letter, is_basic_land, is_land, mana_pips
+from .mana import mana_html as _mana_html
 from .theme import icon
 from .views import cards_by_category
 
@@ -78,26 +79,8 @@ def card_image(card: DeckCard, size: str = "normal") -> str | None:
 
 
 def mana_html(cost: str) -> str:
-    """Mana pips as our own CSS circles: {2}{G}{U} -> three pips. Hybrid pips show both letters."""
-    if not cost:
-        return ""
-    out = []
-    for sym in _SYMBOL.findall(cost):
-        parts = [p for p in sym.upper().split("/") if p != "P"]
-        letters = [colour_letter(p) for p in parts]
-        colours = [c for c in letters if c]
-        if len(colours) >= 2:
-            out.append(
-                f"<i class='pip pip-{colours[0]} hy' data-b='{colours[1]}'>"
-                f"<span class='sr-only'>{esc(sym)}</span></i>"
-            )
-        elif colours:
-            out.append(f"<i class='pip pip-{colours[0]}'><span class='sr-only'>{esc(sym)}</span></i>")
-        elif parts and parts[0] in ("C",):
-            out.append("<i class='pip pip-C'><span class='sr-only'>colorless</span></i>")
-        else:
-            out.append(f"<i class='pip pip-g'>{esc(parts[0] if parts else sym)}</i>")
-    return "<span class='mana' aria-label='mana cost'>" + "".join(out) + "</span>"
+    """Mana pips (mana.py): {2}{G}{U} -> three discs with our own glyphs."""
+    return _mana_html(cost)
 
 
 def money(value: float | None) -> str:
@@ -264,6 +247,22 @@ def featured(deck: Deck) -> DeckCard | None:
     return None
 
 
+def legality_chip_html(deck: Deck, stats: dict[str, Any] | None) -> str:
+    """The banner's Legality chip: green when every card is legal in the deck's format, red with
+    the number of problems otherwise, nothing for a deck without a format. Rendered again by the
+    edit endpoint (api.py) so the page can swap it in after a card changes."""
+    stats = stats or {}
+    legal_problems = stats.get("legality_problems") or []
+    if not deck.format:
+        return ""
+    if not legal_problems:
+        return (
+            f"<span class='legal ok' title='Legal in {esc(deck.format or 'this format')}'>"
+            f"{icon('check')} Legality</span>"
+        )
+    return f"<span class='legal bad' title='{len(legal_problems)} problem(s)'>{icon('x')} Legality</span>"
+
+
 def banner_html(
     deck: Deck,
     stats: dict[str, Any] | None,
@@ -278,15 +277,7 @@ def banner_html(
     style = f" style=\"--art:url('{esc(art_url)}')\"" if art_url else ""
     bracket = stats.get("bracket_estimate") or {}
     bracket_names = {1: "Exhibition (1)", 2: "Core (2)", 3: "Upgraded (3)", 4: "Optimized (4)", 5: "cEDH (5)"}
-    legal_problems = stats.get("legality_problems") or []
-    legality = (
-        f"<span class='legal ok' title='Legal in {esc(deck.format or 'this format')}'>"
-        f"{icon('check')} Legality</span>"
-        if deck.format and not legal_problems
-        else f"<span class='legal bad' title='{len(legal_problems)} problem(s)'>{icon('x')} Legality</span>"
-        if deck.format
-        else ""
-    )
+    legality = legality_chip_html(deck, stats)
     privacy = (
         f"<span class='privacy' title='Private deck'>{icon('eye-off')}</span>"
         if deck.private
@@ -323,21 +314,22 @@ def banner_html(
             f"<button type='submit' title='Copy this deck into your own Archidekt account as a new private "
             f"deck'>{icon('clone')} Clone deck</button></form>"
         )
-    # Archidekt's own playtester (draw, mulligan, play by hand), shown inside the gateway's
-    # playtest page: the gateway builds no copy of it, so a game plays the same wherever it is
-    # started. A private deck needs the person's own Archidekt sign-in in that browser.
+    # Archidekt's own playtester (draw, mulligan, play by hand) in its own tab (D-13, T-098): a frame
+    # inside the gateway never carries the person's Archidekt sign-in, so a private deck stayed empty
+    # there. The app opens the link in the phone's browser, where that sign-in lives.
     primary += (
-        f"<a class='btn' href='/decks/{did}/playtest' "
-        f"title='Draw and play this deck by hand in Archidekt&#39;s playtester'>{icon('play')} Playtest</a>"
+        f"<a class='btn' href='https://archidekt.com/playtester-v2/{did}' target='_blank' "
+        "rel='noreferrer noopener' title='Draw and play this deck by hand in Archidekt&#39;s playtester, "
+        f"in a new tab'>{icon('play')} Playtest</a>"
     )
     if csrf:
         # The same run as the assistant's run_deck_report: statistics, validation and 300
         # goldfish games on the research service, stored under History.
         primary += (
             f"<form method='post' action='/decks/{did}/report' class='inline'>{csrf_in}"
-            "<button type='submit' title='Goldfish simulation (300 games), validation and statistics; the "
-            f"same run the assistant&#39;s run_deck_report makes. Saved under History.'>{icon('stats')} "
-            "Run simulation</button></form>"
+            "<button type='submit' data-busy-label='Simulating…' title='300 goldfish games, a decklist check "
+            "and the deck statistics, saved under History. The run takes up to a minute; the result page "
+            f"opens when it is done.'>{icon('stats')} Run simulation</button></form>"
         )
     more_items = []
     if own and csrf:
@@ -464,8 +456,8 @@ def toolbar_html(deck: Deck, *, own: bool, view: str, group: str, sort: str, q: 
     add = (
         "<form method='get' action='/decks/{did}/edit' class='field add quick'>"
         "<label for='quick'>Add card</label><div class='quickrow'>"
-        "<input id='quick' type='text' name='add' placeholder='Quick add (card name)' list='cardnames' "
-        "autocomplete='off'><datalist id='cardnames'></datalist>"
+        "<input id='quick' type='text' name='add' placeholder='Quick add (card name)' data-suggest='cards' "
+        "autocomplete='off'>"
         f"<button type='submit' class='primary'>{icon('search')} "
         "<span>Card search</span></button></div></form>"
         if own
@@ -522,8 +514,8 @@ def text_row(card: DeckCard, *, deck: Deck, owned: dict[str, int] | None = None)
     hover = f"<span class='hover'><img src='{esc(img)}' alt='' loading='lazy'></span>" if img else ""
     cls = " side" if not deck.in_deck(card) else ""
     return (
-        f"<li class='row{cls}' data-name='{esc(card.name.lower())}' data-card='{esc(card.name)}'"
-        f"{_card_data(card)}>"
+        f"<li class='row{cls}' tabindex='0' role='button' data-name='{esc(card.name.lower())}' "
+        f"data-card='{esc(card.name)}'{_card_data(card, deck)}>"
         f"<span class='q'>{card.quantity}</span>"
         f"<span class='n'>{_label_dot(card)}{_owned_dot(card, owned)}<span "
         f"class='name'>{esc(card.name)}</span>"
@@ -573,12 +565,21 @@ def card_view_attrs(card: DeckCard, *, img: str | None = None) -> str:
     )
 
 
-def _card_data(card: DeckCard) -> str:
-    """Data attributes the page script reads for the card viewer and for dragging between stacks."""
-    return card_view_attrs(card, img=card_image(card))
+def _card_data(card: DeckCard, deck: Deck) -> str:
+    """Data attributes the page script reads for the card viewer and for its own edits (the card
+    menu, the viewer's quantity buttons, dragging between stacks): the row's count, zone (main
+    or side), first category (empty when Archidekt has none) and relation id, which pick the row
+    an edit targets when the same card sits in the deck and on the maybeboard."""
+    zone = "main" if deck.in_deck(card) else "side"
+    cat = card.categories[0] if card.categories else ""
+    rel = f" data-rel='{card.relation_id}'" if card.relation_id is not None else ""
+    return (
+        card_view_attrs(card, img=card_image(card))
+        + f" data-qty='{card.quantity}' data-zone='{zone}' data-cat='{esc(cat)}'{rel}"
+    )
 
 
-def image_card(card: DeckCard, *, owned: dict[str, int] | None = None) -> str:
+def image_card(card: DeckCard, *, deck: Deck, owned: dict[str, int] | None = None) -> str:
     img = card_image(card)
     body = (
         f"<img src='{esc(img)}' alt='{esc(card.name)}' loading='lazy'>"
@@ -596,7 +597,8 @@ def image_card(card: DeckCard, *, owned: dict[str, int] | None = None) -> str:
     if card.game_changer:
         extra += "<span class='corner gc' title='Game changer'></span>"
     return (
-        f"<div class='c' data-name='{esc(card.name.lower())}' data-card='{esc(card.name)}'{_card_data(card)} "
+        f"<div class='c' data-name='{esc(card.name.lower())}' data-card='{esc(card.name)}'"
+        f"{_card_data(card, deck)} "
         f"title='{esc(card.name)}' tabindex='0' role='button'>{body}{qty}{extra}"
         f"{_finish_badge(card)}{_owned_dot(card, owned)}</div>"
     )
@@ -635,14 +637,36 @@ def cards_html(
                 + "</ul>"
             )
         else:
-            body = "<div class='cards'>" + "".join(image_card(c, owned=owned) for c in cards) + "</div>"
+            imgs = "".join(image_card(c, deck=deck, owned=owned) for c in cards)
+            body = f"<div class='cards'>{imgs}</div>"
         sections.append(f"<section class='stack' data-group='{esc(name)}'>{head}{body}</section>")
     # data-own and data-group let deck.js offer drag-and-drop between categories on the member's
     # own deck (the drops become one proposal, applied from the review page like every other edit).
-    droppable = " data-own='1'" if own and group == "category" else ""
+    # data-own marks the member's own deck (the card menu and the viewer offer edits); data-drop
+    # the category grouping on it, where cards drag between stacks. The card menu's "Move to" list
+    # (deck.js) names the deck's own categories whatever the grouping, and knows the maybeboard.
+    cats = [c["name"] for c in deck.categories if isinstance(c.get("name"), str)]
+    droppable = (
+        " data-own='1'"
+        + (" data-drop='1'" if group == "category" else "")
+        + f" data-cats='{esc(json.dumps(cats, separators=(',', ':')))}'"
+        f" data-side='{esc(deck.side_category())}'"
+        f" data-excluded='{esc(json.dumps(sorted(excluded), separators=(',', ':')))}'"
+        if own
+        else ""
+    )
+    # The card menu (deck.js) draws these icons; a template keeps them out of the page's flow.
+    icons = (
+        "<template class='icons'>"
+        + "".join(
+            f"<span data-ic='{n}'>{icon(n)}</span>"
+            for n in ("eye", "swap", "tag", "eye-off", "x", "edit", "external")
+        )
+        + "</template>"
+    )
     return (
-        f"<div class='deckview {esc(view)}' id='cards' data-deck='{esc(deck.id)}'{droppable}>"
-        f"{''.join(sections)}</div>"
+        f"<div class='deckview {esc(view)}' id='cards' data-deck='{esc(deck.id)}' "
+        f"data-grouping='{esc(group)}'{droppable}>{icons}{''.join(sections)}</div>"
     )
 
 
@@ -708,50 +732,10 @@ def _odds_html(deck: Deck, cards: list[DeckCard]) -> str:
     )
 
 
-def stats_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
-    if not stats:
-        return ""
-    pips = {k: float(v) for k, v in (stats.get("colour_pips") or {}).items()}
-    sources = {k: float(v) for k, v in (stats.get("mana_sources") or {}).items() if k in WUBRG}
-    cards = deck.main_cards
-    cost_cards = Counter()
-    prod_cards = Counter()
-    for c in cards:
-        for col in mana_pips(c.mana_cost):
-            cost_cards[col] += c.quantity
-        for col in c.mana_production or {}:
-            if col in WUBRG:
-                prod_cards[col] += c.quantity
-    pip_total = sum(pips.values()) or 1
-    src_total = sum(sources.values()) or 1
-    colour_cards = "".join(
-        "<div class='ccard'>"
-        f"<div class='cname'><i class='pip pip-{col}'></i> {COLOUR_NAMES[col]}</div>"
-        f"<div class='lbl'>Cost</div><div class='pbar'><span class='fill seg-{col}' "
-        f"style='width:{100 * pips.get(col, 0) / pip_total:.0f}%'></span>"
-        f"<b>{100 * pips.get(col, 0) / pip_total:.0f}%</b></div>"
-        f"<div class='sub'>{pips.get(col, 0):g} pips - {cost_cards.get(col, 0)} cards</div>"
-        f"<div class='lbl'>Production</div><div class='pbar'><span class='fill seg-{col}' "
-        f"style='width:{100 * sources.get(col, 0) / src_total:.0f}%'></span>"
-        f"<b>{100 * sources.get(col, 0) / src_total:.0f}%</b></div>"
-        f"<div class='sub'>{sources.get(col, 0):g} mana - {prod_cards.get(col, 0)} cards</div>"
-        "</div>"
-        for col in WUBRG
-        if pips.get(col) or sources.get(col)
-    )
-    curve = stats.get("mana_curve") or {}
-    top = max([int(v or 0) for v in curve.values()] + [1])
-    bars = "".join(
-        f"<div class='bar'><b>{int(v or 0)}</b>"
-        f"<span style='height:{max(2, round(100 * int(v or 0) / top))}%'></span>"
-        f"<em>{esc(k.replace('7+', '7+'))}</em></div>"
-        for k, v in curve.items()
-    )
-    mv_total = sum(c.cmc * c.quantity for c in cards if c.cmc is not None and not is_land(c))
-    types = stats.get("type_counts") or {}
-    rarities = stats.get("rarity_counts") or {}
-    type_rows = "".join(f"<tr><td>{esc(k)}</td><td>{v}</td></tr>" for k, v in types.items())
-    rarity_rows = "".join(f"<tr><td>{esc(k.capitalize())}</td><td>{v}</td></tr>" for k, v in rarities.items())
+def legality_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
+    """The stats panel's Legality block: the cards that are not legal in the deck's format, or
+    one green line. Re-rendered by the edit endpoint after a card changes."""
+    stats = stats or {}
     problems = stats.get("legality_problems") or []
     problems_html = (
         "<div class='legality'><h3>Legality</h3><ul>"
@@ -770,7 +754,13 @@ def stats_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
             else ""
         )
     )
-    odds_html = _odds_html(deck, cards)
+    return problems_html
+
+
+def checks_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
+    """The stats panel's Deck checks block (deck_stats.deck_checks rendered as Archidekt's
+    checklist). Re-rendered by the edit endpoint after a card changes."""
+    stats = stats or {}
     checks = stats.get("checks") or {}
     if checks:
         size = checks.get("deck_size") or {}
@@ -804,6 +794,11 @@ def stats_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
                     + (
                         " · cannot command: " + names(zone["cannot_command"])
                         if zone.get("cannot_command")
+                        else ""
+                    )
+                    + (
+                        f" · not verified: {esc(zone['unverified_note'])}"
+                        if zone.get("unverified_note")
                         else ""
                     ),
                     zone.get("ok", True),
@@ -899,6 +894,56 @@ def stats_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
         )
     else:
         checks_html = ""
+    return checks_html
+
+
+def stats_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
+    if not stats:
+        return ""
+    pips = {k: float(v) for k, v in (stats.get("colour_pips") or {}).items()}
+    sources = {k: float(v) for k, v in (stats.get("mana_sources") or {}).items() if k in WUBRG}
+    cards = deck.main_cards
+    cost_cards = Counter()
+    prod_cards = Counter()
+    for c in cards:
+        for col in mana_pips(c.mana_cost):
+            cost_cards[col] += c.quantity
+        for col in c.mana_production or {}:
+            if col in WUBRG:
+                prod_cards[col] += c.quantity
+    pip_total = sum(pips.values()) or 1
+    src_total = sum(sources.values()) or 1
+    colour_cards = "".join(
+        "<div class='ccard'>"
+        f"<div class='cname'><i class='pip pip-{col}'></i> {COLOUR_NAMES[col]}</div>"
+        f"<div class='lbl'>Cost</div><div class='pbar'><span class='fill seg-{col}' "
+        f"style='width:{100 * pips.get(col, 0) / pip_total:.0f}%'></span>"
+        f"<b>{100 * pips.get(col, 0) / pip_total:.0f}%</b></div>"
+        f"<div class='sub'>{pips.get(col, 0):g} pips - {cost_cards.get(col, 0)} cards</div>"
+        f"<div class='lbl'>Production</div><div class='pbar'><span class='fill seg-{col}' "
+        f"style='width:{100 * sources.get(col, 0) / src_total:.0f}%'></span>"
+        f"<b>{100 * sources.get(col, 0) / src_total:.0f}%</b></div>"
+        f"<div class='sub'>{sources.get(col, 0):g} mana - {prod_cards.get(col, 0)} cards</div>"
+        "</div>"
+        for col in WUBRG
+        if pips.get(col) or sources.get(col)
+    )
+    curve = stats.get("mana_curve") or {}
+    top = max([int(v or 0) for v in curve.values()] + [1])
+    bars = "".join(
+        f"<div class='bar'><b>{int(v or 0)}</b>"
+        f"<span style='height:{max(2, round(100 * int(v or 0) / top))}%'></span>"
+        f"<em>{esc(k.replace('7+', '7+'))}</em></div>"
+        for k, v in curve.items()
+    )
+    mv_total = sum(c.cmc * c.quantity for c in cards if c.cmc is not None and not is_land(c))
+    types = stats.get("type_counts") or {}
+    rarities = stats.get("rarity_counts") or {}
+    type_rows = "".join(f"<tr><td>{esc(k)}</td><td>{v}</td></tr>" for k, v in types.items())
+    rarity_rows = "".join(f"<tr><td>{esc(k.capitalize())}</td><td>{v}</td></tr>" for k, v in rarities.items())
+    problems_html = legality_panel_html(deck, stats)
+    odds_html = _odds_html(deck, cards)
+    checks_html = checks_panel_html(deck, stats)
     bracket = stats.get("bracket_estimate") or {}
     basis = bracket.get("basis") or []
     avg_mv = stats.get("average_mana_value") if stats.get("average_mana_value") is not None else "–"
@@ -1008,6 +1053,34 @@ def _compare_row(name: str, qty_text: str, cards: dict[str, DeckCard]) -> str:
     )
 
 
+def precon_labels(precons: dict[str, list[dict[str, Any]]]) -> list[str]:
+    """'Deck name (Set)' for every preconstructed deck, the labels the compare box suggests."""
+    return [
+        f"{d['name']} ({set_name})"
+        for set_name, rows in precons.items()
+        for d in rows
+        if d.get("id") and d.get("name")
+    ]
+
+
+def precon_by_label(precons: dict[str, list[dict[str, Any]]], text: str) -> int | None:
+    """The deck id of the precon whose label is ``text`` (case-insensitive), or whose bare name is
+    when exactly one precon carries that name; None otherwise."""
+    want = " ".join(text.split()).casefold()
+    if not want:
+        return None
+    by_name: list[int] = []
+    for set_name, rows in precons.items():
+        for d in rows:
+            if not (d.get("id") and d.get("name")):
+                continue
+            if want == f"{d['name']} ({set_name})".casefold():
+                return int(d["id"])
+            if want == str(d["name"]).casefold():
+                by_name.append(int(d["id"]))
+    return by_name[0] if len(by_name) == 1 else None
+
+
 def compare_page_html(
     deck: Deck,
     *,
@@ -1025,12 +1098,7 @@ def compare_page_html(
     when both are Archidekt decks."""
     did = esc(deck.id)
     name = esc(deck.name or f"Deck {deck.id}")
-    options = "".join(
-        f"<option value='{esc(d.get('id'))}'>{esc(d.get('name'))} ({esc(set_name)})</option>"
-        for set_name, rows in precons.items()
-        for d in rows
-        if d.get("id") and d.get("name")
-    )
+    options = esc(json.dumps(precon_labels(precons), ensure_ascii=False))
     form = (
         "<section class='panel comparehead'>"
         f"<div><a href='/decks/{did}'>← {name}</a>"
@@ -1038,9 +1106,8 @@ def compare_page_html(
         f"<form method='get' action='/decks/{did}/compare' class='compareform'>"
         "<label class='field'><span>Other deck: a preconstructed deck from the list, or any Archidekt deck "
         "id or link</span>"
-        f"<input name='with' list='preconlist' value='{esc(other_ref)}' placeholder='Start typing a precon "
-        "name, or paste a deck link' autocomplete='off'></label>"
-        f"<datalist id='preconlist'>{options}</datalist>"
+        f"<input name='with' data-suggest='static' data-options='{options}' value='{esc(other_ref)}' "
+        "placeholder='Start typing a precon name, or paste a deck link' autocomplete='off'></label>"
         "<label class='field'><span>…or paste a decklist (one card per line, Archidekt's export text works)"
         f"</span><textarea name='paste' rows='4' placeholder='1 Sol Ring&#10;1 Arcane Signet'>{esc(paste)}"
         "</textarea></label>"
@@ -1206,8 +1273,10 @@ def deck_list_html(
 
 
 def deck_list_controls_html(
-    *, q: str, order: str, view: str, folders: list[str], folder: str, total: int
+    *, q: str, order: str, view: str, folders: list[str], folder: str, total: int, pending: bool = False
 ) -> str:
+    """The toolbar over the deck list. ``pending``: the list is still being read (the folder picker
+    is rendered hidden and the total left blank; decks.js fills both)."""
     folder_opts = "".join(
         f"<option value='{esc(f)}'{' selected' if f == folder else ''}>{esc(f)}</option>" for f in folders
     )
@@ -1219,14 +1288,14 @@ def deck_list_controls_html(
         + _select("view", {"grid": "Grid", "list": "List"}, view, "View as", "grid")
         + _select("order", LIST_ORDERS, order, "Order by", "sort")
         + (
-            "<div class='field'><label for='f-folder'>Folder</label><span class='sel'>"
-            f"{icon('decks')}<select id='f-folder' name='folder'><option value=''>All folders</option>"
-            f"{folder_opts}"
-            "</select></span></div>"
-            if folders
+            f"<div class='field' id='folder-field'{' hidden' if pending else ''}><label for='f-folder'>"
+            f"Folder</label><span class='sel'>{icon('decks')}<select id='f-folder' name='folder'>"
+            f"<option value=''>All folders</option>{folder_opts}</select></span></div>"
+            if folders or pending
             else ""
         )
-        + f"<div class='field'><span class='lbl'>Total decks: {total}</span>"
+        + f"<div class='field'><span class='lbl' id='decks-total'>Total decks: {'…' if pending else total}"
+        "</span>"
         f"<a class='btn' href='/folders'>{icon('folder')} Folders</a>"
         f"<a class='btn btn-primary' href='/decks/new'>{icon('plus')} New deck</a></div>"
         "<noscript><button type='submit' class='apply'>Apply</button></noscript>"
@@ -1268,11 +1337,7 @@ DECK_CSS = """
 .banner .controls .primary{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center}
 .banner .controls .btn,.banner .controls button{margin:0}
 .banner .controls form.inline{display:contents}
-/* playtest page: Archidekt's playtester framed below a one-line header */
-.playhead,.comparehead{display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap}
-.playframe{display:block;width:100%;height:calc(100dvh - 11rem);min-height:480px;
-  border:1px solid var(--border);border-radius:var(--radius);background:#111}
-.playnote{margin:.5rem 0 0}
+.comparehead{display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap}
 /* compare page */
 .comparehead{flex-direction:column;align-items:stretch}
 .compareform{display:grid;gap:.75rem}
@@ -1367,7 +1432,7 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .field .sel{position:relative;display:block}
 .field .sel > svg{position:absolute;left:.75rem;top:50%;transform:translateY(-50%);color:var(--orange);
   pointer-events:none}
-.field .sel select{padding-left:2.1rem}
+.field .sel > svg ~ select,.field .sel > svg ~ .msel-btn{padding-left:2.1rem}
 .field .search{margin:0}
 .toolbar .apply{margin-top:.5rem}
 @media (max-width:1200px){ .toolbar .controls{grid-template-columns:1fr}
@@ -1387,18 +1452,6 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .stackhead summary.icon-only{width:28px;height:28px;border:0;background:transparent;color:var(--text-muted)}
 .stackhead summary.icon-only:hover{color:var(--orange)}
 
-/* mana pips (own CSS circles, no icon font) */
-.mana{display:inline-flex;gap:2px;align-items:center;white-space:nowrap}
-.pip{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;
-  font-size:10px;font-weight:900;font-style:normal;color:#111;background:#cbc2bf;
-  box-shadow:-1px 1px 0 rgba(0,0,0,.6);flex:none;vertical-align:middle}
-.pip-W{background:#f8f6d8} .pip-U{background:#c1d7e9} .pip-B{background:#bab1ab} .pip-R{background:#e49977}
-.pip-G{background:#a3c095} .pip-C{background:#cbc2bf} .pip-g{background:#cbc2bf}
-.pip.hy{background:linear-gradient(135deg,var(--h1) 50%,var(--h2) 50%)}
-.pip-W.hy{--h1:#f8f6d8} .pip-U.hy{--h1:#c1d7e9} .pip-B.hy{--h1:#bab1ab} .pip-R.hy{--h1:#e49977}
-.pip-G.hy{--h1:#a3c095}
-.pip.hy[data-b=W]{--h2:#f8f6d8} .pip.hy[data-b=U]{--h2:#c1d7e9} .pip.hy[data-b=B]{--h2:#bab1ab}
-.pip.hy[data-b=R]{--h2:#e49977} .pip.hy[data-b=G]{--h2:#a3c095}
 .stats .pip,.ccard .pip{width:18px;height:18px}
 
 /* text view rows (textViewCard: 30px, bold name, mana column) */
@@ -1459,41 +1512,111 @@ ul.rows .hover img{width:100%;height:100%;display:block}
 .deckview.stacks .cards.fanned .c{transform:none}
 .deckview .c.dragging{opacity:.4}
 .deckview .stack.dropping{outline:3px dashed var(--orange);outline-offset:4px;border-radius:5px}
-.deckview[data-own] .stackhead .meta::after{content:' · drag cards here to recategorise';
+.deckview[data-drop] .stackhead .meta::after{content:' · drag cards here to recategorise';
   color:var(--text-muted)}
-@media (hover:none){ .deckview[data-own] .stackhead .meta::after{content:' · hold a card to move it'} }
-/* card viewer: a tapped card, large, with what can be done with it */
+@media (hover:none){ .deckview[data-drop] .stackhead .meta::after{content:' · hold a card to move it'} }
+/* card viewer: a tapped card, large, with what can be done with it. A dialog over a blurred,
+   darkened page; the image column grows with the window, the text column scrolls on its own. */
 .cardview{position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;
-  background:rgba(0,0,0,.72);padding:1rem}
+  background:var(--scrim-strong,rgba(0,0,0,.78));padding:1.5rem;
+  -webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
 .cardview.open{display:flex}
-.cardview .box{display:grid;grid-template-columns:minmax(0,1fr) minmax(14rem,18rem);gap:1rem;max-width:44rem;
-  width:100%;
-  max-height:100%;background:var(--surface);border-radius:var(--radius-panel);padding:1rem;box-shadow:var(--shadow);overflow:auto}
-.cardview img{width:100%;aspect-ratio:5/7;border-radius:4.5%;object-fit:cover;background:var(--surface-2)}
-.cardview .ph{display:flex;align-items:center;justify-content:center;aspect-ratio:5/7;border-radius:4.5%;
-  background:var(--surface-2);color:var(--text-muted);padding:1rem;text-align:center;font-weight:700}
-.cardview h3{margin:0 0 .25rem;font-size:1.2rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
-.cardview h4{margin:.75rem 0 .15rem;font-size:1rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
-.cardview .face:first-child h4{margin-top:.25rem}
-.cardview .meta{color:var(--text-muted);font-size:.9rem;margin:0 0 .5rem}
-.cardview .rules{white-space:pre-line;font-size:.95rem;line-height:1.45;margin:0 0 .75rem}
-.cardview .cardtext{max-height:40vh;overflow:auto;padding-right:.25rem}
-.cardview .printing{margin:.25rem 0 .25rem}
-.cardview .flavor{font-style:italic;color:var(--text-muted);font-size:.9rem;white-space:pre-line;
-  margin:0 0 .75rem}
-.cardview .facts{margin:0 0 .25rem} .cardview .legal{margin:0 0 .75rem;font-size:.85rem;line-height:1.4}
-.cardview .legal b{font-weight:600;color:var(--text)}
-.cardview .info{min-width:0}
-.cardview .acts{display:flex;flex-direction:column;gap:.5rem}
-.cardview .acts .btn,.cardview .acts button{margin:0;width:100%}
-.cardview .box{position:relative} .cardview .close{position:absolute;top:.6rem;right:.6rem}
-@media (min-width:601px){ .cardview .info h3{padding-right:5.5rem} }
-@media (max-width:600px){ .cardview{padding:0;align-items:flex-end}
-  .cardview .box{grid-template-columns:1fr;max-height:92vh;
-    border-radius:var(--radius-panel) var(--radius-panel) 0 0;
-    padding:.75rem .75rem calc(.75rem + env(safe-area-inset-bottom))}
-  .cardview img,.cardview .ph{max-width:52vw;margin:0 auto}
-  .cardview .cardtext{max-height:none} }
+html.cardview-open{overflow:hidden}
+.cardview .box{display:grid;grid-template-columns:minmax(14rem,24rem) minmax(16rem,1fr);
+  grid-template-rows:auto minmax(0,1fr);grid-template-areas:'pic head' 'pic info';gap:.75rem 1.25rem;
+  width:min(100%,58rem);max-height:100%;background:var(--surface);color:var(--text);
+  border:1px solid var(--border);border-radius:var(--radius-panel);padding:1.25rem;
+  box-shadow:0 12px 40px rgba(0,0,0,.5);overflow:hidden;animation:cardin .16s ease-out}
+@keyframes cardin{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){ .cardview .box{animation:none} }
+.cardview .pane{grid-area:pic;min-width:0;align-self:start}
+.cardview img,.cardview .ph{width:100%;aspect-ratio:5/7;border-radius:4.5%;object-fit:cover;
+  background:var(--surface-2);display:block}
+.cardview .ph{display:flex;align-items:center;justify-content:center;color:var(--text-muted);padding:1rem;
+  text-align:center;font-weight:700}
+.cardview .info{grid-area:info;min-width:0;display:flex;flex-direction:column;gap:.75rem;min-height:0}
+.cardview .head{grid-area:head;display:flex;align-items:flex-start;justify-content:space-between;gap:.75rem;
+  min-width:0}
+.cardview h3{margin:0;font-size:1.35rem;line-height:1.25;display:flex;align-items:center;gap:.6rem;
+  flex-wrap:wrap;overflow-wrap:anywhere;min-width:0}
+.cardview .close{flex:none;margin:0;width:2.4rem;min-height:2.4rem;height:2.4rem;font-size:1.5rem;
+  line-height:1;font-weight:400;border-radius:50%}
+.cardview .cardtext{overflow:auto;min-height:0;padding-right:.25rem;overscroll-behavior:contain}
+.cardview h4{margin:.9rem 0 .2rem;font-size:1.05rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.cardview .face:first-child h4{margin-top:0}
+.cardview .typeline{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .75rem;margin:0 0 .5rem;
+  font-weight:700;font-size:.95rem}
+.cardview .typeline .pt{padding:0 .5rem;border:1px solid var(--border);border-radius:var(--radius);
+  background:var(--bg)}
+.cardview .rules{white-space:pre-line;font-size:1rem;line-height:1.5;margin:0 0 .6rem;overflow-wrap:anywhere}
+.cardview .flavor{font-style:italic;color:var(--text-muted);font-size:.93rem;white-space:pre-line;
+  margin:0 0 .6rem;overflow-wrap:anywhere}
+.cardview .facts{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:.3rem .9rem;margin:0;
+  font-size:.9rem;border-top:1px solid var(--border-soft);padding-top:.75rem}
+.cardview .facts dt{color:var(--text-muted);font-weight:700}
+.cardview .facts dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.cardview .facts .gc{color:var(--orange-text);font-weight:700}
+.cardview .chips{display:flex;flex-wrap:wrap;gap:.3rem}
+.cardview .chip{display:inline-block;padding:.05rem .5rem;border-radius:1rem;background:var(--surface-2);
+  font-size:.82rem;line-height:1.5;white-space:nowrap}
+.cardview .acts{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:auto;padding-top:.25rem}
+.cardview .acts .btn,.cardview .acts button{margin:0;flex:1 1 auto}
+@media (max-width:700px){
+  .cardview{padding:0;align-items:flex-end;-webkit-backdrop-filter:none;backdrop-filter:none}
+  .cardview .box{grid-template-columns:minmax(0,44%) minmax(0,1fr);grid-template-rows:auto auto;
+    grid-template-areas:'pic head' 'info info';gap:.75rem;width:100%;max-height:94vh;max-height:94dvh;
+    border-radius:var(--radius-panel) var(--radius-panel) 0 0;border-bottom:0;
+    padding:.75rem .75rem calc(.75rem + env(safe-area-inset-bottom));overflow:auto;animation-name:cardup}
+  @keyframes cardup{from{transform:translateY(12px)}to{transform:none}}
+  .cardview .head{flex-direction:column-reverse;align-items:flex-end;justify-content:flex-end;gap:.5rem}
+  .cardview .head h3{align-self:stretch;font-size:1.2rem}
+  .cardview .cardtext{overflow:visible}
+  .cardview .acts .btn,.cardview .acts button{flex:1 1 100%} }
+@media (min-width:1400px){
+  .cardview .box{width:min(100%,66rem);grid-template-columns:minmax(16rem,27rem) minmax(0,1fr)} }
+/* the card menu (deck.js): the shared .menu panel, fixed where the pointer or finger was */
+.ctxmenu{position:fixed;z-index:65;min-width:220px;max-width:min(20rem,calc(100vw - 1rem));overflow:auto;
+  overscroll-behavior:contain;border:1px solid var(--border)}
+.ctxmenu .head{text-transform:none;letter-spacing:0;font-size:.9rem;color:var(--text);white-space:normal;
+  overflow-wrap:anywhere;padding-bottom:.35rem;border-bottom:1px solid var(--border);margin-bottom:.25rem}
+.ctxmenu .ic,.ctxmenu .i{width:18px;height:18px;flex:none;color:var(--orange);fill:none;stroke:currentColor;
+  stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.ctxmenu a,.ctxmenu button,.ctxmenu .item{white-space:normal;min-height:38px}
+.ctxmenu .qtyrow{display:flex;align-items:center;gap:.5rem;min-height:38px;padding:0 1rem;cursor:default}
+.ctxmenu .qtyrow .lbl{flex:1}
+.ctxmenu .qtyrow .step{width:36px;min-width:36px;height:32px;min-height:32px;padding:0;justify-content:center;
+  border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);font-size:1.15rem;
+  font-weight:700;line-height:1}
+.ctxmenu .qtyrow .step:hover:not(:disabled){background:var(--border)}
+.ctxmenu .qtyrow .n{min-width:1.6rem;text-align:center;font-variant-numeric:tabular-nums}
+.ctxmenu .more .chev{margin-left:auto;color:var(--text-muted);font-size:1.2rem;line-height:1}
+.ctxmenu .more[aria-expanded=true] .chev{transform:rotate(90deg)}
+.ctxmenu .sub{display:flex;flex-direction:column;background:var(--surface);border-top:1px solid var(--border);
+  border-bottom:1px solid var(--border);max-height:40vh;overflow:auto}
+.ctxmenu .sub button{padding-left:2.4rem;min-height:34px;font-size:.95rem}
+.ctxmenu .sub .on:disabled{color:var(--toolbar-active);font-weight:700}
+.ctxmenu.busy{opacity:.6;pointer-events:none}
+.deckview .c.held,.deckview .row.held{outline:3px solid var(--orange);outline-offset:2px}
+/* the toast after a save (theme .toast, bottom right): the message, Undo and History */
+.deck-toast{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;padding:.75rem 1rem;z-index:59;
+  border-left:4px solid var(--blue);color:var(--text)}
+.deck-toast.error{border-left-color:var(--red)} .deck-toast.warn{border-left-color:var(--orange)}
+.deck-toast[role=alertdialog]{z-index:66}  /* a question ("Save anyway?") sits above the viewer */
+.deck-toast .msg{flex:1 1 10rem;min-width:0;overflow-wrap:anywhere}
+.deck-toast .acts{display:inline-flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.deck-toast .acts button,.deck-toast .acts .btn{margin:0;min-height:34px;padding:0 .75rem}
+.deck-toast .acts a:not(.btn){color:var(--orange-text);font-weight:700;text-decoration:underline}
+.deck-toast .close{width:2rem;min-height:2rem;height:2rem;padding:0;margin:0 0 0 auto;border:0;
+  background:transparent;font-size:1.3rem;line-height:1;color:var(--text-muted)}
+.deck-toast .close:hover{color:var(--text)}
+@media (max-width:600px){ .deck-toast{right:.5rem;left:.5rem;bottom:.5rem;width:auto;max-width:none} }
+@media (max-width:900px){ .has-tabbar .deck-toast{bottom:calc(64px + env(safe-area-inset-bottom))} }
+/* the viewer's own copies control: one fewer, the count, one more */
+.cardview .acts .qtyctl{display:inline-flex;align-items:center;gap:.4rem;flex:1 1 auto}
+.cardview .acts .qtyctl button{flex:0 0 auto;width:2.6rem;padding:0;font-size:1.2rem;font-weight:700}
+.cardview .acts .qtyctl .n{min-width:2rem;text-align:center;font-size:1.1rem;
+  font-variant-numeric:tabular-nums}
+.cardview .acts .qtyctl.busy{opacity:.6}
 /* pending category moves (own deck, stacks or grid): a bar like the editor's */
 .movebar{position:sticky;bottom:0;z-index:20;display:none;align-items:center;gap:.5rem;flex-wrap:wrap;
   background:var(--toolbar-bg);color:var(--toolbar-text);padding:.5rem 1rem;margin:1rem -1rem 0;
@@ -1536,21 +1659,17 @@ ul.rows .hover img{width:100%;height:100%;display:block}
 .curve .bar span{display:block;width:70%;background:var(--orange);border-radius:2px 2px 0 0}
 .curve .bar b{font-variant-numeric:tabular-nums;margin-bottom:.15rem}
 .curve .bar em{font-style:normal;font-weight:700;margin-top:.3rem}
-.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(6.5rem,1fr));gap:.5rem;margin:0 0 .75rem}
-.tile{background:var(--surface-2);border:1px solid var(--border-soft);border-radius:3px;padding:.5rem .6rem;
-  display:flex;flex-direction:column;gap:.1rem}
-.tile b{font-size:1.25rem;font-variant-numeric:tabular-nums} .tile span{color:var(--text-muted);
-  font-size:.8rem}
-.tile .spark{color:var(--orange);width:100%;height:36px}
+/* .tiles/.tile/.spark: theme.py (shared with the report and history pages) */
 table.qty{width:100%;border-collapse:collapse;font-size:.93rem}
-table.qty td{padding:.3rem .25rem;border-top:1px solid var(--surface-2)}
+table.qty td{padding:.3rem .25rem;border-top:1px solid var(--surface-2);overflow-wrap:anywhere}
 table.qty td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-weight:700}
 .legality ul{margin:.25rem 0 0;padding-left:1.2rem} .legality .ok{color:var(--green-text);font-weight:700}
 .odds{margin-top:1.25rem} .odds h3{margin:0 0 .4rem}
 .odds .oddsform{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;font-size:.9rem;
   color:var(--text-muted)}
-.odds .oddsform select,.odds .oddsform input{height:2rem;padding:0 .4rem;font-size:.9rem;width:auto;
-  min-width:6rem;flex:none}
+.odds .oddsform select,.odds .oddsform .msel-btn,.odds .oddsform input{height:2rem;padding:0 .4rem;
+  font-size:.9rem;width:auto;min-width:6rem;flex:none}
+.odds .oddsform .msel-btn{padding-right:1.5rem;background-position:right .5rem center}
 .odds .oddsform input{width:4rem;min-width:4rem}
 .odds .oddstable{margin-top:.5rem;max-height:16rem;overflow:auto;display:block;width:100%}
 .odds .oddstable td:nth-child(2),.odds .oddstable td:nth-child(3){text-align:right;white-space:nowrap}
@@ -1562,7 +1681,7 @@ table.qty td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-
   padding:.2rem 0;border-top:1px solid var(--border)} .checks li:first-child{border-top:0}
 .checks li b{flex:none} .checks li span{color:var(--text-muted);overflow-wrap:anywhere}
 .checks li.ok svg{color:var(--green-text)} .checks li.bad svg{color:var(--red-text,#d33)}
-@media (max-width:1000px){ .stats .grid{grid-template-columns:1fr} }
+@media (max-width:1000px){ .stats .grid{grid-template-columns:minmax(0,1fr)} }
 
 .description{font-size:16px} .description .empty{color:var(--text-muted)}
 
@@ -1577,11 +1696,14 @@ table.qty td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-
     align-items:center}
   .listbar .field:last-of-type .lbl{margin-right:auto} }
 @media (max-width:600px){ .listbar .controls{grid-template-columns:1fr} }
-ul.decklist.grid{display:grid;grid-template-columns:repeat(5,1fr);gap:25px;margin-bottom:1.25rem}
-@media (max-width:1500px){ ul.decklist.grid{grid-template-columns:repeat(4,1fr)} }
-@media (max-width:1200px){ ul.decklist.grid{grid-template-columns:repeat(3,1fr)} }
-@media (max-width:1000px){ ul.decklist.grid{grid-template-columns:repeat(2,1fr)} }
-@media (max-width:600px){ ul.decklist.grid{grid-template-columns:1fr;gap:1rem} }
+/* minmax(0,1fr), never 1fr: a long deck name (the "Copy of - …" names the app itself makes) must shrink
+   and ellipsise inside its tile, not widen the track and scroll the page sideways. */
+ul.decklist.grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:25px;margin-bottom:1.25rem}
+@media (max-width:1500px){ ul.decklist.grid{grid-template-columns:repeat(4,minmax(0,1fr))} }
+@media (max-width:1200px){ ul.decklist.grid{grid-template-columns:repeat(3,minmax(0,1fr))} }
+@media (max-width:1000px){ ul.decklist.grid{grid-template-columns:repeat(2,minmax(0,1fr))} }
+@media (max-width:600px){ ul.decklist.grid{grid-template-columns:minmax(0,1fr);gap:1rem} }
+ul.decklist .deck,ul.decklist .deck a,ul.decklist .info{min-width:0}
 ul.decklist .deck a{display:flex;flex-direction:column;color:var(--text);text-decoration:none;
   border-radius:5px;overflow:hidden;border:1px solid var(--border);background:var(--surface)}
 ul.decklist .deck.selected a{outline:2px solid var(--orange)}
@@ -1615,8 +1737,11 @@ ul.decklist.list .thumb{width:90px;height:60px;flex:none}
 ul.decklist.list .thumb .ini{font-size:1.5rem} ul.decklist.list .thumb .views{display:none}
 ul.decklist.list .info{flex:1;min-height:0}
 ul.decklist.list .tags{border-top:0;max-width:30%}
+@media (max-width:600px){ ul.decklist.list .deck a{flex-wrap:wrap}
+  ul.decklist.list .tags{max-width:none;flex-basis:100%;border-top:1px solid var(--border-soft)}
+  ul.decklist.list .tags:empty{display:none} }
 ul.decklist.list .deck{margin-bottom:.5rem}
-.pane.list ul.decklist.grid{grid-template-columns:1fr;gap:.75rem}
+.pane.list ul.decklist.grid{grid-template-columns:minmax(0,1fr);gap:.75rem}
 .pane.list ul.decklist .thumb{height:90px}
 
 /* editor (own-deck edits that become one proposal) */
@@ -1630,24 +1755,69 @@ ul.decklist.list .deck{margin-bottom:.5rem}
   box-shadow:0 2px 6px rgba(0,0,0,.35)}
 .editbar button{margin:0}
 .editbar .count{color:inherit;opacity:.85}
+.editbar .backup{display:inline-flex;align-items:center;gap:.35rem;margin:0;font-size:.9rem;
+  opacity:.9;white-space:nowrap}
+.editbar .backup input{margin:0}
 .editbar .status{margin:0;flex-basis:100%}
 .editbar .status:empty{display:none}
 .pendingbox summary{cursor:pointer;font-weight:700}
 .pendingbox summary b{margin-left:.5rem;background:var(--orange);color:#fff;border-radius:10px;
   padding:0 .5rem}
-.addbox form.addcard{display:grid;grid-template-columns:minmax(0,2fr) 5.5rem minmax(0,1fr) minmax(0,1fr) auto;
-  gap:.5rem;align-items:end}
+/* add a card: one search bar. Chips above it say where the card goes; the name box leads with the
+   Add button and the Foil tick beside it; on wide screens the second column also leaves room for
+   the printings that float beside the suggestion list. Never a stray button. */
+.addbox form.addcard{display:grid;gap:.6rem .75rem;align-items:end;grid-template-columns:minmax(0,1fr) auto}
 .addbox form.addcard .field{margin:0}
-.addbox form.addcard button{margin:0;height:var(--ctl)}
+.addbox form.addcard .targets{grid-column:1 / -1;display:flex;flex-wrap:wrap;gap:.35rem;align-items:center}
+.addbox .tchip{margin:0;height:auto;min-height:1.9rem;padding:.15rem .7rem;border-radius:999px;
+  font-size:.86rem;font-weight:600;background:var(--surface);border:1px solid var(--border);
+  color:var(--text-muted)}
+.addbox .tchip.on{background:var(--orange-tint);border-color:var(--orange);color:var(--text)}
+.addbox .tchip.side{margin-left:auto}
+.addbox form.addcard .grow{position:relative}
+.addbox form.addcard .go{display:flex;flex-direction:row;align-items:center;gap:.75rem}
+.addbox form.addcard .go button{margin:0;height:var(--ctl);white-space:nowrap}
+.addbox form.addcard .go .foil{display:inline-flex;align-items:center;gap:.35rem;font-size:.9rem;
+  white-space:nowrap}
+.addbox form.addcard .addstatus{grid-column:1 / -1;margin:0;min-height:1.2em}
+.addbox form.addcard .addstatus:empty{display:none}
+.addprints{display:none}
+@media (min-width:900px){
+  .addbox form.addcard{grid-template-columns:minmax(0,1fr) 19rem}
+  .addprints{display:block;position:absolute;top:calc(100% + 3px);left:calc(100% + .5rem);width:18.5rem;
+    z-index:70;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+    box-shadow:var(--shadow);    padding:.6rem .7rem;max-height:min(24rem,60vh);overflow:auto}
+  .addprints[hidden]{display:none}
+  .addprints .head{display:flex;justify-content:space-between;gap:.5rem;align-items:baseline;
+    margin-bottom:.5rem}
+  .addprints .head b{overflow-wrap:anywhere}
+  .addprints .pgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.4rem}
+  .addprints .print{border:2px solid transparent;border-radius:6px;background:var(--surface-2);padding:.2rem;
+    margin:0;height:auto;display:flex;flex-direction:column;gap:.15rem;align-items:center;cursor:pointer;
+    min-width:0}
+  .addprints .print img{width:100%;aspect-ratio:5/7;border-radius:4.5%;object-fit:cover}
+  .addprints .print .cap{font-size:.7rem;color:var(--text-muted);white-space:nowrap}
+  .addprints .print.current{border-color:var(--orange)}
+  .addprints .print:hover,.addprints .print:focus-visible{border-color:var(--link)}
+  .addprints .hint{margin:.5rem 0 0} }
+@media (max-width:600px){
+  .addbox form.addcard{grid-template-columns:1fr}
+  .addbox form.addcard .go{justify-content:space-between}
+  .addbox form.addcard .go button{flex:1} }
+/* categories side by side on wide screens, one column on phones */
+.cats.existing{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,36rem),1fr));gap:1rem;
+  align-items:start}
+.cats.existing > details.cat{margin:0}
 .addbox form.scanpick{display:flex;gap:.5rem;align-items:end;flex-wrap:wrap;margin-bottom:.75rem}
 .addbox form.scanpick button{margin:0}
 details.cat summary{display:flex;justify-content:space-between;align-items:center;cursor:pointer;
   font-weight:700;font-size:14px;list-style:none;padding:.25rem 0}
 details.cat summary::-webkit-details-marker{display:none}
-details.cat summary b{color:var(--text-muted);font-weight:400}
+details.cat summary b{color:var(--text-muted);font-weight:400;flex:none}
+details.cat summary .cname{min-width:0;overflow-wrap:anywhere}
 ul.erows{list-style:none;margin:.5rem 0 0;padding:0}
-.erow{display:grid;grid-template-columns:34px minmax(0,1fr) auto minmax(8rem,12rem) auto;gap:.6rem;
-  align-items:center;padding:.4rem 0;border-top:1px solid var(--border)}
+.erow{display:grid;grid-template-columns:40px minmax(0,1fr) auto minmax(7rem,10rem) auto;gap:.6rem;
+  align-items:center;padding:.4rem 0;border-top:1px solid var(--border-soft)}
 .erow.changed{background:var(--orange-tint)}
 .erow.removed .name{text-decoration:line-through;color:var(--text-muted)}
 .erow.side .thumb{filter:saturate(.6)}
@@ -1679,10 +1849,12 @@ ul.erows{list-style:none;margin:.5rem 0 0;padding:0}
 .pastebox summary{cursor:pointer;font-weight:700;padding:.4rem 0}
 .pastebox textarea{width:100%;font-family:ui-monospace,monospace;margin:.5rem 0}
 .pastebox .actions{margin-top:.25rem}
-.erow .thumb{width:34px;height:48px;border-radius:3px;object-fit:cover;background:var(--surface-3);
+.erow .thumb{width:40px;height:56px;border-radius:3px;object-fit:cover;background:var(--surface-3);
   display:inline-flex;align-items:center;justify-content:center;color:var(--text-muted)}
-.erow .main{display:flex;flex-direction:column;min-width:0}
-.erow .name{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.erow .main{display:flex;flex-direction:column;min-width:0;gap:.1rem}
+.erow .name{font-weight:700;display:flex;align-items:center;gap:.4rem;min-width:0}
+.erow .name .mana{flex:none}
+.erow .name:not(:has(.mana)){white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
 .erow .meta{font-size:.8rem;color:var(--text-muted)}
 .erow .note:empty{display:none}
 .erow .note{color:var(--orange-text)}
@@ -1690,31 +1862,48 @@ ul.erows{list-style:none;margin:.5rem 0 0;padding:0}
 .erow .qty input{width:3.4rem;height:2.25rem;text-align:center;margin:0;padding:0 .25rem;
   font-variant-numeric:tabular-nums}
 .erow .qty button.mini{margin:0}
-.erow .sel select{height:2.25rem}
+.erow .sel select,.erow .sel .msel-btn{height:2.25rem}
 .erow details.dd summary.mini{display:inline-flex;align-items:center;justify-content:center;width:2.25rem;
   height:2.25rem;padding:0;margin:0}
 .erow .menu .field{display:flex;flex-direction:column;gap:.25rem;padding:.5rem .75rem}
 .erow .menu button{width:100%;text-align:left;border:0;background:none;margin:0;height:35px}
 .erow .menu button:hover{background:var(--surface-3)}
 .erow button.remove{margin:0}
-.picker .pickbox .head{display:flex;justify-content:space-between;align-items:center;gap:1rem}
-.picker .pickbox .head h2{margin:0}
-.picker .prints{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:.6rem;
-  margin-top:.75rem}
+.picker{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;
+  background:rgba(0,0,0,.78);padding:1.5rem;-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
+.picker[hidden]{display:none}
+.picker .pickbox{width:min(100%,64rem);max-height:100%;display:flex;flex-direction:column;gap:.5rem;
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-panel);padding:1.25rem;
+  box-shadow:0 12px 40px rgba(0,0,0,.5);overflow:hidden}
+.picker .pickbox .head{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem}
+.picker .pickbox .head h2{margin:0;font-size:1.3rem;overflow-wrap:anywhere}
+.picker .pickbox .close{flex:none;margin:0;width:2.4rem;min-height:2.4rem;height:2.4rem;font-size:1.5rem;
+  line-height:1;font-weight:400;border-radius:50%}
+.picker .status{margin:0}
+.picker .prints{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:.6rem;
+  overflow:auto;min-height:0;padding:2px}
 .picker .print{border:2px solid transparent;border-radius:6px;background:var(--surface-2);padding:.3rem;
   margin:0;height:auto;display:flex;flex-direction:column;gap:.3rem;align-items:center;cursor:pointer}
 .picker .print img{width:100%;aspect-ratio:5/7;border-radius:4.5%;object-fit:cover}
 .picker .print .cap{font-size:.75rem;color:var(--text-muted)}
 .picker .print.current{border-color:var(--orange)}
 .picker .print:hover{border-color:var(--link)}
+@media (max-width:700px){
+  .picker{padding:0;align-items:flex-end;-webkit-backdrop-filter:none;backdrop-filter:none}
+  .picker .pickbox{width:100%;max-height:94vh;border-radius:var(--radius-panel) var(--radius-panel) 0 0;
+    border-bottom:0;padding:.75rem .75rem calc(.75rem + env(safe-area-inset-bottom))}
+  .picker .prints{grid-template-columns:repeat(auto-fill,minmax(96px,1fr))} }
 @media (max-width:600px){
   .editbar{top:auto;bottom:50px;margin:0;position:fixed;left:0;right:0;
     padding:.5rem max(1rem,env(safe-area-inset-right)) .5rem max(1rem,env(safe-area-inset-left))}
   .editor{padding-bottom:6rem}
   .editbar .review{flex:1}
-  .addbox form.addcard{grid-template-columns:1fr 1fr}
-  .addbox form.addcard .grow,.addbox form.addcard button{grid-column:1 / -1}
-  .erow{grid-template-columns:34px minmax(0,1fr) auto;grid-template-rows:auto auto}
+  .addbox form.addcard{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .addbox form.addcard .grow{grid-column:1 / -1;grid-row:1}
+  .addbox form.addcard .qtyf{grid-column:2;grid-row:2}
+  .addbox form.addcard .go{grid-column:1;grid-row:2} .addbox form.addcard .go button{width:100%}
+  .addbox form.addcard .field:not(.grow):not(.qtyf):not(.go){grid-row:auto;grid-column:auto}
+  .erow{grid-template-columns:40px minmax(0,1fr) auto;grid-template-rows:auto auto}
   .erow .sel{grid-column:2;grid-row:2}
   .erow details.dd,.erow button.remove{grid-column:3;grid-row:2;justify-self:end}
 }
