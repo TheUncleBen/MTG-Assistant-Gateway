@@ -1,4 +1,6 @@
-# syntax=docker/dockerfile:1.7
+# syntax=mirror.gcr.io/docker/dockerfile:1.7
+# Base image and frontend from Google's public mirror of Docker Hub (same images and digests), as in the
+# gateway's Dockerfile: anonymous pulls from Docker Hub are rate-limited and its sign-in service times out.
 # Mystic Forge at a pinned upstream commit, as an internal research and
 # simulation service. Build context: the repository root.
 #
@@ -13,7 +15,7 @@ ARG MF_VERSION=1.3.2
 # Bump when the patch set changes. The image is tagged <MF_VERSION>-<MF_LOCAL>.
 ARG MF_LOCAL=mag2
 
-FROM python:3.14-slim AS source
+FROM mirror.gcr.io/library/python:3.14-slim AS source
 ARG MF_REPO
 ARG MF_COMMIT
 ARG MF_VERSION
@@ -32,7 +34,7 @@ RUN git init -q . \
  && for p in /patches/*.patch; do git apply --verbose "$p"; done \
  && rm -rf .git
 
-FROM python:3.14-slim
+FROM mirror.gcr.io/library/python:3.14-slim
 ARG MF_REPO
 ARG MF_COMMIT
 ARG MF_VERSION

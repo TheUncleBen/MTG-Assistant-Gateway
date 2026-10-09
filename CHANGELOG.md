@@ -16,8 +16,9 @@ twice while fetching the base image.
 ### Fixed
 
 - **Release builds no longer depend on Docker Hub's anonymous pull limit.**
-  The base image and the Dockerfile frontend come from Google's public mirror
-  of Docker Hub (`mirror.gcr.io`, the same images and digests). As a fallback,
+  The base images and the Dockerfile frontend of the gateway and of Mystic
+  Forge come from Google's public mirror of Docker Hub (`mirror.gcr.io`, the
+  same images and digests). As a fallback,
   the image jobs sign in to Docker Hub when the repository secrets
   `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` exist, and skip the sign-in
   otherwise ([DEPLOY.md](docs/DEPLOY.md)).
