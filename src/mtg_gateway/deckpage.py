@@ -23,6 +23,7 @@ from typing import Any
 
 from .archidekt import VOTE_UP, Deck, DeckCard, featured_scryfall_id, format_label
 from .deck_stats import WUBRG, colour_letter, is_basic_land, is_land, mana_pips
+from .mana import mana_html as _mana_html
 from .theme import icon
 from .views import cards_by_category
 
@@ -78,26 +79,8 @@ def card_image(card: DeckCard, size: str = "normal") -> str | None:
 
 
 def mana_html(cost: str) -> str:
-    """Mana pips as our own CSS circles: {2}{G}{U} -> three pips. Hybrid pips show both letters."""
-    if not cost:
-        return ""
-    out = []
-    for sym in _SYMBOL.findall(cost):
-        parts = [p for p in sym.upper().split("/") if p != "P"]
-        letters = [colour_letter(p) for p in parts]
-        colours = [c for c in letters if c]
-        if len(colours) >= 2:
-            out.append(
-                f"<i class='pip pip-{colours[0]} hy' data-b='{colours[1]}'>"
-                f"<span class='sr-only'>{esc(sym)}</span></i>"
-            )
-        elif colours:
-            out.append(f"<i class='pip pip-{colours[0]}'><span class='sr-only'>{esc(sym)}</span></i>")
-        elif parts and parts[0] in ("C",):
-            out.append("<i class='pip pip-C'><span class='sr-only'>colorless</span></i>")
-        else:
-            out.append(f"<i class='pip pip-g'>{esc(parts[0] if parts else sym)}</i>")
-    return "<span class='mana' aria-label='mana cost'>" + "".join(out) + "</span>"
+    """Mana pips (mana.py): {2}{G}{U} -> three discs with our own glyphs."""
+    return _mana_html(cost)
 
 
 def money(value: float | None) -> str:
@@ -1405,18 +1388,6 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .stackhead summary.icon-only{width:28px;height:28px;border:0;background:transparent;color:var(--text-muted)}
 .stackhead summary.icon-only:hover{color:var(--orange)}
 
-/* mana pips (own CSS circles, no icon font) */
-.mana{display:inline-flex;gap:2px;align-items:center;white-space:nowrap}
-.pip{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;
-  font-size:10px;font-weight:900;font-style:normal;color:#111;background:#cbc2bf;
-  box-shadow:-1px 1px 0 rgba(0,0,0,.6);flex:none;vertical-align:middle}
-.pip-W{background:#f8f6d8} .pip-U{background:#c1d7e9} .pip-B{background:#bab1ab} .pip-R{background:#e49977}
-.pip-G{background:#a3c095} .pip-C{background:#cbc2bf} .pip-g{background:#cbc2bf}
-.pip.hy{background:linear-gradient(135deg,var(--h1) 50%,var(--h2) 50%)}
-.pip-W.hy{--h1:#f8f6d8} .pip-U.hy{--h1:#c1d7e9} .pip-B.hy{--h1:#bab1ab} .pip-R.hy{--h1:#e49977}
-.pip-G.hy{--h1:#a3c095}
-.pip.hy[data-b=W]{--h2:#f8f6d8} .pip.hy[data-b=U]{--h2:#c1d7e9} .pip.hy[data-b=B]{--h2:#bab1ab}
-.pip.hy[data-b=R]{--h2:#e49977} .pip.hy[data-b=G]{--h2:#a3c095}
 .stats .pip,.ccard .pip{width:18px;height:18px}
 
 /* text view rows (textViewCard: 30px, bold name, mana column) */
@@ -1480,38 +1451,65 @@ ul.rows .hover img{width:100%;height:100%;display:block}
 .deckview[data-own] .stackhead .meta::after{content:' · drag cards here to recategorise';
   color:var(--text-muted)}
 @media (hover:none){ .deckview[data-own] .stackhead .meta::after{content:' · hold a card to move it'} }
-/* card viewer: a tapped card, large, with what can be done with it */
+/* card viewer: a tapped card, large, with what can be done with it. A dialog over a blurred,
+   darkened page; the image column grows with the window, the text column scrolls on its own. */
 .cardview{position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;
-  background:rgba(0,0,0,.72);padding:1rem}
+  background:var(--scrim-strong,rgba(0,0,0,.78));padding:1.5rem;
+  -webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
 .cardview.open{display:flex}
-.cardview .box{display:grid;grid-template-columns:minmax(0,1fr) minmax(14rem,18rem);gap:1rem;max-width:44rem;
-  width:100%;
-  max-height:100%;background:var(--surface);border-radius:var(--radius-panel);padding:1rem;box-shadow:var(--shadow);overflow:auto}
-.cardview img{width:100%;aspect-ratio:5/7;border-radius:4.5%;object-fit:cover;background:var(--surface-2)}
-.cardview .ph{display:flex;align-items:center;justify-content:center;aspect-ratio:5/7;border-radius:4.5%;
-  background:var(--surface-2);color:var(--text-muted);padding:1rem;text-align:center;font-weight:700}
-.cardview h3{margin:0 0 .25rem;font-size:1.2rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
-.cardview h4{margin:.75rem 0 .15rem;font-size:1rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
-.cardview .face:first-child h4{margin-top:.25rem}
-.cardview .meta{color:var(--text-muted);font-size:.9rem;margin:0 0 .5rem}
-.cardview .rules{white-space:pre-line;font-size:.95rem;line-height:1.45;margin:0 0 .75rem}
-.cardview .cardtext{max-height:40vh;overflow:auto;padding-right:.25rem}
-.cardview .printing{margin:.25rem 0 .25rem}
-.cardview .flavor{font-style:italic;color:var(--text-muted);font-size:.9rem;white-space:pre-line;
-  margin:0 0 .75rem}
-.cardview .facts{margin:0 0 .25rem} .cardview .legal{margin:0 0 .75rem;font-size:.85rem;line-height:1.4}
-.cardview .legal b{font-weight:600;color:var(--text)}
-.cardview .info{min-width:0}
-.cardview .acts{display:flex;flex-direction:column;gap:.5rem}
-.cardview .acts .btn,.cardview .acts button{margin:0;width:100%}
-.cardview .box{position:relative} .cardview .close{position:absolute;top:.6rem;right:.6rem}
-@media (min-width:601px){ .cardview .info h3{padding-right:5.5rem} }
-@media (max-width:600px){ .cardview{padding:0;align-items:flex-end}
-  .cardview .box{grid-template-columns:1fr;max-height:92vh;
-    border-radius:var(--radius-panel) var(--radius-panel) 0 0;
-    padding:.75rem .75rem calc(.75rem + env(safe-area-inset-bottom))}
-  .cardview img,.cardview .ph{max-width:52vw;margin:0 auto}
-  .cardview .cardtext{max-height:none} }
+html.cardview-open{overflow:hidden}
+.cardview .box{display:grid;grid-template-columns:minmax(14rem,24rem) minmax(16rem,1fr);
+  grid-template-rows:auto minmax(0,1fr);grid-template-areas:'pic head' 'pic info';gap:.75rem 1.25rem;
+  width:min(100%,58rem);max-height:100%;background:var(--surface);color:var(--text);
+  border:1px solid var(--border);border-radius:var(--radius-panel);padding:1.25rem;
+  box-shadow:0 12px 40px rgba(0,0,0,.5);overflow:hidden;animation:cardin .16s ease-out}
+@keyframes cardin{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){ .cardview .box{animation:none} }
+.cardview .pane{grid-area:pic;min-width:0;align-self:start}
+.cardview img,.cardview .ph{width:100%;aspect-ratio:5/7;border-radius:4.5%;object-fit:cover;
+  background:var(--surface-2);display:block}
+.cardview .ph{display:flex;align-items:center;justify-content:center;color:var(--text-muted);padding:1rem;
+  text-align:center;font-weight:700}
+.cardview .info{grid-area:info;min-width:0;display:flex;flex-direction:column;gap:.75rem;min-height:0}
+.cardview .head{grid-area:head;display:flex;align-items:flex-start;justify-content:space-between;gap:.75rem;
+  min-width:0}
+.cardview h3{margin:0;font-size:1.35rem;line-height:1.25;display:flex;align-items:center;gap:.6rem;
+  flex-wrap:wrap;overflow-wrap:anywhere;min-width:0}
+.cardview .close{flex:none;margin:0;width:2.4rem;min-height:2.4rem;height:2.4rem;font-size:1.5rem;
+  line-height:1;font-weight:400;border-radius:50%}
+.cardview .cardtext{overflow:auto;min-height:0;padding-right:.25rem;overscroll-behavior:contain}
+.cardview h4{margin:.9rem 0 .2rem;font-size:1.05rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.cardview .face:first-child h4{margin-top:0}
+.cardview .typeline{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .75rem;margin:0 0 .5rem;
+  font-weight:700;font-size:.95rem}
+.cardview .typeline .pt{padding:0 .5rem;border:1px solid var(--border);border-radius:var(--radius);
+  background:var(--bg)}
+.cardview .rules{white-space:pre-line;font-size:1rem;line-height:1.5;margin:0 0 .6rem;overflow-wrap:anywhere}
+.cardview .flavor{font-style:italic;color:var(--text-muted);font-size:.93rem;white-space:pre-line;
+  margin:0 0 .6rem;overflow-wrap:anywhere}
+.cardview .facts{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:.3rem .9rem;margin:0;
+  font-size:.9rem;border-top:1px solid var(--border-soft);padding-top:.75rem}
+.cardview .facts dt{color:var(--text-muted);font-weight:700}
+.cardview .facts dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.cardview .facts .gc{color:var(--orange-text);font-weight:700}
+.cardview .chips{display:flex;flex-wrap:wrap;gap:.3rem}
+.cardview .chip{display:inline-block;padding:.05rem .5rem;border-radius:1rem;background:var(--surface-2);
+  font-size:.82rem;line-height:1.5;white-space:nowrap}
+.cardview .acts{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:auto;padding-top:.25rem}
+.cardview .acts .btn,.cardview .acts button{margin:0;flex:1 1 auto}
+@media (max-width:700px){
+  .cardview{padding:0;align-items:flex-end;-webkit-backdrop-filter:none;backdrop-filter:none}
+  .cardview .box{grid-template-columns:minmax(0,44%) minmax(0,1fr);grid-template-rows:auto auto;
+    grid-template-areas:'pic head' 'info info';gap:.75rem;width:100%;max-height:94vh;max-height:94dvh;
+    border-radius:var(--radius-panel) var(--radius-panel) 0 0;border-bottom:0;
+    padding:.75rem .75rem calc(.75rem + env(safe-area-inset-bottom));overflow:auto;animation-name:cardup}
+  @keyframes cardup{from{transform:translateY(12px)}to{transform:none}}
+  .cardview .head{flex-direction:column-reverse;align-items:flex-end;justify-content:flex-end;gap:.5rem}
+  .cardview .head h3{align-self:stretch;font-size:1.2rem}
+  .cardview .cardtext{overflow:visible}
+  .cardview .acts .btn,.cardview .acts button{flex:1 1 100%} }
+@media (min-width:1400px){
+  .cardview .box{width:min(100%,66rem);grid-template-columns:minmax(16rem,27rem) minmax(0,1fr)} }
 /* pending category moves (own deck, stacks or grid): a bar like the editor's */
 .movebar{position:sticky;bottom:0;z-index:20;display:none;align-items:center;gap:.5rem;flex-wrap:wrap;
   background:var(--toolbar-bg);color:var(--toolbar-text);padding:.5rem 1rem;margin:1rem -1rem 0;

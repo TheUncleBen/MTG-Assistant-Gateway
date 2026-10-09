@@ -22,6 +22,8 @@ from contextvars import ContextVar
 from starlette.responses import HTMLResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from .mana import SPRITE
+
 THEME_COOKIE = "mtg_theme"
 FEEDBACK_SCRIPT = "/static/feedback.js"
 # The Content-Security-Policy of every page render() builds (some pages replace it with their own,
@@ -262,12 +264,32 @@ button.thumbbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px
 .form-actions .status{margin:0 0 0 auto;color:var(--text-muted);font-size:.9rem}
 @media (max-width:600px){ .form-actions > button:not(.mini),.form-actions > .btn{width:100%} }
 
+/* mana and rules-text symbols: own glyphs on Archidekt-coloured discs (mana.py, the sprite in <body>) */
+.mana{display:inline-flex;gap:2px;align-items:center;white-space:nowrap;vertical-align:middle}
+.pip{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;
+  color:#111;background:#cbc2bf;box-shadow:-1px 1px 0 rgba(0,0,0,.55);flex:none;vertical-align:-.2em;
+  font-style:normal;line-height:1}
+.pip svg{width:70%;height:70%;fill:currentColor;display:block}
+.pip b{font-size:10px;font-weight:900;line-height:1}
+.pip.big b{font-size:8px}
+.pip.sm{width:14px;height:14px;margin:0 1px}
+.pip.sm b{font-size:9px}
+.pip-W{background:#f8f6d8} .pip-U{background:#c1d7e9} .pip-B{background:#bab1ab} .pip-R{background:#e49977}
+.pip-G{background:#a3c095} .pip-C{background:#cbc2bf} .pip-g{background:#cbc2bf}
+.pip-T,.pip-Q,.pip-E,.pip-P{background:#cbc2bf} .pip-S{background:#dfe8ee}
+.pip.hy{background:linear-gradient(135deg,var(--h1) 50%,var(--h2) 50%)}
+.pip-W.hy{--h1:#f8f6d8} .pip-U.hy{--h1:#c1d7e9} .pip-B.hy{--h1:#bab1ab} .pip-R.hy{--h1:#e49977}
+.pip-G.hy{--h1:#a3c095}
+.pip.hy[data-b=W]{--h2:#f8f6d8} .pip.hy[data-b=U]{--h2:#c1d7e9} .pip.hy[data-b=B]{--h2:#bab1ab}
+.pip.hy[data-b=R]{--h2:#e49977} .pip.hy[data-b=G]{--h2:#a3c095}
+
 /* typed suggestions (static/suggest.js): a listbox under the box, themed like the dropdown menus */
 .suggest{position:relative;display:block;min-width:0}
 .suggest > input{width:100%}
-.suggest-list{position:absolute;top:calc(100% + 3px);left:0;right:0;z-index:70;margin:0;padding:.3rem 0;
-  list-style:none;max-height:min(19rem,55vh);overflow:auto;overscroll-behavior:contain;
-  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}
+.suggest-list{position:absolute;top:calc(100% + 3px);left:0;right:0;z-index:70;margin:0;
+  padding:.3rem 0;list-style:none;max-height:min(19rem,55vh);overflow:auto;overscroll-behavior:contain;
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+  box-shadow:var(--shadow)}
 .suggest-list li{display:block;padding:.55rem 1rem;cursor:pointer;line-height:1.3;overflow-wrap:anywhere;
   font-weight:400}
 .suggest-list li[aria-selected=true],.suggest-list li:hover{background:var(--surface-2)}
@@ -779,7 +801,7 @@ def render(
         "<meta name='theme-color' content='#111111'>"
         "<link rel='manifest' href='/app.webmanifest'>"
         f"<title>{html.escape(title)} · {html.escape(site)}</title><style>{CSS}</style>{head_extra}</head>"
-        f"<body class='{classes}'>"
+        f"<body class='{classes}'>{SPRITE}"
         "<header class='topbar'><div class='wrap'><div class='left'>"
         f"<a class='brand' href='/'{' aria-current=page' if cur == '/' else ''}>"
         f"<span class='mark'>{icon('layers')}</span>"

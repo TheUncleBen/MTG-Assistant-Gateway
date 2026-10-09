@@ -1,40 +1,93 @@
-/* The card viewer every page shares: the card large, and the whole card readable as text (every
-   face: name, mana cost, type line, rules text, power and toughness or loyalty), plus the printing
-   and finish. Pages pass the card's data and the actions they offer; nothing here talks to the
-   server. Loaded before deck.js, companion.js and collection.js, which call window.MtgCardView. */
+/* The card viewer every page shares: the card large, the whole card readable as text (every
+   face: name, mana cost, type line, rules text with its symbols drawn, power and toughness or
+   loyalty), the printing, prices and legality, and the actions the page offers. Pages pass the
+   card's data; nothing here talks to the server. Mana and rules symbols are the gateway's own
+   glyphs (mana.py puts the SVG sprite on every page; this draws the same discs). A dialog with
+   a focus trap, Escape, a click on the backdrop and the phone's Back button all close it.
+   Loaded before deck.js, companion.js, compare.js and collection.js, which call window.MtgCardView. */
 (function () {
   "use strict";
   var viewer = null;
   var lastFocus = null;
+  var COLOURS = "WUBRG";
+  var GLYPHS = "WUBRGCTQSEP";
+  var WORDS = { W: "white", U: "blue", B: "black", R: "red", G: "green", C: "colorless", T: "tap", Q: "untap",
+    S: "snow", E: "energy", P: "Phyrexian" };
+  var FORMATS = { commander: "Commander", paupercommander: "Pauper Commander", duel: "Duel Commander",
+    oathbreaker: "Oathbreaker", standard: "Standard", pioneer: "Pioneer", modern: "Modern", legacy: "Legacy",
+    vintage: "Vintage", pauper: "Pauper", brawl: "Brawl", standardbrawl: "Standard Brawl", historic: "Historic",
+    historicbrawl: "Historic Brawl", alchemy: "Alchemy", timeless: "Timeless", explorer: "Explorer",
+    gladiator: "Gladiator", premodern: "Premodern", oldschool: "Old School", penny: "Penny Dreadful",
+    predh: "PreDH", future: "Future", canlander: "Canadian Highlander", "1v1": "1v1", tlr: "Timeless",
+    competitivebrawl: "Competitive Brawl" };
+
   function el(tag, cls, text) {
     var e = document.createElement(tag);
     if (cls) e.className = cls;
     if (text !== undefined && text !== null) e.textContent = text;
     return e;
   }
-  function mana(cost) {
-    // {2}{G}{U} -> the same pips the pages draw server-side (mana_html); hybrid shows both colours
-    var wrap = el("span", "mana");
-    wrap.setAttribute("aria-label", "mana cost " + cost);
-    var re = /\{([^}]+)\}/g, m;
-    while ((m = re.exec(cost))) {
-      var parts = m[1].toUpperCase().split("/").filter(function (p) { return p !== "P"; });
-      var colours = parts.filter(function (p) { return "WUBRG".indexOf(p) >= 0; });
-      var pip;
-      if (colours.length >= 2) {
-        pip = el("i", "pip pip-" + colours[0] + " hy");
-        pip.setAttribute("data-b", colours[1]);
-      } else if (colours.length === 1) {
-        pip = el("i", "pip pip-" + colours[0]);
-      } else if (parts[0] === "C") {
-        pip = el("i", "pip pip-C");
+  function svgUse(id) {
+    var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    var use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+    use.setAttribute("href", "#ms-" + id);
+    svg.appendChild(use);
+    return svg;
+  }
+  function describe(sym) {
+    return sym.toUpperCase().split("/").map(function (p) { return WORDS[p] || p; }).join(" or ");
+  }
+  /* One symbol as a disc, exactly as mana.py draws it server-side. */
+  function pip(sym, small) {
+    var raw = sym.trim();
+    var parts = raw.toUpperCase().split("/");
+    var colours = parts.filter(function (p) { return COLOURS.indexOf(p) >= 0; });
+    var phy = parts.indexOf("P") >= 0;
+    var i = el("i", "pip" + (small ? " sm" : ""));
+    i.setAttribute("role", "img");
+    i.setAttribute("aria-label", describe(raw));
+    if (colours.length) {
+      i.classList.add("pip-" + colours[0]);
+      if (colours.length >= 2) { i.classList.add("hy"); i.setAttribute("data-b", colours[1]); }
+      if (colours.length === 1 && COLOURS.indexOf(parts[0]) < 0 && !phy) {
+        i.appendChild(el("b", null, parts[0]));            // {2/W}
       } else {
-        pip = el("i", "pip pip-g", parts[0] || m[1]);
+        i.appendChild(svgUse(phy ? "P" : colours[0]));
       }
-      wrap.appendChild(pip);
+      return i;
     }
+    var key = parts[0];
+    if (GLYPHS.indexOf(key) >= 0 && key.length === 1) {
+      i.classList.add("pip-" + key);
+      i.appendChild(svgUse(key));
+      return i;
+    }
+    var text = raw.length > 3 ? raw.slice(0, 3) : raw;
+    i.classList.add("pip-g");
+    if (text.length > 1) i.classList.add("big");
+    i.appendChild(el("b", null, text));
+    return i;
+  }
+  function mana(cost) {
+    var wrap = el("span", "mana");
+    var re = /\{([^}]+)\}/g, m;
+    while ((m = re.exec(cost || ""))) wrap.appendChild(pip(m[1], false));
     return wrap;
   }
+  /* Rules text with every {symbol} drawn; newlines kept (the element uses white-space: pre-line). */
+  function symbolize(text, target) {
+    var re = /\{([^}]+)\}/g, m, pos = 0;
+    text = text || "";
+    while ((m = re.exec(text))) {
+      if (m.index > pos) target.appendChild(document.createTextNode(text.slice(pos, m.index)));
+      target.appendChild(pip(m[1], true));
+      pos = m.index + m[0].length;
+    }
+    if (pos < text.length) target.appendChild(document.createTextNode(text.slice(pos)));
+    return target;
+  }
+
   function ensure() {
     if (viewer) return viewer;
     viewer = el("div", "cardview");
@@ -43,7 +96,17 @@
     viewer.setAttribute("aria-label", "Card");
     document.body.appendChild(viewer);
     viewer.addEventListener("click", function (e) { if (e.target === viewer) close(); });
-    document.addEventListener("keydown", function (e) { if (e.key === "Escape" && viewer.classList.contains("open")) close(); });
+    document.addEventListener("keydown", function (e) {
+      if (!viewer.classList.contains("open")) return;
+      if (e.key === "Escape") { e.preventDefault(); close(); return; }
+      if (e.key === "Tab") {                                  // keep focus inside the dialog
+        var f = viewer.querySelectorAll("a[href],button:not([disabled]),input,select,textarea,[tabindex]:not([tabindex='-1'])");
+        if (!f.length) return;
+        var first = f[0], last = f[f.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    });
     return viewer;
   }
   /* Opening pushes a history entry so the phone's Back button (and the browser's) closes the
@@ -53,6 +116,7 @@
     if (!viewer) return;
     viewer.classList.remove("open");
     viewer.textContent = "";
+    document.documentElement.classList.remove("cardview-open");
     if (lastFocus && lastFocus.focus) lastFocus.focus();
   }
   function close() {
@@ -61,11 +125,11 @@
     hide();
   }
   window.addEventListener("popstate", function () {
-    // Back over the viewer's own entry closes it; Back over an entry pushed on top of it (a menu
-    // opened while the card is up) leaves the viewer and its entry in place.
     if (history.state && history.state.cardview) return;
     if (viewer && viewer.classList.contains("open")) { pushed = false; hide(); }
   });
+
+  function titleCase(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : ""; }
   function faceBlock(face, isOnly) {
     var block = el("div", "face");
     if (!isOnly) {
@@ -73,10 +137,21 @@
       if (face.mana) head.appendChild(mana(face.mana));
       block.appendChild(head);
     }
-    var line = [face.type, face.pt ? face.pt : "", face.loyalty ? "Loyalty " + face.loyalty : ""].filter(Boolean).join(" · ");
-    if (line) block.appendChild(el("p", "meta", line));
-    if (face.text) block.appendChild(el("p", "rules", face.text));
+    var line = el("p", "typeline");
+    if (face.type) line.appendChild(el("span", "type", face.type));
+    if (face.pt) line.appendChild(el("span", "pt", face.pt));
+    if (face.loyalty) line.appendChild(el("span", "pt", "Loyalty " + face.loyalty));
+    if (line.childNodes.length) block.appendChild(line);
+    if (face.text) block.appendChild(symbolize(face.text, el("p", "rules")));
+    if (face.flavor) block.appendChild(el("p", "flavor", face.flavor));
     return block;
+  }
+  function fact(dl, term, value, cls) {
+    if (!value) return;
+    dl.appendChild(el("dt", null, term));
+    var dd = el("dd", cls || null);
+    if (typeof value === "string") dd.textContent = value; else dd.appendChild(value);
+    dl.appendChild(dd);
   }
   /* card: {name, img, set, type, mana, text, pt, loyalty, finish, faces: [{name, mana, type, text, pt, loyalty}],
             rarity, price, artist, flavor, salt, rank, legal (comma list of formats), gc}
@@ -86,51 +161,62 @@
     lastFocus = document.activeElement;
     v.textContent = "";
     var box = el("div", "box");
+    var pane = el("div", "pane");
     var pic;
     if (card.img) {
       pic = el("img");
       pic.src = card.img.replace("/small/", "/normal/");
       pic.alt = card.name || "";
+      pic.decoding = "async";
     } else {
       pic = el("div", "ph", card.name || "");
     }
+    pane.appendChild(pic);
     var side = el("div", "info");
+    var head = el("div", "head");
     var title = el("h3", null, card.name || "");
     if (card.mana) title.appendChild(mana(card.mana));
-    side.appendChild(title);
-    var faces = card.faces && card.faces.length > 1 ? card.faces : [{ type: card.type, text: card.text, pt: card.pt, loyalty: card.loyalty }];
+    head.appendChild(title);
+    var closeBtn = el("button", "close icon-only");
+    closeBtn.type = "button";
+    closeBtn.setAttribute("aria-label", "Close");
+    closeBtn.appendChild(el("span", "x", "×"));
+    closeBtn.addEventListener("click", close);
+    head.appendChild(closeBtn);
+    var faces = card.faces && card.faces.length > 1 ? card.faces : [{ type: card.type, text: card.text, pt: card.pt, loyalty: card.loyalty, flavor: card.flavor }];
     var text = el("div", "cardtext");
-    faces.forEach(function (f) { text.appendChild(faceBlock(f, faces.length === 1)); });
-    if (!card.text && !(card.faces && card.faces.length)) text.appendChild(el("p", "meta muted", "No rules text available for this card."));
+    faces.forEach(function (f, i) {
+      if (faces.length > 1 && i === faces.length - 1 && card.flavor && !f.flavor) f.flavor = card.flavor;
+      text.appendChild(faceBlock(f, faces.length === 1));
+    });
+    if (!card.text && !(card.faces && card.faces.length)) text.appendChild(el("p", "muted", "No rules text available for this card."));
     side.appendChild(text);
-    if (card.flavor) text.appendChild(el("p", "flavor", card.flavor));
-    var printing = [card.set, card.rarity ? card.rarity.charAt(0).toUpperCase() + card.rarity.slice(1) : "",
-      card.finish && card.finish.toLowerCase() !== "normal" && card.finish.toLowerCase() !== "nonfoil" ? card.finish.charAt(0).toUpperCase() + card.finish.slice(1) : "",
-      card.artist ? "Art: " + card.artist : ""].filter(Boolean).join(" · ");
-    if (printing) side.appendChild(el("p", "meta printing", printing));
-    var facts = [card.price ? "$" + card.price : "", card.salt ? "Salt " + card.salt : "",
-      card.rank ? "EDHREC rank " + card.rank : "", card.gc ? "Game changer" : ""].filter(Boolean).join(" · ");
-    if (facts) side.appendChild(el("p", "meta facts", facts));
+    var dl = el("dl", "facts");
+    var printing = [card.set, card.rarity ? titleCase(card.rarity) : "",
+      card.finish && card.finish.toLowerCase() !== "normal" && card.finish.toLowerCase() !== "nonfoil" ? titleCase(card.finish) : ""].filter(Boolean).join(" · ");
+    fact(dl, "Printing", printing);
+    fact(dl, "Artist", card.artist);
+    fact(dl, "Price", card.price ? "$" + card.price : "");
+    fact(dl, "Salt", card.salt ? String(card.salt) : "");
+    fact(dl, "EDHREC rank", card.rank ? String(card.rank) : "");
+    if (card.gc) fact(dl, "Note", "Game changer", "gc");
     if (card.legal) {
-      var legal = el("p", "meta legal");
-      legal.appendChild(el("b", null, "Legal in: "));
-      legal.appendChild(document.createTextNode(card.legal.split(",").filter(Boolean).join(", ")));
-      side.appendChild(legal);
+      var chips = el("span", "chips");
+      card.legal.split(",").filter(Boolean).forEach(function (f) { chips.appendChild(el("span", "chip", FORMATS[f] || titleCase(f))); });
+      fact(dl, "Legal in", chips, "legal");
     }
+    if (dl.childNodes.length) side.appendChild(dl);
     if (actions && actions.length) {
       var acts = el("div", "acts");
       actions.forEach(function (a) { acts.appendChild(a); });
       side.appendChild(acts);
     }
-    var closeBtn = el("button", "btn close", "Close");
-    closeBtn.type = "button";
-    closeBtn.setAttribute("aria-label", "Close");
-    closeBtn.addEventListener("click", close);
-    box.appendChild(pic);
+    box.appendChild(pane);
+    box.appendChild(head);
     box.appendChild(side);
-    box.appendChild(closeBtn);
     v.appendChild(box);
     v.classList.add("open");
+    document.documentElement.classList.add("cardview-open");
     if (!pushed) {
       try { history.pushState({ cardview: 1 }, ""); pushed = true; } catch (e) { pushed = false; }
     }
@@ -161,5 +247,5 @@
       gc: node.hasAttribute("data-gc")
     };
   }
-  window.MtgCardView = { open: open, close: close, fromElement: fromElement, mana: mana };
+  window.MtgCardView = { open: open, close: close, fromElement: fromElement, mana: mana, pip: pip, symbolize: symbolize };
 })();

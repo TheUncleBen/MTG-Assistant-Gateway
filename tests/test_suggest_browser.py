@@ -142,8 +142,9 @@ def test_commander_box_suggests_from_a_themed_listbox(server: Server) -> None:
         assert errors == []
         # the form's buttons: one row, one height, inside the panel
         rects = page.evaluate(
-            "() => [...document.querySelectorAll('#searchform .form-actions > *')]"
-            ".map(b => { const r = b.getBoundingClientRect(); return [Math.round(r.top), Math.round(r.height), Math.round(r.right)]; })"
+            "() => [...document.querySelectorAll('#searchform .form-actions > *')].map(b => {"
+            " const r = b.getBoundingClientRect();"
+            " return [Math.round(r.top), Math.round(r.height), Math.round(r.right)]; })"
         )
         assert len(rects) == 2 and rects[0][0] == rects[1][0] and rects[0][1] == rects[1][1], rects
         panel_right = page.evaluate(

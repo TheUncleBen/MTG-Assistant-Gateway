@@ -61,8 +61,8 @@ FORMAT_OPTIONS = sorted(
     ((str(i), format_label(FORMAT_NAMES[i])) for i in sorted(FORMAT_NAMES)), key=lambda kv: kv[1].lower()
 )
 BROWSE_CSS = """
-.searchbar .controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));
-  gap:.9rem 1rem;align-items:end}
+.searchbar .controls{display:grid;gap:.9rem 1rem;align-items:end;
+  grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr))}
 .searchbar .controls .field{margin:0}
 .searchbar .foot{grid-column:1 / -1;display:flex;flex-wrap:wrap;align-items:end;
   justify-content:space-between;gap:.9rem 1.5rem}
@@ -73,8 +73,8 @@ BROWSE_CSS = """
 .searchbar .form-actions{margin:0;flex:1 1 auto;justify-content:flex-end}
 .searchbar .form-actions .btn-primary{min-width:11rem}
 .searchbar .field .lbl{display:block;font-size:1rem;font-weight:700;margin-bottom:.3rem}
-@media (min-width:1200px){ .searchbar .controls{grid-template-columns:minmax(0,2fr) minmax(0,2fr) minmax(0,1.5fr)
-  minmax(10rem,1fr) minmax(10rem,1fr)} }
+@media (min-width:1200px){ .searchbar .controls{
+  grid-template-columns:minmax(0,2fr) minmax(0,2fr) minmax(0,1.5fr) minmax(10rem,1fr) minmax(10rem,1fr)} }
 @media (max-width:600px){ .searchbar .foot{flex-direction:column;align-items:stretch}
   .searchbar .form-actions{justify-content:stretch} }
 .results-head{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap;
