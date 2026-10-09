@@ -155,8 +155,10 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         # Not "/": the dashboard needs a session, so it would send the browser straight to sign-in.
         resp = RedirectResponse("/signed-out", status_code=303)
         resp.delete_cookie(session_cookie, path="/", secure=secure, httponly=True, samesite="lax")
-        # Ask the browser to drop cached pages and site storage (scan drafts and the like) too.
-        resp.headers["Clear-Site-Data"] = '"cache", "storage"'
+        # Ask the browser to drop site storage (scan drafts and the like) too. Not "cache": every
+        # gateway page is already Cache-Control: no-store, and clearing the browser's whole HTTP
+        # cache is what made sign-out take seconds in Chrome (Ben, 2026-10-09).
+        resp.headers["Clear-Site-Data"] = '"storage"'
         resp.set_cookie(
             fresh_cookie, "1", max_age=3600, path="/", secure=secure, httponly=True, samesite="lax"
         )
@@ -319,7 +321,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 state.membership.avatars.delete(sub)
             resp = RedirectResponse("/data-deleted", status_code=303)
             resp.delete_cookie(session_cookie, path="/", secure=secure, httponly=True, samesite="lax")
-            resp.headers["Clear-Site-Data"] = '"cache", "storage"'
+            resp.headers["Clear-Site-Data"] = '"storage"'  # pages are no-store already (see /logout)
             return resp
         if action == "link":
             login_name = data.get("archidekt_login", "").strip()

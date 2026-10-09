@@ -49,7 +49,8 @@ async def test_logout_without_form_token_clears_nothing(h: Harness) -> None:
         assert page.status_code == 200 and "action='/logout'" in page.text
         r = await b.http.post("/logout", data={"csrf": await b.csrf("/logout")})
         assert r.status_code == 303 and r.headers["location"] == "/signed-out"
-        assert r.headers["clear-site-data"] == '"cache", "storage"'
+        # Storage only: pages are no-store, and clearing the HTTP cache made sign-out slow.
+        assert r.headers["clear-site-data"] == '"storage"'
         assert (await b.http.get("/account")).status_code == 302
     finally:
         await b.aclose()

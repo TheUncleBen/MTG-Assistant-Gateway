@@ -108,6 +108,10 @@ extra outbound request a day to Scryfall (the card-name catalog).
   table has the symptom and the way back. The optional `location
   /cards/data/` block from 0.7.4 is withdrawn: the link's token lives ten
   minutes and returns only the member's own data, so it is harmless in a log.
+- **Sign-out took seconds.** The sign-out response (and *Delete my data*)
+  asked the browser to clear its whole HTTP cache as well as the site's
+  storage, which Chrome does slowly. Every gateway page is already sent with
+  `Cache-Control: no-store`, so only the storage is cleared now.
 - **Release notes carry the app files' checksums.** A release that ships the
   Android app lists the SHA-256 of the APK and AAB next to the signing
   certificate, so a download can be checked against the notes.
