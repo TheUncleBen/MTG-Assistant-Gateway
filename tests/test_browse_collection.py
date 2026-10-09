@@ -419,16 +419,30 @@ async def test_guide_is_end_user_documentation(stack: Stack) -> None:
         await b.login("/guide")
         r = await b.http.get("/guide", headers=NAV)
         assert r.status_code == 200
+        # the four Diátaxis parts, in order, each with its own sections nested under it
+        parts = [r.text.index(f"id='{pid}'") for pid in ("tutorials", "howto", "reference", "explanation")]
+        assert parts == sorted(parts)
         for word in (
-            "Your decks",
-            "Finding decks",
-            "Scanning cards",
-            "Your collection",
-            "Proposals and history",
-            "With an AI assistant",
-            "The Android app",
+            "Tutorials",
+            "How-to guides",
+            "Reference",
+            "Explanation",
+            "Link Archidekt",
+            "Your first deck edit",
+            "Add or change cards",
+            "Use your collection",
+            "Scan a photo of your cards",
+            "What the assistant can do, by tool",
+            "Approval modes and risk levels",
+            "Keyboard shortcuts",
+            "Approvals, snapshots and backups",
+            "Privacy and what is stored",
+            "Use the Android app",
         ):
             assert word in r.text, word
+        assert "<nav aria-label='Guide contents'>" in r.text and "src='/static/guide.js'" in r.text
+        js = await b.http.get("/static/guide.js")
+        assert js.status_code == 200 and "guide-q" in js.text
         for banned in ("docker", "Docker", "MTG_", "Portainer", "compose"):
             assert banned not in r.text, banned
         menu = r.text[r.text.index("<nav class='user'") : r.text.index("</header>")]
