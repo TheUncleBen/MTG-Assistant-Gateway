@@ -187,7 +187,7 @@
     sel.addEventListener("change", function () {
       if (sel.value === "\u0000new") {
         var name = (window.prompt("New category name") || "").trim().slice(0, 60);
-        if (!name) { sel.value = current || ""; return; }
+        if (!name) { sel.value = current || ""; if (window.MtgSelect) window.MtgSelect.refresh(sel); return; }
         if (cfg.categories.indexOf(name) < 0) cfg.categories.push(name);
         onchange(name);
         return;

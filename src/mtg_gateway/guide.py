@@ -835,6 +835,12 @@ def guide_body(
             "adds the highlighted card (or the first answer when the list is still catching up) and keeps "
             "the cursor in the box",
         ),
+        (
+            "Any dropdown",
+            "<kbd>Enter</kbd>, <kbd>Space</kbd> or <kbd>↓</kbd>; then <kbd>↑</kbd> <kbd>↓</kbd>, letters, "
+            "<kbd>Enter</kbd>, <kbd>Esc</kbd>",
+            "opens the site's own list; move, jump to a choice by its first letters, pick, close",
+        ),
         ("Guide", "<kbd>Esc</kbd> in the search box", "clears the search and shows the whole guide again"),
         ("Menus and dialogs", "<kbd>Esc</kbd>", "closes the open menu, sheet or dialog"),
     ]

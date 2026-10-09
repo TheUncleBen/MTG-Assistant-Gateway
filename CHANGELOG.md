@@ -205,6 +205,21 @@ catalog). Back up the database before you update, as always.
 - **`/healthz` answers only `{"status": ...}`.** Anyone can ask it, and the
   version and the research service's name told a stranger which project the
   gateway runs. The System card on the admin page still shows both.
+- **Dropdown lists are the site's own.** Every dropdown (the filters on
+  Decks, Search, Collection and History, the deck page's views and odds,
+  the editor's category and finish per row, deck settings, New deck,
+  folders, the profile) opens the gateway's themed list instead of the
+  browser's pop-up, on the website and in the Android app alike. It works
+  from the keyboard (Enter, Space or an arrow opens it; arrows, Home, End
+  and the first letters move; Enter picks; Escape closes) and on phones
+  and touch screens it is a bottom sheet with finger-sized rows. The
+  underlying form controls are unchanged, so filters still apply as soon as
+  a choice is made, and a page with many dropdowns (the editor) builds a
+  list only when it opens.
+- The file pickers on Collection (Import a list) and New deck are themed
+  controls (a Choose a file button and the chosen name), the editor's row
+  category no longer clips its text, and the editor's two Maybeboard chips
+  (the category and the zone) are told apart by their names.
 
 ### Added
 

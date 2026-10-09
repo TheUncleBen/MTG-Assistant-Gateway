@@ -114,7 +114,7 @@ VIZ_CSS = """
 .sel{position:relative;display:block}
 .sel > svg{position:absolute;left:.75rem;top:50%;transform:translateY(-50%);color:var(--orange);
   pointer-events:none}
-.sel select{padding-left:2.1rem}
+.sel > svg ~ select,.sel > svg ~ .msel-btn{padding-left:2.1rem}
 """
 
 CSS = (
@@ -268,6 +268,48 @@ textarea{width:100%;min-height:8rem;padding:.5rem .75rem;font:inherit;font-size:
   resize:vertical}
 input:focus,textarea:focus,select:focus{outline:2px solid var(--focus);outline-offset:1px;
   border-color:var(--orange)}
+/* themed dropdown lists (static/select.js): the native select is kept for the form and for scripts
+   but sits off-screen; the button in its place looks like the closed select, and the open list is
+   the shared .menu panel (a bottom sheet under 600px or with a coarse pointer). The .menu button
+   rules would restyle a trigger inside a menu panel (the collection's row details), hence the
+   doubled selector. */
+select.msel-native{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;
+  clip:rect(0,0,0,0);opacity:0;pointer-events:none}
+.msel-btn,.menu button.msel-btn{display:flex;align-items:center;justify-content:flex-start;gap:0;width:100%;
+  height:var(--ctl);min-height:0;margin:0;padding:0 2rem 0 1rem;font:inherit;font-size:1rem;font-weight:400;
+  text-align:left;white-space:nowrap;border-radius:var(--radius);border:1px solid var(--border);
+  color:var(--text);cursor:pointer;background-color:var(--surface);background-image:url(/static/chevron.svg);
+  background-repeat:no-repeat;background-position:right .75rem center;background-size:10px 6px;
+  transition:background-color .2s ease-in-out}
+.msel-btn:hover,.menu button.msel-btn:hover{background-color:var(--surface-2);color:var(--text)}
+.msel-btn:focus-visible,.menu button.msel-btn:focus-visible{outline:2px solid var(--focus);outline-offset:1px;
+  border-color:var(--orange);background-color:var(--surface)}
+.msel-btn[aria-expanded=true]{border-color:var(--orange)}
+.msel-btn:active:not(:disabled){transform:none;filter:none}
+.msel-btn .msel-txt{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.msel-list{position:fixed;z-index:80;max-width:calc(100vw - 1rem);overflow:auto;overscroll-behavior:contain;
+  border:1px solid var(--border)}
+.msel-list [role=option]{min-height:40px;white-space:normal;overflow-wrap:anywhere;padding:.3rem 1rem}
+.msel-list [role=option][aria-selected=true]{background:var(--border);box-shadow:inset 3px 0 0 var(--orange)}
+.msel-list .head.title{padding:.6rem 1rem .4rem;font-size:.9rem}
+.msel-scrim{position:fixed;inset:0;z-index:79;background:var(--scrim)}
+.msel-list.sheet{left:0;right:0;bottom:0;top:auto;width:auto;max-width:none;max-height:min(70vh,70dvh);
+  min-width:0;border-radius:var(--radius-sheet) var(--radius-sheet) 0 0;border-bottom:0;
+  padding:.5rem 0 calc(.5rem + env(safe-area-inset-bottom));animation:mselup .15s ease-out}
+.msel-list.sheet [role=option]{min-height:44px}
+@keyframes mselup{from{transform:translateY(12px)}to{transform:none}}
+@media (prefers-reduced-motion:reduce){ .msel-list.sheet{animation:none} }
+/* file pickers (static/filepick.js): a themed Choose a file button and the chosen name; the input is
+   off-screen but keeps the keyboard (Tab reaches it, Enter or Space opens the system's picker) */
+.filepick{display:flex;flex-direction:row;flex-wrap:wrap;align-items:center;justify-content:flex-start;
+  gap:.4rem .75rem}
+.filepick > .lbl{flex:0 0 100%}
+.filepick > label.filebtn{display:inline-flex;margin:0;font-weight:400;cursor:pointer}
+.filepick .filebtn input{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;
+  overflow:hidden;clip:rect(0,0,0,0)}
+.filepick .filebtn input:focus-visible + .btn{outline:2px solid var(--focus);outline-offset:1px;
+  border-color:var(--orange)}
+.filepick .fname{color:var(--text-muted);min-width:0;overflow-wrap:anywhere}
 input::placeholder,textarea::placeholder{color:var(--text-muted);opacity:1}
 .check{display:flex;align-items:center;gap:.6rem;margin:.5rem 0;font-weight:400;min-height:2rem;
   cursor:pointer}
@@ -969,6 +1011,7 @@ def render(
         )
         + f"{tabbar}<script src='{FEEDBACK_SCRIPT}' defer></script>"
         "<script src='/static/mana.js' defer></script><script src='/static/suggest.js' defer></script>"
+        "<script src='/static/select.js' defer></script>"
         "</body></html>"
     )
     return HTMLResponse(
