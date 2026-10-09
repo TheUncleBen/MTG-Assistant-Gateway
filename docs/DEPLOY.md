@@ -420,25 +420,38 @@ redeploy, since a Swarm task can come back with a new address.
 **Rate limiting (optional).** `/register`, `/authorize`, `/token` and `/login`
 answer anyone. The gateway trims abandoned sign-ins and anonymous log rows as
 they pile up, but it doesn't slow the requests down. To slow down
-scripted floods, add one line to NPM's `/data/nginx/custom/http_top.conf`
-(create the file in NPM's data folder, then restart NPM):
+scripted floods you need two pieces in two different places. They are not
+interchangeable: Nginx accepts `limit_req_zone` only at its top level, and
+NPM's Advanced tab is inside a `server` block, so pasting it there makes
+Nginx reject the whole proxy host and the site goes offline (a certificate
+or connection error in the browser, `nginx: [emerg]` in NPM's log) until
+you take the line out again.
 
-```nginx
-limit_req_zone $binary_remote_addr zone=mtg_oauth:10m rate=30r/m;
-```
+1. The zone, in a file on the NPM host, **never in the Advanced tab**:
+   `/data/nginx/custom/http_top.conf` inside NPM's data folder (the folder
+   you mounted at `/data`; create the `custom` folder and the file if they
+   don't exist), then restart the NPM container:
 
-and this to the gateway proxy host's Advanced tab, under the lines above:
+   ```nginx
+   limit_req_zone $binary_remote_addr zone=mtg_oauth:10m rate=30r/m;
+   ```
 
-```nginx
-location ~ ^/(register|authorize|token|login)$ {
-  limit_req zone=mtg_oauth burst=30 nodelay;
-  include conf.d/include/proxy.conf;
-}
-```
+2. The limit, in the gateway proxy host's **Advanced** tab, under the
+   lines above (this part belongs there, and only works once step 1 is in
+   place; without it NPM rejects the host too):
+
+   ```nginx
+   location ~ ^/(register|authorize|token|login)$ {
+     limit_req zone=mtg_oauth burst=30 nodelay;
+     include conf.d/include/proxy.conf;
+   }
+   ```
 
 A normal connection makes a handful of these calls, so these numbers never
 get in a real person's way. Leave it out if you'd rather not maintain custom
-NPM files.
+NPM files. If the site is offline after any change to the Advanced tab,
+remove what you pasted and save: NPM goes back to the last configuration
+that worked (see [TROUBLESHOOTING.md](TROUBLESHOOTING.md#the-site-doesnt-load)).
 
 A `502 Bad Gateway` from NPM means it can't reach the gateway. Check that
 NPM's stack has the network from step 1 (exact name) and was redeployed

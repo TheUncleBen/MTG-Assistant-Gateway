@@ -570,8 +570,15 @@ that is gone or not theirs 404 `not_found`, an exhausted Archidekt budget
 429 `rate_limited`, an unreachable Archidekt or Scryfall 503 `unavailable`,
 and each hit is a `card` metric. The first answer is kept for the link's lifetime, so a
 replayed link costs no Archidekt or Scryfall call. The token is the URL's
-last path segment: if your reverse proxy logs request paths, exclude
-`/cards/data/` from its access log (the gateway's own access log is off). The AI app loads
+last path segment, so a reverse proxy that logs request paths keeps it for
+as long as it keeps its access log; that is acceptable: the link expires
+ten minutes after the tool call, answers twenty fetches at most, and
+returns only that member's own data, so a logged token cannot be used
+against anyone. The gateway's own access log is off. Don't add a custom
+`location` for `/cards/data/` to Nginx Proxy Manager's Advanced tab to
+keep it out of the log: NPM's generated `proxy.conf` already carries the
+`proxy_pass` for the host, and the extra block took a gateway offline
+(0.7.4's optional step, withdrawn in 0.7.9). The AI app loads
 each card's pictures and rules text from Scryfall directly, never through
 the gateway. `MTG_APPLY_IN_CHAT=false` removes every card and this endpoint.
 
