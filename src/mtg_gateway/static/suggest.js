@@ -18,24 +18,36 @@
   var counter = 0;
 
   function fold(s) {
+    // the same folding as scan/names.py: hyphens, apostrophes and commas count as spaces
     s = s.toLowerCase();
-    try { s = s.normalize("NFKD").replace(/[̀-ͯ]/g, ""); } catch (e) { /* old engine */ }
-    return s.replace(/\s+/g, " ").trim();
+    try { s = s.normalize("NFKD").replace(/[\u0300-\u036f]/g, ""); } catch (e) { /* old engine */ }
+    return s.replace(/[-'\u2019,]/g, " ").replace(/\s+/g, " ").trim();
+  }
+  function rank(f, q) {
+    // 0 = starts with, 1 = a word starts with, 2 = inside a word, -1 = absent (as names.py)
+    var at = f.indexOf(q);
+    if (at < 0) return -1;
+    if (at === 0) return 0;
+    while (at > 0 && /[a-z0-9]/.test(f.charAt(at - 1))) {
+      at = f.indexOf(q, at + 1);
+      if (at < 0) return 2;
+    }
+    return 1;
   }
   function narrow(names, q) {
     var starts = [], words = [], inside = [];
     names.forEach(function (n) {
-      var f = fold(n), at = f.indexOf(q);
-      if (at < 0) return;
-      if (at === 0) starts.push(n);
-      else if (!/[a-z0-9]/.test(f.charAt(at - 1))) words.push(n);
-      else inside.push(n);
+      var where = rank(fold(n), q);
+      if (where === 0) starts.push(n); else if (where === 1) words.push(n); else if (where === 2) inside.push(n);
     });
     return starts.concat(words, inside).slice(0, LIMIT);
   }
   function highlight(li, name, q) {
-    var f = fold(name), at = f.indexOf(q);
-    // the folded text keeps one character per character, so the offsets line up with the name
+    // fold without collapsing spaces, so the offsets line up with the name character for character
+    var f = name.toLowerCase();
+    try { f = f.normalize("NFKD").replace(/[\u0300-\u036f]/g, ""); } catch (e) { /* old engine */ }
+    f = f.replace(/[-'\u2019,]/g, " ");
+    var at = f.indexOf(q);
     if (at < 0 || f.length !== name.length) { li.textContent = name; return; }
     li.appendChild(document.createTextNode(name.slice(0, at)));
     var m = document.createElement("mark");
@@ -147,9 +159,13 @@
       close();
       input.dispatchEvent(new CustomEvent("suggest:pick", { bubbles: true, detail: { name: name, card: cards[fold(name)] || null } }));
       input.dispatchEvent(new Event("change", { bubbles: true }));
-      if (input.hasAttribute("data-suggest-submit") && input.form) {
-        if (input.form.requestSubmit) input.form.requestSubmit(); else input.form.submit();
-      }
+      if (input.hasAttribute("data-suggest-submit") && input.form) submit(input.form);
+    }
+    function submit(form) {
+      if (form.requestSubmit) { form.requestSubmit(); return; }
+      // older engines: run the form's own submit handlers; only navigate when none took over
+      var ev = new Event("submit", { bubbles: true, cancelable: true });
+      if (form.dispatchEvent(ev)) form.submit();
     }
     function show(names, q) {
       if (document.activeElement !== input) return;
@@ -202,9 +218,13 @@
       inflight = ctrl;
       var mine = ++seq;
       fetch("/scan/api/search?q=" + encodeURIComponent(raw.trim()), { credentials: "same-origin", signal: ctrl ? ctrl.signal : undefined })
-        .then(function (r) { return r.ok ? r.json() : { names: [] }; })
+        .then(function (r) {
+          // signed out, busy or Scryfall down is not "no such card": close and remember nothing
+          if (!r.ok) { if (mine === seq) close(); return null; }
+          return r.json();
+        })
         .then(function (d) {
-          if (mine !== seq) return;      // a newer request is out
+          if (!d || mine !== seq) return;      // failed, or a newer request is out
           var names = (d.names || []).slice(0, LIMIT);
           memory[q] = names;
           if (names.length < LIMIT) complete[q] = true;
@@ -227,7 +247,7 @@
       }
       if (e.key === "ArrowDown") { e.preventDefault(); if (items.length) setActive((active + 1) % items.length); }
       else if (e.key === "ArrowUp") { e.preventDefault(); if (items.length) setActive((active - 1 + items.length) % items.length); }
-      else if (e.key === "Enter") { if (active >= 0) { e.preventDefault(); pick(active); } else if (items.length && input.hasAttribute("data-suggest-submit")) { e.preventDefault(); pick(0); } else close(); }
+      else if (e.key === "Enter") { if (active >= 0) { e.preventDefault(); pick(active); } else if (items.length && input.hasAttribute("data-suggest-submit") && shownFor === fold(input.value)) { e.preventDefault(); pick(0); } else close(); }
       else if (e.key === "Escape") { e.preventDefault(); close(); }
       else if (e.key === "Tab") { close(); }
     });

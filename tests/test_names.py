@@ -7,7 +7,7 @@ import asyncio
 
 import pytest
 
-from mtg_gateway.scan.names import NameCatalog, fold
+from mtg_gateway.scan.names import NameCatalog, fold, rank
 from mtg_gateway.scan.scryfall import ScryfallClient
 from mtg_gateway.scan.service import ScanService
 
@@ -26,9 +26,38 @@ NAMES = [
 ]
 
 
-def test_fold_drops_accents_and_case() -> None:
-    assert fold("Lim-DÛL") == "lim-dul"
+def test_fold_drops_accents_case_and_joiners() -> None:
+    assert fold("Lim-DÛL's Vault") == "lim dul s vault"
     assert fold("  Sol   Ring ") == "sol ring"
+    assert fold("Shelob, Child") == "shelob child"
+
+
+def test_rank_prefers_a_later_word_start_over_an_earlier_inside_hit() -> None:
+    assert rank("sunscape apprentice", "ap") == 1
+    assert rank("apprentice wizard", "ap") == 0
+    assert rank("zap", "ap") == 2
+    assert rank("zap", "zz") is None
+
+
+def test_catalog_close_cancels_a_running_download() -> None:
+    async def run() -> None:
+        started = asyncio.Event()
+
+        class Slow:
+            async def catalog_card_names(self) -> list[str]:
+                started.set()
+                await asyncio.sleep(60)
+                return []
+
+        cat = NameCatalog(lambda: Slow())
+        cat.ensure()
+        await started.wait()
+        task = cat._task
+        cat.close()
+        await asyncio.sleep(0)
+        assert task is not None and task.cancelled()
+
+    asyncio.run(run())
 
 
 def test_suggest_ranks_prefix_then_word_start_then_inside() -> None:
@@ -37,6 +66,8 @@ def test_suggest_ranks_prefix_then_word_start_then_inside() -> None:
     assert cat.suggest("sol") == ["Sol Ring", "Solemn Simulacrum", "Marisol Fighter", "Unsol Ring Of Fire"]
     assert cat.suggest("shelo") == ["Shelob, Child of Ungoliant", "Shelob, Dread Weaver", "Shelob's Ambush"]
     assert cat.suggest("lim-dul") == ["Lim-Dûl the Necromancer"]
+    assert cat.suggest("lim dul") == ["Lim-Dûl the Necromancer"]
+    assert cat.suggest("shelob child") == ["Shelob, Child of Ungoliant"]
     assert cat.suggest("ice") == ["Fire // Ice"]
     assert cat.suggest("s") == []  # too short
     assert cat.suggest("zzz") == []

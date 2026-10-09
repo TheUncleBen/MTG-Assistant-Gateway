@@ -617,3 +617,16 @@ async def test_another_persons_public_deck_can_be_cloned_but_not_edited(stack: S
     finally:
         stack.ark.private.add(43)
         await b.aclose()
+
+
+def test_precon_by_label_needs_the_set_when_two_precons_share_a_name() -> None:
+    from mtg_gateway.deckpage import precon_by_label
+
+    precons = {
+        "Set A": [{"id": 1, "name": "Twin Deck"}, {"id": 3, "name": "Only Once"}],
+        "Set B": [{"id": 2, "name": "Twin Deck"}],
+    }
+    assert precon_by_label(precons, "twin deck (set b)") == 2
+    assert precon_by_label(precons, "Twin Deck") is None  # ambiguous: the label form is required
+    assert precon_by_label(precons, "only once") == 3
+    assert precon_by_label(precons, "") is None
