@@ -330,7 +330,10 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         if not s.writes_enabled:
             # kept for review, like every proposal while writes are off; the page goes there
             return ok({"applied": False, "proposal_id": pid, "review_url": f"/proposals/{pid}"}, 201)
-        result = await decks.apply(who.sub, pid, via="browser")
+        # A quick edit from the deck page (one click: a copy more, a move, a removal) keeps the
+        # gateway's snapshot but not the extra copy on Archidekt (D-02): one deck copy per click
+        # would fill the backup folder and slow each save by paced Archidekt writes.
+        result = await decks.apply(who.sub, pid, via="browser", archidekt_backup=False)
         applied = result.get("state") == "applied"
         out: dict[str, Any] = {
             "applied": applied,

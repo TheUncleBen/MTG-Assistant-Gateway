@@ -135,7 +135,8 @@ extra outbound request a day to Scryfall (the card-name catalog).
   gateway's own snapshot (Restore under History) is always kept, and the
   assistant's applies always make the copy. `POST /api/v1/proposals`
   takes `archidekt_backup: false` for the same choice (browser session,
-  with `apply: true`).
+  with `apply: true`). Quick edits from the deck page's card menu keep the
+  gateway snapshot only.
 - `POST /api/v1/decks/{id}/edit` (browser session only): the deck page's own
   save. Runs the proposals path exactly (propose, hand-edit confirmation,
   apply with a snapshot), reads the deck again from Archidekt and answers

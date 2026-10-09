@@ -37,6 +37,8 @@ async def test_quantity_remove_and_category_edits_answer_with_fresh_rows_and_che
         assert r.status_code == 201, r.text
         d = r.json()
         assert d["ok"] and d["applied"] is True and d["snapshot_id"] and d["stale"] is False
+        # the quick edit keeps the gateway snapshot but makes no extra copy on Archidekt (D-02)
+        assert d["result"]["result"]["archidekt_backup"] == "skipped", d["result"]
         assert len(stack.ark.patches) > patches
         assert d["rows"] == [
             {

@@ -272,9 +272,11 @@ class FakeArchidekt:
         self.decks[deck_id]["updatedAt"] = "2026-10-02T00:00:00Z"
 
     def _deck_printings(self) -> list[dict[str, Any]]:
-        """The printings the decks here hold, in the card-search result shape (``options`` as
-        the row's finish plus Normal), deduplicated by card id."""
-        seen: dict[int, dict[str, Any]] = {}
+        """The printings the decks here hold or have held, in the card-search result shape
+        (``options`` as the row's finish plus Normal), deduplicated by card id. A card taken out of
+        every deck stays known: the live site knows every printed card, so a removal can be undone
+        with an ``add`` without a backup copy keeping the printing around."""
+        seen: dict[int, dict[str, Any]] = getattr(self, "_known_printings", {})
         for d in self.decks.values():
             for c in d["cards"]:
                 card = c["card"]
@@ -283,6 +285,7 @@ class FakeArchidekt:
                 entry = json.loads(json.dumps(card))
                 entry.setdefault("options", sorted({"Normal", c.get("modifier") or "Normal"}))
                 seen[card["id"]] = entry
+        self._known_printings = seen
         return list(seen.values())
 
     def _listing_row(self, d: dict[str, Any]) -> dict[str, Any]:
@@ -309,6 +312,8 @@ class FakeArchidekt:
     def handle(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
         self.calls.append((request.method, path))
+        if request.method != "GET":
+            self._deck_printings()  # remember every printing before a write may take it out
         if self.inject:
             answer, retry_after = self.inject.pop(0)
             if isinstance(answer, Exception):
@@ -842,6 +847,9 @@ class FakeArchidekt:
             for c in d["cards"]:
                 if c["card"]["id"] == card_id:
                     return json.loads(json.dumps(c["card"]))
+        known = getattr(self, "_known_printings", {}).get(card_id)
+        if known:  # a printing every deck here has since let go of (the live site still knows it)
+            return {k: v for k, v in json.loads(json.dumps(known)).items() if k != "options"}
         raise AssertionError(f"unknown printing id {card_id}")
 
     def apply_patch(self, deck: dict[str, Any], entries: list[dict[str, Any]]) -> None:
