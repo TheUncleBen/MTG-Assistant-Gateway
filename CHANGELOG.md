@@ -216,6 +216,11 @@ catalog). Back up the database before you update, as always.
 
 ### Fixed
 
+- **Deck page save:** the one-click save's follow-up (the "Save anyway"
+  after a confirmation question) now answers only the question the page
+  itself asked. A pending proposal an assistant made is refused there with
+  a pointer to its review page, so it keeps its Approve step and its backup
+  copy. An already-answered question cannot be answered twice.
 - **Account menu on the light theme:** its links were white on the light
   menu (and bold, at the bar's height); they are the menu's own colour and
   weight again.

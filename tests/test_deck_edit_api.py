@@ -259,3 +259,50 @@ async def test_a_lagging_re_read_is_read_again_and_marked_stale(
         assert _deck_card(stack, "Cultivate")[0]["quantity"] == 2  # the write itself landed
     finally:
         await b.aclose()
+
+
+async def test_an_assistants_pending_proposal_is_not_applied_by_the_page(stack: Stack) -> None:  # noqa: F811
+    """0.7.9 gate L1: the follow-up with a proposal_id answers only the question this endpoint
+    asked. A proposal an app made (pending, with its Approve card and its backup copy) is refused
+    here and stays pending; nothing reaches Archidekt."""
+    b = await linked(stack)
+    try:
+        token, _cid = await _app_token(stack.h, "assistant-test")
+        before = len(stack.ark.patches)
+        r = await stack.h.http.post(
+            "/api/v1/proposals",
+            json={
+                "kind": "edit",
+                "deck_id": "42",
+                "changes": [{"action": "set_quantity", "card_name": "Cultivate", "quantity": 3}],
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r.status_code == 201, r.text
+        pid = r.json()["proposal_id"]
+        r = await api(b, "POST", "/api/v1/decks/42/edit", {"proposal_id": pid})
+        assert r.status_code == 400 and r.json()["error"] == "invalid", r.text
+        assert "assistant" in r.json()["message"] and r.json()["review_url"] == f"/proposals/{pid}"
+        assert len(stack.ark.patches) == before and _deck_card(stack, "Cultivate")[0]["quantity"] == 1
+        r = await api(b, "GET", f"/api/v1/proposals/{pid}")
+        assert r.status_code == 200 and r.json()["state"] == "pending", r.text
+        # the page's own question, once answered, cannot be answered twice
+        names = [
+            c["card"]["oracleCard"]["name"]
+            for c in stack.ark.decks[42]["cards"]
+            if c["categories"] != ["Commander"]
+        ][:9]
+        r = await api(
+            b,
+            "POST",
+            "/api/v1/decks/42/edit",
+            {"changes": [{"action": "remove", "card_name": n} for n in names]},
+        )
+        assert r.status_code == 201 and r.json()["needs_confirm"] is True, r.text
+        own = r.json()["proposal_id"]
+        r = await api(b, "POST", "/api/v1/decks/42/edit", {"proposal_id": own})
+        assert r.status_code == 201 and r.json()["applied"] is True, r.text
+        r = await api(b, "POST", "/api/v1/decks/42/edit", {"proposal_id": own})
+        assert r.status_code == 400 and "applied" in r.json()["message"], r.text
+    finally:
+        await b.aclose()

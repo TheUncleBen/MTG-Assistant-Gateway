@@ -320,6 +320,18 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
             p = decks.describe(who.sub, pid)
             if p.get("kind") != "edit" or str(p.get("deck_id")) != deck_id.strip():
                 raise DeckError("invalid", "That proposal is not an edit of this deck.")
+            # Only the question this endpoint asked (needs_confirm) is answered here: a proposal an
+            # assistant made waits for the Approve card or the review page, with its backup copy,
+            # whatever its state. The one-click path never applies an app's pending proposal.
+            row = state.db.get_proposal(pid, who.sub) or {}
+            if row.get("created_by_client") != BROWSER_CLIENT_ID:
+                raise DeckError(
+                    "invalid",
+                    "That proposal was made by an assistant. Approve it on its review page.",
+                    review_url=f"/proposals/{pid}",
+                )
+            if p.get("state") != "pending":
+                raise DeckError("invalid", f"That proposal is {p.get('state')}, not waiting for an answer.")
         else:
             p = await decks.propose(who.sub, deck_id, data.get("changes"))
             why = modes.hand_edit_confirm("edit", p.get("rows"))
