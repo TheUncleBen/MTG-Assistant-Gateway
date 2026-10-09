@@ -198,7 +198,9 @@ def guide_body(
     has_collection: bool,
     max_rows: int = modes.DEFAULT_MAX_ROWS,
     archidekt_backups: bool = True,
+    backup_folder: str = "MTG Gateway backups",
 ) -> str:
+    folder = _esc(backup_folder)
     writes = (
         "Edits are switched on here: what you save in the app goes to Archidekt at once, and an "
         "approved proposal from your assistant is applied for you."
@@ -286,7 +288,8 @@ def guide_body(
         "pick up a scan from the Scan page.</li>"
         "<li>“Which cards in this deck do I own?” using your collection.</li></ul>"
         "<p>Your assistant's access can be withdrawn at any time from the Account page (the "
-        "<strong>Connected apps</strong> list) and ends on its own after a week unless you sign in "
+        "<strong>Connected apps</strong> list) and ends on its own after a while (a week, unless "
+        "this gateway is set otherwise) unless you sign in "
         "again.</p>"
     )
     tut_first_edit = (
@@ -397,7 +400,7 @@ def guide_body(
         "open <a href='/proposals'>Proposals</a>, which lists what is waiting, open one to read the diff "
         "and press <strong>Apply</strong> or <strong>Reject</strong>.</span></li>"
         "<li><span>Before the edit is applied, the gateway checks the deck has not changed in the "
-        "meantime, saves a snapshot and puts a backup copy of the deck in an “MTG Gateway backups” folder "
+        f"meantime, saves a snapshot and puts a backup copy of the deck in a “{folder}” folder "
         "on your Archidekt account, then reads the deck back to confirm.</span></li>"
         "<li><span>Your own saves appear under Proposals too, already applied, so every change has a "
         "record.</span></li></ol>"
@@ -896,7 +899,7 @@ def guide_body(
         "<p>Every apply takes a <strong>snapshot</strong> first: the deck as it was, cards and the deck's "
         "own name, description, format, bracket and privacy, kept on the gateway and listed under History "
         "with <strong>Restore</strong>. The gateway can also put a <strong>backup copy</strong> of the "
-        "whole deck in an “MTG Gateway backups” folder on your Archidekt account, so you have a copy "
+        f"whole deck in a “{folder}” folder on your Archidekt account, so you have a copy "
         "even where this gateway is not. "
         f"{backup_box} Applies made by your assistant always make the copy. Quick edits from the deck "
         "page (the card menu and the viewer's quantity buttons) keep the gateway snapshot only, so a "
@@ -957,7 +960,8 @@ def guide_body(
         "<li>Nothing about the cards in your collection is stored on this gateway: it is read from and "
         "written to Archidekt through your link.</li>"
         "<li>Your assistant's access can be withdrawn at any time from the Account page (the "
-        "<strong>Connected apps</strong> list) and ends on its own after a week unless you sign in "
+        "<strong>Connected apps</strong> list) and ends on its own after a while (a week, unless "
+        "this gateway is set otherwise) unless you sign in "
         "again.</li>"
         "<li>Nothing here is public or indexed. Links to Archidekt and Scryfall carry no referrer.</li>"
         "<li><strong>Delete my data</strong> on the Account page removes everything above, your sign-in "
@@ -1055,6 +1059,7 @@ def add_guide_routes(server: MCPServer, state: AppState) -> None:
                 has_collection=getattr(state, "collection", None) is not None,
                 max_rows=int(getattr(s, "auto_apply_max_rows", modes.DEFAULT_MAX_ROWS)),
                 archidekt_backups=bool(getattr(s, "archidekt_backups", True)),
+                backup_folder=s.archidekt_backup_folder,
             ),
             site=s.server_name,
             signed_in=True,

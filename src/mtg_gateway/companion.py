@@ -427,7 +427,8 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             + (
                 f"<p class='muted small backups-note'>{hidden} backup "
                 f"{'copy' if hidden == 1 else 'copies'} made before changes "
-                "are kept out of this list: <a href='/history#backups'>see them under History</a>.</p>"
+                "are kept out of this list (a deck named like a copy counts as one): "
+                "<a href='/history#backups'>see them under History</a>.</p>"
                 if hidden
                 else ""
             )
