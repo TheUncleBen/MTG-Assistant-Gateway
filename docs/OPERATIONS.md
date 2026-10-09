@@ -63,7 +63,11 @@ schema, when the newest backup (and the newest backup copy) was written, and
 the research service's state as the health check last found it.
 
 The gateway logs one line per notable event to standard output (`MTG_LOG_LEVEL`,
-default `INFO`). An unexpected error is logged with its full traceback, counted
+default `INFO`), and one line per request with its method, route, status and
+timing, for example `GET /decks/{deck_id} 200 41ms archidekt=30ms idp=0ms`.
+That line names the route, never the request: no deck number, Archidekt
+username, signed-link token, member ID or query string reaches the log, and
+a request no page answers is logged as its first path segment only. An unexpected error is logged with its full traceback, counted
 under "server_error" on the admin page, and shown to the person only as a plain
 "Something went wrong" page or JSON message. Outbound request URLs are logged
 only at `DEBUG`. Docker keeps at most three 10 MB log files per container
@@ -574,7 +578,8 @@ last path segment, so a reverse proxy that logs request paths keeps it for
 as long as it keeps its access log; that is acceptable: the link expires
 ten minutes after the tool call, answers twenty fetches at most, and
 returns only that member's own data, so a logged token cannot be used
-against anyone. The gateway's own access log is off. Don't add a custom
+against anyone. The gateway's own request log names the route,
+`/cards/data/{token}`, never the token itself (0.7.9). Don't add a custom
 `location` for `/cards/data/` to Nginx Proxy Manager's Advanced tab to
 keep it out of the log: NPM's generated `proxy.conf` already carries the
 `proxy_pass` for the host, and the extra block took a gateway offline

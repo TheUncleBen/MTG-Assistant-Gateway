@@ -19,6 +19,16 @@ catalog). Back up the database before you update, as always.
 
 ### Changed
 
+- **The request log names the route, not the request.** Each request's log
+  line now reads `GET /decks/{deck_id} 200 41ms …` instead of the path
+  itself, so deck numbers, Archidekt usernames, signed-link tokens and member
+  IDs stay out of the gateway's log at the default level, as the Archidekt
+  link disclosure says. A request no page answers is logged as its first
+  path segment only.
+- **Top bar in a narrow window with a mouse** (600 to 800 px, an open Fold's
+  browser or a half-width desktop window): the brand's word steps aside so
+  the section links end before the account button and the page needs no
+  sideways scroll.
 - **Android app: sign-in opens in your phone's browser**, where passkeys
   (Bitwarden and the like) and password managers work, and comes back to
   the app signed in. The gateway's sign-in page inside the app hands off to
@@ -206,6 +216,9 @@ catalog). Back up the database before you update, as always.
 
 ### Fixed
 
+- **Account menu on the light theme:** its links were white on the light
+  menu (and bold, at the bar's height); they are the menu's own colour and
+  weight again.
 - **Simulations lost double-faced cards.** Archidekt names a transforming or
   modal card with both faces (`Enduring Angel // Angelic Enforcer`); the
   research service looks names up through Scryfall's collection endpoint,

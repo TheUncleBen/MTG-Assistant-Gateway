@@ -294,7 +294,8 @@ async def test_request_log_line_has_no_query_string(stack: Stack, caplog: pytest
             assert r.status_code in (302, 303, 404), r.status_code
         lines = [rec.getMessage() for rec in caplog.records if rec.name == "mtg_gateway.requests"]
         assert all("\n" not in ln for ln in lines), lines
-        assert any("/decks/?GET /admin 200?" in ln for ln in lines), lines
+        # 0.7.9: the line names the route, or the first segment of an unrouted path
+        assert any(ln.startswith("GET /decks/… 404 ") for ln in lines), lines
     finally:
         await b.aclose()
 

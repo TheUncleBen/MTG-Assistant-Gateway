@@ -2,10 +2,16 @@
 
 The gateway runs with uvicorn's access log off, so until now nothing said how long a page took
 or where the time went. :class:`TimingMiddleware` is the outermost ASGI layer: it measures the
-whole request, logs ``method path status ms`` at INFO (no query string, no user id) and adds a
-``Server-Timing`` header a browser's network panel shows next to the request, with
+whole request, logs ``method route status ms`` at INFO and adds a ``Server-Timing`` header a
+browser's network panel shows next to the request, with
 ``total``, ``archidekt`` (time this request spent awaiting Archidekt, pacer waits included) and
 ``idp`` (time spent asking the identity provider whether the member is still allowed in).
+
+The log line names the route, not the request: ``/decks/{deck_id}``, ``/users/{username}``,
+``/cards/data/{token}``, so a deck number, an Archidekt username, a signed link's token or a
+member's user ID never reaches the log (nor does the query string or the member). A request no
+route answers (a 404) is logged as its first path segment only. This is what the Archidekt link
+disclosure and OPERATIONS.md promise about the request log.
 
 The two partial times are context variables that :mod:`archidekt` and :mod:`membership` add to;
 a background task started from a request copies the context, so what it awaits later is not
@@ -28,6 +34,25 @@ idp_time: ContextVar[float] = ContextVar("idp_time", default=0.0)
 
 # Noise the log line would add nothing to; the header is still set.
 _QUIET_PREFIXES = ("/static/", "/scan/static/", "/healthz")
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def logged_path(scope: Scope) -> str:
+    """What the log line says for a request: the matched route's template, never the raw path.
+
+    After routing the scope carries the ``Route`` that answered (its ``path`` is the template with
+    ``{param}`` placeholders) and ``root_path`` (a mount's prefix). Without a match, the first
+    path segment and ``/…`` stand in, so an unrouted request cannot write a secret into the log.
+    """
+    root = str(scope.get("root_path") or "")
+    template = getattr(scope.get("route"), "path", None)
+    if isinstance(template, str) and template:
+        if root and template == root:
+            return _CONTROL.sub("?", root)[:300] + "/…"  # a Mount answered: its prefix, no more
+        return _CONTROL.sub("?", root + template)[:300]
+    raw = _CONTROL.sub("?", str(scope.get("path", "")))
+    first, _sep, rest = raw.lstrip("/").partition("/")
+    return "/" + first[:80] + ("/…" if rest else "")
 
 
 def add_time(var: ContextVar[float], seconds: float) -> None:
@@ -64,9 +89,9 @@ class TimingMiddleware:
         try:
             await self.app(scope, receive, send_wrapper)
         finally:
-            # the decoded path is a client's string: one line per request, whatever it holds
-            path = re.sub(r"[\x00-\x1f\x7f]", "?", str(scope.get("path", "")))[:300]
-            if not path.startswith(_QUIET_PREFIXES):
+            raw = str(scope.get("path", ""))
+            if not raw.startswith(_QUIET_PREFIXES):
+                path = logged_path(scope)
                 log.info(
                     "%s %s %d %.0fms archidekt=%.0fms idp=%.0fms",
                     scope.get("method", "-"),

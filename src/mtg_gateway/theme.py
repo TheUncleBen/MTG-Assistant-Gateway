@@ -195,21 +195,29 @@ details.dd > summary::-webkit-details-marker{display:none}
   display:flex;flex-direction:column}
 details.dd .menu{position:absolute;top:calc(100% + .25rem);right:0}
 details.dd .menu.left{left:0;right:auto}
-.menu a,.menu button,.menu .item{display:flex;align-items:center;gap:.6rem;
+/* Each item rule is written twice, plain and under details.dd: inside the top bar the plain
+   .menu rule would lose to .topbar nav a (the bar's white text, 40px, bold) and the account
+   menu's links would be white on the light theme's menu. */
+.menu a,.menu button,.menu .item,details.dd .menu a,details.dd .menu button,details.dd .menu .item{
+  display:flex;align-items:center;gap:.6rem;
   min-height:35px;padding:0 1rem;margin:0;width:100%;background:transparent;border:0;border-radius:0;
   color:var(--text);text-decoration:none;font:inherit;font-weight:400;font-size:1rem;cursor:pointer;
-  text-align:left;white-space:nowrap;justify-content:flex-start}
-.menu a:hover,.menu button:hover,.menu a:focus-visible,.menu button:focus-visible{
-  background:var(--border);color:var(--text)}
-.menu button:disabled{color:var(--text-muted);cursor:default;background:transparent}
+  text-align:left;white-space:nowrap;justify-content:flex-start;height:auto}
+.menu a:hover,.menu button:hover,.menu a:focus-visible,.menu button:focus-visible,
+details.dd .menu a:hover,details.dd .menu button:hover,details.dd .menu a:focus-visible,
+details.dd .menu button:focus-visible{background:var(--border);color:var(--text)}
+.menu button:disabled,details.dd .menu button:disabled{color:var(--text-muted);cursor:default;
+  background:transparent}
 .menu .sep{height:1px;background:var(--border);margin:.25rem 0}
-.menu a.danger,.menu button.danger{color:var(--danger-text);background:transparent;border:0}
-.menu button.danger:hover,.menu button.danger:focus-visible{background:var(--border);color:var(--danger-text)}
+.menu a.danger,.menu button.danger,details.dd .menu a.danger,details.dd .menu button.danger{
+  color:var(--danger-text);background:transparent;border:0}
+.menu button.danger:hover,.menu button.danger:focus-visible,details.dd .menu button.danger:hover,
+details.dd .menu button.danger:focus-visible{background:var(--border);color:var(--danger-text)}
 .menu .head{padding:.4rem 1rem .2rem;font-size:.8rem;font-weight:700;color:var(--menu-head);
   text-transform:uppercase;letter-spacing:.04em}
 .menu form{margin:0;display:contents}
 /* the chosen theme: --orange-text would be 4.0:1 on the light menu */
-.menu .on{color:var(--toolbar-active);font-weight:700}
+.menu .on,details.dd .menu .on{color:var(--toolbar-active);font-weight:700}
 /* a dropdown trigger styled like phatDropdown: bordered, 39px, orange chevron, label floating above */
 .field{position:relative;display:flex;flex-direction:column;gap:.3rem;min-width:0}
 .field > label,.field > .lbl{font-weight:700;margin:0;font-size:1rem}
@@ -487,6 +495,15 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
 @media (max-width:599px){ .pane.aside,.pane.detail.empty{display:none} }
 
 @media (max-width:900px){ .topbar nav.site a{padding:0 .45rem;font-size:.93rem} .brand{margin-right:.25rem} }
+/* A narrow window with a mouse (600 to 800 px, a half-width desktop window or an open Fold):
+   the bar keeps its text links and drops the brand's word, so nothing runs under the account
+   button and the page needs no sideways scroll. The word returns above 800 px. */
+@media (min-width:600px) and (max-width:799.98px) and (hover:hover) and (pointer:fine){
+  .topbar .brand .word{display:none} }
+.topbar .left{flex:1 1 auto}
+.topbar nav.site{flex:none}
+.brand{min-width:0}
+.brand .word{overflow:hidden;text-overflow:ellipsis}
 /* home dashboard: section tiles (Archidekt's landing cards) */
 .home .hero{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:1rem;
   margin:0 0 1rem}

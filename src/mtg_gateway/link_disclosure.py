@@ -156,9 +156,10 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "Logs and backups",
         (
             "Logs never contain your password or session. At the usual log level they hold no "
-            "Archidekt addresses or usernames; a few messages include a deck number. With debug "
-            "logging on, they list the Archidekt addresses called, which include deck numbers and "
-            "usernames.",
+            "Archidekt addresses or usernames: the request log names the kind of page, not the "
+            "deck or the person (/decks/{deck_id}, /users/{username}), and a few other messages "
+            "may include a deck number. With debug logging on, they list the Archidekt addresses "
+            "called, which include deck numbers and usernames.",
             "The gateway's own backups leave out the session and keep everything else above. A "
             "copy of the server's disk made another way includes the session, still encrypted.",
         ),
