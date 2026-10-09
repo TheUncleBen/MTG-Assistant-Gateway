@@ -83,6 +83,10 @@
   });
   document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeMenus(null); });
   // Opening a menu pushes a history entry on phones, so Back closes the menu instead of leaving the page.
+  // `pushed` remembers that this page pushed it and is cleared the moment the entry is given back
+  // (history.back() lands later, as a popstate), so closing one menu and another in quick
+  // succession never goes back twice and leaves the page.
+  var pushed = false, popping = false;
   document.addEventListener("toggle", function (e) {
     var d = e.target;
     if (!(d instanceof HTMLDetailsElement) || !d.classList.contains("dd")) return;
@@ -90,17 +94,31 @@
       closeMenus(d);
       keepOnScreen(d);
       var phone = window.matchMedia("(max-width: 599.98px)").matches || window.matchMedia("(max-width: 899.98px) and ((pointer: coarse) or (hover: none))").matches;
-      if ((phone || document.body.classList.contains("app")) && !history.state?.menu) history.pushState({ menu: 1 }, "");
+      if ((phone || document.body.classList.contains("app")) && !pushed && !history.state?.menu) {
+        history.pushState({ menu: 1 }, "");
+        pushed = true;
+      }
     } else {
       var m = d.querySelector(":scope > .menu");
       if (m) { m.style.left = ""; m.style.right = ""; }
-      if (history.state && history.state.menu) history.back();
+      if (pushed) { pushed = false; popping = true; history.back(); }
     }
   }, true);
-  window.addEventListener("popstate", function () { if (openMenus().length) closeMenus(null); });
-  // A menu panel hangs from its button's right edge; near the left edge of the window (the first
-  // card of a grid, a row's menu on a phone) that would push part of it off screen. The panel
-  // is shifted back inside, with an 8px margin, and the shift is undone when the menu closes.
+  // Back (the button, or the back() above landing): close whatever is open, unless this is the
+  // page's own back() for a menu that is already closed, which must not close the next one.
+  window.addEventListener("popstate", function () {
+    pushed = false;
+    if (popping) { popping = false; return; }
+    if (openMenus().length) closeMenus(null);
+  });
+  // A menu panel hangs from one edge of its button: the right edge usually, the left edge for
+  // the deck page's More menu (.menu.left). Near the matching edge of the window (the first
+  // card of a grid, a row's menu on a phone, More at 720 px) part of it would be off screen.
+  // The panel is moved back inside, with an 8px margin, whichever edge it hangs from: its
+  // used left offset (what the stylesheet's left or right resolved to) plus the shift becomes
+  // an explicit left, so no knowledge of the anchor is needed. (Not a transform: Chrome's
+  // mobile layout still counts a translated panel's old place as page width.) The move is
+  // undone when the menu closes.
   function keepOnScreen(d) {
     var menu = d.querySelector(":scope > .menu");
     if (!menu || menu.classList.contains("sheet")) return;
@@ -109,8 +127,8 @@
     if (r.left < 8) shift = 8 - r.left;
     else if (r.right > vw - 8) shift = (vw - 8) - r.right;
     if (shift) {
-      var anchorRight = getComputedStyle(menu).right !== "auto";
-      if (anchorRight) menu.style.right = (-shift) + "px"; else menu.style.left = shift + "px";
+      menu.style.left = (parseFloat(getComputedStyle(menu).left) || 0) + shift + "px";
+      menu.style.right = "auto";
     }
   }
 

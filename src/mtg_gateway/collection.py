@@ -801,7 +801,9 @@ COLLECTION_CSS = """
 .importbox .actions{margin-top:.5rem}
 @media (max-width:600px){ .addbox form.addcard{grid-template-columns:1fr 1fr}
   .addbox form.addcard .grow,.addbox form.addcard button{grid-column:1 / -1} }
-ul.collgrid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:1rem}
+/* A card is at least 170px wide so its controls row (minus, count, plus, Details, remove:
+   about 158px) always fits inside it instead of touching the next card. */
+ul.collgrid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:1rem}
 ul.collgrid .col .pic{position:relative;aspect-ratio:5/7;border-radius:4.5%;overflow:hidden;
   background:var(--surface-2);
   border:2px solid var(--card-border)}
@@ -817,11 +819,11 @@ ul.collgrid .col .pic .cond{position:absolute;left:6px;bottom:6px;font-size:.7re
 ul.collgrid .col .cap{display:flex;flex-direction:column;margin:.35rem 0 .25rem;min-width:0}
 ul.collgrid .col .cap .name{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 ul.collgrid .col .cap .set{font-size:.8rem;color:var(--text-muted)}
-ul.collgrid .col .act,ul.colllist .act{display:flex;align-items:center;gap:.35rem}
+ul.collgrid .col .act,ul.colllist .act{display:flex;align-items:center;gap:.25rem;min-width:0}
 form.qty{display:inline-flex;align-items:center;gap:.15rem;margin:0}
 form.qty button.mini,form.rm button.mini{margin:0;width:2.25rem;height:2.25rem;padding:0;display:inline-flex;
   align-items:center;justify-content:center}
-form.qty output{min-width:2rem;text-align:center;font-weight:700;font-variant-numeric:tabular-nums}
+form.qty output{min-width:1.5rem;text-align:center;font-weight:700;font-variant-numeric:tabular-nums}
 form.rm{display:inline;margin:0 0 0 auto}
 ul.colllist{list-style:none;margin:0;padding:0}
 ul.colllist .row{display:grid;grid-template-columns:34px minmax(0,1fr) auto auto auto auto;gap:.6rem;

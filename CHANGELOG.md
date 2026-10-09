@@ -249,10 +249,26 @@ catalog). Back up the database before you update, as always.
   The printings card in the chat picks a finish with the card's own chips
   instead of the browser's list. A card's Details menu in the collection
   grid opens inside the window instead of 50 px off its left edge; any
-  dropdown panel near a window edge is shifted back inside. On touch
+  dropdown panel near a window edge is shifted back inside, whichever
+  edge it hangs from (the deck page's More menu stuck out on the right
+  at 720 px). On touch
   screens History's Details, a report's folded sections and the deck's
   text rows are 40 px tall. The review page's third choice is "Not now",
   and the editor shows one Maybeboard chip (the zone's), not two.
+- **No sideways scrolling:** a deck with a long name ("Copy of - Sample
+  Commander Deck", or longer) no longer widens My decks, a profile's
+  decks or the precons grid past the window; the name ellipsises in its
+  tile. A collection card's controls row (minus, count, plus, Details,
+  remove) fits inside its card instead of touching the next card. The
+  review page's three choices sit in one row only from 800 px wide and
+  stack below that, so "Not now" never sits alone on a second line.
+  Inside a collection row's Details menu the Finish, Condition and
+  Language pickers and the Save button keep their borders and colour.
+  A browser test now lays out every page at 18 widths from 320 to 1400
+  px, with a mouse and on a touch screen, with long deck, card and
+  member names, a full collection, history and a pending proposal, and
+  fails on any sideways scroll, clipped or overlapping control, or
+  dropdown panel outside the window.
 - **Touch screens:** the small controls a mouse never minds are at least
   40 px tall on a phone or tablet: the editor's add-to chips, the deck page's
   category button and odds form, folded Details, footer links, the brand

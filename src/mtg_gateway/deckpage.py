@@ -1696,11 +1696,14 @@ table.qty td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-
     align-items:center}
   .listbar .field:last-of-type .lbl{margin-right:auto} }
 @media (max-width:600px){ .listbar .controls{grid-template-columns:1fr} }
-ul.decklist.grid{display:grid;grid-template-columns:repeat(5,1fr);gap:25px;margin-bottom:1.25rem}
-@media (max-width:1500px){ ul.decklist.grid{grid-template-columns:repeat(4,1fr)} }
-@media (max-width:1200px){ ul.decklist.grid{grid-template-columns:repeat(3,1fr)} }
-@media (max-width:1000px){ ul.decklist.grid{grid-template-columns:repeat(2,1fr)} }
-@media (max-width:600px){ ul.decklist.grid{grid-template-columns:1fr;gap:1rem} }
+/* minmax(0,1fr), never 1fr: a long deck name (the "Copy of - …" names the app itself makes) must shrink
+   and ellipsise inside its tile, not widen the track and scroll the page sideways. */
+ul.decklist.grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:25px;margin-bottom:1.25rem}
+@media (max-width:1500px){ ul.decklist.grid{grid-template-columns:repeat(4,minmax(0,1fr))} }
+@media (max-width:1200px){ ul.decklist.grid{grid-template-columns:repeat(3,minmax(0,1fr))} }
+@media (max-width:1000px){ ul.decklist.grid{grid-template-columns:repeat(2,minmax(0,1fr))} }
+@media (max-width:600px){ ul.decklist.grid{grid-template-columns:minmax(0,1fr);gap:1rem} }
+ul.decklist .deck,ul.decklist .deck a,ul.decklist .info{min-width:0}
 ul.decklist .deck a{display:flex;flex-direction:column;color:var(--text);text-decoration:none;
   border-radius:5px;overflow:hidden;border:1px solid var(--border);background:var(--surface)}
 ul.decklist .deck.selected a{outline:2px solid var(--orange)}
@@ -1735,7 +1738,7 @@ ul.decklist.list .thumb .ini{font-size:1.5rem} ul.decklist.list .thumb .views{di
 ul.decklist.list .info{flex:1;min-height:0}
 ul.decklist.list .tags{border-top:0;max-width:30%}
 ul.decklist.list .deck{margin-bottom:.5rem}
-.pane.list ul.decklist.grid{grid-template-columns:1fr;gap:.75rem}
+.pane.list ul.decklist.grid{grid-template-columns:minmax(0,1fr);gap:.75rem}
 .pane.list ul.decklist .thumb{height:90px}
 
 /* editor (own-deck edits that become one proposal) */

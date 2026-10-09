@@ -275,16 +275,26 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--focus);outline-o
    doubled selector. */
 select.msel-native{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;
   clip:rect(0,0,0,0);opacity:0;pointer-events:none}
-.msel-btn,.menu button.msel-btn{display:flex;align-items:center;justify-content:flex-start;gap:0;width:100%;
+.msel-btn,.menu button.msel-btn,details.dd .menu button.msel-btn{display:flex;align-items:center;
+  justify-content:flex-start;gap:0;width:100%;
   height:var(--ctl);min-height:0;margin:0;padding:0 2rem 0 1rem;font:inherit;font-size:1rem;font-weight:400;
   text-align:left;white-space:nowrap;border-radius:var(--radius);border:1px solid var(--border);
   color:var(--text);cursor:pointer;background-color:var(--surface);background-image:url(/static/chevron.svg);
   background-repeat:no-repeat;background-position:right .75rem center;background-size:10px 6px;
   transition:background-color .2s ease-in-out}
-.msel-btn:hover,.menu button.msel-btn:hover{background-color:var(--surface-2);color:var(--text)}
-.msel-btn:focus-visible,.menu button.msel-btn:focus-visible{outline:2px solid var(--focus);outline-offset:1px;
+.msel-btn:hover,.menu button.msel-btn:hover,details.dd .menu button.msel-btn:hover{
+  background-color:var(--surface-2);color:var(--text)}
+.msel-btn:focus-visible,.menu button.msel-btn:focus-visible,details.dd .menu button.msel-btn:focus-visible{
+  outline:2px solid var(--focus);outline-offset:1px;
   border-color:var(--orange);background-color:var(--surface)}
 .msel-btn[aria-expanded=true]{border-color:var(--orange)}
+/* A form inside a dropdown (a collection row's Details) keeps its primary Save button: the menu
+   item rule above would otherwise strip its colour, border and radius. */
+details.dd .menu .actions button.primary{background:var(--orange);border:1px solid var(--orange);
+  color:var(--on-orange);border-radius:var(--radius);justify-content:center;height:var(--ctl);
+  min-height:var(--ctl);font-weight:600}
+details.dd .menu .actions button.primary:hover,details.dd .menu .actions button.primary:focus-visible{
+  background:var(--orange);color:var(--on-orange);filter:brightness(1.08)}
 .msel-btn:active:not(:disabled){transform:none;filter:none}
 .msel-btn .msel-txt{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .msel-list{position:fixed;z-index:80;max-width:calc(100vw - 1rem);overflow:auto;overscroll-behavior:contain;
@@ -362,13 +372,16 @@ button.thumbbtn{all:unset;display:block;cursor:pointer;line-height:0;border-radi
   font-size:.85rem}
 button.thumbbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .choice{display:flex;flex-direction:column;gap:.6rem;margin-top:1rem}
+/* The three choices (Apply…, Reject…, Not now) sit in one row only from 800px: narrower than
+   that the row would wrap and leave "Not now" alone on a second line, so they stack full width. */
 .choice button,.choice .btn{margin-top:0;width:100%}
-@media (min-width:600px){ .choice{flex-direction:row;align-items:center;flex-wrap:wrap}
+@media (min-width:800px){ .choice{flex-direction:row;align-items:center;flex-wrap:wrap}
   .choice button,.choice .btn{width:auto} }
 .actions{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:1rem;align-items:center}
 .actions .btn,.actions button,.actions form > button{margin-top:0}
 .actions form{display:contents}
-@media (max-width:600px){ main form > button:not(.mini):not(.inline),main .choice .btn{width:100%} }
+@media (max-width:600px){ main form > button:not(.mini):not(.inline){width:100%} }
+@media (max-width:799.98px){ main .choice .btn{width:100%} }
 /* one row of equal-height buttons at the end of a form; on phones they stack full width */
 .form-actions{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;margin-top:1rem}
 .form-actions > button,.form-actions > .btn,.form-actions form > button{margin:0}
