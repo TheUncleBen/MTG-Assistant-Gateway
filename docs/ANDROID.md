@@ -347,8 +347,14 @@ keytool -genkeypair -v -keystore mtg-assistant-release.jks -alias mtgassistant \
   -keyalg RSA -keysize 2048 -validity 10000
 ```
 
-`keytool` comes with any Java install. Keep the `.jks` file and its passwords
-outside the repository, for example in a password manager. Never commit a
+`keytool` comes with any Java install (on Windows, for example the free
+Eclipse Temurin JDK; the command is the same in PowerShell on one line, without
+the `\`). It asks for a password and a name; the name is printed in the
+certificate, so a project name is enough. On current Java versions the file is
+a PKCS12 keystore with one password for both the store and the key, so the
+key password is the same as the store password. Keep the `.jks` file and its
+password outside the repository, for example in a password manager, with a
+backup copy somewhere else. Never commit a
 keystore: `android/.gitignore` already excludes `*.jks` and `*.keystore`.
 
 The certificate's SHA-256 fingerprint, which developer registration
@@ -376,10 +382,13 @@ secrets):
 
 | Secret | Value |
 |---|---|
-| `ANDROID_KEYSTORE_B64` | the keystore file, base64: `base64 -w0 mtg-assistant-release.jks` |
+| `ANDROID_KEYSTORE_B64` | the keystore file, base64: `base64 -w0 mtg-assistant-release.jks` (Linux), `base64 -i mtg-assistant-release.jks` (macOS), or in Windows PowerShell `[Convert]::ToBase64String([IO.File]::ReadAllBytes("$PWD\mtg-assistant-release.jks")) \| Set-Clipboard`, which copies it straight to the clipboard |
 | `ANDROID_KEY_ALIAS` | the alias, `mtgassistant` above |
 | `ANDROID_STORE_PASS` | the keystore password |
-| `ANDROID_KEY_PASS` | the key password (often the same) |
+| `ANDROID_KEY_PASS` | the key password (the same as the keystore password for a keystore made as above) |
+
+Paste each value straight into GitHub's secret form; never into a chat, an
+issue or a file in the repository.
 
 With the secrets set, a release build runs the unit tests, builds and signs the APK
 with the runner's Android SDK, copies
@@ -396,9 +405,10 @@ environment, so set it up like this:
 
 - **Deployment branches and tags**: *Selected branches and tags*, with the
   branch rule `main`. Runs from any other ref then never receive the secrets.
-- **Required reviewers**: yourself (or whoever may release), so every signing
-  run waits for an approval in the Actions tab. The release waits with it: the
-  image and the tag follow once you approve.
+- **Required reviewers** (optional): yourself (or whoever may release), so
+  every signing run waits for an approval in the Actions tab. The release waits
+  with it: the image and the GitHub release follow only once you approve, so
+  leave it off if releases should publish without you.
 - Delete any repository-level copies of the four `ANDROID_*` secrets, and
   protect `main` (Settings, Rules) so that only people you trust can change it.
 
