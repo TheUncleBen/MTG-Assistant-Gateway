@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import secrets
 import time
 from typing import Any
@@ -20,7 +21,7 @@ from typing import Any
 from . import deck_stats
 from .archidekt import Deck
 from .db import Database
-from .decklist import DecklistError, parse_decklist, to_text
+from .decklist import DecklistError, front_faces, parse_decklist, to_text
 from .decks import DeckError, DeckService, _clean_deck_id, current_client, deck_to_text
 from .mf_proxy import MysticForgeProxy, is_busy
 
@@ -158,11 +159,17 @@ class ReportService:
         goldfish: dict[str, Any] | None = None
         validation: dict[str, Any] | None = None
         if self.mf is not None:
-            validation = await self._mf(sub, "validate_decklist", {"decklist": main, "commander": commander})
+            # The research service reads names through Scryfall's collection lookup, which
+            # knows double-faced cards by their front face only.
+            sim_text, sim_commander = front_faces(main), _front_face(commander)
+            validation = await self._mf(
+                sub, "validate_decklist", {"decklist": sim_text, "commander": sim_commander}
+            )
             if simulate and commander is None:
                 goldfish = {"tool": "goldfish_run", "ok": False, "text": NO_COMMANDER_TEXT}
             elif simulate:
-                goldfish = await self._mf(sub, "goldfish_run", {"deck": main, "n": games, **options})
+                goldfish = await self._mf(sub, "goldfish_run", {"deck": sim_text, "n": games, **options})
+                _commander_aside(goldfish, sim_commander)
         return {
             "stored": False,
             "deck": {"id": None, "name": "pasted list", "card_count": stats["card_count"]},
@@ -195,8 +202,9 @@ class ReportService:
         goldfish: dict[str, Any] | None = None
         validation: dict[str, Any] | None = None
         if self.mf is not None:
-            text = deck_to_text(deck)
-            commander = (stats.get("commanders") or [None])[0]
+            # Front faces only: see run_text.
+            text = front_faces(deck_to_text(deck))
+            commander = _front_face((stats.get("commanders") or [None])[0])
             validation = await self._mf(sub, "validate_decklist", {"decklist": text, "commander": commander})
             if simulate and commander is None:
                 # Mystic Forge's text path would take the first line as the commander and
@@ -204,6 +212,7 @@ class ReportService:
                 goldfish = {"tool": "goldfish_run", "ok": False, "text": NO_COMMANDER_TEXT}
             elif simulate:
                 goldfish = await self._mf(sub, "goldfish_run", {"deck": text, "n": games, **options})
+                _commander_aside(goldfish, commander)
         rid = "rep_" + secrets.token_urlsafe(9)
         with self.db.tx() as c:
             # Stored only while the member exists: a report still running when they deleted
@@ -398,6 +407,61 @@ def _succeeded(row: dict[str, Any]) -> bool:
 RUN_OPTIONS = ("annotations", "combos", "seed", "until_turn", "opponents", "mulligan")
 AB_OPTIONS = ("annotations", "annotations_a", "annotations_b", "combos", "seed", "until_turn")
 AB_FLAGS = ("allow_different_commanders",)
+
+
+def _front_face(name: str | None) -> str | None:
+    return name.split(" // ", 1)[0] if isinstance(name, str) else name
+
+
+# One entry of the honesty report's card lines: "Name (drawn 11%)", comma-separated. Names hold
+# commas themselves ("Liesa, Forgotten Archangel"), so entries split on the "(drawn …)" tail.
+_ENTRY = re.compile(r"(.+?)( \(drawn \d+%\))(?:, |$)")
+
+
+def _commander_aside(goldfish: dict[str, Any], commander: str | None) -> None:
+    """Take the commander out of the simulation's "unrecognized" list, in the metrics and in the
+    text. The simulator casts it from the command zone (so it is never drawn) and plays it as a
+    creature; its honesty report still files it as an unrecognized card "drawn 0%", which reads
+    as a lookup failure. The report says instead that the commander's abilities beyond combat
+    are not modelled. Nothing else in the result changes; a result without the list is left
+    as it is."""
+    if not commander or not goldfish.get("ok"):
+        return
+    data = goldfish.get("data")
+    metrics = data.get("metrics") if isinstance(data, dict) else None
+    honesty = metrics.get("honesty") if isinstance(metrics, dict) else None
+    if not isinstance(honesty, dict):
+        return
+    unrecognized = honesty.get("unrecognized")
+    if not isinstance(unrecognized, list):
+        return
+    kept = [c for c in unrecognized if not (isinstance(c, dict) and c.get("name") == commander)]
+    if len(kept) == len(unrecognized):
+        return
+    honesty["unrecognized"] = kept
+    honesty["commander_note"] = (
+        f"{commander} is cast from the command zone (never drawn); its abilities beyond combat are "
+        "not modelled"
+    )
+    text = goldfish.get("text")
+    if not isinstance(text, str):
+        return
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        if not line.startswith("Unrecognized"):
+            continue
+        # "Unrecognized — 32 cards (candidates for annotation; see goldfish_annotate):" then one
+        # line "- Name (drawn 11%), Name (drawn 0%), ..."
+        if i + 1 < len(lines) and lines[i + 1].startswith("- "):
+            entries = _ENTRY.findall(lines[i + 1][2:])
+            rest = [name + drawn for name, drawn in entries if name != commander]
+            if not entries or len(rest) == len(entries):
+                break
+            lines[i + 1] = "- " + ", ".join(rest) if rest else "- (none)"
+            lines[i] = re.sub(r"\b(\d+) cards?\b", lambda m: f"{int(m.group(1)) - 1} cards", line, count=1)
+            lines.insert(i + 2, f"Commander — {honesty['commander_note']}")
+        break
+    goldfish["text"] = "\n".join(lines)
 
 
 # What a successful simulation's text always contains (Mystic Forge's renderers).

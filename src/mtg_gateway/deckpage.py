@@ -788,6 +788,11 @@ def stats_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
                         " · cannot command: " + names(zone["cannot_command"])
                         if zone.get("cannot_command")
                         else ""
+                    )
+                    + (
+                        f" · not verified: {esc(zone['unverified_note'])}"
+                        if zone.get("unverified_note")
+                        else ""
                     ),
                     zone.get("ok", True),
                 )

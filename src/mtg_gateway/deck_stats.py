@@ -343,7 +343,8 @@ def deck_checks(deck: Deck, cards: list[DeckCard], commanders: list[DeckCard], q
     """Structural checks from the deck's own data, for every Archidekt format: deck size (exact
     for the commander-style formats, at least 60 for constructed ones), the command zone (count,
     whether each card may lead, partner pairing, Oathbreaker's planeswalker plus signature spell,
-    Tiny Leaders' mana value cap, Pauper Commander's uncommon leader), colour identity against the
+    Tiny Leaders' mana value cap, Pauper Commander's uncommon leader, unverified when the deck's
+    printing is not the uncommon one), colour identity against the
     commanders, singleton rule or the four-copies limit, restricted cards (one copy), companion
     rows, sideboard size (constructed), card legality for the format (banned, not legal), the set
     bracket against the estimate, and uncategorised rows. Each entry says what was checked;
@@ -400,10 +401,23 @@ def deck_checks(deck: Deck, cards: list[DeckCard], commanders: list[DeckCard], q
                 zone["ok"] = False
                 problems.append("Tiny Leaders commander above mana value 3: " + ", ".join(big))
         if fmt == "paupercommander":
-            not_unc = [c.name for c in commanders if c.rarity and c.rarity.lower() != "uncommon"]
-            if not_unc:
-                zone["ok"] = False
-                problems.append("Pauper Commander wants an uncommon commander: " + ", ".join(not_unc))
+            # Pauper Commander's rule is about the card, not the printing in the deck: any
+            # creature ever printed at uncommon may lead, whichever printing is used (format
+            # rules, pdhhomebase.com, checked 2026-10-09). The deck's data names only the chosen
+            # printing's rarity, so an uncommon printing settles it and any other rarity is
+            # reported as unverified rather than as a failure.
+            other = [
+                f"{c.name} ({c.rarity.lower()} printing)"
+                for c in commanders
+                if c.rarity and c.rarity.lower() != "uncommon"
+            ]
+            if other:
+                zone["unverified"] = other
+                zone["unverified_note"] = (
+                    "Pauper Commander lets a creature lead if any printing of it is uncommon; "
+                    "this deck uses another printing, so check the card's printings: "
+                    + ", ".join(other)
+                )
     elif fmt in _NO_COMMANDER and commanders:
         zone["ok"] = False
         problems.append(f"{fmt} has no command zone; {zone['count']} card(s) sit in the Commander category")
