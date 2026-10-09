@@ -7,6 +7,53 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [Unreleased]
+
+Everything about the pages is meant to feel immediate and look like one
+site at any window size, zoom or device (web and the Android app alike).
+Nothing to change in the stack or the settings; the gateway makes one
+extra outbound request a day to Scryfall (the card-name catalog).
+
+### Changed
+
+- **Typed card names suggest instantly.** The gateway downloads Scryfall's
+  card-name catalog once a day (about 700 KB) and answers suggestions from
+  memory, so a name list appears within about a hundred milliseconds of a
+  pause in typing instead of after a paced Scryfall round trip per
+  keystroke. Until the catalog has loaded (the first minute after a start,
+  or while Scryfall is unreachable) suggestions come from Scryfall as
+  before.
+- **Suggestion lists are the site's own.** Every card-name box (deck search,
+  home, Quick add, the deck editor, the collection) and the compare page's
+  precon box show a themed, keyboard- and screen-reader-accessible list
+  instead of the browser's built-in datalist. Down and Up move, Enter
+  picks, Escape closes; the match is underlined.
+- **Deck editor, adding a card.** Suggestions show the card's picture, mana
+  cost and type line; Enter adds the card and keeps the box focused for the
+  next one; a new row shows its picture and mana cost. The add form's
+  controls share one row on desktop and fold onto two or three rows on a
+  phone (no stray full-width button). Categories sit side by side on wide
+  screens. The printing picker opens as a dialog over the page.
+- **Card viewer.** Mana costs and the symbols in rules text ({T}, {B}, hybrid,
+  Phyrexian, snow, energy, numbers) are drawn as the gateway's own glyphs on
+  coloured discs, in the viewer and in every card row. The viewer is a
+  proper dialog: a blurred, darkened page behind it, a header with the name
+  and cost, the type line, rules and flavour text, a facts table (printing,
+  artist, price, salt, EDHREC rank) and legality chips, an actions row, a
+  focus trap, Escape and the phone's Back button to close, a bottom sheet
+  on phones; it never scrolls sideways.
+- **Forms and buttons.** A form's buttons sit together in one row at one
+  height (the Search decks page's Search and Clear buttons no longer sit
+  mid-form at different sizes; the Account page's buttons are one row). On
+  phones they stack full width.
+
+### Added
+
+- `GET /scan/api/peek?names=a|b|c` (browser session only): mana cost, type
+  line, small picture and default printing for up to twenty exact card
+  names, from one batched, cached Scryfall lookup; the suggestion lists use
+  it to decorate their rows.
+
 ## [0.7.8] - 2026-10-08
 
 Wording fixes from the acceptance check of 0.7.7, and a narrower Authentik
