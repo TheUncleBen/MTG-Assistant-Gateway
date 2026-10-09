@@ -23,6 +23,7 @@ still the owner's test to report.
 ## Contents
 
 - [1. Getting the app](#1-getting-the-app)
+  - [Adding the app to a gateway](#adding-the-app-to-a-gateway)
 - [2. Using it](#2-using-it)
 - [3. Scanning with the phone camera](#3-scanning-with-the-phone-camera)
 - [4. Foldables and large screens](#4-foldables-and-large-screens)
@@ -70,11 +71,51 @@ one. Settings and sign-in are kept as long as the gateway signs releases with
 the same key ([section 8](#8-signing-your-release-key)). **Change gateway** in
 the app's menu (the round button, bottom right) brings the address screen back.
 
-If your gateway's `/app` page says the app isn't shipped there, the operator's
-image was built without it. The operator can download `mtg-assistant-gateway-release.apk` and
-`mtg-assistant-gateway.json` from the project's GitHub release, rename the APK to `mtg-assistant-gateway.apk`,
-copy both (real files, not symlinks) into a folder mounted into the gateway and
-point `MTG_APP_DIR` at it, or build their own ([section 7](#7-building-the-app)).
+If your gateway's `/app` page says there is no app file, the gateway's image
+was built without one: the release build only adds the app when the
+maintainers' signing secrets are set ([section 9](#9-releasing-the-ci-build-and-the-gateway-image)).
+To check a version, open its
+[GitHub release](https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases):
+a release that carries the app lists an "Android app signing certificate
+SHA-256" line in its notes and has `mtg-assistant-gateway-release.apk` under
+**Assets**. A release without them has no app, in the image or on GitHub.
+Ask the gateway's owner, who can add the app by hand
+([Adding the app to a gateway](#adding-the-app-to-a-gateway)).
+
+### Adding the app to a gateway
+
+For operators whose image has no app, or who build their own:
+
+1. Get the two files: `mtg-assistant-gateway-release.apk` and
+   `mtg-assistant-gateway.json`, either from a GitHub release that has them
+   or from your own build in `android/out/` ([section 7](#7-building-the-app)).
+2. On the node that runs the gateway, put them in a folder of their own as
+   real files (not symlinks), with the APK renamed to
+   `mtg-assistant-gateway.apk`, readable by the gateway's user:
+
+   ```bash
+   sudo mkdir -p /srv/mtg-gateway/app
+   sudo cp mtg-assistant-gateway-release.apk /srv/mtg-gateway/app/mtg-assistant-gateway.apk
+   sudo cp mtg-assistant-gateway.json /srv/mtg-gateway/app/
+   sudo chown -R 1000:1000 /srv/mtg-gateway/app
+   ```
+
+3. Mount the folder into the gateway service read-only and point
+   `MTG_APP_DIR` at it. In the stack file, under the gateway's `volumes:`:
+
+   ```yaml
+         - type: bind
+           source: /srv/mtg-gateway/app
+           target: /app-dist
+           read_only: true
+   ```
+
+   and under its `environment:`, `MTG_APP_DIR: /app-dist`. Redeploy the stack.
+4. Open `/app` signed in: it now shows the version, checksums and the
+   download button. If you built the app yourself, give your users your
+   signing certificate SHA-256 some way other than the gateway (step 1 of
+   [Getting the app](#1-getting-the-app)), because no GitHub release
+   publishes it.
 
 Requirements: Android 10 or later. A camera is optional; without one the app
 still works, it just can't scan.
@@ -308,8 +349,14 @@ keytool -genkeypair -v -keystore mtg-assistant-release.jks -alias mtgassistant \
   -keyalg RSA -keysize 2048 -validity 10000
 ```
 
-`keytool` comes with any Java install. Keep the `.jks` file and its passwords
-outside the repository, for example in a password manager. Never commit a
+`keytool` comes with any Java install (on Windows, for example the free
+Eclipse Temurin JDK; the command is the same in PowerShell on one line, without
+the `\`). It asks for a password and a name; the name is printed in the
+certificate, so a project name is enough. On current Java versions the file is
+a PKCS12 keystore with one password for both the store and the key, so the
+key password is the same as the store password. Keep the `.jks` file and its
+password outside the repository, for example in a password manager, with a
+backup copy somewhere else. Never commit a
 keystore: `android/.gitignore` already excludes `*.jks` and `*.keystore`.
 
 The certificate's SHA-256 fingerprint, which developer registration
@@ -337,10 +384,13 @@ secrets):
 
 | Secret | Value |
 |---|---|
-| `ANDROID_KEYSTORE_B64` | the keystore file, base64: `base64 -w0 mtg-assistant-release.jks` |
+| `ANDROID_KEYSTORE_B64` | the keystore file, base64: `base64 -w0 mtg-assistant-release.jks` (Linux), `base64 -i mtg-assistant-release.jks` (macOS), or in Windows PowerShell `[Convert]::ToBase64String([IO.File]::ReadAllBytes("$PWD\mtg-assistant-release.jks")) \| Set-Clipboard`, which copies it straight to the clipboard |
 | `ANDROID_KEY_ALIAS` | the alias, `mtgassistant` above |
 | `ANDROID_STORE_PASS` | the keystore password |
-| `ANDROID_KEY_PASS` | the key password (often the same) |
+| `ANDROID_KEY_PASS` | the key password (the same as the keystore password for a keystore made as above) |
+
+Paste each value straight into GitHub's secret form; never into a chat, an
+issue or a file in the repository.
 
 With the secrets set, a release build runs the unit tests, builds and signs the APK
 with the runner's Android SDK, copies
@@ -357,9 +407,10 @@ environment, so set it up like this:
 
 - **Deployment branches and tags**: *Selected branches and tags*, with the
   branch rule `main`. Runs from any other ref then never receive the secrets.
-- **Required reviewers**: yourself (or whoever may release), so every signing
-  run waits for an approval in the Actions tab. The release waits with it: the
-  image and the tag follow once you approve.
+- **Required reviewers** (optional): yourself (or whoever may release), so
+  every signing run waits for an approval in the Actions tab. The release waits
+  with it: the image and the GitHub release follow only once you approve, so
+  leave it off if releases should publish without you.
 - Delete any repository-level copies of the four `ANDROID_*` secrets, and
   protect `main` (Settings, Rules) so that only people you trust can change it.
 

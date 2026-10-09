@@ -470,6 +470,12 @@ and the plugin files) sends you to Authentik first, and only members of
 Then connect your assistant: [CONNECT.md](CONNECT.md). To invite people, see
 [ONBOARDING.md](ONBOARDING.md#for-the-owner).
 
+**Android app (optional).** Signed in, open `/app`. If it offers a download,
+the app is in your image and there is nothing to do. If it says there is no
+app file, your image was built without one; add it as described in
+[ANDROID.md](ANDROID.md#adding-the-app-to-a-gateway). Everything works in a
+phone's browser without it.
+
 The repository's end-to-end test runs these same steps automatically on a
 single-node Swarm with a real Authentik: [tests/e2e/README.md](../tests/e2e/README.md).
 
