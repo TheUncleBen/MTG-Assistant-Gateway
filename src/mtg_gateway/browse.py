@@ -23,6 +23,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from .archidekt import FORMAT_IDS, FORMAT_NAMES, SEARCH_ORDERS, format_label, list_row
+from .busy import busy_response
 from .deckpage import DECK_CSS, avatar_html, covers_for, deck_list_html
 from .decks import DeckError
 from .pages import _csrf, browser_session, login_redirect
@@ -291,6 +292,8 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
                                 f"Did you mean: {links}?</p>"
                             )
             except DeckError as exc:
+                if busy := busy_response(exc, request, page, sub=sub, sid=sid):
+                    return busy
                 body += problem(exc)
             else:
                 body += note
@@ -335,6 +338,8 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
         try:
             listing = await decks.precons(sub)
         except DeckError as exc:
+            if busy := busy_response(exc, request, page, sub=sub, sid=sid):
+                return busy
             return page(
                 "Preconstructed decks", precons_form(q) + problem(exc), sub=sub, sid=sid, current="/search"
             )
@@ -400,6 +405,8 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
         try:
             found = await decks.search_decks(sub, **query)
         except DeckError as exc:
+            if busy := busy_response(exc, request, page, sub=sub, sid=sid):
+                return busy
             return page(
                 username,
                 problem(exc),

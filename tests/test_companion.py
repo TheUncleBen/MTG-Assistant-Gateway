@@ -3,6 +3,7 @@ reports, exports and the app shell. Writes go through proposals exactly as the t
 
 from __future__ import annotations
 
+import html
 import json
 import re
 from pathlib import Path
@@ -632,3 +633,123 @@ def test_precon_by_label_needs_the_set_when_two_precons_share_a_name() -> None:
     assert precon_by_label(precons, "Twin Deck") is None  # ambiguous: the label form is required
     assert precon_by_label(precons, "only once") == 3
     assert precon_by_label(precons, "") is None
+
+
+# -- a busy or unreachable Archidekt answers the same on every page (0.7.9, gate finding D6) ----
+BUSY_PAGES = (
+    "/decks",
+    "/decks/42",
+    "/decks/42?view=grid",
+    "/decks/42/export",
+    "/decks/42/compare",
+    "/decks/42/compare?with=43",
+    "/decks/42/edit",
+    "/decks/42/settings",
+    "/decks/42/delete",
+    "/folders",
+    "/collection",
+    "/users/alice",
+    "/search?name=Sample",
+    "/precons",
+)
+BUSY_DOWNLOADS = (
+    "/decks/42/export.txt",
+    "/decks/42/export.archidekt.txt",
+    "/decks/42/export.csv",
+    "/decks/42/export.arena.txt",
+    "/decks/42/export.dek",
+    "/decks/42/export.pdf",
+)
+
+
+def _assert_busy_page(r, path: str, *, status: int, title: str, max_wait: int) -> None:
+    assert r.status_code == status, (path, r.status_code, r.text[:300])
+    assert f"<title>{title}" in r.text and f"<h1>{title}</h1>" in r.text, (path, r.text[:300])
+    assert f"<a class='btn btn-primary' href='{html.escape(path)}'>Try again</a>" in r.text, path
+    assert 1 <= int(r.headers["retry-after"]) <= max_wait, (path, r.headers)
+    assert r.headers["cache-control"] == "no-store", path
+    for wrong in ("Deck not found", "Cannot edit", "could not be run", "Archidekt could not find"):
+        assert wrong not in r.text, (path, wrong)
+
+
+async def test_a_used_up_archidekt_budget_is_one_shared_429_page_everywhere(stack: Stack) -> None:
+    """Once the member's Archidekt budget (MTG_ARCHIDEKT_CALLS_PER_10_MIN) is spent, every page
+    that reads from Archidekt says so the same way: "Archidekt is busy", HTTP 429 with the
+    budget's Retry-After, no-store, a Try again link to the same URL. Never "Deck not found" or
+    "Cannot edit this deck" (the deck and the account are fine), never 200, 502 or 503."""
+    from mtg_gateway.decks import RateBudget
+
+    b = await linked_browser(stack)
+    try:
+        decks = stack.h.app.state.gateway.decks
+        decks.archidekt_budget = RateBudget(per_window=1, window=600)
+        first = await b.http.get("/decks/42", headers=NAV)
+        assert first.status_code == 200  # the one call of the window
+        for path in BUSY_PAGES:
+            r = await b.http.get(path, headers=NAV)
+            _assert_busy_page(r, path, status=429, title="Archidekt is busy", max_wait=600)
+            assert "used up for a few minutes" in r.text and "work again shortly" in r.text, path
+            assert "Your account has used its 1 Archidekt actions" in r.text, path
+            assert "href='/decks'>My decks</a>" in r.text, path
+        for path in BUSY_DOWNLOADS:
+            r = await b.http.get(path)
+            assert r.status_code == 429 and r.text.startswith("Archidekt is busy."), (path, r.text)
+            assert 1 <= int(r.headers["retry-after"]) <= 600 and r.headers["cache-control"] == "no-store"
+            assert r.headers["content-type"].startswith("text/plain"), path
+        js = await b.http.get("/decks/42/export.json")  # the JSON download answers in its own shape
+        assert js.status_code == 429 and js.json()["error"] == "rate_limited", js.text
+        assert js.json()["message"].startswith("Archidekt is busy.") and js.json()["retry_after"] >= 1
+        assert 1 <= int(js.headers["retry-after"]) <= 600 and js.headers["cache-control"] == "no-store"
+        # the JSON API already said 429 (docs/API.md); the budget's wait is the same header there
+        api = await b.http.get("/api/v1/decks/42")
+        assert api.status_code == 429 and api.json()["error"] == "rate_limited"
+    finally:
+        await b.aclose()
+
+
+async def test_an_unreachable_archidekt_is_one_shared_503_page_everywhere(stack: Stack) -> None:
+    """Archidekt not answering (kind "unavailable") is the same page on every route too: 503,
+    Retry-After, Try again, titled so nobody looks for a missing deck."""
+    b = await linked_browser(stack)
+    try:
+        for path in BUSY_PAGES:
+            stack.ark.inject = [(503, None)] * 20  # every call of this page load fails
+            r = await b.http.get(path, headers=NAV)
+            _assert_busy_page(
+                r, path, status=503, title="Archidekt can&#x27;t be reached right now", max_wait=60
+            )
+        for path in BUSY_DOWNLOADS:
+            stack.ark.inject = [(503, None)] * 20
+            r = await b.http.get(path)
+            assert r.status_code == 503 and r.headers["retry-after"] == "60", (path, r.text)
+        stack.ark.inject = [(503, None)] * 20
+        js = await b.http.get("/decks/42/export.json")
+        assert (
+            js.status_code == 503
+            and js.json()["error"] == "unavailable"
+            and js.headers["retry-after"] == "60"
+        )
+        stack.ark.inject = []
+    finally:
+        stack.ark.inject = []
+        await b.aclose()
+
+
+async def test_a_missing_deck_is_still_not_found(stack: Stack) -> None:
+    """The shared page is only for a busy or unreachable Archidekt; a deck that is not there
+    keeps its 404 and its own words."""
+    b = await linked_browser(stack)
+    try:
+        for path, title in (
+            ("/decks/999999", "Deck not found"),
+            ("/decks/999999/export", "Deck not found"),
+            ("/decks/999999/compare", "Deck not found"),
+            ("/decks/999999/edit", "Cannot edit this deck"),
+            ("/decks/999999/settings", "Cannot edit this deck"),
+        ):
+            r = await b.http.get(path, headers=NAV)
+            assert r.status_code == 404 and f"<title>{title}" in r.text, (path, r.status_code)
+            assert "retry-after" not in r.headers, path
+        assert (await b.http.get("/decks/999999/export.txt")).status_code == 404
+    finally:
+        await b.aclose()

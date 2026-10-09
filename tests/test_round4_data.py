@@ -538,6 +538,12 @@ def test_budget_refills_over_time(monkeypatch: pytest.MonkeyPatch) -> None:
     assert budget.take("u") and budget.take("u") and not budget.take("u")
     now[0] += 300  # half a window refills one call
     assert budget.take("u") and not budget.take("u")
+    # Retry-After: whole seconds until the next call may go (a full bucket says 1)
+    assert budget.retry_after("u") == 300 and budget.retry_after("fresh") == 1
+    now[0] += 100
+    assert budget.retry_after("u") == 200
+    now[0] += 200
+    assert budget.retry_after("u") == 1 and budget.take("u")
 
 
 # -- E-7: per-app pending cap; report deletes from apps are limited to their own reports --------

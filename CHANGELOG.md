@@ -216,6 +216,18 @@ catalog). Back up the database before you update, as always.
 
 ### Fixed
 
+- **A used-up Archidekt budget no longer looks like a missing deck.** When a
+  member's Archidekt budget (`MTG_ARCHIDEKT_CALLS_PER_10_MIN`) is spent, the
+  deck, grid, export, compare, editor, settings, delete, folders, My decks,
+  collection, search, precon and profile pages all answered differently
+  ("Deck not found", "Cannot edit this deck", 200, 400, 404, 502 or 503).
+  They now share one page, *Archidekt is busy*, with HTTP 429, a
+  `Retry-After` header from the budget, `Cache-Control: no-store` and a
+  *Try again* link to the same address; an unreachable Archidekt gets the
+  same treatment as *Archidekt can't be reached right now* (503). Deck
+  exports answer the same status as plain text or JSON. "Deck not found"
+  (404) is kept for a deck that is really not there. The JSON API already
+  answered 429 and is unchanged.
 - **Deck page save:** the one-click save's follow-up (the "Save anyway"
   after a confirmation question) now answers only the question the page
   itself asked. A pending proposal an assistant made is refused there with

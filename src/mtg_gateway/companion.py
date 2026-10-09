@@ -24,6 +24,7 @@ from starlette.responses import FileResponse, JSONResponse, RedirectResponse, Re
 
 from . import deck_stats
 from .archidekt import FORMAT_NAMES, Deck, featured_scryfall_id, format_label, parse_deck
+from .busy import busy_json_response, busy_response, busy_text_response
 from .decklist import DecklistError, parse_decklist
 from .deckpage import (
     DECK_CSS,
@@ -324,16 +325,17 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
 
     async def my_decks(
         sub: str, *, wait: float | None = None
-    ) -> tuple[list[dict[str, Any]] | None, str | None]:
-        """(decks, problem) where problem is a short message when the list is unavailable. With
-        ``wait``, decks is None when the list is cold and Archidekt has not answered in time: the
-        page then renders a placeholder that decks.js fills from /api/decks/mine."""
+    ) -> tuple[list[dict[str, Any]] | None, str | None, DeckError | None]:
+        """(decks, problem, failure) where problem is a short message when the list is unavailable
+        and failure the DeckError behind it (for the shared busy page). With ``wait``, decks is
+        None when the list is cold and Archidekt has not answered in time: the page then renders a
+        placeholder that decks.js fills from /api/decks/mine."""
         try:
-            return await decks.list_decks_quick(sub, wait=wait), None
+            return await decks.list_decks_quick(sub, wait=wait), None, None
         except DeckError as exc:
             if exc.kind == "not_linked":
-                return [], "not_linked"
-            return [], str(exc)
+                return [], "not_linked", exc
+            return [], str(exc), exc
 
     def arrange_decks(
         rows: list[dict[str, Any]], *, q: str, order: str, folder: str
@@ -385,7 +387,9 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             return login_redirect("/decks")
         qp = request.query_params
         q, order, view, folder = list_query(qp)
-        rows, problem = await my_decks(sub, wait=decks.deck_list_wait)
+        rows, problem, failure = await my_decks(sub, wait=decks.deck_list_wait)
+        if failure is not None and (busy := busy_response(failure, request, page, sub=sub, sid=sid)):
+            return busy
         pending = rows is None  # cold start: the shell goes out now, decks.js fills the list
         hidden = 0  # the gateway's backup copies, kept out of this list (D-03); the list is warm now
         if not pending and not problem:
@@ -623,6 +627,8 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         try:
             deck = await decks.get_any_deck(sub, deck_id)
         except DeckError as exc:
+            if busy := busy_response(exc, request, page, sub=sub, sid=sid):
+                return busy
             return page(
                 "Deck not found",
                 f"<div class='panel'><p>{_esc(exc)}</p>"
@@ -886,7 +892,11 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         except DeckError:
             return None
 
-    def settings_problem(deck_id: str, exc: DeckError, sub: str, sid: str | None) -> Response:
+    def settings_problem(
+        request: Request, deck_id: str, exc: DeckError, sub: str, sid: str | None
+    ) -> Response:
+        if busy := busy_response(exc, request, page, sub=sub, sid=sid):
+            return busy
         return page(
             "Cannot edit this deck",
             f"<div class='panel'><p>{_esc(exc)}</p>"
@@ -905,7 +915,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         try:
             deck = await decks.get_own_deck(sub, deck_id)
         except DeckError as exc:
-            return settings_problem(deck_id, exc, sub, sid)
+            return settings_problem(request, deck_id, exc, sub, sid)
         ok = request.query_params.get("ok") or ""
         return page(
             f"Deck settings: {deck.name}",
@@ -934,7 +944,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             try:
                 deck = await decks.get_own_deck(sub, deck_id)
             except DeckError as again:
-                return settings_problem(deck_id, again, sub, sid)
+                return settings_problem(request, deck_id, again, sub, sid)
             return page(
                 f"Deck settings: {deck.name}",
                 settings_form(deck, _csrf(s, sid), error=str(exc), folders=await folders_or_none(sub)),
@@ -1026,7 +1036,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         try:
             deck = await decks.get_own_deck(sub, deck_id)
         except DeckError as exc:
-            return settings_problem(deck_id, exc, sub, sid)
+            return settings_problem(request, deck_id, exc, sub, sid)
         return page(
             f"Delete {deck.name}",
             delete_form(deck, _csrf(s, sid)),
@@ -1052,7 +1062,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             try:
                 deck = await decks.get_own_deck(sub, deck_id)
             except DeckError as again:
-                return settings_problem(deck_id, again, sub, sid)
+                return settings_problem(request, deck_id, again, sub, sid)
             return page(
                 f"Delete {deck.name}",
                 delete_form(deck, _csrf(s, sid), str(exc)),
@@ -1119,7 +1129,9 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         sub, sid = browser_session(state, request)
         if not sub:
             return login_redirect("/folders")
-        _rows, problem = await my_decks(sub)
+        _rows, problem, failure = await my_decks(sub)
+        if failure is not None and (busy := busy_response(failure, request, page, sub=sub, sid=sid)):
+            return busy
         if problem == "not_linked":
             return page("Folders", link_prompt(), sub=sub, sid=sid, current="/decks")
         ok = request.query_params.get("ok") or ""
@@ -1220,6 +1232,8 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         try:
             deck = await decks.get_own_deck(sub, deck_id)
         except DeckError as exc:
+            if busy := busy_response(exc, request, page, sub=sub, sid=sid):
+                return busy
             return page(
                 "Cannot edit this deck",
                 f"<div class='panel'><p>{_esc(exc)}</p>"
@@ -1405,6 +1419,8 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         try:
             deck = await decks.get_any_deck(sub, deck_id)
         except DeckError as exc:
+            if busy := busy_response(exc, request, page, sub=sub, sid=sid):
+                return busy
             return page(
                 "Deck not found", f"<div class='card'><p>{_esc(exc)}</p></div>", sub=sub, sid=sid, status=404
             )
@@ -1480,7 +1496,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         try:
             deck = await decks.get_any_deck(sub, request.path_params["deck_id"])
         except DeckError as exc:
-            return Response(str(exc), 404)
+            return busy_text_response(exc) or Response(str(exc), 404)
         name = re.sub(r"[^A-Za-z0-9._-]+", "_", deck.name or deck.id)[:60]
         return Response(
             deck_to_archidekt_text(deck) + "\n",
@@ -1502,7 +1518,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         try:
             deck = await decks.get_any_deck(sub, request.path_params["deck_id"])
         except DeckError as exc:
-            return Response(str(exc), 404)
+            return busy_text_response(exc) or Response(str(exc), 404)
         text = deck_to_text(deck)
         side = deck_to_text(deck, zone="side")
         if side:
@@ -1526,7 +1542,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         try:
             deck = await decks.get_any_deck(sub, request.path_params["deck_id"])
         except DeckError as exc:
-            return Response(str(exc), 404)
+            return busy_text_response(exc) or Response(str(exc), 404)
         name = re.sub(r"[^A-Za-z0-9._-]+", "_", deck.name or deck.id)[:60]
         body = make(deck)
         return Response(
@@ -1570,7 +1586,9 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         try:
             deck = await decks.get_any_deck(sub, request.path_params["deck_id"])
         except DeckError as exc:
-            return JSONResponse({"ok": False, "error": exc.kind, "message": str(exc)}, 404)
+            return busy_json_response(exc) or JSONResponse(
+                {"ok": False, "error": exc.kind, "message": str(exc)}, 404
+            )
         name = re.sub(r"[^A-Za-z0-9._-]+", "_", deck.name or deck.id)[:60]
         return JSONResponse(
             deck_out(deck),
@@ -1594,7 +1612,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         try:
             deck = await decks.get_any_deck(sub, request.path_params["deck_id"])
         except DeckError as exc:
-            return Response(str(exc), 404)
+            return busy_text_response(exc) or Response(str(exc), 404)
 
         def cell(value: Any) -> str:
             # A cell starting like a formula is quoted the way spreadsheets expect, so a deck
@@ -1698,6 +1716,8 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         try:
             deck = await decks.get_any_deck(sub, deck_id)
         except DeckError as exc:
+            if busy := busy_response(exc, request, page, sub=sub, sid=sid):
+                return busy
             return page(
                 "Deck not found",
                 f"<div class='panel'><p>{_esc(exc)}</p>"

@@ -20,6 +20,7 @@ import contextvars
 import dataclasses
 import json
 import logging
+import math
 import re
 import secrets
 import time
@@ -171,6 +172,15 @@ class RateBudget:
                 if v[0] + (now - v[1]) * self.per_window / self.window < self.per_window
             }
         return True
+
+    def retry_after(self, key: str) -> int:
+        """Whole seconds until ``key`` may spend a call again (at least 1): what a refusal's
+        Retry-After header says."""
+        tokens, at = self._buckets.get(key, (float(self.per_window), time.monotonic()))
+        tokens += (time.monotonic() - at) * self.per_window / self.window
+        if tokens >= 1:
+            return 1
+        return max(1, math.ceil((1 - tokens) * self.window / self.per_window - 1e-6))
 
 
 class MemberCache:
@@ -392,12 +402,15 @@ def actor_label(client_id: str | None, name: str | None = None) -> str:
 
 class DeckError(Exception):
     """A user-facing failure: the message is safe to show as is. ``extra`` holds structured
-    fields the tool reply carries alongside ``error`` and ``message``."""
+    fields the tool reply carries alongside ``error`` and ``message``. ``retry_after`` (seconds)
+    is set when the refusal knows how long to wait (a used-up Archidekt budget); the browser
+    pages put it in their Retry-After header."""
 
-    def __init__(self, kind: str, message: str, **extra: Any):
+    def __init__(self, kind: str, message: str, *, retry_after: int | None = None, **extra: Any):
         super().__init__(message)
         self.kind = kind
         self.extra = extra
+        self.retry_after = retry_after
 
 
 @dataclass(frozen=True)
@@ -1266,7 +1279,7 @@ class DeckService:
             )
         refused = self.budget_refusal(sub)
         if refused:
-            raise DeckError("rate_limited", refused)
+            raise DeckError("rate_limited", refused, retry_after=self.archidekt_budget.retry_after(sub))
         self._archidekt_in_flight[sub] = self._archidekt_in_flight.get(sub, 0) + 1
         token = _slot_holder.set(sub)
         try:

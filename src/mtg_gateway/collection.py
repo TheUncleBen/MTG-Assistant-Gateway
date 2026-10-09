@@ -27,6 +27,7 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from .approve import CARD_TOOL_META, proposal_tool_result
 from .archidekt import COLLECTION_PAGE_SIZE, ArchidektError, _faces, _oracle_text, _pt
+from .busy import busy_response
 from .deckpage import DECK_CSS, image_url, mana_html
 from .decks import DeckError, current_client
 from .pages import _csrf, _safe_next, browser_session, login_redirect, read_limited
@@ -60,11 +61,12 @@ _ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
 
 class CollectionError(Exception):
     """User-facing failure. ``kind``: invalid, not_found, not_linked, unavailable, rate_limited,
-    busy, auth."""
+    busy, auth. ``retry_after`` copies DeckError's (seconds to wait, when known)."""
 
-    def __init__(self, kind: str, message: str):
+    def __init__(self, kind: str, message: str, *, retry_after: int | None = None):
         super().__init__(message)
         self.kind = kind
+        self.retry_after = retry_after
 
 
 def _clean(value: Any, limit: int) -> str:
@@ -82,7 +84,7 @@ def _wrap(exc: Exception) -> CollectionError:
             return CollectionError("auth", str(exc))
         if kind == "contract":
             return CollectionError("unavailable", "Archidekt answered in an unexpected way; try again")
-        return CollectionError(kind, str(exc))
+        return CollectionError(kind, str(exc), retry_after=getattr(exc, "retry_after", None))
     raise exc
 
 
@@ -997,6 +999,8 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         try:
             out = await service.page(sub, page=page_no, q=q, sort=sort)
         except CollectionError as exc:
+            if busy := busy_response(exc, request, page, sub=sub, sid=sid):
+                return busy
             status = 200 if exc.kind in ("not_linked", "auth") else _STATUS.get(exc.kind, 400)
             return page(
                 "My collection",
