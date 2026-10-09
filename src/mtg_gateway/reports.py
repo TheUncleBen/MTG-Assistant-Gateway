@@ -330,10 +330,13 @@ class ReportService:
         limit: int = 20,
         *,
         search: str | None = None,
+        since: int | None = None,
+        until: int | None = None,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         """Newest first, with the trend numbers but not the full report. ``search`` matches the
-        deck name, case-insensitively."""
+        deck name, case-insensitively; ``since`` (inclusive) and ``until`` (exclusive) are epoch
+        seconds."""
         limit = max(1, min(int(limit), 2100))  # the History page reads up to its last page plus one
         sql = "SELECT * FROM reports WHERE owner_sub = ?"
         args: list[Any] = [sub]
@@ -343,6 +346,12 @@ class ReportService:
         if search:
             sql += " AND deck_name LIKE ? ESCAPE '\\'"
             args.append(_like(search))
+        if since is not None:
+            sql += " AND taken_at >= ?"
+            args.append(int(since))
+        if until is not None:
+            sql += " AND taken_at < ?"
+            args.append(int(until))
         sql += " ORDER BY taken_at DESC, rowid DESC LIMIT ? OFFSET ?"
         args += [limit, max(0, int(offset))]
         with self.db._lock:

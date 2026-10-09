@@ -107,8 +107,17 @@ catalog). Back up the database before you update, as always.
   assistant), the time, and its details folded away. Snapshot rows link to
   the change they were taken before and keep their "Restore (review first)"
   button. A filter bar narrows the page by deck, type, state and a search
-  over deck names and change text, and "Older" pages through the rest 25 at
-  a time. The per-deck trend tiles are styled like the rest of the site.
+  over deck names and change text, a "When" preset (Today, Last 7, 30 or 90
+  days, This year: UTC calendar days, as every time on the site, chosen from
+  a themed list rather than a native date picker) and "Older" pages through
+  the rest 25 at a time. "Group by" switches the timeline from days to
+  decks: each deck a section headed by its name, linked to the deck and to
+  its own history, decks in the order of their newest entry and each one's
+  rows newest first, with the filters, folded details, Restore and paging
+  unchanged. Every filter and the grouping sit in the address bar, so a
+  view can be bookmarked. The "Backup copies on Archidekt" panel no longer
+  touches the "Older" button. The per-deck trend tiles are styled like the
+  rest of the site.
 
 - **Home, My decks and the collection open at once.** With an Archidekt
   account linked, the member's deck list is kept in memory for a minute and a

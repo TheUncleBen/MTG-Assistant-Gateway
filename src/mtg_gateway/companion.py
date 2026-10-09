@@ -46,8 +46,10 @@ from .history_view import (
     build_events,
     events_html,
     filter_bar_html,
+    is_filtered,
     pager_html,
     read_query,
+    when_since,
 )
 from .pages import (
     BROWSER_CLIENT_ID,
@@ -1784,9 +1786,10 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
     # -- history --------------------------------------------------------------
     @server.custom_route("/history", methods=["GET"], include_in_schema=False)
     async def history(request: Request) -> Response:
-        """Proposals, snapshots and reports as one timeline grouped by day, narrowed by deck, type,
-        state and a search, 25 at a time. Each list is narrowed and paged in SQL, so a deck's own
-        history keeps its older entries however busy the member's other decks are."""
+        """Proposals, snapshots and reports as one timeline grouped by day (or by deck), narrowed
+        by deck, type, state, a "When" preset of UTC days and a search, 25 at a time. Each list is
+        narrowed and paged in SQL, so a deck's own history keeps its older entries however busy
+        the member's other decks are."""
         sub, sid = browser_session(state, request)
         if not sub:
             return login_redirect("/history")
@@ -1794,18 +1797,27 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         deck_id = query["deck_id"] or None
         want = query["type"]
         states = [query["state"]] if query["state"] else None
+        since = when_since(query["when"])
         # Each kind fetched up to the end of this page plus one: the lists merge by time, so the
         # page is sliced after the merge and the extra row says whether an older page exists.
         fetch = query["offset"] + PAGE + 1
         proposals = snapshots = reps = []
         if want in ("all", "changes"):
             proposals = decks.list_proposals(
-                sub, full=True, deck_id=deck_id, states=states, search=query["q"] or None, limit=fetch
+                sub,
+                full=True,
+                deck_id=deck_id,
+                states=states,
+                search=query["q"] or None,
+                since=since,
+                limit=fetch,
             )
         if want in ("all", "snapshots") and not states:
-            snapshots = decks.list_snapshots(sub, deck_id=deck_id, search=query["q"] or None, limit=fetch)
+            snapshots = decks.list_snapshots(
+                sub, deck_id=deck_id, search=query["q"] or None, since=since, limit=fetch
+            )
         if want in ("all", "reports") and not states:
-            reps = reports.list(sub, deck_id, limit=fetch, search=query["q"] or None)
+            reps = reports.list(sub, deck_id, limit=fetch, search=query["q"] or None, since=since)
         client_ids = {r.get("created_by_client") for r in reps if r.get("created_by_client")}
         names = {cid: state.db.client_name(cid) for cid in client_ids if not cid.startswith("__")}
         csrf_in = f"<input type='hidden' name='csrf' value='{_esc(_csrf(s, sid))}'>"
@@ -1816,7 +1828,13 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         # The backup copies the gateway made on Archidekt (D-03): kept out of Home and My decks,
         # listed here on the first, unfiltered page (and on a deck's own history).
         copies_panel = ""
-        if want == "all" and not query["q"] and not query["state"] and not query["offset"]:
+        if (
+            want == "all"
+            and not query["q"]
+            and not query["state"]
+            and not query["when"]
+            and not query["offset"]
+        ):
             try:
                 copies = await asyncio.wait_for(
                     decks.backup_copies(sub, deck_id=deck_id, wait=decks.deck_list_wait), DECKS_JSON_TIMEOUT
@@ -1846,12 +1864,13 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         head = f"<p><a href='/decks/{_esc(deck_id)}'>← Back to the deck</a></p>" if deck_id else ""
         hint = "more below" if has_more else ""
         if shown:
-            listing = f"<section class='history'>{events_html(shown)}</section>" + pager_html(
-                query, has_more=has_more
+            listing = (
+                f"<section class='history'>{events_html(shown, group=query['group'], query=query)}</section>"
             )
+            listing += pager_html(query, has_more=has_more)
         elif query["offset"]:
             listing = "<div class='card'><p>No older entries.</p></div>" + pager_html(query, has_more=False)
-        elif any(v for k, v in query.items() if k != "offset"):
+        elif is_filtered(query):
             listing = "<div class='card'><p>Nothing matches these filters.</p></div>"
         else:
             listing = (
