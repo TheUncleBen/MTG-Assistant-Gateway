@@ -516,6 +516,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
             await state.provider.cimd.aclose()
             await state.archidekt.aclose()
             if state.scan is not None:
+                state.scan.names.close()
                 await state.scan.scryfall.aclose()
             state.db.close()
 

@@ -28,11 +28,30 @@ RETRY_AFTER_FAILURE = 600
 MAX_SUGGESTIONS = 20
 
 
+_JOINERS = str.maketrans("-'\u2019,", "    ")
+
+
 def fold(text: str) -> str:
-    """Lower-case, accent-free form for matching."""
+    """Lower-case, accent-free form for matching; hyphens, apostrophes and commas count as spaces
+    so "lim dul" finds "Lim-Dûl's Vault" (static/suggest.js folds the same way)."""
     nfkd = unicodedata.normalize("NFKD", text)
     plain = "".join(c for c in nfkd if not unicodedata.combining(c)).casefold()
-    return " ".join(plain.split())
+    return " ".join(plain.translate(_JOINERS).split())
+
+
+def rank(folded: str, q: str) -> int | None:
+    """0 when ``folded`` starts with ``q``, 1 when a word of it does, 2 when ``q`` only appears
+    inside a word, None when it does not appear."""
+    at = folded.find(q)
+    if at < 0:
+        return None
+    if at == 0:
+        return 0
+    while at > 0 and folded[at - 1].isalnum():
+        at = folded.find(q, at + 1)
+        if at < 0:
+            return 2
+    return 1
 
 
 def _sort_key(name: str) -> tuple[str, str]:
@@ -85,6 +104,12 @@ class NameCatalog:
         self._next_try = time.monotonic() + RETRY_AFTER_FAILURE
         self._task = loop.create_task(self.load())
 
+    def close(self) -> None:
+        """Cancel a download still running (called when the gateway shuts down)."""
+        if self._task is not None and not self._task.done():
+            self._task.cancel()
+        self._task = None
+
     async def load(self) -> bool:
         try:
             names = await self._scryfall().catalog_card_names()
@@ -108,15 +133,10 @@ class NameCatalog:
         words: list[str] = []
         inside: list[str] = []
         for name, folded in zip(self._names, self._folded, strict=True):
-            at = folded.find(q)
-            if at < 0:
+            where = rank(folded, q)
+            if where is None:
                 continue
-            if at == 0:
-                starts.append(name)
-            elif not folded[at - 1].isalnum():
-                words.append(name)
-            else:
-                inside.append(name)
+            (starts, words, inside)[where].append(name)
             if len(starts) >= limit:
                 break
         return (starts + words + inside)[:limit]

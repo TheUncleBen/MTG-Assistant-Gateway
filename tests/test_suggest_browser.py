@@ -177,6 +177,19 @@ def test_no_match_and_escape(server: Server) -> None:
         assert page.locator("[role=listbox]:visible").count() == 0
         # the list never widens the page
         assert page.evaluate("() => document.documentElement.scrollWidth") <= 390
+        # a failed answer (signed out, busy, Scryfall down) is not "no such card": the list closes
+        page.route("**/scan/api/search*", lambda route: route.fulfill(status=503, body="{}"))
+        box.fill("")
+        box.press_sequentially("shelob d", delay=20)
+        page.wait_for_timeout(600)
+        assert page.locator(".suggest-list li.none").count() == 0
+        assert page.locator("[role=listbox]:visible").count() == 0
+        # the client folds and ranks like scan/names.py: joiners are spaces, a later word start wins
+        assert page.evaluate('() => window.MtgSuggest.fold("Lim-D\u00fbl\'s Vault")') == "lim dul s vault"
+        ranked = page.evaluate(
+            "() => window.MtgSuggest.narrow(['Zap', 'Sunscape Apprentice', 'Apprentice Wizard'], 'ap')"
+        )
+        assert ranked == ["Apprentice Wizard", "Sunscape Apprentice", "Zap"]
         browser.close()
 
 

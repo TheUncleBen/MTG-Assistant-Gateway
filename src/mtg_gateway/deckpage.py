@@ -1002,17 +1002,21 @@ def precon_labels(precons: dict[str, list[dict[str, Any]]]) -> list[str]:
 
 
 def precon_by_label(precons: dict[str, list[dict[str, Any]]], text: str) -> int | None:
-    """The deck id of the precon whose label or bare name is ``text`` (case-insensitive)."""
+    """The deck id of the precon whose label is ``text`` (case-insensitive), or whose bare name is
+    when exactly one precon carries that name; None otherwise."""
     want = " ".join(text.split()).casefold()
     if not want:
         return None
+    by_name: list[int] = []
     for set_name, rows in precons.items():
         for d in rows:
             if not (d.get("id") and d.get("name")):
                 continue
-            if want in (f"{d['name']} ({set_name})".casefold(), str(d["name"]).casefold()):
+            if want == f"{d['name']} ({set_name})".casefold():
                 return int(d["id"])
-    return None
+            if want == str(d["name"]).casefold():
+                by_name.append(int(d["id"]))
+    return by_name[0] if len(by_name) == 1 else None
 
 
 def compare_page_html(
