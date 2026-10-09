@@ -452,9 +452,10 @@ From any machine:
 
 ```bash
 curl -s https://mtg.example.com/healthz
-# {"status":"ok","version":"0.7.8","mystic_forge":"ok"}
-# ("degraded" with "mystic_forge":"down" means the gateway works but the
-#  research service doesn't answer: check the Mystic Forge service)
+# {"status":"ok"}
+# ("degraded" means the gateway works but the research service doesn't
+#  answer: check the Mystic Forge service. The admin page's System
+#  card shows the version and whether the research service answers.)
 
 curl -s https://mtg.example.com/.well-known/oauth-authorization-server | head -c 300
 # JSON with "issuer":"https://mtg.example.com", "authorization_endpoint", ...
@@ -601,7 +602,7 @@ gateway's `environment:` in the stack file, or it has no effect.
 | `MTG_REFRESH_TOKEN_TTL` | no, *stack* | `2592000` | Refresh token lifetime, seconds (30 days; 3600 to 31536000) |
 | `MTG_REAUTH_INTERVAL` | no, *stack* | `604800` | How long (seconds, default a week) after signing in an assistant can keep refreshing its tokens without a fresh sign-in (3600 to 31536000). Once this runs out the next refresh is refused and the person signs in again (and sees the gateway's consent page). Group membership doesn't wait for this: it is checked live with the identity provider on every request (`MTG_MEMBERSHIP_CHECK_TTL`) |
 | `MTG_LOG_LEVEL` | no, *stack* | `INFO` | Logging level |
-| `MTG_SERVER_NAME` | no, *stack* | `MTG Assistant Gateway` | Name shown on the gateway's pages, the install page and to assistants |
+| `MTG_SERVER_NAME` | no, *stack* | `MTG Assistant Gateway` | Name shown on the gateway's pages, the install page and to assistants. Set your own and the plugin's short name follows it (`Deck Helper` → `deck-helper`), and the public plugin files no longer name this project or link to its repository. Anyone who installed the plugin under the old short name installs it again from `/install` |
 | `MTG_LISTEN_HOST`, `MTG_LISTEN_PORT` | no | `0.0.0.0`, `8080` | Address and port inside the container. Leave them; the stack, Compose file and health checks expect 8080 |
 | `MTG_MYSTIC_FORGE_URL` | no, *stack* | empty (no research tools) | Internal Mystic Forge MCP URL; the stack sets `http://mtg-assistant-mysticforge:8000/mcp` |
 | `MTG_WRITES_ENABLED` | no, *stack* | `false` | `true` lets approved proposals be applied to Archidekt |

@@ -194,9 +194,9 @@ docker compose logs -f gateway
 
 ```bash
 curl -s https://mtg.example.com/healthz
-# {"status":"ok","version":"0.7.8","mystic_forge":"ok"}
-# ("degraded" with "mystic_forge":"down": the gateway works, the research
-#  service doesn't answer; see docker compose logs mysticforge)
+# {"status":"ok"}
+# ("degraded": the gateway works, the research service doesn't answer;
+#  see docker compose logs mysticforge)
 
 curl -s https://mtg.example.com/.well-known/oauth-authorization-server | head -c 300
 # JSON with "issuer":"https://mtg.example.com", ...

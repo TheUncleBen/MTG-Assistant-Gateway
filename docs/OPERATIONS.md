@@ -50,11 +50,12 @@ docker service logs -f mtg_mtg-assistant-mysticforge
 curl -s https://mtg.example.com/healthz
 ```
 
-`/healthz` returns `{"status":"ok","version":"...","mystic_forge":"ok"}` when
-the gateway is up and its database answers, and HTTP 503 with
-`"detail":"database unavailable"` otherwise (the reason is in the gateway's
-log, never in the reply). `mystic_forge` is `ok`, `down` or `not_configured`.
-When Mystic Forge is down, `status` is `"degraded"` but the reply is still
+`/healthz` returns `{"status":"ok"}` when the gateway is up and its database
+answers, and HTTP 503 with `"detail":"database unavailable"` otherwise (the
+reason is in the gateway's log, never in the reply). It names no version or
+service, since anyone can ask it and those would tell a stranger which
+project the gateway runs. When Mystic Forge is down, `status` is
+`"degraded"` but the reply is still
 HTTP 200: the gateway's own pages and Archidekt tools keep working without
 it, so the container is not restarted for it; only research and simulations
 fail. The admin page's **System** card shows the version, database size and
