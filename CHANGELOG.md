@@ -16,6 +16,12 @@ extra outbound request a day to Scryfall (the card-name catalog).
 
 ### Changed
 
+- **Playtest opens Archidekt's playtester in its own tab** (in the app: the
+  phone's browser), where your Archidekt sign-in lives, so private decks
+  play too. The gateway no longer frames it; old links are sent on.
+- **"Desktop layout" switch** in the account menu, remembered per device:
+  a phone or the app shows the computer layout, like a browser's Desktop
+  site switch. "Fit the screen" goes back to the adaptive layout.
 - **Sign-out acts on the first click.** The button says "Signing out…"
   and locks at once, both account-page buttons post straight away
   (no confirmation detour for "all my devices"), and the browser is no

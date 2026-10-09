@@ -24,7 +24,7 @@ from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
 from .avatars import initials_svg
 from .clickguard import form_stamp, guarded_form, submitted_too_soon
 from .decks import DeckError, current_client, row_label, row_line
-from .theme import THEME_COOKIE, render, theme_from_cookie
+from .theme import LAYOUT_COOKIE, THEME_COOKIE, layout_from_cookie, render, theme_from_cookie
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -167,6 +167,34 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             resp.set_cookie(
                 THEME_COOKIE,
                 theme,
+                max_age=365 * 86400,
+                path="/",
+                secure=secure,
+                httponly=True,
+                samesite="lax",
+            )
+        return resp
+
+    @server.custom_route("/layout", methods=["POST"], include_in_schema=False)
+    async def set_layout(request: Request) -> Response:
+        """ "Fit the screen" / "Desktop layout" from the account menu (T-046): a cookie read by
+        theme.render, which then asks the device for a wide viewport like a browser's Desktop site
+        switch. Signed-in members only, with the form token."""
+        sub, sid = current(request)
+        data = await form(request)
+        if isinstance(data, Response):
+            return data
+        back = _safe_next(data.get("next"))
+        if not (sub and sid and check_csrf(sid, data)):
+            return RedirectResponse(back, status_code=303)
+        layout = layout_from_cookie(data.get("layout"))
+        resp = RedirectResponse(back, status_code=303)
+        if layout == "auto":
+            resp.delete_cookie(LAYOUT_COOKIE, path="/")
+        else:
+            resp.set_cookie(
+                LAYOUT_COOKIE,
+                layout,
                 max_age=365 * 86400,
                 path="/",
                 secure=secure,

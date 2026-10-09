@@ -306,12 +306,13 @@ def banner_html(
             f"<button type='submit' title='Copy this deck into your own Archidekt account as a new private "
             f"deck'>{icon('clone')} Clone deck</button></form>"
         )
-    # Archidekt's own playtester (draw, mulligan, play by hand), shown inside the gateway's
-    # playtest page: the gateway builds no copy of it, so a game plays the same wherever it is
-    # started. A private deck needs the person's own Archidekt sign-in in that browser.
+    # Archidekt's own playtester (draw, mulligan, play by hand) in its own tab (D-13, T-098): a frame
+    # inside the gateway never carries the person's Archidekt sign-in, so a private deck stayed empty
+    # there. The app opens the link in the phone's browser, where that sign-in lives.
     primary += (
-        f"<a class='btn' href='/decks/{did}/playtest' "
-        f"title='Draw and play this deck by hand in Archidekt&#39;s playtester'>{icon('play')} Playtest</a>"
+        f"<a class='btn' href='https://archidekt.com/playtester-v2/{did}' target='_blank' "
+        "rel='noreferrer noopener' title='Draw and play this deck by hand in Archidekt&#39;s playtester, "
+        f"in a new tab'>{icon('play')} Playtest</a>"
     )
     if csrf:
         # The same run as the assistant's run_deck_report: statistics, validation and 300
@@ -1273,11 +1274,7 @@ DECK_CSS = """
 .banner .controls .primary{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center}
 .banner .controls .btn,.banner .controls button{margin:0}
 .banner .controls form.inline{display:contents}
-/* playtest page: Archidekt's playtester framed below a one-line header */
-.playhead,.comparehead{display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap}
-.playframe{display:block;width:100%;height:calc(100dvh - 11rem);min-height:480px;
-  border:1px solid var(--border);border-radius:var(--radius);background:#111}
-.playnote{margin:.5rem 0 0}
+.comparehead{display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap}
 /* compare page */
 .comparehead{flex-direction:column;align-items:stretch}
 .compareform{display:grid;gap:.75rem}

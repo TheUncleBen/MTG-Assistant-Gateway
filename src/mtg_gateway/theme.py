@@ -25,6 +25,9 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from .mana import SPRITE
 
 THEME_COOKIE = "mtg_theme"
+# "auto" (unset) follows the window width; "desktop" asks a phone or the app for the computer layout.
+LAYOUT_COOKIE = "mtg_layout"
+LAYOUTS = ("auto", "desktop")
 FEEDBACK_SCRIPT = "/static/feedback.js"
 # The Content-Security-Policy of every page render() builds (some pages replace it with their own,
 # which keeps the same frame-ancestors and base-uri). form-action is last so sources can follow it.
@@ -36,6 +39,7 @@ DEFAULT_CSP = (
 )
 THEMES = ("system", "light", "dark")
 _theme: ContextVar[str] = ContextVar("mtg_theme", default="system")
+_layout: ContextVar[str] = ContextVar("mtg_layout", default="auto")
 _path: ContextVar[str] = ContextVar("mtg_path", default="/")
 # True while rendering for the Android app's WebView (its user agent carries "MTGAssistant/"):
 # pages then use the phone layout at every width and drop the website footer.
@@ -659,6 +663,14 @@ def theme_from_cookie(value: str | None) -> str:
     return value if value in THEMES else "system"
 
 
+def layout_from_cookie(value: str | None) -> str:
+    return value if value in LAYOUTS else "auto"
+
+
+def current_layout() -> str:
+    return _layout.get()
+
+
 # The site navigation, in Archidekt's order of sections as far as the gateway has them: decks,
 # deck search, cards you own, scanning, then the gateway's own review pages. The same list feeds
 # the top bar on wide screens and the bottom tab bar on phones.
@@ -715,6 +727,10 @@ def render(
     ``heading=False`` leaves the <h1> to the body (deck banner)."""
     theme = current_theme()
     app = in_app()
+    # "Use desktop layout" (T-046): a wide fixed viewport, as a browser's "Desktop site" switch
+    # would give, so the width-based media queries pick the computer layout and the device zooms out;
+    # the app's forced rail is dropped too.
+    desktop = current_layout() == "desktop"
     nav = ""
     tabbar = ""
     cur = current or ""
@@ -761,6 +777,13 @@ def render(
             f"<form method='post' action='/theme'>{csrf_in}"
             f"<input type='hidden' name='next' value='{html.escape(current_path())}'>"
             f"{theme_items}</form>"
+            "<div class='sep'></div><div class='head'>Site layout</div>"
+            f"<form method='post' action='/layout'>{csrf_in}"
+            f"<input type='hidden' name='next' value='{html.escape(current_path())}'>"
+            f"<button name='layout' value='auto'{' class=on' if not desktop else ''}>"
+            f"{icon('check') if not desktop else '<span class=i></span>'}Fit the screen</button>"
+            f"<button name='layout' value='desktop'{' class=on' if desktop else ''}>"
+            f"{icon('check') if desktop else '<span class=i></span>'}Desktop layout</button></form>"
             "<div class='sep'></div>"
             f"<form method='post' action='/logout'>{csrf_in}"
             f"<button data-busy-text='Signing out…'>{icon('x')}Sign out</button></form>"
@@ -799,14 +822,21 @@ def render(
     h1 = f"<h1>{html.escape(title)}</h1>" if heading else ""
     classes = " ".join(
         c
-        for c in ("wide" if wide else "", "has-tabbar" if tabbar else "", "app" if app else "", body_class)
+        for c in (
+            "wide" if wide else "",
+            "has-tabbar" if tabbar else "",
+            "app" if app and not desktop else "",
+            "desktop" if desktop else "",
+            body_class,
+        )
         if c
     )
+    viewport = "width=1100" if desktop else "width=device-width, initial-scale=1, viewport-fit=cover"
     main_cls = "wrap panes" if panes else "wrap"
     doc = (
         f"<!doctype html><html lang='en'{f' data-theme={theme}' if theme != 'system' else ''}>"
         "<head><meta charset='utf-8'>"
-        "<meta name='viewport' content='width=device-width, initial-scale=1, viewport-fit=cover'>"
+        f"<meta name='viewport' content='{viewport}'>"
         "<meta name='referrer' content='no-referrer'>"
         f"<meta name='color-scheme' content='{'dark light' if theme == 'system' else theme}'>"
         "<meta name='theme-color' content='#111111'>"
@@ -861,6 +891,7 @@ class ThemeMiddleware:
             await self.app(scope, receive, send)
             return
         value = None
+        layout = None
         app = False
         for k, v in scope.get("headers", []):
             if k == b"cookie":
@@ -868,9 +899,12 @@ class ThemeMiddleware:
                     name, _, val = part.strip().partition("=")
                     if name == THEME_COOKIE:
                         value = val.strip()
+                    elif name == LAYOUT_COOKIE:
+                        layout = val.strip()
             elif k == b"user-agent" and APP_UA_MARK in v.decode("latin-1", "replace"):
                 app = True
         token = _theme.set(theme_from_cookie(value))
+        ltoken = _layout.set(layout_from_cookie(layout))
         path = scope.get("path") or "/"
         ptoken = _path.set(path)
         atoken = _app.set(app)
@@ -878,6 +912,7 @@ class ThemeMiddleware:
             await self.app(scope, receive, send)
         finally:
             _theme.reset(token)
+            _layout.reset(ltoken)
             _path.reset(ptoken)
             _app.reset(atoken)
 

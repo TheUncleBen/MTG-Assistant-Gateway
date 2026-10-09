@@ -246,3 +246,29 @@ def test_sign_out_acts_on_the_first_click_and_says_so(server: Server) -> None:
         assert page.evaluate("() => window.__submits") == 1
         assert page.evaluate("() => document.documentElement.scrollWidth") <= 1366
         browser.close()
+
+
+def test_desktop_layout_switch_gives_a_phone_the_computer_layout(server: Server) -> None:
+    """T-046: with the Desktop layout cookie a phone gets a 1100 px viewport (as a browser's Desktop
+    site switch would), so the width queries show the top bar instead of the bottom tab bar."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = server.sign_in()
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        phone = {"viewport": {"width": 390, "height": 800}, "is_mobile": True, "has_touch": True}
+        ctx = browser.new_context(**phone)
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        page.goto(f"{server.base}/decks", wait_until="networkidle")
+        assert page.locator(".tabbar").is_visible() and not page.locator(".topbar nav a").first.is_visible()
+        ctx.add_cookies([{"name": "mtg_layout", "value": "desktop", "url": server.base}])
+        page.goto(f"{server.base}/decks", wait_until="networkidle")
+        assert page.evaluate("() => document.documentElement.clientWidth") == 1100
+        assert not page.locator(".tabbar").is_visible() and page.locator(".topbar nav a").first.is_visible()
+        # a one-pixel rounding of the 1100 -> 390 scaling is not an overflow (no element crosses the edge)
+        assert page.evaluate("() => document.documentElement.scrollWidth") <= 1101
+        browser.close()

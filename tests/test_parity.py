@@ -43,6 +43,27 @@ async def test_theme_cookie_and_shell(stack: Stack) -> None:
         # no token: nothing is set
         r = await b.http.post("/theme", data={"theme": "dark"})
         assert r.status_code == 303 and "set-cookie" not in r.headers
+        # T-046: "Desktop layout" is a cookie too; it asks the device for a wide viewport (as a
+        # browser's Desktop site switch would) so the width queries pick the top bar, and the app's
+        # forced rail is dropped. "Fit the screen" clears it.
+        assert "Site layout" in page.text and "action='/layout'" in page.text
+        r = await b.http.post("/layout", data={"csrf": csrf, "layout": "desktop", "next": "/decks"})
+        assert r.status_code == 303 and "mtg_layout=desktop" in r.headers["set-cookie"]
+        page = await b.http.get("/decks", headers=NAV)
+        assert "<meta name='viewport' content='width=1100'>" in page.text
+        assert "desktop" in page.text.split("<body class='")[1].split("'")[0]
+        app_ua = {**NAV, "User-Agent": "Mozilla/5.0 (Linux; Android 14) MTGAssistant/1"}
+        in_app = await b.http.get("/decks", headers=app_ua)
+        body_cls = in_app.text.split("<body class='")[1].split("'")[0].split()
+        assert "desktop" in body_cls and "app" not in body_cls
+        r = await b.http.post("/layout", data={"csrf": csrf, "layout": "auto", "next": "/decks"})
+        assert r.status_code == 303 and (
+            'mtg_layout=""' in r.headers["set-cookie"] or "mtg_layout=;" in r.headers["set-cookie"]
+        )
+        page = await b.http.get("/decks", headers=NAV)
+        assert "content='width=device-width, initial-scale=1, viewport-fit=cover'" in page.text
+        r = await b.http.post("/layout", data={"layout": "desktop"})
+        assert r.status_code == 303 and "set-cookie" not in r.headers
     finally:
         await b.aclose()
 
@@ -66,9 +87,10 @@ async def test_deck_list_controls_and_views(stack: Stack) -> None:
         deck = await b.http.get("/decks/42", headers=NAV)
         assert deck.status_code == 200
         assert "class='banner'" in deck.text and "Quick add" in deck.text and "Clone deck" in deck.text
-        # Archidekt's own playtester framed on the gateway's playtest page; the simulation (the
-        # same run as run_deck_report) is one click; the compare view is under More
-        assert "href='/decks/42/playtest'" in deck.text and "Run simulation" in deck.text
+        # Archidekt's own playtester in its own tab (D-13); the simulation (the same run as
+        # run_deck_report) is one click; the compare view is under More
+        assert "href='https://archidekt.com/playtester-v2/42' target='_blank'" in deck.text
+        assert "Run simulation" in deck.text
         assert "href='/decks/42/compare'" in deck.text and "Run deck report" not in deck.text
         assert "/decks/42/settings" in deck.text and "Deck stats" in deck.text
         assert "cards.scryfall.io" in deck.headers["content-security-policy"]

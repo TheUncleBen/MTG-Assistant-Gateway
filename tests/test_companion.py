@@ -371,26 +371,22 @@ async def test_deck_editor_page(stack: Stack) -> None:
         await b.aclose()
 
 
-async def test_playtest_page_frames_archidekts_playtester(stack: Stack) -> None:
-    """The playtest page is Archidekt's own playtester in a frame (the only origin the page's CSP
-    lets it frame), with the deck's name, a way back and the plain link as a fallback. Missing
-    decks and anonymous visitors are handled like the deck page."""
+async def test_playtest_goes_to_archidekts_own_playtester(stack: Stack) -> None:
+    """Playtest opens Archidekt's playtester in its own tab (D-13): a frame on a gateway page never
+    carried the person's Archidekt sign-in, so a private deck stayed empty there (T-098). Old links
+    to the gateway's playtest page are sent on; nothing is framed any more."""
     b = await linked_browser(stack)
     try:
+        deck = await b.http.get("/decks/42", headers=NAV)
+        assert (
+            "href='https://archidekt.com/playtester-v2/42' target='_blank' rel='noreferrer noopener'"
+            in deck.text
+        )
+        assert "<iframe" not in deck.text
         r = await b.http.get("/decks/42/playtest", headers=NAV)
-        assert r.status_code == 200
-        assert "<iframe class='playframe' src='https://archidekt.com/playtester-v2/42'" in r.text
-        assert "sandbox='allow-scripts allow-same-origin" in r.text
-        assert "href='https://archidekt.com/playtester-v2/42' target='_blank'" in r.text  # fallback
-        assert "href='/decks/42'" in r.text and "Sample Commander Deck" in r.text
-        csp = r.headers["content-security-policy"]
-        assert "frame-src https://archidekt.com;" in csp and "frame-ancestors 'none'" in csp
-        assert "script-src 'self'" in csp and "img-src 'self'" in csp  # the shell's own script and avatar
-        assert "cards.scryfall.io" not in csp
-        missing = await b.http.get("/decks/999999/playtest", headers=NAV)
-        assert missing.status_code == 404
-        anon = await stack.h.http.get("/decks/42/playtest", headers=NAV)
-        assert anon.status_code == 302 and anon.headers["location"].startswith("/login?next=")
+        assert r.status_code == 303 and r.headers["location"] == "https://archidekt.com/playtester-v2/42"
+        odd = await b.http.get("/decks/evil/playtest", headers=NAV)
+        assert odd.status_code == 303 and odd.headers["location"] == "/decks"
     finally:
         await b.aclose()
 

@@ -62,13 +62,6 @@ DECK_CSP = (
     "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; "
     "img-src 'self' https://cards.scryfall.io; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 )
-# The playtest page frames Archidekt's own playtester (archidekt.com sends no frame-ancestors or
-# X-Frame-Options; checked live 2026-10-08) and nothing else; the gateway's pages themselves
-# still refuse to be framed.
-PLAYTEST_CSP = (
-    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; worker-src 'self'; img-src 'self'; "
-    "frame-src https://archidekt.com; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
-)
 # Format names the settings and new-deck forms offer, one per Archidekt format id.
 FORMAT_CHOICES = sorted({FORMAT_NAMES[i] for i in FORMAT_NAMES}, key=lambda n: format_label(n).lower())
 EDITOR_CSP = (
@@ -1552,50 +1545,12 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
 
     @server.custom_route("/decks/{deck_id}/playtest", methods=["GET"], include_in_schema=False)
     async def playtest_page(request: Request) -> Response:
-        """Archidekt's own playtester for this deck, inside the gateway (web and the app's
-        WebView alike; the app loads frames in place). The gateway builds no playtester of its
-        own, so a game here is the same game as on archidekt.com."""
-        deck_id = request.path_params["deck_id"]
-        sub, sid = browser_session(state, request)
-        if not sub:
-            return login_redirect(f"/decks/{deck_id}/playtest")
-        try:
-            deck = await decks.get_any_deck(sub, deck_id)
-        except DeckError as exc:
-            return page(
-                "Deck not found",
-                f"<div class='panel'><p>{_esc(exc)}</p>"
-                "<a class='btn' href='/decks'>Back to my decks</a></div>",
-                sub=sub,
-                sid=sid,
-                status=404 if exc.kind == "not_found" else 400,
-            )
-        did = _esc(deck.id)
-        src = f"https://archidekt.com/playtester-v2/{did}"
-        body = (
-            "<section class='panel playhead'>"
-            f"<div><a href='/decks/{did}'>← {_esc(deck.name or f'Deck {deck.id}')}</a>"
-            "<span class='muted small'> · Archidekt's playtester, shown here</span></div>"
-            f"<a class='btn' href='{src}' target='_blank' rel='noreferrer noopener'>{icon('external')} "
-            "Open on Archidekt</a></section>"
-            f"<iframe class='playframe' src='{src}' title='Archidekt playtester' allow='fullscreen' "
-            "referrerpolicy='no-referrer' sandbox='allow-scripts allow-same-origin allow-forms allow-popups "
-            "allow-popups-to-escape-sandbox'></iframe>"
-            "<p class='muted small playnote'>The playtester runs on archidekt.com. A private deck shows only "
-            "when this browser is signed in to Archidekt; if the frame stays empty, use Open on "
-            "Archidekt.</p>"
-        )
-        return page(
-            f"Playtest: {deck.name or deck.id}",
-            body,
-            sub=sub,
-            sid=sid,
-            two_pane=True,
-            current="/decks",
-            csp=PLAYTEST_CSP,
-            heading=False,
-            deck_css=True,
-        )
+        """Old links to the gateway's framed playtester go straight to Archidekt's own (D-13): a frame
+        never carried the person's Archidekt sign-in, so private decks stayed empty in it."""
+        deck_id = str(request.path_params["deck_id"])
+        if not deck_id.isdigit():
+            return RedirectResponse("/decks", status_code=303)
+        return RedirectResponse(f"https://archidekt.com/playtester-v2/{deck_id}", status_code=303)
 
     @server.custom_route("/decks/{deck_id}/compare", methods=["GET"], include_in_schema=False)
     async def compare_page(request: Request) -> Response:
