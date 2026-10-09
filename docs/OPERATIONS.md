@@ -214,7 +214,7 @@ at `https://mtg.example.com/skill`. The files are part of the assistant
 plugin, `plugin/mtg-gateway/` in the repository
 (`skills/mtg-gateway/SKILL.md` and `chatgpt-instructions.md`). The image
 copies that to `/usr/share/mtg-gateway/plugin`, so a new image brings new
-skill text and a new plugin archive at `/plugin/mtg-gateway.zip`.
+skill text and a new plugin archive at `/plugin/mtg-gateway.zip` (or `/plugin/<slug of MTG_SERVER_NAME>.zip`).
 
 To serve your own edited copy without rebuilding, mount a folder with the
 same layout (`mtg-gateway/` inside it) and point `MTG_PLUGIN_DIR` at it
