@@ -128,27 +128,31 @@ svg.i{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:2;stroke-l
 .topbar .icon-btn{width:40px;padding:0;justify-content:center;font-size:1.2rem}
 .topbar .icon-btn img.av{width:28px;height:28px;border-radius:50%;object-fit:cover;display:block}
 
-/* dropdown menus (details/summary, no script): phatDropdown trigger + menu panel */
+/* dropdown menus (details/summary, no script): phatDropdown trigger + menu panel. The panel
+   styling is the shared .menu class, so a script-made menu (the deck page's card menu) looks the
+   same; details.dd only adds where its panel sits. */
 details.dd{position:relative;margin:0}
 details.dd > summary{list-style:none;cursor:pointer;user-select:none}
 details.dd > summary::-webkit-details-marker{display:none}
-details.dd .menu{position:absolute;top:calc(100% + .25rem);right:0;z-index:30;min-width:200px;
+.menu{z-index:30;min-width:200px;
   background:var(--surface-2);border-radius:var(--radius-panel);box-shadow:var(--shadow);padding:.25rem 0;
   display:flex;flex-direction:column}
+details.dd .menu{position:absolute;top:calc(100% + .25rem);right:0}
 details.dd .menu.left{left:0;right:auto}
-details.dd .menu a,details.dd .menu button,details.dd .menu .item{display:flex;align-items:center;gap:.6rem;
+.menu a,.menu button,.menu .item{display:flex;align-items:center;gap:.6rem;
   min-height:35px;padding:0 1rem;margin:0;width:100%;background:transparent;border:0;border-radius:0;
   color:var(--text);text-decoration:none;font:inherit;font-weight:400;font-size:1rem;cursor:pointer;
   text-align:left;white-space:nowrap;justify-content:flex-start}
-details.dd .menu a:hover,details.dd .menu button:hover,details.dd .menu a:focus-visible{
-  background:var(--border);color:var(--text)}
-details.dd .menu .sep{height:1px;background:var(--border);margin:.25rem 0}
-details.dd .menu a.danger{color:var(--danger-text)}
-details.dd .menu .head{padding:.4rem 1rem .2rem;font-size:.8rem;font-weight:700;color:var(--menu-head);
+.menu a:hover,.menu button:hover,.menu a:focus-visible,.menu button:focus-visible{
+  background:var(--border);color:var(--text);outline:none}
+.menu button:disabled{color:var(--text-muted);cursor:default;background:transparent}
+.menu .sep{height:1px;background:var(--border);margin:.25rem 0}
+.menu a.danger,.menu button.danger{color:var(--danger-text)}
+.menu .head{padding:.4rem 1rem .2rem;font-size:.8rem;font-weight:700;color:var(--menu-head);
   text-transform:uppercase;letter-spacing:.04em}
-details.dd .menu form{margin:0;display:contents}
+.menu form{margin:0;display:contents}
 /* the chosen theme: --orange-text would be 4.0:1 on the light menu */
-details.dd .menu .on{color:var(--toolbar-active);font-weight:700}
+.menu .on{color:var(--toolbar-active);font-weight:700}
 /* a dropdown trigger styled like phatDropdown: bordered, 39px, orange chevron, label floating above */
 .field{position:relative;display:flex;flex-direction:column;gap:.3rem;min-width:0}
 .field > label,.field > .lbl{font-weight:700;margin:0;font-size:1rem}
