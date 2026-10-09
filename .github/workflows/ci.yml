@@ -270,11 +270,21 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Log in to Docker Hub (only when the owner set DOCKERHUB_USERNAME and DOCKERHUB_TOKEN)
+        # The base image comes from Google's mirror of Docker Hub, so this is a fallback for anything
+        # buildx still fetches from Docker Hub: signed-in pulls have a much higher rate limit.
+        if: env.DOCKERHUB_USERNAME != ''
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Build amd64 image for a smoke test
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
@@ -299,6 +309,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -311,6 +323,14 @@ jobs:
           path: docker/app-dist/
       - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Log in to Docker Hub (only when the owner set DOCKERHUB_USERNAME and DOCKERHUB_TOKEN)
+        # The base image comes from Google's mirror of Docker Hub, so this is a fallback for anything
+        # buildx still fetches from Docker Hub: signed-in pulls have a much higher rate limit.
+        if: env.DOCKERHUB_USERNAME != ''
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build amd64 image for a smoke test
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
