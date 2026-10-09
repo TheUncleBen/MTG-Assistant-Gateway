@@ -291,7 +291,7 @@ If the packages are public you can skip this step.
 
    | Variable | What to put |
    | --- | --- |
-   | `MTG_IMAGE`, `MTG_TAG` | `ghcr.io/<owner>/mtg-assistant-gateway` and `latest` to follow every new version, or one version to stay on it, for example `0.7.9` ([VERSIONS.md](VERSIONS.md)) |
+   | `MTG_IMAGE`, `MTG_TAG` | `ghcr.io/<owner>/mtg-assistant-gateway` and `latest` to follow every new version, or one version to stay on it, for example `0.7.10` ([VERSIONS.md](VERSIONS.md)) |
    | `MTG_PUBLIC_URL` | `https://mtg.example.com` |
    | `MTG_OIDC_ISSUER` | the issuer URL from step 3 |
    | `MTG_OIDC_CLIENT_ID` | the Client ID from step 3 |
@@ -353,7 +353,13 @@ versions refuse the `pids` key and the stack wouldn't deploy. The Compose
 file ([DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md)) sets both.
 
 The images are built on the official Python base images by tag, so every
-release build picks up the base image's latest security patches. GitHub
+release build picks up the base image's latest security patches. The base
+image is fetched from Google's public mirror of Docker Hub (`mirror.gcr.io`,
+the same images and digests), because Docker Hub limits anonymous pulls per
+address and shared CI runners hit that limit. As a fallback for anything a
+build still fetches from Docker Hub, the image jobs sign in to Docker Hub when
+the repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (a
+read-only access token) exist; without them the step is skipped. GitHub
 Actions are pinned by commit, Python dependencies by version
 (`constraints.txt`), and the Android build checks its Gradle wrapper before
 running it.

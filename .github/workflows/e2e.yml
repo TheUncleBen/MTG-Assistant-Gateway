@@ -80,6 +80,10 @@ jobs:
                 || format('["{0}"]', inputs.authentik)) }}
     env:
       E2E_AUTHENTIK_IMAGE: ghcr.io/goauthentik/server:${{ matrix.authentik }}
+      # The stack's other images from Google's mirror of Docker Hub (see Dockerfile)
+      E2E_NGINX_IMAGE: mirror.gcr.io/library/nginx:1.27-alpine
+      E2E_POSTGRES_IMAGE: mirror.gcr.io/library/postgres:16-alpine
+      E2E_REDIS_IMAGE: mirror.gcr.io/library/redis:7-alpine
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
