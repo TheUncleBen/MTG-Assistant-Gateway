@@ -16,6 +16,22 @@ extra outbound request a day to Scryfall (the card-name catalog).
 
 ### Changed
 
+- **The Guide is a handbook in four parts.** Tutorials take a new member
+  through linking Archidekt, connecting an assistant, a first deck edit and a
+  first simulation step by step; how-to guides give one recipe per task (add
+  cards, approve a proposal, restore a snapshot, compare with a precon, export
+  and import, scan, the collection, playtest, theme and layout, sign out
+  everywhere); the reference lists what the assistant can do tool by tool,
+  every page and its address, the approval modes and risk levels, the
+  keyboard shortcuts (the deck page's card menu on Shift+F10, Enter to open a
+  card) and the editor's search bar syntax ("3 sol ring", the chips); the
+  explanation covers how approvals, snapshots and the per-save backup copy
+  work, how lists stay fresh, privacy, and why Playtest opens Archidekt in a
+  new tab. A contents rail (a drawer on phones) follows the reader and marks
+  the section in view, every heading has its own link, a search box filters
+  the sections and the rail as you type (Escape clears), and "Back to top"
+  appears once you have scrolled. Text that had gone stale (Playtest in a
+  frame, one sign-out button) is corrected.
 - **Adding cards is one search bar.** In the deck editor, chips above the
   box say where a card goes (Auto, a category, the maybeboard), Enter
   adds the highlighted card and keeps the cursor in the box, "3 sol ring"
