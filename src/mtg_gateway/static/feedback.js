@@ -82,33 +82,53 @@
     closeMenus(inside);
   });
   document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeMenus(null); });
-  // Opening a menu pushes a history entry on phones, so Back closes the menu instead of leaving the page.
-  // `pushed` remembers that this page pushed it and is cleared the moment the entry is given back
-  // (history.back() lands later, as a popstate), so closing one menu and another in quick
-  // succession never goes back twice and leaves the page.
+  // On phones (and in the app) one history entry stands for "a menu is open", so Back closes the
+  // menu instead of leaving the page. This block is the entry's only owner: `pushed` says the
+  // entry exists, `popping` that the page itself asked for it back. Opening the first menu
+  // pushes it; the last menu closing gives it back; and when that back lands late, after the
+  // person has already opened another menu, the entry is pushed again for that menu (never
+  // before it lands, so two entries or two backs can never be in flight), so Back never leaves
+  // the page while a menu is open and never goes back twice.
   var pushed = false, popping = false;
+  function phoneLike() {
+    return window.matchMedia("(max-width: 599.98px)").matches ||
+      window.matchMedia("(max-width: 899.98px) and ((pointer: coarse) or (hover: none))").matches ||
+      document.body.classList.contains("app");
+  }
+  function takeEntry() {
+    // while the page's own back() is still landing, the popstate handler takes the entry instead
+    if (pushed || popping || !phoneLike()) return;
+    history.pushState({ menu: 1 }, "");
+    pushed = true;
+  }
+  function giveEntryBack() {
+    if (!pushed || popping) return;
+    pushed = false;
+    popping = true;
+    history.back();
+  }
   document.addEventListener("toggle", function (e) {
     var d = e.target;
     if (!(d instanceof HTMLDetailsElement) || !d.classList.contains("dd")) return;
     if (d.open) {
       closeMenus(d);
       keepOnScreen(d);
-      var phone = window.matchMedia("(max-width: 599.98px)").matches || window.matchMedia("(max-width: 899.98px) and ((pointer: coarse) or (hover: none))").matches;
-      if ((phone || document.body.classList.contains("app")) && !pushed && !history.state?.menu) {
-        history.pushState({ menu: 1 }, "");
-        pushed = true;
-      }
+      takeEntry();
     } else {
       var m = d.querySelector(":scope > .menu");
       if (m) { m.style.left = ""; m.style.right = ""; }
-      if (pushed) { pushed = false; popping = true; history.back(); }
+      if (!openMenus().length) giveEntryBack();
     }
   }, true);
-  // Back (the button, or the back() above landing): close whatever is open, unless this is the
-  // page's own back() for a menu that is already closed, which must not close the next one.
   window.addEventListener("popstate", function () {
+    if (popping) {
+      // the page's own back() landed; a menu opened meanwhile needs the entry again
+      popping = false;
+      if (openMenus().length) takeEntry();
+      return;
+    }
+    // the person pressed Back: the entry is gone, close what is open without going back again
     pushed = false;
-    if (popping) { popping = false; return; }
     if (openMenus().length) closeMenus(null);
   });
   // A menu panel hangs from one edge of its button: the right edge usually, the left edge for

@@ -268,7 +268,22 @@ catalog). Back up the database before you update, as always.
   px, with a mouse and on a touch screen, with long deck, card and
   member names, a full collection, history and a pending proposal, and
   fails on any sideways scroll, clipped or overlapping control, or
-  dropdown panel outside the window.
+  dropdown panel outside the window. Its data is hostile: a 40-character
+  unbroken username and deck name, long folder and tag names.
+- **Phone menus and Back:** one history entry stands for "a menu is
+  open", with one owner in the page script: opening a second menu
+  straight from the first, or right after closing it, keeps that entry,
+  so Back closes the menu and never leaves the page (gate R4-1), and
+  never goes back twice. Three browser tests tap real menus on a phone
+  and press Back.
+- **Long names in controls:** the Follow button on a member's profile
+  and on a deck page, the editor's category chips and the follow
+  confirmation shrink and ellipsise inside their row, with the whole
+  name in the control's title, instead of widening the page (a
+  40-character username made a profile 163 px too wide at 320 px). In
+  the My decks list view on a phone the tags sit under the row instead
+  of squeezing the deck name to 44 px, and a collection card's picture
+  fills its tile (a card with no image no longer collapses to a dot).
 - **Touch screens:** the small controls a mouse never minds are at least
   40 px tall on a phone or tablet: the editor's add-to chips, the deck page's
   category button and odds form, folded Details, footer links, the brand

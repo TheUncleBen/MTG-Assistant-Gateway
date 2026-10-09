@@ -1737,6 +1737,9 @@ ul.decklist.list .thumb{width:90px;height:60px;flex:none}
 ul.decklist.list .thumb .ini{font-size:1.5rem} ul.decklist.list .thumb .views{display:none}
 ul.decklist.list .info{flex:1;min-height:0}
 ul.decklist.list .tags{border-top:0;max-width:30%}
+@media (max-width:600px){ ul.decklist.list .deck a{flex-wrap:wrap}
+  ul.decklist.list .tags{max-width:none;flex-basis:100%;border-top:1px solid var(--border-soft)}
+  ul.decklist.list .tags:empty{display:none} }
 ul.decklist.list .deck{margin-bottom:.5rem}
 .pane.list ul.decklist.grid{grid-template-columns:minmax(0,1fr);gap:.75rem}
 .pane.list ul.decklist .thumb{height:90px}

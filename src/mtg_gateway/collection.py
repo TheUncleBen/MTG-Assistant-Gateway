@@ -804,7 +804,9 @@ COLLECTION_CSS = """
 /* A card is at least 170px wide so its controls row (minus, count, plus, Details, remove:
    about 158px) always fits inside it instead of touching the next card. */
 ul.collgrid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:1rem}
-ul.collgrid .col .pic{position:relative;aspect-ratio:5/7;border-radius:4.5%;overflow:hidden;
+ul.collgrid .col .pic{position:relative;display:block;width:100%;box-sizing:border-box;aspect-ratio:5/7;
+  border-radius:4.5%;
+  overflow:hidden;
   background:var(--surface-2);
   border:2px solid var(--card-border)}
 ul.collgrid .col .pic img{width:100%;height:100%;display:block;object-fit:cover}

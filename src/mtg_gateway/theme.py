@@ -554,6 +554,13 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
    Comments link matches its Like and Bookmark buttons (gate D9). */
 .choice button,.choice .btn{min-height:48px}
 .banner .social a.soc,.banner .social button.soc{height:34px;min-height:34px}
+/* A control that carries text a member typed (a username in Follow, a deck's category in the
+   editor's chips, a folder's name) shrinks and ellipsises inside its row, with the whole text
+   in its title, instead of widening the page (gate R4-2: a 40-character username). */
+.soc,.btn.soc,.addbox button.tchip,.chips button{max-width:100%;min-width:0}
+.soc > span,.addbox button.tchip{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.social .confirm{max-width:100%;flex-wrap:wrap;min-width:0}
+.social .confirm > span{min-width:0;overflow-wrap:anywhere}
 /* Touch screens: every control at least 40 px tall (Material's minimum), including the small
    ones a mouse never minds (gate D11): the editor's add-to chips, the deck page's category
    button and odds form, folded Details, footer links, the brand mark, list links, crumbs. */

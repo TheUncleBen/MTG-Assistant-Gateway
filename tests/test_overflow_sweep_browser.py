@@ -1,6 +1,6 @@
 """R-131 overflow sweep in headless Chromium: with realistic data (a deck named like the app's
 own copies, a very long deck name, long card names in a full collection, a long member name,
-history, a report and a pending proposal) every page is laid out at 28 widths from 320 to 1400
+history, a report and a pending proposal) every page is laid out at 18 widths from 320 to 1400
 px, with a mouse and on a touch screen, and must never scroll sideways, keep every control
 inside the window and inside whatever clips it, and never let two controls overlap. Every
 dropdown menu (details.dd) is also opened and its panel must sit inside the window. Skipped
@@ -16,6 +16,7 @@ import pytest
 
 from mtg_gateway.archidekt_csv import parse_export, to_deck_json
 
+from . import fake_archidekt as FA
 from .test_editor_browser import PNG, _link
 from .test_history_page import seed_history, store_report
 from .test_scan_browser import _chromium_path
@@ -34,18 +35,53 @@ CARDS = [
     "Acidic Slime",
     "Opt",
     "Forest",
+    "Asmoranomardicadaistinaculdacar",
+    "Okiri, Belligerent Bannerkeeper of the Greatest Grand Army",
 ]
 WIDTHS = [320, 360, 400, 480, 560, 600, 640, 680, 720, 760, 800, 900, 1000, 1100, 1200, 1300, 1366, 1400]
+
+
+LONGUSER = "Planeswalker_Archivist_of_the_Multiverse"  # 40 characters, one unbroken word
+UNBROKEN = "Superlongunbrokendecknamewithoutanyspace"  # 40 characters, no space to wrap at
+UNBROKEN_2 = "Thisisanotherveryveryverylongwordwithnospa"
+FOLDERS = [
+    "Commander decks in progress and testing builds for Friday Night Magic at the shop",
+    "Archiveddecksnolongerplayedbutkeptforreference",
+]
+LONG_TAGS = ["landfall-and-ramp-synergies-with-an-extra-long-tag-name", "budget under 100 (paper only)"]
+# Archidekt's real maximum username length is not verified; 40 unbroken characters is the hostile
+# case this sweep uses. Everything a member can type is long and, where possible, unbroken.
 
 
 @pytest.fixture
 def server(tmp_path: Path):
     s = Server(tmp_path)
+    long_cards = ((9801, CARDS[-2]), (9802, CARDS[-1]))
+    for cid, name in long_cards:
+        FA.CARD_DB.setdefault(name.lower(), {"id": cid, "oracleCard": {"name": name}})
     fixture = Path(__file__).parent / "fixtures" / "sample_deck.csv"
     cards = parse_export(fixture.read_text(encoding="utf-8"))
     s.ark.decks[44] = to_deck_json(cards, deck_id=44, name=LONG_COPY, owner="alice")
     s.ark.decks[45] = to_deck_json(cards[:20], deck_id=45, name=LONGER, owner="alice")
-    s.ark.users["alice"]["decks"] += [44, 45]
+    s.ark.decks[46] = to_deck_json(cards[:12], deck_id=46, name=UNBROKEN, owner="alice")
+    s.ark.users["alice"]["decks"] += [44, 45, 46]
+    # another member with the longest username, owning two long-named decks (profile + deck page Follow)
+    s.ark.users[LONGUSER] = {"password": "pw-long", "id": 79, "decks": [47, 48]}
+    s.ark.decks[47] = to_deck_json(cards[:15], deck_id=47, name=UNBROKEN_2, owner=LONGUSER)
+    s.ark.decks[48] = to_deck_json(cards[:15], deck_id=48, name=LONGER, owner=LONGUSER)
+    for i, name in enumerate(FOLDERS, 1):
+        s.ark.folders.setdefault("alice", []).append({"id": 500 + i, "name": name, "private": False})
+    s.ark.deck_folder[44] = 501
+    s.ark.deck_folder[46] = 502
+    orig_row = s.ark._listing_row
+
+    def row(d):  # long listing tags on every deck but the sample one
+        r = orig_row(d)
+        if d["id"] != 42:
+            r["tags"] = [{"id": 11 + k, "name": t} for k, t in enumerate(LONG_TAGS + ["ramp"])]
+        return r
+
+    s.ark._listing_row = row
     s.ark.add_side_row(42, "Sol Ring")
     s.start()
     try:
@@ -63,6 +99,9 @@ def _pages(server: Server, pending: str) -> list[str]:
         "/decks/42?view=grid",
         "/decks/44",
         "/decks/45?view=grid",
+        "/decks/46",
+        "/decks/47",
+        f"/decks?folder={FOLDERS[0]}",
         "/decks/42/edit",
         "/decks/45/edit",
         "/decks/42/settings",
@@ -73,8 +112,10 @@ def _pages(server: Server, pending: str) -> list[str]:
         "/collection?view=grid",
         "/collection?view=list",
         "/search",
+        f"/search?q={UNBROKEN_2}",
         "/precons",
         "/users/alice",
+        f"/users/{LONGUSER}",
         "/history",
         "/history/reports/r1",
         "/activity",
@@ -228,6 +269,9 @@ def _seed(server: Server) -> tuple[str, str]:
         json={"items": [{"name": n, "quantity": 1 + i % 3} for i, n in enumerate(CARDS)], "source": "scan"},
     )
     assert r.status_code == 200, r.text
+    for i, row in enumerate(server.ark.collections.get("alice", {}).values()):  # long collection tags
+        if i % 2 == 0:
+            row["tags"] = [{"id": 21, "name": LONG_TAGS[0]}, {"id": 22, "name": "trade binder page 12"}]
     import time
 
     seed_history(server.db, "user-1", now=int(time.time()))

@@ -81,13 +81,16 @@ BROWSE_CSS = """
 .results-head{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap;
   margin:0 0 .75rem}
 .results-head .muted{margin:0}
+.results-head h2,.results-head .muted{min-width:0;overflow-wrap:anywhere}
 .pager{display:flex;justify-content:center;align-items:center;gap:.5rem;margin:1rem 0}
 .pager .btn{margin:0}
-.profile{display:flex;align-items:center;gap:1rem;margin:0 0 1rem}
+.profile{display:flex;align-items:center;gap:1rem;margin:0 0 1rem;min-width:0}
+.profile .who .uname{overflow-wrap:anywhere}
 .profile .who{display:flex;flex-direction:column;min-width:0}
 .profile .who .uname{font-size:1.5rem;font-weight:900}
 .profile .who .sub{color:var(--text-muted)}
-.profile .social{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-left:auto}
+.profile .social{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-left:auto;min-width:0;
+  max-width:100%}
 .profile .social .btn,.profile .social .soc{margin:0;display:inline-flex;align-items:center;gap:.4rem}
 .profile .social .soc.on{background:var(--orange);border-color:var(--orange);color:#fff}
 .profile .social .confirm{display:inline-flex;align-items:center;gap:.4rem;background:var(--surface-2);
@@ -421,8 +424,8 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
         link = state.db.get_link(sub) or {}
         follow = (
             f"<button type='button' class='btn soc' data-social='follow' data-user='{_esc(owner_id)}' "
-            f"data-name='{_esc(shown)}' data-state='unknown'>{icon('follow')}"
-            f"<span>Follow {_esc(shown)}</span></button>"
+            f"data-name='{_esc(shown)}' data-state='unknown' title='Follow {_esc(shown)} on Archidekt'>"
+            f"{icon('follow')}<span>Follow {_esc(shown)}</span></button>"
             if owner_id and str(link.get("archidekt_user_id") or "") != str(owner_id)
             else ""
         )
