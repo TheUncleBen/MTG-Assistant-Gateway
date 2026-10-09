@@ -4,15 +4,12 @@
    card's data; nothing here talks to the server. Mana and rules symbols are the gateway's own
    glyphs (mana.py puts the SVG sprite on every page; this draws the same discs). A dialog with
    a focus trap, Escape, a click on the backdrop and the phone's Back button all close it.
-   Loaded before deck.js, companion.js, compare.js and collection.js, which call window.MtgCardView. */
+   Loaded after static/mana.js (on every page) and before deck.js, companion.js, compare.js and
+   collection.js, which call window.MtgCardView. */
 (function () {
   "use strict";
   var viewer = null;
   var lastFocus = null;
-  var COLOURS = "WUBRG";
-  var GLYPHS = "WUBRGCTQSEP";
-  var WORDS = { W: "white", U: "blue", B: "black", R: "red", G: "green", C: "colorless", T: "tap", Q: "untap",
-    S: "snow", E: "energy", P: "Phyrexian" };
   var FORMATS = { commander: "Commander", paupercommander: "Pauper Commander", duel: "Duel Commander",
     oathbreaker: "Oathbreaker", standard: "Standard", pioneer: "Pioneer", modern: "Modern", legacy: "Legacy",
     vintage: "Vintage", pauper: "Pauper", brawl: "Brawl", standardbrawl: "Standard Brawl", historic: "Historic",
@@ -27,66 +24,9 @@
     if (text !== undefined && text !== null) e.textContent = text;
     return e;
   }
-  function svgUse(id) {
-    var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    svg.setAttribute("viewBox", "0 0 24 24");
-    var use = document.createElementNS("http://www.w3.org/2000/svg", "use");
-    use.setAttribute("href", "#ms-" + id);
-    svg.appendChild(use);
-    return svg;
-  }
-  function describe(sym) {
-    return sym.toUpperCase().split("/").map(function (p) { return WORDS[p] || p; }).join(" or ");
-  }
-  /* One symbol as a disc, exactly as mana.py draws it server-side. */
-  function pip(sym, small) {
-    var raw = sym.trim();
-    var parts = raw.toUpperCase().split("/");
-    var colours = parts.filter(function (p) { return COLOURS.indexOf(p) >= 0; });
-    var phy = parts.indexOf("P") >= 0;
-    var i = el("i", "pip" + (small ? " sm" : ""));
-    i.setAttribute("role", "img");
-    i.setAttribute("aria-label", describe(raw));
-    if (colours.length) {
-      i.classList.add("pip-" + colours[0]);
-      if (colours.length >= 2) { i.classList.add("hy"); i.setAttribute("data-b", colours[1]); }
-      if (colours.length === 1 && COLOURS.indexOf(parts[0]) < 0 && !phy) {
-        i.appendChild(el("b", null, parts[0]));            // {2/W}
-      } else {
-        i.appendChild(svgUse(phy ? "P" : colours[0]));
-      }
-      return i;
-    }
-    var key = parts[0];
-    if (GLYPHS.indexOf(key) >= 0 && key.length === 1) {
-      i.classList.add("pip-" + key);
-      i.appendChild(svgUse(key));
-      return i;
-    }
-    var text = raw.length > 3 ? raw.slice(0, 3) : raw;
-    i.classList.add("pip-g");
-    if (text.length > 1) i.classList.add("big");
-    i.appendChild(el("b", null, text));
-    return i;
-  }
-  function mana(cost) {
-    var wrap = el("span", "mana");
-    var re = /\{([^}]+)\}/g, m;
-    while ((m = re.exec(cost || ""))) wrap.appendChild(pip(m[1], false));
-    return wrap;
-  }
-  /* Rules text with every {symbol} drawn; newlines kept (the element uses white-space: pre-line). */
-  function symbolize(text, target) {
-    var re = /\{([^}]+)\}/g, m, pos = 0;
-    text = text || "";
-    while ((m = re.exec(text))) {
-      if (m.index > pos) target.appendChild(document.createTextNode(text.slice(pos, m.index)));
-      target.appendChild(pip(m[1], true));
-      pos = m.index + m[0].length;
-    }
-    if (pos < text.length) target.appendChild(document.createTextNode(text.slice(pos)));
-    return target;
-  }
+  // static/mana.js is deferred at the end of the body, so it is read when a card opens, not now
+  function mana(cost) { return window.MtgMana.mana(cost); }
+  function symbolize(text, target) { return window.MtgMana.symbolize(text, target); }
 
   function ensure() {
     if (viewer) return viewer;
@@ -247,5 +187,5 @@
       gc: node.hasAttribute("data-gc")
     };
   }
-  window.MtgCardView = { open: open, close: close, fromElement: fromElement, mana: mana, pip: pip, symbolize: symbolize };
+  window.MtgCardView = { open: open, close: close, fromElement: fromElement, mana: mana, symbolize: symbolize };
 })();

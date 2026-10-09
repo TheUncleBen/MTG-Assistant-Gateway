@@ -1651,10 +1651,28 @@ ul.decklist.list .deck{margin-bottom:.5rem}
 .pendingbox summary{cursor:pointer;font-weight:700}
 .pendingbox summary b{margin-left:.5rem;background:var(--orange);color:#fff;border-radius:10px;
   padding:0 .5rem}
-.addbox form.addcard{display:grid;grid-template-columns:minmax(0,2fr) 5.5rem minmax(0,1fr) minmax(0,1fr) auto;
-  gap:.5rem;align-items:end}
+/* add a card: the name box leads; count, category, finish, zone and the button sit on the same
+   row where there is room, and fold onto two rows on narrow screens (never a stray button) */
+.addbox form.addcard{display:grid;gap:.6rem .75rem;align-items:end;
+  grid-template-columns:minmax(12rem,3fr) 5rem minmax(8rem,1.2fr) minmax(6.5rem,1fr) minmax(6.5rem,1fr) auto}
 .addbox form.addcard .field{margin:0}
-.addbox form.addcard button{margin:0;height:var(--ctl)}
+.addbox form.addcard button{margin:0;height:var(--ctl);white-space:nowrap}
+.addbox form.addcard .addstatus{grid-column:1 / -1;margin:0;min-height:1.2em}
+.addbox form.addcard .addstatus:empty{display:none}
+@media (max-width:1100px){
+  .addbox form.addcard{grid-template-columns:minmax(0,1fr) 5rem auto}
+  .addbox form.addcard .grow{grid-column:1} .addbox form.addcard .qtyf{grid-column:2}
+  .addbox form.addcard .go{grid-column:3}
+  .addbox form.addcard .field:not(.grow):not(.qtyf):not(.go){grid-row:2;grid-column:auto}
+  .addbox form.addcard{grid-template-areas:none} }
+@media (max-width:1100px) and (min-width:601px){
+  .addbox form.addcard{grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr)}
+  .addbox form.addcard .grow{grid-column:1 / 3} .addbox form.addcard .qtyf{grid-column:3;grid-row:1}
+  .addbox form.addcard .go{grid-column:3;grid-row:2} }
+/* categories side by side on wide screens, one column on phones */
+.cats.existing{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,30rem),1fr));gap:1rem;
+  align-items:start}
+.cats.existing > details.cat{margin:0}
 .addbox form.scanpick{display:flex;gap:.5rem;align-items:end;flex-wrap:wrap;margin-bottom:.75rem}
 .addbox form.scanpick button{margin:0}
 details.cat summary{display:flex;justify-content:space-between;align-items:center;cursor:pointer;
@@ -1662,8 +1680,8 @@ details.cat summary{display:flex;justify-content:space-between;align-items:cente
 details.cat summary::-webkit-details-marker{display:none}
 details.cat summary b{color:var(--text-muted);font-weight:400}
 ul.erows{list-style:none;margin:.5rem 0 0;padding:0}
-.erow{display:grid;grid-template-columns:34px minmax(0,1fr) auto minmax(8rem,12rem) auto;gap:.6rem;
-  align-items:center;padding:.4rem 0;border-top:1px solid var(--border)}
+.erow{display:grid;grid-template-columns:40px minmax(0,1fr) auto minmax(7rem,10rem) auto;gap:.6rem;
+  align-items:center;padding:.4rem 0;border-top:1px solid var(--border-soft)}
 .erow.changed{background:var(--orange-tint)}
 .erow.removed .name{text-decoration:line-through;color:var(--text-muted)}
 .erow.side .thumb{filter:saturate(.6)}
@@ -1695,10 +1713,12 @@ ul.erows{list-style:none;margin:.5rem 0 0;padding:0}
 .pastebox summary{cursor:pointer;font-weight:700;padding:.4rem 0}
 .pastebox textarea{width:100%;font-family:ui-monospace,monospace;margin:.5rem 0}
 .pastebox .actions{margin-top:.25rem}
-.erow .thumb{width:34px;height:48px;border-radius:3px;object-fit:cover;background:var(--surface-3);
+.erow .thumb{width:40px;height:56px;border-radius:3px;object-fit:cover;background:var(--surface-3);
   display:inline-flex;align-items:center;justify-content:center;color:var(--text-muted)}
-.erow .main{display:flex;flex-direction:column;min-width:0}
-.erow .name{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.erow .main{display:flex;flex-direction:column;min-width:0;gap:.1rem}
+.erow .name{font-weight:700;display:flex;align-items:center;gap:.4rem;min-width:0}
+.erow .name .mana{flex:none}
+.erow .name:not(:has(.mana)){white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
 .erow .meta{font-size:.8rem;color:var(--text-muted)}
 .erow .note:empty{display:none}
 .erow .note{color:var(--orange-text)}
@@ -1713,24 +1733,41 @@ ul.erows{list-style:none;margin:.5rem 0 0;padding:0}
 .erow .menu button{width:100%;text-align:left;border:0;background:none;margin:0;height:35px}
 .erow .menu button:hover{background:var(--surface-3)}
 .erow button.remove{margin:0}
-.picker .pickbox .head{display:flex;justify-content:space-between;align-items:center;gap:1rem}
-.picker .pickbox .head h2{margin:0}
-.picker .prints{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:.6rem;
-  margin-top:.75rem}
+.picker{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;
+  background:rgba(0,0,0,.78);padding:1.5rem;-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
+.picker[hidden]{display:none}
+.picker .pickbox{width:min(100%,64rem);max-height:100%;display:flex;flex-direction:column;gap:.5rem;
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-panel);padding:1.25rem;
+  box-shadow:0 12px 40px rgba(0,0,0,.5);overflow:hidden}
+.picker .pickbox .head{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem}
+.picker .pickbox .head h2{margin:0;font-size:1.3rem;overflow-wrap:anywhere}
+.picker .pickbox .close{flex:none;margin:0;width:2.4rem;min-height:2.4rem;height:2.4rem;font-size:1.5rem;
+  line-height:1;font-weight:400;border-radius:50%}
+.picker .status{margin:0}
+.picker .prints{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:.6rem;
+  overflow:auto;min-height:0;padding:2px}
 .picker .print{border:2px solid transparent;border-radius:6px;background:var(--surface-2);padding:.3rem;
   margin:0;height:auto;display:flex;flex-direction:column;gap:.3rem;align-items:center;cursor:pointer}
 .picker .print img{width:100%;aspect-ratio:5/7;border-radius:4.5%;object-fit:cover}
 .picker .print .cap{font-size:.75rem;color:var(--text-muted)}
 .picker .print.current{border-color:var(--orange)}
 .picker .print:hover{border-color:var(--link)}
+@media (max-width:700px){
+  .picker{padding:0;align-items:flex-end;-webkit-backdrop-filter:none;backdrop-filter:none}
+  .picker .pickbox{width:100%;max-height:94vh;border-radius:var(--radius-panel) var(--radius-panel) 0 0;
+    border-bottom:0;padding:.75rem .75rem calc(.75rem + env(safe-area-inset-bottom))}
+  .picker .prints{grid-template-columns:repeat(auto-fill,minmax(96px,1fr))} }
 @media (max-width:600px){
   .editbar{top:auto;bottom:50px;margin:0;position:fixed;left:0;right:0;
     padding:.5rem max(1rem,env(safe-area-inset-right)) .5rem max(1rem,env(safe-area-inset-left))}
   .editor{padding-bottom:6rem}
   .editbar .review{flex:1}
-  .addbox form.addcard{grid-template-columns:1fr 1fr}
-  .addbox form.addcard .grow,.addbox form.addcard button{grid-column:1 / -1}
-  .erow{grid-template-columns:34px minmax(0,1fr) auto;grid-template-rows:auto auto}
+  .addbox form.addcard{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .addbox form.addcard .grow{grid-column:1 / -1;grid-row:1}
+  .addbox form.addcard .qtyf{grid-column:2;grid-row:2}
+  .addbox form.addcard .go{grid-column:1;grid-row:2} .addbox form.addcard .go button{width:100%}
+  .addbox form.addcard .field:not(.grow):not(.qtyf):not(.go){grid-row:auto;grid-column:auto}
+  .erow{grid-template-columns:40px minmax(0,1fr) auto;grid-template-rows:auto auto}
   .erow .sel{grid-column:2;grid-row:2}
   .erow details.dd,.erow button.remove{grid-column:3;grid-row:2;justify-self:end}
 }

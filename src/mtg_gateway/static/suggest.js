@@ -13,6 +13,7 @@
   var MIN = 2;
   var DELAY = 90;
   var memory = {};      // query -> names (this page's lifetime)
+  var cards = {};       // folded name -> card summary (rich lists: mana, type, picture)
   var complete = {};    // query -> true when the answer had fewer than LIMIT names
   var counter = 0;
 
@@ -70,6 +71,7 @@
     input.removeAttribute("list");
 
     var items = [], active = -1, timer = null, inflight = null, seq = 0, shownFor = "";
+    var rich = input.hasAttribute("data-suggest-rich"), peeking = null;
     // data-suggest="static": the choices come with the page (data-options: a JSON list of
     // labels, or of {l: label, v: value}); picking fills the label, the form reads it by name.
     var fixed = null;
@@ -94,12 +96,56 @@
       input.setAttribute("aria-activedescendant", items[i].id);
       if (items[i].scrollIntoView) items[i].scrollIntoView({ block: "nearest" });
     }
+    /* Rich rows: the names show at once; one request then brings mana cost, type line and a small
+       picture for the names not seen before, and each row is decorated in place. */
+    function decorate(li, c) {
+      if (!c || li.querySelector(".rich")) return;
+      var row = document.createElement("span");
+      row.className = "rich";
+      if (c.image_small) {
+        var img = document.createElement("img");
+        img.src = c.image_small; img.alt = ""; img.loading = "lazy"; img.className = "thumb";
+        row.appendChild(img);
+      }
+      var text = document.createElement("span");
+      text.className = "txt";
+      var nm = document.createElement("span");
+      nm.className = "nm";
+      while (li.firstChild) nm.appendChild(li.firstChild);
+      if (c.mana_cost && window.MtgMana) nm.appendChild(window.MtgMana.mana(c.mana_cost));
+      text.appendChild(nm);
+      if (c.type_line) {
+        var ty = document.createElement("span");
+        ty.className = "ty"; ty.textContent = c.type_line;
+        text.appendChild(ty);
+      }
+      row.appendChild(text);
+      li.appendChild(row);
+    }
+    function peek(names) {
+      var missing = names.filter(function (n) { return !(fold(n) in cards); });
+      names.forEach(function (n, i) { if (cards[fold(n)] && items[i]) decorate(items[i], cards[fold(n)]); });
+      if (!missing.length) return;
+      if (peeking) peeking.abort();
+      var ctrl = typeof AbortController === "function" ? new AbortController() : null;
+      peeking = ctrl;
+      var shown = shownFor;
+      fetch("/scan/api/peek?names=" + encodeURIComponent(missing.join("|")), { credentials: "same-origin", signal: ctrl ? ctrl.signal : undefined })
+        .then(function (r) { return r.ok ? r.json() : { cards: [] }; })
+        .then(function (d) {
+          (d.cards || []).forEach(function (c) { if (c && c.name) cards[fold(c.name)] = c; });
+          missing.forEach(function (n) { if (!(fold(n) in cards)) cards[fold(n)] = null; });
+          if (shownFor !== shown || list.hidden) return;
+          items.forEach(function (li) { decorate(li, cards[fold(li.getAttribute("data-name"))]); });
+        })
+        .catch(function () {});
+    }
     function pick(i) {
       var name = items[i] ? items[i].getAttribute("data-name") : "";
       if (!name) return;
       input.value = name;
       close();
-      input.dispatchEvent(new CustomEvent("suggest:pick", { bubbles: true, detail: { name: name } }));
+      input.dispatchEvent(new CustomEvent("suggest:pick", { bubbles: true, detail: { name: name, card: cards[fold(name)] || null } }));
       input.dispatchEvent(new Event("change", { bubbles: true }));
       if (input.hasAttribute("data-suggest-submit") && input.form) {
         if (input.form.requestSubmit) input.form.requestSubmit(); else input.form.submit();
@@ -134,6 +180,7 @@
       list.hidden = false;
       input.setAttribute("aria-expanded", "true");
       shownFor = q;
+      if (rich && names.length) peek(names);
     }
     function lookup() {
       var raw = input.value, q = fold(raw);

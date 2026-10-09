@@ -266,6 +266,7 @@ button.thumbbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px
 
 /* mana and rules-text symbols: own glyphs on Archidekt-coloured discs (mana.py, the sprite in <body>) */
 .mana{display:inline-flex;gap:2px;align-items:center;white-space:nowrap;vertical-align:middle}
+.mana .sep{color:var(--text-muted);font-size:.8em;margin:0 .15em}
 .pip{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;
   color:#111;background:#cbc2bf;box-shadow:-1px 1px 0 rgba(0,0,0,.55);flex:none;vertical-align:-.2em;
   font-style:normal;line-height:1}
@@ -295,6 +296,13 @@ button.thumbbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px
 .suggest-list li[aria-selected=true],.suggest-list li:hover{background:var(--surface-2)}
 .suggest-list li[aria-selected=true]{box-shadow:inset 3px 0 0 var(--orange)}
 .suggest-list li.none{color:var(--text-muted);cursor:default}
+.suggest-list .rich{display:flex;align-items:center;gap:.6rem;min-width:0}
+.suggest-list .rich .thumb{width:28px;height:39px;border-radius:2px;object-fit:cover;flex:none;
+  background:var(--surface-2)}
+.suggest-list .rich .txt{display:flex;flex-direction:column;min-width:0;gap:.1rem}
+.suggest-list .rich .nm{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap}
+.suggest-list .rich .ty{font-size:.82rem;color:var(--text-muted);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
 .suggest-list mark{background:none;color:inherit;font-weight:700;text-decoration:underline;
   text-decoration-color:var(--orange);text-underline-offset:.15em}
 
@@ -820,7 +828,8 @@ def render(
             else ""
         )
         + f"{tabbar}<script src='{FEEDBACK_SCRIPT}' defer></script>"
-        "<script src='/static/suggest.js' defer></script></body></html>"
+        "<script src='/static/mana.js' defer></script><script src='/static/suggest.js' defer></script>"
+        "</body></html>"
     )
     return HTMLResponse(
         doc,

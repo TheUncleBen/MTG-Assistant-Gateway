@@ -803,6 +803,43 @@ class ScanService:
                 raise ScanError(exc.kind, str(exc)) from exc
             return []
 
+    async def peek(self, names: list[str], *, owner: str | None = None) -> list[dict[str, Any]]:
+        """Card summaries (mana cost, type line, small image, default printing) for up to twenty
+        exact names, for the suggestion list to decorate its rows: one batched Scryfall request
+        for the names not already in the day-long card cache; unknown names are left out."""
+        wanted: list[str] = []
+        seen: set[str] = set()
+        for n in names:
+            n = " ".join(n.split())
+            k = _norm(n)
+            if n and 2 <= len(n) <= 150 and k not in seen:
+                seen.add(k)
+                wanted.append(n)
+        wanted = wanted[:20]
+        out: dict[str, dict[str, Any]] = {}
+        missing: list[str] = []
+        for n in wanted:
+            hit = self.scryfall.cards.get(f"peek:{_norm(n)}")
+            if hit is not None:
+                out[_norm(n)] = hit
+            else:
+                missing.append(n)
+        if missing:
+            try:
+                with self._lookup_slot(owner):
+                    found, _ = await self.scryfall.collection([{"name": n} for n in missing])
+            except ScryfallError as exc:
+                if exc.kind in ("unavailable", "rate_limited"):
+                    raise ScanError(exc.kind, str(exc)) from exc
+                found = []
+            for card in found:
+                summary = summarize(card)
+                if summary.get("name"):
+                    key = _norm(str(summary["name"]))
+                    out[key] = summary
+                    self.scryfall.cards.put(f"peek:{key}", summary)
+        return [out[_norm(n)] for n in wanted if _norm(n) in out]
+
     def describe(self, results: list[Resolution]) -> dict[str, Any]:
         items = [r.as_dict() for r in results]
         counts = {s: 0 for s in STATUSES}

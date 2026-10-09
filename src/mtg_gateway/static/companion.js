@@ -77,6 +77,7 @@
     render();
   }
 
+  var known = {}; // lower name -> card summary from the suggestion list (picture, mana, type)
   function addCard(name, qty, category, printing, finish, zone) {
     zone = zone === "side" ? "side" : "main";
     var key = keyFor(name, zone);
@@ -86,6 +87,8 @@
       added[key].quantity = Math.min(99, added[key].quantity + qty);
     } else {
       added[key] = { name: name, zone: zone, quantity: qty, category: category || null };
+      var k = known[name.toLowerCase()];
+      if (k) { added[key].image = k.image_small || null; added[key].mana = k.mana_cost || ""; added[key].type = k.type_line || ""; }
       // a pinned printing or a foil goes to the deck proper only (the gateway refuses them for zone side)
       if (zone === "main" && printing && printing.set_code && printing.collector_number) {
         added[key].set_code = printing.set_code;
@@ -248,11 +251,13 @@
     addedBox.textContent = "";
     Object.keys(added).forEach(function (k) {
       var a = added[k];
+      var nameEl = el("span", { class: "name", text: a.name });
+      if (a.mana && window.MtgMana) nameEl.appendChild(window.MtgMana.mana(a.mana));
       addedBox.appendChild(el("li", { class: "erow new" }, [
-        el("span", { class: "thumb ph" }, [svg("plus")]),
+        a.image ? el("img", { class: "thumb", src: a.image, alt: "", loading: "lazy" }) : el("span", { class: "thumb ph" }, [svg("plus")]),
         el("span", { class: "main" }, [
-          el("span", { class: "name", text: a.name }),
-          el("span", { class: "meta", text: (a.set_code ? a.set_code.toUpperCase() + " " + a.collector_number + " · " : "") + (a.foil ? "foil · " : "") + (a.zone === "side" ? "new " + (cfg.sideCategory || "maybeboard").toLowerCase() + " card" : "new card") })
+          nameEl,
+          el("span", { class: "meta", text: [a.type || "", a.set_code ? a.set_code.toUpperCase() + " " + a.collector_number : "", a.foil ? "foil" : "", a.zone === "side" ? "new " + (cfg.sideCategory || "maybeboard").toLowerCase() + " card" : "new card"].filter(Boolean).join(" · ") })
         ]),
         qtyControls(function () { return a.quantity; }, function (v) { mutate(function () { if (v === 0) delete added[k]; else a.quantity = v; }); }),
         a.zone === "side" ? el("span", { class: "s muted small", text: cfg.sideCategory || "Maybeboard" }) : categorySelect(a.category || "", function (v) { mutate(function () { a.category = v || null; }); }, true),
@@ -280,19 +285,27 @@
 
   // printing picker: one card's printings from Scryfall through the gateway
   var picker = root.querySelector(".picker");
+  picker.setAttribute("role", "dialog");
+  picker.setAttribute("aria-modal", "true");
+  picker.setAttribute("aria-label", "Printings");
+  picker.addEventListener("click", function (e) { if (e.target === picker) closePicker(); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !picker.hidden) { e.preventDefault(); closePicker(); } });
+  var pickerFocus = null;
   function openPicker(r) {
+    pickerFocus = document.activeElement;
     picker.hidden = false;
     picker.textContent = "";
-    var box = el("div", { class: "panel pickbox" }, [
+    var closeBtn = el("button", { type: "button", class: "close icon-only", "aria-label": "Close", onclick: closePicker }, [el("span", { class: "x", text: "\u00d7" })]);
+    var box = el("div", { class: "pickbox" }, [
       el("div", { class: "head" }, [
         el("h2", { text: "Printings of " + r.name }),
-        el("button", { type: "button", class: "mini", "aria-label": "close", onclick: closePicker }, [svg("x")])
+        closeBtn
       ]),
       el("p", { class: "muted small status", text: "Looking up printings…" }),
       el("div", { class: "prints" })
     ]);
     picker.appendChild(box);
-    box.scrollIntoView({ block: "nearest" });
+    closeBtn.focus();
     var status = box.querySelector(".status");
     fetch("/scan/api/resolve", {
       method: "POST", credentials: "same-origin",
@@ -325,7 +338,11 @@
       })
       .catch(function (e) { status.textContent = "Printings could not be loaded: " + (e && e.message ? e.message : "network error"); status.className = "notice error"; });
   }
-  function closePicker() { picker.hidden = true; picker.textContent = ""; }
+  function closePicker() {
+    picker.hidden = true;
+    picker.textContent = "";
+    if (pickerFocus && pickerFocus.focus) pickerFocus.focus();
+  }
 
   // existing cards, by category
   var existing = root.querySelector(".existing");
@@ -370,10 +387,12 @@
           el("button", { type: "button", onclick: function () { more.removeAttribute("open"); mutate(function () { r.after = 0; }); } }, [svg("x"), el("span", { text: " Remove from deck" })])
         ])
       ]);
+      var nameEl = el("span", { class: "name", text: c.name });
+      if (r.mana && window.MtgMana) nameEl.appendChild(window.MtgMana.mana(r.mana));
       var li = el("li", { class: "erow" + (c.in_deck ? "" : " side"), "data-row": key }, [
         thumb(r, c.name),
         el("span", { class: "main" }, [
-          el("span", { class: "name", text: c.name }),
+          nameEl,
           el("span", { class: "meta", text: (r.set ? r.set.toUpperCase() + " " + r.number : "") + (r.finish !== "normal" ? " · " + r.finish : "") + (r.price != null ? " · $" + Number(r.price).toFixed(2) : "") }),
           el("span", { class: "note muted small" })
         ]),
@@ -390,6 +409,10 @@
 
   // add a card by name (suggestions: static/suggest.js; picking one submits this form)
   var input = root.querySelector("input[name=card]");
+  input.addEventListener("suggest:pick", function (ev) {
+    if (ev.detail && ev.detail.card) known[ev.detail.name.toLowerCase()] = ev.detail.card;
+  });
+  var addStatus = root.querySelector(".addstatus");
   root.querySelector("form.addcard").addEventListener("submit", function (ev) {
     ev.preventDefault();
     var name = input.value.trim();
@@ -399,6 +422,7 @@
     var finish = root.querySelector("select[name=addfinish]").value || null;
     var zone = root.querySelector("select[name=addzone]").value || "main";
     mutate(function () { addCard(name, qty, cat, null, finish, zone); });
+    if (addStatus) addStatus.textContent = "Added " + qty + " × " + name + ". Type the next card, or save.";
     input.value = "";
     input.focus();
   });
