@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       gateway_tag:
-        description: "Gateway image tag to test (e.g. latest, main-<sha>)"
+        description: "Gateway image tag to test (e.g. latest, 0.7, 0.7.9)"
         default: latest
       deck_id:
         description: "Numeric id of a public Archidekt deck to read (defaults to the LIVE_SMOKE_DECK_ID repository variable)"
@@ -49,8 +49,8 @@ jobs:
         shell: bash
         run: |
           set -eu
-          # A manual run tests the tag it was given; a push tests the tag this
-          # branch's Dockerfile produces (MF_VERSION-MF_LOCAL).
+          # The mystic_forge_tag input is tested when given; left empty, the tag this
+          # branch's Dockerfile produces (MF_VERSION-MF_LOCAL) is tested.
           own="$(sed -n 's/^ARG MF_VERSION=//p' docker/mystic-forge/Dockerfile)-$(sed -n 's/^ARG MF_LOCAL=//p' docker/mystic-forge/Dockerfile)"
           tag="${MF_TAG_INPUT:-$own}"
           for t in "$own" "$tag"; do

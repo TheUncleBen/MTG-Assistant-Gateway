@@ -353,13 +353,16 @@ versions refuse the `pids` key and the stack wouldn't deploy. The Compose
 file ([DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md)) sets both.
 
 The images are built on the official Python base images by tag, so every
-release build picks up the base image's latest security patches. The base
+gateway release picks up the base image's latest security patches. The base
 image is fetched from Google's public mirror of Docker Hub (`mirror.gcr.io`,
 the same images and digests), because Docker Hub limits anonymous pulls per
 address and shared CI runners hit that limit. As a fallback for anything a
 build still fetches from Docker Hub, the image jobs sign in to Docker Hub when
 the repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (a
-read-only access token) exist; without them the step is skipped. GitHub
+read-only access token) exist; without them the step is skipped. The
+Mystic Forge image is built once per tag (`1.3.2-mag2`) and not rebuilt by
+later releases; a manual run of its workflow from `main` rebuilds it with
+current base patches. GitHub
 Actions are pinned by commit, Python dependencies by version
 (`constraints.txt`), and the Android build checks its Gradle wrapper before
 running it.
