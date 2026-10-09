@@ -55,7 +55,9 @@ Mystic Forge, the research service, has its own image tag
 (`<upstream version>-mag<n>`, for example `1.3.2-mag2`) that changes only when
 its build changes. The stack file names the right one. The first `main` commit
 that carries a new Mystic Forge tag publishes it and marks it with the git tag
-`mystic-forge-1.3.2-mag2`, so later commits never rebuild or overwrite it.
+`mystic-forge-1.3.2-mag2`, so later commits never rebuild or overwrite it. The
+same build also moves the image's `latest` tag and adds a tag carrying the
+short commit SHA; deploy the versioned tag the stack file names.
 
 ## For contributors: making a release
 
@@ -63,7 +65,7 @@ There is no separate release step. Every pull request:
 
 1. raises `VERSION` (one line, for example `1.1.0`), picking MAJOR, MINOR or
    PATCH as above, and changes the version in `pyproject.toml`,
-   `src/mtg_gateway/__init__.py` and the plugin manifests to match (a unit
+   `src/mtg_gateway/__init__.py`, `.claude-plugin/marketplace.json` and the plugin manifests to match (a unit
    test checks they agree; the Android app reads `VERSION` on its own);
 2. adds a `## [1.1.0] - YYYY-MM-DD` section to `CHANGELOG.md`.
 
