@@ -18,7 +18,8 @@ with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
   JavaScript off the detail shows open and the box works, and the server
   still refuses a link without the tick. The list of what the person who runs
   the server can read now also names the member's user ID at the sign-in
-  service. After a failed link the form comes back with the detail open.
+  service. Pressing Link before opening the detail sends nothing and points
+  at the detail. After a failed link the form comes back with the detail open.
   docs/USING.md carries the same text.
 
 ## [0.7.8] - 2026-10-08
