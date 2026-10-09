@@ -80,9 +80,13 @@ def test_the_commander_is_taken_out_of_the_unrecognized_list() -> None:
     # The commander alone in the list: the list empties and the count says so.
     alone = copy.deepcopy(GOLDFISH)
     alone["data"]["metrics"]["honesty"]["unrecognized"] = [{"name": "Liesa, Forgotten Archangel"}]
-    alone["text"] = alone["text"].replace("3 cards", "1 card").replace(
-        "- Aegis of the Gods (drawn 11%), Liesa, Forgotten Archangel (drawn 0%), Sun Titan (drawn 18%)",
-        "- Liesa, Forgotten Archangel (drawn 0%)",
+    alone["text"] = (
+        alone["text"]
+        .replace("3 cards", "1 card")
+        .replace(
+            "- Aegis of the Gods (drawn 11%), Liesa, Forgotten Archangel (drawn 0%), Sun Titan (drawn 18%)",
+            "- Liesa, Forgotten Archangel (drawn 0%)",
+        )
     )
     _commander_aside(alone, "Liesa, Forgotten Archangel")
     assert "Unrecognized — 0 cards" in alone["text"] and "\n- (none)\n" in alone["text"]

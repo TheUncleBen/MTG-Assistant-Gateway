@@ -7,15 +7,28 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
-## [Unreleased]
+## [0.7.9] - 2026-10-09
 
-Everything about the pages is meant to feel immediate and look like one
-site at any window size, zoom or device (web and the Android app alike).
-Nothing to change in the stack or the settings; the gateway makes one
-extra outbound request a day to Scryfall (the card-name catalog).
+Everything the owner's test round raised, in one update: the held work
+(the shorter Archidekt disclosure, the Android app's sign-in through the
+phone's browser, the faster and themed pages, the owner's own name on the
+public files) and the fixes below. Nothing to change in the stack or the
+settings unless you want the new optional `MTG_ANDROID_PACKAGE`; the
+gateway makes one extra outbound request a day to Scryfall (the card-name
+catalog). Back up the database before you update, as always.
 
 ### Changed
 
+- **Android app: sign-in opens in your phone's browser**, where passkeys
+  (Bitwarden and the like) and password managers work, and comes back to
+  the app signed in. The gateway's sign-in page inside the app hands off to
+  the browser; the browser hands back a one-time code that only the app can
+  redeem (`POST /login/app`, new). The browser itself is not signed in to
+  the gateway afterwards, and after a sign-out the next sign-in asks for
+  credentials again. Older apps keep the in-app sign-in. New optional
+  `MTG_ANDROID_PACKAGE`, only if you build the app with another package ID.
+  Install the new app over the old one; it needs this gateway version for
+  the browser sign-in and signs in as before on an older one.
 - **Linking Archidekt:** the disclosure above the link form is shorter and
   plainer. A four-line summary now comes first and is always open. The full
   detail keeps every fact it had, reworded with less repetition, and is

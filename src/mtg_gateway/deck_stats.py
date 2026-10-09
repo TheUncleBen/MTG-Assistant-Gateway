@@ -415,8 +415,7 @@ def deck_checks(deck: Deck, cards: list[DeckCard], commanders: list[DeckCard], q
                 zone["unverified"] = other
                 zone["unverified_note"] = (
                     "Pauper Commander lets a creature lead if any printing of it is uncommon; "
-                    "this deck uses another printing, so check the card's printings: "
-                    + ", ".join(other)
+                    "this deck uses another printing, so check the card's printings: " + ", ".join(other)
                 )
     elif fmt in _NO_COMMANDER and commanders:
         zone["ok"] = False
