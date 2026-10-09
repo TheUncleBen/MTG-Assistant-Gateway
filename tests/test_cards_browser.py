@@ -553,7 +553,7 @@ def test_account_card_points_at_what_is_missing() -> None:
             card.locator("#open").wait_for()
             assert (
                 "mtg-gateway-users" in card.locator("#facts").inner_text()
-                and "version 0.7.8" in card.locator("#facts").inner_text()
+                and "version 0.7.9" in card.locator("#facts").inner_text()
             )
             assert not errors, errors
         finally:
