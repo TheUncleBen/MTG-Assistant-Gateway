@@ -23,7 +23,7 @@ import re
 import secrets
 import time
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -49,6 +49,7 @@ from .archidekt_csv import CsvError, parse_export
 from .config import Settings
 from .db import Database
 from .decklist import DecklistError, ListCard, clean_category, clean_text, parse_decklist, to_text
+from .timing import add_time, archidekt_time
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +119,17 @@ MAX_ARCHIDEKT_PER_USER = 3
 # The member whose Archidekt slot the running task already holds, so nested calls (an apply's
 # reads and writes, get_any_deck's private retry) do not take a second one.
 _slot_holder: ContextVar[str | None] = ContextVar("_slot_holder", default=None)
+# The member whose Archidekt session the current ``_call_unslotted`` runs with: how a write
+# the client is about to send is tied back to the member whose caches it makes stale.
+_acting_sub: ContextVar[str | None] = ContextVar("_acting_sub", default=None)
+# A member's deck list is kept in memory for this long after Archidekt answered (fresh), and
+# served for up to DECK_LIST_STALE seconds more while one refresh runs in the background.
+DECK_LIST_FRESH = 90.0
+DECK_LIST_STALE = 15 * 60.0
+# How long a page waits for a cold deck list before it renders with a placeholder the browser
+# fills from /api/decks/mine (the fetch carries on and lands in the cache either way).
+DECK_LIST_COLD_WAIT = 1.5
+TOUCH_LINK_INTERVAL = 60.0  # the link's last_used_at is written at most this often per member
 # Archidekt work one member may start per ARCHIDEKT_BUDGET_WINDOW seconds (each deck read,
 # proposal, apply or proxied archidekt_* research call counts once), on top of the concurrency
 # cap above: a looping assistant cannot keep a steady stream of requests going on the member's
@@ -158,6 +170,105 @@ class RateBudget:
                 if v[0] + (now - v[1]) * self.per_window / self.window < self.per_window
             }
         return True
+
+
+class MemberCache:
+    """One value per member with stale-while-revalidate: a fresh value is served as is, a stale
+    one (older than ``fresh`` seconds, younger than ``stale``) is served at once while one refresh
+    runs in the background, and anything older (or missing) is fetched, every waiter sharing the
+    one fetch in flight. ``drop`` forgets a member's value and makes a fetch that was already in
+    flight store nothing, so a write racing a read never leaves the old list behind."""
+
+    def __init__(self, fresh: float, stale: float):
+        self.fresh = fresh
+        self.stale = stale
+        self._entries: dict[str, tuple[float, float, Any]] = {}  # sub -> (monotonic, wall, value)
+        self._refreshing: dict[str, asyncio.Task[Any]] = {}
+        self._dropped: dict[str, float] = {}
+
+    def peek(self, sub: str) -> tuple[Any, str]:
+        """(value, state) where state is fresh, stale or miss (value None)."""
+        hit = self._entries.get(sub)
+        if hit is None:
+            return None, "miss"
+        age = time.monotonic() - hit[0]
+        if age < self.fresh:
+            return hit[2], "fresh"
+        if age < self.stale:
+            return hit[2], "stale"
+        self._entries.pop(sub, None)
+        return None, "miss"
+
+    def fetched_at(self, sub: str) -> float | None:
+        hit = self._entries.get(sub)
+        return hit[1] if hit else None
+
+    def drop(self, sub: str) -> None:
+        self._entries.pop(sub, None)
+        self._dropped[sub] = time.monotonic()
+
+    def clear(self) -> None:
+        for sub in list(self._entries):
+            self.drop(sub)
+
+    def refreshing(self, sub: str) -> bool:
+        return sub in self._refreshing
+
+    def _refresh(self, sub: str, fetch: Callable[[], Awaitable[Any]]) -> asyncio.Task[Any]:
+        task = self._refreshing.get(sub)
+        if task is not None:
+            return task
+        started = time.monotonic()
+
+        async def run() -> Any:
+            value = await fetch()
+            if self._dropped.get(sub, 0.0) <= started:  # not invalidated while it was fetched
+                self._entries[sub] = (time.monotonic(), time.time(), value)
+            return value
+
+        def done(t: asyncio.Task[Any]) -> None:
+            self._refreshing.pop(sub, None)
+            if not t.cancelled() and t.exception() is not None:
+                logger.debug("member cache refresh failed for a member: %r", t.exception())
+
+        task = asyncio.create_task(run())
+        task.add_done_callback(done)
+        self._refreshing[sub] = task
+        if len(self._entries) > 10_000:
+            self._entries.clear()
+            self._dropped.clear()
+        return task
+
+    async def get(
+        self, sub: str, fetch: Callable[[], Awaitable[Any]], *, wait: float | None = None
+    ) -> Any | None:
+        """The member's value: fresh at once; stale at once with a refresh in the background;
+        otherwise fetched. With ``wait``, a fetch that takes longer answers None instead and
+        carries on, so the caller can render a placeholder and come back for the value."""
+        value, state = self.peek(sub)
+        if state == "fresh":
+            return value
+        if state == "stale":
+            self._refresh(sub, fetch)
+            return value
+        task = self._refresh(sub, fetch)
+        # The fetch runs in its own task (its own context), so the time this request spends
+        # waiting for it is what counts as its Archidekt time (timing.py).
+        started = time.perf_counter()
+        try:
+            if wait is None:
+                return await asyncio.shield(task)
+            done, _pending = await asyncio.wait({task}, timeout=wait)
+            if not done:
+                return None
+            return task.result()
+        finally:
+            add_time(archidekt_time, time.perf_counter() - started)
+
+    async def aclose(self) -> None:
+        for task in list(self._refreshing.values()):
+            task.cancel()
+        await asyncio.gather(*self._refreshing.values(), return_exceptions=True)
 
 
 # -- review rows ----------------------------------------------------------------
@@ -1103,6 +1214,33 @@ class DeckService:
         # decks). None while the collection pages are not loaded.
         self.collection_apply: Any = None
         self._precon_cache: tuple[float, dict[str, list[dict[str, Any]]]] | None = None
+        # The member's deck list (list_decks), served from memory between Archidekt reads and
+        # dropped by every write the gateway sends for that member.
+        self.deck_lists = MemberCache(DECK_LIST_FRESH, DECK_LIST_STALE)
+        self.deck_list_wait = DECK_LIST_COLD_WAIT
+        # Other member caches (the collection's first page) hear about writes here: (sub, path).
+        self.write_hooks: list[Callable[[str, str], None]] = []
+        listeners = getattr(self.client, "write_listeners", None)  # a test double may lack it
+        if listeners is not None:
+            listeners.append(self._on_archidekt_write)
+        self._touched: dict[str, float] = {}  # sub -> when last_used_at was last written
+
+    def _on_archidekt_write(self, path: str) -> None:
+        """A write is about to go to Archidekt with some member's session: whatever the gateway
+        remembers for that member about what the write changes is stale from now on."""
+        sub = _acting_sub.get()
+        if not sub:
+            return
+        if not path.startswith("/collection"):
+            self.deck_lists.drop(sub)
+        for hook in self.write_hooks:
+            hook(sub, path)
+
+    def forget_member(self, sub: str) -> None:
+        """Drop everything cached for a member (their link changed or their data was deleted)."""
+        self.deck_lists.drop(sub)
+        for hook in self.write_hooks:
+            hook(sub, "")
 
     @asynccontextmanager
     async def archidekt_slot(self, sub: str | None) -> AsyncIterator[None]:
@@ -1190,10 +1328,12 @@ class DeckService:
         ):
             raise refused
         self._audit("archidekt_linked", sub=sub, detail={"archidekt_username": session["username"]})
+        self.forget_member(sub)
         return self.status(sub)
 
     def unlink(self, sub: str) -> None:
         self.db.revoke_link(sub)
+        self.forget_member(sub)
         self._audit("archidekt_unlinked", sub=sub)
 
     def status(self, sub: str) -> dict[str, Any]:
@@ -1386,6 +1526,7 @@ class DeckService:
         exp = jwt_exp(token)
         if exp is None or exp - time.time() < 300:
             token = await refreshed("expiring")
+        acting = _acting_sub.set(sub)
         try:
             try:
                 result = await fn(token, *args)
@@ -1398,8 +1539,21 @@ class DeckService:
             if exc.kind == "auth":
                 raise expire("rejected after refresh") from exc
             raise DeckError(exc.kind, str(exc)) from exc
-        self.db.touch_link(sub)
+        finally:
+            _acting_sub.reset(acting)
+        self._touch(sub)
         return result
+
+    def _touch(self, sub: str) -> None:
+        """Record that the link was used, at most once a minute: the write (a SQLite transaction)
+        is off the path of every other Archidekt call."""
+        now = time.monotonic()
+        if now - self._touched.get(sub, -TOUCH_LINK_INTERVAL) < TOUCH_LINK_INTERVAL:
+            return
+        self._touched[sub] = now
+        if len(self._touched) > 10_000:
+            self._touched = {sub: now}
+        self.db.touch_link(sub)
 
     def _audit(self, event: str, *, sub: str | None = None, detail: dict[str, Any] | None = None) -> None:
         """Audit row that also names the OAuth client acting on this request (id and registered
@@ -1422,14 +1576,34 @@ class DeckService:
 
     # -- reads ----------------------------------------------------------------
     async def list_decks(self, sub: str) -> list[dict[str, Any]]:
-        _token, row = self._token(sub)
+        """The member's decks, from the in-memory list when it is fresh (DECK_LIST_FRESH) or stale
+        with a refresh running (DECK_LIST_STALE), else read from Archidekt now. Every write the
+        gateway sends for the member drops the list first, so the next read is live again."""
+        rows = await self.list_decks_quick(sub, wait=None)
+        assert rows is not None
+        return rows
+
+    async def list_decks_quick(self, sub: str, *, wait: float | None = None) -> list[dict[str, Any]] | None:
+        """``list_decks`` that gives up waiting for a cold read after ``wait`` seconds and answers
+        None; the read carries on and lands in the cache for /api/decks/mine. ``wait=None``
+        waits for it. The list comes back as fresh dicts, so a caller may sort or add to it."""
+        _token, row = self._token(sub)  # not linked: raise before touching the cache
         exclude = self.settings.archidekt_backup_folder if self.settings.archidekt_backups else None
-        return await self._call(
-            sub,
-            lambda token, *_: self.client.list_decks(
-                token, row["archidekt_username"], row.get("archidekt_user_id"), exclude_folder=exclude
-            ),
-        )
+
+        async def fetch() -> list[dict[str, Any]]:
+            return await self._call(
+                sub,
+                lambda token, *_: self.client.list_decks(
+                    token, row["archidekt_username"], row.get("archidekt_user_id"), exclude_folder=exclude
+                ),
+            )
+
+        rows = await self.deck_lists.get(sub, fetch, wait=wait)
+        return None if rows is None else [dict(d) for d in rows]
+
+    def decks_fetched_at(self, sub: str) -> float | None:
+        """When the cached deck list was read from Archidekt (epoch seconds), None when none is."""
+        return self.deck_lists.fetched_at(sub)
 
     async def get_deck(self, sub: str, deck_id: str) -> Deck:
         deck_id = _clean_deck_id(deck_id)
@@ -1827,6 +2001,7 @@ class DeckService:
         """At shutdown: give running applies ``grace`` seconds to finish, then cancel the rest,
         which records each as failed ("interrupted", with what it had sent) before the database
         closes."""
+        await self.deck_lists.aclose()
         running = list(self._running.values())
         if not running:
             return

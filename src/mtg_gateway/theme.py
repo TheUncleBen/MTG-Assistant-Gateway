@@ -447,6 +447,13 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
 .home details.connect summary .addr{font-weight:400;font-size:.9rem;word-break:break-all}
 .home .panel-head{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin:0 0 .75rem}
 .home .panel-head h2{margin:0}
+/* placeholders while a deck list is still being read (decks.js swaps the real list in) */
+.skeleton>*{display:block;background:var(--surface-2);border:1px solid var(--border);
+  border-radius:var(--radius);animation:skeleton 1.4s ease-in-out infinite}
+.home .recent.skeleton>span{aspect-ratio:16/9}
+ul.decklist.skeleton>li{height:230px;list-style:none}
+@keyframes skeleton{50%{opacity:.55}}
+@media (prefers-reduced-motion:reduce){ .skeleton>*{animation:none} }
 /* Adaptive navigation after Android's window size classes. Compact (under 600px, any device): a
    bottom tab bar (Archidekt's floatingToolbar). Medium (600 to 899px) on a touch screen, such as
    an unfolded foldable or a tablet in a browser, and the Android app at every width from 600px:

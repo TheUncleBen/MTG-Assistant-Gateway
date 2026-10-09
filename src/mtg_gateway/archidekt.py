@@ -21,10 +21,13 @@ import random
 import re
 import time
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
+
+from .timing import add_time, archidekt_time
 
 logger = logging.getLogger(__name__)
 
@@ -544,6 +547,7 @@ class Pacer:
 CARD_PATH = "/cards/v2/"
 CACHE_MAX_ENTRIES = 500
 BACKOFF_CAP = 10.0  # seconds; the longest single wait between retries
+MAX_LIST_PAGES = 4  # deck-list pages of 50 followed for one member (200 decks)
 
 
 class ArchidektClient:
@@ -574,6 +578,9 @@ class ArchidektClient:
         self.card_cache_seconds = max(0.0, float(card_cache_seconds))
         self._cache: dict[str, tuple[float, Any]] = {}
         self.stats = {"requests": 0, "cache_hits": 0, "retries": 0, "rate_limited": 0, "failures": 0}
+        # Called with the path of every write about to be sent (decks.py drops the member caches
+        # that write makes stale: the deck list, the collection's first page).
+        self.write_listeners: list[Callable[[str], None]] = []
         # No cookie jar: the client is shared by every member and by anonymous reads, so a cookie
         # Archidekt set for one member's sign-in must never ride along on anyone else's request
         # (or outlive an unlink). Each request carries only its own member's bearer token.
@@ -659,6 +666,8 @@ class ArchidektClient:
         if method != "GET" and not path.startswith("/rest-auth/"):
             # cleared before the write is sent: a write that fails halfway may still have landed
             self.forget_deck_reads()
+            for listener in self.write_listeners:
+                listener(path)
         attempts = 1 + (self.retries if method == "GET" else 0)
         for attempt in range(attempts):
             try:
@@ -694,6 +703,20 @@ class ArchidektClient:
         headers = {"Accept": "application/json", "User-Agent": self.user_agent}
         if token:
             headers["Authorization"] = f"{scheme} {token}"
+        started = time.perf_counter()
+        try:
+            return await self._paced_send(method, path, headers, json_body, params)
+        finally:
+            add_time(archidekt_time, time.perf_counter() - started)  # pacer wait and transfer alike
+
+    async def _paced_send(
+        self,
+        method: str,
+        path: str,
+        headers: dict[str, str],
+        json_body: Any | None,
+        params: dict[str, Any] | None,
+    ) -> Any:
         async with self.pacer:
             self.stats["requests"] += 1
             try:
@@ -785,28 +808,25 @@ class ArchidektClient:
         *,
         exclude_folder: str | None = None,
     ) -> list[dict[str, Any]]:
-        """The linked user's decks. Archidekt honours ``ownerUsername`` (verified live 2026-10-04;
-        the older ``owner``/``ownerexact`` parameters are ignored and return everyone's decks).
-        When the linked account's id is known a second ``ownerId`` listing is merged in. Both
-        are sent with the usual ``JWT`` scheme: Archidekt treats ``Bearer`` as signed out and then
-        leaves the owner's private decks out (verified live 2026-10-05, both filters returned
-        exactly the account's private decks with JWT).
-        Every entry is still checked against the linked account on our side, and an entry whose
-        owner cannot be read is dropped rather than shown as the user's. Entries in the folder
-        named ``exclude_folder`` (the gateway's backup copies) are left out."""
-        filters: list[dict[str, Any]] = [{"ownerUsername": username}]
-        if user_id:
-            filters.append({"ownerId": user_id})
+        """The linked user's decks. Archidekt honours ``ownerId`` and ``ownerUsername`` (verified
+        live 2026-10-04 and 2026-10-05: each returned exactly the account's decks, private ones
+        included, when sent with the usual ``JWT`` scheme; ``Bearer`` is treated as signed out and
+        leaves the private decks out; the older ``owner``/``ownerexact`` parameters are ignored
+        and return everyone's decks). One listing is sent: by ``ownerId`` when the linked
+        account's id is known (the id cannot change, a username can), else by ``ownerUsername``.
+        Up to MAX_LIST_PAGES pages of 50 are followed, so a member with more than fifty decks
+        sees them all. Every entry is still checked against the linked account on our side, and
+        an entry whose owner cannot be read is dropped rather than shown as the user's. Entries in
+        the folder named ``exclude_folder`` (the gateway's backup copies) are left out."""
+        flt: dict[str, Any] = {"ownerId": user_id} if user_id else {"ownerUsername": username}
         decks: list[dict[str, Any]] = []
         seen: set[str] = set()
         dropped = 0
-        for flt in filters:
-            body = await self._request(
-                "GET",
-                "/decks/v3/",
-                token=token,
-                params={**flt, "orderBy": "-updatedAt", "pageSize": 50},
-            )
+        for page in range(1, MAX_LIST_PAGES + 1):
+            params = {**flt, "orderBy": "-updatedAt", "pageSize": 50}
+            if page > 1:
+                params["page"] = page
+            body = await self._request("GET", "/decks/v3/", token=token, params=params)
             results = body.get("results") if isinstance(body, dict) else None
             if not isinstance(results, list):
                 raise ArchidektError("contract", "unexpected deck list shape")
@@ -825,6 +845,8 @@ class ArchidektClient:
                     continue  # the gateway's backup copies stay out of the user's list
                 row["owner"] = username
                 decks.append(row)
+            if not body.get("next") or len(results) < 50:
+                break
         if dropped:
             logger.info("deck list: dropped %d entries not owned by the linked account", dropped)
         decks.sort(key=lambda d: d["updated_at"], reverse=True)

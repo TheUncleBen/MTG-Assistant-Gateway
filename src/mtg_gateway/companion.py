@@ -9,12 +9,15 @@ column below; internal links never open a new tab; external sites (Archidekt, Sc
 
 from __future__ import annotations
 
+import asyncio
 import html
 import json
 import logging
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlencode
 
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, RedirectResponse, Response
@@ -69,6 +72,7 @@ PLAYTEST_CSP = (
     "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; worker-src 'self'; img-src 'self'; "
     "frame-src https://archidekt.com; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 )
+DECKS_JSON_TIMEOUT = 25.0  # /api/decks/mine waits this long for a cold list at most
 # Format names the settings and new-deck forms offer, one per Archidekt format id.
 FORMAT_CHOICES = sorted({FORMAT_NAMES[i] for i in FORMAT_NAMES}, key=lambda n: format_label(n).lower())
 EDITOR_CSP = (
@@ -308,14 +312,51 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         given = data.get("csrf", "").encode()
         return bool(sid and expected and hmac.compare_digest(given, expected.encode()))
 
-    async def my_decks(sub: str) -> tuple[list[dict[str, Any]], str | None]:
-        """(decks, problem) where problem is a short message when the list is unavailable."""
+    async def my_decks(
+        sub: str, *, wait: float | None = None
+    ) -> tuple[list[dict[str, Any]] | None, str | None]:
+        """(decks, problem) where problem is a short message when the list is unavailable. With
+        ``wait``, decks is None when the list is cold and Archidekt has not answered in time: the
+        page then renders a placeholder that decks.js fills from /api/decks/mine."""
         try:
-            return await decks.list_decks(sub), None
+            return await decks.list_decks_quick(sub, wait=wait), None
         except DeckError as exc:
             if exc.kind == "not_linked":
                 return [], "not_linked"
             return [], str(exc)
+
+    def arrange_decks(
+        rows: list[dict[str, Any]], *, q: str, order: str, folder: str
+    ) -> tuple[list[dict[str, Any]], list[str], int]:
+        """Filter and sort the member's list as the /decks controls ask: (rows, folders, total)."""
+        folders = sorted({str(d.get("folder")) for d in rows if d.get("folder")}, key=str.lower)
+        total = len(rows)
+        if q:
+            rows = [d for d in rows if q.lower() in str(d.get("name", "")).lower()]
+        if folder:
+            rows = [d for d in rows if d.get("folder") == folder]
+        if order == "name":
+            rows.sort(key=lambda d: str(d.get("name", "")).lower())
+        elif order == "created":
+            rows.sort(key=lambda d: str(d.get("created_at") or ""), reverse=True)
+        elif order == "format":
+            rows.sort(key=lambda d: (str(d.get("format_name") or ""), str(d.get("name", "")).lower()))
+        return rows, folders, total
+
+    def list_query(qp: Any) -> tuple[str, str, str, str]:
+        """The deck list's query parameters, each limited to its known values: (q, order, view, folder)."""
+        q = (qp.get("q") or "").strip()[:80]
+        order = qp.get("order") if qp.get("order") in LIST_ORDERS else "updated"
+        view = qp.get("view") if qp.get("view") in ("grid", "list") else "grid"
+        folder = (qp.get("folder") or "").strip()[:80]
+        return q, order, view, folder
+
+    def deck_list_skeleton(view: str) -> str:
+        return (
+            f"<ul class='plain decklist {_esc(view)} skeleton' aria-hidden='true'>"
+            + "<li></li>" * 6
+            + "</ul><p class='sr-only' role='status'>Loading your decks</p>"
+        )
 
     def link_prompt() -> str:
         return (
@@ -331,23 +372,10 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         if not sub:
             return login_redirect("/decks")
         qp = request.query_params
-        q = (qp.get("q") or "").strip()[:80]
-        order = qp.get("order") if qp.get("order") in LIST_ORDERS else "updated"
-        view = qp.get("view") if qp.get("view") in ("grid", "list") else "grid"
-        folder = (qp.get("folder") or "").strip()[:80]
-        rows, problem = await my_decks(sub)
-        folders = sorted({str(d.get("folder")) for d in rows if d.get("folder")}, key=str.lower)
-        total = len(rows)
-        if q:
-            rows = [d for d in rows if q.lower() in str(d.get("name", "")).lower()]
-        if folder:
-            rows = [d for d in rows if d.get("folder") == folder]
-        if order == "name":
-            rows.sort(key=lambda d: str(d.get("name", "")).lower())
-        elif order == "created":
-            rows.sort(key=lambda d: str(d.get("created_at") or ""), reverse=True)
-        elif order == "format":
-            rows.sort(key=lambda d: (str(d.get("format_name") or ""), str(d.get("name", "")).lower()))
+        q, order, view, folder = list_query(qp)
+        rows, problem = await my_decks(sub, wait=decks.deck_list_wait)
+        pending = rows is None  # cold start: the shell goes out now, decks.js fills the list
+        rows, folders, total = arrange_decks(rows or [], q=q, order=order, folder=folder)
         open_form = (
             "<form method='get' action='/decks/open' class='openform'>"
             "<label for='ref'>Open any Archidekt deck</label>"
@@ -362,14 +390,22 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         if problem == "not_linked":
             body = link_prompt() + f"<div class='panel'>{open_form}</div>"
             return page("My decks", notice + body, sub=sub, sid=sid, current="/decks")
-        covers = covers_for(rows, state.db.deck_covers([str(d["id"]) for d in rows]))
+        if pending:
+            src = "/api/decks/mine?" + urlencode(
+                {"shape": "list", "q": q, "order": order, "view": view, "folder": folder}
+            )
+            listing = f"<div data-decks-src='{_esc(src)}' aria-busy='true'>{deck_list_skeleton(view)}</div>"
+        else:
+            covers = covers_for(rows, state.db.deck_covers([str(d["id"]) for d in rows]))
+            listing = (f"<p class='notice error'>{_esc(problem)}</p>" if problem else "") + deck_list_html(
+                rows, covers=covers, q=q, view=view
+            )
         body = (
             notice
             + deck_list_controls_html(
-                q=q, order=order, view=view, folders=folders, folder=folder, total=total
+                q=q, order=order, view=view, folders=folders, folder=folder, total=total, pending=pending
             )
-            + (f"<p class='notice error'>{_esc(problem)}</p>" if problem else "")
-            + deck_list_html(rows, covers=covers, q=q, view=view)
+            + listing
             + f"<div class='panel'>{open_form}</div>"
         )
         return page(
@@ -382,7 +418,57 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             scripts=True,
             csp=DECK_CSP,  # the covers are Scryfall images
             deck_css=True,
+            extra_scripts=("decks.js",),
         )
+
+    @server.custom_route("/api/decks/mine", methods=["GET"], include_in_schema=False)
+    async def my_decks_json(request: Request) -> Response:
+        """The signed-in member's deck list for the pages' placeholders (decks.js): the rows, plus
+        the HTML the page itself would have rendered (``shape=list`` with the /decks controls'
+        q, order, view and folder; ``shape=recent`` for the home panel) so there is one renderer.
+        Browser session only; a GET that changes nothing needs no CSRF token."""
+        sub, _sid = browser_session(state, request)
+        if not sub:
+            return JSONResponse(
+                {"ok": False, "error": "unauthenticated"}, 401, headers={"Cache-Control": "no-store"}
+            )
+        qp = request.query_params
+        shape = "recent" if qp.get("shape") == "recent" else "list"
+        q, order, view, folder = list_query(qp)
+        try:
+            rows = await asyncio.wait_for(decks.list_decks(sub), DECKS_JSON_TIMEOUT)
+        except DeckError as exc:
+            rows, problem = None, (exc.kind, str(exc))
+        except TimeoutError:
+            rows, problem = None, ("unavailable", "Archidekt did not answer in time.")
+        else:
+            problem = None
+        fetched_at = decks.decks_fetched_at(sub)
+        out: dict[str, Any] = {
+            "ok": problem is None,
+            "shape": shape,
+            "fetched_at": datetime.fromtimestamp(fetched_at, UTC).isoformat() if fetched_at else None,
+        }
+        if problem is not None:
+            out["error"], out["message"] = problem
+        if shape == "recent":
+            from .home import recent_panel_inner
+
+            recent = sorted(rows or [], key=lambda d: d.get("updated_at") or "", reverse=True)
+            covers = covers_for(recent, state.db.deck_covers([str(d["id"]) for d in recent]))
+            out["html"] = recent_panel_inner(None if problem else recent, covers)
+            out["count"] = len(recent)
+        else:
+            shown, folders, total = arrange_decks(rows or [], q=q, order=order, folder=folder)
+            covers = covers_for(shown, state.db.deck_covers([str(d["id"]) for d in shown]))
+            out["html"] = (
+                f"<p class='notice error'>{_esc(problem[1])}</p>" if problem else ""
+            ) + deck_list_html(shown, covers=covers, q=q, view=view)
+            out["count"], out["total"], out["folders"] = len(shown), total, folders
+        for d in rows or []:
+            d.setdefault("url", f"https://archidekt.com/decks/{d['id']}")
+        out["decks"] = rows or []
+        return JSONResponse(out, headers={"Cache-Control": "no-store"})
 
     @server.custom_route("/decks/open", methods=["GET"], include_in_schema=False)
     async def open_deck(request: Request) -> Response:
