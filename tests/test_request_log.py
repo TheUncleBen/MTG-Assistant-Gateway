@@ -47,7 +47,7 @@ def test_logged_path_names_the_route_template() -> None:
     app.add_middleware(Spy)
     c = TestClient(app, raise_server_exceptions=False)
     for url in (
-        "/decks/27093869/edit",
+        "/decks/4242424/edit",
         "/cards/data/SECRET-TOKEN",
         "/admin/users/member%40idp/with/slashes",
         "/api/v1/decks/55",
@@ -66,7 +66,7 @@ def test_logged_path_names_the_route_template() -> None:
         "/nothing/…",
     ]
     joined = " ".join(seen)
-    for secret in ("27093869", "SECRET", "member", "slashes", "55", "anything", "see"):
+    for secret in ("4242424", "SECRET", "member", "slashes", "55", "anything", "see"):
         assert secret not in joined
     # a control character in an unrouted path is replaced, never written as is
     assert logged_path({"path": "/\x01odd/x", "root_path": ""}) == "/?odd/…"
@@ -80,7 +80,7 @@ async def test_gateway_log_holds_no_deck_number_username_or_token(
     assert any(isinstance(m, TimingMiddleware) for m in _layers(h)), "TimingMiddleware is the outer layer"
     caplog.set_level(logging.INFO, logger="mtg_gateway.requests")
     for path in (
-        "/decks/27093869",
+        "/decks/4242424",
         "/users/somebody",
         "/cards/data/SECRET-TOKEN",
         "/admin/users/member-sub-1",
@@ -97,7 +97,7 @@ async def test_gateway_log_holds_no_deck_number_username_or_token(
     assert lines[4].startswith("GET /proposals/{pid} ")
     assert lines[5].startswith("GET /no-such/… ")
     joined = "\n".join(lines)
-    for secret in ("27093869", "somebody", "SECRET", "member-sub", "prop-9", "page"):
+    for secret in ("4242424", "somebody", "SECRET", "member-sub", "prop-9", "page"):
         assert secret not in joined, joined
 
 
