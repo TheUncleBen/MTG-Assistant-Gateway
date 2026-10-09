@@ -1,6 +1,6 @@
 """The simulation's words and names: double-faced cards reach the research service by their front
 face, the commander is not filed as an unrecognised card, and the text never sends anyone to a
-hidden tool (Ben's T-041 notes, 2026-10-09)."""
+hidden tool (owner test round, T-041, 2026-10-09)."""
 
 from __future__ import annotations
 
@@ -90,6 +90,14 @@ def test_the_commander_is_taken_out_of_the_unrecognized_list() -> None:
     )
     _commander_aside(alone, "Liesa, Forgotten Archangel")
     assert "Unrecognized — 0 cards" in alone["text"] and "\n- (none)\n" in alone["text"]
+    # A text line the parse cannot reproduce (an entry without a "(drawn N%)" tail): the data
+    # is still fixed, the text is left alone rather than losing an entry.
+    odd = copy.deepcopy(GOLDFISH)
+    odd["text"] = odd["text"].replace("Sun Titan (drawn 18%)", "Sun Titan")
+    before_text = odd["text"]
+    _commander_aside(odd, "Liesa, Forgotten Archangel")
+    assert odd["text"] == before_text
+    assert "commander_note" in odd["data"]["metrics"]["honesty"]
 
 
 def test_goldfish_report_is_never_named_in_a_result() -> None:

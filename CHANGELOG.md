@@ -123,7 +123,8 @@ catalog). Back up the database before you update, as always.
   minutes and returns only the member's own data, so it is harmless in a log.
 - **Sign-out took seconds.** The sign-out response (and *Delete my data*)
   asked the browser to clear its whole HTTP cache as well as the site's
-  storage, which Chrome does slowly. Every gateway page is already sent with
+  storage; clearing the cache is the likely slow part in Chrome (inferred, not
+  measured). Every gateway page is already sent with
   `Cache-Control: no-store`, so only the storage is cleared now.
 - **Release notes carry the app files' checksums.** A release that ships the
   Android app lists the SHA-256 of the APK and AAB next to the signing

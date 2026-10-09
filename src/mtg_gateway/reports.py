@@ -455,10 +455,17 @@ def _commander_aside(goldfish: dict[str, Any], commander: str | None) -> None:
         if i + 1 < len(lines) and lines[i + 1].startswith("- "):
             entries = _ENTRY.findall(lines[i + 1][2:])
             rest = [name + drawn for name, drawn in entries if name != commander]
-            if not entries or len(rest) == len(entries):
+            # Only rewrite a line the parse reproduces in full: an entry without a "(drawn N%)"
+            # tail would otherwise be dropped silently.
+            if ", ".join(n + d for n, d in entries) != lines[i + 1][2:] or len(rest) == len(entries):
                 break
             lines[i + 1] = "- " + ", ".join(rest) if rest else "- (none)"
-            lines[i] = re.sub(r"\b(\d+) cards?\b", lambda m: f"{int(m.group(1)) - 1} cards", line, count=1)
+            lines[i] = re.sub(
+                r"\b(\d+) cards?\b",
+                lambda m: f"{int(m.group(1)) - 1} card{'' if int(m.group(1)) - 1 == 1 else 's'}",
+                line,
+                count=1,
+            )
             lines.insert(i + 2, f"Commander — {honesty['commander_note']}")
         break
     goldfish["text"] = "\n".join(lines)

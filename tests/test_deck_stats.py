@@ -568,7 +568,7 @@ def test_format_specific_command_zones() -> None:
     # Pauper Commander: a creature ever printed at uncommon may lead, whichever printing the deck
     # uses (a mythic or rare printing of such a card is fine). The deck's data names only the
     # chosen printing's rarity, so a non-uncommon printing is reported as unverified, never as a
-    # failure (Ben's T-115 case: a leader in a rare printing that was also printed at uncommon).
+    # failure (owner test round T-115: a leader in a rare printing that was also printed at uncommon).
     pdh = deck([_cmdr("Aesi", rarity="mythic"), card("Island", 99, types=["Land"], supertypes=["Basic"])],
                format_id=17, categories=cat)  # fmt: skip
     pdh_zone = compute(pdh)["checks"]["commander_zone"]

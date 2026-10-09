@@ -157,7 +157,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         resp.delete_cookie(session_cookie, path="/", secure=secure, httponly=True, samesite="lax")
         # Ask the browser to drop site storage (scan drafts and the like) too. Not "cache": every
         # gateway page is already Cache-Control: no-store, and clearing the browser's whole HTTP
-        # cache is what made sign-out take seconds in Chrome (Ben, 2026-10-09).
+        # cache is what made sign-out take seconds in Chrome (owner test round T-015, 2026-10-09).
         resp.headers["Clear-Site-Data"] = '"storage"'
         resp.set_cookie(
             fresh_cookie, "1", max_age=3600, path="/", secure=secure, httponly=True, samesite="lax"
