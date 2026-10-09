@@ -537,9 +537,10 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             "[Ramp]</code>, "
             "a <code># Sideboard</code> header), an Archidekt CSV export or this gateway's .json export, "
             "or choose a file (.txt, .csv or .json). Leave it empty for an empty deck.</p>"
-            "<div class='field filepick'><label for='file'>From a file</label>"
+            "<div class='field filepick'><span class='lbl'>From a file</span><label class='filebtn'>"
             "<input id='file' type='file' accept='.txt,.csv,.json,text/plain,text/csv,application/json' "
-            "data-fill='source' data-kind='kind'></div>"
+            "data-fill='source' data-kind='kind'><span class='btn'>Choose a file</span></label>"
+            "<span class='fname' aria-live='polite'>No file chosen</span></div>"
             f"<textarea id='source' name='source' rows='12' placeholder='1 Sol Ring&#10;1 Arcane Signet'>"
             f"{_esc(values.get('source', ''))}</textarea>"
             "<div class='field'><label for='kind'>The text above is</label><select id='kind' name='kind'>"
@@ -1349,10 +1350,11 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             "Auto</button>"
             + "".join(
                 f"<button type='button' class='tchip' data-cat='{_esc(c)}' data-zone='main' "
-                f"aria-pressed='false'>{_esc(c)}</button>"
+                f"aria-pressed='false' title='The {_esc(c)} category'>{_esc(c)}</button>"
                 for c in categories
             )
-            + f"<button type='button' class='tchip side' data-cat='' data-zone='side' aria-pressed='false'>"
+            + f"<button type='button' class='tchip side' data-cat='' data-zone='side' aria-pressed='false' "
+            f"aria-label='{side_name} zone' title='The {side_name} zone: kept outside the deck'>"
             f"{side_name}</button></div>"
             "<div class='field grow'><label for='addname'>Card name</label>"
             "<input id='addname' type='text' name='card' data-suggest='cards' data-suggest-submit "

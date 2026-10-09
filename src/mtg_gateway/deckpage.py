@@ -1432,7 +1432,7 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .field .sel{position:relative;display:block}
 .field .sel > svg{position:absolute;left:.75rem;top:50%;transform:translateY(-50%);color:var(--orange);
   pointer-events:none}
-.field .sel select{padding-left:2.1rem}
+.field .sel > svg ~ select,.field .sel > svg ~ .msel-btn{padding-left:2.1rem}
 .field .search{margin:0}
 .toolbar .apply{margin-top:.5rem}
 @media (max-width:1200px){ .toolbar .controls{grid-template-columns:1fr}
@@ -1667,8 +1667,9 @@ table.qty td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-
 .odds{margin-top:1.25rem} .odds h3{margin:0 0 .4rem}
 .odds .oddsform{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;font-size:.9rem;
   color:var(--text-muted)}
-.odds .oddsform select,.odds .oddsform input{height:2rem;padding:0 .4rem;font-size:.9rem;width:auto;
-  min-width:6rem;flex:none}
+.odds .oddsform select,.odds .oddsform .msel-btn,.odds .oddsform input{height:2rem;padding:0 .4rem;
+  font-size:.9rem;width:auto;min-width:6rem;flex:none}
+.odds .oddsform .msel-btn{padding-right:1.5rem;background-position:right .5rem center}
 .odds .oddsform input{width:4rem;min-width:4rem}
 .odds .oddstable{margin-top:.5rem;max-height:16rem;overflow:auto;display:block;width:100%}
 .odds .oddstable td:nth-child(2),.odds .oddstable td:nth-child(3){text-align:right;white-space:nowrap}
@@ -1854,7 +1855,7 @@ ul.erows{list-style:none;margin:.5rem 0 0;padding:0}
 .erow .qty input{width:3.4rem;height:2.25rem;text-align:center;margin:0;padding:0 .25rem;
   font-variant-numeric:tabular-nums}
 .erow .qty button.mini{margin:0}
-.erow .sel select{height:2.25rem}
+.erow .sel select,.erow .sel .msel-btn{height:2.25rem}
 .erow details.dd summary.mini{display:inline-flex;align-items:center;justify-content:center;width:2.25rem;
   height:2.25rem;padding:0;margin:0}
 .erow .menu .field{display:flex;flex-direction:column;gap:.25rem;padding:.5rem .75rem}
