@@ -329,6 +329,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             if data.get("confirm") != "yes":
                 return RedirectResponse("/account?err=confirm_delete", status_code=303)
             state.db.delete_member_data(sub)
+            state.decks.forget_member(sub)
             if state.membership is not None:
                 state.membership.avatars.delete(sub)
             resp = RedirectResponse("/data-deleted", status_code=303)
