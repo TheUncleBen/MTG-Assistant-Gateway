@@ -412,9 +412,11 @@ def guide_body(
     )
     how_restore = (
         "<ol class='steps'>"
-        "<li><span>Open <a href='/history'>History</a>. Entries are grouped by day; the filter bar narrows "
-        "them by deck, type (Changes, Snapshots, Reports), state and a search over deck names and change "
-        "text, and <strong>Older</strong> pages through the rest 25 at a time.</span></li>"
+        "<li><span>Open <a href='/history'>History</a>. Entries are grouped by day (or by deck, with "
+        "<strong>Group by</strong>); the filter bar narrows them by deck, type (Changes, Snapshots, "
+        "Reports), state, when (today, the last 7, 30 or 90 days or this year, counted in UTC days) and "
+        "a search over deck names and change text, and <strong>Older</strong> pages through the rest 25 "
+        "at a time.</span></li>"
         "<li><span>A snapshot row links to the change it was taken before and has <strong>Restore (review "
         "first)</strong>. Press it to see what would change.</span></li>"
         "<li><span>Confirm. <strong>Restore</strong> puts the deck back exactly as the snapshot had it, "

@@ -1418,12 +1418,15 @@ class Database:
         kinds: list[str] | tuple[str, ...] | None = None,
         states: list[str] | tuple[str, ...] | None = None,
         search: str | None = None,
+        since: int | None = None,
+        until: int | None = None,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         """Newest first. ``deck_id``, ``kinds`` (edit, create_deck, restore), ``states`` (pending,
-        applied, failed, rejected, expired: a pending proposal past its expiry counts as expired)
-        and ``search`` (a case-insensitive match on the deck name or the change summary) narrow
-        the list in SQL, so a deck with many proposals keeps its older ones on its own page."""
+        applied, failed, rejected, expired: a pending proposal past its expiry counts as expired),
+        ``search`` (a case-insensitive match on the deck name or the change summary) and a time
+        window (``since`` inclusive, ``until`` exclusive, epoch seconds) narrow the list in SQL,
+        so a deck with many proposals keeps its older ones on its own page."""
         sql = (
             "SELECT id, kind, deck_id, deck_name, state, created_at, expires_at, applied_at, "
             "created_by_client, diff_text FROM proposals WHERE owner_sub = ?"
@@ -1453,6 +1456,12 @@ class Database:
             like = _like(search)
             sql += " AND (deck_name LIKE ? ESCAPE '\\' OR diff_text LIKE ? ESCAPE '\\')"
             args += [like, like]
+        if since is not None:
+            sql += " AND created_at >= ?"
+            args.append(int(since))
+        if until is not None:
+            sql += " AND created_at < ?"
+            args.append(int(until))
         sql += " ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?"
         args += [max(0, int(limit)), max(0, int(offset))]
         with self._lock:
@@ -1564,11 +1573,14 @@ class Database:
         *,
         deck_id: str | None = None,
         search: str | None = None,
+        since: int | None = None,
+        until: int | None = None,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         """Newest first. Each row carries the deck name and card count read from the stored deck,
-        never the deck itself (a snapshot is a whole deck; get_snapshot returns one). ``deck_id``
-        and ``search`` (on the stored deck's name) narrow the list in SQL."""
+        never the deck itself (a snapshot is a whole deck; get_snapshot returns one). ``deck_id``,
+        ``search`` (on the stored deck's name) and a time window (``since`` inclusive, ``until``
+        exclusive, epoch seconds) narrow the list in SQL."""
         sql = (
             "SELECT id, deck_id, proposal_id, taken_at, deck_json, backup_deck_id, backup_url "
             "FROM snapshots WHERE owner_sub = ?"
@@ -1580,6 +1592,12 @@ class Database:
         if search:
             sql += " AND json_extract(deck_json, '$.name') LIKE ? ESCAPE '\\'"
             args.append(_like(search))
+        if since is not None:
+            sql += " AND taken_at >= ?"
+            args.append(int(since))
+        if until is not None:
+            sql += " AND taken_at < ?"
+            args.append(int(until))
         sql += " ORDER BY taken_at DESC, rowid DESC LIMIT ? OFFSET ?"
         args += [max(0, int(limit)), max(0, int(offset))]
         with self._lock:

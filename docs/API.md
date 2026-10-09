@@ -172,7 +172,7 @@ cookie, set by `POST /theme`); internal links never open a new tab.
 | `/decks/{id}/clone` (POST) | A `clone` proposal for the deck |
 | `/decks/{id}/report` (POST) | Run a deck report and open it |
 | `/decks/{id}/export`, `.txt`, `.json`, `.csv` | Export as text, JSON or an Archidekt-style CSV |
-| `/history?deck_id=` | Proposals, snapshots and reports over time, with restore |
+| `/history?deck_id=` | Proposals, snapshots and reports over time, with restore; `type=`, `state=`, `q=`, `when=` (today, 7d, 30d, 90d, year: UTC days) and `group=` (day or deck) narrow and arrange the page, `offset=` pages it |
 | `/history/reports/{rid}` | One report, designed: headline tiles, trends, the research service's text; `/history/reports/{rid}/export.md` and `.html` download it, and Copy puts the Markdown on the clipboard |
 | `POST /layout` | Browser session (CSRF): the "Desktop layout" / "Fit the screen" switch, remembered per device in a cookie |
 | `/activity` | My activity |

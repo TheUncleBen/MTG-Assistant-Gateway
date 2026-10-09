@@ -118,5 +118,32 @@ def test_report_and_history_pages_fit(server: Server, width: int, scheme: str) -
         restore = page.locator(".hrow.k-snapshot details[open] .form-actions button").first
         assert restore.is_visible() and "Restore (review first)" in restore.inner_text()
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+        # the "When" and "Group by" selects render as themed selects (no native date input) and,
+        # like the other filters, reach the URL through the Filter button
+        assert page.locator("input[type=date]").count() == 0
+        for sel in ("#h-when", "#h-group"):
+            assert (
+                page.locator(sel).is_visible()
+                and page.evaluate(f"getComputedStyle(document.querySelector('{sel}')).appearance") == "none"
+            )
+        page.select_option("#h-when", "7d")
+        page.select_option("#h-group", "deck")
+        page.locator(".filterbar button[type=submit]").click()
+        page.wait_for_load_state("networkidle")
+        assert "when=7d" in page.url and "group=deck" in page.url and "deck_id=42" in page.url
+        assert page.locator(".history .day.deck").count() == 1
+        assert (
+            page.locator("#h-when").input_value() == "7d" and page.locator("#h-group").input_value() == "deck"
+        )
+        # the backups panel (when present) keeps a gap from the pager
+        gap = page.evaluate(
+            """() => {
+              const pager = document.querySelector('.pager'), backups = document.querySelector('#backups');
+              if (!pager || !backups) return null;
+              return backups.getBoundingClientRect().top - pager.getBoundingClientRect().bottom;
+            }"""
+        )
+        assert gap is None or gap >= 12, gap
+        assert not errors, errors
         assert not errors, errors
         browser.close()

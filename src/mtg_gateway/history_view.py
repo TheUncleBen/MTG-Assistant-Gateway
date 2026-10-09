@@ -1,5 +1,6 @@
 """The history page (``/history``): the member's proposals, snapshots and deck reports as one
-timeline, grouped by day, with a filter bar (deck, type, state, search) and "Older" pages.
+timeline, grouped by day or by deck, with a filter bar (deck, type, state, when, search) and
+"Older" pages.
 
 The rows come from the database already narrowed and paged (db.list_proposals, db.list_snapshots,
 ReportService.list); this module only reads a request's filters and draws the page. Every
@@ -8,6 +9,7 @@ string a row shows is escaped here; nothing in it runs script (the site's CSP fo
 
 from __future__ import annotations
 
+import calendar
 import html
 import time
 from typing import Any
@@ -27,6 +29,19 @@ STATES = (
     ("rejected", "Rejected"),
     ("expired", "Expired"),
 )
+# The "When" presets: UTC calendar days (every time on the site is UTC), each a window that
+# starts at the beginning of a day and runs to now. The value is what the query string carries.
+WHENS = (
+    ("", "Any time"),
+    ("today", "Today"),
+    ("7d", "Last 7 days"),
+    ("30d", "Last 30 days"),
+    ("90d", "Last 90 days"),
+    ("year", "This year"),
+)
+WHEN_DAYS = {"today": 1, "7d": 7, "30d": 30, "90d": 90}
+GROUPS = (("day", "Day"), ("deck", "Deck"))
+DEFAULTS = {"type": "all", "group": "day"}
 KIND_LABELS = {
     "edit": "Edit",
     "create_deck": "New deck",
@@ -51,6 +66,8 @@ def read_query(params: Any) -> dict[str, Any]:
     """The page's filters from the query string, each limited to what the page offers."""
     kind = (params.get("type") or "all").strip().lower()
     state = (params.get("state") or "").strip().lower()
+    when = (params.get("when") or "").strip().lower()
+    group = (params.get("group") or "day").strip().lower()
     try:
         offset = int(params.get("offset") or 0)
     except ValueError:
@@ -59,14 +76,33 @@ def read_query(params: Any) -> dict[str, Any]:
         "deck_id": (params.get("deck_id") or "").strip()[:40],
         "type": kind if kind in {t for t, _ in TYPES} else "all",
         "state": state if state in {s for s, _ in STATES} else "",
+        "when": when if when in {w for w, _ in WHENS} else "",
+        "group": group if group in {g for g, _ in GROUPS} else "day",
         "q": (params.get("q") or "").strip()[:120],
         "offset": max(0, min(offset, MAX_OFFSET)),
     }
 
 
+def is_filtered(query: dict[str, Any]) -> bool:
+    """Whether any filter (not the grouping or the page) narrows the timeline."""
+    return any(v and v != DEFAULTS.get(k, "") for k, v in query.items() if k not in ("offset", "group"))
+
+
+def when_since(when: str, *, now: int | None = None) -> int | None:
+    """The start (epoch seconds, inclusive) of a "When" preset's window: midnight UTC of the
+    first of its days, or 1 January for "year"; ``None`` for "Any time" or an unknown value."""
+    now = int(time.time()) if now is None else now
+    if when == "year":
+        return int(calendar.timegm((time.gmtime(now).tm_year, 1, 1, 0, 0, 0)))
+    days = WHEN_DAYS.get(when)
+    if not days:
+        return None
+    return (now // 86400 - (days - 1)) * 86400
+
+
 def query_string(query: dict[str, Any], **override: Any) -> str:
     q = {**query, **override}
-    pairs = [(k, v) for k, v in q.items() if v not in ("", 0, None, "all")]
+    pairs = [(k, v) for k, v in q.items() if v not in ("", 0, None) and v != DEFAULTS.get(k)]
     return "?" + urlencode(pairs) if pairs else ""
 
 
@@ -202,54 +238,98 @@ def _day_label(day: str, today: str, yesterday: str) -> str:
     return time.strftime("%A %d %B %Y", t).replace(" 0", " ")
 
 
-def events_html(events: list[dict[str, Any]], *, now: int | None = None) -> str:
-    """The rows grouped under sticky day headings (UTC days, as every time on the site)."""
+def _row_html(e: dict[str, Any], *, with_day: bool) -> str:
+    kind = e["kind"]
+    label = KIND_LABELS.get(kind, "Edit")
+    name = _esc(e["deck_name"])
+    deck_link = f"<a class='name' href='/decks/{_esc(e['deck_id'])}'>{name}</a>" if e.get("deck_id") else name
+    title = (
+        f"<a class='kind' href='{e['href']}'>{label}</a>"
+        if e.get("href")
+        else f"<span class='kind'>{label}</span>"
+    )
+    who = f"<span class='who'>by {_esc(e['who'])}</span>" if e.get("who") else ""
+    fmt = "%d %b %Y %H:%M UTC" if with_day else "%H:%M UTC"
+    when = time.strftime(fmt, time.gmtime(e["ts"]))
+    if with_day:
+        when = when.lstrip("0")
+    details = (
+        f"<details><summary>Details</summary><div class='more'>{e['details']}</div></details>"
+        if e.get("details")
+        else ""
+    )
+    return (
+        f"<li class='hrow k-{_esc(kind)}'><span class='k' title='{label}'>"
+        f"{icon(KIND_ICONS.get(kind, 'edit'))}</span><div class='body'><div class='l1'>{title}{deck_link}"
+        f"{_badge(e.get('state') or '')}</div>"
+        f"<p class='sum'>{_esc(e['summary'])}</p>{details}</div>"
+        f"<div class='side'><time>{when}</time>{who}</div></li>"
+    )
+
+
+def _section_html(heading: str, rows: list[str], *, extra: str = "", cls: str = "") -> str:
+    n = len(rows)
+    return (
+        f"<h2 class='day{(' ' + cls) if cls else ''}'><span>{heading}</span>"
+        f"<small>{n} {'entry' if n == 1 else 'entries'}{extra}</small></h2>"
+        f"<ul class='plain hrows'>{''.join(rows)}</ul>"
+    )
+
+
+def events_html(
+    events: list[dict[str, Any]],
+    *,
+    now: int | None = None,
+    group: str = "day",
+    query: dict[str, Any] | None = None,
+) -> str:
+    """The rows under sticky headings: one per UTC day (as every time on the site), or with
+    ``group='deck'`` one per deck, headed by the deck's name (linked to its page and to its own
+    history), decks in the order of their newest entry and each deck's rows newest first."""
+    if group == "deck":
+        return _by_deck_html(events, query or {})
     now = int(time.time()) if now is None else now
     today = time.strftime("%Y-%m-%d", time.gmtime(now))
     yesterday = time.strftime("%Y-%m-%d", time.gmtime(now - 86400))
     out: list[str] = []
     current = None
     rows: list[str] = []
-
-    def flush() -> None:
-        if current is not None and rows:
-            out.append(
-                f"<h2 class='day'><span>{_esc(_day_label(current, today, yesterday))}</span>"
-                f"<small>{len(rows)} {'entry' if len(rows) == 1 else 'entries'}</small></h2>"
-                f"<ul class='plain hrows'>{''.join(rows)}</ul>"
-            )
-
     for e in events:
         day = time.strftime("%Y-%m-%d", time.gmtime(e["ts"]))
         if day != current:
-            flush()
+            if current is not None and rows:
+                out.append(_section_html(_esc(_day_label(current, today, yesterday)), rows))
             current, rows = day, []
-        kind = e["kind"]
-        label = KIND_LABELS.get(kind, "Edit")
-        name = _esc(e["deck_name"])
-        deck_link = (
-            f"<a class='name' href='/decks/{_esc(e['deck_id'])}'>{name}</a>" if e.get("deck_id") else name
-        )
-        title = (
-            f"<a class='kind' href='{e['href']}'>{label}</a>"
-            if e.get("href")
-            else f"<span class='kind'>{label}</span>"
-        )
-        who = f"<span class='who'>by {_esc(e['who'])}</span>" if e.get("who") else ""
-        when = time.strftime("%H:%M UTC", time.gmtime(e["ts"]))
-        details = (
-            f"<details><summary>Details</summary><div class='more'>{e['details']}</div></details>"
-            if e.get("details")
-            else ""
-        )
-        rows.append(
-            f"<li class='hrow k-{_esc(kind)}'><span class='k' title='{label}'>"
-            f"{icon(KIND_ICONS.get(kind, 'edit'))}</span><div class='body'><div class='l1'>{title}{deck_link}"
-            f"{_badge(e.get('state') or '')}</div>"
-            f"<p class='sum'>{_esc(e['summary'])}</p>{details}</div>"
-            f"<div class='side'><time>{when}</time>{who}</div></li>"
-        )
-    flush()
+        rows.append(_row_html(e, with_day=False))
+    if current is not None and rows:
+        out.append(_section_html(_esc(_day_label(current, today, yesterday)), rows))
+    return "".join(out)
+
+
+def _by_deck_html(events: list[dict[str, Any]], query: dict[str, Any]) -> str:
+    """The deck grouping: ``events`` are newest first, so the decks come out in the order of
+    their newest entry and each deck's rows keep that order. Each heading links the deck's
+    page and, unless the page is already one deck's, its own history with the same filters."""
+    order: list[str] = []
+    by_deck: dict[str, list[dict[str, Any]]] = {}
+    for e in events:
+        key = str(e.get("deck_id") or e.get("deck_name") or "")
+        if key not in by_deck:
+            order.append(key)
+            by_deck[key] = []
+        by_deck[key].append(e)
+    out: list[str] = []
+    for key in order:
+        group = by_deck[key]
+        name = _esc(group[0].get("deck_name") or key)
+        deck_id = group[0].get("deck_id")
+        heading = f"<a href='/decks/{_esc(deck_id)}'>{name}</a>" if deck_id else name
+        extra = ""
+        if deck_id and not query.get("deck_id"):
+            own = query_string({**query, "offset": 0}, deck_id=str(deck_id))
+            extra = f" · <a href='/history{_esc(own)}'>only this deck</a>"
+        rows = [_row_html(e, with_day=True) for e in group]
+        out.append(_section_html(heading, rows, extra=extra, cls="deck"))
     return "".join(out)
 
 
@@ -276,6 +356,10 @@ def filter_bar_html(query: dict[str, Any], decks: dict[str, str], *, shown: int,
         f"<select id='h-type' name='type'>{options(list(TYPES), query['type'])}</select></span></div>"
         f"<div class='field'><label for='h-state'>State</label><span class='sel'>{icon('proposals')}"
         f"<select id='h-state' name='state'>{options(list(STATES), query['state'])}</select></span></div>"
+        f"<div class='field'><label for='h-when'>When (UTC days)</label><span class='sel'>{icon('history')}"
+        f"<select id='h-when' name='when'>{options(list(WHENS), query['when'])}</select></span></div>"
+        f"<div class='field'><label for='h-group'>Group by</label><span class='sel'>{icon('layers')}"
+        f"<select id='h-group' name='group'>{options(list(GROUPS), query['group'])}</select></span></div>"
         "<div class='field'><label for='h-q'>Search</label><input type='search' id='h-q' name='q' "
         f"value='{_esc(query['q'])}' placeholder='Deck name or a card in a change' autocomplete='off'></div>"
         "</div>"
@@ -372,7 +456,10 @@ HISTORY_CSS = """
 .hrow .side time{font-variant-numeric:tabular-nums}
 @media (max-width:480px){ .hrow{grid-template-columns:auto minmax(0,1fr)}
   .hrow .side{grid-column:2;flex-direction:row;gap:.5rem;align-items:center;white-space:normal} }
+.history .day.deck span a{text-decoration:none} .history .day.deck span a:hover{color:var(--orange)}
+.history .day small a{font-weight:400}
 .pager{justify-content:space-between} .pager .btn{margin:0}
+.pager + .backups,.history + .backups{margin-top:1rem}
 .trend h2{font-size:1.2rem}
 .backups h2{font-size:1.2rem} .backups .copies{margin:0;display:grid;gap:.4rem}
 .backups .copies li{display:flex;flex-wrap:wrap;gap:.25rem .5rem;align-items:baseline;overflow-wrap:anywhere}
@@ -386,7 +473,9 @@ __all__ = [
     "build_events",
     "events_html",
     "filter_bar_html",
+    "is_filtered",
     "pager_html",
     "query_string",
     "read_query",
+    "when_since",
 ]
