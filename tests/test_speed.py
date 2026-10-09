@@ -333,3 +333,25 @@ async def test_touch_link_is_written_at_most_once_a_minute(
         assert db.get_link("user-1")["last_used_at"] is not None
     finally:
         await b.aclose()
+
+
+async def test_background_refresh_runs_outside_the_callers_context() -> None:
+    # A refresh started while the caller holds the member's Archidekt slot must not inherit it:
+    # it would run uncounted after the caller's slot is released.
+    from mtg_gateway.decks import _slot_holder
+
+    cache = MemberCache(fresh=0, stale=600)
+    seen: list[str | None] = []
+
+    async def fetch() -> list[str]:
+        seen.append(_slot_holder.get())
+        return ["x"]
+
+    assert await cache.get("u1", fetch) == ["x"]  # cold: fetched in the caller's own context
+    token = _slot_holder.set("u1")
+    try:
+        assert await cache.get("u1", fetch) == ["x"]  # stale: refresh in the background
+        await asyncio.sleep(0.01)
+    finally:
+        _slot_holder.reset(token)
+    assert seen == [None, None]

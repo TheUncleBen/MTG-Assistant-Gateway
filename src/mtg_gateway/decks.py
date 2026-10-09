@@ -16,6 +16,7 @@ source reading and is not verified against Archidekt (see ``build_payload``).
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import dataclasses
 import json
 import logging
@@ -234,7 +235,9 @@ class MemberCache:
             if not t.cancelled() and t.exception() is not None:
                 logger.debug("member cache refresh failed for a member: %r", t.exception())
 
-        task = asyncio.create_task(run())
+        # A fresh context: the refresh is nobody's request, so it must not inherit the caller's
+        # Archidekt slot (_slot_holder), client id or request timing.
+        task = asyncio.create_task(run(), context=contextvars.Context())
         task.add_done_callback(done)
         self._refreshing[sub] = (task, started)
         if len(self._entries) > 10_000:
