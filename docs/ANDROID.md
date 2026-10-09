@@ -111,8 +111,8 @@ else your gateway serves. A few things are native:
   Tab), not in the app's own web view: that is where passkeys, your password
   manager's autofill (Bitwarden and the like) and "Sign in with ..." buttons
   work, exactly as they do on the website. When you are done there, tap **Open
-  the app** on the last page (the browser may do it for you) and you are back
-  in the app, signed in. The browser itself stays signed out of the gateway.
+  the MTG Assistant Gateway app** on the last page and you are back in the
+  app, signed in. The browser itself stays signed out of the gateway.
   Whether a passkey or autofill works is up to your browser and password
   manager: if it works on the website in that browser, it works here. If you
   would rather sign in inside the app, the sign-in page has a link for that;
@@ -504,11 +504,17 @@ screen is shown without a prefill, so a link can't pick your gateway for you.
   the browser; it keeps a one-time code for two minutes and shows a page whose
   button opens the app through an `intent:` link naming the app's package ID
   (`MTG_ANDROID_PACKAGE`, [DEPLOY.md](DEPLOY.md#environment-reference)), so
-  Android hands it only to the installed app with that ID. The app then posts
-  the code with its secret to `/login/app`, and only then is the session
-  created, in the app. The code is worthless without the secret, works once,
-  and one wrong try burns it. An app that starts a sign-in of its own never
-  receives the code meant for this one. The browser's own sign-in at the
+  Android hands it only to the installed app with that ID; that relies on the
+  browser honouring the package in `intent:` links, which Chrome does (other
+  browsers not checked), so the button waits for your tap and names the app.
+  The app then posts the code with its secret to `/login/app`, and only then
+  is the session created, in the app. The code is worthless without the
+  secret, works once, and one wrong try burns it. `/login/app` accepts posts
+  only from the app (its user agent, never from another site's page), so
+  nobody can sign your browser in to their account with a code of theirs.
+  A verified App Link ([section 12](#12-app-links-opening-gateway-links-in-the-app))
+  would not depend on the browser for the hand-back; it is not used for this
+  yet because it needs per-gateway setup. The browser's own sign-in at the
   sign-in service stays signed in, as on the website; the app's **Sign out**
   makes the next sign-in ask for your credentials again.
 - JavaScript runs only for pages the WebView loads, and the native bridge the

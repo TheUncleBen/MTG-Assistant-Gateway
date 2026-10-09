@@ -17,9 +17,14 @@ and autofill work, and the browser hands the result back to the app.
    browser session created, with its cookie set in the WebView.
 
 The code alone is useless: without the verifier, which never leaves the app that started the
-sign-in, ``/login/app`` refuses it. An app on the phone that started a sign-in of its own (and so
-knows its own verifier) never receives the code either, because the ``intent:`` link names the
-gateway's app by package ID and Android lets only one installed app hold a package ID.
+sign-in, ``/login/app`` refuses it, and ``/login/app`` takes posts only from the app (its user
+agent, not from another site's page), so nobody can push their own code into someone else's
+browser. An app on the phone that starts a sign-in of its own (and so knows its own verifier)
+should not receive the code either: the ``intent:`` link names the gateway's app by package ID,
+and Android lets only one installed app hold a package ID. That relies on the browser honouring
+``package=`` in ``intent:`` links (Chrome documents it; other browsers are not verified), so the
+link also waits for a tap and says which app it opens. A verified https App Link would not rely
+on the browser; it needs per-gateway setup (docs/ANDROID.md, section 12).
 """
 
 from __future__ import annotations
@@ -110,7 +115,8 @@ def handoff_body(next_path: str, fresh: bool) -> str:
         f"<div class='card' id='app-signin' data-next='{html.escape(next_path)}' "
         f"data-fresh='{'1' if fresh else '0'}' data-inapp='{html.escape(inapp)}'>"
         "<p>Sign-in opens in your phone's browser, where your passkey and password manager work. "
-        "When you're done there, tap <b>Open the app</b> and you're back here, signed in.</p>"
+        "When you're done there, tap <b>Open the MTG Assistant Gateway app</b> and you're back "
+        "here, signed in.</p>"
         "<div class='actions'><button class='primary' type='button' id='app-signin-go'>"
         "Sign in with the browser</button></div>"
         f"<p class='muted small'><a href='{html.escape(inapp)}'>Sign in inside the app instead</a> "
@@ -123,11 +129,12 @@ def return_body(code: str, package: str) -> str:
     """The browser's last page: a button that opens the app with the one-time code."""
     url = html.escape(intent_url(code, package))
     return (
-        "<div class='card'><p>You're signed in. Go back to the app to finish.</p>"
-        f"<div class='actions'><a class='btn btn-primary' id='app-return' href='{url}'>Open the app</a></div>"
+        "<div class='card'><p>You're signed in. Go back to the MTG Assistant Gateway app to finish.</p>"
+        f"<div class='actions'><a class='btn btn-primary' id='app-return' href='{url}'>"
+        "Open the MTG Assistant Gateway app</a></div>"
         "<p class='muted small'>The link works once, for two minutes. If the app doesn't open, "
-        "go back to it and sign in again. You stay signed out in this browser.</p></div>"
-        f"<script src='{SCRIPT}'></script>"
+        "go back to it and sign in again. You stay signed out in this browser. If you didn't "
+        "start this sign-in from the MTG Assistant Gateway app, don't tap the button.</p></div>"
     )
 
 

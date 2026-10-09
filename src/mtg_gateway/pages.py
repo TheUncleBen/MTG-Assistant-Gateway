@@ -102,10 +102,10 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             if sub:
                 return RedirectResponse(nxt, status_code=302)
             if in_app() and q.get("inapp") != "1":
+                # The fresh cookie stays until a sign-in completes (start_session), so backing out
+                # of the browser and coming back here still asks for credentials again.
                 resp = page("Sign in", app_signin.handoff_body(nxt, fresh), scripts=True)
                 resp.headers["Cache-Control"] = "no-store"
-                if fresh:
-                    resp.delete_cookie(fresh_cookie, path="/", secure=secure, httponly=True, samesite="lax")
                 return resp
         try:
             url = await state.provider.start_idp_login(BROWSER_CLIENT_ID, params, force_login=fresh)
@@ -477,7 +477,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         if isinstance(challenge, str) and app_signin.CHALLENGE.fullmatch(challenge):
             # The Android app's sign-in: no session in this browser, a one-time code for the app.
             code = state.app_signins.issue(identity.sub, challenge, nxt)  # type: ignore[attr-defined]
-            resp = page("Signed in", app_signin.return_body(code, s.android_package), scripts=True)
+            resp = page("Signed in", app_signin.return_body(code, s.android_package))
             resp.headers["Cache-Control"] = "no-store"
             resp.headers["Referrer-Policy"] = "no-referrer"
             return resp
@@ -488,6 +488,8 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         state.db.create_browser_session(sid, sub, s.browser_session_ttl)
         state.db.audit("browser_login", sub=sub, detail={"via": via} if via else None)
         resp = RedirectResponse(nxt, status_code=status, headers={"Cache-Control": "no-store"})
+        if via is not None:
+            resp.delete_cookie(fresh_cookie, path="/", secure=secure, httponly=True, samesite="lax")
         resp.set_cookie(
             session_cookie,
             sid,
@@ -501,7 +503,17 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
 
     @server.custom_route("/login/app", methods=["POST"], include_in_schema=False)
     async def login_app(request: Request) -> Response:
-        """The Android app finishing its browser sign-in: the one-time code and the app's verifier."""
+        """The Android app finishing its browser sign-in: the one-time code and the app's verifier.
+
+        Only the app may post here: the app's user agent, and never from another site's page.
+        Without that, someone could sign in as themselves in their own browser, then make a
+        victim's browser post their code and verifier, signing the victim in as them."""
+        if not in_app() or request.headers.get("sec-fetch-site", "none") not in ("none", "same-origin"):
+            resp = page(
+                "Sign-in failed", "<p>This sign-in can only be finished by the Android app.</p>", status=403
+            )
+            resp.headers["Cache-Control"] = "no-store"
+            return resp
         data = await form(request)
         if isinstance(data, Response):
             return data

@@ -102,7 +102,7 @@ async def test_browser_sign_in_hands_a_code_only_the_app_can_use(harness: Harnes
         # The code works once.
         again = await httpx.AsyncClient(
             transport=httpx.ASGITransport(app=harness.app), base_url=GATEWAY
-        ).post("/login/app", data={"code": code, "verifier": verifier})
+        ).post("/login/app", data={"code": code, "verifier": verifier}, headers=APP_UA)
         assert again.status_code == 400 and "mtg_session=" not in again.headers.get("set-cookie", "")
 
 
@@ -110,13 +110,15 @@ async def test_code_without_the_right_verifier_is_refused_and_burnt(harness: Har
     verifier, challenge = pair()
     async with client(harness) as browser, client(harness) as thief:
         code = code_from(await browser_leg(harness, browser, challenge))
-        wrong = await thief.post("/login/app", data={"code": code, "verifier": secrets.token_urlsafe(32)})
+        wrong = await thief.post(
+            "/login/app", data={"code": code, "verifier": secrets.token_urlsafe(32)}, headers=APP_UA
+        )
         assert wrong.status_code == 400 and "mtg_session=" not in wrong.headers.get("set-cookie", "")
         # One wrong try burns it: the right verifier no longer helps either.
-        late = await thief.post("/login/app", data={"code": code, "verifier": verifier})
+        late = await thief.post("/login/app", data={"code": code, "verifier": verifier}, headers=APP_UA)
         assert late.status_code == 400
         for bad in ({}, {"code": "x", "verifier": verifier}, {"code": code, "verifier": "short"}):
-            assert (await thief.post("/login/app", data=bad)).status_code == 400
+            assert (await thief.post("/login/app", data=bad, headers=APP_UA)).status_code == 400
 
 
 async def test_bad_challenge_and_fresh_sign_in(harness: Harness) -> None:
@@ -164,3 +166,45 @@ def test_package_setting(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
         monkeypatch.setenv("MTG_ANDROID_PACKAGE", bad)
         with pytest.raises(ConfigError, match="MTG_ANDROID_PACKAGE"):
             load_settings()
+
+
+async def test_only_the_app_can_finish_a_sign_in(harness: Harness) -> None:
+    """Login CSRF: an attacker signs in as themselves, then makes a victim's browser post their
+    code and verifier. A normal browser, or any post from another site, is refused."""
+    verifier, challenge = pair()
+    async with client(harness) as attacker, client(harness) as victim:
+        code = code_from(await browser_leg(harness, attacker, challenge))
+        data = {"code": code, "verifier": verifier}
+        lures = (
+            {},  # the victim's normal browser
+            {**APP_UA, "Sec-Fetch-Site": "cross-site", "Origin": "https://evil.example"},
+            {**APP_UA, "Sec-Fetch-Site": "same-site"},
+        )
+        for headers in lures:
+            r = await victim.post("/login/app", data=data, headers=headers)
+            assert r.status_code == 403 and "mtg_session=" not in r.headers.get("set-cookie", "")
+        # Refused before the code is read: the app (no Sec-Fetch-Site, or "none") still finishes.
+        ok = await victim.post("/login/app", data=data, headers={**APP_UA, "Sec-Fetch-Site": "none"})
+        assert ok.status_code == 303 and "mtg_session=" in ok.headers["set-cookie"]
+
+
+async def test_fresh_survives_backing_out_until_a_sign_in_completes(harness: Harness) -> None:
+    verifier, challenge = pair()
+    async with client(harness) as app, client(harness) as browser:
+        app.cookies.set("__Host-mtg_fresh_login", "1", domain=urlparse(GATEWAY).hostname)
+        first = await app.get("/login", params={"next": "/"}, headers=APP_UA)
+        assert "mtg_fresh_login" not in first.headers.get("set-cookie", "")
+        again = await app.get("/login", params={"next": "/"}, headers=APP_UA)
+        assert "data-fresh='1'" in again.text  # backed out of the browser: still a fresh sign-in
+        code = code_from(await browser_leg(harness, browser, challenge))
+        done = await app.post("/login/app", data={"code": code, "verifier": verifier}, headers=APP_UA)
+        assert done.status_code == 303
+        assert any("mtg_fresh_login=" in v and "Max-Age=0" in v for v in done.headers.get_list("set-cookie"))
+
+
+async def test_return_page_waits_for_a_tap_and_names_the_app(harness: Harness) -> None:
+    _v, challenge = pair()
+    async with client(harness) as browser:
+        page = await browser_leg(harness, browser, challenge)
+        assert "Open the MTG Assistant Gateway app" in page.text
+        assert "app-signin.js" not in page.text
