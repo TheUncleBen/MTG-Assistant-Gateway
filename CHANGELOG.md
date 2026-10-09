@@ -75,6 +75,43 @@ extra outbound request a day to Scryfall (the card-name catalog).
   names, from one batched, cached Scryfall lookup; the suggestion lists use
   it to decorate their rows.
 
+### Fixed
+
+- **Simulations lost double-faced cards.** Archidekt names a transforming or
+  modal card with both faces (`Enduring Angel // Angelic Enforcer`); the
+  research service looks names up through Scryfall's collection endpoint,
+  which knows only the front face, so such cards were dropped as "not
+  recognized by Scryfall" and the deck ran short. The gateway now sends front
+  faces to the simulator and the validator. Your own lists and exports keep
+  both faces.
+- **The commander was listed as an unrecognised card.** The simulation's
+  honesty report filed the commander under "unrecognized, drawn 0%" because
+  it is cast from the command zone. It is now set aside with one sentence
+  saying its abilities beyond combat are not modelled, in the numbers and in
+  the text. A result no longer points at `goldfish_report`, a tool the
+  gateway hides.
+- **Pauper Commander leaders in another printing.** The format lets any
+  creature ever printed at uncommon lead, whichever printing the deck uses.
+  A deck's data names only the chosen printing's rarity, so a rare or mythic
+  printing of such a card used to fail the deck check; it is now reported
+  as "not verified" with the reason, and the deck passes.
+- **No profile picture, and no way to tell why.** The Authentik guide makes
+  selecting the uploaded-picture mapping on the provider an explicit second
+  step (creating the mapping alone sends nothing, and with an uploaded
+  picture first in Avatars no Gravatar is sent either), the troubleshooting
+  table says so, and with `MTG_LOG_LEVEL=DEBUG` the gateway logs which
+  picture claims arrived, by kind only (never the address or the image).
+- **Nginx Proxy Manager snippets that took the site offline.** DEPLOY.md step
+  7 now puts the two rate-limit pieces in their two places (`limit_req_zone`
+  only in `/data/nginx/custom/http_top.conf`, never in a proxy host's
+  Advanced tab) and says what the wrong place does; the troubleshooting
+  table has the symptom and the way back. The optional `location
+  /cards/data/` block from 0.7.4 is withdrawn: the link's token lives ten
+  minutes and returns only the member's own data, so it is harmless in a log.
+- **Release notes carry the app files' checksums.** A release that ships the
+  Android app lists the SHA-256 of the APK and AAB next to the signing
+  certificate, so a download can be checked against the notes.
+
 ## [0.7.8] - 2026-10-08
 
 Wording fixes from the acceptance check of 0.7.7, and a narrower Authentik
