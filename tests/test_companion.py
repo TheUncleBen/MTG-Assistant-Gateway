@@ -402,8 +402,11 @@ async def test_compare_page_shows_what_a_build_changed(stack: Stack) -> None:
     b = await linked_browser(stack)
     try:
         empty = await b.http.get("/decks/42/compare", headers=NAV)
-        assert empty.status_code == 200 and "<datalist id='preconlist'>" in empty.text
-        assert "<option value='42'>" in empty.text  # the fake's precon listing carries deck 42
+        assert empty.status_code == 200 and "data-suggest='static'" in empty.text
+        # the fake's precon listing carries deck 42; its label is offered, and names resolve
+        assert "Sample Commander Deck (" in empty.text and "<datalist" not in empty.text
+        by_name = await b.http.get("/decks/42/compare?with=Sample+Commander+Deck", headers=NAV)
+        assert by_name.status_code == 200 and "Taken out of Sample Commander Deck" in by_name.text
         assert "Taken out of" not in empty.text
         # against itself: nothing changes
         same = await b.http.get("/decks/42/compare?with=https://archidekt.com/decks/42/sample", headers=NAV)
