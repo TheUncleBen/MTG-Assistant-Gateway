@@ -213,8 +213,8 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
     @route("/decks/{deck_id}/history", "GET")
     async def deck_history(request: Request, who: Caller) -> Response:
         deck_id = str(request.path_params["deck_id"])
-        proposals = [p for p in decks.list_proposals(who.sub) if p["deck_id"] == deck_id]
-        snapshots = [x for x in decks.list_snapshots(who.sub) if x["deck_id"] == deck_id]
+        proposals = decks.list_proposals(who.sub, deck_id=deck_id)
+        snapshots = decks.list_snapshots(who.sub, deck_id=deck_id)
         return ok(
             {
                 "deck_id": deck_id,

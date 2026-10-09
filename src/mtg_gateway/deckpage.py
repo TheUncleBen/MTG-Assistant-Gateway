@@ -318,9 +318,9 @@ def banner_html(
         # goldfish games on the research service, stored under History.
         primary += (
             f"<form method='post' action='/decks/{did}/report' class='inline'>{csrf_in}"
-            "<button type='submit' title='Goldfish simulation (300 games), validation and statistics; the "
-            f"same run the assistant&#39;s run_deck_report makes. Saved under History.'>{icon('stats')} "
-            "Run simulation</button></form>"
+            "<button type='submit' data-busy-label='Simulating…' title='300 goldfish games, a decklist check "
+            "and the deck statistics, saved under History. The run takes up to a minute; the result page "
+            f"opens when it is done.'>{icon('stats')} Run simulation</button></form>"
         )
     more_items = []
     if own and csrf:
@@ -1556,12 +1556,7 @@ html.cardview-open{overflow:hidden}
 .curve .bar span{display:block;width:70%;background:var(--orange);border-radius:2px 2px 0 0}
 .curve .bar b{font-variant-numeric:tabular-nums;margin-bottom:.15rem}
 .curve .bar em{font-style:normal;font-weight:700;margin-top:.3rem}
-.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(6.5rem,1fr));gap:.5rem;margin:0 0 .75rem}
-.tile{background:var(--surface-2);border:1px solid var(--border-soft);border-radius:3px;padding:.5rem .6rem;
-  display:flex;flex-direction:column;gap:.1rem}
-.tile b{font-size:1.25rem;font-variant-numeric:tabular-nums} .tile span{color:var(--text-muted);
-  font-size:.8rem}
-.tile .spark{color:var(--orange);width:100%;height:36px}
+/* .tiles/.tile/.spark: theme.py (shared with the report and history pages) */
 table.qty{width:100%;border-collapse:collapse;font-size:.93rem}
 table.qty td{padding:.3rem .25rem;border-top:1px solid var(--surface-2)}
 table.qty td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-weight:700}

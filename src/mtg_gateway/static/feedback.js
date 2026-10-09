@@ -11,11 +11,15 @@
 (function () {
   "use strict";
   var RESET_MS = 10000; // a download or a slow answer: allow another press after this long
+  var LONG_RESET_MS = 120000; // a button with data-busy-label runs long (the deck simulation)
 
   function clear(form) {
     delete form.dataset.sending;
     var busy = form.querySelectorAll("[aria-busy=true]");
-    for (var i = 0; i < busy.length; i++) busy[i].removeAttribute("aria-busy");
+    for (var i = 0; i < busy.length; i++) {
+      busy[i].removeAttribute("aria-busy");
+      if (busy[i].dataset.idleHtml) { busy[i].innerHTML = busy[i].dataset.idleHtml; delete busy[i].dataset.idleHtml; }
+    }
     var outside = form.id ? document.querySelectorAll("[form='" + form.id + "'][aria-busy=true]") : [];
     for (var j = 0; j < outside.length; j++) outside[j].removeAttribute("aria-busy");
   }
@@ -29,8 +33,15 @@
     }
     form.dataset.sending = "1";
     var button = e.submitter;
-    if (button && button.tagName === "BUTTON") button.setAttribute("aria-busy", "true");
-    setTimeout(function () { clear(form); }, RESET_MS);
+    if (button && button.tagName === "BUTTON") {
+      button.setAttribute("aria-busy", "true");
+      // A long run (the deck simulation) says what it is doing: data-busy-label replaces the label.
+      if (button.dataset.busyLabel) {
+        button.dataset.idleHtml = button.innerHTML;
+        button.textContent = button.dataset.busyLabel;
+      }
+    }
+    setTimeout(function () { clear(form); }, button && button.dataset && button.dataset.busyLabel ? LONG_RESET_MS : RESET_MS);
   });
 
   // Coming back with the Back button restores the page from memory: nothing is sending any more.
