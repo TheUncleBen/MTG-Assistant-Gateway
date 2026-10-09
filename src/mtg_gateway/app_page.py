@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import FileResponse, RedirectResponse, Response
 
+from .admin import is_admin
 from .pages import _csrf, _safe_next, browser_session
 from .theme import render
 
@@ -117,7 +118,13 @@ def add_app_routes(server: MCPServer, state: AppState) -> None:
                 "<div class='actions'><a class='btn' href='/decks'>Back to decks</a></div></div>"
             )
             return render(
-                "Android app", body, site=s.server_name, status=200, signed_in=True, csrf=_csrf(s, sid)
+                "Android app",
+                body,
+                site=s.server_name,
+                status=200,
+                signed_in=True,
+                csrf=_csrf(s, sid),
+                admin=is_admin(state, sub),
             )
         meta = app_meta(base)
         version = meta.get("version_name")
@@ -169,7 +176,14 @@ def add_app_routes(server: MCPServer, state: AppState) -> None:
             "Android only accepts an update signed with the same key as the installed app, so your "
             "settings and sign-in are kept, and a file signed by anyone else is refused.</p></div>"
         )
-        return render("Android app", body, site=s.server_name, signed_in=True, csrf=_csrf(s, sid))
+        return render(
+            "Android app",
+            body,
+            site=s.server_name,
+            signed_in=True,
+            csrf=_csrf(s, sid),
+            admin=is_admin(state, sub),
+        )
 
     @server.custom_route(f"/app/{APK_NAME}", methods=["GET"], include_in_schema=False)
     async def apk(request: Request) -> Response:

@@ -229,6 +229,14 @@ catalog). Back up the database before you update, as always.
 
 ### Fixed
 
+- **Touch screens:** the small controls a mouse never minds are at least
+  40 px tall on a phone or tablet: the editor's add-to chips, the deck page's
+  category button and odds form, folded Details, footer links, the brand
+  mark, History and Proposals list links, report crumbs and Search's popular
+  chips. The proposal review's three choices sit at one height, the deck
+  banner's Comments link matches its Like and Bookmark buttons, and an
+  admin's top bar keeps the Admin link on every page (it was missing on
+  Proposals, Account, the sign-out, Assistant skill and Android app pages).
 - **A used-up Archidekt budget no longer looks like a missing deck.** When a
   member's Archidekt budget (`MTG_ARCHIDEKT_CALLS_PER_10_MIN`) is spent, the
   deck, grid, export, compare, editor, settings, delete, folders, My decks,

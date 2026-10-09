@@ -58,9 +58,17 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             status=status,
             signed_in=sub is not None,
             csrf=_csrf(s, sid),
+            admin=_is_admin(sub),
             scripts=scripts,
             head_extra=head_extra,
         )
+
+    def _is_admin(sub: str | None) -> bool:
+        # the same top bar (with the Admin link) on every signed-in page, not only the deck pages
+        if not sub or not s.admin_group:
+            return False
+        user = state.db.get_user(sub) or {}
+        return s.admin_group in (user.get("groups") or [])
 
     def current(request: Request) -> tuple[str | None, str | None]:
         return browser_session(state, request)

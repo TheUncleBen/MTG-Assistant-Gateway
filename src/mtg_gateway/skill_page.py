@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
+from .admin import is_admin
 from .pages import _csrf, _safe_next, browser_session
 from .plugin_page import PLUGIN_NAME, plugin_dir
 from .theme import render
@@ -96,7 +97,13 @@ def add_skill_routes(server: MCPServer, state: AppState) -> None:
         if base is None:
             body = "<div class='card'><p>The assistant skill is not installed on this gateway.</p></div>"
             return render(
-                "Assistant skill", body, site=s.server_name, status=503, signed_in=True, csrf=_csrf(s, sid)
+                "Assistant skill",
+                body,
+                site=s.server_name,
+                status=503,
+                signed_in=True,
+                csrf=_csrf(s, sid),
+                admin=is_admin(state, sub),
             )
         gpt = chatgpt_text(base)
         gpt_block = (
@@ -124,7 +131,14 @@ def add_skill_routes(server: MCPServer, state: AppState) -> None:
             "apps.</p>"
             f"{gpt_block}</div>"
         )
-        return render("Assistant skill", body, site=s.server_name, signed_in=True, csrf=_csrf(s, sid))
+        return render(
+            "Assistant skill",
+            body,
+            site=s.server_name,
+            signed_in=True,
+            csrf=_csrf(s, sid),
+            admin=is_admin(state, sub),
+        )
 
     @server.custom_route("/skill/mtg-gateway.zip", methods=["GET"], include_in_schema=False)
     async def skill_zip(request: Request) -> Response:

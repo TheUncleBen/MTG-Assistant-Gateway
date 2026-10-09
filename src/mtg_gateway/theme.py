@@ -495,6 +495,24 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
 @media (max-width:599px){ .pane.aside,.pane.detail.empty{display:none} }
 
 @media (max-width:900px){ .topbar nav.site a{padding:0 .45rem;font-size:.93rem} .brand{margin-right:.25rem} }
+/* The proposal review's three choices sit at one height (gate D8), and the deck banner's
+   Comments link matches its Like and Bookmark buttons (gate D9). */
+.choice button,.choice .btn{min-height:48px}
+.banner .social a.soc,.banner .social button.soc{height:34px;min-height:34px}
+/* Touch screens: every control at least 40 px tall (Material's minimum), including the small
+   ones a mouse never minds (gate D11): the editor's add-to chips, the deck page's category
+   button and odds form, folded Details, footer links, the brand mark, list links, crumbs. */
+@media (pointer:coarse){
+  .addbox button.tchip,.popular a,.cardview .chip{min-height:40px}
+  .odds form.oddsform select,.odds form.oddsform input,.odds form.oddsform button{min-height:40px;height:40px}
+  details > summary{min-height:40px;display:flex;align-items:center}
+  details.dd > summary.icon-only{min-height:40px;min-width:40px}
+  footer.site .links a{display:inline-flex;align-items:center;min-height:40px;padding:0 .5rem}
+  .brand{min-height:40px}
+  .hrow a.kind,.hrow a.name,.proposals a.name,.report .crumbs a,li > a.name{display:inline-block;
+    padding:.6rem 0}
+  .banner .social a.soc,.banner .social button.soc{height:40px;min-height:40px;border-radius:20px}
+}
 /* A narrow window with a mouse (600 to 800 px, a half-width desktop window or an open Fold):
    the bar keeps its text links and drops the brand's word, so nothing runs under the account
    button and the page needs no sideways scroll. The word returns above 800 px. */
