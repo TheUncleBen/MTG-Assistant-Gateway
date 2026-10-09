@@ -41,6 +41,7 @@ from .decks import DeckError, actor_label, current_client
 from .history_view import (
     HISTORY_CSS,
     PAGE,
+    backup_copies_html,
     build_events,
     events_html,
     filter_bar_html,
@@ -386,6 +387,12 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         q, order, view, folder = list_query(qp)
         rows, problem = await my_decks(sub, wait=decks.deck_list_wait)
         pending = rows is None  # cold start: the shell goes out now, decks.js fills the list
+        hidden = 0  # the gateway's backup copies, kept out of this list (D-03); the list is warm now
+        if not pending and not problem:
+            try:
+                hidden = len(await decks.backup_copies(sub, wait=0.0) or [])
+            except DeckError:
+                hidden = 0
         rows, folders, total = arrange_decks(rows or [], q=q, order=order, folder=folder)
         open_form = (
             "<form method='get' action='/decks/open' class='openform'>"
@@ -417,6 +424,14 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
                 q=q, order=order, view=view, folders=folders, folder=folder, total=total, pending=pending
             )
             + listing
+            + (
+                f"<p class='muted small backups-note'>{hidden} backup "
+                f"{'copy' if hidden == 1 else 'copies'} made before changes "
+                "are kept out of this list (a deck named like a copy counts as one): "
+                "<a href='/history#backups'>see them under History</a>.</p>"
+                if hidden
+                else ""
+            )
             + f"<div class='panel'>{open_form}</div>"
         )
         return page(
@@ -1778,6 +1793,17 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         has_more = len(events) > query["offset"] + PAGE
         shown = events[query["offset"] : query["offset"] + PAGE]
         seen = {**state.db.history_decks(sub), **reports.decks_seen(sub)}
+        # The backup copies the gateway made on Archidekt (D-03): kept out of Home and My decks,
+        # listed here on the first, unfiltered page (and on a deck's own history).
+        copies_panel = ""
+        if want == "all" and not query["q"] and not query["state"] and not query["offset"]:
+            try:
+                copies = await asyncio.wait_for(
+                    decks.backup_copies(sub, deck_id=deck_id, wait=decks.deck_list_wait), DECKS_JSON_TIMEOUT
+                )
+            except (DeckError, TimeoutError):
+                copies = []  # not linked, or Archidekt unavailable: the panel is simply absent
+            copies_panel = backup_copies_html(copies, folder=s.archidekt_backup_folder, deck_id=deck_id)
         trend = ""
         if deck_id:
             series = reports.series(sub, deck_id)
@@ -1812,7 +1838,8 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
                 "<div class='card'><p>Nothing yet. Changes you or the assistant propose, the snapshots taken "
                 "before a change is applied and deck reports appear here.</p></div>"
             )
-        body = head + trend + filter_bar_html(query, seen, shown=len(shown), total_hint=hint) + listing
+        bar = filter_bar_html(query, seen, shown=len(shown), total_hint=hint)
+        body = head + trend + bar + listing + copies_panel
         return page(
             "History" if not deck_id else "Deck history",
             body,

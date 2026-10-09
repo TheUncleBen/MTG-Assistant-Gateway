@@ -646,7 +646,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
         description=(
             "List the decks owned by the linked Archidekt account (most recently updated first). Optional "
             "filters: name_contains, deck_format (commander, modern...), folder. This is the one tool for "
-            "the member's deck list; search_decks with owner lists another user's public decks."
+            "the member's deck list; search_decks with owner lists another user's public decks. The "
+            "gateway's own backup copies are left out (each snapshot in list_snapshots links its copy)."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )

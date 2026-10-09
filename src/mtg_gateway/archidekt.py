@@ -187,6 +187,15 @@ def backup_name(deck_name: str, when: float) -> str:
     return f"{deck_name} (backup {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime(when))})"
 
 
+BACKUP_NAME_RE = re.compile(r" \(backup \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC\)$")
+
+
+def is_backup_name(name: str) -> bool:
+    """Whether a deck name is one ``backup_name`` made (a copy moved out of the backup folder is
+    still recognised by its name)."""
+    return bool(BACKUP_NAME_RE.search(name or ""))
+
+
 @dataclass
 class DeckCard:
     relation_id: int | None
@@ -811,7 +820,7 @@ class ArchidektClient:
         username: str,
         user_id: str | None = None,
         *,
-        exclude_folder: str | None = None,
+        backup_folder: str | None = None,
     ) -> list[dict[str, Any]]:
         """The linked user's decks. Archidekt honours ``ownerId`` and ``ownerUsername`` (verified
         live 2026-10-04 and 2026-10-05: each returned exactly the account's decks, private ones
@@ -822,7 +831,9 @@ class ArchidektClient:
         Up to MAX_LIST_PAGES pages of 50 are followed, so a member with more than fifty decks
         sees them all. Every entry is still checked against the linked account on our side, and
         an entry whose owner cannot be read is dropped rather than shown as the user's. Entries in
-        the folder named ``exclude_folder`` (the gateway's backup copies) are left out."""
+        the folder named ``backup_folder``, or named like the gateway's backup copies, come back
+        with ``backup: True``: the deck pages keep them out of the member's lists and show them
+        under History instead."""
         flt: dict[str, Any] = {"ownerId": user_id} if user_id else {"ownerUsername": username}
         decks: list[dict[str, Any]] = []
         seen: set[str] = set()
@@ -846,8 +857,8 @@ class ArchidektClient:
                     continue
                 seen.add(deck_id)
                 row = list_row(d)
-                if exclude_folder and row["folder"] == exclude_folder:
-                    continue  # the gateway's backup copies stay out of the user's list
+                if (backup_folder and row["folder"] == backup_folder) or is_backup_name(row["name"]):
+                    row["backup"] = True  # the gateway's backup copies: listed under History only
                 row["owner"] = username
                 decks.append(row)
             if not body.get("next") or len(results) < 50:

@@ -1590,23 +1590,63 @@ class DeckService:
         assert rows is not None
         return rows
 
-    async def list_decks_quick(self, sub: str, *, wait: float | None = None) -> list[dict[str, Any]] | None:
-        """``list_decks`` that gives up waiting for a cold read after ``wait`` seconds and answers
-        None; the read carries on and lands in the cache for /api/decks/mine. ``wait=None``
-        waits for it. The list comes back as fresh dicts, so a caller may sort or add to it."""
+    async def _deck_rows(self, sub: str, *, wait: float | None) -> list[dict[str, Any]] | None:
+        """Every deck of the linked account from the member cache (or Archidekt), the gateway's
+        backup copies marked ``backup: True``: those in the backup folder, those named like one,
+        and those a snapshot here records as its copy (``db.backup_copies``)."""
         _token, row = self._token(sub)  # not linked: raise before touching the cache
-        exclude = self.settings.archidekt_backup_folder if self.settings.archidekt_backups else None
+        folder = self.settings.archidekt_backup_folder if self.settings.archidekt_backups else None
 
         async def fetch() -> list[dict[str, Any]]:
             return await self._call(
                 sub,
                 lambda token, *_: self.client.list_decks(
-                    token, row["archidekt_username"], row.get("archidekt_user_id"), exclude_folder=exclude
+                    token, row["archidekt_username"], row.get("archidekt_user_id"), backup_folder=folder
                 ),
             )
 
         rows = await self.deck_lists.get(sub, fetch, wait=wait)
-        return None if rows is None else [dict(d) for d in rows]
+        if rows is None:
+            return None
+        known = self.db.backup_copies(sub)
+        out = []
+        for d in rows:
+            d = dict(d)
+            if d["id"] in known:
+                d["backup"] = True
+                d["backup_of"] = known[d["id"]]["deck_id"]
+                d["snapshot_id"] = known[d["id"]]["snapshot_id"]
+            out.append(d)
+        return out
+
+    async def list_decks_quick(self, sub: str, *, wait: float | None = None) -> list[dict[str, Any]] | None:
+        """``list_decks`` that gives up waiting for a cold read after ``wait`` seconds and answers
+        None; the read carries on and lands in the cache for /api/decks/mine. ``wait=None``
+        waits for it. The list comes back as fresh dicts, so a caller may sort or add to it. The
+        gateway's backup copies are left out (``backup_copies`` lists them, History shows them)."""
+        rows = await self._deck_rows(sub, wait=wait)
+        return None if rows is None else [d for d in rows if not d.get("backup")]
+
+    async def backup_copies(
+        self, sub: str, *, deck_id: str | None = None, wait: float | None = None
+    ) -> list[dict[str, Any]] | None:
+        """The gateway's backup copies on Archidekt (decks kept out of the member's lists), newest
+        first; with ``deck_id``, only the copies of that deck (those a snapshot here records, or
+        whose name starts with that deck's name). None when the list is cold and ``wait`` ran out."""
+        rows = await self._deck_rows(sub, wait=wait)
+        if rows is None:
+            return None
+        copies = [d for d in rows if d.get("backup")]
+        if deck_id:
+            names = {str(d.get("name", "")) for d in rows if d["id"] == str(deck_id)}
+
+            def of_this_deck(d: dict[str, Any]) -> bool:
+                if d.get("backup_of"):
+                    return d["backup_of"] == str(deck_id)
+                return any(str(d.get("name", "")).startswith(n + " (backup ") for n in names)
+
+            copies = [d for d in copies if of_this_deck(d)]
+        return copies
 
     def decks_fetched_at(self, sub: str) -> float | None:
         """When the cached deck list was read from Archidekt (epoch seconds), None when none is."""

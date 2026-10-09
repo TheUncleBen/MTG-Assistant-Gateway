@@ -1604,6 +1604,24 @@ class Database:
             )
         return out
 
+    def backup_copies(self, owner_sub: str) -> dict[str, dict[str, Any]]:
+        """The Archidekt deck copies the gateway made for a member, by the copy's deck id:
+        {backup_deck_id: {deck_id, snapshot_id, taken_at}} (the newest snapshot wins a repeat)."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, deck_id, taken_at, backup_deck_id FROM snapshots "
+                "WHERE owner_sub = ? AND backup_deck_id IS NOT NULL ORDER BY taken_at",
+                (owner_sub,),
+            ).fetchall()
+        return {
+            str(r["backup_deck_id"]): {
+                "deck_id": r["deck_id"],
+                "snapshot_id": r["id"],
+                "taken_at": r["taken_at"],
+            }
+            for r in rows
+        }
+
     def set_snapshot_backup(self, snapshot_id: str, *, backup_deck_id: str, backup_url: str) -> None:
         with self.tx() as c:
             c.execute(
