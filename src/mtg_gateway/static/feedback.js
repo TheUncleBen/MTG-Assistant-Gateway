@@ -88,13 +88,31 @@
     if (!(d instanceof HTMLDetailsElement) || !d.classList.contains("dd")) return;
     if (d.open) {
       closeMenus(d);
+      keepOnScreen(d);
       var phone = window.matchMedia("(max-width: 599.98px)").matches || window.matchMedia("(max-width: 899.98px) and ((pointer: coarse) or (hover: none))").matches;
       if ((phone || document.body.classList.contains("app")) && !history.state?.menu) history.pushState({ menu: 1 }, "");
-    } else if (history.state && history.state.menu) {
-      history.back();
+    } else {
+      var m = d.querySelector(":scope > .menu");
+      if (m) { m.style.left = ""; m.style.right = ""; }
+      if (history.state && history.state.menu) history.back();
     }
   }, true);
   window.addEventListener("popstate", function () { if (openMenus().length) closeMenus(null); });
+  // A menu panel hangs from its button's right edge; near the left edge of the window (the first
+  // card of a grid, a row's menu on a phone) that would push part of it off screen. The panel
+  // is shifted back inside, with an 8px margin, and the shift is undone when the menu closes.
+  function keepOnScreen(d) {
+    var menu = d.querySelector(":scope > .menu");
+    if (!menu || menu.classList.contains("sheet")) return;
+    menu.style.left = ""; menu.style.right = "";
+    var r = menu.getBoundingClientRect(), vw = document.documentElement.clientWidth, shift = 0;
+    if (r.left < 8) shift = 8 - r.left;
+    else if (r.right > vw - 8) shift = (vw - 8) - r.right;
+    if (shift) {
+      var anchorRight = getComputedStyle(menu).right !== "auto";
+      if (anchorRight) menu.style.right = (-shift) + "px"; else menu.style.left = shift + "px";
+    }
+  }
 
   // Inside the Android app: the account menu's App section calls the app through window.MtgNative
   // (the server renders those buttons from the app's user agent; the class is also set here in

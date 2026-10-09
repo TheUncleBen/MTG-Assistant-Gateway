@@ -153,6 +153,11 @@
       }
       scrim = document.createElement("div");
       scrim.className = "msel-scrim";
+      // The scrim stays until the tap's click lands on it: closing on pointerdown would remove
+      // it first and the click would fall through to whatever is under the finger (a link, a
+      // remove button). The pointerdown and the click are both swallowed here.
+      scrim.addEventListener("pointerdown", function (e) { e.preventDefault(); });
+      scrim.addEventListener("click", function (e) { e.preventDefault(); e.stopPropagation(); close(); });
       document.body.appendChild(scrim);
     }
     document.body.appendChild(list);
@@ -259,7 +264,9 @@
     if (key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); typeAhead(key); }
   }
   document.addEventListener("pointerdown", function (e) {
-    if (open && !open.list.contains(e.target) && e.target !== open.btn && !open.btn.contains(e.target)) close();
+    // a mouse list closes as soon as the pointer goes down outside it; the touch sheet waits for
+    // the click on its scrim (above), so the tap never reaches the page behind it
+    if (open && !open.sheet && !open.list.contains(e.target) && e.target !== open.btn && !open.btn.contains(e.target)) close();
   }, true);
   document.addEventListener("scroll", function (e) {
     if (open && !open.sheet && !open.list.contains(e.target)) close();

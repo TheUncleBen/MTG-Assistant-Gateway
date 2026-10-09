@@ -244,6 +244,15 @@ catalog). Back up the database before you update, as always.
 
 ### Fixed
 
+- **Touch dropdowns:** the tap that closes a dropdown's bottom sheet no
+  longer also lands on what is under the finger (a link, a remove button).
+  The printings card in the chat picks a finish with the card's own chips
+  instead of the browser's list. A card's Details menu in the collection
+  grid opens inside the window instead of 50 px off its left edge; any
+  dropdown panel near a window edge is shifted back inside. On touch
+  screens History's Details, a report's folded sections and the deck's
+  text rows are 40 px tall. The review page's third choice is "Not now",
+  and the editor shows one Maybeboard chip (the zone's), not two.
 - **Touch screens:** the small controls a mouse never minds are at least
   40 px tall on a phone or tablet: the editor's add-to chips, the deck page's
   category button and odds form, folded Details, footer links, the brand

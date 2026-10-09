@@ -1367,7 +1367,10 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             + "".join(
                 f"<button type='button' class='tchip' data-cat='{_esc(c)}' data-zone='main' "
                 f"aria-pressed='false' title='The {_esc(c)} category'>{_esc(c)}</button>"
+                # the side zone's own category has the zone chip below, not a second chip of the
+                # same name (gate D10)
                 for c in categories
+                if c.casefold() != deck.side_category().casefold()
             )
             + f"<button type='button' class='tchip side' data-cat='' data-zone='side' aria-pressed='false' "
             f"aria-label='{side_name} zone' title='The {side_name} zone: kept outside the deck'>"

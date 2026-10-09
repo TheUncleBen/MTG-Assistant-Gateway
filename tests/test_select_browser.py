@@ -259,12 +259,12 @@ def test_editor_rows_are_enhanced_as_they_appear(server: Server) -> None:
         assert new_sel.evaluate("s => s.value") == "Land"
         assert new_row.locator(".msel-btn").inner_text().strip() == "Land"
         assert page.locator(".pendingbox .n").inner_text() == "2"
-        # the two Maybeboard chips (category, zone) are told apart (D10)
+        # one Maybeboard chip, the zone's (the category of the same name has no chip of its own, D10)
         names = page.evaluate(
-            "() => [...document.querySelectorAll('.targets .tchip')]"
-            ".map(b => b.getAttribute('aria-label') || b.textContent.trim())"
+            "() => [...document.querySelectorAll('.targets .tchip')].map(b => b.textContent.trim())"
         )
         assert len(names) == len(set(names)), names
+        assert names.count("Maybeboard") == 1 and page.locator(".targets .tchip.side").count() == 1, names
         assert errors == []
         browser.close()
 
@@ -311,5 +311,88 @@ def test_natives_stay_and_triggers_take_the_focus(server: Server) -> None:
         page.wait_for_timeout(200)
         assert page.locator(".filepick .fname").inner_text() == "mine.txt"
         assert page.locator("#source").input_value() == "1 Sol Ring\n"
+        assert errors == []
+        browser.close()
+
+
+@pytest.mark.parametrize("width", [360, 720])
+def test_a_tap_outside_the_touch_sheet_only_closes_it(server: Server, width: int) -> None:
+    """Re-gate R2-1: on a touch screen the tap that closes the bottom sheet must not also land on
+    what is under the finger (here the brand link, which would leave the page)."""
+    from playwright.sync_api import sync_playwright
+
+    sid = _link(server)
+    exe = _exe()
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": width, "height": 800}, has_touch=True, is_mobile=True)
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        ctx.route(
+            re.compile(r"https://cards\.scryfall\.io/.*"),
+            lambda route: route.fulfill(status=200, content_type="image/png", body=PNG),
+        )
+        page = ctx.new_page()
+        page.goto(f"{server.base}/decks", wait_until="networkidle")
+        btn = page.locator("#f-order-btn").bounding_box()
+        assert btn is not None
+        page.touchscreen.tap(btn["x"] + btn["width"] / 2, btn["y"] + btn["height"] / 2)
+        listbox = page.locator("#msel-list[role=listbox].sheet")
+        listbox.wait_for(state="visible", timeout=3000)
+        page.wait_for_timeout(300)  # the sheet slides in
+        brand = page.locator(".topbar .brand").bounding_box()
+        assert brand is not None
+        page.touchscreen.tap(brand["x"] + brand["width"] / 2, brand["y"] + brand["height"] / 2)
+        page.wait_for_timeout(500)
+        assert page.locator("#msel-list").count() == 0
+        assert page.url.endswith("/decks"), page.url  # the brand link under the tap was not followed
+        # the sheet still works after that: a row tap picks
+        page.touchscreen.tap(btn["x"] + btn["width"] / 2, btn["y"] + btn["height"] / 2)
+        listbox.wait_for(state="visible", timeout=3000)
+        page.wait_for_timeout(300)
+        row = listbox.locator("[role=option]").last.bounding_box()
+        assert row is not None
+        with page.expect_navigation():
+            page.touchscreen.tap(row["x"] + row["width"] / 2, row["y"] + row["height"] / 2)
+        page.wait_for_load_state("networkidle")
+        assert "order=" in page.url
+        browser.close()
+
+
+@pytest.mark.parametrize("width", [360, 720, 1366])
+def test_a_collection_cards_details_menu_stays_on_screen(server: Server, width: int) -> None:
+    """Re-gate R2-3: in the grid view the first card's Details menu hung off the left edge of the
+    window, cutting its Finish, Condition and Language fields; feedback.js shifts a panel back
+    inside the window when it opens."""
+    from playwright.sync_api import sync_playwright
+
+    sid = _link(server)
+    exe = _exe()
+    with sync_playwright() as p:
+        browser, page, errors = _browser(p, exe, server, width, sid)
+        page.goto(f"{server.base}/collection", wait_until="networkidle")
+        csrf = page.locator("input[name=csrf]").first.get_attribute("value")
+        added = page.evaluate(
+            """async (csrf) => { const r = await fetch('/collection/api/add', { method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+              body: JSON.stringify({ items: [{ name: 'Sol Ring', quantity: 1 }], source: 'scan' }) });
+              return [r.status, await r.text()]; }""",
+            csrf,
+        )
+        assert added[0] == 200, added
+        for view in ("grid", "list"):
+            page.goto(f"{server.base}/collection?view={view}", wait_until="networkidle")
+            menu = page.locator("ul#cards details.rowmenu").first
+            menu.locator("summary").click()
+            page.wait_for_timeout(150)
+            box = page.evaluate(
+                "() => { const m = document.querySelector('ul#cards details.rowmenu[open] > .menu');"
+                " const r = m.getBoundingClientRect(); return { left: r.left, right: r.right,"
+                " width: r.width, vw: document.documentElement.clientWidth }; }"
+            )
+            assert box["left"] >= 0 and box["right"] <= box["vw"], (view, box)
+            assert box["width"] >= 180, (view, box)  # the panel kept its size (14rem); it moved, not shrank
+            # its fields are reachable: the Finish trigger sits inside the window too
+            fin = page.locator("ul#cards details.rowmenu[open] .menu button.msel-btn").first.bounding_box()
+            assert fin is not None and fin["x"] >= 0 and fin["x"] + fin["width"] <= width, (view, fin)
         assert errors == []
         browser.close()

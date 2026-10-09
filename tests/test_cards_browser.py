@@ -312,9 +312,12 @@ def test_printings_card_lists_pictures_filters_and_sends_the_pick_to_the_assista
             card.locator("#filter").fill("legends")
             assert card.locator(".tile").count() == 1 and "CMR" in card.locator(".tile").first.inner_text()
             card.locator("#filter").fill("")
-            card.locator("#finish").select_option("etched")
+            # the finish filter is the card's own chip row, never the host's native list (R-131)
+            assert card.locator("select").count() == 0
+            card.locator("#finish button[data-finish=etched]").click()
+            assert card.locator("#finish button[aria-pressed=true]").inner_text() == "Etched"
             assert card.locator(".tile").count() == 1
-            card.locator("#finish").select_option("")
+            card.locator("#finish button[data-finish='']").click()
             assert card.locator(".tile").count() == 3
             # Tap one: it is marked, the status says so, and the assistant hears the pick.
             card.locator(".tile").nth(0).click()

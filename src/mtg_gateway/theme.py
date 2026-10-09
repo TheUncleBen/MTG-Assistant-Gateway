@@ -364,7 +364,7 @@ button.thumbbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px
 .choice{display:flex;flex-direction:column;gap:.6rem;margin-top:1rem}
 .choice button,.choice .btn{margin-top:0;width:100%}
 @media (min-width:600px){ .choice{flex-direction:row;align-items:center;flex-wrap:wrap}
-  .choice button,.choice .btn{width:auto} .choice .btn:last-child{margin-left:auto} }
+  .choice button,.choice .btn{width:auto} }
 .actions{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:1rem;align-items:center}
 .actions .btn,.actions button,.actions form > button{margin-top:0}
 .actions form{display:contents}
@@ -554,6 +554,11 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
   .hrow a.kind,.hrow a.name,.proposals a.name,.report .crumbs a,li > a.name{display:inline-block;
     padding:.6rem 0}
   .banner .social a.soc,.banner .social button.soc{height:40px;min-height:40px;border-radius:20px}
+  /* :not(._) only raises specificity: the pages' own rules (same selectors, loaded later) set
+     2rem and 30px and would otherwise win */
+  .hrow details > summary:not(._),.report details summary:not(._){min-height:40px;display:flex;
+    align-items:center}
+  ul.rows .row:not(._){height:40px}
 }
 /* A narrow window with a mouse (600 to 800 px, a half-width desktop window or an open Fold):
    the bar keeps its text links and drops the brand's word, so nothing runs under the account

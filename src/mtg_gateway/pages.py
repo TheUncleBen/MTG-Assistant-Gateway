@@ -1160,7 +1160,7 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str = "") -> str:
                     ("apply", "Apply these changes to Archidekt", "primary btn-lg"),
                     ("reject", "Reject this proposal", "danger"),
                 ],
-                extra="<a class='btn' href='/proposals'>Not now, back to proposals</a>",
+                extra="<a class='btn' href='/proposals'>Not now</a>",
             )
             + "</div>"
         )
