@@ -94,7 +94,7 @@ async def test_marketplace_and_archive_are_public_and_consistent(harness: Harnes
 def test_plugin_short_name_follows_the_owners_name() -> None:
     assert plugin_page.plugin_slug("MTG Assistant Gateway") == "mtg-gateway"
     assert plugin_page.plugin_slug("Deck Helper") == "deck-helper"
-    assert plugin_page.plugin_slug("  Ben's   Cards!! ") == "ben-s-cards"
+    assert plugin_page.plugin_slug("  Kim's   Cards!! ") == "kim-s-cards"
     assert plugin_page.plugin_slug("!!!") == "mtg-gateway"
     assert len(plugin_page.plugin_slug("x" * 100)) == plugin_page.SLUG_MAX
     # Nothing that could break the skills' YAML front matter or a JSON string.
