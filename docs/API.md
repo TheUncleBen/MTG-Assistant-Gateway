@@ -39,7 +39,7 @@ code and a human `message`:
 | `not_found` | 404 | not yours, or does not exist |
 | `forbidden` | 403 | the deck belongs to someone else |
 | `writes_disabled` | 403 | `MTG_WRITES_ENABLED` is off |
-| `browser_required` | 403 | this gateway applies proposals only on the review page or the in-chat card (`review_url` is included) |
+| `browser_required` | 403 | the member's approval mode wants their own press for this proposal (review page or in-chat card); nothing was sent (`review_url` is included) |
 | `browser_pending` | 409 | MCP only: the client opened the review page for the user (URL elicitation) but the proposal is still pending |
 | `invalid_approval` | 403 | MCP only: `confirm_proposal` was called without the card's one-time code for this proposal, app and member; audited as `approval_refused` |
 | `in_chat_disabled` | 403 | MCP only: `MTG_APPLY_IN_CHAT` is off, so the card cannot apply; use the review page |
