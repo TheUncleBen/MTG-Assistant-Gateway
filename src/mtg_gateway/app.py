@@ -105,6 +105,7 @@ from .schemas import (
 from .skill_page import add_skill_routes
 from .social import add_social_routes
 from .theme import NoSniffMiddleware, ThemeMiddleware, render
+from .timing import TimingMiddleware
 from .views import deck_brief, deck_out
 
 DeckView = Literal["text", "summary", "cards", "export", "full"]
@@ -1664,6 +1665,8 @@ def create_app(
     # Outermost, so the responses of the middlewares above (413, 503, sign-in error pages) get
     # nosniff and HSTS too.
     app.add_middleware(NoSniffMiddleware, hsts=settings.public_url.startswith("https://"))
+    # Outermost of all: the request log line and Server-Timing cover every layer above.
+    app.add_middleware(TimingMiddleware)
     return app
 
 

@@ -330,6 +330,13 @@ def hash_token(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def _like(search: str) -> str:
+    """A LIKE pattern matching ``search`` anywhere, with its wildcards escaped (ESCAPE '\\')."""
+    text = str(search).strip()[:200]
+    text = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{text}%"
+
+
 class Database:
     def __init__(self, path: Path | str):
         self.path = Path(path)
@@ -1402,15 +1409,70 @@ class Database:
         d["rows"] = json.loads(rows_json) if rows_json else None
         return d
 
-    def list_proposals(self, owner_sub: str, limit: int = 20) -> list[dict[str, Any]]:
+    def list_proposals(
+        self,
+        owner_sub: str,
+        limit: int = 20,
+        *,
+        deck_id: str | None = None,
+        kinds: list[str] | tuple[str, ...] | None = None,
+        states: list[str] | tuple[str, ...] | None = None,
+        search: str | None = None,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Newest first. ``deck_id``, ``kinds`` (edit, create_deck, restore), ``states`` (pending,
+        applied, failed, rejected, expired: a pending proposal past its expiry counts as expired)
+        and ``search`` (a case-insensitive match on the deck name or the change summary) narrow
+        the list in SQL, so a deck with many proposals keeps its older ones on its own page."""
+        sql = (
+            "SELECT id, kind, deck_id, deck_name, state, created_at, expires_at, applied_at, "
+            "created_by_client, diff_text FROM proposals WHERE owner_sub = ?"
+        )
+        args: list[Any] = [owner_sub]
+        if deck_id:
+            sql += " AND deck_id = ?"
+            args.append(str(deck_id))
+        if kinds:
+            sql += f" AND kind IN ({','.join('?' * len(kinds))})"
+            args.extend(str(k) for k in kinds)
+        if states:
+            now = int(time.time())
+            parts = []
+            for st in states:
+                if st == "expired":
+                    parts.append("(state = 'pending' AND expires_at < ?)")
+                    args.append(now)
+                elif st == "pending":
+                    parts.append("(state = 'pending' AND expires_at >= ?)")
+                    args.append(now)
+                else:
+                    parts.append("state = ?")
+                    args.append(str(st))
+            sql += " AND (" + " OR ".join(parts) + ")"
+        if search:
+            like = _like(search)
+            sql += " AND (deck_name LIKE ? ESCAPE '\\' OR diff_text LIKE ? ESCAPE '\\')"
+            args += [like, like]
+        sql += " ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?"
+        args += [max(0, int(limit)), max(0, int(offset))]
+        with self._lock:
+            rows = self._conn.execute(sql, args).fetchall()
+        return [dict(r) for r in rows]
+
+    def history_decks(self, owner_sub: str) -> dict[str, str]:
+        """The decks that appear in the member's proposals and snapshots: id -> last known name,
+        for a history filter."""
         with self._lock:
             rows = self._conn.execute(
-                "SELECT id, kind, deck_id, deck_name, state, created_at, expires_at, applied_at, "
-                "created_by_client, diff_text FROM proposals WHERE owner_sub = ? "
-                "ORDER BY created_at DESC LIMIT ?",
-                (owner_sub, limit),
+                "SELECT deck_id, deck_name, created_at AS at FROM proposals WHERE owner_sub = ? "
+                "UNION ALL SELECT deck_id, json_extract(deck_json, '$.name'), taken_at FROM snapshots "
+                "WHERE owner_sub = ? ORDER BY at",
+                (owner_sub, owner_sub),
             ).fetchall()
-        return [dict(r) for r in rows]
+        out: dict[str, str] = {}
+        for r in rows:
+            out[str(r["deck_id"])] = str(r["deck_name"] or out.get(str(r["deck_id"])) or "")
+        return out
 
     def reject_proposal(self, proposal_id: str, owner_sub: str) -> bool:
         """Move pending -> rejected for the owner; False if it was not pending."""
@@ -1495,15 +1557,33 @@ class Database:
         with self.tx() as c:
             return c.execute(sql, values).rowcount == 1
 
-    def list_snapshots(self, owner_sub: str, limit: int = 20) -> list[dict[str, Any]]:
+    def list_snapshots(
+        self,
+        owner_sub: str,
+        limit: int = 20,
+        *,
+        deck_id: str | None = None,
+        search: str | None = None,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
         """Newest first. Each row carries the deck name and card count read from the stored deck,
-        never the deck itself (a snapshot is a whole deck; get_snapshot returns one)."""
+        never the deck itself (a snapshot is a whole deck; get_snapshot returns one). ``deck_id``
+        and ``search`` (on the stored deck's name) narrow the list in SQL."""
+        sql = (
+            "SELECT id, deck_id, proposal_id, taken_at, deck_json, backup_deck_id, backup_url "
+            "FROM snapshots WHERE owner_sub = ?"
+        )
+        args: list[Any] = [owner_sub]
+        if deck_id:
+            sql += " AND deck_id = ?"
+            args.append(str(deck_id))
+        if search:
+            sql += " AND json_extract(deck_json, '$.name') LIKE ? ESCAPE '\\'"
+            args.append(_like(search))
+        sql += " ORDER BY taken_at DESC, rowid DESC LIMIT ? OFFSET ?"
+        args += [max(0, int(limit)), max(0, int(offset))]
         with self._lock:
-            rows = self._conn.execute(
-                "SELECT id, deck_id, proposal_id, taken_at, deck_json, backup_deck_id, backup_url "
-                "FROM snapshots WHERE owner_sub = ? ORDER BY taken_at DESC, rowid DESC LIMIT ?",
-                (owner_sub, limit),
-            ).fetchall()
+            rows = self._conn.execute(sql, args).fetchall()
         out = []
         for r in rows:
             deck = json.loads(r["deck_json"])

@@ -247,6 +247,22 @@ def featured(deck: Deck) -> DeckCard | None:
     return None
 
 
+def legality_chip_html(deck: Deck, stats: dict[str, Any] | None) -> str:
+    """The banner's Legality chip: green when every card is legal in the deck's format, red with
+    the number of problems otherwise, nothing for a deck without a format. Rendered again by the
+    edit endpoint (api.py) so the page can swap it in after a card changes."""
+    stats = stats or {}
+    legal_problems = stats.get("legality_problems") or []
+    if not deck.format:
+        return ""
+    if not legal_problems:
+        return (
+            f"<span class='legal ok' title='Legal in {esc(deck.format or 'this format')}'>"
+            f"{icon('check')} Legality</span>"
+        )
+    return f"<span class='legal bad' title='{len(legal_problems)} problem(s)'>{icon('x')} Legality</span>"
+
+
 def banner_html(
     deck: Deck,
     stats: dict[str, Any] | None,
@@ -261,15 +277,7 @@ def banner_html(
     style = f" style=\"--art:url('{esc(art_url)}')\"" if art_url else ""
     bracket = stats.get("bracket_estimate") or {}
     bracket_names = {1: "Exhibition (1)", 2: "Core (2)", 3: "Upgraded (3)", 4: "Optimized (4)", 5: "cEDH (5)"}
-    legal_problems = stats.get("legality_problems") or []
-    legality = (
-        f"<span class='legal ok' title='Legal in {esc(deck.format or 'this format')}'>"
-        f"{icon('check')} Legality</span>"
-        if deck.format and not legal_problems
-        else f"<span class='legal bad' title='{len(legal_problems)} problem(s)'>{icon('x')} Legality</span>"
-        if deck.format
-        else ""
-    )
+    legality = legality_chip_html(deck, stats)
     privacy = (
         f"<span class='privacy' title='Private deck'>{icon('eye-off')}</span>"
         if deck.private
@@ -306,21 +314,22 @@ def banner_html(
             f"<button type='submit' title='Copy this deck into your own Archidekt account as a new private "
             f"deck'>{icon('clone')} Clone deck</button></form>"
         )
-    # Archidekt's own playtester (draw, mulligan, play by hand), shown inside the gateway's
-    # playtest page: the gateway builds no copy of it, so a game plays the same wherever it is
-    # started. A private deck needs the person's own Archidekt sign-in in that browser.
+    # Archidekt's own playtester (draw, mulligan, play by hand) in its own tab (D-13, T-098): a frame
+    # inside the gateway never carries the person's Archidekt sign-in, so a private deck stayed empty
+    # there. The app opens the link in the phone's browser, where that sign-in lives.
     primary += (
-        f"<a class='btn' href='/decks/{did}/playtest' "
-        f"title='Draw and play this deck by hand in Archidekt&#39;s playtester'>{icon('play')} Playtest</a>"
+        f"<a class='btn' href='https://archidekt.com/playtester-v2/{did}' target='_blank' "
+        "rel='noreferrer noopener' title='Draw and play this deck by hand in Archidekt&#39;s playtester, "
+        f"in a new tab'>{icon('play')} Playtest</a>"
     )
     if csrf:
         # The same run as the assistant's run_deck_report: statistics, validation and 300
         # goldfish games on the research service, stored under History.
         primary += (
             f"<form method='post' action='/decks/{did}/report' class='inline'>{csrf_in}"
-            "<button type='submit' title='Goldfish simulation (300 games), validation and statistics; the "
-            f"same run the assistant&#39;s run_deck_report makes. Saved under History.'>{icon('stats')} "
-            "Run simulation</button></form>"
+            "<button type='submit' data-busy-label='Simulating…' title='300 goldfish games, a decklist check "
+            "and the deck statistics, saved under History. The run takes up to a minute; the result page "
+            f"opens when it is done.'>{icon('stats')} Run simulation</button></form>"
         )
     more_items = []
     if own and csrf:
@@ -505,8 +514,8 @@ def text_row(card: DeckCard, *, deck: Deck, owned: dict[str, int] | None = None)
     hover = f"<span class='hover'><img src='{esc(img)}' alt='' loading='lazy'></span>" if img else ""
     cls = " side" if not deck.in_deck(card) else ""
     return (
-        f"<li class='row{cls}' data-name='{esc(card.name.lower())}' data-card='{esc(card.name)}'"
-        f"{_card_data(card)}>"
+        f"<li class='row{cls}' tabindex='0' role='button' data-name='{esc(card.name.lower())}' "
+        f"data-card='{esc(card.name)}'{_card_data(card, deck)}>"
         f"<span class='q'>{card.quantity}</span>"
         f"<span class='n'>{_label_dot(card)}{_owned_dot(card, owned)}<span "
         f"class='name'>{esc(card.name)}</span>"
@@ -556,12 +565,21 @@ def card_view_attrs(card: DeckCard, *, img: str | None = None) -> str:
     )
 
 
-def _card_data(card: DeckCard) -> str:
-    """Data attributes the page script reads for the card viewer and for dragging between stacks."""
-    return card_view_attrs(card, img=card_image(card))
+def _card_data(card: DeckCard, deck: Deck) -> str:
+    """Data attributes the page script reads for the card viewer and for its own edits (the card
+    menu, the viewer's quantity buttons, dragging between stacks): the row's count, zone (main
+    or side), first category (empty when Archidekt has none) and relation id, which pick the row
+    an edit targets when the same card sits in the deck and on the maybeboard."""
+    zone = "main" if deck.in_deck(card) else "side"
+    cat = card.categories[0] if card.categories else ""
+    rel = f" data-rel='{card.relation_id}'" if card.relation_id is not None else ""
+    return (
+        card_view_attrs(card, img=card_image(card))
+        + f" data-qty='{card.quantity}' data-zone='{zone}' data-cat='{esc(cat)}'{rel}"
+    )
 
 
-def image_card(card: DeckCard, *, owned: dict[str, int] | None = None) -> str:
+def image_card(card: DeckCard, *, deck: Deck, owned: dict[str, int] | None = None) -> str:
     img = card_image(card)
     body = (
         f"<img src='{esc(img)}' alt='{esc(card.name)}' loading='lazy'>"
@@ -579,7 +597,8 @@ def image_card(card: DeckCard, *, owned: dict[str, int] | None = None) -> str:
     if card.game_changer:
         extra += "<span class='corner gc' title='Game changer'></span>"
     return (
-        f"<div class='c' data-name='{esc(card.name.lower())}' data-card='{esc(card.name)}'{_card_data(card)} "
+        f"<div class='c' data-name='{esc(card.name.lower())}' data-card='{esc(card.name)}'"
+        f"{_card_data(card, deck)} "
         f"title='{esc(card.name)}' tabindex='0' role='button'>{body}{qty}{extra}"
         f"{_finish_badge(card)}{_owned_dot(card, owned)}</div>"
     )
@@ -618,14 +637,36 @@ def cards_html(
                 + "</ul>"
             )
         else:
-            body = "<div class='cards'>" + "".join(image_card(c, owned=owned) for c in cards) + "</div>"
+            imgs = "".join(image_card(c, deck=deck, owned=owned) for c in cards)
+            body = f"<div class='cards'>{imgs}</div>"
         sections.append(f"<section class='stack' data-group='{esc(name)}'>{head}{body}</section>")
     # data-own and data-group let deck.js offer drag-and-drop between categories on the member's
     # own deck (the drops become one proposal, applied from the review page like every other edit).
-    droppable = " data-own='1'" if own and group == "category" else ""
+    # data-own marks the member's own deck (the card menu and the viewer offer edits); data-drop
+    # the category grouping on it, where cards drag between stacks. The card menu's "Move to" list
+    # (deck.js) names the deck's own categories whatever the grouping, and knows the maybeboard.
+    cats = [c["name"] for c in deck.categories if isinstance(c.get("name"), str)]
+    droppable = (
+        " data-own='1'"
+        + (" data-drop='1'" if group == "category" else "")
+        + f" data-cats='{esc(json.dumps(cats, separators=(',', ':')))}'"
+        f" data-side='{esc(deck.side_category())}'"
+        f" data-excluded='{esc(json.dumps(sorted(excluded), separators=(',', ':')))}'"
+        if own
+        else ""
+    )
+    # The card menu (deck.js) draws these icons; a template keeps them out of the page's flow.
+    icons = (
+        "<template class='icons'>"
+        + "".join(
+            f"<span data-ic='{n}'>{icon(n)}</span>"
+            for n in ("eye", "swap", "tag", "eye-off", "x", "edit", "external")
+        )
+        + "</template>"
+    )
     return (
-        f"<div class='deckview {esc(view)}' id='cards' data-deck='{esc(deck.id)}'{droppable}>"
-        f"{''.join(sections)}</div>"
+        f"<div class='deckview {esc(view)}' id='cards' data-deck='{esc(deck.id)}' "
+        f"data-grouping='{esc(group)}'{droppable}>{icons}{''.join(sections)}</div>"
     )
 
 
@@ -691,50 +732,10 @@ def _odds_html(deck: Deck, cards: list[DeckCard]) -> str:
     )
 
 
-def stats_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
-    if not stats:
-        return ""
-    pips = {k: float(v) for k, v in (stats.get("colour_pips") or {}).items()}
-    sources = {k: float(v) for k, v in (stats.get("mana_sources") or {}).items() if k in WUBRG}
-    cards = deck.main_cards
-    cost_cards = Counter()
-    prod_cards = Counter()
-    for c in cards:
-        for col in mana_pips(c.mana_cost):
-            cost_cards[col] += c.quantity
-        for col in c.mana_production or {}:
-            if col in WUBRG:
-                prod_cards[col] += c.quantity
-    pip_total = sum(pips.values()) or 1
-    src_total = sum(sources.values()) or 1
-    colour_cards = "".join(
-        "<div class='ccard'>"
-        f"<div class='cname'><i class='pip pip-{col}'></i> {COLOUR_NAMES[col]}</div>"
-        f"<div class='lbl'>Cost</div><div class='pbar'><span class='fill seg-{col}' "
-        f"style='width:{100 * pips.get(col, 0) / pip_total:.0f}%'></span>"
-        f"<b>{100 * pips.get(col, 0) / pip_total:.0f}%</b></div>"
-        f"<div class='sub'>{pips.get(col, 0):g} pips - {cost_cards.get(col, 0)} cards</div>"
-        f"<div class='lbl'>Production</div><div class='pbar'><span class='fill seg-{col}' "
-        f"style='width:{100 * sources.get(col, 0) / src_total:.0f}%'></span>"
-        f"<b>{100 * sources.get(col, 0) / src_total:.0f}%</b></div>"
-        f"<div class='sub'>{sources.get(col, 0):g} mana - {prod_cards.get(col, 0)} cards</div>"
-        "</div>"
-        for col in WUBRG
-        if pips.get(col) or sources.get(col)
-    )
-    curve = stats.get("mana_curve") or {}
-    top = max([int(v or 0) for v in curve.values()] + [1])
-    bars = "".join(
-        f"<div class='bar'><b>{int(v or 0)}</b>"
-        f"<span style='height:{max(2, round(100 * int(v or 0) / top))}%'></span>"
-        f"<em>{esc(k.replace('7+', '7+'))}</em></div>"
-        for k, v in curve.items()
-    )
-    mv_total = sum(c.cmc * c.quantity for c in cards if c.cmc is not None and not is_land(c))
-    types = stats.get("type_counts") or {}
-    rarities = stats.get("rarity_counts") or {}
-    type_rows = "".join(f"<tr><td>{esc(k)}</td><td>{v}</td></tr>" for k, v in types.items())
-    rarity_rows = "".join(f"<tr><td>{esc(k.capitalize())}</td><td>{v}</td></tr>" for k, v in rarities.items())
+def legality_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
+    """The stats panel's Legality block: the cards that are not legal in the deck's format, or
+    one green line. Re-rendered by the edit endpoint after a card changes."""
+    stats = stats or {}
     problems = stats.get("legality_problems") or []
     problems_html = (
         "<div class='legality'><h3>Legality</h3><ul>"
@@ -753,7 +754,13 @@ def stats_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
             else ""
         )
     )
-    odds_html = _odds_html(deck, cards)
+    return problems_html
+
+
+def checks_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
+    """The stats panel's Deck checks block (deck_stats.deck_checks rendered as Archidekt's
+    checklist). Re-rendered by the edit endpoint after a card changes."""
+    stats = stats or {}
     checks = stats.get("checks") or {}
     if checks:
         size = checks.get("deck_size") or {}
@@ -887,6 +894,56 @@ def stats_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
         )
     else:
         checks_html = ""
+    return checks_html
+
+
+def stats_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
+    if not stats:
+        return ""
+    pips = {k: float(v) for k, v in (stats.get("colour_pips") or {}).items()}
+    sources = {k: float(v) for k, v in (stats.get("mana_sources") or {}).items() if k in WUBRG}
+    cards = deck.main_cards
+    cost_cards = Counter()
+    prod_cards = Counter()
+    for c in cards:
+        for col in mana_pips(c.mana_cost):
+            cost_cards[col] += c.quantity
+        for col in c.mana_production or {}:
+            if col in WUBRG:
+                prod_cards[col] += c.quantity
+    pip_total = sum(pips.values()) or 1
+    src_total = sum(sources.values()) or 1
+    colour_cards = "".join(
+        "<div class='ccard'>"
+        f"<div class='cname'><i class='pip pip-{col}'></i> {COLOUR_NAMES[col]}</div>"
+        f"<div class='lbl'>Cost</div><div class='pbar'><span class='fill seg-{col}' "
+        f"style='width:{100 * pips.get(col, 0) / pip_total:.0f}%'></span>"
+        f"<b>{100 * pips.get(col, 0) / pip_total:.0f}%</b></div>"
+        f"<div class='sub'>{pips.get(col, 0):g} pips - {cost_cards.get(col, 0)} cards</div>"
+        f"<div class='lbl'>Production</div><div class='pbar'><span class='fill seg-{col}' "
+        f"style='width:{100 * sources.get(col, 0) / src_total:.0f}%'></span>"
+        f"<b>{100 * sources.get(col, 0) / src_total:.0f}%</b></div>"
+        f"<div class='sub'>{sources.get(col, 0):g} mana - {prod_cards.get(col, 0)} cards</div>"
+        "</div>"
+        for col in WUBRG
+        if pips.get(col) or sources.get(col)
+    )
+    curve = stats.get("mana_curve") or {}
+    top = max([int(v or 0) for v in curve.values()] + [1])
+    bars = "".join(
+        f"<div class='bar'><b>{int(v or 0)}</b>"
+        f"<span style='height:{max(2, round(100 * int(v or 0) / top))}%'></span>"
+        f"<em>{esc(k.replace('7+', '7+'))}</em></div>"
+        for k, v in curve.items()
+    )
+    mv_total = sum(c.cmc * c.quantity for c in cards if c.cmc is not None and not is_land(c))
+    types = stats.get("type_counts") or {}
+    rarities = stats.get("rarity_counts") or {}
+    type_rows = "".join(f"<tr><td>{esc(k)}</td><td>{v}</td></tr>" for k, v in types.items())
+    rarity_rows = "".join(f"<tr><td>{esc(k.capitalize())}</td><td>{v}</td></tr>" for k, v in rarities.items())
+    problems_html = legality_panel_html(deck, stats)
+    odds_html = _odds_html(deck, cards)
+    checks_html = checks_panel_html(deck, stats)
     bracket = stats.get("bracket_estimate") or {}
     basis = bracket.get("basis") or []
     avg_mv = stats.get("average_mana_value") if stats.get("average_mana_value") is not None else "–"
@@ -1216,8 +1273,10 @@ def deck_list_html(
 
 
 def deck_list_controls_html(
-    *, q: str, order: str, view: str, folders: list[str], folder: str, total: int
+    *, q: str, order: str, view: str, folders: list[str], folder: str, total: int, pending: bool = False
 ) -> str:
+    """The toolbar over the deck list. ``pending``: the list is still being read (the folder picker
+    is rendered hidden and the total left blank; decks.js fills both)."""
     folder_opts = "".join(
         f"<option value='{esc(f)}'{' selected' if f == folder else ''}>{esc(f)}</option>" for f in folders
     )
@@ -1229,14 +1288,14 @@ def deck_list_controls_html(
         + _select("view", {"grid": "Grid", "list": "List"}, view, "View as", "grid")
         + _select("order", LIST_ORDERS, order, "Order by", "sort")
         + (
-            "<div class='field'><label for='f-folder'>Folder</label><span class='sel'>"
-            f"{icon('decks')}<select id='f-folder' name='folder'><option value=''>All folders</option>"
-            f"{folder_opts}"
-            "</select></span></div>"
-            if folders
+            f"<div class='field' id='folder-field'{' hidden' if pending else ''}><label for='f-folder'>"
+            f"Folder</label><span class='sel'>{icon('decks')}<select id='f-folder' name='folder'>"
+            f"<option value=''>All folders</option>{folder_opts}</select></span></div>"
+            if folders or pending
             else ""
         )
-        + f"<div class='field'><span class='lbl'>Total decks: {total}</span>"
+        + f"<div class='field'><span class='lbl' id='decks-total'>Total decks: {'…' if pending else total}"
+        "</span>"
         f"<a class='btn' href='/folders'>{icon('folder')} Folders</a>"
         f"<a class='btn btn-primary' href='/decks/new'>{icon('plus')} New deck</a></div>"
         "<noscript><button type='submit' class='apply'>Apply</button></noscript>"
@@ -1278,11 +1337,7 @@ DECK_CSS = """
 .banner .controls .primary{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center}
 .banner .controls .btn,.banner .controls button{margin:0}
 .banner .controls form.inline{display:contents}
-/* playtest page: Archidekt's playtester framed below a one-line header */
-.playhead,.comparehead{display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap}
-.playframe{display:block;width:100%;height:calc(100dvh - 11rem);min-height:480px;
-  border:1px solid var(--border);border-radius:var(--radius);background:#111}
-.playnote{margin:.5rem 0 0}
+.comparehead{display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap}
 /* compare page */
 .comparehead{flex-direction:column;align-items:stretch}
 .compareform{display:grid;gap:.75rem}
@@ -1457,9 +1512,9 @@ ul.rows .hover img{width:100%;height:100%;display:block}
 .deckview.stacks .cards.fanned .c{transform:none}
 .deckview .c.dragging{opacity:.4}
 .deckview .stack.dropping{outline:3px dashed var(--orange);outline-offset:4px;border-radius:5px}
-.deckview[data-own] .stackhead .meta::after{content:' · drag cards here to recategorise';
+.deckview[data-drop] .stackhead .meta::after{content:' · drag cards here to recategorise';
   color:var(--text-muted)}
-@media (hover:none){ .deckview[data-own] .stackhead .meta::after{content:' · hold a card to move it'} }
+@media (hover:none){ .deckview[data-drop] .stackhead .meta::after{content:' · hold a card to move it'} }
 /* card viewer: a tapped card, large, with what can be done with it. A dialog over a blurred,
    darkened page; the image column grows with the window, the text column scrolls on its own. */
 .cardview{position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;
@@ -1519,6 +1574,48 @@ html.cardview-open{overflow:hidden}
   .cardview .acts .btn,.cardview .acts button{flex:1 1 100%} }
 @media (min-width:1400px){
   .cardview .box{width:min(100%,66rem);grid-template-columns:minmax(16rem,27rem) minmax(0,1fr)} }
+/* the card menu (deck.js): the shared .menu panel, fixed where the pointer or finger was */
+.ctxmenu{position:fixed;z-index:65;min-width:220px;max-width:min(20rem,calc(100vw - 1rem));overflow:auto;
+  overscroll-behavior:contain;border:1px solid var(--border)}
+.ctxmenu .head{text-transform:none;letter-spacing:0;font-size:.9rem;color:var(--text);white-space:normal;
+  overflow-wrap:anywhere;padding-bottom:.35rem;border-bottom:1px solid var(--border);margin-bottom:.25rem}
+.ctxmenu .ic,.ctxmenu .i{width:18px;height:18px;flex:none;color:var(--orange);fill:none;stroke:currentColor;
+  stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.ctxmenu a,.ctxmenu button,.ctxmenu .item{white-space:normal;min-height:38px}
+.ctxmenu .qtyrow{display:flex;align-items:center;gap:.5rem;min-height:38px;padding:0 1rem;cursor:default}
+.ctxmenu .qtyrow .lbl{flex:1}
+.ctxmenu .qtyrow .step{width:36px;min-width:36px;height:32px;min-height:32px;padding:0;justify-content:center;
+  border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);font-size:1.15rem;
+  font-weight:700;line-height:1}
+.ctxmenu .qtyrow .step:hover:not(:disabled){background:var(--border)}
+.ctxmenu .qtyrow .n{min-width:1.6rem;text-align:center;font-variant-numeric:tabular-nums}
+.ctxmenu .more .chev{margin-left:auto;color:var(--text-muted);font-size:1.2rem;line-height:1}
+.ctxmenu .more[aria-expanded=true] .chev{transform:rotate(90deg)}
+.ctxmenu .sub{display:flex;flex-direction:column;background:var(--surface);border-top:1px solid var(--border);
+  border-bottom:1px solid var(--border);max-height:40vh;overflow:auto}
+.ctxmenu .sub button{padding-left:2.4rem;min-height:34px;font-size:.95rem}
+.ctxmenu .sub .on:disabled{color:var(--toolbar-active);font-weight:700}
+.ctxmenu.busy{opacity:.6;pointer-events:none}
+.deckview .c.held,.deckview .row.held{outline:3px solid var(--orange);outline-offset:2px}
+/* the toast after a save (theme .toast, bottom right): the message, Undo and History */
+.deck-toast{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;padding:.75rem 1rem;z-index:59;
+  border-left:4px solid var(--blue);color:var(--text)}
+.deck-toast.error{border-left-color:var(--red)} .deck-toast.warn{border-left-color:var(--orange)}
+.deck-toast .msg{flex:1 1 10rem;min-width:0;overflow-wrap:anywhere}
+.deck-toast .acts{display:inline-flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.deck-toast .acts button,.deck-toast .acts .btn{margin:0;min-height:34px;padding:0 .75rem}
+.deck-toast .acts a:not(.btn){color:var(--orange-text);font-weight:700;text-decoration:underline}
+.deck-toast .close{width:2rem;min-height:2rem;height:2rem;padding:0;margin:0 0 0 auto;border:0;
+  background:transparent;font-size:1.3rem;line-height:1;color:var(--text-muted)}
+.deck-toast .close:hover{color:var(--text)}
+@media (max-width:600px){ .deck-toast{right:.5rem;left:.5rem;bottom:.5rem;width:auto;max-width:none} }
+@media (max-width:900px){ .has-tabbar .deck-toast{bottom:calc(64px + env(safe-area-inset-bottom))} }
+/* the viewer's own copies control: one fewer, the count, one more */
+.cardview .acts .qtyctl{display:inline-flex;align-items:center;gap:.4rem;flex:1 1 auto}
+.cardview .acts .qtyctl button{flex:0 0 auto;width:2.6rem;padding:0;font-size:1.2rem;font-weight:700}
+.cardview .acts .qtyctl .n{min-width:2rem;text-align:center;font-size:1.1rem;
+  font-variant-numeric:tabular-nums}
+.cardview .acts .qtyctl.busy{opacity:.6}
 /* pending category moves (own deck, stacks or grid): a bar like the editor's */
 .movebar{position:sticky;bottom:0;z-index:20;display:none;align-items:center;gap:.5rem;flex-wrap:wrap;
   background:var(--toolbar-bg);color:var(--toolbar-text);padding:.5rem 1rem;margin:1rem -1rem 0;
@@ -1561,12 +1658,7 @@ html.cardview-open{overflow:hidden}
 .curve .bar span{display:block;width:70%;background:var(--orange);border-radius:2px 2px 0 0}
 .curve .bar b{font-variant-numeric:tabular-nums;margin-bottom:.15rem}
 .curve .bar em{font-style:normal;font-weight:700;margin-top:.3rem}
-.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(6.5rem,1fr));gap:.5rem;margin:0 0 .75rem}
-.tile{background:var(--surface-2);border:1px solid var(--border-soft);border-radius:3px;padding:.5rem .6rem;
-  display:flex;flex-direction:column;gap:.1rem}
-.tile b{font-size:1.25rem;font-variant-numeric:tabular-nums} .tile span{color:var(--text-muted);
-  font-size:.8rem}
-.tile .spark{color:var(--orange);width:100%;height:36px}
+/* .tiles/.tile/.spark: theme.py (shared with the report and history pages) */
 table.qty{width:100%;border-collapse:collapse;font-size:.93rem}
 table.qty td{padding:.3rem .25rem;border-top:1px solid var(--surface-2)}
 table.qty td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-weight:700}
@@ -1655,31 +1747,57 @@ ul.decklist.list .deck{margin-bottom:.5rem}
   box-shadow:0 2px 6px rgba(0,0,0,.35)}
 .editbar button{margin:0}
 .editbar .count{color:inherit;opacity:.85}
+.editbar .backup{display:inline-flex;align-items:center;gap:.35rem;margin:0;font-size:.9rem;
+  opacity:.9;white-space:nowrap}
+.editbar .backup input{margin:0}
 .editbar .status{margin:0;flex-basis:100%}
 .editbar .status:empty{display:none}
 .pendingbox summary{cursor:pointer;font-weight:700}
 .pendingbox summary b{margin-left:.5rem;background:var(--orange);color:#fff;border-radius:10px;
   padding:0 .5rem}
-/* add a card: the name box leads; count, category, finish, zone and the button sit on the same
-   row where there is room, and fold onto two rows on narrow screens (never a stray button) */
-.addbox form.addcard{display:grid;gap:.6rem .75rem;align-items:end;
-  grid-template-columns:minmax(12rem,3fr) 5rem minmax(8rem,1.2fr) minmax(6.5rem,1fr) minmax(6.5rem,1fr) auto}
+/* add a card: one search bar. Chips above it say where the card goes; the name box leads with the
+   Add button and the Foil tick beside it; on wide screens the second column also leaves room for
+   the printings that float beside the suggestion list. Never a stray button. */
+.addbox form.addcard{display:grid;gap:.6rem .75rem;align-items:end;grid-template-columns:minmax(0,1fr) auto}
 .addbox form.addcard .field{margin:0}
-.addbox form.addcard button{margin:0;height:var(--ctl);white-space:nowrap}
+.addbox form.addcard .targets{grid-column:1 / -1;display:flex;flex-wrap:wrap;gap:.35rem;align-items:center}
+.addbox .tchip{margin:0;height:auto;min-height:1.9rem;padding:.15rem .7rem;border-radius:999px;
+  font-size:.86rem;font-weight:600;background:var(--surface);border:1px solid var(--border);
+  color:var(--text-muted)}
+.addbox .tchip.on{background:var(--orange-tint);border-color:var(--orange);color:var(--text)}
+.addbox .tchip.side{margin-left:auto}
+.addbox form.addcard .grow{position:relative}
+.addbox form.addcard .go{display:flex;flex-direction:row;align-items:center;gap:.75rem}
+.addbox form.addcard .go button{margin:0;height:var(--ctl);white-space:nowrap}
+.addbox form.addcard .go .foil{display:inline-flex;align-items:center;gap:.35rem;font-size:.9rem;
+  white-space:nowrap}
 .addbox form.addcard .addstatus{grid-column:1 / -1;margin:0;min-height:1.2em}
 .addbox form.addcard .addstatus:empty{display:none}
-@media (max-width:1100px){
-  .addbox form.addcard{grid-template-columns:minmax(0,1fr) 5rem auto}
-  .addbox form.addcard .grow{grid-column:1} .addbox form.addcard .qtyf{grid-column:2}
-  .addbox form.addcard .go{grid-column:3}
-  .addbox form.addcard .field:not(.grow):not(.qtyf):not(.go){grid-row:2;grid-column:auto}
-  .addbox form.addcard{grid-template-areas:none} }
-@media (max-width:1100px) and (min-width:601px){
-  .addbox form.addcard{grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr)}
-  .addbox form.addcard .grow{grid-column:1 / 3} .addbox form.addcard .qtyf{grid-column:3;grid-row:1}
-  .addbox form.addcard .go{grid-column:3;grid-row:2} }
+.addprints{display:none}
+@media (min-width:900px){
+  .addbox form.addcard{grid-template-columns:minmax(0,1fr) 19rem}
+  .addprints{display:block;position:absolute;top:calc(100% + 3px);left:calc(100% + .5rem);width:18.5rem;
+    z-index:70;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+    box-shadow:var(--shadow);    padding:.6rem .7rem;max-height:min(24rem,60vh);overflow:auto}
+  .addprints[hidden]{display:none}
+  .addprints .head{display:flex;justify-content:space-between;gap:.5rem;align-items:baseline;
+    margin-bottom:.5rem}
+  .addprints .head b{overflow-wrap:anywhere}
+  .addprints .pgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.4rem}
+  .addprints .print{border:2px solid transparent;border-radius:6px;background:var(--surface-2);padding:.2rem;
+    margin:0;height:auto;display:flex;flex-direction:column;gap:.15rem;align-items:center;cursor:pointer;
+    min-width:0}
+  .addprints .print img{width:100%;aspect-ratio:5/7;border-radius:4.5%;object-fit:cover}
+  .addprints .print .cap{font-size:.7rem;color:var(--text-muted);white-space:nowrap}
+  .addprints .print.current{border-color:var(--orange)}
+  .addprints .print:hover,.addprints .print:focus-visible{border-color:var(--link)}
+  .addprints .hint{margin:.5rem 0 0} }
+@media (max-width:600px){
+  .addbox form.addcard{grid-template-columns:1fr}
+  .addbox form.addcard .go{justify-content:space-between}
+  .addbox form.addcard .go button{flex:1} }
 /* categories side by side on wide screens, one column on phones */
-.cats.existing{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,30rem),1fr));gap:1rem;
+.cats.existing{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,36rem),1fr));gap:1rem;
   align-items:start}
 .cats.existing > details.cat{margin:0}
 .addbox form.scanpick{display:flex;gap:.5rem;align-items:end;flex-wrap:wrap;margin-bottom:.75rem}

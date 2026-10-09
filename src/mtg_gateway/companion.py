@@ -9,12 +9,15 @@ column below; internal links never open a new tab; external sites (Archidekt, Sc
 
 from __future__ import annotations
 
+import asyncio
 import html
 import json
 import logging
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlencode
 
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, RedirectResponse, Response
@@ -35,9 +38,17 @@ from .deckpage import (
     precon_by_label,
 )
 from .decks import DeckError, actor_label, current_client
+from .history_view import (
+    HISTORY_CSS,
+    PAGE,
+    build_events,
+    events_html,
+    filter_bar_html,
+    pager_html,
+    read_query,
+)
 from .pages import (
     BROWSER_CLIENT_ID,
-    _badge,
     _csrf,
     _err_code,
     _when,
@@ -45,7 +56,13 @@ from .pages import (
     login_redirect,
     read_limited,
 )
-from .theme import icon, render
+from .report_view import (
+    REPORT_CSS,
+    report_body_html,
+    report_export_html,
+    report_markdown,
+)
+from .theme import VIZ_CSS, icon, render
 from .views import auto_category, cards_by_category
 
 if TYPE_CHECKING:
@@ -62,13 +79,7 @@ DECK_CSP = (
     "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; "
     "img-src 'self' https://cards.scryfall.io; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 )
-# The playtest page frames Archidekt's own playtester (archidekt.com sends no frame-ancestors or
-# X-Frame-Options; checked live 2026-10-08) and nothing else; the gateway's pages themselves
-# still refuse to be framed.
-PLAYTEST_CSP = (
-    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; worker-src 'self'; img-src 'self'; "
-    "frame-src https://archidekt.com; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
-)
+DECKS_JSON_TIMEOUT = 25.0  # /api/decks/mine waits this long for a cold list at most
 # Format names the settings and new-deck forms offer, one per Archidekt format id.
 FORMAT_CHOICES = sorted({FORMAT_NAMES[i] for i in FORMAT_NAMES}, key=lambda n: format_label(n).lower())
 EDITOR_CSP = (
@@ -263,6 +274,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         heading: bool = True,
         deck_css: bool = False,
         extra_scripts: tuple[str, ...] = (),
+        extra_css: str = "",
     ) -> Response:
         user = state.db.get_user(sub) or {}
         admin = bool(s.admin_group and s.admin_group in (user.get("groups") or []))
@@ -279,6 +291,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             current=current,
             heading=heading,
             head_extra=(f"<style>{DECK_CSS}</style>" if deck_css else "")
+            + (f"<style>{extra_css}</style>" if extra_css else "")
             + (
                 "<script src='/static/cardview.js' defer></script>"
                 "<script src='/static/deck.js' defer></script>"
@@ -308,14 +321,53 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         given = data.get("csrf", "").encode()
         return bool(sid and expected and hmac.compare_digest(given, expected.encode()))
 
-    async def my_decks(sub: str) -> tuple[list[dict[str, Any]], str | None]:
-        """(decks, problem) where problem is a short message when the list is unavailable."""
+    async def my_decks(
+        sub: str, *, wait: float | None = None
+    ) -> tuple[list[dict[str, Any]] | None, str | None]:
+        """(decks, problem) where problem is a short message when the list is unavailable. With
+        ``wait``, decks is None when the list is cold and Archidekt has not answered in time: the
+        page then renders a placeholder that decks.js fills from /api/decks/mine."""
         try:
-            return await decks.list_decks(sub), None
+            return await decks.list_decks_quick(sub, wait=wait), None
         except DeckError as exc:
             if exc.kind == "not_linked":
                 return [], "not_linked"
             return [], str(exc)
+
+    def arrange_decks(
+        rows: list[dict[str, Any]], *, q: str, order: str, folder: str
+    ) -> tuple[list[dict[str, Any]], list[str], int]:
+        """Filter and sort the member's list as the /decks controls ask: (rows, folders, total)."""
+        folders = sorted({str(d.get("folder")) for d in rows if d.get("folder")}, key=str.lower)
+        total = len(rows)
+        if q:
+            rows = [d for d in rows if q.lower() in str(d.get("name", "")).lower()]
+        if folder:
+            rows = [d for d in rows if d.get("folder") == folder]
+        if order == "name":
+            rows.sort(key=lambda d: str(d.get("name", "")).lower())
+        elif order == "created":
+            rows.sort(key=lambda d: str(d.get("created_at") or ""), reverse=True)
+        elif order == "format":
+            rows.sort(key=lambda d: (str(d.get("format_name") or ""), str(d.get("name", "")).lower()))
+        return rows, folders, total
+
+    def list_query(qp: Any) -> tuple[str, str, str, str]:
+        """The deck list's query parameters, each limited to its known values: (q, order, view, folder)."""
+        q = (qp.get("q") or "").strip()[:80]
+        order = qp.get("order") if qp.get("order") in LIST_ORDERS else "updated"
+        view = qp.get("view") if qp.get("view") in ("grid", "list") else "grid"
+        folder = (qp.get("folder") or "").strip()[:80]
+        return q, order, view, folder
+
+    def deck_list_skeleton(view: str) -> str:
+        return (
+            f"<ul class='plain decklist {_esc(view)} skeleton' aria-hidden='true'>"
+            + "<li></li>" * 6
+            + "</ul><p class='sr-only' role='status'>Loading your decks</p>"
+            "<noscript><p class='muted'><a href='/decks'>Reload</a> to see your decks (this page fills "
+            "itself with scripts on).</p></noscript>"
+        )
 
     def link_prompt() -> str:
         return (
@@ -331,23 +383,10 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         if not sub:
             return login_redirect("/decks")
         qp = request.query_params
-        q = (qp.get("q") or "").strip()[:80]
-        order = qp.get("order") if qp.get("order") in LIST_ORDERS else "updated"
-        view = qp.get("view") if qp.get("view") in ("grid", "list") else "grid"
-        folder = (qp.get("folder") or "").strip()[:80]
-        rows, problem = await my_decks(sub)
-        folders = sorted({str(d.get("folder")) for d in rows if d.get("folder")}, key=str.lower)
-        total = len(rows)
-        if q:
-            rows = [d for d in rows if q.lower() in str(d.get("name", "")).lower()]
-        if folder:
-            rows = [d for d in rows if d.get("folder") == folder]
-        if order == "name":
-            rows.sort(key=lambda d: str(d.get("name", "")).lower())
-        elif order == "created":
-            rows.sort(key=lambda d: str(d.get("created_at") or ""), reverse=True)
-        elif order == "format":
-            rows.sort(key=lambda d: (str(d.get("format_name") or ""), str(d.get("name", "")).lower()))
+        q, order, view, folder = list_query(qp)
+        rows, problem = await my_decks(sub, wait=decks.deck_list_wait)
+        pending = rows is None  # cold start: the shell goes out now, decks.js fills the list
+        rows, folders, total = arrange_decks(rows or [], q=q, order=order, folder=folder)
         open_form = (
             "<form method='get' action='/decks/open' class='openform'>"
             "<label for='ref'>Open any Archidekt deck</label>"
@@ -362,14 +401,22 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         if problem == "not_linked":
             body = link_prompt() + f"<div class='panel'>{open_form}</div>"
             return page("My decks", notice + body, sub=sub, sid=sid, current="/decks")
-        covers = covers_for(rows, state.db.deck_covers([str(d["id"]) for d in rows]))
+        if pending:
+            src = "/api/decks/mine?" + urlencode(
+                {"shape": "list", "q": q, "order": order, "view": view, "folder": folder}
+            )
+            listing = f"<div data-decks-src='{_esc(src)}' aria-busy='true'>{deck_list_skeleton(view)}</div>"
+        else:
+            covers = covers_for(rows, state.db.deck_covers([str(d["id"]) for d in rows]))
+            listing = (f"<p class='notice error'>{_esc(problem)}</p>" if problem else "") + deck_list_html(
+                rows, covers=covers, q=q, view=view
+            )
         body = (
             notice
             + deck_list_controls_html(
-                q=q, order=order, view=view, folders=folders, folder=folder, total=total
+                q=q, order=order, view=view, folders=folders, folder=folder, total=total, pending=pending
             )
-            + (f"<p class='notice error'>{_esc(problem)}</p>" if problem else "")
-            + deck_list_html(rows, covers=covers, q=q, view=view)
+            + listing
             + f"<div class='panel'>{open_form}</div>"
         )
         return page(
@@ -382,7 +429,57 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             scripts=True,
             csp=DECK_CSP,  # the covers are Scryfall images
             deck_css=True,
+            extra_scripts=("decks.js",),
         )
+
+    @server.custom_route("/api/decks/mine", methods=["GET"], include_in_schema=False)
+    async def my_decks_json(request: Request) -> Response:
+        """The signed-in member's deck list for the pages' placeholders (decks.js): the rows, plus
+        the HTML the page itself would have rendered (``shape=list`` with the /decks controls'
+        q, order, view and folder; ``shape=recent`` for the home panel) so there is one renderer.
+        Browser session only; a GET that changes nothing needs no CSRF token."""
+        sub, _sid = browser_session(state, request)
+        if not sub:
+            return JSONResponse(
+                {"ok": False, "error": "unauthenticated"}, 401, headers={"Cache-Control": "no-store"}
+            )
+        qp = request.query_params
+        shape = "recent" if qp.get("shape") == "recent" else "list"
+        q, order, view, folder = list_query(qp)
+        try:
+            rows = await asyncio.wait_for(decks.list_decks(sub), DECKS_JSON_TIMEOUT)
+        except DeckError as exc:
+            rows, problem = None, (exc.kind, str(exc))
+        except TimeoutError:
+            rows, problem = None, ("unavailable", "Archidekt did not answer in time.")
+        else:
+            problem = None
+        fetched_at = decks.decks_fetched_at(sub)
+        out: dict[str, Any] = {
+            "ok": problem is None,
+            "shape": shape,
+            "fetched_at": datetime.fromtimestamp(fetched_at, UTC).isoformat() if fetched_at else None,
+        }
+        if problem is not None:
+            out["error"], out["message"] = problem
+        if shape == "recent":
+            from .home import recent_panel_inner
+
+            recent = sorted(rows or [], key=lambda d: d.get("updated_at") or "", reverse=True)
+            covers = covers_for(recent, state.db.deck_covers([str(d["id"]) for d in recent]))
+            out["html"] = recent_panel_inner(None if problem else recent, covers)
+            out["count"] = len(recent)
+        else:
+            shown, folders, total = arrange_decks(rows or [], q=q, order=order, folder=folder)
+            covers = covers_for(shown, state.db.deck_covers([str(d["id"]) for d in shown]))
+            out["html"] = (
+                f"<p class='notice error'>{_esc(problem[1])}</p>" if problem else ""
+            ) + deck_list_html(shown, covers=covers, q=q, view=view)
+            out["count"], out["total"], out["folders"] = len(shown), total, folders
+        for d in rows or []:
+            d.setdefault("url", f"https://archidekt.com/decks/{d['id']}")
+        out["decks"] = rows or []
+        return JSONResponse(out, headers={"Cache-Control": "no-store"})
 
     @server.custom_route("/decks/open", methods=["GET"], include_in_schema=False)
     async def open_deck(request: Request) -> Response:
@@ -1199,7 +1296,6 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             "sideCategory": deck.side_category(),
         }
         side_name = _esc(deck.side_category())
-        cat_opts = "".join(f"<option value='{_esc(c)}'>{_esc(c)}</option>" for c in categories)
         body = (
             f"<script id='editor-config' type='application/json'>{_json_for_html(config)}</script>"
             "<div id='editor' class='editor'>"
@@ -1218,26 +1314,40 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             f"{icon('check')} <span class='label'>Save changes</span></button>"
             f"<button type='button' class='undo' disabled>{icon('undo')} Undo</button>"
             "<span class='count muted'>No changes yet</span>"
-            "<p class='status' role='status'></p></div>"
+            + (
+                # D-02: the extra copy on Archidekt is the member's choice per save; the gateway's own
+                # snapshot (Restore under History) is always kept.
+                "<label class='backup'><input type='checkbox' name='archidekt_backup' checked> "
+                "Also keep a backup copy on Archidekt</label>"
+                if s.archidekt_backups
+                else ""
+            )
+            + "<p class='status' role='status'></p></div>"
             "<details class='panel pendingbox'><summary>Pending changes <b class='n'>0</b></summary>"
             "<div class='pending'></div><p class='muted small limit'></p></details>"
+            # One search bar that adds (C-11, the "Search bar" option): chips pick where a card goes,
+            # Enter adds it, "3 sol ring" adds three, and the printings of the highlighted card show
+            # beside the list on wide screens (static/companion.js).
             "<section class='panel addbox'><h2>Add a card</h2>" + picker + "<form class='addcard'>"
+            "<div class='targets' role='group' aria-label='Add to'>"
+            "<button type='button' class='tchip on' data-cat='' data-zone='main' aria-pressed='true'>"
+            "Auto</button>"
+            + "".join(
+                f"<button type='button' class='tchip' data-cat='{_esc(c)}' data-zone='main' "
+                f"aria-pressed='false'>{_esc(c)}</button>"
+                for c in categories
+            )
+            + f"<button type='button' class='tchip side' data-cat='' data-zone='side' aria-pressed='false'>"
+            f"{side_name}</button></div>"
             "<div class='field grow'><label for='addname'>Card name</label>"
             "<input id='addname' type='text' name='card' data-suggest='cards' data-suggest-submit "
-            "data-suggest-rich placeholder='Start typing a card name; Enter adds it' "
-            "autocomplete='off' required></div>"
-            "<div class='field qtyf'><label for='addqty'>Qty</label>"
-            "<input id='addqty' type='number' name='qty' value='1' min='1' max='99'></div>"
-            "<div class='field'><label for='addcat'>Category</label><span class='sel'>"
-            f"<select id='addcat' name='addcat'><option value=''>Auto</option>{cat_opts}</select>"
-            "</span></div>"
-            "<div class='field'><label for='addfinish'>Finish</label><span class='sel'>"
-            "<select id='addfinish' name='addfinish'><option value=''>Normal</option>"
-            "<option value='foil'>Foil</option></select></span></div>"
-            "<div class='field'><label for='addzone'>Add to</label><span class='sel'>"
-            f"<select id='addzone' name='addzone'><option value='main'>Deck</option>"
-            f"<option value='side'>{side_name}</option></select></span></div>"
-            f"<div class='field go'><button class='btn-primary'>{icon('plus')} Add</button></div>"
+            "data-suggest-rich data-suggest-qty placeholder='Type a card name; Enter adds one, "
+            "“3 sol ring” adds three' autocomplete='off' required>"
+            "<div class='addprints' hidden aria-label='Printings' role='group'></div></div>"
+            f"<div class='field go'><button class='btn-primary'>{icon('plus')} Add</button>"
+            "<label class='foil'><input type='checkbox' name='foil'> Foil</label></div>"
+            "<input type='hidden' id='addcat' name='addcat' value=''>"
+            "<input type='hidden' id='addzone' name='addzone' value='main'>"
             "<p class='addstatus muted small' role='status' aria-live='polite'></p></form>"
             "<details class='pastebox'><summary>Paste a list</summary>"
             "<form class='pastelist'><label for='pastetext'>One card per line, with a count in front "
@@ -1548,54 +1658,17 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         except DeckError as exc:
             code = exc.kind if exc.kind in DECK_ERR_MESSAGES else "report_failed"
             return RedirectResponse(f"/decks/{deck_id}?err={code}", status_code=303)
-        return RedirectResponse(f"/history/reports/{_esc(report['report_id'])}", status_code=303)
+        reused = "?reused=1" if report.get("reused") else ""
+        return RedirectResponse(f"/history/reports/{_esc(report['report_id'])}{reused}", status_code=303)
 
     @server.custom_route("/decks/{deck_id}/playtest", methods=["GET"], include_in_schema=False)
     async def playtest_page(request: Request) -> Response:
-        """Archidekt's own playtester for this deck, inside the gateway (web and the app's
-        WebView alike; the app loads frames in place). The gateway builds no playtester of its
-        own, so a game here is the same game as on archidekt.com."""
-        deck_id = request.path_params["deck_id"]
-        sub, sid = browser_session(state, request)
-        if not sub:
-            return login_redirect(f"/decks/{deck_id}/playtest")
-        try:
-            deck = await decks.get_any_deck(sub, deck_id)
-        except DeckError as exc:
-            return page(
-                "Deck not found",
-                f"<div class='panel'><p>{_esc(exc)}</p>"
-                "<a class='btn' href='/decks'>Back to my decks</a></div>",
-                sub=sub,
-                sid=sid,
-                status=404 if exc.kind == "not_found" else 400,
-            )
-        did = _esc(deck.id)
-        src = f"https://archidekt.com/playtester-v2/{did}"
-        body = (
-            "<section class='panel playhead'>"
-            f"<div><a href='/decks/{did}'>← {_esc(deck.name or f'Deck {deck.id}')}</a>"
-            "<span class='muted small'> · Archidekt's playtester, shown here</span></div>"
-            f"<a class='btn' href='{src}' target='_blank' rel='noreferrer noopener'>{icon('external')} "
-            "Open on Archidekt</a></section>"
-            f"<iframe class='playframe' src='{src}' title='Archidekt playtester' allow='fullscreen' "
-            "referrerpolicy='no-referrer' sandbox='allow-scripts allow-same-origin allow-forms allow-popups "
-            "allow-popups-to-escape-sandbox'></iframe>"
-            "<p class='muted small playnote'>The playtester runs on archidekt.com. A private deck shows only "
-            "when this browser is signed in to Archidekt; if the frame stays empty, use Open on "
-            "Archidekt.</p>"
-        )
-        return page(
-            f"Playtest: {deck.name or deck.id}",
-            body,
-            sub=sub,
-            sid=sid,
-            two_pane=True,
-            current="/decks",
-            csp=PLAYTEST_CSP,
-            heading=False,
-            deck_css=True,
-        )
+        """Old links to the gateway's framed playtester go straight to Archidekt's own (D-13): a frame
+        never carried the person's Archidekt sign-in, so private decks stayed empty in it."""
+        deck_id = str(request.path_params["deck_id"])
+        if not deck_id.isdigit():
+            return RedirectResponse("/decks", status_code=303)
+        return RedirectResponse(f"https://archidekt.com/playtester-v2/{deck_id}", status_code=303)
 
     @server.custom_route("/decks/{deck_id}/compare", methods=["GET"], include_in_schema=False)
     async def compare_page(request: Request) -> Response:
@@ -1676,60 +1749,35 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
     # -- history --------------------------------------------------------------
     @server.custom_route("/history", methods=["GET"], include_in_schema=False)
     async def history(request: Request) -> Response:
+        """Proposals, snapshots and reports as one timeline grouped by day, narrowed by deck, type,
+        state and a search, 25 at a time. Each list is narrowed and paged in SQL, so a deck's own
+        history keeps its older entries however busy the member's other decks are."""
         sub, sid = browser_session(state, request)
         if not sub:
             return login_redirect("/history")
-        deck_id = (request.query_params.get("deck_id") or "").strip()
-        proposals = decks.list_proposals(sub)
-        snapshots = decks.list_snapshots(sub)
-        reps = reports.list(sub, deck_id or None, limit=50)
-        if deck_id:
-            proposals = [p for p in proposals if p["deck_id"] == deck_id]
-            snapshots = [x for x in snapshots if x["deck_id"] == deck_id]
-        events: list[tuple[int, str]] = []
-        for p in proposals:
-            kind = {"create_deck": "New deck", "restore": "Restore"}.get(p.get("kind", "edit"), "Edit")
-            events.append(
-                (
-                    int(p["created_at"]),
-                    f"<li><a class='name' href='/proposals/{_esc(p['id'])}'>{_esc(kind)}: "
-                    f"{_esc(p['deck_name'] or p['deck_id'])}</a>"
-                    f"<span class='badge {_badge(p['state'])}'>{_esc(p['state'])}</span>"
-                    f"<span class='when'>{_when(p['created_at'])}</span></li>",
-                )
+        query = read_query(request.query_params)
+        deck_id = query["deck_id"] or None
+        want = query["type"]
+        states = [query["state"]] if query["state"] else None
+        # Each kind fetched up to the end of this page plus one: the lists merge by time, so the
+        # page is sliced after the merge and the extra row says whether an older page exists.
+        fetch = query["offset"] + PAGE + 1
+        proposals = snapshots = reps = []
+        if want in ("all", "changes"):
+            proposals = decks.list_proposals(
+                sub, full=True, deck_id=deck_id, states=states, search=query["q"] or None, limit=fetch
             )
-        for x in snapshots:
-            backup = f" · {_ext(x['backup_url'], 'Archidekt backup')}" if x.get("backup_url") else ""
-            events.append(
-                (
-                    int(x["taken_at"]),
-                    f"<li><span class='name'>Snapshot: {_esc(x['deck_name'] or x['deck_id'])} "
-                    f"<span class='muted small'>({_esc(x.get('card_count'))} cards){backup}</span></span>"
-                    f"<form method='post' action='/history/restore'><input type='hidden' name='csrf' "
-                    f"value='{_esc(_csrf(s, sid))}'><input type='hidden' name='snapshot_id' "
-                    f"value='{_esc(x['snapshot_id'])}'><button class='secondary'>Restore…</button></form>"
-                    f"<span class='when'>{_when(x['taken_at'])}</span></li>",
-                )
-            )
-        for r in reps:
-            m = r["metrics"]
-            bits = [
-                f"{_num(m.get('card_count'), 0)} cards",
-                f"avg MV {_num(m.get('average_mana_value'))}",
-            ]
-            if m.get("price_total") is not None:
-                bits.append(f"${_num(m.get('price_total'))}")
-            if r.get("bracket_estimate"):
-                bits.append(f"bracket ~{r['bracket_estimate']}")
-            events.append(
-                (
-                    int(r["taken_at"]),
-                    f"<li><a class='name' href='/history/reports/{_esc(r['report_id'])}'>Report: "
-                    f"{_esc(r['deck_name'])}</a><span class='muted small'>{_esc(' · '.join(bits))}</span>"
-                    f"<span class='when'>{_when(r['taken_at'])}</span></li>",
-                )
-            )
-        events.sort(key=lambda e: e[0], reverse=True)
+        if want in ("all", "snapshots") and not states:
+            snapshots = decks.list_snapshots(sub, deck_id=deck_id, search=query["q"] or None, limit=fetch)
+        if want in ("all", "reports") and not states:
+            reps = reports.list(sub, deck_id, limit=fetch, search=query["q"] or None)
+        client_ids = {r.get("created_by_client") for r in reps if r.get("created_by_client")}
+        names = {cid: state.db.client_name(cid) for cid in client_ids if not cid.startswith("__")}
+        csrf_in = f"<input type='hidden' name='csrf' value='{_esc(_csrf(s, sid))}'>"
+        events = build_events(proposals, snapshots, reps, csrf_input=csrf_in, client_names=names)
+        has_more = len(events) > query["offset"] + PAGE
+        shown = events[query["offset"] : query["offset"] + PAGE]
+        seen = {**state.db.history_decks(sub), **reports.decks_seen(sub)}
         trend = ""
         if deck_id:
             series = reports.series(sub, deck_id)
@@ -1746,21 +1794,33 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
                     if any(isinstance(p.get(key), (int, float)) for p in series)
                 ]
                 trend = (
-                    f"<div class='card'><h2>Trend over {len(series)} reports</h2>"
+                    f"<div class='card trend'><h2>Trend over {len(series)} reports</h2>"
                     f"<div class='tiles'>{''.join(cards)}</div></div>"
                 )
         head = f"<p><a href='/decks/{_esc(deck_id)}'>← Back to the deck</a></p>" if deck_id else ""
-        body = (
-            head
-            + trend
-            + (
-                f"<div class='card'><ul class='plain plist'>{''.join(h for _t, h in events)}</ul></div>"
-                if events
-                else "<div class='card'><p>Nothing yet. Proposals, snapshots and deck reports appear here."
-                "</p></div>"
+        hint = "more below" if has_more else ""
+        if shown:
+            listing = f"<section class='history'>{events_html(shown)}</section>" + pager_html(
+                query, has_more=has_more
             )
+        elif query["offset"]:
+            listing = "<div class='card'><p>No older entries.</p></div>" + pager_html(query, has_more=False)
+        elif any(v for k, v in query.items() if k != "offset"):
+            listing = "<div class='card'><p>Nothing matches these filters.</p></div>"
+        else:
+            listing = (
+                "<div class='card'><p>Nothing yet. Changes you or the assistant propose, the snapshots taken "
+                "before a change is applied and deck reports appear here.</p></div>"
+            )
+        body = head + trend + filter_bar_html(query, seen, shown=len(shown), total_hint=hint) + listing
+        return page(
+            "History" if not deck_id else "Deck history",
+            body,
+            sub=sub,
+            sid=sid,
+            current="/history",
+            extra_css=HISTORY_CSS,
         )
-        return page("History" if not deck_id else "Deck history", body, sub=sub, sid=sid)
 
     @server.custom_route("/history/restore", methods=["POST"], include_in_schema=False)
     async def restore(request: Request) -> Response:
@@ -1783,30 +1843,97 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             return page("History", f"<p class='notice error'>{_esc(exc)}</p>", sub=sub, sid=sid, status=400)
         return RedirectResponse(f"/proposals/{p['proposal_id']}", status_code=303)
 
+    def _report_or_404(sub: str, rid: str) -> dict[str, Any] | None:
+        try:
+            return reports.get(sub, rid)
+        except DeckError:
+            return None
+
     @server.custom_route("/history/reports/{rid}", methods=["GET"], include_in_schema=False)
     async def report_page(request: Request) -> Response:
+        """One stored report as a page a person reads: the deck, the headline numbers of the goldfish
+        simulation with their confidence intervals, charts, what the simulation could not model,
+        the validation verdict and the deck statistics; the service's raw text folded away."""
         sub, sid = browser_session(state, request)
         if not sub:
             return login_redirect("/history")
-        try:
-            r = reports.get(sub, request.path_params["rid"])
-        except DeckError as exc:
-            return page("Report", f"<div class='card'><p>{_esc(exc)}</p></div>", sub=sub, sid=sid, status=404)
-        body = (
-            f"<div class='card'><p><a href='/decks/{_esc(r['deck_id'])}'>← {_esc(r['deck_name'])}</a> · "
-            f"<a href='/history?deck_id={_esc(r['deck_id'])}'>deck history</a></p>"
-            f"<p class='muted small'>Taken {_when(r['taken_at'])}</p>" + stats_strip(r["stats"]) + "</div>"
+        rid = request.path_params["rid"]
+        r = _report_or_404(sub, rid)
+        if r is None:
+            return page(
+                "Report",
+                "<div class='card'><p>No such report for your account.</p></div>",
+                sub=sub,
+                sid=sid,
+                status=404,
+            )
+        safe = _esc(rid)
+        md = report_markdown(r)
+        actions = (
+            "<div class='form-actions'>"
+            f"<a class='btn' href='/history/reports/{safe}/export.md' download>{icon('download')} Markdown"
+            f"</a><a class='btn' href='/history/reports/{safe}/export.html' download>{icon('download')} "
+            f"HTML page</a><button type='button' class='btn copybtn' data-copy='rep-md'>{icon('copy')} "
+            "Copy as Markdown</button>"
+            "</div>"
+            f"<textarea id='rep-md' class='sr-only' readonly aria-label='The report as Markdown'>{_esc(md)}"
+            "</textarea>"
         )
-        for key, title in (("goldfish", "Goldfish simulation"), ("validation", "Validation")):
-            block = r.get(key)
-            if not block:
-                continue
-            text = block.get("text") or json.dumps(block.get("data"), indent=1)
-            status = "" if block.get("ok") else " <span class='badge danger'>failed</span>"
-            body += f"<div class='card'><h2>{title}{status}</h2><pre>{_esc(text[:20000])}</pre></div>"
-        if not r.get("goldfish") and not r.get("validation"):
-            body += "<p class='muted small'>The research service was not configured when this report ran.</p>"
-        return page(f"Report: {r['deck_name']}", body, sub=sub, sid=sid)
+        body = report_body_html(
+            r,
+            stats_html=stats_strip(r.get("stats")),
+            actions_html=actions,
+            reused=request.query_params.get("reused") == "1",
+        )
+        return page(
+            f"Report: {r['deck_name']}",
+            body,
+            sub=sub,
+            sid=sid,
+            heading=False,
+            current="/history",
+            extra_scripts=("export.js",),
+            extra_css=REPORT_CSS,
+        )
+
+    def _report_file(r: dict[str, Any], ext: str, body: str, media_type: str) -> Response:
+        name = re.sub(r"[^A-Za-z0-9._-]+", "_", r.get("deck_name") or r["deck_id"])[:60]
+        day = _when(r.get("taken_at"))[:10]
+        return Response(
+            body,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{name}-report-{day}{ext}"',
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+
+    @server.custom_route("/history/reports/{rid}/export.md", methods=["GET"], include_in_schema=False)
+    async def report_export_md(request: Request) -> Response:
+        sub, _sid = browser_session(state, request)
+        if not sub:
+            return login_redirect("/history")
+        r = _report_or_404(sub, request.path_params["rid"])
+        if r is None:
+            return Response("No such report for your account.", 404)
+        return _report_file(r, ".md", report_markdown(r), "text/markdown; charset=utf-8")
+
+    @server.custom_route("/history/reports/{rid}/export.html", methods=["GET"], include_in_schema=False)
+    async def report_export_html_file(request: Request) -> Response:
+        """The report as one HTML file: inline styles and SVG, no scripts, nothing fetched."""
+        sub, _sid = browser_session(state, request)
+        if not sub:
+            return login_redirect("/history")
+        r = _report_or_404(sub, request.path_params["rid"])
+        if r is None:
+            return Response("No such report for your account.", 404)
+        html_doc = report_export_html(r, stats_html=stats_strip(r.get("stats")), theme_css=VIZ_CSS)
+        resp = _report_file(r, ".html", html_doc, "text/html; charset=utf-8")
+        resp.headers["Content-Security-Policy"] = (
+            "default-src 'none'; style-src 'unsafe-inline'; img-src data:"
+        )
+        return resp
 
     # -- activity ---------------------------------------------------------------
     @server.custom_route("/activity", methods=["GET"], include_in_schema=False)
@@ -1877,7 +2004,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             "self.addEventListener('install',()=>self.skipWaiting());"
             "self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));"
             "self.addEventListener('fetch',e=>{"
-            "if(e.request.mode!=='navigate')return;"
+            "if(e.request.mode!=='navigate'||e.request.method!=='GET')return;"
             "e.respondWith(fetch(e.request).catch(()=>new Response(" + json.dumps(OFFLINE_PAGE) + ","
             "{status:503,headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store',"
             "'Content-Security-Policy':\"default-src 'none'; style-src 'unsafe-inline'; "

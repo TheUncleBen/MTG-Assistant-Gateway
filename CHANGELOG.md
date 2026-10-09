@@ -39,6 +39,86 @@ catalog). Back up the database before you update, as always.
   service. Pressing Link before opening the detail sends nothing and points
   at the detail. After a failed link the form comes back with the detail open.
   docs/USING.md carries the same text.
+- **Adding cards is one search bar.** In the deck editor, chips above the
+  box say where a card goes (Auto, a category, the maybeboard), Enter
+  adds the highlighted card and keeps the cursor in the box, "3 sol ring"
+  adds three, and on wide screens the printings of the highlighted card
+  show as pictures beside the list: the set used last on this deck is
+  pre-selected, and a click adds that printing. Enter pressed while the
+  list is still catching up takes the first answer when it arrives.
+- **Playtest opens Archidekt's playtester in its own tab** (in the app: the
+  phone's browser), where your Archidekt sign-in lives, so private decks
+  play too. The gateway no longer frames it; old links are sent on.
+- **"Desktop layout" switch** in the account menu, remembered per device:
+  a phone or the app shows the computer layout, like a browser's Desktop
+  site switch. "Fit the screen" goes back to the adaptive layout.
+- **Sign-out acts on the first click.** The button says "Signing out…"
+  and locks at once, both account-page buttons post straight away
+  (no confirmation detour for "all my devices"), and the browser is no
+  longer asked to clear its cache on the way out, which held the
+  sign-out for seconds in Chromium.
+- **A deck report is a page to read, with exports.** "Run simulation" used
+  to dump the research service's raw text. The report page now opens with
+  the deck, its commander, the games run and when; shows the headline
+  numbers as tiles with their 95% intervals (turn the commander lands,
+  chance of 40 damage or a lethal board by the last turn, mulligans, land
+  drops); draws four small charts (milestones reached by turn, the turn the
+  commander was cast, mana available and damage per turn) in the site's
+  colours without any script; explains in plain words what the simulation
+  could not model (cards it does not recognise, removal and other
+  interaction it cannot value, cards that never mattered, and the shortcuts
+  it takes) with each group's share of the deck; and gives the validation
+  verdict as a badge with the problems listed. Double-faced cards show their
+  front face. The raw output stays, folded away at the end. The page has no
+  assistant tool names on it. Buttons download the report as Markdown or as
+  a self-contained HTML page (no scripts, light and dark) and copy the
+  Markdown to the clipboard. The deck page's button says the run takes up
+  to a minute and shows "Simulating…" while it does; a report reused
+  because the deck had not changed says so.
+- **History is a timeline, not a log.** Entries are grouped by day under
+  headings that stay in view while scrolling; each row shows what it is
+  (edit, new deck, restore, snapshot, report) with an icon, the deck as a
+  link, a one-line summary of the change, who made it (you or the
+  assistant), the time, and its details folded away. Snapshot rows link to
+  the change they were taken before and keep their "Restore (review first)"
+  button. A filter bar narrows the page by deck, type, state and a search
+  over deck names and change text, and "Older" pages through the rest 25 at
+  a time. The per-deck trend tiles are styled like the rest of the site.
+
+- **Home, My decks and the collection open at once.** With an Archidekt
+  account linked, the member's deck list is kept in memory for a minute and a
+  half after Archidekt answered and served from there by Home, My decks, the
+  deck tools and the JSON API; for a quarter of an hour more a slightly older
+  list is shown while one refresh runs in the background. Every change the
+  gateway sends to Archidekt for that member (a new deck, an applied proposal,
+  a deleted deck, a folder, a tag, a cover) drops the list first, so the next
+  view is live again. The listing itself is one Archidekt request (by the
+  account's id, where before it was one by name and one by id, each waiting its
+  turn in the shared queue), following up to four pages of fifty decks. The
+  collection's unfiltered first page is kept for a minute per sort and dropped
+  by every collection add, change or removal. When the list is cold and
+  Archidekt has not answered within a second and a half, Home and My decks go
+  out at once with a grey placeholder that the page fills from
+  `/api/decks/mine` (same markup, rendered by the gateway; no change without
+  script, where a reload shows the list). Every response now carries a
+  `Server-Timing` header (total, Archidekt and sign-in-provider time) and the
+  log has one line per request (method, path, status, milliseconds; no query
+  string or member id). The link's "last used" time is written at most once a
+  minute instead of on every Archidekt call.
+- **Edit a deck straight from its page.** On your own deck a right-click on a
+  card (a press and hold on a phone, Shift+F10 or the Menu key on a focused
+  card) opens the site's own card menu in place of the browser's: open the
+  card, one more or one fewer copy, move it to a category or the maybeboard,
+  remove it, or jump to the editor. The card viewer has the same quantity
+  buttons and Remove. Each change is saved at once as one proposal with its
+  snapshot (the same path as the editor, with the same "are you sure" for a
+  big removal), and the page redraws in place: the card's count and the
+  stack totals, the Size line, the Legality chip, the Legality and Deck
+  checks panels, all from a fresh read of the deck, with a toast offering
+  Undo. Dragging cards between categories now saves correctly (its
+  request named the wrong field, so nothing was moved) and Undo all puts
+  the cards back without reloading. On someone else's deck the menu offers
+  Open card and Open on Scryfall.
 - **Typed card names suggest instantly.** The gateway downloads Scryfall's
   card-name catalog once a day (about 700 KB) and answers suggestions from
   memory, so a name list appears within about a hundred milliseconds of a
@@ -83,6 +163,20 @@ catalog). Back up the database before you update, as always.
 
 ### Added
 
+- **The backup copy on Archidekt is a tick box per save.** The deck
+  editor's save bar has "Also keep a backup copy on Archidekt", on by
+  default; unticking it skips only that extra copy for that save. The
+  gateway's own snapshot (Restore under History) is always kept, and the
+  assistant's applies always make the copy. `POST /api/v1/proposals`
+  takes `archidekt_backup: false` for the same choice (browser session,
+  with `apply: true`). Quick edits from the deck page's card menu keep the
+  gateway snapshot only.
+- `POST /api/v1/decks/{id}/edit` (browser session only): the deck page's own
+  save. Runs the proposals path exactly (propose, hand-edit confirmation,
+  apply with a snapshot), reads the deck again from Archidekt and answers
+  with the touched rows, the freshly computed checks and the re-rendered
+  Legality chip and Deck checks panel; a read that still lags the write is
+  retried once and marked `stale`, and `{refresh: true, names}` reads again.
 - `GET /scan/api/peek?names=a|b|c` (browser session only): mana cost, type
   line, small picture and default printing for up to twenty exact card
   names, from one batched, cached Scryfall lookup; the suggestion lists use
@@ -129,6 +223,14 @@ catalog). Back up the database before you update, as always.
 - **Release notes carry the app files' checksums.** A release that ships the
   Android app lists the SHA-256 of the APK and AAB next to the signing
   certificate, so a download can be checked against the notes.
+- **A deck's history lost older entries.** The page filtered the account's
+  newest 20 proposals and snapshots down to one deck, so a deck's own
+  history page (and the deck's API listing) stopped short whenever other
+  decks had been busier. The deck, type, state, search and page are now
+  applied in the database query.
+- **Trend tiles and sparklines on the history and report pages were
+  unstyled.** Their styles lived in the deck page's stylesheet only; they
+  are now part of the site theme.
 
 ## [0.7.8] - 2026-10-08
 

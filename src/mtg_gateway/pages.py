@@ -24,7 +24,7 @@ from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
 from .avatars import initials_svg
 from .clickguard import form_stamp, guarded_form, submitted_too_soon
 from .decks import DeckError, current_client, row_label, row_line
-from .theme import THEME_COOKIE, in_app, render, theme_from_cookie
+from .theme import LAYOUT_COOKIE, THEME_COOKIE, in_app, layout_from_cookie, render, theme_from_cookie
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -128,8 +128,10 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             "<p class='muted small'>Unsaved scan drafts on this device are cleared too.</p>"
             "<form method='post' action='/logout'>"
             f"<input type='hidden' name='csrf' value='{html.escape(_csrf(s, sid) or '')}'>"
-            "<div class='actions'><button class='primary'>Sign out</button>"
-            "<button name='everywhere' value='1'>Sign out on all my devices</button></div></form>"
+            "<div class='form-actions'>"
+            "<button class='primary' data-busy-text='Signing out…'>Sign out</button>"
+            "<button name='everywhere' value='1' data-busy-text='Signing out…'>"
+            "Sign out on all my devices</button></div></form>"
             "<p class='muted small'>All devices signs out every browser and the Android app. "
             "Connected AI apps keep working; disconnect them on your Account page.</p></div>",
             sub=sub,
@@ -183,6 +185,34 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             resp.set_cookie(
                 THEME_COOKIE,
                 theme,
+                max_age=365 * 86400,
+                path="/",
+                secure=secure,
+                httponly=True,
+                samesite="lax",
+            )
+        return resp
+
+    @server.custom_route("/layout", methods=["POST"], include_in_schema=False)
+    async def set_layout(request: Request) -> Response:
+        """ "Fit the screen" / "Desktop layout" from the account menu (T-046): a cookie read by
+        theme.render, which then asks the device for a wide viewport like a browser's Desktop site
+        switch. Signed-in members only, with the form token."""
+        sub, sid = current(request)
+        data = await form(request)
+        if isinstance(data, Response):
+            return data
+        back = _safe_next(data.get("next"))
+        if not (sub and sid and check_csrf(sid, data)):
+            return RedirectResponse(back, status_code=303)
+        layout = layout_from_cookie(data.get("layout"))
+        resp = RedirectResponse(back, status_code=303)
+        if layout == "auto":
+            resp.delete_cookie(LAYOUT_COOKIE, path="/")
+        else:
+            resp.set_cookie(
+                LAYOUT_COOKIE,
+                layout,
                 max_age=365 * 86400,
                 path="/",
                 secure=secure,
@@ -317,6 +347,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             if data.get("confirm") != "yes":
                 return RedirectResponse("/account?err=confirm_delete", status_code=303)
             state.db.delete_member_data(sub)
+            state.decks.forget_member(sub)
             if state.membership is not None:
                 state.membership.avatars.delete(sub)
             resp = RedirectResponse("/data-deleted", status_code=303)
@@ -695,8 +726,9 @@ def _account_body(state: Any, sub: str, csrf: str | None, *, disclosure_read: bo
         "<a class='btn' href='/skill'>Get the assistant skill for Claude or ChatGPT</a>"
         "<a class='btn' href='/app'>Get the Android app</a>"
         f"<form method='post' action='/logout'>{csrf_in}"
-        "<button class='inline'>Sign out</button></form></div>"
-        "<p class='small'><a href='/logout'>Sign out on all my devices</a></p></div>"
+        "<button class='inline' data-busy-text='Signing out…'>Sign out</button>"
+        "<button class='inline' name='everywhere' value='1' data-busy-text='Signing out…'>"
+        "Sign out on all my devices</button></form></div></div>"
     ]
     out.append(_mode_card(state, sub, csrf_in))
     out.append(_apps_card(state, sub, csrf_in))

@@ -5,8 +5,11 @@
      search;
    - on touch screens a tap fans a stack out and a tap on a card opens a viewer with the card
      large and what can be done with it (grid view, stacks, text rows alike);
-   - on the member's own deck, cards can be dragged between categories (mouse, or press and hold
-     on touch); the moves are saved to Archidekt in one go, with a snapshot first. */
+   - a right-click, a press and hold, or Shift+F10 on a card opens the card's own menu (open it,
+     one more or one fewer copy, move to a category, remove, edit) in place of the browser's;
+   - on the member's own deck the menu, the viewer and a drag between categories save through
+     the deck page's edit endpoint (one proposal applied at once, with a snapshot); the answer
+     redraws the touched cards, the Legality chip and the Deck checks in place, with Undo. */
 (function () {
   "use strict";
   var $ = function (sel, root) { return (root || document).querySelector(sel); };
@@ -95,7 +98,328 @@
   if (cards && cards.classList.contains("deckview")) {
   var deckId = cards.getAttribute("data-deck");
   var own = cards.hasAttribute("data-own");
+  var canDrag = cards.hasAttribute("data-drop");
+  var byCategory = cards.getAttribute("data-grouping") === "category";
   var touch = window.matchMedia("(hover: none)").matches;
+  var phone = function () {
+    return window.matchMedia("(max-width: 599.98px)").matches ||
+      window.matchMedia("(max-width: 899.98px) and ((pointer: coarse) or (hover: none))").matches ||
+      document.body.classList.contains("app");
+  };
+  var enc = encodeURIComponent;
+  function readJson(attr, fallback) { try { return JSON.parse(cards.getAttribute(attr)) || fallback; } catch (e) { return fallback; } }
+  var deckCats = readJson("data-cats", []);
+  var sideCat = cards.getAttribute("data-side") || "Maybeboard";
+  var excluded = readJson("data-excluded", []);
+  function frontFace(name) { return (name || "").split(" // ")[0].trim().toLowerCase(); }
+  function qtyOf(card) { return parseInt(card.getAttribute("data-qty"), 10) || 0; }
+  function zoneOf(card) { return card.getAttribute("data-zone") === "side" ? "side" : "main"; }
+  function catOf(card) { return card.getAttribute("data-cat") || ""; }
+  function stackOf(card) { var st = card.closest(".stack"); return st ? st.getAttribute("data-group") : ""; }
+  function money(n) { return "$" + Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function stop(e) { e.preventDefault(); e.stopPropagation(); }
+
+  // -- toast: what was saved, with Undo; errors stay until dismissed ---------------------------
+  var toastEl = null, toastTimer = null;
+  function dismissToast() { if (toastEl) toastEl.remove(); toastEl = null; clearTimeout(toastTimer); }
+  function toast(text, opts) {
+    opts = opts || {};
+    dismissToast();
+    toastEl = el("div", "toast deck-toast" + (opts.error ? " error" : "") + (opts.warn ? " warn" : ""));
+    toastEl.setAttribute("role", opts.error ? "alert" : opts.dialog ? "alertdialog" : "status");
+    var msg = el("span", "msg", text);
+    toastEl.appendChild(msg);
+    var acts = el("span", "acts");
+    (opts.actions || []).forEach(function (a) { acts.appendChild(a); });
+    toastEl.appendChild(acts);
+    var x = el("button", "close icon-only", "×");
+    x.type = "button";
+    x.setAttribute("aria-label", "Dismiss");
+    x.addEventListener("click", function () { dismissToast(); if (opts.onDismiss) opts.onDismiss(); });
+    toastEl.appendChild(x);
+    document.body.appendChild(toastEl);
+    if (!opts.error && !opts.sticky) toastTimer = setTimeout(dismissToast, opts.ms || 9000);
+    return toastEl;
+  }
+
+  // -- the save: the deck page's own edit endpoint (api.py), one proposal applied at once --------
+  function api(path, body) {
+    return fetch(path, {
+      method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": CSRF },
+      body: JSON.stringify(body)
+    }).then(function (r) { return r.json().then(function (d) { d.status = r.status; return d; }); });
+  }
+  var editUrl = "/api/v1/decks/" + enc(deckId) + "/edit";
+  var saving = false;
+  function askConfirm(why, pid) {
+    return new Promise(function (resolve) {
+      var yes = el("button", "btn-primary", "Save anyway");
+      yes.type = "button";
+      var no = el("button", "", "Cancel");
+      no.type = "button";
+      var done = function (v) { dismissToast(); resolve(v); };
+      yes.addEventListener("click", function () { done(true); });
+      no.addEventListener("click", function () {
+        // the proposal made for the check is not wanted: reject it so Proposals stays clean
+        api("/api/v1/proposals/" + enc(pid) + "/reject", {}).catch(function () { /* a leftover pending proposal is harmless */ });
+        done(false);
+      });
+      toast(why + " Save anyway?", { warn: true, dialog: true, sticky: true, actions: [yes, no], onDismiss: function () { resolve(false); } });
+      yes.focus();
+    });
+  }
+  /* changes: the proposal's changes; undo: the inverse changes (null for none, as for an undo
+     itself). Resolves with the endpoint's answer once applied and drawn; rejects with an Error whose
+     message is shown, or with {cancelled: true} when the person said no to the confirmation. */
+  function saveEdit(changes, undoChanges, opts) {
+    opts = opts || {};
+    if (saving) return Promise.reject(new Error("Another change is still saving; one moment."));
+    saving = true;
+    var body = opts.proposalId ? { proposal_id: opts.proposalId } : { changes: changes, confirmed: opts.confirmed === true };
+    return api(editUrl, body).then(function (d) {
+      if (d.ok && d.applied) {
+        saving = false;
+        applyAnswer(d, changes, undoChanges);
+        return d;
+      }
+      if (d.ok && d.needs_confirm) {
+        saving = false;
+        return askConfirm(d.why, d.proposal_id).then(function (yes) {
+          if (!yes) { var c = new Error("Nothing was changed."); c.cancelled = true; throw c; }
+          return saveEdit(changes, undoChanges, { proposalId: d.proposal_id });
+        });
+      }
+      saving = false;
+      if (d.ok && d.status === 202 && d.proposal_id) {
+        var see = el("a", "btn", "Review page");
+        see.href = "/proposals/" + enc(d.proposal_id);
+        toast("Still saving on Archidekt; the review page shows how far it got.", { sticky: true, actions: [see] });
+        return d;
+      }
+      if (d.ok && d.proposal_id) { location.href = "/proposals/" + enc(d.proposal_id); return d; }  // writes are off: kept for review
+      throw new Error(d.message || "The change could not be saved.");
+    }).catch(function (err) {
+      saving = false;
+      if (!err || !err.cancelled) throw err instanceof Error ? err : new Error("No connection; nothing was changed.");
+      throw err;
+    });
+  }
+  function showError(err) {
+    if (err && err.cancelled) return;
+    toast((err && err.message) || "No connection; nothing was changed.", { error: true });
+  }
+
+  // -- drawing the answer in place: the touched cards, the stack totals, the chip and the panels --
+  var removedCards = {}; // front face -> [elements taken off the page], put back by an Undo
+  function stackByName(name) {
+    return $$(".stack", cards).filter(function (st) { return st.getAttribute("data-group") === name; })[0] || null;
+  }
+  function ensureStack(name) {
+    var st = stackByName(name);
+    if (st || !byCategory) return st;
+    st = el("section", "stack");
+    st.setAttribute("data-group", name);
+    var head = el("div", "stackhead");
+    var h4 = el("h4");
+    h4.appendChild(el("span", "title", name));
+    head.appendChild(h4);
+    head.appendChild(el("div", "meta", "Qty: 0"));
+    st.appendChild(head);
+    st.appendChild(cards.classList.contains("text") ? el("ul", "plain rows") : el("div", "cards"));
+    // the maybeboard sits last, as on Archidekt; a new category goes before it
+    var side = excluded.map(stackByName).filter(Boolean)[0];
+    if (side && excluded.indexOf(name) < 0) cards.insertBefore(st, side); else cards.appendChild(st);
+    return st;
+  }
+  function setQty(card, qty) {
+    card.setAttribute("data-qty", String(qty));
+    var q = $(".qty, .q", card);
+    if (q) q.textContent = String(qty);
+  }
+  function refreshStacks() {
+    $$(".stack", cards).forEach(function (st) {
+      var items = $$(".c, .row", st);
+      if (!items.length) { st.remove(); return; }
+      var qty = 0, price = 0, priced = false;
+      items.forEach(function (c) {
+        var n = qtyOf(c);
+        qty += n;
+        var p = parseFloat(c.getAttribute("data-price"));
+        if (!isNaN(p)) { price += p * n; priced = true; }
+      });
+      var meta = $(".stackhead .meta", st);
+      if (meta) meta.textContent = "Qty: " + qty + (priced && price ? " · Price: " + money(price) : "");
+    });
+  }
+  function swapHtml(selector, html, insertInto, before) {
+    var old = $(selector);
+    if (old) {
+      if (html) old.outerHTML = html; else old.remove();
+      return;
+    }
+    if (!html) return;
+    var holder = $(insertInto);
+    if (!holder) return;
+    var tpl = document.createElement("template");
+    tpl.innerHTML = html;
+    var anchor = before ? $(before, holder) : null;
+    holder.insertBefore(tpl.content, anchor);
+  }
+  function drawStats(d) {
+    var st = d.stats || {};
+    if (d.banner_html !== undefined) swapHtml(".banner .legal", d.banner_html, ".banner .row:nth-of-type(2)", ".banner .row:nth-of-type(2) > span:nth-child(2)");
+    if (d.checks_html !== undefined) swapHtml(".stats .checks", d.checks_html, ".stats .side", ".legality, .bracket");
+    if (d.legality_html !== undefined) swapHtml(".stats .legality", d.legality_html, ".stats .side", ".bracket");
+    $$(".banner .row > span").forEach(function (sp) {
+      var t = sp.textContent;
+      if (/^Size:/.test(t) && st.card_count !== undefined) sp.textContent = "Size: " + st.card_count;
+      else if (/distinct cards$/.test(t) && st.distinct !== undefined) sp.textContent = st.distinct + " distinct cards";
+      else if (/^Est cost:/.test(t) && st.price_total !== undefined && st.price_total !== null) { var b = $("b", sp); if (b) b.textContent = money(st.price_total); }
+      else if (/^Salt sum:/.test(t) && st.salt_total !== undefined && st.salt_total !== null) { var s2 = $("b", sp); if (s2) s2.textContent = String(st.salt_total); }
+    });
+    var tiles = $$(".stats .tiles .tile");
+    if (tiles[0] && st.card_count !== undefined) $("b", tiles[0]).textContent = String(st.card_count);
+    if (tiles[1] && st.land_count !== undefined) $("b", tiles[1]).textContent = String(st.land_count);
+    if (tiles[2] && st.price_total !== undefined && st.price_total !== null) $("b", tiles[2]).textContent = money(st.price_total);
+  }
+  function drawRows(rows, names) {
+    var left = (rows || []).slice();
+    var take = function (card) {
+      var rel = card.getAttribute("data-rel");
+      var i = -1;
+      if (rel) left.some(function (r, k) { if (String(r.relation_id) === rel) { i = k; return true; } return false; });
+      if (i < 0) left.some(function (r, k) {
+        if (frontFace(r.name) === frontFace(card.getAttribute("data-card")) && r.zone === zoneOf(card)) { i = k; return true; }
+        return false;
+      });
+      if (i < 0) left.some(function (r, k) { if (frontFace(r.name) === frontFace(card.getAttribute("data-card"))) { i = k; return true; } return false; });
+      return i < 0 ? null : left.splice(i, 1)[0];
+    };
+    var place = function (card, r) {
+      setQty(card, r.qty);
+      card.setAttribute("data-zone", r.zone);
+      var cat = (r.categories && r.categories[0]) || "";
+      card.setAttribute("data-cat", cat);
+      if (r.relation_id !== null && r.relation_id !== undefined) card.setAttribute("data-rel", String(r.relation_id));
+      card.classList.toggle("side", r.zone === "side" && card.classList.contains("row"));
+      if (byCategory && cat && stackOf(card) !== cat) {
+        var st = ensureStack(cat);
+        if (st) $(".cards, .rows", st).appendChild(card);
+      }
+    };
+    names.forEach(function (name) {
+      $$(".c, .row", cards).filter(function (c) { return frontFace(c.getAttribute("data-card")) === name; }).forEach(function (card) {
+        var r = take(card);
+        if (r) { place(card, r); return; }
+        (removedCards[name] = removedCards[name] || []).push(card);
+        card.remove();
+      });
+    });
+    // rows with no card on the page: a card an Undo put back (its element was kept)
+    left.forEach(function (r) {
+      var kept = removedCards[frontFace(r.name)];
+      var card = kept && kept.shift();
+      if (!card) return;
+      var st = ensureStack((r.categories && r.categories[0]) || stackOf(card)) || stackByName(stackOf(card)) || $(".stack", cards);
+      if (!st) return;
+      $(".cards, .rows", st).appendChild(card);
+      place(card, r);
+    });
+    refreshStacks();
+  }
+  function namesOf(changes) {
+    var seen = {};
+    return changes.map(function (ch) { return frontFace(ch.card_name); }).filter(function (n) { if (seen[n]) return false; seen[n] = true; return true; });
+  }
+  var refreshed = false;
+  function applyAnswer(d, changes, undoChanges) {
+    var names = namesOf(changes);
+    drawRows(d.rows, names);
+    drawStats(d);
+    if (menu) closeMenu();
+    var actions = [];
+    if (undoChanges && undoChanges.length) {
+      var undo = el("button", "btn", "Undo");
+      undo.type = "button";
+      undo.addEventListener("click", function () {
+        undo.disabled = true;
+        undo.textContent = "Undoing…";
+        saveEdit(undoChanges, null).then(function () { toast("Undone. Both steps are under History."); }).catch(showError);
+      });
+      actions.push(undo);
+    }
+    var hist = el("a", "", "History");
+    hist.href = "/history?deck_id=" + enc(deckId);
+    actions.push(hist);
+    if (d.stale && !refreshed) {
+      // Archidekt's read still showed the old rows: read once more in a moment, then draw that
+      refreshed = true;
+      toast("Saved. Refreshing…", { sticky: true, actions: actions });
+      setTimeout(function () {
+        api(editUrl, { refresh: true, names: names }).then(function (r) {
+          if (r.ok) { drawRows(r.rows, names); drawStats(r); }
+          toast("Saved. Snapshot kept under History", { actions: actions });
+        }).catch(function () { toast("Saved. Snapshot kept under History", { actions: actions }); });
+      }, 1500);
+      return;
+    }
+    toast("Saved. Snapshot kept under History", { actions: actions });
+  }
+
+  // -- the edits a card offers (menu and viewer alike) ----------------------------------------
+  function changeFor(card, action, value) {
+    var name = card.getAttribute("data-card");
+    var zone = zoneOf(card);
+    var ch = { action: action, card_name: name };
+    if (zone === "side") ch.zone = "side";
+    if (action === "set_quantity") ch.quantity = value;
+    if (action === "set_category") ch.category = value;
+    return ch;
+  }
+  // Another row of the same card in a zone: a set_category or set_quantity names the card and
+  // the zone, so it would move or count both rows. The menu's own change is fine (the person
+  // sees the rows); an Undo built from it would not be, so none is offered then.
+  function twinIn(card, zone) {
+    var face = frontFace(card.getAttribute("data-card"));
+    return $$(".c, .row", cards).some(function (c) { return c !== card && zoneOf(c) === zone && frontFace(c.getAttribute("data-card")) === face; });
+  }
+  function inverseFor(card, ch) {
+    var name = card.getAttribute("data-card");
+    var zone = zoneOf(card);
+    var qty = qtyOf(card);
+    var inv;
+    if (ch.action === "set_quantity") inv = { action: "set_quantity", card_name: name, quantity: qty };
+    else if (ch.action === "remove") {
+      inv = { action: "add", card_name: name, quantity: qty };
+      var cat = catOf(card);
+      if (cat) inv.category = cat;
+    } else if (ch.action === "set_category") {
+      inv = { action: "set_category", card_name: name, category: catOf(card) || stackOf(card) };
+      // after the move the row sits in the zone its new category puts it in
+      zone = excluded.indexOf(ch.category) >= 0 ? "side" : "main";
+      if (twinIn(card, zone)) return null;
+    } else return null;
+    if (zone === "side") inv.zone = "side";
+    return inv;
+  }
+  function edit(card, action, value) {
+    var ch = changeFor(card, action, value);
+    var inv = inverseFor(card, ch);
+    return saveEdit([ch], inv ? [inv] : null);
+  }
+  function stepQty(card, delta) {
+    var q = qtyOf(card) + delta;
+    if (q <= 0) return edit(card, "remove");
+    return edit(card, "set_quantity", q);
+  }
+  function categoryChoices(card) {
+    var cur = byCategory ? stackOf(card) : catOf(card);
+    var names = deckCats.slice();
+    if (byCategory) $$(".stack", cards).forEach(function (st) { var n = st.getAttribute("data-group"); if (names.indexOf(n) < 0) names.push(n); });
+    if (names.indexOf(sideCat) < 0) names.push(sideCat);
+    return names.map(function (n) { return { name: n, current: n === cur, side: excluded.indexOf(n) >= 0 }; });
+  }
 
   // -- card viewer (static/cardview.js shows the whole card; this adds the deck's actions) -------
   var CardView = window.MtgCardView;
@@ -104,17 +428,53 @@
     if (!CardView) return;
     var name = card.getAttribute("data-card") || "";
     var acts = [];
-    var group = card.closest(".stack");
     if (own && deckId) {
-      var edit = el("a", "btn btn-primary", "Edit in deck editor");
-      edit.href = "/decks/" + encodeURIComponent(deckId) + "/edit#card-" + encodeURIComponent(name);
-      acts.push(edit);
-      if (group && cards.hasAttribute("data-own")) {
-        var move = el("button", "btn", "Move to another category…");
-        move.type = "button";
-        move.addEventListener("click", function () { closeViewer(); pickCategory(card); });
-        acts.push(move);
-      }
+      var ctl = el("span", "qtyctl");
+      ctl.setAttribute("role", "group");
+      ctl.setAttribute("aria-label", "Copies in the deck");
+      var minus = el("button", "btn", "−");
+      minus.type = "button";
+      var n = el("b", "n", String(qtyOf(card)));
+      n.setAttribute("aria-live", "polite");
+      var plus = el("button", "btn", "+");
+      plus.type = "button";
+      var relabel = function () {
+        var q = qtyOf(card);
+        n.textContent = String(q);
+        minus.setAttribute("aria-label", q <= 1 ? "Remove the last copy" : "One fewer: " + (q - 1));
+        plus.setAttribute("aria-label", "One more: " + (q + 1));
+      };
+      relabel();
+      var busy = function (on) { minus.disabled = plus.disabled = on; ctl.classList.toggle("busy", on); };
+      var step = function (delta) {
+        busy(true);
+        stepQty(card, delta).then(function () {
+          busy(false);
+          if (!card.isConnected) { closeViewer(); return; }
+          relabel();
+        }).catch(function (err) { busy(false); showError(err); });
+      };
+      minus.addEventListener("click", function () { step(-1); });
+      plus.addEventListener("click", function () { step(1); });
+      ctl.appendChild(minus); ctl.appendChild(n); ctl.appendChild(plus);
+      acts.push(ctl);
+      var rm = el("button", "btn btn-danger", "Remove from deck");
+      rm.type = "button";
+      rm.addEventListener("click", function () {
+        rm.disabled = true;
+        edit(card, "remove").then(function () { closeViewer(); }).catch(function (err) { rm.disabled = false; showError(err); });
+      });
+      acts.push(rm);
+      var move = el("button", "btn", "Move to…");
+      move.type = "button";
+      move.addEventListener("click", function () {
+        closeViewer();
+        setTimeout(function () { var r = card.getBoundingClientRect(); openMenu(card, r.left + r.width / 2, r.top + r.height / 2, { submenu: true }); }, 50);
+      });
+      acts.push(move);
+      var editLink = el("a", "btn", "Edit in deck editor");
+      editLink.href = "/decks/" + enc(deckId) + "/edit#card-" + enc(name);
+      acts.push(editLink);
     }
     var ownBtn = el("button", "btn", "I own this card");
     ownBtn.type = "button";
@@ -130,19 +490,221 @@
       }).catch(function () { ownBtn.textContent = "Could not add: no connection"; });
     });
     acts.push(ownBtn);
-    var scry = el("a", "btn", "Open on Scryfall");
+    acts.push(scryfallLink(name));
+    CardView.open(CardView.fromElement(card), acts);
+  }
+  function scryfallLink(name, cls) {
+    var scry = el("a", cls || "btn", "Open on Scryfall");
     scry.href = "https://scryfall.com/search?q=" + encodeURIComponent("!\"" + name + "\"");
     scry.target = "_blank";
     scry.rel = "noopener noreferrer";
-    acts.push(scry);
-    CardView.open(CardView.fromElement(card), acts);
+    return scry;
   }
+
+  // -- card menu: right-click, press and hold, Shift+F10 or the Menu key on a focused card -------
+  // A themed menu (the shared .menu styling) in place of the browser's; Escape, a click or tap
+  // outside, scrolling and the phone's Back button close it, and focus goes back to the card.
+  var menu = null, menuCard = null, menuStack = null, menuPushed = false, menuFocusBack = false, ignorePop = false;
+  function closeMenu(fromHistory) {
+    if (!menu) return;
+    var m = menu, card = menuCard, stack = menuStack, back = menuFocusBack;
+    menu = null; menuCard = null; menuStack = null; menuFocusBack = false;
+    m.remove();
+    if (menuPushed && !fromHistory) {
+      // going back over the menu's entry fires popstate later; that one is ours, not a Back press
+      menuPushed = false;
+      ignorePop = true;
+      try { history.back(); } catch (e) { ignorePop = false; }
+    }
+    menuPushed = false;
+    if (!back) return;
+    if (card && card.isConnected) { card.focus(); return; }
+    // the card was removed: the next card of its stack, else any card, keeps the keyboard on the page
+    var next = (stack && stack.isConnected && $(".c, .row", stack)) || $(".c, .row", cards);
+    if (next) next.focus();
+  }
+  function menuItem(text, ic, onClick, cls) {
+    var b = el("button", cls || "", "");
+    b.type = "button";
+    b.setAttribute("role", "menuitem");
+    if (ic) b.appendChild(icon(ic));
+    b.appendChild(document.createTextNode(text));
+    if (onClick) b.addEventListener("click", function (e) { stop(e); onClick(); });
+    return b;
+  }
+  // the gateway's own icons, rendered by the server into a template under #cards (theme.icon)
+  function icon(name) {
+    var tpl = $("template.icons", cards);
+    var src = tpl ? tpl.content.querySelector("[data-ic='" + name + "'] svg") : null;
+    return src ? src.cloneNode(true) : document.createTextNode("");
+  }
+  function openMenu(card, x, y, opts) {
+    opts = opts || {};
+    closeMenu();
+    var name = card.getAttribute("data-card") || "";
+    var m = el("div", "menu ctxmenu");
+    m.setAttribute("role", "menu");
+    m.setAttribute("aria-label", "Card: " + name);
+    var head = el("div", "head", name);
+    m.appendChild(head);
+    m.appendChild(menuItem("Open card", "eye", function () { closeMenu(); openViewer(card); }));
+    if (own && deckId) {
+      var row = el("div", "item qtyrow");
+      row.setAttribute("role", "none");
+      row.appendChild(el("span", "lbl", "Quantity"));
+      var minus = el("button", "step", "−");
+      minus.type = "button";
+      minus.setAttribute("role", "menuitem");
+      var n = el("b", "n", String(qtyOf(card)));
+      var plus = el("button", "step", "+");
+      plus.type = "button";
+      plus.setAttribute("role", "menuitem");
+      var relabel = function () {
+        var q = qtyOf(card);
+        n.textContent = String(q);
+        minus.setAttribute("aria-label", q <= 1 ? "Remove the last copy of " + name : "One fewer " + name + ": " + (q - 1));
+        plus.setAttribute("aria-label", "One more " + name + ": " + (q + 1));
+      };
+      relabel();
+      var stepping = function (delta) {
+        minus.disabled = plus.disabled = true;
+        m.classList.add("busy");
+        stepQty(card, delta).then(function () { /* applyAnswer closed the menu */ }).catch(function (err) {
+          if (menu === m) { minus.disabled = plus.disabled = false; m.classList.remove("busy"); relabel(); }
+          showError(err);
+        });
+      };
+      minus.addEventListener("click", function (e) { stop(e); stepping(-1); });
+      plus.addEventListener("click", function (e) { stop(e); stepping(1); });
+      row.appendChild(minus); row.appendChild(n); row.appendChild(plus);
+      m.appendChild(row);
+      var moveBtn = menuItem("Move to", "swap", null, "more");
+      moveBtn.setAttribute("aria-haspopup", "true");
+      moveBtn.setAttribute("aria-expanded", "false");
+      moveBtn.appendChild(el("span", "chev", "›"));
+      var sub = el("div", "sub");
+      sub.setAttribute("role", "group");
+      sub.setAttribute("aria-label", "Categories");
+      sub.hidden = true;
+      categoryChoices(card).forEach(function (c) {
+        var b = menuItem(c.name, c.side ? "eye-off" : "tag", function () {
+          m.classList.add("busy");
+          edit(card, "set_category", c.name).catch(function (err) { if (menu === m) m.classList.remove("busy"); showError(err); });
+        }, c.current ? "on" : "");
+        if (c.side) b.title = "Not counted in the deck";
+        if (c.current) { b.disabled = true; b.setAttribute("aria-current", "true"); }
+        sub.appendChild(b);
+      });
+      var toggleSub = function (open) {
+        sub.hidden = !open;
+        moveBtn.setAttribute("aria-expanded", open ? "true" : "false");
+        if (open) { var f = $("button:not([disabled])", sub); if (f) f.focus(); fit(m); }
+      };
+      moveBtn.addEventListener("click", function (e) { stop(e); toggleSub(sub.hidden); });
+      moveBtn.addEventListener("keydown", function (e) { if (e.key === "ArrowRight") { stop(e); toggleSub(true); } });
+      sub.addEventListener("keydown", function (e) { if (e.key === "ArrowLeft") { stop(e); toggleSub(false); moveBtn.focus(); } });
+      m.appendChild(moveBtn);
+      m.appendChild(sub);
+      m.appendChild(menuItem("Remove from deck", "x", function () {
+        m.classList.add("busy");
+        edit(card, "remove").catch(function (err) { if (menu === m) m.classList.remove("busy"); showError(err); });
+      }, "danger"));
+      m.appendChild(el("div", "sep"));
+      var editLink = el("a", "", "");
+      editLink.setAttribute("role", "menuitem");
+      editLink.href = "/decks/" + enc(deckId) + "/edit#card-" + enc(name);
+      editLink.appendChild(icon("edit"));
+      editLink.appendChild(document.createTextNode("Edit in deck editor"));
+      m.appendChild(editLink);
+    } else {
+      var scry = scryfallLink(name, "");
+      scry.setAttribute("role", "menuitem");
+      scry.insertBefore(icon("external"), scry.firstChild);
+      m.appendChild(scry);
+    }
+    m.addEventListener("keydown", function (e) {
+      var items = $$("[role=menuitem]:not([disabled])", m).filter(function (b) { return b.offsetParent !== null; });
+      var i = items.indexOf(document.activeElement);
+      if (e.key === "Escape") { stop(e); closeMenu(); return; }
+      if (e.key === "ArrowDown") { stop(e); (items[i + 1] || items[0]).focus(); }
+      else if (e.key === "ArrowUp") { stop(e); (items[i - 1] || items[items.length - 1]).focus(); }
+      else if (e.key === "Home") { stop(e); items[0].focus(); }
+      else if (e.key === "End") { stop(e); items[items.length - 1].focus(); }
+      else if (e.key === "Tab") { closeMenu(); }
+    });
+    m.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+    menu = m;
+    menuCard = card;
+    menuStack = card.closest(".stack");
+    menuFocusBack = true;
+    menuScroll = [window.scrollX, window.scrollY];
+    m.style.visibility = "hidden";
+    document.body.appendChild(m);
+    m.style.left = x + "px";
+    m.style.top = y + "px";
+    fit(m);
+    m.style.visibility = "";
+    if (opts.submenu && own) { var mb = $(".more", m); if (mb) mb.click(); }
+    var first = $("[role=menuitem]:not([disabled])", m);
+    if (first && !(opts.submenu && own)) first.focus();
+    if (phone()) { try { history.pushState({ menu: 1, card: 1 }, ""); menuPushed = true; } catch (e) { menuPushed = false; } }
+  }
+  function fit(m) {
+    // keep the whole menu inside the window: never a horizontal scrollbar, never off the bottom
+    var pad = 8;
+    var w = m.offsetWidth, h = m.offsetHeight;
+    var x = parseFloat(m.style.left) || 0, y = parseFloat(m.style.top) || 0;
+    if (x + w + pad > window.innerWidth) x = Math.max(pad, window.innerWidth - w - pad);
+    if (y + h + pad > window.innerHeight) y = Math.max(pad, window.innerHeight - h - pad);
+    m.style.left = x + "px";
+    m.style.top = y + "px";
+    m.style.maxHeight = (window.innerHeight - y - pad) + "px";
+  }
+  cards.addEventListener("contextmenu", function (e) {
+    var card = e.target.closest(".c, .row");
+    if (!card || !cards.contains(card)) return;
+    e.preventDefault();  // never the browser's image menu over a card
+    if (menu && menuCard === card) return;  // a touch hold already opened it
+    openMenu(card, e.clientX, e.clientY);
+  });
+  cards.addEventListener("keydown", function (e) {
+    var card = e.target.closest(".c, .row");
+    if (!card) return;
+    if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+      stop(e);
+      var r = card.getBoundingClientRect();
+      openMenu(card, r.left + Math.min(r.width / 2, 40), r.top + Math.min(r.height / 2, 40));
+    }
+  });
+  document.addEventListener("pointerdown", function (e) { if (menu && !menu.contains(e.target)) closeMenu(); }, true);
+  document.addEventListener("keydown", function (e) { if (menu && e.key === "Escape" && !menu.contains(e.target)) { closeMenu(); } });
+  // the page scrolling away closes the menu (a list inside it may scroll; a scroll that ended
+  // just before the menu opened reports itself a frame later and does not count)
+  var menuScroll = [0, 0], scrollGrace = 0;
+  window.addEventListener("scroll", function (e) {
+    if (!menu || (e.target instanceof Element && menu.contains(e.target))) return;
+    if (Date.now() < scrollGrace) { menuScroll = [window.scrollX, window.scrollY]; return; }
+    if (Math.abs(window.scrollX - menuScroll[0]) > 4 || Math.abs(window.scrollY - menuScroll[1]) > 4) closeMenu();
+  }, { capture: true, passive: true });
+  window.addEventListener("resize", function () { if (menu) closeMenu(); });
+  window.addEventListener("popstate", function () {
+    if (ignorePop) {
+      // going back may put the page's scroll position back too (a menu opened since stays)
+      ignorePop = false;
+      scrollGrace = Date.now() + 400;
+      menuScroll = [window.scrollX, window.scrollY];
+      return;
+    }
+    if (menu) closeMenu(true);
+  });
 
   // -- stacks and grid: tap to fan out, tap a card to open it ----------------------------------
   var isStacks = cards.classList.contains("stacks");
+  var dragged = null;
+  var swallowClick = false;
   cards.addEventListener("click", function (e) {
     var card = e.target.closest(".c, .row");
-    if (!card || !cards.contains(card) || dragged) return;
+    if (!card || !cards.contains(card) || dragged || swallowClick) return;
     var fan = card.closest(".cards");
     if (isStacks && touch && fan && !fan.classList.contains("fanned")) {
       // first tap on a collapsed stack fans it out; cards behind the top one were not visible yet
@@ -153,15 +715,16 @@
     openViewer(card);
   });
   cards.addEventListener("keydown", function (e) {
-    if ((e.key === "Enter" || e.key === " ") && e.target.classList && e.target.classList.contains("c")) {
+    if ((e.key === "Enter" || e.key === " ") && e.target.matches && e.target.matches(".c, .row")) {
       e.preventDefault();
       openViewer(e.target);
     }
   });
 
-  // -- own deck: drag cards between categories, moves become one proposal ---------------------
-  if (own && deckId) {
-  var moves = {}; // card name -> {from, to}
+  // -- own deck: drag cards between categories; the drops are saved in one go ------------------
+  var moveCardFn = null;  // set below when this grouping takes drops
+  if (own && deckId && canDrag) {
+  var moves = {}; // relation id (or name) -> {card, name, from, to}
   var bar = document.createElement("div");
   bar.className = "movebar";
   bar.setAttribute("role", "region");
@@ -184,53 +747,82 @@
     bar.classList.toggle("show", n > 0);
     count.textContent = n === 1 ? "1 card moved" : n + " cards moved";
     review.disabled = n === 0;
+    if (!n) status.textContent = "";
   }
+  function keyOf(card) { return card.getAttribute("data-rel") || (card.getAttribute("data-card") + "|" + zoneOf(card)); }
+  moveCardFn = moveCard;
   function moveCard(card, target) {
     var from = card.closest(".stack");
     if (!target || target === from) return;
-    var name = card.getAttribute("data-card");
-    var original = moves[name] ? moves[name].from : from.getAttribute("data-group");
+    var key = keyOf(card);
+    var original = moves[key] ? moves[key].from : from.getAttribute("data-group");
     var to = target.getAttribute("data-group");
     $(".cards, .rows", target).appendChild(card);
-    if (to === original) delete moves[name];
-    else moves[name] = { from: original, to: to };
+    if (to === original) delete moves[key];
+    else moves[key] = { card: card, name: card.getAttribute("data-card"), from: original, to: to };
     refreshBar();
   }
-  undo.addEventListener("click", function () { location.reload(); });
+  // Undo all puts every pending card back where it was; nothing was sent yet
+  undo.addEventListener("click", function () {
+    Object.keys(moves).forEach(function (k) {
+      var mv = moves[k];
+      var st = stackByName(mv.from) || ensureStack(mv.from);
+      if (st) $(".cards, .rows", st).appendChild(mv.card);
+    });
+    moves = {};
+    refreshStacks();
+    refreshBar();
+  });
   // The member's own moves are saved to Archidekt at once (one proposal, applied with its
-  // snapshot); the assistant never reaches this path.
+  // snapshot); the assistant never reaches this path. A side row names its zone so the move
+  // targets the maybeboard row and not a copy of the same card in the deck.
+  function moveChanges() {
+    return Object.keys(moves).map(function (k) {
+      var mv = moves[k];
+      var ch = { action: "set_category", card_name: mv.name, category: mv.to };
+      if (zoneOf(mv.card) === "side") ch.zone = "side";
+      return ch;
+    });
+  }
+  function moveInverse() {
+    var out = [];
+    var ok = Object.keys(moves).every(function (k) {
+      var mv = moves[k];
+      var zone = excluded.indexOf(mv.to) >= 0 ? "side" : "main";
+      if (twinIn(mv.card, zone)) return false;
+      var ch = { action: "set_category", card_name: mv.name, category: mv.from };
+      if (zone === "side") ch.zone = "side";
+      out.push(ch);
+      return true;
+    });
+    return ok ? out : null;
+  }
   review.addEventListener("click", function () {
-    var changes = Object.keys(moves).map(function (name) { return { action: "set_category", card_name: name, categories: [moves[name].to] }; });
+    var changes = moveChanges();
     if (!changes.length) return;
     review.disabled = true;
+    undo.disabled = true;
+    status.className = "status";
     status.textContent = "Saving to Archidekt…";
-    fetch("/api/v1/proposals", {
-      method: "POST", credentials: "same-origin",
-      headers: { "Content-Type": "application/json", "X-CSRF-Token": CSRF },
-      body: JSON.stringify({ kind: "edit", deck_id: deckId, changes: changes, apply: true, confirmed: true })
-    }).then(function (r) { return r.json(); }).then(function (d) {
-      if (d.ok && d.applied) { location.href = "/decks/" + encodeURIComponent(deckId) + "?ok=saved"; return; }
-      if (d.ok && d.proposal_id) { location.href = "/proposals/" + encodeURIComponent(d.proposal_id); return; }
-      status.textContent = "Could not save: " + ((d && d.message) || "unknown error");
+    saveEdit(changes, moveInverse()).then(function () {
+      moves = {};
+      undo.disabled = false;
+      status.textContent = "";
+      refreshBar();
+    }).catch(function (err) {
       review.disabled = false;
-    }).catch(function () { status.textContent = "Could not save: no connection"; review.disabled = false; });
+      undo.disabled = false;
+      status.className = "status notice error";
+      status.textContent = err && err.cancelled ? "" : "Could not save: " + ((err && err.message) || "no connection");
+    });
   });
 
-  function pickCategory(card) {
-    var groups = $$(".stack", cards).map(function (st) { return st.getAttribute("data-group"); });
-    var from = card.closest(".stack").getAttribute("data-group");
-    var choice = window.prompt("Move “" + card.getAttribute("data-card") + "” from " + from + " to which category?\n\n" + groups.join("\n"));
-    if (!choice) return;
-    var target = $$(".stack", cards).filter(function (st) { return st.getAttribute("data-group").toLowerCase() === choice.trim().toLowerCase(); })[0];
-    if (target) moveCard(card, target);
-  }
-
   // mouse drag (native drag and drop)
-  var dragged = null;
   $$(".c, .row", cards).forEach(function (c) { c.setAttribute("draggable", "true"); });
   cards.addEventListener("dragstart", function (e) {
     var card = e.target.closest(".c, .row");
     if (!card) return;
+    closeMenu();
     dragged = card;
     card.classList.add("dragging");
     try { e.dataTransfer.setData("text/plain", card.getAttribute("data-card")); e.dataTransfer.effectAllowed = "move"; } catch (err) { /* older browsers */ }
@@ -256,32 +848,45 @@
   cards.addEventListener("dragend", function () {
     if (dragged) dragged.classList.remove("dragging");
     $$(".stack.dropping", cards).forEach(function (s) { s.classList.remove("dropping"); });
-    var was = dragged;
-    dragged = null;
-    if (was) setTimeout(function () { /* swallow the click that follows a drop */ }, 0);
+    setTimeout(function () { dragged = null; }, 0);  // swallow the click that follows a drop
   });
+  } // droppable
 
-  // touch drag: press and hold a card for 350 ms, then slide it onto another category
-  var hold = null, touchCard = null, ghost = null, lastTarget = null;
+  // touch: press and hold a card for 350 ms. Let go without moving and the card's menu opens;
+  // slide it (on the category grouping of your own deck) and it moves onto another category.
+  var hold = null, armed = null, touchCard = null, ghost = null, lastTarget = null, startX = 0, startY = 0;
+  function armTouch(card) {
+    armed = card;
+    card.classList.add("held");
+    if (navigator.vibrate) navigator.vibrate(20);
+  }
+  function startTouchDrag(t) {
+    touchCard = armed;
+    dragged = touchCard;
+    touchCard.classList.add("dragging");
+    ghost = touchCard.cloneNode(true);
+    ghost.classList.remove("dragging", "held");
+    ghost.style.cssText = "position:fixed;z-index:70;width:" + touchCard.offsetWidth + "px;pointer-events:none;opacity:.9;left:" + (t.clientX - touchCard.offsetWidth / 2) + "px;top:" + (t.clientY - 40) + "px;margin:0";
+    document.body.appendChild(ghost);
+  }
   cards.addEventListener("touchstart", function (e) {
     var card = e.target.closest(".c, .row");
     if (!card || e.touches.length !== 1) return;
     var t = e.touches[0];
-    hold = setTimeout(function () {
-      touchCard = card;
-      dragged = card;
-      card.classList.add("dragging");
-      ghost = card.cloneNode(true);
-      ghost.classList.remove("dragging");
-      ghost.style.cssText = "position:fixed;z-index:70;width:" + card.offsetWidth + "px;pointer-events:none;opacity:.9;left:" + (t.clientX - card.offsetWidth / 2) + "px;top:" + (t.clientY - 40) + "px;margin:0";
-      document.body.appendChild(ghost);
-      if (navigator.vibrate) navigator.vibrate(20);
-    }, 350);
+    startX = t.clientX; startY = t.clientY;
+    clearTimeout(hold);
+    hold = setTimeout(function () { armTouch(card); }, 350);
   }, { passive: true });
   cards.addEventListener("touchmove", function (e) {
-    if (!touchCard) { clearTimeout(hold); return; }
-    e.preventDefault();
     var t = e.touches[0];
+    var moved = Math.abs(t.clientX - startX) > 8 || Math.abs(t.clientY - startY) > 8;
+    if (!armed && !touchCard) { if (moved) clearTimeout(hold); return; }  // a plain scroll
+    if (armed && !touchCard) {
+      if (!moved || menu) return;
+      if (!canDrag) { armed.classList.remove("held"); armed = null; return; }  // sliding elsewhere: let the page scroll
+      startTouchDrag(t);
+    }
+    e.preventDefault();
     ghost.style.left = (t.clientX - touchCard.offsetWidth / 2) + "px";
     ghost.style.top = (t.clientY - 40) + "px";
     var under = document.elementFromPoint(t.clientX, t.clientY);
@@ -290,18 +895,33 @@
     if (st) st.classList.add("dropping");
     lastTarget = st;
   }, { passive: false });
-  function endTouch() {
+  function endTouch(e) {
     clearTimeout(hold);
-    if (!touchCard) return;
-    if (lastTarget) { lastTarget.classList.remove("dropping"); moveCard(touchCard, lastTarget); }
-    touchCard.classList.remove("dragging");
-    if (ghost) ghost.remove();
-    ghost = null; lastTarget = null; touchCard = null;
-    setTimeout(function () { dragged = null; }, 0);
+    var wasArmed = armed;
+    if (wasArmed) wasArmed.classList.remove("held");
+    armed = null;
+    if (touchCard) {
+      if (lastTarget) { lastTarget.classList.remove("dropping"); if (moveCardFn) moveCardFn(touchCard, lastTarget); }
+      touchCard.classList.remove("dragging", "held");
+      if (ghost) ghost.remove();
+      ghost = null; lastTarget = null; touchCard = null;
+      setTimeout(function () { dragged = null; }, 0);
+      return;
+    }
+    if (wasArmed && e.type === "touchend") {
+      // held still: the card's menu, where the finger was
+      if (e.cancelable) e.preventDefault();
+      swallowClick = true;
+      setTimeout(function () { swallowClick = false; }, 400);
+      if (!(menu && menuCard === wasArmed)) {
+        var t = e.changedTouches && e.changedTouches[0];
+        var r = wasArmed.getBoundingClientRect();
+        openMenu(wasArmed, t ? t.clientX : r.left + r.width / 2, t ? t.clientY : r.top + r.height / 2);
+      }
+    }
   }
   cards.addEventListener("touchend", endTouch);
   cards.addEventListener("touchcancel", endTouch);
-  } // own deck
   } // deck view
 
   // -- Archidekt social actions: like, bookmark, follow, comments ------------------------------------

@@ -20,7 +20,7 @@ from typing import Any
 
 from . import deck_stats
 from .archidekt import Deck
-from .db import Database
+from .db import Database, _like
 from .decklist import DecklistError, front_faces, parse_decklist, to_text
 from .decks import DeckError, DeckService, _clean_deck_id, current_client, deck_to_text
 from .mf_proxy import MysticForgeProxy, is_busy
@@ -323,16 +323,28 @@ class ReportService:
             ).fetchone()
         return dict(row) if row else None
 
-    def list(self, sub: str, deck_id: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
-        """Newest first, with the trend numbers but not the full report."""
-        limit = max(1, min(int(limit), 200))
+    def list(
+        self,
+        sub: str,
+        deck_id: str | None = None,
+        limit: int = 20,
+        *,
+        search: str | None = None,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Newest first, with the trend numbers but not the full report. ``search`` matches the
+        deck name, case-insensitively."""
+        limit = max(1, min(int(limit), 2100))  # the History page reads up to its last page plus one
         sql = "SELECT * FROM reports WHERE owner_sub = ?"
         args: list[Any] = [sub]
         if deck_id:
             sql += " AND deck_id = ?"
             args.append(str(deck_id))
-        sql += " ORDER BY taken_at DESC, rowid DESC LIMIT ?"
-        args.append(limit)
+        if search:
+            sql += " AND deck_name LIKE ? ESCAPE '\\'"
+            args.append(_like(search))
+        sql += " ORDER BY taken_at DESC, rowid DESC LIMIT ? OFFSET ?"
+        args += [limit, max(0, int(offset))]
         with self.db._lock:
             rows = self.db._conn.execute(sql, args).fetchall()
         return [self._summary(dict(r)) for r in rows]
@@ -347,6 +359,14 @@ class ReportService:
         out["goldfish"] = json.loads(d["goldfish_json"]) if d.get("goldfish_json") else None
         out["validation"] = json.loads(d["validation_json"]) if d.get("validation_json") else None
         return out
+
+    def decks_seen(self, sub: str) -> dict[str, str]:
+        """The decks the member has reports for: id -> last known name."""
+        with self.db._lock:
+            rows = self.db._conn.execute(
+                "SELECT deck_id, deck_name FROM reports WHERE owner_sub = ? ORDER BY taken_at", (sub,)
+            ).fetchall()
+        return {str(r["deck_id"]): str(r["deck_name"] or "") for r in rows}
 
     def series(self, sub: str, deck_id: str, limit: int = 60) -> list[dict[str, Any]]:
         """Oldest first: taken_at plus the trend numbers, for charts."""
@@ -385,6 +405,7 @@ class ReportService:
             "has_goldfish": bool(goldfish and goldfish.get("ok")),
             "has_validation": bool(validation and validation.get("ok")),
             "bracket_estimate": (stats.get("bracket_estimate") or {}).get("bracket"),
+            "created_by_client": d.get("created_by_client"),
         }
 
 

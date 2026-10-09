@@ -25,6 +25,9 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from .mana import SPRITE
 
 THEME_COOKIE = "mtg_theme"
+# "auto" (unset) follows the window width; "desktop" asks a phone or the app for the computer layout.
+LAYOUT_COOKIE = "mtg_layout"
+LAYOUTS = ("auto", "desktop")
 FEEDBACK_SCRIPT = "/static/feedback.js"
 # The Content-Security-Policy of every page render() builds (some pages replace it with their own,
 # which keeps the same frame-ancestors and base-uri). form-action is last so sources can follow it.
@@ -36,6 +39,7 @@ DEFAULT_CSP = (
 )
 THEMES = ("system", "light", "dark")
 _theme: ContextVar[str] = ContextVar("mtg_theme", default="system")
+_layout: ContextVar[str] = ContextVar("mtg_layout", default="auto")
 _path: ContextVar[str] = ContextVar("mtg_path", default="/")
 # True while rendering for the Android app's WebView (its user agent carries "MTGAssistant/"):
 # pages then use the phone layout at every width and drop the website footer.
@@ -59,6 +63,58 @@ _LIGHT = """
     --red-tint:rgba(255,85,91,.16); --blue-tint:rgba(66,134,244,.14);
     --danger-text:#b3262e; --toolbar-active:#8a4600; /* dark values: #ff8086 and #fa890d */
     --shadow:0 3px 6px rgba(0,0,0,.25); --scrim:rgba(0,0,0,.4);
+"""
+
+# Tiles, sparklines, charts and the filter-bar select: shared by the deck, report and history
+# pages and copied into a report's self-contained HTML export.
+VIZ_CSS = """
+/* summary tiles, sparklines and the small script-free charts (deck page, reports, history trends) */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,6.5rem),1fr));gap:.5rem;
+  margin:0 0 .75rem}
+.tile{background:var(--surface-2);border:1px solid var(--border-soft);border-radius:3px;padding:.5rem .6rem;
+  display:flex;flex-direction:column;gap:.1rem;min-width:0}
+.tile b{font-size:1.25rem;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.tile span{color:var(--text-muted);font-size:.8rem;overflow-wrap:anywhere}
+.tile .spark{color:var(--orange);width:100%;height:36px}
+.tiles.wide{grid-template-columns:repeat(auto-fit,minmax(min(100%,10rem),1fr));gap:.75rem}
+.tiles.wide .tile{padding:.7rem .8rem;gap:.2rem} .tiles.wide .tile b{font-size:1.5rem}
+/* a confidence interval under a tile's number: a track with the interval filled in */
+.tile .ci{position:relative;display:block;height:6px;margin:.3rem 0 .1rem;border-radius:3px;
+  background:var(--surface-3);overflow:hidden}
+.tile .ci i{position:absolute;top:0;bottom:0;background:var(--orange);border-radius:3px}
+.bars{display:flex;align-items:flex-end;gap:.4rem;height:8rem;padding:.25rem 0;
+  border-bottom:1px solid var(--border)}
+.bars .bar{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;
+  min-width:0;font-size:.75rem}
+.bars .bar span{display:block;width:70%;background:var(--orange);border-radius:2px 2px 0 0}
+.bars .bar b{font-variant-numeric:tabular-nums;margin-bottom:.15rem}
+.bars .bar em{font-style:normal;font-weight:700;margin-top:.3rem;overflow-wrap:anywhere;text-align:center}
+.twocol{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr));gap:1rem}
+.twocol h3{margin-top:0}
+.pips li{display:flex;align-items:center;gap:.5rem;padding:.25rem 0;flex-wrap:wrap}
+.pips li span:nth-child(2){flex:1 1 5rem} .pips b{font-variant-numeric:tabular-nums}
+.pips i{font-style:normal;color:var(--text-muted);font-size:.86rem}
+/* SVG charts drawn on the server: lines and columns take their colours from the theme */
+.chart{min-width:0} .chart h3{margin:0 0 .4rem}
+.chart svg{display:block;width:100%;height:auto;color:var(--text-muted);font-size:11px;overflow:visible}
+.chart text{fill:currentColor} .chart .grid{stroke:var(--border-soft);stroke-width:1}
+.chart .axis{stroke:var(--border)} .chart .col{fill:var(--orange)} .chart .col.c2{fill:var(--blue)}
+.chart .s1{stroke:var(--orange)} .chart .s2{stroke:var(--blue)} .chart .s3{stroke:var(--green)}
+.chart .s4{stroke:var(--purple)} .chart polyline{fill:none;stroke-width:2.5;stroke-linejoin:round;
+  stroke-linecap:round} .chart circle.s1{fill:var(--orange)} .chart circle.s2{fill:var(--blue)}
+.chart circle.s3{fill:var(--green)} .chart circle.s4{fill:var(--purple)}
+.legend{display:flex;flex-wrap:wrap;gap:.3rem 1rem;margin:.4rem 0 0;padding:0;list-style:none;
+  font-size:.86rem}
+.legend li{display:inline-flex;align-items:center;gap:.4rem}
+.legend i{display:inline-block;width:14px;height:4px;border-radius:2px;background:var(--orange)}
+.legend .s2{background:var(--blue)} .legend .s3{background:var(--green)} .legend .s4{background:var(--purple)}
+.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr));gap:1rem 1.5rem;
+  margin:.5rem 0 0}
+/* a select with a leading icon (filter bars) */
+.sel{position:relative;display:block}
+.sel > svg{position:absolute;left:.75rem;top:50%;transform:translateY(-50%);color:var(--orange);
+  pointer-events:none}
+.sel select{padding-left:2.1rem}
 """
 
 CSS = (
@@ -128,27 +184,32 @@ svg.i{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:2;stroke-l
 .topbar .icon-btn{width:40px;padding:0;justify-content:center;font-size:1.2rem}
 .topbar .icon-btn img.av{width:28px;height:28px;border-radius:50%;object-fit:cover;display:block}
 
-/* dropdown menus (details/summary, no script): phatDropdown trigger + menu panel */
+/* dropdown menus (details/summary, no script): phatDropdown trigger + menu panel. The panel
+   styling is the shared .menu class, so a script-made menu (the deck page's card menu) looks the
+   same; details.dd only adds where its panel sits. */
 details.dd{position:relative;margin:0}
 details.dd > summary{list-style:none;cursor:pointer;user-select:none}
 details.dd > summary::-webkit-details-marker{display:none}
-details.dd .menu{position:absolute;top:calc(100% + .25rem);right:0;z-index:30;min-width:200px;
+.menu{z-index:30;min-width:200px;
   background:var(--surface-2);border-radius:var(--radius-panel);box-shadow:var(--shadow);padding:.25rem 0;
   display:flex;flex-direction:column}
+details.dd .menu{position:absolute;top:calc(100% + .25rem);right:0}
 details.dd .menu.left{left:0;right:auto}
-details.dd .menu a,details.dd .menu button,details.dd .menu .item{display:flex;align-items:center;gap:.6rem;
+.menu a,.menu button,.menu .item{display:flex;align-items:center;gap:.6rem;
   min-height:35px;padding:0 1rem;margin:0;width:100%;background:transparent;border:0;border-radius:0;
   color:var(--text);text-decoration:none;font:inherit;font-weight:400;font-size:1rem;cursor:pointer;
   text-align:left;white-space:nowrap;justify-content:flex-start}
-details.dd .menu a:hover,details.dd .menu button:hover,details.dd .menu a:focus-visible{
+.menu a:hover,.menu button:hover,.menu a:focus-visible,.menu button:focus-visible{
   background:var(--border);color:var(--text)}
-details.dd .menu .sep{height:1px;background:var(--border);margin:.25rem 0}
-details.dd .menu a.danger{color:var(--danger-text)}
-details.dd .menu .head{padding:.4rem 1rem .2rem;font-size:.8rem;font-weight:700;color:var(--menu-head);
+.menu button:disabled{color:var(--text-muted);cursor:default;background:transparent}
+.menu .sep{height:1px;background:var(--border);margin:.25rem 0}
+.menu a.danger,.menu button.danger{color:var(--danger-text);background:transparent;border:0}
+.menu button.danger:hover,.menu button.danger:focus-visible{background:var(--border);color:var(--danger-text)}
+.menu .head{padding:.4rem 1rem .2rem;font-size:.8rem;font-weight:700;color:var(--menu-head);
   text-transform:uppercase;letter-spacing:.04em}
-details.dd .menu form{margin:0;display:contents}
+.menu form{margin:0;display:contents}
 /* the chosen theme: --orange-text would be 4.0:1 on the light menu */
-details.dd .menu .on{color:var(--toolbar-active);font-weight:700}
+.menu .on{color:var(--toolbar-active);font-weight:700}
 /* a dropdown trigger styled like phatDropdown: bordered, 39px, orange chevron, label floating above */
 .field{position:relative;display:flex;flex-direction:column;gap:.3rem;min-width:0}
 .field > label,.field > .lbl{font-weight:700;margin:0;font-size:1rem}
@@ -366,7 +427,9 @@ details.disclosure[open] > summary::before{content:'\\25BE'}
 .plist form{margin:0;display:inline}
 .plist form button{margin:0;height:35px;padding:0 .7rem;width:auto}
 
-/* change list: the heart of the review page */
+"""
+    + VIZ_CSS
+    + """/* change list: the heart of the review page */
 .summary{display:flex;flex-wrap:wrap;gap:.5rem;margin:0 0 .75rem}
 .summary span{display:inline-block;padding:.25rem .65rem;border-radius:var(--radius);font-weight:700;
   font-size:.9rem;background:var(--surface-2);border:1px solid var(--border-soft)}
@@ -453,6 +516,13 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
 .home details.connect summary .addr{font-weight:400;font-size:.9rem;word-break:break-all}
 .home .panel-head{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin:0 0 .75rem}
 .home .panel-head h2{margin:0}
+/* placeholders while a deck list is still being read (decks.js swaps the real list in) */
+.skeleton>*{display:block;background:var(--surface-2);border:1px solid var(--border);
+  border-radius:var(--radius);animation:skeleton 1.4s ease-in-out infinite}
+.home .recent.skeleton>span{aspect-ratio:16/9}
+ul.decklist.skeleton>li{height:230px;list-style:none}
+@keyframes skeleton{50%{opacity:.55}}
+@media (prefers-reduced-motion:reduce){ .skeleton>*{animation:none} }
 /* Adaptive navigation after Android's window size classes. Compact (under 600px, any device): a
    bottom tab bar (Archidekt's floatingToolbar). Medium (600 to 899px) on a touch screen, such as
    an unfolded foldable or a tablet in a browser, and the Android app at every width from 600px:
@@ -665,6 +735,14 @@ def theme_from_cookie(value: str | None) -> str:
     return value if value in THEMES else "system"
 
 
+def layout_from_cookie(value: str | None) -> str:
+    return value if value in LAYOUTS else "auto"
+
+
+def current_layout() -> str:
+    return _layout.get()
+
+
 # The site navigation, in Archidekt's order of sections as far as the gateway has them: decks,
 # deck search, cards you own, scanning, then the gateway's own review pages. The same list feeds
 # the top bar on wide screens and the bottom tab bar on phones.
@@ -721,6 +799,10 @@ def render(
     ``heading=False`` leaves the <h1> to the body (deck banner)."""
     theme = current_theme()
     app = in_app()
+    # "Use desktop layout" (T-046): a wide fixed viewport, as a browser's "Desktop site" switch
+    # would give, so the width-based media queries pick the computer layout and the device zooms out;
+    # the app's forced rail is dropped too.
+    desktop = current_layout() == "desktop"
     nav = ""
     tabbar = ""
     cur = current or ""
@@ -767,8 +849,16 @@ def render(
             f"<form method='post' action='/theme'>{csrf_in}"
             f"<input type='hidden' name='next' value='{html.escape(current_path())}'>"
             f"{theme_items}</form>"
+            "<div class='sep'></div><div class='head'>Site layout</div>"
+            f"<form method='post' action='/layout'>{csrf_in}"
+            f"<input type='hidden' name='next' value='{html.escape(current_path())}'>"
+            f"<button name='layout' value='auto'{' class=on' if not desktop else ''}>"
+            f"{icon('check') if not desktop else '<span class=i></span>'}Fit the screen</button>"
+            f"<button name='layout' value='desktop'{' class=on' if desktop else ''}>"
+            f"{icon('check') if desktop else '<span class=i></span>'}Desktop layout</button></form>"
             "<div class='sep'></div>"
-            f"<form method='post' action='/logout'>{csrf_in}<button>{icon('x')}Sign out</button></form>"
+            f"<form method='post' action='/logout'>{csrf_in}"
+            f"<button data-busy-text='Signing out…'>{icon('x')}Sign out</button></form>"
             "</div></details>"
         )
         nav = (
@@ -804,14 +894,21 @@ def render(
     h1 = f"<h1>{html.escape(title)}</h1>" if heading else ""
     classes = " ".join(
         c
-        for c in ("wide" if wide else "", "has-tabbar" if tabbar else "", "app" if app else "", body_class)
+        for c in (
+            "wide" if wide else "",
+            "has-tabbar" if tabbar else "",
+            "app" if app and not desktop else "",
+            "desktop" if desktop else "",
+            body_class,
+        )
         if c
     )
+    viewport = "width=1100" if desktop else "width=device-width, initial-scale=1, viewport-fit=cover"
     main_cls = "wrap panes" if panes else "wrap"
     doc = (
         f"<!doctype html><html lang='en'{f' data-theme={theme}' if theme != 'system' else ''}>"
         "<head><meta charset='utf-8'>"
-        "<meta name='viewport' content='width=device-width, initial-scale=1, viewport-fit=cover'>"
+        f"<meta name='viewport' content='{viewport}'>"
         "<meta name='referrer' content='no-referrer'>"
         f"<meta name='color-scheme' content='{'dark light' if theme == 'system' else theme}'>"
         "<meta name='theme-color' content='#111111'>"
@@ -866,6 +963,7 @@ class ThemeMiddleware:
             await self.app(scope, receive, send)
             return
         value = None
+        layout = None
         app = False
         for k, v in scope.get("headers", []):
             if k == b"cookie":
@@ -873,9 +971,12 @@ class ThemeMiddleware:
                     name, _, val = part.strip().partition("=")
                     if name == THEME_COOKIE:
                         value = val.strip()
+                    elif name == LAYOUT_COOKIE:
+                        layout = val.strip()
             elif k == b"user-agent" and APP_UA_MARK in v.decode("latin-1", "replace"):
                 app = True
         token = _theme.set(theme_from_cookie(value))
+        ltoken = _layout.set(layout_from_cookie(layout))
         path = scope.get("path") or "/"
         ptoken = _path.set(path)
         atoken = _app.set(app)
@@ -883,6 +984,7 @@ class ThemeMiddleware:
             await self.app(scope, receive, send)
         finally:
             _theme.reset(token)
+            _layout.reset(ltoken)
             _path.reset(ptoken)
             _app.reset(atoken)
 

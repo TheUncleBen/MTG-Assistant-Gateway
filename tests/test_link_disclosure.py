@@ -299,6 +299,7 @@ async def test_password_and_tokens_never_reach_the_logs(
     assert structured(await call(h, token, "list_my_decks"))["ok"] is True
     issued = set(ark.tokens)
     ark.expire_access_tokens()  # forces a refresh on the next use
+    h.app.state.gateway.decks.deck_lists.drop("user-1")  # a cached list would not go to Archidekt
     assert structured(await call(h, token, "list_my_decks"))["ok"] is True
     assert ark.refresh_calls >= 1
     csrf = await b.csrf()

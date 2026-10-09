@@ -211,3 +211,64 @@ def test_no_page_renders_a_datalist(server: Server) -> None:
         text = h.get(path).text
         assert "<datalist" not in text, path
         assert "data-suggest=" in text, path
+
+
+def test_sign_out_acts_on_the_first_click_and_says_so(server: Server) -> None:
+    """T-015: the Sign out button shows 'Signing out…' at once and locks itself, so a second press
+    does nothing (feedback.js). The submit itself is swallowed here so the page stays inspectable;
+    the server side of sign-out is covered by tests/test_web_hygiene.py."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = server.sign_in()
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": 1366, "height": 800})
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        # runs after feedback.js's document listener (window, bubble phase): count and stop submits
+        ctx.add_init_script(
+            "window.__submits = 0; window.addEventListener('submit', e => { window.__submits++;"
+            " e.preventDefault(); });"
+        )
+        page = ctx.new_page()
+        page.goto(f"{server.base}/account", wait_until="networkidle")
+        button = page.locator(".form-actions form[action='/logout'] button:not([name])")
+        button.click()
+        page.wait_for_function(  # the lock comes a tick after the form is handed to the browser
+            "() => { const b = document.querySelector(\".form-actions form[action='/logout'] button\");"
+            " return b.getAttribute('aria-busy') === 'true' && b.textContent.trim() === 'Signing out…'"
+            " && b.disabled; }",
+            timeout=3000,
+        )
+        button.click(force=True)  # a second press while it works
+        assert page.evaluate("() => window.__submits") == 1
+        assert page.evaluate("() => document.documentElement.scrollWidth") <= 1366
+        browser.close()
+
+
+def test_desktop_layout_switch_gives_a_phone_the_computer_layout(server: Server) -> None:
+    """T-046: with the Desktop layout cookie a phone gets a 1100 px viewport (as a browser's Desktop
+    site switch would), so the width queries show the top bar instead of the bottom tab bar."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = server.sign_in()
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        phone = {"viewport": {"width": 390, "height": 800}, "is_mobile": True, "has_touch": True}
+        ctx = browser.new_context(**phone)
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        page.goto(f"{server.base}/decks", wait_until="networkidle")
+        assert page.locator(".tabbar").is_visible() and not page.locator(".topbar nav a").first.is_visible()
+        ctx.add_cookies([{"name": "mtg_layout", "value": "desktop", "url": server.base}])
+        page.goto(f"{server.base}/decks", wait_until="networkidle")
+        assert page.evaluate("() => document.documentElement.clientWidth") == 1100
+        assert not page.locator(".tabbar").is_visible() and page.locator(".topbar nav a").first.is_visible()
+        # a one-pixel rounding of the 1100 -> 390 scaling is not an overflow (no element crosses the edge)
+        assert page.evaluate("() => document.documentElement.scrollWidth") <= 1101
+        browser.close()

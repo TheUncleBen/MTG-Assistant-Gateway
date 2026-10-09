@@ -84,6 +84,22 @@
 
     var items = [], active = -1, timer = null, inflight = null, seq = 0, shownFor = "";
     var rich = input.hasAttribute("data-suggest-rich"), peeking = null;
+    // data-suggest-qty: a count in front ("3 sol ring") is kept out of the lookup and kept on pick
+    var qtyMode = input.hasAttribute("data-suggest-qty");
+    var pendingEnter = false;  // Enter pressed while the list still showed an older text
+    function split(raw) {
+      var m = qtyMode ? /^(\s*\d{1,2}\s*[xX]?\s+)(.*)$/.exec(raw) : null;
+      return m ? { prefix: m[1], rest: m[2] } : { prefix: "", rest: raw };
+    }
+    function text() { return split(input.value).rest; }
+    function emit(type, detail) { input.dispatchEvent(new CustomEvent(type, { bubbles: true, detail: detail })); }
+    // the row Enter would take: the highlighted one, else the first
+    function announce() {
+      var li = items[active >= 0 ? active : 0];
+      if (!li) return;
+      var name = li.getAttribute("data-name");
+      emit("suggest:active", { name: name, card: cards[fold(name)] || null, implicit: active < 0 });
+    }
     // data-suggest="static": the choices come with the page (data-options: a JSON list of
     // labels, or of {l: label, v: value}); picking fills the label, the form reads it by name.
     var fixed = null;
@@ -93,12 +109,14 @@
     }
 
     function close() {
+      var was = !list.hidden;
       list.hidden = true;
       list.textContent = "";
       items = [];
       active = -1;
       input.setAttribute("aria-expanded", "false");
       input.removeAttribute("aria-activedescendant");
+      if (was) emit("suggest:close", {});
     }
     function setActive(i) {
       if (active >= 0 && items[active]) items[active].setAttribute("aria-selected", "false");
@@ -107,6 +125,7 @@
       items[i].setAttribute("aria-selected", "true");
       input.setAttribute("aria-activedescendant", items[i].id);
       if (items[i].scrollIntoView) items[i].scrollIntoView({ block: "nearest" });
+      announce();
     }
     /* Rich rows: the names show at once; one request then brings mana cost, type line and a small
        picture for the names not seen before, and each row is decorated in place. */
@@ -149,13 +168,14 @@
           missing.forEach(function (n) { if (!(fold(n) in cards)) cards[fold(n)] = null; });
           if (shownFor !== shown || list.hidden) return;
           items.forEach(function (li) { decorate(li, cards[fold(li.getAttribute("data-name"))]); });
+          announce();  // the card details (oracle id, picture) are known now
         })
         .catch(function () {});
     }
     function pick(i) {
       var name = items[i] ? items[i].getAttribute("data-name") : "";
       if (!name) return;
-      input.value = name;
+      input.value = split(input.value).prefix + name;
       close();
       input.dispatchEvent(new CustomEvent("suggest:pick", { bubbles: true, detail: { name: name, card: cards[fold(name)] || null } }));
       input.dispatchEvent(new Event("change", { bubbles: true }));
@@ -197,9 +217,11 @@
       input.setAttribute("aria-expanded", "true");
       shownFor = q;
       if (rich && names.length) peek(names);
+      announce();
+      if (pendingEnter) { pendingEnter = false; if (names.length) pick(0); }
     }
     function lookup() {
-      var raw = input.value, q = fold(raw);
+      var raw = text(), q = fold(raw);
       if (q.length < MIN) { close(); if (inflight) inflight.abort(); return; }
       if (fixed) { show(narrow(fixed, q), q); return; }
       if (memory[q]) { show(memory[q], q); return; }
@@ -228,26 +250,32 @@
           var names = (d.names || []).slice(0, LIMIT);
           memory[q] = names;
           if (names.length < LIMIT) complete[q] = true;
-          if (fold(input.value) === q) show(names, q);
+          if (fold(text()) === q) show(names, q);
         })
         .catch(function () { /* aborted or offline: keep what is shown */ });
     }
     input.addEventListener("input", function () {
       clearTimeout(timer);
-      var q = fold(input.value);
+      pendingEnter = false;
+      var q = fold(text());
       if (fixed || memory[q]) { lookup(); return; }   // known text: no wait at all
       timer = setTimeout(lookup, DELAY);
     });
-    input.addEventListener("focus", function () { if (fold(input.value).length >= MIN && !items.length) lookup(); });
+    input.addEventListener("focus", function () { if (fold(text()).length >= MIN && !items.length) lookup(); });
     input.addEventListener("blur", function () { setTimeout(close, 0); });
     input.addEventListener("keydown", function (e) {
       if (list.hidden) {
-        if (e.key === "ArrowDown" && fold(input.value).length >= MIN) { e.preventDefault(); lookup(); }
+        if (e.key === "ArrowDown" && fold(text()).length >= MIN) { e.preventDefault(); lookup(); }
         return;
       }
       if (e.key === "ArrowDown") { e.preventDefault(); if (items.length) setActive((active + 1) % items.length); }
       else if (e.key === "ArrowUp") { e.preventDefault(); if (items.length) setActive((active - 1 + items.length) % items.length); }
-      else if (e.key === "Enter") { if (active >= 0) { e.preventDefault(); pick(active); } else if (items.length && input.hasAttribute("data-suggest-submit") && shownFor === fold(input.value)) { e.preventDefault(); pick(0); } else close(); }
+      else if (e.key === "Enter") { if (active >= 0) { e.preventDefault(); pick(active); } else if (items.length && input.hasAttribute("data-suggest-submit")) {
+        e.preventDefault();
+        // the list belongs to the current text: take its first row; an older list: take the first
+        // row of the answer that is on its way (typing again cancels that)
+        if (shownFor === fold(text())) pick(0); else pendingEnter = true;
+      } else close(); }
       else if (e.key === "Escape") { e.preventDefault(); close(); }
       else if (e.key === "Tab") { close(); }
     });

@@ -101,6 +101,25 @@ def test_add_a_card_with_rich_suggestions(server: Server, width: int) -> None:
         assert page.locator(".pendingbox .n").inner_text() == "1"
         assert page.evaluate("() => document.activeElement.id") == "addname"
         assert box.input_value() == ""
+        # C-11 search bar: a count in front adds that many, a chip picks the category, and on wide
+        # screens the highlighted card's printings float beside the list (a click adds that printing)
+        page.locator(".targets .tchip", has_text="Land").first.click()
+        assert page.evaluate("() => document.activeElement.id") == "addname"
+        box.press_sequentially("3 sol r", delay=30)
+        page.locator("[role=option] mark", has_text="Sol R").first.wait_for(timeout=3000)  # list for "sol r"
+        assert page.locator("[role=option]").first.get_attribute("data-name") == "Sol Ring"
+        if width >= 900:
+            page.locator(".addprints:visible .print").first.wait_for(timeout=3000)
+            page.locator(".addprints .print").first.click()
+            status = page.locator(".addstatus").inner_text()
+            assert "Added 3 × Sol Ring (" in status and "to Land" in status, status
+        else:
+            assert page.locator(".addprints:visible").count() == 0
+            box.press("Enter")
+            assert "Added 3 × Sol Ring to Land" in page.locator(".addstatus").inner_text()
+        assert page.locator(".pendingbox .n").inner_text() == "1"  # the same card, one pending row
+        assert page.locator(".addprints:visible").count() == 0 and box.input_value() == ""
+        page.locator(".targets .tchip", has_text="Auto").click()
         # a card the deck does not hold yet becomes a new row with its picture and mana cost
         box.press_sequentially("oathsw", delay=30)
         page.locator("[role=option]").first.wait_for(timeout=3000)
