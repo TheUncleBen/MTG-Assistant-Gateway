@@ -9,6 +9,7 @@ same proposal flow: nothing here talks to Archidekt directly.
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import json
 import logging
@@ -20,7 +21,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from . import deck_stats, modes
-from .decks import DeckError, current_client, scopes_allow_writes
+from .decks import DeckError, current_client, edit_mismatches, parse_changes, scopes_allow_writes
 from .pages import BROWSER_CLIENT_ID, _csrf, browser_session, read_limited
 from .views import deck_brief, deck_out
 
@@ -33,6 +34,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 MAX_JSON = 2_000_000
+# The deck page's own edit (POST /decks/{id}/edit) re-reads the deck after the apply; when
+# Archidekt's read still shows the old rows it waits this long and reads once more.
+EDIT_REREAD_DELAY = 1.5
 STATUS_FOR = {
     "invalid": 400,
     "not_found": 404,
@@ -241,6 +245,117 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         if ref.startswith("snap_") or (not ref.isdigit() and "/" not in ref and "." not in ref):
             return parse_deck(decks.snapshot(sub, ref.removeprefix("snap_"))["deck"])
         return await decks.get_any_deck(sub, ref)
+
+    # -- the deck page's own edits -------------------------------------------
+    @route("/decks/{deck_id}/edit", "POST", write=True)
+    async def edit_deck(request: Request, who: Caller) -> Response:
+        """One edit made on the deck page itself (the card menu's quantity and category items,
+        the viewer's buttons, a drag between stacks). It runs the proposals path exactly: propose,
+        the hand-edit confirmation rule, apply with its snapshot as the member's own press; then
+        the deck is read again from Archidekt and the answer carries the touched rows, the
+        freshly computed checks and the re-rendered Legality chip and Deck checks panel, so the
+        page redraws in place. Body: ``{changes: [1..40]}`` (``confirmed: true`` after a
+        needs_confirm answer) or ``{proposal_id}`` to apply the proposal a needs_confirm answer
+        named; ``{refresh: true, names: [...]}`` only reads the deck again (the page's follow-up
+        when an answer was stale). Browser session only; apps propose through /api/v1/proposals."""
+        from .archidekt import front_face, parse_deck
+        from .deckpage import checks_panel_html, legality_chip_html, legality_panel_html
+
+        if who.via != "browser":
+            raise DeckError(
+                "browser_required",
+                "This is the deck page's own save; apps propose through /api/v1/proposals.",
+            )
+        data = await json_body(request)
+        if isinstance(data, Response):
+            return data
+        deck_id = str(request.path_params["deck_id"])
+
+        def view(deck: Any, touched: set[str], *, stale: bool) -> dict[str, Any]:
+            """The rows of the touched cards and the page fragments, from one read of the deck."""
+            stats = deck_stats.compute(deck)
+            checks = stats.get("checks") or {}
+            return {
+                "stale": stale,
+                "rows": [
+                    {
+                        "name": c.name,
+                        "qty": c.quantity,
+                        "zone": "main" if deck.in_deck(c) else "side",
+                        "categories": list(c.categories),
+                        "relation_id": c.relation_id,
+                    }
+                    for c in deck.cards
+                    if front_face(c.name).casefold() in touched
+                ],
+                "stats": {
+                    "legal": bool(deck.format) and not stats.get("legality_problems"),
+                    "problems": stats.get("legality_problems") or [],
+                    "checks": checks,
+                    "checks_ok": bool(checks.get("ok", True)),
+                    "card_count": stats.get("card_count", 0),
+                    "distinct": stats.get("distinct", 0),
+                    "land_count": stats.get("land_count", 0),
+                    "side_count": sum(c.quantity for c in deck.side_cards),
+                    "price_total": stats.get("price_total"),
+                    "salt_total": stats.get("salt_total"),
+                    "format": deck.format,
+                },
+                "banner_html": legality_chip_html(deck, stats),
+                "checks_html": checks_panel_html(deck, stats),
+                "legality_html": legality_panel_html(deck, stats),
+            }
+
+        if data.get("refresh") is True:
+            # The page's one follow-up after a stale answer: the deck read again, nothing written.
+            names = data.get("names")
+            if not isinstance(names, list) or len(names) > 40 or not all(isinstance(n, str) for n in names):
+                raise DeckError("invalid", "names must be a list of up to 40 card names")
+            deck = await decks.get_own_deck(who.sub, deck_id)
+            return ok({"applied": None, **view(deck, {front_face(n).casefold() for n in names}, stale=False)})
+        pid = data.get("proposal_id")
+        if pid is not None:
+            if not isinstance(pid, str) or not pid:
+                raise DeckError("invalid", "proposal_id must be a string")
+            p = decks.describe(who.sub, pid)
+            if p.get("kind") != "edit" or str(p.get("deck_id")) != deck_id.strip():
+                raise DeckError("invalid", "That proposal is not an edit of this deck.")
+        else:
+            p = await decks.propose(who.sub, deck_id, data.get("changes"))
+            why = modes.hand_edit_confirm("edit", p.get("rows"))
+            if why and data.get("confirmed") is not True:
+                pid = p["proposal_id"]
+                return ok({"applied": False, "needs_confirm": True, "why": why, "proposal_id": pid}, 201)
+        pid = p["proposal_id"]
+        if not s.writes_enabled:
+            # kept for review, like every proposal while writes are off; the page goes there
+            return ok({"applied": False, "proposal_id": pid, "review_url": f"/proposals/{pid}"}, 201)
+        result = await decks.apply(who.sub, pid, via="browser")
+        applied = result.get("state") == "applied"
+        out: dict[str, Any] = {
+            "applied": applied,
+            "proposal_id": pid,
+            "snapshot_id": result.get("snapshot_id"),
+            "result": result,
+        }
+        if not applied:  # a large edit still running: the page says so and offers the review page
+            return ok(out, 202)
+        changes = parse_changes(result.get("changes") or p.get("changes"))
+        # The apply verified the deck once; this read is the one the page draws from. Archidekt's
+        # reads have been seen to lag a write, so a deck that does not show the change yet is
+        # read once more after a short pause, and the answer says when it still has not caught up.
+        deck = await decks.get_own_deck(who.sub, deck_id)
+        stale = False
+        try:
+            before = parse_deck(decks.snapshot(who.sub, str(result.get("snapshot_id")))["deck"])
+            if edit_mismatches(before, changes, deck):
+                await asyncio.sleep(EDIT_REREAD_DELAY)
+                deck = await decks.get_own_deck(who.sub, deck_id)
+                stale = bool(edit_mismatches(before, changes, deck))
+        except DeckError:  # no snapshot to compare with: answer with the read as it is
+            logger.info("edit %s: could not compare the re-read deck with its snapshot", pid)
+        out.update(view(deck, {front_face(ch.card_name).casefold() for ch in changes}, stale=stale))
+        return ok(out, 201)
 
     # -- proposals ------------------------------------------------------------
     @route("/proposals", "GET")

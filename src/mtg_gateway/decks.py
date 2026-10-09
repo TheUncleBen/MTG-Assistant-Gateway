@@ -2110,25 +2110,7 @@ class DeckService:
         await self._rows_unchanged(sub, deck)  # lookups and backup take a while: check again
         await self._send(sub, deck.id, payload, progress)
         verified = await self.get_deck(sub, deck.id)
-        # The counts after the count changes, less what a category move takes out of the deck
-        # proper (into the maybeboard) and plus what it brings in; the side counts the other way.
-        expected = dict(after)
-        expected_side = dict(after_side)
-        for name, qty in leaving_deck(deck, recategorise).items():
-            expected[name] = expected.get(name, 0) - qty
-            expected_side[name] = expected_side.get(name, 0) + qty
-        for name, qty in entering_deck(deck, recategorise).items():
-            expected[name] = expected.get(name, 0) + qty
-            expected_side[name] = expected_side.get(name, 0) - qty
-        mismatches = _mismatches(verified.counts_by_name(), {n: q for n, q in expected.items() if q > 0})
-        mismatches = sorted(
-            set(mismatches)
-            | set(
-                _mismatches(verified.side_counts_by_name(), {n: q for n, q in expected_side.items() if q > 0})
-            )
-            | set(_category_mismatches(verified, recategorise))
-            | set(_printing_mismatches(verified, specs))
-        )
+        mismatches = edit_mismatches(deck, changes, verified, specs)
         result = {
             "snapshot_id": snapshot_id,
             **backup,
@@ -3464,6 +3446,34 @@ def _partial_note(progress: dict[str, Any]) -> str:
     elif progress.get("deck_id"):
         note += f" The new deck is {progress['deck_id']} on Archidekt."
     return note
+
+
+def edit_mismatches(
+    before: Deck, changes: list[Change], now: Deck, specs: list[dict[str, Any]] | None = None
+) -> list[str]:
+    """Names (with "printing or finish" where that is what differs) whose rows on ``now`` do not
+    show ``changes`` applied to ``before``: the apply's verify, and the edit endpoint's test of
+    whether a re-read has caught up with the write. Empty when the deck matches. ``specs`` are
+    the printing specs the apply resolved (``_printing_entries`` fills in each one's modifier);
+    without them the printing changes are not compared."""
+    _before, after, _rows, _before_side, after_side = plan_zones(before, changes)
+    recategorise, _lines = category_plan(before, changes)
+    # The counts after the count changes, less what a category move takes out of the deck
+    # proper (into the maybeboard) and plus what it brings in; the side counts the other way.
+    expected = dict(after)
+    expected_side = dict(after_side)
+    for name, qty in leaving_deck(before, recategorise).items():
+        expected[name] = expected.get(name, 0) - qty
+        expected_side[name] = expected_side.get(name, 0) + qty
+    for name, qty in entering_deck(before, recategorise).items():
+        expected[name] = expected.get(name, 0) + qty
+        expected_side[name] = expected_side.get(name, 0) - qty
+    return sorted(
+        set(_mismatches(now.counts_by_name(), {n: q for n, q in expected.items() if q > 0}))
+        | set(_mismatches(now.side_counts_by_name(), {n: q for n, q in expected_side.items() if q > 0}))
+        | set(_category_mismatches(now, recategorise))
+        | set(_printing_mismatches(now, specs or []))
+    )
 
 
 def _mismatches(got: dict[str, int], want: dict[str, int]) -> list[str]:

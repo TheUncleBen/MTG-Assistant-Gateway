@@ -247,6 +247,22 @@ def featured(deck: Deck) -> DeckCard | None:
     return None
 
 
+def legality_chip_html(deck: Deck, stats: dict[str, Any] | None) -> str:
+    """The banner's Legality chip: green when every card is legal in the deck's format, red with
+    the number of problems otherwise, nothing for a deck without a format. Rendered again by the
+    edit endpoint (api.py) so the page can swap it in after a card changes."""
+    stats = stats or {}
+    legal_problems = stats.get("legality_problems") or []
+    if not deck.format:
+        return ""
+    if not legal_problems:
+        return (
+            f"<span class='legal ok' title='Legal in {esc(deck.format or 'this format')}'>"
+            f"{icon('check')} Legality</span>"
+        )
+    return f"<span class='legal bad' title='{len(legal_problems)} problem(s)'>{icon('x')} Legality</span>"
+
+
 def banner_html(
     deck: Deck,
     stats: dict[str, Any] | None,
@@ -261,15 +277,7 @@ def banner_html(
     style = f" style=\"--art:url('{esc(art_url)}')\"" if art_url else ""
     bracket = stats.get("bracket_estimate") or {}
     bracket_names = {1: "Exhibition (1)", 2: "Core (2)", 3: "Upgraded (3)", 4: "Optimized (4)", 5: "cEDH (5)"}
-    legal_problems = stats.get("legality_problems") or []
-    legality = (
-        f"<span class='legal ok' title='Legal in {esc(deck.format or 'this format')}'>"
-        f"{icon('check')} Legality</span>"
-        if deck.format and not legal_problems
-        else f"<span class='legal bad' title='{len(legal_problems)} problem(s)'>{icon('x')} Legality</span>"
-        if deck.format
-        else ""
-    )
+    legality = legality_chip_html(deck, stats)
     privacy = (
         f"<span class='privacy' title='Private deck'>{icon('eye-off')}</span>"
         if deck.private
@@ -507,7 +515,7 @@ def text_row(card: DeckCard, *, deck: Deck, owned: dict[str, int] | None = None)
     cls = " side" if not deck.in_deck(card) else ""
     return (
         f"<li class='row{cls}' data-name='{esc(card.name.lower())}' data-card='{esc(card.name)}'"
-        f"{_card_data(card)}>"
+        f"{_card_data(card, deck)}>"
         f"<span class='q'>{card.quantity}</span>"
         f"<span class='n'>{_label_dot(card)}{_owned_dot(card, owned)}<span "
         f"class='name'>{esc(card.name)}</span>"
@@ -557,12 +565,21 @@ def card_view_attrs(card: DeckCard, *, img: str | None = None) -> str:
     )
 
 
-def _card_data(card: DeckCard) -> str:
-    """Data attributes the page script reads for the card viewer and for dragging between stacks."""
-    return card_view_attrs(card, img=card_image(card))
+def _card_data(card: DeckCard, deck: Deck) -> str:
+    """Data attributes the page script reads for the card viewer and for its own edits (the card
+    menu, the viewer's quantity buttons, dragging between stacks): the row's count, zone (main
+    or side), first category (empty when Archidekt has none) and relation id, which pick the row
+    an edit targets when the same card sits in the deck and on the maybeboard."""
+    zone = "main" if deck.in_deck(card) else "side"
+    cat = card.categories[0] if card.categories else ""
+    rel = f" data-rel='{card.relation_id}'" if card.relation_id is not None else ""
+    return (
+        card_view_attrs(card, img=card_image(card))
+        + f" data-qty='{card.quantity}' data-zone='{zone}' data-cat='{esc(cat)}'{rel}"
+    )
 
 
-def image_card(card: DeckCard, *, owned: dict[str, int] | None = None) -> str:
+def image_card(card: DeckCard, *, deck: Deck, owned: dict[str, int] | None = None) -> str:
     img = card_image(card)
     body = (
         f"<img src='{esc(img)}' alt='{esc(card.name)}' loading='lazy'>"
@@ -580,7 +597,8 @@ def image_card(card: DeckCard, *, owned: dict[str, int] | None = None) -> str:
     if card.game_changer:
         extra += "<span class='corner gc' title='Game changer'></span>"
     return (
-        f"<div class='c' data-name='{esc(card.name.lower())}' data-card='{esc(card.name)}'{_card_data(card)} "
+        f"<div class='c' data-name='{esc(card.name.lower())}' data-card='{esc(card.name)}'"
+        f"{_card_data(card, deck)} "
         f"title='{esc(card.name)}' tabindex='0' role='button'>{body}{qty}{extra}"
         f"{_finish_badge(card)}{_owned_dot(card, owned)}</div>"
     )
@@ -619,14 +637,36 @@ def cards_html(
                 + "</ul>"
             )
         else:
-            body = "<div class='cards'>" + "".join(image_card(c, owned=owned) for c in cards) + "</div>"
+            imgs = "".join(image_card(c, deck=deck, owned=owned) for c in cards)
+            body = f"<div class='cards'>{imgs}</div>"
         sections.append(f"<section class='stack' data-group='{esc(name)}'>{head}{body}</section>")
     # data-own and data-group let deck.js offer drag-and-drop between categories on the member's
     # own deck (the drops become one proposal, applied from the review page like every other edit).
-    droppable = " data-own='1'" if own and group == "category" else ""
+    # data-own marks the member's own deck (the card menu and the viewer offer edits); data-drop
+    # the category grouping on it, where cards drag between stacks. The card menu's "Move to" list
+    # (deck.js) names the deck's own categories whatever the grouping, and knows the maybeboard.
+    cats = [c["name"] for c in deck.categories if isinstance(c.get("name"), str)]
+    droppable = (
+        " data-own='1'"
+        + (" data-drop='1'" if group == "category" else "")
+        + f" data-cats='{esc(json.dumps(cats, separators=(',', ':')))}'"
+        f" data-side='{esc(deck.side_category())}'"
+        f" data-excluded='{esc(json.dumps(sorted(excluded), separators=(',', ':')))}'"
+        if own
+        else ""
+    )
+    # The card menu (deck.js) draws these icons; a template keeps them out of the page's flow.
+    icons = (
+        "<template class='icons'>"
+        + "".join(
+            f"<span data-ic='{n}'>{icon(n)}</span>"
+            for n in ("eye", "swap", "tag", "eye-off", "x", "edit", "external")
+        )
+        + "</template>"
+    )
     return (
-        f"<div class='deckview {esc(view)}' id='cards' data-deck='{esc(deck.id)}'{droppable}>"
-        f"{''.join(sections)}</div>"
+        f"<div class='deckview {esc(view)}' id='cards' data-deck='{esc(deck.id)}' "
+        f"data-grouping='{esc(group)}'{droppable}>{icons}{''.join(sections)}</div>"
     )
 
 
@@ -692,50 +732,10 @@ def _odds_html(deck: Deck, cards: list[DeckCard]) -> str:
     )
 
 
-def stats_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
-    if not stats:
-        return ""
-    pips = {k: float(v) for k, v in (stats.get("colour_pips") or {}).items()}
-    sources = {k: float(v) for k, v in (stats.get("mana_sources") or {}).items() if k in WUBRG}
-    cards = deck.main_cards
-    cost_cards = Counter()
-    prod_cards = Counter()
-    for c in cards:
-        for col in mana_pips(c.mana_cost):
-            cost_cards[col] += c.quantity
-        for col in c.mana_production or {}:
-            if col in WUBRG:
-                prod_cards[col] += c.quantity
-    pip_total = sum(pips.values()) or 1
-    src_total = sum(sources.values()) or 1
-    colour_cards = "".join(
-        "<div class='ccard'>"
-        f"<div class='cname'><i class='pip pip-{col}'></i> {COLOUR_NAMES[col]}</div>"
-        f"<div class='lbl'>Cost</div><div class='pbar'><span class='fill seg-{col}' "
-        f"style='width:{100 * pips.get(col, 0) / pip_total:.0f}%'></span>"
-        f"<b>{100 * pips.get(col, 0) / pip_total:.0f}%</b></div>"
-        f"<div class='sub'>{pips.get(col, 0):g} pips - {cost_cards.get(col, 0)} cards</div>"
-        f"<div class='lbl'>Production</div><div class='pbar'><span class='fill seg-{col}' "
-        f"style='width:{100 * sources.get(col, 0) / src_total:.0f}%'></span>"
-        f"<b>{100 * sources.get(col, 0) / src_total:.0f}%</b></div>"
-        f"<div class='sub'>{sources.get(col, 0):g} mana - {prod_cards.get(col, 0)} cards</div>"
-        "</div>"
-        for col in WUBRG
-        if pips.get(col) or sources.get(col)
-    )
-    curve = stats.get("mana_curve") or {}
-    top = max([int(v or 0) for v in curve.values()] + [1])
-    bars = "".join(
-        f"<div class='bar'><b>{int(v or 0)}</b>"
-        f"<span style='height:{max(2, round(100 * int(v or 0) / top))}%'></span>"
-        f"<em>{esc(k.replace('7+', '7+'))}</em></div>"
-        for k, v in curve.items()
-    )
-    mv_total = sum(c.cmc * c.quantity for c in cards if c.cmc is not None and not is_land(c))
-    types = stats.get("type_counts") or {}
-    rarities = stats.get("rarity_counts") or {}
-    type_rows = "".join(f"<tr><td>{esc(k)}</td><td>{v}</td></tr>" for k, v in types.items())
-    rarity_rows = "".join(f"<tr><td>{esc(k.capitalize())}</td><td>{v}</td></tr>" for k, v in rarities.items())
+def legality_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
+    """The stats panel's Legality block: the cards that are not legal in the deck's format, or
+    one green line. Re-rendered by the edit endpoint after a card changes."""
+    stats = stats or {}
     problems = stats.get("legality_problems") or []
     problems_html = (
         "<div class='legality'><h3>Legality</h3><ul>"
@@ -754,7 +754,13 @@ def stats_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
             else ""
         )
     )
-    odds_html = _odds_html(deck, cards)
+    return problems_html
+
+
+def checks_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
+    """The stats panel's Deck checks block (deck_stats.deck_checks rendered as Archidekt's
+    checklist). Re-rendered by the edit endpoint after a card changes."""
+    stats = stats or {}
     checks = stats.get("checks") or {}
     if checks:
         size = checks.get("deck_size") or {}
@@ -883,6 +889,56 @@ def stats_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
         )
     else:
         checks_html = ""
+    return checks_html
+
+
+def stats_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
+    if not stats:
+        return ""
+    pips = {k: float(v) for k, v in (stats.get("colour_pips") or {}).items()}
+    sources = {k: float(v) for k, v in (stats.get("mana_sources") or {}).items() if k in WUBRG}
+    cards = deck.main_cards
+    cost_cards = Counter()
+    prod_cards = Counter()
+    for c in cards:
+        for col in mana_pips(c.mana_cost):
+            cost_cards[col] += c.quantity
+        for col in c.mana_production or {}:
+            if col in WUBRG:
+                prod_cards[col] += c.quantity
+    pip_total = sum(pips.values()) or 1
+    src_total = sum(sources.values()) or 1
+    colour_cards = "".join(
+        "<div class='ccard'>"
+        f"<div class='cname'><i class='pip pip-{col}'></i> {COLOUR_NAMES[col]}</div>"
+        f"<div class='lbl'>Cost</div><div class='pbar'><span class='fill seg-{col}' "
+        f"style='width:{100 * pips.get(col, 0) / pip_total:.0f}%'></span>"
+        f"<b>{100 * pips.get(col, 0) / pip_total:.0f}%</b></div>"
+        f"<div class='sub'>{pips.get(col, 0):g} pips - {cost_cards.get(col, 0)} cards</div>"
+        f"<div class='lbl'>Production</div><div class='pbar'><span class='fill seg-{col}' "
+        f"style='width:{100 * sources.get(col, 0) / src_total:.0f}%'></span>"
+        f"<b>{100 * sources.get(col, 0) / src_total:.0f}%</b></div>"
+        f"<div class='sub'>{sources.get(col, 0):g} mana - {prod_cards.get(col, 0)} cards</div>"
+        "</div>"
+        for col in WUBRG
+        if pips.get(col) or sources.get(col)
+    )
+    curve = stats.get("mana_curve") or {}
+    top = max([int(v or 0) for v in curve.values()] + [1])
+    bars = "".join(
+        f"<div class='bar'><b>{int(v or 0)}</b>"
+        f"<span style='height:{max(2, round(100 * int(v or 0) / top))}%'></span>"
+        f"<em>{esc(k.replace('7+', '7+'))}</em></div>"
+        for k, v in curve.items()
+    )
+    mv_total = sum(c.cmc * c.quantity for c in cards if c.cmc is not None and not is_land(c))
+    types = stats.get("type_counts") or {}
+    rarities = stats.get("rarity_counts") or {}
+    type_rows = "".join(f"<tr><td>{esc(k)}</td><td>{v}</td></tr>" for k, v in types.items())
+    rarity_rows = "".join(f"<tr><td>{esc(k.capitalize())}</td><td>{v}</td></tr>" for k, v in rarities.items())
+    problems_html = legality_panel_html(deck, stats)
+    odds_html = _odds_html(deck, cards)
+    checks_html = checks_panel_html(deck, stats)
     bracket = stats.get("bracket_estimate") or {}
     basis = bracket.get("basis") or []
     avg_mv = stats.get("average_mana_value") if stats.get("average_mana_value") is not None else "–"
@@ -1451,9 +1507,9 @@ ul.rows .hover img{width:100%;height:100%;display:block}
 .deckview.stacks .cards.fanned .c{transform:none}
 .deckview .c.dragging{opacity:.4}
 .deckview .stack.dropping{outline:3px dashed var(--orange);outline-offset:4px;border-radius:5px}
-.deckview[data-own] .stackhead .meta::after{content:' · drag cards here to recategorise';
+.deckview[data-drop] .stackhead .meta::after{content:' · drag cards here to recategorise';
   color:var(--text-muted)}
-@media (hover:none){ .deckview[data-own] .stackhead .meta::after{content:' · hold a card to move it'} }
+@media (hover:none){ .deckview[data-drop] .stackhead .meta::after{content:' · hold a card to move it'} }
 /* card viewer: a tapped card, large, with what can be done with it. A dialog over a blurred,
    darkened page; the image column grows with the window, the text column scrolls on its own. */
 .cardview{position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;
@@ -1513,6 +1569,48 @@ html.cardview-open{overflow:hidden}
   .cardview .acts .btn,.cardview .acts button{flex:1 1 100%} }
 @media (min-width:1400px){
   .cardview .box{width:min(100%,66rem);grid-template-columns:minmax(16rem,27rem) minmax(0,1fr)} }
+/* the card menu (deck.js): the shared .menu panel, fixed where the pointer or finger was */
+.ctxmenu{position:fixed;z-index:65;min-width:220px;max-width:min(20rem,calc(100vw - 1rem));overflow:auto;
+  overscroll-behavior:contain;border:1px solid var(--border)}
+.ctxmenu .head{text-transform:none;letter-spacing:0;font-size:.9rem;color:var(--text);white-space:normal;
+  overflow-wrap:anywhere;padding-bottom:.35rem;border-bottom:1px solid var(--border);margin-bottom:.25rem}
+.ctxmenu .ic,.ctxmenu .i{width:18px;height:18px;flex:none;color:var(--orange);fill:none;stroke:currentColor;
+  stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.ctxmenu a,.ctxmenu button,.ctxmenu .item{white-space:normal;min-height:38px}
+.ctxmenu .qtyrow{display:flex;align-items:center;gap:.5rem;min-height:38px;padding:0 1rem;cursor:default}
+.ctxmenu .qtyrow .lbl{flex:1}
+.ctxmenu .qtyrow .step{width:36px;min-width:36px;height:32px;min-height:32px;padding:0;justify-content:center;
+  border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);font-size:1.15rem;
+  font-weight:700;line-height:1}
+.ctxmenu .qtyrow .step:hover:not(:disabled){background:var(--border)}
+.ctxmenu .qtyrow .n{min-width:1.6rem;text-align:center;font-variant-numeric:tabular-nums}
+.ctxmenu .more .chev{margin-left:auto;color:var(--text-muted);font-size:1.2rem;line-height:1}
+.ctxmenu .more[aria-expanded=true] .chev{transform:rotate(90deg)}
+.ctxmenu .sub{display:flex;flex-direction:column;background:var(--surface);border-top:1px solid var(--border);
+  border-bottom:1px solid var(--border);max-height:40vh;overflow:auto}
+.ctxmenu .sub button{padding-left:2.4rem;min-height:34px;font-size:.95rem}
+.ctxmenu .sub .on:disabled{color:var(--toolbar-active);font-weight:700}
+.ctxmenu.busy{opacity:.6;pointer-events:none}
+.deckview .c.held,.deckview .row.held{outline:3px solid var(--orange);outline-offset:2px}
+/* the toast after a save (theme .toast, bottom right): the message, Undo and History */
+.deck-toast{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;padding:.75rem 1rem;z-index:59;
+  border-left:4px solid var(--blue);color:var(--text)}
+.deck-toast.error{border-left-color:var(--red)} .deck-toast.warn{border-left-color:var(--orange)}
+.deck-toast .msg{flex:1 1 10rem;min-width:0;overflow-wrap:anywhere}
+.deck-toast .acts{display:inline-flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.deck-toast .acts button,.deck-toast .acts .btn{margin:0;min-height:34px;padding:0 .75rem}
+.deck-toast .acts a:not(.btn){color:var(--orange-text);font-weight:700;text-decoration:underline}
+.deck-toast .close{width:2rem;min-height:2rem;height:2rem;padding:0;margin:0 0 0 auto;border:0;
+  background:transparent;font-size:1.3rem;line-height:1;color:var(--text-muted)}
+.deck-toast .close:hover{color:var(--text)}
+@media (max-width:600px){ .deck-toast{right:.5rem;left:.5rem;bottom:.5rem;width:auto;max-width:none} }
+@media (max-width:900px){ .has-tabbar .deck-toast{bottom:calc(64px + env(safe-area-inset-bottom))} }
+/* the viewer's own copies control: one fewer, the count, one more */
+.cardview .acts .qtyctl{display:inline-flex;align-items:center;gap:.4rem;flex:1 1 auto}
+.cardview .acts .qtyctl button{flex:0 0 auto;width:2.6rem;padding:0;font-size:1.2rem;font-weight:700}
+.cardview .acts .qtyctl .n{min-width:2rem;text-align:center;font-size:1.1rem;
+  font-variant-numeric:tabular-nums}
+.cardview .acts .qtyctl.busy{opacity:.6}
 /* pending category moves (own deck, stacks or grid): a bar like the editor's */
 .movebar{position:sticky;bottom:0;z-index:20;display:none;align-items:center;gap:.5rem;flex-wrap:wrap;
   background:var(--toolbar-bg);color:var(--toolbar-text);padding:.5rem 1rem;margin:1rem -1rem 0;

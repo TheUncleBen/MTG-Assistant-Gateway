@@ -82,6 +82,20 @@ extra outbound request a day to Scryfall (the card-name catalog).
   log has one line per request (method, path, status, milliseconds; no query
   string or member id). The link's "last used" time is written at most once a
   minute instead of on every Archidekt call.
+- **Edit a deck straight from its page.** On your own deck a right-click on a
+  card (a press and hold on a phone, Shift+F10 or the Menu key on a focused
+  card) opens the site's own card menu in place of the browser's: open the
+  card, one more or one fewer copy, move it to a category or the maybeboard,
+  remove it, or jump to the editor. The card viewer has the same quantity
+  buttons and Remove. Each change is saved at once as one proposal with its
+  snapshot (the same path as the editor, with the same "are you sure" for a
+  big removal), and the page redraws in place: the card's count and the
+  stack totals, the Size line, the Legality chip, the Legality and Deck
+  checks panels, all from a fresh read of the deck, with a toast offering
+  Undo. Dragging cards between categories now saves correctly (its
+  request named the wrong field, so nothing was moved) and Undo all puts
+  the cards back without reloading. On someone else's deck the menu offers
+  Open card and Open on Scryfall.
 - **Typed card names suggest instantly.** The gateway downloads Scryfall's
   card-name catalog once a day (about 700 KB) and answers suggestions from
   memory, so a name list appears within about a hundred milliseconds of a
@@ -122,6 +136,12 @@ extra outbound request a day to Scryfall (the card-name catalog).
   assistant's applies always make the copy. `POST /api/v1/proposals`
   takes `archidekt_backup: false` for the same choice (browser session,
   with `apply: true`).
+- `POST /api/v1/decks/{id}/edit` (browser session only): the deck page's own
+  save. Runs the proposals path exactly (propose, hand-edit confirmation,
+  apply with a snapshot), reads the deck again from Archidekt and answers
+  with the touched rows, the freshly computed checks and the re-rendered
+  Legality chip and Deck checks panel; a read that still lags the write is
+  retried once and marked `stale`, and `{refresh: true, names}` reads again.
 - `GET /scan/api/peek?names=a|b|c` (browser session only): mana cost, type
   line, small picture and default printing for up to twenty exact card
   names, from one batched, cached Scryfall lookup; the suggestion lists use
