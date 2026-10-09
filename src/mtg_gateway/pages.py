@@ -320,7 +320,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 return page(
                     "Account",
                     _err("Enter your Archidekt username or email and password.")
-                    + _account_body(state, sub, _csrf(s, sid)),
+                    + _account_body(state, sub, _csrf(s, sid), disclosure_read=True),
                     status=400,
                     sub=sub,
                     sid=sid,
@@ -328,9 +328,10 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             try:
                 await state.decks.link(sub, login_name, password)
             except DeckError as exc:
+                # The member ticked the box after opening the detail: keep it open, not folded again.
                 return page(
                     "Account",
-                    _err(str(exc)) + _account_body(state, sub, _csrf(s, sid)),
+                    _err(str(exc)) + _account_body(state, sub, _csrf(s, sid), disclosure_read=True),
                     status=400,
                     sub=sub,
                     sid=sid,
@@ -619,7 +620,7 @@ def _when(ts: int | None) -> str:
     return time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(ts))
 
 
-def _account_body(state: Any, sub: str, csrf: str | None) -> str:
+def _account_body(state: Any, sub: str, csrf: str | None, *, disclosure_read: bool = False) -> str:
     info = state.decks.status(sub)
     user = state.db.get_user(sub) or {}
     who = html.escape(user.get("preferred_username") or user.get("email") or sub)
@@ -662,7 +663,7 @@ def _account_body(state: Any, sub: str, csrf: str | None) -> str:
     else:
         out.append(
             "<div class='card'><h2>Link your Archidekt account</h2>"
-            f"{link_disclosure.form_html(_sweep_on(state))}"
+            f"{link_disclosure.form_html(_sweep_on(state), read=disclosure_read)}"
             f"<form method='post' autocomplete='off'>{csrf_in}"
             "<input type='hidden' name='action' value='link'>"
             "<label for='l'>Archidekt username or email</label>"
@@ -670,8 +671,12 @@ def _account_body(state: Any, sub: str, csrf: str | None) -> str:
             "<label for='p'>Archidekt password</label>"
             "<input id='p' type='password' name='archidekt_password' required "
             "autocomplete='current-password'>"
-            "<label class='check'><input type='checkbox' name='accept_risk' value='1' required> "
+            "<label class='check'><input type='checkbox' name='accept_risk' value='1' required "
+            "aria-describedby='accept-risk-hint'> "
             f"<span>{html.escape(link_disclosure.ACKNOWLEDGE)}</span></label>"
+            # Shown by static/disclosure.js while the tick box waits for the detail to be opened.
+            "<p class='muted small' id='accept-risk-hint' hidden>"
+            f"{html.escape(link_disclosure.TICK_HINT)}</p>"
             "<button class='primary'>Link account</button></form></div>"
         )
     s = state.settings

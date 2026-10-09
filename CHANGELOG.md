@@ -7,6 +7,20 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [Unreleased]
+
+### Changed
+
+- **Linking Archidekt:** the disclosure above the link form is shorter and
+  plainer. A four-line summary now comes first and is always open. The full
+  detail keeps every fact it had, reworded with less repetition, and is
+  folded: the tick box stays disabled until the member opens it. With
+  JavaScript off the detail shows open and the box works, and the server
+  still refuses a link without the tick. The list of what the person who runs
+  the server can read now also names the member's user ID at the sign-in
+  service. After a failed link the form comes back with the detail open.
+  docs/USING.md carries the same text.
+
 ## [0.7.8] - 2026-10-08
 
 Wording fixes from the acceptance check of 0.7.7, and a narrower Authentik

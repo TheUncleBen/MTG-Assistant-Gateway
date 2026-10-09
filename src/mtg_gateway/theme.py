@@ -288,6 +288,12 @@ button.thumbbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px
 .disclosure p{margin:0 0 .4rem}
 details.disclosure{margin:.75rem 0 0;border-top:1px solid var(--border);padding-top:.6rem}
 details.disclosure > summary{cursor:pointer;font-weight:700;min-height:2rem;display:flex;align-items:center}
+/* the folded full detail inside the link-form disclosure (link_disclosure.form_html) */
+details.disclosure-detail{margin:.6rem 0 0;border-top:1px solid var(--border);padding-top:.4rem}
+details.disclosure-detail > summary{cursor:pointer;font-weight:700;min-height:2.75rem;display:flex;
+  align-items:center}
+details.disclosure-detail > summary::before{content:'\\25B8';margin-right:.5rem}
+details.disclosure-detail[open] > summary::before{content:'\\25BE'}
 details.disclosure > summary::before{content:'\\25B8';margin-right:.5rem}
 details.disclosure[open] > summary::before{content:'\\25BE'}
 .toast{position:fixed;right:2rem;bottom:2rem;z-index:20;width:350px;max-width:calc(100% - 2rem);

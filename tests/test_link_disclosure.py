@@ -53,38 +53,46 @@ def _raw(stack: Stack, sub: str) -> dict:
 def test_disclosure_names_what_the_operator_and_admins_can_and_cannot_do() -> None:
     text = link_disclosure.plain_text()
     for must in (
-        "Your password is not stored anywhere by the gateway.",
-        "the key that opens it is on the same server",
+        "The gateway never stores your password.",
+        "The key that opens the session is on the same server.",
         "act as you on Archidekt until it expires",
         "They cannot get your password from the session.",
         "They control the code this server runs.",
-        "Link only if you trust the person who runs this server.",
+        "Link only if you trust them.",
         "cannot open your proposals",
-        "The gateway never writes your password or your session to its logs.",
-        "The gateway's own backups leave your session out",
+        "Logs never contain your password or session.",
+        "The gateway's own backups leave out the session",
         "about 40 days after you link",
-        "Whether the session also stops working on Archidekt's side is not known",
-        "Whether changing your Archidekt password ends it is not known either.",
-        "deleted within about an hour if the person who runs the gateway turned on its hourly clean-up",
-        "the next time you or one of your apps tries to use the gateway",
+        "Whether the session also stops working at Archidekt, or ends when you change your "
+        "Archidekt password, is not known",
+        "If the hourly clean-up is on",
+        "usually deleted within about an hour",
+        "the next time you or one of your apps uses the gateway",
         "Archidekt's terms of service restrict automated access",
         # what the session reads beyond your own decks, and the writes and backup copies
-        "other people's decks and comment threads you or your assistant",
+        "other people's decks and comment threads you or your assistant look at",
         "looking up the cards in the changes you make",
         "the list of people you follow",
         "including deleting a deck when you ask",
         "backup folder on your Archidekt account",
         # everything else the operator can read, and the sign-in service's tokens
-        "your approval mode",
-        "your profile picture",
+        "approval mode",
+        "profile picture",
         "deck and collection changes",
-        "which apps you connected, usage counts",
-        "encrypted with the same key, so they can open those too",
+        "connected apps, usage counts",
+        "use the same key, so they can open those too",
         # everything admins see and do
         "username, groups and user ID at the sign-in service",
         "how many app tokens and browser sessions you have open",
         "whether and when you were disabled",
         "disable and enable your account",
+        # the operator list names the sign-in service's user ID too (0.7.8 gate item I-1)
+        "email, username, user ID and groups at the sign-in service",
+        # the summary on top
+        "never stores it",
+        "act as you on Archidekt until it expires (about 40 days)",
+        "they cannot use your link",
+        "Whether Archidekt itself ends the session when you unlink or change your password is not known.",
     ):
         assert must in text, must
     # never claims what is not backed by code and tests
@@ -100,12 +108,20 @@ async def test_disclosure_is_shown_in_full_and_must_be_ticked_before_linking(sta
     page = (await b.http.get("/account")).text
     assert "Link your Archidekt account" in page
     assert "<div class='notice disclosure' id='archidekt-disclosure'>" in page
+    for line in link_disclosure.SUMMARY:
+        assert html.escape(line) in page, line
     for heading, lines in link_disclosure.SECTIONS:
         assert html.escape(heading) in page
         for line in lines:
             assert html.escape(line) in page, line
     assert html.escape(link_disclosure.ACKNOWLEDGE) in page
     assert "name='accept_risk' value='1' required" in page
+    # rendered open and usable (so it works without scripts); the script folds it and locks the box
+    detail = f"<details class='disclosure-detail' id='{link_disclosure.DETAIL_ID}' open data-must-open>"
+    assert detail in page
+    assert page.index("In short") < page.index(detail)
+    assert f"<script src='{link_disclosure.SCRIPT}' defer></script>" in page
+    assert "aria-describedby='accept-risk-hint'" in page and "id='accept-risk-hint' hidden" in page
     # the form comes after the disclosure, so it is read first
     assert page.index("archidekt-disclosure") < page.index("name='archidekt_password'")
 
@@ -115,7 +131,22 @@ async def test_disclosure_is_shown_in_full_and_must_be_ticked_before_linking(sta
         data={"csrf": csrf, "action": "link", "archidekt_login": "alice", "archidekt_password": "pw-alice"},
     )
     assert r.status_code == 400 and "Tick the box" in r.text
+    assert "data-must-open" in r.text  # not ticked: still folded and locked
     assert not any(path.endswith("/rest-auth/login/") for _m, path in ark.calls)
+    assert h.db.get_link("user-1") is None
+    # ticked, but Archidekt refused the password: the form comes back with the detail open
+    r = await b.http.post(
+        "/account",
+        data={
+            "csrf": csrf,
+            "action": "link",
+            "archidekt_login": "alice",
+            "archidekt_password": "wrong",
+            "accept_risk": "1",
+        },
+    )
+    assert r.status_code == 400 and link_disclosure.DETAIL_ID in r.text
+    assert "data-must-open" not in r.text
     assert h.db.get_link("user-1") is None
     await b.aclose()
 
@@ -129,6 +160,8 @@ async def test_disclosure_stays_readable_on_the_account_page_after_linking(stack
     assert "Linked to <strong>alice</strong>" in page
     assert "<details class='disclosure' id='archidekt-disclosure'>" in page
     assert html.escape(link_disclosure.SECTIONS[3][1][0]) in page
+    assert html.escape(link_disclosure.SUMMARY[1]) in page
+    assert "data-must-open" not in page
     assert "Unlink and delete stored session" in page
     await b.aclose()
 
@@ -277,6 +310,8 @@ async def test_password_and_tokens_never_reach_the_logs(
 
 def test_the_guide_for_members_carries_the_same_text() -> None:
     doc = (Path(__file__).resolve().parent.parent / "docs" / "USING.md").read_text(encoding="utf-8")
+    for line in link_disclosure.SUMMARY:
+        assert f"- {line}" in doc, line
     for _heading, lines in link_disclosure.SECTIONS:
         for line in lines:
             assert f"- {line}" in doc, line
