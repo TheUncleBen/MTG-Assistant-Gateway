@@ -19,12 +19,12 @@ from urllib.parse import parse_qs, quote
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from . import link_disclosure, modes
+from . import app_signin, link_disclosure, modes
 from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
 from .avatars import initials_svg
 from .clickguard import form_stamp, guarded_form, submitted_too_soon
 from .decks import DeckError, current_client, row_label, row_line
-from .theme import THEME_COOKIE, render, theme_from_cookie
+from .theme import THEME_COOKIE, in_app, render, theme_from_cookie
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -82,16 +82,33 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
     # -- sign in / out ------------------------------------------------------
     @server.custom_route("/login", methods=["GET"], include_in_schema=False)
     async def login(request: Request) -> Response:
-        nxt = _safe_next(request.query_params.get("next", "/account"))
-        sub, _sid = current(request)
-        if sub:
-            return RedirectResponse(nxt, status_code=302)
+        q = request.query_params
+        nxt = _safe_next(q.get("next", "/account"))
         # Right after a sign-out on this device, the identity provider is asked to make the person
         # enter their credentials again, so the next person on a shared device or the Android app
-        # is not silently signed back in as the previous one.
-        fresh = request.cookies.get(fresh_cookie) == "1"
+        # is not silently signed back in as the previous one. ``fresh=1`` carries that from the
+        # app to its browser sign-in; it can only ever ask for more, never less.
+        fresh = request.cookies.get(fresh_cookie) == "1" or q.get("fresh") == "1"
+        params: dict[str, str] = {"next": nxt}
+        challenge = q.get("app_challenge")
+        if challenge is not None:
+            # The Android app's sign-in, running in the phone's browser (app_signin.py). This
+            # browser's own session, if any, is not handed over: the identity provider decides.
+            if not app_signin.CHALLENGE.fullmatch(challenge):
+                return page("Sign-in failed", "<p>That sign-in link is not valid.</p>", status=400)
+            params["app_challenge"] = challenge
+        else:
+            sub, _sid = current(request)
+            if sub:
+                return RedirectResponse(nxt, status_code=302)
+            if in_app() and q.get("inapp") != "1":
+                resp = page("Sign in", app_signin.handoff_body(nxt, fresh), scripts=True)
+                resp.headers["Cache-Control"] = "no-store"
+                if fresh:
+                    resp.delete_cookie(fresh_cookie, path="/", secure=secure, httponly=True, samesite="lax")
+                return resp
         try:
-            url = await state.provider.start_idp_login(BROWSER_CLIENT_ID, {"next": nxt}, force_login=fresh)
+            url = await state.provider.start_idp_login(BROWSER_CLIENT_ID, params, force_login=fresh)
         except LoginError as exc:
             return page("Sign-in unavailable", f"<p>{html.escape(str(exc))}</p>", status=exc.status)
         resp = RedirectResponse(url, status_code=302, headers={"Cache-Control": "no-store"})
@@ -455,11 +472,22 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             return page("Sign-in failed", f"<p>{html.escape(str(exc))}</p>", status=exc.status)
         if identity is None:
             return page("Sign-in cancelled", "<p>You cancelled at the identity provider.</p>", status=200)
-        sid = secrets.token_urlsafe(32)
-        state.db.create_browser_session(sid, identity.sub, s.browser_session_ttl)
-        state.db.audit("browser_login", sub=identity.sub)
         nxt = _safe_next(str(session["params"].get("next", "/account")))
-        resp = RedirectResponse(nxt, status_code=302, headers={"Cache-Control": "no-store"})
+        challenge = session["params"].get("app_challenge")
+        if isinstance(challenge, str) and app_signin.CHALLENGE.fullmatch(challenge):
+            # The Android app's sign-in: no session in this browser, a one-time code for the app.
+            code = state.app_signins.issue(identity.sub, challenge, nxt)  # type: ignore[attr-defined]
+            resp = page("Signed in", app_signin.return_body(code, s.android_package), scripts=True)
+            resp.headers["Cache-Control"] = "no-store"
+            resp.headers["Referrer-Policy"] = "no-referrer"
+            return resp
+        return start_session(identity.sub, nxt, via=None)
+
+    def start_session(sub: str, nxt: str, *, via: str | None, status: int = 302) -> Response:
+        sid = secrets.token_urlsafe(32)
+        state.db.create_browser_session(sid, sub, s.browser_session_ttl)
+        state.db.audit("browser_login", sub=sub, detail={"via": via} if via else None)
+        resp = RedirectResponse(nxt, status_code=status, headers={"Cache-Control": "no-store"})
         resp.set_cookie(
             session_cookie,
             sid,
@@ -470,6 +498,19 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             samesite="lax",
         )
         return resp
+
+    @server.custom_route("/login/app", methods=["POST"], include_in_schema=False)
+    async def login_app(request: Request) -> Response:
+        """The Android app finishing its browser sign-in: the one-time code and the app's verifier."""
+        data = await form(request)
+        if isinstance(data, Response):
+            return data
+        pending = state.app_signins.redeem(data.get("code", ""), data.get("verifier", ""))  # type: ignore[attr-defined]
+        if pending is None:
+            resp = page("Sign-in failed", app_signin.expired_body("/"), status=400)
+            resp.headers["Cache-Control"] = "no-store"
+            return resp
+        return start_session(pending.sub, _safe_next(pending.next_path), via="android_app", status=303)
 
     state.finish_browser_login = finish_browser_login  # type: ignore[attr-defined]
 

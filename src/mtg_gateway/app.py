@@ -11,7 +11,7 @@ import re
 import secrets
 import time
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Annotated, Any, Literal
 from urllib.parse import parse_qs, urlencode, urlsplit
 
@@ -45,6 +45,7 @@ from . import __version__, deck_stats
 from .admin import add_admin_routes
 from .api import add_api_routes
 from .app_page import add_app_routes
+from .app_signin import AppSignins
 from .approve import (
     APPLY_TOOL_META,
     APPROVAL_META_KEY,
@@ -127,6 +128,7 @@ class AppState:
     metrics: Metrics | None = None
     membership: MembershipChecker | None = None
     sweep: AuthentikSweep | None = None  # removed-member clean-up (idp_sweep.py)
+    app_signins: AppSignins = field(default_factory=AppSignins)  # the Android app's browser sign-in
 
 
 def _tool_error(exc: DeckError) -> dict[str, object]:

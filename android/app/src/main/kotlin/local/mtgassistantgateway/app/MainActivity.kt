@@ -35,6 +35,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
+import androidx.browser.customtabs.CustomTabsIntent
 import androidx.core.util.Consumer
 import androidx.window.java.layout.WindowInfoTrackerCallbackAdapter
 import androidx.window.layout.FoldingFeature
@@ -57,6 +58,10 @@ import java.io.ByteArrayInputStream
  * /login redirected to) during a sign-in, stay in the app. Links anywhere else open in the phone's browser, as do `target=_blank` links. Other schemes
  * open another app only when tapped in the main frame, and only an activity that accepts links
  * from a browser.
+ *
+ * Signing in: the gateway's /login page in the app hands the sign-in to the phone's browser
+ * (a Custom Tab), where passkeys and password managers work, and the browser hands it back with
+ * a one-time code ([BrowserSignIn]). An older gateway signs in inside the WebView as before.
  *
  * Links into the app: an https link to the configured gateway (an App Link in the applinks flavor,
  * or a link shared to the app) opens that page. Before setup the address screen is shown without
@@ -139,8 +144,10 @@ class MainActivity : ComponentActivity() {
         fab.visibility = View.GONE // shown by syncFab over pages that are not the gateway's
         configureWebView()
         // A link is consumed once: after a restore the saved page wins, not the old intent.
-        val linked = takeLinkedUrl(intent)?.takeIf { GatewayUrl.isGateway(origin, it) }
+        val signInCode = takeSignInCode(intent)
+        val linked = if (signInCode != null) null else takeLinkedUrl(intent)?.takeIf { GatewayUrl.isGateway(origin, it) }
         when {
+            signInCode != null -> if (!finishBrowserSignIn(signInCode)) web.loadUrl(origin + "/")
             savedInstanceState != null -> {
                 // The blank page over a refused one has no Retry after a restore: start at home.
                 val restored = web.restoreState(savedInstanceState)
@@ -155,6 +162,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        takeSignInCode(intent)?.let { finishBrowserSignIn(it); return }
         val url = takeLinkedUrl(intent) ?: return
         if (!GatewayUrl.isGateway(origin, url)) {
             Toast.makeText(this, getString(R.string.link_other_gateway), Toast.LENGTH_LONG).show()
@@ -258,6 +266,41 @@ class MainActivity : ComponentActivity() {
             pendingCamera = true
             web.loadUrl(GatewayUrl.join(origin, "/scan"))
         }
+    }
+
+    // -- sign-in through the phone's browser ([BrowserSignIn]) --------------------
+
+    private fun startBrowserSignIn(next: String?, fresh: Boolean) {
+        val verifier = BrowserSignIn.newVerifier()
+        prefs.setPendingSignIn(origin, verifier, System.currentTimeMillis())
+        val url = BrowserSignIn.startUrl(origin, next, BrowserSignIn.challengeOf(verifier), fresh)
+        try {
+            CustomTabsIntent.Builder().setShowTitle(true).build().launchUrl(this, Uri.parse(url))
+        } catch (e: ActivityNotFoundException) {
+            Toast.makeText(this, getString(R.string.sign_in_no_browser), Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** The browser came back with a code: post it with this app's verifier. False when no sign-in was waiting. */
+    private fun finishBrowserSignIn(code: String): Boolean {
+        val verifier = prefs.takePendingSignIn(origin, System.currentTimeMillis())
+        if (verifier == null) {
+            Toast.makeText(this, getString(R.string.sign_in_not_started), Toast.LENGTH_LONG).show()
+            return false
+        }
+        if (camera != null) closeCamera()
+        errorBox.visibility = View.GONE
+        web.postUrl(GatewayUrl.join(origin, BrowserSignIn.FINISH_PATH), BrowserSignIn.finishBody(code, verifier))
+        return true
+    }
+
+    /** The one-time code of a `mtgassistant-signin://signin?code=...` link, consumed once, or null. */
+    private fun takeSignInCode(intent: Intent?): String? {
+        if (intent?.action != Intent.ACTION_VIEW) return null
+        val data = intent.data ?: return null
+        val code = BrowserSignIn.codeOf(data.scheme, data.host, data.getQueryParameter("code")) ?: return null
+        intent.action = null
+        return code
     }
 
     private fun onScanPage(): Boolean =
@@ -777,6 +820,10 @@ class MainActivity : ComponentActivity() {
             startActivity(Intent(this@MainActivity, SetupActivity::class.java))
             finish()
         }
+
+        /** The gateway's /login page in the app: sign in through the phone's browser ([BrowserSignIn]). */
+        @JavascriptInterface
+        fun signInWithBrowser(next: String?, fresh: Boolean) = onGatewayPage { startBrowserSignIn(next, fresh) }
 
         /** The /scan page reporting what it did with a photo (see [ScanGlue]). */
         @JavascriptInterface
