@@ -412,7 +412,7 @@ async def test_card_printings_filters_and_limits(stack: Stack) -> None:
 # -- health check -------------------------------------------------------------------------------
 async def test_health_check_reports_the_research_service(stack: Stack) -> None:
     r = await stack.h.http.get("/healthz")
-    assert r.status_code == 200 and r.json()["status"] == "ok" and r.json()["mystic_forge"] == "ok"
+    assert r.status_code == 200 and r.json() == {"status": "ok"}
 
 
 async def test_health_check_notices_the_research_service_is_down(tmp_path: Path, idp: FakeIdP) -> None:
@@ -429,7 +429,7 @@ async def test_health_check_notices_the_research_service_is_down(tmp_path: Path,
         r = await h.http.get("/healthz")
         # still 200: the gateway's own pages work, so the container must not be restarted for it
         assert r.status_code == 200, r.text
-        assert r.json()["status"] == "degraded" and r.json()["mystic_forge"] == "down"
+        assert r.json() == {"status": "degraded"}
 
 
 # -- linking Archidekt --------------------------------------------------------------------------

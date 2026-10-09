@@ -7,6 +7,22 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [Unreleased]
+
+### Changed
+
+- **Your own name hides this project on your gateway's public files.** With
+  `MTG_SERVER_NAME` set, the plugin's short name follows it (`Deck Helper`
+  becomes `deck-helper`): the install pages, `/plugin/marketplace.json` and
+  the plugin download (now `/plugin/<name>.zip`) use it for the plugin, its
+  connector and its skills, and the download no longer carries this project's
+  name or a link to its repository. Anyone who installed the plugin under the
+  old name installs it again from `/install`. Without `MTG_SERVER_NAME`
+  nothing changes.
+- **`/healthz` answers only `{"status": ...}`.** Anyone can ask it, and the
+  version and the research service's name told a stranger which project the
+  gateway runs. The System card on the admin page still shows both.
+
 ## [0.7.8] - 2026-10-08
 
 Wording fixes from the acceptance check of 0.7.7, and a narrower Authentik

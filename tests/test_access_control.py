@@ -226,7 +226,7 @@ async def test_public_surface(gw: Harness) -> None:  # noqa: F811
         assert r.status_code in (302, 401, 404), (path, r.status_code)
         assert "user-1" not in r.text
     h = await gw.http.get("/healthz")
-    assert set(h.json()) == {"status", "version", "mystic_forge"}  # states only, nothing about members
+    assert h.json() == {"status": "ok"}  # the state only: nothing about members, the version or the stack
     # No CORS on the cookie API: a cross-site page can't read it.
     r = await gw.http.options(
         "/api/v1/me", headers={"Origin": "https://evil.example", "Access-Control-Request-Method": "GET"}

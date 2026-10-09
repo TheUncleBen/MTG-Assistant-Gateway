@@ -3,14 +3,10 @@
 from __future__ import annotations
 
 import time
-from pathlib import Path
 
 import httpx
 
 from .conftest import MCP_URL, PUBLIC_URL
-
-# The version the gateway reports is the repository's VERSION file (docs/VERSIONS.md).
-VERSION = (Path(__file__).resolve().parents[2] / "VERSION").read_text().strip()
 
 
 def test_protected_resource_metadata_points_at_the_gateway(http: httpx.Client):
@@ -84,10 +80,10 @@ def test_health_and_landing_page_leak_nothing(http: httpx.Client):
     # it starts after the gateway (its own start period is 30 s), so give it a moment.
     for _ in range(45):
         health = http.get("/healthz").json()
-        if health.get("mystic_forge") == "ok":
+        if health.get("status") == "ok":
             break
         time.sleep(2)
-    assert health == {"status": "ok", "version": VERSION, "mystic_forge": "ok"}
+    assert health == {"status": "ok"}  # no version or service names: they would name the project
     landing = http.get("/")
     assert landing.status_code == 302 and landing.headers["location"] == "/login?next=/"
     assert "auth.e2e.test" not in landing.text  # the identity provider is not advertised

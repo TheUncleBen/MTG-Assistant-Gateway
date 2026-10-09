@@ -1561,12 +1561,10 @@ def build_mcp_server(state: AppState) -> MCPServer:
         # The research service (simulations, card research) is reported, not required: the
         # gateway's own pages and Archidekt tools still work without it, so a Mystic Forge outage
         # makes the status "degraded" (still HTTP 200, so the container is not restarted for it).
-        if state.mf_proxy is None:
-            mf = "not_configured"
-        else:
-            mf = "ok" if await state.mf_proxy.healthy() else "down"
-        status = "degraded" if mf == "down" else "ok"
-        return JSONResponse({"status": status, "version": __version__, "mystic_forge": mf})
+        # Only the status: anyone can ask, and the version and the research service's name would
+        # tell a stranger which project this is. The admin page's System card shows both.
+        down = state.mf_proxy is not None and not await state.mf_proxy.healthy()
+        return JSONResponse({"status": "degraded" if down else "ok"})
 
     @server.custom_route(APP_CONFIG_PATH, methods=["GET"], include_in_schema=False)
     async def app_config(_request: Request) -> Response:
