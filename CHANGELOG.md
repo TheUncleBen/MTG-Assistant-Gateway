@@ -62,6 +62,26 @@ extra outbound request a day to Scryfall (the card-name catalog).
   over deck names and change text, and "Older" pages through the rest 25 at
   a time. The per-deck trend tiles are styled like the rest of the site.
 
+- **Home, My decks and the collection open at once.** With an Archidekt
+  account linked, the member's deck list is kept in memory for a minute and a
+  half after Archidekt answered and served from there by Home, My decks, the
+  deck tools and the JSON API; for a quarter of an hour more a slightly older
+  list is shown while one refresh runs in the background. Every change the
+  gateway sends to Archidekt for that member (a new deck, an applied proposal,
+  a deleted deck, a folder, a tag, a cover) drops the list first, so the next
+  view is live again. The listing itself is one Archidekt request (by the
+  account's id, where before it was one by name and one by id, each waiting its
+  turn in the shared queue), following up to four pages of fifty decks. The
+  collection's unfiltered first page is kept for a minute per sort and dropped
+  by every collection add, change or removal. When the list is cold and
+  Archidekt has not answered within a second and a half, Home and My decks go
+  out at once with a grey placeholder that the page fills from
+  `/api/decks/mine` (same markup, rendered by the gateway; no change without
+  script, where a reload shows the list). Every response now carries a
+  `Server-Timing` header (total, Archidekt and sign-in-provider time) and the
+  log has one line per request (method, path, status, milliseconds; no query
+  string or member id). The link's "last used" time is written at most once a
+  minute instead of on every Archidekt call.
 - **Typed card names suggest instantly.** The gateway downloads Scryfall's
   card-name catalog once a day (about 700 KB) and answers suggestions from
   memory, so a name list appears within about a hundred milliseconds of a

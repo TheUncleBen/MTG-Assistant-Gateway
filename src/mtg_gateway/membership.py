@@ -34,6 +34,7 @@ from cryptography.fernet import Fernet, InvalidToken
 
 from .avatars import AvatarStore
 from .oidc import IdPTokens, IdPUnavailable, groups_claim_present, resolve_groups
+from .timing import add_time, idp_time
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,13 @@ class MembershipChecker:
     # -- the check ----------------------------------------------------------------
     async def check(self, sub: str) -> Membership:
         """Is ``sub`` still allowed in, according to the identity provider right now?"""
+        started = time.perf_counter()
+        try:
+            return await self._check(sub)
+        finally:
+            add_time(idp_time, time.perf_counter() - started)
+
+    async def _check(self, sub: str) -> Membership:
         ttl = self.settings.membership_check_ttl
         last = self._checked.get(sub)
         if ttl and last is not None and time.monotonic() - last < ttl:

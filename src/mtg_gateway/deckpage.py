@@ -1212,8 +1212,10 @@ def deck_list_html(
 
 
 def deck_list_controls_html(
-    *, q: str, order: str, view: str, folders: list[str], folder: str, total: int
+    *, q: str, order: str, view: str, folders: list[str], folder: str, total: int, pending: bool = False
 ) -> str:
+    """The toolbar over the deck list. ``pending``: the list is still being read (the folder picker
+    is rendered hidden and the total left blank; decks.js fills both)."""
     folder_opts = "".join(
         f"<option value='{esc(f)}'{' selected' if f == folder else ''}>{esc(f)}</option>" for f in folders
     )
@@ -1225,14 +1227,14 @@ def deck_list_controls_html(
         + _select("view", {"grid": "Grid", "list": "List"}, view, "View as", "grid")
         + _select("order", LIST_ORDERS, order, "Order by", "sort")
         + (
-            "<div class='field'><label for='f-folder'>Folder</label><span class='sel'>"
-            f"{icon('decks')}<select id='f-folder' name='folder'><option value=''>All folders</option>"
-            f"{folder_opts}"
-            "</select></span></div>"
-            if folders
+            f"<div class='field' id='folder-field'{' hidden' if pending else ''}><label for='f-folder'>"
+            f"Folder</label><span class='sel'>{icon('decks')}<select id='f-folder' name='folder'>"
+            f"<option value=''>All folders</option>{folder_opts}</select></span></div>"
+            if folders or pending
             else ""
         )
-        + f"<div class='field'><span class='lbl'>Total decks: {total}</span>"
+        + f"<div class='field'><span class='lbl' id='decks-total'>Total decks: {'…' if pending else total}"
+        "</span>"
         f"<a class='btn' href='/folders'>{icon('folder')} Folders</a>"
         f"<a class='btn btn-primary' href='/decks/new'>{icon('plus')} New deck</a></div>"
         "<noscript><button type='submit' class='apply'>Apply</button></noscript>"

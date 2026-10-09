@@ -18,6 +18,7 @@ import html
 import io
 import json
 import re
+import time
 from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import Field
@@ -43,6 +44,7 @@ MAX_ITEMS_PER_CALL = 100  # each card costs one or two Archidekt calls, paced ab
 MAX_QUANTITY = 9_999
 MAX_PAGES_FOR_EXPORT = 50  # 5,000 records
 PAGE_SIZE = COLLECTION_PAGE_SIZE
+FIRST_PAGE_TTL = 60.0  # seconds the unfiltered first page is served from memory
 FINISHES = ("nonfoil", "foil", "etched")
 MODIFIERS = {"nonfoil": "Normal", "foil": "Foil", "etched": "Etched"}
 CONDITIONS = ("", "NM", "LP", "MP", "HP", "DMG")
@@ -263,6 +265,19 @@ class CollectionService:
         self.decks = decks
         self.client = decks.client
         self.scan = scan
+        # The unfiltered first page per member and sort, kept FIRST_PAGE_TTL seconds: the page
+        # most views of /collection show (view changes never reach Archidekt). Any collection
+        # write the gateway sends for the member drops it (decks.write_hooks).
+        self._first_pages: dict[str, dict[str, tuple[float, dict[str, Any]]]] = {}
+        self.first_page_ttl = FIRST_PAGE_TTL
+        decks.write_hooks.append(self._on_write)
+
+    def _on_write(self, sub: str, path: str) -> None:
+        if not path or path.startswith("/collection"):
+            self._first_pages.pop(sub, None)
+
+    def forget(self, sub: str) -> None:
+        self._first_pages.pop(sub, None)
 
     def _user_id(self, sub: str) -> str:
         link = self.decks.db.get_link(sub)
@@ -288,6 +303,11 @@ class CollectionService:
         """One page of the collection as Archidekt orders and filters it (``cardName`` is a name
         substring). Returns rows, count, page, total_pages and has_next."""
         uid = self._user_id(sub)
+        cacheable = page == 1 and not q and page_size == PAGE_SIZE and self.first_page_ttl > 0
+        if cacheable:
+            hit = self._first_pages.get(sub, {}).get(sort)
+            if hit is not None and time.monotonic() - hit[0] < self.first_page_ttl:
+                return {**hit[1], "rows": list(hit[1]["rows"])}
         order = "editionDate" if sort == "edition" else ""
         body = await self._run(
             sub,
@@ -298,13 +318,19 @@ class CollectionService:
         rows = [row_out(r) for r in body["results"] if isinstance(r, dict)]
         count = body.get("count")
         total_pages = body.get("totalPages")
-        return {
+        out = {
             "rows": rows,
             "count": count if isinstance(count, int) else len(rows),
             "page": body.get("page") if isinstance(body.get("page"), int) else page,
             "total_pages": total_pages if isinstance(total_pages, int) else 1,
             "has_next": bool(body.get("next")),
         }
+        if cacheable:
+            if len(self._first_pages) > 10_000:
+                self._first_pages.clear()
+            self._first_pages.setdefault(sub, {})[sort] = (time.monotonic(), out)
+            return {**out, "rows": list(rows)}
+        return out
 
     async def _raw_rows(self, sub: str, *, max_pages: int) -> list[dict[str, Any]]:
         """Archidekt's records, newest first, over up to ``max_pages`` pages."""
