@@ -193,7 +193,8 @@ async def test_reports_are_stored_and_listed(stack: Stack) -> None:
         assert got["ok"] and got["stats"]["card_count"] == rep["stats"]["card_count"]
         # pages
         page = await b.http.get("/history?deck_id=42", headers=NAV)
-        assert page.status_code == 200 and "Report:" in page.text
+        # the history timeline shows the report as a row of its own (history_view), not a "Report:" line
+        assert page.status_code == 200 and "k-report" in page.text and "Open the report" in page.text
         detail = await b.http.get(f"/history/reports/{rep['report_id']}", headers=NAV)
         assert detail.status_code == 200 and "Goldfish simulation" in detail.text
         gone = await h.http.delete(f"/api/v1/reports/{rep['report_id']}", headers=auth)
@@ -292,8 +293,13 @@ async def test_deck_pages(stack: Stack) -> None:
         assert ran.status_code == 303 and ran.headers["location"].startswith("/history/reports/")
         shown = await b.http.get(ran.headers["location"], headers=NAV)
         assert shown.status_code == 200 and "Goldfish simulation" in shown.text and "## Metrics" in shown.text
+        # the page speaks to a person: no assistant tool names, exports in one row of buttons
+        assert "goldfish_" not in shown.text and "run_deck_report" not in shown.text
+        assert (
+            "export.md" in shown.text and "export.html" in shown.text and "data-copy='rep-md'" in shown.text
+        )
         hist = await b.http.get("/history", headers=NAV)
-        assert hist.status_code == 200 and "Report:" in hist.text
+        assert hist.status_code == 200 and "k-report" in hist.text and "filterbar" in hist.text
         act = await b.http.get("/activity", headers=NAV)
         assert act.status_code == 200 and "archidekt linked" in act.text
         for path in ("/decks", "/decks/42", "/history", "/activity"):

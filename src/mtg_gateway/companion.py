@@ -35,9 +35,17 @@ from .deckpage import (
     precon_by_label,
 )
 from .decks import DeckError, actor_label, current_client
+from .history_view import (
+    HISTORY_CSS,
+    PAGE,
+    build_events,
+    events_html,
+    filter_bar_html,
+    pager_html,
+    read_query,
+)
 from .pages import (
     BROWSER_CLIENT_ID,
-    _badge,
     _csrf,
     _err_code,
     _when,
@@ -45,7 +53,13 @@ from .pages import (
     login_redirect,
     read_limited,
 )
-from .theme import icon, render
+from .report_view import (
+    REPORT_CSS,
+    report_body_html,
+    report_export_html,
+    report_markdown,
+)
+from .theme import VIZ_CSS, icon, render
 from .views import auto_category, cards_by_category
 
 if TYPE_CHECKING:
@@ -256,6 +270,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         heading: bool = True,
         deck_css: bool = False,
         extra_scripts: tuple[str, ...] = (),
+        extra_css: str = "",
     ) -> Response:
         user = state.db.get_user(sub) or {}
         admin = bool(s.admin_group and s.admin_group in (user.get("groups") or []))
@@ -272,6 +287,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             current=current,
             heading=heading,
             head_extra=(f"<style>{DECK_CSS}</style>" if deck_css else "")
+            + (f"<style>{extra_css}</style>" if extra_css else "")
             + (
                 "<script src='/static/cardview.js' defer></script>"
                 "<script src='/static/deck.js' defer></script>"
@@ -1546,7 +1562,8 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         except DeckError as exc:
             code = exc.kind if exc.kind in DECK_ERR_MESSAGES else "report_failed"
             return RedirectResponse(f"/decks/{deck_id}?err={code}", status_code=303)
-        return RedirectResponse(f"/history/reports/{_esc(report['report_id'])}", status_code=303)
+        reused = "?reused=1" if report.get("reused") else ""
+        return RedirectResponse(f"/history/reports/{_esc(report['report_id'])}{reused}", status_code=303)
 
     @server.custom_route("/decks/{deck_id}/playtest", methods=["GET"], include_in_schema=False)
     async def playtest_page(request: Request) -> Response:
@@ -1636,60 +1653,35 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
     # -- history --------------------------------------------------------------
     @server.custom_route("/history", methods=["GET"], include_in_schema=False)
     async def history(request: Request) -> Response:
+        """Proposals, snapshots and reports as one timeline grouped by day, narrowed by deck, type,
+        state and a search, 25 at a time. Each list is narrowed and paged in SQL, so a deck's own
+        history keeps its older entries however busy the member's other decks are."""
         sub, sid = browser_session(state, request)
         if not sub:
             return login_redirect("/history")
-        deck_id = (request.query_params.get("deck_id") or "").strip()
-        proposals = decks.list_proposals(sub)
-        snapshots = decks.list_snapshots(sub)
-        reps = reports.list(sub, deck_id or None, limit=50)
-        if deck_id:
-            proposals = [p for p in proposals if p["deck_id"] == deck_id]
-            snapshots = [x for x in snapshots if x["deck_id"] == deck_id]
-        events: list[tuple[int, str]] = []
-        for p in proposals:
-            kind = {"create_deck": "New deck", "restore": "Restore"}.get(p.get("kind", "edit"), "Edit")
-            events.append(
-                (
-                    int(p["created_at"]),
-                    f"<li><a class='name' href='/proposals/{_esc(p['id'])}'>{_esc(kind)}: "
-                    f"{_esc(p['deck_name'] or p['deck_id'])}</a>"
-                    f"<span class='badge {_badge(p['state'])}'>{_esc(p['state'])}</span>"
-                    f"<span class='when'>{_when(p['created_at'])}</span></li>",
-                )
+        query = read_query(request.query_params)
+        deck_id = query["deck_id"] or None
+        want = query["type"]
+        states = [query["state"]] if query["state"] else None
+        # Each kind fetched up to the end of this page plus one: the lists merge by time, so the
+        # page is sliced after the merge and the extra row says whether an older page exists.
+        fetch = query["offset"] + PAGE + 1
+        proposals = snapshots = reps = []
+        if want in ("all", "changes"):
+            proposals = decks.list_proposals(
+                sub, full=True, deck_id=deck_id, states=states, search=query["q"] or None, limit=fetch
             )
-        for x in snapshots:
-            backup = f" · {_ext(x['backup_url'], 'Archidekt backup')}" if x.get("backup_url") else ""
-            events.append(
-                (
-                    int(x["taken_at"]),
-                    f"<li><span class='name'>Snapshot: {_esc(x['deck_name'] or x['deck_id'])} "
-                    f"<span class='muted small'>({_esc(x.get('card_count'))} cards){backup}</span></span>"
-                    f"<form method='post' action='/history/restore'><input type='hidden' name='csrf' "
-                    f"value='{_esc(_csrf(s, sid))}'><input type='hidden' name='snapshot_id' "
-                    f"value='{_esc(x['snapshot_id'])}'><button class='secondary'>Restore…</button></form>"
-                    f"<span class='when'>{_when(x['taken_at'])}</span></li>",
-                )
-            )
-        for r in reps:
-            m = r["metrics"]
-            bits = [
-                f"{_num(m.get('card_count'), 0)} cards",
-                f"avg MV {_num(m.get('average_mana_value'))}",
-            ]
-            if m.get("price_total") is not None:
-                bits.append(f"${_num(m.get('price_total'))}")
-            if r.get("bracket_estimate"):
-                bits.append(f"bracket ~{r['bracket_estimate']}")
-            events.append(
-                (
-                    int(r["taken_at"]),
-                    f"<li><a class='name' href='/history/reports/{_esc(r['report_id'])}'>Report: "
-                    f"{_esc(r['deck_name'])}</a><span class='muted small'>{_esc(' · '.join(bits))}</span>"
-                    f"<span class='when'>{_when(r['taken_at'])}</span></li>",
-                )
-            )
-        events.sort(key=lambda e: e[0], reverse=True)
+        if want in ("all", "snapshots") and not states:
+            snapshots = decks.list_snapshots(sub, deck_id=deck_id, search=query["q"] or None, limit=fetch)
+        if want in ("all", "reports") and not states:
+            reps = reports.list(sub, deck_id, limit=fetch, search=query["q"] or None)
+        client_ids = {r.get("created_by_client") for r in reps if r.get("created_by_client")}
+        names = {cid: state.db.client_name(cid) for cid in client_ids if not cid.startswith("__")}
+        csrf_in = f"<input type='hidden' name='csrf' value='{_esc(_csrf(s, sid))}'>"
+        events = build_events(proposals, snapshots, reps, csrf_input=csrf_in, client_names=names)
+        has_more = len(events) > query["offset"] + PAGE
+        shown = events[query["offset"] : query["offset"] + PAGE]
+        seen = {**state.db.history_decks(sub), **reports.decks_seen(sub)}
         trend = ""
         if deck_id:
             series = reports.series(sub, deck_id)
@@ -1706,21 +1698,33 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
                     if any(isinstance(p.get(key), (int, float)) for p in series)
                 ]
                 trend = (
-                    f"<div class='card'><h2>Trend over {len(series)} reports</h2>"
+                    f"<div class='card trend'><h2>Trend over {len(series)} reports</h2>"
                     f"<div class='tiles'>{''.join(cards)}</div></div>"
                 )
         head = f"<p><a href='/decks/{_esc(deck_id)}'>← Back to the deck</a></p>" if deck_id else ""
-        body = (
-            head
-            + trend
-            + (
-                f"<div class='card'><ul class='plain plist'>{''.join(h for _t, h in events)}</ul></div>"
-                if events
-                else "<div class='card'><p>Nothing yet. Proposals, snapshots and deck reports appear here."
-                "</p></div>"
+        hint = "more below" if has_more else ""
+        if shown:
+            listing = f"<section class='history'>{events_html(shown)}</section>" + pager_html(
+                query, has_more=has_more
             )
+        elif query["offset"]:
+            listing = "<div class='card'><p>No older entries.</p></div>" + pager_html(query, has_more=False)
+        elif any(v for k, v in query.items() if k != "offset"):
+            listing = "<div class='card'><p>Nothing matches these filters.</p></div>"
+        else:
+            listing = (
+                "<div class='card'><p>Nothing yet. Changes you or the assistant propose, the snapshots taken "
+                "before a change is applied and deck reports appear here.</p></div>"
+            )
+        body = head + trend + filter_bar_html(query, seen, shown=len(shown), total_hint=hint) + listing
+        return page(
+            "History" if not deck_id else "Deck history",
+            body,
+            sub=sub,
+            sid=sid,
+            current="/history",
+            extra_css=HISTORY_CSS,
         )
-        return page("History" if not deck_id else "Deck history", body, sub=sub, sid=sid)
 
     @server.custom_route("/history/restore", methods=["POST"], include_in_schema=False)
     async def restore(request: Request) -> Response:
@@ -1743,30 +1747,97 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             return page("History", f"<p class='notice error'>{_esc(exc)}</p>", sub=sub, sid=sid, status=400)
         return RedirectResponse(f"/proposals/{p['proposal_id']}", status_code=303)
 
+    def _report_or_404(sub: str, rid: str) -> dict[str, Any] | None:
+        try:
+            return reports.get(sub, rid)
+        except DeckError:
+            return None
+
     @server.custom_route("/history/reports/{rid}", methods=["GET"], include_in_schema=False)
     async def report_page(request: Request) -> Response:
+        """One stored report as a page a person reads: the deck, the headline numbers of the goldfish
+        simulation with their confidence intervals, charts, what the simulation could not model,
+        the validation verdict and the deck statistics; the service's raw text folded away."""
         sub, sid = browser_session(state, request)
         if not sub:
             return login_redirect("/history")
-        try:
-            r = reports.get(sub, request.path_params["rid"])
-        except DeckError as exc:
-            return page("Report", f"<div class='card'><p>{_esc(exc)}</p></div>", sub=sub, sid=sid, status=404)
-        body = (
-            f"<div class='card'><p><a href='/decks/{_esc(r['deck_id'])}'>← {_esc(r['deck_name'])}</a> · "
-            f"<a href='/history?deck_id={_esc(r['deck_id'])}'>deck history</a></p>"
-            f"<p class='muted small'>Taken {_when(r['taken_at'])}</p>" + stats_strip(r["stats"]) + "</div>"
+        rid = request.path_params["rid"]
+        r = _report_or_404(sub, rid)
+        if r is None:
+            return page(
+                "Report",
+                "<div class='card'><p>No such report for your account.</p></div>",
+                sub=sub,
+                sid=sid,
+                status=404,
+            )
+        safe = _esc(rid)
+        md = report_markdown(r)
+        actions = (
+            "<div class='form-actions'>"
+            f"<a class='btn' href='/history/reports/{safe}/export.md' download>{icon('download')} Markdown"
+            f"</a><a class='btn' href='/history/reports/{safe}/export.html' download>{icon('download')} "
+            f"HTML page</a><button type='button' class='btn copybtn' data-copy='rep-md'>{icon('copy')} "
+            "Copy as Markdown</button>"
+            "</div>"
+            f"<textarea id='rep-md' class='sr-only' readonly aria-label='The report as Markdown'>{_esc(md)}"
+            "</textarea>"
         )
-        for key, title in (("goldfish", "Goldfish simulation"), ("validation", "Validation")):
-            block = r.get(key)
-            if not block:
-                continue
-            text = block.get("text") or json.dumps(block.get("data"), indent=1)
-            status = "" if block.get("ok") else " <span class='badge danger'>failed</span>"
-            body += f"<div class='card'><h2>{title}{status}</h2><pre>{_esc(text[:20000])}</pre></div>"
-        if not r.get("goldfish") and not r.get("validation"):
-            body += "<p class='muted small'>The research service was not configured when this report ran.</p>"
-        return page(f"Report: {r['deck_name']}", body, sub=sub, sid=sid)
+        body = report_body_html(
+            r,
+            stats_html=stats_strip(r.get("stats")),
+            actions_html=actions,
+            reused=request.query_params.get("reused") == "1",
+        )
+        return page(
+            f"Report: {r['deck_name']}",
+            body,
+            sub=sub,
+            sid=sid,
+            heading=False,
+            current="/history",
+            extra_scripts=("export.js",),
+            extra_css=REPORT_CSS,
+        )
+
+    def _report_file(r: dict[str, Any], ext: str, body: str, media_type: str) -> Response:
+        name = re.sub(r"[^A-Za-z0-9._-]+", "_", r.get("deck_name") or r["deck_id"])[:60]
+        day = _when(r.get("taken_at"))[:10]
+        return Response(
+            body,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{name}-report-{day}{ext}"',
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+
+    @server.custom_route("/history/reports/{rid}/export.md", methods=["GET"], include_in_schema=False)
+    async def report_export_md(request: Request) -> Response:
+        sub, _sid = browser_session(state, request)
+        if not sub:
+            return login_redirect("/history")
+        r = _report_or_404(sub, request.path_params["rid"])
+        if r is None:
+            return Response("No such report for your account.", 404)
+        return _report_file(r, ".md", report_markdown(r), "text/markdown; charset=utf-8")
+
+    @server.custom_route("/history/reports/{rid}/export.html", methods=["GET"], include_in_schema=False)
+    async def report_export_html_file(request: Request) -> Response:
+        """The report as one HTML file: inline styles and SVG, no scripts, nothing fetched."""
+        sub, _sid = browser_session(state, request)
+        if not sub:
+            return login_redirect("/history")
+        r = _report_or_404(sub, request.path_params["rid"])
+        if r is None:
+            return Response("No such report for your account.", 404)
+        html_doc = report_export_html(r, stats_html=stats_strip(r.get("stats")), theme_css=VIZ_CSS)
+        resp = _report_file(r, ".html", html_doc, "text/html; charset=utf-8")
+        resp.headers["Content-Security-Policy"] = (
+            "default-src 'none'; style-src 'unsafe-inline'; img-src data:"
+        )
+        return resp
 
     # -- activity ---------------------------------------------------------------
     @server.custom_route("/activity", methods=["GET"], include_in_schema=False)

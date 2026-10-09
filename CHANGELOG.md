@@ -34,6 +34,34 @@ extra outbound request a day to Scryfall (the card-name catalog).
   (no confirmation detour for "all my devices"), and the browser is no
   longer asked to clear its cache on the way out, which held the
   sign-out for seconds in Chromium.
+- **A deck report is a page to read, with exports.** "Run simulation" used
+  to dump the research service's raw text. The report page now opens with
+  the deck, its commander, the games run and when; shows the headline
+  numbers as tiles with their 95% intervals (turn the commander lands,
+  chance of 40 damage or a lethal board by the last turn, mulligans, land
+  drops); draws four small charts (milestones reached by turn, the turn the
+  commander was cast, mana available and damage per turn) in the site's
+  colours without any script; explains in plain words what the simulation
+  could not model (cards it does not recognise, removal and other
+  interaction it cannot value, cards that never mattered, and the shortcuts
+  it takes) with each group's share of the deck; and gives the validation
+  verdict as a badge with the problems listed. Double-faced cards show their
+  front face. The raw output stays, folded away at the end. The page has no
+  assistant tool names on it. Buttons download the report as Markdown or as
+  a self-contained HTML page (no scripts, light and dark) and copy the
+  Markdown to the clipboard. The deck page's button says the run takes up
+  to a minute and shows "Simulating…" while it does; a report reused
+  because the deck had not changed says so.
+- **History is a timeline, not a log.** Entries are grouped by day under
+  headings that stay in view while scrolling; each row shows what it is
+  (edit, new deck, restore, snapshot, report) with an icon, the deck as a
+  link, a one-line summary of the change, who made it (you or the
+  assistant), the time, and its details folded away. Snapshot rows link to
+  the change they were taken before and keep their "Restore (review first)"
+  button. A filter bar narrows the page by deck, type, state and a search
+  over deck names and change text, and "Older" pages through the rest 25 at
+  a time. The per-deck trend tiles are styled like the rest of the site.
+
 - **Typed card names suggest instantly.** The gateway downloads Scryfall's
   card-name catalog once a day (about 700 KB) and answers suggestions from
   memory, so a name list appears within about a hundred milliseconds of a
@@ -71,6 +99,17 @@ extra outbound request a day to Scryfall (the card-name catalog).
   line, small picture and default printing for up to twenty exact card
   names, from one batched, cached Scryfall lookup; the suggestion lists use
   it to decorate their rows.
+
+### Fixed
+
+- **A deck's history lost older entries.** The page filtered the account's
+  newest 20 proposals and snapshots down to one deck, so a deck's own
+  history page (and the deck's API listing) stopped short whenever other
+  decks had been busier. The deck, type, state, search and page are now
+  applied in the database query.
+- **Trend tiles and sparklines on the history and report pages were
+  unstyled.** Their styles lived in the deck page's stylesheet only; they
+  are now part of the site theme.
 
 ## [0.7.8] - 2026-10-08
 

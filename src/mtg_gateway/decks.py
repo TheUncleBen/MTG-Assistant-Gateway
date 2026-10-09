@@ -1696,13 +1696,18 @@ class DeckService:
             self._room_for_proposal(row["owner_sub"])
             raise DeckError("rate_limited", "Too many pending proposals; apply or reject some first.")
 
-    def list_proposals(self, sub: str) -> list[dict[str, Any]]:
+    def list_proposals(self, sub: str, *, full: bool = False, **narrow: Any) -> list[dict[str, Any]]:
+        """Newest first; ``narrow`` is passed to the database (deck_id, kinds, states, search,
+        limit, offset). With ``full`` each row keeps its whole change text as ``diff_text``."""
         now = int(time.time())
         out = []
-        for r in self.db.list_proposals(sub):
+        for r in self.db.list_proposals(sub, **narrow):
             state = "expired" if r["state"] == "pending" and r["expires_at"] < now else r["state"]
-            lines = str(r.pop("diff_text", None) or "").splitlines()
+            diff_text = str(r.pop("diff_text", None) or "")
+            lines = diff_text.splitlines()
             summary = "; ".join(lines[:3]) + (f" (+{len(lines) - 3} more)" if len(lines) > 3 else "")
+            if full:
+                r["diff_text"] = diff_text
             out.append(
                 {
                     **r,
@@ -2482,8 +2487,9 @@ class DeckService:
             raise DeckError("not_found", "No such snapshot for your account.")
         return row
 
-    def list_snapshots(self, sub: str) -> list[dict[str, Any]]:
-        return self.db.list_snapshots(sub)
+    def list_snapshots(self, sub: str, **narrow: Any) -> list[dict[str, Any]]:
+        """Newest first; ``narrow`` is passed to the database (deck_id, search, limit, offset)."""
+        return self.db.list_snapshots(sub, **narrow)
 
     async def propose_restore(self, sub: str, snapshot_id: str) -> dict[str, Any]:
         """A proposal that puts the deck back to what a snapshot recorded, relation by relation:

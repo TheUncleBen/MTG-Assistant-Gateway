@@ -65,6 +65,58 @@ _LIGHT = """
     --shadow:0 3px 6px rgba(0,0,0,.25); --scrim:rgba(0,0,0,.4);
 """
 
+# Tiles, sparklines, charts and the filter-bar select: shared by the deck, report and history
+# pages and copied into a report's self-contained HTML export.
+VIZ_CSS = """
+/* summary tiles, sparklines and the small script-free charts (deck page, reports, history trends) */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,6.5rem),1fr));gap:.5rem;
+  margin:0 0 .75rem}
+.tile{background:var(--surface-2);border:1px solid var(--border-soft);border-radius:3px;padding:.5rem .6rem;
+  display:flex;flex-direction:column;gap:.1rem;min-width:0}
+.tile b{font-size:1.25rem;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.tile span{color:var(--text-muted);font-size:.8rem;overflow-wrap:anywhere}
+.tile .spark{color:var(--orange);width:100%;height:36px}
+.tiles.wide{grid-template-columns:repeat(auto-fit,minmax(min(100%,10rem),1fr));gap:.75rem}
+.tiles.wide .tile{padding:.7rem .8rem;gap:.2rem} .tiles.wide .tile b{font-size:1.5rem}
+/* a confidence interval under a tile's number: a track with the interval filled in */
+.tile .ci{position:relative;display:block;height:6px;margin:.3rem 0 .1rem;border-radius:3px;
+  background:var(--surface-3);overflow:hidden}
+.tile .ci i{position:absolute;top:0;bottom:0;background:var(--orange);border-radius:3px}
+.bars{display:flex;align-items:flex-end;gap:.4rem;height:8rem;padding:.25rem 0;
+  border-bottom:1px solid var(--border)}
+.bars .bar{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;
+  min-width:0;font-size:.75rem}
+.bars .bar span{display:block;width:70%;background:var(--orange);border-radius:2px 2px 0 0}
+.bars .bar b{font-variant-numeric:tabular-nums;margin-bottom:.15rem}
+.bars .bar em{font-style:normal;font-weight:700;margin-top:.3rem;overflow-wrap:anywhere;text-align:center}
+.twocol{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr));gap:1rem}
+.twocol h3{margin-top:0}
+.pips li{display:flex;align-items:center;gap:.5rem;padding:.25rem 0;flex-wrap:wrap}
+.pips li span:nth-child(2){flex:1 1 5rem} .pips b{font-variant-numeric:tabular-nums}
+.pips i{font-style:normal;color:var(--text-muted);font-size:.86rem}
+/* SVG charts drawn on the server: lines and columns take their colours from the theme */
+.chart{min-width:0} .chart h3{margin:0 0 .4rem}
+.chart svg{display:block;width:100%;height:auto;color:var(--text-muted);font-size:11px;overflow:visible}
+.chart text{fill:currentColor} .chart .grid{stroke:var(--border-soft);stroke-width:1}
+.chart .axis{stroke:var(--border)} .chart .col{fill:var(--orange)} .chart .col.c2{fill:var(--blue)}
+.chart .s1{stroke:var(--orange)} .chart .s2{stroke:var(--blue)} .chart .s3{stroke:var(--green)}
+.chart .s4{stroke:var(--purple)} .chart polyline{fill:none;stroke-width:2.5;stroke-linejoin:round;
+  stroke-linecap:round} .chart circle.s1{fill:var(--orange)} .chart circle.s2{fill:var(--blue)}
+.chart circle.s3{fill:var(--green)} .chart circle.s4{fill:var(--purple)}
+.legend{display:flex;flex-wrap:wrap;gap:.3rem 1rem;margin:.4rem 0 0;padding:0;list-style:none;
+  font-size:.86rem}
+.legend li{display:inline-flex;align-items:center;gap:.4rem}
+.legend i{display:inline-block;width:14px;height:4px;border-radius:2px;background:var(--orange)}
+.legend .s2{background:var(--blue)} .legend .s3{background:var(--green)} .legend .s4{background:var(--purple)}
+.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr));gap:1rem 1.5rem;
+  margin:.5rem 0 0}
+/* a select with a leading icon (filter bars) */
+.sel{position:relative;display:block}
+.sel > svg{position:absolute;left:.75rem;top:50%;transform:translateY(-50%);color:var(--orange);
+  pointer-events:none}
+.sel select{padding-left:2.1rem}
+"""
+
 CSS = (
     """
 :root{
@@ -364,7 +416,9 @@ details.disclosure[open] > summary::before{content:'\\25BE'}
 .plist form{margin:0;display:inline}
 .plist form button{margin:0;height:35px;padding:0 .7rem;width:auto}
 
-/* change list: the heart of the review page */
+"""
+    + VIZ_CSS
+    + """/* change list: the heart of the review page */
 .summary{display:flex;flex-wrap:wrap;gap:.5rem;margin:0 0 .75rem}
 .summary span{display:inline-block;padding:.25rem .65rem;border-radius:var(--radius);font-weight:700;
   font-size:.9rem;background:var(--surface-2);border:1px solid var(--border-soft)}
