@@ -1192,7 +1192,6 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             "sideCategory": deck.side_category(),
         }
         side_name = _esc(deck.side_category())
-        cat_opts = "".join(f"<option value='{_esc(c)}'>{_esc(c)}</option>" for c in categories)
         body = (
             f"<script id='editor-config' type='application/json'>{_json_for_html(config)}</script>"
             "<div id='editor' class='editor'>"
@@ -1214,23 +1213,29 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             "<p class='status' role='status'></p></div>"
             "<details class='panel pendingbox'><summary>Pending changes <b class='n'>0</b></summary>"
             "<div class='pending'></div><p class='muted small limit'></p></details>"
+            # One search bar that adds (C-11, the "Search bar" option): chips pick where a card goes,
+            # Enter adds it, "3 sol ring" adds three, and the printings of the highlighted card show
+            # beside the list on wide screens (static/companion.js).
             "<section class='panel addbox'><h2>Add a card</h2>" + picker + "<form class='addcard'>"
+            "<div class='targets' role='group' aria-label='Add to'>"
+            "<button type='button' class='tchip on' data-cat='' data-zone='main' aria-pressed='true'>"
+            "Auto</button>"
+            + "".join(
+                f"<button type='button' class='tchip' data-cat='{_esc(c)}' data-zone='main' "
+                f"aria-pressed='false'>{_esc(c)}</button>"
+                for c in categories
+            )
+            + f"<button type='button' class='tchip side' data-cat='' data-zone='side' aria-pressed='false'>"
+            f"{side_name}</button></div>"
             "<div class='field grow'><label for='addname'>Card name</label>"
             "<input id='addname' type='text' name='card' data-suggest='cards' data-suggest-submit "
-            "data-suggest-rich placeholder='Start typing a card name; Enter adds it' "
-            "autocomplete='off' required></div>"
-            "<div class='field qtyf'><label for='addqty'>Qty</label>"
-            "<input id='addqty' type='number' name='qty' value='1' min='1' max='99'></div>"
-            "<div class='field'><label for='addcat'>Category</label><span class='sel'>"
-            f"<select id='addcat' name='addcat'><option value=''>Auto</option>{cat_opts}</select>"
-            "</span></div>"
-            "<div class='field'><label for='addfinish'>Finish</label><span class='sel'>"
-            "<select id='addfinish' name='addfinish'><option value=''>Normal</option>"
-            "<option value='foil'>Foil</option></select></span></div>"
-            "<div class='field'><label for='addzone'>Add to</label><span class='sel'>"
-            f"<select id='addzone' name='addzone'><option value='main'>Deck</option>"
-            f"<option value='side'>{side_name}</option></select></span></div>"
-            f"<div class='field go'><button class='btn-primary'>{icon('plus')} Add</button></div>"
+            "data-suggest-rich data-suggest-qty placeholder='Type a card name; Enter adds one, "
+            "“3 sol ring” adds three' autocomplete='off' required>"
+            "<div class='addprints' hidden aria-label='Printings' role='group'></div></div>"
+            f"<div class='field go'><button class='btn-primary'>{icon('plus')} Add</button>"
+            "<label class='foil'><input type='checkbox' name='foil'> Foil</label></div>"
+            "<input type='hidden' id='addcat' name='addcat' value=''>"
+            "<input type='hidden' id='addzone' name='addzone' value='main'>"
             "<p class='addstatus muted small' role='status' aria-live='polite'></p></form>"
             "<details class='pastebox'><summary>Paste a list</summary>"
             "<form class='pastelist'><label for='pastetext'>One card per line, with a count in front "

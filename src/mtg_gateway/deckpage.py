@@ -1652,26 +1652,49 @@ ul.decklist.list .deck{margin-bottom:.5rem}
 .pendingbox summary{cursor:pointer;font-weight:700}
 .pendingbox summary b{margin-left:.5rem;background:var(--orange);color:#fff;border-radius:10px;
   padding:0 .5rem}
-/* add a card: the name box leads; count, category, finish, zone and the button sit on the same
-   row where there is room, and fold onto two rows on narrow screens (never a stray button) */
-.addbox form.addcard{display:grid;gap:.6rem .75rem;align-items:end;
-  grid-template-columns:minmax(12rem,3fr) 5rem minmax(8rem,1.2fr) minmax(6.5rem,1fr) minmax(6.5rem,1fr) auto}
+/* add a card: one search bar. Chips above it say where the card goes; the name box leads with the
+   Add button and the Foil tick beside it; on wide screens the second column also leaves room for
+   the printings that float beside the suggestion list. Never a stray button. */
+.addbox form.addcard{display:grid;gap:.6rem .75rem;align-items:end;grid-template-columns:minmax(0,1fr) auto}
 .addbox form.addcard .field{margin:0}
-.addbox form.addcard button{margin:0;height:var(--ctl);white-space:nowrap}
+.addbox form.addcard .targets{grid-column:1 / -1;display:flex;flex-wrap:wrap;gap:.35rem;align-items:center}
+.addbox .tchip{margin:0;height:auto;min-height:1.9rem;padding:.15rem .7rem;border-radius:999px;
+  font-size:.86rem;font-weight:600;background:var(--surface);border:1px solid var(--border);
+  color:var(--text-muted)}
+.addbox .tchip.on{background:var(--orange-tint);border-color:var(--orange);color:var(--text)}
+.addbox .tchip.side{margin-left:auto}
+.addbox form.addcard .grow{position:relative}
+.addbox form.addcard .go{display:flex;flex-direction:row;align-items:center;gap:.75rem}
+.addbox form.addcard .go button{margin:0;height:var(--ctl);white-space:nowrap}
+.addbox form.addcard .go .foil{display:inline-flex;align-items:center;gap:.35rem;font-size:.9rem;
+  white-space:nowrap}
 .addbox form.addcard .addstatus{grid-column:1 / -1;margin:0;min-height:1.2em}
 .addbox form.addcard .addstatus:empty{display:none}
-@media (max-width:1100px){
-  .addbox form.addcard{grid-template-columns:minmax(0,1fr) 5rem auto}
-  .addbox form.addcard .grow{grid-column:1} .addbox form.addcard .qtyf{grid-column:2}
-  .addbox form.addcard .go{grid-column:3}
-  .addbox form.addcard .field:not(.grow):not(.qtyf):not(.go){grid-row:2;grid-column:auto}
-  .addbox form.addcard{grid-template-areas:none} }
-@media (max-width:1100px) and (min-width:601px){
-  .addbox form.addcard{grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr)}
-  .addbox form.addcard .grow{grid-column:1 / 3} .addbox form.addcard .qtyf{grid-column:3;grid-row:1}
-  .addbox form.addcard .go{grid-column:3;grid-row:2} }
+.addprints{display:none}
+@media (min-width:900px){
+  .addbox form.addcard{grid-template-columns:minmax(0,1fr) 19rem}
+  .addprints{display:block;position:absolute;top:calc(100% + 3px);left:calc(100% + .5rem);width:18.5rem;
+    z-index:70;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+    box-shadow:var(--shadow);    padding:.6rem .7rem;max-height:min(24rem,60vh);overflow:auto}
+  .addprints[hidden]{display:none}
+  .addprints .head{display:flex;justify-content:space-between;gap:.5rem;align-items:baseline;
+    margin-bottom:.5rem}
+  .addprints .head b{overflow-wrap:anywhere}
+  .addprints .pgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.4rem}
+  .addprints .print{border:2px solid transparent;border-radius:6px;background:var(--surface-2);padding:.2rem;
+    margin:0;height:auto;display:flex;flex-direction:column;gap:.15rem;align-items:center;cursor:pointer;
+    min-width:0}
+  .addprints .print img{width:100%;aspect-ratio:5/7;border-radius:4.5%;object-fit:cover}
+  .addprints .print .cap{font-size:.7rem;color:var(--text-muted);white-space:nowrap}
+  .addprints .print.current{border-color:var(--orange)}
+  .addprints .print:hover,.addprints .print:focus-visible{border-color:var(--link)}
+  .addprints .hint{margin:.5rem 0 0} }
+@media (max-width:600px){
+  .addbox form.addcard{grid-template-columns:1fr}
+  .addbox form.addcard .go{justify-content:space-between}
+  .addbox form.addcard .go button{flex:1} }
 /* categories side by side on wide screens, one column on phones */
-.cats.existing{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,30rem),1fr));gap:1rem;
+.cats.existing{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,36rem),1fr));gap:1rem;
   align-items:start}
 .cats.existing > details.cat{margin:0}
 .addbox form.scanpick{display:flex;gap:.5rem;align-items:end;flex-wrap:wrap;margin-bottom:.75rem}

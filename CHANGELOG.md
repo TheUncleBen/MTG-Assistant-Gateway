@@ -16,6 +16,13 @@ extra outbound request a day to Scryfall (the card-name catalog).
 
 ### Changed
 
+- **Adding cards is one search bar.** In the deck editor, chips above the
+  box say where a card goes (Auto, a category, the maybeboard), Enter
+  adds the highlighted card and keeps the cursor in the box, "3 sol ring"
+  adds three, and on wide screens the printings of the highlighted card
+  show as pictures beside the list: the set used last on this deck is
+  pre-selected, and a click adds that printing. Enter pressed while the
+  list is still catching up takes the first answer when it arrives.
 - **Playtest opens Archidekt's playtester in its own tab** (in the app: the
   phone's browser), where your Archidekt sign-in lives, so private decks
   play too. The gateway no longer frames it; old links are sent on.
