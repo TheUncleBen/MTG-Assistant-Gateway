@@ -266,7 +266,7 @@ button.thumbbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px
 @media (max-width:600px){ .form-actions > button:not(.mini),.form-actions > .btn,
   .form-actions form > button{width:100%} }
 
-/* mana and rules-text symbols: own glyphs on Archidekt-coloured discs (mana.py, the sprite in <body>) */
+/* mana and rules-text symbols: own glyphs on Archidekt-coloured discs (mana.py puts the SVG sprite on the page) */
 .mana{display:inline-flex;gap:2px;align-items:center;white-space:nowrap;vertical-align:middle}
 .mana .sep{color:var(--text-muted);font-size:.8em;margin:0 .15em}
 .pip{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;
