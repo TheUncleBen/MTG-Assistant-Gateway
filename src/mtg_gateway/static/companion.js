@@ -571,7 +571,9 @@
     if (changes().length && !root.dataset.leaving) { ev.preventDefault(); ev.returnValue = ""; }
   });
 
-  // save: one proposal, applied at once (apply:true); a big removal asks first
+  // save: one proposal, applied at once (apply:true); a big removal asks first. The tick box says
+  // whether Archidekt also gets a backup copy (the gateway's snapshot is kept either way).
+  var backupBox = root.querySelector("input[name=archidekt_backup]");
   function save(confirmed) {
     var btn = root.querySelector("button.review");
     btn.disabled = true;
@@ -584,7 +586,8 @@
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json", "X-CSRF-Token": cfg.csrf },
-      body: JSON.stringify({ kind: "edit", deck_id: cfg.deckId, changes: changes(), apply: true, confirmed: confirmed === true })
+      body: JSON.stringify({ kind: "edit", deck_id: cfg.deckId, changes: changes(), apply: true, confirmed: confirmed === true,
+        archidekt_backup: !(backupBox && !backupBox.checked) })
     })
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
       .then(function (res) {

@@ -1226,7 +1226,15 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             f"{icon('check')} <span class='label'>Save changes</span></button>"
             f"<button type='button' class='undo' disabled>{icon('undo')} Undo</button>"
             "<span class='count muted'>No changes yet</span>"
-            "<p class='status' role='status'></p></div>"
+            + (
+                # D-02: the extra copy on Archidekt is the member's choice per save; the gateway's own
+                # snapshot (Restore under History) is always kept.
+                "<label class='backup'><input type='checkbox' name='archidekt_backup' checked> "
+                "Also keep a backup copy on Archidekt</label>"
+                if s.archidekt_backups
+                else ""
+            )
+            + "<p class='status' role='status'></p></div>"
             "<details class='panel pendingbox'><summary>Pending changes <b class='n'>0</b></summary>"
             "<div class='pending'></div><p class='muted small limit'></p></details>"
             # One search bar that adds (C-11, the "Search bar" option): chips pick where a card goes,

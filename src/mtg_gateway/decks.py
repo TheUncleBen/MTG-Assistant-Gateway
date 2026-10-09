@@ -1754,7 +1754,12 @@ class DeckService:
             )
         return row
 
-    async def apply(self, sub: str, proposal_id: str, *, via: str) -> dict[str, Any]:
+    async def apply(
+        self, sub: str, proposal_id: str, *, via: str, archidekt_backup: bool | None = None
+    ) -> dict[str, Any]:
+        """``archidekt_backup=False`` (a member's own hand edit, the save bar's tick box unticked, or a
+        quick edit on the deck page) skips the extra backup copy on Archidekt; the gateway's own
+        snapshot is always taken. The assistant's applies always keep the copy."""
         if not self.settings.writes_enabled:
             raise DeckError(
                 "writes_disabled",
@@ -1766,6 +1771,8 @@ class DeckService:
             raise DeckError("not_found", "No such proposal for your account.")
         if row["state"] == "applied":
             raise DeckError("already_applied", "This proposal was already applied; nothing was sent again.")
+        if archidekt_backup is False and via == "browser":
+            row["archidekt_backup"] = False
         creator = row.get("created_by_client")
         # "mcp" is the assistant's own apply_proposal call: allowed only when this member's
         # approval mode (modes.py) lets the assistant apply a proposal of this risk itself.
@@ -2159,6 +2166,8 @@ class DeckService:
         made the edit does not proceed: the proposal goes back to pending so the user can retry."""
         if not self.settings.archidekt_backups:
             return {}
+        if row.get("archidekt_backup") is False:
+            return {"archidekt_backup": "skipped"}  # the member's own choice at save time (D-02)
         reason = f"before proposal {row['id']} changed this deck ({row.get('kind') or 'edit'})"
         try:
             return await self._backup_copy(sub, deck, snapshot_id, reason=reason)

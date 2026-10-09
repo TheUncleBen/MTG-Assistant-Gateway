@@ -267,7 +267,12 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                 why = modes.hand_edit_confirm("edit", p.get("rows"))
                 if why and data.get("confirmed") is not True:
                     return ok({**p, "applied": False, "needs_confirm": True, "why": why}, 201)
-                result = await decks.apply(who.sub, p["proposal_id"], via="browser")
+                result = await decks.apply(
+                    who.sub,
+                    p["proposal_id"],
+                    via="browser",
+                    archidekt_backup=data.get("archidekt_backup") is not False,
+                )
                 # a large edit may still be running ("applying"); result carries its progress
                 return ok({**p, "applied": result.get("state") == "applied", "result": result}, 201)
             return ok(p, 201)

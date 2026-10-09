@@ -1642,6 +1642,9 @@ ul.decklist.list .deck{margin-bottom:.5rem}
   box-shadow:0 2px 6px rgba(0,0,0,.35)}
 .editbar button{margin:0}
 .editbar .count{color:inherit;opacity:.85}
+.editbar .backup{display:inline-flex;align-items:center;gap:.35rem;margin:0;font-size:.9rem;
+  opacity:.9;white-space:nowrap}
+.editbar .backup input{margin:0}
 .editbar .status{margin:0;flex-basis:100%}
 .editbar .status:empty{display:none}
 .pendingbox summary{cursor:pointer;font-weight:700}

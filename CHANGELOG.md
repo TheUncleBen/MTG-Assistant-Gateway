@@ -95,6 +95,13 @@ extra outbound request a day to Scryfall (the card-name catalog).
 
 ### Added
 
+- **The backup copy on Archidekt is a tick box per save.** The deck
+  editor's save bar has "Also keep a backup copy on Archidekt", on by
+  default; unticking it skips only that extra copy for that save. The
+  gateway's own snapshot (Restore under History) is always kept, and the
+  assistant's applies always make the copy. `POST /api/v1/proposals`
+  takes `archidekt_backup: false` for the same choice (browser session,
+  with `apply: true`).
 - `GET /scan/api/peek?names=a|b|c` (browser session only): mana cost, type
   line, small picture and default printing for up to twenty exact card
   names, from one batched, cached Scryfall lookup; the suggestion lists use

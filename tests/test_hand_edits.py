@@ -102,3 +102,34 @@ async def test_bearer_tokens_cannot_apply_in_one_step(stack: Stack) -> None:  # 
         assert len(stack.ark.patches) == before
     finally:
         await b.aclose()
+
+
+async def test_the_save_bar_tick_box_decides_the_extra_copy_on_archidekt(stack: Stack) -> None:  # noqa: F811
+    """D-02: the member chooses per save whether the extra backup copy goes to Archidekt; the
+    gateway's own snapshot is taken either way, and the assistant's applies never skip the copy."""
+    b = await linked(stack)
+    db = stack.h.app.state.gateway.db
+    try:
+        body = {
+            "kind": "edit",
+            "deck_id": "42",
+            "changes": [{"action": "add", "card_name": "Cultivate", "quantity": 1}],
+            "apply": True,
+        }
+        r = await api(b, "POST", "/api/v1/proposals", {**body, "archidekt_backup": False})
+        assert r.status_code == 201, r.text
+        d = r.json()
+        assert d["result"]["state"] == "applied", d
+        assert d["result"]["result"]["archidekt_backup"] == "skipped", d["result"]
+        snap = db.get_snapshot(d["result"]["snapshot_id"], "user-1")
+        assert snap and not snap.get("backup_deck_id")
+        before = len(stack.ark.decks)
+        r = await api(b, "POST", "/api/v1/proposals", body)  # box ticked (the default)
+        assert r.status_code == 201, r.text
+        d = r.json()
+        assert d["result"]["state"] == "applied", d
+        assert d["result"]["result"].get("archidekt_backup") != "skipped", d["result"]
+        snap = db.get_snapshot(d["result"]["snapshot_id"], "user-1")
+        assert snap and snap.get("backup_deck_id") and len(stack.ark.decks) == before + 1
+    finally:
+        await b.aclose()
