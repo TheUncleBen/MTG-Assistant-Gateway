@@ -13,6 +13,18 @@ https://mtg.example.com/mcp
 Swap `mtg.example.com` for the hostname the owner gave you, and keep the
 `/mcp` on the end.
 
+**Before you add it, check the address from outside.** Claude and ChatGPT
+reach the gateway from their own servers, not from your network, so an
+address that works at home can still fail for them ("couldn't reach this
+address", or the connector never finishes connecting). On a phone with Wi‑Fi
+off (mobile data), open `https://mtg.example.com/healthz`: it should show
+`{"status":"ok"}`. Then open `https://mtg.example.com/mcp`: a one-line message saying
+`Authentication required` is the right answer (the connector signs in through
+OAuth; a blank timeout or a proxy error page is not). If
+either fails on mobile data but works on your home Wi‑Fi, the owner has a
+checklist in [TROUBLESHOOTING.md](TROUBLESHOOTING.md#the-site-doesnt-load)
+(the "couldn't reach this address" row).
+
 The gateway's install page can show just the steps for your app:
 `https://mtg.example.com/install?for=claude`, `?for=claude-code`,
 `?for=chatgpt` or `?for=codex`.

@@ -19,6 +19,10 @@ catalog). Back up the database before you update, as always.
 
 ### Changed
 
+- **Connecting from outside:** CONNECT.md now starts with a check from
+  mobile data (the AI service reaches the gateway from the internet, not
+  from your network), and TROUBLESHOOTING.md has a row for "couldn't reach
+  this address" with the proxy, access-list, certificate and router checks.
 - **The request log names the route, not the request.** Each request's log
   line now reads `GET /decks/{deck_id} 200 41ms …` instead of the path
   itself, so deck numbers, Archidekt usernames, signed-link tokens and member
