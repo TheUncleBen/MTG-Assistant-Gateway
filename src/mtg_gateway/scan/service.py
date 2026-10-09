@@ -16,6 +16,7 @@ from typing import Any
 from ..db import Database
 from ..decklist import ListCard, to_text
 from .art import art_owner
+from .names import NameCatalog
 from .scryfall import ScryfallClient, ScryfallError, summarize
 from .store import ScanStore
 
@@ -389,6 +390,7 @@ class ScanService:
         self.db = db
         self.scryfall = scryfall
         self.call_seconds = call_seconds
+        self.names = NameCatalog(lambda: self.scryfall)
         self.t = thresholds or ScanThresholds()
         self.art_matcher = art_matcher
         self.store = ScanStore(db)
@@ -784,9 +786,15 @@ class ScanService:
             raise ScanError("unavailable", str(exc)) from exc
 
     async def suggest(self, query: str, *, owner: str | None = None) -> list[str]:
+        """Card names for typed text: from the in-memory catalog (names.py) when it is loaded,
+        which costs no Scryfall call; otherwise Scryfall's autocomplete while it loads."""
         query = query.strip()
         if len(query) < 2 or len(query) > 100:
             return []
+        self.names.ensure()
+        local = self.names.suggest(query)
+        if local is not None:
+            return local
         try:
             with self._lookup_slot(owner):
                 return (await self.scryfall.autocomplete(query))[:20]

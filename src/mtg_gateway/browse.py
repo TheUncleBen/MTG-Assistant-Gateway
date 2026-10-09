@@ -61,18 +61,22 @@ FORMAT_OPTIONS = sorted(
     ((str(i), format_label(FORMAT_NAMES[i])) for i in sorted(FORMAT_NAMES)), key=lambda kv: kv[1].lower()
 )
 BROWSE_CSS = """
-.searchbar .controls{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,2fr) minmax(0,
-  1.5fr) minmax(8rem,1fr) minmax(8rem,1fr);
-  gap:1rem;align-items:end}
-.searchbar .colours{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem;min-height:var(--ctl)}
+.searchbar .controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));
+  gap:.9rem 1rem;align-items:end}
+.searchbar .controls .field{margin:0}
+.searchbar .foot{grid-column:1 / -1;display:flex;flex-wrap:wrap;align-items:end;
+  justify-content:space-between;gap:.9rem 1.5rem}
+.searchbar .colours{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .9rem;min-height:var(--ctl)}
 .searchbar .colours label{display:inline-flex;align-items:center;gap:.3rem;margin:0;cursor:pointer;
-  font-weight:400}
+  font-weight:400;min-height:2rem}
 .searchbar .colours input{width:auto;height:auto;margin:0}
-.searchbar .go{display:flex;gap:.5rem;align-items:end}
-.searchbar .go .btn,.searchbar .go button{margin:0}
-.searchbar .field .lbl{display:block;font-size:.93rem;font-weight:700;margin-bottom:.3rem}
-@media (max-width:1000px){ .searchbar .controls{grid-template-columns:1fr 1fr} }
-@media (max-width:600px){ .searchbar .controls{grid-template-columns:1fr} }
+.searchbar .form-actions{margin:0;flex:1 1 auto;justify-content:flex-end}
+.searchbar .form-actions .btn-primary{min-width:11rem}
+.searchbar .field .lbl{display:block;font-size:1rem;font-weight:700;margin-bottom:.3rem}
+@media (min-width:1200px){ .searchbar .controls{grid-template-columns:minmax(0,2fr) minmax(0,2fr) minmax(0,1.5fr)
+  minmax(10rem,1fr) minmax(10rem,1fr)} }
+@media (max-width:600px){ .searchbar .foot{flex-direction:column;align-items:stretch}
+  .searchbar .form-actions{justify-content:stretch} }
 .results-head{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap;
   margin:0 0 .75rem}
 .results-head .muted{margin:0}
@@ -173,8 +177,8 @@ def search_form_html(query: dict[str, Any]) -> str:
         f"value='{_esc(query['name'])}' placeholder='Any part of the name'></div>"
         "<div class='field'><label for='s-cmd'>Commander</label>"
         f"<input id='s-cmd' type='text' name='commander' value='{_esc(query['commander'])}' "
-        "placeholder='Card name, e.g. Atraxa, Praetors&#39; Voice' list='cardnames' autocomplete='off'>"
-        "<datalist id='cardnames'></datalist></div>"
+        "placeholder='Card name, e.g. Atraxa, Praetors&#39; Voice' data-suggest='cards' "
+        "autocomplete='off'></div>"
         "<div class='field'><label for='s-owner'>Owner</label>"
         "<input id='s-owner' type='text' name='owner' "
         f"value='{_esc(query['owner'])}' placeholder='Archidekt username'></div>"
@@ -182,11 +186,11 @@ def search_form_html(query: dict[str, Any]) -> str:
         f"<select id='s-format' name='format'>{fmt_opts}</select></span></div>"
         f"<div class='field'><label for='s-order'>Sort by</label><span class='sel'>{icon('sort')}"
         f"<select id='s-order' name='order'>{order_opts}</select></span></div>"
-        "<div class='field'><span class='lbl'>Colour "
+        "<div class='foot'><div class='field'><span class='lbl'>Colour "
         f"identity</span><div class='colours'>{colours}</div></div>"
-        "<div class='field go'><button type='submit' "
+        "<div class='form-actions'><button type='submit' "
         f"class='btn-primary'>{icon('search')} Search decks</button>"
-        "<a class='btn' href='/search'>Clear</a></div>"
+        "<a class='btn' href='/search'>Clear</a></div></div>"
         "</form></section>"
     )
 

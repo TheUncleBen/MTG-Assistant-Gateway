@@ -464,8 +464,8 @@ def toolbar_html(deck: Deck, *, own: bool, view: str, group: str, sort: str, q: 
     add = (
         "<form method='get' action='/decks/{did}/edit' class='field add quick'>"
         "<label for='quick'>Add card</label><div class='quickrow'>"
-        "<input id='quick' type='text' name='add' placeholder='Quick add (card name)' list='cardnames' "
-        "autocomplete='off'><datalist id='cardnames'></datalist>"
+        "<input id='quick' type='text' name='add' placeholder='Quick add (card name)' data-suggest='cards' "
+        "autocomplete='off'>"
         f"<button type='submit' class='primary'>{icon('search')} "
         "<span>Card search</span></button></div></form>"
         if own
@@ -1008,6 +1008,30 @@ def _compare_row(name: str, qty_text: str, cards: dict[str, DeckCard]) -> str:
     )
 
 
+def precon_labels(precons: dict[str, list[dict[str, Any]]]) -> list[str]:
+    """'Deck name (Set)' for every preconstructed deck, the labels the compare box suggests."""
+    return [
+        f"{d['name']} ({set_name})"
+        for set_name, rows in precons.items()
+        for d in rows
+        if d.get("id") and d.get("name")
+    ]
+
+
+def precon_by_label(precons: dict[str, list[dict[str, Any]]], text: str) -> int | None:
+    """The deck id of the precon whose label or bare name is ``text`` (case-insensitive)."""
+    want = " ".join(text.split()).casefold()
+    if not want:
+        return None
+    for set_name, rows in precons.items():
+        for d in rows:
+            if not (d.get("id") and d.get("name")):
+                continue
+            if want in (f"{d['name']} ({set_name})".casefold(), str(d["name"]).casefold()):
+                return int(d["id"])
+    return None
+
+
 def compare_page_html(
     deck: Deck,
     *,
@@ -1025,12 +1049,7 @@ def compare_page_html(
     when both are Archidekt decks."""
     did = esc(deck.id)
     name = esc(deck.name or f"Deck {deck.id}")
-    options = "".join(
-        f"<option value='{esc(d.get('id'))}'>{esc(d.get('name'))} ({esc(set_name)})</option>"
-        for set_name, rows in precons.items()
-        for d in rows
-        if d.get("id") and d.get("name")
-    )
+    options = esc(json.dumps(precon_labels(precons), ensure_ascii=False))
     form = (
         "<section class='panel comparehead'>"
         f"<div><a href='/decks/{did}'>← {name}</a>"
@@ -1038,9 +1057,8 @@ def compare_page_html(
         f"<form method='get' action='/decks/{did}/compare' class='compareform'>"
         "<label class='field'><span>Other deck: a preconstructed deck from the list, or any Archidekt deck "
         "id or link</span>"
-        f"<input name='with' list='preconlist' value='{esc(other_ref)}' placeholder='Start typing a precon "
-        "name, or paste a deck link' autocomplete='off'></label>"
-        f"<datalist id='preconlist'>{options}</datalist>"
+        f"<input name='with' data-suggest='static' data-options='{options}' value='{esc(other_ref)}' "
+        "placeholder='Start typing a precon name, or paste a deck link' autocomplete='off'></label>"
         "<label class='field'><span>…or paste a decklist (one card per line, Archidekt's export text works)"
         f"</span><textarea name='paste' rows='4' placeholder='1 Sol Ring&#10;1 Arcane Signet'>{esc(paste)}"
         "</textarea></label>"

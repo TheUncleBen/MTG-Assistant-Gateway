@@ -388,24 +388,8 @@
     existing.appendChild(det);
   });
 
-  // add a card by name (Scryfall autocomplete through the gateway's scan API)
+  // add a card by name (suggestions: static/suggest.js; picking one submits this form)
   var input = root.querySelector("input[name=card]");
-  var datalist = root.querySelector("datalist");
-  var timer = null;
-  input.addEventListener("input", function () {
-    clearTimeout(timer);
-    var q = input.value.trim();
-    if (q.length < 3) return;
-    timer = setTimeout(function () {
-      fetch("/scan/api/search?q=" + encodeURIComponent(q), { credentials: "same-origin" })
-        .then(function (r) { return r.ok ? r.json() : { names: [] }; })
-        .then(function (d) {
-          datalist.textContent = "";
-          (d.names || []).slice(0, 12).forEach(function (n) { datalist.appendChild(el("option", { value: n })); });
-        })
-        .catch(function () {});
-    }, 250);
-  });
   root.querySelector("form.addcard").addEventListener("submit", function (ev) {
     ev.preventDefault();
     var name = input.value.trim();

@@ -481,6 +481,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
         except Exception:  # never keep the gateway from starting; the hourly round tries again
             logger.exception("sealing or purging stored Archidekt sessions failed")
         tasks = [asyncio.create_task(purge_loop(state.db, also=state.decks.purge_expired_links))]
+        if state.scan is not None:
+            state.scan.names.ensure()  # card-name catalog for typed suggestions, in the background
         if state.sweep is None:
             state.sweep = AuthentikSweep(s, state.db, state.decks)
         if state.sweep.enabled:

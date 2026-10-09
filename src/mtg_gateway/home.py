@@ -129,8 +129,8 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             "<div class='field'><label for='home-q'>Deck name</label>"
             "<input id='home-q' type='search' name='q' placeholder='Deck name'></div>"
             "<div class='field'><label for='home-c'>Commander</label>"
-            "<input id='home-c' type='text' name='commander' list='cardnames' autocomplete='off' "
-            "placeholder='Commander'><datalist id='cardnames'></datalist></div>"
+            "<input id='home-c' type='text' name='commander' data-suggest='cards' autocomplete='off' "
+            "placeholder='Commander'></div>"
             f"<button class='btn-primary'>{icon('search')} Search Archidekt</button></form></section>"
         )
         tiles = (

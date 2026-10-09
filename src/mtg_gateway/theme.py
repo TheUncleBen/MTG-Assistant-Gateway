@@ -256,6 +256,25 @@ button.thumbbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px
 .actions .btn,.actions button,.actions form > button{margin-top:0}
 .actions form{display:contents}
 @media (max-width:600px){ main form > button:not(.mini):not(.inline),main .choice .btn{width:100%} }
+/* one row of equal-height buttons at the end of a form; on phones they stack full width */
+.form-actions{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;margin-top:1rem}
+.form-actions > button,.form-actions > .btn,.form-actions form > button{margin:0}
+.form-actions .status{margin:0 0 0 auto;color:var(--text-muted);font-size:.9rem}
+@media (max-width:600px){ .form-actions > button:not(.mini),.form-actions > .btn{width:100%} }
+
+/* typed suggestions (static/suggest.js): a listbox under the box, themed like the dropdown menus */
+.suggest{position:relative;display:block;min-width:0}
+.suggest > input{width:100%}
+.suggest-list{position:absolute;top:calc(100% + 3px);left:0;right:0;z-index:70;margin:0;padding:.3rem 0;
+  list-style:none;max-height:min(19rem,55vh);overflow:auto;overscroll-behavior:contain;
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}
+.suggest-list li{display:block;padding:.55rem 1rem;cursor:pointer;line-height:1.3;overflow-wrap:anywhere;
+  font-weight:400}
+.suggest-list li[aria-selected=true],.suggest-list li:hover{background:var(--surface-2)}
+.suggest-list li[aria-selected=true]{box-shadow:inset 3px 0 0 var(--orange)}
+.suggest-list li.none{color:var(--text-muted);cursor:default}
+.suggest-list mark{background:none;color:inherit;font-weight:700;text-decoration:underline;
+  text-decoration-color:var(--orange);text-underline-offset:.15em}
 
 /* badges, pills and notices */
 .badge{display:inline-block;vertical-align:middle;padding:.125rem .5rem;border-radius:5px;font-size:.86rem;
@@ -778,7 +797,8 @@ def render(
             if not app
             else ""
         )
-        + f"{tabbar}<script src='{FEEDBACK_SCRIPT}' defer></script></body></html>"
+        + f"{tabbar}<script src='{FEEDBACK_SCRIPT}' defer></script>"
+        "<script src='/static/suggest.js' defer></script></body></html>"
     )
     return HTMLResponse(
         doc,

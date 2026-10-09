@@ -89,31 +89,7 @@
     if (q.form) q.form.addEventListener("submit", function (ev) { if (document.activeElement === q) { ev.preventDefault(); apply(); } });
   }
 
-  // -- card-name autocomplete (Quick add, the search form's commander, the collection's add box) -
-  var names = $("#cardnames");
-  if (names) {
-    var timer = null;
-    $$("input[list=cardnames]").forEach(function (input) {
-      input.addEventListener("input", function () {
-        clearTimeout(timer);
-        var v = input.value.trim();
-        if (v.length < 3) return;
-        timer = setTimeout(function () {
-          fetch("/scan/api/search?q=" + encodeURIComponent(v), { credentials: "same-origin" })
-            .then(function (r) { return r.ok ? r.json() : { names: [] }; })
-            .then(function (d) {
-              names.textContent = "";
-              (d.names || []).slice(0, 12).forEach(function (n) {
-                var o = document.createElement("option");
-                o.value = n;
-                names.appendChild(o);
-              });
-            })
-            .catch(function () {});
-        }, 250);
-      });
-    });
-  }
+  // (card-name suggestions: static/suggest.js, on every input[data-suggest])
 
   // -- deck page only (the social block further down runs on every deck, own or not) -------
   if (cards && cards.classList.contains("deckview")) {
