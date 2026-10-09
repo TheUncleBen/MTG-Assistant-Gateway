@@ -412,7 +412,7 @@ async def test_card_printings_filters_and_limits(stack: Stack) -> None:
 # -- health check -------------------------------------------------------------------------------
 async def test_health_check_reports_the_research_service(stack: Stack) -> None:
     r = await stack.h.http.get("/healthz")
-    assert r.status_code == 200 and r.json()["status"] == "ok" and r.json()["mystic_forge"] == "ok"
+    assert r.status_code == 200 and r.json() == {"status": "ok"}
 
 
 async def test_health_check_notices_the_research_service_is_down(tmp_path: Path, idp: FakeIdP) -> None:
@@ -429,7 +429,7 @@ async def test_health_check_notices_the_research_service_is_down(tmp_path: Path,
         r = await h.http.get("/healthz")
         # still 200: the gateway's own pages work, so the container must not be restarted for it
         assert r.status_code == 200, r.text
-        assert r.json()["status"] == "degraded" and r.json()["mystic_forge"] == "down"
+        assert r.json() == {"status": "degraded"}
 
 
 # -- linking Archidekt --------------------------------------------------------------------------
@@ -440,7 +440,8 @@ async def test_linking_archidekt_needs_the_risk_note_acknowledged(stack: Stack) 
         page = await b.http.get("/account", headers=NAV)
         assert "terms of service restrict automated access" in page.text
         assert (
-            "name='accept_risk'" in page.text and "the key that opens it is on the same server" in page.text
+            "name='accept_risk'" in page.text
+            and "The key that opens the session is on the same server" in page.text
         )
         csrf = await b.csrf("/account")
         r = await b.http.post(

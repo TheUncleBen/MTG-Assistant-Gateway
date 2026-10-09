@@ -91,6 +91,60 @@ async def test_marketplace_and_archive_are_public_and_consistent(harness: Harnes
     assert again.content == z.content
 
 
+def test_plugin_short_name_follows_the_owners_name() -> None:
+    assert plugin_page.plugin_slug("MTG Assistant Gateway") == "mtg-gateway"
+    assert plugin_page.plugin_slug("Deck Helper") == "deck-helper"
+    assert plugin_page.plugin_slug("  Kim's   Cards!! ") == "kim-s-cards"
+    assert plugin_page.plugin_slug("!!!") == "mtg-gateway"
+    assert len(plugin_page.plugin_slug("x" * 100)) == plugin_page.SLUG_MAX
+    # Nothing that could break the skills' YAML front matter or a JSON string.
+    assert plugin_page.plugin_label('Deck: "Helper" <b>') == "Deck Helper b"
+
+
+async def test_owner_named_gateway_serves_no_project_name_or_link(
+    tmp_path: Path, idp: FakeIdP, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With MTG_SERVER_NAME set, nothing a stranger can fetch names this project or links to
+    its repository: the plugin, its connector and skills take the owner's name."""
+    monkeypatch.setenv("MTG_PLUGIN_DIR", str(REPO_PLUGIN))
+    async with running(Harness(make_settings(tmp_path, server_name="Deck Helper"), idp)) as h:
+        mp = (await h.http.get("/plugin/marketplace.json")).json()
+        (entry,) = mp["plugins"]
+        assert mp["name"] == entry["name"] == "deck-helper"
+        sha = entry["source"]["sha256"]
+        assert entry["source"]["url"] == f"{GATEWAY}/plugin/deck-helper.zip?v={sha}"
+        assert "/deck-helper:setup" in entry["description"]
+        assert (await h.http.get("/plugin/mtg-gateway.zip")).status_code == 404
+
+        z = await h.http.get("/plugin/deck-helper.zip")
+        assert z.status_code == 200 and hashlib.sha256(z.content).hexdigest() == sha
+        assert 'filename="deck-helper.zip"' in z.headers["content-disposition"]
+        zf = zipfile.ZipFile(io.BytesIO(z.content))
+        names = zf.namelist()
+        assert all(n.startswith("deck-helper/") for n in names)
+        assert "deck-helper/skills/deck-helper/SKILL.md" in names
+        assert "deck-helper/skills/setup/SKILL.md" in names
+        for connector in ("deck-helper/.mcp.json", "deck-helper/mcp.json"):
+            servers = json.loads(zf.read(connector))["mcpServers"]
+            assert list(servers) == ["deck-helper"] and servers["deck-helper"]["url"] == f"{GATEWAY}/mcp"
+        for manifest in ("deck-helper/plugin.json", "deck-helper/.claude-plugin/plugin.json"):
+            doc = json.loads(zf.read(manifest))
+            assert doc["name"] == "deck-helper" and doc["author"] == {"name": "Deck Helper"}
+            assert "homepage" not in doc
+        skill = zf.read("deck-helper/skills/deck-helper/SKILL.md").decode()
+        assert skill.startswith("---\nname: deck-helper\n")
+        texts = {n: zf.read(n).decode() for n in names}
+        texts["/install.md"] = (await h.http.get("/install.md")).text
+        texts["/install"] = (await h.http.get("/install")).text
+        texts["/plugin/marketplace.json"] = json.dumps(mp)
+        texts["/healthz"] = (await h.http.get("/healthz")).text
+        for where, text in texts.items():
+            for needle in ("MTG Assistant Gateway", "mtg-gateway", "TheUncleBen", "MTG-Assistant-Gateway"):
+                assert needle not in text, (where, needle)
+        assert "claude plugin install deck-helper@deck-helper" in texts["/install.md"]
+        assert "codex mcp add deck-helper" in texts["/install.md"]
+
+
 async def test_install_pages(harness: Harness) -> None:
     b = Browser(harness)
     try:

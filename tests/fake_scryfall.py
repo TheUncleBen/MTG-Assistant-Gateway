@@ -56,6 +56,8 @@ class FakeScryfall:
         # commanders sharing a name part), set by a test: query text -> card names.
         self.commanders: dict[str, list[str]] = {}
         self.requests: list[tuple[str, str]] = []
+        # /catalog/card-names: None answers 404 (the gateway then falls back to autocomplete).
+        self.catalog: list[str] | None = None
         self.fail_with: int | None = None
 
     def client(self) -> httpx.AsyncClient:
@@ -107,6 +109,12 @@ class FakeScryfall:
             if canned is not None and not q.get("set"):
                 return httpx.Response(canned.get("status", 200), json=canned)
             return self.not_found(f"No cards found matching “{q.get('fuzzy')}”")
+        if path == "/catalog/card-names":
+            if self.catalog is None:
+                return self.not_found("no catalog in this fake")
+            return httpx.Response(
+                200, json={"object": "catalog", "total_values": len(self.catalog), "data": self.catalog}
+            )
         if path == "/cards/autocomplete":
             canned = self.autocomplete.get(q.get("q", "").strip().lower())
             if canned is None:

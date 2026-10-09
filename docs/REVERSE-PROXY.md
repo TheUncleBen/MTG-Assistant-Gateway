@@ -153,7 +153,7 @@ was redeployed after you added it, and that the forward hostname is right.
 
 ```bash
 curl -s https://mtg.example.com/healthz
-# {"status":"ok","version":"..."}
+# {"status":"ok"}
 
 curl -s https://mtg.example.com/.well-known/oauth-authorization-server | head -c 200
 # JSON whose "issuer" is exactly your MTG_PUBLIC_URL

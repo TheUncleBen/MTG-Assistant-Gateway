@@ -412,6 +412,14 @@ jobs:
             printf -- '- Image: `%s:%s` (also `latest` until the next version)\n' "$image" "$VERSION"
             printf -- '- Source: tag `v%s`, branch `release/%s`\n' "$VERSION" "$VERSION"
             if [ -n "$CERT" ]; then printf -- '- Android app signing certificate SHA-256: `%s`\n' "$CERT"; fi
+            # The app files' own checksums, so a download from the release (or from a gateway's /app
+            # page) can be checked against the notes.
+            if [ -d "$RUNNER_TEMP/app" ]; then
+              for f in "$RUNNER_TEMP"/app/*.apk "$RUNNER_TEMP"/app/*.aab; do
+                [ -f "$f" ] || continue
+                printf -- '- `%s` SHA-256: `%s`\n' "$(basename "$f")" "$(sha256sum "$f" | cut -d' ' -f1)"
+              done
+            fi
           } > "$notes"
           files=()
           if [ -d "$RUNNER_TEMP/app" ]; then files=("$RUNNER_TEMP"/app/*); fi

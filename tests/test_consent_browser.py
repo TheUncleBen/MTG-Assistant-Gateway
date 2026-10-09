@@ -278,6 +278,11 @@ def test_consent_on_a_phone_unlocks_with_a_first_tap(server: Server) -> None:
             page.goto(server.authorize_url())
             page.wait_for_selector(APPROVE)
             page.wait_for_timeout(1000)  # past the dwell time, so only the touch is missing
+            # Re-lock first: a loaded headless Chromium can emit a mouse move of its own after a
+            # late layout, which would count as the unlocking interaction instead of the tap
+            # (seen in CI; the next test does the same). The clocks restart from here.
+            page.evaluate("() => window.dispatchEvent(new Event('blur'))")
+            page.wait_for_timeout(1000)
             box = page.locator(APPROVE).bounding_box()
             assert box is not None
             x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2

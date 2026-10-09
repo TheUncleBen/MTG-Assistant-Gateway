@@ -15,7 +15,7 @@ Helpful things to include:
 
 - what an attacker can do, and what they need first (a member account, a
   registered MCP client, network access to the server, nothing at all);
-- the version or commit you tested (`/healthz` shows the version);
+- the version or commit you tested (the System card on the admin page shows the version);
 - steps or a short script that shows it, against your own test deployment;
 - anything about your setup that matters (identity provider, reverse proxy,
   non-default settings).

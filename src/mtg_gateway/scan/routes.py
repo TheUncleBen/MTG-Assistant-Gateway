@@ -243,6 +243,37 @@ def add_scan_routes(server: MCPServer, state: AppState, service: ScanService) ->
             headers={"Cache-Control": "private, max-age=300", "X-Content-Type-Options": "nosniff"},
         )
 
+    @server.custom_route("/scan/api/peek", methods=["GET"], include_in_schema=False)
+    async def peek(request: Request) -> Response:
+        """Summaries for the names a suggestion list shows (``names=a|b|c``, up to twenty)."""
+        who = api_user(request, write=False)
+        if isinstance(who, Response):
+            return who
+        names = [n for n in (request.query_params.get("names") or "").split("|") if n.strip()]
+        try:
+            cards = await service.peek(names, owner=who[0])
+        except ScanError as exc:
+            return fail(exc)
+        slim = [
+            {
+                k: c.get(k)
+                for k in (
+                    "name",
+                    "mana_cost",
+                    "type_line",
+                    "image_small",
+                    "set",
+                    "collector_number",
+                    "oracle_id",
+                )
+            }
+            for c in cards
+        ]
+        return JSONResponse(
+            {"ok": True, "cards": slim},
+            headers={"Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff"},
+        )
+
     @server.custom_route("/scan/api/prints", methods=["GET"], include_in_schema=False)
     async def prints(request: Request) -> Response:
         who = api_user(request, write=False)

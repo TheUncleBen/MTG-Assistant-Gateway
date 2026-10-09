@@ -565,10 +565,16 @@ def test_format_specific_command_zones() -> None:
     tiny = deck([_cmdr("Aesi", cmc=6.0), card("Island", 49, types=["Land"], supertypes=["Basic"])],
                 format_id=27, categories=cat)  # fmt: skip
     assert any("Tiny Leaders" in p for p in compute(tiny)["checks"]["problems"])
-    # Pauper Commander: an uncommon commander
+    # Pauper Commander: a creature ever printed at uncommon may lead, whichever printing the deck
+    # uses (a mythic or rare printing of such a card is fine). The deck's data names only the
+    # chosen printing's rarity, so a non-uncommon printing is reported as unverified, never as a
+    # failure (owner test round T-115: a leader in a rare printing that was also printed at uncommon).
     pdh = deck([_cmdr("Aesi", rarity="mythic"), card("Island", 99, types=["Land"], supertypes=["Basic"])],
                format_id=17, categories=cat)  # fmt: skip
-    assert any("uncommon" in p for p in compute(pdh)["checks"]["problems"])
+    pdh_zone = compute(pdh)["checks"]["commander_zone"]
+    assert pdh_zone["ok"] is True and pdh_zone["unverified"] == ["Aesi (mythic printing)"]
+    assert "any printing of it is uncommon" in pdh_zone["unverified_note"]
+    assert not any("uncommon" in p for p in compute(pdh)["checks"]["problems"])
     # ... which need not be legendary, and is not held to the commons rule the other 99 follow
     # (Archidekt flags the uncommon leader itself as not legal in paupercommander).
     legal = {"paupercommander": "legal"}

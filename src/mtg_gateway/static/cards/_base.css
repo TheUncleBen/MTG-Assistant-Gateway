@@ -73,6 +73,7 @@ textarea{min-height:72px;resize:vertical}
 .toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 10px}
 .toolbar>*{flex:1 1 160px}
 .toolbar>button{flex:0 0 auto}
+.toolbar>.chips.finish{flex:1 1 auto;margin:0}
 .scroll{max-height:var(--max-h);overflow:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--border);border-radius:var(--radius)}
 :root[data-display=fullscreen] .scroll{max-height:none;border:0}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:8px;padding:8px}

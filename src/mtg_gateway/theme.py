@@ -22,7 +22,12 @@ from contextvars import ContextVar
 from starlette.responses import HTMLResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from .mana import SPRITE
+
 THEME_COOKIE = "mtg_theme"
+# "auto" (unset) follows the window width; "desktop" asks a phone or the app for the computer layout.
+LAYOUT_COOKIE = "mtg_layout"
+LAYOUTS = ("auto", "desktop")
 FEEDBACK_SCRIPT = "/static/feedback.js"
 # The Content-Security-Policy of every page render() builds (some pages replace it with their own,
 # which keeps the same frame-ancestors and base-uri). form-action is last so sources can follow it.
@@ -34,6 +39,7 @@ DEFAULT_CSP = (
 )
 THEMES = ("system", "light", "dark")
 _theme: ContextVar[str] = ContextVar("mtg_theme", default="system")
+_layout: ContextVar[str] = ContextVar("mtg_layout", default="auto")
 _path: ContextVar[str] = ContextVar("mtg_path", default="/")
 # True while rendering for the Android app's WebView (its user agent carries "MTGAssistant/"):
 # pages then use the phone layout at every width and drop the website footer.
@@ -57,6 +63,58 @@ _LIGHT = """
     --red-tint:rgba(255,85,91,.16); --blue-tint:rgba(66,134,244,.14);
     --danger-text:#b3262e; --toolbar-active:#8a4600; /* dark values: #ff8086 and #fa890d */
     --shadow:0 3px 6px rgba(0,0,0,.25); --scrim:rgba(0,0,0,.4);
+"""
+
+# Tiles, sparklines, charts and the filter-bar select: shared by the deck, report and history
+# pages and copied into a report's self-contained HTML export.
+VIZ_CSS = """
+/* summary tiles, sparklines and the small script-free charts (deck page, reports, history trends) */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,6.5rem),1fr));gap:.5rem;
+  margin:0 0 .75rem}
+.tile{background:var(--surface-2);border:1px solid var(--border-soft);border-radius:3px;padding:.5rem .6rem;
+  display:flex;flex-direction:column;gap:.1rem;min-width:0}
+.tile b{font-size:1.25rem;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.tile span{color:var(--text-muted);font-size:.8rem;overflow-wrap:anywhere}
+.tile .spark{color:var(--orange);width:100%;height:36px}
+.tiles.wide{grid-template-columns:repeat(auto-fit,minmax(min(100%,10rem),1fr));gap:.75rem}
+.tiles.wide .tile{padding:.7rem .8rem;gap:.2rem} .tiles.wide .tile b{font-size:1.5rem}
+/* a confidence interval under a tile's number: a track with the interval filled in */
+.tile .ci{position:relative;display:block;height:6px;margin:.3rem 0 .1rem;border-radius:3px;
+  background:var(--surface-3);overflow:hidden}
+.tile .ci i{position:absolute;top:0;bottom:0;background:var(--orange);border-radius:3px}
+.bars{display:flex;align-items:flex-end;gap:.4rem;height:8rem;padding:.25rem 0;
+  border-bottom:1px solid var(--border)}
+.bars .bar{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;
+  min-width:0;font-size:.75rem}
+.bars .bar span{display:block;width:70%;background:var(--orange);border-radius:2px 2px 0 0}
+.bars .bar b{font-variant-numeric:tabular-nums;margin-bottom:.15rem}
+.bars .bar em{font-style:normal;font-weight:700;margin-top:.3rem;overflow-wrap:anywhere;text-align:center}
+.twocol{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr));gap:1rem}
+.twocol h3{margin-top:0}
+.pips li{display:flex;align-items:center;gap:.5rem;padding:.25rem 0;flex-wrap:wrap}
+.pips li span:nth-child(2){flex:1 1 5rem} .pips b{font-variant-numeric:tabular-nums}
+.pips i{font-style:normal;color:var(--text-muted);font-size:.86rem}
+/* SVG charts drawn on the server: lines and columns take their colours from the theme */
+.chart{min-width:0} .chart h3{margin:0 0 .4rem}
+.chart svg{display:block;width:100%;height:auto;color:var(--text-muted);font-size:11px;overflow:visible}
+.chart text{fill:currentColor} .chart .grid{stroke:var(--border-soft);stroke-width:1}
+.chart .axis{stroke:var(--border)} .chart .col{fill:var(--orange)} .chart .col.c2{fill:var(--blue)}
+.chart .s1{stroke:var(--orange)} .chart .s2{stroke:var(--blue)} .chart .s3{stroke:var(--green)}
+.chart .s4{stroke:var(--purple)} .chart polyline{fill:none;stroke-width:2.5;stroke-linejoin:round;
+  stroke-linecap:round} .chart circle.s1{fill:var(--orange)} .chart circle.s2{fill:var(--blue)}
+.chart circle.s3{fill:var(--green)} .chart circle.s4{fill:var(--purple)}
+.legend{display:flex;flex-wrap:wrap;gap:.3rem 1rem;margin:.4rem 0 0;padding:0;list-style:none;
+  font-size:.86rem}
+.legend li{display:inline-flex;align-items:center;gap:.4rem}
+.legend i{display:inline-block;width:14px;height:4px;border-radius:2px;background:var(--orange)}
+.legend .s2{background:var(--blue)} .legend .s3{background:var(--green)} .legend .s4{background:var(--purple)}
+.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr));gap:1rem 1.5rem;
+  margin:.5rem 0 0}
+/* a select with a leading icon (filter bars) */
+.sel{position:relative;display:block}
+.sel > svg{position:absolute;left:.75rem;top:50%;transform:translateY(-50%);color:var(--orange);
+  pointer-events:none}
+.sel > svg ~ select,.sel > svg ~ .msel-btn{padding-left:2.1rem}
 """
 
 CSS = (
@@ -126,27 +184,43 @@ svg.i{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:2;stroke-l
 .topbar .icon-btn{width:40px;padding:0;justify-content:center;font-size:1.2rem}
 .topbar .icon-btn img.av{width:28px;height:28px;border-radius:50%;object-fit:cover;display:block}
 
-/* dropdown menus (details/summary, no script): phatDropdown trigger + menu panel */
+/* dropdown menus (details/summary, no script): phatDropdown trigger + menu panel. The panel
+   styling is the shared .menu class, so a script-made menu (the deck page's card menu) looks the
+   same; details.dd only adds where its panel sits. */
 details.dd{position:relative;margin:0}
 details.dd > summary{list-style:none;cursor:pointer;user-select:none}
 details.dd > summary::-webkit-details-marker{display:none}
-details.dd .menu{position:absolute;top:calc(100% + .25rem);right:0;z-index:30;min-width:200px;
+.menu{z-index:30;min-width:200px;
   background:var(--surface-2);border-radius:var(--radius-panel);box-shadow:var(--shadow);padding:.25rem 0;
   display:flex;flex-direction:column}
+details.dd .menu{position:absolute;top:calc(100% + .25rem);right:0;max-width:calc(100vw - 16px)}
 details.dd .menu.left{left:0;right:auto}
-details.dd .menu a,details.dd .menu button,details.dd .menu .item{display:flex;align-items:center;gap:.6rem;
+/* Each item rule is written twice, plain and under details.dd: inside the top bar the plain
+   .menu rule would lose to .topbar nav a (the bar's white text, 40px, bold) and the account
+   menu's links would be white on the light theme's menu. */
+.menu a,.menu button,.menu .item,details.dd .menu a,details.dd .menu button,details.dd .menu .item{
+  display:flex;align-items:center;gap:.6rem;
   min-height:35px;padding:0 1rem;margin:0;width:100%;background:transparent;border:0;border-radius:0;
   color:var(--text);text-decoration:none;font:inherit;font-weight:400;font-size:1rem;cursor:pointer;
-  text-align:left;white-space:nowrap;justify-content:flex-start}
-details.dd .menu a:hover,details.dd .menu button:hover,details.dd .menu a:focus-visible{
-  background:var(--border);color:var(--text)}
-details.dd .menu .sep{height:1px;background:var(--border);margin:.25rem 0}
-details.dd .menu a.danger{color:var(--danger-text)}
-details.dd .menu .head{padding:.4rem 1rem .2rem;font-size:.8rem;font-weight:700;color:var(--menu-head);
+  text-align:left;white-space:nowrap;justify-content:flex-start;height:auto}
+/* An item carrying a member's text (a category name) wraps inside the panel instead of widening
+   it past the window (gate R5-3 seed: a 51-character unbroken category name at 320 px). */
+details.dd .menu a,details.dd .menu button{white-space:normal;overflow-wrap:anywhere;min-width:0}
+.menu a:hover,.menu button:hover,.menu a:focus-visible,.menu button:focus-visible,
+details.dd .menu a:hover,details.dd .menu button:hover,details.dd .menu a:focus-visible,
+details.dd .menu button:focus-visible{background:var(--border);color:var(--text)}
+.menu button:disabled,details.dd .menu button:disabled{color:var(--text-muted);cursor:default;
+  background:transparent}
+.menu .sep{height:1px;background:var(--border);margin:.25rem 0}
+.menu a.danger,.menu button.danger,details.dd .menu a.danger,details.dd .menu button.danger{
+  color:var(--danger-text);background:transparent;border:0}
+.menu button.danger:hover,.menu button.danger:focus-visible,details.dd .menu button.danger:hover,
+details.dd .menu button.danger:focus-visible{background:var(--border);color:var(--danger-text)}
+.menu .head{padding:.4rem 1rem .2rem;font-size:.8rem;font-weight:700;color:var(--menu-head);
   text-transform:uppercase;letter-spacing:.04em}
-details.dd .menu form{margin:0;display:contents}
+.menu form{margin:0;display:contents}
 /* the chosen theme: --orange-text would be 4.0:1 on the light menu */
-details.dd .menu .on{color:var(--toolbar-active);font-weight:700}
+.menu .on,details.dd .menu .on{color:var(--toolbar-active);font-weight:700}
 /* a dropdown trigger styled like phatDropdown: bordered, 39px, orange chevron, label floating above */
 .field{position:relative;display:flex;flex-direction:column;gap:.3rem;min-width:0}
 .field > label,.field > .lbl{font-weight:700;margin:0;font-size:1rem}
@@ -197,6 +271,58 @@ textarea{width:100%;min-height:8rem;padding:.5rem .75rem;font:inherit;font-size:
   resize:vertical}
 input:focus,textarea:focus,select:focus{outline:2px solid var(--focus);outline-offset:1px;
   border-color:var(--orange)}
+/* themed dropdown lists (static/select.js): the native select is kept for the form and for scripts
+   but sits off-screen; the button in its place looks like the closed select, and the open list is
+   the shared .menu panel (a bottom sheet under 600px or with a coarse pointer). The .menu button
+   rules would restyle a trigger inside a menu panel (the collection's row details), hence the
+   doubled selector. */
+select.msel-native{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;
+  clip:rect(0,0,0,0);opacity:0;pointer-events:none}
+.msel-btn,.menu button.msel-btn,details.dd .menu button.msel-btn{display:flex;align-items:center;
+  justify-content:flex-start;gap:0;width:100%;
+  height:var(--ctl);min-height:0;margin:0;padding:0 2rem 0 1rem;font:inherit;font-size:1rem;font-weight:400;
+  text-align:left;white-space:nowrap;border-radius:var(--radius);border:1px solid var(--border);
+  color:var(--text);cursor:pointer;background-color:var(--surface);background-image:url(/static/chevron.svg);
+  background-repeat:no-repeat;background-position:right .75rem center;background-size:10px 6px;
+  transition:background-color .2s ease-in-out}
+.msel-btn:hover,.menu button.msel-btn:hover,details.dd .menu button.msel-btn:hover{
+  background-color:var(--surface-2);color:var(--text)}
+.msel-btn:focus-visible,.menu button.msel-btn:focus-visible,details.dd .menu button.msel-btn:focus-visible{
+  outline:2px solid var(--focus);outline-offset:1px;
+  border-color:var(--orange);background-color:var(--surface)}
+.msel-btn[aria-expanded=true]{border-color:var(--orange)}
+/* A form inside a dropdown (a collection row's Details) keeps its primary Save button: the menu
+   item rule above would otherwise strip its colour, border and radius. */
+details.dd .menu .actions button.primary{background:var(--orange);border:1px solid var(--orange);
+  color:var(--on-orange);border-radius:var(--radius);justify-content:center;height:var(--ctl);
+  min-height:var(--ctl);font-weight:600}
+details.dd .menu .actions button.primary:hover,details.dd .menu .actions button.primary:focus-visible{
+  background:var(--orange);color:var(--on-orange);filter:brightness(1.08)}
+.msel-btn:active:not(:disabled){transform:none;filter:none}
+.msel-btn .msel-txt{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.msel-list{position:fixed;z-index:80;max-width:calc(100vw - 1rem);overflow:auto;overscroll-behavior:contain;
+  border:1px solid var(--border)}
+.msel-list [role=option]{min-height:40px;white-space:normal;overflow-wrap:anywhere;padding:.3rem 1rem}
+.msel-list [role=option][aria-selected=true]{background:var(--border);box-shadow:inset 3px 0 0 var(--orange)}
+.msel-list .head.title{padding:.6rem 1rem .4rem;font-size:.9rem}
+.msel-scrim{position:fixed;inset:0;z-index:79;background:var(--scrim)}
+.msel-list.sheet{left:0;right:0;bottom:0;top:auto;width:auto;max-width:none;max-height:min(70vh,70dvh);
+  min-width:0;border-radius:var(--radius-sheet) var(--radius-sheet) 0 0;border-bottom:0;
+  padding:.5rem 0 calc(.5rem + env(safe-area-inset-bottom));animation:mselup .15s ease-out}
+.msel-list.sheet [role=option]{min-height:44px}
+@keyframes mselup{from{transform:translateY(12px)}to{transform:none}}
+@media (prefers-reduced-motion:reduce){ .msel-list.sheet{animation:none} }
+/* file pickers (static/filepick.js): a themed Choose a file button and the chosen name; the input is
+   off-screen but keeps the keyboard (Tab reaches it, Enter or Space opens the system's picker) */
+.filepick{display:flex;flex-direction:row;flex-wrap:wrap;align-items:center;justify-content:flex-start;
+  gap:.4rem .75rem}
+.filepick > .lbl{flex:0 0 100%}
+.filepick > label.filebtn{display:inline-flex;margin:0;font-weight:400;cursor:pointer}
+.filepick .filebtn input{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;
+  overflow:hidden;clip:rect(0,0,0,0)}
+.filepick .filebtn input:focus-visible + .btn{outline:2px solid var(--focus);outline-offset:1px;
+  border-color:var(--orange)}
+.filepick .fname{color:var(--text-muted);min-width:0;overflow-wrap:anywhere}
 input::placeholder,textarea::placeholder{color:var(--text-muted);opacity:1}
 .check{display:flex;align-items:center;gap:.6rem;margin:.5rem 0;font-weight:400;min-height:2rem;
   cursor:pointer}
@@ -249,13 +375,65 @@ button.thumbbtn{all:unset;display:block;cursor:pointer;line-height:0;border-radi
   font-size:.85rem}
 button.thumbbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .choice{display:flex;flex-direction:column;gap:.6rem;margin-top:1rem}
+/* The three choices (Apply…, Reject…, Not now) sit in one row only from 800px: narrower than
+   that the row would wrap and leave "Not now" alone on a second line, so they stack full width. */
 .choice button,.choice .btn{margin-top:0;width:100%}
-@media (min-width:600px){ .choice{flex-direction:row;align-items:center;flex-wrap:wrap}
-  .choice button,.choice .btn{width:auto} .choice .btn:last-child{margin-left:auto} }
+@media (min-width:800px){ .choice{flex-direction:row;align-items:center;flex-wrap:wrap}
+  .choice button,.choice .btn{width:auto} }
 .actions{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:1rem;align-items:center}
 .actions .btn,.actions button,.actions form > button{margin-top:0}
 .actions form{display:contents}
-@media (max-width:600px){ main form > button:not(.mini):not(.inline),main .choice .btn{width:100%} }
+@media (max-width:600px){ main form > button:not(.mini):not(.inline){width:100%} }
+@media (max-width:799.98px){ main .choice .btn{width:100%} }
+/* one row of equal-height buttons at the end of a form; on phones they stack full width */
+.form-actions{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;margin-top:1rem}
+.form-actions > button,.form-actions > .btn,.form-actions form > button{margin:0}
+.form-actions form{display:contents}
+.form-actions .status{margin:0 0 0 auto;color:var(--text-muted);font-size:.9rem}
+@media (max-width:600px){ .form-actions > button:not(.mini),.form-actions > .btn,
+  .form-actions form > button{width:100%} }
+
+/* mana and rules-text symbols: own glyphs on Archidekt-coloured discs (sprite from mana.py) */
+.mana{display:inline-flex;gap:2px;align-items:center;white-space:nowrap;vertical-align:middle}
+.mana .sep{color:var(--text-muted);font-size:.8em;margin:0 .15em}
+.pip{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;
+  color:#111;background:#cbc2bf;box-shadow:-1px 1px 0 rgba(0,0,0,.55);flex:none;vertical-align:-.2em;
+  font-style:normal;line-height:1}
+.pip svg{width:70%;height:70%;fill:currentColor;display:block}
+.pip b{font-size:10px;font-weight:900;line-height:1}
+.pip.big b{font-size:8px}
+.pip.sm{width:14px;height:14px;margin:0 1px}
+.pip.sm b{font-size:9px}
+.pip-W{background:#f8f6d8} .pip-U{background:#c1d7e9} .pip-B{background:#bab1ab} .pip-R{background:#e49977}
+.pip-G{background:#a3c095} .pip-C{background:#cbc2bf} .pip-g{background:#cbc2bf}
+.pip-T,.pip-Q,.pip-E,.pip-P{background:#cbc2bf} .pip-S{background:#dfe8ee}
+.pip.hy{background:linear-gradient(135deg,var(--h1) 50%,var(--h2) 50%)}
+.pip-W.hy{--h1:#f8f6d8} .pip-U.hy{--h1:#c1d7e9} .pip-B.hy{--h1:#bab1ab} .pip-R.hy{--h1:#e49977}
+.pip-G.hy{--h1:#a3c095}
+.pip.hy[data-b=W]{--h2:#f8f6d8} .pip.hy[data-b=U]{--h2:#c1d7e9} .pip.hy[data-b=B]{--h2:#bab1ab}
+.pip.hy[data-b=R]{--h2:#e49977} .pip.hy[data-b=G]{--h2:#a3c095}
+
+/* typed suggestions (static/suggest.js): a listbox under the box, themed like the dropdown menus */
+.suggest{position:relative;display:block;min-width:0}
+.suggest > input{width:100%}
+.suggest-list{position:absolute;top:calc(100% + 3px);left:0;right:0;z-index:70;margin:0;
+  padding:.3rem 0;list-style:none;max-height:min(19rem,55vh);overflow:auto;overscroll-behavior:contain;
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+  box-shadow:var(--shadow)}
+.suggest-list li{display:block;padding:.55rem 1rem;cursor:pointer;line-height:1.3;overflow-wrap:anywhere;
+  font-weight:400}
+.suggest-list li[aria-selected=true],.suggest-list li:hover{background:var(--surface-2)}
+.suggest-list li[aria-selected=true]{box-shadow:inset 3px 0 0 var(--orange)}
+.suggest-list li.none{color:var(--text-muted);cursor:default}
+.suggest-list .rich{display:flex;align-items:center;gap:.6rem;min-width:0}
+.suggest-list .rich .thumb{width:28px;height:39px;border-radius:2px;object-fit:cover;flex:none;
+  background:var(--surface-2)}
+.suggest-list .rich .txt{display:flex;flex-direction:column;min-width:0;gap:.1rem}
+.suggest-list .rich .nm{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap}
+.suggest-list .rich .ty{font-size:.82rem;color:var(--text-muted);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.suggest-list mark{background:none;color:inherit;font-weight:700;text-decoration:underline;
+  text-decoration-color:var(--orange);text-underline-offset:.15em}
 
 /* badges, pills and notices */
 .badge{display:inline-block;vertical-align:middle;padding:.125rem .5rem;border-radius:5px;font-size:.86rem;
@@ -288,6 +466,12 @@ button.thumbbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px
 .disclosure p{margin:0 0 .4rem}
 details.disclosure{margin:.75rem 0 0;border-top:1px solid var(--border);padding-top:.6rem}
 details.disclosure > summary{cursor:pointer;font-weight:700;min-height:2rem;display:flex;align-items:center}
+/* the folded full detail inside the link-form disclosure (link_disclosure.form_html) */
+details.disclosure-detail{margin:.6rem 0 0;border-top:1px solid var(--border);padding-top:.4rem}
+details.disclosure-detail > summary{cursor:pointer;font-weight:700;min-height:2.75rem;display:flex;
+  align-items:center}
+details.disclosure-detail > summary::before{content:'\\25B8';margin-right:.5rem}
+details.disclosure-detail[open] > summary::before{content:'\\25BE'}
 details.disclosure > summary::before{content:'\\25B8';margin-right:.5rem}
 details.disclosure[open] > summary::before{content:'\\25BE'}
 .toast{position:fixed;right:2rem;bottom:2rem;z-index:20;width:350px;max-width:calc(100% - 2rem);
@@ -309,7 +493,9 @@ details.disclosure[open] > summary::before{content:'\\25BE'}
 .plist form{margin:0;display:inline}
 .plist form button{margin:0;height:35px;padding:0 .7rem;width:auto}
 
-/* change list: the heart of the review page */
+"""
+    + VIZ_CSS
+    + """/* change list: the heart of the review page */
 .summary{display:flex;flex-wrap:wrap;gap:.5rem;margin:0 0 .75rem}
 .summary span{display:inline-block;padding:.25rem .65rem;border-radius:var(--radius);font-weight:700;
   font-size:.9rem;background:var(--surface-2);border:1px solid var(--border-soft)}
@@ -367,6 +553,45 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
 @media (max-width:599px){ .pane.aside,.pane.detail.empty{display:none} }
 
 @media (max-width:900px){ .topbar nav.site a{padding:0 .45rem;font-size:.93rem} .brand{margin-right:.25rem} }
+/* The proposal review's three choices sit at one height (gate D8), and the deck banner's
+   Comments link matches its Like and Bookmark buttons (gate D9). */
+.choice button,.choice .btn{min-height:48px}
+.banner .social a.soc,.banner .social button.soc{height:34px;min-height:34px}
+/* A control that carries text a member typed (a username in Follow, a deck's category in the
+   editor's chips, a folder's name) shrinks and ellipsises inside its row, with the whole text
+   in its title, instead of widening the page (gate R4-2: a 40-character username). */
+.soc,.btn.soc,.addbox button.tchip,.chips button{max-width:100%;min-width:0}
+.soc > span,.addbox button.tchip{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.social .confirm{max-width:100%;flex-wrap:wrap;min-width:0}
+.social .confirm > span{min-width:0;overflow-wrap:anywhere}
+/* Touch screens: every control at least 40 px tall (Material's minimum), including the small
+   ones a mouse never minds (gate D11): the editor's add-to chips, the deck page's category
+   button and odds form, folded Details, footer links, the brand mark, list links, crumbs. */
+@media (pointer:coarse){
+  .addbox button.tchip,.popular a,.cardview .chip{min-height:40px}
+  .odds form.oddsform select,.odds form.oddsform input,.odds form.oddsform button{min-height:40px;height:40px}
+  details > summary{min-height:40px;display:flex;align-items:center}
+  details.dd > summary.icon-only{min-height:40px;min-width:40px}
+  footer.site .links a{display:inline-flex;align-items:center;min-height:40px;padding:0 .5rem}
+  .brand{min-height:40px}
+  .hrow a.kind,.hrow a.name,.proposals a.name,.report .crumbs a,li > a.name{display:inline-block;
+    padding:.6rem 0}
+  .banner .social a.soc,.banner .social button.soc{height:40px;min-height:40px;border-radius:20px}
+  /* :not(._) only raises specificity: the pages' own rules (same selectors, loaded later) set
+     2rem and 30px and would otherwise win */
+  .hrow details > summary:not(._),.report details summary:not(._){min-height:40px;display:flex;
+    align-items:center}
+  ul.rows .row:not(._){height:40px}
+}
+/* A narrow window with a mouse (600 to 800 px, a half-width desktop window or an open Fold):
+   the bar keeps its text links and drops the brand's word, so nothing runs under the account
+   button and the page needs no sideways scroll. The word returns above 800 px. */
+@media (min-width:600px) and (max-width:799.98px) and (hover:hover) and (pointer:fine){
+  .topbar .brand .word{display:none} }
+.topbar .left{flex:1 1 auto}
+.topbar nav.site{flex:none}
+.brand{min-width:0}
+.brand .word{overflow:hidden;text-overflow:ellipsis}
 /* home dashboard: section tiles (Archidekt's landing cards) */
 .home .hero{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:1rem;
   margin:0 0 1rem}
@@ -396,6 +621,13 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
 .home details.connect summary .addr{font-weight:400;font-size:.9rem;word-break:break-all}
 .home .panel-head{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin:0 0 .75rem}
 .home .panel-head h2{margin:0}
+/* placeholders while a deck list is still being read (decks.js swaps the real list in) */
+.skeleton>*{display:block;background:var(--surface-2);border:1px solid var(--border);
+  border-radius:var(--radius);animation:skeleton 1.4s ease-in-out infinite}
+.home .recent.skeleton>span{aspect-ratio:16/9}
+ul.decklist.skeleton>li{height:230px;list-style:none}
+@keyframes skeleton{50%{opacity:.55}}
+@media (prefers-reduced-motion:reduce){ .skeleton>*{animation:none} }
 /* Adaptive navigation after Android's window size classes. Compact (under 600px, any device): a
    bottom tab bar (Archidekt's floatingToolbar). Medium (600 to 899px) on a touch screen, such as
    an unfolded foldable or a tablet in a browser, and the Android app at every width from 600px:
@@ -608,6 +840,14 @@ def theme_from_cookie(value: str | None) -> str:
     return value if value in THEMES else "system"
 
 
+def layout_from_cookie(value: str | None) -> str:
+    return value if value in LAYOUTS else "auto"
+
+
+def current_layout() -> str:
+    return _layout.get()
+
+
 # The site navigation, in Archidekt's order of sections as far as the gateway has them: decks,
 # deck search, cards you own, scanning, then the gateway's own review pages. The same list feeds
 # the top bar on wide screens and the bottom tab bar on phones.
@@ -664,6 +904,10 @@ def render(
     ``heading=False`` leaves the <h1> to the body (deck banner)."""
     theme = current_theme()
     app = in_app()
+    # "Use desktop layout" (T-046): a wide fixed viewport, as a browser's "Desktop site" switch
+    # would give, so the width-based media queries pick the computer layout and the device zooms out;
+    # the app's forced rail is dropped too.
+    desktop = current_layout() == "desktop"
     nav = ""
     tabbar = ""
     cur = current or ""
@@ -710,8 +954,16 @@ def render(
             f"<form method='post' action='/theme'>{csrf_in}"
             f"<input type='hidden' name='next' value='{html.escape(current_path())}'>"
             f"{theme_items}</form>"
+            "<div class='sep'></div><div class='head'>Site layout</div>"
+            f"<form method='post' action='/layout'>{csrf_in}"
+            f"<input type='hidden' name='next' value='{html.escape(current_path())}'>"
+            f"<button name='layout' value='auto'{' class=on' if not desktop else ''}>"
+            f"{icon('check') if not desktop else '<span class=i></span>'}Fit the screen</button>"
+            f"<button name='layout' value='desktop'{' class=on' if desktop else ''}>"
+            f"{icon('check') if desktop else '<span class=i></span>'}Desktop layout</button></form>"
             "<div class='sep'></div>"
-            f"<form method='post' action='/logout'>{csrf_in}<button>{icon('x')}Sign out</button></form>"
+            f"<form method='post' action='/logout'>{csrf_in}"
+            f"<button data-busy-text='Signing out…'>{icon('x')}Sign out</button></form>"
             "</div></details>"
         )
         nav = (
@@ -747,20 +999,27 @@ def render(
     h1 = f"<h1>{html.escape(title)}</h1>" if heading else ""
     classes = " ".join(
         c
-        for c in ("wide" if wide else "", "has-tabbar" if tabbar else "", "app" if app else "", body_class)
+        for c in (
+            "wide" if wide else "",
+            "has-tabbar" if tabbar else "",
+            "app" if app and not desktop else "",
+            "desktop" if desktop else "",
+            body_class,
+        )
         if c
     )
+    viewport = "width=1100" if desktop else "width=device-width, initial-scale=1, viewport-fit=cover"
     main_cls = "wrap panes" if panes else "wrap"
     doc = (
         f"<!doctype html><html lang='en'{f' data-theme={theme}' if theme != 'system' else ''}>"
         "<head><meta charset='utf-8'>"
-        "<meta name='viewport' content='width=device-width, initial-scale=1, viewport-fit=cover'>"
+        f"<meta name='viewport' content='{viewport}'>"
         "<meta name='referrer' content='no-referrer'>"
         f"<meta name='color-scheme' content='{'dark light' if theme == 'system' else theme}'>"
         "<meta name='theme-color' content='#111111'>"
         "<link rel='manifest' href='/app.webmanifest'>"
         f"<title>{html.escape(title)} · {html.escape(site)}</title><style>{CSS}</style>{head_extra}</head>"
-        f"<body class='{classes}'>"
+        f"<body class='{classes}'>{SPRITE}"
         "<header class='topbar'><div class='wrap'><div class='left'>"
         f"<a class='brand' href='/'{' aria-current=page' if cur == '/' else ''}>"
         f"<span class='mark'>{icon('layers')}</span>"
@@ -778,7 +1037,10 @@ def render(
             if not app
             else ""
         )
-        + f"{tabbar}<script src='{FEEDBACK_SCRIPT}' defer></script></body></html>"
+        + f"{tabbar}<script src='{FEEDBACK_SCRIPT}' defer></script>"
+        "<script src='/static/mana.js' defer></script><script src='/static/suggest.js' defer></script>"
+        "<script src='/static/select.js' defer></script>"
+        "</body></html>"
     )
     return HTMLResponse(
         doc,
@@ -807,6 +1069,7 @@ class ThemeMiddleware:
             await self.app(scope, receive, send)
             return
         value = None
+        layout = None
         app = False
         for k, v in scope.get("headers", []):
             if k == b"cookie":
@@ -814,9 +1077,12 @@ class ThemeMiddleware:
                     name, _, val = part.strip().partition("=")
                     if name == THEME_COOKIE:
                         value = val.strip()
+                    elif name == LAYOUT_COOKIE:
+                        layout = val.strip()
             elif k == b"user-agent" and APP_UA_MARK in v.decode("latin-1", "replace"):
                 app = True
         token = _theme.set(theme_from_cookie(value))
+        ltoken = _layout.set(layout_from_cookie(layout))
         path = scope.get("path") or "/"
         ptoken = _path.set(path)
         atoken = _app.set(app)
@@ -824,6 +1090,7 @@ class ThemeMiddleware:
             await self.app(scope, receive, send)
         finally:
             _theme.reset(token)
+            _layout.reset(ltoken)
             _path.reset(ptoken)
             _app.reset(atoken)
 

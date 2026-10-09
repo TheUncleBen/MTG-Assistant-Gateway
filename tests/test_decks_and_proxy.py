@@ -79,6 +79,11 @@ def fake_mystic_forge() -> MCPServer:
 
     @mf.tool(name="validate_decklist", description="validate a decklist")
     async def validate_decklist(params: _ValidateDecklistInput) -> str:
+        # Like Mystic Forge, which reads names through Scryfall's collection lookup: a
+        # double-faced card named with both faces is "not found".
+        both = [line for line in params.decklist.splitlines() if " // " in line]
+        if both:
+            return "# Validation: ISSUES FOUND\n\n**not found on Scryfall:**\n" + "\n".join(both)
         return f"Validated {len(params.decklist.splitlines())} lines"
 
     @mf.tool(name="watchlist_list", description="stateful, must stay hidden")
@@ -257,7 +262,7 @@ async def test_browser_login_link_status_unlink(stack: Stack) -> None:
     # Logout ends the session and tells the browser to drop cached pages and site storage.
     out_resp = await b.http.post("/logout", data={"csrf": await b.csrf()})
     assert out_resp.status_code == 303
-    assert out_resp.headers["clear-site-data"] == '"cache", "storage"'
+    assert out_resp.headers["clear-site-data"] == '"storage"'
     assert out_resp.headers["location"] == "/signed-out"
     signed_out = await b.http.get("/signed-out")
     assert signed_out.status_code == 200 and "Sign out" not in signed_out.text
@@ -1421,6 +1426,17 @@ async def test_pasted_lists_are_reported_but_not_stored(stack: Stack) -> None:
     assert rep["goldfish"]["ok"] is True and "## Metrics" in rep["goldfish"]["text"], rep["goldfish"]
     assert rep["validation"]["ok"] is True, rep["validation"]
     assert rep["stats"]["card_count"] == 100 and rep["stats"]["card_data"] == "unavailable"
+    # Double-faced cards reach the simulator by their front face (Archidekt names both faces;
+    # Scryfall's collection lookup, which the research service uses, knows only the front).
+    faces = (
+        "Commander\n1 Enduring Angel // Angelic Enforcer\n\n98 Plains\n"
+        "1 Elbrus, the Binding Blade // Withengar Unbound\n"
+    )
+    rep = structured(await call(h, token, "run_deck_report", {"deck_ref": faces, "games": 20}))
+    assert rep["ok"] and rep["validation"]["text"].startswith("Validated"), rep["validation"]
+    gf = rep["goldfish"]
+    assert gf["ok"] and "Commander: 1 Enduring Angel [Commander] |" in gf["text"], gf
+    assert "Enduring Angel // Angelic Enforcer" in rep["decklist_text"]  # the member's own list keeps both
     after = structured(await call(h, token, "list_deck_reports", {}))["reports"]
     assert len(after) == len(before)
     # No commander: the structural checks still come back, the simulation is refused as such.

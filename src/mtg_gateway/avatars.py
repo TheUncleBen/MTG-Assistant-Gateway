@@ -88,6 +88,15 @@ def gravatar_url(value: str) -> str | None:
     return value.strip()
 
 
+def _picture_kind(value: Any) -> str:
+    """The kind of ``picture`` claim, for the debug log: never the address or the image."""
+    if not isinstance(value, str) or not value:
+        return "absent"
+    if value.startswith("data:"):
+        return "an embedded image" if decode_data_uri(value) else "an embedded image of an unsupported type"
+    return "a Gravatar address" if gravatar_url(value) else "an address the gateway does not fetch"
+
+
 def initials_svg(name: str, sub: str) -> bytes:
     """A round badge with up to two initials, in a colour picked from the subject."""
     words = [w for w in re.split(r"[\s._@-]+", name) if w and w[0].isalnum()]
@@ -162,6 +171,14 @@ class AvatarStore:
         pictures (docs/IDP-AUTHENTIK.md): when it changes, ``fetch_uploaded`` asks for the image
         itself, once. Otherwise the standard ``picture`` claim is used."""
         version = claims.get("mtg_picture_version")
+        if logger.isEnabledFor(logging.DEBUG):
+            # What the provider sent about the picture, by kind only (never the value): the
+            # usual question when a member sees initials is which of the two claims arrived.
+            logger.debug(
+                "profile picture claims for a member: userinfo carries %s; picture claim is %s",
+                ", ".join(sorted(k for k in claims if isinstance(k, str))) or "nothing",
+                _picture_kind(claims.get("picture")),
+            )
         if isinstance(version, str) and _VERSION.fullmatch(version) and fetch_uploaded is not None:
             source = hashlib.sha256(f"uploaded:{version}".encode()).hexdigest()
             try:

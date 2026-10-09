@@ -50,11 +50,12 @@ docker service logs -f mtg_mtg-assistant-mysticforge
 curl -s https://mtg.example.com/healthz
 ```
 
-`/healthz` returns `{"status":"ok","version":"...","mystic_forge":"ok"}` when
-the gateway is up and its database answers, and HTTP 503 with
-`"detail":"database unavailable"` otherwise (the reason is in the gateway's
-log, never in the reply). `mystic_forge` is `ok`, `down` or `not_configured`.
-When Mystic Forge is down, `status` is `"degraded"` but the reply is still
+`/healthz` returns `{"status":"ok"}` when the gateway is up and its database
+answers, and HTTP 503 with `"detail":"database unavailable"` otherwise (the
+reason is in the gateway's log, never in the reply). It names no version or
+service, since anyone can ask it and those would tell a stranger which
+project the gateway runs. When Mystic Forge is down, `status` is
+`"degraded"` but the reply is still
 HTTP 200: the gateway's own pages and Archidekt tools keep working without
 it, so the container is not restarted for it; only research and simulations
 fail. The admin page's **System** card shows the version, database size and
@@ -62,7 +63,11 @@ schema, when the newest backup (and the newest backup copy) was written, and
 the research service's state as the health check last found it.
 
 The gateway logs one line per notable event to standard output (`MTG_LOG_LEVEL`,
-default `INFO`). An unexpected error is logged with its full traceback, counted
+default `INFO`), and one line per request with its method, route, status and
+timing, for example `GET /decks/{deck_id} 200 41ms archidekt=30ms idp=0ms`.
+That line names the route, never the request: no deck number, Archidekt
+username, signed-link token, member ID or query string reaches the log, and
+a request no page answers is logged as its first path segment only. An unexpected error is logged with its full traceback, counted
 under "server_error" on the admin page, and shown to the person only as a plain
 "Something went wrong" page or JSON message. Outbound request URLs are logged
 only at `DEBUG`. Docker keeps at most three 10 MB log files per container
@@ -213,7 +218,7 @@ at `https://mtg.example.com/skill`. The files are part of the assistant
 plugin, `plugin/mtg-gateway/` in the repository
 (`skills/mtg-gateway/SKILL.md` and `chatgpt-instructions.md`). The image
 copies that to `/usr/share/mtg-gateway/plugin`, so a new image brings new
-skill text and a new plugin archive at `/plugin/mtg-gateway.zip`.
+skill text and a new plugin archive at `/plugin/mtg-gateway.zip` (or `/plugin/<slug of MTG_SERVER_NAME>.zip`).
 
 To serve your own edited copy without rebuilding, mount a folder with the
 same layout (`mtg-gateway/` inside it) and point `MTG_PLUGIN_DIR` at it
@@ -569,8 +574,16 @@ that is gone or not theirs 404 `not_found`, an exhausted Archidekt budget
 429 `rate_limited`, an unreachable Archidekt or Scryfall 503 `unavailable`,
 and each hit is a `card` metric. The first answer is kept for the link's lifetime, so a
 replayed link costs no Archidekt or Scryfall call. The token is the URL's
-last path segment: if your reverse proxy logs request paths, exclude
-`/cards/data/` from its access log (the gateway's own access log is off). The AI app loads
+last path segment, so a reverse proxy that logs request paths keeps it for
+as long as it keeps its access log; that is acceptable: the link expires
+ten minutes after the tool call, answers twenty fetches at most, and
+returns only that member's own data, so a logged token cannot be used
+against anyone. The gateway's own request log names the route,
+`/cards/data/{token}`, never the token itself (0.7.9). Don't add a custom
+`location` for `/cards/data/` to Nginx Proxy Manager's Advanced tab to
+keep it out of the log: NPM's generated `proxy.conf` already carries the
+`proxy_pass` for the host, and the extra block took a gateway offline
+(0.7.4's optional step, withdrawn in 0.7.9). The AI app loads
 each card's pictures and rules text from Scryfall directly, never through
 the gateway. `MTG_APPLY_IN_CHAT=false` removes every card and this endpoint.
 

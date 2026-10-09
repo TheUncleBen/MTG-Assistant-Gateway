@@ -147,7 +147,8 @@ def test_sign_out_in_the_browser_ends_the_session_and_clears_site_data(env: Env)
                 await page.click("main >> text=Sign out")
             logout = await info.value
             assert logout.status == 303
-            assert (await logout.header_value("clear-site-data")) == '"cache", "storage"'
+            # storage only: clearing the cache too made the sign-out page wait for a full re-download
+            assert (await logout.header_value("clear-site-data")) == '"storage"'
             await page.wait_for_url(f"{PUBLIC_URL}/signed-out", timeout=30_000)
             assert "Sign out" not in await page.inner_text("body")
             # The session is gone on the server too: the account page sends the browser through

@@ -3,7 +3,10 @@ package local.mtgassistantgateway.app
 import android.content.Context
 import android.content.SharedPreferences
 
-/** What the app keeps: which gateway to open, and the sign-in origin that gateway advertised. */
+/**
+ * What the app keeps: which gateway to open, the sign-in origin that gateway advertised, and the
+ * verifier of a browser sign-in in progress ([BrowserSignIn]).
+ */
 class Prefs(context: Context) {
     private val p: SharedPreferences = context.getSharedPreferences("mtgassistant", Context.MODE_PRIVATE)
 
@@ -22,9 +25,29 @@ class Prefs(context: Context) {
         p.edit().putString(KEY_PROVIDER_FOR, gateway).putString(KEY_PROVIDER, provider).apply()
     }
 
+    /** Remembers the verifier of the browser sign-in just started for [gateway] (one at a time). */
+    fun setPendingSignIn(gateway: String, verifier: String, now: Long) {
+        p.edit().putString(KEY_SIGNIN_FOR, gateway).putString(KEY_SIGNIN_VERIFIER, verifier).putLong(KEY_SIGNIN_AT, now).apply()
+    }
+
+    /**
+     * The verifier of the browser sign-in started for [gateway] within [BrowserSignIn.MAX_AGE_MS],
+     * or null. Read once: it is removed either way, so a code can be finished only once.
+     */
+    fun takePendingSignIn(gateway: String, now: Long): String? {
+        val forGateway = p.getString(KEY_SIGNIN_FOR, null)
+        val verifier = p.getString(KEY_SIGNIN_VERIFIER, null)
+        val at = p.getLong(KEY_SIGNIN_AT, 0L)
+        p.edit().remove(KEY_SIGNIN_FOR).remove(KEY_SIGNIN_VERIFIER).remove(KEY_SIGNIN_AT).apply()
+        return if (forGateway == gateway && verifier != null && now >= at && now - at <= BrowserSignIn.MAX_AGE_MS) verifier else null
+    }
+
     companion object {
         private const val KEY_ORIGIN = "gateway_origin"
         private const val KEY_PROVIDER = "idp_origin"
         private const val KEY_PROVIDER_FOR = "idp_origin_gateway"
+        private const val KEY_SIGNIN_FOR = "signin_gateway"
+        private const val KEY_SIGNIN_VERIFIER = "signin_verifier"
+        private const val KEY_SIGNIN_AT = "signin_started_at"
     }
 }

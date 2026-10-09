@@ -44,17 +44,53 @@ def tile(
     )
 
 
-async def recent_decks(state: AppState, sub: str) -> list[dict[str, Any]] | None:
-    """The member's newest decks, or None when they cannot be read right now."""
+PENDING = "pending"  # recent_decks: the list is being read; the page shows a placeholder meanwhile
+
+
+async def recent_decks(state: AppState, sub: str, *, wait: float | None) -> list[dict[str, Any]] | str | None:
+    """The member's newest decks; None when they cannot be read right now; PENDING when the list
+    is cold and the read has not answered within ``wait`` seconds (it carries on in the cache)."""
     try:
-        rows = await asyncio.wait_for(state.decks.list_decks(sub), DECKS_TIMEOUT)
+        rows = await asyncio.wait_for(state.decks.list_decks_quick(sub, wait=wait), DECKS_TIMEOUT)
     except (DeckError, TimeoutError):
         return None
     except Exception:  # pragma: no cover - a surprise must not take the home page down
         log.exception("home: listing decks failed")
         return None
+    if rows is None:
+        return PENDING
     rows.sort(key=lambda d: d.get("updated_at") or "", reverse=True)
     return rows
+
+
+def recent_panel_inner(decks: list[dict[str, Any]] | None, covers: dict[str, dict[str, Any]]) -> str:
+    """The inside of the home page's My decks panel: the newest covers, or why there are none.
+    /api/decks/mine?shape=recent answers with the same markup for the placeholder to swap in."""
+    if decks:
+        return (
+            "<div class='panel-head'><h2>My decks</h2>"
+            f"<a class='btn' href='/decks'>All decks ({len(decks)})</a></div>" + recent_html(decks, covers)
+        )
+    if decks is None:
+        return (
+            "<h2>My decks</h2><p class='muted'>Archidekt did not answer in time. "
+            "<a href='/decks'>Open the deck list</a> to try again.</p>"
+        )
+    return (
+        "<h2>My decks</h2><p class='muted'>No decks yet. "
+        "<a href='/decks/new'>Create one</a>, or <a href='/scan'>scan a pile of cards</a>.</p>"
+    )
+
+
+def recent_skeleton() -> str:
+    """The panel while the deck list is still being read: six grey covers the script replaces."""
+    return (
+        "<div class='panel-head'><h2>My decks</h2><a class='btn' href='/decks'>All decks</a></div>"
+        "<div class='recent skeleton' aria-hidden='true'>" + "<span></span>" * RECENT + "</div>"
+        "<p class='sr-only' role='status'>Loading your decks</p>"
+        "<noscript><p class='muted'><a href='/'>Reload</a> to see your decks (this page fills itself "
+        "with scripts on).</p></noscript>"
+    )
 
 
 def recent_html(decks: list[dict[str, Any]], covers: dict[str, dict[str, Any]]) -> str:
@@ -82,10 +118,14 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
         pending = state.db.count_pending_proposals(sub)
         scans = len(state.scan.list_sessions(sub)) if getattr(state, "scan", None) else 0
 
-        decks: list[dict[str, Any]] | None = None
+        decks: list[dict[str, Any]] | str | None = None
         if link["linked"]:
-            decks = await recent_decks(state, sub)
-        covers = covers_for(decks, state.db.deck_covers([str(d["id"]) for d in decks])) if decks else {}
+            decks = await recent_decks(state, sub, wait=state.decks.deck_list_wait)
+        covers = (
+            covers_for(decks, state.db.deck_covers([str(d["id"]) for d in decks]))
+            if isinstance(decks, list) and decks
+            else {}
+        )
 
         hero = (
             f"<div class='hero'><div><h1>Hi {_esc(who)}</h1>"
@@ -103,24 +143,16 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             )
             + "</div>"
         )
-        if decks:
+        if decks == PENDING:
+            # Cold start: the page goes out now and decks.js fills the panel from the cache.
             recent = (
-                "<section class='panel'><div class='panel-head'><h2>My decks</h2>"
-                f"<a class='btn' href='/decks'>All decks ({len(decks)})</a></div>"
-                + recent_html(decks, covers)
+                "<section class='panel' data-decks-src='/api/decks/mine?shape=recent' aria-busy='true'>"
+                + recent_skeleton()
                 + "</section>"
             )
-        elif link["linked"] and decks is None:
-            recent = (
-                "<section class='panel'><h2>My decks</h2><p class='muted'>Archidekt did not answer in time. "
-                "<a href='/decks'>Open the deck list</a> to try again.</p></section>"
-            )
         elif link["linked"]:
-            recent = (
-                "<section class='panel'><h2>My decks</h2><p class='muted'>No decks yet. "
-                "<a href='/decks/new'>Create one</a>, or <a href='/scan'>scan a pile of cards</a>.</p>"
-                "</section>"
-            )
+            assert not isinstance(decks, str)
+            recent = "<section class='panel'>" + recent_panel_inner(decks, covers) + "</section>"
         else:
             recent = ""
         search = (
@@ -129,8 +161,8 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             "<div class='field'><label for='home-q'>Deck name</label>"
             "<input id='home-q' type='search' name='q' placeholder='Deck name'></div>"
             "<div class='field'><label for='home-c'>Commander</label>"
-            "<input id='home-c' type='text' name='commander' list='cardnames' autocomplete='off' "
-            "placeholder='Commander'><datalist id='cardnames'></datalist></div>"
+            "<input id='home-c' type='text' name='commander' data-suggest='cards' autocomplete='off' "
+            "placeholder='Commander'></div>"
             f"<button class='btn-primary'>{icon('search')} Search Archidekt</button></form></section>"
         )
         tiles = (
@@ -200,7 +232,8 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             current="/",
             heading=False,
             body_class="home",
-            head_extra="<script src='/static/deck.js' defer></script>",
+            head_extra="<script src='/static/deck.js' defer></script>"
+            "<script src='/static/decks.js' defer></script>",
         )
         resp.headers["Content-Security-Policy"] = DECK_CSP  # deck covers come from Scryfall
         return resp

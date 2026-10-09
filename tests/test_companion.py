@@ -3,6 +3,7 @@ reports, exports and the app shell. Writes go through proposals exactly as the t
 
 from __future__ import annotations
 
+import html
 import json
 import re
 from pathlib import Path
@@ -193,7 +194,8 @@ async def test_reports_are_stored_and_listed(stack: Stack) -> None:
         assert got["ok"] and got["stats"]["card_count"] == rep["stats"]["card_count"]
         # pages
         page = await b.http.get("/history?deck_id=42", headers=NAV)
-        assert page.status_code == 200 and "Report:" in page.text
+        # the history timeline shows the report as a row of its own (history_view), not a "Report:" line
+        assert page.status_code == 200 and "k-report" in page.text and "Open the report" in page.text
         detail = await b.http.get(f"/history/reports/{rep['report_id']}", headers=NAV)
         assert detail.status_code == 200 and "Goldfish simulation" in detail.text
         gone = await h.http.delete(f"/api/v1/reports/{rep['report_id']}", headers=auth)
@@ -292,8 +294,13 @@ async def test_deck_pages(stack: Stack) -> None:
         assert ran.status_code == 303 and ran.headers["location"].startswith("/history/reports/")
         shown = await b.http.get(ran.headers["location"], headers=NAV)
         assert shown.status_code == 200 and "Goldfish simulation" in shown.text and "## Metrics" in shown.text
+        # the page speaks to a person: no assistant tool names, exports in one row of buttons
+        assert "goldfish_" not in shown.text and "run_deck_report" not in shown.text
+        assert (
+            "export.md" in shown.text and "export.html" in shown.text and "data-copy='rep-md'" in shown.text
+        )
         hist = await b.http.get("/history", headers=NAV)
-        assert hist.status_code == 200 and "Report:" in hist.text
+        assert hist.status_code == 200 and "k-report" in hist.text and "filterbar" in hist.text
         act = await b.http.get("/activity", headers=NAV)
         assert act.status_code == 200 and "archidekt linked" in act.text
         for path in ("/decks", "/decks/42", "/history", "/activity"):
@@ -371,26 +378,22 @@ async def test_deck_editor_page(stack: Stack) -> None:
         await b.aclose()
 
 
-async def test_playtest_page_frames_archidekts_playtester(stack: Stack) -> None:
-    """The playtest page is Archidekt's own playtester in a frame (the only origin the page's CSP
-    lets it frame), with the deck's name, a way back and the plain link as a fallback. Missing
-    decks and anonymous visitors are handled like the deck page."""
+async def test_playtest_goes_to_archidekts_own_playtester(stack: Stack) -> None:
+    """Playtest opens Archidekt's playtester in its own tab (D-13): a frame on a gateway page never
+    carried the person's Archidekt sign-in, so a private deck stayed empty there (T-098). Old links
+    to the gateway's playtest page are sent on; nothing is framed any more."""
     b = await linked_browser(stack)
     try:
+        deck = await b.http.get("/decks/42", headers=NAV)
+        assert (
+            "href='https://archidekt.com/playtester-v2/42' target='_blank' rel='noreferrer noopener'"
+            in deck.text
+        )
+        assert "<iframe" not in deck.text
         r = await b.http.get("/decks/42/playtest", headers=NAV)
-        assert r.status_code == 200
-        assert "<iframe class='playframe' src='https://archidekt.com/playtester-v2/42'" in r.text
-        assert "sandbox='allow-scripts allow-same-origin" in r.text
-        assert "href='https://archidekt.com/playtester-v2/42' target='_blank'" in r.text  # fallback
-        assert "href='/decks/42'" in r.text and "Sample Commander Deck" in r.text
-        csp = r.headers["content-security-policy"]
-        assert "frame-src https://archidekt.com;" in csp and "frame-ancestors 'none'" in csp
-        assert "script-src 'self'" in csp and "img-src 'self'" in csp  # the shell's own script and avatar
-        assert "cards.scryfall.io" not in csp
-        missing = await b.http.get("/decks/999999/playtest", headers=NAV)
-        assert missing.status_code == 404
-        anon = await stack.h.http.get("/decks/42/playtest", headers=NAV)
-        assert anon.status_code == 302 and anon.headers["location"].startswith("/login?next=")
+        assert r.status_code == 303 and r.headers["location"] == "https://archidekt.com/playtester-v2/42"
+        odd = await b.http.get("/decks/evil/playtest", headers=NAV)
+        assert odd.status_code == 303 and odd.headers["location"] == "/decks"
     finally:
         await b.aclose()
 
@@ -402,8 +405,11 @@ async def test_compare_page_shows_what_a_build_changed(stack: Stack) -> None:
     b = await linked_browser(stack)
     try:
         empty = await b.http.get("/decks/42/compare", headers=NAV)
-        assert empty.status_code == 200 and "<datalist id='preconlist'>" in empty.text
-        assert "<option value='42'>" in empty.text  # the fake's precon listing carries deck 42
+        assert empty.status_code == 200 and "data-suggest='static'" in empty.text
+        # the fake's precon listing carries deck 42; its label is offered, and names resolve
+        assert "Sample Commander Deck (" in empty.text and "<datalist" not in empty.text
+        by_name = await b.http.get("/decks/42/compare?with=Sample+Commander+Deck", headers=NAV)
+        assert by_name.status_code == 200 and "Taken out of Sample Commander Deck" in by_name.text
         assert "Taken out of" not in empty.text
         # against itself: nothing changes
         same = await b.http.get("/decks/42/compare?with=https://archidekt.com/decks/42/sample", headers=NAV)
@@ -613,4 +619,137 @@ async def test_another_persons_public_deck_can_be_cloned_but_not_edited(stack: S
         assert copy["private"] is True and len(copy["cards"]) == len(stack.ark.decks[43]["cards"])
     finally:
         stack.ark.private.add(43)
+        await b.aclose()
+
+
+def test_precon_by_label_needs_the_set_when_two_precons_share_a_name() -> None:
+    from mtg_gateway.deckpage import precon_by_label
+
+    precons = {
+        "Set A": [{"id": 1, "name": "Twin Deck"}, {"id": 3, "name": "Only Once"}],
+        "Set B": [{"id": 2, "name": "Twin Deck"}],
+    }
+    assert precon_by_label(precons, "twin deck (set b)") == 2
+    assert precon_by_label(precons, "Twin Deck") is None  # ambiguous: the label form is required
+    assert precon_by_label(precons, "only once") == 3
+    assert precon_by_label(precons, "") is None
+
+
+# -- a busy or unreachable Archidekt answers the same on every page (0.7.9, gate finding D6) ----
+BUSY_PAGES = (
+    "/decks",
+    "/decks/42",
+    "/decks/42?view=grid",
+    "/decks/42/export",
+    "/decks/42/compare",
+    "/decks/42/compare?with=43",
+    "/decks/42/edit",
+    "/decks/42/settings",
+    "/decks/42/delete",
+    "/folders",
+    "/collection",
+    "/users/alice",
+    "/search?name=Sample",
+    "/precons",
+)
+BUSY_DOWNLOADS = (
+    "/decks/42/export.txt",
+    "/decks/42/export.archidekt.txt",
+    "/decks/42/export.csv",
+    "/decks/42/export.arena.txt",
+    "/decks/42/export.dek",
+    "/decks/42/export.pdf",
+)
+
+
+def _assert_busy_page(r, path: str, *, status: int, title: str, max_wait: int) -> None:
+    assert r.status_code == status, (path, r.status_code, r.text[:300])
+    assert f"<title>{title}" in r.text and f"<h1>{title}</h1>" in r.text, (path, r.text[:300])
+    assert f"<a class='btn btn-primary' href='{html.escape(path)}'>Try again</a>" in r.text, path
+    assert 1 <= int(r.headers["retry-after"]) <= max_wait, (path, r.headers)
+    assert r.headers["cache-control"] == "no-store", path
+    for wrong in ("Deck not found", "Cannot edit", "could not be run", "Archidekt could not find"):
+        assert wrong not in r.text, (path, wrong)
+
+
+async def test_a_used_up_archidekt_budget_is_one_shared_429_page_everywhere(stack: Stack) -> None:
+    """Once the member's Archidekt budget (MTG_ARCHIDEKT_CALLS_PER_10_MIN) is spent, every page
+    that reads from Archidekt says so the same way: "Archidekt is busy", HTTP 429 with the
+    budget's Retry-After, no-store, a Try again link to the same URL. Never "Deck not found" or
+    "Cannot edit this deck" (the deck and the account are fine), never 200, 502 or 503."""
+    from mtg_gateway.decks import RateBudget
+
+    b = await linked_browser(stack)
+    try:
+        decks = stack.h.app.state.gateway.decks
+        decks.archidekt_budget = RateBudget(per_window=1, window=600)
+        first = await b.http.get("/decks/42", headers=NAV)
+        assert first.status_code == 200  # the one call of the window
+        for path in BUSY_PAGES:
+            r = await b.http.get(path, headers=NAV)
+            _assert_busy_page(r, path, status=429, title="Archidekt is busy", max_wait=600)
+            assert "used up for a few minutes" in r.text and "work again shortly" in r.text, path
+            assert "Your account has used its 1 Archidekt actions" in r.text, path
+            assert "href='/decks'>My decks</a>" in r.text, path
+        for path in BUSY_DOWNLOADS:
+            r = await b.http.get(path)
+            assert r.status_code == 429 and r.text.startswith("Archidekt is busy."), (path, r.text)
+            assert 1 <= int(r.headers["retry-after"]) <= 600 and r.headers["cache-control"] == "no-store"
+            assert r.headers["content-type"].startswith("text/plain"), path
+        js = await b.http.get("/decks/42/export.json")  # the JSON download answers in its own shape
+        assert js.status_code == 429 and js.json()["error"] == "rate_limited", js.text
+        assert js.json()["message"].startswith("Archidekt is busy.") and js.json()["retry_after"] >= 1
+        assert 1 <= int(js.headers["retry-after"]) <= 600 and js.headers["cache-control"] == "no-store"
+        # the JSON API already said 429 (docs/API.md); the budget's wait is the same header there
+        api = await b.http.get("/api/v1/decks/42")
+        assert api.status_code == 429 and api.json()["error"] == "rate_limited"
+    finally:
+        await b.aclose()
+
+
+async def test_an_unreachable_archidekt_is_one_shared_503_page_everywhere(stack: Stack) -> None:
+    """Archidekt not answering (kind "unavailable") is the same page on every route too: 503,
+    Retry-After, Try again, titled so nobody looks for a missing deck."""
+    b = await linked_browser(stack)
+    try:
+        for path in BUSY_PAGES:
+            stack.ark.inject = [(503, None)] * 20  # every call of this page load fails
+            r = await b.http.get(path, headers=NAV)
+            _assert_busy_page(
+                r, path, status=503, title="Archidekt can&#x27;t be reached right now", max_wait=60
+            )
+        for path in BUSY_DOWNLOADS:
+            stack.ark.inject = [(503, None)] * 20
+            r = await b.http.get(path)
+            assert r.status_code == 503 and r.headers["retry-after"] == "60", (path, r.text)
+        stack.ark.inject = [(503, None)] * 20
+        js = await b.http.get("/decks/42/export.json")
+        assert (
+            js.status_code == 503
+            and js.json()["error"] == "unavailable"
+            and js.headers["retry-after"] == "60"
+        )
+        stack.ark.inject = []
+    finally:
+        stack.ark.inject = []
+        await b.aclose()
+
+
+async def test_a_missing_deck_is_still_not_found(stack: Stack) -> None:
+    """The shared page is only for a busy or unreachable Archidekt; a deck that is not there
+    keeps its 404 and its own words."""
+    b = await linked_browser(stack)
+    try:
+        for path, title in (
+            ("/decks/999999", "Deck not found"),
+            ("/decks/999999/export", "Deck not found"),
+            ("/decks/999999/compare", "Deck not found"),
+            ("/decks/999999/edit", "Cannot edit this deck"),
+            ("/decks/999999/settings", "Cannot edit this deck"),
+        ):
+            r = await b.http.get(path, headers=NAV)
+            assert r.status_code == 404 and f"<title>{title}" in r.text, (path, r.status_code)
+            assert "retry-after" not in r.headers, path
+        assert (await b.http.get("/decks/999999/export.txt")).status_code == 404
+    finally:
         await b.aclose()

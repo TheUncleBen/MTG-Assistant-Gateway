@@ -7,8 +7,11 @@ source repository to connect:
   was handed the link) describe the steps for every client.
 - ``/plugin/marketplace.json`` is a Claude Code marketplace with one plugin
   whose source is the ZIP archive below, pinned by SHA-256.
-- ``/plugin/mtg-gateway.zip`` is the plugin from the repository's ``plugin/``
+- ``/plugin/<name>.zip`` is the plugin from the repository's ``plugin/``
   folder with this gateway's own address written into its connector files.
+  ``<name>`` is ``mtg-gateway`` unless the owner set ``MTG_SERVER_NAME``: then the
+  plugin, its connector and skills take a name made from it, and the archive drops
+  the project's name and homepage, so the public files don't point at the project.
 
 None of this is secret: the plugin holds the public MCP URL and the end-user
 skill text, so these routes need no sign-in. ``/install`` is the exception: a browser
@@ -25,6 +28,7 @@ import html
 import io
 import json
 import os
+import re
 import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -44,6 +48,9 @@ if TYPE_CHECKING:
 
 PLUGIN_NAME = "mtg-gateway"
 MARKETPLACE_NAME = "mtg-gateway"
+# The product name the plugin's files carry; an owner's MTG_SERVER_NAME replaces it.
+DEFAULT_SITE = "MTG Assistant Gateway"
+SLUG_MAX = 40
 IMAGE_PLUGIN_DIR = Path("/usr/share/mtg-gateway/plugin")
 REPO_PLUGIN_DIR = Path(__file__).resolve().parents[2] / "plugin"
 MAX_FILE_BYTES = 512 * 1024
@@ -62,6 +69,39 @@ def plugin_dir() -> Path | None:
     return None
 
 
+def plugin_slug(site: str) -> str:
+    """The plugin's short name: ``mtg-gateway`` under the default name, otherwise the owner's
+    name in lower case with every run of other characters turned into one hyphen."""
+    if site == DEFAULT_SITE:
+        return PLUGIN_NAME
+    slug = re.sub(r"[^a-z0-9]+", "-", site.lower()).strip("-")[:SLUG_MAX].strip("-")
+    return slug or PLUGIN_NAME
+
+
+def plugin_label(site: str) -> str:
+    """The owner's name as the plugin's text may carry it: letters, digits, spaces and . _ ' -
+    only, so it can't break the skills' front matter or the JSON it is written into."""
+    label = " ".join(re.sub(r"[^A-Za-z0-9 ._'-]+", " ", site).split())
+    return label or plugin_slug(site)
+
+
+def _renamed(data: bytes, rel: str, site: str, name: str) -> bytes:
+    """A text file of the plugin with the product's name and short name replaced by the
+    owner's, and no link to the project's homepage."""
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data
+    label = plugin_label(site)
+    if rel.endswith(".json"):
+        doc = json.loads(text)
+        if isinstance(doc, dict):
+            doc.pop("homepage", None)
+            doc.pop("repository", None)
+        text = json.dumps(doc, indent=2) + "\n"
+    return text.replace(DEFAULT_SITE, label).replace(PLUGIN_NAME, name).encode("utf-8")
+
+
 def _with_url(raw: bytes, mcp_url: str) -> bytes:
     """Return the connector file with every server's ``url`` set to this gateway."""
     doc = json.loads(raw.decode("utf-8"))
@@ -70,14 +110,17 @@ def _with_url(raw: bytes, mcp_url: str) -> bytes:
     return (json.dumps(doc, indent=2) + "\n").encode("utf-8")
 
 
-def build_zip(base: Path, mcp_url: str) -> bytes:
+def build_zip(base: Path, mcp_url: str, site: str = DEFAULT_SITE) -> bytes:
     """ZIP of ``base/mtg-gateway`` with the folder at the root and the MCP URL filled in.
+    Under an owner's own ``site`` name, folders and text are renamed (``_renamed``).
 
     Only regular files are included; symlinks and oversized files are skipped. Hidden
     folders other than ``.claude-plugin`` are left out (there are none in the repository,
     but a stray ``.git`` must never ship).
     """
     root = base / PLUGIN_NAME
+    name = plugin_slug(site)
+    custom = site != DEFAULT_SITE
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for path in sorted(root.rglob("*")):
@@ -87,9 +130,13 @@ def build_zip(base: Path, mcp_url: str) -> bytes:
             if any(p.startswith(".") and p != ".claude-plugin" for p in rel_parts[:-1]):
                 continue
             data = path.read_bytes()
+            rel = path.relative_to(base).as_posix()
+            if custom:
+                data = _renamed(data, rel, site, name)
+                rel = "/".join(name if part == PLUGIN_NAME else part for part in rel.split("/"))
             if len(rel_parts) == 1 and rel_parts[0] in CONNECTOR_FILES:
                 data = _with_url(data, mcp_url)
-            info = zipfile.ZipInfo(path.relative_to(base).as_posix(), date_time=ZIP_DATE)
+            info = zipfile.ZipInfo(rel, date_time=ZIP_DATE)
             info.compress_type = zipfile.ZIP_DEFLATED
             info.external_attr = 0o644 << 16
             zf.writestr(info, data)
@@ -98,8 +145,9 @@ def build_zip(base: Path, mcp_url: str) -> bytes:
 
 def marketplace(public_url: str, owner: str, zip_sha256: str) -> dict:
     """The ``marketplace.json`` document pointing at the served archive."""
+    name = plugin_slug(owner)
     return {
-        "name": MARKETPLACE_NAME,
+        "name": MARKETPLACE_NAME if name == PLUGIN_NAME else name,
         "owner": {"name": owner, "url": public_url},
         "metadata": {
             "description": f"The assistant plugin for {owner}: the gateway connector plus the MTG skill.",
@@ -107,16 +155,16 @@ def marketplace(public_url: str, owner: str, zip_sha256: str) -> dict:
         },
         "plugins": [
             {
-                "name": PLUGIN_NAME,
+                "name": name,
                 "description": "Magic: The Gathering research, goldfish simulation and safe Archidekt "
-                "deck edits through this gateway. Run /mtg-gateway:setup after installing.",
+                f"deck edits through this gateway. Run /{name}:setup after installing.",
                 "version": __version__,
                 "category": "productivity",
                 "keywords": ["mtg", "magic-the-gathering", "archidekt", "mcp"],
                 "source": {
                     "source": "archive",
                     # Content-addressed so a cached marketplace never pairs with a newer archive.
-                    "url": f"{public_url}/plugin/{PLUGIN_NAME}.zip?v={zip_sha256}",
+                    "url": f"{public_url}/plugin/{name}.zip?v={zip_sha256}",
                     "sha256": zip_sha256,
                 },
             }
@@ -180,19 +228,20 @@ fallbacks:
 
 
 def _section_md(client: str, public_url: str, site: str) -> str:
+    name = plugin_slug(site)
     mp = f"{public_url}/plugin/marketplace.json"
     mcp = f"{public_url}/mcp"
     if client == "claude-code":
         return f"""## Claude Code (terminal)
 
 Works on Windows, macOS and Linux. Run these two commands, then tell the
-person to run `/mcp`, choose **mtg-gateway** and **Authenticate**, which
-opens the sign-in page in their browser. Then run the `/mtg-gateway:setup`
+person to run `/mcp`, choose **{name}** and **Authenticate**, which
+opens the sign-in page in their browser. Then run the `/{name}:setup`
 skill to finish.
 
 ```
 claude plugin marketplace add {mp}
-claude plugin install mtg-gateway@mtg-gateway
+claude plugin install {name}@{name}
 ```
 
 The plugin archive is pinned by SHA-256 in the marketplace file, so Claude
@@ -211,9 +260,9 @@ the phone's web browser at claude.ai.
 Pick one. Both end with a sign-in in your browser; nothing is typed into Claude.
 
 1. **Plugin upload (connector and skill in one file):** download
-   `{public_url}/plugin/mtg-gateway.zip`, then on claude.ai or in the desktop
+   `{public_url}/plugin/{name}.zip`, then on claude.ai or in the desktop
    app open **Customize → Plugins → Add → Upload plugin** and choose the ZIP.
-   Open the plugin's **Connectors** tab, add the MTG Assistant Gateway connector and
+   Open the plugin's **Connectors** tab, add the {site} connector and
    press **Connect**. Under OAuth client choose **Use Claude's published
    identity** when asked.
 2. **Connector only:** open [this link]({link}), which pre-fills the Add
@@ -261,8 +310,8 @@ tool is blocked" below.
 As documented by OpenAI:
 
 ```
-codex mcp add mtg-gateway --url {mcp}
-codex mcp login mtg-gateway
+codex mcp add {name} --url {mcp}
+codex mcp login {name}
 ```
 """
     raise ValueError(client)
@@ -313,10 +362,10 @@ def add_plugin_routes(server: MCPServer, state: AppState) -> None:
         base = plugin_dir()
         if base is None:
             return None
-        key = f"{base}|{s.mcp_url}"
+        key = f"{base}|{s.mcp_url}|{s.server_name}"
         hit = cache.get(key)
         if hit is None:
-            data = build_zip(base, s.mcp_url)
+            data = build_zip(base, s.mcp_url, s.server_name)
             hit = cache[key] = (data, hashlib.sha256(data).hexdigest())
         return hit
 
@@ -333,7 +382,9 @@ def add_plugin_routes(server: MCPServer, state: AppState) -> None:
             headers={**static, "Cache-Control": "no-cache"},
         )
 
-    @server.custom_route(f"/plugin/{PLUGIN_NAME}.zip", methods=["GET"], include_in_schema=False)
+    zip_name = f"{plugin_slug(s.server_name)}.zip"
+
+    @server.custom_route(f"/plugin/{zip_name}", methods=["GET"], include_in_schema=False)
     async def plugin_zip(_request: Request) -> Response:
         hit = archive()
         if hit is None:
@@ -343,7 +394,7 @@ def add_plugin_routes(server: MCPServer, state: AppState) -> None:
             media_type="application/zip",
             headers={
                 **static,
-                "Content-Disposition": f'attachment; filename="{PLUGIN_NAME}.zip"',
+                "Content-Disposition": f'attachment; filename="{zip_name}"',
                 "ETag": f'"{hit[1]}"',
             },
         )
@@ -427,18 +478,19 @@ def add_plugin_routes(server: MCPServer, state: AppState) -> None:
 
 def _section_html(client: str, public_url: str, site: str, mcp_url: str) -> str:
     e = html.escape
+    name = plugin_slug(site)
     if client == "claude-code":
         mp = f"{public_url}/plugin/marketplace.json"
         return (
             "<div class='card'><h2>Claude Code</h2>"
             "<p>Two commands, then <code>/mcp</code> to sign in in your browser and "
-            "<code>/mtg-gateway:setup</code> to finish.</p>"
-            f"<pre>claude plugin marketplace add {e(mp)}\nclaude plugin install mtg-gateway@mtg-gateway</pre>"
+            f"<code>/{e(name)}:setup</code> to finish.</p>"
+            f"<pre>claude plugin marketplace add {e(mp)}\nclaude plugin install {e(name)}@{e(name)}</pre>"
             "</div>"
         )
     if client == "claude":
         link = claude_connect_link(public_url, site)
-        zip_url = f"{public_url}/plugin/{PLUGIN_NAME}.zip"
+        zip_url = f"{public_url}/plugin/{name}.zip"
         return (
             "<div class='card'><h2>Claude: web, desktop, iPhone and Android</h2>"
             "<p>Every tool works here, including deck edits. Add it on claude.ai or in the desktop app; "
@@ -481,7 +533,7 @@ def _section_html(client: str, public_url: str, site: str, mcp_url: str) -> str:
     if client == "codex":
         return (
             "<div class='card'><h2>Codex CLI</h2>"
-            f"<pre>codex mcp add mtg-gateway --url {e(mcp_url)}\ncodex mcp login mtg-gateway</pre></div>"
+            f"<pre>codex mcp add {e(name)} --url {e(mcp_url)}\ncodex mcp login {e(name)}</pre></div>"
         )
     raise ValueError(client)
 
@@ -495,4 +547,6 @@ __all__ = [
     "marketplace",
     "pick_client",
     "plugin_dir",
+    "plugin_label",
+    "plugin_slug",
 ]

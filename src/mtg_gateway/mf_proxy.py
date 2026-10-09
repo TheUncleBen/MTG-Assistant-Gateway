@@ -97,6 +97,10 @@ TEXT_REWRITES: tuple[tuple[re.Pattern[str], str], ...] = (
         re.compile(r"pass them to\s+goldfish_run as `annotations`"),
         "pass them to run_deck_report, or compare_decks with simulate=true, as options.annotations",
     ),
+    (
+        re.compile(r"Full report: goldfish_report\([^)]*\)\.?"),
+        "This is the full report; the stored copy is under History (get_deck_report).",
+    ),
     (re.compile(r"\bgoldfish_run/goldfish_ab\b"), "run_deck_report / compare_decks"),
     (re.compile(r"\bgoldfish_ab\b"), "compare_decks (simulate=true)"),
     (re.compile(r"\bgoldfish_run\b"), "run_deck_report"),

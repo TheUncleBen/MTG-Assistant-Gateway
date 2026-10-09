@@ -200,6 +200,24 @@ def to_text(cards: list[ListCard], *, with_categories: bool = True, zone: str = 
     return "\n".join(lines) + ("\n" if lines else "")
 
 
+_FACE_SPLIT = re.compile(r"^(\d+x?\s+)(.+?)((?:\s+\([^)]*\)[^\[\*]*)?(?:\s+\*[FE]\*)?(?:\s+\[.*\])?\s*)$")
+
+
+def front_faces(text: str) -> str:
+    """``text`` with every double-faced or split card named by its front face only: "1 Enduring
+    Angel // Angelic Enforcer [Creatures]" becomes "1 Enduring Angel [Creatures]". Archidekt names
+    such cards with both faces, which Scryfall's collection lookup (the research service's way of
+    reading a list) does not find, so the simulators dropped them; the front face alone is found
+    by every Scryfall lookup and by Archidekt's import. Set, number, finish and categories stay."""
+    out = []
+    for line in text.splitlines():
+        m = _FACE_SPLIT.match(line)
+        if m and " // " in m.group(2):
+            line = m.group(1) + m.group(2).split(" // ", 1)[0] + m.group(3)
+        out.append(line)
+    return "\n".join(out) + ("\n" if text.endswith("\n") else "")
+
+
 def clean_text(value: Any) -> str:
     """One line of plain text: control and format characters (newlines, bidi overrides) and
     line or paragraph separators become spaces and whitespace runs collapse. Names and categories

@@ -191,6 +191,9 @@ def test_link_archidekt_account_in_the_browser(clients, env: Env, user: str, arc
             # a wrong password is refused by Archidekt (the mock) and shown on the page
             await page.fill("input[name=archidekt_login]", archidekt_user)
             await page.fill("input[name=archidekt_password]", "wrong")
+            # the tick box unlocks only once the full detail is opened (static/disclosure.js)
+            assert await page.is_disabled("input[name=accept_risk]")
+            await page.click("#archidekt-disclosure-detail > summary")
             await page.check("input[name=accept_risk]")
             await page.click("text=Link account")
             await page.wait_for_load_state("domcontentloaded")

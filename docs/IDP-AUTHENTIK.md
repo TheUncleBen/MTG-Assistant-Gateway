@@ -318,7 +318,8 @@ the `picture` claim, which made every token as big as the image (a 1 MB
 picture meant 1 MB tokens on every check); the gateway still copes with
 that, but upgrade. Authentik 2026.8.3 and newer leave it out of `picture`,
 so tokens stay small. To show uploaded pictures on 2026.8.3 and newer, add
-this optional scope mapping. It puts only a 16-character fingerprint of the
+this optional scope mapping **and select it on the provider**: both steps,
+or nothing is sent. It puts only a 16-character fingerprint of the
 picture in tokens; the gateway asks for the image itself only when the
 fingerprint changes.
 
@@ -341,8 +342,13 @@ return {"mtg_picture_version": sha256(avatar.encode()).hexdigest()[:16]}
 ```
 <!-- /uploaded-picture-mapping -->
 
-2. Open the gateway's provider, **Edit → Advanced protocol settings →
-   Scopes**, add the new mapping next to the four built-in ones, and save.
+2. **Applications → Providers → the gateway's provider → Edit → Advanced
+   protocol settings → Scopes**: move `MTG Assistant Gateway: uploaded
+   picture` from Available to Selected, next to the four built-in ones
+   (`openid`, `email`, `profile`, `offline_access`), and save. This is the
+   step that makes Authentik send it; creating the mapping alone does
+   nothing, and with an uploaded picture first in **Avatars** the member gets
+   no Gravatar either, so the gateway keeps drawing initials.
 
 Nothing changes on the gateway, and nobody needs to sign in again: the
 picture appears within a few seconds of the member's next page. Any other

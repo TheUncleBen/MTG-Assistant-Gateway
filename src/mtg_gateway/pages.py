@@ -19,12 +19,12 @@ from urllib.parse import parse_qs, quote
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from . import link_disclosure, modes
+from . import app_signin, link_disclosure, modes
 from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
 from .avatars import initials_svg
 from .clickguard import form_stamp, guarded_form, submitted_too_soon
 from .decks import DeckError, current_client, row_label, row_line
-from .theme import THEME_COOKIE, render, theme_from_cookie
+from .theme import LAYOUT_COOKIE, THEME_COOKIE, in_app, layout_from_cookie, render, theme_from_cookie
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -58,9 +58,17 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             status=status,
             signed_in=sub is not None,
             csrf=_csrf(s, sid),
+            admin=_is_admin(sub),
             scripts=scripts,
             head_extra=head_extra,
         )
+
+    def _is_admin(sub: str | None) -> bool:
+        # the same top bar (with the Admin link) on every signed-in page, not only the deck pages
+        if not sub or not s.admin_group:
+            return False
+        user = state.db.get_user(sub) or {}
+        return s.admin_group in (user.get("groups") or [])
 
     def current(request: Request) -> tuple[str | None, str | None]:
         return browser_session(state, request)
@@ -82,16 +90,33 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
     # -- sign in / out ------------------------------------------------------
     @server.custom_route("/login", methods=["GET"], include_in_schema=False)
     async def login(request: Request) -> Response:
-        nxt = _safe_next(request.query_params.get("next", "/account"))
-        sub, _sid = current(request)
-        if sub:
-            return RedirectResponse(nxt, status_code=302)
+        q = request.query_params
+        nxt = _safe_next(q.get("next", "/account"))
         # Right after a sign-out on this device, the identity provider is asked to make the person
         # enter their credentials again, so the next person on a shared device or the Android app
-        # is not silently signed back in as the previous one.
-        fresh = request.cookies.get(fresh_cookie) == "1"
+        # is not silently signed back in as the previous one. ``fresh=1`` carries that from the
+        # app to its browser sign-in; it can only ever ask for more, never less.
+        fresh = request.cookies.get(fresh_cookie) == "1" or q.get("fresh") == "1"
+        params: dict[str, str] = {"next": nxt}
+        challenge = q.get("app_challenge")
+        if challenge is not None:
+            # The Android app's sign-in, running in the phone's browser (app_signin.py). This
+            # browser's own session, if any, is not handed over: the identity provider decides.
+            if not app_signin.CHALLENGE.fullmatch(challenge):
+                return page("Sign-in failed", "<p>That sign-in link is not valid.</p>", status=400)
+            params["app_challenge"] = challenge
+        else:
+            sub, _sid = current(request)
+            if sub:
+                return RedirectResponse(nxt, status_code=302)
+            if in_app() and q.get("inapp") != "1":
+                # The fresh cookie stays until a sign-in completes (start_session), so backing out
+                # of the browser and coming back here still asks for credentials again.
+                resp = page("Sign in", app_signin.handoff_body(nxt, fresh), scripts=True)
+                resp.headers["Cache-Control"] = "no-store"
+                return resp
         try:
-            url = await state.provider.start_idp_login(BROWSER_CLIENT_ID, {"next": nxt}, force_login=fresh)
+            url = await state.provider.start_idp_login(BROWSER_CLIENT_ID, params, force_login=fresh)
         except LoginError as exc:
             return page("Sign-in unavailable", f"<p>{html.escape(str(exc))}</p>", status=exc.status)
         resp = RedirectResponse(url, status_code=302, headers={"Cache-Control": "no-store"})
@@ -111,8 +136,10 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             "<p class='muted small'>Unsaved scan drafts on this device are cleared too.</p>"
             "<form method='post' action='/logout'>"
             f"<input type='hidden' name='csrf' value='{html.escape(_csrf(s, sid) or '')}'>"
-            "<div class='actions'><button class='primary'>Sign out</button>"
-            "<button name='everywhere' value='1'>Sign out on all my devices</button></div></form>"
+            "<div class='form-actions'>"
+            "<button class='primary' data-busy-text='Signing out…'>Sign out</button>"
+            "<button name='everywhere' value='1' data-busy-text='Signing out…'>"
+            "Sign out on all my devices</button></div></form>"
             "<p class='muted small'>All devices signs out every browser and the Android app. "
             "Connected AI apps keep working; disconnect them on your Account page.</p></div>",
             sub=sub,
@@ -138,8 +165,10 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         # Not "/": the dashboard needs a session, so it would send the browser straight to sign-in.
         resp = RedirectResponse("/signed-out", status_code=303)
         resp.delete_cookie(session_cookie, path="/", secure=secure, httponly=True, samesite="lax")
-        # Ask the browser to drop cached pages and site storage (scan drafts and the like) too.
-        resp.headers["Clear-Site-Data"] = '"cache", "storage"'
+        # Ask the browser to drop site storage (scan drafts and the like) too. Not "cache": every
+        # gateway page is already Cache-Control: no-store, and clearing the browser's whole HTTP
+        # cache is what made sign-out take seconds in Chrome (owner test round T-015, 2026-10-09).
+        resp.headers["Clear-Site-Data"] = '"storage"'
         resp.set_cookie(
             fresh_cookie, "1", max_age=3600, path="/", secure=secure, httponly=True, samesite="lax"
         )
@@ -164,6 +193,34 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             resp.set_cookie(
                 THEME_COOKIE,
                 theme,
+                max_age=365 * 86400,
+                path="/",
+                secure=secure,
+                httponly=True,
+                samesite="lax",
+            )
+        return resp
+
+    @server.custom_route("/layout", methods=["POST"], include_in_schema=False)
+    async def set_layout(request: Request) -> Response:
+        """ "Fit the screen" / "Desktop layout" from the account menu (T-046): a cookie read by
+        theme.render, which then asks the device for a wide viewport like a browser's Desktop site
+        switch. Signed-in members only, with the form token."""
+        sub, sid = current(request)
+        data = await form(request)
+        if isinstance(data, Response):
+            return data
+        back = _safe_next(data.get("next"))
+        if not (sub and sid and check_csrf(sid, data)):
+            return RedirectResponse(back, status_code=303)
+        layout = layout_from_cookie(data.get("layout"))
+        resp = RedirectResponse(back, status_code=303)
+        if layout == "auto":
+            resp.delete_cookie(LAYOUT_COOKIE, path="/")
+        else:
+            resp.set_cookie(
+                LAYOUT_COOKIE,
+                layout,
                 max_age=365 * 86400,
                 path="/",
                 secure=secure,
@@ -298,11 +355,12 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             if data.get("confirm") != "yes":
                 return RedirectResponse("/account?err=confirm_delete", status_code=303)
             state.db.delete_member_data(sub)
+            state.decks.forget_member(sub)
             if state.membership is not None:
                 state.membership.avatars.delete(sub)
             resp = RedirectResponse("/data-deleted", status_code=303)
             resp.delete_cookie(session_cookie, path="/", secure=secure, httponly=True, samesite="lax")
-            resp.headers["Clear-Site-Data"] = '"cache", "storage"'
+            resp.headers["Clear-Site-Data"] = '"storage"'  # pages are no-store already (see /logout)
             return resp
         if action == "link":
             login_name = data.get("archidekt_login", "").strip()
@@ -320,7 +378,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 return page(
                     "Account",
                     _err("Enter your Archidekt username or email and password.")
-                    + _account_body(state, sub, _csrf(s, sid)),
+                    + _account_body(state, sub, _csrf(s, sid), disclosure_read=True),
                     status=400,
                     sub=sub,
                     sid=sid,
@@ -328,9 +386,10 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             try:
                 await state.decks.link(sub, login_name, password)
             except DeckError as exc:
+                # The member ticked the box after opening the detail: keep it open, not folded again.
                 return page(
                     "Account",
-                    _err(str(exc)) + _account_body(state, sub, _csrf(s, sid)),
+                    _err(str(exc)) + _account_body(state, sub, _csrf(s, sid), disclosure_read=True),
                     status=400,
                     sub=sub,
                     sid=sid,
@@ -455,11 +514,24 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             return page("Sign-in failed", f"<p>{html.escape(str(exc))}</p>", status=exc.status)
         if identity is None:
             return page("Sign-in cancelled", "<p>You cancelled at the identity provider.</p>", status=200)
-        sid = secrets.token_urlsafe(32)
-        state.db.create_browser_session(sid, identity.sub, s.browser_session_ttl)
-        state.db.audit("browser_login", sub=identity.sub)
         nxt = _safe_next(str(session["params"].get("next", "/account")))
-        resp = RedirectResponse(nxt, status_code=302, headers={"Cache-Control": "no-store"})
+        challenge = session["params"].get("app_challenge")
+        if isinstance(challenge, str) and app_signin.CHALLENGE.fullmatch(challenge):
+            # The Android app's sign-in: no session in this browser, a one-time code for the app.
+            code = state.app_signins.issue(identity.sub, challenge, nxt)  # type: ignore[attr-defined]
+            resp = page("Signed in", app_signin.return_body(code, s.android_package))
+            resp.headers["Cache-Control"] = "no-store"
+            resp.headers["Referrer-Policy"] = "no-referrer"
+            return resp
+        return start_session(identity.sub, nxt, via=None)
+
+    def start_session(sub: str, nxt: str, *, via: str | None, status: int = 302) -> Response:
+        sid = secrets.token_urlsafe(32)
+        state.db.create_browser_session(sid, sub, s.browser_session_ttl)
+        state.db.audit("browser_login", sub=sub, detail={"via": via} if via else None)
+        resp = RedirectResponse(nxt, status_code=status, headers={"Cache-Control": "no-store"})
+        if via is not None:
+            resp.delete_cookie(fresh_cookie, path="/", secure=secure, httponly=True, samesite="lax")
         resp.set_cookie(
             session_cookie,
             sid,
@@ -470,6 +542,29 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             samesite="lax",
         )
         return resp
+
+    @server.custom_route("/login/app", methods=["POST"], include_in_schema=False)
+    async def login_app(request: Request) -> Response:
+        """The Android app finishing its browser sign-in: the one-time code and the app's verifier.
+
+        Only the app may post here: the app's user agent, and never from another site's page.
+        Without that, someone could sign in as themselves in their own browser, then make a
+        victim's browser post their code and verifier, signing the victim in as them."""
+        if not in_app() or request.headers.get("sec-fetch-site", "none") not in ("none", "same-origin"):
+            resp = page(
+                "Sign-in failed", "<p>This sign-in can only be finished by the Android app.</p>", status=403
+            )
+            resp.headers["Cache-Control"] = "no-store"
+            return resp
+        data = await form(request)
+        if isinstance(data, Response):
+            return data
+        pending = state.app_signins.redeem(data.get("code", ""), data.get("verifier", ""))  # type: ignore[attr-defined]
+        if pending is None:
+            resp = page("Sign-in failed", app_signin.expired_body("/"), status=400)
+            resp.headers["Cache-Control"] = "no-store"
+            return resp
+        return start_session(pending.sub, _safe_next(pending.next_path), via="android_app", status=303)
 
     state.finish_browser_login = finish_browser_login  # type: ignore[attr-defined]
 
@@ -619,7 +714,7 @@ def _when(ts: int | None) -> str:
     return time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(ts))
 
 
-def _account_body(state: Any, sub: str, csrf: str | None) -> str:
+def _account_body(state: Any, sub: str, csrf: str | None, *, disclosure_read: bool = False) -> str:
     info = state.decks.status(sub)
     user = state.db.get_user(sub) or {}
     who = html.escape(user.get("preferred_username") or user.get("email") or sub)
@@ -635,11 +730,13 @@ def _account_body(state: Any, sub: str, csrf: str | None) -> str:
         f"<dt>Deck writes</dt><dd>{writes}</dd></dl>"
         "<p class='muted small'>Deck writes are switched on or off for the whole gateway by its "
         "operator. While they are off, proposals can be reviewed but not applied.</p>"
-        "<a class='btn' href='/skill'>Get the assistant skill for Claude or ChatGPT</a> "
+        "<div class='form-actions'>"
+        "<a class='btn' href='/skill'>Get the assistant skill for Claude or ChatGPT</a>"
         "<a class='btn' href='/app'>Get the Android app</a>"
         f"<form method='post' action='/logout'>{csrf_in}"
-        "<button class='inline'>Sign out</button></form> "
-        "<a class='small' href='/logout'>Sign out on all my devices</a></div>"
+        "<button class='inline' data-busy-text='Signing out…'>Sign out</button>"
+        "<button class='inline' name='everywhere' value='1' data-busy-text='Signing out…'>"
+        "Sign out on all my devices</button></form></div></div>"
     ]
     out.append(_mode_card(state, sub, csrf_in))
     out.append(_apps_card(state, sub, csrf_in))
@@ -662,7 +759,7 @@ def _account_body(state: Any, sub: str, csrf: str | None) -> str:
     else:
         out.append(
             "<div class='card'><h2>Link your Archidekt account</h2>"
-            f"{link_disclosure.form_html(_sweep_on(state))}"
+            f"{link_disclosure.form_html(_sweep_on(state), read=disclosure_read)}"
             f"<form method='post' autocomplete='off'>{csrf_in}"
             "<input type='hidden' name='action' value='link'>"
             "<label for='l'>Archidekt username or email</label>"
@@ -670,8 +767,12 @@ def _account_body(state: Any, sub: str, csrf: str | None) -> str:
             "<label for='p'>Archidekt password</label>"
             "<input id='p' type='password' name='archidekt_password' required "
             "autocomplete='current-password'>"
-            "<label class='check'><input type='checkbox' name='accept_risk' value='1' required> "
+            "<label class='check'><input type='checkbox' name='accept_risk' value='1' required "
+            "aria-describedby='accept-risk-hint'> "
             f"<span>{html.escape(link_disclosure.ACKNOWLEDGE)}</span></label>"
+            # Shown by static/disclosure.js while the tick box waits for the detail to be opened.
+            "<p class='muted small' id='accept-risk-hint' hidden>"
+            f"{html.escape(link_disclosure.TICK_HINT)}</p>"
             "<button class='primary'>Link account</button></form></div>"
         )
     s = state.settings
@@ -1059,7 +1160,7 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str = "") -> str:
                     ("apply", "Apply these changes to Archidekt", "primary btn-lg"),
                     ("reject", "Reject this proposal", "danger"),
                 ],
-                extra="<a class='btn' href='/proposals'>Not now, back to proposals</a>",
+                extra="<a class='btn' href='/proposals'>Not now</a>",
             )
             + "</div>"
         )

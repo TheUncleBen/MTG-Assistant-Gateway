@@ -23,6 +23,7 @@ still the owner's test to report.
 ## Contents
 
 - [1. Getting the app](#1-getting-the-app)
+  - [Adding the app to a gateway](#adding-the-app-to-a-gateway)
 - [2. Using it](#2-using-it)
 - [3. Scanning with the phone camera](#3-scanning-with-the-phone-camera)
 - [4. Foldables and large screens](#4-foldables-and-large-screens)
@@ -62,19 +63,59 @@ download button. Then:
    unsure, don't install it and ask the gateway's owner.
 4. On first launch the app asks for your **gateway address**: type the hostname
    the owner gave you, for example `mtg.example.com`. The app checks that the
-   address answers as a gateway, saves it, and opens the site. Sign in exactly
-   as in a browser.
+   address answers as a gateway, saves it, and opens the site. Sign-in then
+   opens in your phone's browser ([Sign-in](#2-using-it) below).
 
 **Updates** are the same download again: install the newer file over the old
 one. Settings and sign-in are kept as long as the gateway signs releases with
 the same key ([section 8](#8-signing-your-release-key)). **Change gateway** in
 the app's menu (the round button, bottom right) brings the address screen back.
 
-If your gateway's `/app` page says the app isn't shipped there, the operator's
-image was built without it. The operator can download `mtg-assistant-gateway-release.apk` and
-`mtg-assistant-gateway.json` from the project's GitHub release, rename the APK to `mtg-assistant-gateway.apk`,
-copy both (real files, not symlinks) into a folder mounted into the gateway and
-point `MTG_APP_DIR` at it, or build their own ([section 7](#7-building-the-app)).
+If your gateway's `/app` page says there is no app file, the gateway's image
+was built without one: the release build only adds the app when the
+maintainers' signing secrets are set ([section 9](#9-releasing-the-ci-build-and-the-gateway-image)).
+To check a version, open its
+[GitHub release](https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases):
+a release that carries the app lists an "Android app signing certificate
+SHA-256" line in its notes and has `mtg-assistant-gateway-release.apk` under
+**Assets**. A release without them has no app, in the image or on GitHub.
+Ask the gateway's owner, who can add the app by hand
+([Adding the app to a gateway](#adding-the-app-to-a-gateway)).
+
+### Adding the app to a gateway
+
+For operators whose image has no app, or who build their own:
+
+1. Get the two files: `mtg-assistant-gateway-release.apk` and
+   `mtg-assistant-gateway.json`, either from a GitHub release that has them
+   or from your own build in `android/out/` ([section 7](#7-building-the-app)).
+2. On the node that runs the gateway, put them in a folder of their own as
+   real files (not symlinks), with the APK renamed to
+   `mtg-assistant-gateway.apk`, readable by the gateway's user:
+
+   ```bash
+   sudo mkdir -p /srv/mtg-gateway/app
+   sudo cp mtg-assistant-gateway-release.apk /srv/mtg-gateway/app/mtg-assistant-gateway.apk
+   sudo cp mtg-assistant-gateway.json /srv/mtg-gateway/app/
+   sudo chown -R 1000:1000 /srv/mtg-gateway/app
+   ```
+
+3. Mount the folder into the gateway service read-only and point
+   `MTG_APP_DIR` at it. In the stack file, under the gateway's `volumes:`:
+
+   ```yaml
+         - type: bind
+           source: /srv/mtg-gateway/app
+           target: /app-dist
+           read_only: true
+   ```
+
+   and under its `environment:`, `MTG_APP_DIR: /app-dist`. Redeploy the stack.
+4. Open `/app` signed in: it now shows the version, checksums and the
+   download button. If you built the app yourself, give your users your
+   signing certificate SHA-256 some way other than the gateway (step 1 of
+   [Getting the app](#1-getting-the-app)), because no GitHub release
+   publishes it.
 
 Requirements: Android 10 or later. A camera is optional; without one the app
 still works, it just can't scan.
@@ -107,16 +148,17 @@ else your gateway serves. A few things are native:
   the gateway, and on the one sign-in service the gateway's sign-in redirects
   you to, stay in the app. Links to other apps (`mailto:` and the like) open
   only when you tap them.
-- **Sign-in** runs in the app's embedded web view, which suits Authentik's own
-  login forms. If the sign-in service sends you on to another site (a "Sign in
-  with Discord/GitHub/Google" source, say), that site opens in your browser
-  rather than in the app, so a sign-in that chains through a third-party
-  provider can't finish in the app; use *Open in browser* in that case and
-  tell the gateway's owner. The same goes for sign-in services that hand
-  you to another site with a form (SAML or other brokered logins): the app
-  stops that page and opens it in the browser, where the form's data is
-  lost. If your gateway's sign-in works that way, use the gateway in the
-  phone's browser instead of the app.
+- **Sign-in** happens in your phone's browser, shown over the app (a Custom
+  Tab), not in the app's own web view: that is where passkeys, your password
+  manager's autofill (Bitwarden and the like) and "Sign in with ..." buttons
+  work, exactly as they do on the website. When you are done there, tap **Open
+  the MTG Assistant Gateway app** on the last page and you are back in the
+  app, signed in. The browser itself stays signed out of the gateway.
+  Whether a passkey or autofill works is up to your browser and password
+  manager: if it works on the website in that browser, it works here. If you
+  would rather sign in inside the app, the sign-in page has a link for that;
+  passkeys and autofill may not work there. With a gateway older than this
+  app version, sign-in runs inside the app as before.
 - **Staying signed in.** The app's sign-in is a browser session like the
   website's, so it ends the same way: when the browser session runs out,
   when you use **Sign out on all my devices** on the `/logout` page, on your
@@ -200,6 +242,7 @@ The app talks only to pages and endpoints the gateway already serves:
 | Used for | Endpoint |
 |---|---|
 | Checking the address at setup | `GET /healthz` (expects JSON with `"status": "ok"`) |
+| Signing in through the browser | `GET /login` (in the app, a page that hands the sign-in to the browser), then `POST /login/app` with the one-time code ([section 13](#13-privacy-and-security-notes)) |
 | Everything else | the normal pages, loaded in the app |
 | Phone-camera scans | the `/scan` page's `window.__scan` hooks (`flattenCard`, `flatTitleRegion`, `infoRegionOf`, `scanRegion`, `showTab`, `noCardFrame`, `undoLastAdd`) and its `scan:*` events |
 | App Links (optional) | `GET /.well-known/assetlinks.json`, served from `MTG_ANDROID_ASSETLINKS` ([section 12](#12-app-links-opening-gateway-links-in-the-app)) |
@@ -306,8 +349,14 @@ keytool -genkeypair -v -keystore mtg-assistant-release.jks -alias mtgassistant \
   -keyalg RSA -keysize 2048 -validity 10000
 ```
 
-`keytool` comes with any Java install. Keep the `.jks` file and its passwords
-outside the repository, for example in a password manager. Never commit a
+`keytool` comes with any Java install (on Windows, for example the free
+Eclipse Temurin JDK; the command is the same in PowerShell on one line, without
+the `\`). It asks for a password and a name; the name is printed in the
+certificate, so a project name is enough. On current Java versions the file is
+a PKCS12 keystore with one password for both the store and the key, so the
+key password is the same as the store password. Keep the `.jks` file and its
+password outside the repository, for example in a password manager, with a
+backup copy somewhere else. Never commit a
 keystore: `android/.gitignore` already excludes `*.jks` and `*.keystore`.
 
 The certificate's SHA-256 fingerprint, which developer registration
@@ -335,10 +384,13 @@ secrets):
 
 | Secret | Value |
 |---|---|
-| `ANDROID_KEYSTORE_B64` | the keystore file, base64: `base64 -w0 mtg-assistant-release.jks` |
+| `ANDROID_KEYSTORE_B64` | the keystore file, base64: `base64 -w0 mtg-assistant-release.jks` (Linux), `base64 -i mtg-assistant-release.jks` (macOS), or in Windows PowerShell `[Convert]::ToBase64String([IO.File]::ReadAllBytes("$PWD\mtg-assistant-release.jks")) \| Set-Clipboard`, which copies it straight to the clipboard |
 | `ANDROID_KEY_ALIAS` | the alias, `mtgassistant` above |
 | `ANDROID_STORE_PASS` | the keystore password |
-| `ANDROID_KEY_PASS` | the key password (often the same) |
+| `ANDROID_KEY_PASS` | the key password (the same as the keystore password for a keystore made as above) |
+
+Paste each value straight into GitHub's secret form; never into a chat, an
+issue or a file in the repository.
 
 With the secrets set, a release build runs the unit tests, builds and signs the APK
 with the runner's Android SDK, copies
@@ -355,9 +407,10 @@ environment, so set it up like this:
 
 - **Deployment branches and tags**: *Selected branches and tags*, with the
   branch rule `main`. Runs from any other ref then never receive the secrets.
-- **Required reviewers**: yourself (or whoever may release), so every signing
-  run waits for an approval in the Actions tab. The release waits with it: the
-  image and the tag follow once you approve.
+- **Required reviewers** (optional): yourself (or whoever may release), so
+  every signing run waits for an approval in the Actions tab. The release waits
+  with it: the image and the GitHub release follow only once you approve, so
+  leave it off if releases should publish without you.
 - Delete any repository-level copies of the four `ANDROID_*` secrets, and
   protect `main` (Settings, Rules) so that only people you trust can change it.
 
@@ -439,7 +492,9 @@ The usual convention is a domain you control, reversed, plus a name. This app is
 sideloaded, not published in a store, so it doesn't need one:
 `local.mtgassistantgateway.app` is a neutral name that belongs to no domain or person.
 It lives in one file, `android/app/application-id.txt`; the Gradle build reads it from
-there. Change it and rebuild; nothing else needs editing. The Kotlin package name
+there. Change it and rebuild, and set `MTG_ANDROID_PACKAGE` on your gateway to the same
+ID so the browser sign-in hands back to your build
+([DEPLOY.md](DEPLOY.md#environment-reference)); nothing else needs editing. The Kotlin package name
 (`local.mtgassistantgateway.app`, where the source lives) stays as it is: the manifest
 names the app's screens in full, so they don't depend on the package ID. Operators who sign
 their own builds should pick their own ID
@@ -493,6 +548,26 @@ screen is shown without a prefill, so a link can't pick your gateway for you.
   afresh.
 - `https` is required for the gateway address, and cleartext traffic is off in
   the manifest.
+- **Signing in through the browser** follows the usual pattern for native
+  apps (RFC 8252, with a PKCE-style check). The app makes a random secret for
+  each sign-in, keeps it on the phone, and sends only its SHA-256 with the
+  browser's `/login`. After the sign-in service, the gateway sets no cookie in
+  the browser; it keeps a one-time code for two minutes and shows a page whose
+  button opens the app through an `intent:` link naming the app's package ID
+  (`MTG_ANDROID_PACKAGE`, [DEPLOY.md](DEPLOY.md#environment-reference)), so
+  Android hands it only to the installed app with that ID; that relies on the
+  browser honouring the package in `intent:` links, which Chrome does (other
+  browsers not checked), so the button waits for your tap and names the app.
+  The app then posts the code with its secret to `/login/app`, and only then
+  is the session created, in the app. The code is worthless without the
+  secret, works once, and one wrong try burns it. `/login/app` accepts posts
+  only from the app (its user agent, never from another site's page), so
+  nobody can sign your browser in to their account with a code of theirs.
+  A verified App Link ([section 12](#12-app-links-opening-gateway-links-in-the-app))
+  would not depend on the browser for the hand-back; it is not used for this
+  yet because it needs per-gateway setup. The browser's own sign-in at the
+  sign-in service stays signed in, as on the website; the app's **Sign out**
+  makes the next sign-in ask for your credentials again.
 - JavaScript runs only for pages the WebView loads, and the native bridge the
   app exposes to pages (`MtgNative`) answers only the gateway's own page: the
   app notes which page is showing when a call arrives and checks again before
