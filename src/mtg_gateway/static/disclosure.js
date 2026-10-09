@@ -20,6 +20,17 @@
     if (detail.open) unlock();
   }
 
+  // A disabled box is skipped by the browser's required check, so stop the form here instead of
+  // letting the server refuse it (which would clear the typed password): point at the detail.
+  if (box.form) {
+    box.form.addEventListener("submit", function (ev) {
+      if (!box.disabled) return;
+      ev.preventDefault();
+      if (hint) hint.hidden = false;
+      detail.querySelector("summary").focus();
+    });
+  }
+
   detail.open = false;
   box.checked = false;
   box.disabled = true;

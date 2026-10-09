@@ -72,6 +72,13 @@ def test_tick_box_unlocks_only_once_the_detail_is_opened() -> None:
             assert page.locator("#accept-risk-hint").is_visible()
             assert page.get_by_text(link_disclosure.SUMMARY[1]).is_visible()
             assert not page.get_by_text(link_disclosure.SECTIONS[3][1][0]).is_visible()
+            # pressing Link before opening it sends nothing and points at the detail
+            posts: list[str] = []
+            page.on("request", lambda r: posts.append(r.url) if r.method == "POST" else None)
+            page.click("text=Link account")
+            page.wait_for_timeout(300)
+            assert posts == []
+            assert page.evaluate("() => document.activeElement.tagName") == "SUMMARY"
             # open it from the keyboard: focus the summary, press Enter
             page.locator(f"#{link_disclosure.DETAIL_ID} > summary").focus()
             page.keyboard.press("Enter")

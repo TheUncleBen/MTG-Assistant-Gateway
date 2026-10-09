@@ -297,8 +297,8 @@ mentioned at the end.
 **In short**
 
 - The gateway sends your Archidekt password to Archidekt once and never stores it. It keeps the sign-in session Archidekt returns, encrypted. Assume that session can do anything your Archidekt sign-in can.
-- The person who runs this server holds the key, so they could use the session to act as you on Archidekt until it expires (about 40 days), and they can read everything else the gateway keeps about you. Link only if you trust them.
-- Admins can see your account details and activity log, but not your password or session, and they cannot use your link.
+- The person who runs this server holds the key, so they could use the session to act as you on Archidekt until it expires (about 40 days after you link), and they can read everything else the gateway keeps about you. Link only if you trust them.
+- Admins can see your account details and activity log, but not your password or session, and nothing on the admin pages uses your link. An admin who also has access to the server can do what the person who runs it can.
 - You can unlink at any time. Whether Archidekt itself ends the session when you unlink or change your password is not known.
 
 **Full detail**
@@ -325,7 +325,7 @@ mentioned at the end.
 
 *What the person who runs this server can do*
 
-- The key that opens the session is on the same server. With access to the server they can use the session to act as you on Archidekt until it expires: read, change or delete your decks and collection, or anything else your sign-in allows. If Archidekt lets a session change your email or password (not known), they could use that to keep your account. They cannot get your password from the session.
+- The key that opens the session is on the same server. Anyone with access to the server, including the person who runs it, can use the session to act as you on Archidekt until it expires: read, change or delete your decks and collection, or anything else your sign-in allows. If Archidekt lets a session change your email or password (not known), they could use that to keep your account. They cannot get your password from the session.
 - They can read everything else the gateway keeps about you, unencrypted: your name, email, username, user ID and groups at the sign-in service, profile picture (if sent), sign-in and last-seen times, approval mode, Archidekt username and user number, proposed and applied deck and collection changes, deck snapshots, reports and covers, scans, connected apps, usage counts and the activity log. The sign-in service's tokens the gateway keeps to check your groups use the same key, so they can open those too.
 - They control the code this server runs. This gateway's code never keeps your password, but changed code could.
 

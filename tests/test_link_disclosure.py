@@ -90,8 +90,11 @@ def test_disclosure_names_what_the_operator_and_admins_can_and_cannot_do() -> No
         "email, username, user ID and groups at the sign-in service",
         # the summary on top
         "never stores it",
-        "act as you on Archidekt until it expires (about 40 days)",
-        "they cannot use your link",
+        "act as you on Archidekt until it expires (about 40 days after you link)",
+        "nothing on the admin pages uses your link",
+        "An admin who also has access to the server can do what the person who runs it can.",
+        # not only the operator: anyone with server access (hosting staff, an intruder)
+        "Anyone with access to the server, including the person who runs it, can use the session",
         "Whether Archidekt itself ends the session when you unlink or change your password is not known.",
     ):
         assert must in text, must
