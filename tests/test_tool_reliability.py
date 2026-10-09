@@ -440,7 +440,8 @@ async def test_linking_archidekt_needs_the_risk_note_acknowledged(stack: Stack) 
         page = await b.http.get("/account", headers=NAV)
         assert "terms of service restrict automated access" in page.text
         assert (
-            "name='accept_risk'" in page.text and "the key that opens it is on the same server" in page.text
+            "name='accept_risk'" in page.text
+            and "The key that opens the session is on the same server" in page.text
         )
         csrf = await b.csrf("/account")
         r = await b.http.post(
