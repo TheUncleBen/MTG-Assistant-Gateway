@@ -147,7 +147,8 @@ details.dd .menu.left{left:0;right:auto}
   background:var(--border);color:var(--text);outline:none}
 .menu button:disabled{color:var(--text-muted);cursor:default;background:transparent}
 .menu .sep{height:1px;background:var(--border);margin:.25rem 0}
-.menu a.danger,.menu button.danger{color:var(--danger-text)}
+.menu a.danger,.menu button.danger{color:var(--danger-text);background:transparent;border:0}
+.menu button.danger:hover,.menu button.danger:focus-visible{background:var(--border);color:var(--danger-text)}
 .menu .head{padding:.4rem 1rem .2rem;font-size:.8rem;font-weight:700;color:var(--menu-head);
   text-transform:uppercase;letter-spacing:.04em}
 .menu form{margin:0;display:contents}

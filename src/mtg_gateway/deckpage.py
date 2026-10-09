@@ -641,20 +641,31 @@ def cards_html(
         sections.append(f"<section class='stack' data-group='{esc(name)}'>{head}{body}</section>")
     # data-own and data-group let deck.js offer drag-and-drop between categories on the member's
     # own deck (the drops become one proposal, applied from the review page like every other edit).
-    droppable = " data-own='1'" if own and group == "category" else ""
-    # The card menu's "Move to" list (deck.js) names the deck's own categories whatever the
-    # grouping, and knows which one is the maybeboard; data-group tells it the current grouping.
+    # data-own marks the member's own deck (the card menu and the viewer offer edits); data-drop
+    # the category grouping on it, where cards drag between stacks. The card menu's "Move to" list
+    # (deck.js) names the deck's own categories whatever the grouping, and knows the maybeboard.
     cats = [c["name"] for c in deck.categories if isinstance(c.get("name"), str)]
-    menu_data = (
-        f" data-cats='{esc(json.dumps(cats, separators=(',', ':')))}'"
+    droppable = (
+        " data-own='1'"
+        + (" data-drop='1'" if group == "category" else "")
+        + f" data-cats='{esc(json.dumps(cats, separators=(',', ':')))}'"
         f" data-side='{esc(deck.side_category())}'"
         f" data-excluded='{esc(json.dumps(sorted(excluded), separators=(',', ':')))}'"
         if own
         else ""
     )
+    # The card menu (deck.js) draws these icons; a template keeps them out of the page's flow.
+    icons = (
+        "<template class='icons'>"
+        + "".join(
+            f"<span data-ic='{n}'>{icon(n)}</span>"
+            for n in ("eye", "swap", "tag", "eye-off", "x", "edit", "external")
+        )
+        + "</template>"
+    )
     return (
         f"<div class='deckview {esc(view)}' id='cards' data-deck='{esc(deck.id)}' "
-        f"data-grouping='{esc(group)}'{droppable}{menu_data}>{''.join(sections)}</div>"
+        f"data-grouping='{esc(group)}'{droppable}>{icons}{''.join(sections)}</div>"
     )
 
 
@@ -1497,9 +1508,9 @@ ul.rows .hover img{width:100%;height:100%;display:block}
 .deckview.stacks .cards.fanned .c{transform:none}
 .deckview .c.dragging{opacity:.4}
 .deckview .stack.dropping{outline:3px dashed var(--orange);outline-offset:4px;border-radius:5px}
-.deckview[data-own] .stackhead .meta::after{content:' · drag cards here to recategorise';
+.deckview[data-drop] .stackhead .meta::after{content:' · drag cards here to recategorise';
   color:var(--text-muted)}
-@media (hover:none){ .deckview[data-own] .stackhead .meta::after{content:' · hold a card to move it'} }
+@media (hover:none){ .deckview[data-drop] .stackhead .meta::after{content:' · hold a card to move it'} }
 /* card viewer: a tapped card, large, with what can be done with it. A dialog over a blurred,
    darkened page; the image column grows with the window, the text column scrolls on its own. */
 .cardview{position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;
@@ -1559,6 +1570,48 @@ html.cardview-open{overflow:hidden}
   .cardview .acts .btn,.cardview .acts button{flex:1 1 100%} }
 @media (min-width:1400px){
   .cardview .box{width:min(100%,66rem);grid-template-columns:minmax(16rem,27rem) minmax(0,1fr)} }
+/* the card menu (deck.js): the shared .menu panel, fixed where the pointer or finger was */
+.ctxmenu{position:fixed;z-index:65;min-width:220px;max-width:min(20rem,calc(100vw - 1rem));overflow:auto;
+  overscroll-behavior:contain;border:1px solid var(--border)}
+.ctxmenu .head{text-transform:none;letter-spacing:0;font-size:.9rem;color:var(--text);white-space:normal;
+  overflow-wrap:anywhere;padding-bottom:.35rem;border-bottom:1px solid var(--border);margin-bottom:.25rem}
+.ctxmenu .ic,.ctxmenu .i{width:18px;height:18px;flex:none;color:var(--orange);fill:none;stroke:currentColor;
+  stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.ctxmenu a,.ctxmenu button,.ctxmenu .item{white-space:normal;min-height:38px}
+.ctxmenu .qtyrow{display:flex;align-items:center;gap:.5rem;min-height:38px;padding:0 1rem;cursor:default}
+.ctxmenu .qtyrow .lbl{flex:1}
+.ctxmenu .qtyrow .step{width:36px;min-width:36px;height:32px;min-height:32px;padding:0;justify-content:center;
+  border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);font-size:1.15rem;
+  font-weight:700;line-height:1}
+.ctxmenu .qtyrow .step:hover:not(:disabled){background:var(--border)}
+.ctxmenu .qtyrow .n{min-width:1.6rem;text-align:center;font-variant-numeric:tabular-nums}
+.ctxmenu .more .chev{margin-left:auto;color:var(--text-muted);font-size:1.2rem;line-height:1}
+.ctxmenu .more[aria-expanded=true] .chev{transform:rotate(90deg)}
+.ctxmenu .sub{display:flex;flex-direction:column;background:var(--surface);border-top:1px solid var(--border);
+  border-bottom:1px solid var(--border);max-height:40vh;overflow:auto}
+.ctxmenu .sub button{padding-left:2.4rem;min-height:34px;font-size:.95rem}
+.ctxmenu .sub .on:disabled{color:var(--toolbar-active);font-weight:700}
+.ctxmenu.busy{opacity:.6;pointer-events:none}
+.deckview .c.held,.deckview .row.held{outline:3px solid var(--orange);outline-offset:2px}
+/* the toast after a save (theme .toast, bottom right): the message, Undo and History */
+.deck-toast{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;padding:.75rem 1rem;z-index:59;
+  border-left:4px solid var(--blue);color:var(--text)}
+.deck-toast.error{border-left-color:var(--red)} .deck-toast.warn{border-left-color:var(--orange)}
+.deck-toast .msg{flex:1 1 10rem;min-width:0;overflow-wrap:anywhere}
+.deck-toast .acts{display:inline-flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.deck-toast .acts button,.deck-toast .acts .btn{margin:0;min-height:34px;padding:0 .75rem}
+.deck-toast .acts a:not(.btn){color:var(--orange-text);font-weight:700;text-decoration:underline}
+.deck-toast .close{width:2rem;min-height:2rem;height:2rem;padding:0;margin:0 0 0 auto;border:0;
+  background:transparent;font-size:1.3rem;line-height:1;color:var(--text-muted)}
+.deck-toast .close:hover{color:var(--text)}
+@media (max-width:600px){ .deck-toast{right:.5rem;left:.5rem;bottom:.5rem;width:auto;max-width:none} }
+@media (max-width:900px){ .has-tabbar .deck-toast{bottom:calc(64px + env(safe-area-inset-bottom))} }
+/* the viewer's own copies control: one fewer, the count, one more */
+.cardview .acts .qtyctl{display:inline-flex;align-items:center;gap:.4rem;flex:1 1 auto}
+.cardview .acts .qtyctl button{flex:0 0 auto;width:2.6rem;padding:0;font-size:1.2rem;font-weight:700}
+.cardview .acts .qtyctl .n{min-width:2rem;text-align:center;font-size:1.1rem;
+  font-variant-numeric:tabular-nums}
+.cardview .acts .qtyctl.busy{opacity:.6}
 /* pending category moves (own deck, stacks or grid): a bar like the editor's */
 .movebar{position:sticky;bottom:0;z-index:20;display:none;align-items:center;gap:.5rem;flex-wrap:wrap;
   background:var(--toolbar-bg);color:var(--toolbar-text);padding:.5rem 1rem;margin:1rem -1rem 0;

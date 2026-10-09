@@ -36,7 +36,7 @@ def test_site_text_tokens_pass_in_light_and_dark() -> None:
         assert ratio(t["toolbar-active"], t["surface-2"]) >= 4.5  # the chosen item in the menu
     # The button red is a fill, never text: as text on the dark panel it was 2.55:1.
     assert not re.search(r"[{;]color:var\(--danger-fill\)", deckpage.DECK_CSS + theme.CSS)
-    assert "details.dd .menu .on{color:var(--toolbar-active)" in theme.CSS
+    assert ".menu .on{color:var(--toolbar-active)" in theme.CSS  # the shared menu panel class
 
 
 def test_card_default_text_colours_pass_on_every_card_background() -> None:

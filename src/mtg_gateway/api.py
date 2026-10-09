@@ -256,7 +256,8 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         freshly computed checks and the re-rendered Legality chip and Deck checks panel, so the
         page redraws in place. Body: ``{changes: [1..40]}`` (``confirmed: true`` after a
         needs_confirm answer) or ``{proposal_id}`` to apply the proposal a needs_confirm answer
-        named. Browser session only; apps propose through /api/v1/proposals."""
+        named; ``{refresh: true, names: [...]}`` only reads the deck again (the page's follow-up
+        when an answer was stale). Browser session only; apps propose through /api/v1/proposals."""
         from .archidekt import front_face, parse_deck
         from .deckpage import checks_panel_html, legality_chip_html, legality_panel_html
 
@@ -269,6 +270,49 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         if isinstance(data, Response):
             return data
         deck_id = str(request.path_params["deck_id"])
+
+        def view(deck: Any, touched: set[str], *, stale: bool) -> dict[str, Any]:
+            """The rows of the touched cards and the page fragments, from one read of the deck."""
+            stats = deck_stats.compute(deck)
+            checks = stats.get("checks") or {}
+            return {
+                "stale": stale,
+                "rows": [
+                    {
+                        "name": c.name,
+                        "qty": c.quantity,
+                        "zone": "main" if deck.in_deck(c) else "side",
+                        "categories": list(c.categories),
+                        "relation_id": c.relation_id,
+                    }
+                    for c in deck.cards
+                    if front_face(c.name).casefold() in touched
+                ],
+                "stats": {
+                    "legal": bool(deck.format) and not stats.get("legality_problems"),
+                    "problems": stats.get("legality_problems") or [],
+                    "checks": checks,
+                    "checks_ok": bool(checks.get("ok", True)),
+                    "card_count": stats.get("card_count", 0),
+                    "distinct": stats.get("distinct", 0),
+                    "land_count": stats.get("land_count", 0),
+                    "side_count": sum(c.quantity for c in deck.side_cards),
+                    "price_total": stats.get("price_total"),
+                    "salt_total": stats.get("salt_total"),
+                    "format": deck.format,
+                },
+                "banner_html": legality_chip_html(deck, stats),
+                "checks_html": checks_panel_html(deck, stats),
+                "legality_html": legality_panel_html(deck, stats),
+            }
+
+        if data.get("refresh") is True:
+            # The page's one follow-up after a stale answer: the deck read again, nothing written.
+            names = data.get("names")
+            if not isinstance(names, list) or len(names) > 40 or not all(isinstance(n, str) for n in names):
+                raise DeckError("invalid", "names must be a list of up to 40 card names")
+            deck = await decks.get_own_deck(who.sub, deck_id)
+            return ok({"applied": None, **view(deck, {front_face(n).casefold() for n in names}, stale=False)})
         pid = data.get("proposal_id")
         if pid is not None:
             if not isinstance(pid, str) or not pid:
@@ -310,41 +354,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                 stale = bool(edit_mismatches(before, changes, deck))
         except DeckError:  # no snapshot to compare with: answer with the read as it is
             logger.info("edit %s: could not compare the re-read deck with its snapshot", pid)
-        stats = deck_stats.compute(deck)
-        touched = {front_face(ch.card_name).casefold() for ch in changes}
-        checks = stats.get("checks") or {}
-        out.update(
-            {
-                "stale": stale,
-                "rows": [
-                    {
-                        "name": c.name,
-                        "qty": c.quantity,
-                        "zone": "main" if deck.in_deck(c) else "side",
-                        "categories": list(c.categories),
-                        "relation_id": c.relation_id,
-                    }
-                    for c in deck.cards
-                    if front_face(c.name).casefold() in touched
-                ],
-                "stats": {
-                    "legal": bool(deck.format) and not stats.get("legality_problems"),
-                    "problems": stats.get("legality_problems") or [],
-                    "checks": checks,
-                    "checks_ok": bool(checks.get("ok", True)),
-                    "card_count": stats.get("card_count", 0),
-                    "distinct": stats.get("distinct", 0),
-                    "land_count": stats.get("land_count", 0),
-                    "side_count": sum(c.quantity for c in deck.side_cards),
-                    "price_total": stats.get("price_total"),
-                    "salt_total": stats.get("salt_total"),
-                    "format": deck.format,
-                },
-                "banner_html": legality_chip_html(deck, stats),
-                "checks_html": checks_panel_html(deck, stats),
-                "legality_html": legality_panel_html(deck, stats),
-            }
-        )
+        out.update(view(deck, {front_face(ch.card_name).casefold() for ch in changes}, stale=stale))
         return ok(out, 201)
 
     # -- proposals ------------------------------------------------------------
