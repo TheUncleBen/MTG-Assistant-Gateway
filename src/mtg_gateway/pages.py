@@ -689,11 +689,12 @@ def _account_body(state: Any, sub: str, csrf: str | None, *, disclosure_read: bo
         f"<dt>Deck writes</dt><dd>{writes}</dd></dl>"
         "<p class='muted small'>Deck writes are switched on or off for the whole gateway by its "
         "operator. While they are off, proposals can be reviewed but not applied.</p>"
-        "<a class='btn' href='/skill'>Get the assistant skill for Claude or ChatGPT</a> "
+        "<div class='form-actions'>"
+        "<a class='btn' href='/skill'>Get the assistant skill for Claude or ChatGPT</a>"
         "<a class='btn' href='/app'>Get the Android app</a>"
         f"<form method='post' action='/logout'>{csrf_in}"
-        "<button class='inline'>Sign out</button></form> "
-        "<a class='small' href='/logout'>Sign out on all my devices</a></div>"
+        "<button class='inline'>Sign out</button></form></div>"
+        "<p class='small'><a href='/logout'>Sign out on all my devices</a></p></div>"
     ]
     out.append(_mode_card(state, sub, csrf_in))
     out.append(_apps_card(state, sub, csrf_in))

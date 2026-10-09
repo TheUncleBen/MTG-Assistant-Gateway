@@ -288,6 +288,20 @@ class ScryfallClient:
         self.names.put(key, out)
         return out
 
+    async def catalog_card_names(self) -> list[str]:
+        """Every card name Scryfall knows (``GET /catalog/card-names``, about 700 KB, a ``catalog``
+        object with ``data``: the full name of every card, double-faced ones as ``Front // Back``).
+        One request; the caller keeps the list and refreshes it daily (see names.py)."""
+        resp = await self._request("GET", "/catalog/card-names", interval=self.lookup_interval)
+        data = self._json(resp)
+        names = data.get("data")
+        if data.get("object") != "catalog" or not isinstance(names, list):
+            raise ScryfallError("contract", "Scryfall's card-name catalog has an unexpected shape")
+        out = [n for n in names if isinstance(n, str) and n]
+        if len(out) < 1000:
+            raise ScryfallError("contract", f"Scryfall's card-name catalog is too short ({len(out)})")
+        return out
+
     async def prints(self, oracle_id: str) -> dict[str, Any]:
         """Every printing of one card (the ``prints_search_uri`` query), newest first, summarized.
 

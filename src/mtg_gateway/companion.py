@@ -32,6 +32,7 @@ from .deckpage import (
     deck_list_html,
     deck_page_html,
     featured,
+    precon_by_label,
 )
 from .decks import DeckError, actor_label, current_client
 from .pages import (
@@ -1222,9 +1223,10 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             "<div class='pending'></div><p class='muted small limit'></p></details>"
             "<section class='panel addbox'><h2>Add a card</h2>" + picker + "<form class='addcard'>"
             "<div class='field grow'><label for='addname'>Card name</label>"
-            "<input id='addname' type='text' name='card' list='cardnames' placeholder='Card name' "
-            "autocomplete='off' required><datalist id='cardnames'></datalist></div>"
-            "<div class='field'><label for='addqty'>Qty</label>"
+            "<input id='addname' type='text' name='card' data-suggest='cards' data-suggest-submit "
+            "data-suggest-rich placeholder='Start typing a card name; Enter adds it' "
+            "autocomplete='off' required></div>"
+            "<div class='field qtyf'><label for='addqty'>Qty</label>"
             "<input id='addqty' type='number' name='qty' value='1' min='1' max='99'></div>"
             "<div class='field'><label for='addcat'>Category</label><span class='sel'>"
             f"<select id='addcat' name='addcat'><option value=''>Auto</option>{cat_opts}</select>"
@@ -1235,7 +1237,8 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             "<div class='field'><label for='addzone'>Add to</label><span class='sel'>"
             f"<select id='addzone' name='addzone'><option value='main'>Deck</option>"
             f"<option value='side'>{side_name}</option></select></span></div>"
-            f"<button class='btn-primary'>{icon('plus')} Add</button></form>"
+            f"<div class='field go'><button class='btn-primary'>{icon('plus')} Add</button></div>"
+            "<p class='addstatus muted small' role='status' aria-live='polite'></p></form>"
             "<details class='pastebox'><summary>Paste a list</summary>"
             "<form class='pastelist'><label for='pastetext'>One card per line, with a count in front "
             "(“2 Lightning Bolt”)</label>"
@@ -1635,7 +1638,9 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
                 error, status = f"The pasted list could not be read: {_esc(exc)}", 400
         elif other_ref:
             try:
-                other = await decks.get_any_deck(sub, other_ref)
+                # a precon picked by name (the suggestion list) is looked up in the precon listing
+                precon_id = precon_by_label(precons, other_ref)
+                other = await decks.get_any_deck(sub, str(precon_id) if precon_id else other_ref)
                 other_name = other.name or f"deck {other.id}"
             except DeckError as exc:
                 error, status = (

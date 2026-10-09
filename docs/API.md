@@ -161,7 +161,7 @@ cookie, set by `POST /theme`); internal links never open a new tab.
 | `/decks/open?ref=` | Redirects an Archidekt link or id to its deck page |
 | `/decks/new?scan_session=` | New deck form (name, format, private, pasted list or CSV) that makes a `new_deck` proposal; a scan session prefills the list |
 | `/decks/{id}?view=&group=&sort=&q=` | One deck: banner (art, legality, bracket, size, price, tags), toolbar (Quick add, View as text / stacks / grid, Group by, Sort by, local filter), cards, deck stats, description; owners get Edit deck, Clone deck and Deck settings |
-| `/decks/{id}/edit?scan_session=&add=` | The editor: quantities, categories (new ones by typing), finish, printing (picker over Scryfall), additions with autocomplete and Undo become one proposal; a scan session or a Quick add name prefills it |
+| `/decks/{id}/edit?scan_session=&add=` | The editor: quantities, categories (new ones by typing), finish, printing (picker over Scryfall), additions with instant suggestions (picture, mana cost, type) and Undo become one proposal; a scan session or a Quick add name prefills it |
 | `/decks/{id}/settings` | Deck settings (name, format, bracket, description, private, unlisted) as a `details` proposal, plus the hand actions below |
 | `/decks/{id}/cover` (POST `card`) | Set the cover image to a card of the deck (its Scryfall id) or back to Archidekt's automatic pick (empty); snapshot first, verified by re-reading |
 | `/decks/{id}/tags` (POST `action=add name=` or `action=remove relation_id=`) | Add an Archidekt deck tag (reused if it exists, else created) or remove one; snapshot first, verified |
