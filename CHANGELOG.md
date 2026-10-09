@@ -96,6 +96,13 @@ extra outbound request a day to Scryfall (the card-name catalog).
   request named the wrong field, so nothing was moved) and Undo all puts
   the cards back without reloading. On someone else's deck the menu offers
   Open card and Open on Scryfall.
+- **Backup copies stay out of your deck lists.** The copies the gateway
+  makes on Archidekt before a change (in the backup folder, or named
+  "… (backup date UTC)") no longer appear on Home, My decks, the assistant's
+  deck list or the deck API. History shows them in a "Backup copies on
+  Archidekt" panel, each linked to Archidekt and to the deck it copied; a
+  deck's own history lists only its copies. My decks says how many are kept
+  out and where to find them.
 - **Typed card names suggest instantly.** The gateway downloads Scryfall's
   card-name catalog once a day (about 700 KB) and answers suggestions from
   memory, so a name list appears within about a hundred milliseconds of a

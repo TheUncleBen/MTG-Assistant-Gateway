@@ -286,6 +286,44 @@ def filter_bar_html(query: dict[str, Any], decks: dict[str, str], *, shown: int,
     )
 
 
+def backup_copies_html(
+    copies: list[dict[str, Any]] | None, *, folder: str, deck_id: str | None = None
+) -> str:
+    """The "Backup copies on Archidekt" panel: the deck copies the gateway made (kept out of Home
+    and My decks), each linked to Archidekt and to the deck it was a copy of. ``None`` (the deck
+    list still cold) says so; an empty list renders nothing."""
+    if copies is None:
+        return (
+            "<section class='card backups' id='backups'><h2>Backup copies on Archidekt</h2>"
+            "<p class='muted'>Your Archidekt decks are still being read; reload in a moment to see the "
+            "backup copies.</p></section>"
+        )
+    if not copies:
+        return ""
+    items = []
+    for d in copies:
+        did = _esc(str(d.get("id", "")))
+        name = _esc(str(d.get("name", "")))
+        of = ""
+        if d.get("backup_of") and not deck_id:
+            of = f" <span class='muted'>of <a href='/decks/{_esc(str(d['backup_of']))}'>this deck</a></span>"
+        when = str(d.get("updated_at") or d.get("created_at") or "")[:10]
+        items.append(
+            f"<li><a href='https://archidekt.com/decks/{did}' target='_blank' "
+            f"rel='noopener noreferrer'>{name}</a>{of}"
+            + (f" <time class='muted'>{_esc(when)}</time>" if when else "")
+            + "</li>"
+        )
+    where = "this deck" if deck_id else "your decks"
+    return (
+        f"<section class='card backups' id='backups'><h2>Backup copies on Archidekt ({len(copies)})</h2>"
+        f"<p class='muted'>Full copies of {where} as they were before a change, kept in the "
+        f"&ldquo;{_esc(folder)}&rdquo; folder of your Archidekt account. They stay out of Home and My "
+        "decks; Restore here uses the gateway's own snapshots.</p>"
+        f"<ul class='plain copies'>{''.join(items)}</ul></section>"
+    )
+
+
 def pager_html(query: dict[str, Any], *, has_more: bool) -> str:
     offset = query["offset"]
     if not has_more and offset == 0:
@@ -336,11 +374,15 @@ HISTORY_CSS = """
   .hrow .side{grid-column:2;flex-direction:row;gap:.5rem;align-items:center;white-space:normal} }
 .pager{justify-content:space-between} .pager .btn{margin:0}
 .trend h2{font-size:1.2rem}
+.backups h2{font-size:1.2rem} .backups .copies{margin:0;display:grid;gap:.4rem}
+.backups .copies li{display:flex;flex-wrap:wrap;gap:.25rem .5rem;align-items:baseline;overflow-wrap:anywhere}
+.backups time{font-size:.86rem;font-variant-numeric:tabular-nums}
 """
 
 __all__ = [
     "HISTORY_CSS",
     "PAGE",
+    "backup_copies_html",
     "build_events",
     "events_html",
     "filter_bar_html",
