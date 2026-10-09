@@ -193,7 +193,7 @@ details.dd > summary::-webkit-details-marker{display:none}
 .menu{z-index:30;min-width:200px;
   background:var(--surface-2);border-radius:var(--radius-panel);box-shadow:var(--shadow);padding:.25rem 0;
   display:flex;flex-direction:column}
-details.dd .menu{position:absolute;top:calc(100% + .25rem);right:0}
+details.dd .menu{position:absolute;top:calc(100% + .25rem);right:0;max-width:calc(100vw - 16px)}
 details.dd .menu.left{left:0;right:auto}
 /* Each item rule is written twice, plain and under details.dd: inside the top bar the plain
    .menu rule would lose to .topbar nav a (the bar's white text, 40px, bold) and the account
@@ -203,6 +203,9 @@ details.dd .menu.left{left:0;right:auto}
   min-height:35px;padding:0 1rem;margin:0;width:100%;background:transparent;border:0;border-radius:0;
   color:var(--text);text-decoration:none;font:inherit;font-weight:400;font-size:1rem;cursor:pointer;
   text-align:left;white-space:nowrap;justify-content:flex-start;height:auto}
+/* An item carrying a member's text (a category name) wraps inside the panel instead of widening
+   it past the window (gate R5-3 seed: a 51-character unbroken category name at 320 px). */
+details.dd .menu a,details.dd .menu button{white-space:normal;overflow-wrap:anywhere;min-width:0}
 .menu a:hover,.menu button:hover,.menu a:focus-visible,.menu button:focus-visible,
 details.dd .menu a:hover,details.dd .menu button:hover,details.dd .menu a:focus-visible,
 details.dd .menu button:focus-visible{background:var(--border);color:var(--text)}

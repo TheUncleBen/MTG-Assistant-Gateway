@@ -284,6 +284,14 @@ catalog). Back up the database before you update, as always.
   the My decks list view on a phone the tags sit under the row instead
   of squeezing the deck name to 44 px, and a collection card's picture
   fills its tile (a card with no image no longer collapses to a dot).
+  The follow question on a profile grows with its text, so a long name
+  wraps and its Follow and No buttons stay inside the chip instead of
+  dropping under the Archidekt profile link (gate R5-1); the profile
+  header puts the social row under a long name rather than squeezing
+  either, a profile is found for usernames over 60 characters, the
+  deck page's follow question wraps a long name too, and a long
+  unbroken category name wraps in the editor's category heading and
+  in the deck page's stats tables (gate R5-2, R5-3).
 - **Touch screens:** the small controls a mouse never minds are at least
   40 px tall on a phone or tablet: the editor's add-to chips, the deck page's
   category button and odds form, folded Details, footer links, the brand

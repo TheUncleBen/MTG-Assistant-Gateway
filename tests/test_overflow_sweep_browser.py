@@ -49,6 +49,11 @@ FOLDERS = [
     "Archiveddecksnolongerplayedbutkeptforreference",
 ]
 LONG_TAGS = ["landfall-and-ramp-synergies-with-an-extra-long-tag-name", "budget under 100 (paper only)"]
+LONG64 = "Planeswalker_Archivist_of_the_Multiverse_and_Keeper_of_Every_Dk1"  # 64 characters, unbroken
+LONG_CATS = [
+    "Rampandlandfallsynergiesunbrokencategorynamenospace",  # 51 characters, no space
+    "Card draw and card advantage engines for the long game ahead",
+]
 # Archidekt's real maximum username length is not verified; 40 unbroken characters is the hostile
 # case this sweep uses. Everything a member can type is long and, where possible, unbroken.
 
@@ -69,6 +74,17 @@ def server(tmp_path: Path):
     s.ark.users[LONGUSER] = {"password": "pw-long", "id": 79, "decks": [47, 48]}
     s.ark.decks[47] = to_deck_json(cards[:15], deck_id=47, name=UNBROKEN_2, owner=LONGUSER)
     s.ark.decks[48] = to_deck_json(cards[:15], deck_id=48, name=LONGER, owner=LONGUSER)
+    # the longest username seen by the gate (64 characters) with one deck, and a deck of alice's whose
+    # categories are long (the editor's heading and chips, the deck page's category headings and odds table)
+    s.ark.users[LONG64] = {"password": "pw-64", "id": 80, "decks": [49]}
+    s.ark.decks[49] = to_deck_json(cards[:15], deck_id=49, name=LONGER, owner=LONG64)
+    s.ark.decks[50] = to_deck_json(cards[:20], deck_id=50, name="Long categories", owner="alice")
+    cats = [{"name": c, "isPremier": False, "includedInDeck": True} for c in LONG_CATS]
+    s.ark.decks[50]["categories"] += cats
+    for k, c in enumerate(s.ark.decks[50]["cards"]):
+        if k % 3 != 2:
+            c["categories"] = [LONG_CATS[k % 2]]
+    s.ark.users["alice"]["decks"].append(50)
     for i, name in enumerate(FOLDERS, 1):
         s.ark.folders.setdefault("alice", []).append({"id": 500 + i, "name": name, "private": False})
     s.ark.deck_folder[44] = 501
@@ -101,6 +117,9 @@ def _pages(server: Server, pending: str) -> list[str]:
         "/decks/45?view=grid",
         "/decks/46",
         "/decks/47",
+        "/decks/49",
+        "/decks/50",
+        "/decks/50/edit",
         f"/decks?folder={FOLDERS[0]}",
         "/decks/42/edit",
         "/decks/45/edit",
@@ -116,6 +135,7 @@ def _pages(server: Server, pending: str) -> list[str]:
         "/precons",
         "/users/alice",
         f"/users/{LONGUSER}",
+        f"/users/{LONG64}",
         "/history",
         "/history/reports/r1",
         "/activity",
@@ -249,6 +269,35 @@ async () => {
 """
 
 
+# After Follow was pressed: the question chip's buttons must be inside the window, uncovered (the
+# topmost element at each one's centre is the button itself), and the page must not scroll sideways.
+CONFIRM = """
+() => {
+  const vw = document.documentElement.clientWidth, out = [];
+  const chip = document.querySelector('.social .confirm');
+  if (!chip) return ['no follow question appeared'];
+  const r = chip.getBoundingClientRect();
+  if (r.left < -1 || r.right > vw + 1) out.push('question chip outside the window (' + Math.round(r.left) +
+    '..' + Math.round(r.right) + ' of ' + vw + ')');
+  for (const b of chip.querySelectorAll('button')) {
+    const br = b.getBoundingClientRect();
+    if (!(br.width > 0 && br.height > 0)) { out.push('"' + b.innerText + '" has no size'); continue; }
+    if (br.top < r.top - 1 || br.bottom > r.bottom + 1) out.push('"' + b.innerText + '" is outside the chip');
+    const cx = br.left + br.width / 2, cy = br.top + br.height / 2;
+    const top = document.elementFromPoint(cx, cy);
+    if (!top || !(top === b || b.contains(top))) {
+      const t = top ? top.tagName.toLowerCase() + ' "' + (top.innerText || '').trim().slice(0, 24) + '"'
+        : 'nothing';
+      out.push('"' + b.innerText + '" is covered by ' + t);
+    }
+  }
+  if (document.documentElement.scrollWidth > vw) out.push('document scrolls sideways by ' +
+    (document.documentElement.scrollWidth - vw) + 'px with the question open');
+  return out;
+}
+"""
+
+
 def _seed(server: Server) -> tuple[str, str]:
     import httpx
 
@@ -315,3 +364,52 @@ def test_no_page_scrolls_sideways_or_clips_a_control(server: Server, touch: bool
     assert errors == []
     more = f"\n… {len(problems)} in all" if len(problems) > 80 else ""
     assert problems == [], "\n".join(problems[:80]) + more
+
+
+FOLLOW_PAGES = [f"/users/{LONGUSER}", f"/users/{LONG64}", "/decks/47", "/decks/49"]
+
+
+@pytest.mark.parametrize("touch", [False, True], ids=["mouse", "touch"])
+def test_follow_question_can_be_answered(server: Server, touch: bool) -> None:
+    """Gate R5-1: pressing Follow on a profile or deck page with a long owner name shows a question
+    whose Follow and No buttons are visible, inside the chip and not under another control, at
+    every sweep width, with no sideways scroll (fresh load and press at each width)."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid, _pending = _seed(server)
+    problems: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        kw = {"has_touch": True, "is_mobile": True} if touch else {}
+        ctx = browser.new_context(viewport={"width": 1366, "height": 900}, **kw)
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        ctx.route(
+            re.compile(r"https://cards\.scryfall\.io/.*"),
+            lambda route: route.fulfill(status=200, content_type="image/png", body=PNG),
+        )
+        page = ctx.new_page()
+        errors: list[str] = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        for path in FOLLOW_PAGES:
+            for w in WIDTHS:
+                page.set_viewport_size({"width": w, "height": 900})
+                r = page.goto(f"{server.base}{path}", wait_until="networkidle")
+                assert r is not None and r.status == 200, (path, r and r.status)
+                btn = page.locator("[data-social=follow]")
+                btn.wait_for(state="visible")
+                if touch:
+                    box = btn.bounding_box()
+                    page.touchscreen.tap(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+                else:
+                    btn.click()
+                page.locator(".social .confirm").wait_for(state="visible")
+                found = page.evaluate(CONFIRM) + page.evaluate(MEASURE)
+                problems += [f"{path} @{w}px: {f}" for f in found]
+        browser.close()
+    if os.environ.get("SWEEP_OUT"):
+        Path(os.environ["SWEEP_OUT"]).write_text("\n".join(problems))
+    assert errors == []
+    assert problems == [], "\n".join(problems[:80])

@@ -71,8 +71,33 @@ def _open(server: Server):
     page = ctx.new_page()
     errors: list[str] = []
     page.on("pageerror", lambda e: errors.append(str(e)))
+    # /account first, so that one Back too many has somewhere to go, and the test can tell "went back
+    # once" (still on /decks) from "went back twice" (on /account) with a real navigation
+    page.goto(f"{server.base}/account", wait_until="networkidle")
     page.goto(f"{server.base}/decks", wait_until="networkidle")
     return p, browser, page, errors
+
+
+# Closes the open menu with its own button and opens the other in the same script run, before the
+# close's history.back() can land (a popstate is a later task): the real race of gate R4-6b.
+RACE = """
+([ai, bi]) => {
+  const s = [...document.querySelectorAll('details.dd > summary')]
+    .filter(x => x.getBoundingClientRect().width > 0);
+  s[ai].click();
+  s[bi].click();
+  return document.querySelectorAll('details.dd[open]').length;
+}
+"""
+# Back and another menu's button in the same instant, with a menu open (gate R4-6b).
+BACK_AND_OPEN = """
+(bi) => {
+  const s = [...document.querySelectorAll('details.dd > summary')]
+    .filter(x => x.getBoundingClientRect().width > 0);
+  history.back();
+  s[bi].click();
+}
+"""
 
 
 def test_a_menu_opened_straight_from_another_keeps_its_back_entry(server: Server) -> None:
@@ -91,6 +116,8 @@ def test_a_menu_opened_straight_from_another_keeps_its_back_entry(server: Server
         page.wait_for_timeout(200)
         assert page.url == url, "Back left the page"
         assert page.evaluate(STATE) == {"menu": False, "open": 0}
+        page.go_back(wait_until="networkidle")
+        assert page.url.endswith("/account"), "the menus left exactly one entry behind"
         assert errors == []
     finally:
         browser.close()
@@ -98,24 +125,52 @@ def test_a_menu_opened_straight_from_another_keeps_its_back_entry(server: Server
 
 
 def test_closing_one_menu_and_opening_another_quickly_goes_back_once(server: Server) -> None:
-    """Close A with its own button and open B before that back() has landed: B stays open, keeps
-    the entry, and one Back closes it on the same page."""
+    """Close A with its own button and open B before that back() has landed (both clicks in one
+    script run, so the popstate is still pending when B opens): B stays open and keeps the entry,
+    one Back closes it on the same page, and the next Back leaves for the page before, so the entry
+    was given back exactly once."""
     p, browser, page, errors = _open(server)
     try:
         url = page.url
-        a, b = _two_menus(page)
+        a, _b = _two_menus(page)
         _tap(page, a)
-        box_a, box_b = a.bounding_box(), b.bounding_box()
-        page.touchscreen.tap(box_a["x"] + box_a["width"] / 2, box_a["y"] + box_a["height"] / 2)
-        page.touchscreen.tap(box_b["x"] + box_b["width"] / 2, box_b["y"] + box_b["height"] / 2)
-        page.wait_for_timeout(300)
-        assert page.url == url
+        assert page.evaluate(STATE) == {"menu": True, "open": 1}
+        assert page.evaluate(RACE, [0, 1]) == 1, "B did not open in the same instant A closed"
+        page.wait_for_timeout(300)  # A's back() lands; B takes the entry again
+        assert page.url == url, "the page was left while a menu was opening"
         assert page.evaluate(STATE) == {"menu": True, "open": 1}, page.evaluate(OPEN)
         page.go_back(wait_until="commit")
         page.wait_for_timeout(200)
         assert page.url == url, "Back left the page"
         assert page.evaluate(STATE) == {"menu": False, "open": 0}
-        # one more Back now really leaves the page: the entry was given back exactly once
+        page.go_back(wait_until="networkidle")
+        assert page.url.endswith("/account"), "a second Back should leave the deck list, not stay"
+        assert errors == []
+    finally:
+        browser.close()
+        p.stop()
+
+
+def test_back_in_the_same_instant_as_opening_another_menu_stays_on_the_page(server: Server) -> None:
+    """Gate R4-6b: with menu A open, Back and B's button in the same script run. Whatever ends up
+    open, the page stays, and the history is consistent: a menu open only with the entry, and
+    never two entries."""
+    p, browser, page, errors = _open(server)
+    try:
+        url = page.url
+        a, _b = _two_menus(page)
+        _tap(page, a)
+        page.evaluate(BACK_AND_OPEN, 1)
+        page.wait_for_timeout(300)
+        assert page.url == url, "Back together with a menu button left the page"
+        state = page.evaluate(STATE)
+        assert state in ({"menu": False, "open": 0}, {"menu": True, "open": 1}), state
+        if state["open"]:
+            page.go_back(wait_until="commit")
+            page.wait_for_timeout(200)
+            assert page.url == url and page.evaluate(STATE) == {"menu": False, "open": 0}
+        page.go_back(wait_until="networkidle")
+        assert page.url.endswith("/account"), "one more Back leaves the deck list exactly once"
         assert errors == []
     finally:
         browser.close()
@@ -131,7 +186,8 @@ def test_back_with_a_menu_open_closes_it_and_stays(server: Server) -> None:
         page.go_back(wait_until="commit")
         page.wait_for_timeout(200)
         assert page.url == url and page.evaluate(STATE) == {"menu": False, "open": 0}
-        # closing by Back gave nothing back twice: the page can still go forward to nothing
+        page.go_back(wait_until="networkidle")
+        assert page.url.endswith("/account"), "closing by Back gave nothing back a second time"
         assert errors == []
     finally:
         browser.close()

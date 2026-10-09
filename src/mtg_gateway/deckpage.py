@@ -1661,7 +1661,7 @@ html.cardview-open{overflow:hidden}
 .curve .bar em{font-style:normal;font-weight:700;margin-top:.3rem}
 /* .tiles/.tile/.spark: theme.py (shared with the report and history pages) */
 table.qty{width:100%;border-collapse:collapse;font-size:.93rem}
-table.qty td{padding:.3rem .25rem;border-top:1px solid var(--surface-2)}
+table.qty td{padding:.3rem .25rem;border-top:1px solid var(--surface-2);overflow-wrap:anywhere}
 table.qty td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-weight:700}
 .legality ul{margin:.25rem 0 0;padding-left:1.2rem} .legality .ok{color:var(--green-text);font-weight:700}
 .odds{margin-top:1.25rem} .odds h3{margin:0 0 .4rem}
@@ -1681,7 +1681,7 @@ table.qty td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-
   padding:.2rem 0;border-top:1px solid var(--border)} .checks li:first-child{border-top:0}
 .checks li b{flex:none} .checks li span{color:var(--text-muted);overflow-wrap:anywhere}
 .checks li.ok svg{color:var(--green-text)} .checks li.bad svg{color:var(--red-text,#d33)}
-@media (max-width:1000px){ .stats .grid{grid-template-columns:1fr} }
+@media (max-width:1000px){ .stats .grid{grid-template-columns:minmax(0,1fr)} }
 
 .description{font-size:16px} .description .empty{color:var(--text-muted)}
 
@@ -1813,7 +1813,8 @@ ul.decklist.list .deck{margin-bottom:.5rem}
 details.cat summary{display:flex;justify-content:space-between;align-items:center;cursor:pointer;
   font-weight:700;font-size:14px;list-style:none;padding:.25rem 0}
 details.cat summary::-webkit-details-marker{display:none}
-details.cat summary b{color:var(--text-muted);font-weight:400}
+details.cat summary b{color:var(--text-muted);font-weight:400;flex:none}
+details.cat summary .cname{min-width:0;overflow-wrap:anywhere}
 ul.erows{list-style:none;margin:.5rem 0 0;padding:0}
 .erow{display:grid;grid-template-columns:40px minmax(0,1fr) auto minmax(7rem,10rem) auto;gap:.6rem;
   align-items:center;padding:.4rem 0;border-top:1px solid var(--border-soft)}

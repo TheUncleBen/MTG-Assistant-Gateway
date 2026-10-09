@@ -955,7 +955,7 @@
     if (old) old.dismiss(); // one question at a time; the other button comes back
     var chip = el("span", "confirm");
     chip.setAttribute("role", "group");
-    chip.appendChild(document.createTextNode(question + " "));
+    chip.appendChild(el("span", "", question)); // in a span, so a long name in it can wrap (.confirm > span)
     var yes = el("button", "btn-primary", yesLabel);
     yes.type = "button";
     var no = el("button", "", "No");

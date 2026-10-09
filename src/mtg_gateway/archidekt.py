@@ -896,7 +896,8 @@ class ArchidektClient:
             if deck_format is None:
                 deck_format = 3
         if owner:
-            params["ownerUsername"] = owner[:60]
+            # a profile sends the whole username here; Archidekt's real username limit is unverified
+            params["ownerUsername"] = owner[:120]
         if deck_format is not None:
             params["deckFormat"] = int(deck_format)
         if colors:

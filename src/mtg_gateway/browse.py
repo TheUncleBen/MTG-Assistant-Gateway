@@ -84,20 +84,27 @@ BROWSE_CSS = """
 .results-head h2,.results-head .muted{min-width:0;overflow-wrap:anywhere}
 .pager{display:flex;justify-content:center;align-items:center;gap:.5rem;margin:1rem 0}
 .pager .btn{margin:0}
-.profile{display:flex;align-items:center;gap:1rem;margin:0 0 1rem;min-width:0}
+/* Avatar, name and the social row: the name block takes the room and wraps a long unbroken name;
+   the social row keeps its own size (Follow ellipsises inside it) and drops under the name when the
+   two no longer fit side by side, so neither squeezes the other (gate R5-2: a 64-character name). */
+.profile{display:flex;flex-wrap:wrap;align-items:center;gap:1rem;margin:0 0 1rem;min-width:0}
 .profile .who .uname{overflow-wrap:anywhere}
-.profile .who{display:flex;flex-direction:column;min-width:0}
+.profile .who{display:flex;flex-direction:column;flex:1 1 16rem;min-width:0}
 .profile .who .uname{font-size:1.5rem;font-weight:900}
 .profile .who .sub{color:var(--text-muted)}
-.profile .social{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-left:auto;min-width:0;
+.profile .social{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-left:auto;flex:0 0 auto;
   max-width:100%}
 .profile .social .btn,.profile .social .soc{margin:0;display:inline-flex;align-items:center;gap:.4rem}
+.profile .social .soc[hidden]{display:none}
 .profile .social .soc.on{background:var(--orange);border-color:var(--orange);color:#fff}
-.profile .social .confirm{display:inline-flex;align-items:center;gap:.4rem;background:var(--surface-2);
-  border-radius:17px;padding:0 .35rem 0 .85rem;height:34px;font-size:.9rem;font-weight:700}
+/* The follow question grows with its text: a long name wraps onto more lines and the Follow and
+   No buttons stay inside the chip instead of dropping under the link (gate R5-1). */
+.profile .social .confirm{display:inline-flex;align-items:center;flex-wrap:wrap;gap:.4rem;
+  background:var(--surface-2);border-radius:17px;padding:.25rem .35rem .25rem .85rem;min-height:34px;
+  max-width:100%;box-sizing:border-box;font-size:.9rem;font-weight:700}
 .profile .social .confirm button{margin:0;height:26px;padding:0 .7rem;border-radius:13px;font-size:.85rem}
 .profile .social .note{flex-basis:100%;color:var(--text-muted);font-size:.9rem;margin:0}
-@media (max-width:600px){ .profile{flex-wrap:wrap} .profile .social{margin-left:0;flex-basis:100%} }
+@media (max-width:600px){ .profile .social{margin-left:0;flex-basis:100%} }
 .popular{display:flex;flex-wrap:wrap;gap:.4rem;margin:.5rem 0 0}
 .popular a{display:inline-flex;align-items:center;height:30px;padding:0 .7rem;border-radius:15px;
   background:var(--surface-2);color:var(--text);text-decoration:none;font-size:.9rem;
@@ -131,7 +138,7 @@ def read_query(qp: Any) -> dict[str, Any]:
     return {
         "name": (qp.get("name") or qp.get("q") or "").strip()[:120],
         "commander": (qp.get("commander") or "").strip()[:120],
-        "owner": (qp.get("owner") or "").strip()[:60],
+        "owner": (qp.get("owner") or "").strip()[:120],  # a profile's username comes through here too
         "deck_format": int(fmt) if fmt.isdigit() and int(fmt) in FORMAT_NAMES else None,
         "colors": colors,
         "order_by": qp.get("order") if qp.get("order") in SEARCH_ORDERS else "-viewCount",
