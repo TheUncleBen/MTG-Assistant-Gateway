@@ -27,6 +27,8 @@
     <string name="download_failed">Could not download %1$s.</string>
     <string name="download_signed_out">Your sign-in has ended. Reload the page, sign in again and retry the download.</string>
     <string name="no_app_for_link">No app can open that link.</string>
+    <string name="sign_in_no_browser">No browser is installed to sign in with. Use "Sign in inside the app instead" on the page.</string>
+    <string name="sign_in_not_started">That sign-in wasn\'t started here or has expired. Sign in again from the app.</string>
     <string name="camera_permission_needed">Camera permission is needed to scan cards.</string>
     <string name="camera_permission_settings">The camera is turned off for this app. Turn on Camera under Permissions, then come back and tap Scan again.</string>
     <string name="scan_page_too_old">This gateway\'s scan page has no photo hooks; it needs a newer gateway version.</string>

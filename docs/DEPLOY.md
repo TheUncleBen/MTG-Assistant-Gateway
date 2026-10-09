@@ -621,6 +621,7 @@ gateway's `environment:` in the stack file, or it has no effect.
 | `MTG_PLUGIN_DIR` | no | `/usr/share/mtg-gateway/plugin` | Folder holding the assistant plugin shipped in the image; serves `/skill`, `/install` and `/plugin/` |
 | `MTG_APP_DIR` | no | `/usr/share/mtg-gateway/app` | Folder holding the Android app (`mtg-assistant-gateway.apk` and `mtg-assistant-gateway.json`) that `/app` hands out; the release build puts it in the image, see [ANDROID.md](ANDROID.md) |
 | `MTG_ANDROID_ASSETLINKS` | no | empty (an empty list is served) | The Android App Links statement list served at `/.well-known/assetlinks.json`, as one JSON list (the whole `assetlinks.json` content, starting with `[`). Anything that isn't valid JSON, or isn't a list, stops the gateway at startup with a config error. Only needed if you build the app's App Links flavor for this gateway ([ANDROID.md](ANDROID.md#12-app-links-opening-gateway-links-in-the-app)) |
+| `MTG_ANDROID_PACKAGE` | no | `local.mtgassistantgateway.app` | The Android app's package ID, which the browser sign-in hands back to ([ANDROID.md](ANDROID.md#13-privacy-and-security-notes)). Change it only if you build the app with another package ID ([ANDROID.md](ANDROID.md#11-the-package-id)); anything that isn't a package ID stops the gateway at startup with a config error |
 | `PUID`, `PGID` | yes, *stack* | | User and group the process runs as |
 
 The card scanning settings (`MTG_SCAN_*`) are listed in
