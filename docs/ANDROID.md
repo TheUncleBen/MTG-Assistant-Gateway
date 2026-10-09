@@ -62,8 +62,8 @@ download button. Then:
    unsure, don't install it and ask the gateway's owner.
 4. On first launch the app asks for your **gateway address**: type the hostname
    the owner gave you, for example `mtg.example.com`. The app checks that the
-   address answers as a gateway, saves it, and opens the site. Sign in exactly
-   as in a browser.
+   address answers as a gateway, saves it, and opens the site. Sign-in then
+   opens in your phone's browser ([Sign-in](#2-using-it) below).
 
 **Updates** are the same download again: install the newer file over the old
 one. Settings and sign-in are kept as long as the gateway signs releases with
@@ -107,16 +107,17 @@ else your gateway serves. A few things are native:
   the gateway, and on the one sign-in service the gateway's sign-in redirects
   you to, stay in the app. Links to other apps (`mailto:` and the like) open
   only when you tap them.
-- **Sign-in** runs in the app's embedded web view, which suits Authentik's own
-  login forms. If the sign-in service sends you on to another site (a "Sign in
-  with Discord/GitHub/Google" source, say), that site opens in your browser
-  rather than in the app, so a sign-in that chains through a third-party
-  provider can't finish in the app; use *Open in browser* in that case and
-  tell the gateway's owner. The same goes for sign-in services that hand
-  you to another site with a form (SAML or other brokered logins): the app
-  stops that page and opens it in the browser, where the form's data is
-  lost. If your gateway's sign-in works that way, use the gateway in the
-  phone's browser instead of the app.
+- **Sign-in** happens in your phone's browser, shown over the app (a Custom
+  Tab), not in the app's own web view: that is where passkeys, your password
+  manager's autofill (Bitwarden and the like) and "Sign in with ..." buttons
+  work, exactly as they do on the website. When you are done there, tap **Open
+  the app** on the last page (the browser may do it for you) and you are back
+  in the app, signed in. The browser itself stays signed out of the gateway.
+  Whether a passkey or autofill works is up to your browser and password
+  manager: if it works on the website in that browser, it works here. If you
+  would rather sign in inside the app, the sign-in page has a link for that;
+  passkeys and autofill may not work there. With a gateway older than this
+  app version, sign-in runs inside the app as before.
 - **Staying signed in.** The app's sign-in is a browser session like the
   website's, so it ends the same way: when the browser session runs out,
   when you use **Sign out on all my devices** on the `/logout` page, on your
@@ -200,6 +201,7 @@ The app talks only to pages and endpoints the gateway already serves:
 | Used for | Endpoint |
 |---|---|
 | Checking the address at setup | `GET /healthz` (expects JSON with `"status": "ok"`) |
+| Signing in through the browser | `GET /login` (in the app, a page that hands the sign-in to the browser), then `POST /login/app` with the one-time code ([section 13](#13-privacy-and-security-notes)) |
 | Everything else | the normal pages, loaded in the app |
 | Phone-camera scans | the `/scan` page's `window.__scan` hooks (`flattenCard`, `flatTitleRegion`, `infoRegionOf`, `scanRegion`, `showTab`, `noCardFrame`, `undoLastAdd`) and its `scan:*` events |
 | App Links (optional) | `GET /.well-known/assetlinks.json`, served from `MTG_ANDROID_ASSETLINKS` ([section 12](#12-app-links-opening-gateway-links-in-the-app)) |
@@ -439,7 +441,9 @@ The usual convention is a domain you control, reversed, plus a name. This app is
 sideloaded, not published in a store, so it doesn't need one:
 `local.mtgassistantgateway.app` is a neutral name that belongs to no domain or person.
 It lives in one file, `android/app/application-id.txt`; the Gradle build reads it from
-there. Change it and rebuild; nothing else needs editing. The Kotlin package name
+there. Change it and rebuild, and set `MTG_ANDROID_PACKAGE` on your gateway to the same
+ID so the browser sign-in hands back to your build
+([DEPLOY.md](DEPLOY.md#environment-reference)); nothing else needs editing. The Kotlin package name
 (`local.mtgassistantgateway.app`, where the source lives) stays as it is: the manifest
 names the app's screens in full, so they don't depend on the package ID. Operators who sign
 their own builds should pick their own ID
@@ -493,6 +497,20 @@ screen is shown without a prefill, so a link can't pick your gateway for you.
   afresh.
 - `https` is required for the gateway address, and cleartext traffic is off in
   the manifest.
+- **Signing in through the browser** follows the usual pattern for native
+  apps (RFC 8252, with a PKCE-style check). The app makes a random secret for
+  each sign-in, keeps it on the phone, and sends only its SHA-256 with the
+  browser's `/login`. After the sign-in service, the gateway sets no cookie in
+  the browser; it keeps a one-time code for two minutes and shows a page whose
+  button opens the app through an `intent:` link naming the app's package ID
+  (`MTG_ANDROID_PACKAGE`, [DEPLOY.md](DEPLOY.md#environment-reference)), so
+  Android hands it only to the installed app with that ID. The app then posts
+  the code with its secret to `/login/app`, and only then is the session
+  created, in the app. The code is worthless without the secret, works once,
+  and one wrong try burns it. An app that starts a sign-in of its own never
+  receives the code meant for this one. The browser's own sign-in at the
+  sign-in service stays signed in, as on the website; the app's **Sign out**
+  makes the next sign-in ask for your credentials again.
 - JavaScript runs only for pages the WebView loads, and the native bridge the
   app exposes to pages (`MtgNative`) answers only the gateway's own page: the
   app notes which page is showing when a call arrives and checks again before
