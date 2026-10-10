@@ -58,6 +58,7 @@ async def test_quantity_remove_and_category_edits_answer_with_fresh_rows_and_che
                 "relation_id": d["rows"][0]["relation_id"],
                 "finish": "Normal",
                 "label": "",
+                "mana_value": None,
             }
         ]
         assert _deck_card(stack, "Cultivate")[0]["quantity"] == 2
@@ -104,6 +105,7 @@ async def test_quantity_remove_and_category_edits_answer_with_fresh_rows_and_che
                 "relation_id": d["rows"][0]["relation_id"],
                 "finish": "Normal",
                 "label": "",
+                "mana_value": None,
             }
         ]
         assert _deck_card(stack, "Acidic Slime")[0]["categories"] == ["Removal"]

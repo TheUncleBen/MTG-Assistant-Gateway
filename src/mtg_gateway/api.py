@@ -286,6 +286,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                         "relation_id": c.relation_id,
                         "finish": c.modifier or "Normal",
                         "label": c.label,
+                        "mana_value": c.custom_cmc,
                     }
                     for c in deck.cards
                     if front_face(c.name).casefold() in touched

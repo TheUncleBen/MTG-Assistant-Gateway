@@ -24,7 +24,7 @@ from urllib.parse import quote
 
 from .archidekt import VOTE_UP, Deck, DeckCard, featured_scryfall_id, format_label
 from .deck_stats import WUBRG, colour_letter, is_basic_land, is_land, mana_pips
-from .decks import split_label
+from .decks import mana_value_text, split_label
 from .mana import mana_html as _mana_html
 from .theme import icon, plural
 from .views import auto_category, cards_by_category
@@ -638,6 +638,7 @@ def _card_data(card: DeckCard, deck: Deck) -> str:
         card_view_attrs(card, img=card_image(card))
         + f" data-qty='{card.quantity}' data-zone='{zone}' data-cat='{esc(cat)}'{rel}"
         + (f" data-label='{esc(card.label)}'" if split_label(card.label)[0] else "")
+        + (f" data-mv='{mana_value_text(card.custom_cmc)}'" if card.custom_cmc is not None else "")
     )
 
 
@@ -1762,6 +1763,14 @@ html.cardview-open{overflow:hidden}
 .ctxmenu a,.ctxmenu button,.ctxmenu .item{white-space:normal;min-height:38px}
 .ctxmenu .qtyrow{display:flex;align-items:center;gap:.5rem;min-height:38px;padding:0 1rem;cursor:default}
 .ctxmenu .qtyrow .lbl{flex:1}
+.ctxmenu .mvform{display:flex;flex-direction:column;gap:.4rem;padding:.25rem .75rem .5rem}
+.ctxmenu .mvform label{font-weight:600}
+.ctxmenu .mvform input{width:6rem;min-height:38px}
+.ctxmenu .mvform .hint{margin:0;font-size:.85rem;color:var(--text-muted)}
+.ctxmenu .mvform .acts{display:flex;gap:.4rem;flex-wrap:wrap}
+.ctxmenu .mvform .acts .btn{min-height:38px;justify-content:center}
+.ctxmenu .mvform .status{margin:0;font-size:.9rem}
+.ctxmenu .mvform .status.err{color:var(--red-text)}
 .ctxmenu .qtyrow .step{width:36px;min-width:36px;height:32px;min-height:32px;padding:0;justify-content:center;
   border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);font-size:1.15rem;
   font-weight:700;line-height:1}

@@ -279,6 +279,52 @@
     dot.textContent = "";
     dot.appendChild(el("span", "sr-only", "tag " + t.name));
   }
+  // Archidekt's custom mana value: the deck's own override of a card's mana value (data-mv)
+  function setManaValue(card, mv) {
+    if (mv === null || mv === undefined || mv === "") card.removeAttribute("data-mv");
+    else card.setAttribute("data-mv", String(mv));
+  }
+  // The card menu's "Mana value…" form: a whole number from 0 to 20, or Clear to use the card's own
+  function manaValueForm(card, m) {
+    var name = card.getAttribute("data-card") || "";
+    var cur = card.getAttribute("data-mv");
+    m.textContent = "";
+    m.appendChild(el("div", "head", name));
+    var form = el("form", "mvform");
+    var lab = el("label", "", "Custom mana value");
+    var input = el("input", "");
+    input.type = "number"; input.min = "0"; input.max = "20"; input.step = "1"; input.inputMode = "numeric";
+    input.id = "mv-input"; lab.htmlFor = "mv-input";
+    input.value = cur === null ? "" : cur;
+    var hint = el("p", "hint", "Archidekt counts this instead of the card's own mana value, in this deck only.");
+    var msg = el("p", "status", "");
+    msg.setAttribute("role", "status");
+    var save = el("button", "btn primary", "Save"); save.type = "submit";
+    var clear = el("button", "btn", "Clear"); clear.type = "button"; clear.hidden = cur === null;
+    var cancel = el("button", "btn", "Cancel"); cancel.type = "button";
+    var acts = el("div", "acts");
+    acts.appendChild(save); acts.appendChild(clear); acts.appendChild(cancel);
+    form.appendChild(lab); form.appendChild(input); form.appendChild(hint); form.appendChild(acts); form.appendChild(msg);
+    m.appendChild(form);
+    var send = function (value) {
+      var ch = { action: "set_mana_value", card_name: name, mana_value: value, zone: card.getAttribute("data-zone") || "main" };
+      var inv = { action: "set_mana_value", card_name: name, mana_value: cur === null ? null : Number(cur), zone: ch.zone };
+      m.classList.add("busy");
+      saveEdit([ch], [inv]).then(function () { closeMenu(); toast("Mana value saved."); })
+        .catch(function (err) { m.classList.remove("busy"); if (!err || !err.cancelled) { msg.className = "status err"; msg.textContent = err.message; } });
+    };
+    form.addEventListener("submit", function (e) {
+      stop(e);
+      var v = input.value.trim();
+      if (!/^\d{1,2}$/.test(v) || Number(v) > 20) { msg.className = "status err"; msg.textContent = "Enter a whole number from 0 to 20."; input.focus(); return; }
+      if (cur !== null && Number(cur) === Number(v)) { closeMenu(); return; }
+      send(Number(v));
+    });
+    clear.addEventListener("click", function (e) { stop(e); send(null); });
+    cancel.addEventListener("click", function (e) { stop(e); closeMenu(); });
+    fit(m);
+    input.focus();
+  }
   function refreshStacks() {
     $$(".stack", cards).forEach(function (st) {
       var items = $$(".c, .row", st);
@@ -343,6 +389,7 @@
       card.setAttribute("data-zone", r.zone);
       if (r.finish) setFinish(card, r.finish);
       if (r.label !== undefined) setLabel(card, r.label);
+      if (r.mana_value !== undefined) setManaValue(card, r.mana_value);
       var cat = (r.categories && r.categories[0]) || "";
       card.setAttribute("data-cat", cat);
       if (r.relation_id !== null && r.relation_id !== undefined) card.setAttribute("data-rel", String(r.relation_id));
@@ -650,6 +697,7 @@
       m.appendChild(moveBtn);
       m.appendChild(sub);
       if (window.MtgDeckTag) m.appendChild(menuItem("Colour tag…", "tag", function () { closeMenu(); window.MtgDeckTag(card); }));
+      m.appendChild(menuItem("Mana value…", "edit", function () { manaValueForm(card, m); }));
       m.appendChild(menuItem("Remove from deck", "x", function () {
         m.classList.add("busy");
         edit(card, "remove").catch(function (err) { if (menu === m) m.classList.remove("busy"); showError(err); });

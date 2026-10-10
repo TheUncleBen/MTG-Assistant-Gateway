@@ -229,6 +229,8 @@ class DeckCard:
     two_card_combo_ids: list[str] = field(default_factory=list)
     notes: str = ""  # the user's own text: carried as is, never interpreted
     label: str = ""
+    # Archidekt's custom mana value for this row (the deck's own override of the card's), or None
+    custom_cmc: float | None = None
     companion: bool = False
     image_hash: str = ""
     scryfall_uid: str = ""
@@ -1643,6 +1645,7 @@ def parse_deck(body: Any) -> Deck:
                 two_card_combo_ids=[str(i) for i in combos if i is not None],
                 notes=str(entry.get("notes") or ""),
                 label=str(entry.get("label") or ""),
+                custom_cmc=_number(entry.get("customCmc")),
                 companion=entry.get("companion") is True,
                 image_hash=str(card.get("scryfallImageHash") or ""),
                 scryfall_uid=str(card.get("uid") or ""),

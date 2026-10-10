@@ -881,6 +881,8 @@ class FakeArchidekt:
                         rel["label"] = e["modifications"]["label"]  # the colour tag, "Name,#rrggbb"
                     if "companion" in e["modifications"]:
                         rel["companion"] = bool(e["modifications"]["companion"])
+                    if "customCmc" in e["modifications"]:  # the deck's own mana value for the row
+                        rel["customCmc"] = e["modifications"]["customCmc"]
             else:
                 self.next_rel_id += 1
                 deck["cards"].append(
