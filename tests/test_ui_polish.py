@@ -8,6 +8,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
 from mtg_gateway import companion, deckpage, theme
@@ -248,3 +249,19 @@ async def test_long_folder_filter_and_its_empty_message(stack: Stack) -> None:  
         assert "Show every folder" in listing.json()["html"]
     finally:
         await b.aclose()
+
+
+def test_error_page_shell_survives_a_failing_database(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 500 from a failing database renders the themed page: the shell lookup falls back to the
+    signed-out shell instead of raising inside the error handler."""
+    from types import SimpleNamespace
+
+    from mtg_gateway import app as app_mod
+
+    class BrokenDb:
+        def get_user(self, _sub: str) -> dict:
+            raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(app_mod, "browser_session", lambda _state, _request: ("sub-1", "sid-1"))
+    state = SimpleNamespace(db=BrokenDb(), settings=SimpleNamespace(admin_group=None))
+    assert app_mod._shell_for(state, None) == {}  # type: ignore[arg-type]

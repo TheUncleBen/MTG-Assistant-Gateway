@@ -46,8 +46,9 @@ control, icon and message.
   keeps its dark colors in the light theme; the Android 13 themed icon is an
   outline. Buttons carry dark text on orange, show pressed and disabled
   states and are at least 48 dp tall. TalkBack reads the sliders' names and
-  announces status and errors. The setup screen's Go key continues, the app
-  follows a dark-mode switch while open, and it shows its offline message when
+  announces status and errors. The setup screen's Go key continues. A
+  dark-mode switch while the app is open re-themes it at the next page, so
+  the page in use is never reloaded. The app shows its offline message when
   the connection is down. The home screen label is "MTG Gateway" (the full name
   stays in Settings), and a long press on the icon offers My decks, Scan cards
   and Proposals.

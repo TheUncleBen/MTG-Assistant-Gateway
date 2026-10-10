@@ -109,6 +109,9 @@ class MainActivity : ComponentActivity() {
     }
     private var fold: FoldingFeature? = null
     private var camera: CameraPanel? = null // the scan panel while it is open
+    /** The Light/Dark mode this activity was drawn in; a switch is applied at the next page load. */
+    private var nightMode = 0
+    private var themePending = false
     /** Ties the page's scan events to the glue this activity installed (see [ScanGlue.install]). */
     private val glueNonce = java.security.SecureRandom().let { r -> ByteArray(16).also(r::nextBytes) }.joinToString("") { "%02x".format(it) }
     /** The photo the page is about to fetch from [ScanGlue.PHOTO_PATH]; read on Chromium's IO thread. */
@@ -125,8 +128,20 @@ class MainActivity : ComponentActivity() {
     private lateinit var updateLater: Button
     private var updateOffer: AppUpdate.Offer? = null
 
+    /**
+     * uiMode stays in configChanges: recreating at once would reload the page under the person and
+     * lose an editor's unsaved edits, an unsent comment, the scan panel or a file being picked. The
+     * switch is noted here and applied at the next page load ([Client.onPageFinished]).
+     */
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        val night = newConfig.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK
+        themePending = night != nightMode // switched back before a page load: nothing to redraw
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        nightMode = resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK
         prefs = Prefs(this)
         val saved = prefs.gatewayOrigin
         if (saved == null) {
@@ -777,6 +792,13 @@ class MainActivity : ComponentActivity() {
             // otherwise reopen the provider's old login page, or the refused page, every time.
             if (nav.pageFinished(url)) view.clearHistory()
             syncBackCallback()
+            // A Light/Dark switch while the app was open: redraw the app's own screens now that a new
+            // page has just loaded (it holds no unsaved edits yet), never under a page in use.
+            if (themePending && fileCallback == null) {
+                themePending = false
+                recreate()
+                return
+            }
             // A new document under an open panel (reload, sign-in bounce) would start the page's own
             // camera and take the lens from the panel, so the panel closes first; the glue is installed
             // fresh and the person taps Scan again.

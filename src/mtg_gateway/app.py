@@ -1737,15 +1737,17 @@ _MACHINE_PREFIXES = (
 def _shell_for(state: AppState, request: Request) -> dict[str, Any]:
     """The signed-in page shell (navigation, account menu, tab bar) for a member whose browser
     session is valid, so an error page looks like every other page; nothing for a visitor."""
+    # The error page must never fail on its own: a 500 from a failing database lands here too.
     try:
         sub, sid = browser_session(state, request)
-    except Exception:  # the error page must never fail on its own
+        if not sub:
+            return {}
+        user = state.db.get_user(sub) or {}
+        admin = bool(state.settings.admin_group and state.settings.admin_group in (user.get("groups") or []))
+        csrf = _csrf(state.settings, sid)
+        return {"signed_in": True, "csrf": csrf, "admin": admin, "user": display_name(user)}
+    except Exception:
         return {}
-    if not sub:
-        return {}
-    user = state.db.get_user(sub) or {}
-    admin = bool(state.settings.admin_group and state.settings.admin_group in (user.get("groups") or []))
-    return {"signed_in": True, "csrf": _csrf(state.settings, sid), "admin": admin, "user": display_name(user)}
 
 
 def _wants_page(request: Request) -> bool:

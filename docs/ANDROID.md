@@ -221,9 +221,9 @@ else your gateway serves. A few things are native:
   bottom tab bar colours. On Android 10-14 that comes from the app's theme; on
   Android 15 and later, where apps draw under transparent bars, the app paints
   those two strips itself so the result looks the same. The app follows the
-  phone's Light / Dark setting, and switching it while the app is open
-  re-themes the app's screens (the page is restored where it was; an open
-  camera panel closes). The pages follow the setting too unless you pick Light
+  phone's Light / Dark setting. A switch while the app is open re-themes the
+  app's own screens at the next page you open, so the page in use (an editor
+  with unsaved edits, an open camera panel) is never reloaded under you. The pages follow the setting too unless you pick Light
   or Dark in the account menu on the page, which wins inside the app as well.
   The camera screen is always dark, over the black viewfinder.
 - **Launcher.** The icon's label is "MTG Gateway" (the full name does not fit
