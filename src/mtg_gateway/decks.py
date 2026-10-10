@@ -38,6 +38,7 @@ from . import modes
 from .approve import approval_code, approval_matches
 from .archidekt import (
     FORMAT_IDS,
+    MAX_LIST_PAGES,
     ArchidektClient,
     ArchidektError,
     Deck,
@@ -256,16 +257,29 @@ class MemberCache:
         return task
 
     async def get(
-        self, sub: str, fetch: Callable[[], Awaitable[Any]], *, wait: float | None = None
+        self,
+        sub: str,
+        fetch: Callable[[], Awaitable[Any]],
+        *,
+        wait: float | None = None,
+        prefer_fresh: bool = False,
     ) -> Any | None:
         """The member's value: fresh at once; stale at once with a refresh in the background;
         otherwise fetched. With ``wait``, a fetch that takes longer answers None instead and
-        carries on, so the caller can render a placeholder and come back for the value."""
+        carries on, so the caller can render a placeholder and come back for the value.
+        ``prefer_fresh`` (with ``wait``) waits that long for the refresh of a stale value before
+        falling back to it: the same one request, for a page that judges what is still there."""
         value, state = self.peek(sub)
         if state == "fresh":
             return value
         if state == "stale":
-            self._refresh(sub, fetch)
+            task = self._refresh(sub, fetch)
+            if prefer_fresh and wait:
+                started = time.perf_counter()
+                done, _pending = await asyncio.wait({task}, timeout=wait)
+                add_time(archidekt_time, time.perf_counter() - started)
+                if done and not task.cancelled() and task.exception() is None:
+                    return task.result()
             return value
         task = self._refresh(sub, fetch)
         # The fetch runs in its own task (its own context), so the time this request spends
@@ -1603,7 +1617,9 @@ class DeckService:
         assert rows is not None
         return rows
 
-    async def _deck_rows(self, sub: str, *, wait: float | None) -> list[dict[str, Any]] | None:
+    async def _deck_rows(
+        self, sub: str, *, wait: float | None, prefer_fresh: bool = False
+    ) -> list[dict[str, Any]] | None:
         """Every deck of the linked account from the member cache (or Archidekt), the gateway's
         backup copies marked ``backup: True``: those in the backup folder, those named like one,
         and those a snapshot here records as its copy (``db.backup_copies``)."""
@@ -1618,7 +1634,7 @@ class DeckService:
                 ),
             )
 
-        rows = await self.deck_lists.get(sub, fetch, wait=wait)
+        rows = await self.deck_lists.get(sub, fetch, wait=wait, prefer_fresh=prefer_fresh)
         if rows is None:
             return None
         known = self.db.backup_copies(sub)
@@ -1641,12 +1657,18 @@ class DeckService:
         return None if rows is None else [d for d in rows if not d.get("backup")]
 
     async def backup_copies(
-        self, sub: str, *, deck_id: str | None = None, wait: float | None = None
+        self,
+        sub: str,
+        *,
+        deck_id: str | None = None,
+        wait: float | None = None,
+        prefer_fresh: bool = False,
     ) -> list[dict[str, Any]] | None:
         """The gateway's backup copies on Archidekt (decks kept out of the member's lists), newest
         first; with ``deck_id``, only the copies of that deck (those a snapshot here records, or
-        whose name starts with that deck's name). None when the list is cold and ``wait`` ran out."""
-        rows = await self._deck_rows(sub, wait=wait)
+        whose name starts with that deck's name). None when the list is cold and ``wait`` ran out.
+        A copy deleted on Archidekt is not in the list, so it is not listed here either."""
+        rows = await self._deck_rows(sub, wait=wait, prefer_fresh=prefer_fresh)
         if rows is None:
             return None
         copies = [d for d in rows if d.get("backup")]
@@ -1660,6 +1682,21 @@ class DeckService:
 
             copies = [d for d in copies if of_this_deck(d)]
         return copies
+
+    async def on_archidekt(self, sub: str, *, wait: float | None = None) -> dict[str, Any] | None:
+        """What the member's deck list (the cached one, no extra request) says is on Archidekt:
+        ``{"ids", "read_at"}``, every deck and backup copy id and when the list was read. None
+        when the list cannot tell that something is gone: still cold, read by username (which may
+        leave private decks out), or cut off at MAX_LIST_PAGES pages. A list older than
+        DECK_LIST_FRESH is refreshed first, waiting up to ``wait`` for it (prefer_fresh)."""
+        rows = await self._deck_rows(sub, wait=wait, prefer_fresh=True)
+        _token, link = self._token(sub)
+        read_at = self.deck_lists.fetched_at(sub)
+        if rows is None or read_at is None or not link.get("archidekt_user_id"):
+            return None
+        if len(rows) >= MAX_LIST_PAGES * 50:
+            return None
+        return {"ids": {str(d["id"]) for d in rows}, "read_at": read_at}
 
     def decks_fetched_at(self, sub: str) -> float | None:
         """When the cached deck list was read from Archidekt (epoch seconds), None when none is."""
@@ -2728,7 +2765,19 @@ class DeckService:
         snap = self.snapshot(sub, str(snapshot_id or "").strip())
         wanted = parse_deck(snap["deck"])
         self._room_for_proposal(sub)
-        deck = await self.get_own_deck(sub, snap["deck_id"])
+        try:
+            deck = await self.get_own_deck(sub, snap["deck_id"])
+        except DeckError as exc:
+            if exc.kind != "not_found":
+                raise
+            # The deck was deleted on Archidekt: a restore rewrites that deck, so there is nothing
+            # to put the snapshot back onto. The snapshot itself is kept here.
+            raise DeckError(
+                "not_found",
+                f"Deck {snap['deck_id']} is no longer on your Archidekt account (deleted there?), so "
+                f"snapshot {snap['id']} cannot be restored onto it. Nothing was changed, and the "
+                "snapshot with its card list is still kept in the gateway.",
+            ) from exc
         payload, lines = restore_rows(wanted, deck)
         details, detail_lines = details_rows(deck, snapshot_details(wanted))
         lines += detail_lines
@@ -3820,3 +3869,22 @@ def normalise_cards(
             "invalid", "that is more cards than a proposal may create at once (300 rows, 400 cards)"
         )
     return out
+
+
+def mark_gone(snapshots: list[dict[str, Any]], listed: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Reconcile History's snapshots with the member's Archidekt deck list (``on_archidekt``):
+    a snapshot taken before the list was read whose deck is not in it gets ``deck_gone`` (Restore
+    cannot work: it rewrites that deck), one whose Archidekt backup copy is not in it gets
+    ``backup_gone`` (deleted on Archidekt; Restore still works, it uses the snapshot kept here).
+    Without a list that can tell, nothing is marked."""
+    if not listed:
+        return snapshots
+    ids, read_at = listed["ids"], float(listed["read_at"])
+    for x in snapshots:
+        if float(x.get("taken_at") or 0) >= read_at:
+            continue  # newer than the list: it cannot know
+        if str(x.get("deck_id") or "") not in ids:
+            x["deck_gone"] = True
+        if x.get("backup_deck_id") and str(x["backup_deck_id"]) not in ids:
+            x["backup_gone"] = True
+    return snapshots
