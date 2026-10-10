@@ -41,7 +41,7 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 from starlette.routing import Route, request_response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from . import __version__, deck_stats
+from . import __version__, deck_stats, theme
 from .admin import add_admin_routes
 from .api import add_api_routes
 from .app_page import PROJECT_URL, add_app_routes
@@ -86,7 +86,7 @@ from .membership import Membership, MembershipChecker
 from .metrics import Metrics
 from .mf_proxy import ALLOWED_TOOLS, MysticForgeProxy
 from .oidc import OIDCClient
-from .pages import BROWSER_CLIENT_ID, SESSION_COOKIE, add_browser_routes
+from .pages import BROWSER_CLIENT_ID, SESSION_COOKIE, _csrf, add_browser_routes, browser_session
 from .plugin_page import add_plugin_routes
 from .reports import ReportService
 from .scan import add_scan
@@ -105,7 +105,7 @@ from .schemas import (
 )
 from .skill_page import add_skill_routes
 from .social import add_social_routes
-from .theme import NoSniffMiddleware, ThemeMiddleware, render
+from .theme import NoSniffMiddleware, ThemeMiddleware, display_name, render
 from .timing import TimingMiddleware
 from .update_check import UpdateChecker
 from .views import deck_brief, deck_out
@@ -401,6 +401,9 @@ class MembershipMiddleware:
         "/healthz",
         "/favicon.ico",
         "/apple-touch-icon.png",
+        "/robots.txt",
+        "/app.webmanifest",
+        "/sw.js",
     )
 
     def __init__(self, app: ASGIApp, state: AppState):
@@ -442,6 +445,7 @@ class MembershipMiddleware:
                     f"<div class='card'><p>{message}</p></div>",
                     site=self.state.settings.server_name,
                     status=503,
+                    **_shell_for(self.state, request),
                 )
             else:
                 resp = JSONResponse(
@@ -1093,11 +1097,11 @@ def build_mcp_server(state: AppState) -> MCPServer:
         name="deck_stats",
         title="Deck statistics",
         description=(
-            "Mana curve, colour pips against mana sources, type and rarity counts, average mana value, price "
+            "Mana curve, color pips against mana sources, type and rarity counts, average mana value, price "
             "total, format legality problems, game changers, tutors, "
             "extra turns, mass land denial, salt, a "
             "Commander bracket ESTIMATE and structural checks (deck size for the format, commander zone "
-            "and whether each card may command, colour identity violations, singleton violations, "
+            "and whether each card may command, color identity violations, singleton violations, "
             "uncategorised rows: stats.checks), all from Archidekt's own card data in one read (no Mystic "
             "Forge call). deck_ref is an Archidekt id or URL, a snapshot id, or a pasted decklist (then "
             "only counts and structural checks: no card data; lines that are not cards are listed in "
@@ -1359,7 +1363,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
         description=(
             "Step 1 of changing a deck's own settings rather than its cards, for decks the linked account "
             "owns. details holds only the settings to change: name, description, deck_format, "
-            "edh_bracket (null clears it), private, unlisted, and its organisation: folder (an existing "
+            "edh_bracket (null clears it), private, unlisted, and its organization: folder (an existing "
             "folder's name, as list_my_decks shows them), add_tags, remove_tags, cover (a card in the "
             "deck). This is the one tool for those; nothing else moves, tags or re-covers a deck. "
             "Fields already set that way are dropped "
@@ -1640,6 +1644,7 @@ def create_app(
     mf_proxy: MysticForgeProxy | None = None,
     cimd: CimdFetcher | None = None,
 ) -> Starlette:
+    theme.PUBLIC_URL = settings.public_url.rstrip("/")  # link previews point at the site's icon
     db = db or Database(settings.db_path)
     oidc = oidc or OIDCClient(
         settings.oidc_issuer,
@@ -1729,6 +1734,22 @@ _MACHINE_PREFIXES = (
 )
 
 
+def _shell_for(state: AppState, request: Request) -> dict[str, Any]:
+    """The signed-in page shell (navigation, account menu, tab bar) for a member whose browser
+    session is valid, so an error page looks like every other page; nothing for a visitor."""
+    # The error page must never fail on its own: a 500 from a failing database lands here too.
+    try:
+        sub, sid = browser_session(state, request)
+        if not sub:
+            return {}
+        user = state.db.get_user(sub) or {}
+        admin = bool(state.settings.admin_group and state.settings.admin_group in (user.get("groups") or []))
+        csrf = _csrf(state.settings, sid)
+        return {"signed_in": True, "csrf": csrf, "admin": admin, "user": display_name(user)}
+    except Exception:
+        return {}
+
+
 def _wants_page(request: Request) -> bool:
     path = request.url.path
     if path.startswith(_MACHINE_PREFIXES):
@@ -1752,6 +1773,7 @@ def _friendly_errors(app: Starlette, state: AppState) -> None:
                 "<a class='btn' href='/'>Home</a></div></div>",
                 site=site,
                 status=404,
+                **_shell_for(state, request),
             )
         return JSONResponse(
             {"ok": False, "error": "not_found", "message": "Nothing exists at this address."}, 404
@@ -1771,6 +1793,7 @@ def _friendly_errors(app: Starlette, state: AppState) -> None:
                 "</a></div></div>",
                 site=site,
                 status=500,
+                **_shell_for(state, request),
             )
         return JSONResponse(
             {

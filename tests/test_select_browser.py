@@ -225,7 +225,7 @@ def test_editor_rows_are_enhanced_as_they_appear(server: Server) -> None:
         )
         assert clipped == 0
         # a pick in a row's category list reaches the editor's pending changes
-        cat = page.locator(".erow:not(.new) .sel select[aria-label=category]").first
+        cat = page.locator(".erow:not(.new) .sel select[aria-label^='Category of']").first
         trigger = cat.locator("xpath=following-sibling::button[1]")
         trigger.click()
         listbox = page.locator("#msel-list[role=listbox]")
@@ -239,7 +239,7 @@ def test_editor_rows_are_enhanced_as_they_appear(server: Server) -> None:
         assert cat.evaluate("s => s.value") == wanted != current
         assert trigger.inner_text().strip() == wanted
         assert page.locator(".pendingbox .n").inner_text() == "1"
-        assert "set category" in (page.locator(".pending .changes").text_content() or "")
+        assert "Category" in (page.locator(".pending .changes").text_content() or "")
         # a card added by script gets an enhanced row too
         box = page.locator("#addname")
         box.click()
@@ -285,7 +285,8 @@ def test_natives_stay_and_triggers_take_the_focus(server: Server) -> None:
                 assert n["btn"] and (n["hidden"] == "true" or n["tab"] == "-1"), (path, n)
             focusable = page.evaluate(
                 "() => [...document.querySelectorAll('button.msel-btn')].every(b => {"
-                " b.focus(); return document.activeElement === b || b.disabled || !b.offsetParent; })"
+                " b.focus(); return document.activeElement === b || b.disabled || !b.offsetParent"
+                " || !!b.closest('details:not([open])'); })"  # the collection's folded Add box
             )
             assert focusable, path
             assert page.evaluate("() => document.documentElement.scrollWidth") <= 1366

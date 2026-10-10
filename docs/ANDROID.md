@@ -217,10 +217,23 @@ else your gateway serves. A few things are native:
 - **The /scan page's own camera** works inside the app: the app asks for camera
   permission once, and grants it to the gateway's pages only.
 - **Look and theme.** The app's own screens (setup, error, menu) use the pages'
-  palette, and the status bar and navigation bar take the pages' top bar and
-  bottom tab bar colours. The app follows the phone's Light / Dark setting;
-  the pages follow it too unless you pick Light or Dark in the account menu
-  on the page, which wins inside the app as well.
+  palette, and the status bar and navigation bar show the pages' top bar and
+  bottom tab bar colours. On Android 10-14 that comes from the app's theme; on
+  Android 15 and later, where apps draw under transparent bars, the app paints
+  those two strips itself so the result looks the same. The app follows the
+  phone's Light / Dark setting. A switch while the app is open re-themes the
+  app's own screens at the next page you open, so the page in use (an editor
+  with unsaved edits, an open camera panel) is never reloaded under you. The pages follow the setting too unless you pick Light
+  or Dark in the account menu on the page, which wins inside the app as well.
+  The camera screen is always dark, over the black viewfinder.
+- **Launcher.** The icon's label is "MTG Gateway" (the full name does not fit
+  most launchers). Long-press the icon for shortcuts to **My decks**, **Scan
+  cards** and **Proposals** on your gateway; they appear once the app has been
+  opened and the gateway address is set.
+- **If the gateway never loads** (moved, gone, mistyped port), the error
+  screen offers **Change gateway** next to **Retry**, so another address can
+  be typed without clearing the app's data. **Back** on the address screen
+  returns to the page when a gateway was already set.
 
 ## 3. Scanning with the phone camera
 
@@ -235,13 +248,13 @@ than a browser can, then hands it to that page, which keeps running underneath:
    the camera reports it (the app uses CameraX, Google's camera library, and
    asks it what the camera can do):
    - **Torch** on/off.
-   - **Brightness** slider for the torch. Shown when CameraX reports adjustable
+   - **Torch brightness** slider. Shown when CameraX reports adjustable
      torch strength, which it does on Android 15 or later for cameras with more
      than one level. Earlier Android versions can only set torch strength while
      no app has the camera open, so with the preview running the slider isn't
      offered there.
    - **Zoom**, within the range the camera reports.
-   - **Brightness** (exposure compensation).
+   - **Exposure** (exposure compensation).
 3. Tap **Shoot**. The photo goes to the scan page, which finds the card, reads
    the name and the set line and looks it up, exactly as the page's Photo
    button would. The camera stays open: the result appears as a line over the

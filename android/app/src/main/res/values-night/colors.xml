@@ -8,9 +8,10 @@
     <color name="text">#e3e3e3</color>
     <color name="text_muted">#a8a8a8</color>
     <color name="accent">#fa890d</color>
-    <color name="on_accent">#ffffff</color>
-    <color name="danger">#ff555b</color>
+    <color name="on_accent">#111111</color>
+    <color name="danger">#ff8086</color>
     <color name="navbar">#111111</color>
+    <color name="navbar_text">#ffffff</color>
     <color name="toolbar">#2e2d2d</color>
     <color name="icon_bg">#1c1f26</color>
     <color name="scrim">#99000000</color>

@@ -20,12 +20,13 @@ import re
 import time
 from collections import Counter
 from typing import Any
+from urllib.parse import quote
 
 from .archidekt import VOTE_UP, Deck, DeckCard, featured_scryfall_id, format_label
 from .deck_stats import WUBRG, colour_letter, is_basic_land, is_land, mana_pips
 from .mana import mana_html as _mana_html
-from .theme import icon
-from .views import cards_by_category
+from .theme import icon, plural
+from .views import auto_category, cards_by_category
 
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _SYMBOL = re.compile(r"\{([^{}]+)\}")
@@ -85,6 +86,13 @@ def mana_html(cost: str) -> str:
 
 def money(value: float | None) -> str:
     return "–" if value is None else f"${value:,.2f}"
+
+
+def est_cost_html(stats: dict[str, Any]) -> str:
+    """The deck's estimated cost: a dash with an explanation while no card has a price."""
+    if not stats.get("priced_cards"):
+        return "<span title='No prices from Archidekt yet'>–</span>"
+    return money(stats.get("price_total"))
 
 
 def ago(iso: str) -> str:
@@ -275,7 +283,8 @@ def legality_chip_html(deck: Deck, stats: dict[str, Any] | None) -> str:
             f"<span class='legal ok' title='Legal in {esc(deck.format or 'this format')}'>"
             f"{icon('check')} Legality</span>"
         )
-    title = f"{len(problems)} problem(s): " + "; ".join(problems[:5]) + ("…" if len(problems) > 5 else "")
+    more = "…" if len(problems) > 5 else ""
+    title = plural(len(problems), "problem") + ": " + "; ".join(problems[:5]) + more
     return f"<span class='legal bad' title='{esc(title)}'>{icon('x')} Legality</span>"
 
 
@@ -295,9 +304,11 @@ def banner_html(
     bracket_names = {1: "Exhibition (1)", 2: "Core (2)", 3: "Upgraded (3)", 4: "Optimized (4)", 5: "cEDH (5)"}
     legality = legality_chip_html(deck, stats)
     privacy = (
-        f"<span class='privacy' title='Private deck'>{icon('eye-off')}</span>"
+        f"<span class='privacy' title='Private deck'>{icon('eye-off')}"
+        "<span class='sr-only'>Private deck</span></span>"
         if deck.private
-        else f"<span class='privacy' title='Unlisted deck'>{icon('eye-off')}</span>"
+        else f"<span class='privacy' title='Unlisted deck'>{icon('eye-off')}"
+        "<span class='sr-only'>Unlisted deck</span></span>"
         if deck.unlisted
         else ""
     )
@@ -375,15 +386,15 @@ def banner_html(
         "<div class='shade'><div class='content'>"
         f"<div class='strip'{style}></div>"
         "<div class='info'>"
-        f"<h1 class='deckname'>{privacy}<span>{esc(deck.name)}</span></h1>"
+        f"<h1 class='deckname'>{privacy}<span title='{esc(deck.name)}'>{esc(deck.name)}</span></h1>"
         "<div class='row'>"
         + (f"<span>{esc(ago(deck.updated_at))}</span>" if ago(deck.updated_at) else "")
-        + f"<span>{stats.get('distinct', 0)} distinct cards</span>"
+        + f"<span>{plural(stats.get('distinct', 0), 'distinct card')}</span>"
         "</div><div class='row'>"
         f"<span>{esc(format_label(deck.format))}</span>{legality}{own_bracket}{est_bracket}"
         "</div><div class='row'>"
         f"<span>Size: {stats.get('card_count', sum(c.quantity for c in deck.main_cards))}</span>"
-        f"<span>Est cost: <b class='orange'>{money(stats.get('price_total'))}</b></span>"
+        f"<span>Est cost: <b class='orange'>{est_cost_html(stats)}</b></span>"
         f"<span>Salt sum: <b class='orange'>{esc(salt)}</b></span>"
         "</div>"
         f"<div class='tags'>{icon('tag')} {tags}</div>"
@@ -489,7 +500,8 @@ def toolbar_html(deck: Deck, *, own: bool, view: str, group: str, sort: str, q: 
         + "<div class='field filter'><label for='q'>Local filter</label><span class='search'>"
         f"<input id='q' type='search' name='q' value='{esc(q)}' placeholder='Filter deck (eg: Sol Ring)' "
         "autocomplete='off'>"
-        f"<button type='submit' aria-label='Apply filter'>{icon('search')}</button></span></div>"
+        f"<button type='submit' aria-label='Apply filter' title='Apply filter'>{icon('search')}</button>"
+        "</span></div>"
         "<noscript><button type='submit' class='apply'>Apply</button></noscript>"
         "</form></div></section>"
     )
@@ -534,7 +546,7 @@ def text_row(card: DeckCard, *, deck: Deck, owned: dict[str, int] | None = None)
         f"data-card='{esc(card.name)}'{_card_data(card, deck)}>"
         f"<span class='q'>{card.quantity}</span>"
         f"<span class='n'>{_label_dot(card)}{_owned_dot(card, owned)}<span "
-        f"class='name'>{esc(card.name)}</span>"
+        f"class='name' title='{esc(card.name)}'>{esc(card.name)}</span>"
         f"{_finish_badge(card)}{hover}</span>"
         f"<span class='mc'>{mana_html(card.mana_cost)}</span>"
         f"<span class='set' title='{esc(card.set_code.upper())} {esc(card.collector_number)}'>"
@@ -634,16 +646,18 @@ def cards_html(
         price = sum((c.price or 0) * c.quantity for c in cards)
         strike = " strike" if name in excluded else ""
         menu = (
-            f"<details class='dd'><summary class='icon-only btn-ghost' aria-label='Category options'>"
-            f"{icon('more')}</summary><div class='menu'>"
-            f"<a href='/decks/{did}/edit#cat-{esc(name)}'>{icon('edit')} Edit cards in {esc(name)}</a>"
+            f"<details class='dd'><summary class='icon-only btn-ghost' aria-label='Options for {esc(name)}' "
+            f"title='Category options'>{icon('more')}</summary><div class='menu'>"
+            f"<a href='/decks/{did}/edit#cat-{quote(name, safe='')}'>{icon('edit')} Edit cards in "
+            f"{esc(name)}</a>"
             f"<a href='/decks/{did}/settings#categories'>{icon('settings')} Category options</a>"
             "</div></details>"
             if own and group == "category"
             else ""
         )
         head = (
-            f"<div class='stackhead'><h4><span class='title{strike}'>{esc(name)}</span>{menu}</h4>"
+            f"<div class='stackhead'><h2><span class='title{strike}' title='{esc(name)}'>{esc(name)}</span>"
+            f"{menu}</h2>"
             f"<div class='meta'>Qty: {qty}" + (f" · Price: {money(price)}" if price else "") + "</div></div>"
         )
         if view == "text":
@@ -689,7 +703,10 @@ def cards_html(
 def _bar(parts: dict[str, float], *, label: str) -> str:
     total = sum(v for v in parts.values() if v) or 0
     if not total:
-        return f"<div class='cbar empty' aria-label='{esc(label)}'></div>"
+        return (
+            f"<div class='cbar empty' role='img' aria-label='{esc(label)}: no data'>"
+            "<span>No mana data</span></div>"
+        )
     segs = "".join(
         f"<span class='seg seg-{k}' style='width:{100 * v / total:.1f}%' "
         f"title='{COLOUR_NAMES.get(k, k)}: {v:g}'></span>"
@@ -710,9 +727,10 @@ def _odds_groups(cards: list[DeckCard]) -> dict[str, dict[str, int]]:
         "Mana value": Counter(),
     }
     for c in cards:
-        for cat in c.categories or ["Uncategorized"]:
+        # a card without a category of its own sits under its auto category, as the page groups it
+        for cat in c.categories or [auto_category(c)]:
             groups["Categories"][cat] += c.quantity
-        groups["Primary category"][(c.categories or ["Uncategorized"])[0]] += c.quantity
+        groups["Primary category"][(c.categories or [auto_category(c)])[0]] += c.quantity
         groups["Card name"][c.name] += c.quantity
         for t in c.types or ["Other"]:
             groups["Types"][t] += c.quantity
@@ -737,9 +755,11 @@ def _odds_html(deck: Deck, cards: list[DeckCard]) -> str:
         "<form class='oddsform' onsubmit='return false'>"
         "<select name='mode' aria-label='At least or exactly'><option value='atleast'>At least</option>"
         "<option value='exact'>Exactly</option></select>"
-        "<input type='number' name='k' value='1' min='0' max='99' aria-label='How many'> card(s) by "
+        "<input type='number' name='k' value='1' min='0' max='99' aria-label='How many'> "
+        "<span data-plural='k'>card</span> by "
         f"<select name='by' aria-label='Group by'>{options}</select> having drawn "
-        f"<input type='number' name='n' value='7' min='1' max='{size}' aria-label='Cards drawn'> card(s)"
+        f"<input type='number' name='n' value='7' min='1' max='{size}' aria-label='Cards drawn'> "
+        "<span data-plural='n'>cards</span>"
         "</form>"
         "<table class='qty oddstable'><thead><tr><th>Group</th><th>Qty</th><th>Odds</th></tr></thead>"
         "<tbody><tr><td class='muted' colspan='3'>Turn on scripts to see the odds.</td></tr></tbody></table>"
@@ -827,7 +847,7 @@ def checks_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
             )
             outside = checks.get("colour_identity_violations") or []
             rows.append(
-                ("Colour identity", "all cards inside" if not outside else names(outside), not outside)
+                ("Color identity", "all cards inside" if not outside else names(outside), not outside)
             )
         elif family == "highlander" and not zone.get("ok", True):
             rows.append(
@@ -866,7 +886,7 @@ def checks_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
                 )
             text = "every card legal" if legal.get("ok", True) else "; ".join(bad)
             if legal.get("unknown"):
-                text += f" ({legal['unknown']} card(s) without legality data)"
+                text += f" ({plural(legal['unknown'], 'card')} without legality data)"
             rows.append((f"Legal in {esc(format_label(deck.format))}", text, legal.get("ok", True)))
         comp = checks.get("companion") or {}
         if comp.get("count"):
@@ -940,11 +960,11 @@ def stats_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
         f"<div class='lbl'>Cost</div><div class='pbar'><span class='fill seg-{col}' "
         f"style='width:{100 * pips.get(col, 0) / pip_total:.0f}%'></span>"
         f"<b>{100 * pips.get(col, 0) / pip_total:.0f}%</b></div>"
-        f"<div class='sub'>{pips.get(col, 0):g} pips - {cost_cards.get(col, 0)} cards</div>"
+        f"<div class='sub'>{plural(pips.get(col, 0), 'pip')} · {plural(cost_cards.get(col, 0), 'card')}</div>"
         f"<div class='lbl'>Production</div><div class='pbar'><span class='fill seg-{col}' "
         f"style='width:{100 * sources.get(col, 0) / src_total:.0f}%'></span>"
         f"<b>{100 * sources.get(col, 0) / src_total:.0f}%</b></div>"
-        f"<div class='sub'>{sources.get(col, 0):g} mana - {prod_cards.get(col, 0)} cards</div>"
+        f"<div class='sub'>{sources.get(col, 0):g} mana · {plural(prod_cards.get(col, 0), 'card')}</div>"
         "</div>"
         for col in WUBRG
         if pips.get(col) or sources.get(col)
@@ -985,8 +1005,8 @@ def stats_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
     return (
         "<section class='panel stats' id='stats'><div class='head'><h2>Deck stats</h2></div>"
         "<div class='grid'><div>"
-        f"<div class='lbl'>Cost</div>{_bar(pips, label='Mana cost by colour')}"
-        f"<div class='lbl'>Production</div>{_bar(sources, label='Mana production by colour')}"
+        f"<div class='lbl'>Cost</div>{_bar(pips, label='Mana cost by color')}"
+        f"<div class='lbl'>Production</div>{_bar(sources, label='Mana production by color')}"
         f"<div class='ccards'>{colour_cards}</div>"
         f"<p class='avg'><b>Avg Mana Value: {esc(avg_mv)}</b>"
         f"<br><span class='small'>Total Mana Value: {mv_total:.2f}</span></p>"
@@ -996,7 +1016,7 @@ def stats_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
         f"<div class='tiles'><div class='tile'><b>{stats.get('card_count', 0)}</b>"
         "<span>Deck size</span></div>"
         f"<div class='tile'><b>{stats.get('land_count', 0)}</b><span>Lands</span></div>"
-        f"<div class='tile'><b>{money(stats.get('price_total'))}</b><span>Est cost</span></div>"
+        f"<div class='tile'><b>{est_cost_html(stats)}</b><span>Est cost</span></div>"
         f"<div class='tile'><b>{stats.get('priced_cards', 0)}</b><span>Priced cards</span></div></div>"
         f"<h3>Quantity of types</h3><table class='qty'><tbody>{type_rows or no_types}</tbody></table>"
         + (f"<h3>Rarity</h3><table class='qty'><tbody>{rarity_rows}</tbody></table>" if rarity_rows else "")
@@ -1060,6 +1080,15 @@ STAT_LABELS = {
     "mass_land_denial": "Mass land denial",
     "salt_total": "Salt",
 }
+
+
+def _delta_text(key: str, v: float) -> str:
+    """A statistics difference, rounded: money for the price, two decimals for averages."""
+    if key == "price_total":
+        return f"${abs(v):,.2f}" if v > 0 else f"-${abs(v):,.2f}"
+    if isinstance(v, float) and not v.is_integer():
+        return f"{v:.2f}"
+    return f"{int(v)}"
 
 
 def _compare_row(name: str, qty_text: str, cards: dict[str, DeckCard]) -> str:
@@ -1127,7 +1156,8 @@ def compare_page_html(
         f"<form method='get' action='/decks/{did}/compare' class='compareform'>"
         "<label class='field'><span>Other deck: a preconstructed deck from the list, or any Archidekt deck "
         "id or link</span>"
-        f"<input name='with' data-suggest='static' data-options='{options}' value='{esc(other_ref)}' "
+        f"<input type='text' name='with' data-suggest='static' data-options='{options}' "
+        f"value='{esc(other_ref)}' "
         "placeholder='Start typing a precon name, or paste a deck link' autocomplete='off'></label>"
         "<label class='field'><span>…or paste a decklist (one card per line, Archidekt's export text works)"
         f"</span><textarea name='paste' rows='4' placeholder='1 Sol Ring&#10;1 Arcane Signet'>{esc(paste)}"
@@ -1182,7 +1212,8 @@ def compare_page_html(
     delta = result.get("stats_delta")
     if delta:
         rows = "".join(
-            f"<tr><th>{esc(STAT_LABELS.get(k, k))}</th><td>{'+' if v > 0 else ''}{esc(v)}</td></tr>"
+            f"<tr><th>{esc(STAT_LABELS.get(k, k))}</th><td>{'+' if v > 0 else ''}{_delta_text(k, v)}</td>"
+            "</tr>"
             for k, v in delta.items()
             if isinstance(v, (int, float)) and v != 0
         )
@@ -1203,7 +1234,7 @@ LIST_ORDERS = {"updated": "Updated at", "created": "Created at", "name": "Name",
 
 def colour_bar_html(colors: dict[str, Any] | None) -> str:
     parts = {k: float(v) for k, v in (colors or {}).items() if k in WUBRG and v}
-    return _bar(parts, label="Colour identity") if parts else "<div class='cbar empty'></div>"
+    return _bar(parts, label="Color identity") if parts else "<div class='cbar empty'></div>"
 
 
 def deck_card_html(
@@ -1212,9 +1243,9 @@ def deck_card_html(
     did = esc(d["id"])
     art = image_url((cover or {}).get("scryfall_uid"), "art_crop")
     style = f" style=\"background-image:url('{esc(art)}')\"" if art else ""
-    fmt = (d.get("format_name") or "").capitalize() if d.get("format_name") else ""
+    fmt = format_label(d.get("format_name")) if d.get("format_name") else ""
     if not fmt and isinstance(d.get("format"), str):
-        fmt = d["format"].capitalize()
+        fmt = format_label(d["format"])
     bracket = d.get("bracket")
     bracket_names = {1: "Exhibition (1)", 2: "Core (2)", 3: "Upgraded (3)", 4: "Optimized (4)", 5: "cEDH (5)"}
     line = fmt or "Custom"
@@ -1240,14 +1271,14 @@ def deck_card_html(
     return (
         f"<li class='deck{' selected' if selected else ''}'><a href='/decks/{did}'>"
         f"<span class='thumb{' noart' if not art else ''}'{style}><span class='ini'>{initial}</span>"
-        + (f"<span class='views'>{size} cards</span>" if size else "")
+        + (f"<span class='views'>{plural(size, 'card')}</span>" if size else "")
         + colour_bar_html(d.get("colors"))
         + "</span>"
         "<span class='info'>"
         f"{avatar_html(d.get('owner') or '', 'sm')}"
-        f"<span class='text'><span class='name'>{esc(d.get('name'))}</span>"
-        f"<span class='fmt'>{esc(line)}</span>"
-        f"<span class='sub'>{esc(' · '.join(sub_bits))}</span>"
+        f"<span class='text'><span class='name' title='{esc(d.get('name'))}'>{esc(d.get('name'))}</span>"
+        f"<span class='fmt' title='{esc(line)}'>{esc(line)}</span>"
+        f"<span class='sub' title='{esc(' · '.join(sub_bits))}'>{esc(' · '.join(sub_bits))}</span>"
         "</span></span>"
         f"<span class='tags'>{tags_html}</span></a></li>"
     )
@@ -1274,8 +1305,15 @@ def deck_list_html(
     q: str = "",
     view: str = "grid",
     show_owner: bool = False,
+    folder: str = "",
 ) -> str:
     if not decks:
+        if folder:
+            return (
+                f"<div class='panel'><p>No decks in the folder “{esc(folder)}”"
+                + (f" matching “{esc(q)}”" if q else "")
+                + ". <a href='/decks'>Show every folder</a>.</p></div>"
+            )
         return (
             "<div class='panel'><p>No decks yet"
             + (f" matching “{esc(q)}”" if q else "")
@@ -1305,8 +1343,10 @@ def deck_list_controls_html(
         "<section class='panel listbar'><form method='get' action='/decks' class='controls' id='listform'>"
         "<div class='field grow'><label for='q'>Filter deck name</label><span class='search'>"
         f"<input id='q' type='search' name='q' value='{esc(q)}' placeholder='Example deck name'>"
-        f"<button type='submit' aria-label='Filter'>{icon('search')}</button></span></div>"
-        + _select("view", {"grid": "Grid", "list": "List"}, view, "View as", "grid")
+        f"<button type='submit' aria-label='Filter' title='Filter'>{icon('search')}</button></span></div>"
+        + _select(
+            "view", {"grid": "Grid", "list": "List"}, view, "View as", "list" if view == "list" else "grid"
+        )
         + _select("order", LIST_ORDERS, order, "Order by", "sort")
         + (
             f"<div class='field' id='folder-field'{' hidden' if pending else ''}><label for='f-folder'>"
@@ -1363,6 +1403,7 @@ DECK_CSS = """
 .comparehead{flex-direction:column;align-items:stretch}
 .compareform{display:grid;gap:.75rem}
 .compareform .field span{display:block;font-size:.85rem;color:var(--text-muted);margin-bottom:.25rem}
+.compareform .field input,.compareform .field textarea{font-weight:400}
 .compareform input,.compareform textarea{width:100%}
 .compareform button{justify-self:start}
 .comparecols{display:grid;grid-template-columns:repeat(auto-fit,minmax(18rem,1fr));gap:1rem;margin-top:1rem}
@@ -1384,8 +1425,9 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
   border-radius:17px;border:1px solid rgba(255,255,255,.4);background:rgba(0,0,0,.28);color:#fff;
   font-weight:700;font-size:.9rem;text-decoration:none;cursor:pointer;margin:0;line-height:1}
 .banner .social .soc:hover,.banner .social .soc:focus-visible{border-color:var(--orange);color:var(--orange)}
-.banner .social .soc.on{background:var(--orange);border-color:var(--orange);color:#fff}
-.banner .social .soc.on:hover{color:#fff;filter:brightness(1.08)}
+/* dark text on orange (white on Archidekt's orange is 2.4:1) */
+.banner .social .soc.on{background:var(--orange);border-color:var(--orange);color:var(--on-orange)}
+.banner .social .soc.on:hover{color:var(--on-orange);filter:brightness(1.08)}
 .banner .social .soc svg{width:18px;height:18px}
 .banner .social .soc[disabled]{opacity:.6;cursor:progress}
 .banner .social .soc[hidden]{display:none}
@@ -1416,13 +1458,16 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .comments .confirmbar{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;padding:.5rem .75rem;
   background:var(--surface-2);border-radius:var(--radius)}
 .comments .confirmbar button{margin:0}
+.comments .notice button{margin:0 0 0 .5rem;min-height:30px;padding:0 .7rem;font-size:.9rem}
 .banner .owner{display:flex;flex-direction:column;align-items:center;gap:.35rem;color:#fff;
   text-decoration:none;font-weight:700;max-width:160px;flex:none}
 .banner .owner:hover{color:var(--orange)}
 .banner .strip{display:none}
 .banner .owner .uname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px}
+/* initials in the page's text colour on surface-3: 6.5:1 light, 6.8:1 dark (white was 1.8:1 in light) */
 .avatar{display:inline-flex;align-items:center;justify-content:center;border-radius:50%;
-  background:var(--surface-3);color:#fff;font-weight:900;border:1px solid var(--border);flex:none}
+  background:var(--surface-3);color:var(--text);font-weight:900;border:1px solid var(--border);flex:none}
+.banner .avatar{background:#3a3a3a;color:#fff;border-color:rgba(255,255,255,.4)}
 .avatar.lg{width:50px;height:50px;font-size:1.4rem} .avatar.sm{width:40px;height:40px;font-size:1.1rem}
 .avatar.xl{width:80px;height:80px;font-size:2rem}
 @media (max-width:600px){
@@ -1436,8 +1481,14 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
   .banner .owner{flex-direction:row;justify-content:flex-end;max-width:none;padding:.5rem 1rem 0;order:-1}
   .banner .owner .avatar{width:80px;height:80px;font-size:2rem;margin-right:auto;margin-top:0;
     border-width:3px;border-color:var(--bg)}
-  .banner .controls .primary,.banner .controls .primary .btn,.banner .controls .primary button,
-  .banner .controls details.dd{width:100%}
+  /* phones: the actions in two columns instead of five full-width rows */
+  .banner .controls .primary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.5rem}
+  .banner .controls .primary .btn,.banner .controls .primary button,.banner .controls details.dd{width:100%;
+    min-width:0}
+  .banner .controls .primary .btn,.banner .controls .primary button{padding-left:.5rem;padding-right:.5rem;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .banner .controls .primary form.inline{display:contents}
+  .banner .controls details.dd > summary.btn{width:100%}
 }
 
 /* toolbar panel (filterBar) */
@@ -1465,8 +1516,8 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 
 /* category (stack) headers */
 .stackhead{padding-top:.5rem;margin-bottom:.25rem}
-.stackhead h4{display:flex;align-items:center;justify-content:space-between;gap:.5rem;font-size:14px;
-  font-weight:700;min-height:28px}
+.stackhead h2{display:flex;align-items:center;justify-content:space-between;gap:.5rem;font-size:14px;
+  font-weight:700;min-height:28px;margin:0}
 .stackhead .title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .stackhead .title.strike{text-decoration:line-through;color:var(--text-muted)}
 .stackhead .meta{font-size:12px;color:var(--text-muted);display:block}
@@ -1475,9 +1526,10 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 
 .stats .pip,.ccard .pip{width:18px;height:18px}
 
-/* text view rows (textViewCard: 30px, bold name, mana column) */
-.deckview.text{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:0 2rem;
-  align-items:start}
+/* text view rows (textViewCard: 30px, bold name, mana column): the categories flow down
+   columns like a newspaper, so a short category leaves no hole under it */
+.deckview.text{columns:300px;column-gap:2rem}
+.deckview.text .stack{break-inside:avoid;page-break-inside:avoid;margin-bottom:.75rem}
 ul.rows{list-style:none;margin:0;padding:0}
 ul.rows .row{display:grid;grid-template-columns:1.6rem minmax(0,1fr) auto 3rem 4.5rem;align-items:center;
   gap:.4rem;height:30px;border-top:1px solid var(--surface-2);position:relative;font-size:1rem}
@@ -1533,7 +1585,7 @@ ul.rows .hover img{width:100%;height:100%;display:block}
 .deckview.stacks .cards.fanned .c{transform:none}
 .deckview .c.dragging{opacity:.4}
 .deckview .stack.dropping{outline:3px dashed var(--orange);outline-offset:4px;border-radius:5px}
-.deckview[data-drop] .stackhead .meta::after{content:' · drag cards here to recategorise';
+.deckview[data-drop] .stackhead .meta::after{content:' · drag cards here to recategorize';
   color:var(--text-muted)}
 @media (hover:none){ .deckview[data-drop] .stackhead .meta::after{content:' · hold a card to move it'} }
 /* card viewer: a tapped card, large, with what can be done with it. A dialog over a blurred,
@@ -1647,11 +1699,9 @@ html.cardview-open{overflow:hidden}
 .movebar .status{margin:0;flex-basis:100%} .movebar .status:empty{display:none}
 @media (max-width:900px){ .has-tabbar .movebar{position:fixed;left:0;right:0;
   bottom:calc(56px + env(safe-area-inset-bottom));margin:0} }
-.deckview.grid .cards{display:grid;grid-template-columns:repeat(5,1fr);gap:1rem}
-@media (max-width:1500px){ .deckview.grid .cards{grid-template-columns:repeat(4,1fr)} }
-@media (max-width:1200px){ .deckview.grid .cards{grid-template-columns:repeat(3,1fr)} }
-@media (max-width:1000px){ .deckview.grid .cards{grid-template-columns:repeat(3,1fr)} }
-@media (max-width:600px){ .deckview.grid .cards{grid-template-columns:repeat(2,1fr)}
+/* grid view: cards about 170 to 230 px wide, as many per row as fit (five in a 1366 px window) */
+.deckview.grid .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:1rem}
+@media (max-width:600px){ .deckview.grid .cards{grid-template-columns:repeat(2,minmax(0,1fr))}
   .deckview.stacks{grid-template-columns:1fr 1fr;gap:.75rem} }
 
 /* deck stats panel */
@@ -1660,7 +1710,7 @@ html.cardview-open{overflow:hidden}
 .stats .lbl{font-weight:700;margin:.75rem 0 .25rem}
 .cbar{display:flex;height:36px;border-radius:3px;overflow:hidden;background:var(--surface-2);gap:2px}
 .cbar .seg{display:block;height:100%;clip-path:polygon(0 0,100% 0,calc(100% - 7px) 100%,0 100%);min-width:6px}
-.cbar.empty{opacity:.5}
+.cbar.empty{opacity:.7;align-items:center;justify-content:center;font-size:.8rem;color:var(--text-muted)}
 .seg-W{background:#f8f6d8} .seg-U{background:#92c5de} .seg-B{background:#8a8a8a} .seg-R{background:#e6948a}
 .seg-G{background:#a6d8a0} .seg-C{background:#cbc2bf}
 .ccards{display:grid;grid-template-columns:repeat(auto-fill,minmax(14rem,1fr));gap:1rem;margin-top:1rem}
@@ -1670,7 +1720,8 @@ html.cardview-open{overflow:hidden}
 .pbar{position:relative;height:26px;border-radius:3px;background:var(--surface-2);overflow:hidden}
 .pbar .fill{position:absolute;left:0;top:0;bottom:0}
 .pbar b{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:.8rem;
-  background:var(--surface-3);color:#fff;padding:0 .35rem;border-radius:3px}
+  background:var(--surface);color:var(--text);padding:0 .35rem;border-radius:3px;
+  border:1px solid var(--border)}
 .ccard .sub{font-size:.8rem;color:var(--text-muted);text-align:center;margin-top:.2rem}
 .stats .avg{margin:1rem 0 .25rem}
 .curve{display:flex;align-items:flex-end;gap:.5rem;height:9rem;padding:.25rem 0;
@@ -1787,7 +1838,7 @@ ul.decklist.list .deck{margin-bottom:.5rem}
   padding:.5rem .75rem;color:var(--text)}
 .editbar .confirmbar span{flex:1 1 14rem;min-width:0;overflow-wrap:anywhere}
 .pendingbox summary{cursor:pointer;font-weight:700}
-.pendingbox summary b{margin-left:.5rem;background:var(--orange);color:#fff;border-radius:10px;
+.pendingbox summary b{margin-left:.5rem;background:var(--orange);color:var(--on-orange);border-radius:10px;
   padding:0 .5rem}
 /* add a card: one search bar. Chips above it say where the card goes; the name box leads with the
    Add button and the Foil tick beside it; on wide screens the second column also leaves room for
@@ -1845,6 +1896,8 @@ ul.erows{list-style:none;margin:.5rem 0 0;padding:0}
 .erow{display:grid;grid-template-columns:40px minmax(0,1fr) auto minmax(7rem,10rem) auto;gap:.6rem;
   align-items:center;padding:.4rem 0;border-top:1px solid var(--border-soft)}
 .erow.changed{background:var(--orange-tint)}
+.erow.target,details.cat.target > summary{outline:3px solid var(--orange);outline-offset:2px;
+  border-radius:3px}
 .erow.removed .name{text-decoration:line-through;color:var(--text-muted)}
 .erow.side .thumb{filter:saturate(.6)}
 .erow.side .meta{font-style:italic}
@@ -1922,10 +1975,15 @@ ul.erows{list-style:none;margin:.5rem 0 0;padding:0}
 /* Compact width: the save bar sits fixed on top of the bottom tab bar. The same breakpoint as the
    tab bar (theme.py's __MOBILE__, under 600px): at exactly 600px the rail or the top bar is
    showing and the bar stays sticky at the top, so nothing is left under a fixed bar with no room
-   kept for it (gate 0.7.10: the footer links at 600px). The footer keeps room for both bars. */
+   kept for it (gate 0.7.10: the footer links at 600px). The footer keeps room for both bars.
+   One slim row: the count is in the review button, the backup tick's text is smaller. */
 @media (max-width:599.98px){
   .editbar{top:auto;bottom:calc(56px + env(safe-area-inset-bottom));margin:0;position:fixed;left:0;right:0;
-    padding:.5rem max(1rem,env(safe-area-inset-right)) .5rem max(1rem,env(safe-area-inset-left))}
+    padding:.35rem max(.75rem,env(safe-area-inset-right)) .35rem max(.75rem,env(safe-area-inset-left));
+    gap:.4rem;flex-wrap:nowrap}
+  .editbar .count{display:none}
+  .editbar .backup{font-size:.8rem;white-space:normal;flex:1 1 6rem;min-width:0}
+  .editbar .status{flex-basis:100%}
   .editor{padding-bottom:6rem}
   body:has(#editor) footer.site{padding-bottom:calc(11rem + env(safe-area-inset-bottom))}
   .editbar .review{flex:1}

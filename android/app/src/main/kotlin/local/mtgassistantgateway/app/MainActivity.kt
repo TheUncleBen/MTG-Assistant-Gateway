@@ -6,12 +6,16 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ShortcutInfo
+import android.content.pm.ShortcutManager
+import android.graphics.drawable.Icon
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Message
 import android.os.SystemClock
 import android.provider.MediaStore
+import android.util.Log
 import android.view.View
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
@@ -105,6 +109,9 @@ class MainActivity : ComponentActivity() {
     }
     private var fold: FoldingFeature? = null
     private var camera: CameraPanel? = null // the scan panel while it is open
+    /** The Light/Dark mode this activity was drawn in; a switch is applied at the next page load. */
+    private var nightMode = 0
+    private var themePending = false
     /** Ties the page's scan events to the glue this activity installed (see [ScanGlue.install]). */
     private val glueNonce = java.security.SecureRandom().let { r -> ByteArray(16).also(r::nextBytes) }.joinToString("") { "%02x".format(it) }
     /** The photo the page is about to fetch from [ScanGlue.PHOTO_PATH]; read on Chromium's IO thread. */
@@ -121,8 +128,20 @@ class MainActivity : ComponentActivity() {
     private lateinit var updateLater: Button
     private var updateOffer: AppUpdate.Offer? = null
 
+    /**
+     * uiMode stays in configChanges: recreating at once would reload the page under the person and
+     * lose an editor's unsaved edits, an unsent comment, the scan panel or a file being picked. The
+     * switch is noted here and applied at the next page load ([Client.onPageFinished]).
+     */
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        val night = newConfig.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK
+        themePending = night != nightMode // switched back before a page load: nothing to redraw
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        nightMode = resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK
         prefs = Prefs(this)
         val saved = prefs.gatewayOrigin
         if (saved == null) {
@@ -147,6 +166,10 @@ class MainActivity : ComponentActivity() {
             if (retryHome) web.loadUrl(origin + "/") else web.reload()
             retryHome = false
         }
+        // A saved gateway that never loads (moved, gone, a mistyped port) covers its own menu with
+        // this box and hides the floating button: this is the way to another address.
+        findViewById<Button>(R.id.error_change).setOnClickListener { changeGateway() }
+        publishShortcuts()
         fab = findViewById(R.id.fab)
         fab.setOnClickListener { showMenu(it) }
         fab.visibility = View.GONE // shown by syncFab over pages that are not the gateway's
@@ -256,15 +279,44 @@ class MainActivity : ComponentActivity() {
                 R.id.menu_scan -> startScan()
                 R.id.menu_reload -> web.reload()
                 R.id.menu_browser -> openExternal(Uri.parse(web.url ?: origin))
-                R.id.menu_gateway -> {
-                    startActivity(Intent(this, SetupActivity::class.java))
-                    finish()
-                }
+                R.id.menu_gateway -> changeGateway()
                 R.id.menu_update -> updater.check(manual = true)
             }
             true
         }
         menu.show()
+    }
+
+    /** The setup screen, to type another gateway address; this screen goes (Back there returns to a fresh one). */
+    private fun changeGateway() {
+        startActivity(Intent(this, SetupActivity::class.java))
+        finish()
+    }
+
+    /**
+     * Launcher shortcuts to the gateway's pages, the same three as its web manifest. Dynamic, not
+     * static, because the gateway address is typed at first launch and the shortcut must carry a
+     * link to that gateway: each is an ACTION_VIEW of the page's https URL aimed at this activity,
+     * which [takeLinkedUrl] opens like any gateway link (in onCreate or, while the app is open,
+     * onNewIntent). Replaced whenever the app starts, so a changed gateway gets its own links.
+     */
+    private fun publishShortcuts() {
+        val sm = getSystemService(ShortcutManager::class.java) ?: return
+        val labels = mapOf("decks" to R.string.shortcut_decks, "scan" to R.string.shortcut_scan, "proposals" to R.string.shortcut_proposals)
+        try {
+            sm.dynamicShortcuts = GatewayUrl.SHORTCUTS.map { (id, path) ->
+                val open = Intent(Intent.ACTION_VIEW, Uri.parse(GatewayUrl.join(origin, path)), this, MainActivity::class.java)
+                ShortcutInfo.Builder(this, id)
+                    .setShortLabel(getString(labels.getValue(id)))
+                    .setIcon(Icon.createWithResource(this, R.mipmap.ic_launcher))
+                    .setIntent(open)
+                    .build()
+            }
+        } catch (e: IllegalStateException) {
+            Log.w(TAG, "shortcuts not published: ${e.message}") // rate limited or a locked user: the links are a convenience
+        } catch (e: IllegalArgumentException) {
+            Log.w(TAG, "shortcuts not published: ${e.message}")
+        }
     }
 
     /**
@@ -699,6 +751,7 @@ class MainActivity : ComponentActivity() {
         /** Called (posted to the UI thread) once a new main-frame document has committed. */
         override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
             if (url == BLANK) return // the app's own blank page over a refused one (below)
+            progress.progress = 0 // not the previous page's 100%
             progress.visibility = View.VISIBLE
             errorBox.visibility = View.GONE // a new page is loading: an older error no longer applies
             val allowed = nav.pageStarted(url)
@@ -739,6 +792,13 @@ class MainActivity : ComponentActivity() {
             // otherwise reopen the provider's old login page, or the refused page, every time.
             if (nav.pageFinished(url)) view.clearHistory()
             syncBackCallback()
+            // A Light/Dark switch while the app was open: redraw the app's own screens now that a new
+            // page has just loaded (it holds no unsaved edits yet), never under a page in use.
+            if (themePending && fileCallback == null) {
+                themePending = false
+                recreate()
+                return
+            }
             // A new document under an open panel (reload, sign-in bounce) would start the page's own
             // camera and take the lens from the panel, so the panel closes first; the glue is installed
             // fresh and the person taps Scan again.
@@ -755,10 +815,13 @@ class MainActivity : ComponentActivity() {
             if (!request.isForMainFrame) return
             val url = request.url.toString()
             // The reverse proxy answers 502/503/504 with its own bare page while the gateway is down or
-            // restarting: show the app's own message with Retry instead.
+            // restarting: show the app's own message with Retry instead. The pages' service worker
+            // answers a navigation with its own 503 when the phone is offline, marked with
+            // X-MTG-Offline, which is the offline message, not the gateway's.
             if (GatewayUrl.isGateway(origin, url) && errorResponse.statusCode in 502..504) {
                 progress.visibility = View.GONE
-                errorText.text = getString(R.string.gateway_down)
+                val offline = errorResponse.responseHeaders?.keys?.any { it.equals(OFFLINE_HEADER, ignoreCase = true) } == true
+                errorText.text = getString(if (offline) R.string.page_offline else R.string.gateway_down)
                 errorBox.visibility = View.VISIBLE
                 return
             }
@@ -779,7 +842,11 @@ class MainActivity : ComponentActivity() {
             progress.visibility = View.GONE
             errorText.text = when (error.errorCode) {
                 WebViewClient.ERROR_HOST_LOOKUP, WebViewClient.ERROR_CONNECT, WebViewClient.ERROR_TIMEOUT -> getString(R.string.page_offline)
-                else -> getString(R.string.page_error, error.description)
+                else -> {
+                    // Chromium's code (net::ERR_...) goes to the log, not the screen.
+                    Log.w(TAG, "page failed: ${error.errorCode} ${error.description}")
+                    getString(R.string.page_error)
+                }
             }
             errorBox.visibility = View.VISIBLE
         }
@@ -911,7 +978,10 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
+        private const val TAG = "MtgAssistant"
         private const val BLANK = "about:blank"
+        /** Header the gateway's service worker puts on its own offline page (companion.py, /sw.js). */
+        private const val OFFLINE_HEADER = "X-MTG-Offline"
         private const val REQ_FILE = 2
         private const val REQ_PERM_WEB_CAMERA = 3
         private const val REQ_PERM_NATIVE_CAMERA = 4

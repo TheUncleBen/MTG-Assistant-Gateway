@@ -39,7 +39,7 @@ from starlette.responses import JSONResponse, PlainTextResponse, Response
 
 from . import __version__
 from .pages import _csrf, browser_session, login_redirect
-from .theme import render
+from .theme import display_name, render
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -478,6 +478,7 @@ def add_plugin_routes(server: MCPServer, state: AppState) -> None:
             signed_in=True,
             csrf=_csrf(s, sid),
             admin=admin,
+            user=display_name(user),
             current="/install",
         )
         resp.headers["Cache-Control"] = "no-store"

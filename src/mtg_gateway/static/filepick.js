@@ -10,16 +10,16 @@
     var file = input.files && input.files[0];
     var field = input.closest ? input.closest(".filepick") : null;
     var fname = field && field.querySelector(".fname");
-    if (fname) fname.textContent = file ? file.name : "No file chosen";
+    if (fname) { fname.textContent = file ? file.name : "No file chosen"; fname.classList.remove("error"); }
+    // a problem is said in the field itself (a themed note, never the browser's alert box)
+    var problem = function (text) {
+      input.value = "";
+      if (fname) { fname.textContent = text; fname.classList.add("error"); fname.setAttribute("role", "alert"); }
+    };
     if (!input.hasAttribute("data-fill")) return;
     var area = document.getElementById(input.getAttribute("data-fill"));
     if (!file || !area) return;
-    if (file.size > 4000000) {
-      alert("That file is larger than 4 MB.");
-      input.value = "";
-      if (fname) fname.textContent = "No file chosen";
-      return;
-    }
+    if (file.size > 4000000) { problem("That file is larger than 4 MB; choose a smaller one."); return; }
     var reader = new FileReader();
     reader.onload = function () {
       area.value = String(reader.result || "");
@@ -34,7 +34,7 @@
       }
       area.dispatchEvent(new Event("input", { bubbles: true }));
     };
-    reader.onerror = function () { alert("That file could not be read."); };
+    reader.onerror = function () { problem("That file could not be read; choose another."); };
     reader.readAsText(file);
   });
 })();

@@ -14,10 +14,22 @@ class GatewayUrlTest {
     @Test fun pathAndWhitespaceDropped() = assertEquals("https://mtg.example.com", ok("  https://MTG.example.com/scan?x=1 "))
     @Test fun defaultPortDropped() = assertEquals("https://mtg.example.com", ok("https://mtg.example.com:443/"))
     @Test fun customPortKept() = assertEquals("https://mtg.example.com:8443", ok("mtg.example.com:8443"))
-    @Test fun httpRejected() = assertTrue(bad("http://mtg.example.com").reason.contains("https"))
-    @Test fun userInfoRejected() = assertTrue(bad("https://me:secret@mtg.example.com").reason.contains("password"))
-    @Test fun emptyRejected() = assertTrue(bad("   ").reason.isNotEmpty())
-    @Test fun garbageRejected() = assertTrue(bad("https://exa mple").reason.isNotEmpty())
+    @Test fun httpRejected() = assertEquals(GatewayUrl.Problem.NOT_HTTPS, bad("http://mtg.example.com").reason)
+    @Test fun userInfoRejected() = assertEquals(GatewayUrl.Problem.USER_INFO, bad("https://me:secret@mtg.example.com").reason)
+    @Test fun emptyRejected() = assertEquals(GatewayUrl.Problem.EMPTY, bad("   ").reason)
+    @Test fun garbageRejected() = assertEquals(GatewayUrl.Problem.INVALID, bad("https://exa mple").reason)
+    @Test fun noHostRejected() = assertEquals(GatewayUrl.Problem.INVALID, bad("https:///scan").reason)
+
+    @Test fun shortcutsMatchTheWebManifest() {
+        // The same three as /app.webmanifest (companion.py), each a page on the configured gateway.
+        assertEquals(listOf("/decks", "/scan", "/proposals"), GatewayUrl.SHORTCUTS.map { it.second })
+        assertEquals(GatewayUrl.SHORTCUTS.size, GatewayUrl.SHORTCUTS.map { it.first }.toSet().size)
+        for ((_, path) in GatewayUrl.SHORTCUTS) {
+            val url = GatewayUrl.join("https://mtg.example.com:8443", path)
+            assertEquals("https://mtg.example.com:8443$path", url)
+            assertTrue(GatewayUrl.isGateway("https://mtg.example.com:8443", url))
+        }
+    }
 
     @Test fun originOfHandlesPorts() {
         assertEquals("https://a.example", GatewayUrl.originOf("https://a.example:443/x"))

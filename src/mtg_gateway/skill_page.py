@@ -22,7 +22,7 @@ from starlette.responses import RedirectResponse, Response
 from .admin import is_admin
 from .pages import _csrf, _safe_next, browser_session
 from .plugin_page import PLUGIN_NAME, plugin_dir
-from .theme import render
+from .theme import display_name, render
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -104,6 +104,7 @@ def add_skill_routes(server: MCPServer, state: AppState) -> None:
                 signed_in=True,
                 csrf=_csrf(s, sid),
                 admin=is_admin(state, sub),
+                user=display_name(state.db.get_user(sub)),
             )
         gpt = chatgpt_text(base)
         gpt_block = (
@@ -138,6 +139,7 @@ def add_skill_routes(server: MCPServer, state: AppState) -> None:
             signed_in=True,
             csrf=_csrf(s, sid),
             admin=is_admin(state, sub),
+            user=display_name(state.db.get_user(sub)),
         )
 
     @server.custom_route("/skill/mtg-gateway.zip", methods=["GET"], include_in_schema=False)
