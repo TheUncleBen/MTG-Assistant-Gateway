@@ -86,7 +86,9 @@ PRECONS: list[dict[str, Any]] = json.loads(PRECONS_FILE.read_text("utf-8")) if P
 
 
 def forge_jar() -> Path:
-    jars = sorted(FORGE_HOME.glob("*jar-with-dependencies.jar"))
+    # The release holds several launchers; only the desktop one has the headless `sim` mode (the
+    # mobile-dev one needs a display even to start).
+    jars = sorted(FORGE_HOME.glob("forge-gui-desktop-*jar-with-dependencies.jar"))
     if not jars:
         raise RuntimeError(f"no Forge jar in {FORGE_HOME}")
     return jars[-1]

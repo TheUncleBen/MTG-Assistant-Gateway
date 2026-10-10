@@ -23,7 +23,7 @@ RUN test -n "$FORGE_URL" \
  && curl -fsSL --retry 3 -o "/tmp/$FORGE_ASSET" "$FORGE_URL" \
  && echo "$FORGE_SHA256  /tmp/$FORGE_ASSET" | sha256sum -c - \
  && mkdir -p /opt/forge && tar -xjf "/tmp/$FORGE_ASSET" -C /opt/forge && rm "/tmp/$FORGE_ASSET" \
- && ls /opt/forge/*jar-with-dependencies.jar
+ && ls /opt/forge/forge-gui-desktop-*jar-with-dependencies.jar
 # scryfall-names.json is written by docker/forge/scryfall_names.py before the build (the image
 # workflow does this), so the image knows cards Forge lists under another printed name.
 COPY docker/forge/build_names.py docker/forge/forge_service.py docker/forge/scryfall-names.json \
