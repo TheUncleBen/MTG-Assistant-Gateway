@@ -236,7 +236,8 @@ def guide_body(
         "page and ask it to research, simulate or edit for you. An assistant's edit comes back to you as a "
         "proposal.</span></li></ol>"
         "<p class='tip'>On a phone the tabs at the bottom are Decks, Scan, Collection, Proposals and More; "
-        "Search is the magnifier at the top. More opens Home, History, Guide and Account (and Admin). "
+        "the magnifier at the top opens the search box for cards and decks. More opens Home, History, Guide "
+        "and Account (and Admin). "
         "Unfolded or on a tablet the tabs move to a rail down the left edge, with Search among them. "
         "Your account menu is your picture at the top right, and a tap anywhere else closes it.</p>"
     )
@@ -452,6 +453,13 @@ def guide_body(
         "every format in one place.</p>"
     )
     how_search = (
+        "<p>The search box at the top of every page finds cards and decks at once. Type part of a name: "
+        "the <strong>Cards</strong> group lists matching cards with their cost and type (pick one to open "
+        "it on the <a href='/cards'>Cards</a> page, where you can read it large and <strong>add it to any "
+        "of your decks</strong>, choosing the copies and category; the add is saved like an edit on the "
+        "deck page, with its snapshot), and the <strong>Decks</strong> group offers the deck search for "
+        "what you typed and, when a legendary creature matches, “Decks with commander …”. Enter on plain "
+        "text searches decks. On a phone the box is behind the magnifier at the top.</p>"
         "<p><a href='/search'>Search</a> finds public decks on Archidekt the way the Archidekt site does: by "
         "deck name, commander, format, colours or the person who built it, ordered by newest, most viewed "
         "or largest. Open any result to read it with the same views as your own decks; the owner's name "
@@ -733,6 +741,7 @@ def guide_body(
         ),
         ("Export", "<code>/decks/&lt;id&gt;/export</code>", "import text, plain list, sideboard, downloads"),
         ("Search", "<code>/search</code>", "public decks by name, commander, format, colours, owner"),
+        ("Cards", "<code>/cards</code>", "cards by name, with picture, cost and type; add one to a deck"),
         (
             "A member of Archidekt",
             "<code>/users/&lt;name&gt;</code>",

@@ -172,9 +172,11 @@ def add_app_routes(server: MCPServer, state: AppState) -> None:
             "<li>Open MTG Assistant Gateway and type this gateway's address: "
             f"<code>{html.escape(s.public_url)}</code>.</li>"
             "</ol>"
-            "<p class='muted small'>Updates: come back here and install the newer file over the old one. "
-            "Android only accepts an update signed with the same key as the installed app, so your "
-            "settings and sign-in are kept, and a file signed by anyone else is refused.</p></div>"
+            "<p class='muted small'>Updates: the app looks for new versions in the project's GitHub "
+            "releases and offers them itself; Update installs one over the app you have. Android only "
+            "accepts an update signed with the same key as the installed app, so your settings and "
+            "sign-in are kept, and a file signed by anyone else is refused. An app from before 0.7.11 "
+            "was signed with a test key: uninstall it once and install this file.</p></div>"
         )
         return render(
             "Android app",

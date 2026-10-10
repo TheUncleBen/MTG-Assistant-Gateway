@@ -277,7 +277,7 @@ def test_users_cannot_see_or_touch_each_others_decks_and_proposals(clients, env:
     async def go():
         f = clients["bob-test"]
         async with f.session() as s:
-            assert (await f.call(s, "whoami"))["preferred_username"] == "bob-test"
+            assert (await f.call(s, "whoami"))["name"] == "Bob Test"
             other = await f.call(s, "get_proposal", {"proposal_id": STATE["edit"]})
             assert other["ok"] is False and other["error"] == "not_found", other
             assert (await f.call(s, "apply_proposal", {"proposal_id": STATE["edit"]}))["error"] in (

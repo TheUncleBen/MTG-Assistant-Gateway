@@ -1,8 +1,8 @@
 {
   "name": "mtg-gateway",
-  "version": "0.7.12",
-  "description": "Magic: The Gathering research, goldfish simulation and safe Archidekt deck edits through a self-hosted MTG Assistant Gateway. Adds the gateway connector and the MTG skill; run /mtg-gateway:setup to sign in.",
-  "author": { "name": "MTG Assistant Gateway" },
+  "version": "0.7.13",
+  "description": "Magic: The Gathering research, goldfish simulation and safe Archidekt deck edits through a self-hosted MTG Assistant Gateway. Adds the gateway connector and the MTG skill; run /mtg-gateway:setup-mtg-gateway to sign in.",
+  "author": { "name": "TheUncleBen", "url": "https://github.com/TheUncleBen" },
   "homepage": "https://github.com/TheUncleBen/MTG-Assistant-Gateway",
   "keywords": ["mtg", "magic-the-gathering", "archidekt", "mcp"]
 }

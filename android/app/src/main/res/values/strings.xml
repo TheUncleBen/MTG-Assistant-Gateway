@@ -15,6 +15,22 @@
     <string name="menu_reload">Reload</string>
     <string name="menu_browser">Open in browser</string>
     <string name="menu_gateway">Change gateway</string>
+    <string name="menu_update">Check for app updates</string>
+
+    <string name="update_available">Version %1$s of the app is available.</string>
+    <string name="update_now">Update</string>
+    <string name="update_later">Later</string>
+    <string name="update_downloading">Downloading version %1$s…</string>
+    <string name="update_installing">Installing version %1$s…</string>
+    <string name="update_handed_over">Android is installing the update. The app closes when it is done; open it again from its icon. If Android asks, allow installs from this app and confirm.</string>
+    <string name="update_none">You have the newest version (%1$s).</string>
+    <string name="update_off">This build of the app does not look for updates. Get new versions from your gateway\'s Android app page.</string>
+    <string name="update_check_failed">Could not reach GitHub to look for an update. Check the connection and try again.</string>
+    <string name="update_other_key">Version %1$s is out, but it is signed with a different key than this app, so Android would refuse it. Get the app from your gateway\'s Android app page.</string>
+    <string name="update_download_failed">The update did not download completely. Try again later.</string>
+    <string name="update_not_an_app">The downloaded file is not the expected version of this app, so it was not installed.</string>
+    <string name="update_install_failed">The update was not installed (%1$s).</string>
+    <string name="update_confirm_failed">Android wants you to confirm the update. Open the app and tap Update again.</string>
     <string name="fab_label">Menu</string>
 
     <string name="page_error">The page could not be loaded: %1$s</string>
@@ -36,7 +52,8 @@
     <string name="scan_page_slow">The scan page did not answer in time. Tap Done and check the page.</string>
     <string name="scan_page_missing">This gateway has no scan page.</string>
     <string name="page_elsewhere">A page from another site tried to open inside the app and was stopped. Tap Retry to go back to your gateway.</string>
-    <string name="link_other_gateway">That link is for another site, not your gateway.</string>
+    <string name="link_other_gateway">This app opens links to your gateway (%1$s) and archidekt.com deck links. That link is neither, so it was not opened.</string>
+    <string name="link_none_shared">There was no https link in what was shared. Share a link to your gateway or an archidekt.com deck link.</string>
 
     <string name="camera_title">Scan a card</string>
     <string name="shoot">Shoot</string>

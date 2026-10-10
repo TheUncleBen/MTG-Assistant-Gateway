@@ -317,6 +317,8 @@ async def test_app_shell_routes(stack: Stack) -> None:
     assert m.headers["content-type"].startswith("application/manifest+json")
     sw = await h.http.get("/sw.js")
     assert sw.status_code == 200 and "fetch" in sw.text and sw.headers["cache-control"] == "no-store"
+    # one dropped connection doesn't show the offline page: two retries first, GET navigations only
+    assert "RETRY=[300,1000]" in sw.text and "e.request.method!=='GET'" in sw.text
     links = await h.http.get("/.well-known/assetlinks.json")
     assert links.status_code == 200
     assert links.json()[0]["relation"] == ["delegate_permission/common.handle_all_urls"]
@@ -751,5 +753,34 @@ async def test_a_missing_deck_is_still_not_found(stack: Stack) -> None:
             assert r.status_code == 404 and f"<title>{title}" in r.text, (path, r.status_code)
             assert "retry-after" not in r.headers, path
         assert (await b.http.get("/decks/999999/export.txt")).status_code == 404
+    finally:
+        await b.aclose()
+
+
+async def test_every_page_that_links_the_manifest_lets_the_browser_load_it(stack: Stack) -> None:
+    # Under default-src 'none' a page without manifest-src 'self' makes the browser refuse
+    # /app.webmanifest, and with it add-to-home-screen.
+    b = await linked_browser(stack)
+    try:
+        paths = (
+            "/",
+            "/decks",
+            "/decks/42",
+            "/decks/42/edit",
+            "/account",
+            "/proposals",
+            "/history",
+            "/collection",
+            "/search",
+            "/cards?q=sol",
+            "/activity",
+            "/scan",
+        )
+        for path in paths:
+            r = await b.http.get(path, headers=NAV)
+            assert r.status_code == 200, path
+            assert r.text.count("rel='manifest'") <= 1, path  # one manifest; a second would win
+            if "rel='manifest'" in r.text:
+                assert "manifest-src 'self'" in r.headers["content-security-policy"], path
     finally:
         await b.aclose()

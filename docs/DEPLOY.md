@@ -291,7 +291,7 @@ If the packages are public you can skip this step.
 
    | Variable | What to put |
    | --- | --- |
-   | `MTG_IMAGE`, `MTG_TAG` | `ghcr.io/<owner>/mtg-assistant-gateway` and `latest` to follow every new version, or one version to stay on it, for example `0.7.10` ([VERSIONS.md](VERSIONS.md)) |
+   | `MTG_IMAGE`, `MTG_TAG` | `ghcr.io/<owner>/mtg-assistant-gateway` and `latest` to follow every new version, or one version to stay on it, for example `0.7.13` ([VERSIONS.md](VERSIONS.md)) |
    | `MTG_PUBLIC_URL` | `https://mtg.example.com` |
    | `MTG_OIDC_ISSUER` | the issuer URL from step 3 |
    | `MTG_OIDC_CLIENT_ID` | the Client ID from step 3 |
@@ -353,13 +353,16 @@ versions refuse the `pids` key and the stack wouldn't deploy. The Compose
 file ([DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md)) sets both.
 
 The images are built on the official Python base images by tag, so every
-release build picks up the base image's latest security patches. The base
+gateway release picks up the base image's latest security patches. The base
 image is fetched from Google's public mirror of Docker Hub (`mirror.gcr.io`,
 the same images and digests), because Docker Hub limits anonymous pulls per
 address and shared CI runners hit that limit. As a fallback for anything a
 build still fetches from Docker Hub, the image jobs sign in to Docker Hub when
 the repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (a
-read-only access token) exist; without them the step is skipped. GitHub
+read-only access token) exist; without them the step is skipped. The
+Mystic Forge image is built once per tag (`1.3.2-mag2`) and not rebuilt by
+later releases; a manual run of its workflow from `main` rebuilds it with
+current base patches. GitHub
 Actions are pinned by commit, Python dependencies by version
 (`constraints.txt`), and the Android build checks its Gradle wrapper before
 running it.
@@ -651,6 +654,7 @@ gateway's `environment:` in the stack file, or it has no effect.
 | `MTG_APPROVAL_MODE_MAX` | no, *stack* | `auto` | The highest mode members may choose; `auto` means no cap. A stored choice above the cap is read as the cap |
 | `MTG_AUTO_APPLY_MAX_ROWS` | no, *stack* | `5` | How many review rows an edit may have and still count as low risk in `semi` mode (1 to 100) |
 | `MTG_APPLY_IN_CHAT` | no, *stack* | `true` | The Approve/Reject card an AI app that renders MCP Apps shows next to a proposal. Its Approve button calls `confirm_proposal` with a one-time code the assistant never sees; The same switch turns on the other cards (printings, recognised cards, a deck, the account) and the ten-minute signed data links they load (`GET /cards/data/`); `false` removes every card, the links and the tool, leaving the review page (and `apply_proposal` where the member's approval mode allows it) |
+| `MTG_UPDATE_CHECK` | no, *stack* | `true` | Twice a day, one anonymous request to GitHub's releases API for this project's newest release. When it is newer than the running gateway, admins see a notice on every page and the update steps on the admin overview (Portainer, Swarm, docker compose). Notice only: the gateway never pulls an image or touches Docker. `false` sends nothing |
 | `MTG_ARCHIDEKT_CALLS_PER_10_MIN` | no, *stack* | `120` | Archidekt work one member may start per 10 minutes (a deck read, a proposal, an apply, a link, and the proxied `archidekt_*` research tools), refilled evenly; past it the member gets `rate_limited` for a few minutes. Stops a looping assistant from keeping a steady stream of requests on Archidekt. 10 to 100000 |
 | `MTG_ARCHIDEKT_MIN_INTERVAL` | no, *stack* | `1.0` | Seconds between two Archidekt requests, for everyone together (0.25 to 10). See [OPERATIONS.md](OPERATIONS.md#archidekt-rate-limiting) |
 | `MTG_ARCHIDEKT_MAX_PER_MINUTE` | no, *stack* | `40` | Archidekt requests in any 60 seconds, for everyone together; past it requests wait their turn (1 to 120) |

@@ -570,6 +570,53 @@
   window.addEventListener("beforeunload", function (ev) {
     if (changes().length && !root.dataset.leaving) { ev.preventDefault(); ev.returnValue = ""; }
   });
+  // Back from the page that a discard went to may restore this one from memory: guard it again.
+  window.addEventListener("pageshow", function (ev) { if (ev.persisted) delete root.dataset.leaving; });
+
+  // Leaving with unsaved changes through the page itself (Close editor, a tab, a menu link, a
+  // form such as "Load" a scan) asks here, in the save bar, instead of the browser's generic
+  // "Leave site?" box: Discard goes on without that box, Keep editing stays, Save saves first.
+  // The browser's box is kept for what the page cannot see (closing the tab, reload, Back).
+  function askToLeave(go) {
+    var old = root.querySelector(".confirmbar");
+    if (old) old.remove();
+    var n = changes().length;
+    var bar = el("div", { class: "confirmbar leavebar notice warn", role: "alertdialog", "aria-labelledby": "leave-q" });
+    bar.appendChild(el("span", { id: "leave-q", text: "You have " + n + " unsaved change" + (n === 1 ? "" : "s") + ". Discard " + (n === 1 ? "it" : "them") + "?" }));
+    var discard = el("button", { type: "button", class: "discard", text: "Discard changes" });
+    var keep = el("button", { type: "button", class: "btn-primary keep", text: "Keep editing" });
+    var saveNow = el("button", { type: "button", class: "savefirst", text: "Save changes" });
+    bar.appendChild(keep); bar.appendChild(discard); bar.appendChild(saveNow);
+    root.querySelector(".editbar").appendChild(bar);
+    function close() { bar.remove(); document.removeEventListener("keydown", onKey, true); }
+    function onKey(e) { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); } }
+    document.addEventListener("keydown", onKey, true);
+    keep.addEventListener("click", close);
+    discard.addEventListener("click", function () { close(); root.dataset.leaving = "1"; go(); });
+    saveNow.addEventListener("click", function () { close(); save(false); });
+    keep.focus();
+  }
+  function pending() { return changes().length && !root.dataset.leaving; }
+  document.addEventListener("click", function (ev) {
+    if (ev.defaultPrevented || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+    var a = ev.target instanceof Element ? ev.target.closest("a[href]") : null;
+    if (!a || a.hasAttribute("download") || (a.target && a.target !== "_self") || !pending()) return;
+    var url = new URL(a.href, window.location.href);
+    if (url.origin !== window.location.origin) return;
+    if (url.hash && url.pathname === window.location.pathname && url.search === window.location.search) return;
+    ev.preventDefault();
+    askToLeave(function () { window.location.href = url.href; });
+  });
+  // capture phase, ahead of feedback.js's busy state; the editor's own forms are handled in place
+  window.addEventListener("submit", function (ev) {
+    var form = ev.target;
+    if (!(form instanceof HTMLFormElement) || form.matches("form.addcard, form.pastelist")) return;
+    if ((form.getAttribute("target") || "_self") !== "_self" || !pending()) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    var by = ev.submitter || null;
+    askToLeave(function () { if (form.requestSubmit) form.requestSubmit(by); else form.submit(); });
+  }, true);
 
   // save: one proposal, applied at once (apply:true); a big removal asks first. The tick box says
   // whether Archidekt also gets a backup copy (the gateway's snapshot is kept either way).

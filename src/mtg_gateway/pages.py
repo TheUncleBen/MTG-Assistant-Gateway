@@ -730,6 +730,7 @@ def _account_body(state: Any, sub: str, csrf: str | None, *, disclosure_read: bo
         f"<dt>Deck writes</dt><dd>{writes}</dd></dl>"
         "<p class='muted small'>Deck writes are switched on or off for the whole gateway by its "
         "operator. While they are off, proposals can be reviewed but not applied.</p>"
+        f"{_identity_details(user)}"
         "<div class='form-actions'>"
         "<a class='btn' href='/skill'>Get the assistant skill for Claude or ChatGPT</a>"
         "<a class='btn' href='/app'>Get the Android app</a>"
@@ -778,6 +779,25 @@ def _account_body(state: Any, sub: str, csrf: str | None, *, disclosure_read: bo
     s = state.settings
     out.append(_delete_card(csrf_in, s.backup_keep_days if s.backup_dir is not None else None))
     return "".join(out)
+
+
+def _identity_details(user: dict[str, Any]) -> str:
+    """What the sign-in service told the gateway about this person, for their eyes only. The
+    assistant gets far less (whoami: a display name; never the email or groups)."""
+    groups = [str(g) for g in (user.get("groups") or [])]
+    rows = [
+        ("Name", user.get("name")),
+        ("Username", user.get("preferred_username")),
+        ("Email", user.get("email")),
+        ("Groups", ", ".join(groups) if groups else None),
+    ]
+    facts = "".join(f"<dt>{k}</dt><dd>{html.escape(str(v))}</dd>" for k, v in rows if v)
+    return (
+        "<details class='identity'><summary>What your sign-in shares</summary>"
+        f"<dl class='meta'>{facts or '<dt>Nothing</dt><dd></dd>'}</dl>"
+        "<p class='muted small'>The gateway uses your groups only to check you may use it. "
+        "Your assistant is told your name and nothing else from this list.</p></details>"
+    )
 
 
 def _sweep_on(state: Any) -> bool:

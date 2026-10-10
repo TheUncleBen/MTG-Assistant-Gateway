@@ -94,6 +94,7 @@ services:
       # The Approve/Reject card an AI app shows in the chat may apply with its one-time code
       # (the assistant never has the code). false leaves only the review page.
       MTG_APPLY_IN_CHAT: ${MTG_APPLY_IN_CHAT:-true}
+      MTG_UPDATE_CHECK: ${MTG_UPDATE_CHECK:-true}
       MTG_ARCHIDEKT_BACKUPS: ${MTG_ARCHIDEKT_BACKUPS:-true}
       MTG_ARCHIDEKT_BACKUP_FOLDER: ${MTG_ARCHIDEKT_BACKUP_FOLDER:-MTG Gateway backups}
       # Token and session lifetimes, in seconds. Shorter is stricter.

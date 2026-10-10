@@ -157,6 +157,11 @@
   // case a proxy rewrote the user agent).
   if (window.MtgNative) {
     document.body.classList.add("app");
+    // An app older than this page has no such action: leave its button out rather than show a dead one.
+    var actions = document.querySelectorAll("[data-native]");
+    for (var k = 0; k < actions.length; k++) {
+      if (typeof window.MtgNative[actions[k].getAttribute("data-native")] !== "function") actions[k].setAttribute("hidden", "");
+    }
     document.addEventListener("click", function (e) {
       var b = e.target instanceof Element ? e.target.closest("[data-native]") : null;
       if (!b) return;
