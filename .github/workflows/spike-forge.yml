@@ -36,7 +36,7 @@ jobs:
           find /tmp/forge -maxdepth 2 | head -60
       - name: Run the spike
         env:
-          SPIKE_MODE: sim
+          SPIKE_MODE: coverage
           SPIKE_GAMES: "5"
           SPIKE_RUN_TIMEOUT: "1500"
           PYTHONUNBUFFERED: "1"

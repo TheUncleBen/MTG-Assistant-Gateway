@@ -106,6 +106,40 @@ def print_names() -> dict:
     return names
 
 
+REAL_WORLD = re.compile(
+    r"\b(wearing|wear|hair|beard|glasses|shirt|hat|shoes?|birthday|stand(s|ing)? up|sit(s|ting)? down|touch(es|ing)?|"
+    r"clap|sing|hum|dance|shout|whisper|speak|say(s)? |said|tell(s)? a|pun|joke|eyes|nose|ears?|tongue|chair|floor|"
+    r"artist|illustrat|art on|flavor text|photograph|in the real world|outside the game|game designer|"
+    r"opponent's face|letter|vowel|syllable|word|spell(s|ing)? out|rhyme|accent|silent|laugh|smile|draw a picture|"
+    r"phone|computer|internet|website|calendar|time zone|hours? of the day|o'clock|minutes?|seconds?|timer|countdown|"
+    r"pick up|drop|throw|flip this card|stack of|tower|dexterity|blow|kiss|hug|high.five|vote with|raise your hand)\b",
+    re.I)
+
+
+def classify_left(left: list[dict]) -> None:
+    """Split the cards still missing after name matching into what could be scripted for an engine
+    and what depends on the physical world (players' bodies, speech, the card's artwork, real time)."""
+    import collections
+    groups = collections.defaultdict(list)
+    for m in left:
+        text = m.get("oracle_text") or ""
+        if m.get("set_type") == "memorabilia":
+            g = "memorabilia (oversized, Hero's Path, Bounty, display)"
+        elif REAL_WORLD.search(text):
+            g = "physical-world rules (heuristic)"
+        elif m.get("set_type") == "funny" or m.get("border_color") == "silver" or m.get("security_stamp") == "acorn":
+            g = "joke/acorn cards with game-only rules (scriptable)"
+        elif m.get("set_type") == "alchemy":
+            g = "Arena-only Alchemy (scriptable)"
+        else:
+            g = "other legal-anywhere-or-playtest (scriptable)"
+        groups[g].append(m)
+    print("LEFTOVER CLASSIFICATION (all cards, after name matching):", flush=True)
+    for g, v in sorted(groups.items(), key=lambda kv: -len(kv[1])):
+        print(f"== {g}: {len(v)}", flush=True)
+        print("   " + " | ".join(f"{x['name']} [{x.get('set')}]: {(x.get('oracle_text') or '')[:90]!r}" for x in v[:45]), flush=True)
+
+
 def coverage() -> dict:
     forge = forge_card_names()
     (OUT / "forge-card-names.json").write_text(json.dumps(sorted(forge), indent=0))
@@ -160,7 +194,10 @@ def coverage() -> dict:
             if full.lower() not in forge_low and full.split(" // ")[0].lower() not in forge_low:
                 missing.append({"name": full, "set": c.get("set"), "set_type": c.get("set_type"),
                                 "games": c.get("games"), "type_line": c.get("type_line"),
-                                "released_at": c.get("released_at"), "layout": c.get("layout")})
+                                "released_at": c.get("released_at"), "layout": c.get("layout"),
+                                "oracle_text": c.get("oracle_text") or " // ".join(
+                                    f.get("oracle_text", "") for f in c.get("card_faces") or []),
+                                "border_color": c.get("border_color"), "security_stamp": c.get("security_stamp")})
         (OUT / f"forge-missing-{label}.json").write_text(json.dumps(missing, indent=1))
         n = len(pool)
         byname = {c["name"]: c for c in pool}
@@ -170,6 +207,8 @@ def coverage() -> dict:
                       "covered_pct": round(100 * (n - len(missing)) / n, 2),
                       "aliasable": len(aliases),
                       "covered_pct_with_aliases": round(100 * (n - len(left)) / n, 2)}
+        if label == "all_cards":
+            classify_left([m for m in missing if m["name"] not in aliases])
         if label != "all_cards":
             print(f"{label} STILL MISSING ({len(left)}): " + " | ".join(
                 f"{x} [{byname[x].get('set')}/{byname[x].get('set_type')}]" for x in left))
