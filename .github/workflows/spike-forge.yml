@@ -1,0 +1,50 @@
+# Throwaway measurement for the simulator decision: Forge's card coverage, memory, speed and
+# repeatability on an arm64 runner. Runs only on this spike branch; never merged.
+name: Spike Forge on arm64
+
+on:
+  push:
+    branches: ["claude/project-thread-gpqiqc"]
+    paths:
+      - ".github/workflows/spike-forge.yml"
+      - "scripts/spike_forge/**"
+
+permissions:
+  contents: read
+
+jobs:
+  spike:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends time xvfb bzip2
+      - name: Download the latest Forge release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view -R Card-Forge/forge --json tagName,assets --jq '.tagName, (.assets[].name)'
+          asset=$(gh release view -R Card-Forge/forge --json assets --jq '.assets[].name' | grep -E '^forge-gui-desktop-.*\.tar\.bz2$' | head -1)
+          test -n "$asset"
+          gh release download -R Card-Forge/forge --pattern "$asset" --dir /tmp/forge-dl
+          mkdir -p /tmp/forge && tar -xjf "/tmp/forge-dl/$asset" -C /tmp/forge
+          ls /tmp/forge | head -50
+      - name: Run the spike
+        run: |
+          jar=$(find /tmp/forge -maxdepth 3 -name 'forge-gui-desktop-*-jar-with-dependencies.jar' | head -1)
+          test -n "$jar"
+          python3 scripts/spike_forge/run_spike.py "$(dirname "$jar")" out
+      - name: Summary
+        if: always()
+        run: cat out/summary.md >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: forge-spike
+          path: out/
+          retention-days: 14
