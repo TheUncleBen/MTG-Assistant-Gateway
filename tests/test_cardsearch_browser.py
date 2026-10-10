@@ -24,10 +24,19 @@ pytest.importorskip("playwright")
 
 LONG_NAME = "Okiri, Belligerent Bannerkeeper of the Greatest Grand Army"
 RTL_NAME = "Solemn Simulacrum שלום עולם"
-EMOJI_NAME = "Solar Blaze \U0001F525\U0001F525"
-CATALOG = ["Aesi, Tyrant of Gyre Strait", "Sol Ring", "Sol Talisman", "Mountain", "Mountain Goat",
-           LONG_NAME, RTL_NAME, EMOJI_NAME, "Asmoranomardicadaistinaculdacar"] + SHELOBS
-RTL_DECK = "משחק שלי \U0001F409 Dragons of the Multiverse " * 3
+EMOJI_NAME = "Solar Blaze \U0001f525\U0001f525"
+CATALOG = [
+    "Aesi, Tyrant of Gyre Strait",
+    "Sol Ring",
+    "Sol Talisman",
+    "Mountain",
+    "Mountain Goat",
+    LONG_NAME,
+    RTL_NAME,
+    EMOJI_NAME,
+    "Asmoranomardicadaistinaculdacar",
+] + SHELOBS
+RTL_DECK = "משחק שלי \U0001f409 Dragons of the Multiverse " * 3
 UNBROKEN_DECK = "Superlongunbrokendecknamewithoutanyspaceatallwhatsoeverreally"
 SIZES = [(360, "light"), (360, "dark"), (720, "light"), (720, "dark"), (1280, "light"), (1280, "dark")]
 
@@ -247,7 +256,7 @@ def test_add_to_deck_from_the_card_page_saves_through_the_edit_endpoint(
         names = page.locator("#ad-deck option").all_inner_texts()
         assert any(n.startswith("Sample Commander Deck") for n in names), names
         assert any(n.startswith(UNBROKEN_DECK) for n in names), names
-        assert any("\U0001F409" in n for n in names), names
+        assert any("\U0001f409" in n for n in names), names
         page.evaluate(
             "() => { const s = document.getElementById('ad-deck'); s.value = '42';"
             " s.dispatchEvent(new Event('change', {bubbles: true})); }"
@@ -333,5 +342,32 @@ def test_a_member_without_a_link_cannot_open_the_dialog(server: Server) -> None:
         page.locator(".cc .pic").first.click()
         page.locator(".cardview.open .rules").wait_for(timeout=3000)
         assert len(reads) == 1, reads
+        assert errors == [], errors
+        browser.close()
+
+
+@pytest.mark.parametrize(
+    "path", ["/account", "/proposals", "/history", "/collection", "/search", "/decks/42"]
+)
+def test_the_top_bar_search_suggests_on_every_page_without_csp_violations(server: Server, path: str) -> None:
+    """Each page carries its own Content-Security-Policy; the box must work under all of them
+    (it fetches suggestions from the gateway and shows Scryfall card pictures)."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid = _link(server)
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1280, "dark", exe)
+        blocked: list[str] = []
+        page.on(
+            "console",
+            lambda m: blocked.append(m.text) if "Content Security Policy" in m.text else None,
+        )
+        page.goto(f"{server.base}{path}", wait_until="networkidle")
+        page.locator("#site-q").click()
+        page.locator("#site-q").press_sequentially("sol r", delay=25)
+        page.locator(".topbar [role=option]", has_text="Sol Ring").first.wait_for(timeout=3000)
+        page.wait_for_load_state("networkidle")
+        assert blocked == [], blocked
         assert errors == [], errors
         browser.close()
