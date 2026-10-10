@@ -1081,7 +1081,10 @@
       var b = el("b", "", c.owner.username || "someone");
       who.appendChild(b);
       who.appendChild(document.createTextNode(" · " + when(c.created_at) + (c.edited_at ? " · edited" : "")));
-      if (c.points) who.appendChild(document.createTextNode(" · " + c.points + (c.points === 1 ? " point" : " points")));
+      var pts = el("span", "pts");
+      var showPoints = function () { pts.textContent = c.points ? " · " + c.points + (c.points === 1 || c.points === -1 ? " point" : " points") : ""; };
+      showPoints();
+      who.appendChild(pts);
       box.appendChild(who);
       var p = el("p", "", c.text);
       box.appendChild(p);
@@ -1100,6 +1103,36 @@
         textarea.focus();
       });
       acts.appendChild(reply);
+      // votes on other people's comments (Archidekt's comment vote), asked first like the deck's Like
+      if (me !== null && c.id && !(c.owner && c.owner.id === me)) {
+        var voteBtn = function (up) {
+          var btn = el("button", "btn-ghost vote", up ? "▲ Up" : "▼ Down");
+          btn.type = "button";
+          var mine = function () { return c.user_vote === (up ? 1 : 2); };
+          var label = function () {
+            btn.setAttribute("aria-pressed", mine() ? "true" : "false");
+            btn.setAttribute("aria-label", (mine() ? "Take back your " : "Vote ") + (up ? "up" : "down") + ": comment by " + (c.owner.username || "someone"));
+          };
+          label();
+          btn.addEventListener("click", function () {
+            var undoing = mine();
+            confirmChip(btn, undoing ? "Take back your vote?" : (up ? "Vote this comment up on Archidekt?" : "Vote this comment down on Archidekt?"), undoing ? "Take back" : "Vote", function () {
+              btn.disabled = true;
+              socialRequest("POST", deckUrl + "/" + encodeURIComponent(c.id) + "/vote", { vote: undoing ? "none" : (up ? "up" : "down") }).then(function (d) {
+                btn.disabled = false;
+                if (!d.ok) { var n = el("p", "notice error"); n.appendChild(socialProblem(d)); acts.appendChild(n); setTimeout(function () { n.remove(); }, 8000); return; }
+                c.user_vote = d.vote; c.points = d.points;
+                showPoints();
+                Array.prototype.forEach.call(acts.querySelectorAll("button.vote"), function (x) { if (x.relabel) x.relabel(); });
+              }).catch(function () { btn.disabled = false; });
+            });
+          });
+          btn.relabel = label;
+          return btn;
+        };
+        acts.appendChild(voteBtn(true));
+        acts.appendChild(voteBtn(false));
+      }
       if (me !== null && c.owner && c.owner.id === me) {
         var edit = el("button", "btn-ghost", "Edit");
         edit.type = "button";

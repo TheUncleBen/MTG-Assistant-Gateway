@@ -1379,7 +1379,9 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             "<div class='editbar' role='region' aria-label='Pending changes'>"
             "<button type='button' class='btn-primary review' disabled>"
             f"{icon('check')} <span class='label'>Save changes</span></button>"
-            f"<button type='button' class='undo' disabled>{icon('undo')} Undo</button>"
+            f"<button type='button' class='undo' disabled title='Undo (Ctrl+Z)'>{icon('undo')} Undo</button>"
+            "<button type='button' class='redo' disabled title='Redo (Ctrl+Shift+Z)'>"
+            f"{icon('redo')} Redo</button>"
             "<span class='count muted'>No changes yet</span>"
             + (
                 # D-02: the extra copy on Archidekt is the member's choice per save; the gateway's own

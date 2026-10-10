@@ -797,6 +797,16 @@ class ScanService:
                 raise ScanError(exc.kind, str(exc)) from exc
             raise ScanError("unavailable", str(exc)) from exc
 
+    async def rulings(self, card_id: str, *, owner: str | None = None) -> list[dict[str, str]]:
+        """A card's rulings by Scryfall id, through the member's lookup slot and the shared pacer."""
+        try:
+            with self._lookup_slot(owner):
+                return await self.scryfall.rulings(card_id)
+        except ScryfallError as exc:
+            if exc.kind in ("unavailable", "rate_limited", "not_found"):
+                raise ScanError(exc.kind, str(exc)) from exc
+            raise ScanError("unavailable", str(exc)) from exc
+
     async def suggest(self, query: str, *, owner: str | None = None) -> list[str]:
         """Card names for typed text: from the in-memory catalog (names.py) when it is loaded,
         which costs no Scryfall call; otherwise Scryfall's autocomplete while it loads."""

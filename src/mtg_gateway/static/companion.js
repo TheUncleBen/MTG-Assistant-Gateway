@@ -51,6 +51,7 @@
   }
   var rowEls = {}; // lower name -> the <li> of an existing card
   var history = []; // snapshots for Undo
+  var future = [];  // snapshots for Redo: what Undo took back, until the next new change
 
   function snapshot() {
     var s = {};
@@ -60,21 +61,32 @@
     });
     return { rows: s, added: JSON.parse(JSON.stringify(added)) };
   }
-  function mutate(fn) {
-    history.push(snapshot());
-    if (history.length > 100) history.shift();
-    fn();
-    render();
-  }
-  function undo() {
-    var s = history.pop();
-    if (!s) return;
+  function restore(s) {
     Object.keys(s.rows).forEach(function (k) {
       var r = rows[k], v = s.rows[k];
       r.after = v.after; r.setCategory = v.setCategory; r.setFinish = v.setFinish; r.printing = v.printing;
     });
     added = s.added;
     render();
+  }
+  function mutate(fn) {
+    history.push(snapshot());
+    if (history.length > 100) history.shift();
+    future = [];
+    fn();
+    render();
+  }
+  function undo() {
+    var s = history.pop();
+    if (!s) return;
+    future.push(snapshot());
+    restore(s);
+  }
+  function redo() {
+    var s = future.pop();
+    if (!s) return;
+    history.push(snapshot());
+    restore(s);
   }
 
   var known = {}; // lower name -> card summary from the suggestion list (picture, mana, type)
@@ -269,6 +281,7 @@
     root.querySelector("button.review .label").textContent = n ? "Save " + n + " change" + (n === 1 ? "" : "s") : "Save changes";
     root.querySelector("button.review").disabled = !n || n > MAX;
     root.querySelector("button.undo").disabled = !history.length;
+    root.querySelector("button.redo").disabled = !future.length;
     root.querySelector(".limit").textContent = n > MAX ? "At most " + MAX + " changes can be saved in one go; save these first." : "";
     // added cards block
     var addedBox = root.querySelector(".added");
@@ -592,6 +605,16 @@
       .catch(function () { status.textContent = "The names could not be checked (network error); nothing was added."; btn.disabled = false; });
   });
   root.querySelector("button.undo").addEventListener("click", undo);
+  root.querySelector("button.redo").addEventListener("click", redo);
+  // Ctrl+Z / Ctrl+Shift+Z (Cmd on a Mac) and Ctrl+Y, except while typing in a field
+  document.addEventListener("keydown", function (ev) {
+    if (!(ev.ctrlKey || ev.metaKey) || ev.altKey) return;
+    var t = ev.target, tag = t && t.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (t && t.isContentEditable)) return;
+    var k = (ev.key || "").toLowerCase();
+    if (k === "z" && !ev.shiftKey) { ev.preventDefault(); undo(); }
+    else if ((k === "z" && ev.shiftKey) || k === "y") { ev.preventDefault(); redo(); }
+  });
 
   // menus close on outside click / Escape
   document.addEventListener("click", function (ev) {

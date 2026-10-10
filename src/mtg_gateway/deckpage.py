@@ -1450,6 +1450,12 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .comments .cmt form.editcomment textarea{flex:1 1 100%;min-height:4rem}
 .comments .cmt .confirmbar{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.3rem 0}
 .comments .cmt .acts button{margin:0;height:28px;padding:0 .6rem;font-size:.8rem}
+.comments .cmt .acts{display:flex;flex-wrap:wrap;gap:.25rem;align-items:center}
+.comments .cmt .acts button.vote[aria-pressed=true]{color:var(--orange-text);font-weight:700}
+.comments .cmt .acts .confirm{display:inline-flex;flex-wrap:wrap;gap:.4rem;align-items:center;min-width:0;
+  font-size:.85rem}
+.comments .cmt .acts .confirm > span{min-width:0;overflow-wrap:anywhere}
+.comments .cmt .acts .notice{flex-basis:100%;margin:.25rem 0 0}
 .comments form.newcomment{display:flex;flex-direction:column;gap:.5rem}
 .comments form.newcomment textarea{width:100%;resize:vertical;min-height:4.5rem}
 .comments form.newcomment button{align-self:flex-start;margin:0}
@@ -1632,6 +1638,16 @@ html.cardview-open{overflow:hidden}
 .cardview .chips{display:flex;flex-wrap:wrap;gap:.3rem}
 .cardview .chip{display:inline-block;padding:.05rem .5rem;border-radius:1rem;background:var(--surface-2);
   font-size:.82rem;line-height:1.5;white-space:nowrap}
+.cardview .pane .flip{display:flex;margin:.5rem auto 0;min-height:40px}
+.cardview .pane .flip[hidden]{display:none}
+.cardview .more{display:flex;flex-wrap:wrap;gap:.4rem}
+.cardview .more .btn{margin:0;min-height:40px}
+.cardview .rulings{font-size:.9rem;border-top:1px solid var(--border-soft);padding-top:.5rem;flex:0 1 auto;
+  min-height:4rem;overflow:auto;overscroll-behavior:contain}
+.cardview .rulings ul{list-style:none;margin:0;padding:0;display:grid;gap:.6rem}
+.cardview .rulings time{font-weight:700;color:var(--text-muted);font-size:.82rem;display:block}
+.cardview .rulings p{margin:.1rem 0;line-height:1.45;overflow-wrap:anywhere}
+.cardview .rulings .src{font-size:.8rem}
 .cardview .acts{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:auto;padding-top:.25rem}
 .cardview .acts .btn,.cardview .acts button{margin:0;flex:1 1 auto}
 @media (max-width:700px){
@@ -1643,7 +1659,7 @@ html.cardview-open{overflow:hidden}
   @keyframes cardup{from{transform:translateY(12px)}to{transform:none}}
   .cardview .head{flex-direction:column-reverse;align-items:flex-end;justify-content:flex-end;gap:.5rem}
   .cardview .head h3{align-self:stretch;font-size:1.2rem}
-  .cardview .cardtext{overflow:visible}
+  .cardview .cardtext,.cardview .rulings{overflow:visible}
   .cardview .acts .btn,.cardview .acts button{flex:1 1 100%} }
 @media (min-width:1400px){
   .cardview .box{width:min(100%,66rem);grid-template-columns:minmax(16rem,27rem) minmax(0,1fr)} }

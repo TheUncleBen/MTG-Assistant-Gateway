@@ -154,6 +154,30 @@ class SocialService:
         self.state.db.audit("deck_voted", sub=sub, detail={"deck_id": deck.id, "vote": want})
         return {"vote": want, "points": points}
 
+    async def vote_comment(self, sub: str, deck_id: str, comment_id: int, want: int) -> dict[str, Any]:
+        """Vote on one comment of the deck's thread (first page): PUT /comments/vote/{id}/ with
+        {up, remove}, the body archidekt.com's own comment vote sends (its bundle, read 2026-10-10).
+        The new score is worked out the way the site does, from the thread's points and the
+        member's earlier vote."""
+        self._me(sub)
+        thread = await self.comments(sub, deck_id)
+        found = _find(thread["comments"], comment_id)
+        if found is None:
+            raise DeckError(
+                "not_found", "that comment is not in this deck's thread (or not on its first page)"
+            )
+        if want == VOTE_NONE:
+            await self.decks._call(sub, lambda t: self.client.vote_deck(t, comment_id, up=True, remove=True))
+        else:
+            await self.decks._call(sub, lambda t: self.client.vote_deck(t, comment_id, up=want == VOTE_UP))
+        weight = {VOTE_UP: 1, VOTE_DOWN: -1, VOTE_NONE: 0}
+        before = found["user_vote"] if found["user_vote"] in weight else VOTE_NONE
+        points = found["points"] - weight[before] + weight[want]
+        self.state.db.audit(
+            "comment_voted", sub=sub, detail={"deck_id": deck_id, "comment": comment_id, "vote": want}
+        )
+        return {"comment": comment_id, "vote": want, "points": points}
+
     async def bookmark(self, sub: str, deck_id: str, on: bool) -> dict[str, Any]:
         self._me(sub)
         await self.decks._call(sub, lambda t: self.client.bookmark_deck(t, deck_id, on=on))
@@ -449,6 +473,28 @@ def add_social_routes(server: MCPServer, state: AppState) -> SocialService:
             return _fail("invalid", "text must be a string")
         try:
             out = await service.edit_comment(sub, deck_id(request), cid, data["text"])
+        except (DeckError, ArchidektError) as exc:
+            return _err(exc)
+        return JSONResponse({"ok": True, **out}, headers=NO_STORE)
+
+    @server.custom_route(
+        "/social/api/decks/{deck_id}/comments/{comment_id}/vote", methods=["POST"], include_in_schema=False
+    )
+    async def vote_comment(request: Request) -> Response:
+        sub = who(request, write=True)
+        if isinstance(sub, Response):
+            return sub
+        cid = comment_id(request)
+        if cid is None:
+            return _fail("invalid", "comment id must be a number")
+        data = await body(request)
+        if isinstance(data, Response):
+            return data
+        want = {"up": VOTE_UP, "down": VOTE_DOWN, "none": VOTE_NONE}.get(str(data.get("vote")))
+        if want is None:
+            return _fail("invalid", "vote must be up, down or none")
+        try:
+            out = await service.vote_comment(sub, deck_id(request), cid, want)
         except (DeckError, ArchidektError) as exc:
             return _err(exc)
         return JSONResponse({"ok": True, **out}, headers=NO_STORE)

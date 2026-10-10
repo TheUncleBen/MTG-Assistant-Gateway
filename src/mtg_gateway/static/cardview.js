@@ -1,7 +1,9 @@
 /* The card viewer every page shares: the card large, the whole card readable as text (every
    face: name, mana cost, type line, rules text with its symbols drawn, power and toughness or
    loyalty), the printing, prices and legality, and the actions the page offers. Pages pass the
-   card's data; nothing here talks to the server. Mana and rules symbols are the gateway's own
+   card's data. Two reads are the viewer's own, both same-origin and only for the open card: the
+   card's links and back-face picture (/cards/api/text, when the page did not pass them) and,
+   when the Rulings button is pressed, the rulings (/cards/api/rulings). Mana and rules symbols are the gateway's own
    glyphs (mana.py puts the SVG sprite on every page; this draws the same discs). A dialog with
    a focus trap, Escape, a click on the backdrop and the phone's Back button all close it.
    Loaded after static/mana.js (on every page) and before deck.js, companion.js, compare.js and
@@ -27,6 +29,33 @@
   // static/mana.js is deferred at the end of the body, so it is read when a card opens, not now
   function mana(cost) { return window.MtgMana.mana(cost); }
   function symbolize(text, target) { return window.MtgMana.symbolize(text, target); }
+
+  var extras = Object.create(null);   // card name -> promise of {links, back_img}
+  var rulingsFor = Object.create(null); // card name -> promise of the rulings list
+  function getJSON(url) {
+    return fetch(url, { credentials: "same-origin", headers: { Accept: "application/json" } })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); });
+  }
+  function extraFor(name) {
+    if (!extras[name]) {
+      extras[name] = getJSON("/cards/api/text?name=" + encodeURIComponent(name))
+        .then(function (x) { return x.ok && x.d && x.d.card ? x.d.card : null; })
+        .catch(function () { delete extras[name]; return null; });
+    }
+    return extras[name];
+  }
+  // EDHREC's page for a card, in the form Scryfall's own card data links to (edhrec.com/route/?cc=)
+  function edhrecUrl(name) {
+    return "https://edhrec.com/route/?cc=" + encodeURIComponent(name.split(" // ")[0]).replace(/%20/g, "+");
+  }
+  function outLink(text, href) {
+    var a = el("a", "btn small", text + " ↗");
+    a.href = href;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.setAttribute("aria-label", text + " (opens a new tab)");
+    return a;
+  }
 
   function ensure() {
     if (viewer) return viewer;
@@ -129,6 +158,31 @@
       pic = el("div", "ph", card.name || "");
     }
     pane.appendChild(pic);
+    /* A double-faced card's back: from the page's data or the card's links read below; the
+       button shows once the back picture is known. */
+    var front = pic.tagName === "IMG" ? pic.src : "";
+    var flip = el("button", "btn small flip", "Show back");
+    flip.type = "button";
+    flip.hidden = true;
+    var flipped = false;
+    flip.addEventListener("click", function () {
+      flipped = !flipped;
+      // a face that failed to load earlier left a name tile (feedback.js); the other face gets its chance
+      pic.classList.remove("img-broken");
+      var tile = pane.querySelector(".img-fallback");
+      if (tile) tile.remove();
+      pic.src = flipped ? flip.getAttribute("data-back") : front;
+      pic.alt = (card.name || "") + (flipped ? " (back face)" : "");
+      flip.textContent = flipped ? "Show front" : "Show back";
+      flip.setAttribute("aria-pressed", flipped ? "true" : "false");
+    });
+    function offerBack(url) {
+      if (!url || !front || flip.getAttribute("data-back")) return;
+      flip.setAttribute("data-back", url);
+      flip.setAttribute("aria-pressed", "false");
+      flip.hidden = false;
+    }
+    pane.appendChild(flip);
     var side = el("div", "info");
     var head = el("div", "head");
     var title = el("h3", null, card.name || "");
@@ -166,6 +220,75 @@
       fact(dl, "Legal in", chips, "legal");
     }
     if (dl.childNodes.length) side.appendChild(dl);
+    var more = el("div", "more");
+    var rbtn = el("button", "btn small", "Rulings");
+    rbtn.type = "button";
+    rbtn.setAttribute("aria-expanded", "false");
+    var rbox = el("div", "rulings");
+    rbox.hidden = true;
+    rbox.id = "cardview-rulings";
+    rbtn.setAttribute("aria-controls", rbox.id);
+    rbtn.addEventListener("click", function () {
+      var opening = rbox.hidden || rbox.hasAttribute("data-failed");  // after a failure, a press retries
+      rbox.removeAttribute("data-failed");
+      rbox.hidden = !opening;
+      rbtn.setAttribute("aria-expanded", opening ? "true" : "false");
+      if (!opening || rbox.getAttribute("data-done")) return;
+      rbox.textContent = "";
+      rbox.appendChild(el("p", "muted", "Reading the rulings…"));
+      var name = card.name || "";
+      if (!rulingsFor[name]) {
+        rulingsFor[name] = getJSON("/cards/api/rulings?name=" + encodeURIComponent(name))
+          .then(function (x) { if (!x.ok) delete rulingsFor[name]; return x; })
+          .catch(function () { delete rulingsFor[name]; return { ok: false, d: null }; });
+      }
+      rulingsFor[name].then(function (x) {
+        rbox.textContent = "";
+        if (!x.ok || !x.d || !x.d.ok) {
+          rbox.appendChild(el("p", "notice error", "The rulings could not be read" + (x.d && x.d.message ? ": " + x.d.message : ": no connection") + ". Press Rulings again to retry."));
+          rbox.setAttribute("data-failed", "1");
+          return;
+        }
+        rbox.setAttribute("data-done", "1");
+        var rows = x.d.rulings || [];
+        if (!rows.length) { rbox.appendChild(el("p", "muted", "This card has no rulings.")); return; }
+        var list = el("ul");
+        rows.forEach(function (r) {
+          var li = el("li");
+          if (r.date) {
+            var t = el("time", null, r.date);
+            t.setAttribute("datetime", r.date);
+            li.appendChild(t);
+          }
+          li.appendChild(symbolize(r.text || "", el("p")));
+          if (r.source) li.appendChild(el("span", "src muted", r.source));
+          list.appendChild(li);
+        });
+        rbox.appendChild(list);
+      });
+    });
+    more.appendChild(rbtn);
+    more.appendChild(outLink("EDHREC", card.links && card.links.edhrec || edhrecUrl(card.name || "")));
+    function offerLinks(links) {
+      if (links && links.tcgplayer && !more.querySelector("[data-shop]")) {
+        var t = outLink("TCGplayer", links.tcgplayer);
+        t.setAttribute("data-shop", "tcgplayer");
+        more.appendChild(t);
+      }
+    }
+    if (card.name) {
+      side.appendChild(more);
+      side.appendChild(rbox);
+    }
+    offerLinks(card.links);
+    offerBack(card.back_img);
+    if (card.name && (!card.links || (!card.back_img && card.faces && card.faces.length > 1))) {
+      extraFor(card.name).then(function (x) {
+        if (!x || !viewer || !viewer.classList.contains("open") || !v.contains(more)) return;
+        offerLinks(x.links);
+        offerBack(x.back_img);
+      });
+    }
     if (actions && actions.length) {
       var acts = el("div", "acts");
       actions.forEach(function (a) { acts.appendChild(a); });
