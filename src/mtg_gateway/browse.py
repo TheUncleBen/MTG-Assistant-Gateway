@@ -54,7 +54,8 @@ async def commander_names(state: Any, text: str) -> list[str]:
 
 
 SEARCH_CSP = (
-    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; "
+    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; "
+    "manifest-src 'self'; connect-src 'self'; "
     "img-src 'self' https://cards.scryfall.io; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 )
 COLOURS = (("W", "White"), ("U", "Blue"), ("B", "Black"), ("R", "Red"), ("G", "Green"))

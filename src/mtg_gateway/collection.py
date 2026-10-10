@@ -53,7 +53,8 @@ CONDITIONS = ("", "NM", "LP", "MP", "HP", "DMG")
 # ``editionDate`` was seen in the site's requests, the default is Archidekt's newest-first).
 SORTS = {"added": "Recently added", "edition": "Set release"}
 COLLECTION_CSP = (
-    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; "
+    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; "
+    "manifest-src 'self'; connect-src 'self'; "
     "img-src 'self' https://cards.scryfall.io; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 )
 _ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")

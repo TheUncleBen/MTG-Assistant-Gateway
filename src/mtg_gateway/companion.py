@@ -82,14 +82,16 @@ STATIC_DIR = Path(__file__).parent / "static"
 ICON_HEADERS = {"Cache-Control": "public, max-age=86400", "X-Content-Type-Options": "nosniff"}
 # Pages with the editor load one script from /static; everything else keeps the default CSP.
 DECK_CSP = (
-    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; "
+    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; "
+    "manifest-src 'self'; connect-src 'self'; "
     "img-src 'self' https://cards.scryfall.io; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 )
 DECKS_JSON_TIMEOUT = 25.0  # /api/decks/mine waits this long for a cold list at most
 # Format names the settings and new-deck forms offer, one per Archidekt format id.
 FORMAT_CHOICES = sorted({FORMAT_NAMES[i] for i in FORMAT_NAMES}, key=lambda n: format_label(n).lower())
 EDITOR_CSP = (
-    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; "
+    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; "
+    "manifest-src 'self'; connect-src 'self'; "
     "img-src 'self' https://cards.scryfall.io; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 )
 
@@ -730,9 +732,15 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         def sel(flag: bool) -> str:
             return " selected" if flag else ""
 
-        fmt_opts = "".join(
-            f"<option value='{_esc(n)}'{sel(fmt_current == n)}>{_esc(format_label(n))}</option>"
-            for n in FORMAT_CHOICES
+        # A deck with no format (or one this list doesn't know) shows that, selected, rather than
+        # the browser falling back to the first format; an empty value leaves the format alone.
+        fmt_opts = (
+            "" if fmt_current in FORMAT_CHOICES else "<option value='' selected>No format set</option>"
+        ) + (
+            "".join(
+                f"<option value='{_esc(n)}'{sel(fmt_current == n)}>{_esc(format_label(n))}</option>"
+                for n in FORMAT_CHOICES
+            )
         )
         bracket_current = v.get("edh_bracket", str(deck.edh_bracket or ""))
         brackets = {

@@ -77,6 +77,12 @@ the first signed Android app, and less personal data for assistants.
 - **Sharing a link into the Android app** works from apps such as Discord
   that send the link inside message text. Archidekt deck links open the
   gateway's deck page; other links get a clear message.
+- **Add to home screen works on every page.** The pages' security policy
+  now allows the gateway's own web app manifest (browsers refused it
+  everywhere except the scanner), and the scanner names only its own.
+- **Deck settings no longer change a deck's format by themselves.** A deck
+  with no format shows "No format set"; before, the list showed its first
+  format and saving any other setting applied it.
 - Short menu items stay on one line; the editor's save bar no longer covers
   the footer links at exactly 600 px wide; a menu-history browser test no
   longer depends on timing.

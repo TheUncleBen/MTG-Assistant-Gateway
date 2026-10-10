@@ -475,3 +475,33 @@ async def test_settings_and_new_deck_form_edge_cases(stack: Stack) -> None:
         assert bad.status_code == 400 and bad.json()["error"] == "invalid"
     finally:
         await b.aclose()
+
+
+async def test_settings_for_a_deck_without_a_format_keep_it_unset(stack: Stack) -> None:
+    # The format list used to fall back to its first entry, so saving any other setting quietly
+    # gave a deck with no format "1v1 Commander".
+    ark = stack.ark
+    ark.decks[42]["deckFormat"] = None
+    b = await _linked_browser(stack)
+    try:
+        csrf = await b.csrf()
+        page = await b.http.get("/decks/42/settings", headers=NAV)
+        assert page.status_code == 200
+        assert "<option value='' selected>No format set</option>" in page.text
+        r = await b.http.post(
+            "/decks/42/settings",
+            data={
+                "csrf": csrf,
+                "name": "Sample Commander Deck",
+                "deck_format": "",
+                "edh_bracket": "",
+                "description": "Only the description changes.",
+                "private": "",
+                "unlisted": "",
+            },
+        )
+        assert r.status_code == 303 and r.headers["location"] == "/decks/42?ok=saved", r.text
+        assert ark.decks[42]["deckFormat"] is None
+        assert ark.decks[42]["description"] == "Only the description changes."
+    finally:
+        await b.aclose()

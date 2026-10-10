@@ -38,7 +38,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 CARDS_CSP = (
-    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; "
+    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; "
+    "manifest-src 'self'; connect-src 'self'; "
     "img-src 'self' https://cards.scryfall.io; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 )
 MAX_QUERY = 100
