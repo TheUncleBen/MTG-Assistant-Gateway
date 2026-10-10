@@ -151,23 +151,63 @@ def test_closing_one_menu_and_opening_another_quickly_goes_back_once(server: Ser
         p.stop()
 
 
+def _settled(page) -> None:
+    """Wait until the race has played out, on page state rather than a clock: the Back has landed
+    (its popstate counted by POPS), and every task queued behind it (the toggle events of the menus
+    it closed or opened, a pushState they make) has run: two animation frames and a macrotask after
+    the last popstate, with no new popstate or history change in between."""
+    page.wait_for_function("() => window.__pops >= 1", timeout=10000)
+    page.evaluate(
+        """async () => {
+          for (;;) {
+            const before = [window.__pops, history.length, JSON.stringify(history.state),
+              document.querySelectorAll('details.dd[open]').length].join();
+            await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+            await new Promise(r => setTimeout(r, 0));
+            const after = [window.__pops, history.length, JSON.stringify(history.state),
+              document.querySelectorAll('details.dd[open]').length].join();
+            if (before === after) return;
+          }
+        }"""
+    )
+
+
+# Counts popstate events on the page (installed after the page has loaded, before the race).
+POPS = "() => { window.__pops = 0; addEventListener('popstate', () => { window.__pops++; }); }"
+
+
 def test_back_in_the_same_instant_as_opening_another_menu_stays_on_the_page(server: Server) -> None:
     """Gate R4-6b: with menu A open, Back and B's button in the same script run. Whatever ends up
     open, the page stays, and the history is consistent: a menu open only with the entry, and
-    never two entries."""
+    never two entries.
+
+    Deterministic (it was flaky under load): it waits for A's history entry before the race, for
+    the Back to land and everything queued behind it before checking, and for each later Back on
+    page state, never on a fixed sleep."""
     p, browser, page, errors = _open(server)
     try:
         url = page.url
+        length = page.evaluate("() => history.length")
         a, _b = _two_menus(page)
         _tap(page, a)
+        # A has taken its entry (the toggle event that pushes it is a task after the tap)
+        page.wait_for_function(
+            "() => !!(history.state && history.state.menu)"
+            " && document.querySelectorAll('details.dd[open]').length === 1"
+        )
+        assert page.evaluate("() => history.length") == length + 1
+        page.evaluate(POPS)
         page.evaluate(BACK_AND_OPEN, 1)
-        page.wait_for_timeout(300)
+        _settled(page)
         assert page.url == url, "Back together with a menu button left the page"
         state = page.evaluate(STATE)
         assert state in ({"menu": False, "open": 0}, {"menu": True, "open": 1}), state
+        # never two entries: one entry exactly while a menu is open
+        assert page.evaluate("() => history.length") == length + 1
         if state["open"]:
+            page.evaluate("() => { window.__pops = 0; }")
             page.go_back(wait_until="commit")
-            page.wait_for_timeout(200)
+            _settled(page)
             assert page.url == url and page.evaluate(STATE) == {"menu": False, "open": 0}
         page.go_back(wait_until="networkidle")
         assert page.url.endswith("/account"), "one more Back leaves the deck list exactly once"
