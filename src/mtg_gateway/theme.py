@@ -650,6 +650,10 @@ ul.decklist.skeleton>li{height:230px;list-style:none}
 .tabbar{display:none}
 .topbar .searchbtn{display:none}
 .tabbar details.more{position:relative}
+/* An open top-bar suggestion list or phone More sheet sits above the editor's save bar
+   (z-index 20), so a tap on a row can never land on Save changes underneath. */
+.topbar:focus-within{z-index:25}
+body .tabbar:has(details.more[open]){z-index:25}
 .tabbar details.more summary{list-style:none;cursor:pointer}
 .tabbar details.more summary::-webkit-details-marker{display:none}
 .tabbar details.more .menu.sheet{position:fixed;left:50%;transform:translateX(-50%);top:auto;
