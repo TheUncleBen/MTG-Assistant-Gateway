@@ -254,7 +254,9 @@ def _open(
     page.set_content(HOST % ("#262624" if theme == "dark" else "#ffffff", width, theme))
     page.evaluate("(r) => { window.toolResult = r; }", result)
     page.evaluate("(x) => { window.hostExtra = x; }", host_extra or {})
-    page.evaluate("(html) => { document.getElementById('f').srcdoc = html; }", card_html(name))
+    page.evaluate(
+        "(html) => { document.getElementById('f').srcdoc = html; }", card_html(name, "https://mtg.test")
+    )
     page.wait_for_function(
         "() => window.log.some(m => m.method === 'ui/notifications/initialized')", timeout=10_000
     )
@@ -633,3 +635,304 @@ def test_screenshots_at_phone_fold_and_desktop_widths_light_and_dark() -> None:
                     page.close()
         finally:
             browser.close()
+
+
+# -- the display-only cards: compare_decks, deck_stats, list_my_decks / search_decks, get_scan_session
+
+HOSTILE = "<img src=x onerror=alert(1)>"
+
+COMPARE = {
+    "ok": True,
+    "added": [{"name": "Arcane Signet " + HOSTILE, "quantity": 1}, {"name": "Cultivate", "quantity": 2}],
+    "removed": [{"name": "Acidic Slime", "quantity": 1}],
+    "changed": [{"name": "Forest", "before": 15, "after": 14}],
+    "summary": {
+        "before_size": 100,
+        "after_size": 101,
+        "cut": 1,
+        "added": 3,
+        "kept": 96,
+        "cut_pct": 1,
+        "added_pct": 3,
+        "basic_land_changes": [{"name": "Forest", "before": 15, "after": 14}],
+    },
+    "a": {
+        "id": "42",
+        "name": "Deck A " + HOSTILE,
+        "owner": "alice",
+        "format": "commander",
+        "card_count": 100,
+    },
+    "b": {
+        "id": "43",
+        "name": "A very long deck name " * 6,
+        "owner": "amy",
+        "format": "commander",
+        "card_count": 101,
+    },
+    "stats_delta": {
+        "card_count": 1,
+        "land_count": -1,
+        "average_mana_value": 0.12,
+        "price_total": 3.5,
+        "tutors": 0,
+    },
+}
+
+STATS = {
+    "ok": True,
+    "deck": {
+        "id": "42",
+        "name": "Sample " + HOSTILE,
+        "owner": "alice",
+        "url": "https://archidekt.com/decks/42",
+        "format": "commander",
+        "card_count": 100,
+    },
+    "stats": {
+        "card_count": 100,
+        "distinct": 64,
+        "land_count": 37,
+        "nonland_count": 63,
+        "average_mana_value": 3.12,
+        "mana_curve": {"0": 1, "1": 8, "2": 14, "3": 15, "4": 11, "5": 7, "6": 4, "7+": 3},
+        "colour_pips": {"G": 30, "U": 22},
+        "mana_sources": {"G": 20, "U": 16, "C": 3},
+        "price_total": 412.5,
+        "priced_cards": 64,
+        "format": "commander",
+        "game_changers": ["Cyclonic Rift"],
+        "tutors": 2,
+        "extra_turns": 0,
+        "mass_land_denial": 0,
+        "salt_total": 12.4,
+        "commanders": ["Aesi " + HOSTILE],
+        "colour_identity": ["G", "U"],
+        "bracket_estimate": {"bracket": 3, "kind": "estimate", "basis": ["1 game changer"]},
+        "archidekt_bracket": 2,
+        "checks": {
+            "problems": [
+                "bracket set to 2 but the cards suggest at least 3 (estimate)",
+                "Banned: " + HOSTILE,
+            ],
+            "ok": False,
+            "legal": False,
+        },
+    },
+}
+
+MY_DECKS = {
+    "ok": True,
+    "count": 2,
+    "decks": [
+        {
+            "id": "42",
+            "name": "Sample " + HOSTILE,
+            "format": 3,
+            "format_name": "commander",
+            "private": True,
+            "colors": {"G": 14, "U": 12},
+            "size": 100,
+            "bracket": 3,
+            "folder": "Cube",
+            "featured_scryfall_id": "6511f317-bd38-46d0-b800-7125a3f420da",
+            "owner": "alice",
+            "url": "https://archidekt.com/decks/42",
+        },
+        {
+            "id": "44",
+            "name": "x" * 90,
+            "format": 1,
+            "format_name": None,
+            "owner": "alice",
+            "colors": {},
+            "url": "https://archidekt.com/decks/44",
+            "featured_scryfall_id": None,
+        },
+    ],
+}
+
+SEARCH = {
+    "ok": True,
+    "decks": [
+        {
+            "id": "7",
+            "name": "Public deck",
+            "format_name": "modern",
+            "owner": "amy " + HOSTILE,
+            "colors": {"R": 3},
+            "size": 60,
+            "featured_scryfall_id": None,
+            "url": "https://archidekt.com/decks/7",
+            "gateway_url": "https://mtg.test/decks/7",
+        }
+    ],
+    "count": 1000,
+    "has_more": True,
+    "page": 1,
+}
+
+SCAN = {
+    "ok": True,
+    "id": "scan_1",
+    "name": "Binder " + HOSTILE,
+    "status": "open",
+    "item_count": 3,
+    "card_count": 4,
+    "unresolved": 1,
+    "items": [
+        {
+            "quantity": 2,
+            "name": "Sol Ring",
+            "status": "exact",
+            "note": "",
+            "card": {"name": "Sol Ring", "scryfall_id": "s-1", "set": "cmm", "collector_number": "411"},
+        },
+        {
+            "quantity": 1,
+            "name": "Islnad",
+            "status": "fuzzy",
+            "note": "name corrected",
+            "card": {"name": "Island", "scryfall_id": "s-2", "set": "dmu", "collector_number": "262"},
+        },
+        {"quantity": 1, "name": "Zzyzx " + HOSTILE, "status": "not_found", "note": "", "card": None},
+    ],
+    "decklist_text": "2 Sol Ring\n1 Island",
+    "changes": [],
+}
+
+
+def _fits(card) -> None:
+    """No horizontal scroll inside the card's frame."""
+    sw, cw = card.locator("body").evaluate(
+        "b => [b.ownerDocument.documentElement.scrollWidth, b.ownerDocument.documentElement.clientWidth]"
+    )
+    assert sw <= cw, (sw, cw)
+
+
+def _display_card(name: str, result: dict, ready: str, check) -> None:
+    """Open one display-only card at 320px in both themes, wait for ``ready``, then ``check``;
+    hostile names stay text (no element from them, no dialog), and an error result shows its message."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            for theme in ("light", "dark"):
+                page = browser.new_page(viewport={"width": 336, "height": 900})
+                errors: list[str] = []
+                dialogs: list[str] = []
+                page.on("pageerror", lambda e, errors=errors: errors.append(str(e)))
+                page.on("dialog", lambda d, dialogs=dialogs: (dialogs.append(d.message), d.dismiss()))
+                _route(page)
+                card = _open(page, name, result, width=320, theme=theme)
+                card.locator(ready).first.wait_for(timeout=10_000)
+                page.wait_for_timeout(150)
+                _fits(card)
+                check(page, card)
+                _fits(card)
+                assert card.locator("img[src='x']").count() == 0 and not dialogs, dialogs
+                _shot(page, f"{name}-{theme}-320")
+                assert not errors, errors
+                page.close()
+            page = browser.new_page()
+            card = _open(
+                page,
+                name,
+                {"structuredContent": {"ok": False, "error": "not_found", "message": "gone " + HOSTILE}},
+            )
+            card.locator("#status.err").wait_for()
+            assert ("gone " + HOSTILE) in card.locator("#status").inner_text()
+            assert card.locator("img[src='x']").count() == 0
+        finally:
+            browser.close()
+
+
+def _keyboard_open(page, card, text: str) -> str:
+    """Give a link the keyboard focus, press Enter, and return the URL the host was asked to open."""
+    before = len(_calls(page, "ui/open-link"))
+    target = card.locator("a.link", has_text=text).first
+    assert target.get_attribute("href") is not None  # an anchor with an href is in the tab order
+    target.focus()
+    assert target.evaluate("a => a.ownerDocument.activeElement === a")
+    target.press("Enter")
+    page.wait_for_function(
+        f"() => window.log.filter(m => m.method === 'ui/open-link').length > {before}", timeout=5_000
+    )
+    return _calls(page, "ui/open-link")[-1]["params"]["url"]
+
+
+def test_compare_card_shows_each_side_and_the_differences_at_320px() -> None:
+    def check(page, card) -> None:
+        assert ("Deck A " + HOSTILE) in card.locator("#sides").inner_text()
+        assert card.locator("#count").inner_text().lower() == "96 kept"
+        rows = card.locator("#list .row")
+        assert rows.count() == 1 and "Acidic Slime" in rows.first.inner_text()  # A only first
+        card.locator("#tabs button", has_text="In B only").click()
+        assert card.locator("#list .row").count() == 2
+        assert ("Arcane Signet " + HOSTILE) in card.locator("#list").inner_text()
+        card.locator("#tabs button", has_text="In both").click()
+        assert card.locator("#list .row").count() == 1  # Forest once, not twice
+        assert "15 → 14" in card.locator("#list .row").first.inner_text()
+        delta = card.locator("#delta").inner_text()
+        assert "Lands" in delta and "−1" in delta and "+$3.50" in delta and "Tutors" not in delta
+
+    _display_card("compare-card", {"structuredContent": COMPARE}, "#list .row", check)
+
+
+def test_stats_card_draws_curve_colours_price_and_verdict_at_320px() -> None:
+    def check(page, card) -> None:
+        assert card.locator("#title").inner_text() == "Sample " + HOSTILE
+        assert card.locator("#curve .col").count() == 8
+        assert "15 at 3" in card.locator("#curve").get_attribute("aria-label")
+        colours = card.locator("#colours li")
+        assert colours.count() == 3 and "30 symbols" in colours.nth(1).inner_text()  # U, G, C
+        facts = card.locator("#facts").inner_text()
+        assert "$412.50" in facts and "3.12" in facts
+        verdict = card.locator("#verdict")
+        assert "bad" in verdict.get_attribute("class") and "Bracket estimate 3" in verdict.inner_text()
+        assert ("Banned: " + HOSTILE) in verdict.inner_text()
+        assert card.locator("#state").inner_text().lower() == "2 problems"
+        assert _keyboard_open(page, card, "Open in the app") == "https://mtg.test/decks/42"
+
+    _display_card("stats-card", {"structuredContent": STATS}, "#curve .col", check)
+
+
+def test_deck_list_card_lists_decks_with_covers_and_links_at_320px() -> None:
+    def check(page, card) -> None:
+        rows = card.locator("#list .row.deck")
+        assert rows.count() == 2 and card.locator("#title").inner_text() == "Your decks"
+        assert ("Sample " + HOSTILE) in rows.first.inner_text()
+        assert "private" in rows.first.inner_text() and "commander" in rows.first.inner_text()
+        cover = rows.first.locator("img.cover")
+        assert cover.count() == 1 and "art_crop" in cover.get_attribute("src")
+        assert cover.get_attribute("src").startswith("https://api.scryfall.com/")
+        assert rows.nth(1).locator("img").count() == 0
+        assert _keyboard_open(page, card, "Open in the app") == "https://mtg.test/decks/42"
+        assert _keyboard_open(page, card, "Archidekt") == "https://archidekt.com/decks/42"
+
+    _display_card("deck-list-card", {"structuredContent": MY_DECKS}, "#list .row.deck", check)
+
+    def check_search(page, card) -> None:
+        assert card.locator("#title").inner_text() == "Decks found"
+        assert ("by amy " + HOSTILE) in card.locator("#list").inner_text()
+        assert "more" in card.locator("#note").inner_text()
+        assert _keyboard_open(page, card, "Open in the app") == "https://mtg.test/decks/7"
+
+    _display_card("deck-list-card", {"structuredContent": SEARCH}, "#list .row.deck", check_search)
+
+
+def test_scan_card_flags_unrecognised_items_and_links_the_scan_page_at_320px() -> None:
+    def check(page, card) -> None:
+        assert card.locator("#title").inner_text() == "Binder " + HOSTILE
+        rows = card.locator("#list .row")
+        assert rows.count() == 3
+        assert "flag" in rows.first.get_attribute("class")  # the unrecognised item comes first
+        assert ("Zzyzx " + HOSTILE) in rows.first.inner_text()
+        assert "not recognised" in rows.first.inner_text()
+        assert "read as Islnad" in card.locator("#list").inner_text()
+        assert card.locator("#summary").inner_text() == "3 cards recognised, 1 item needs a look."
+        assert _keyboard_open(page, card, "Open the Scan page") == "https://mtg.test/scan"
+
+    _display_card("scan-card", {"structuredContent": SCAN}, "#list .row", check)

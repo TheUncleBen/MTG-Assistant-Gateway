@@ -272,3 +272,47 @@ def test_bulk_edge_cases_at_320(server: Server) -> None:
         assert page.locator(".deck-toast button", has_text="Undo").count() == 0
         assert errors == []
         browser.close()
+
+
+@pytest.mark.parametrize(("width", "scheme"), [(320, "dark"), (1366, "light")])
+def test_brewer_view_and_custom_mana_value(server: Server, width: int, scheme: str) -> None:
+    """0.7.20: the Brewer view (picture, name and cost, type line, rules text) and the card
+    menu's Mana value form, which saves Archidekt's custom mana value and clears it again."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, color_scheme=scheme)
+        page.goto(f"{server.base}/decks/42?view=brewer", wait_until="networkidle")
+        assert page.locator(".deckview.brewer").count() == 1
+        row = page.locator(".deckview.brewer .row.brew[data-card='Cultivate']").first
+        assert "Sorcery" in row.locator(".ty").inner_text()
+        assert _overflow(page) == 0
+        _shot(page, f"deck-brewer-{width}-{scheme}")
+        row.scroll_into_view_if_needed()
+        row.click(button="right")
+        page.locator(".ctxmenu [role=menuitem]", has_text="Mana value").click()
+        assert page.locator(".ctxmenu .mvform button", has_text="Clear").count() == 0  # nothing to clear
+        page.locator(".ctxmenu .mvform input").fill("25")
+        page.locator(".ctxmenu .mvform button", has_text="Save").click()
+        assert "0 to 20" in page.locator(".ctxmenu .mvform .status").inner_text()
+        page.locator(".ctxmenu .mvform input").fill("2")
+        assert page.locator(".ctxmenu .mvform .status").inner_text() == ""  # typing clears the error
+        _shot(page, f"deck-mv-form-{width}-{scheme}")
+        with page.expect_response(EDIT_URL) as r:
+            page.locator(".ctxmenu .mvform button", has_text="Save").click()
+        assert json.loads(r.value.request.post_data)["changes"] == [
+            {"action": "set_mana_value", "card_name": "Cultivate", "mana_value": 2, "zone": "main"}
+        ]
+        page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
+        assert _rows(server, "Cultivate")[0]["customCmc"] == 2
+        assert row.get_attribute("data-mv") == "2"
+        # Undo takes the override off again
+        with page.expect_response(EDIT_URL) as r2:
+            page.locator(".deck-toast button", has_text="Undo").click()
+        assert json.loads(r2.value.request.post_data)["changes"][0]["mana_value"] is None
+        page.locator(".deck-toast .msg", has_text="Undone").wait_for(timeout=8000)
+        assert _rows(server, "Cultivate")[0].get("customCmc") is None
+        assert errors == []
+        browser.close()

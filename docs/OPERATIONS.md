@@ -567,8 +567,12 @@ for the member when the assistant calls `apply_proposal`.
 The same switch covers the cards that show and relay rather than apply:
 the printings of a card (`card_printings`), the cards read from photos or a
 list (`resolve_cards`), a deck by category (`get_deck`,
-`get_snapshot`) and the account's setup (`whoami`, `account_status`). A tap
-on them reaches the assistant as plain text; they call no tool. A deck's
+`get_snapshot`) and the account's setup (`whoami`, `account_status`), and
+four that only display the tool's own answer, with nothing added to it: a
+comparison (`compare_decks`), a deck's statistics (`deck_stats`), a list of
+decks (`list_my_decks`, `search_decks`) and a scan session
+(`get_scan_session`). A tap on them reaches the assistant as plain text, or
+opens a page; they call no tool. A deck's
 rows or a card's printings are too big for a tool result, so the card gets
 a signed link to `GET /cards/data/<token>`: the token names the member, what
 it is for and which deck, snapshot or card, and expires after ten minutes

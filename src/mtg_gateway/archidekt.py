@@ -229,6 +229,8 @@ class DeckCard:
     two_card_combo_ids: list[str] = field(default_factory=list)
     notes: str = ""  # the user's own text: carried as is, never interpreted
     label: str = ""
+    # Archidekt's custom mana value for this row (the deck's own override of the card's), or None
+    custom_cmc: float | None = None
     companion: bool = False
     image_hash: str = ""
     scryfall_uid: str = ""
@@ -240,6 +242,7 @@ class DeckCard:
     faces: list[dict[str, str]] = field(default_factory=list)  # per face: name, mana_cost, type_line, text...
     artist: str = ""
     flavor: str = ""
+    keywords: list[str] = field(default_factory=list)  # Archidekt's oracle ``keywords`` (Flying, Equip...)
 
     @property
     def type_line(self) -> str:
@@ -1338,6 +1341,31 @@ class ArchidektClient:
             "POST", "/users/follow/", token=token, json_body={"followId": int(user_id), "unfollow": not on}
         )
 
+    # Deck collaborators ("editors"), from archidekt.com's deck settings bundle (2026-10-10):
+    # GET /decks/{id}/editors/ answers {"results": [{id, user {id, username, avatar}, createdBy,
+    # createdAt}]}; POST /decks/{id}/editors/ {"user": user id} adds one and answers that row;
+    # DELETE /decks/editors/{editor row id}/ removes one. Archidekt's page offers only people the
+    # owner follows. Reported from the bundle, not exercised live by this session.
+
+    async def deck_editors(self, token: str, deck_id: str) -> list[dict[str, Any]]:
+        if not DECK_ID_RE.fullmatch(str(deck_id)):
+            raise ArchidektError("contract", "deck id is not a number")
+        body = await self._request("GET", f"/decks/{deck_id}/editors/", token=token)
+        rows = body.get("results") if isinstance(body, dict) else body
+        if not isinstance(rows, list):
+            raise ArchidektError("contract", "unexpected collaborator list shape")
+        return [r for r in rows if isinstance(r, dict)]
+
+    async def add_deck_editor(self, token: str, deck_id: str, user_id: int) -> Any:
+        if not DECK_ID_RE.fullmatch(str(deck_id)):
+            raise ArchidektError("contract", "deck id is not a number")
+        return await self._request(
+            "POST", f"/decks/{deck_id}/editors/", token=token, json_body={"user": int(user_id)}
+        )
+
+    async def remove_deck_editor(self, token: str, editor_id: int) -> Any:
+        return await self._request("DELETE", f"/decks/editors/{int(editor_id)}/", token=token)
+
     async def following(self, token: str, user_id: str, page: int = 1) -> dict[str, Any]:
         """GET /users/{id}/following/: {"count", "next", "previous", "results": [{id, username,
         avatar, following}]} (checked live 2026-10-07)."""
@@ -1643,6 +1671,7 @@ def parse_deck(body: Any) -> Deck:
                 two_card_combo_ids=[str(i) for i in combos if i is not None],
                 notes=str(entry.get("notes") or ""),
                 label=str(entry.get("label") or ""),
+                custom_cmc=_number(entry.get("customCmc")),
                 companion=entry.get("companion") is True,
                 image_hash=str(card.get("scryfallImageHash") or ""),
                 scryfall_uid=str(card.get("uid") or ""),
@@ -1654,6 +1683,7 @@ def parse_deck(body: Any) -> Deck:
                 faces=_faces(oracle),
                 artist=str(card.get("artist") or ""),
                 flavor=str(card.get("flavor") or ""),
+                keywords=_str_list(oracle.get("keywords")),
                 owned=_int(card.get("owned")),
             )
         )

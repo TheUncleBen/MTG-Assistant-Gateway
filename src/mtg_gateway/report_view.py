@@ -465,6 +465,31 @@ def tiles_for(g: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+def speed_numbers(block: Any) -> dict[str, Any]:
+    """The simulation's speed numbers a deck's report trend follows (reports.TREND_METRICS):
+    the commander's median cast turn, the median turn 40 damage was dealt when it was, and the
+    share of games (in percent) that dealt it by the last simulated turn (``until_turn``). Only
+    what a successful simulation stored; a missing number is None, never guessed."""
+    g = parse_goldfish(block)
+    out: dict[str, Any] = {
+        "commander_cast_median_turn": None,
+        "kill_median_turn": None,
+        "kill_pct": None,
+        "until_turn": None,
+    }
+    if not g or not g["ok"]:
+        return out
+    m = g.get("metrics") or {}
+    cc = m.get("commander_cast") if isinstance(m.get("commander_cast"), dict) else {}
+    kill = m.get("kill") if isinstance(m.get("kill"), dict) else {}
+    out["commander_cast_median_turn"] = _float(cc.get("median_among_reached"))
+    out["kill_median_turn"] = _float(kill.get("median_among_reached"))
+    rate = _rate(kill.get("reached_pct"))
+    out["kill_pct"] = round(100 * rate["value"], 1) if rate else None
+    out["until_turn"] = g.get("until_turn") if isinstance(g.get("until_turn"), int) else None
+    return out
+
+
 # -- drawing -----------------------------------------------------------------------
 def _tile(t: dict[str, Any]) -> str:
     rate = t.get("rate")
@@ -1131,6 +1156,7 @@ __all__ = [
     "report_export_html",
     "report_markdown",
     "report_sections",
+    "speed_numbers",
     "svg_columns",
     "svg_lines",
     "tiles_for",

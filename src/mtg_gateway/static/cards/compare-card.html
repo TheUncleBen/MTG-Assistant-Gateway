@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Deck comparison</title>
+<style>
+/*@BASE@*/
+.sides{display:grid;grid-template-columns:minmax(0,1fr);gap:6px;margin:0 0 10px}
+@media (min-width:480px){.sides{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
+.side{background:var(--bg2);border-radius:var(--radius);padding:8px 10px;min-width:0}
+.side .k{display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.side .v{display:block;font-weight:600;overflow-wrap:anywhere}
+.side .s{display:block;font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.chips button .n{font-variant-numeric:tabular-nums;margin-left:4px}
+.row.plain{grid-template-columns:minmax(0,1fr) auto;min-height:44px}
+.qty.plus{color:var(--green)} .qty.minus{color:var(--red)}
+.delta{list-style:none;margin:10px 0 0;padding:0;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.delta li{display:flex;justify-content:space-between;gap:10px;padding:7px 10px;border-top:1px solid var(--border);font-size:13px}
+.delta li:first-child{border-top:0}
+.delta li > span:first-child{color:var(--muted)}
+.delta li b{font-variant-numeric:tabular-nums;font-weight:600;white-space:nowrap}
+.empty{padding:12px 10px;color:var(--muted);font-size:13px}
+h2.dh{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:12px 0 6px}
+h2.dh + .delta{margin-top:0}
+</style>
+</head>
+<body>
+<div class="card" id="card">
+  <div class="head"><h1 id="title">Deck comparison</h1><span class="badge info" id="count"></span></div>
+  <p class="sum" id="summary"></p>
+  <div class="sides" id="sides"></div>
+  <div class="chips" id="tabs" role="group" aria-label="Which cards to show"></div>
+  <div class="scroll" id="scroll"><div id="list" role="list"></div></div>
+  <h2 class="dh hidden" id="dhead">Statistics, B compared with A</h2>
+  <ul class="delta hidden" id="delta" aria-labelledby="dhead"></ul>
+  <p class="note hidden" id="note"></p>
+  <div class="status hidden" id="status" role="status" aria-live="polite"></div>
+</div>
+<script>
+/*@BRIDGE@*/
+(function () {
+  "use strict";
+  var B = Bridge, el = B.el, $ = B.$;
+  var MAX_ROWS = 300;
+  var LABELS = {
+    card_count: "Cards", distinct: "Different cards", land_count: "Lands", nonland_count: "Nonlands",
+    average_mana_value: "Average mana value", price_total: "Price", priced_cards: "Priced cards",
+    tutors: "Tutors", extra_turns: "Extra turns", mass_land_denial: "Mass land denial", salt_total: "Salt"
+  };
+  var data = null, tab = "a";
+
+  function num(v) { var n = Number(v); return isFinite(n) ? n : 0; }
+  function side(label, brief, size) {
+    var d = el("div", "side");
+    d.appendChild(el("span", "k", label));
+    d.appendChild(el("span", "v", brief && brief.name ? brief.name : "Pasted list"));
+    var bits = [];
+    if (brief && brief.owner) bits.push("by " + brief.owner);
+    if (brief && brief.format) bits.push(String(brief.format));
+    bits.push(size + " cards");
+    d.appendChild(el("span", "s", bits.join(" · ")));
+    return d;
+  }
+  function rowsFor(which) {
+    if (which === "a") return (data.removed || []).map(function (r) { return { name: r.name, qty: "×" + num(r.quantity), cls: "minus" }; });
+    if (which === "b") return (data.added || []).map(function (r) { return { name: r.name, qty: "×" + num(r.quantity), cls: "plus" }; });
+    var basics = ((data.summary || {}).basic_land_changes || []).filter(function (r) {
+      return !(data.changed || []).some(function (c) { return c.name === r.name; });
+    });
+    return (data.changed || []).concat(basics).map(function (r) { return { name: r.name, qty: num(r.before) + " → " + num(r.after), cls: "" }; });
+  }
+  function drawTabs() {
+    var t = $("tabs"); t.replaceChildren();
+    [["a", "In A only"], ["b", "In B only"], ["both", "In both, count changed"]].forEach(function (p) {
+      var b = el("button", tab === p[0] ? "on" : ""); b.type = "button";
+      b.setAttribute("aria-pressed", tab === p[0] ? "true" : "false");
+      b.appendChild(document.createTextNode(p[1]));
+      b.appendChild(el("span", "n", "(" + rowsFor(p[0]).length + ")"));
+      b.onclick = function () { tab = p[0]; draw(); };
+      t.appendChild(b);
+    });
+  }
+  function draw() {
+    drawTabs();
+    var list = $("list"); list.replaceChildren();
+    var rows = rowsFor(tab);
+    if (!rows.length) list.appendChild(el("div", "empty", tab === "both" ? "No card in both decks changed its count." : "No cards."));
+    rows.slice(0, MAX_ROWS).forEach(function (r) {
+      var li = el("div", "row plain"); li.setAttribute("role", "listitem");
+      li.appendChild(el("span", "name", r.name));
+      li.appendChild(el("span", "qty " + r.cls, r.qty));
+      list.appendChild(li);
+    });
+    if (rows.length > MAX_ROWS) list.appendChild(el("div", "empty", (rows.length - MAX_ROWS) + " more in the assistant's message."));
+    B.reportSize();
+  }
+  function fmtDelta(key, v) {
+    var n = num(v), sign = n > 0 ? "+" : n < 0 ? "−" : "", abs = Math.abs(n);
+    var text = key === "price_total" ? "$" + abs.toFixed(2) : (Math.round(abs * 100) / 100).toString();
+    return sign + text;
+  }
+  function drawDelta(delta) {
+    var ul = $("delta"); ul.replaceChildren();
+    var shown = 0;
+    Object.keys(LABELS).forEach(function (k) {
+      if (!delta || delta[k] == null || num(delta[k]) === 0) return;
+      var li = el("li"); li.appendChild(el("span", "", LABELS[k])); li.appendChild(el("b", "", fmtDelta(k, delta[k])));
+      ul.appendChild(li); shown++;
+    });
+    ul.className = shown ? "delta" : "delta hidden";
+    $("dhead").className = shown ? "dh" : "dh hidden";
+  }
+  function load(result) {
+    var sc = result.structuredContent || {};
+    if (result.isError || (sc.ok === false && !sc.summary)) {
+      B.setStatus(String(sc.message || (result.content && result.content[0] && result.content[0].text) || "The decks could not be compared."), "err");
+      return;
+    }
+    data = sc;
+    var sum = sc.summary || {};
+    var sides = $("sides"); sides.replaceChildren();
+    sides.appendChild(side("Deck A", sc.a, num(sum.before_size)));
+    sides.appendChild(side("Deck B", sc.b, num(sum.after_size)));
+    $("count").textContent = num(sum.kept) + " kept";
+    $("summary").textContent = num(sum.cut) + (num(sum.cut) === 1 ? " card" : " cards") + " only in A (" + num(sum.cut_pct) + "% of A), " +
+      num(sum.added) + " only in B (" + num(sum.added_pct) + "% of B), basic lands aside.";
+    drawDelta(sc.stats_delta);
+    var notes = [];
+    if (sc.unread_lines && typeof sc.unread_lines === "object") notes.push("Some lines of a pasted list are not cards; the assistant's message lists them.");
+    if (sc.goldfish_ab) notes.push("The A/B simulation's numbers are in the assistant's message.");
+    if (notes.length) { $("note").textContent = notes.join(" "); $("note").className = "note"; }
+    if (sc.ok === false && sc.message) B.setStatus(String(sc.message), "err");
+    draw();
+  }
+  B.start("MTG Assistant Gateway comparison card", load, {});
+})();
+</script>
+</body>
+</html>

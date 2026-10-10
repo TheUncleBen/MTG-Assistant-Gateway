@@ -125,7 +125,7 @@
     dl.appendChild(dd);
   }
   /* card: {name, img, set, type, mana, text, pt, loyalty, finish, faces: [{name, mana, type, text, pt, loyalty}],
-            rarity, price, artist, flavor, salt, rank, legal (comma list of formats), gc}
+            rarity, price, artist, flavor, salt, rank, legal (comma list of formats), gc, mv, notes}
      actions: elements (buttons, links) shown under the text */
   function open(card, actions) {
     var v = ensure();
@@ -216,6 +216,8 @@
     fact(dl, "Salt", card.salt ? String(card.salt) : "");
     fact(dl, "EDHREC rank", card.rank ? Number(card.rank).toLocaleString() : "");
     if (card.gc) fact(dl, "Note", "Game changer", "gc");
+    fact(dl, "Custom mana value", card.mv);
+    fact(dl, "Card notes", card.notes, "notes");  // Archidekt's per-card notes, shown read-only
     if (card.legal) {
       var chips = el("span", "chips");
       card.legal.split(",").filter(Boolean).forEach(function (f) { chips.appendChild(el("span", "chip", FORMATS[f] || titleCase(f))); });
@@ -324,7 +326,9 @@
       salt: node.getAttribute("data-salt") || "",
       rank: node.getAttribute("data-rank") || "",
       legal: node.getAttribute("data-legal") || "",
-      gc: node.hasAttribute("data-gc")
+      gc: node.hasAttribute("data-gc"),
+      mv: node.getAttribute("data-mv") || "",
+      notes: node.getAttribute("data-notes") || ""
     };
   }
   window.MtgCardView = { text: extraFor, open: open, update: update, close: close, fromElement: fromElement, mana: mana, symbolize: symbolize };

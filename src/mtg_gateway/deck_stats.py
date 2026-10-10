@@ -84,6 +84,86 @@ def _round(value: float) -> float:
     return round(value + 0.0, 2)
 
 
+# A card's one type for a split curve, in the order Archidekt picks a card's auto category
+# (views._AUTO_TYPES), so an Artifact Creature counts once, as a Creature.
+PRIMARY_TYPES = (
+    "Creature", "Planeswalker", "Battle", "Instant", "Sorcery", "Artifact", "Enchantment", "Land",
+)  # fmt: skip
+CURVE_BUCKETS = ("0", "1", "2", "3", "4", "5", "6", "7+")
+
+
+def primary_type(card: DeckCard) -> str:
+    """The card's first type in PRIMARY_TYPES order ('Other' when it has none of them)."""
+    have = {t.casefold() for t in card.types}
+    return next((t for t in PRIMARY_TYPES if t.casefold() in have), "Other")
+
+
+def primary_category(card: DeckCard) -> str:
+    """The row's first category (Archidekt's primary category); an uncategorised card counts
+    under Archidekt's auto category for it, else its primary type."""
+    if card.categories:
+        return card.categories[0]
+    return card.default_category or primary_type(card)
+
+
+def curve_bucket(card: DeckCard) -> str | None:
+    """The mana curve column of a nonland card ('0' to '6', '7+'); None for lands and cards
+    without a mana value."""
+    if is_land(card) or card.cmc is None:
+        return None
+    return _curve_bucket(card.cmc)
+
+
+def curve_by(cards: list[DeckCard], key: Any) -> dict[str, dict[str, int]]:
+    """The mana curve split by ``key(card)`` (a type or a category): per column, cards per group,
+    biggest group first. The groups in a column add up to that column of ``mana_curve``."""
+    out: dict[str, Counter[str]] = {b: Counter() for b in CURVE_BUCKETS}
+    for c in cards:
+        bucket = curve_bucket(c)
+        if bucket is not None:
+            out[bucket][key(c)] += c.quantity
+    return {b: dict(n.most_common()) for b, n in out.items()}
+
+
+def outside_pips(card: DeckCard, identity: set[str]) -> dict[str, float]:
+    """The coloured pips of the card's mana cost whose colour is outside ``identity`` (a hybrid
+    pip's half for an outside colour counts as half)."""
+    return {k: v for k, v in mana_pips(card.mana_cost).items() if k not in identity}
+
+
+def out_of_identity(cards: list[DeckCard], commanders: list[DeckCard]) -> dict[str, Any] | None:
+    """Mana-cost pips outside the commanders' colour identity: ``identity`` (WUBRG letters),
+    ``pips`` per outside colour (times the copies), ``cards`` with the outside ``colours`` per
+    card. None when the deck has no commander."""
+    if not commanders:
+        return None
+    identity = {colour_letter(x) for c in commanders for x in c.color_identity} - {None}
+    pips: dict[str, float] = {}
+    rows: list[dict[str, Any]] = []
+    for c in cards:
+        out = outside_pips(c, identity)  # type: ignore[arg-type]
+        if not out:
+            continue
+        rows.append({"name": c.name, "colours": [k for k in WUBRG if k in out]})
+        for k, v in out.items():
+            pips[k] = pips.get(k, 0.0) + v * c.quantity
+    return {
+        "identity": [k for k in WUBRG if k in identity],
+        "pips": {k: _round(pips[k]) for k in WUBRG if k in pips},
+        "cards": rows,
+    }
+
+
+def counts_of(cards: list[DeckCard], field_name: str) -> dict[str, int]:
+    """Cards (copies) per value of a list field such as ``subtypes`` or ``keywords``, most first
+    (then by name)."""
+    n: Counter[str] = Counter()
+    for c in cards:
+        for v in dict.fromkeys(getattr(c, field_name)):
+            n[v] += c.quantity
+    return dict(sorted(n.items(), key=lambda kv: (-kv[1], kv[0].casefold())))
+
+
 def bracket_estimate(cards: list[DeckCard], deck_format: str | None = None) -> dict[str, Any]:
     """A Commander bracket estimate from Archidekt's own card flags only (game changers, mass
     land denial, extra turns, tutors, two-card combos). Rules: any mass land denial, or two or
@@ -151,9 +231,13 @@ def compute(deck: Deck) -> dict[str, Any]:
         for colour, n in mana_pips(c.mana_cost).items():
             pips[colour] = pips.get(colour, 0.0) + n * c.quantity
     sources: dict[str, int] = {}
+    land_sources: dict[str, int] = {}
     for c in cards:
         for colour, n in (c.mana_production or {}).items():
             sources[colour] = sources.get(colour, 0) + n * c.quantity
+            if is_land(c):
+                land_sources[colour] = land_sources.get(colour, 0) + n * c.quantity
+    order = lambda kv: (WUBRG + "C").find(kv[0])  # noqa: E731
 
     types: Counter[str] = Counter()
     rarities: Counter[str] = Counter()
@@ -190,9 +274,14 @@ def compute(deck: Deck) -> dict[str, Any]:
         "average_mana_value": _round(mv_total / mv_count) if mv_count else None,
         "mana_curve": dict(curve),
         "colour_pips": {k: _round(v) for k, v in pips.items() if k in WUBRG and v},
-        "mana_sources": dict(sorted(sources.items(), key=lambda kv: (WUBRG + "C").find(kv[0]))),
+        "mana_sources": dict(sorted(sources.items(), key=order)),
+        "mana_sources_lands": dict(sorted(land_sources.items(), key=order)),
+        "mana_curve_by_type": curve_by(cards, primary_type),
+        "mana_curve_by_category": curve_by(cards, primary_category),
         "type_counts": dict(types.most_common()),
         "rarity_counts": dict(rarities.most_common()),
+        "subtype_counts": counts_of(cards, "subtypes"),
+        "keyword_counts": counts_of(cards, "keywords"),
         "price_total": _round(price_total),
         "priced_cards": len(priced),
         "format": deck.format,
@@ -205,6 +294,7 @@ def compute(deck: Deck) -> dict[str, Any]:
         "salt_total": _round(sum(c.salt * c.quantity for c in cards if c.salt is not None)),
         "commanders": [c.name for c in commanders],
         "colour_identity": colour_identity(cards),
+        "out_of_identity": out_of_identity(cards, commanders),
         "bracket_estimate": bracket_estimate(cards, deck.format),
         "archidekt_bracket": deck.edh_bracket,
         "checks": deck_checks(deck, cards, commanders, qty),

@@ -7,6 +7,32 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.20] - 2026-10-10
+
+The rest of the Archidekt deck features that could be built from Archidekt's own site code.
+
+### Added
+- Custom mana value: set or clear a card's mana value override from the deck page's card menu
+  (Mana value…), or ask the assistant (`propose_deck_changes` with `set_mana_value`). It is a
+  low-risk change, like a colour tag.
+- Per-card notes show in the card viewer and in `get_deck`, read-only.
+- The Brewer view on the deck page: each card's picture, name and cost, type line and rules text.
+- Deck collaborators: listed on the deck settings page and by `get_deck_collaborators`. Adding or
+  removing one (`propose_collaborator`, or the settings page form) changes who can edit the deck,
+  so it is an account action: it opens a review page and only your Apply there changes Archidekt,
+  in every approval mode. Only people you follow can be added, as on Archidekt.
+- More statistics controls: mana curve by type or category, colours as bars or a pie, land-only
+  colour sources, pips outside the commander's identity, subtype and keyword counts, and a click
+  on any of them shows only those cards. `deck_stats` returns the same numbers.
+- Report trends on a deck's History page (sparklines and a table across its stored reports), and
+  as `trend` in `list_deck_reports` for that deck.
+- More in-chat cards (where the owner has the in-chat card on): a comparison card for
+  `compare_decks`, a statistics card for `deck_stats`, a deck list card for `list_my_decks` and
+  `search_decks`, and a scan session card for `get_scan_session`. The tool results are unchanged.
+
+### Not built
+- Writing per-card notes: no Archidekt route for it was found, so the gateway does not guess one.
+
 ## [0.7.19] - 2026-10-10
 
 ### Security

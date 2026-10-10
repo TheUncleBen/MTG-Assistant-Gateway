@@ -119,13 +119,15 @@ def test_no_white_text_on_orange_anywhere() -> None:
 
 
 def test_card_default_text_colours_pass_on_every_card_background() -> None:
-    for html in (card_html("deck-card"), proposal_html()):
+    names = ("deck-card", "compare-card", "stats-card", "deck-list-card", "scan-card")
+    for html in (*(card_html(n) for n in names), proposal_html()):
         assert "--color-text-tertiary" not in html  # muted text takes the host's secondary colour
         blocks = re.findall(r":root(?:\[data-theme=dark\])?\{[^}]*--muted[^}]*\}", html)
         assert len(blocks) >= 2
         for block in blocks:
             d = dict(re.findall(r"--([a-z0-9-]+):var\(--[a-z-]+,(#[0-9a-f]{6})\)", block))
             for fg, bgs in (
+                ("text", ("bg", "bg2")),  # the stats card's bar counts sit on bg2
                 ("muted", ("bg", "bg2", "green-bg", "amber-bg")),
                 ("blue", ("bg", "bg2", "blue-bg")),
                 ("green", ("bg", "green-bg")),

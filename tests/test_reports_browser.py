@@ -96,7 +96,7 @@ def test_report_and_history_pages_fit(server: Server, width: int, scheme: str) -
             """() => {
               const day = document.querySelector('.history .day');
               const sel = document.querySelector('.filterbar select');
-              const spark = document.querySelector('.trend .tile');
+              const spark = document.querySelector('.trend .tmetric');
               return {
                 scrollWidth: document.documentElement.scrollWidth,
                 innerWidth: window.innerWidth,
@@ -104,7 +104,7 @@ def test_report_and_history_pages_fit(server: Server, width: int, scheme: str) -
                 dayPosition: day ? getComputedStyle(day).position : null,
                 selectArrow: sel ? getComputedStyle(sel).appearance : null,
                 selectWidth: sel ? sel.getBoundingClientRect().width : 0,
-                trendBg: spark ? getComputedStyle(spark).backgroundColor : null,
+                trendBorder: spark ? getComputedStyle(spark).borderTopStyle : null,
               };
             }"""
         )
@@ -112,7 +112,7 @@ def test_report_and_history_pages_fit(server: Server, width: int, scheme: str) -
         assert hist["scrollWidth"] <= hist["innerWidth"], hist
         assert hist["rows"] == 25 and hist["dayPosition"] == "sticky"
         assert hist["selectArrow"] == "none" and 0 < hist["selectWidth"] <= hist["innerWidth"]
-        assert hist["trendBg"] not in (None, "rgba(0, 0, 0, 0)", "transparent"), "trend tiles are styled"
+        assert hist["trendBorder"] == "solid", "trend cards are styled"
         # a row's details open in place and the Restore button sits in a form-actions row
         page.locator(".hrow.k-snapshot details summary").first.click()
         restore = page.locator(".hrow.k-snapshot details[open] .form-actions button").first
@@ -202,5 +202,83 @@ def test_forge_section_refreshes_itself_until_the_run_ends(server: Server) -> No
         assert page.locator(".card.forge[aria-live=polite]").count() == 1
         assert page.evaluate("window.__same_page === true")
         assert "Games played: 2 of 2." in page.locator("#rep-md").input_value()  # Copy as Markdown too
+        assert not errors, errors
+        browser.close()
+
+
+# phone, a folded Fold's cover screen, an unfolded Fold, a laptop
+@pytest.mark.parametrize("width", [320, 344, 717, 1366])
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_report_trends_fit_and_read(server: Server, width: int, scheme: str) -> None:
+    """A deck's report trends: no sideways scroll (the table scrolls in its own box), each
+    sparkline is a labelled image drawn in a colour with 3:1 against the card, and every text
+    in the section keeps 4.5:1 in both themes."""
+    from playwright.sync_api import sync_playwright
+
+    from .test_editor_leave_browser import CONTRAST
+    from .test_history_page import GOLDFISH_PRECON
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = server.sign_in_and_link()
+    now = int(time.time())
+    store_report(server.db, "user-1", "rep_a", taken_at=now - 6 * 86400)
+    store_report(server.db, "user-1", "rep_b", taken_at=now - 3 * 86400, goldfish=None)
+    store_report(
+        server.db,
+        "user-1",
+        "rep_c",
+        taken_at=now - 200,
+        stats={"average_mana_value": 3.05, "price_total": 1234.5, "land_count": 35},
+        goldfish=GOLDFISH_PRECON,
+    )
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": width, "height": 900}, color_scheme=scheme)
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        errors: list[str] = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(f"{server.base}/history?deck_id=42", wait_until="networkidle")
+        page.locator(".trend details.tdata summary").click()
+        _shot(page, f"trends-{width}-{scheme}")
+        state = page.evaluate(
+            """(contrast) => {
+              const ratio = eval(contrast);
+              const trend = document.querySelector('.trend');
+              const texts = Array.from(trend.querySelectorAll('*'))
+                .filter(e => Array.from(e.childNodes).some(n => n.nodeType === 3 && n.textContent.trim()))
+                .filter(e => e.getClientRects().length);
+              const low = texts.map(e => [e.tagName + ' ' + e.textContent.trim().slice(0, 30), ratio(e)])
+                .filter(([, r]) => r < 4.5);
+              const svg = trend.querySelector('svg.tspark');
+              // the line against the card behind it: its stroke as the "text" colour
+              const probe = document.createElement('span');
+              probe.style.color = getComputedStyle(svg.querySelector('polyline')).stroke;
+              svg.parentElement.appendChild(probe);
+              const lineRatio = ratio(probe);
+              probe.remove();
+              const tbl = trend.querySelector('.tbl');
+              return {
+                scrollWidth: document.documentElement.scrollWidth,
+                innerWidth: window.innerWidth,
+                low,
+                checked: texts.length,
+                lineRatio,
+                svgs: Array.from(trend.querySelectorAll('svg.tspark')).map(s => [
+                  s.getAttribute('role'), s.getAttribute('aria-label'), s.getBoundingClientRect().width]),
+                tableRight: tbl.getBoundingClientRect().right,
+              };
+            }""",
+            CONTRAST,
+        )
+        assert state["scrollWidth"] <= state["innerWidth"], state
+        assert state["tableRight"] <= state["innerWidth"]
+        assert state["checked"] > 20 and not state["low"], state["low"]
+        assert state["lineRatio"] >= 3, state["lineRatio"]
+        assert len(state["svgs"]) == 6
+        for role, label, w in state["svgs"]:
+            assert role == "img" and "over" in label and " on " in label and 0 < w <= state["innerWidth"]
         assert not errors, errors
         browser.close()

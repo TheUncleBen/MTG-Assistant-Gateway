@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Scan session</title>
+<style>
+/*@BASE@*/
+.row.flag{background:var(--amber-bg)}
+.row.flag .name,.row.flag .qty{color:var(--amber)}
+.row.flag .sub{color:var(--amber)}
+.row.flag .pill{background:var(--bg);border-color:var(--amber);color:var(--amber)}
+</style>
+</head>
+<body>
+<div class="card" id="card">
+  <div class="head"><h1 id="title">Scan session</h1><span class="badge" id="state"></span></div>
+  <p class="sum" id="summary"></p>
+  <div class="scroll" id="scroll"><div id="list" role="list"></div></div>
+  <p class="note hidden" id="note"></p>
+  <div class="actions" id="actions"></div>
+  <div class="status hidden" id="status" role="status" aria-live="polite"></div>
+</div>
+<script>
+/*@BRIDGE@*/
+(function () {
+  "use strict";
+  var B = Bridge, el = B.el, $ = B.$;
+  var GATEWAY = "@GATEWAY@";
+  var MAX_IMAGES = 120, MAX_ROWS = 400;
+  var FLAGS = { not_found: "not recognised", ambiguous: "which one?", deferred: "not looked up yet", error: "lookup failed", fuzzy: "name corrected" };
+
+  function num(v) { var n = Number(v); return isFinite(n) && n > 0 ? n : 1; }
+  function needsLook(it) { return !it.card || ["not_found", "ambiguous", "deferred", "error"].indexOf(it.status) >= 0; }
+  function load(result) {
+    var sc = result.structuredContent || {};
+    if (sc.ok === false || result.isError) {
+      B.setStatus(String(sc.message || (result.content && result.content[0] && result.content[0].text) || "The scan session could not be read."), "err");
+      return;
+    }
+    $("title").textContent = String(sc.name || "Scan session");
+    var st = $("state");
+    st.textContent = sc.status === "done" ? "done" : "open";
+    st.className = sc.status === "done" ? "badge ok" : "badge info";
+    var items = Array.isArray(sc.items) ? sc.items.filter(function (it) { return it && typeof it === "object"; }) : [];
+    var flagged = items.filter(needsLook), known = items.filter(function (it) { return !needsLook(it); });
+    var cards = 0; known.forEach(function (it) { cards += num(it.quantity); });
+    $("summary").textContent = cards + (cards === 1 ? " card" : " cards") + " recognised" +
+      (flagged.length ? ", " + flagged.length + (flagged.length === 1 ? " item needs" : " items need") + " a look." : ".");
+    var list = $("list"); list.replaceChildren();
+    if (!items.length) list.appendChild(el("div", "row", "This scan has no cards yet."));
+    var images = 0;
+    flagged.concat(known).slice(0, MAX_ROWS).forEach(function (it) {
+      var card = it.card && typeof it.card === "object" ? it.card : null;
+      var flag = needsLook(it);
+      var li = el("div", "row" + (flag ? " flag" : "")); li.setAttribute("role", "listitem");
+      if (card && images < MAX_IMAGES) { li.appendChild(B.picture(B.scryfallImage(card.scryfall_id || "", card.name || ""))); images++; }
+      else li.appendChild(el("span", "pic none"));
+      var n = el("span");
+      var name = el("span", "name", String((card && card.name) || it.name || "(no name)"));
+      var label = FLAGS[it.status] || (flag ? "not recognised" : "");
+      if (label) name.appendChild(el("span", "pill" + (flag ? "" : " warn"), label));
+      n.appendChild(name);
+      var sub = [];
+      if (card && it.name && String(it.name) !== String(card.name)) sub.push("read as " + it.name);
+      if (card && card.set) sub.push(String(card.set).toUpperCase() + (card.collector_number ? " #" + card.collector_number : ""));
+      if (it.foil) sub.push("foil");
+      if (it.note && String(it.note) !== label) sub.push(String(it.note));
+      if (sub.length) n.appendChild(el("span", "sub", sub.join(" · ")));
+      li.appendChild(n);
+      li.appendChild(el("span", "qty", "×" + num(it.quantity)));
+      list.appendChild(li);
+    });
+    if (items.length > MAX_ROWS) list.appendChild(el("div", "row", (items.length - MAX_ROWS) + " more on the Scan page."));
+    if (flagged.length) { $("note").textContent = "The highlighted items were not matched to a card; fix them on the Scan page or tell the assistant what they are."; $("note").className = "note"; }
+    var a = $("actions"); a.replaceChildren();
+    if (GATEWAY) {
+      var l = el("a", "link", "Open the Scan page"); l.href = "#";
+      l.onclick = function (e) { e.preventDefault(); B.openLink(GATEWAY + "/scan", function (m) { B.setStatus(m, ""); }); };
+      a.appendChild(l);
+    }
+    B.reportSize();
+  }
+  B.start("MTG Assistant Gateway scan card", load, {});
+})();
+</script>
+</body>
+</html>

@@ -25,6 +25,7 @@ from .decklist import DecklistError, front_faces, parse_decklist, to_text
 from .decks import DeckError, DeckService, _clean_deck_id, current_client, deck_to_text
 from .forge import FINAL_STATES, ForgeClient, ForgeError, refresh, start_run
 from .mf_proxy import MysticForgeProxy, is_busy
+from .report_view import speed_numbers
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,19 @@ TREND_KEYS = (
     "price_total",
     "salt_total",
 )
+# The numbers a deck's trend (ReportService.trend: the History page and list_deck_reports) follows
+# across its stored reports: key, label, unit. The first four come from the stored statistics,
+# the last three from the stored goldfish simulation (report_view.speed_numbers).
+TREND_METRICS = (
+    ("average_mana_value", "Average mana value", ""),
+    ("land_count", "Lands", ""),
+    ("price_total", "Deck price", "$"),
+    ("salt_total", "Salt total", ""),
+    ("commander_cast_median_turn", "Commander cast (median turn)", "turn"),
+    ("kill_median_turn", "40 damage dealt (median turn, when dealt)", "turn"),
+    ("kill_pct", "Games dealing 40 damage by the last simulated turn", "%"),
+)
+TREND_LIMIT = 60
 
 
 class _Flight:
@@ -513,12 +527,64 @@ class ReportService:
             ).fetchall()
         return {str(r["deck_id"]): str(r["deck_name"] or "") for r in rows}
 
-    def series(self, sub: str, deck_id: str, limit: int = 60) -> list[dict[str, Any]]:
-        """Oldest first: taken_at plus the trend numbers, for charts."""
-        rows = self.list(sub, deck_id, limit=limit)
-        return [
-            {"report_id": r["report_id"], "taken_at": r["taken_at"], **r["metrics"]} for r in reversed(rows)
-        ]
+    def series(self, sub: str, deck_id: str, limit: int = TREND_LIMIT) -> list[dict[str, Any]]:
+        """A deck's newest ``limit`` reports oldest first: report_id, taken_at, the trend numbers
+        (TREND_KEYS) and the simulation's speed numbers (report_view.speed_numbers), for charts."""
+        limit = max(1, min(int(limit), MAX_REPORTS_PER_USER))
+        with self.db._lock:
+            rows = self.db._conn.execute(
+                "SELECT id, taken_at, stats_json, goldfish_json FROM reports "
+                "WHERE owner_sub = ? AND deck_id = ? ORDER BY taken_at DESC, rowid DESC LIMIT ?",
+                (sub, str(deck_id), limit),
+            ).fetchall()
+        out = []
+        for r in reversed(rows):
+            stats = json.loads(r["stats_json"]) if r["stats_json"] else {}
+            goldfish = json.loads(r["goldfish_json"]) if r["goldfish_json"] else None
+            out.append(
+                {
+                    "report_id": r["id"],
+                    "taken_at": r["taken_at"],
+                    **{k: stats.get(k) for k in TREND_KEYS},
+                    **speed_numbers(goldfish),
+                }
+            )
+        return out
+
+    def trend(self, sub: str, deck_id: str, limit: int = TREND_LIMIT) -> dict[str, Any] | None:
+        """How a deck's stored reports moved over time: the series (oldest first) and, per
+        TREND_METRICS number that at least two reports hold, its first and latest values with
+        their dates and the change between them. None with fewer than two reports."""
+        series = self.series(sub, deck_id, limit)
+        if len(series) < 2:
+            return None
+        metrics = []
+        for key, label, unit in TREND_METRICS:
+            held = [p for p in series if _number(p.get(key))]
+            if len(held) < 2:
+                continue
+            first, latest = held[0], held[-1]
+            metrics.append(
+                {
+                    "key": key,
+                    "label": label,
+                    "unit": unit,
+                    "reports": len(held),
+                    "first": first[key],
+                    "first_at": first["taken_at"],
+                    "latest": latest[key],
+                    "latest_at": latest["taken_at"],
+                    "change": round(latest[key] - first[key], 2),
+                }
+            )
+        return {
+            "deck_id": str(deck_id),
+            "reports": len(series),
+            "first_at": series[0]["taken_at"],
+            "latest_at": series[-1]["taken_at"],
+            "metrics": metrics,
+            "series": series,
+        }
 
     def delete(self, sub: str, report_id: str, *, client_id: str | None = None) -> None:
         """Delete one of the member's reports. With ``client_id`` (an app's bearer token), only a
@@ -558,6 +624,10 @@ class ReportService:
             "bracket_estimate": (stats.get("bracket_estimate") or {}).get("bracket"),
             "created_by_client": d.get("created_by_client"),
         }
+
+
+def _number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def _succeeded(row: dict[str, Any]) -> bool:
@@ -689,4 +759,4 @@ def deck_summary_for(deck: Deck) -> dict[str, Any]:
     }
 
 
-__all__ = ["ReportService", "TREND_KEYS", "deck_summary_for", "sim_options"]
+__all__ = ["ReportService", "TREND_KEYS", "TREND_METRICS", "deck_summary_for", "sim_options"]

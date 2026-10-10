@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Deck statistics</title>
+<style>
+/*@BASE@*/
+h2{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:12px 0 6px}
+.bars{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:4px;align-items:end;height:116px;
+  padding:6px 4px 0;background:var(--bg2);border-radius:var(--radius)}
+.bars .col{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;min-width:0}
+.bars .n{font-size:11px;font-variant-numeric:tabular-nums;color:var(--text);font-weight:600;line-height:1.3}
+.bars .bar{width:100%;max-width:34px;background:var(--blue);border-radius:3px 3px 0 0;min-height:2px}
+.bars .mv{font-size:11px;color:var(--muted);line-height:1.6}
+.colours{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.colours li{display:grid;grid-template-columns:4.6em minmax(0,1fr) auto;align-items:center;gap:8px;font-size:13px}
+.colours .track{height:10px;background:var(--bg2);border-radius:999px;overflow:hidden;border:1px solid var(--border)}
+.colours .fill{display:block;height:100%;border-radius:999px}
+.colours .fill.W{background:#f8f1d8}.colours .fill.U{background:#9bc8e8}.colours .fill.B{background:#4b4a4a}
+.colours .fill.R{background:#e49977}.colours .fill.G{background:#97c498}.colours .fill.C{background:#c9c6bd}
+.colours .v{font-variant-numeric:tabular-nums;color:var(--muted);white-space:nowrap;font-size:12px}
+ul.facts{list-style:none;margin:0;padding:0;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+ul.facts li{display:flex;justify-content:space-between;gap:10px;padding:7px 10px;border-top:1px solid var(--border);font-size:13px}
+ul.facts li:first-child{border-top:0}
+ul.facts li > span:first-child{color:var(--muted)}
+ul.facts li b{font-weight:600;text-align:right;overflow-wrap:anywhere}
+.verdict{margin:10px 0 0;padding:9px 11px;border-radius:var(--radius);font-size:13px;overflow-wrap:anywhere}
+.verdict.ok{background:var(--green-bg);color:var(--green)} .verdict.bad{background:var(--red-bg);color:var(--red)}
+.verdict.info{background:var(--bg2);color:var(--text)}
+.verdict ul{margin:6px 0 0;padding-left:18px}
+</style>
+</head>
+<body>
+<div class="card" id="card">
+  <div class="head"><h1 id="title">Deck statistics</h1><span class="badge" id="state"></span></div>
+  <p class="sum" id="summary"></p>
+  <div id="curvebox" class="hidden"><h2 id="curvehead">Mana curve (nonland cards)</h2><div class="bars" id="curve" role="img"></div></div>
+  <div id="colourbox" class="hidden"><h2>Colours: mana symbols and sources</h2><ul class="colours" id="colours"></ul></div>
+  <h2>Numbers</h2>
+  <ul class="facts" id="facts"></ul>
+  <div class="verdict hidden" id="verdict"></div>
+  <p class="note hidden" id="note"></p>
+  <div class="actions" id="actions"></div>
+  <div class="status hidden" id="status" role="status" aria-live="polite"></div>
+</div>
+<script>
+/*@BRIDGE@*/
+(function () {
+  "use strict";
+  var B = Bridge, el = B.el, $ = B.$;
+  var GATEWAY = "@GATEWAY@";
+  var KEYS = ["0", "1", "2", "3", "4", "5", "6", "7+"];
+  var NAMES = { W: "White", U: "Blue", B: "Black", R: "Red", G: "Green", C: "Colourless" };
+  var MAX_PROBLEMS = 8;
+
+  function num(v) { var n = Number(v); return isFinite(n) ? n : 0; }
+  function fact(list, k, v) { var li = el("li"); li.appendChild(el("span", "", k)); li.appendChild(el("b", "", v)); list.appendChild(li); }
+  function link(text, url) {
+    var a = el("a", "link", text); a.href = "#";
+    a.onclick = function (e) { e.preventDefault(); B.openLink(url, function (m) { B.setStatus(m, ""); }); };
+    return a;
+  }
+  function drawCurve(curve) {
+    var box = $("curve"); box.replaceChildren();
+    var max = 1, parts = [];
+    KEYS.forEach(function (k) { max = Math.max(max, num(curve[k])); });
+    KEYS.forEach(function (k) {
+      var n = num(curve[k]);
+      parts.push(n + " at " + k);
+      var col = el("div", "col");
+      col.appendChild(el("span", "n", String(n)));
+      var bar = el("span", "bar"); bar.style.height = Math.max(2, Math.round(68 * n / max)) + "px";
+      col.appendChild(bar);
+      col.appendChild(el("span", "mv", k));
+      box.appendChild(col);
+    });
+    box.setAttribute("aria-label", "Mana curve, cards by mana value: " + parts.join(", "));
+    $("curvebox").className = "";
+  }
+  function drawColours(pips, sources, identity) {
+    var ul = $("colours"); ul.replaceChildren();
+    var keys = ["W", "U", "B", "R", "G", "C"].filter(function (c) {
+      return num(pips[c]) || num(sources[c]) || (identity || []).indexOf(c) >= 0;
+    });
+    if (!keys.length) return;
+    var total = 0; keys.forEach(function (c) { total += num(pips[c]); });
+    keys.forEach(function (c) {
+      var li = el("li"); li.appendChild(el("span", "", NAMES[c]));
+      var track = el("span", "track"); track.setAttribute("aria-hidden", "true");
+      var fill = el("span", "fill " + c); fill.style.width = (total ? Math.round(100 * num(pips[c]) / total) : 0) + "%";
+      track.appendChild(fill); li.appendChild(track);
+      li.appendChild(el("span", "v", num(pips[c]) + " symbols · " + num(sources[c]) + " sources"));
+      ul.appendChild(li);
+    });
+    $("colourbox").className = "";
+  }
+  function drawVerdict(st) {
+    var checks = st.checks || {}, v = $("verdict"); v.replaceChildren();
+    var lines = [];
+    var fmt = st.format || checks.format_family || "";
+    var problems = Array.isArray(checks.problems) ? checks.problems : [];
+    var legal = checks.legal;
+    var head;
+    if (legal === true) { head = "Legal" + (fmt ? " in " + fmt : "") + "."; v.className = problems.length ? "verdict info" : "verdict ok"; }
+    else if (problems.length) { head = "Not legal" + (fmt ? " in " + fmt : "") + " yet."; v.className = "verdict bad"; }
+    else { head = fmt ? "Checked for " + fmt + "." : "No format set, so legality was not checked."; v.className = "verdict info"; }
+    var br = st.bracket_estimate || {};
+    var bracket = br.bracket != null ? "Bracket estimate " + br.bracket : "";
+    if (st.archidekt_bracket != null) bracket += (bracket ? " (set on the deck: " : "Bracket set on the deck: ") + st.archidekt_bracket + (bracket ? ")" : "");
+    if (bracket) lines.push(bracket + ".");
+    v.appendChild(el("span", "", head + (lines.length ? " " + lines.join(" ") : "") + (problems.length ? " To look at:" : "")));
+    if (problems.length) {
+      var ul = el("ul");
+      problems.slice(0, MAX_PROBLEMS).forEach(function (p) { ul.appendChild(el("li", "", String(p))); });
+      if (problems.length > MAX_PROBLEMS) ul.appendChild(el("li", "", (problems.length - MAX_PROBLEMS) + " more in the assistant's message"));
+      v.appendChild(ul);
+    }
+    var st2 = $("state");
+    if (legal === true) { st2.textContent = "legal"; st2.className = "badge ok"; }
+    else if (problems.length) { st2.textContent = problems.length + (problems.length === 1 ? " problem" : " problems"); st2.className = "badge bad"; }
+    else { st2.textContent = "checked"; st2.className = "badge"; }
+  }
+  function load(result) {
+    var sc = result.structuredContent || {};
+    if (sc.ok === false || result.isError) {
+      B.setStatus(String(sc.message || (result.content && result.content[0] && result.content[0].text) || "The deck could not be read."), "err");
+      return;
+    }
+    var deck = sc.deck || {}, st = sc.stats || {};
+    $("title").textContent = String(deck.name || "Deck statistics");
+    var sum = [];
+    if (deck.owner) sum.push("by " + deck.owner);
+    if (st.format) sum.push(String(st.format));
+    sum.push(num(st.card_count != null ? st.card_count : deck.card_count) + " cards");
+    if (st.commanders && st.commanders.length) sum.push("Commander: " + st.commanders.join(" / "));
+    $("summary").textContent = sum.join(" · ");
+    var facts = $("facts"); facts.replaceChildren();
+    if (st.card_data === "unavailable") {
+      fact(facts, "Cards", String(num(st.card_count)));
+      fact(facts, "Different cards", String(num(st.distinct)));
+      if (st.sideboard_count) fact(facts, "Sideboard", String(num(st.sideboard_count)));
+      $("note").textContent = "A pasted list has names and counts only: no curve, colours or prices.";
+      $("note").className = "note";
+    } else {
+      if (st.mana_curve) drawCurve(st.mana_curve);
+      drawColours(st.colour_pips || {}, st.mana_sources || {}, st.colour_identity);
+      fact(facts, "Lands / nonlands", num(st.land_count) + " / " + num(st.nonland_count));
+      if (st.average_mana_value != null) fact(facts, "Average mana value", String(st.average_mana_value));
+      fact(facts, "Price", "$" + num(st.price_total).toFixed(2) + (st.priced_cards != null && num(st.priced_cards) < num(st.distinct) ? " (" + num(st.priced_cards) + " of " + num(st.distinct) + " priced)" : ""));
+      if (st.game_changers) fact(facts, "Game changers", String(st.game_changers.length));
+      fact(facts, "Tutors · extra turns · land denial", num(st.tutors) + " · " + num(st.extra_turns) + " · " + num(st.mass_land_denial));
+      if (st.salt_total) fact(facts, "Salt", String(st.salt_total));
+    }
+    drawVerdict(st);
+    var a = $("actions"); a.replaceChildren();
+    if (deck.id != null && GATEWAY) a.appendChild(link("Open in the app", GATEWAY + "/decks/" + encodeURIComponent(String(deck.id))));
+    if (deck.url) a.appendChild(link("Open on Archidekt", String(deck.url)));
+    B.reportSize();
+  }
+  B.start("MTG Assistant Gateway statistics card", load, {});
+})();
+</script>
+</body>
+</html>
