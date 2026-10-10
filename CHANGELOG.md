@@ -7,6 +7,23 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.12] - 2026-10-10
+
+The 0.7.11 code with a release build that finishes. 0.7.11 stays a tag
+without an image or Android app: its release build stopped after signing the
+app, because the build script could not read the signing certificate's
+SHA-256 from apksigner's output.
+
+### Fixed
+
+- **Android release build.** The certificate's SHA-256 is taken from the
+  keystore the app was signed with, and the build checks that apksigner
+  reports the same digest for the APK, whatever wording apksigner uses.
+  Pull requests that change `android/` now also build a release signed with
+  a throwaway key, so this path is tested before it reaches `main`.
+- The app and docs say "before 0.7.12" for the one-time reinstall, since
+  0.7.12 is the first release with a signed app.
+
 ## [0.7.11] - 2026-10-10
 
 Fixes from the owner's test round on 0.7.10, a search box in the top bar,
