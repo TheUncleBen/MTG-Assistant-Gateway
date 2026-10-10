@@ -1,12 +1,12 @@
-"""Archidekt account actions an assistant can propose (0.7.17): like or vote down a deck,
-bookmark it, follow its owner, post, edit, delete or vote on a comment, delete a deck and create
-a folder. Each is a proposal of kind ``action`` with one review row, so it goes through the same
-approval flow as every other write, but (R-142) only the member's press on the signed-in review
-page applies one: never the assistant, whatever the approval mode (modes.py), and not the in-chat
-card, which only opens the review page for these. The work itself is the code the gateway's
-own pages already use (the deck page's social buttons in social.py, the delete and folder
-pages in decks.py), so a proposal does exactly what the matching button
-does, with the same checks again at apply time."""
+"""Archidekt account actions an assistant can propose (0.7.17): like or vote down a deck, bookmark
+it, follow its owner, post, edit, delete or vote on a comment, delete a deck and create a
+folder; 0.7.20 adds and removes a deck's collaborators. Each is a proposal of kind ``action``
+with one review row, so it goes through the same approval flow as every other write, but (R-142)
+only the member's press on the signed-in review page applies one: never the assistant, whatever
+the approval mode (modes.py), and not the in-chat card, which only opens the review page for
+these. The work itself is the code the gateway's own pages already use (the deck page's social
+buttons in social.py, the delete and folder pages in decks.py), so a proposal does exactly what
+the matching button does, with the same checks again at apply time."""
 
 from __future__ import annotations
 
@@ -34,11 +34,19 @@ LABELS = {
     "comment_vote": "Comment vote",
     "delete_deck": "Delete deck",
     "create_folder": "New folder",
+    "collaborator_add": "Add collaborator",
+    "collaborator_remove": "Remove collaborator",
 }
 ACTIONS = frozenset(LABELS)
 DESTRUCTIVE = frozenset({"delete_deck"})  # never applied by an assistant on its own
 CANNOT_UNDO = frozenset({"delete_deck", "comment_delete"})
 VOTES = {"up": VOTE_UP, "down": VOTE_DOWN, "none": VOTE_NONE}
+COLLABORATOR_ACTIONS = frozenset({"collaborator_add", "collaborator_remove"})
+# Archidekt's own settings page says this of collaborators (2026-10-10 bundle).
+COLLABORATOR_NOTE = (
+    "A collaborator can make any change to the deck that you can, except its main settings. "
+    "Archidekt's own settings page offers only people you follow, and so does the gateway."
+)
 
 
 def risk_of(rows: list[dict[str, Any]] | None) -> tuple[str, str]:
@@ -48,6 +56,8 @@ def risk_of(rows: list[dict[str, Any]] | None) -> tuple[str, str]:
         return "destructive", "deletes a deck; an assistant never applies this by itself"
     if action == "create_folder":
         return "consent", "creates a folder on your Archidekt account; you approve each one yourself"
+    if action in COLLABORATOR_ACTIONS:
+        return "consent", "changes who can edit your deck on Archidekt; you approve each one yourself"
     return "consent", "acts publicly on Archidekt under your name; you approve each one yourself"
 
 
@@ -107,7 +117,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         deck_id = _clean_deck_id(str(params.get("deck_id") or ""))
         deck = (
             await decks.get_own_deck(sub, deck_id)
-            if action == "delete_deck"
+            if action == "delete_deck" or action in COLLABORATOR_ACTIONS
             else await decks.get_any_deck(sub, deck_id)
         )
         changes["deck_id"] = deck.id
@@ -210,6 +220,38 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         changes.update(name=name, parent=parent["id"])
         where_to = "your top level" if not parent["depth"] else f"'{parent['name']}'"
         row["text"] = f"Create the folder '{name}' in {where_to}"
+    elif action in COLLABORATOR_ACTIONS:
+        want = clean_text(str(params.get("username") or "")).lstrip("@")
+        if not want:
+            raise DeckError("invalid", "username is required: the Archidekt username of the person")
+        current = await social.collaborators(sub, deck.id)
+        if action == "collaborator_add":
+            people = await social.following_names(sub)
+            hits = [i for i, n in people.items() if n.casefold() == want.casefold()]
+            if not hits:  # followed a moment ago, after the short-lived list was read
+                people = await social.following_names(sub, fresh=True)
+                hits = [i for i, n in people.items() if n.casefold() == want.casefold()]
+            if not hits:
+                raise DeckError(
+                    "not_found",
+                    f"{want} is not among the people you follow on Archidekt. Collaborators are "
+                    "added from the people you follow, as on Archidekt's own settings page.",
+                )
+            user_id, name = hits[0], people[hits[0]]
+            if any(c["user_id"] == user_id for c in current):
+                raise DeckError("invalid", f"{name} is already a collaborator on this deck")
+            row["text"] = f"Let {name} edit your deck on Archidekt as a collaborator"
+            row["note"] = COLLABORATOR_NOTE
+        else:
+            found = next((c for c in current if c["username"].casefold() == want.casefold()), None)
+            if found is None:
+                names = ", ".join(c["username"] for c in current) or "none"
+                raise DeckError(
+                    "not_found", f"{want} is not a collaborator on this deck (collaborators: {names})"
+                )
+            user_id, name = found["user_id"], found["username"]
+            row["text"] = f"Stop {name} editing your deck on Archidekt"
+        changes.update(user_id=user_id, username=name)
     if action in CANNOT_UNDO:
         row["cannot_undo"] = True
     if action in DESTRUCTIVE:
@@ -273,6 +315,10 @@ async def apply(
                     row["id"], state="pending", result={"error": "backup_failed", "detail": str(exc)}
                 )
             raise
+    elif action == "collaborator_add":
+        result = await _social(decks).add_collaborator(sub, deck_id, int(c["user_id"]))
+    elif action == "collaborator_remove":
+        result = await _social(decks).remove_collaborator(sub, deck_id, int(c["user_id"]))
     elif action == "create_folder":
         folder = await decks.create_folder(sub, str(c["name"]), int(c["parent"]))
         result = {"folder_id": folder["id"], "name": folder["name"], "verified": True}

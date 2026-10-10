@@ -22,6 +22,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from .archidekt import VOTE_DOWN, VOTE_NONE, VOTE_UP, ArchidektError, Deck
+from .decklist import clean_text
 from .decks import DeckError, _clean_deck_id
 from .pages import _csrf, browser_session, read_limited
 
@@ -121,7 +122,7 @@ class SocialService:
         self.state = state
         self.decks = state.decks
         self.client = state.decks.client
-        self._following: dict[str, tuple[float, set[int]]] = {}
+        self._following: dict[str, tuple[float, dict[int, str]]] = {}
 
     def _me(self, sub: str) -> tuple[str, str]:
         """(Archidekt user id, username) of the member's linked account."""
@@ -191,22 +192,74 @@ class SocialService:
         return {"bookmarked": on}
 
     async def following(self, sub: str) -> set[int]:
+        return set(await self.following_names(sub))
+
+    async def following_names(self, sub: str, *, fresh: bool = False) -> dict[int, str]:
+        """The people the member follows on Archidekt: user id -> username (cached briefly;
+        ``fresh`` reads Archidekt again)."""
         uid, _name = self._me(sub)
         hit = self._following.get(sub)
-        if hit and hit[0] > time.monotonic():
+        if hit and hit[0] > time.monotonic() and not fresh:
             return hit[1]
-        ids: set[int] = set()
+        users: dict[int, str] = {}
         page = 1
         while page <= FOLLOWING_PAGES:
             body = await self.decks._call(sub, lambda t, page=page: self.client.following(t, uid, page))
             for row in body["results"]:
                 if isinstance(row, dict) and _int(row.get("id")) is not None:
-                    ids.add(int(row["id"]))
+                    users[int(row["id"])] = str(row.get("username") or "")
             if not body.get("next"):
                 break
             page += 1
-        self._following[sub] = (time.monotonic() + FOLLOWING_TTL, ids)
-        return ids
+        self._following[sub] = (time.monotonic() + FOLLOWING_TTL, users)
+        return users
+
+    # -- deck collaborators (Archidekt's "editors": people who may change the deck) -----------------
+
+    async def collaborators(self, sub: str, deck_id: str) -> list[dict[str, Any]]:
+        """The collaborators of the member's own deck: [{editor_id, user_id, username, added_by,
+        added_at}]."""
+        self._me(sub)
+        deck = await self.decks.get_own_deck(sub, deck_id)
+        rows = await self.decks._call(sub, lambda t: self.client.deck_editors(t, str(deck.id)))
+        out = []
+        for r in rows:
+            user = r.get("user") if isinstance(r.get("user"), dict) else {}
+            by = r.get("createdBy") if isinstance(r.get("createdBy"), dict) else {}
+            if _int(r.get("id")) is None or _int(user.get("id")) is None:
+                continue
+            out.append(
+                {
+                    "editor_id": int(r["id"]),
+                    "user_id": int(user["id"]),
+                    "username": clean_text(str(user.get("username") or "")),
+                    "added_by": clean_text(str(by.get("username") or "")),
+                    "added_at": str(r.get("createdAt") or ""),
+                }
+            )
+        return out
+
+    async def add_collaborator(self, sub: str, deck_id: str, user_id: int) -> dict[str, Any]:
+        uid, _name = self._me(sub)
+        if str(user_id) == uid:
+            raise DeckError("invalid", "you own this deck already")
+        if any(c["user_id"] == user_id for c in await self.collaborators(sub, deck_id)):
+            return {"added": False, "already": True, "verified": True}
+        await self.decks._call(sub, lambda t: self.client.add_deck_editor(t, deck_id, user_id))
+        verified = any(c["user_id"] == user_id for c in await self.collaborators(sub, deck_id))
+        self.state.db.audit("collaborator_added", sub=sub, detail={"deck_id": deck_id, "user_id": user_id})
+        return {"added": True, "verified": verified}
+
+    async def remove_collaborator(self, sub: str, deck_id: str, user_id: int) -> dict[str, Any]:
+        """Remove by the person's user id: the editor row is looked up on this deck first, so
+        only a collaborator of this deck can be removed through it."""
+        row = next((c for c in await self.collaborators(sub, deck_id) if c["user_id"] == user_id), None)
+        if row is None:
+            return {"removed": False, "already": True, "verified": True}
+        await self.decks._call(sub, lambda t: self.client.remove_deck_editor(t, row["editor_id"]))
+        verified = all(c["user_id"] != user_id for c in await self.collaborators(sub, deck_id))
+        self.state.db.audit("collaborator_removed", sub=sub, detail={"deck_id": deck_id, "user_id": user_id})
+        return {"removed": True, "verified": verified}
 
     async def follow_state(self, sub: str, user_id: int) -> dict[str, Any]:
         uid, _name = self._me(sub)

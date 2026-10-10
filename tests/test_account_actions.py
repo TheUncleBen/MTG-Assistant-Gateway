@@ -387,3 +387,107 @@ async def test_the_in_chat_card_cannot_apply_an_account_action(stack: Stack, too
         structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))["state"]
         == "pending"
     )
+
+
+# -- 0.7.20: deck collaborators (Archidekt's "editors"). Adding or removing one changes who can
+# edit the deck, so it is an account action: only the member's press on the review page applies it.
+
+
+def _amy_row() -> dict:
+    return {
+        "id": 901,
+        "user": {"id": 78, "username": "amy", "avatar": None},
+        "createdBy": {"id": 77, "username": "alice", "avatar": None},
+        "createdAt": "2026-10-10T00:00:00Z",
+    }
+
+
+async def test_collaborators_are_listed_added_and_removed_on_the_members_press(stack: Stack) -> None:
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _set_mode(h, "auto")
+    listed = structured(await call(h, token, "get_deck_collaborators", {"deck_id": "42"}))
+    assert listed == {"ok": True, "collaborators": []}
+    # only people the member follows can be added, as on Archidekt's own settings page
+    p = structured(
+        await call(h, token, "propose_collaborator", {"deck_id": "42", "action": "add", "username": "amy"})
+    )
+    assert p["ok"] is False and p["error"] == "not_found" and "follow" in p["message"], p
+    ark.follows["alice"] = {78}
+    res = await call(h, token, "propose_collaborator", {"deck_id": "42", "action": "add", "username": "@AMY"})
+    p = structured(res)
+    assert p["risk"] == "consent" and p["assistant_may_apply"] is False, p
+    assert p["rows"][0]["text"] == "Let amy edit your deck on Archidekt as a collaborator"
+    assert "except its main settings" in p["rows"][0]["note"]
+    assert ark.editors.get(42, []) == []  # nothing yet
+    done = await _press(h, token, res)
+    assert done["result"]["verified"] is True
+    assert [r["user"]["username"] for r in ark.editors[42]] == ["amy"]
+    listed = structured(await call(h, token, "get_deck_collaborators", {"deck_id": "42"}))
+    assert listed["collaborators"][0]["username"] == "amy"
+    assert listed["collaborators"][0]["added_by"] == "alice"
+    again = structured(
+        await call(h, token, "propose_collaborator", {"deck_id": "42", "action": "add", "username": "amy"})
+    )
+    assert again["ok"] is False and "already" in again["message"]
+    res = await call(
+        h, token, "propose_collaborator", {"deck_id": "42", "action": "remove", "username": "amy"}
+    )
+    assert structured(res)["rows"][0]["text"] == "Stop amy editing your deck on Archidekt"
+    await _press(h, token, res)
+    assert ark.editors[42] == []
+    gone = structured(
+        await call(h, token, "propose_collaborator", {"deck_id": "42", "action": "remove", "username": "amy"})
+    )
+    assert gone["ok"] is False and gone["error"] == "not_found"
+    # someone else's deck has no collaborators the member can change
+    other = structured(
+        await call(h, token, "propose_collaborator", {"deck_id": "43", "action": "add", "username": "amy"})
+    )
+    assert other["ok"] is False
+
+
+@pytest.mark.parametrize("mode", ["manual", "semi", "auto"])
+@pytest.mark.parametrize("action", ["add", "remove"])
+async def test_no_mode_lets_the_assistant_change_collaborators(stack: Stack, mode: str, action: str) -> None:
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    ark.follows["alice"] = {78}
+    if action == "remove":
+        ark.editors[42] = [_amy_row()]
+    await _set_mode(h, mode)
+    res = await call(h, token, "propose_collaborator", {"deck_id": "42", "action": action, "username": "amy"})
+    p = structured(res)
+    assert p["ok"] and p["kind"] == "action" and p["risk"] in modes.MEMBER_ONLY, p
+    assert not (res.get("_meta") or {}).get(APPROVAL_META_KEY)  # the in-chat card cannot apply it
+    before = [dict(r) for r in ark.editors.get(42, [])]
+    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert out["ok"] is False and out["error"] == "browser_required", out
+    assert [dict(r) for r in ark.editors.get(42, [])] == before
+
+
+async def test_settings_page_lists_collaborators_and_opens_a_review_page(stack: Stack) -> None:
+    h, ark = stack.h, stack.ark
+    await linked_user(stack)
+    ark.follows["alice"] = {78}
+    ark.editors[42] = [_amy_row()]
+    b = Browser(h)
+    try:
+        await b.login()
+        page = (await b.http.get("/decks/42/settings")).text
+        assert "id='collaborators'" in page and "<b>amy</b>" in page and "added by alice" in page
+        csrf = await b.csrf()
+        r = await b.http.post(
+            "/decks/42/collaborators", data={"csrf": csrf, "action": "remove", "username": "amy"}
+        )
+        assert r.status_code == 303 and r.headers["location"].startswith("/proposals/"), r.text
+        assert len(ark.editors[42]) == 1  # the form only proposes: Apply on the review page removes
+        review = (await b.http.get(r.headers["location"])).text
+        assert "Stop amy editing your deck on Archidekt" in review
+        bad = await b.http.post(
+            "/decks/42/collaborators", data={"csrf": csrf, "action": "add", "username": "nobody"}
+        )
+        assert bad.status_code == 400 and "not among the people you follow" in bad.text
+        assert (await b.http.post("/decks/42/collaborators", data={"action": "remove"})).status_code == 403
+    finally:
+        await b.aclose()

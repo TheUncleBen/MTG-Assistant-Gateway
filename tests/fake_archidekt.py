@@ -137,6 +137,8 @@ class FakeArchidekt:
         self.next_coll_id = 5000
         self.follows: dict[str, set[int]] = {}
         self.bookmarks: dict[str, set[int]] = {}
+        self.editors: dict[int, list[dict[str, Any]]] = {}  # deck id -> collaborator rows
+        self.next_editor_id = 900
         self.votes: dict[tuple[str, int], int] = {}
         self.comments: dict[int, list[dict[str, Any]]] = {}  # thread root -> flat list of comments
         self.next_comment_id = 800000
@@ -776,6 +778,15 @@ class FakeArchidekt:
                     "type": 4,
                 },
             )
+        if len(parts) == 4 and parts[1:3] == ["decks", "editors"] and request.method == "DELETE":
+            for deck_id, rows in self.editors.items():
+                row = next((r for r in rows if str(r["id"]) == parts[3]), None)
+                if row is not None:
+                    if self.decks.get(deck_id, {}).get("owner", {}).get("username") != who:
+                        return httpx.Response(403, json={"detail": "You do not have permission."})
+                    rows.remove(row)
+                    return httpx.Response(204)
+            return httpx.Response(404, json={"detail": "Not found."})
         if len(parts) >= 3 and parts[1] == "decks" and parts[2].isdigit():
             deck = self.decks.get(int(parts[2]))
             mine = deck is not None and deck["owner"]["username"] == who
@@ -796,6 +807,23 @@ class FakeArchidekt:
                 return httpx.Response(
                     403, json={"detail": "You do not have permission to perform this action."}
                 )
+            if parts[3:] == ["editors"] and request.method == "GET":
+                rows = self.editors.get(deck["id"], [])
+                return httpx.Response(200, json={"count": len(rows), "results": [dict(r) for r in rows]})
+            if parts[3:] == ["editors"] and request.method == "POST":
+                uid = json.loads(request.content).get("user")
+                name = self._username(uid) if isinstance(uid, int) else None
+                if name is None:
+                    return httpx.Response(400, json={"user": ["Invalid pk - object does not exist."]})
+                self.next_editor_id += 1
+                row = {
+                    "id": self.next_editor_id,
+                    "user": {"id": uid, "username": name, "avatar": None},
+                    "createdBy": {"id": self._user_id(who), "username": who, "avatar": None},
+                    "createdAt": "2026-10-10T00:00:00Z",
+                }
+                self.editors.setdefault(deck["id"], []).append(row)
+                return httpx.Response(201, json=row)
             if len(parts) == 3 and request.method == "DELETE":
                 del self.decks[deck["id"]]
                 self.private.discard(deck["id"])

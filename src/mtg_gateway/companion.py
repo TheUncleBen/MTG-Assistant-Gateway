@@ -23,7 +23,7 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, RedirectResponse, Response
 
 from . import deck_stats
-from .archidekt import FORMAT_NAMES, Deck, featured_scryfall_id, format_label, parse_deck
+from .archidekt import FORMAT_NAMES, ArchidektError, Deck, featured_scryfall_id, format_label, parse_deck
 from .busy import busy_json_response, busy_response, busy_text_response
 from .decklist import DecklistError, parse_decklist
 from .deckpage import (
@@ -715,6 +715,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         error: str = "",
         *,
         folders: dict[str, Any] | None = None,
+        collaborators: list[dict[str, Any]] | None = None,
         ok: str = "",
     ) -> str:
         v = values or {}
@@ -807,6 +808,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             + cover_section(deck, csrf)
             + tags_section(deck, csrf)
             + folder_section(deck, csrf, folders)
+            + collaborator_section(deck, csrf, collaborators)
             + "<section class='panel danger' id='delete'><h2>Delete this deck</h2>"
             "<p class='muted small'>Deletes the deck on Archidekt after you type its name. A snapshot is "
             "kept under History"
@@ -903,6 +905,55 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             "› Folders</a>.</p></section>"
         )
 
+    def collaborator_section(deck: Deck, csrf: str | None, rows: list[dict[str, Any]] | None) -> str:
+        """Archidekt's deck collaborators. Adding or removing one changes who can edit the deck,
+        so (R-142) both forms make a proposal and open its review page: the member's Apply there
+        is what changes Archidekt, as for every other account action."""
+        did = _esc(deck.id)
+        csrf_in = f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
+        if rows is None:
+            listing = "<p class='muted'>The collaborators could not be read from Archidekt right now.</p>"
+        else:
+            items = "".join(
+                f"<li><span><b>{_esc(r['username'])}</b>"
+                + (
+                    f" <span class='muted small'>added by {_esc(r['added_by'])}</span>"
+                    if r["added_by"]
+                    else ""
+                )
+                + "</span>"
+                f"<form method='post' action='/decks/{did}/collaborators' class='inline'>{csrf_in}"
+                "<input type='hidden' name='action' value='remove'>"
+                f"<input type='hidden' name='username' value='{_esc(r['username'])}'>"
+                f"<button class='mini' aria-label='Remove {_esc(r['username'])}' title='Remove'>"
+                f"{icon('x')}</button></form></li>"
+                for r in rows
+            )
+            empty = "<li class=muted>No collaborators.</li>"
+            listing = f"<ul class='plain taglist collablist'>{items or empty}</ul>"
+        return (
+            "<section class='panel tagbox' id='collaborators'><h2>Collaborators</h2>"
+            + listing
+            + f"<form method='post' action='/decks/{did}/collaborators' class='addtag'>{csrf_in}"
+            "<input type='hidden' name='action' value='add'>"
+            "<div class='field grow'><label for='collabname'>Add someone you follow on Archidekt</label>"
+            "<input id='collabname' type='text' name='username' maxlength='60' autocomplete='off' "
+            "placeholder='Archidekt username' required>"
+            f"</div><button>{icon('check')} Review</button></form>"
+            "<p class='muted small'>A collaborator can make any change to this deck that you can, except "
+            "its main settings. Each change opens a review page; nothing changes on Archidekt until you "
+            "press Apply there.</p></section>"
+        )
+
+    async def collaborators_or_none(sub: str, deck_id: str) -> list[dict[str, Any]] | None:
+        social = getattr(state, "social", None)
+        if social is None:
+            return None
+        try:
+            return await social.collaborators(sub, deck_id)
+        except (DeckError, ArchidektError):
+            return None
+
     async def folders_or_none(sub: str) -> dict[str, Any] | None:
         try:
             return await decks.folders(sub)
@@ -936,7 +987,13 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         ok = request.query_params.get("ok") or ""
         return page(
             f"Deck settings: {deck.name}",
-            settings_form(deck, _csrf(s, sid), folders=await folders_or_none(sub), ok=ok),
+            settings_form(
+                deck,
+                _csrf(s, sid),
+                folders=await folders_or_none(sub),
+                collaborators=await collaborators_or_none(sub, deck.id),
+                ok=ok,
+            ),
             sub=sub,
             sid=sid,
             current="/decks",
@@ -964,7 +1021,13 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
                 return settings_problem(request, deck_id, again, sub, sid)
             return page(
                 f"Deck settings: {deck.name}",
-                settings_form(deck, _csrf(s, sid), error=str(exc), folders=await folders_or_none(sub)),
+                settings_form(
+                    deck,
+                    _csrf(s, sid),
+                    error=str(exc),
+                    folders=await folders_or_none(sub),
+                    collaborators=await collaborators_or_none(sub, deck.id),
+                ),
                 sub=sub,
                 sid=sid,
                 status=400,
@@ -972,7 +1035,22 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
                 csp=DECK_CSP,
                 deck_css=True,
             )
+        if code.startswith("/proposals/"):  # an account action: its review page holds the Apply
+            return RedirectResponse(code, status_code=303)
         return RedirectResponse(f"/decks/{_esc(deck_id)}/settings?ok={code}#{anchor}", status_code=303)
+
+    @server.custom_route("/decks/{deck_id}/collaborators", methods=["POST"], include_in_schema=False)
+    async def collaborators_post(request: Request) -> Response:
+        deck_id = request.path_params["deck_id"]
+
+        async def run(sub: str, data: dict[str, str]) -> str:
+            kind = {"add": "collaborator_add", "remove": "collaborator_remove"}.get(data.get("action") or "")
+            if kind is None:
+                raise DeckError("invalid", "Pick add or remove.")
+            made = await decks.propose_action(sub, kind, deck_id=deck_id, username=data.get("username") or "")
+            return "/proposals/" + quote(str(made["proposal_id"]), safe="")
+
+        return await hand_action(request, deck_id, run, ok="collaborators", anchor="collaborators")
 
     @server.custom_route("/decks/{deck_id}/cover", methods=["POST"], include_in_schema=False)
     async def cover_post(request: Request) -> Response:

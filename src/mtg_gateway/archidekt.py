@@ -1340,6 +1340,31 @@ class ArchidektClient:
             "POST", "/users/follow/", token=token, json_body={"followId": int(user_id), "unfollow": not on}
         )
 
+    # Deck collaborators ("editors"), from archidekt.com's deck settings bundle (2026-10-10):
+    # GET /decks/{id}/editors/ answers {"results": [{id, user {id, username, avatar}, createdBy,
+    # createdAt}]}; POST /decks/{id}/editors/ {"user": user id} adds one and answers that row;
+    # DELETE /decks/editors/{editor row id}/ removes one. Archidekt's page offers only people the
+    # owner follows. Reported from the bundle, not exercised live by this session.
+
+    async def deck_editors(self, token: str, deck_id: str) -> list[dict[str, Any]]:
+        if not DECK_ID_RE.fullmatch(str(deck_id)):
+            raise ArchidektError("contract", "deck id is not a number")
+        body = await self._request("GET", f"/decks/{deck_id}/editors/", token=token)
+        rows = body.get("results") if isinstance(body, dict) else body
+        if not isinstance(rows, list):
+            raise ArchidektError("contract", "unexpected collaborator list shape")
+        return [r for r in rows if isinstance(r, dict)]
+
+    async def add_deck_editor(self, token: str, deck_id: str, user_id: int) -> Any:
+        if not DECK_ID_RE.fullmatch(str(deck_id)):
+            raise ArchidektError("contract", "deck id is not a number")
+        return await self._request(
+            "POST", f"/decks/{deck_id}/editors/", token=token, json_body={"user": int(user_id)}
+        )
+
+    async def remove_deck_editor(self, token: str, editor_id: int) -> Any:
+        return await self._request("DELETE", f"/decks/editors/{int(editor_id)}/", token=token)
+
     async def following(self, token: str, user_id: str, page: int = 1) -> dict[str, Any]:
         """GET /users/{id}/following/: {"count", "next", "previous", "results": [{id, username,
         avatar, following}]} (checked live 2026-10-07)."""
