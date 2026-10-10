@@ -53,6 +53,7 @@ MAX_BODY = 256 * 1024
 RESULT = re.compile(r"Game (?P<game>\d+) ended in (?P<ms>\d+) ms\. (?P<rest>.*)$")
 WINNER = re.compile(r"(?P<who>\S.*?) has won", re.IGNORECASE)
 DRAW = re.compile(r"\bdraw\b", re.IGNORECASE)
+HEADER = re.compile(r"\bvs\b.* - .* of \w+")
 STOPPED_SLOW = re.compile(r"Stopping slow match as draw", re.IGNORECASE)
 LOAD_PROBLEM = re.compile(
     r"(could not|cannot|can't|unable to) (find|load)|unsupported|not supported|unknown card", re.IGNORECASE
@@ -121,6 +122,7 @@ class Job:
         self.results: list[dict[str, Any]] = []
         self.load_problems: list[str] = []
         self.tail: list[str] = []
+        self.header = ""  # Forge's "Ai(1)-D1 vs Ai(2)-D2 - 3 games of Commander seed 42" line
         self.returncode: int | None = None
         self.proc: subprocess.Popen[str] | None = None
         self.cancelled = False
@@ -137,6 +139,7 @@ class Job:
             "log_tail": self.tail[-40:],
             "returncode": self.returncode,
             "seed": self.seed,
+            "header": self.header,
             "game_seconds": GAME_SECONDS,
             "queued_s": round((self.started or time.time()) - self.created, 1),
             "run_s": round((self.finished or time.time()) - self.started, 1) if self.started else None,
@@ -236,6 +239,8 @@ def run_job(job: Job) -> None:
                 if not line.strip():
                     continue
                 job.tail = (job.tail + [line[:300]])[-80:]
+                if not job.header and HEADER.search(line):
+                    job.header = line.strip()[:300]
                 if STOPPED_SLOW.search(line):
                     stopped_slow = True
                 result = parse_result(line)

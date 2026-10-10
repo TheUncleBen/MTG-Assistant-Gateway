@@ -34,7 +34,7 @@ run_job "{\"format\":\"Constructed\",\"games\":2,\"decks\":[{\"main\":$red},{\"m
 precons=$(curl -fsS http://127.0.0.1:18100/precons | python3 -c 'import json,sys; p=json.load(sys.stdin)["precons"]; print(json.dumps([{"precon": d["name"]} for d in p[:4]]))')
 run_job "{\"format\":\"Commander\",\"games\":1,\"seed\":42,\"decks\":$precons}" 1
 # Forge 2.0.15 takes the seed (-s) and the game clock (-c): its header line names the seed.
-echo "$view" | python3 -c 'import json,sys; t=json.load(sys.stdin)["log_tail"]; sys.exit(not any(" seed 42" in l for l in t))'
+echo "$view" | python3 -c 'import json,sys; h=json.load(sys.stdin)["header"]; print("HEADER:", h); sys.exit(" seed 42" not in h)'
 first=$(echo "$view" | python3 -c 'import json,sys; v=json.load(sys.stdin); print(v["results"][0]["winner"], [l for l in v["log_tail"] if "Turn " in l and "Outcome" in l])')
 # Same seed again: report (not yet a gate) whether the game repeats exactly.
 run_job "{\"format\":\"Commander\",\"games\":1,\"seed\":42,\"decks\":$precons}" 1
