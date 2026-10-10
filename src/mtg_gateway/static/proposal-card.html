@@ -287,8 +287,8 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
         ? "Your approval mode applies every change without asking: your assistant applies this itself."
         : "Low-risk edit (" + (p.risk_reason || "") + "): your approval mode lets your assistant apply it without asking.";
     }
-    if (p.risk === "destructive") return "This deletes the deck from your Archidekt account. Only you can approve it, in every approval mode.";
-    if (p.risk === "consent") return "This acts on your Archidekt account under your name. Only you can approve it, every time, in every approval mode.";
+    if (p.risk === "destructive") return "This deletes the deck from your Archidekt account. Only you can approve it, on the review page, in every approval mode.";
+    if (p.risk === "consent") return "This acts on your Archidekt account under your name. Only you can approve it, on the review page, every time, in every approval mode.";
     if (p.approval_mode === "semi" && p.risk === "high") return "High risk (" + (p.risk_reason || "") + "), so this one needs your approval.";
     return "";
   }
