@@ -291,26 +291,28 @@
     m.textContent = "";
     m.appendChild(el("div", "head", name));
     var form = el("form", "mvform");
+    form.noValidate = true;  // our own message, in the menu, rather than the browser bubble
     var lab = el("label", "", "Custom mana value");
     var input = el("input", "");
     input.type = "number"; input.min = "0"; input.max = "20"; input.step = "1"; input.inputMode = "numeric";
     input.id = "mv-input"; lab.htmlFor = "mv-input";
     input.value = cur === null ? "" : cur;
-    var hint = el("p", "hint", "Archidekt counts this instead of the card's own mana value, in this deck only.");
+    var hint = el("p", "hint", "Archidekt's mana value override for this card, in this deck only.");
     var msg = el("p", "status", "");
     msg.setAttribute("role", "status");
     var save = el("button", "btn primary", "Save"); save.type = "submit";
-    var clear = el("button", "btn", "Clear"); clear.type = "button"; clear.hidden = cur === null;
+    var clear = el("button", "btn", "Clear"); clear.type = "button";
     var cancel = el("button", "btn", "Cancel"); cancel.type = "button";
     var acts = el("div", "acts");
-    acts.appendChild(save); acts.appendChild(clear); acts.appendChild(cancel);
+    acts.appendChild(save); if (cur !== null) acts.appendChild(clear); acts.appendChild(cancel);
+    input.addEventListener("input", function () { msg.className = "status"; msg.textContent = ""; });
     form.appendChild(lab); form.appendChild(input); form.appendChild(hint); form.appendChild(acts); form.appendChild(msg);
     m.appendChild(form);
     var send = function (value) {
       var ch = { action: "set_mana_value", card_name: name, mana_value: value, zone: card.getAttribute("data-zone") || "main" };
       var inv = { action: "set_mana_value", card_name: name, mana_value: cur === null ? null : Number(cur), zone: ch.zone };
       m.classList.add("busy");
-      saveEdit([ch], [inv]).then(function () { closeMenu(); toast("Mana value saved."); })
+      saveEdit([ch], [inv]).then(function () { closeMenu(); })  // applyAnswer shows Saved with Undo
         .catch(function (err) { m.classList.remove("busy"); if (!err || !err.cancelled) { msg.className = "status err"; msg.textContent = err.message; } });
     };
     form.addEventListener("submit", function (e) {

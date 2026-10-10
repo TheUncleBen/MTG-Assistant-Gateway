@@ -32,7 +32,14 @@ from .views import auto_category, cards_by_category
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _SYMBOL = re.compile(r"\{([^{}]+)\}")
 
-VIEWS = {"text": "Text", "table": "Table", "stacks": "Stacks", "scroll": "Scroll", "grid": "Grid"}
+VIEWS = {
+    "text": "Text",
+    "table": "Table",
+    "brewer": "Brewer",
+    "stacks": "Stacks",
+    "scroll": "Scroll",
+    "grid": "Grid",
+}
 GROUPS = {
     "category": "Categories",
     "type": "Type",
@@ -589,6 +596,32 @@ def table_row(card: DeckCard, *, deck: Deck, owned: dict[str, int] | None = None
     )
 
 
+def brewer_row(card: DeckCard, *, deck: Deck, owned: dict[str, int] | None = None) -> str:
+    """One card in the Brewer view: a small picture beside the name and cost, the type line and
+    the rules text, with the count and price (Archidekt's Brewer view, as read from its site code:
+    a list that shows each card's text so a deck can be read without opening every card)."""
+    img = card_image(card)
+    pic = (
+        f"<img class='art' src='{esc(img)}' alt='' loading='lazy'>"
+        if img
+        else "<span class='art ph' aria-hidden='true'></span>"
+    )
+    cls = " side" if not deck.in_deck(card) else ""
+    text = card.oracle_text
+    return (
+        f"<li class='row brew{cls}' tabindex='0' role='button' data-name='{esc(card.name.lower())}' "
+        f"data-card='{esc(card.name)}'{_card_data(card, deck)}>"
+        f"{pic}<span class='bd'>"
+        f"<span class='n'><span class='q'>{card.quantity}</span>{_label_dot(card)}{_owned_dot(card, owned)}"
+        f"<span class='name' title='{esc(card.name)}'>{esc(card.name)}</span>{_finish_badge(card)}"
+        f"<span class='mc'>{mana_html(card.mana_cost)}</span></span>"
+        f"<span class='ty'>{esc(card.type_line)}</span>"
+        + (f"<span class='tx'>{esc(text)}</span>" if text else "")
+        + f"<span class='price'>{money(card.price) if card.price is not None else ''}</span>"
+        "</span></li>"
+    )
+
+
 def card_view_attrs(card: DeckCard, *, img: str | None = None) -> str:
     """Data attributes ``static/cardview.js`` reads to show the whole card: image, printing,
     finish, mana cost, type line, rules text, power and toughness or loyalty, and every face."""
@@ -707,6 +740,12 @@ def cards_html(
                 "<ul class='plain rows'>"
                 + TABLE_HEAD
                 + "".join(table_row(c, deck=deck, owned=owned) for c in cards)
+                + "</ul>"
+            )
+        elif view == "brewer":
+            body = (
+                "<ul class='plain rows'>"
+                + "".join(brewer_row(c, deck=deck, owned=owned) for c in cards)
                 + "</ul>"
             )
         else:
@@ -1649,6 +1688,19 @@ ul.rows .hover img{width:100%;height:100%;display:block}
     grid-template-columns:1.6rem minmax(0,1fr) 2rem auto}
   .deckview.table ul.rows .ty,.deckview.table ul.rows .set,.deckview.table ul.rows .price{display:none} }
 /* Scroll view: each group one row of whole cards, scrolled sideways inside its own strip */
+/* brewer view: each card's picture, name and cost, type line and rules text, in columns */
+.deckview.brewer{columns:340px;column-gap:1.5rem}
+.deckview.brewer .stack{break-inside:avoid;page-break-inside:avoid;margin-bottom:1rem}
+ul.rows .row.brew{display:flex;align-items:flex-start;gap:.6rem;height:auto;padding:.4rem 0}
+.row.brew .art{width:56px;aspect-ratio:63/88;border-radius:4px;object-fit:cover;flex:none;
+  background:var(--surface-2)}
+.row.brew .bd{display:flex;flex-direction:column;gap:.15rem;min-width:0;flex:1}
+.row.brew .n .q{min-width:1.2rem}
+.row.brew .n .mc{margin-left:auto;flex:none}
+.row.brew .ty{font-size:.82rem;color:var(--text-muted)}
+.row.brew .tx{font-size:.82rem;white-space:pre-line;display:-webkit-box;-webkit-line-clamp:4;
+  -webkit-box-orient:vertical;overflow:hidden}
+.row.brew .price{text-align:left}
 .deckview.scroll .stack{margin-bottom:1rem;min-width:0}
 .deckview.scroll .cards{display:flex;gap:.75rem;overflow-x:auto;overscroll-behavior-x:contain;
   scroll-snap-type:x proximity;padding:.25rem .1rem .75rem}
