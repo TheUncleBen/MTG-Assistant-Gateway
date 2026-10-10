@@ -7,12 +7,15 @@ stack and for docker compose. It is a notice only: the gateway never pulls an im
 to Docker and never restarts itself; whoever runs it updates when they choose.
 
 ``MTG_UPDATE_CHECK=false`` turns the lookup off, and nothing is sent to GitHub then. The request
-carries no member data: it is one anonymous GET with the gateway's version in the User-Agent.
+carries no member data: it is one anonymous GET with the gateway's version in the User-Agent (GitHub
+sees the server's IP address, as any website does). It always asks this project's repository, the
+one the published images are built from; a fork that publishes its own images changes ``REPO``.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import time
@@ -93,18 +96,19 @@ class UpdateChecker:
     async def check_once(self) -> None:
         http = self._http or httpx.AsyncClient(timeout=httpx.Timeout(15.0), follow_redirects=False)
         try:
-            r = await http.get(
-                LATEST_API,
-                headers={
-                    "Accept": "application/vnd.github+json",
-                    "User-Agent": f"mtg-assistant-gateway/{__version__} update-check",
-                },
-            )
-            if r.status_code != 200:
-                raise ValueError(f"GitHub answered HTTP {r.status_code}")
-            if len(r.content) > MAX_BYTES:
-                raise ValueError("answer too large")
-            version, url = read_release(r.json())
+            headers = {
+                "Accept": "application/vnd.github+json",
+                "User-Agent": f"mtg-assistant-gateway/{__version__} update-check",
+            }
+            async with http.stream("GET", LATEST_API, headers=headers) as r:
+                if r.status_code != 200:
+                    raise ValueError(f"GitHub answered HTTP {r.status_code}")
+                body = bytearray()
+                async for chunk in r.aiter_bytes():
+                    body += chunk
+                    if len(body) > MAX_BYTES:
+                        raise ValueError("answer too large")
+            version, url = read_release(json.loads(bytes(body)))
         finally:
             if self._http is None:
                 await http.aclose()

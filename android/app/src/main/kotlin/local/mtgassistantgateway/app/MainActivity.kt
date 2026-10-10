@@ -645,6 +645,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onPause() {
+        Updater.inFront = false
         camera?.pause()
         web.onPause()
         CookieManager.getInstance().flush()
@@ -655,6 +656,8 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         web.onResume()
         camera?.resume()
+        Updater.inFront = true
+        Updater.showPendingConfirmation(this)
         if (this::updater.isInitialized) updater.checkIfDue()
     }
 

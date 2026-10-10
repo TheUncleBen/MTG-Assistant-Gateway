@@ -79,7 +79,8 @@ object AppUpdate {
 
     /**
      * Is the published certificate one the installed app is signed with? [installed] are the
-     * SHA-256s of the app's current signers (one, unless the key was rotated).
+     * SHA-256s of the app's signers. A future key rotation (APK signature scheme v3) is not handled:
+     * the rotated release would not be offered, and people would install it from the /app page once.
      */
     fun sameSigner(installed: Collection<String>, published: String?): Boolean {
         val p = fingerprint(published) ?: return false
