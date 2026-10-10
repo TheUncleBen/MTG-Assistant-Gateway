@@ -22,6 +22,10 @@ colour tags.
   the card. The assistant can propose tags too (`set_label` in `propose_deck_changes`); a tag
   change is low risk, so it follows your approval mode like other small edits.
 
+### Fixed
+- Card search's Add to deck: a second read of the same deck's categories no longer resets the
+  category you just picked.
+
 ### Changed
 - The in-chat card for deleting a deck shows Reject as a plain button next to the red Delete.
 
