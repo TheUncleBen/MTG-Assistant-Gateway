@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Decks</title>
+<style>
+/*@BASE@*/
+.row.deck{grid-template-columns:auto minmax(0,1fr);align-items:start;padding:8px 10px}
+.cover{width:64px;height:47px;border-radius:4px;background:var(--bg2);object-fit:cover;display:block;flex:none}
+.cover.none{visibility:visible;opacity:.35}
+.row.deck a.link:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:2px}
+.row.deck .sub{margin-top:2px}
+.row.deck .links{display:flex;flex-wrap:wrap;gap:0 14px}
+.pips{margin-left:4px}
+</style>
+</head>
+<body>
+<div class="card" id="card">
+  <div class="head"><h1 id="title">Decks</h1><span class="badge info" id="count"></span></div>
+  <p class="sum" id="summary"></p>
+  <div class="toolbar hidden" id="tools">
+    <input type="search" id="filter" placeholder="Find a deck" aria-label="Find a deck in the list" autocomplete="off">
+  </div>
+  <div class="scroll" id="scroll"><div id="list" role="list"></div></div>
+  <p class="note hidden" id="note"></p>
+  <div class="status hidden" id="status" role="status" aria-live="polite"></div>
+</div>
+<script>
+/*@BRIDGE@*/
+(function () {
+  "use strict";
+  var B = Bridge, el = B.el, $ = B.$;
+  var GATEWAY = "@GATEWAY@";
+  var MAX_IMAGES = 60, MAX_ROWS = 200;
+  var decks = [], search = false;
+
+  function link(text, url, cls) {
+    var a = el("a", cls || "link", text); a.href = "#";
+    a.onclick = function (e) { e.preventDefault(); B.openLink(url, function (m) { B.setStatus(m, ""); }); };
+    return a;
+  }
+  function pips(colors) {
+    var p = el("span", "pips"), any = false;
+    ["W", "U", "B", "R", "G"].forEach(function (c) { if (colors && Number(colors[c]) > 0) { p.appendChild(el("span", c)); any = true; } });
+    if (!any) return null;
+    p.setAttribute("aria-hidden", "true");
+    return p;
+  }
+  function appUrl(d) {
+    if (typeof d.gateway_url === "string" && d.gateway_url) return d.gateway_url;
+    return GATEWAY && d.id != null ? GATEWAY + "/decks/" + encodeURIComponent(String(d.id)) : "";
+  }
+  function draw() {
+    var q = String($("filter").value || "").trim().toLowerCase();
+    var list = $("list"); list.replaceChildren();
+    var rows = decks.filter(function (d) { return !q || String(d.name || "").toLowerCase().indexOf(q) >= 0 || String(d.owner || "").toLowerCase().indexOf(q) >= 0; });
+    if (!rows.length) list.appendChild(el("div", "row", q ? "No deck matches." : "No decks."));
+    rows.slice(0, MAX_ROWS).forEach(function (d, i) {
+      var li = el("div", "row deck"); li.setAttribute("role", "listitem");
+      var uid = typeof d.featured_scryfall_id === "string" ? d.featured_scryfall_id : "";
+      if (uid && i < MAX_IMAGES) li.appendChild(B.picture(B.scryfallImage(uid, "", "art_crop"), "cover"));
+      else li.appendChild(el("span", "cover none"));
+      var body = el("div");
+      body.appendChild(el("span", "name", String(d.name || "Untitled deck")));
+      var bits = [];
+      var fmt = d.format_name || (typeof d.format === "string" ? d.format : "");
+      if (fmt) bits.push(String(fmt));
+      if (search && d.owner) bits.push("by " + d.owner);
+      if (d.size != null) bits.push(d.size + " cards");
+      if (d.bracket != null) bits.push("bracket " + d.bracket);
+      if (d.private) bits.push("private"); else if (d.unlisted) bits.push("unlisted");
+      if (d.folder) bits.push("in " + d.folder);
+      var sub = el("span", "sub", bits.join(" · "));
+      var p = pips(d.colors); if (p) sub.appendChild(p);
+      body.appendChild(sub);
+      var links = el("div", "links");
+      var nm = String(d.name || "this deck");
+      if (appUrl(d)) { var o = link("Open in the app", appUrl(d)); o.setAttribute("aria-label", "Open " + nm + " in the app"); links.appendChild(o); }
+      if (typeof d.url === "string" && d.url) { var ar = link("Archidekt", d.url); ar.setAttribute("aria-label", "Open " + nm + " on Archidekt"); links.appendChild(ar); }
+      body.appendChild(links);
+      li.appendChild(body);
+      list.appendChild(li);
+    });
+    if (rows.length > MAX_ROWS) list.appendChild(el("div", "row", (rows.length - MAX_ROWS) + " more in the assistant's message."));
+    B.reportSize();
+  }
+  function load(result) {
+    var sc = result.structuredContent || {};
+    if (sc.ok === false || result.isError) {
+      B.setStatus(String(sc.message || (result.content && result.content[0] && result.content[0].text) || "The decks could not be listed."), "err");
+      return;
+    }
+    decks = Array.isArray(sc.decks) ? sc.decks.filter(function (d) { return d && typeof d === "object"; }) : [];
+    search = "page" in sc || "has_more" in sc || "commander_suggestions" in sc;
+    $("title").textContent = search ? "Decks found" : "Your decks";
+    var total = typeof sc.count === "number" ? sc.count : decks.length;
+    $("count").textContent = total + (total === 1 ? " deck" : " decks");
+    var who = !search && decks.length && decks[0].owner ? "by " + decks[0].owner + " · " : "";
+    var rest = decks.length < total ? "showing " + decks.length + " of " + total + "." : "open one in the app or on Archidekt.";
+    if (!who) rest = rest.charAt(0).toUpperCase() + rest.slice(1);
+    $("summary").textContent = who + rest;
+    var notes = [];
+    if (Array.isArray(sc.commander_suggestions) && sc.commander_suggestions.length) notes.push("Several commanders match: " + sc.commander_suggestions.slice(0, 8).join(", ") + ".");
+    if (sc.commander_matched) notes.push("Searched for " + sc.commander_matched + ".");
+    if (sc.has_more || sc.more_on_page) notes.push("There are more; ask for the next page.");
+    if (notes.length) { $("note").textContent = notes.join(" "); $("note").className = "note"; }
+    if (decks.length > 8) $("tools").className = "toolbar";
+    draw();
+  }
+  $("filter").addEventListener("input", draw);
+  B.start("MTG Assistant Gateway deck list card", load, {});
+})();
+</script>
+</body>
+</html>

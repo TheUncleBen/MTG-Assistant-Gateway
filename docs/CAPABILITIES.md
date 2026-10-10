@@ -102,8 +102,12 @@ card, the cards read from photos or a list, a deck by category, the account's
 setup. Every pick on a card reaches the assistant as plain text, and the
 assistant then proposes as usual; the only card that acts by itself is the
 proposal card, whose Approve and Reject (with an optional reason) both use its
-one-time code. Display-only cards are kept to the deck read, where pictures
-and rules text would otherwise fill the chat.
+one-time code. Display-only cards draw what the tool already answered, where a
+picture reads faster than the text: the deck read (pictures and rules text), a
+comparison (`compare_decks`), a deck's statistics (`deck_stats`: curve,
+colours, price, legality, bracket estimate), a list of decks (`list_my_decks`,
+`search_decks`) and a scan session (`get_scan_session`); they change nothing and
+add nothing to what the assistant reads.
 An app without cards (Claude Code, older clients) gets the same text results,
 and a form question for ambiguous names.
 

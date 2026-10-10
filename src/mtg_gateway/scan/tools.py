@@ -10,7 +10,7 @@ from mcp.server.mcpserver import Context
 from mcp_types import CallToolResult
 from pydantic import Field
 
-from ..cards import PICKER_CARD_URI, PRINTINGS_CARD_URI, ask_choices, tool_meta, with_card
+from ..cards import PICKER_CARD_URI, PRINTINGS_CARD_URI, SCAN_CARD_URI, ask_choices, tool_meta, with_card
 from ..schemas import change_for_assistant
 from .service import ScanError, ScanService, parse_cards, parse_text
 
@@ -314,6 +314,7 @@ def add_scan_tools(server: MCPServer, service: ScanService, *, links: CardLinks 
             "ask the user about them."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": False},
+        meta=tool_meta(SCAN_CARD_URI) if links is not None else None,
     )
     async def get_scan_session(session: str) -> dict[str, Any]:
         try:

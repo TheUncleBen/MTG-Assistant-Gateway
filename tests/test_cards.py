@@ -15,10 +15,14 @@ from mtg_gateway import cards
 from mtg_gateway.cards import (
     ACCOUNT_CARD_URI,
     CARD_META_KEY,
+    COMPARE_CARD_URI,
     DECK_CARD_URI,
+    DECK_LIST_CARD_URI,
     LINK_PATH,
     PICKER_CARD_URI,
     PRINTINGS_CARD_URI,
+    SCAN_CARD_URI,
+    STATS_CARD_URI,
     CardLinks,
     ask_choices,
     card_html,
@@ -39,7 +43,24 @@ CARDED = {
     "resolve_cards": PICKER_CARD_URI,
     "account_status": ACCOUNT_CARD_URI,
     "whoami": ACCOUNT_CARD_URI,
+    "compare_decks": COMPARE_CARD_URI,
+    "deck_stats": STATS_CARD_URI,
+    "list_my_decks": DECK_LIST_CARD_URI,
+    "search_decks": DECK_LIST_CARD_URI,
+    "get_scan_session": SCAN_CARD_URI,
 }
+# The display-only cards: they draw the result's own structured content, so the result is unchanged.
+DISPLAY_ONLY = {COMPARE_CARD_URI, STATS_CARD_URI, DECK_LIST_CARD_URI, SCAN_CARD_URI}
+CARD_NAMES = (
+    "printings-card",
+    "picker-card",
+    "deck-card",
+    "account-card",
+    "compare-card",
+    "stats-card",
+    "deck-list-card",
+    "scan-card",
+)
 
 
 class Stack:
@@ -104,7 +125,7 @@ async def test_tools_carry_their_cards_and_the_cards_declare_only_what_they_load
     for name, uri in CARDED.items():
         assert tools[name]["_meta"]["ui"]["resourceUri"] == uri, name
         assert tools[name]["_meta"]["ui/resourceUri"] == uri, name
-    for name in ("list_my_decks", "deck_stats", "compare_decks", "parse_decklist"):
+    for name in ("parse_decklist", "list_scan_sessions", "list_snapshots"):
         assert "ui" not in (tools[name].get("_meta") or {}), name
     res = await _resources(stack.h, token)
     for uri in set(CARDED.values()):
@@ -122,6 +143,13 @@ async def test_tools_carry_their_cards_and_the_cards_declare_only_what_they_load
     assert not csp[ACCOUNT_CARD_URI].get("resourceDomains") and not csp[ACCOUNT_CARD_URI].get(
         "connectDomains"
     )
+    # The display-only cards fetch nothing; the deck list and scan cards show Scryfall pictures.
+    for uri in DISPLAY_ONLY:
+        assert not csp[uri].get("connectDomains"), uri
+    for uri in (COMPARE_CARD_URI, STATS_CARD_URI):
+        assert not csp[uri].get("resourceDomains"), uri
+    for uri in (DECK_LIST_CARD_URI, SCAN_CARD_URI):
+        assert set(csp[uri]["resourceDomains"]) == {"https://api.scryfall.com", "https://cards.scryfall.io"}
     assert "frameDomains" not in json.dumps(csp)
 
 
@@ -140,12 +168,50 @@ async def test_switching_the_card_off_removes_every_card(no_card: Stack) -> None
 
 
 def test_every_card_is_one_self_contained_document() -> None:
-    for name in ("printings-card", "picker-card", "deck-card", "account-card"):
-        html = card_html(name)
+    for name in CARD_NAMES:
+        html = card_html(name, "https://gateway.example.com/")
+        assert "@GATEWAY@" not in html
         assert "/*@BRIDGE@*/" not in html and "/*@BASE@*/" not in html
         assert "var Bridge = " in html and "ui/initialize" in html and "ui/notifications/size-changed" in html
         assert "innerHTML" not in html and "<script src" not in html and "eval(" not in html
         assert 'content="light dark"' in html and "prefers-color-scheme:dark" in html
+    # The cards that link to the gateway's own pages get its address as a JS string literal.
+    for name in ("stats-card", "deck-list-card", "scan-card"):
+        assert 'var GATEWAY = "https://gateway.example.com";' in card_html(
+            name, "https://gateway.example.com/"
+        )
+        assert 'var GATEWAY = "";' in card_html(name)
+    assert "\\u003c/script" in card_html("scan-card", "https://gateway.example.com/</script>")
+
+
+async def test_display_only_cards_leave_the_tool_results_as_they_were(stack: Stack) -> None:
+    """compare_decks, deck_stats, list_my_decks, search_decks and get_scan_session: the tool names
+    its card for MCP Apps hosts (Claude, ChatGPT; the nested key and the flat one older hosts read),
+    and the result is the same JSON for the assistant, with nothing added for the card."""
+    h = stack.h
+    token = await linked_user(stack)
+    tools = await _tools(h, token)
+    saved = await call(
+        h, token, "save_scan_session", {"name": "Binder <img src=x>", "text": "2 Sol Ring\n1 Zzyzx"}
+    )
+    sid = saved["structuredContent"]["id"]
+    for name, args in (
+        ("compare_decks", {"a": "42", "b_list": "1 Sol Ring\n1 Arcane Signet"}),
+        ("deck_stats", {"deck_ref": "42"}),
+        ("list_my_decks", {}),
+        ("search_decks", {"name": "deck"}),
+        ("get_scan_session", {"session": sid}),
+    ):
+        meta = tools[name]["_meta"]
+        assert meta["ui"]["resourceUri"] == meta["ui/resourceUri"] == CARDED[name], name
+        result = await call(h, token, name, args)
+        sc = result["structuredContent"]
+        assert sc["ok"] is True, (name, sc)
+        assert not result.get("_meta"), name  # nothing for the card rides along
+        assert json.loads(result["content"][0]["text"]) == sc, name
+        assert "ui://" not in result["content"][0]["text"], name
+    scan = structured(await call(h, token, "get_scan_session", {"session": sid}))
+    assert scan["name"] == "Binder <img src=x>" and scan["unresolved"] >= 1
 
 
 # -- the assistant's copy versus the card's --------------------------------------------------------

@@ -486,6 +486,8 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
 def add_browse_tools(server: MCPServer, state: AppState) -> None:
     from mcp.server.auth.middleware.auth_context import get_access_token
 
+    from .cards import DECK_LIST_CARD_URI, tool_meta
+
     decks = state.decks
 
     def _sub() -> str:
@@ -513,6 +515,8 @@ def add_browse_tools(server: MCPServer, state: AppState) -> None:
             "the signed-in member's own decks, private ones included. Read-only."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
+        # the deck list card (cards.py) draws the result; on the same switch as every card
+        meta=tool_meta(DECK_LIST_CARD_URI) if state.settings.apply_in_chat else None,
     )
     async def search_decks(
         name: Annotated[str | None, Field(description="Part of the deck name.")] = None,

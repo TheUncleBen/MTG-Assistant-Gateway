@@ -248,7 +248,8 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
   phones, ChatGPT as reported): the printings of a card as pictures to tap,
   the cards read from photos or a list to keep or drop, a deck by category
   with pictures and rules text, the account's setup, and the proposal with
-  Approve and Reject. A pick on a card goes back to the assistant as plain
+  Approve and Reject. Comparisons, deck statistics, deck lists and scan
+  sessions show as read-only cards too. A pick on a card goes back to the assistant as plain
   text; it never changes anything by itself. Bulky data reaches the card
   through a ten-minute signed link, not through the model.
 - **Card scanning.** The `/scan` page reads physical cards with your phone

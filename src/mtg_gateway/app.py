@@ -69,7 +69,17 @@ from .auth_provider import (
 )
 from .backup import nightly_loop, purge_loop
 from .browse import add_browse_routes, add_browse_tools
-from .cards import ACCOUNT_CARD_URI, DECK_CARD_URI, CardLinks, add_card_routes, tool_meta, with_card
+from .cards import (
+    ACCOUNT_CARD_URI,
+    COMPARE_CARD_URI,
+    DECK_CARD_URI,
+    DECK_LIST_CARD_URI,
+    STATS_CARD_URI,
+    CardLinks,
+    add_card_routes,
+    tool_meta,
+    with_card,
+)
 from .cardsearch import add_cardsearch_routes
 from .cimd import CimdFetcher
 from .clickguard import form_stamp, guarded_form, submitted_too_soon
@@ -660,6 +670,10 @@ def build_mcp_server(state: AppState) -> MCPServer:
     state.cards = CardLinks(s.fernet_key, s.public_url) if s.apply_in_chat else None
     deck_card_meta = tool_meta(DECK_CARD_URI) if s.apply_in_chat else None
     account_card_meta = tool_meta(ACCOUNT_CARD_URI) if s.apply_in_chat else None
+    # Display-only cards that draw the result's own structured content: nothing is added to it.
+    deck_list_card_meta = tool_meta(DECK_LIST_CARD_URI) if s.apply_in_chat else None
+    stats_card_meta = tool_meta(STATS_CARD_URI) if s.apply_in_chat else None
+    compare_card_meta = tool_meta(COMPARE_CARD_URI) if s.apply_in_chat else None
 
     def _deck_card(data: dict[str, object], kind: str, ref: str) -> CallToolResult:
         """A deck read as the assistant gets it, plus the deck card's signed link in _meta."""
@@ -701,6 +715,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "gateway's own backup copies are left out (each snapshot in list_snapshots links its copy)."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
+        meta=deck_list_card_meta,
     )
     async def list_my_decks(
         name_contains: str | None = None, deck_format: str | None = None, folder: str | None = None
@@ -1119,6 +1134,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "Archidekt deck's legality and structure; validate_decklist checks a pasted list card by card."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
+        meta=stats_card_meta,
     )
     async def deck_stats_tool(
         deck_ref: Annotated[
@@ -1205,6 +1221,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "For Forge games of two decks, run run_deck_report on each with the same options.seed."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
+        meta=compare_card_meta,
     )
     async def compare_decks(
         a: Annotated[
