@@ -30,7 +30,9 @@
   function mana(cost) { return window.MtgMana.mana(cost); }
   function symbolize(text, target) { return window.MtgMana.symbolize(text, target); }
 
-  var extras = Object.create(null);   // card name -> promise of {links, back_img}
+  // card name -> promise of the card's /cards/api/text answer (links, back_img and the rules text);
+  // shared with the card search page (MtgCardView.text), so one opening reads it once
+  var extras = Object.create(null);
   var rulingsFor = Object.create(null); // card name -> promise of the rulings list
   function getJSON(url) {
     return fetch(url, { credentials: "same-origin", headers: { Accept: "application/json" } })
@@ -325,5 +327,5 @@
       gc: node.hasAttribute("data-gc")
     };
   }
-  window.MtgCardView = { open: open, update: update, close: close, fromElement: fromElement, mana: mana, symbolize: symbolize };
+  window.MtgCardView = { text: extraFor, open: open, update: update, close: close, fromElement: fromElement, mana: mana, symbolize: symbolize };
 })();

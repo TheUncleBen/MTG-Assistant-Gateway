@@ -1998,6 +1998,10 @@ ul.erows{list-style:none;margin:.5rem 0 0;padding:0}
     padding:.35rem max(.75rem,env(safe-area-inset-right)) .35rem max(.75rem,env(safe-area-inset-left));
     gap:.4rem;flex-wrap:nowrap}
   .editbar .count{display:none}
+  /* Undo and Redo keep their names for screen readers; on a phone the arrows alone show */
+  .editbar .undo .bl,.editbar .redo .bl{position:absolute;width:1px;height:1px;overflow:hidden;
+    clip:rect(0 0 0 0);white-space:nowrap}
+  .editbar .undo,.editbar .redo{padding-inline:.6rem;flex:none}
   .editbar .backup{font-size:.8rem;white-space:normal;flex:1 1 6rem;min-width:0}
   .editbar .status{flex-basis:100%}
   .editor{padding-bottom:6rem}
