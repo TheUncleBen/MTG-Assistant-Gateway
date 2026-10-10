@@ -102,6 +102,35 @@ def coverage() -> dict:
     return out
 
 
+def group_report() -> None:
+    """Print the missing cards by group (the artifact is not reachable from every reader)."""
+    import collections
+    allm = json.loads((OUT / "forge-missing-all_cards.json").read_text())
+    cmd = {m["name"] for m in json.loads((OUT / "forge-missing-commander_legal.json").read_text())}
+
+    def group(m: dict) -> str:
+        games = m.get("games") or []
+        if m.get("set_type") == "funny":
+            return "un-set / playtest / acorn (funny)"
+        if "paper" not in games:
+            return "digital-only (Arena/MTGO)"
+        if m.get("set_type") in ("memorabilia", "token", "minigame"):
+            return "memorabilia / minigame"
+        if m.get("layout") in ("adventure", "flip", "split", "transform", "modal_dfc", "meld", "prepare"):
+            return "paper, multi-face (possible name-matching miss)"
+        return "paper, other"
+    g = collections.defaultdict(list)
+    for m in allm:
+        g[group(m)].append(m)
+    print("MISSING BY GROUP")
+    for k, v in sorted(g.items(), key=lambda kv: -len(kv[1])):
+        st = collections.Counter(x.get("set_type") for x in v).most_common(6)
+        print(f"== {k}: {len(v)}  set_types={st}")
+        names = [f"{x['name']} [{x.get('set')}/{x.get('layout')}/{x.get('released_at')}]" for x in v]
+        print("   " + " | ".join(names[:400]))
+    print("COMMANDER-LEGAL MISSING (" + str(len(cmd)) + "): " + " | ".join(sorted(cmd)))
+
+
 # ---------- decks ----------
 
 def front(name: str) -> str:
@@ -199,6 +228,7 @@ def main() -> None:
         (OUT / "summary.json").write_text(json.dumps(summary, indent=1))
         (OUT / "summary.md").write_text("# Forge coverage\n\n" + json.dumps(summary["coverage"], indent=1) + "\n")
         print(json.dumps(summary["coverage"], indent=1))
+        group_report()
         return
 
     (DECKS / "liesa.dck").write_text((HERE / "liesa.dck").read_text())
