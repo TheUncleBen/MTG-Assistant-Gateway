@@ -435,6 +435,111 @@ def pager_html(query: dict[str, Any], *, has_more: bool) -> str:
     return "".join(parts)
 
 
+def _trend_value(value: Any, unit: str) -> str:
+    """One trend number as the page says it: '$310.00', '57%', 'turn 5', '3.21'."""
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return "–"
+    if unit == "$":
+        return f"${value:,.2f}"
+    if unit == "%":
+        return f"{value:g}%"
+    if unit == "turn":
+        return f"turn {value:g}"
+    return f"{round(value, 2):g}"
+
+
+def _trend_change(change: float, unit: str) -> str:
+    """The change since the first report in words, so it reads without colour or arrows."""
+    if not change:
+        return "no change"
+    size = abs(change)
+    if unit == "$":
+        amount = f"${size:,.2f}"
+    elif unit == "%":
+        amount = f"{size:g} percentage points"
+    elif unit == "turn":
+        amount = f"{size:g} {'turn' if size == 1 else 'turns'}"
+    else:
+        amount = f"{round(size, 2):g}"
+    return f"{'up' if change > 0 else 'down'} {amount}"
+
+
+def _day(ts: Any) -> str:
+    return time.strftime("%Y-%m-%d", time.gmtime(int(ts or 0)))
+
+
+def _trend_svg(values: list[Any], label: str, *, width: int = 120, height: int = 32) -> str:
+    """A sparkline of one metric across the reports, oldest left (no script, CSP-safe). It
+    stretches to its box and the line keeps its width (non-scaling stroke). ``label`` is what a
+    screen reader hears instead of the picture."""
+    points = [(i, float(v)) for i, v in enumerate(values) if isinstance(v, (int, float))]
+    lo, hi = min(v for _, v in points), max(v for _, v in points)
+    span = (hi - lo) or 1.0
+    step = (width - 8) / max(1, len(values) - 1)
+
+    def xy(i: int, v: float) -> str:
+        y = height / 2 if hi == lo else height - 4 - (v - lo) / span * (height - 8)
+        return f"{4 + i * step:.1f},{y:.1f}"
+
+    coords = " ".join(xy(i, v) for i, v in points)
+    return (
+        f"<svg class='tspark' viewBox='0 0 {width} {height}' preserveAspectRatio='none' role='img' "
+        f"aria-label='{_esc(label)}'><polyline points='{coords}' vector-effect='non-scaling-stroke'/></svg>"
+    )
+
+
+def trend_html(trend: dict[str, Any] | None) -> str:
+    """The "Report trends" card of a deck's history: one sparkline per metric its stored reports
+    hold (ReportService.trend, the same numbers list_deck_reports gives the assistant), each with
+    the latest value and the change since the first report, then every report's numbers as a
+    table for anyone who cannot see the lines. Nothing with fewer than two reports."""
+    if not trend or trend.get("reports", 0) < 2 or not trend.get("metrics"):
+        return ""
+    series = trend["series"]
+    items = []
+    for m in trend["metrics"]:
+        unit = m["unit"]
+        latest, first = _trend_value(m["latest"], unit), _trend_value(m["first"], unit)
+        change = _trend_change(m["change"], unit)
+        said = (
+            f"{m['label']} over {m['reports']} reports: {first} on {_day(m['first_at'])}, "
+            f"{latest} on {_day(m['latest_at'])}, {change}."
+        )
+        items.append(
+            f"<li class='tmetric'><h3>{_esc(m['label'])}</h3>"
+            f"{_trend_svg([p.get(m['key']) for p in series], said)}"
+            f"<p class='now'><b>{_esc(latest)}</b> <span>latest, {time_html(m['latest_at'])}</span></p>"
+            f"<p class='delta'>{_esc(change[:1].upper() + change[1:])} since {_esc(first)} on "
+            f"{time_html(m['first_at'])}</p></li>"
+        )
+    shown = trend["metrics"]
+    turns = any(isinstance(p.get("until_turn"), int) for p in series)
+    head = "".join(f"<th scope='col'>{_esc(m['label'])}</th>" for m in shown)
+    head += "<th scope='col'>Turns simulated</th>" if turns else ""
+    rows = []
+    for p in series:
+        cells = "".join(f"<td>{_esc(_trend_value(p.get(m['key']), m['unit']))}</td>" for m in shown)
+        if turns:
+            cells += f"<td>{_esc(p.get('until_turn') if p.get('until_turn') is not None else '–')}</td>"
+        rows.append(
+            f"<tr><th scope='row'><a href='/history/reports/{_esc(p['report_id'])}'>"
+            f"{time_html(p['taken_at'])}</a></th>{cells}</tr>"
+        )
+    n = trend["reports"]
+    return (
+        "<section class='card trend' aria-labelledby='trend-h'><h2 id='trend-h'>Report trends</h2>"
+        f"<p class='muted'>How this deck's {n} most recent stored reports moved, oldest to newest, from "
+        f"{time_html(trend['first_at'])} to {time_html(trend['latest_at'])}. The goldfish numbers come "
+        "from the reports that ran a simulation.</p>"
+        f"<ul class='plain tmetrics'>{''.join(items)}</ul>"
+        "<details class='tdata'><summary>The numbers by report</summary>"
+        "<div class='tbl' role='region' aria-label='Report numbers, oldest first' tabindex='0'>"
+        f"<table><caption class='sr-only'>Each report's numbers, oldest first</caption><thead><tr>"
+        f"<th scope='col'>Report</th>{head}</tr></thead><tbody>{''.join(rows)}</tbody></table></div>"
+        "</details></section>"
+    )
+
+
 HISTORY_CSS = """
 .filterbar .controls{display:grid;gap:.6rem 1rem;align-items:end;
   grid-template-columns:repeat(auto-fit,minmax(min(100%,11rem),1fr))}
@@ -473,7 +578,23 @@ HISTORY_CSS = """
 .history .day small a{font-weight:400}
 .pager{justify-content:space-between} .pager .btn{margin:0}
 .pager + .backups,.history + .backups{margin-top:1rem}
-.trend h2{font-size:1.2rem}
+.trend h2{font-size:1.2rem} .trend > p.muted{margin:.2rem 0 .75rem}
+.tmetrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));gap:.75rem;margin:0}
+.tmetric{border:1px solid var(--border);border-radius:3px;padding:.6rem .75rem;min-width:0}
+.tmetric h3{margin:0 0 .3rem;font-size:.95rem;overflow-wrap:anywhere}
+.tspark{display:block;width:100%;height:36px;color:var(--orange-text)}
+.tspark polyline{fill:none;stroke:currentColor;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.tmetric p{margin:.3rem 0 0;font-size:.88rem;overflow-wrap:anywhere}
+.tmetric .now b{font-size:1.2rem;font-variant-numeric:tabular-nums}
+.tmetric .now span,.tmetric .delta{color:var(--text-muted)}
+.tdata{margin-top:.75rem} .tdata > summary{cursor:pointer;color:var(--link);min-height:2rem;display:flex;
+  align-items:center}
+.tdata .tbl{overflow-x:auto;max-width:100%;margin-top:.4rem}
+.tdata table{border-collapse:collapse;font-size:.86rem;font-variant-numeric:tabular-nums}
+.tdata th,.tdata td{padding:.3rem .5rem;border-bottom:1px solid var(--border-soft);text-align:right;
+  vertical-align:top}
+.tdata thead th{min-width:6rem}
+.tdata th[scope=row],.tdata thead th:first-child{text-align:left;min-width:0;white-space:nowrap}
 .backups h2{font-size:1.2rem} .backups .copies{margin:0;display:grid;gap:.4rem}
 .backups .copies li{display:flex;flex-wrap:wrap;gap:.25rem .5rem;align-items:baseline;overflow-wrap:anywhere}
 .backups time{font-size:.86rem;font-variant-numeric:tabular-nums}
@@ -490,5 +611,6 @@ __all__ = [
     "pager_html",
     "query_string",
     "read_query",
+    "trend_html",
     "when_since",
 ]

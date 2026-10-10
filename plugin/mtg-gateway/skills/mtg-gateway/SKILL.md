@@ -112,8 +112,10 @@ the ingest tool, never a private deck's id.
 - **Testing:** `run_deck_report` reads the deck, keeps its statistics and,
   when the research service is up, a `validate_decklist` and a goldfish run
   (`games`, default 300), stored for the user. `list_deck_reports` (per deck
-  with `deck_id`) shows the trend numbers over time, `get_deck_report` one
-  report in full. The same reports are on the gateway's History page
+  with `deck_id`) shows the trend numbers over time and, with two or more
+  reports, `trend`: first and latest value, dates and change per metric
+  (statistics and goldfish speed), the same as the deck's History page;
+  `get_deck_report` one report in full. The same reports are on the gateway's History page
   (`/history`). An unchanged deck within ten minutes returns the earlier
   report (`reused: true`); say so rather than calling it a new run. The
   goldfish rules below apply to the numbers inside a report too.

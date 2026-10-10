@@ -51,6 +51,7 @@ from .history_view import (
     is_filtered,
     pager_html,
     read_query,
+    trend_html,
     when_since,
 )
 from .pages import (
@@ -157,28 +158,6 @@ def _pips(pips: dict[str, Any], sources: dict[str, Any] | None) -> str:
             f"<b>{_num(p, 0)} pips</b>" + (f"<i>{_num(s, 0)} sources</i>" if s is not None else "") + "</li>"
         )
     return f"<ul class='plain pips'>{''.join(rows)}</ul>" if rows else ""
-
-
-def _sparkline(points: list[float | None], *, width: int = 160, height: int = 36) -> str:
-    """Inline SVG line for a metric over time (no script, CSP-safe)."""
-    vals = [p for p in points if isinstance(p, (int, float))]
-    if len(vals) < 2:
-        return ""
-    lo, hi = min(vals), max(vals)
-    span = (hi - lo) or 1.0
-    step = (width - 4) / (len(points) - 1)
-    coords = []
-    for i, p in enumerate(points):
-        if not isinstance(p, (int, float)):
-            continue
-        x = 2 + i * step
-        y = height - 2 - (p - lo) / span * (height - 4)
-        coords.append(f"{x:.1f},{y:.1f}")
-    return (
-        f"<svg class='spark' viewBox='0 0 {width} {height}' width='{width}' height='{height}' "
-        f"aria-hidden='true'><polyline fill='none' stroke='currentColor' stroke-width='2' "
-        f"points='{' '.join(coords)}'/></svg>"
-    )
 
 
 def stats_strip(stats: dict[str, Any] | None) -> str:
@@ -1901,25 +1880,8 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             except (DeckError, TimeoutError):
                 copies = []  # not linked, or Archidekt unavailable: the panel is simply absent
             copies_panel = backup_copies_html(copies, folder=s.archidekt_backup_folder, deck_id=deck_id)
-        trend = ""
-        if deck_id:
-            series = reports.series(sub, deck_id)
-            if len(series) >= 2:
-                cards = [
-                    f"<div class='tile'><b>{_esc(label)}</b>{_sparkline([p.get(key) for p in series])}"
-                    f"<span>{_num(series[0].get(key))} → {_num(series[-1].get(key))}</span></div>"
-                    for key, label in (
-                        ("average_mana_value", "Avg MV"),
-                        ("land_count", "Lands"),
-                        ("price_total", "Price"),
-                        ("salt_total", "Salt"),
-                    )
-                    if any(isinstance(p.get(key), (int, float)) for p in series)
-                ]
-                trend = (
-                    f"<div class='card trend'><h2>Trend over {len(series)} reports</h2>"
-                    f"<div class='tiles'>{''.join(cards)}</div></div>"
-                )
+        # the deck's report trends (none with fewer than two reports)
+        trend = trend_html(reports.trend(sub, deck_id)) if deck_id else ""
         head = f"<p><a href='/decks/{_esc(deck_id)}'>← Back to the deck</a></p>" if deck_id else ""
         hint = "more below" if has_more else ""
         if shown:

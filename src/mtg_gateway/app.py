@@ -1351,12 +1351,20 @@ def build_mcp_server(state: AppState) -> MCPServer:
         title="List stored deck reports",
         description=(
             "The user's stored deck reports, newest first, with the trend numbers (card count, average mana "
-            "value, lands, price, salt) per report. Filter by deck_id. get_deck_report returns one in full."
+            "value, lands, price, salt) per report. Filter by deck_id. With deck_id and two or more "
+            "reports, trend is the deck's History-page trend: its last 60 reports oldest first (series, "
+            "with the goldfish speed numbers: commander median cast turn, median 40-damage turn, share "
+            "of games dealing 40 damage by until_turn) and per metric the first and latest values, "
+            "their dates and the change; otherwise null. get_deck_report returns one in full."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": False},
     )
     async def list_deck_reports(deck_id: str | None = None) -> dict[str, object]:
-        return {"ok": True, "reports": state.reports.list(_sub(), deck_id)}
+        out: dict[str, object] = {"ok": True, "reports": state.reports.list(_sub(), deck_id)}
+        if deck_id:
+            # the same numbers the deck's History page draws (history_view.trend_html)
+            out["trend"] = state.reports.trend(_sub(), deck_id)
+        return out
 
     @server.tool(
         name="get_deck_report",
