@@ -35,6 +35,8 @@ jobs:
           mkdir -p /tmp/forge && tar -xjf "/tmp/forge-dl/$asset" -C /tmp/forge
           find /tmp/forge -maxdepth 2 | head -60
       - name: Run the spike
+        env:
+          SPIKE_MODE: coverage
         run: |
           jar=$(find /tmp/forge -maxdepth 3 -name '*jar-with-dependencies.jar' | head -1)
           test -n "$jar"

@@ -72,25 +72,34 @@ def scryfall_commander_pool() -> list[dict]:
     text = raw.decode("utf-8")
     cards = [json.loads(line) for line in text.splitlines() if line.strip()] if url.endswith(
         (".jsonl", ".jsonl.gz")) else json.loads(text)
-    return [c for c in cards if c.get("legalities", {}).get("commander") in ("legal", "restricted")]
+    return cards
+
+
+NON_CARDS = {"token", "double_faced_token", "emblem", "art_series", "vanguard", "scheme", "planar"}
 
 
 def coverage() -> dict:
     forge = forge_card_names()
+    (OUT / "forge-card-names.json").write_text(json.dumps(sorted(forge), indent=0))
     forge_low = {n.lower() for n in forge}
-    pool = scryfall_commander_pool()
-    missing = []
-    for c in pool:
-        full = c["name"]
-        front = full.split(" // ")[0]
-        if full.lower() not in forge_low and front.lower() not in forge_low:
-            missing.append({"name": full, "set": c.get("set"), "type_line": c.get("type_line"),
-                            "released_at": c.get("released_at")})
-    (OUT / "forge-missing-commander-cards.json").write_text(json.dumps(missing, indent=1))
-    n = len(pool)
-    return {"forge_scripts": len(forge), "commander_pool": n, "missing": len(missing),
-            "covered_pct": round(100 * (n - len(missing)) / n, 2),
-            "missing_sample": [m["name"] for m in missing[:60]]}
+    allc = [c for c in scryfall_commander_pool() if c.get("layout") not in NON_CARDS]
+    pools = {"all_cards": allc,
+             "commander_legal": [c for c in allc
+                                 if c.get("legalities", {}).get("commander") in ("legal", "restricted")]}
+    out = {"forge_scripts": len(forge)}
+    for label, pool in pools.items():
+        missing = []
+        for c in pool:
+            full = c["name"]
+            if full.lower() not in forge_low and full.split(" // ")[0].lower() not in forge_low:
+                missing.append({"name": full, "set": c.get("set"), "set_type": c.get("set_type"),
+                                "games": c.get("games"), "type_line": c.get("type_line"),
+                                "released_at": c.get("released_at"), "layout": c.get("layout")})
+        (OUT / f"forge-missing-{label}.json").write_text(json.dumps(missing, indent=1))
+        n = len(pool)
+        out[label] = {"pool": n, "missing": len(missing),
+                      "covered_pct": round(100 * (n - len(missing)) / n, 2)}
+    return out
 
 
 # ---------- decks ----------
@@ -185,6 +194,12 @@ def main() -> None:
         summary["coverage"] = coverage()
     except Exception as exc:  # keep going: the sim numbers matter as much
         summary["coverage"] = {"error": repr(exc)}
+
+    if os.environ.get("SPIKE_MODE") == "coverage":
+        (OUT / "summary.json").write_text(json.dumps(summary, indent=1))
+        (OUT / "summary.md").write_text("# Forge coverage\n\n" + json.dumps(summary["coverage"], indent=1) + "\n")
+        print(json.dumps(summary["coverage"], indent=1))
+        return
 
     (DECKS / "liesa.dck").write_text((HERE / "liesa.dck").read_text())
     opponents = precon_decks(3)
