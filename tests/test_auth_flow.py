@@ -501,3 +501,13 @@ async def test_account_page_shows_the_person_what_their_sign_in_shares(gw: Harne
         assert "rel='icon' href='/favicon.ico'" in page
     finally:
         await b.aclose()
+
+
+async def test_whoami_never_uses_an_email_shaped_username_as_the_name(gw: Harness, idp: FakeIdP):
+    # Entra ID's UPN and Keycloak's "email as username" put the email in preferred_username.
+    idp.user = {**idp.user, "name": None, "preferred_username": "alice@example.test"}
+    tokens = await gw.tokens_for(await gw.register())
+    r = await gw.mcp(tokens["access_token"], "tools/call", {"name": "whoami", "arguments": {}})
+    result = sse_json(r)["result"]
+    assert result["structuredContent"]["name"] is None
+    assert "alice@example.test" not in json.dumps(result)

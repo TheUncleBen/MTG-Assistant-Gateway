@@ -2,14 +2,9 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import pytest
 
 from .conftest import PUBLIC_URL, LoginNotCompleted
-
-EVIDENCE = Path(__file__).with_name(".generated") / "identity-evidence.json"
 
 
 async def test_two_users_get_their_own_identities(mcp_client):
@@ -33,9 +28,8 @@ async def test_two_users_get_their_own_identities(mcp_client):
     assert alice.storage.client_info.client_secret
     assert alice.storage.tokens and alice.storage.tokens.refresh_token
     assert (alice.storage.tokens.expires_in or 0) <= 3600
-    # Keep what this Authentik version asserted, for comparing versions run by run (no tokens).
-    EVIDENCE.parent.mkdir(exist_ok=True)
-    EVIDENCE.write_text(json.dumps({"alice-test": me_ben, "bob-test": me_friend}, indent=2, sort_keys=True))
+    # What Authentik asserted (email, groups) is recorded from the gateway's own records by
+    # test_04's backup check, in .generated/identity-evidence.json.
 
 
 async def test_same_user_from_two_clients_is_the_same_person(mcp_client):

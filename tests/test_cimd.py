@@ -265,7 +265,8 @@ async def test_cimd_login_end_to_end(gw: Harness, docs: DocHost):
     tokens = t.json()
     assert tokens["scope"] == "mtg"
     r = await gw.mcp(tokens["access_token"], "tools/call", {"name": "whoami", "arguments": {}}, rid=2)
-    assert sse_json(r)["result"]["structuredContent"]["client_id"] == CLIENT_URL
+    assert sse_json(r)["result"]["structuredContent"]["signed_in"] is True
+    assert gw.db.get_token(tokens["access_token"], "access")["client_id"] == CLIENT_URL
 
     # Refresh works for the public client, and the document was fetched once (cached after).
     rt = await gw.http.post(
