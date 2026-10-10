@@ -77,10 +77,45 @@ def scryfall_commander_pool() -> list[dict]:
 NON_CARDS = {"token", "double_faced_token", "emblem", "art_series", "vanguard", "scheme", "planar"}
 
 
+def norm(name: str) -> str:
+    import unicodedata
+    n = unicodedata.normalize("NFKD", name.replace("\ua789", ":")).encode("ascii", "ignore").decode()
+    return re.sub(r"\s+", " ", n).strip().lower()
+
+
+def print_names() -> dict:
+    """oracle_id -> every name any printing carries (printed, flavor/Universes Within, faces)."""
+    bulk = json.loads(get("https://api.scryfall.com/bulk-data/default-cards"))
+    raw = gzip.decompress(get(bulk["jsonl_download_uri"])).decode("utf-8")
+    names: dict = {}
+    for line in raw.splitlines():
+        if not line.strip():
+            continue
+        c = json.loads(line)
+        oid = c.get("oracle_id") or (c.get("card_faces") or [{}])[0].get("oracle_id")
+        if not oid:
+            continue
+        bag = names.setdefault(oid, set())
+        for k in ("name", "printed_name", "flavor_name"):
+            if c.get(k):
+                bag.add(c[k])
+        for f in c.get("card_faces") or []:
+            for k in ("name", "printed_name", "flavor_name"):
+                if f.get(k):
+                    bag.add(f[k])
+    return names
+
+
 def coverage() -> dict:
     forge = forge_card_names()
     (OUT / "forge-card-names.json").write_text(json.dumps(sorted(forge), indent=0))
     forge_low = {n.lower() for n in forge}
+    forge_norm = {norm(n) for n in forge}
+    try:
+        pnames = print_names()
+    except Exception as exc:
+        print("print names unavailable:", repr(exc))
+        pnames = {}
     allc = [c for c in scryfall_commander_pool() if c.get("layout") not in NON_CARDS]
     def playable(c: dict) -> bool:
         return (c.get("set_type") not in ("funny", "memorabilia", "token", "minigame")
@@ -92,7 +127,20 @@ def coverage() -> dict:
         key = ((c.get("oracle_text") or "").replace(c["name"], "~"), c.get("type_line"), c.get("mana_cost"))
         if key[0]:
             by_text.setdefault(key, []).append(c["name"])
+    def resolvable(c: dict) -> str | None:
+        """Another name this same card is printed under (or a spelling) that Forge knows."""
+        cands = {c["name"], *c["name"].split(" // ")}
+        oid = c.get("oracle_id") or (c.get("card_faces") or [{}])[0].get("oracle_id")
+        cands |= pnames.get(oid, set())
+        for n in cands:
+            if norm(n) in forge_norm:
+                return n
+        return None
+
     def aliasable(c: dict) -> str | None:
+        r = resolvable(c)
+        if r:
+            return r
         key = ((c.get("oracle_text") or "").replace(c["name"], "~"), c.get("type_line"), c.get("mana_cost"))
         for other in by_text.get(key, []):
             if other != c["name"] and other.lower() in forge_low:
@@ -100,6 +148,7 @@ def coverage() -> dict:
         return None
     pools = {"all_cards": allc,
              "playable_paper": [c for c in allc if playable(c)],
+             "legal_in_any_format": [c for c in allc if any(v in ("legal", "restricted") for v in (c.get("legalities") or {}).values())],
              "playable_paper_or_digital": [c for c in allc if c.get("set_type") not in ("funny", "memorabilia", "token", "minigame")],
              "commander_legal": [c for c in allc
                                  if c.get("legalities", {}).get("commander") in ("legal", "restricted")]}
