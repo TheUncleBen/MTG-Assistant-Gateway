@@ -99,6 +99,23 @@
   function open(card, actions) {
     var v = ensure();
     lastFocus = document.activeElement;
+    var closeBtn = draw(v, card, actions);
+    v.classList.add("open");
+    document.documentElement.classList.add("cardview-open");
+    if (!pushed) {
+      try { history.pushState({ cardview: 1 }, ""); pushed = true; } catch (e) { pushed = false; }
+    }
+    closeBtn.focus();
+  }
+  /* Redraws the open viewer with fuller data (a page that reads the rules text after opening);
+     focus stays where it was (on the close button when it was inside the viewer). */
+  function update(card, actions) {
+    if (!viewer || !viewer.classList.contains("open")) return;
+    var inside = viewer.contains(document.activeElement);
+    var closeBtn = draw(viewer, card, actions);
+    if (inside) closeBtn.focus();
+  }
+  function draw(v, card, actions) {
     v.textContent = "";
     var box = el("div", "box");
     var pane = el("div", "pane");
@@ -129,7 +146,7 @@
       if (faces.length > 1 && i === faces.length - 1 && card.flavor && !f.flavor) f.flavor = card.flavor;
       text.appendChild(faceBlock(f, faces.length === 1));
     });
-    if (!card.text && !(card.faces && card.faces.length)) text.appendChild(el("p", "muted", "No rules text available for this card."));
+    if (!card.text && !(card.faces && card.faces.length)) text.appendChild(el("p", "muted", card.loading ? "Reading the card text…" : "No rules text available for this card."));
     side.appendChild(text);
     var dl = el("dl", "facts");
     var printing = [card.set, card.rarity ? titleCase(card.rarity) : "",
@@ -155,12 +172,7 @@
     box.appendChild(head);
     box.appendChild(side);
     v.appendChild(box);
-    v.classList.add("open");
-    document.documentElement.classList.add("cardview-open");
-    if (!pushed) {
-      try { history.pushState({ cardview: 1 }, ""); pushed = true; } catch (e) { pushed = false; }
-    }
-    closeBtn.focus();
+    return closeBtn;
   }
   /* Reads the data-* attributes the server puts on card rows and image cards. */
   function fromElement(node) {
@@ -187,5 +199,5 @@
       gc: node.hasAttribute("data-gc")
     };
   }
-  window.MtgCardView = { open: open, close: close, fromElement: fromElement, mana: mana, symbolize: symbolize };
+  window.MtgCardView = { open: open, update: update, close: close, fromElement: fromElement, mana: mana, symbolize: symbolize };
 })();
