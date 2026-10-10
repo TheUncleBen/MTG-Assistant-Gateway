@@ -28,3 +28,4 @@ deploy/compose/data/
 deploy/compose/backups/
 docker/forge/scryfall-names.json
 docker/forge/precons.json
+docker/forge/scryfall-legal.json

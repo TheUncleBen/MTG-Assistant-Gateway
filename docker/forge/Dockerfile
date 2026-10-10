@@ -50,7 +50,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 util-li
  && mkdir -p /data && chown forge:forge /data
 COPY --from=source /opt/forge /opt/forge
 COPY --from=source /opt/forge-index /opt/forge-index
-COPY docker/forge/forge_service.py /app/forge_service.py
+COPY docker/forge/forge_service.py docker/forge/coverage.py /app/
 COPY docker/forge/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY docker/forge/NOTICE.md /opt/forge/NOTICE-mtg-assistant.md
 WORKDIR /opt/forge

@@ -108,7 +108,7 @@ jobs:
           driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
       - name: Scryfall's printed names and the newest Commander precons
         run: |
-          python3 docker/forge/scryfall_names.py docker/forge/scryfall-names.json
+          python3 docker/forge/scryfall_names.py docker/forge/scryfall-names.json docker/forge/scryfall-legal.json
           python3 docker/forge/precons.py docker/forge/precons.json
       - name: Build arm64 image
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
@@ -122,6 +122,12 @@ jobs:
         run: docker image ls forge:ci-arm64
       - name: Service tests (offline)
         run: python3 -m unittest discover -s docker/forge -p 'test_*.py' -v
+      - name: Coverage gate (cards legal in at least one format)
+        run: |
+          set -o pipefail
+          docker run --rm -v "$PWD/docker/forge/scryfall-legal.json:/tmp/legal.json:ro" -w /app forge:ci-arm64 \
+            python3 coverage.py /tmp/legal.json 99.5 | tee coverage.txt
+          head -1 coverage.txt >> "$GITHUB_STEP_SUMMARY"
       - name: Smoke test
         run: scripts/ci_smoke_forge.sh forge:ci-arm64
 
@@ -160,7 +166,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
       - name: Scryfall's printed names and the newest Commander precons
         run: |
-          python3 docker/forge/scryfall_names.py docker/forge/scryfall-names.json
+          python3 docker/forge/scryfall_names.py docker/forge/scryfall-names.json docker/forge/scryfall-legal.json
           python3 docker/forge/precons.py docker/forge/precons.json
       - name: Build and push linux/arm64 and linux/amd64
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
