@@ -30,8 +30,8 @@ run_job() {
   echo "$view" | python3 -c 'import json,sys; v=json.load(sys.stdin); n=int(sys.argv[1]); sys.exit(not (v["state"]=="done" and v["games_done"]==n and all(r["winner"] or r["draw"] for r in v["results"])))' "$2"
 }
 run_job "{\"format\":\"Constructed\",\"games\":2,\"decks\":[{\"main\":$red},{\"main\":$green}]}" 2
-# One two-player Commander game between the two newest bundled precons: the realistic load.
-precons=$(curl -fsS http://127.0.0.1:18100/precons | python3 -c 'import json,sys; p=json.load(sys.stdin)["precons"]; print(json.dumps([{"precon": d["name"]} for d in p[:2]]))')
+# One four-player Commander game between the newest bundled precons: the realistic Pi load.
+precons=$(curl -fsS http://127.0.0.1:18100/precons | python3 -c 'import json,sys; p=json.load(sys.stdin)["precons"]; print(json.dumps([{"precon": d["name"]} for d in p[:4]]))')
 run_job "{\"format\":\"Commander\",\"games\":1,\"decks\":$precons}" 1
 docker logs forge | tail -20
 docker rm -f forge
