@@ -39,15 +39,15 @@ snapshot first and is read back to verify.
 | Search public decks (name, commander, partial commander names, format, colours, owner), and one user's public decks (`owner`, newest first) | `search_decks` | no | hides Mystic Forge `archidekt_user_decks`; the web profile page `/users/<name>` is the hand path |
 | Read any deck, the member's own private ones included: cards (type line, power/toughness, loyalty), zones, stats, plain list, Archidekt import text, picked with `view`; rules text, faces, flavour and artist on request | `get_deck` | no | the deck card in the chat shows the deck by category with pictures and rules text; hides Mystic Forge `archidekt_deck`, `archidekt_export`; `owner` says whose deck it is |
 | Read a pasted list or an Archidekt CSV export | `parse_decklist`, `parse_deck_export` | no | |
-| Statistics, legality, structural checks, bracket estimate | `deck_stats` | no | hides `validate_archidekt_deck` |
+| Statistics, legality, structural checks, bracket estimate; curve by type or category, land-only colour sources, pips outside the commander's identity, subtype and keyword counts | `deck_stats` | no | hides `validate_archidekt_deck` |
 | Diff two decks, snapshots or lists (precon upgrades included), with an optional paired goldfish A/B | `compare_decks` | no | hides `precon_diff`, `goldfish_ab`; the deck page's Compare view is the hand path |
-| Goldfish simulation of one deck or pasted list, stored with its stats and validation (a pasted list is returned, not stored) | `run_deck_report` (+ `list_deck_reports`, `get_deck_report`) | stores a report | hides `goldfish_run`; takes the simulator's options; the deck page's Run simulation is the hand path |
+| Goldfish simulation of one deck or pasted list, stored with its stats and validation (a pasted list is returned, not stored); trends across a deck's reports | `run_deck_report` (+ `list_deck_reports` with its `trend`, `get_deck_report`) | stores a report | hides `goldfish_run`; takes the simulator's options; the deck page's Run simulation is the hand path, its History page draws the trends |
 | Draw odds; what the engine models for a deck | `goldfish_odds`, `goldfish_annotate` (Mystic Forge) | no | annotations feed `run_deck_report`; the deck page's Probability of draw is the hand path to the same odds |
 | Validate a pasted list that is not a deck yet | `validate_decklist` (Mystic Forge) | no | an Archidekt deck's checks are in `deck_stats` |
 | Card lookups, rulings, prices, rules, EDHREC, combos, precon lists | the Mystic Forge research tools | no | the full list is in the tool reference |
 | Turn names or card photos into exact printings | `resolve_cards`, `card_printings` | no | the picker card lets the person keep, drop or pick among suggestions; the printings card shows every printing's picture to tap (a form question in an app without cards) |
 | Scan sessions (the Scan page's drafts) | `list_scan_sessions`, `get_scan_session`, `save_scan_session` | saves a draft | drafts stay in the gateway until used |
-| Edit a deck's cards (main or maybeboard): counts, categories, commander, finish, printing, colour tags | `propose_deck_changes` | proposal | |
+| Edit a deck's cards (main or maybeboard): counts, categories, commander, finish, printing, colour tags, custom mana value | `propose_deck_changes` | proposal | per-card notes are returned by `get_deck` but cannot be changed (see D) |
 | Create a deck from cards, a list, a CSV, the gateway's JSON or a scan | `propose_new_deck` | proposal (high) | |
 | Clone a deck | `propose_clone_deck` | proposal (low) | |
 | Change a deck's name, description, format, bracket, privacy; move it to a folder, add or remove tags, set its cover | `propose_deck_details` | proposal (high) | applied with the same verified calls as the deck settings page |
@@ -66,7 +66,7 @@ tools since 0.7.17, but only as proposals, and (R-142) the person applies each
 one themselves on its review page, in every approval mode (the in-chat card
 only opens that page, since 0.7.19): no mode,
 setting or batch lets an assistant apply a like, vote, bookmark, follow,
-comment, new folder or deck deletion. The gateway enforces this where proposals
+comment, new folder, collaborator change or deck deletion. The gateway enforces this where proposals
 are applied, not only in the pages.
 
 ## B. What a person does by hand (web pages and the Android app)
@@ -81,9 +81,9 @@ deleting a deck asks for its name.
 | --- | --- |
 | Home | newest decks with covers, search, tiles to every section |
 | Decks | the linked account's decks (grid or list, filter, sort), New deck (name, pasted list, CSV, the gateway's .json, a chosen file, scan), Folders (create, rename) |
-| One deck | views (text, table, stacks, scroll, grid), grouping, sorting, filter, your own stack order (drag a stack's handle or use the arrow keys; kept in this browser, Reset puts the deck's order back), Select cards on your own deck to move, refinish, colour-tag or remove several in one save with one Undo (Colour tag… is in the card menu too), the whole card on tap (image, every face's mana cost, type line, rules text, power/toughness or loyalty, flavour, printing, rarity, artist, price, salt, legal formats; Scryfall, mark owned, move category), drag cards between categories and Save moves, Quick add, Playtest (Archidekt's own playtester in a new tab, or the phone's browser from the app, where the person's Archidekt sign-in lives), Run simulation (the same statistics, validation and 300-game goldfish run as `run_deck_report`, opened and filed under History), statistics with Probability of draw and Deck checks, description, comments (post, edit and delete your own), like, bookmark, follow the owner; More: Settings, Compare with another deck (a precon from Archidekt's list, any deck or a pasted list; the same comparison as `compare_decks`), Export (Archidekt import text, plain text, sideboard, each with Copy; downloads as Archidekt .txt, plain .txt, .csv, .json, and one-way Arena .txt, MTGO .dek, PDF; see [EXPORT-IMPORT.md](EXPORT-IMPORT.md)), Open on Archidekt, Delete deck |
+| One deck | views (text, table, brewer, stacks, scroll, grid), grouping, sorting, filter, your own stack order (drag a stack's handle or use the arrow keys; kept in this browser, Reset puts the deck's order back), Select cards on your own deck to move, refinish, colour-tag or remove several in one save with one Undo (Colour tag… and Mana value… are in the card menu too), the whole card on tap (image, every face's mana cost, type line, rules text, power/toughness or loyalty, flavour, printing, rarity, artist, price, salt, legal formats, custom mana value, the card's notes (read-only); Scryfall, mark owned, move category), drag cards between categories and Save moves, Quick add, Playtest (Archidekt's own playtester in a new tab, or the phone's browser from the app, where the person's Archidekt sign-in lives), Run simulation (the same statistics, validation and 300-game goldfish run as `run_deck_report`, opened and filed under History), statistics with Probability of draw and Deck checks (curve by type or category, colours as bars or a pie, lands only, pips outside the commander's identity, subtypes and keywords; a click shows only those cards), description, comments (post, edit and delete your own), like, bookmark, follow the owner; More: Settings, Compare with another deck (a precon from Archidekt's list, any deck or a pasted list; the same comparison as `compare_decks`), Export (Archidekt import text, plain text, sideboard, each with Copy; downloads as Archidekt .txt, plain .txt, .csv, .json, and one-way Arena .txt, MTGO .dek, PDF; see [EXPORT-IMPORT.md](EXPORT-IMPORT.md)), Open on Archidekt, Delete deck |
 | Editor | quantities, categories, finish, printing, add cards (deck or maybeboard), maybeboard and sideboard rows, paste a list (Archidekt's syntax: printing, `*F*`/`*E*`, `[Category]`, `# Sideboard`), the whole card from a thumbnail, remove, undo, Save changes |
-| Deck settings | name, format, bracket, description, private, unlisted; cover image; tags; folder; Delete this deck |
+| Deck settings | name, format, bracket, description, private, unlisted; cover image; tags; folder; collaborators (add or remove opens a review page to Apply); Delete this deck |
 | Search | public decks by name, commander, format, colours, owner; a user's profile page; Precons by set |
 | Scan | phone camera or photos to a draft; set lock, foil, printing picker; save as a new deck, into a deck, or to the collection |
 | Collection | the Archidekt Collection: filter, sort, grid or list, add, quantity, per-row details (finish, condition, language, price paid), the whole card from a thumbnail, remove, CSV export, import from a CSV or a card list (pasted or a file) |
@@ -144,13 +144,11 @@ later; none is promised.
   to it were refused from the build environment, so a link import could not be built or
   checked. A Moxfield export pasted as text imports today (New deck, the deck editor's paste
   box, or the assistant's `parse_decklist`).
-- **Archidekt features not yet matched:** per-card notes on a deck card,
-  custom mana value, deck collaborators, the Brewer view, Archidekt's extra
-  statistics controls.
-- **Deck reports:** trends across a deck's stored reports on its History page;
-  goldfish runs for 60-card formats; an interactive goldfish game you play
-  turn by turn.
-- **More in-chat cards** beyond the deck, proposal and picker cards.
+- **Per-card notes can be read, not written** (0.7.20). Notes show in the card viewer and in
+  `get_deck`, but no Archidekt route that writes them was found in Archidekt's own site code, so
+  the gateway does not guess one.
+- **Deck reports:** goldfish runs for 60-card formats; an interactive goldfish game you play
+  turn by turn. (Trends across a deck's reports shipped in 0.7.20.)
 - **Watchlists and price history:** no price ingest and no watchlist.
 - **Notifications and summaries:** sign-in protected ntfy notifications;
   scheduled AI summaries.
