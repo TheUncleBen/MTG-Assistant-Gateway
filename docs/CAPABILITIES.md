@@ -118,9 +118,10 @@ and a form question for ambiguous names.
   simulation and Compare on the deck page for people, `run_deck_report` and
   `compare_decks` for the assistant, same engine and settings.
 - **Only a person does:** link Archidekt and set approval modes, approve a
-  high-risk proposal in manual or semi-auto mode, delete a deck, create and
-  rename folders, like, bookmark, follow, comment, scan with the camera,
-  administer members.
+  high-risk proposal in manual or semi-auto mode, approve a like, vote,
+  bookmark, follow, comment, new folder or deck deletion (an assistant may
+  propose these; the person approves each one on its review page, in every
+  mode), rename folders, scan with the camera, administer members.
 - **Both reach:** reading decks and collections, statistics, creating and
   editing decks, deck settings (folder, tags and cover included), cloning,
   restoring snapshots, collection changes, scan drafts. The person's path applies at once; the assistant's path is a
@@ -135,7 +136,20 @@ comparison so that this holds; 0.7.3 folded the separate own-deck reader into
 
 ## D. Parked
 
+Not built, and listed here so nothing is dropped silently. Each may still come
+later; none is promised.
+
 - **Moxfield import by link** (parked 2026-10-10, 0.7.19). Moxfield has no public API, and requests
   to it were refused from the build environment, so a link import could not be built or
   checked. A Moxfield export pasted as text imports today (New deck, the deck editor's paste
   box, or the assistant's `parse_decklist`).
+- **Archidekt features not yet matched:** per-card notes on a deck card,
+  custom mana value, deck collaborators, the Brewer view, Archidekt's extra
+  statistics controls.
+- **Deck reports:** trends across a deck's stored reports on its History page;
+  goldfish runs for 60-card formats; an interactive goldfish game you play
+  turn by turn.
+- **More in-chat cards** beyond the deck, proposal and picker cards.
+- **Watchlists and price history:** no price ingest and no watchlist.
+- **Notifications and summaries:** sign-in protected ntfy notifications;
+  scheduled AI summaries.
