@@ -150,12 +150,19 @@ def build_events(
             }
         )
     for x in snapshots:
-        backup = (
-            f"<a href='{_esc(x['backup_url'])}' target='_blank' rel='noopener noreferrer'>"
-            "Archidekt backup copy</a>"
-            if x.get("backup_url")
-            else ""
-        )
+        # deck_gone / backup_gone: what the member's Archidekt deck list says (decks.mark_gone)
+        if x.get("backup_gone"):
+            backup = (
+                "The Archidekt backup copy made with it is no longer on Archidekt (deleted there). "
+                "Restore does not need it: it uses this snapshot, kept in the gateway."
+            )
+        elif x.get("backup_url"):
+            backup = (
+                f"<a href='{_esc(x['backup_url'])}' target='_blank' rel='noopener noreferrer'>"
+                "Archidekt backup copy</a>"
+            )
+        else:
+            backup = ""
         link = (
             f"<a href='/proposals/{_esc(x['proposal_id'])}'>the change it was taken before</a>"
             if x.get("proposal_id")
@@ -164,17 +171,23 @@ def build_events(
         count = x.get("card_count")
         summary = f"{count} cards as the deck stood" if count is not None else "The whole deck as it stood"
         summary += " just before a change was applied." if x.get("proposal_id") else "."
-        details = (
-            "<p>Restoring makes a proposal that puts the deck back to this snapshot; you review and confirm "
-            "it "
-            "before anything changes on Archidekt.</p>"
-            + (f"<p>See {link}.</p>" if link else "")
-            + (f"<p>{backup}</p>" if backup else "")
-            + "<form method='post' action='/history/restore' class='form-actions'>"
-            + csrf_input
-            + f"<input type='hidden' name='snapshot_id' value='{_esc(x['snapshot_id'])}'>"
-            + f"<button type='submit'>{icon('undo')} Restore (review first)</button></form>"
-        )
+        if x.get("deck_gone"):
+            # A restore rewrites the deck itself; with the deck deleted on Archidekt it cannot work.
+            summary += " The deck is no longer on Archidekt."
+            restore = (
+                "<p class='muted'>This deck is no longer on your Archidekt account (deleted there?), so "
+                "the snapshot cannot be restored onto it. The snapshot stays here.</p>"
+            )
+        else:
+            restore = (
+                "<p>Restoring makes a proposal that puts the deck back to this snapshot; you review and "
+                "confirm it before anything changes on Archidekt.</p>"
+                "<form method='post' action='/history/restore' class='form-actions'>"
+                + csrf_input
+                + f"<input type='hidden' name='snapshot_id' value='{_esc(x['snapshot_id'])}'>"
+                + f"<button type='submit'>{icon('undo')} Restore (review first)</button></form>"
+            )
+        details = (f"<p>See {link}.</p>" if link else "") + (f"<p>{backup}</p>" if backup else "") + restore
         events.append(
             {
                 "ts": int(x.get("taken_at") or 0),

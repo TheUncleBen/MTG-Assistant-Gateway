@@ -6,9 +6,27 @@ from __future__ import annotations
 
 from mtg_gateway.archidekt import is_backup_name
 from mtg_gateway.archidekt_csv import parse_export, to_deck_json
+from mtg_gateway.decks import mark_gone
 
 from .fake_archidekt import FIXTURE
 from .test_browse_collection import NAV, Stack, api, linked, stack  # noqa: F401 - fixture
+
+
+def test_mark_gone_judges_only_what_the_list_can_know() -> None:
+    def snaps() -> list[dict]:
+        return [
+            {"deck_id": "42", "backup_deck_id": "100", "taken_at": 1000},  # copy deleted
+            {"deck_id": "43", "backup_deck_id": None, "taken_at": 1000},  # deck deleted
+            {"deck_id": "44", "backup_deck_id": "101", "taken_at": 2000},  # newer than the list
+        ]
+
+    listed = {"ids": {"42", "44"}, "read_at": 1500.0}
+    a, b, c = mark_gone(snaps(), listed)
+    assert a.get("backup_gone") and not a.get("deck_gone")
+    assert b.get("deck_gone") and not b.get("backup_gone")
+    assert not c.get("deck_gone") and not c.get("backup_gone")
+    # no list that can tell (cold, read by username, cut off): nothing is marked
+    assert not any(x.get("deck_gone") or x.get("backup_gone") for x in mark_gone(snaps(), None))
 
 
 def test_backup_names_are_recognised() -> None:
@@ -74,5 +92,57 @@ async def test_backup_copies_leave_the_lists_and_show_under_history(stack: Stack
         assert "Backup copies on Archidekt" not in other.text
         filtered = await b.http.get("/history?type=snapshots", headers=NAV)
         assert "Backup copies on Archidekt" not in filtered.text
+    finally:
+        await b.aclose()
+
+
+async def test_history_reconciles_with_what_is_still_on_archidekt(stack: Stack) -> None:  # noqa: F811
+    """T-074: backup copies (and decks) deleted on Archidekt are noticed from the deck list the
+    gateway already reads: a deleted copy leaves the panel and its snapshot says so (Restore still
+    works, from the snapshot kept here); a deleted deck's snapshot offers no Restore, and a restore
+    asked anyway fails with a clear message. No request is sent per copy."""
+    b = await linked(stack)
+    ark, svc = stack.ark, stack.h.app.state.gateway.decks
+    try:
+        r = await api(
+            b,
+            "POST",
+            "/api/v1/proposals",
+            {
+                "kind": "edit",
+                "deck_id": "42",
+                "changes": [{"action": "add", "card_name": "Cultivate", "quantity": 1}],
+                "apply": True,
+            },
+        )
+        assert r.status_code == 201, r.text
+        copy_id = r.json()["result"]["result"]["backup_deck_id"]
+        snap_id = (await b.http.get("/api/v1/decks/42/history")).json()["snapshots"][0]["snapshot_id"]
+        restore_form = f"name='snapshot_id' value='{snap_id}'"
+        hist = await b.http.get("/history", headers=NAV)
+        assert "Backup copies on Archidekt (1)" in hist.text and "Archidekt backup copy</a>" in hist.text
+        assert restore_form in hist.text
+
+        # the owner deletes the backup copy on archidekt.com; the cached list has aged
+        del ark.decks[int(copy_id)]
+        svc.deck_lists.fresh = 0
+        ark.calls.clear()
+        hist = await b.http.get("/history", headers=NAV)
+        assert "Backup copies on Archidekt" not in hist.text and "Archidekt backup copy</a>" not in hist.text
+        assert "no longer on Archidekt (deleted there)" in hist.text
+        assert restore_form in hist.text  # Restore uses the gateway's snapshot, not the copy
+        reads = [p for m, p in ark.calls if m == "GET"]
+        assert all(p.startswith("/api/decks/v3/") for p in reads), reads  # only the deck list
+        csrf = await b.csrf("/history")
+        r = await b.http.post("/history/restore", data={"csrf": csrf, "snapshot_id": snap_id})
+        assert r.status_code == 303 and r.headers["location"].startswith("/proposals/")
+
+        # the deck itself is deleted on Archidekt: its snapshot cannot be put back onto it
+        del ark.decks[42]
+        hist = await b.http.get("/history", headers=NAV)
+        assert "The deck is no longer on Archidekt." in hist.text and restore_form not in hist.text
+        r = await b.http.post("/history/restore", data={"csrf": csrf, "snapshot_id": snap_id})
+        assert r.status_code == 400
+        assert "Deck 42 is no longer on your Archidekt account" in r.text and "Nothing was changed" in r.text
     finally:
         await b.aclose()

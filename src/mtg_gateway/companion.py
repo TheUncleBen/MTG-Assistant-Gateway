@@ -38,7 +38,7 @@ from .deckpage import (
     featured,
     precon_by_label,
 )
-from .decks import DeckError, actor_label, current_client
+from .decks import DeckError, actor_label, current_client, mark_gone
 from .history_view import (
     HISTORY_CSS,
     PAGE,
@@ -1825,6 +1825,17 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             reps = reports.list(sub, deck_id, limit=fetch, search=query["q"] or None, since=since)
         client_ids = {r.get("created_by_client") for r in reps if r.get("created_by_client")}
         names = {cid: state.db.client_name(cid) for cid in client_ids if not cid.startswith("__")}
+        if snapshots:
+            # Reconciled with the member's Archidekt deck list, the one the backup copies panel
+            # reads too (cached; no request per snapshot): a deck or a backup copy deleted on
+            # Archidekt is marked, and a deleted deck's snapshots offer no Restore.
+            try:
+                listed = await asyncio.wait_for(
+                    decks.on_archidekt(sub, wait=decks.deck_list_wait), DECKS_JSON_TIMEOUT
+                )
+            except (DeckError, TimeoutError):
+                listed = None  # not linked, or Archidekt unavailable: shown as recorded
+            mark_gone(snapshots, listed)
         csrf_in = f"<input type='hidden' name='csrf' value='{_esc(_csrf(s, sid))}'>"
         events = build_events(proposals, snapshots, reps, csrf_input=csrf_in, client_names=names)
         has_more = len(events) > query["offset"] + PAGE
@@ -1842,7 +1853,8 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         ):
             try:
                 copies = await asyncio.wait_for(
-                    decks.backup_copies(sub, deck_id=deck_id, wait=decks.deck_list_wait), DECKS_JSON_TIMEOUT
+                    decks.backup_copies(sub, deck_id=deck_id, wait=decks.deck_list_wait, prefer_fresh=True),
+                    DECKS_JSON_TIMEOUT,
                 )
             except (DeckError, TimeoutError):
                 copies = []  # not linked, or Archidekt unavailable: the panel is simply absent
