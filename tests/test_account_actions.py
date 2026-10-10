@@ -377,6 +377,11 @@ async def test_the_in_chat_card_cannot_apply_an_account_action(stack: Stack, too
         await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": code})
     )
     assert out["ok"] is False and out["error"] == "browser_required", out
+    # and the REST apply with the assistant's bearer token is the assistant's apply: refused too
+    r = await h.http.post(
+        f"/api/v1/proposals/{p['proposal_id']}/apply", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert r.json().get("error") == "browser_required", r.text
     assert ark.votes == {} and ark.deleted == [] and not any(ark.follows.values())
     assert (
         structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))["state"]
