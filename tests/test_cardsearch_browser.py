@@ -252,7 +252,7 @@ def test_add_to_deck_from_the_card_page_saves_through_the_edit_endpoint(
         assert page.locator(".cardview.open").count() == 0
         assert sheet.locator("h3").inner_text() == "Add Sol Talisman"
         # the deck list has been read (the member cache); the long, RTL and emoji names are options
-        page.wait_for_function("document.querySelectorAll('#ad-deck option').length >= 3", timeout=5000)
+        page.wait_for_function("() => document.querySelectorAll('#ad-deck option').length >= 3", timeout=5000)
         names = page.locator("#ad-deck option").all_inner_texts()
         assert any(n.startswith("Sample Commander Deck") for n in names), names
         assert any(n.startswith(UNBROKEN_DECK) for n in names), names
@@ -261,7 +261,7 @@ def test_add_to_deck_from_the_card_page_saves_through_the_edit_endpoint(
             "() => { const s = document.getElementById('ad-deck'); s.value = '42';"
             " s.dispatchEvent(new Event('change', {bubbles: true})); }"
         )
-        page.wait_for_function("document.querySelectorAll('#ad-cat option').length >= 2", timeout=5000)
+        page.wait_for_function("() => document.querySelectorAll('#ad-cat option').length >= 2", timeout=5000)
         assert "Ramp" in page.locator("#ad-cat option").all_inner_texts()
         assert page.evaluate(SHEET_CHECK) == []
         page.locator("#ad-qty").fill("2")
@@ -296,7 +296,7 @@ def test_with_writes_off_the_add_is_kept_for_review_and_nothing_is_written(serve
         page.goto(f"{server.base}/cards?q=sol", wait_until="networkidle")
         page.locator("button[data-add]").nth(1).click()
         page.locator(".addsheet.open").wait_for(timeout=3000)
-        page.wait_for_function("document.querySelectorAll('#ad-deck option').length >= 3", timeout=5000)
+        page.wait_for_function("() => document.querySelectorAll('#ad-deck option').length >= 3", timeout=5000)
         page.evaluate(
             "() => { const s = document.getElementById('ad-deck'); s.value = '42';"
             " s.dispatchEvent(new Event('change', {bubbles: true})); }"
@@ -338,7 +338,7 @@ def test_a_member_without_a_link_cannot_open_the_dialog(server: Server) -> None:
         assert page.evaluate(MEASURE) == []
         # closing and opening the same card again reads nothing more
         page.keyboard.press("Escape")
-        page.wait_for_function("!document.querySelector('.cardview.open')", timeout=3000)
+        page.wait_for_function("() => !document.querySelector('.cardview.open')", timeout=3000)
         page.locator(".cc .pic").first.click()
         page.locator(".cardview.open .rules").wait_for(timeout=3000)
         assert len(reads) == 1, reads

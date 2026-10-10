@@ -116,9 +116,24 @@ APKSIGNER="$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner 2>/dev/null | sort -V
 [ -n "$APKSIGNER" ] || { echo "apksigner not found under $ANDROID_HOME/build-tools" >&2; exit 1; }
 "$APKSIGNER" verify --min-sdk-version 29 "$OUT/$NAME-release.apk"
 # The signing certificate's SHA-256, which the gateway's /app page and the release notes show so people
-# can check who signed what they download (docs/ANDROID.md, section 1).
-CERT_SHA="$("$APKSIGNER" verify --print-certs "$OUT/$NAME-release.apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: \([0-9a-f]\{64\}\)$/\1/p' | head -n 1)"
-[ -n "$CERT_SHA" ] || { echo "could not read the signing certificate's SHA-256 from apksigner" >&2; exit 1; }
+# can check who signed what they download (docs/ANDROID.md, section 1). It is the SHA-256 of the
+# certificate in the keystore Gradle signed with; apksigner must then report the same digest for the APK.
+# apksigner's wording changes between build-tools versions, so only the digest itself is matched.
+need keytool "install a JDK"
+CERT_DER="$OUT/signing-cert.der"
+rm -f "$CERT_DER"
+keytool -exportcert -keystore "$RELEASE_KEYSTORE" -storepass:env RELEASE_STORE_PASS -alias "$RELEASE_KEY_ALIAS" \
+  -file "$CERT_DER" >/dev/null 2>&1 && [ -s "$CERT_DER" ] \
+  || { echo "could not read the signing certificate from the keystore (alias $RELEASE_KEY_ALIAS)" >&2; exit 1; }
+CERT_SHA="$(sha256sum "$CERT_DER" | cut -d' ' -f1)"
+rm -f "$CERT_DER"
+APK_CERTS="$("$APKSIGNER" verify --print-certs "$OUT/$NAME-release.apk" | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+case "$APK_CERTS" in
+  *"$CERT_SHA"*) ;;
+  *) echo "apksigner does not report the keystore's certificate (SHA-256 $CERT_SHA) for the APK:" >&2
+     printf '%s\n' "$APK_CERTS" | grep 'sha-256' >&2 || true
+     exit 1;;
+esac
 log "Signed APK: $OUT/$NAME-release.apk"
 
 # Metadata the gateway's /app page shows next to the download (see src/mtg_gateway/app_page.py).
