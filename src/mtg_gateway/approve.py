@@ -80,7 +80,9 @@ def proposal_tool_result(data: dict[str, Any], *, decks: Any, sub: str, in_chat:
         and not data.get("assistant_may_apply")  # the assistant applies it: no buttons to press
     ):
         row = decks.db.get_proposal(str(data["proposal_id"]), sub)
-        if row is not None:
+        # R-142: an Archidekt account action is approved only on the review page, so its card gets
+        # no code and shows "Approve on the review page" instead of Approve and Reject
+        if row is not None and row.get("kind") != "action":
             approval = decks.approval_for(sub, row)
     meta = {APPROVAL_META_KEY: approval} if approval else None
     return CallToolResult(

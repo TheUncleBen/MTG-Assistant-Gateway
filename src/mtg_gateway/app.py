@@ -1463,7 +1463,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "'like', 'vote_down' or 'clear_vote' (the deck's like), 'bookmark' or 'unbookmark', "
             "'follow_owner' or 'unfollow_owner' (Archidekt follows people, not decks: this follows the "
             "deck's owner). Returns a proposal (kind 'action', risk 'consent') that only the user applies, "
-            "on the card or the review page, in every approval mode: never call apply_proposal for it. "
+            "on the review page, in every approval mode: never call apply_proposal for it. "
             "Changes nothing by itself."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
@@ -1543,7 +1543,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
         description=(
             "Step 1 of deleting one of the user's own Archidekt decks. Only when the user asked for this "
             "deck to be deleted. Returns a proposal (kind 'action', risk 'destructive') that only the user "
-            "can approve, on the card or the review page, whatever their approval mode: never call "
+            "can approve, on the review page, whatever their approval mode: never call "
             "apply_proposal for it. The gateway keeps a snapshot first (and a backup copy on Archidekt when "
             "backups are on); Archidekt itself has no undo. A change to the deck after the proposal stops "
             "the deletion."

@@ -62,7 +62,8 @@ snapshot first and is read back to verify.
 **No assistant tool exists for:** renaming folders, linking or unlinking
 Archidekt, approval modes, admin. Social actions and deleting a deck have
 tools since 0.7.17, but only as proposals, and (R-142) the person applies each
-one themselves on its card or review page, in every approval mode: no mode,
+one themselves on its review page, in every approval mode (the in-chat card
+only opens that page, since 0.7.19): no mode,
 setting or batch lets an assistant apply a like, vote, bookmark, follow,
 comment, new folder or deck deletion. The gateway enforces this where proposals
 are applied, not only in the pages.
@@ -131,3 +132,10 @@ options, the paired A/B, rules text and Archidekt import text on a deck read,
 structural checks in the statistics, and the precon-style summary in the
 comparison so that this holds; 0.7.3 folded the separate own-deck reader into
 `get_deck` and the separate profile tool into `search_decks`).
+
+## D. Parked
+
+- **Moxfield import by link** (parked 2026-10-10, 0.7.19). Moxfield has no public API, and requests
+  to it were refused from the build environment, so a link import could not be built or
+  checked. A Moxfield export pasted as text imports today (New deck, the deck editor's paste
+  box, or the assistant's `parse_decklist`).

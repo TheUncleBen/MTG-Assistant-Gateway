@@ -2154,9 +2154,12 @@ class DeckService:
         # approval mode (modes.py) lets the assistant apply a proposal of this risk itself.
         # "app" is the member's press on the in-chat card, gated by its one-time code
         # (approve.py); "browser" is the review page; "auto" is never a caller's choice.
-        if via == "mcp" and row.get("kind") == "action":
+        if via != "browser" and row.get("kind") == "action":
             # R-142: an Archidekt account action (social, folder, delete deck) is applied only by
-            # the member's own press, whatever the mode; checked here as well as by its risk tier
+            # the member's own press on the signed-in review page, whatever the mode. Not the
+            # assistant's apply_proposal, and not the in-chat card either: the card's press runs
+            # inside the chat app, where the model's own calls run too. Checked here as well as by
+            # its risk tier.
             self._audit(
                 "apply_needs_user",
                 sub=sub,
@@ -2166,7 +2169,7 @@ class DeckService:
                 "browser_required",
                 "This is an action on the user's Archidekt account (a like, vote, bookmark, follow, "
                 "comment, folder or deck deletion). Each one needs the user's own approval on the "
-                "proposal card or the review page, in every approval mode. Nothing was sent to "
+                "review page (review_url), in every approval mode. Nothing was sent to "
                 "Archidekt; do not retry.",
                 review_url=f"{self.settings.public_url}/proposals/{proposal_id}",
                 state=row["state"],
@@ -3832,9 +3835,9 @@ def _next_step(
         )
     if state == "pending" and risk in modes.MEMBER_ONLY:
         return (
-            f"{card} the user {what} and the review link: this acts on their Archidekt account, so "
-            "they approve it themselves on the card or the review page, in every approval mode. "
-            "Do not call apply_proposal."
+            f"Show the user {what} and the review link: this acts on their Archidekt account, so "
+            "they approve it themselves on the review page, in every approval mode (the in-chat "
+            "card only opens that page). Do not call apply_proposal."
         )
     if state == "pending" and mode == "semi":
         return (

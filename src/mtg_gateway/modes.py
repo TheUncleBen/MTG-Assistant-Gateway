@@ -23,7 +23,7 @@ proposal is low risk only if what the review page would show is small and safe:
   a snapshot, deck details (name, format, description, visibility).
 * **consent** (R-142): the Archidekt account actions of actions.py: likes, votes, bookmarks,
   follows, posting, editing, deleting and voting on comments, and creating a folder. Each one
-  waits for the member's own press on its proposal card or review page, in every mode.
+  waits for the member's own press on its review page, in every mode (0.7.19: not the in-chat card).
 * **destructive** (R-142): deleting a deck. Like consent, no mode lets an assistant apply it.
 
 The operator may set the default mode for members who have not chosen (``MTG_APPROVAL_MODE_DEFAULT``)
