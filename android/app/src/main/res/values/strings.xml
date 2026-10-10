@@ -36,7 +36,8 @@
     <string name="scan_page_slow">The scan page did not answer in time. Tap Done and check the page.</string>
     <string name="scan_page_missing">This gateway has no scan page.</string>
     <string name="page_elsewhere">A page from another site tried to open inside the app and was stopped. Tap Retry to go back to your gateway.</string>
-    <string name="link_other_gateway">That link is for another site, not your gateway.</string>
+    <string name="link_other_gateway">This app opens links to your gateway (%1$s) and archidekt.com deck links. That link is neither, so it was not opened.</string>
+    <string name="link_none_shared">There was no https link in what was shared. Share a link to your gateway or an archidekt.com deck link.</string>
 
     <string name="camera_title">Scan a card</string>
     <string name="shoot">Shoot</string>

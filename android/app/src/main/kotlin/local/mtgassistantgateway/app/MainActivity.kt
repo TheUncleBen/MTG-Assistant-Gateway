@@ -145,7 +145,7 @@ class MainActivity : ComponentActivity() {
         configureWebView()
         // A link is consumed once: after a restore the saved page wins, not the old intent.
         val signInCode = takeSignInCode(intent)
-        val linked = if (signInCode != null) null else takeLinkedUrl(intent)?.takeIf { GatewayUrl.isGateway(origin, it) }
+        val linked = if (signInCode != null) null else linkedPage(takeLink(intent))
         when {
             signInCode != null -> if (!finishBrowserSignIn(signInCode)) web.loadUrl(origin + "/")
             savedInstanceState != null -> {
@@ -163,11 +163,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         takeSignInCode(intent)?.let { finishBrowserSignIn(it); return }
-        val url = takeLinkedUrl(intent) ?: return
-        if (!GatewayUrl.isGateway(origin, url)) {
-            Toast.makeText(this, getString(R.string.link_other_gateway), Toast.LENGTH_LONG).show()
-            return
-        }
+        val url = linkedPage(takeLink(intent)) ?: return
         if (camera != null) closeCamera()
         web.loadUrl(url)
     }
@@ -555,20 +551,56 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * The https URL an ACTION_VIEW (App Link) or ACTION_SEND intent carries, or null. The intent's
-     * action is cleared so the same link is not followed again on a later recreate.
+     * Where an ACTION_VIEW (App Link) or ACTION_SEND intent leads, or null for any other intent.
+     * A share is searched for its first usable https link: in EXTRA_TEXT, in ClipData (where some
+     * apps put it instead) and in EXTRA_SUBJECT ([SharedLink.resolve]). The intent's action is
+     * cleared so the same link is not followed again on a later recreate.
      */
-    private fun takeLinkedUrl(intent: Intent?): String? {
+    private fun takeLink(intent: Intent?): SharedLink.Target? {
         if (intent == null) return null
-        val raw = when (intent.action) {
-            Intent.ACTION_VIEW -> intent.dataString
-            Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)?.trim()
-            else -> null
-        } ?: return null
+        val target = when (intent.action) {
+            Intent.ACTION_VIEW -> {
+                val raw = intent.dataString?.trim()
+                when {
+                    raw == null -> SharedLink.Target.None
+                    GatewayUrl.isGateway(origin, raw) -> SharedLink.Target.Open(raw)
+                    else -> SharedLink.resolve(origin, listOf(raw))
+                }
+            }
+            Intent.ACTION_SEND -> {
+                val texts = mutableListOf<String?>(intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString())
+                intent.clipData?.let { clip ->
+                    for (i in 0 until clip.itemCount) {
+                        val item = clip.getItemAt(i)
+                        texts.add(item.text?.toString())
+                        texts.add(item.uri?.toString())
+                    }
+                }
+                texts.add(intent.getCharSequenceExtra(Intent.EXTRA_SUBJECT)?.toString())
+                SharedLink.resolve(origin, texts)
+            }
+            else -> return null
+        }
         intent.action = null
-        val uri = Uri.parse(raw)
-        if (uri.scheme?.lowercase() != "https" || uri.host.isNullOrEmpty()) return null
-        return raw
+        return target
+    }
+
+    /**
+     * The gateway page a link leads to, or null; says why when a link arrived but leads nowhere in
+     * the app. Only gateway pages load in the WebView (an archidekt.com deck link becomes the
+     * gateway's page for that deck); any other link is left alone rather than opened inside.
+     */
+    private fun linkedPage(target: SharedLink.Target?): String? = when (target) {
+        null -> null
+        is SharedLink.Target.Open -> target.url
+        is SharedLink.Target.Other -> {
+            Toast.makeText(this, getString(R.string.link_other_gateway, origin.removePrefix("https://")), Toast.LENGTH_LONG).show()
+            null
+        }
+        SharedLink.Target.None -> {
+            Toast.makeText(this, getString(R.string.link_none_shared), Toast.LENGTH_LONG).show()
+            null
+        }
     }
 
     override fun onPause() {

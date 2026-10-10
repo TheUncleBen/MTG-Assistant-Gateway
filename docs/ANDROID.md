@@ -143,7 +143,11 @@ else your gateway serves. A few things are native:
 - **Links to your gateway** from other apps open in the app: share a gateway
   link to it from the browser's share sheet, or, when the operator built the
   app with App Links ([section 12](#12-app-links-opening-gateway-links-in-the-app)),
-  just tap the link.
+  just tap the link. Sharing a whole message works too (from Discord, say): the
+  app opens the first link in it that is either on your gateway or an
+  `archidekt.com/decks/...` deck link, which opens that deck's page on your
+  gateway. Any other link is not opened, and the app says which links it
+  takes; share those to your browser instead.
 - **Links to other sites** (Archidekt, Scryfall) open in your browser. Pages on
   the gateway, and on the one sign-in service the gateway's sign-in redirects
   you to, stay in the app. Links to other apps (`mailto:` and the like) open
