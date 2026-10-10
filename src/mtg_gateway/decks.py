@@ -2253,8 +2253,8 @@ class DeckService:
             raise DeckError(
                 "browser_required",
                 "This is an action on the user's Archidekt account (a like, vote, bookmark, follow, "
-                "comment, folder or deck deletion). Each one needs the user's own approval on the "
-                "review page (review_url), in every approval mode. Nothing was sent to "
+                "comment, folder, collaborator change or deck deletion). Each one needs the user's "
+                "own approval on the review page (review_url), in every approval mode. Nothing was sent to "
                 "Archidekt; do not retry.",
                 review_url=f"{self.settings.public_url}/proposals/{proposal_id}",
                 state=row["state"],

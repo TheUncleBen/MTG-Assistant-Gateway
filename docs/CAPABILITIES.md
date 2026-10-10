@@ -124,7 +124,7 @@ and a form question for ambiguous names.
   `compare_decks` for the assistant, same engine and settings.
 - **Only a person does:** link Archidekt and set approval modes, approve a
   high-risk proposal in manual or semi-auto mode, approve a like, vote,
-  bookmark, follow, comment, new folder or deck deletion (an assistant may
+  bookmark, follow, comment, new folder, collaborator change or deck deletion (an assistant may
   propose these; the person approves each one on its review page, in every
   mode), rename folders, scan with the camera, administer members.
 - **Both reach:** reading decks and collections, statistics, creating and

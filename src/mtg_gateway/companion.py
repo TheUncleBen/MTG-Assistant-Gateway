@@ -951,7 +951,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         if social is None:
             return None
         try:
-            return await social.collaborators(sub, deck_id)
+            return await social.collaborators(sub, deck_id, owned=True)  # the page just read it as own
         except (DeckError, ArchidektError):
             return None
 

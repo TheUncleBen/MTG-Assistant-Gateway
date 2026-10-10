@@ -119,7 +119,7 @@ printing-type change in that proposal. Diff lines read
 
 `set_mana_value` (`name`, `mana_value`, optional `zone`) sets Archidekt's custom
 mana value on every row of the card in that zone (the per-card mana value
-override Archidekt's deck editor offers). `null` takes it off. Like a colour tag it is low risk and
+override Archidekt's deck editor offers). `null` takes it off. The gateway's statistics (`deck_stats`, the deck page's curve, reports) use the card's printed mana value. Like a colour tag it is low risk and
 counts as the card's one printing-type change. Diff lines read
 `Sol Ring: custom mana value none -> 3`.
 

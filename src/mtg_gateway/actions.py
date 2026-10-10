@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 from .archidekt import VOTE_DOWN, VOTE_NONE, VOTE_UP
 from .decklist import clean_text
 from .decks import DeckError, _clean_deck_id, _row
+from .social import FOLLOWING_PAGES
 
 if TYPE_CHECKING:
     from .decks import DeckService
@@ -224,7 +225,7 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         want = clean_text(str(params.get("username") or "")).lstrip("@")
         if not want:
             raise DeckError("invalid", "username is required: the Archidekt username of the person")
-        current = await social.collaborators(sub, deck.id)
+        current = await social.collaborators(sub, deck.id, owned=True)
         if action == "collaborator_add":
             people = await social.following_names(sub)
             hits = [i for i, n in people.items() if n.casefold() == want.casefold()]
@@ -234,8 +235,9 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             if not hits:
                 raise DeckError(
                     "not_found",
-                    f"{want} is not among the people you follow on Archidekt. Collaborators are "
-                    "added from the people you follow, as on Archidekt's own settings page.",
+                    f"{want} is not among the people you follow on Archidekt (the gateway reads the "
+                    f"first {FOLLOWING_PAGES} pages of that list). Collaborators are added from the "
+                    "people you follow, as on Archidekt's own settings page.",
                 )
             user_id, name = hits[0], people[hits[0]]
             if any(c["user_id"] == user_id for c in current):

@@ -35,6 +35,7 @@ MAX_COMMENT = 2000
 MAX_THREAD_DEPTH = 6
 FOLLOWING_PAGES = 5  # how far into the member's following list the follow state is looked for
 FOLLOWING_TTL = 120.0  # seconds the following list is remembered after a read
+FRESH_GAP = 15.0  # seconds between forced re-reads of the following list (a collaborator lookup)
 NO_STORE = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
 _STATUS = {
     "csrf": 403,
@@ -123,6 +124,7 @@ class SocialService:
         self.decks = state.decks
         self.client = state.decks.client
         self._following: dict[str, tuple[float, dict[int, str]]] = {}
+        self._following_fresh: dict[str, float] = {}  # sub -> when a fresh read was last forced
 
     def _me(self, sub: str) -> tuple[str, str]:
         """(Archidekt user id, username) of the member's linked account."""
@@ -199,7 +201,12 @@ class SocialService:
         ``fresh`` reads Archidekt again)."""
         uid, _name = self._me(sub)
         hit = self._following.get(sub)
-        if hit and hit[0] > time.monotonic() and not fresh:
+        now = time.monotonic()
+        if fresh and hit and now - self._following_fresh.get(sub, -FRESH_GAP) < FRESH_GAP:
+            fresh = False  # one forced read per FRESH_GAP: a run of typos does not re-read every page
+        if fresh:
+            self._following_fresh[sub] = now
+        if hit and hit[0] > now and not fresh:
             return hit[1]
         users: dict[int, str] = {}
         page = 1
@@ -216,12 +223,14 @@ class SocialService:
 
     # -- deck collaborators (Archidekt's "editors": people who may change the deck) -----------------
 
-    async def collaborators(self, sub: str, deck_id: str) -> list[dict[str, Any]]:
+    async def collaborators(self, sub: str, deck_id: str, *, owned: bool = False) -> list[dict[str, Any]]:
         """The collaborators of the member's own deck: [{editor_id, user_id, username, added_by,
-        added_at}]."""
+        added_at}]. ``owned``: the caller has just read the deck as the member's own, so it is
+        not read again."""
         self._me(sub)
-        deck = await self.decks.get_own_deck(sub, deck_id)
-        rows = await self.decks._call(sub, lambda t: self.client.deck_editors(t, str(deck.id)))
+        if not owned:
+            deck_id = (await self.decks.get_own_deck(sub, deck_id)).id
+        rows = await self.decks._call(sub, lambda t: self.client.deck_editors(t, str(deck_id)))
         out = []
         for r in rows:
             user = r.get("user") if isinstance(r.get("user"), dict) else {}
@@ -246,9 +255,12 @@ class SocialService:
         if any(c["user_id"] == user_id for c in await self.collaborators(sub, deck_id)):
             return {"added": False, "already": True, "verified": True}
         await self.decks._call(sub, lambda t: self.client.add_deck_editor(t, deck_id, user_id))
-        verified = any(c["user_id"] == user_id for c in await self.collaborators(sub, deck_id))
         self.state.db.audit("collaborator_added", sub=sub, detail={"deck_id": deck_id, "user_id": user_id})
-        return {"added": True, "verified": verified}
+        if not any(c["user_id"] == user_id for c in await self.collaborators(sub, deck_id, owned=True)):
+            raise DeckError(
+                "verify_mismatch", "Archidekt accepted the request but the deck does not list them"
+            )
+        return {"added": True, "verified": True}
 
     async def remove_collaborator(self, sub: str, deck_id: str, user_id: int) -> dict[str, Any]:
         """Remove by the person's user id: the editor row is looked up on this deck first, so
@@ -257,9 +269,10 @@ class SocialService:
         if row is None:
             return {"removed": False, "already": True, "verified": True}
         await self.decks._call(sub, lambda t: self.client.remove_deck_editor(t, row["editor_id"]))
-        verified = all(c["user_id"] != user_id for c in await self.collaborators(sub, deck_id))
         self.state.db.audit("collaborator_removed", sub=sub, detail={"deck_id": deck_id, "user_id": user_id})
-        return {"removed": True, "verified": verified}
+        if any(c["user_id"] == user_id for c in await self.collaborators(sub, deck_id, owned=True)):
+            raise DeckError("verify_mismatch", "Archidekt accepted the request but the deck still lists them")
+        return {"removed": True, "verified": True}
 
     async def follow_state(self, sub: str, user_id: int) -> dict[str, Any]:
         uid, _name = self._me(sub)

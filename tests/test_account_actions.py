@@ -32,8 +32,12 @@ async def _browser_apply(h, pid: str) -> dict:
     try:
         await b.login()
         csrf = await b.csrf()
-        r = await b.http.post(f"/api/v1/proposals/{pid}/apply", headers={"X-CSRF-Token": csrf})
-        return r.json()
+        r = await b.http.post(f"/proposals/{pid}", data={"csrf": csrf, "action": "apply"})
+        assert r.status_code == 303, r.text
+        err = r.headers["location"].partition("?err=")[2]
+        if err:  # the review page shows the refusal by its code
+            return {"ok": False, "error": err}
+        return (await b.http.get(f"/api/v1/proposals/{pid}")).json()
     finally:
         await b.aclose()
 
@@ -402,7 +406,12 @@ def _amy_row() -> dict:
     }
 
 
-async def test_collaborators_are_listed_added_and_removed_on_the_members_press(stack: Stack) -> None:
+async def test_collaborators_are_listed_added_and_removed_on_the_members_press(
+    stack: Stack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mtg_gateway import social
+
+    monkeypatch.setattr(social, "FRESH_GAP", 0.0)  # the member follows amy straight after the miss
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     await _set_mode(h, "auto")
@@ -491,3 +500,40 @@ async def test_settings_page_lists_collaborators_and_opens_a_review_page(stack: 
         assert (await b.http.post("/decks/42/collaborators", data={"action": "remove"})).status_code == 403
     finally:
         await b.aclose()
+
+
+async def test_the_json_api_does_not_apply_an_account_action(stack: Stack) -> None:
+    """R-142: only the review page's own form applies an account action, not the JSON API, even
+    with the member's signed-in session and CSRF token."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    p = structured(await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "like"}))
+    b = Browser(h)
+    try:
+        await b.login()
+        csrf = await b.csrf()
+        r = await b.http.post(f"/api/v1/proposals/{p['proposal_id']}/apply", headers={"X-CSRF-Token": csrf})
+        assert r.json()["error"] == "browser_required" and ark.votes == {}, r.text
+    finally:
+        await b.aclose()
+
+
+async def test_a_collaborator_archidekt_did_not_add_is_reported_not_applied(
+    stack: Stack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mtg_gateway.archidekt import ArchidektClient
+
+    async def ignored(self, token, deck_id, user_id):  # Archidekt answers but lists nobody new
+        return {}
+
+    monkeypatch.setattr(ArchidektClient, "add_deck_editor", ignored)
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    ark.follows["alice"] = {78}
+    p = structured(
+        await call(h, token, "propose_collaborator", {"deck_id": "42", "action": "add", "username": "amy"})
+    )
+    out = await _browser_apply(h, p["proposal_id"])
+    assert out["ok"] is False, out
+    again = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
+    assert again["state"] != "applied", again
