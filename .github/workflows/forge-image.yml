@@ -1,0 +1,165 @@
+name: Forge image
+
+# Builds the Forge simulation image (docker/forge/): Forge's release archive, unmodified, plus the
+# gateway's job service. A pull request that touches it builds natively on arm64 (the Pi's
+# architecture) and plays a smoke game there, pushing nothing. A push to main publishes the image tag
+# the Dockerfile names (<FORGE_VERSION>-<FORGE_LOCAL>) only the first time main carries it, the same
+# claim rule as the Mystic Forge image (git tag forge-<that tag>).
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    paths:
+      - "docker/forge/**"
+      - "scripts/ci_smoke_forge.sh"
+      - ".github/workflows/forge-image.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: forge-image-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/mtg-assistant-forge
+  DOCKERFILE: docker/forge/Dockerfile
+
+jobs:
+  pin:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.pin.outputs.version }}
+      local: ${{ steps.pin.outputs.local }}
+      asset: ${{ steps.pin.outputs.asset }}
+      sha256: ${{ steps.pin.outputs.sha256 }}
+      url: ${{ steps.url.outputs.url }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Read the pin from the Dockerfile
+        id: pin
+        run: |
+          set -eu
+          for k in VERSION LOCAL ASSET SHA256; do
+            v=$(sed -n "s/^ARG FORGE_${k}=//p" "$DOCKERFILE" | head -n1)
+            test -n "$v"
+            echo "$(echo "$k" | tr 'A-Z' 'a-z')=$v" >> "$GITHUB_OUTPUT"
+            echo "FORGE_${k}=$v"
+          done
+      - name: Find the release asset and check its checksum
+        id: url
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ASSET: ${{ steps.pin.outputs.asset }}
+          SHA: ${{ steps.pin.outputs.sha256 }}
+        run: |
+          set -eu
+          url=$(gh api 'repos/Card-Forge/forge/releases?per_page=30' \
+            --jq ".[] | .assets[] | select(.name == \"$ASSET\") | .browser_download_url" | head -n1)
+          test -n "$url" || { echo "no Forge release has the asset $ASSET"; exit 1; }
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$ASSET" "$url"
+          have=$(sha256sum "$RUNNER_TEMP/$ASSET" | cut -d' ' -f1)
+          echo "$url sha256 $have"
+          if [ "$have" != "$SHA" ]; then
+            echo "::error::FORGE_SHA256 in $DOCKERFILE is '$SHA'; the release asset's checksum is $have"
+            exit 1
+          fi
+
+  claim:
+    needs: pin
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      build: ${{ steps.claim.outputs.build }}
+    steps:
+      - id: claim
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.pin.outputs.version }}-${{ needs.pin.outputs.local }}
+        run: |
+          set -eu
+          [[ "$TAG" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,100}$ ]] || { echo "bad tag: $TAG"; exit 1; }
+          if gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/forge-$TAG" -f sha="$GITHUB_SHA" >/dev/null 2>"$RUNNER_TEMP/err"; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            have=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/forge-$TAG" --jq .object.sha 2>/dev/null) || { cat "$RUNNER_TEMP/err"; exit 1; }
+            if [ "$have" = "$GITHUB_SHA" ]; then echo "build=true" >> "$GITHUB_OUTPUT"; else echo "build=false" >> "$GITHUB_OUTPUT"; fi
+          fi
+
+  smoke-arm64:
+    # Native arm64 build and a real game, with memory figures, on every pull request and publish.
+    needs: [pin, claim]
+    if: >-
+      !cancelled() && needs.pin.result == 'success'
+      && (github.event_name != 'push' || needs.claim.outputs.build == 'true')
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        with:
+          driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
+      - name: Build arm64 image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ${{ env.DOCKERFILE }}
+          load: true
+          tags: forge:ci-arm64
+          build-args: FORGE_URL=${{ needs.pin.outputs.url }}
+      - name: Image size
+        run: docker image ls forge:ci-arm64
+      - name: Service tests (offline)
+        run: python3 -m unittest discover -s docker/forge -p 'test_*.py' -v
+      - name: Smoke test
+        run: scripts/ci_smoke_forge.sh forge:ci-arm64
+
+  image:
+    needs: [pin, smoke-arm64]
+    if: >-
+      !cancelled() && needs.smoke-arm64.result == 'success'
+      && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+        with:
+          image: mirror.gcr.io/tonistiigi/binfmt:latest
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        with:
+          driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image tags
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=${{ needs.pin.outputs.version }}-${{ needs.pin.outputs.local }}
+            type=raw,value=latest,enable={{is_default_branch}}
+      - name: Build and push linux/arm64 and linux/amd64
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ${{ env.DOCKERFILE }}
+          platforms: linux/arm64,linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: FORGE_URL=${{ needs.pin.outputs.url }}
