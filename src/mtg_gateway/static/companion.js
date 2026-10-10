@@ -51,6 +51,7 @@
   }
   var rowEls = {}; // lower name -> the <li> of an existing card
   var history = []; // snapshots for Undo
+  var future = [];  // snapshots for Redo: what Undo took back, until the next new change
 
   function snapshot() {
     var s = {};
@@ -60,21 +61,38 @@
     });
     return { rows: s, added: JSON.parse(JSON.stringify(added)) };
   }
-  function mutate(fn) {
-    history.push(snapshot());
-    if (history.length > 100) history.shift();
-    fn();
-    render();
-  }
-  function undo() {
-    var s = history.pop();
-    if (!s) return;
+  function restore(s) {
     Object.keys(s.rows).forEach(function (k) {
       var r = rows[k], v = s.rows[k];
       r.after = v.after; r.setCategory = v.setCategory; r.setFinish = v.setFinish; r.printing = v.printing;
     });
     added = s.added;
     render();
+  }
+  function mutate(fn) {
+    history.push(snapshot());
+    if (history.length > 100) history.shift();
+    future = [];
+    fn();
+    render();
+  }
+  /* While a save is on its way, or its "Save anyway?" question is up, the changes on screen are
+     the ones being saved: Undo and Redo wait. */
+  var saving = false;
+  function locked() { return saving || !!root.querySelector(".confirmbar"); }
+  function undo() {
+    if (locked()) return;
+    var s = history.pop();
+    if (!s) return;
+    future.push(snapshot());
+    restore(s);
+  }
+  function redo() {
+    if (locked()) return;
+    var s = future.pop();
+    if (!s) return;
+    history.push(snapshot());
+    restore(s);
   }
 
   var known = {}; // lower name -> card summary from the suggestion list (picture, mana, type)
@@ -269,6 +287,7 @@
     root.querySelector("button.review .label").textContent = n ? "Save " + n + " change" + (n === 1 ? "" : "s") : "Save changes";
     root.querySelector("button.review").disabled = !n || n > MAX;
     root.querySelector("button.undo").disabled = !history.length;
+    root.querySelector("button.redo").disabled = !future.length;
     root.querySelector(".limit").textContent = n > MAX ? "At most " + MAX + " changes can be saved in one go; save these first." : "";
     // added cards block
     var addedBox = root.querySelector(".added");
@@ -592,6 +611,18 @@
       .catch(function () { status.textContent = "The names could not be checked (network error); nothing was added."; btn.disabled = false; });
   });
   root.querySelector("button.undo").addEventListener("click", undo);
+  root.querySelector("button.redo").addEventListener("click", redo);
+  // Ctrl+Z / Ctrl+Shift+Z (Cmd on a Mac) and Ctrl+Y, except while typing in a field
+  document.addEventListener("keydown", function (ev) {
+    if (!(ev.ctrlKey || ev.metaKey) || ev.altKey) return;
+    var t = ev.target, tag = t && t.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (t && t.isContentEditable)) return;
+    // not behind the printing picker or the card viewer, and not while a save is on its way
+    if (!picker.hidden || document.documentElement.classList.contains("cardview-open") || locked()) return;
+    var k = (ev.key || "").toLowerCase();
+    if (k === "z" && !ev.shiftKey && history.length) { ev.preventDefault(); undo(); }
+    else if (((k === "z" && ev.shiftKey) || (k === "y" && !ev.metaKey)) && future.length) { ev.preventDefault(); redo(); }
+  });
 
   // menus close on outside click / Escape
   document.addEventListener("click", function (ev) {
@@ -660,6 +691,7 @@
   function save(confirmed) {
     var btn = root.querySelector("button.review");
     btn.disabled = true;
+    saving = true;
     var status = root.querySelector(".status");
     status.textContent = confirmed ? "Saving to Archidekt…" : "Saving to Archidekt…";
     status.className = "status";
@@ -681,6 +713,7 @@
         } else if (res.ok && d.needs_confirm) {
           // the proposal exists but nothing was sent: ask, then apply that same proposal
           status.textContent = "";
+          saving = false;  // the question bar now holds the edits until it is answered
           var bar = el("div", { class: "confirmbar notice warn", role: "alertdialog" });
           bar.appendChild(el("span", { text: d.why + " Save anyway?" }));
           var yes = el("button", { type: "button", class: "btn-primary", text: "Save anyway" });
@@ -693,11 +726,11 @@
               method: "POST", credentials: "same-origin", headers: { "X-CSRF-Token": cfg.csrf }
             }).then(function (r) { return r.json(); }).then(function (a) {
               if (a.ok) { root.dataset.leaving = "1"; window.location.href = "/decks/" + encodeURIComponent(cfg.deckId) + "?ok=saved"; return; }
-              bar.remove(); status.textContent = a.message || "Archidekt refused the change; nothing was saved."; status.className = "status notice error"; btn.disabled = false;
-            }).catch(function () { bar.remove(); status.textContent = "Network error; nothing was changed."; status.className = "status notice error"; btn.disabled = false; });
+              bar.remove(); status.textContent = a.message || "Archidekt refused the change; nothing was saved."; status.className = "status notice error"; btn.disabled = false; saving = false;
+            }).catch(function () { bar.remove(); status.textContent = "Network error; nothing was changed."; status.className = "status notice error"; btn.disabled = false; saving = false; });
           });
           no.addEventListener("click", function () {
-            bar.remove(); btn.disabled = false;
+            bar.remove(); btn.disabled = false; saving = false;
             // the proposal made for the check is not wanted: reject it so Proposals stays clean
             fetch("/api/v1/proposals/" + encodeURIComponent(d.proposal_id) + "/reject", {
               method: "POST", credentials: "same-origin", headers: { "X-CSRF-Token": cfg.csrf }
@@ -711,13 +744,13 @@
         } else {
           status.textContent = d.message || "The changes could not be saved.";
           status.className = "status notice error";
-          btn.disabled = false;
+          btn.disabled = false; saving = false;
         }
       })
       .catch(function () {
         status.textContent = "Network error; nothing was changed.";
         status.className = "status notice error";
-        btn.disabled = false;
+        btn.disabled = false; saving = false;
       });
   }
   root.querySelector("button.review").addEventListener("click", function () { save(false); });

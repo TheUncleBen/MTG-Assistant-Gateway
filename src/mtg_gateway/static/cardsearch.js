@@ -90,10 +90,12 @@
   var showing = "";    // the card the viewer shows now
   function textFor(name) {
     if (texts[name]) return texts[name];
-    texts[name] = fetch("/cards/api/text?name=" + enc(name), { credentials: "same-origin" })
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (d) { return d && d.ok && d.card ? d.card : null; })
-      .catch(function () { delete texts[name]; return null; });
+    // the viewer's own read of the same answer (it wants the links and the back face): one request
+    texts[name] = window.MtgCardView && window.MtgCardView.text ? window.MtgCardView.text(name)
+      : fetch("/cards/api/text?name=" + enc(name), { credentials: "same-origin" })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) { return d && d.ok && d.card ? d.card : null; })
+        .catch(function () { delete texts[name]; return null; });
     return texts[name];
   }
   function merged(base, text) {

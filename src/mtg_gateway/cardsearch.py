@@ -17,10 +17,11 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
+import re
 import time
 from collections import OrderedDict
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -125,6 +126,42 @@ def _face(f: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def _https_on(url: Any, hosts: tuple[str, ...]) -> str:
+    """``url`` when it is an https link on one of ``hosts``, else "" (links from Scryfall's card
+    data are shown as they are, but only to the sites the viewer names)."""
+    if not isinstance(url, str) or len(url) > 500 or re.search(r"[\\@\s\x00-\x1f\x7f]", url):
+        return ""  # a backslash or userinfo reads as another host in a browser than here
+    parts = urlsplit(url)
+    host = parts.hostname or ""
+    return url if parts.scheme == "https" and host in hosts and parts.netloc == host else ""
+
+
+def card_links(card: dict[str, Any]) -> dict[str, str]:
+    """EDHREC and TCGplayer pages for a card, from the links in Scryfall's own card data:
+    ``related_uris.edhrec`` as is, and the TCGplayer product page that Scryfall's partner link in
+    ``purchase_uris.tcgplayer`` forwards to (its ``u`` parameter), so no referral link is shown."""
+    related = card.get("related_uris") or {}
+    buy = card.get("purchase_uris") or {}
+    out: dict[str, str] = {}
+    if edhrec := _https_on(related.get("edhrec"), ("edhrec.com",)):
+        out["edhrec"] = edhrec
+    partner = buy.get("tcgplayer")
+    if isinstance(partner, str):
+        target = (parse_qs(urlsplit(partner).query).get("u") or [""])[0]
+        if tcg := _https_on(target, ("www.tcgplayer.com", "tcgplayer.com")):
+            out["tcgplayer"] = tcg
+    return out
+
+
+def back_image(card: dict[str, Any]) -> str:
+    """The back face's picture of a double-faced card (each face has its own picture), else ""."""
+    faces = [f for f in card.get("card_faces") or [] if isinstance(f, dict)]
+    if len(faces) < 2:
+        return ""
+    uris = faces[1].get("image_uris") or {}
+    return _https_on(uris.get("normal"), ("cards.scryfall.io",))
+
+
 def card_text(card: dict[str, Any]) -> dict[str, Any]:
     """What the card viewer shows beyond the picture, from a whole Scryfall card: the rules text
     (every face of a double-faced or split card), power and toughness or loyalty, flavour text,
@@ -149,6 +186,9 @@ def card_text(card: dict[str, Any]) -> dict[str, Any]:
         "rank": str(rank) if isinstance(rank, int) else "",
         "legal": legal,
         "gc": bool(card.get("game_changer")),
+        "id": str(card.get("id") or ""),
+        "back_img": back_image(card),
+        "links": card_links(card),
     }
 
 
@@ -210,6 +250,33 @@ class TextCache:
             self._inflight.pop(k, None)
             if fut.done() and not fut.cancelled():
                 fut.exception()  # mark it retrieved: the raiser reports it, waiters get their own
+
+
+RULINGS_TTL = 24 * 3600  # rulings change rarely
+RULINGS_MAX = 300
+
+
+class RulingsCache:
+    """Rulings by Scryfall card id: a small LRU with a time to live (each list is a few KB)."""
+
+    def __init__(self, *, ttl: float = RULINGS_TTL, max_items: int = RULINGS_MAX):
+        self.ttl = ttl
+        self.max_items = max_items
+        self._items: OrderedDict[str, tuple[float, list[dict[str, str]]]] = OrderedDict()
+
+    def get(self, card_id: str) -> list[dict[str, str]] | None:
+        hit = self._items.get(card_id)
+        if hit is None or hit[0] < time.monotonic():
+            self._items.pop(card_id, None)
+            return None
+        self._items.move_to_end(card_id)
+        return hit[1]
+
+    def put(self, card_id: str, rows: list[dict[str, str]]) -> None:
+        self._items[card_id] = (time.monotonic() + self.ttl, rows)
+        self._items.move_to_end(card_id)
+        while len(self._items) > self.max_items:
+            self._items.popitem(last=False)
 
 
 def clean_query(raw: str | None) -> str:
@@ -304,6 +371,50 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
             )
         return JSONResponse(
             {"ok": True, "card": text},
+            headers={"Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff"},
+        )
+
+    rulings_cache = RulingsCache()
+    state.card_rulings = rulings_cache  # type: ignore[attr-defined]  # tests look at the cache
+
+    @server.custom_route("/cards/api/rulings", methods=["GET"], include_in_schema=False)
+    async def rulings_api(request: Request) -> Response:
+        """The rulings for one card (``name=``, exact), read from Scryfall when the viewer's Rulings
+        button is pressed: the card's id comes from the text cache above, the rulings are kept a
+        day."""
+        sub, _sid = browser_session(state, request)
+        if not sub:
+            return JSONResponse({"ok": False, "error": "unauthenticated"}, 401, headers=NO_STORE)
+        name = clean_query(request.query_params.get("name"))
+        if len(name) < 2:
+            return JSONResponse(
+                {"ok": False, "error": "invalid", "message": "name is required"}, 400, headers=NO_STORE
+            )
+        scan = state.scan
+        if scan is None:
+            return JSONResponse(
+                {"ok": False, "error": "unavailable", "message": "Card lookup is switched off."},
+                503,
+                headers=NO_STORE,
+            )
+
+        async def source(n: str) -> dict[str, Any]:
+            return await scan.named_raw(n, owner=sub)
+
+        try:
+            text = await texts.fetch(name, source)
+            card_id = str(text.get("id") or "")
+            rows = rulings_cache.get(card_id)
+            if rows is None:
+                rows = await scan.rulings(card_id, owner=sub)
+                rulings_cache.put(card_id, rows)
+        except ScanError as exc:
+            status = {"not_found": 404, "rate_limited": 429, "busy": 429}.get(exc.kind, 503)
+            return JSONResponse(
+                {"ok": False, "error": exc.kind, "message": str(exc)}, status, headers=NO_STORE
+            )
+        return JSONResponse(
+            {"ok": True, "name": text.get("name") or name, "rulings": rows},
             headers={"Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff"},
         )
 
