@@ -2068,15 +2068,20 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
 
     @server.custom_route("/sw.js", methods=["GET"], include_in_schema=False)
     async def service_worker(_request: Request) -> Response:
-        # Network only: the pages are private and must never be served from a cache. When a page
-        # can't be reached at all (no connection), answer with a plain offline page built here
-        # instead of the browser's own error screen.
+        # Network only: the pages are private and must never be served from a cache. A page load
+        # that fails at the network level is tried twice more (after 0.3 s and 1 s) before the
+        # plain offline page built here answers instead of the browser's own error screen, so one
+        # dropped connection on the way in doesn't show "offline". GET navigations only.
         js = (
             "self.addEventListener('install',()=>self.skipWaiting());"
             "self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));"
+            "const RETRY=[300,1000];"
+            "const wait=ms=>new Promise(r=>setTimeout(r,ms));"
+            "const tryFetch=(req,i)=>fetch(req).catch(err=>"
+            "i<RETRY.length?wait(RETRY[i]).then(()=>tryFetch(req,i+1)):Promise.reject(err));"
             "self.addEventListener('fetch',e=>{"
             "if(e.request.mode!=='navigate'||e.request.method!=='GET')return;"
-            "e.respondWith(fetch(e.request).catch(()=>new Response(" + json.dumps(OFFLINE_PAGE) + ","
+            "e.respondWith(tryFetch(e.request,0).catch(()=>new Response(" + json.dumps(OFFLINE_PAGE) + ","
             "{status:503,headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store',"
             "'Content-Security-Policy':\"default-src 'none'; style-src 'unsafe-inline'; "
             "base-uri 'none'; frame-ancestors 'none'\"}})));"

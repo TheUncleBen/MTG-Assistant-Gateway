@@ -54,6 +54,9 @@ SLUG_MAX = 40
 IMAGE_PLUGIN_DIR = Path("/usr/share/mtg-gateway/plugin")
 REPO_PLUGIN_DIR = Path(__file__).resolve().parents[2] / "plugin"
 MAX_FILE_BYTES = 512 * 1024
+# The install steps are Markdown, served as plain text: some assistants' web readers refuse a
+# text/markdown answer, and every reader takes text/plain.
+INSTALL_MD_TYPE = "text/plain; charset=utf-8"
 ZIP_DATE = (2026, 1, 1, 0, 0, 0)
 # The connector files whose ``url`` the gateway fills in with its own address.
 CONNECTOR_FILES = (".mcp.json", "mcp.json")
@@ -404,7 +407,7 @@ def add_plugin_routes(server: MCPServer, state: AppState) -> None:
         client = pick_client(request.query_params.get("for"))
         return PlainTextResponse(
             install_markdown(s.public_url, s.server_name, client),
-            media_type="text/markdown; charset=utf-8",
+            media_type=INSTALL_MD_TYPE,
             headers=static,
         )
 
@@ -421,7 +424,7 @@ def add_plugin_routes(server: MCPServer, state: AppState) -> None:
                 return login_redirect(target)
             return PlainTextResponse(
                 install_markdown(s.public_url, s.server_name, client),
-                media_type="text/markdown; charset=utf-8",
+                media_type=INSTALL_MD_TYPE,
                 headers={"Cache-Control": "no-store", "Vary": "Sec-Fetch-Mode, Cookie"},
             )
         e = html.escape

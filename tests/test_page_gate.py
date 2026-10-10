@@ -42,7 +42,7 @@ async def test_machine_routes_stay_open(harness: Harness) -> None:
     # An AI agent handed the install page's address gets the public Markdown steps, not a login.
     agent = await harness.http.get("/install?for=claude-code")
     assert agent.status_code == 200
-    assert agent.headers["content-type"].startswith("text/markdown")
+    assert agent.headers["content-type"].startswith("text/plain")
     assert "claude plugin install mtg-gateway@mtg-gateway" in agent.text
     assert "<html" not in agent.text
 
