@@ -15,7 +15,7 @@ CATALOG = [
     "Sol Ring",
     "Sol Talisman",
     "Solemn Simulacrum שלום",  # Hebrew in a name
-    "Solar Blaze \U0001F525",  # emoji in a name
+    "Solar Blaze \U0001f525",  # emoji in a name
     "Aesi, Tyrant of Gyre Strait",
     "Okiri, Belligerent Bannerkeeper of the Greatest Grand Army",
 ] + [f"Filler Card {i}" for i in range(50)]
@@ -80,7 +80,7 @@ async def test_hostile_text_is_escaped_and_short_text_shows_the_help(stack: Stac
     _catalog(stack)
     b = await linked(stack)
     try:
-        r = await b.http.get("/cards", params={"q": "<script>alert(1)</script> שלום \U0001F525"})
+        r = await b.http.get("/cards", params={"q": "<script>alert(1)</script> שלום \U0001f525"})
         assert r.status_code == 200
         assert "<script>alert" not in r.text and "&lt;script&gt;alert(1)&lt;/script&gt;" in r.text
         assert "No card is named like that" in r.text

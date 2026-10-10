@@ -36,8 +36,10 @@ FEEDBACK_SCRIPT = "/static/feedback.js"
 # img-src 'self' is for the gateway's own files only (the select arrow, /static/chevron.svg); pages
 # that show card images add cards.scryfall.io in their own policy.
 DEFAULT_CSP = (
-    # cards.scryfall.io: the top bar's search suggestions show a small card picture on every page
+    # The top bar's search box is on every page: connect-src 'self' lets it ask the gateway for
+    # suggestions, and cards.scryfall.io is the small card picture each suggestion shows.
     "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; worker-src 'self'; "
+    "connect-src 'self'; "
     "img-src 'self' https://cards.scryfall.io; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
 )
 THEMES = ("system", "light", "dark")
