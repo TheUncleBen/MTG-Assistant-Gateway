@@ -113,7 +113,7 @@ def test_another_user_cannot_read_the_sessions(clients, env: Env):
     async def go():
         f = clients["bob-test"]
         async with f.session() as s:
-            assert (await f.call(s, "whoami"))["preferred_username"] == "bob-test"
+            assert (await f.call(s, "whoami"))["name"] == "Bob Test"
             assert (await f.call(s, "list_scan_sessions"))["sessions"] == []
             by_id = await f.call(s, "get_scan_session", {"session": STATE["session"]})
             by_name = await f.call(s, "get_scan_session", {"session": "E2E scan"})

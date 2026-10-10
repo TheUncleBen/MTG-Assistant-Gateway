@@ -79,6 +79,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
+ICON_HEADERS = {"Cache-Control": "public, max-age=86400", "X-Content-Type-Options": "nosniff"}
 # Pages with the editor load one script from /static; everything else keeps the default CSP.
 DECK_CSP = (
     "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; "
@@ -2077,8 +2078,8 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             "background_color": "#181818",
             "theme_color": "#111111",
             "icons": [
-                {"src": "/scan/static/icon-192.png", "sizes": "192x192", "type": "image/png"},
-                {"src": "/scan/static/icon-512.png", "sizes": "512x512", "type": "image/png"},
+                {"src": "/static/gateway-icon-192.png", "sizes": "192x192", "type": "image/png"},
+                {"src": "/static/gateway-icon-512.png", "sizes": "512x512", "type": "image/png"},
             ],
             "shortcuts": [
                 {"name": "My decks", "url": "/decks"},
@@ -2123,6 +2124,15 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         except ValueError:
             return JSONResponse([], headers={"Cache-Control": "no-store"})
         return JSONResponse(data, headers={"Cache-Control": "public, max-age=3600"})
+
+    # Browsers, and apps that show a connector's icon from its site, ask for these at the root.
+    @server.custom_route("/favicon.ico", methods=["GET"], include_in_schema=False)
+    async def favicon(_request: Request) -> Response:
+        return FileResponse(STATIC_DIR / "favicon.ico", media_type="image/x-icon", headers=ICON_HEADERS)
+
+    @server.custom_route("/apple-touch-icon.png", methods=["GET"], include_in_schema=False)
+    async def touch_icon(_request: Request) -> Response:
+        return FileResponse(STATIC_DIR / "gateway-icon-180.png", media_type="image/png", headers=ICON_HEADERS)
 
     @server.custom_route("/static/{path:path}", methods=["GET"], include_in_schema=False)
     async def static(request: Request) -> Response:

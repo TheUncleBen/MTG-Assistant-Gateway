@@ -1,5 +1,5 @@
 ---
-name: setup
+name: setup-mtg-gateway
 description: Connect this assistant to the MTG Assistant Gateway for the first time, or fix a connection that stopped working. Use when the user says "set up", "connect", "install" or "sign in to" the MTG gateway, when a gateway tool fails with 401 or "not authenticated", or right after the mtg-gateway plugin was installed.
 ---
 
@@ -51,7 +51,9 @@ Signing in is a browser step the user does themselves:
    if the named app is the one they are using, otherwise Deny.
 3. The browser says the sign-in finished; the user comes back here.
 
-Then call the `whoami` tool. Good result: the user's own name or email.
+Then call the `whoami` tool. Good result: `signed_in` is true and `name` is the user's own
+name. That is all `whoami` returns about the person (plus the gateway version and the
+account page): no email, groups or IDs.
 
 If it fails:
 

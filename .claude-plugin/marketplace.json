@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "mtg-gateway",
-      "description": "Magic: The Gathering research, goldfish simulation and safe Archidekt deck edits through an MTG Assistant Gateway. Connector URL comes from MTG_GATEWAY_URL; run /mtg-gateway:setup after installing.",
+      "description": "Magic: The Gathering research, goldfish simulation and safe Archidekt deck edits through an MTG Assistant Gateway. Connector URL comes from MTG_GATEWAY_URL; run /mtg-gateway:setup-mtg-gateway after installing.",
       "version": "0.7.11",
       "category": "productivity",
       "keywords": ["mtg", "magic-the-gathering", "archidekt", "mcp"],

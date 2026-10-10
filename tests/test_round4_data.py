@@ -393,8 +393,8 @@ async def test_read_scope_token_cannot_propose_or_write_via_api(stack: Stack) ->
     await linked_user(stack)
     for scope in ("mtg.read", "read"):
         token, _cid = await _app_token(h, f"reader-{scope}", scope=scope)
-        who = structured(await call(h, token, "whoami"))
-        assert who["scopes"] == [scope]
+        assert h.db.get_token(token, "access")["scopes"] == [scope]
+        assert structured(await call(h, token, "whoami"))["signed_in"] is True
         listing = structured(await call(h, token, "list_my_decks"))
         assert listing["ok"], listing
         res = await call(
