@@ -1,5 +1,9 @@
-# syntax=docker/dockerfile:1.7
-FROM python:3.12-slim-bookworm AS build
+# syntax=mirror.gcr.io/docker/dockerfile:1.7
+# The base image and the Dockerfile frontend come from Google's public mirror of Docker Hub (same images,
+# same digests) because anonymous pulls from Docker Hub are rate-limited per address, and shared CI
+# runners hit that limit (0.7.10). CI also signs in to Docker Hub when the owner set DOCKERHUB_USERNAME
+# and DOCKERHUB_TOKEN (docs/DEPLOY.md).
+FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS build
 WORKDIR /build
 COPY pyproject.toml README.md LICENSE constraints.txt ./
 COPY src ./src
@@ -9,7 +13,7 @@ RUN python3 scripts/fetch_ocr_assets.py
 RUN pip install --no-cache-dir --upgrade pip wheel \
  && pip wheel --no-cache-dir --wheel-dir /wheels -c constraints.txt .
 
-FROM python:3.12-slim-bookworm
+FROM mirror.gcr.io/library/python:3.12-slim-bookworm
 LABEL org.opencontainers.image.source="https://github.com/TheUncleBen/MTG-Assistant-Gateway" \
       org.opencontainers.image.licenses="PolyForm-Noncommercial-1.0.0"
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
