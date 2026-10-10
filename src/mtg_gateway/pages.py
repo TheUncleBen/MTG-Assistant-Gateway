@@ -1024,6 +1024,31 @@ def _change_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, dic
                     html.escape(f"{r.get('format', '')}, {r.get('cards', 0)} cards, {visibility}"),
                 )
             )
+        elif kind == "action":
+            # an Archidekt account action (actions.py): what happens, the comment text in full
+            # (as it will be posted, and what it replaces or deletes) and whether it can be undone
+            counts["chg"] += 1
+            extra = ""
+            if r.get("before_text"):
+                extra += (
+                    "<span class='small muted'>Now:</span>"
+                    f"<blockquote class='said'>{html.escape(str(r['before_text']))}</blockquote>"
+                )
+            if r.get("after_text"):
+                extra += (
+                    "<span class='small muted'>Will say:</span>"
+                    f"<blockquote class='said'>{html.escape(str(r['after_text']))}</blockquote>"
+                )
+            if r.get("note"):
+                extra += f"<span class='small'>{html.escape(str(r['note']))}</span>"
+            out.append(
+                _li(
+                    "del action" if r.get("cannot_undo") else "chg action",
+                    str(r.get("label") or "Action"),
+                    html.escape(str(r.get("text") or "")) + extra,
+                    "Can't be undone on Archidekt" if r.get("cannot_undo") else "",
+                )
+            )
         elif kind == "restore":
             out.append(
                 _li(
@@ -1135,6 +1160,10 @@ def _progress_html(p: dict[str, Any]) -> str:
     return f"<p class='notice warn' role='status'>{html.escape(text)}</p>"
 
 
+def _risk_badge(risk: str) -> str:
+    return "danger" if risk == "destructive" else "warn" if risk == "high" else ""
+
+
 def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str = "") -> str:
     if p.get("kind") == "details":
         rows, total = _detail_rows(p.get("rows"), p["diff"])
@@ -1154,6 +1183,9 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str = "") -> str:
             summary.append(f"<span class='chg'>{counts['cat']} recategorized</span>")
         summary.append(f"<span>Net {'+' if net > 0 else ''}{net} card{'s' if abs(net) != 1 else ''}</span>")
         heading, aria = "What will change", "Card changes"
+        if p.get("kind") == "action":  # an Archidekt account action: no cards change
+            summary = [f"<span>{total} Archidekt action{'s' if total != 1 else ''}; no cards change</span>"]
+            heading, aria = "What will happen", "Archidekt action"
     raw = "<pre class='diff'>" + html.escape(p["diff"]) + "</pre>"
     meta = (
         "<dl class='meta'>"
@@ -1163,6 +1195,8 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str = "") -> str:
             if p.get("kind") == "create_deck" and p["deck_id"] == "new"
             else "<dt>Target</dt><dd>Your Archidekt collection</dd>"
             if p.get("kind") == "collection"
+            else "<dt>Target</dt><dd>Your Archidekt account</dd>"
+            if p.get("kind") == "action" and p["deck_id"] == "account"
             else f"<dt>Deck</dt><dd><a href='/decks/{quote(str(p['deck_id']), safe='')}'>"
             f"{html.escape(str(p.get('deck_name') or p['deck_id']))}</a>"
             + (
@@ -1181,7 +1215,7 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str = "") -> str:
         )
         + (f"<dt>Proposed by</dt><dd>{actor_html(p['created_by'])}</dd>" if p.get("created_by") else "")
         + (
-            f"<dt>Risk</dt><dd><span class='badge {'warn' if p['risk'] == 'high' else ''}'>"
+            f"<dt>Risk</dt><dd><span class='badge {_risk_badge(p['risk'])}'>"
             f"{html.escape(p['risk'])}</span> <span class='small muted'>"
             f"{html.escape(p['risk_reason'])}</span></dd>"
             if p.get("risk")

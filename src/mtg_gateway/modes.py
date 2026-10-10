@@ -20,7 +20,9 @@ proposal is low risk only if what the review page would show is small and safe:
   touches the commander; or a clone, which creates a private copy and changes nothing that
   exists.
 * **high**: everything else: more rows than that, any commander change, a new deck, restoring
-  a snapshot, and deck details (name, format, description, visibility).
+  a snapshot, deck details (name, format, description, visibility), and the Archidekt account
+  actions of actions.py (likes, bookmarks, follows, comments) except creating a folder (low).
+* **destructive**: deleting a deck. No mode lets an assistant apply it; the member presses.
 
 The operator may set the default mode for members who have not chosen (``MTG_APPROVAL_MODE_DEFAULT``)
 and cap what members may choose (``MTG_APPROVAL_MODE_MAX``, default ``auto`` = no cap).
@@ -90,6 +92,10 @@ def risk_of(
     """``("low" | "high", reason)`` for a proposal, from its kind and stored review rows."""
     if kind == "clone":
         return "low", "copies a deck and changes nothing that exists"
+    if kind == "action":
+        from .actions import risk_of as action_risk
+
+        return action_risk(rows)
     if kind == "create_deck":
         return "high", "creates a new deck"
     if kind == "restore":
@@ -169,4 +175,6 @@ def _copies_moved(row: dict[str, Any]) -> int:
 
 def assistant_may_apply(mode: str, risk: str) -> bool:
     """Whether the member's mode lets their assistant apply a proposal of this risk itself."""
+    if risk == "destructive":  # deleting a deck: always the member's own press
+        return False
     return mode == "auto" or (mode == "semi" and risk == "low")

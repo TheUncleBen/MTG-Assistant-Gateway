@@ -229,6 +229,7 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
       case "restore": return ["Restore", "snapshot " + r.snapshot_id + " taken " + r.taken + " (" + r.rows + " rows)", ""];
       case "description": return ["Description", r.after_len ? excerpt(r.after_text, r.after_len) : "cleared", ""];
       case "detail": return [String(r.field || "Setting"), arrow(r.before, r.after), ""];
+      case "action": return [String(r.label || "Action"), String(r.text || "") + (r.after_text ? ": " + excerpt(r.after_text, String(r.after_text).length) : ""), r.cannot_undo ? "Can't be undone" : ""];
       default: return ["Change", r.text || "", ""];
     }
   }
@@ -247,6 +248,7 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
     if (p.kind === "restore") return "Restore " + name;
     if (p.kind === "details") return "Settings of " + name;
     if (p.kind === "collection") return "Your collection";
+    if (p.kind === "action") return p.deck_id === "account" ? "Your Archidekt account" : "Archidekt: " + name;
     return "Change to " + name;
   }
   // Rows are shown grouped by what they do, in this order, so a big edit reads as a summary.

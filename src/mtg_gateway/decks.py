@@ -2186,6 +2186,10 @@ class DeckService:
             return await self._apply_clone(sub, row, progress)
         if row.get("kind") == "collection":
             return await self._apply_collection(sub, row, progress)
+        if row.get("kind") == "action":
+            from . import actions
+
+            return await actions.apply(self, sub, row, progress)
         changes = parse_changes(row["changes"])
         deck = await self._current_deck_for(sub, row)
         _before, after, _lines, _before_side, after_side = plan_zones(deck, changes)
@@ -2529,6 +2533,12 @@ class DeckService:
         result = {**applied, "verified": applied.get("verified") is True, "snapshot_id": None}
         self.db.finish_proposal(row["id"], state="applied", result=result)
         return self.describe(sub, row["id"])
+
+    async def propose_action(self, sub: str, action: str, **params: Any) -> dict[str, Any]:
+        """A proposal (kind ``action``) for one Archidekt account action: actions.py."""
+        from . import actions
+
+        return await actions.propose(self, sub, action, params)
 
     async def propose_clone(self, sub: str, deck_id: str, name: str | None = None) -> dict[str, Any]:
         """A proposal (kind ``clone``) that copies any deck the member can read (their own, a

@@ -104,13 +104,15 @@ once saved); `POST /collection/api/rows/{id}` with `{"quantity": n}` (0 removes)
 in the member's own collection answers `404`, and a member without a linked account `409`
 `not_linked`.
 
-Archidekt's social actions are browser-only too, under `/social/api`, and have no tool or `/api/v1`
-counterpart on purpose: `POST /social/api/decks/{id}/vote` `{"vote": "up" | "down" | "none"}`
+Archidekt's social actions for the browser are under `/social/api` (an assistant proposes the same
+through `propose_deck_social` and `propose_comment`; there is no `/api/v1` counterpart): `POST /social/api/decks/{id}/vote` `{"vote": "up" | "down" | "none"}`
 (a like is an up-vote on the deck's thread; answers the new `vote` and `points`), `POST
 /social/api/decks/{id}/bookmark` `{"on": bool}`, `GET` and `POST /social/api/users/{id}/follow`
 (`{"on": bool}`; the GET answers `following` and `self`), `GET /social/api/decks/{id}/comments?page=`
 (the thread as nested `comments`) and `POST /social/api/decks/{id}/comments` `{"text", "parent"?}`
-(`parent` must be a comment of that deck's thread). All need the session cookie and the CSRF token
+(`parent` must be a comment of that deck's thread), and `POST
+/social/api/decks/{id}/comments/{comment_id}/vote` `{"vote": "up" | "down" | "none"}` on someone
+else's comment (answers `vote` and the comment's new `points`). All need the session cookie and the CSRF token
 and run under the member's own Archidekt session.
 
 Admin callers (members of `MTG_ADMIN_GROUP`) also have `GET /api/v1/admin/overview`,
