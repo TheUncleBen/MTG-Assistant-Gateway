@@ -83,11 +83,45 @@
     }
     return acts;
   }
+  /* The rules text (every face), power and toughness, flavour, price and legality are read when a
+     card is opened, once per card for the page's lifetime (the gateway keeps them a while too),
+     and drawn into the open viewer when they arrive, if it still shows that card. */
+  var texts = {};      // card name -> promise of the text, or null when it could not be read
+  var showing = "";    // the card the viewer shows now
+  function textFor(name) {
+    if (texts[name]) return texts[name];
+    texts[name] = fetch("/cards/api/text?name=" + enc(name), { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) { return d && d.ok && d.card ? d.card : null; })
+      .catch(function () { delete texts[name]; return null; });
+    return texts[name];
+  }
+  function merged(base, text) {
+    var card = {};
+    Object.keys(base).forEach(function (k) { card[k] = base[k]; });
+    if (text) Object.keys(text).forEach(function (k) { if (text[k] || k === "faces") card[k] = text[k]; });
+    return card;
+  }
+  function openViewer(pic) {
+    var base = window.MtgCardView.fromElement(pic);
+    var name = base.name;
+    showing = name;
+    var known = texts[name] && texts[name]._value;
+    if (known !== undefined) { window.MtgCardView.open(merged(base, known), viewerActions(pic)); return; }
+    base.loading = true;
+    window.MtgCardView.open(base, viewerActions(pic));
+    textFor(name).then(function (text) {
+      if (texts[name]) texts[name]._value = text;
+      if (showing !== name) return;
+      delete base.loading;
+      window.MtgCardView.update(merged(base, text), viewerActions(pic));
+    });
+  }
   grid.addEventListener("click", function (e) {
     var pic = e.target.closest(".pic");
     if (pic && window.MtgCardView) {
       e.preventDefault();
-      window.MtgCardView.open(window.MtgCardView.fromElement(pic), viewerActions(pic));
+      openViewer(pic);
       return;
     }
     var add = e.target.closest("button[data-add]");

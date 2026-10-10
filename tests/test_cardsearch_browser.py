@@ -315,9 +315,23 @@ def test_a_member_without_a_link_cannot_open_the_dialog(server: Server) -> None:
         btn = page.locator("button[data-add]").first
         assert btn.is_disabled()
         assert "Link your Archidekt account" in (btn.get_attribute("title") or "")
+        reads: list[str] = []
+        page.on("request", lambda r: reads.append(r.url) if "/cards/api/text" in r.url else None)
         page.locator(".cc .pic").first.click()
         page.locator(".cardview.open").wait_for(timeout=3000)
         assert page.locator(".cardview.open button", has_text="Add to deck").is_disabled()
         assert page.locator(".addsheet.open").count() == 0
+        # the rules text arrives after the viewer opened and is drawn into it (symbols as glyphs)
+        rules = page.locator(".cardview.open .rules")
+        rules.wait_for(timeout=5000)
+        assert "Add" in rules.inner_text() and rules.locator("svg, .pip").count() >= 2
+        assert page.locator(".cardview.open .facts").inner_text().count("Artist") == 1
+        assert page.evaluate(MEASURE) == []
+        # closing and opening the same card again reads nothing more
+        page.keyboard.press("Escape")
+        page.wait_for_function("!document.querySelector('.cardview.open')", timeout=3000)
+        page.locator(".cc .pic").first.click()
+        page.locator(".cardview.open .rules").wait_for(timeout=3000)
+        assert len(reads) == 1, reads
         assert errors == [], errors
         browser.close()
