@@ -622,9 +622,12 @@ def build_mcp_server(state: AppState) -> MCPServer:
         if token is None or not token.subject:
             raise RuntimeError("no authenticated user on this request")
         user = state.db.get_user(token.subject) or {}
+        # Some providers send the email as the username (Entra ID's UPN, Keycloak's "email as
+        # username"); an email-shaped value is never used as the name.
+        names = [str(v) for v in (user.get("name"), user.get("preferred_username")) if v]
         return {
             "signed_in": True,
-            "name": user.get("name") or user.get("preferred_username"),
+            "name": next((v for v in names if "@" not in v), None),
             "gateway_version": __version__,
             "account_page": f"{s.public_url}/account",
         }

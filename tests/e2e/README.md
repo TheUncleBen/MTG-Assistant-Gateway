@@ -70,8 +70,8 @@ release, and only when its diff touches the gateway package (scan UI excluded), 
 files, the suite itself or its dependencies; a manual run (Actions tab, "Run workflow") runs
 `2025.6.4` and `2026.8.3`, or the one chosen, and is how main is re-checked. `authentik_setup.py`
 records what each version produced in `.generated/authentik-evidence.json` (version, applied
-blueprints, flows, provider fields, group bindings) and the sign-in test records the identity
-Authentik asserted in `.generated/identity-evidence.json`; the workflow prints and uploads both,
+blueprints, flows, provider fields, group bindings) and the backup test records the identity
+Authentik asserted (name, email, groups, as the gateway stored them) in `.generated/identity-evidence.json`; the workflow prints and uploads both,
 nothing secret in either.
 
 `run.sh` knobs: `E2E_AUTHENTIK_IMAGE`, `E2E_NGINX_IMAGE`, `E2E_SKIP_BUILD=1`,
