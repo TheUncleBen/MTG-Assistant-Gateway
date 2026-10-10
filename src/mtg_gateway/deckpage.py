@@ -1626,9 +1626,10 @@ ul.rows .hover img{width:100%;height:100%;display:block}
 .deckview.picking .c,.deckview.picking .row{cursor:pointer}
 .deckview.picking .c.picked{outline:3px solid var(--orange);outline-offset:2px}
 /* a check mark, so a chosen card differs from the focused one (same orange ring) */
-.deckview.picking .c.picked::after{content:'✓';position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+.deckview.picking .c.picked::after{content:'✓';position:absolute;left:50%;top:50%;
+  transform:translate(-50%,-50%);
   width:44px;height:44px;border-radius:50%;background:var(--orange);color:#000;font-size:26px;font-weight:700;
-  display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 3px #fff}
+  display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 3px var(--bg)}
 .deckview.picking .row.picked{background:var(--surface-2);box-shadow:inset 4px 0 0 var(--orange)}
 .deckview.picking .row.picked .name{font-weight:700}
 /* Table view: one full-width list per group, a column each for type, mana value, cost, printing */
