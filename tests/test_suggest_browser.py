@@ -146,7 +146,8 @@ def test_commander_box_suggests_from_a_themed_listbox(server: Server) -> None:
             " const r = b.getBoundingClientRect();"
             " return [Math.round(r.top), Math.round(r.height), Math.round(r.right)]; })"
         )
-        assert len(rects) == 2 and rects[0][0] == rects[1][0] and rects[0][1] == rects[1][1], rects
+        # Search decks, Clear and Search cards
+        assert len(rects) == 3 and len({r[0] for r in rects}) == 1 and len({r[1] for r in rects}) == 1, rects
         panel_right = page.evaluate(
             "() => document.querySelector('.searchbar').getBoundingClientRect().right"
         )

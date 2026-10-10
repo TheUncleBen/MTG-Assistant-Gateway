@@ -70,6 +70,7 @@ from .auth_provider import (
 from .backup import nightly_loop, purge_loop
 from .browse import add_browse_routes, add_browse_tools
 from .cards import ACCOUNT_CARD_URI, DECK_CARD_URI, CardLinks, add_card_routes, tool_meta, with_card
+from .cardsearch import add_cardsearch_routes
 from .cimd import CimdFetcher
 from .clickguard import form_stamp, guarded_form, submitted_too_soon
 from .collection import add_collection
@@ -1426,6 +1427,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
         add_card_routes(server, state, state.cards)
     add_collection(server, state)  # after add_scan: card names are resolved through the scan service
     add_browse_routes(server, state)
+    add_cardsearch_routes(server, state)  # /cards: the top bar's card search, adds through the edit API
     add_social_routes(server, state)
     add_browse_tools(server, state)
     add_home_routes(server, state)
