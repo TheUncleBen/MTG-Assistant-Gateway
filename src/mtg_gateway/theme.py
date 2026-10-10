@@ -38,7 +38,8 @@ FEEDBACK_SCRIPT = "/static/feedback.js"
 DEFAULT_CSP = (
     # The top bar's search box is on every page: connect-src 'self' lets it ask the gateway for
     # suggestions, and cards.scryfall.io is the small card picture each suggestion shows.
-    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; worker-src 'self'; "
+    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; "
+    "manifest-src 'self'; worker-src 'self'; "
     "connect-src 'self'; "
     "img-src 'self' https://cards.scryfall.io; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
 )
@@ -1097,6 +1098,8 @@ def render(
     )
     viewport = "width=1100" if desktop else "width=device-width, initial-scale=1, viewport-fit=cover"
     main_cls = "wrap panes" if panes else "wrap"
+    # a page with its own web app (the scanner) names its own manifest; a second one would win
+    manifest = "" if "rel='manifest'" in head_extra else "<link rel='manifest' href='/app.webmanifest'>"
     doc = (
         f"<!doctype html><html lang='en'{f' data-theme={theme}' if theme != 'system' else ''}>"
         "<head><meta charset='utf-8'>"
@@ -1104,7 +1107,7 @@ def render(
         "<meta name='referrer' content='no-referrer'>"
         f"<meta name='color-scheme' content='{'dark light' if theme == 'system' else theme}'>"
         "<meta name='theme-color' content='#111111'>"
-        "<link rel='manifest' href='/app.webmanifest'>"
+        f"{manifest}"
         "<link rel='icon' href='/favicon.ico' sizes='32x32'>"
         "<link rel='icon' href='/static/gateway-icon.svg' type='image/svg+xml'>"
         "<link rel='apple-touch-icon' href='/apple-touch-icon.png'>"

@@ -17,15 +17,16 @@ from .conftest import MCP_URL, PUBLIC_URL, Env, McpClient, browser_page, gateway
 from .test_04_operations import GATEWAY, container_of, sh
 
 # Every other page may load only the gateway's own scripts (feedback.js, the offline service worker,
-# the top bar's search box), ask only the gateway (the search suggestions), and show only its own
-# images (the account picture, /account/avatar) plus the suggestions' card pictures.
+# the top bar's search box) and web app manifest, ask only the gateway (the search suggestions), and
+# show only its own images (the account picture, /account/avatar) plus the suggestions' card pictures.
 STRICT_CSP = (
-    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; worker-src 'self'; "
-    "connect-src 'self'; "
+    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; "
+    "manifest-src 'self'; worker-src 'self'; connect-src 'self'; "
     "img-src 'self' https://cards.scryfall.io; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
 )
 HOME_CSP = (
-    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; "
+    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; "
+    "manifest-src 'self'; connect-src 'self'; "
     "img-src 'self' https://cards.scryfall.io; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 )
 STATE: dict[str, str] = {}
