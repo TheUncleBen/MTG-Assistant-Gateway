@@ -574,14 +574,14 @@ def parse_changes(raw: Any) -> list[Change]:
     if clash:
         raise DeckError(
             "invalid",
-            "a card cannot be added, removed or recounted and recategorised or reprinted in the same "
+            "a card cannot be added, removed or recounted and recategorized or reprinted in the same "
             "proposal: " + ", ".join(clash),
         )
     clash = sorted(set(categorised) & set(reprinted))
     if clash:
         raise DeckError(
             "invalid",
-            "a card cannot be recategorised and reprinted in the same proposal: " + ", ".join(clash),
+            "a card cannot be recategorized and reprinted in the same proposal: " + ", ".join(clash),
         )
     return out
 

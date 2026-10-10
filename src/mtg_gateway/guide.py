@@ -23,7 +23,7 @@ from starlette.responses import Response
 
 from . import modes
 from .pages import _csrf, browser_session, login_redirect
-from .theme import icon, render
+from .theme import display_name, icon, render
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -461,7 +461,7 @@ def guide_body(
         "what you typed and, when a legendary creature matches, “Decks with commander …”. Enter on plain "
         "text searches decks. On a phone the box is behind the magnifier at the top.</p>"
         "<p><a href='/search'>Search</a> finds public decks on Archidekt the way the Archidekt site does: by "
-        "deck name, commander, format, colours or the person who built it, ordered by newest, most viewed "
+        "deck name, commander, format, colors or the person who built it, ordered by newest, most viewed "
         "or largest. Open any result to read it with the same views as your own decks; the owner's name "
         "opens their profile with every public deck they have. Archidekt matches a commander by its full "
         "name only; type part of one (“Krenko”) and the search looks it up for you: one match shows "
@@ -936,7 +936,7 @@ def guide_body(
         "<li>The collection's unfiltered first page is kept for a minute per sort and dropped by every "
         "collection add, change or removal.</li>"
         "<li>When the list is cold and Archidekt has not answered within a second and a half, Home and "
-        "Decks open at once with a grey <strong>placeholder</strong> that the page fills as soon as the "
+        "Decks open at once with a gray <strong>placeholder</strong> that the page fills as soon as the "
         "list arrives; without script a reload shows the list.</li>"
         "<li>Card names suggest instantly because the gateway downloads Scryfall's card-name catalog once "
         "a day and answers from memory; until it has loaded (the first minute after a start) suggestions "
@@ -1082,6 +1082,7 @@ def add_guide_routes(server: MCPServer, state: AppState) -> None:
             signed_in=True,
             csrf=_csrf(s, sid),
             admin=admin,
+            user=display_name(user),
             wide=True,
             scripts=True,
             current="/guide",

@@ -1,14 +1,16 @@
 package local.mtgassistantgateway.app
 
-import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.View
+import android.view.inputmethod.EditorInfo
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
+import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import org.json.JSONObject
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -20,7 +22,7 @@ import java.util.concurrent.Executors
  * on /healthz before saving. Anyone running their own gateway types their own address here,
  * so the app has no server baked in.
  */
-class SetupActivity : Activity() {
+class SetupActivity : ComponentActivity() {
     private val io = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
 
@@ -31,11 +33,22 @@ class SetupActivity : Activity() {
         val input = findViewById<EditText>(R.id.gateway_url)
         val status = findViewById<TextView>(R.id.setup_status)
         val button = findViewById<Button>(R.id.setup_continue)
-        Prefs(this).gatewayOrigin?.let { input.setText(it) }
+        Prefs(this).gatewayOrigin?.let {
+            input.setText(it)
+            // "Change gateway" from a working app: Back returns to the page instead of leaving the
+            // app (MainActivity finished itself to get here). A callback, because with
+            // enableOnBackInvokedCallback the activity's onBackPressed() is never called.
+            onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+                override fun handleOnBackPressed() {
+                    startActivity(Intent(this@SetupActivity, MainActivity::class.java))
+                    finish()
+                }
+            })
+        }
 
         button.setOnClickListener {
             when (val r = GatewayUrl.normalize(input.text.toString())) {
-                is GatewayUrl.Result.Bad -> showStatus(status, r.reason, error = true)
+                is GatewayUrl.Result.Bad -> showStatus(status, getString(reasonText(r.reason)), error = true)
                 is GatewayUrl.Result.Ok -> {
                     button.isEnabled = false
                     showStatus(status, getString(R.string.setup_checking, r.origin), error = false)
@@ -56,6 +69,24 @@ class SetupActivity : Activity() {
                 }
             }
         }
+        wireGoKey(input, button)
+    }
+
+    /** The keyboard's Go key does what Continue does. */
+    private fun wireGoKey(input: EditText, button: Button) {
+        input.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_GO) {
+                button.performClick()
+                true
+            } else false
+        }
+    }
+
+    private fun reasonText(p: GatewayUrl.Problem): Int = when (p) {
+        GatewayUrl.Problem.EMPTY -> R.string.setup_bad_empty
+        GatewayUrl.Problem.INVALID -> R.string.setup_bad_invalid
+        GatewayUrl.Problem.NOT_HTTPS -> R.string.setup_bad_http
+        GatewayUrl.Problem.USER_INFO -> R.string.setup_bad_userinfo
     }
 
     override fun onDestroy() {

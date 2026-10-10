@@ -399,8 +399,8 @@ async def test_activity_badge_for_an_app_named_browser(stack: Stack) -> None:
     await b.login()
     page = (await b.http.get("/activity")).text
     await b.aclose()
-    badges = re.findall(r"<span class='badge'>(.*?)</span>", page)
-    assert any(x.startswith("app: browser (") for x in badges), badges
+    badges = re.findall(r"<span class='badge' title='(app: browser \(.*?\))'>(.*?)</span>", page)
+    assert any(x[1].startswith("app: browser") and "(" in x[0] for x in badges), badges  # id in the tooltip
     rows = h.app.state.gateway.db.audit_for_user("user-1", 10)
     assert any((r.get("detail") or {}).get("origin") == "app" for r in rows)
 

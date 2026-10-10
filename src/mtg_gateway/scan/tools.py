@@ -123,7 +123,7 @@ def add_scan_tools(server: MCPServer, service: ScanService, *, links: CardLinks 
             "(one card per line, e.g. '2 Sol Ring (CMR) 472'). Each result has a status: exact, printing "
             "(matched by set and number), fuzzy (name corrected; confirm with the user), ambiguous or "
             "not_found (with suggestions). Returns a decklist and `changes` ready for propose_deck_changes. "
-            "In an app that shows cards, the user sees the recognised cards with pictures, can drop some, "
+            "In an app that shows cards, the user sees the recognized cards with pictures, can drop some, "
             "pick among suggestions and confirm; wait for that before proposing. "
             "Does not touch Archidekt."
         ),

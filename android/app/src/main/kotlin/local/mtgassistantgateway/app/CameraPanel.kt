@@ -1,6 +1,8 @@
 package local.mtgassistantgateway.app
 
+import android.os.Build
 import android.os.Handler
+import android.view.ContextThemeWrapper
 import android.util.Size
 import android.view.LayoutInflater
 import android.view.Gravity
@@ -75,7 +77,10 @@ class CameraPanel(
         fun close()
     }
 
-    val view: View = LayoutInflater.from(activity).inflate(R.layout.camera_panel, parent, false)
+    // Inflated with the dark camera theme whatever the phone's setting: the panel sits over a black
+    // viewfinder, and the light theme's dark text was unreadable on it.
+    val view: View = LayoutInflater.from(ContextThemeWrapper(activity, R.style.Theme_MtgAssistantGateway_Camera))
+        .inflate(R.layout.camera_panel, parent, false)
     private val viewfinder: FrameLayout = view.findViewById(R.id.viewfinder)
     private val previewView: PreviewView = view.findViewById(R.id.preview)
     private val guideView: CardGuideView = view.findViewById(R.id.guide)
@@ -135,9 +140,10 @@ class CameraPanel(
         undo.setOnClickListener { if (canUndo) { canUndo = false; undo.isEnabled = false; host.undo() } }
         torchToggle.setOnCheckedChangeListener { _, _ -> applyTorch() }
         torchStrength.max = STRENGTH_STEPS - 1
+        torchStrength.contentDescription = activity.getString(R.string.torch_strength) // not the exposure slider's name
         torchStrength.setOnSeekBarChangeListener(onChange { pos ->
             torchLevel = TorchMath.levelFor(pos, STRENGTH_STEPS, torchMax)
-            torchLabel.text = activity.getString(R.string.torch_level, torchLevel, torchMax)
+            showTorchLevel()
             if (!torchToggle.isChecked) torchToggle.isChecked = true else applyTorch()
         })
         zoomBar.max = ZOOM_STEPS - 1
@@ -280,6 +286,13 @@ class CameraPanel(
         if (autoToggle.isChecked && !awaitingPage) capture()
     }
 
+    /** "Torch 3 of 5" next to the slider, and as what TalkBack reads for its state. */
+    private fun showTorchLevel() {
+        val text = activity.getString(R.string.torch_level, torchLevel, torchMax)
+        torchLabel.text = text
+        if (Build.VERSION.SDK_INT >= 30) torchStrength.stateDescription = text
+    }
+
     private fun readCapabilities(cam: Camera) {
         val info = cam.cameraInfo
         flashAvailable = info.hasFlashUnit()
@@ -319,7 +332,7 @@ class CameraPanel(
         torchLabel.visibility = if (strength) View.VISIBLE else View.GONE
         if (strength) {
             torchStrength.progress = Math.round((torchLevel - 1).toFloat() * (STRENGTH_STEPS - 1) / (torchMax - 1))
-            torchLabel.text = activity.getString(R.string.torch_level, torchLevel, torchMax)
+            showTorchLevel()
         }
         showZoom()
         exposureRow.visibility = if (aeHigh > aeLow) View.VISIBLE else View.GONE
@@ -546,12 +559,12 @@ class CameraPanel(
             // Tabletop: viewfinder above the hinge, controls on the flat half below it.
             set(vf, ViewGroup.LayoutParams.MATCH_PARENT, split.first, Gravity.TOP or Gravity.LEFT, 0, 0)
             set(ct, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.TOP, 0, split.second)
-            controls.setBackgroundColor(activity.getColor(R.color.bg))
+            controls.setBackgroundColor(activity.getColor(R.color.cam_bg))
         } else {
             // Book: viewfinder on the left page, controls on the right one.
             set(vf, split.first, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.TOP or Gravity.LEFT, 0, 0)
             set(ct, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.TOP or Gravity.LEFT, split.second, 0)
-            controls.setBackgroundColor(activity.getColor(R.color.bg))
+            controls.setBackgroundColor(activity.getColor(R.color.cam_bg))
         }
         viewfinder.layoutParams = vf
         controls.layoutParams = ct

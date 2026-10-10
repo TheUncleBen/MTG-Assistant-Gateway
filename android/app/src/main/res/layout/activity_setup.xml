@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/root"
     android:layout_width="match_parent" android:layout_height="match_parent"
     android:background="@color/bg" android:fillViewport="true">
@@ -8,16 +9,18 @@
         android:orientation="vertical" android:gravity="center_horizontal">
         <!-- the pages' top bar -->
         <LinearLayout
-            android:layout_width="match_parent" android:layout_height="50dp"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:minHeight="50dp"
             android:orientation="horizontal" android:gravity="center_vertical"
-            android:background="@color/navbar" android:paddingStart="12dp" android:paddingEnd="12dp">
+            android:background="@color/navbar" android:paddingStart="12dp" android:paddingEnd="12dp"
+            android:paddingTop="8dp" android:paddingBottom="8dp">
             <ImageView
                 android:layout_width="25dp" android:layout_height="25dp"
                 android:src="@drawable/ic_launcher_foreground" android:contentDescription="@null"
                 android:background="@drawable/button_primary_bg" />
             <TextView
                 android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:text="@string/app_name" android:textColor="#ffffff" android:textSize="16sp"
+                android:text="@string/app_name" android:textColor="@color/navbar_text" android:textSize="16sp"
                 android:textStyle="bold" android:layout_marginStart="10dp" />
         </LinearLayout>
         <LinearLayout
@@ -28,7 +31,7 @@
             <TextView
                 android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:text="@string/setup_title" android:textColor="@color/text" android:textSize="22sp"
-                android:textStyle="bold" />
+                android:textStyle="bold" android:accessibilityHeading="true" />
             <TextView
                 android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:text="@string/setup_blurb" android:textColor="@color/text_muted" android:textSize="14sp"
@@ -36,9 +39,12 @@
             <TextView
                 android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:text="@string/setup_label" android:textColor="@color/text" android:textSize="13sp"
-                android:textStyle="bold" android:layout_marginTop="20dp" />
+                android:textStyle="bold" android:layout_marginTop="20dp" android:labelFor="@+id/gateway_url" />
+            <!-- The label above names the field (labelFor); the hint is an example value, kept on
+                 purpose, so lint's one-or-the-other rule is ignored here. -->
             <EditText android:id="@+id/gateway_url"
-                android:layout_width="match_parent" android:layout_height="39dp"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:minHeight="48dp" tools:ignore="LabelFor"
                 android:layout_marginTop="6dp" android:hint="@string/setup_hint"
                 android:inputType="textUri" android:imeOptions="actionGo" android:singleLine="true"
                 android:background="@drawable/input_bg" android:paddingStart="10dp" android:paddingEnd="10dp"
@@ -46,11 +52,13 @@
                 android:textColor="@color/text" android:textColorHint="@color/text_muted" android:autofillHints="url" />
             <TextView android:id="@+id/setup_status"
                 android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:layout_marginTop="12dp" android:textSize="14sp" android:visibility="gone" />
+                android:layout_marginTop="12dp" android:textSize="14sp" android:visibility="gone"
+                android:accessibilityLiveRegion="polite" />
             <Button android:id="@+id/setup_continue"
-                android:layout_width="match_parent" android:layout_height="39dp"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:minHeight="48dp"
                 android:layout_marginTop="20dp" android:text="@string/setup_continue"
-                android:background="@drawable/button_primary_bg" android:textColor="@color/on_accent"
+                android:background="@drawable/button_primary_bg" android:textColor="@color/button_primary_text"
                 android:textAllCaps="false" android:textStyle="bold" android:textSize="14sp"
                 android:stateListAnimator="@null" />
         </LinearLayout>

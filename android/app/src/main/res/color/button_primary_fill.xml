@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Fill of the orange buttons (backgroundTint on Shoot): grey while disabled. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_enabled="false" android:color="@color/surface_2" />
+    <item android:color="@color/accent" />
+</selector>

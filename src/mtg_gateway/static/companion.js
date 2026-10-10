@@ -42,7 +42,7 @@
   function thumb(r, name) {
     var node = r.image ? el("img", { class: "thumb", src: r.image, alt: "", loading: "lazy" }) : el("span", { class: "thumb ph" });
     if (!window.MtgCardView) return node;
-    var btn = el("button", { type: "button", class: "thumbbtn", "aria-label": "Show " + name, onclick: function () {
+    var btn = el("button", { type: "button", class: "thumbbtn", "aria-label": "Show " + name, title: "Show the card", onclick: function () {
       var finish = r.setFinish || r.finish;
       window.MtgCardView.open({ name: name, img: r.image || "", set: r.set ? r.set.toUpperCase() + " " + r.number : "",
         type: r.type, mana: r.mana, text: r.text, pt: r.pt, loyalty: r.loyalty, finish: finish, faces: r.faces }, []);
@@ -161,18 +161,20 @@
     return el("span", { text: { minus: "−", plus: "+", more: "⋯", x: "×" }[name] || "" });
   }
 
-  function qtyControls(get, set) {
-    var input = el("input", { type: "number", min: "0", max: "99", value: String(get()), "aria-label": "quantity",
+  // Every control names its card ("Quantity of Sol Ring"), so a screen reader never hears a row
+  // of identical "quantity" fields.
+  function qtyControls(get, set, name) {
+    var input = el("input", { type: "number", min: "0", max: "99", value: String(get()), "aria-label": "Quantity of " + name,
       onchange: function () { var v = parseInt(input.value, 10); if (isNaN(v)) v = get(); set(Math.max(0, Math.min(99, v))); } });
     return el("span", { class: "qty" }, [
-      el("button", { type: "button", class: "mini", "aria-label": "one fewer", onclick: function () { set(Math.max(0, get() - 1)); } }, [svg("minus")]),
+      el("button", { type: "button", class: "mini", "aria-label": "One fewer " + name, title: "One fewer", onclick: function () { set(Math.max(0, get() - 1)); } }, [svg("minus")]),
       input,
-      el("button", { type: "button", class: "mini", "aria-label": "one more", onclick: function () { set(Math.min(99, get() + 1)); } }, [svg("plus")])
+      el("button", { type: "button", class: "mini", "aria-label": "One more " + name, title: "One more", onclick: function () { set(Math.min(99, get() + 1)); } }, [svg("plus")])
     ]);
   }
 
-  function categorySelect(current, onchange, allowAuto, side) {
-    var sel = el("select", { "aria-label": "category" });
+  function categorySelect(current, onchange, allowAuto, side, name) {
+    var sel = el("select", { "aria-label": "Category of " + name });
     var cats = cfg.categories.slice();
     if (side) cats = cats.filter(function (c) { return c !== "Commander"; });  // a commander is a deck-proper row
     else if (cats.indexOf("Commander") < 0) cats.unshift("Commander");
@@ -184,21 +186,42 @@
       sel.appendChild(o);
     });
     sel.appendChild(el("option", { value: "\u0000new", text: "New category…" }));
+    var wrap = el("span", { class: "sel" }, [sel]);
     sel.addEventListener("change", function () {
       if (sel.value === "\u0000new") {
-        var name = (window.prompt("New category name") || "").trim().slice(0, 60);
-        if (!name) { sel.value = current || ""; if (window.MtgSelect) window.MtgSelect.refresh(sel); return; }
-        if (cfg.categories.indexOf(name) < 0) cfg.categories.push(name);
-        onchange(name);
+        // a themed inline field in place of the select (never the browser's prompt box)
+        var restore = function () { sel.value = current || ""; if (window.MtgSelect) window.MtgSelect.refresh(sel); box.replaceWith(wrap); sel.focus(); };
+        var field = el("input", { type: "text", maxlength: "60", placeholder: "New category name", "aria-label": "New category name for " + name, autocomplete: "off" });
+        var ok = el("button", { type: "button", class: "mini primary", "aria-label": "Create the category", title: "Create", onclick: function () {
+          var v = field.value.trim().slice(0, 60);
+          if (!v) { field.focus(); return; }
+          if (cfg.categories.indexOf(v) < 0) cfg.categories.push(v);
+          var have = Array.prototype.some.call(sel.options, function (o) { return o.value === v; });
+          if (!have) sel.insertBefore(el("option", { value: v, text: v }), sel.lastElementChild);
+          sel.value = v;
+          current = v;
+          if (window.MtgSelect) window.MtgSelect.refresh(sel);
+          box.replaceWith(wrap);
+          onchange(v);
+          sel.focus();
+        } }, [svg("check")]);
+        var cancel = el("button", { type: "button", class: "mini", "aria-label": "Cancel", title: "Cancel", onclick: restore }, [svg("x")]);
+        var box = el("span", { class: "newcat" }, [field, ok, cancel]);
+        field.addEventListener("keydown", function (e) {
+          if (e.key === "Enter") { e.preventDefault(); ok.click(); }
+          else if (e.key === "Escape") { e.preventDefault(); restore(); }
+        });
+        wrap.replaceWith(box);
+        field.focus();
         return;
       }
       onchange(sel.value);
     });
-    return el("span", { class: "sel" }, [sel]);
+    return wrap;
   }
 
-  function finishSelect(current, onchange) {
-    var sel = el("select", { "aria-label": "finish", onchange: function () { onchange(sel.value); } });
+  function finishSelect(current, onchange, name) {
+    var sel = el("select", { "aria-label": "Finish of " + name, onchange: function () { onchange(sel.value); } });
     ["normal", "foil", "etched"].forEach(function (f) {
       var o = el("option", { value: f, text: f.charAt(0).toUpperCase() + f.slice(1) });
       if (f === current) o.selected = true;
@@ -207,6 +230,7 @@
     return el("span", { class: "sel" }, [sel]);
   }
 
+  var ACTION_LABELS = { add: "Add", remove: "Remove", set_quantity: "Count", set_commander: "Commander", set_category: "Category", set_finish: "Finish", set_printing: "Printing" };
   function describe(ch) {
     var side = ch.zone === "side" ? " · " + (cfg.sideCategory || "maybeboard").toLowerCase() : "";
     switch (ch.action) {
@@ -232,7 +256,7 @@
       list.forEach(function (ch) {
         var cls = ch.action === "add" ? "add" : ch.action === "remove" ? "del" : "chg";
         ul.appendChild(el("li", { class: cls }, [
-          el("span", { class: "act", text: ch.action.replace(/_/g, " ") }),
+          el("span", { class: "act", text: ACTION_LABELS[ch.action] || ch.action.replace(/_/g, " ") }),
           el("span", { class: "name", text: ch.card_name }),
           el("span", { class: "qty", text: describe(ch) })
         ]));
@@ -259,9 +283,9 @@
           nameEl,
           el("span", { class: "meta", text: [a.type || "", a.set_code ? a.set_code.toUpperCase() + " " + a.collector_number : "", a.foil ? "foil" : "", a.zone === "side" ? "new " + (cfg.sideCategory || "maybeboard").toLowerCase() + " card" : "new card"].filter(Boolean).join(" · ") })
         ]),
-        qtyControls(function () { return a.quantity; }, function (v) { mutate(function () { if (v === 0) delete added[k]; else a.quantity = v; }); }),
-        a.zone === "side" ? el("span", { class: "s muted small", text: cfg.sideCategory || "Maybeboard" }) : categorySelect(a.category || "", function (v) { mutate(function () { a.category = v || null; }); }, true),
-        el("button", { type: "button", class: "mini remove", "aria-label": "remove " + a.name, onclick: function () { mutate(function () { delete added[k]; }); } }, [svg("x")])
+        qtyControls(function () { return a.quantity; }, function (v) { mutate(function () { if (v === 0) delete added[k]; else a.quantity = v; }); }, a.name),
+        a.zone === "side" ? el("span", { class: "s muted small", text: cfg.sideCategory || "Maybeboard" }) : categorySelect(a.category || "", function (v) { mutate(function () { a.category = v || null; }); }, true, false, a.name),
+        el("button", { type: "button", class: "mini remove", "aria-label": "Remove " + a.name, title: "Remove", onclick: function () { mutate(function () { delete added[k]; }); } }, [svg("x")])
       ]));
     });
     // existing rows: update in place
@@ -289,16 +313,27 @@
   picker.setAttribute("aria-modal", "true");
   picker.setAttribute("aria-label", "Printings");
   picker.addEventListener("click", function (e) { if (e.target === picker) closePicker(); });
-  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !picker.hidden) { e.preventDefault(); closePicker(); } });
+  document.addEventListener("keydown", function (e) {
+    if (picker.hidden) return;
+    if (e.key === "Escape") { e.preventDefault(); closePicker(); return; }
+    if (e.key === "Tab") {  // keep focus inside the dialog
+      var f = picker.querySelectorAll("button:not([disabled]),a[href],input,select,[tabindex]:not([tabindex='-1'])");
+      if (!f.length) return;
+      var first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  });
   var pickerFocus = null;
   function openPicker(r) {
     pickerFocus = document.activeElement;
     picker.hidden = false;
     picker.textContent = "";
-    var closeBtn = el("button", { type: "button", class: "close icon-only", "aria-label": "Close", onclick: closePicker }, [el("span", { class: "x", text: "\u00d7" })]);
+    var closeBtn = el("button", { type: "button", class: "close icon-only", "aria-label": "Close", title: "Close", onclick: closePicker }, [el("span", { class: "x", text: "\u00d7" })]);
+    picker.setAttribute("aria-labelledby", "picker-title");
     var box = el("div", { class: "pickbox" }, [
       el("div", { class: "head" }, [
-        el("h2", { text: "Printings of " + r.name }),
+        el("h2", { id: "picker-title", text: "Printings of " + r.name }),
         closeBtn
       ]),
       el("p", { class: "muted small status", text: "Looking up printings…" }),
@@ -347,8 +382,8 @@
   // existing cards, by category
   var existing = root.querySelector(".existing");
   cfg.groups.forEach(function (g) {
-    var det = el("details", { class: "panel cat", open: "" }, [
-      el("summary", {}, [el("span", { class: "cname", text: g.name }), el("b", { text: String(g.total) })])
+    var det = el("details", { class: "panel cat", open: "", id: "cat-" + g.name }, [
+      el("summary", {}, [el("span", { class: "cname", text: g.name, title: g.name }), el("b", { text: String(g.total) })])
     ]);
     var ul = el("ul", { class: "erows" });
     g.cards.forEach(function (c) {
@@ -364,9 +399,9 @@
             el("span", { class: "meta", text: (r.set ? r.set.toUpperCase() + " " + r.number : "") + (r.finish !== "normal" ? " · " + r.finish : "") + " · not in the deck's count" }),
             el("span", { class: "note muted small" })
           ]),
-          qtyControls(function () { return r.after; }, function (v) { mutate(function () { r.after = v; }); }),
-          categorySelect(r.setCategory || shownCategory(r), function (v) { mutate(function () { r.setCategory = v; }); }, false, true),
-          el("button", { type: "button", class: "mini remove", "aria-label": "remove " + c.name, onclick: function () { mutate(function () { r.after = 0; }); } }, [svg("x")])
+          qtyControls(function () { return r.after; }, function (v) { mutate(function () { r.after = v; }); }, c.name),
+          categorySelect(r.setCategory || shownCategory(r), function (v) { mutate(function () { r.setCategory = v; }); }, false, true, c.name),
+          el("button", { type: "button", class: "mini remove", "aria-label": "Remove " + c.name, title: "Remove", onclick: function () { mutate(function () { r.after = 0; }); } }, [svg("x")])
         ]);
         rowEls[key] = sideLi;
         ul.appendChild(sideLi);
@@ -380,24 +415,24 @@
         return;
       }
       var more = el("details", { class: "dd rowmenu" }, [
-        el("summary", { class: "mini", "aria-label": "more for " + c.name }, [svg("more")]),
+        el("summary", { class: "mini", "aria-label": "More for " + c.name, title: "More" }, [svg("more")]),
         el("div", { class: "menu" }, [
-          el("label", { class: "field" }, [el("span", { text: "Finish" }), finishSelect(r.setFinish || r.finish, function (v) { mutate(function () { r.setFinish = v === r.finish ? null : v; }); })]),
+          el("label", { class: "field" }, [el("span", { text: "Finish" }), finishSelect(r.setFinish || r.finish, function (v) { mutate(function () { r.setFinish = v === r.finish ? null : v; }); }, c.name)]),
           el("button", { type: "button", onclick: function () { more.removeAttribute("open"); openPicker(r); } }, [svg("swap"), el("span", { text: " Change printing" })]),
           el("button", { type: "button", onclick: function () { more.removeAttribute("open"); mutate(function () { r.after = 0; }); } }, [svg("x"), el("span", { text: " Remove from deck" })])
         ])
       ]);
-      var nameEl = el("span", { class: "name", text: c.name });
+      var nameEl = el("span", { class: "name", text: c.name, title: c.name });
       if (r.mana && window.MtgMana) nameEl.appendChild(window.MtgMana.mana(r.mana));
-      var li = el("li", { class: "erow" + (c.in_deck ? "" : " side"), "data-row": key }, [
+      var li = el("li", { class: "erow" + (c.in_deck ? "" : " side"), "data-row": key, id: "card-" + c.name }, [
         thumb(r, c.name),
         el("span", { class: "main" }, [
           nameEl,
           el("span", { class: "meta", text: (r.set ? r.set.toUpperCase() + " " + r.number : "") + (r.finish !== "normal" ? " · " + r.finish : "") + (r.price != null ? " · $" + Number(r.price).toFixed(2) : "") }),
           el("span", { class: "note muted small" })
         ]),
-        qtyControls(function () { return r.after; }, function (v) { mutate(function () { r.after = v; }); }),
-        cfg.canCategorise ? categorySelect(r.setCategory || shownCategory(r), function (v) { mutate(function () { r.setCategory = v; }); }, false) : el("span", { class: "s", text: shownCategory(r) }),
+        qtyControls(function () { return r.after; }, function (v) { mutate(function () { r.after = v; }); }, c.name),
+        cfg.canCategorise ? categorySelect(r.setCategory || shownCategory(r), function (v) { mutate(function () { r.setCategory = v; }); }, false, false, c.name) : el("span", { class: "s", text: shownCategory(r) }),
         more
       ]);
       rowEls[key] = li;
@@ -406,6 +441,7 @@
     det.appendChild(ul);
     existing.appendChild(det);
   });
+  if (window.MtgReveal) window.MtgReveal();  // a deep link from the deck page (#cat-…, #card-…)
 
   // add a card: one search bar (static/suggest.js lists the names; Enter picks and submits here).
   // Chips above it say where the card goes; "3 sol ring" adds three; the printings of the
@@ -550,7 +586,7 @@
           });
         });
         area.value = missed.join("\n");
-        status.textContent = found + " card" + (found === 1 ? "" : "s") + " added to the pending changes" + (missed.length ? "; " + missed.length + " name" + (missed.length === 1 ? " was" : "s were") + " not recognised and stay in the box." : ".");
+        status.textContent = found + " card" + (found === 1 ? "" : "s") + " added to the pending changes" + (missed.length ? "; " + missed.length + " name" + (missed.length === 1 ? " was" : "s were") + " not recognized and stay in the box." : ".");
         btn.disabled = false;
       })
       .catch(function () { status.textContent = "The names could not be checked (network error); nothing was added."; btn.disabled = false; });

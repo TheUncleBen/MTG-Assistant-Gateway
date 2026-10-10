@@ -253,7 +253,7 @@ def to_deck_json(
                     "oracleCard": {
                         "name": card.name,
                         "manaCost": card.mana_cost,
-                        "types": [card.types],
+                        "types": [t.strip() for t in card.types.replace(",", " ").split() if t.strip()],
                         "text": card.card_text,
                         "cmc": card.mana_value,
                     },

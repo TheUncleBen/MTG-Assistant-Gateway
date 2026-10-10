@@ -241,7 +241,7 @@ async def test_set_category_and_set_commander_proposed_applied_and_verified(stac
     b = Browser(h)
     await b.login()
     page = await b.http.get(f"/proposals/{p['proposal_id']}")
-    assert "2 recategorised" in page.text and "Net 0 cards" in page.text
+    assert "2 recategorized" in page.text and "Net 0 cards" in page.text
     assert "<span class='act'>Category</span><span class='name'>Sol Ring</span>" in page.text
     assert "<span class='act'>Commander</span><span class='name'>Rampant Growth</span>" in page.text
     await b.aclose()

@@ -27,7 +27,7 @@ from .busy import busy_response
 from .deckpage import DECK_CSS, avatar_html, covers_for, deck_list_html
 from .decks import DeckError
 from .pages import _csrf, browser_session, login_redirect
-from .theme import icon, render
+from .theme import display_name, icon, render
 
 SearchOrder = Literal["-viewCount", "-updatedAt", "-createdAt", "-size", "edhBracket"]  # SEARCH_ORDERS
 
@@ -58,7 +58,7 @@ SEARCH_CSP = (
     "manifest-src 'self'; connect-src 'self'; "
     "img-src 'self' https://cards.scryfall.io; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 )
-COLOURS = (("W", "White"), ("U", "Blue"), ("B", "Black"), ("R", "Red"), ("G", "Green"))
+COLOURS = (("W", "White"), ("U", "Blue"), ("B", "Black"), ("R", "Red"), ("G", "Green"), ("C", "Colorless"))
 FORMAT_OPTIONS = sorted(
     ((str(i), format_label(FORMAT_NAMES[i])) for i in sorted(FORMAT_NAMES)), key=lambda kv: kv[1].lower()
 )
@@ -115,7 +115,8 @@ BROWSE_CSS = """
   max-width:100%}
 .profile .social .btn,.profile .social .soc{margin:0;display:inline-flex;align-items:center;gap:.4rem}
 .profile .social .soc[hidden]{display:none}
-.profile .social .soc.on{background:var(--orange);border-color:var(--orange);color:#fff}
+.profile .social .soc.on{background:var(--orange);border-color:var(--orange);color:var(--on-orange)}
+.profile .social .soc.on:hover{color:var(--on-orange)}
 /* The follow question grows with its text: a long name wraps onto more lines and the Follow and
    No buttons stay inside the chip instead of dropping under the link (gate R5-1). */
 .profile .social .confirm{display:inline-flex;align-items:center;flex-wrap:wrap;gap:.4rem;
@@ -219,7 +220,7 @@ def search_form_html(query: dict[str, Any]) -> str:
         f"<select id='s-format' name='format'>{fmt_opts}</select></span></div>"
         f"<div class='field'><label for='s-order'>Sort by</label><span class='sel'>{icon('sort')}"
         f"<select id='s-order' name='order'>{order_opts}</select></span></div>"
-        "<div class='foot'><div class='field'><span class='lbl'>Colour "
+        "<div class='foot'><div class='field'><span class='lbl'>Color "
         f"identity</span><div class='colours'>{colours}</div></div>"
         "<div class='form-actions'><button type='submit' "
         f"class='btn-primary'>{icon('search')} Search decks</button>"
@@ -276,6 +277,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             signed_in=True,
             csrf=_csrf(s, sid),
             admin=admin,
+            user=display_name(user),
             wide=True,
             current=current,
             scripts=True,
@@ -351,7 +353,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
                 "<section class='panel'><h2>Browse public decks</h2>"
                 "<p class='muted'>Search every public deck on "
                 "Archidekt by name, commander, owner, format and "
-                "colours, sorted the way the site sorts them. Open "
+                "colors, sorted the way the site sorts them. Open "
                 "a deck to see it on the gateway, with the same "
                 "views, stats and export as your own; clone it to your account from its page.</p>"
                 f"<div class='popular'>{popular}"
@@ -419,7 +421,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             "<section class='panel listbar'><form method='get' action='/precons' class='controls'>"
             "<div class='field grow'><label for='q'>Filter by set or deck name</label><span class='search'>"
             f"<input id='q' type='search' name='q' value='{_esc(q)}' placeholder='Example: Bloomburrow'>"
-            f"<button type='submit' aria-label='Filter'>{icon('search')}</button></span></div>"
+            f"<button type='submit' aria-label='Filter' title='Filter'>{icon('search')}</button></span></div>"
             f"<div class='field'><a class='btn' href='/search'>{icon('search')} Search all decks</a></div>"
             "</form></section>"
         )
@@ -503,7 +505,7 @@ def add_browse_tools(server: MCPServer, state: AppState) -> None:
             "`name` (part of the deck name), `commander` (a commander's card name; a partial name is "
             "looked up and, if several commanders match, returned as commander_suggestions), "
             "`owner` (Archidekt username), `format` (" + ", ".join(sorted(FORMAT_IDS)) + "), "
-            "`colors` (letters from WUBRG: colour identity within those colours), "
+            "`colors` (letters from WUBRG: color identity within those colors), "
             "`order_by` (-viewCount, -updatedAt, -createdAt, -size, edhBracket), `page` (60 decks a "
             "page) and `limit` (how many of the page to return, default 20). For one user's decks "
             "(their profile), give `owner` with order_by -updatedAt. Each result has an id and url; "
@@ -517,9 +519,7 @@ def add_browse_tools(server: MCPServer, state: AppState) -> None:
         commander: Annotated[str | None, Field(description="A commander's card name.")] = None,
         owner: Annotated[str | None, Field(description="An Archidekt username.")] = None,
         format: Annotated[str | None, Field(description="commander, modern, standard, ...")] = None,  # noqa: A002
-        colors: Annotated[
-            str | None, Field(description="WUBRG letters: colour identity within them.")
-        ] = None,
+        colors: Annotated[str | None, Field(description="WUBRG letters: color identity within them.")] = None,
         order_by: Annotated[
             SearchOrder, Field(description="Sort order (default most viewed).")
         ] = "-viewCount",

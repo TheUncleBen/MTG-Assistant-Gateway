@@ -23,7 +23,7 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 from . import update_check
 from .decks import ADMIN_CLIENT, actor_label, current_client
 from .pages import BROWSER_CLIENT_ID, _csrf, _when, browser_session, login_redirect, read_limited
-from .theme import render
+from .theme import display_name, plural, render
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -78,9 +78,18 @@ def is_admin(state: Any, sub: str) -> bool:
 def add_admin_routes(server: MCPServer, state: AppState) -> None:
     s = state.settings
 
-    def page(title: str, body: str, *, status: int = 200, sid: str | None = None) -> Response:
+    def page(
+        title: str, body: str, *, status: int = 200, sid: str | None = None, sid_sub: str | None = None
+    ) -> Response:
         return render(
-            title, body, site=s.server_name, status=status, signed_in=True, csrf=_csrf(s, sid), admin=True
+            title,
+            body,
+            site=s.server_name,
+            status=status,
+            signed_in=True,
+            csrf=_csrf(s, sid),
+            admin=True,
+            user=display_name(state.db.get_user(sid_sub) if sid_sub else None),
         )
 
     def not_found(api: bool) -> Response:
@@ -184,8 +193,8 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
         who = admin_user(request)
         if isinstance(who, Response):
             return who
-        _sub, sid = who
-        return page("Admin", _nav("/admin") + _overview_body(state), sid=sid)
+        sub, sid = who
+        return page("Admin: overview", _nav("/admin") + _overview_body(state), sid=sid, sid_sub=sub)
 
     @server.custom_route("/admin/users", methods=["GET"], include_in_schema=False)
     async def users(request: Request) -> Response:
@@ -194,7 +203,12 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
             return who
         sub, sid = who
         notice = _notice(request.query_params.get("ok"), request.query_params.get("err"))
-        return page("Users", _nav("/admin/users") + notice + _users_body(state, sub, _csrf(s, sid)), sid=sid)
+        return page(
+            "Admin: users",
+            _nav("/admin/users") + notice + _users_body(state, sub, _csrf(s, sid)),
+            sid=sid,
+            sid_sub=sub,
+        )
 
     @server.custom_route("/admin/users/{sub:path}", methods=["POST"], include_in_schema=False)
     async def users_post(request: Request) -> Response:
@@ -224,18 +238,23 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
         who = admin_user(request)
         if isinstance(who, Response):
             return who
-        _sub, sid = who
+        sub, sid = who
         only = request.query_params.get("sub") or None
         rows = state.db.audit_recent(200, sub=only)
-        return page("Activity", _nav("/admin/activity") + _activity_body(state, rows, only), sid=sid)
+        return page(
+            "Admin: activity",
+            _nav("/admin/activity") + _activity_body(state, rows, only),
+            sid=sid,
+            sid_sub=sub,
+        )
 
     @server.custom_route("/admin/metrics", methods=["GET"], include_in_schema=False)
     async def metrics_page(request: Request) -> Response:
         who = admin_user(request)
         if isinstance(who, Response):
             return who
-        _sub, sid = who
-        return page("Metrics", _nav("/admin/metrics") + _metrics_body(state), sid=sid)
+        sub, sid = who
+        return page("Admin: metrics", _nav("/admin/metrics") + _metrics_body(state), sid=sid, sid_sub=sub)
 
     # -- JSON API -----------------------------------------------------------
     @server.custom_route("/api/v1/admin/overview", methods=["GET"], include_in_schema=False)
@@ -394,7 +413,7 @@ def _updates_card(u: dict[str, Any]) -> str:
     elif u.get("error"):
         state = f"last check failed ({u['error']}), trying again within the hour"
     elif u.get("latest"):
-        state = f"newest release {u['latest']}, checked {_when(u['checked_at'])}"
+        state = _Html(f"newest release {html.escape(str(u['latest']))}, checked {_when(u['checked_at'])}")
     else:
         state = "not checked yet (the first check runs a minute after start)"
     head = (
@@ -456,12 +475,12 @@ def _cleanup_text(c: dict[str, Any]) -> str:
     if st == "waiting":
         return f"on, not run yet (the first round is {c['first_after_seconds'] // 60} minutes after start)"
     if st == "ok":
-        return (
-            f"last run OK at {_when(c['at'])}: {c['allowed']} allowed member(s), "
-            f"{c['removed']} stored Archidekt session(s) removed"
+        return _Html(
+            f"last run OK at {_when(c['at'])}: {plural(int(c['allowed']), 'allowed member')}, "
+            f"{plural(int(c['removed']), 'stored Archidekt session')} removed"
         )
     if st == "failed":
-        return f"last run FAILED at {_when(c['at'])}, nothing deleted: {c['error']}"
+        return _Html(f"last run FAILED at {_when(c['at'])}, nothing deleted: {html.escape(str(c['error']))}")
     return "not started yet"
 
 
@@ -502,8 +521,13 @@ def _who(u: dict[str, Any]) -> str:
     return html.escape(str(u.get("preferred_username") or u.get("email") or u.get("sub") or ""))
 
 
+class _Html(str):
+    """A value that is already HTML (escaped text plus markup such as a <time>): _stat keeps it."""
+
+
 def _stat(label: str, value: Any) -> str:
-    return f"<dt>{html.escape(label)}</dt><dd><strong>{html.escape(str(value))}</strong></dd>"
+    shown = value if isinstance(value, _Html) else html.escape(str(value))
+    return f"<dt>{html.escape(label)}</dt><dd><strong>{shown}</strong></dd>"
 
 
 def _sparkline(values: list[int], *, label: str, width: int = 240, height: int = 36) -> str:
@@ -544,13 +568,13 @@ def _overview_body(state: Any) -> str:
     if not sysd["backups_enabled"]:
         backup = "off (MTG_BACKUP_DIR not set)"
     elif sysd["last_backup_at"]:
-        backup = _when(sysd["last_backup_at"])
+        backup = _Html(_when(sysd["last_backup_at"]))
     else:
         backup = "none yet"
     if not sysd["backup_copies_enabled"]:
         copies = "off (MTG_BACKUP_COPY_DIR not set)"
     elif sysd["last_backup_copy_at"]:
-        copies = _when(sysd["last_backup_copy_at"])
+        copies = _Html(_when(sysd["last_backup_copy_at"]))
     else:
         copies = "none yet"
     size = sysd["database_bytes"]

@@ -173,6 +173,80 @@
     for (var n = 0; n < nativeOnly.length; n++) nativeOnly[n].setAttribute("hidden", "");
   }
 
+  // 4. Shared text helpers for every page script (deck.js, scan.js, collection.js): one date
+  //    format in the viewer's own time zone and locale, and real plurals.
+  var MtgText = {
+    when: function (value, timeOnly) {
+      var d = value instanceof Date ? value : new Date(value);
+      if (isNaN(d)) return "";
+      try {
+        return timeOnly ? d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+          : d.toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+      } catch (e) { return d.toISOString().slice(0, 16).replace("T", " "); }
+    },
+    plural: function (n, word, pluralWord) {
+      var num = Number(n);
+      return (isNaN(num) ? n : num.toLocaleString()) + " " + (num === 1 ? word : (pluralWord || word + "s"));
+    }
+  };
+  window.MtgText = MtgText;
+  // Every <time datetime> the server rendered in UTC is shown in the viewer's time zone.
+  var times = document.querySelectorAll("time[datetime]");
+  for (var t = 0; t < times.length; t++) {
+    var iso = times[t].getAttribute("datetime");
+    var local = MtgText.when(iso, times[t].getAttribute("data-fmt") === "time");
+    if (local) { times[t].setAttribute("title", times[t].textContent); times[t].textContent = local; }
+  }
+  // "1 card" / "7 cards" next to a number field: the word follows the value (the odds form).
+  document.addEventListener("input", function (e) {
+    var input = e.target;
+    if (!(input instanceof HTMLInputElement) || !input.form || !input.name) return;
+    var words = input.form.querySelectorAll("[data-plural='" + input.name + "']");
+    for (var w = 0; w < words.length; w++) {
+      var one = words[w].getAttribute("data-one") || words[w].textContent.replace(/s$/, "");
+      words[w].setAttribute("data-one", one);
+      words[w].textContent = Number(input.value) === 1 ? one : one + "s";
+    }
+  });
+
+  // 5. A card image that cannot be loaded (Scryfall down, an old link) shows the card's name on a
+  //    plain tile instead of the browser's broken-image glyph. Inline onerror handlers are not
+  //    allowed by the pages' script policy, so the error is caught here, on its way up.
+  document.addEventListener("error", function (e) {
+    var img = e.target;
+    if (!(img instanceof HTMLImageElement) || img.classList.contains("img-broken")) return;
+    if (img.closest(".topbar") || img.classList.contains("av")) return;
+    img.classList.add("img-broken");
+    var ph = document.createElement("span");
+    ph.className = "ph img-fallback";
+    ph.textContent = img.getAttribute("alt") || img.getAttribute("title") || "Image unavailable";
+    ph.setAttribute("role", "img");
+    ph.setAttribute("aria-label", ph.textContent + " (image unavailable)");
+    if (img.parentNode) img.parentNode.insertBefore(ph, img.nextSibling);
+  }, true);
+
+  // 6. A deep link to an element whose id carries a member's text (#cat-Ramp, #card-Sol%20Ring):
+  //    the browser cannot always find it, so it is found here, opened and marked for a moment.
+  function reveal() {
+    var hash = location.hash;
+    if (!hash || hash.length < 2) return;
+    var id;
+    try { id = decodeURIComponent(hash.slice(1)); } catch (e) { id = hash.slice(1); }
+    // only the editor's own deep links; plain anchors (the guide's sections) are the browser's
+    if (!/^(cat|card)-/.test(id)) return;
+    var target = document.getElementById(id);
+    if (!target) return;
+    for (var d = target.closest("details"); d; d = d.parentElement && d.parentElement.closest("details")) d.open = true;
+    target.classList.add("target");
+    target.scrollIntoView({ block: "center" });
+    if (target.tabIndex < 0) target.setAttribute("tabindex", "-1");
+    target.focus({ preventScroll: true });
+    setTimeout(function () { target.classList.remove("target"); }, 4000);
+  }
+  window.MtgReveal = reveal;
+  window.addEventListener("hashchange", reveal);
+  reveal();
+
   if ("serviceWorker" in navigator && window.isSecureContext) {
     navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(function () {});
   }

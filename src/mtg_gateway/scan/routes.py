@@ -38,7 +38,7 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, RedirectResponse, Response
 
 from ..pages import _csrf, _safe_next, browser_session, read_limited
-from ..theme import render
+from ..theme import display_name, render
 from .service import ScanError, ScanService, parse_cards
 
 if TYPE_CHECKING:
@@ -173,6 +173,7 @@ def add_scan_routes(server: MCPServer, state: AppState, service: ScanService) ->
             admin=user_admin,
             # the scanner is its own installable app: its manifest replaces the gateway's
             head_extra="<link rel='manifest' href='/scan/app.webmanifest'>",
+            user=display_name(user),
         )
         resp.headers["Content-Security-Policy"] = SCAN_CSP
         resp.headers["Permissions-Policy"] = "camera=(self)"

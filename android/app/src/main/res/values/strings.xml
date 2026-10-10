@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">MTG Assistant Gateway</string>
+    <!-- Launcher label (the full name is cut to about 12 characters or wrapped on most launchers). -->
+    <string name="launcher_name">MTG Gateway</string>
 
     <string name="setup_title">Your gateway</string>
     <string name="setup_blurb">Type the address of the MTG gateway you were given, for example mtg.example.com. The app opens that site and signs you in there.</string>
@@ -10,6 +12,11 @@
     <string name="setup_checking">Checking %1$s…</string>
     <string name="setup_unreachable">Could not reach that address. Check the spelling and your connection.</string>
     <string name="setup_not_gateway">That address answered (HTTP %1$d) but does not look like an MTG gateway.</string>
+    <!-- GatewayUrl.normalize's reasons (SetupActivity maps GatewayUrl.Problem to these). -->
+    <string name="setup_bad_empty">Enter the gateway address.</string>
+    <string name="setup_bad_invalid">That is not a valid address.</string>
+    <string name="setup_bad_http">The gateway must be reached over https.</string>
+    <string name="setup_bad_userinfo">Leave the user name and password out of the address.</string>
 
     <string name="menu_scan">Scan with phone camera</string>
     <string name="menu_reload">Reload</string>
@@ -32,8 +39,12 @@
     <string name="update_install_failed">The update was not installed (%1$s).</string>
     <string name="update_confirm_failed">Android wants you to confirm the update. Open the app and tap Update again.</string>
     <string name="fab_label">Menu</string>
+    <!-- Launcher shortcuts, the same three as the web manifest (companion.py). -->
+    <string name="shortcut_decks">My decks</string>
+    <string name="shortcut_scan">Scan cards</string>
+    <string name="shortcut_proposals">Proposals</string>
 
-    <string name="page_error">The page could not be loaded: %1$s</string>
+    <string name="page_error">The page could not be loaded. Check your connection, then tap Retry.</string>
     <string name="page_offline">No connection to your gateway. Check that the phone is online, then tap Retry.</string>
     <string name="gateway_down">Your gateway is not answering right now (it may be restarting). Wait a minute, then tap Retry.</string>
     <string name="page_reloaded">The page stopped unexpectedly and was reloaded.</string>
@@ -59,9 +70,10 @@
     <string name="shoot">Shoot</string>
     <string name="done">Done</string>
     <string name="torch">Torch</string>
-    <string name="torch_level">Brightness %1$d of %2$d</string>
+    <string name="torch_level">Torch %1$d of %2$d</string>
+    <string name="torch_strength">Torch brightness</string>
     <string name="zoom">Zoom</string>
-    <string name="exposure">Brightness</string>
+    <string name="exposure">Exposure</string>
     <string name="camera_none">No back camera found.</string>
     <string name="camera_error">Camera error (%1$d). Close and try again.</string>
     <string name="status_no_flash">Fill the dashed box with the card, then tap Shoot.</string>

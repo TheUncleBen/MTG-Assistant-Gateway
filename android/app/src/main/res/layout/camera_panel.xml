@@ -29,17 +29,18 @@
             <TextView android:id="@+id/result_text"
                 android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
                 android:textColor="@color/accent" android:textSize="16sp" android:textStyle="bold"
-                android:visibility="invisible" android:text="" />
+                android:visibility="invisible" android:text="" android:accessibilityLiveRegion="polite" />
             <Button android:id="@+id/undo"
-                android:layout_width="wrap_content" android:layout_height="40dp"
-                android:layout_marginStart="12dp" android:minWidth="80dp" android:text="@string/undo"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:minHeight="48dp" android:layout_marginStart="12dp" android:minWidth="80dp" android:text="@string/undo"
                 android:visibility="gone" />
         </LinearLayout>
 
         <TextView android:id="@+id/camera_status"
             android:layout_width="match_parent" android:layout_height="wrap_content"
             android:layout_marginStart="16dp" android:layout_marginEnd="16dp"
-            android:textColor="@color/text" android:textSize="14sp" android:text="@string/status_no_flash" />
+            android:textColor="@color/cam_text" android:textSize="14sp" android:text="@string/status_no_flash"
+            android:accessibilityLiveRegion="polite" />
 
         <LinearLayout
             android:layout_width="match_parent" android:layout_height="wrap_content"
@@ -50,24 +51,23 @@
                 android:textOn="@string/torch" android:textOff="@string/torch" android:minWidth="96dp" />
             <TextView android:id="@+id/torch_label"
                 android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:layout_marginStart="12dp" android:textColor="@color/text_muted" android:textSize="13sp"
+                android:layout_marginStart="12dp" android:textColor="@color/cam_text_muted" android:textSize="13sp"
                 android:visibility="gone" />
         </LinearLayout>
         <SeekBar android:id="@+id/torch_strength"
             android:layout_width="match_parent" android:layout_height="wrap_content"
             android:layout_marginStart="16dp" android:layout_marginEnd="16dp"
-            android:layout_marginTop="4dp" android:visibility="gone"
-            android:contentDescription="@string/torch_level" />
+            android:layout_marginTop="4dp" android:visibility="gone" android:minHeight="48dp" />
 
         <LinearLayout android:id="@+id/zoom_row"
             android:layout_width="match_parent" android:layout_height="wrap_content"
             android:layout_marginStart="16dp" android:layout_marginEnd="16dp"
             android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="4dp">
             <TextView android:layout_width="80dp" android:layout_height="wrap_content"
-                android:text="@string/zoom" android:textColor="@color/text_muted" android:textSize="13sp" />
+                android:text="@string/zoom" android:textColor="@color/cam_text_muted" android:textSize="13sp" />
             <SeekBar android:id="@+id/zoom"
                 android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
-                android:contentDescription="@string/zoom" />
+                android:minHeight="48dp" android:contentDescription="@string/zoom" />
         </LinearLayout>
 
         <LinearLayout android:id="@+id/exposure_row"
@@ -75,10 +75,10 @@
             android:layout_marginStart="16dp" android:layout_marginEnd="16dp"
             android:orientation="horizontal" android:gravity="center_vertical">
             <TextView android:layout_width="80dp" android:layout_height="wrap_content"
-                android:text="@string/exposure" android:textColor="@color/text_muted" android:textSize="13sp" />
+                android:text="@string/exposure" android:textColor="@color/cam_text_muted" android:textSize="13sp" />
             <SeekBar android:id="@+id/exposure"
                 android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
-                android:contentDescription="@string/exposure" />
+                android:minHeight="48dp" android:contentDescription="@string/exposure" />
         </LinearLayout>
 
         <LinearLayout
@@ -86,15 +86,16 @@
             android:layout_marginStart="16dp" android:layout_marginEnd="16dp"
             android:orientation="horizontal" android:layout_marginTop="8dp" android:layout_marginBottom="16dp">
             <Button android:id="@+id/done"
-                android:layout_width="0dp" android:layout_weight="1" android:layout_height="56dp"
-                android:text="@string/done" />
+                android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                android:minHeight="56dp" android:text="@string/done" />
             <ToggleButton android:id="@+id/auto_toggle"
-                android:layout_width="0dp" android:layout_weight="1" android:layout_height="56dp"
-                android:layout_marginStart="12dp" android:textOn="@string/auto_mode" android:textOff="@string/auto_mode" />
+                android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                android:minHeight="56dp" android:layout_marginStart="12dp" android:textOn="@string/auto_mode" android:textOff="@string/auto_mode" />
             <Button android:id="@+id/shoot"
-                android:layout_width="0dp" android:layout_weight="2" android:layout_height="56dp"
-                android:layout_marginStart="12dp" android:text="@string/shoot" android:enabled="false"
-                android:backgroundTint="@color/accent" android:textColor="@color/on_accent" android:textSize="18sp" />
+                android:layout_width="0dp" android:layout_weight="2" android:layout_height="wrap_content"
+                android:minHeight="56dp" android:layout_marginStart="12dp" android:text="@string/shoot" android:enabled="false"
+                android:backgroundTint="@color/button_primary_fill" android:textColor="@color/button_primary_text"
+                android:textStyle="bold" android:textSize="18sp" />
         </LinearLayout>
     </LinearLayout>
     </ScrollView>

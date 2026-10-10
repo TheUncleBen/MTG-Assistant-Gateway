@@ -397,7 +397,7 @@ def test_picker_card_keeps_drops_and_picks_then_tells_the_assistant() -> None:
             assert tick and qty and qty["x"] > tick["x"] and abs(qty["y"] - tick["y"]) < tick["height"]
             assert rows.nth(1).locator(".sugg .tile").count() == 2
             assert rows.nth(1).locator("input.check").is_disabled()  # nothing to keep until a pick
-            assert "not recognised" in card.locator("#note").inner_text()
+            assert "not recognized" in card.locator("#note").inner_text()
             _shot(page, "picker-dark-600")
             # Pick a suggestion, untick the fuzzy row, confirm.
             rows.nth(1).locator(".sugg .tile").first.click()

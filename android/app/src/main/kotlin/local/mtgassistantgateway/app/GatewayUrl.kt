@@ -13,10 +13,13 @@ import java.net.URISyntaxException
  * Pure functions, no Android types, so the unit tests run on a plain JVM.
  */
 object GatewayUrl {
+    /** Why [normalize] refused the address; SetupActivity maps each to a string resource. */
+    enum class Problem { EMPTY, INVALID, NOT_HTTPS, USER_INFO }
+
     /** Result of [normalize]: an origin like `https://mtg.example.com` or a reason. */
     sealed class Result {
         data class Ok(val origin: String) : Result()
-        data class Bad(val reason: String) : Result()
+        data class Bad(val reason: Problem) : Result()
     }
 
     /**
@@ -28,19 +31,19 @@ object GatewayUrl {
      */
     fun normalize(typed: String): Result {
         var s = typed.trim()
-        if (s.isEmpty()) return Result.Bad("Enter the gateway address.")
+        if (s.isEmpty()) return Result.Bad(Problem.EMPTY)
         if (!s.contains("://")) s = "https://$s"
         val uri = try {
             URI(s)
         } catch (e: URISyntaxException) {
-            return Result.Bad("That is not a valid address.")
+            return Result.Bad(Problem.INVALID)
         }
-        val scheme = uri.scheme?.lowercase() ?: return Result.Bad("That is not a valid address.")
-        if (scheme != "https") return Result.Bad("The gateway must be reached over https.")
-        if (uri.rawUserInfo != null) return Result.Bad("Leave the user name and password out of the address.")
-        val host = uri.host ?: return Result.Bad("That is not a valid address.")
+        val scheme = uri.scheme?.lowercase() ?: return Result.Bad(Problem.INVALID)
+        if (scheme != "https") return Result.Bad(Problem.NOT_HTTPS)
+        if (uri.rawUserInfo != null) return Result.Bad(Problem.USER_INFO)
+        val host = uri.host ?: return Result.Bad(Problem.INVALID)
         if (host.isEmpty() || !host.all { it.isLetterOrDigit() || it == '.' || it == '-' || it == '[' || it == ']' || it == ':' }) {
-            return Result.Bad("That is not a valid address.")
+            return Result.Bad(Problem.INVALID)
         }
         val port = if (uri.port == -1 || uri.port == 443) "" else ":${uri.port}"
         return Result.Ok("https://${host.lowercase()}$port")
@@ -81,6 +84,13 @@ object GatewayUrl {
 
     /** Join an origin and an absolute path. */
     fun join(origin: String, path: String): String = origin.trimEnd('/') + (if (path.startsWith("/")) path else "/$path")
+
+    /**
+     * The launcher shortcuts, the same three as the gateway's web manifest (`/app.webmanifest`):
+     * id to gateway path. They are set once the gateway address is known (dynamic shortcuts), so
+     * each opens a page of the configured gateway.
+     */
+    val SHORTCUTS: List<Pair<String, String>> = listOf("decks" to "/decks", "scan" to "/scan", "proposals" to "/proposals")
 
     /**
      * The gateway page whose redirect goes straight to the identity provider: /login. Only its

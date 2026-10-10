@@ -7,6 +7,62 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.13] - 2026-10-10
+
+A polish pass over every page and the Android app, from an inventory of each
+control, icon and message.
+
+### Changed
+
+- **Website.** Text and control edges meet WCAG AA in both themes (darker
+  link, orange and green text on light pages, lighter red on dark ones, a 3:1
+  border on every field and checked control); orange fills always carry dark
+  text, including the scanner's step numbers, the list badge and the profile's
+  Follow button. Every page starts with a skip link, names the signed-in member
+  in the account menu, marks the current theme and layout button as pressed,
+  and carries description and preview metadata (and `noindex`); `/robots.txt`
+  keeps crawlers out. The browser's own bar follows the light or dark top bar.
+  Tick boxes and radios are drawn in the site's colors, and icon-only buttons
+  have a tooltip. Times are shown in your own time zone with the UTC time in
+  the tooltip, and words follow their numbers ("1 card", "2 cards"). Pages
+  show "an assistant" instead of an app's internal id. Page text, tool text
+  and the in-chat cards use American spelling ("color", "recognized").
+- **Editor and deck page.** "New category…" is an inline field instead of the
+  browser's prompt box; every quantity, category and finish control names its
+  card for screen readers; a card's ⋮ menu and "Edit cards in" links open the
+  editor on that card or category. The text view flows in columns on wide
+  screens, the grid view's cards are smaller, and the phone banner's buttons
+  sit two to a row.
+- **Collection, scanner and other pages.** The collection's Add and Import
+  form folds above the list. The scanner asks "New scan?" and "Delete?" in its
+  own bar instead of the browser's box, shows a camera icon on the shutter and
+  sits clear of the phone tab bar. Card images that fail to load show the
+  card's name; Copy keeps its icon; 404 and error pages keep the signed-in
+  top bar and menus. The web app has maskable home-screen icons, shortcuts, a
+  short name and a themed offline page (served with `X-MTG-Offline: 1`).
+- **Android app.** A gateway that never loads can be changed from the error
+  screen, and Back from "Change gateway" returns to the app. Status and
+  navigation bars stay readable on Android 15 and later; the camera screen
+  keeps its dark colors in the light theme; the Android 13 themed icon is an
+  outline. Buttons carry dark text on orange, show pressed and disabled
+  states and are at least 48 dp tall. TalkBack reads the sliders' names and
+  announces status and errors. The setup screen's Go key continues. A
+  dark-mode switch while the app is open re-themes it at the next page, so
+  the page in use is never reloaded. The app shows its offline message when
+  the connection is down. The home screen label is "MTG Gateway" (the full name
+  stays in Settings), and a long press on the icon offers My decks, Scan cards
+  and Proposals.
+
+### Fixed
+
+- The folder filter matches folder names longer than 80 characters.
+- Comments say when posting or loading fails, and show that they are loading.
+- "Est cost" shows a dash, with a tooltip, while no card has a price; report prices show two
+  decimals; the probability-of-draw table follows its form after the first
+  change and counts automatic categories; a card with two types counts once
+  for each.
+- The compare page's deck box and list use the site's field style.
+
 ## [0.7.12] - 2026-10-10
 
 The 0.7.11 code with a release build that finishes. 0.7.11 stays a tag

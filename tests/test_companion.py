@@ -302,7 +302,7 @@ async def test_deck_pages(stack: Stack) -> None:
         hist = await b.http.get("/history", headers=NAV)
         assert hist.status_code == 200 and "k-report" in hist.text and "filterbar" in hist.text
         act = await b.http.get("/activity", headers=NAV)
-        assert act.status_code == 200 and "archidekt linked" in act.text
+        assert act.status_code == 200 and "Archidekt account linked" in act.text
         for path in ("/decks", "/decks/42", "/history", "/activity"):
             anon = await stack.h.http.get(path, headers=NAV)
             assert anon.status_code == 302 and anon.headers["location"].startswith("/login?next="), path

@@ -49,13 +49,13 @@
         for (var j = k; j <= Math.min(K, n); j++) p += pExact(N, K, n, j);
         return p;
       };
-      var form = $(".oddsform", oddsBox);
+      var oddsForm = $(".oddsform", oddsBox);
       var tbody = $("tbody", oddsBox);
-      var render = function () {
-        var mode = form.elements.mode.value;
-        var k = Math.max(0, parseInt(form.elements.k.value, 10) || 0);
-        var n = Math.min(odds.size, Math.max(1, parseInt(form.elements.n.value, 10) || 7));
-        var group = odds.groups[form.elements.by.value] || {};
+      var renderOdds = function () {
+        var mode = oddsForm.elements.mode.value;
+        var k = Math.max(0, parseInt(oddsForm.elements.k.value, 10) || 0);
+        var n = Math.min(odds.size, Math.max(1, parseInt(oddsForm.elements.n.value, 10) || 7));
+        var group = odds.groups[oddsForm.elements.by.value] || {};
         tbody.textContent = "";
         Object.keys(group).forEach(function (name) {
           var K = group[name];
@@ -67,9 +67,9 @@
           tbody.appendChild(tr);
         });
       };
-      form.addEventListener("input", render);
-      form.addEventListener("change", render);
-      render();
+      oddsForm.addEventListener("input", renderOdds);
+      oddsForm.addEventListener("change", renderOdds);
+      renderOdds();
     }
   }
 
@@ -278,7 +278,7 @@
     $$(".banner .row > span").forEach(function (sp) {
       var t = sp.textContent;
       if (/^Size:/.test(t) && st.card_count !== undefined) sp.textContent = "Size: " + st.card_count;
-      else if (/distinct cards$/.test(t) && st.distinct !== undefined) sp.textContent = st.distinct + " distinct cards";
+      else if (/distinct cards?$/.test(t) && st.distinct !== undefined) sp.textContent = window.MtgText ? window.MtgText.plural(st.distinct, "distinct card") : st.distinct + " distinct cards";
       else if (/^Est cost:/.test(t) && st.price_total !== undefined && st.price_total !== null) { var b = $("b", sp); if (b) b.textContent = money(st.price_total); }
       else if (/^Salt sum:/.test(t) && st.salt_total !== undefined && st.salt_total !== null) { var s2 = $("b", sp); if (s2) s2.textContent = String(st.salt_total); }
     });
@@ -1069,7 +1069,8 @@
     var parentId = null;
     var me = null;  // the member's Archidekt user id, from the thread load; own comments get Edit and Delete
     var deckUrl = "/social/api/decks/" + encodeURIComponent(commentsPanel.getAttribute("data-deck")) + "/comments";
-    var when = function (iso) {
+    var when = function (iso) {  // one date format across the site (feedback.js)
+      if (window.MtgText) return window.MtgText.when(iso);
       var d = new Date(iso);
       return isNaN(d) ? "" : d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
     };
@@ -1162,9 +1163,26 @@
       return box;
     };
     var loaded = false;
+    var failed = function (message) {
+      // say what happened and offer another try (a silent empty thread looked like "no comments")
+      loaded = false;
+      thread.textContent = "";
+      var p = el("p", "notice error");
+      p.setAttribute("role", "alert");
+      p.appendChild(document.createTextNode(message + " "));
+      var retry = el("button", "btn mini-inline", "Try again");
+      retry.type = "button";
+      retry.addEventListener("click", load);
+      p.appendChild(retry);
+      thread.appendChild(p);
+    };
     var load = function () {
       if (loaded) return;
       loaded = true;
+      thread.textContent = "";
+      var loading = el("p", "muted", "Loading comments…");
+      loading.setAttribute("role", "status");
+      thread.appendChild(loading);
       socialRequest("GET", thread.getAttribute("data-src")).then(function (d) {
         if (!d.ok) { thread.textContent = ""; var p = el("p", "muted"); p.appendChild(socialProblem(d)); thread.appendChild(p); return; }
         thread.textContent = "";
@@ -1178,7 +1196,7 @@
           more.target = "_blank"; more.rel = "noopener noreferrer";
           thread.appendChild(more);
         }
-      }).catch(function () { loaded = false; });
+      }).catch(function () { failed("The comments could not be loaded: no connection."); });
     };
     if ("IntersectionObserver" in window) {
       var io = new IntersectionObserver(function (entries) {
@@ -1219,7 +1237,13 @@
           }
           textarea.value = ""; parentId = null; replyTo.hidden = true;
           if (countEl) { var n = (parseInt(countEl.textContent, 10) || 0) + 1; countEl.textContent = n === 1 ? "1 comment" : n + " comments"; }
-        }).catch(function () { bar.remove(); });
+        }).catch(function () {
+          bar.remove();
+          var old = $(".notice", form); if (old) old.remove();
+          var p = el("p", "notice error", "The comment was not posted: no connection. Your text is still in the box.");
+          p.setAttribute("role", "alert");
+          form.insertBefore(p, form.firstChild);
+        });
       });
     });
   }
