@@ -7,6 +7,15 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.21] - 2026-10-10
+
+### Security
+- R-142 is now enforced in one place: the gateway's shared apply refuses every Archidekt account
+  action (like, vote, bookmark, follow, comment, new folder, collaborator change, deck deletion)
+  unless the call comes from the review page's own Apply form, whatever page, API or tool it came
+  through. Before, each route had to refuse it on its own. Nothing changes for people: Apply on the
+  review page works as before.
+
 ## [0.7.20] - 2026-10-10
 
 The rest of the Archidekt deck features that could be built from Archidekt's own site code.
