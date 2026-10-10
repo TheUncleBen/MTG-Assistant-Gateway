@@ -1002,6 +1002,17 @@ def _change_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, dic
         elif kind == "finish":
             counts["cat"] += 1
             out.append(_li("chg", "Finish", name, _was_now(r.get("before", ""), r.get("after", ""))))
+        elif kind == "label":
+            counts["cat"] += 1
+            where = " (maybeboard/sideboard)" if r.get("zone") == "side" else ""
+            out.append(
+                _li(
+                    "chg",
+                    "Colour tag",
+                    name + html.escape(where),
+                    _was_now(r.get("before", ""), r.get("after", "")),
+                )
+            )
         elif kind == "printing":
             counts["cat"] += 1
             out.append(_li("chg", "Printing", name, _was_now(r.get("before", ""), r.get("after", ""))))

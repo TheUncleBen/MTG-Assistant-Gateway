@@ -82,13 +82,14 @@ A list of 1 to 40 objects:
 
 | Field | Required | Notes |
 | --- | --- | --- |
-| `action` | yes | `add`, `remove`, `set_quantity`, `set_category`, `set_commander`, `set_finish` or `set_printing` |
+| `action` | yes | `add`, `remove`, `set_quantity`, `set_category`, `set_commander`, `set_finish`, `set_printing` or `set_label` |
 | `name` | yes | Exact card name (`card_name` also works). Matching against the deck is case-insensitive. |
 | `quantity` | for `set_quantity` | Integer 0 to 99. `add` defaults to 1. `remove` without a quantity removes every copy. |
 | `category` | for `set_category` | For `add`: the category a card new to the deck is filed under (cards already in the deck keep their categories). For `set_category`: the one category every deck-proper row of that card is moved to (maybeboard and sideboard rows are left alone) (up to 60 characters). |
 | `set_code`, `collector_number` | no, together | For `add`: pin the exact printing (as `resolve_cards` and `get_deck` report them). The printing must exist on Archidekt and be this card, or `apply_proposal` refuses the proposal with `not_found` and changes nothing. A pinned add goes in as its own deck row unless the deck already has that printing and finish. |
 | `finish` | no | For `add`: `nonfoil`, `foil` or `etched` (`normal` and `foil: true` also work). A finish the printing does not come in falls back to what Archidekt offers. For `set_finish` (required) and `set_printing` (optional): the finish every copy already in the deck gets. |
-| `zone` | no | `main` (default: the deck proper) or `side` (the maybeboard and sideboard rows, which do not count toward the deck). With `side`, `add`, `remove`, `set_quantity` and `set_category` work on those rows; `set_commander`, `set_finish`, `set_printing` and a pinned printing are for the deck proper only. A side add is filed under the deck's Maybeboard (or its first uncounted category). Diff lines for side rows end in "(maybeboard/sideboard)". |
+| `zone` | no | `main` (default: the deck proper) or `side` (the maybeboard and sideboard rows, which do not count toward the deck). With `side`, `add`, `remove`, `set_quantity` and `set_category` work on those rows; `set_commander`, `set_finish`, `set_printing` and a pinned printing are for the deck proper only. A side add is filed under the deck's Maybeboard (or its first uncounted category). Diff lines for side rows end in "(maybeboard/sideboard)". `set_label` works in either zone. |
+| `label`, `color` | for `set_label` | The colour tag's name (up to 40 characters, no commas; an empty string takes the tag off) and its colour as `#rrggbb` (grey `#656565` when left out). |
 
 `set_category` and `set_commander` take only `name` (plus `category` for
 `set_category`): no quantity or printing. The card must already be in the deck.
@@ -106,6 +107,12 @@ quantity and categories, and the printing must exist and be that card (else
 `not_found`, nothing changes). A card takes one of `set_finish` or `set_printing`
 per proposal, and not also a count or category change. Diff lines read
 `Sol Ring: finish Normal -> Foil` and `Sol Ring: printing CMR 472 -> SLD 1074`.
+
+`set_label` (`name`, `label`, optional `color`, optional `zone`) puts Archidekt's
+colour tag on every row of the card in that zone (Archidekt stores it as
+`Have,#37d67a`); an empty `label` takes it off. It counts as the card's one
+printing-type change in that proposal. Diff lines read
+`Sol Ring: colour tag no tag -> Have (#37d67a)`.
 
 Diff lines read `+1 Card` (added), `-1 Card` (removed), `4 -> 6 Card`
 (quantity changed), `Sol Ring: category Ramp -> Artifacts` and

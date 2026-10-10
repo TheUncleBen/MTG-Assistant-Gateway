@@ -165,7 +165,14 @@ class _Card(BaseModel):
 class DeckChange(_Card):
     action: Annotated[
         Literal[
-            "add", "remove", "set_quantity", "set_category", "set_commander", "set_finish", "set_printing"
+            "add",
+            "remove",
+            "set_quantity",
+            "set_category",
+            "set_commander",
+            "set_finish",
+            "set_printing",
+            "set_label",
         ],
         BeforeValidator(_lower),
     ] = Field(description="What to do with the card.")
@@ -184,6 +191,16 @@ class DeckChange(_Card):
     finish: Finish | None = Field(default=None, description="nonfoil, foil or etched.")
     zone: Annotated[Literal["main", "side"], BeforeValidator(_lower)] | None = Field(
         default=None, description="main (default, the deck proper) or side (maybeboard and sideboard rows)."
+    )
+    label: str | None = Field(
+        default=None,
+        max_length=48,  # a name of up to 40 characters, or Archidekt's own "Name,#rrggbb"
+        description="For set_label: the colour tag's name, e.g. Have or Proxy; an empty string takes it off.",
+    )
+    color: str | None = Field(
+        default=None,
+        pattern=r"^#[0-9a-fA-F]{6}$",
+        description="For set_label: the tag's colour as #rrggbb (grey when left out).",
     )
 
 
