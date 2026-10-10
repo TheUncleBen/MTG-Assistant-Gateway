@@ -20,9 +20,11 @@ proposal is low risk only if what the review page would show is small and safe:
   touches the commander; or a clone, which creates a private copy and changes nothing that
   exists.
 * **high**: everything else: more rows than that, any commander change, a new deck, restoring
-  a snapshot, deck details (name, format, description, visibility), and the Archidekt account
-  actions of actions.py (likes, bookmarks, follows, comments) except creating a folder (low).
-* **destructive**: deleting a deck. No mode lets an assistant apply it; the member presses.
+  a snapshot, deck details (name, format, description, visibility).
+* **consent** (R-142): the Archidekt account actions of actions.py: likes, votes, bookmarks,
+  follows, posting, editing, deleting and voting on comments, and creating a folder. Each one
+  waits for the member's own press on its proposal card or review page, in every mode.
+* **destructive** (R-142): deleting a deck. Like consent, no mode lets an assistant apply it.
 
 The operator may set the default mode for members who have not chosen (``MTG_APPROVAL_MODE_DEFAULT``)
 and cap what members may choose (``MTG_APPROVAL_MODE_MAX``, default ``auto`` = no cap).
@@ -33,6 +35,9 @@ from __future__ import annotations
 from typing import Any
 
 MODES = ("manual", "semi", "auto")
+# Risk tiers no approval mode lets an assistant apply (R-142): acting publicly or on the member's
+# account (consent) and deleting a deck (destructive) always wait for the member's own press.
+MEMBER_ONLY = ("consent", "destructive")
 DEFAULT_MODE = "manual"
 DEFAULT_MAX_ROWS = 5
 MAX_COPIES_PER_ROW = 4  # a row that adds, removes or changes more copies than this is not small
@@ -50,10 +55,15 @@ MODE_HELP = {
     ),
     "semi": (
         "Your assistant applies small edits itself (a few cards added, removed, moved or changed, "
-        "never the commander). New decks, restores, deck details, commander changes and bigger "
-        "edits still wait for your press."
+        "never the commander). New decks, restores, deck details, commander changes, bigger edits, "
+        "and anything on your Archidekt account (likes, votes, bookmarks, follows, comments, new "
+        "folders, deleting a deck) still wait for your press."
     ),
-    "auto": "Your assistant applies every change it proposes, without asking you.",
+    "auto": (
+        "Your assistant applies the deck and collection changes it proposes, without asking you. "
+        "Likes, votes, bookmarks, follows, comments, new folders and deleting a deck still wait for "
+        "your own press, every time, in every mode."
+    ),
 }
 # Shown next to the semi and auto choices, because turning them on has a real cost.
 AUTO_WARNING = (
@@ -175,6 +185,6 @@ def _copies_moved(row: dict[str, Any]) -> int:
 
 def assistant_may_apply(mode: str, risk: str) -> bool:
     """Whether the member's mode lets their assistant apply a proposal of this risk itself."""
-    if risk == "destructive":  # deleting a deck: always the member's own press
+    if risk in MEMBER_ONLY:  # R-142: the member's own press on each one, in every mode
         return False
     return mode == "auto" or (mode == "semi" and risk == "low")

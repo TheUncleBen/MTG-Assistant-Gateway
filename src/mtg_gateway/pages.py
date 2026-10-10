@@ -1161,7 +1161,7 @@ def _progress_html(p: dict[str, Any]) -> str:
 
 
 def _risk_badge(risk: str) -> str:
-    return "danger" if risk == "destructive" else "warn" if risk == "high" else ""
+    return "danger" if risk == "destructive" else "warn" if risk in ("high", "consent") else ""
 
 
 def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str = "") -> str:
@@ -1232,20 +1232,44 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str = "") -> str:
         f"<p class='muted'>{html.escape(_page_step(p))}</p>" + _progress_html(p)
     )
     if p["state"] == "pending" and p["writes_enabled"]:
+        destroy = p.get("risk") == "destructive"
+        if destroy:
+            ask = (
+                "<div class='apply destroy'><h2>Delete this deck on Archidekt?</h2>"
+                "<p class='notice error'><strong>This deletes the deck from your Archidekt account. "
+                "Archidekt itself has no undo.</strong></p>"
+                "<p class='small'>The gateway checks that the deck is unchanged since this proposal and "
+                "keeps a snapshot of it first. Only you can approve this, in every approval mode. "
+                "Nothing happens until you tap Delete.</p>"
+            )
+            apply_button = ("apply", "Delete this deck on Archidekt", "danger btn-lg")
+        elif p.get("kind") == "action":
+            ask = (
+                "<div class='apply'><h2>Do this on Archidekt?</h2>"
+                "<p><strong>This acts on your Archidekt account, under your name.</strong></p>"
+                "<p class='small'>Only you can approve it, every time, in every approval mode. Nothing "
+                "happens until you tap Apply.</p>"
+            )
+            apply_button = ("apply", "Apply: do this on Archidekt", "primary btn-lg")
+        else:
+            ask = (
+                "<div class='apply'><h2>Apply to Archidekt?</h2>"
+                "<p><strong>Applying writes these changes to your deck on Archidekt.</strong></p>"
+                "<p class='small'>The gateway re-checks that the deck is unchanged, keeps a snapshot of it "
+                "from just before the edit, then applies and verifies the result. Nothing happens until "
+                "you tap Apply.</p>"
+            )
+            apply_button = ("apply", "Apply these changes to Archidekt", "primary btn-lg")
         body += (
-            "<div class='apply'><h2>Apply to Archidekt?</h2>"
-            "<p><strong>Applying writes these changes to your deck on Archidekt.</strong></p>"
-            "<p class='small'>The gateway re-checks that the deck is unchanged, keeps a snapshot of it from "
-            "just before the edit, then applies and verifies the result. Nothing happens until you tap "
-            "Apply.</p>"
+            ask
             # Apply and Reject stay disabled until the click guard sees the page in use: a
             # connected app must not get its own proposal applied by a double-click on a page it
             # controls that swaps this window in (clickguard.py).
             + guarded_form(
                 hidden={"csrf": csrf or "", **({"shown": shown} if shown else {})},
                 buttons=[
-                    ("apply", "Apply these changes to Archidekt", "primary btn-lg"),
-                    ("reject", "Reject this proposal", "danger"),
+                    apply_button,
+                    ("reject", "Reject this proposal", "btn" if destroy else "danger"),
                 ],
                 extra="<a class='btn' href='/proposals'>Not now</a>",
             )

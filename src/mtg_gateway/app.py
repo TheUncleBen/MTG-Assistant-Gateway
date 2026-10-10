@@ -56,7 +56,7 @@ from .approve import (
     apps_extension,
     proposal_tool_result,
 )
-from .archidekt import ArchidektClient, Pacer, parse_deck
+from .archidekt import ArchidektClient, ArchidektError, Pacer, parse_deck
 from .archidekt_csv import CsvError, parse_export
 from .auth_provider import (
     BROWSER_COOKIE,
@@ -1442,6 +1442,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
             t = await _social_service().comments(_sub(), _clean_deck_id(deck_id))
         except DeckError as exc:
             return _tool_error(exc)
+        except ArchidektError as exc:  # a read without a linked session goes to Archidekt directly
+            return {"ok": False, "error": exc.kind, "message": str(exc)}
         return {
             "ok": True,
             "count": t["count"],
@@ -1457,8 +1459,9 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "Step 1 of a social action on a deck, under the user's linked Archidekt account. action: "
             "'like', 'vote_down' or 'clear_vote' (the deck's like), 'bookmark' or 'unbookmark', "
             "'follow_owner' or 'unfollow_owner' (Archidekt follows people, not decks: this follows the "
-            "deck's owner). Returns a proposal (kind 'action') the user confirms on the card or the review "
-            "page; apply_proposal does it when assistant_may_apply is true. Changes nothing by itself."
+            "deck's owner). Returns a proposal (kind 'action', risk 'consent') that only the user applies, "
+            "on the card or the review page, in every approval mode: never call apply_proposal for it. "
+            "Changes nothing by itself."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
         meta=card_meta,
@@ -1496,8 +1499,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "the user's own comments only), 'delete' (comment_id; own only, cannot be undone), 'vote_up', "
             "'vote_down' or 'clear_vote' (comment_id; someone else's comment). Comments are public and "
             "carry the user's Archidekt name: post only words the user asked for. Ids come from "
-            "get_deck_comments. Returns a proposal (kind 'action') the user confirms; changes nothing by "
-            "itself."
+            "get_deck_comments. Returns a proposal (kind 'action', risk 'consent') that only the user "
+            "applies, in every approval mode: never call apply_proposal for it. Changes nothing by itself."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
         meta=card_meta,
@@ -1559,8 +1562,9 @@ def build_mcp_server(state: AppState) -> MCPServer:
         description=(
             "Step 1 of making a folder in the user's Archidekt account. name: 1 to 100 characters. inside: "
             "the name of an existing folder to put it in (leave out for the top level); an unknown name is "
-            "refused with the user's folder names. Returns a proposal (kind 'action', low risk) the user "
-            "confirms; changes nothing by itself. Moving decks into it is done on the deck's settings page."
+            "refused with the user's folder names. Returns a proposal (kind 'action', risk 'consent') that "
+            "only the user applies, in every approval mode: never call apply_proposal for it. Changes "
+            "nothing by itself. Moving decks into it is done on the deck's settings page."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
         meta=card_meta,

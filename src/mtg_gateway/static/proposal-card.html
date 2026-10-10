@@ -78,7 +78,11 @@ ul.changes li.group{display:block;padding:5px 10px;font-size:11px;font-weight:70
 ul.changes li.more-row{display:block;padding:0;border-left-color:var(--border)}
 /* The state and risk badges stay whole: on a narrow card the risk badge moves under the state one. */
 .badges{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;flex:0 1 auto;min-width:min-content}
-.badge.risk.high{background:var(--amber-bg);color:var(--amber)}
+.badge.risk.high,.badge.risk.consent{background:var(--amber-bg);color:var(--amber)}
+.badge.risk.destructive{background:var(--red-bg);color:var(--red)}
+button.destroy{background:var(--red-bg);color:var(--red);border:2px solid var(--red)}
+.warnline{margin:10px 0 0;padding:8px 10px;border-radius:var(--radius);background:var(--red-bg);color:var(--red);
+  font-size:13px;font-weight:600;overflow-wrap:anywhere}
 .note{margin:8px 0 0;font-size:13px;color:var(--muted);overflow-wrap:anywhere}
 .foot{margin:10px 0 0;font-size:12px;color:var(--muted);overflow-wrap:anywhere}
 .actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;align-items:center}
@@ -282,6 +286,8 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
         ? "Your approval mode applies every change without asking: your assistant applies this itself."
         : "Low-risk edit (" + (p.risk_reason || "") + "): your approval mode lets your assistant apply it without asking.";
     }
+    if (p.risk === "destructive") return "This deletes the deck from your Archidekt account. Only you can approve it, in every approval mode.";
+    if (p.risk === "consent") return "This acts on your Archidekt account under your name. Only you can approve it, every time, in every approval mode.";
     if (p.approval_mode === "semi" && p.risk === "high") return "High risk (" + (p.risk_reason || "") + "), so this one needs your approval.";
     return "";
   }
@@ -321,7 +327,8 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
       });
     }
     var risk = $("risk");
-    if (sc.risk) { risk.textContent = sc.risk + " risk"; risk.className = "badge risk " + sc.risk; }
+    var RISK_TEXT = { consent: "Needs your approval", destructive: "Destructive: deletes a deck" };
+    if (sc.risk) { risk.textContent = RISK_TEXT[sc.risk] || sc.risk + " risk"; risk.className = "badge risk " + sc.risk; }
     else risk.className = "badge risk hidden";
     var note = modeNote(sc);
     $("note").textContent = note; $("note").className = "note" + (note ? "" : " hidden");
@@ -408,7 +415,15 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
     if (!proposal) return;
     var p = proposal;
     if (p.state === "pending" && p.writes_enabled && approval) {
-      var ok = el("button", "primary", "Approve: apply to Archidekt"); ok.type = "button"; ok.id = "approve";
+      var destroy = p.risk === "destructive";
+      var ok = el("button", destroy ? "destroy" : "primary",
+        destroy ? "Delete this deck on Archidekt" : p.kind === "action" ? "Approve: do this on Archidekt" : "Approve: apply to Archidekt");
+      ok.type = "button"; ok.id = "approve";
+      if (destroy) {
+        var warn = el("p", "warnline", "Deleting a deck can't be undone on Archidekt. The gateway keeps a snapshot first.");
+        warn.setAttribute("role", "note");
+        a.appendChild(warn);
+      }
       var no = el("button", "danger", "Reject"); no.type = "button"; no.id = "reject";
       ok.disabled = no.disabled = true; armed = false;
       ok.onclick = function () { decide("approve"); };

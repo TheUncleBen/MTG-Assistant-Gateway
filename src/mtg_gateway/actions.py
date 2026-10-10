@@ -46,8 +46,8 @@ def risk_of(rows: list[dict[str, Any]] | None) -> tuple[str, str]:
     if action in DESTRUCTIVE:
         return "destructive", "deletes a deck; an assistant never applies this by itself"
     if action == "create_folder":
-        return "low", "creates an empty folder and changes nothing that exists"
-    return "high", "acts publicly on Archidekt under your name"
+        return "consent", "creates a folder on your Archidekt account; you approve each one yourself"
+    return "consent", "acts publicly on Archidekt under your name; you approve each one yourself"
 
 
 def _social(decks: DeckService) -> Any:
@@ -110,7 +110,9 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             else await decks.get_any_deck(sub, deck_id)
         )
         changes["deck_id"] = deck.id
-        where = f"'{deck.name}' by {_owner(deck)}"
+        # the deck's name is on the card's title and the page's Deck line; it is left out of this
+        # sentence so a name written to read like more of it cannot change what the sentence says
+        where = f"by {_owner(deck)}"
     if action == "deck_vote":
         vote = _vote(params.get("vote"))
         changes["vote"] = vote
@@ -158,6 +160,8 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         if action == "comment_vote":
             if own:
                 raise DeckError("invalid", "that is your own comment")
+            if found.get("archived"):
+                raise DeckError("invalid", "that comment is archived on Archidekt and takes no votes")
             vote = _vote(params.get("vote"))
             changes["vote"] = vote
             row["text"] = {
@@ -260,7 +264,14 @@ async def apply(
                 "The deck changed on Archidekt since this proposal was made, so it was not deleted. "
                 "Ask for a new proposal if you still want it gone.",
             )
-        result = {**(await decks.delete_deck(sub, deck_id, deck.name)), "verified": True}
+        try:
+            result = {**(await decks.delete_deck(sub, deck_id, deck.name)), "verified": True}
+        except DeckError as exc:
+            if exc.kind == "backup_failed":  # nothing was deleted: the member can try again or reject
+                decks.db.finish_proposal(
+                    row["id"], state="pending", result={"error": "backup_failed", "detail": str(exc)}
+                )
+            raise
     elif action == "create_folder":
         folder = await decks.create_folder(sub, str(c["name"]), int(c["parent"]))
         result = {"folder_id": folder["id"], "name": folder["name"], "verified": True}

@@ -53,16 +53,19 @@ snapshot first and is read back to verify.
 | Change a deck's name, description, format, bracket, privacy; move it to a folder, add or remove tags, set its cover | `propose_deck_details` | proposal (high) | applied with the same verified calls as the deck settings page |
 | Undo: snapshots and restore (cards and the deck's name, description, format, bracket, privacy) | `list_snapshots`, `get_snapshot`, `propose_restore_snapshot` | proposal (high) | |
 | My collection: read; add or remove cards | `list_collection`, `propose_collection_changes` | proposal | in-chat card like a deck proposal; read back after applying |
-| Like, vote down, bookmark a deck; follow its owner | `propose_deck_social` | proposal (high) | the same calls as the deck page's buttons |
-| Read a deck's comments; post, reply, edit or delete your own, vote on others' | `get_deck_comments`, `propose_comment` | proposal (high) | the full comment text is on the review card |
+| Like, vote down, bookmark a deck; follow its owner | `propose_deck_social` | proposal (consent) | the same calls as the deck page's buttons; never applied by the assistant in any mode |
+| Read a deck's comments; post, reply, edit or delete your own, vote on others' | `get_deck_comments`, `propose_comment` | proposal (consent) | the full comment text is on the review card; never applied by the assistant in any mode |
 | Delete one of your decks | `propose_delete_deck` | proposal (destructive) | never applied by the assistant in any mode; snapshot and backup copy first |
-| Create a folder | `propose_create_folder` | proposal (low) | renaming a folder stays a hand action |
+| Create a folder | `propose_create_folder` | proposal (consent) | never applied by the assistant in any mode; renaming a folder stays a hand action |
 | Proposals: list, read, approve with the card's code, reject (with a reason on the card), apply | `list_my_proposals`, `get_proposal`, `confirm_proposal`, `reject_proposal`, `apply_proposal` | apply writes | `apply_proposal` succeeds only when the mode allows |
 
 **No assistant tool exists for:** renaming folders, linking or unlinking
 Archidekt, approval modes, admin. Social actions and deleting a deck have
-tools since 0.7.17, but only as proposals: the person approves each one, and a
-deck deletion always needs their own press.
+tools since 0.7.17, but only as proposals, and (R-142) the person applies each
+one themselves on its card or review page, in every approval mode: no mode,
+setting or batch lets an assistant apply a like, vote, bookmark, follow,
+comment, new folder or deck deletion. The gateway enforces this where proposals
+are applied, not only in the pages.
 
 ## B. What a person does by hand (web pages and the Android app)
 

@@ -2049,6 +2049,25 @@ class DeckService:
         # approval mode (modes.py) lets the assistant apply a proposal of this risk itself.
         # "app" is the member's press on the in-chat card, gated by its one-time code
         # (approve.py); "browser" is the review page; "auto" is never a caller's choice.
+        if via == "mcp" and row.get("kind") == "action":
+            # R-142: an Archidekt account action (social, folder, delete deck) is applied only by
+            # the member's own press, whatever the mode; checked here as well as by its risk tier
+            self._audit(
+                "apply_needs_user",
+                sub=sub,
+                detail={"proposal_id": proposal_id, "deck_id": row["deck_id"], "risk": "consent"},
+            )
+            raise DeckError(
+                "browser_required",
+                "This is an action on the user's Archidekt account (a like, vote, bookmark, follow, "
+                "comment, folder or deck deletion). Each one needs the user's own approval on the "
+                "proposal card or the review page, in every approval mode. Nothing was sent to "
+                "Archidekt; do not retry.",
+                review_url=f"{self.settings.public_url}/proposals/{proposal_id}",
+                state=row["state"],
+                approval_mode=self.mode_of(sub),
+                risk="consent",
+            )
         if via == "mcp":
             kind = row.get("kind", "edit")
             risk, why = modes.risk_of(kind, row.get("rows"), max_rows=self.settings.auto_apply_max_rows)
@@ -3688,6 +3707,12 @@ def _next_step(
         return (
             f"The user chose {chose}: tell them {what} in one line and call apply_proposal now. "
             "They can also press Apply on the review page."
+        )
+    if state == "pending" and risk in modes.MEMBER_ONLY:
+        return (
+            f"{card} the user {what} and the review link: this acts on their Archidekt account, so "
+            "they approve it themselves on the card or the review page, in every approval mode. "
+            "Do not call apply_proposal."
         )
     if state == "pending" and mode == "semi":
         return (

@@ -222,7 +222,7 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
   every deck and user page, each behind a confirmation and sent under your
   own Archidekt name; your own comments can be edited and deleted, and other
   people's voted on. The assistant can propose the same (`propose_deck_social`,
-  `propose_comment`), each applied only as your approval mode allows.
+  `propose_comment`), but you apply each one yourself, in every approval mode.
 - **Adaptive layout.** Bottom tab bar on phones, a navigation rail from
   600 px on touch screens and in the Android app, the desktop bar in wider
   browsers; the layout follows the live window, so a foldable, split screen
