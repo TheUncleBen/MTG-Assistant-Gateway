@@ -74,7 +74,9 @@ AUTO_WARNING = (
 )
 
 # Row kinds (decks.row_line) a low-risk edit may consist of.
-LOW_RISK_ROW_KINDS = frozenset({"add", "remove", "change", "category", "finish", "printing", "label"})
+LOW_RISK_ROW_KINDS = frozenset(
+    {"add", "remove", "change", "category", "finish", "printing", "label", "mana_value"}
+)
 
 
 def valid_mode(mode: Any) -> bool:
@@ -122,8 +124,8 @@ def risk_of(
     if any(k not in LOW_RISK_ROW_KINDS for k in kinds):
         return (
             "high",
-            "contains a change that is not a card add, remove, quantity, category, finish, printing or "
-            "colour tag",
+            "contains a change that is not a card add, remove, quantity, category, finish, printing, "
+            "colour tag or custom mana value",
         )
     if len(rows) > max_rows:
         return "high", f"changes {len(rows)} rows, more than the {max_rows} a low-risk edit may have"

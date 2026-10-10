@@ -197,7 +197,13 @@ set or finish, expand it), the **cards read from your photos or list** with a
 tick per row and suggestions for names it was unsure about (press **Use these
 cards** when the list is right), a **deck** by category with pictures and
 rules text when you tap a card, and your **account** with what still needs
-setting up. A tap on these cards is sent to the assistant as plain text and
+setting up. Four more only show what the tool answered, so you can read it at
+a glance: a **comparison** of two decks (the cards in one only, the other
+only or both, and the statistics that differ), a deck's **statistics** (mana
+curve, colours, price, legality and the bracket estimate), a **list of decks**
+(yours, or a search) with covers and links to open each one, and a **scan**
+with the cards it recognised and the ones that need a look, linking the Scan
+page. A tap on these cards is sent to the assistant as plain text and
 it carries on from there, with a proposal if anything is to change; none of
 them changes anything by itself. The pictures and rules text come from
 Scryfall; the deck rows and printings come from the gateway through a link
@@ -269,7 +275,8 @@ MCP Apps (reported), so a proposal should appear as a card with Approve and
 Reject buttons like in Claude; this hasn't been tried with ChatGPT yet. If
 no card appears and ChatGPT refuses or hides `apply_proposal`, ask for the
 proposal's review link and press Apply there. The other cards (printings,
-recognised cards, a deck, the account) follow the same standard and should
+recognised cards, a deck, the account, a comparison, statistics, a deck list,
+a scan) follow the same standard and should
 appear the same way (reported, not yet tried); without them, the assistant's
 text has everything, and it asks which set you mean instead of showing the
 pictures.

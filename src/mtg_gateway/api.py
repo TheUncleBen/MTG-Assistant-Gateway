@@ -286,6 +286,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                         "relation_id": c.relation_id,
                         "finish": c.modifier or "Normal",
                         "label": c.label,
+                        "mana_value": c.custom_cmc,
                     }
                     for c in deck.cards
                     if front_face(c.name).casefold() in touched
@@ -443,6 +444,15 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
     @route("/proposals/{pid}/apply", "POST", write=True)
     async def apply(request: Request, who: Caller) -> Response:
         pid = request.path_params["pid"]
+        row = decks.db.get_proposal(pid, who.sub)
+        if row is not None and row.get("kind") == "action":
+            # R-142: an account action is applied only from its review page's own form, which
+            # also carries the page's click-timing guard; this API is not that page.
+            raise DeckError(
+                "browser_required",
+                "An action on your Archidekt account is applied only on its review page.",
+                review_url=f"{decks.settings.public_url}/proposals/{pid}",
+            )
         # A bearer token applies under the member's approval mode, exactly like apply_proposal
         # over MCP (decks.apply decides); the browser session is the member's own press.
         return ok(await decks.apply(who.sub, pid, via="browser" if who.via == "browser" else "mcp"))

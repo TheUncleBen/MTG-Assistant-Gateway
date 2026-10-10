@@ -46,6 +46,8 @@ def card_out(deck: Deck, c: DeckCard) -> dict[str, Any]:
         value = getattr(c, key, None)
         if value not in (None, [], "", False):
             out[key] = value
+    if getattr(c, "custom_cmc", None) is not None:  # 0 is a real override
+        out["custom_mana_value"] = c.custom_cmc
     return out
 
 

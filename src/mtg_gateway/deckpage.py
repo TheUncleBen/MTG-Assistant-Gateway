@@ -16,6 +16,7 @@ from __future__ import annotations
 import calendar
 import html
 import json
+import math
 import re
 import time
 from collections import Counter
@@ -23,8 +24,18 @@ from typing import Any
 from urllib.parse import quote
 
 from .archidekt import VOTE_UP, Deck, DeckCard, featured_scryfall_id, format_label
-from .deck_stats import WUBRG, colour_letter, is_basic_land, is_land, mana_pips
-from .decks import split_label
+from .deck_stats import (
+    CURVE_BUCKETS,
+    WUBRG,
+    colour_letter,
+    curve_bucket,
+    is_basic_land,
+    is_land,
+    mana_pips,
+    primary_category,
+)
+from .deck_stats import primary_type as curve_type
+from .decks import mana_value_text, split_label
 from .mana import mana_html as _mana_html
 from .theme import icon, plural
 from .views import auto_category, cards_by_category
@@ -32,7 +43,14 @@ from .views import auto_category, cards_by_category
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _SYMBOL = re.compile(r"\{([^{}]+)\}")
 
-VIEWS = {"text": "Text", "table": "Table", "stacks": "Stacks", "scroll": "Scroll", "grid": "Grid"}
+VIEWS = {
+    "text": "Text",
+    "table": "Table",
+    "brewer": "Brewer",
+    "stacks": "Stacks",
+    "scroll": "Scroll",
+    "grid": "Grid",
+}
 GROUPS = {
     "category": "Categories",
     "type": "Type",
@@ -589,6 +607,32 @@ def table_row(card: DeckCard, *, deck: Deck, owned: dict[str, int] | None = None
     )
 
 
+def brewer_row(card: DeckCard, *, deck: Deck, owned: dict[str, int] | None = None) -> str:
+    """One card in the Brewer view: a small picture beside the name and cost, the type line and
+    the rules text, with the count and price (Archidekt's Brewer view, as read from its site code:
+    a list that shows each card's text so a deck can be read without opening every card)."""
+    img = card_image(card)
+    pic = (
+        f"<img class='art' src='{esc(img)}' alt='' loading='lazy'>"
+        if img
+        else "<span class='art ph' aria-hidden='true'></span>"
+    )
+    cls = " side" if not deck.in_deck(card) else ""
+    text = card.oracle_text
+    return (
+        f"<li class='row brew{cls}' tabindex='0' role='button' data-name='{esc(card.name.lower())}' "
+        f"data-card='{esc(card.name)}'{_card_data(card, deck)}>"
+        f"{pic}<span class='bd'>"
+        f"<span class='n'><span class='q'>{card.quantity}</span>{_label_dot(card)}{_owned_dot(card, owned)}"
+        f"<span class='name' title='{esc(card.name)}'>{esc(card.name)}</span>{_finish_badge(card)}"
+        f"<span class='mc'>{mana_html(card.mana_cost)}</span></span>"
+        f"<span class='ty'>{esc(card.type_line)}</span>"
+        + (f"<span class='tx'>{esc(text)}</span>" if text else "")
+        + f"<span class='price'>{money(card.price) if card.price is not None else ''}</span>"
+        "</span></li>"
+    )
+
+
 def card_view_attrs(card: DeckCard, *, img: str | None = None) -> str:
     """Data attributes ``static/cardview.js`` reads to show the whole card: image, printing,
     finish, mana cost, type line, rules text, power and toughness or loyalty, and every face."""
@@ -638,6 +682,8 @@ def _card_data(card: DeckCard, deck: Deck) -> str:
         card_view_attrs(card, img=card_image(card))
         + f" data-qty='{card.quantity}' data-zone='{zone}' data-cat='{esc(cat)}'{rel}"
         + (f" data-label='{esc(card.label)}'" if split_label(card.label)[0] else "")
+        + (f" data-mv='{mana_value_text(card.custom_cmc)}'" if card.custom_cmc is not None else "")
+        + (f" data-notes='{esc(card.notes)}'" if card.notes else "")
     )
 
 
@@ -705,6 +751,12 @@ def cards_html(
                 "<ul class='plain rows'>"
                 + TABLE_HEAD
                 + "".join(table_row(c, deck=deck, owned=owned) for c in cards)
+                + "</ul>"
+            )
+        elif view == "brewer":
+            body = (
+                "<ul class='plain rows'>"
+                + "".join(brewer_row(c, deck=deck, owned=owned) for c in cards)
                 + "</ul>"
             )
         else:
@@ -979,25 +1031,190 @@ def checks_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
     return checks_html
 
 
-def stats_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
-    if not stats:
-        return ""
-    pips = {k: float(v) for k, v in (stats.get("colour_pips") or {}).items()}
-    sources = {k: float(v) for k, v in (stats.get("mana_sources") or {}).items() if k in WUBRG}
-    cards = deck.main_cards
-    cost_cards = Counter()
-    prod_cards = Counter()
+# -- stats panel: Archidekt's extra controls (curve by type or category, bar or pie, lands only,
+# out-of-identity pips, quantities by subtype and keyword; a click on a chart part focuses its
+# cards). Every variant is drawn here; static/deckstats.js only shows one and filters the list.
+
+CURVE_MODES = (("none", "None"), ("type", "Type"), ("category", "Category"))
+SERIES_SLOTS = 7  # categorical colours k1..k7; any further group folds into "Other" (k0)
+
+
+def _focus(cards: list[DeckCard], label: str) -> str:
+    """Attributes that let a click on a chart part show just these cards in the deck list (the
+    names match the list's lower-case ``data-name``)."""
+    names = sorted({c.name.lower() for c in cards})
+    return f" data-focus='{esc(json.dumps(names))}' data-focus-label='{esc(label)}'"
+
+
+def _toggle(group: str, value: str, label: str, pressed: bool) -> str:
+    return (
+        f"<button type='button' data-set='{group}' data-value='{value}' "
+        f"aria-pressed='{'true' if pressed else 'false'}'>{esc(label)}</button>"
+    )
+
+
+def _qty(cards: list[DeckCard]) -> int:
+    return sum(c.quantity for c in cards)
+
+
+def _curve_variant(cards: list[DeckCard], mode: str) -> str:
+    """One mana curve: plain bars ("none") or bars stacked by primary type or primary category,
+    with a legend. The bars are a picture (role=img, every number in its label and on the bar);
+    the mana value buttons under them and the legend's buttons focus the cards."""
+    key = {"type": curve_type, "category": primary_category}.get(mode)
+    cols: dict[str, list[DeckCard]] = {b: [] for b in CURVE_BUCKETS}
     for c in cards:
-        for col in mana_pips(c.mana_cost):
-            cost_cards[col] += c.quantity
-        for col in c.mana_production or {}:
-            if col in WUBRG:
-                prod_cards[col] += c.quantity
+        b = curve_bucket(c)
+        if b is not None:
+            cols[b].append(c)
+    top = max([_qty(cs) for cs in cols.values()] + [1])
+    slot: dict[str, int] = {}
+    if key:
+        totals: Counter[str] = Counter()
+        for cs in cols.values():
+            for c in cs:
+                totals[key(c)] += c.quantity
+        ordered = [g for g, _ in sorted(totals.items(), key=lambda kv: (-kv[1], kv[0].casefold()))]
+        slot = {g: (i + 1 if i < SERIES_SLOTS else 0) for i, g in enumerate(ordered)}
+
+    def group(c: DeckCard) -> str:
+        g = key(c) if key else ""
+        return g if slot.get(g) else "Other"
+
+    rank = lambda g: (g == "Other", slot.get(g, 0))  # noqa: E731
+    groups: dict[str, list[DeckCard]] = {}
+    bars, axis, said = [], [], []
+    for b, cs in cols.items():
+        n = _qty(cs)
+        mv = f"mana value {b}"
+        if key and cs:
+            per: dict[str, list[DeckCard]] = {}
+            for c in cs:
+                per.setdefault(group(c), []).append(c)
+                groups.setdefault(group(c), []).append(c)
+            order = sorted(per, key=rank)
+            segs = "".join(
+                f"<i class='sg k{slot.get(g, 0)}' style='flex-grow:{_qty(per[g])}' "
+                f"title='{esc(g)}: {_qty(per[g])}'{_focus(per[g], f'{g} at {mv}')}></i>"
+                for g in order
+            )
+            said.append(f"{b}: {n} (" + ", ".join(f"{_qty(per[g])} {g}" for g in order) + ")")
+        else:
+            segs = f"<i class='sg'{_focus(cs, mv)}></i>" if cs else ""
+            said.append(f"{b}: {n}")
+        bars.append(
+            f"<div class='bar'><b>{n}</b><span class='col' style='height:{max(2, round(100 * n / top))}%'>"
+            f"{segs}</span></div>"
+        )
+        axis.append(
+            f"<button type='button' class='mv'{_focus(cs, mv)} aria-label='Show the "
+            f"{plural(n, 'card')} at {mv}'{'' if cs else ' disabled'}>{esc(b)}</button>"
+        )
+    how = {"type": " by type", "category": " by category"}.get(mode, "")
+    legend = ""
+    if key:
+        legend = (
+            f"<ul class='slegend' aria-label='Mana curve{how}: show the cards of'>"
+            + "".join(
+                f"<li><button type='button'{_focus(groups[g], g)}><i class='sw k{slot.get(g, 0)}'></i>"
+                f"{esc(g)} <b>{_qty(groups[g])}</b></button></li>"
+                for g in sorted(groups, key=rank)
+            )
+            + "</ul>"
+        )
+    return (
+        f"<div class='curve' role='img' aria-label='Mana curve{how}, cards per mana value: "
+        f"{esc('; '.join(said))}'>{''.join(bars)}</div>"
+        f"<div class='curveaxis'>{''.join(axis)}</div>{legend}"
+    )
+
+
+def curve_html(cards: list[DeckCard]) -> str:
+    """The mana curve with Archidekt's "Mana curve by" choice: None, Type or Category."""
+    return (
+        "<div class='curvebox statbox'>"
+        "<div class='statctl' role='group' aria-label='Mana curve by' hidden><span>Mana curve by</span>"
+        + "".join(_toggle("curve", v, label, v == "none") for v, label in CURVE_MODES)
+        + "</div>"
+        + "".join(
+            f"<div data-curve='{v}'{'' if v == 'none' else ' hidden'}>{_curve_variant(cards, v)}</div>"
+            for v, _ in CURVE_MODES
+        )
+        + "</div>"
+    )
+
+
+def _focus_bar(parts: dict[str, float], members: dict[str, list[DeckCard]], *, label: str, what: str) -> str:
+    """``_bar`` with each colour's segment focusing its cards on a click."""
+    total = sum(v for v in parts.values() if v)
+    if not total:
+        return _bar(parts, label=label)
+    segs = "".join(
+        f"<span class='seg seg-{k}' style='width:{100 * v / total:.1f}%' title='{COLOUR_NAMES[k]}: {v:g}'"
+        f"{_focus(members.get(k, []), f'{COLOUR_NAMES[k]} {what}')}></span>"
+        for k, v in parts.items()
+        if v
+    )
+    said = ", ".join(f"{COLOUR_NAMES[k]} {100 * v / total:.0f}%" for k, v in parts.items() if v)
+    return f"<div class='cbar' role='img' aria-label='{esc(label)}: {esc(said)}'>{segs}</div>"
+
+
+def _arc(cx: float, cy: float, r: float, a0: float, a1: float) -> str:
+    """An SVG path for a pie slice from a0 to a1 (fractions of a turn, clockwise from the top)."""
+    if a1 - a0 >= 0.9999:
+        return f"M{cx} {cy - r}A{r} {r} 0 1 1 {cx - 0.01} {cy - r}Z"
+    x0, y0 = cx + r * math.sin(2 * math.pi * a0), cy - r * math.cos(2 * math.pi * a0)
+    x1, y1 = cx + r * math.sin(2 * math.pi * a1), cy - r * math.cos(2 * math.pi * a1)
+    return f"M{cx} {cy}L{x0:.2f} {y0:.2f}A{r} {r} 0 {1 if a1 - a0 > 0.5 else 0} 1 {x1:.2f} {y1:.2f}Z"
+
+
+def _pie(parts: dict[str, float], members: dict[str, list[DeckCard]], *, title: str, unit: str) -> str:
+    """A colour pie (inline SVG, role=img with every share in its label) and a legend of buttons
+    with the numbers that focus each colour's cards."""
+    shown = {k: v for k, v in parts.items() if v}
+    total = sum(shown.values())
+    if not total:
+        return (
+            f"<figure class='pie'><figcaption>{esc(title)}</figcaption>"
+            "<p class='muted small'>No data</p></figure>"
+        )
+    slices, a = [], 0.0
+    for k, v in shown.items():
+        b = a + v / total
+        slices.append(
+            f"<path class='seg-{k}' d='{_arc(50, 50, 46, a, b)}'"
+            f"{_focus(members.get(k, []), f'{COLOUR_NAMES[k]} {title.lower()}')}>"
+            f"<title>{COLOUR_NAMES[k]}: {v:g} ({100 * v / total:.0f}%)</title></path>"
+        )
+        a = b
+    said = ", ".join(f"{COLOUR_NAMES[k]} {v:g} {unit} ({100 * v / total:.0f}%)" for k, v in shown.items())
+    legend = "".join(
+        f"<li><button type='button'{_focus(members.get(k, []), f'{COLOUR_NAMES[k]} {title.lower()}')}>"
+        f"<i class='pip pip-{k}'></i>{COLOUR_NAMES[k]} <b>{100 * v / total:.0f}%</b>"
+        f"<span class='muted'>{v:g}</span></button></li>"
+        for k, v in shown.items()
+    )
+    return (
+        f"<figure class='pie'><figcaption>{esc(title)}</figcaption>"
+        f"<svg viewBox='0 0 100 100' role='img' aria-label='{esc(title)} by color: {esc(said)}'>"
+        f"{''.join(slices)}</svg><ul class='slegend'>{legend}</ul></figure>"
+    )
+
+
+def _colour_cards(
+    pips: dict[str, float],
+    sources: dict[str, float],
+    cost_cards: Counter[str],
+    prod_cards: Counter[str],
+    members: dict[str, list[DeckCard]],
+) -> str:
     pip_total = sum(pips.values()) or 1
     src_total = sum(sources.values()) or 1
-    colour_cards = "".join(
+    return "".join(
         "<div class='ccard'>"
-        f"<div class='cname'><i class='pip pip-{col}'></i> {COLOUR_NAMES[col]}</div>"
+        f"<div class='cname'><button type='button' class='rowbtn'"
+        f"{_focus(members.get(col, []), f'{COLOUR_NAMES[col]} cards and sources')}>"
+        f"<i class='pip pip-{col}'></i> {COLOUR_NAMES[col]}</button></div>"
         f"<div class='lbl'>Cost</div><div class='pbar'><span class='fill seg-{col}' "
         f"style='width:{100 * pips.get(col, 0) / pip_total:.0f}%'></span>"
         f"<b>{100 * pips.get(col, 0) / pip_total:.0f}%</b></div>"
@@ -1010,18 +1227,110 @@ def stats_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
         for col in WUBRG
         if pips.get(col) or sources.get(col)
     )
-    curve = stats.get("mana_curve") or {}
-    top = max([int(v or 0) for v in curve.values()] + [1])
-    bars = "".join(
-        f"<div class='bar'><b>{int(v or 0)}</b>"
-        f"<span style='height:{max(2, round(100 * int(v or 0) / top))}%'></span>"
-        f"<em>{esc(k.replace('7+', '7+'))}</em></div>"
-        for k, v in curve.items()
+
+
+def colours_html(deck: Deck, stats: dict[str, Any]) -> str:
+    """The colour panel with Archidekt's toggles: Bar or Pie, Lands only (production counted from
+    the lands alone), and the mana-cost pips outside the commander's colour identity."""
+    cards = deck.main_cards
+    pips = {k: float(v) for k, v in (stats.get("colour_pips") or {}).items()}
+    cost_members: dict[str, list[DeckCard]] = {}
+    cost_cards: Counter[str] = Counter()
+    for c in cards:
+        for col in mana_pips(c.mana_cost):
+            cost_cards[col] += c.quantity
+            cost_members.setdefault(col, []).append(c)
+    variants = []
+    for src, key, only_lands in (("all", "mana_sources", False), ("lands", "mana_sources_lands", True)):
+        sources = {k: float(v) for k, v in (stats.get(key) or {}).items() if k in WUBRG}
+        prod_members: dict[str, list[DeckCard]] = {}
+        prod_cards: Counter[str] = Counter()
+        for c in cards:
+            if only_lands and not is_land(c):
+                continue
+            for col in c.mana_production or {}:
+                if col in WUBRG:
+                    prod_cards[col] += c.quantity
+                    prod_members.setdefault(col, []).append(c)
+        both = {k: cost_members.get(k, []) + prod_members.get(k, []) for k in WUBRG}
+        prod = "Production (lands only)" if only_lands else "Production"
+        bar = (
+            "<div class='lbl'>Cost</div>"
+            + _focus_bar(pips, cost_members, label="Mana cost by color", what="mana cost")
+            + f"<div class='lbl'>{prod}</div>"
+            + _focus_bar(sources, prod_members, label=f"{prod} by color", what=prod.lower())
+            + f"<div class='ccards'>{_colour_cards(pips, sources, cost_cards, prod_cards, both)}</div>"
+        )
+        pie = (
+            "<div class='pies'>"
+            + _pie(pips, cost_members, title="Mana cost", unit="pips")
+            + _pie(sources, prod_members, title=prod, unit="mana")
+            + "</div>"
+        )
+        variants.append(
+            f"<div data-src='{src}'{' hidden' if only_lands else ''}>"
+            f"<div data-chart='bar'>{bar}</div><div data-chart='pie' hidden>{pie}</div></div>"
+        )
+    ctl = (
+        "<div class='statctl' role='group' aria-label='Colors' hidden><span>Colors</span>"
+        + _toggle("chart", "bar", "Bar", True)
+        + _toggle("chart", "pie", "Pie", False)
+        + "<button type='button' data-set='lands' aria-pressed='false'>Lands only</button></div>"
     )
+    return f"<div class='colourbox statbox'>{ctl}{''.join(variants)}{_identity_html(deck, stats)}</div>"
+
+
+def _identity_html(deck: Deck, stats: dict[str, Any]) -> str:
+    """Mana-cost pips outside the commander's colour identity (only for a deck with one)."""
+    ooi = stats.get("out_of_identity")
+    if not ooi:
+        return ""
+    ident = "".join(
+        f"<i class='pip pip-{k}' title='{COLOUR_NAMES[k]}'></i>" for k in ooi.get("identity") or []
+    )
+    rows = ooi.get("cards") or []
+    if not rows:
+        return (
+            f"<p class='ooi ok'>{icon('check')} <span>No mana-cost pips outside the commander's color "
+            f"identity {ident or '(colorless)'}</span></p>"
+        )
+    names = {r["name"] for r in rows}
+    hit = [c for c in deck.main_cards if c.name in names]
+    pips = ooi.get("pips") or {}
+    detail = ", ".join(f"{COLOUR_NAMES[k]} {v:g}" for k, v in pips.items())
+    return (
+        f"<p class='ooi bad'>{icon('x')} <span><b>{plural(sum(pips.values()), 'pip')} outside the "
+        f"commander's color identity</b> {ident} on {plural(len(rows), 'card')} ({esc(detail)}) "
+        f"<button type='button' class='rowbtn'{_focus(hit, 'cards with pips outside the identity')}>"
+        "Show them</button></span></p>"
+    )
+
+
+def _qty_rows(counts: dict[str, int], cards: list[DeckCard], attr: str, what: str = "") -> str:
+    """Rows of a quantity table whose names focus the cards they count."""
+    by: dict[str, list[DeckCard]] = {}
+    for c in cards:
+        for v in getattr(c, attr):
+            by.setdefault(v, []).append(c)
+    return "".join(
+        f"<tr><td><button type='button' class='rowbtn'{_focus(by.get(k, []), f'{k} {what}'.strip())}>"
+        f"{esc(k)}</button></td><td>{v}</td></tr>"
+        for k, v in counts.items()
+    )
+
+
+def stats_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
+    if not stats:
+        return ""
+    cards = deck.main_cards
     mv_total = sum(c.cmc * c.quantity for c in cards if c.cmc is not None and not is_land(c))
     types = stats.get("type_counts") or {}
     rarities = stats.get("rarity_counts") or {}
-    type_rows = "".join(f"<tr><td>{esc(k)}</td><td>{v}</td></tr>" for k, v in types.items())
+    type_rows = _qty_rows(types, cards, "types")
+    subtypes = stats.get("subtype_counts") or {}
+    keywords = stats.get("keyword_counts") or {}
+    sub_rows = _qty_rows(subtypes, cards, "subtypes")
+    kw_rows = _qty_rows(keywords, cards, "keywords")
     rarity_rows = "".join(f"<tr><td>{esc(k.capitalize())}</td><td>{v}</td></tr>" for k, v in rarities.items())
     problems_html = legality_panel_html(deck, stats)
     odds_html = _odds_html(deck, cards)
@@ -1046,12 +1355,10 @@ def stats_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
     return (
         "<section class='panel stats' id='stats'><div class='head'><h2>Deck stats</h2></div>"
         "<div class='grid'><div>"
-        f"<div class='lbl'>Cost</div>{_bar(pips, label='Mana cost by color')}"
-        f"<div class='lbl'>Production</div>{_bar(sources, label='Mana production by color')}"
-        f"<div class='ccards'>{colour_cards}</div>"
+        f"{colours_html(deck, stats)}"
         f"<p class='avg'><b>Avg Mana Value: {esc(avg_mv)}</b>"
         f"<br><span class='small'>Total Mana Value: {mv_total:.2f}</span></p>"
-        f"<div class='curve' role='img' aria-label='Mana curve'>{bars}</div>"
+        f"{curve_html(cards)}"
         f"{odds_html}"
         "</div><div class='side'>"
         f"<div class='tiles'><div class='tile'><b>{stats.get('card_count', 0)}</b>"
@@ -1061,6 +1368,18 @@ def stats_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
         f"<div class='tile'><b>{stats.get('priced_cards', 0)}</b><span>Priced cards</span></div></div>"
         f"<h3>Quantity of types</h3><table class='qty'><tbody>{type_rows or no_types}</tbody></table>"
         + (f"<h3>Rarity</h3><table class='qty'><tbody>{rarity_rows}</tbody></table>" if rarity_rows else "")
+        + (
+            "<h3>Quantity by subtype</h3><div class='qtyscroll'><table class='qty'>"
+            f"<tbody>{sub_rows}</tbody></table></div>"
+            if sub_rows
+            else ""
+        )
+        + "<h3>Quantity by keyword</h3>"
+        + (
+            f"<div class='qtyscroll'><table class='qty'><tbody>{kw_rows}</tbody></table></div>"
+            if kw_rows
+            else "<p class='small muted'>No keyword data: Archidekt sent no keywords for these cards.</p>"
+        )
         + checks_html
         + problems_html
         + bracket_html
@@ -1647,6 +1966,19 @@ ul.rows .hover img{width:100%;height:100%;display:block}
     grid-template-columns:1.6rem minmax(0,1fr) 2rem auto}
   .deckview.table ul.rows .ty,.deckview.table ul.rows .set,.deckview.table ul.rows .price{display:none} }
 /* Scroll view: each group one row of whole cards, scrolled sideways inside its own strip */
+/* brewer view: each card's picture, name and cost, type line and rules text, in columns */
+.deckview.brewer{columns:340px;column-gap:1.5rem}
+.deckview.brewer .stack{break-inside:avoid;page-break-inside:avoid;margin-bottom:1rem}
+ul.rows .row.brew{display:flex;align-items:flex-start;gap:.6rem;height:auto;padding:.4rem 0}
+.row.brew .art{width:56px;aspect-ratio:63/88;border-radius:4px;object-fit:cover;flex:none;
+  background:var(--surface-2)}
+.row.brew .bd{display:flex;flex-direction:column;gap:.15rem;min-width:0;flex:1}
+.row.brew .n .q{min-width:1.2rem}
+.row.brew .n .mc{margin-left:auto;flex:none}
+.row.brew .ty{font-size:.82rem;color:var(--text-muted)}
+.row.brew .tx{font-size:.82rem;white-space:pre-line;display:-webkit-box;-webkit-line-clamp:4;
+  -webkit-box-orient:vertical;overflow:hidden}
+.row.brew .price{text-align:left}
 .deckview.scroll .stack{margin-bottom:1rem;min-width:0}
 .deckview.scroll .cards{display:flex;gap:.75rem;overflow-x:auto;overscroll-behavior-x:contain;
   scroll-snap-type:x proximity;padding:.25rem .1rem .75rem}
@@ -1723,6 +2055,7 @@ html.cardview-open{overflow:hidden}
   font-size:.9rem;border-top:1px solid var(--border-soft);padding-top:.75rem}
 .cardview .facts dt{color:var(--text-muted);font-weight:700}
 .cardview .facts dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.cardview .facts dd.notes{white-space:pre-wrap}
 .cardview .facts .gc{color:var(--orange-text);font-weight:700}
 .cardview .chips{display:flex;flex-wrap:wrap;gap:.3rem}
 .cardview .chip{display:inline-block;padding:.05rem .5rem;border-radius:1rem;background:var(--surface-2);
@@ -1762,6 +2095,14 @@ html.cardview-open{overflow:hidden}
 .ctxmenu a,.ctxmenu button,.ctxmenu .item{white-space:normal;min-height:38px}
 .ctxmenu .qtyrow{display:flex;align-items:center;gap:.5rem;min-height:38px;padding:0 1rem;cursor:default}
 .ctxmenu .qtyrow .lbl{flex:1}
+.ctxmenu .mvform{display:flex;flex-direction:column;gap:.4rem;padding:.25rem .75rem .5rem}
+.ctxmenu .mvform label{font-weight:600}
+.ctxmenu .mvform input{width:6rem;min-height:38px}
+.ctxmenu .mvform .hint{margin:0;font-size:.85rem;color:var(--text-muted)}
+.ctxmenu .mvform .acts{display:flex;gap:.4rem;flex-wrap:wrap}
+.ctxmenu .mvform .acts .btn{min-height:38px;justify-content:center}
+.ctxmenu .mvform .status{margin:0;font-size:.9rem}
+.ctxmenu .mvform .status.err{color:var(--red-text)}
 .ctxmenu .qtyrow .step{width:36px;min-width:36px;height:32px;min-height:32px;padding:0;justify-content:center;
   border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);font-size:1.15rem;
   font-weight:700;line-height:1}
@@ -1833,9 +2174,54 @@ html.cardview-open{overflow:hidden}
   border-bottom:1px solid var(--border)}
 .curve .bar{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;
   font-size:.75rem}
-.curve .bar span{display:block;width:70%;background:var(--orange);border-radius:2px 2px 0 0}
+.curve .bar .col{display:flex;flex-direction:column-reverse;width:70%;gap:2px;border-radius:2px 2px 0 0;
+  overflow:hidden}
 .curve .bar b{font-variant-numeric:tabular-nums;margin-bottom:.15rem}
-.curve .bar em{font-style:normal;font-weight:700;margin-top:.3rem}
+/* stats controls (static/deckstats.js): Mana curve by, Bar / Pie, Lands only; a click on a chart part
+   or a legend, axis or table button shows just those cards in the list above */
+.statbox{min-width:0}
+.statctl{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;margin:.75rem 0 .25rem;font-size:.9rem}
+.statctl[hidden]{display:none}
+.statctl span{font-weight:700;margin-right:.25rem}
+.statctl button{min-height:32px;padding:0 .7rem;font-size:.9rem}
+.statctl button[aria-pressed=true]{background:var(--orange);border-color:var(--orange);color:var(--on-orange);
+  font-weight:700}
+.statctl button[data-set=lands]{margin-left:.5rem}
+.sg{display:block;flex:1 1 0;min-height:2px;background:var(--orange);cursor:pointer}
+.k1{background:#3987e5} .k2{background:#eb6834} .k3{background:#1baf7a} .k4{background:#eda100}
+.k5{background:#e87ba4} .k6{background:#9085e9} .k7{background:#e34948} .k0{background:#8a8a8a}
+.curveaxis{display:flex;gap:.5rem}
+.curveaxis .mv{flex:1;min-width:0;min-height:28px;padding:0;border:0;background:none;font-weight:700;
+  font-size:.8rem;color:var(--text)}
+.curveaxis .mv:hover:not(:disabled),.slegend button:hover,.rowbtn:hover{background:var(--surface-2)}
+.slegend{list-style:none;display:flex;flex-wrap:wrap;gap:.25rem .5rem;margin:.5rem 0 0;padding:0}
+.slegend button{min-height:28px;padding:0 .4rem;border:0;background:none;font-size:.85rem;gap:.35rem;
+  color:var(--text);font-weight:400;max-width:100%;overflow-wrap:anywhere;text-align:left}
+.slegend button b{font-variant-numeric:tabular-nums}
+.slegend .sw{display:inline-block;flex:none;width:.8rem;height:.8rem;border-radius:2px}
+.cbar .seg[data-focus],.pie path[data-focus]{cursor:pointer}
+.pies{display:flex;flex-wrap:wrap;gap:1rem 2rem;margin-top:.5rem}
+.pie{margin:0;flex:1 1 12rem;min-width:0;display:flex;flex-direction:column;align-items:flex-start}
+.pie figcaption{font-weight:700;margin-bottom:.35rem}
+.pie svg{width:9rem;height:9rem;max-width:100%}
+.pie path{stroke:var(--surface);stroke-width:1.5;stroke-linejoin:round}
+.pie .seg-W{fill:#f8f6d8} .pie .seg-U{fill:#92c5de} .pie .seg-B{fill:#8a8a8a} .pie .seg-R{fill:#e6948a}
+.pie .seg-G{fill:#a6d8a0} .pie .seg-C{fill:#cbc2bf}
+.pie .slegend{flex-direction:column;gap:0}
+.pie .slegend .muted{font-size:.8rem}
+.rowbtn{min-height:24px;padding:0 .25rem;margin:0 0 0 -.25rem;border:0;background:none;color:var(--text);
+  font:inherit;text-align:left;overflow-wrap:anywhere;justify-content:flex-start;gap:.4rem}
+.ccard .cname .rowbtn{font-weight:700}
+[data-focus].on{outline:2px solid var(--focus);outline-offset:1px}
+.ooi{display:flex;gap:.4rem;align-items:baseline;margin:.75rem 0 0;font-size:.93rem}
+.ooi svg{flex:none} .ooi.ok svg{color:var(--green-text)} .ooi.bad svg{color:var(--red-text)}
+.ooi .pip{width:16px;height:16px;vertical-align:-3px}
+.ooi .rowbtn{color:var(--link);text-decoration:underline;margin:0}
+.qtyscroll{max-height:16rem;overflow:auto}
+.statfocus{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;margin:.5rem 0;padding:.5rem .75rem;
+  border:1px solid var(--border);border-radius:3px;background:var(--surface)}
+.statfocus span{flex:1 1 12rem;min-width:0;overflow-wrap:anywhere}
+.statfocus button{min-height:32px}
 /* .tiles/.tile/.spark: theme.py (shared with the report and history pages) */
 table.qty{width:100%;border-collapse:collapse;font-size:.93rem}
 table.qty td{padding:.3rem .25rem;border-top:1px solid var(--surface-2);overflow-wrap:anywhere}

@@ -621,3 +621,93 @@ async def test_set_label_that_archidekt_ignores_is_not_reported_verified(stack: 
     a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     assert not (a.get("ok") and (a.get("result") or {}).get("verified") is True), a
     assert row["label"] == "Have,#37d67a"
+
+
+async def test_set_mana_value_sets_and_clears_the_custom_mana_value(stack: Stack) -> None:
+    """set_mana_value (0.7.20): Archidekt's custom mana value on every row of a card, sent in
+    modifications.customCmc as its own editor does, verified on the re-read; null clears it.
+    A later edit of the row (its quantity) keeps the value and the colour tag."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+
+    async def propose(change: dict) -> dict:
+        args = {"deck_id": "42", "changes": [change]}
+        return structured(await call(h, token, "propose_deck_changes", args))
+
+    p = await propose({"action": "set_mana_value", "name": "Sol Ring", "mana_value": 3})
+    assert p["ok"] and p["risk"] == "low", p
+    assert "Sol Ring: custom mana value none -> 3" in p["diff"]
+    before = len(ark.patches)
+    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert a["ok"] and a["result"]["verified"] is True, a
+    sent = [e for patch in ark.patches[before:] for e in patch.get("cards", [patch])]
+    assert any(e.get("modifications", {}).get("customCmc") == 3 for e in sent), sent
+    row = next(c for c in ark.decks[42]["cards"] if c["card"]["oracleCard"]["name"] == "Sol Ring")
+    assert row["customCmc"] == 3
+    # the same value again is nothing to change
+    assert not (await propose({"action": "set_mana_value", "name": "Sol Ring", "mana_value": 3}))["ok"]
+    # another edit of the row carries the value and a tag along, as Archidekt's own editor does
+    row["label"] = "Have,#37d67a"
+    q = await propose({"action": "set_quantity", "name": "Sol Ring", "quantity": 2})
+    a = structured(await call(h, token, "apply_proposal", {"proposal_id": q["proposal_id"]}))
+    assert a["ok"], a
+    assert row["customCmc"] == 3 and row["label"] == "Have,#37d67a" and row["quantity"] == 2
+    off = await propose({"action": "set_mana_value", "name": "Sol Ring", "mana_value": None})
+    assert off["ok"] and "custom mana value 3 -> none" in off["diff"], off
+    a = structured(await call(h, token, "apply_proposal", {"proposal_id": off["proposal_id"]}))
+    assert a["ok"] and a["result"]["verified"] is True, a
+    assert row["customCmc"] is None
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"mana_value": -1}, "0 to 20"),
+        ({"mana_value": 21}, "0 to 20"),
+        ({"mana_value": 2.5}, "0 to 20"),
+        ({"mana_value": "x"}, "0 to 20"),
+        ({"mana_value": True}, "0 to 20"),
+        ({}, "needs mana_value"),
+        ({"mana_value": 2, "quantity": 2}, "takes only"),
+    ],
+)
+def test_set_mana_value_is_refused_when_malformed(change: dict, message: str) -> None:
+    with pytest.raises(DeckError) as err:
+        parse_changes([{"action": "set_mana_value", "card_name": "Sol Ring", **change}])
+    assert message in str(err.value)
+
+
+def test_set_mana_value_is_low_risk_and_works_on_the_maybeboard() -> None:
+    (ch,) = parse_changes(
+        [{"action": "set_mana_value", "card_name": "Sol Ring", "mana_value": "4", "zone": "side"}]
+    )
+    assert ch.mana_value == 4 and ch.zone == "side"
+    assert ch.as_dict() == {
+        "action": "set_mana_value",
+        "card_name": "Sol Ring",
+        "mana_value": 4,
+        "zone": "side",
+    }
+    assert modes.risk_of("edit", [{"kind": "mana_value", "name": "Sol Ring"}])[0] == "low"
+
+
+async def test_card_notes_and_custom_mana_value_are_shown_read_only(stack: Stack) -> None:
+    """Archidekt's per-card notes and custom mana value (both keys on every live deck card, see
+    tests/fixtures/live/archidekt_deck_blink_sample.json) reach get_deck and the card viewer's
+    data. Notes are read-only: no tool or page writes them."""
+    h, ark = stack.h, stack.ark
+    row = next(c for c in ark.decks[42]["cards"] if c["card"]["oracleCard"]["name"] == "Sol Ring")
+    row["notes"] = "Swap for <Mana Vault> later"
+    row["customCmc"] = 0
+    token = await linked_user(stack)
+    d = structured(await call(h, token, "get_deck", {"deck_ref": "42", "view": "cards"}))
+    sol = next(c for c in d["cards"] if c["name"] == "Sol Ring")
+    assert sol["notes"] == "Swap for <Mana Vault> later" and sol["custom_mana_value"] == 0, sol
+    b = await _linked_browser(stack)
+    try:
+        page = await b.http.get("/decks/42", headers=NAV)
+        assert page.status_code == 200
+        assert "data-notes='Swap for &lt;Mana Vault&gt; later'" in page.text
+        assert "data-mv='0'" in page.text
+    finally:
+        await b.aclose()

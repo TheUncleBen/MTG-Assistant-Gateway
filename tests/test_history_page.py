@@ -15,9 +15,11 @@ from mtg_gateway.db import Database
 
 from .test_companion import NAV, Stack, linked_browser
 from .test_companion import stack as stack  # noqa: PLC0414  (the fixture)
+from .test_decks_and_proxy import call, mcp_token, structured
 
 FIX = Path(__file__).parent / "fixtures" / "reports"
 GOLDFISH = (FIX / "goldfish_run.md").read_text()
+GOLDFISH_PRECON = (FIX / "goldfish_run_precon.md").read_text()
 VALIDATION = (FIX / "validation_issues.md").read_text()
 DAY = 86400
 
@@ -74,7 +76,11 @@ def store_report(
     deck_id: str = "42",
     deck_name: str = "Immortal Reckoning",
     taken_at: int | None = None,
+    stats: dict | None = None,
+    goldfish: str | None = GOLDFISH,
 ) -> None:
+    """One stored report; ``stats`` overrides some of the statistics, ``goldfish=None`` stores
+    a report that ran no simulation."""
     with db.tx() as c:
         c.execute(
             "INSERT INTO reports (id, owner_sub, deck_id, deck_name, fingerprint, taken_at, stats_json, "
@@ -96,9 +102,10 @@ def store_report(
                         "colour_pips": {"W": 35, "B": 41},
                         "mana_sources": {"W": 23, "B": 26},
                         "commanders": ["Liesa, Forgotten Archangel"],
+                        **(stats or {}),
                     }
                 ),
-                json.dumps({"tool": "goldfish_run", "ok": True, "text": GOLDFISH}),
+                json.dumps({"tool": "goldfish_run", "ok": True, "text": goldfish}) if goldfish else None,
                 json.dumps({"tool": "validate_decklist", "ok": True, "text": VALIDATION}),
                 "__browser__",
             ),
@@ -184,7 +191,7 @@ async def test_history_page_filters_groups_and_pages(stack: Stack) -> None:
         assert "by you" in body and "by an assistant" in body and "app-1" not in body  # no raw app id
         assert "<details><summary>Details</summary>" in body
         assert "Restore (review first)" in body and "the change it was taken before" in body
-        assert "Trend over 2 reports" in body and "class='tiles'" in body and "<svg class='spark'" in body
+        assert "2 most recent stored reports" in body and "<svg class='tspark'" in body
         # the filter bar: themed selects in one form, the deck list from the member's history
         assert "class='card filterbar'" in body and body.count("<select") == 5
         assert "<option value='42' selected>Immortal Reckoning</option>" in body
@@ -454,5 +461,81 @@ async def test_report_page_and_exports(stack: Stack) -> None:
         deck = await b.http.get("/decks/42", headers=NAV)
         assert "data-busy-label='Simulating…'" in deck.text and "takes up to a minute" in deck.text
         assert "run_deck_report" not in deck.text
+    finally:
+        await b.aclose()
+
+
+async def test_report_trends_on_a_decks_history(stack: Stack) -> None:
+    """A deck's History page draws its stored reports' trend (statistics and goldfish speed,
+    oldest to newest, the latest value and the change since the first, as accessible SVG plus a
+    table), the assistant's list_deck_reports returns the same numbers, and one report is no
+    trend."""
+    h = stack.h
+    b = await linked_browser(stack)
+    try:
+        token = await mcp_token(h)
+        gw = h.app.state.gateway
+        sub = gw.db._one("SELECT sub FROM users", ())["sub"]
+        now = int(time.time())
+        first_day = time.strftime("%Y-%m-%d", time.gmtime(now - 9 * DAY))
+        last_day = time.strftime("%Y-%m-%d", time.gmtime(now - DAY))
+        store_report(gw.db, sub, "rep_t1", taken_at=now - 9 * DAY)
+        # a statistics-only report: the goldfish lines skip it, the statistics keep it
+        store_report(
+            gw.db, sub, "rep_t2", taken_at=now - 5 * DAY, stats={"price_total": 305.5}, goldfish=None
+        )
+        store_report(
+            gw.db,
+            sub,
+            "rep_t3",
+            taken_at=now - DAY,
+            stats={"average_mana_value": 3.0, "price_total": 290.25, "land_count": 36},
+            goldfish=GOLDFISH_PRECON,
+        )
+        store_report(gw.db, sub, "rep_other", deck_id="43", deck_name="Reap the Tides")
+
+        out = structured(await call(h, token, "list_deck_reports", {"deck_id": "42"}))
+        trend = out["trend"]
+        assert out["ok"] and trend["reports"] == 3 and trend["deck_id"] == "42"
+        assert [p["report_id"] for p in trend["series"]] == ["rep_t1", "rep_t2", "rep_t3"]
+        by_key = {m["key"]: m for m in trend["metrics"]}
+        # salt_total is not stored in these reports, so it is not trended (nothing invented)
+        assert list(by_key) == [
+            "average_mana_value",
+            "land_count",
+            "price_total",
+            "commander_cast_median_turn",
+            "kill_median_turn",
+            "kill_pct",
+        ]
+        mv = by_key["average_mana_value"]
+        assert (mv["first"], mv["latest"], mv["change"], mv["reports"]) == (3.2, 3.0, -0.2, 3)
+        assert mv["first_at"] == now - 9 * DAY and mv["latest_at"] == now - DAY
+        assert by_key["price_total"]["change"] == -19.75
+        cast = by_key["commander_cast_median_turn"]
+        assert (cast["first"], cast["latest"], cast["change"], cast["reports"]) == (5, 6, 1, 2)
+        assert (by_key["kill_pct"]["first"], by_key["kill_pct"]["latest"]) == (57.0, 62.7)
+        assert trend["series"][1]["kill_pct"] is None and trend["series"][2]["until_turn"] == 10
+        # one report is no trend; without deck_id the tool lists as before
+        assert structured(await call(h, token, "list_deck_reports", {"deck_id": "43"}))["trend"] is None
+        assert "trend" not in structured(await call(h, token, "list_deck_reports", {}))
+
+        page = await b.http.get("/history?deck_id=42", headers=NAV)
+        body = page.text.split("<main")[1]
+        assert page.status_code == 200 and "<h2 id='trend-h'>Report trends</h2>" in body
+        assert body.count("<svg class='tspark'") == 6 and body.count("role='img'") >= 6
+        assert (
+            f"aria-label='Average mana value over 3 reports: 3.2 on {first_day}, 3 on {last_day}, down 0.2.'"
+        ) in body
+        assert "<b>$290.25</b>" in body and "Down $19.75 since $310.00 on" in body
+        assert "<b>turn 6</b>" in body and "Up 1 turn since turn 5 on" in body
+        assert "Up 5.7 percentage points since 57% on" in body
+        # the text table: one row per report, oldest first, a dash where a report has no number
+        table = body.split("<table>")[1].split("</table>")[0]
+        assert table.index("rep_t1") < table.index("rep_t2") < table.index("rep_t3")
+        assert "<td>–</td>" in table and "<th scope='col'>Turns simulated</th>" in table
+        # one report: no trend section; nor on the all-decks page
+        assert "Report trends" not in (await b.http.get("/history?deck_id=43", headers=NAV)).text
+        assert "Report trends" not in (await b.http.get("/history", headers=NAV)).text
     finally:
         await b.aclose()

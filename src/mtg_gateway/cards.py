@@ -20,8 +20,14 @@ Every card follows the same rules:
 The cards: ``printings-card`` (card_printings: browse every printing's picture, tap to pick),
 ``picker-card`` (resolve_cards: confirm or drop the recognised cards, pick among ambiguous
 names), ``deck-card`` (get_deck, get_snapshot: the deck by category with pictures
-and rules text on tap) and ``account-card`` (account_status, whoami: one tap to the Account
-page when Archidekt is not linked, writes are off or no approval mode is chosen).
+and rules text on tap), ``account-card`` (account_status, whoami: one tap to the Account
+page when Archidekt is not linked, writes are off or no approval mode is chosen), and four that
+only display what the result already says: ``compare-card`` (compare_decks: the cards in one deck
+only, the other only or both with a changed count, and the key statistics that differ),
+``stats-card`` (deck_stats: the mana curve, colours, price, legality and bracket estimate),
+``deck-list-card`` (list_my_decks, search_decks: one row per deck with its cover, a tap opens it)
+and ``scan-card`` (get_scan_session: the recognised cards and the items that need a look, with a
+link to the Scan page). These read the result's structured content itself; nothing is added to it.
 """
 
 from __future__ import annotations
@@ -57,6 +63,10 @@ PRINTINGS_CARD_URI = URI_BASE + "printings-card"
 PICKER_CARD_URI = URI_BASE + "picker-card"
 DECK_CARD_URI = URI_BASE + "deck-card"
 ACCOUNT_CARD_URI = URI_BASE + "account-card"
+COMPARE_CARD_URI = URI_BASE + "compare-card"
+STATS_CARD_URI = URI_BASE + "stats-card"
+DECK_LIST_CARD_URI = URI_BASE + "deck-list-card"
+SCAN_CARD_URI = URI_BASE + "scan-card"
 CARD_META_KEY = "mtg/card"  # tool-result _meta key a card reads its link or data from
 LINK_TTL = 600  # seconds a signed link stays valid
 LINK_PATH = "/cards/data/"
@@ -71,18 +81,21 @@ def tool_meta(uri: str) -> dict[str, Any]:
     return {"ui": {"resourceUri": uri}, "ui/resourceUri": uri}
 
 
-def card_html(name: str) -> str:
+def card_html(name: str, public_url: str = "") -> str:
     """One card's HTML with the shared bridge (host protocol) and base styles inlined, so each
-    ui:// resource is a single self-contained document."""
+    ui:// resource is a single self-contained document. A card that links to the gateway's own
+    pages (a deck, the Scan page) gets its address as a JS string where it says ``"@GATEWAY@"``,
+    so the tool result itself carries nothing extra for it."""
     html = (STATIC / f"{name}.html").read_text(encoding="utf-8")
     bridge = (STATIC / "_bridge.js").read_text(encoding="utf-8")
     base = (STATIC / "_base.css").read_text(encoding="utf-8")
-    return html.replace("/*@BASE@*/", base).replace("/*@BRIDGE@*/", bridge)
+    gateway = json.dumps(public_url.rstrip("/")).replace("<", "\\u003c")
+    return html.replace("/*@BASE@*/", base).replace("/*@BRIDGE@*/", bridge).replace('"@GATEWAY@"', gateway)
 
 
 def add_card_resources(apps: Apps, public_url: str) -> None:
-    """Register the four cards on the MCP Apps extension. Each declares only the origins it
-    needs: Scryfall for pictures, the gateway for its signed link, Scryfall's API for rules text."""
+    """Register the cards on the MCP Apps extension. Each declares only the origins it needs:
+    Scryfall for pictures, the gateway for its signed link, Scryfall's API for rules text."""
     gateway = _origin(public_url)
     apps.add_html_resource(
         PRINTINGS_CARD_URI,
@@ -118,6 +131,42 @@ def add_card_resources(apps: Apps, public_url: str) -> None:
         title="Account",
         description="What the gateway knows about the signed-in member, with a button to the Account page.",
         csp=ResourceCsp(),
+        prefers_border=True,
+    )
+    apps.add_html_resource(
+        COMPARE_CARD_URI,
+        card_html("compare-card", public_url),
+        name="compare-card",
+        title="Deck comparison",
+        description="Cards in one deck only, the other only or both, and the statistics that differ.",
+        csp=ResourceCsp(),
+        prefers_border=True,
+    )
+    apps.add_html_resource(
+        STATS_CARD_URI,
+        card_html("stats-card", public_url),
+        name="stats-card",
+        title="Deck statistics",
+        description="A deck's mana curve, colours, price, legality and bracket estimate.",
+        csp=ResourceCsp(),
+        prefers_border=True,
+    )
+    apps.add_html_resource(
+        DECK_LIST_CARD_URI,
+        card_html("deck-list-card", public_url),
+        name="deck-list-card",
+        title="Decks",
+        description="A list of decks with their covers, format and owner; tap one to open it.",
+        csp=ResourceCsp(resource_domains=list(CARD_IMAGE_HOSTS)),
+        prefers_border=True,
+    )
+    apps.add_html_resource(
+        SCAN_CARD_URI,
+        card_html("scan-card", public_url),
+        name="scan-card",
+        title="Scan session",
+        description="The cards a scan recognised, the items that need a look, and a link to the Scan page.",
+        csp=ResourceCsp(resource_domains=list(CARD_IMAGE_HOSTS)),
         prefers_border=True,
     )
 
@@ -477,11 +526,15 @@ async def ask_choices(ctx: Any, message: str, questions: list[dict[str, Any]]) -
 __all__ = [
     "ACCOUNT_CARD_URI",
     "CARD_META_KEY",
+    "COMPARE_CARD_URI",
     "DECK_CARD_URI",
+    "DECK_LIST_CARD_URI",
     "LINK_PATH",
     "LINK_TTL",
     "PICKER_CARD_URI",
     "PRINTINGS_CARD_URI",
+    "SCAN_CARD_URI",
+    "STATS_CARD_URI",
     "CardLinks",
     "add_card_resources",
     "add_card_routes",

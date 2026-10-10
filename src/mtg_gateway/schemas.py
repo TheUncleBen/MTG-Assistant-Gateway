@@ -173,6 +173,7 @@ class DeckChange(_Card):
             "set_finish",
             "set_printing",
             "set_label",
+            "set_mana_value",
         ],
         BeforeValidator(_lower),
     ] = Field(description="What to do with the card.")
@@ -201,6 +202,12 @@ class DeckChange(_Card):
         default=None,
         pattern=r"^#[0-9a-fA-F]{6}$",
         description="For set_label: the tag's colour as #rrggbb (grey when left out).",
+    )
+    mana_value: StrictInt | None = Field(
+        default=None,
+        ge=0,
+        le=20,
+        description="For set_mana_value: the card's custom mana value, 0 to 20; null takes it off.",
     )
 
 
@@ -327,6 +334,8 @@ def deck_change_for_service(change: Any) -> Any:
     if not isinstance(d, dict):
         return d
     out = dict(d)
+    if isinstance(change, BaseModel) and "mana_value" in change.model_fields_set:
+        out["mana_value"] = getattr(change, "mana_value", None)  # null is meaningful: it clears
     if "name" in out:
         out["card_name"] = out.pop("name")
     if out.get("finish") == "nonfoil":
