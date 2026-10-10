@@ -399,3 +399,44 @@ async def test_the_loop_backs_off_after_failures_and_deletes_nothing(
     assert waits[:6] == [idp_sweep.FIRST_DELAY, h, 2 * h, 4 * h, h, h]
     assert waits[-1] == idp_sweep.MAX_BACKOFF
     assert "nothing deleted: Authentik answered HTTP 502" in caplog.text
+
+
+# -- is it working? (T-120) -----------------------------------------------------------------------
+async def test_every_successful_round_logs_one_line_and_the_status_follows_it(
+    db: Database, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    ak = RecordedAuthentik()
+    statuses: list[dict] = []
+
+    async def fake_sleep(delay: float) -> None:
+        statuses.append(sweep.status())  # what the admin page would show before each round
+        if len(statuses) == 3:
+            ak.override = {USERS: _resp(_empty_group("someone-else"))}  # the group name is wrong now
+        if len(statuses) == 4:
+            raise asyncio.CancelledError
+
+    async with ak.client() as http:
+        sweep = AuthentikSweep(_settings(), db, None, http=http)
+        monkeypatch.setattr(idp_sweep.asyncio, "sleep", fake_sleep)
+        with pytest.raises(asyncio.CancelledError):
+            await sweep.loop()
+    assert "removed-member clean-up ran: 2 allowed member(s), 2 removed" in caplog.text
+    assert "removed-member clean-up ran: 2 allowed member(s), 0 removed" in caplog.text  # nobody to go
+    waiting, first, second, failed = statuses
+    assert waiting == {"state": "waiting", "first_after_seconds": 120}
+    assert first["state"] == "ok" and first["removed"] == 2 and first["allowed"] == 2 and first["at"]
+    assert second["state"] == "ok" and second["removed"] == 0
+    assert failed["state"] == "failed" and failed["at"]
+    assert failed["error"] == (
+        f"group {USERS!r} found 0 times (is the name right, and may the token view that group?)"
+    )
+    assert TOKEN not in json.dumps(statuses) and TOKEN not in caplog.text
+
+
+def test_status_when_off_gives_the_reason() -> None:
+    off = AuthentikSweep(_settings(token=None), None, None).status()
+    assert off["state"] == "off" and "MTG_AUTHENTIK_API_TOKEN_FILE" in off["reason"]
+    problem = _settings(token=None, authentik_api_token_problem="secret file is empty")
+    bad = AuthentikSweep(problem, None, None)
+    assert bad.status() == {"state": "off", "reason": bad.why_off()}

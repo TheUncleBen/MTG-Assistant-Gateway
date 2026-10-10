@@ -55,6 +55,12 @@ class Server:
         oidc = OIDCClient(IDP, CLIENT_ID, CLIENT_SECRET, settings.callback_url, settings.oidc_scopes)
         self.ark = FakeArchidekt()
         self.ark.decks[42]["deckFormat"] = 3  # Commander: 100 cards, legality shown
+        # A legal deck to start from: the CSV fixture has no supertypes, Archidekt's JSON does.
+        supertypes = {"Aesi, Tyrant of Gyre Strait": "Legendary", "Forest": "Basic", "Island": "Basic"}
+        for row in self.ark.decks[42]["cards"]:
+            sup = supertypes.get(row["card"]["oracleCard"]["name"])
+            if sup:
+                row["card"]["oracleCard"]["superTypes"] = [sup]
         self.ark.add_side_row(42, "Sol Ring")
         client = ArchidektClient(settings.archidekt_base, "test", Pacer(0.0), http=self.ark.client())
         self.app = create_app(settings, db=self.db, oidc=oidc, archidekt=client)
@@ -216,7 +222,7 @@ def test_right_click_menu_and_quantity_plus_redraw_in_place(server: Server, widt
         stack_meta = card.locator("xpath=ancestor::section[contains(@class,'stack')]//div[@class='meta']")
         assert stack_meta.inner_text().startswith("Qty: 2") or re.match(r"Qty: \d+", stack_meta.inner_text())
         assert page.locator(".banner .row span", has_text="Size:").inner_text() == "Size: 101"
-        assert page.locator(".banner .legal.ok").count() == 1
+        assert page.locator(".banner .legal.bad").count() == 1  # 101 cards: not legal, as on Archidekt
         checks = page.locator(".stats .checks")
         assert checks.count() == 1 and "101 of 100" in checks.inner_text()
         assert checks.locator("li.bad").count() >= 1
