@@ -537,3 +537,44 @@ async def test_a_collaborator_archidekt_did_not_add_is_reported_not_applied(
     assert out["ok"] is False, out
     again = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
     assert again["state"] != "applied", again
+
+
+# 0.7.21: the review-page-only rule is structural. DeckService.apply refuses every account action
+# unless its caller is the review page's own form (decks.REVIEW_PAGE), whatever route the call came
+# by: an ordinary browser caller, the in-chat card and the assistant are all refused.
+ALL_ACCOUNT_ACTIONS = ACCOUNT_ACTIONS + [
+    ("propose_comment", {"deck_id": "43", "action": "clear_vote", "comment_id": 555001}),
+    ("propose_deck_social", {"deck_id": "43", "action": "unbookmark"}),
+    ("propose_collaborator", {"deck_id": "42", "action": "add", "username": "amy"}),
+    ("propose_collaborator", {"deck_id": "42", "action": "remove", "username": "amy"}),
+]
+
+
+@pytest.mark.parametrize("via", ["browser", "app", "mcp", "auto", ""])
+@pytest.mark.parametrize(
+    ("tool", "args"),
+    ALL_ACCOUNT_ACTIONS,
+    ids=[f"{t}:{a.get('action', 'folder')}" for t, a in ALL_ACCOUNT_ACTIONS],
+)
+async def test_only_the_review_page_marker_applies_an_account_action(
+    stack: Stack, via: str, tool: str, args: dict
+) -> None:
+    from mtg_gateway.decks import REVIEW_PAGE, DeckError
+
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    _seed_comment(ark)
+    ark.follows["alice"] = {78}
+    if args.get("action") == "remove" and tool == "propose_collaborator":
+        ark.editors[42] = [_amy_row()]
+    await _set_mode(h, "auto")
+    p = structured(await call(h, token, tool, args))
+    assert p["ok"] and p["kind"] == "action", p
+    decks = h.app.state.gateway.decks
+    before = (_archidekt_state(ark), [dict(r) for r in ark.editors.get(42, [])])
+    with pytest.raises(DeckError) as refused:
+        await decks.apply(SUB, p["proposal_id"], via=via)
+    assert refused.value.kind == "browser_required"
+    assert (_archidekt_state(ark), [dict(r) for r in ark.editors.get(42, [])]) == before
+    assert decks.db.get_proposal(p["proposal_id"], SUB)["state"] == "pending"
+    assert via != REVIEW_PAGE

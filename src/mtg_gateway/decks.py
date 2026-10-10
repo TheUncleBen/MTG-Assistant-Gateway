@@ -435,6 +435,11 @@ def actor_label(client_id: str | None, name: str | None = None) -> str:
     return f"app: {shown} ({short})" if shown else f"app: {short}"
 
 
+# The ``via`` of DeckService.apply that only the review page's own form (pages.py) passes: the
+# one caller that may apply an Archidekt account action (R-142).
+REVIEW_PAGE = "review_page"
+
+
 class DeckError(Exception):
     """A user-facing failure: the message is safe to show as is. ``extra`` holds structured
     fields the tool reply carries alongside ``error`` and ``message``. ``retry_after`` (seconds)
@@ -2232,14 +2237,20 @@ class DeckService:
             raise DeckError("not_found", "No such proposal for your account.")
         if row["state"] == "applied":
             raise DeckError("already_applied", "This proposal was already applied; nothing was sent again.")
+        # R-142, structural: only the review page's own form passes REVIEW_PAGE, and an account
+        # action (kind "action") is refused for every other caller, whichever route it came by.
+        review_page = via == REVIEW_PAGE
+        if review_page:
+            via = "browser"  # otherwise the review page is an ordinary browser apply
         if archidekt_backup is False and via == "browser":
             row["archidekt_backup"] = False
         creator = row.get("created_by_client")
         # "mcp" is the assistant's own apply_proposal call: allowed only when this member's
         # approval mode (modes.py) lets the assistant apply a proposal of this risk itself.
         # "app" is the member's press on the in-chat card, gated by its one-time code
-        # (approve.py); "browser" is the review page; "auto" is never a caller's choice.
-        if via != "browser" and row.get("kind") == "action":
+        # (approve.py); "browser" is a member's own page (hand edits, the JSON API with a
+        # session); REVIEW_PAGE is the review page's form; "auto" is never a caller's choice.
+        if not review_page and row.get("kind") == "action":
             # R-142: an Archidekt account action (social, folder, delete deck) is applied only by
             # the member's own press on the signed-in review page, whatever the mode. Not the
             # assistant's apply_proposal, and not the in-chat card either: the card's press runs
