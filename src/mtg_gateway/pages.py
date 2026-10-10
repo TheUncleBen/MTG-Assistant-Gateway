@@ -23,7 +23,7 @@ from . import app_signin, link_disclosure, modes
 from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
 from .avatars import initials_svg
 from .clickguard import form_stamp, guarded_form, submitted_too_soon
-from .decks import DeckError, current_client, row_label, row_line
+from .decks import REVIEW_PAGE, DeckError, current_client, row_label, row_line
 from .theme import (
     LAYOUT_COOKIE,
     THEME_COOKIE,
@@ -502,7 +502,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             if action == "reject":
                 state.decks.reject(sub, pid)
             else:
-                result = await state.decks.apply(sub, pid, via="browser")
+                result = await state.decks.apply(sub, pid, via=REVIEW_PAGE)  # R-142: the one path
         except DeckError as exc:
             # Only a code goes in the URL; _notice maps it to fixed text, so a crafted link cannot
             # put words of its choosing in the page's error box. Failure details are in the result.
