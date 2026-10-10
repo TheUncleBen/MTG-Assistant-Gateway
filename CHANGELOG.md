@@ -7,7 +7,7 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
-## [0.7.14] - unreleased
+## [0.7.14] - 2026-10-10
 
 ### Added
 
@@ -19,6 +19,30 @@ with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
   play is named in the report, never dropped silently. Turn it on with
   `FORGE_REPLICAS=1`, `FORGE_NODE` and `MTG_FORGE_URL` ([DEPLOY.md](docs/DEPLOY.md));
   nothing changes for an install that leaves it off.
+- **Card coverage: 99.69%.** Forge 2.0.15 can play 32,793 of the 32,895 cards
+  that are legal in at least one format. Every image build measures this
+  again and fails below 99.5%. Forge doesn't have the other 102 yet: mostly
+  Unfinity sticker and Attraction cards, plus a few Arena-only Alchemy cards.
+  Reports name them.
+- **Report details.** A report shows the Forge games, each deck's win rate
+  with a 95% range, and the cards Forge could not play.
+  - A game that hits the time limit (`FORGE_GAME_SECONDS`, default 10
+    minutes) counts as a draw.
+  - A seed makes a run repeatable.
+  - To compare two decks, report each one with the same seed.
+  - Each member can have one Forge run going at a time.
+- **Forge updates.** A weekly check opens an issue when Forge publishes a new
+  release, so the image follows Forge without anyone maintaining card data.
+
+### Known gaps
+
+- Opponents are the three newest Commander precons Forge can fully play.
+  They aren't chosen by power bracket yet.
+- There is no test over a large set of real decks, and no scenario check of
+  how individual cards behave in Forge, yet.
+- Speed and memory were measured on a GitHub arm64 runner, not on a
+  Raspberry Pi: a four-player game took 21 to 39 s and peaked at about
+  790 MiB. Pi numbers come from the owner's first deployment.
 
 ## [0.7.13] - 2026-10-10
 
