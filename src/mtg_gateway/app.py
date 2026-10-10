@@ -79,6 +79,7 @@ from .config import Settings
 from .db import Database
 from .decklist import DecklistError, ListCard, clean_text, parse_decklist, to_text
 from .decks import DeckError, DeckService, _clean_deck_id, current_client, deck_to_text, scopes_allow_writes
+from .forge import ForgeClient
 from .guide import add_guide_routes
 from .home import add_home_routes
 from .idp_sweep import AuthentikSweep
@@ -522,6 +523,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
         except Exception:  # never keep the gateway from starting; the hourly round tries again
             logger.exception("sealing or purging stored Archidekt sessions failed")
         tasks = [asyncio.create_task(purge_loop(state.db, also=state.decks.purge_expired_links))]
+        if state.reports is not None:
+            state.reports.resume_forge_runs()  # Forge runs left unfinished by the last shutdown
         if state.scan is not None:
             state.scan.names.ensure()  # card-name catalog for typed suggestions, in the background
         if state.sweep is None:
@@ -1191,7 +1194,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "'this precon versus my build'. simulate=true adds a paired goldfish A/B from the research "
             "service (both decks played game for game under the same seeds; per-metric deltas with "
             "confidence intervals and significance), not stored. Does not touch Archidekt beyond reading "
-            "the decks. This is the one tool for deck differences, precon upgrades and A/B simulations."
+            "the decks. This is the one tool for deck differences, precon upgrades and A/B simulations. "
+            "For Forge games of two decks, run run_deck_report on each with the same options.seed."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )
@@ -1296,6 +1300,9 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "Reads the deck; changes nothing on Archidekt. A report of an unchanged deck within ten minutes "
             "returns the existing one (not when options are given). options passes the simulator's knobs "
             "through (annotations from goldfish_annotate, combos, seed, until_turn, opponents, mulligan). "
+            "When the gateway runs Forge, a stored report also gets a forge section: real games against "
+            "Commander precons, played in the background (read it again with get_deck_report until its "
+            "state is done), with the cards Forge could not play in not_played. "
             "This is the one tool that "
             "runs goldfish games of one deck; compare_decks with simulate=true is the paired A/B of two. "
             "goldfish_odds (draw odds) and goldfish_annotate (card roles) stay separate."
@@ -1479,7 +1486,13 @@ def build_mcp_server(state: AppState) -> MCPServer:
     add_browse_tools(server, state)
     add_home_routes(server, state)
     add_guide_routes(server, state)
-    state.reports = ReportService(state.db, state.decks, state.mf_proxy)
+    state.reports = ReportService(
+        state.db,
+        state.decks,
+        state.mf_proxy,
+        forge=ForgeClient(s.forge_url) if s.forge_url else None,
+        forge_games=s.forge_games,
+    )
     add_api_routes(server, state, state.reports)
     add_companion_routes(server, state, state.reports)
     add_admin_routes(server, state)

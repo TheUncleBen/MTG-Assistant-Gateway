@@ -23,6 +23,7 @@ from .archidekt import Deck
 from .db import Database, _like
 from .decklist import DecklistError, front_faces, parse_decklist, to_text
 from .decks import DeckError, DeckService, _clean_deck_id, current_client, deck_to_text
+from .forge import FINAL_STATES, ForgeClient, ForgeError, refresh, start_run
 from .mf_proxy import MysticForgeProxy, is_busy
 
 logger = logging.getLogger(__name__)
@@ -75,10 +76,17 @@ class ReportService:
         mf: MysticForgeProxy | None,
         *,
         min_interval: int = 600,
+        forge: ForgeClient | None = None,
+        forge_games: int = 10,
     ):
         self.db = db
         self.decks = decks
         self.mf = mf
+        self.forge = forge
+        self.forge_games = forge_games
+        self._forge_task: asyncio.Task[None] | None = None
+        # Held from the one-run-per-member check until the new run is saved (one gateway process).
+        self._forge_start_lock = asyncio.Lock()
         self.min_interval = min_interval
         # One run at a time per (member, deck): a request that arrives while one runs waits for
         # it and then reuses its report instead of starting another simulation.
@@ -91,6 +99,10 @@ class ReportService:
             # its own reports through the API. Older reports have none and only the browser may.
             if "created_by_client" not in {r["name"] for r in c.execute("PRAGMA table_info(reports)")}:
                 c.execute("ALTER TABLE reports ADD COLUMN created_by_client TEXT")
+            # The Forge run of a report (forge.py): its section, and its state for the refresher.
+            if "forge_json" not in {r["name"] for r in c.execute("PRAGMA table_info(reports)")}:
+                c.execute("ALTER TABLE reports ADD COLUMN forge_json TEXT")
+                c.execute("ALTER TABLE reports ADD COLUMN forge_state TEXT")
 
     # -- running --------------------------------------------------------------
     async def run(
@@ -245,7 +257,91 @@ class ReportService:
                 (sub, sub, MAX_REPORTS_PER_USER),
             )
         self.db.audit("report_created", sub=sub, detail={"report_id": rid, "deck_id": deck.id})
+        if simulate and self.forge is not None:
+            seed = options.get("seed")
+            async with self._forge_start_lock:
+                await self._start_or_skip_forge(sub, rid, deck, games, seed)
         return self.get(sub, rid)
+
+    async def _start_or_skip_forge(self, sub: str, rid: str, deck: Any, games: int, seed: Any) -> None:
+        if self._forge_running(sub, rid):
+            # One unfinished Forge run per member, so nobody can fill the shared engine's queue.
+            self._save_forge(
+                rid,
+                {
+                    "state": "skipped",
+                    "error": "Your previous Forge run is still going; this report has no Forge games. "
+                    "Run the report again once it has finished.",
+                },
+            )
+            return
+        await self._start_forge(
+            rid, deck_to_text(deck), deck.name, games, seed if isinstance(seed, int) else None
+        )
+
+    # -- Forge runs (background) ----------------------------------------------
+    async def _start_forge(self, rid: str, text: str, name: str, games: int, seed: int | None = None) -> None:
+        assert self.forge is not None
+        try:
+            section = await start_run(self.forge, text, name, games=min(games, self.forge_games), seed=seed)
+        except ForgeError as exc:
+            section = {"state": "failed", "error": str(exc), **({"detail": exc.detail} if exc.detail else {})}
+        except Exception:  # an unexpected reply must not turn a stored report into a tool error
+            logger.exception("starting a Forge run failed for %s", rid)
+            section = {"state": "failed", "error": "The simulation engine gave an unexpected answer."}
+        self._save_forge(rid, section)
+        self._ensure_forge_refresher()
+
+    def _forge_running(self, sub: str, rid: str) -> bool:
+        finals = tuple(FINAL_STATES)
+        with self.db._lock:
+            row = self.db._conn.execute(
+                "SELECT 1 FROM reports WHERE owner_sub = ? AND id != ? AND forge_state IS NOT NULL AND "
+                f"forge_state NOT IN ({','.join('?' * len(finals))}) LIMIT 1",
+                (sub, rid, *finals),
+            ).fetchone()
+        return row is not None
+
+    def resume_forge_runs(self) -> None:
+        """At startup: carry on refreshing runs a restart left unfinished."""
+        self._ensure_forge_refresher()
+
+    def _save_forge(self, rid: str, section: dict[str, Any]) -> None:
+        with self.db.tx() as c:
+            c.execute(
+                "UPDATE reports SET forge_json = ?, forge_state = ? WHERE id = ?",
+                (json.dumps(section), section.get("state"), rid),
+            )
+
+    def _ensure_forge_refresher(self) -> None:
+        """Keep one background task refreshing unfinished Forge runs until none is left. Also
+        started when a report with an unfinished run is read, so a gateway restart resumes it."""
+        if self.forge is None or (self._forge_task and not self._forge_task.done()):
+            return
+        try:
+            self._forge_task = asyncio.get_running_loop().create_task(self._refresh_forge_runs())
+        except RuntimeError:  # no running loop (a synchronous caller); the next async one starts it
+            pass
+
+    async def _refresh_forge_runs(self, interval: float = 15.0) -> None:
+        assert self.forge is not None
+        finals = tuple(FINAL_STATES)
+        while True:
+            with self.db._lock:
+                rows = self.db._conn.execute(
+                    "SELECT id, forge_json FROM reports WHERE forge_state IS NOT NULL AND forge_state NOT IN "
+                    f"({','.join('?' * len(finals))})",
+                    finals,
+                ).fetchall()
+            if not rows:
+                return
+            for row in rows:
+                try:
+                    section = await refresh(self.forge, json.loads(row["forge_json"]))
+                    self._save_forge(row["id"], section)
+                except Exception:  # one bad row must not stop the others
+                    logger.exception("forge refresh failed for %s", row["id"])
+            await asyncio.sleep(interval)
 
     async def ab(
         self,
@@ -367,6 +463,9 @@ class ReportService:
         out["stats"] = json.loads(d["stats_json"])
         out["goldfish"] = json.loads(d["goldfish_json"]) if d.get("goldfish_json") else None
         out["validation"] = json.loads(d["validation_json"]) if d.get("validation_json") else None
+        out["forge"] = json.loads(d["forge_json"]) if d.get("forge_json") else None
+        if out["forge"] and out["forge"].get("state") not in FINAL_STATES:
+            self._ensure_forge_refresher()
         return out
 
     def decks_seen(self, sub: str) -> dict[str, str]:

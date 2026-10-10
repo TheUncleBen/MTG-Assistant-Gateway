@@ -1,0 +1,47 @@
+name: Forge update check
+
+# Weekly: when Card-Forge publishes a release newer than the one docker/forge/Dockerfile pins, open
+# one issue naming it and its checksum, so a maintainer (or their assistant) bumps the pin. Forge's
+# new card scripts then arrive with a normal image build; nobody maintains card data by hand.
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Compare the pin with Forge's latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          pinned=$(sed -n 's/^ARG FORGE_VERSION=//p' docker/forge/Dockerfile | head -n1)
+          tag=$(gh api repos/Card-Forge/forge/releases/latest --jq .tag_name)
+          latest=${tag#forge-}
+          echo "pinned $pinned, latest $latest"
+          [[ "$latest" =~ ^[0-9]+(\.[0-9]+){1,3}$ ]] || { echo "unexpected tag: $tag"; exit 1; }
+          if [ "$latest" = "$pinned" ]; then exit 0; fi
+          title="Forge $latest is available (pinned: $pinned)"
+          if gh issue list -R "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq 'length' | grep -qv '^0$'; then
+            echo "issue already open"; exit 0
+          fi
+          asset="forge-installer-$latest.tar.bz2"
+          url=$(gh api repos/Card-Forge/forge/releases/latest --jq ".assets[] | select(.name == \"$asset\") | .browser_download_url")
+          test -n "$url" || { echo "release $tag has no $asset"; exit 1; }
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$asset" "$url"
+          sha=$(sha256sum "$RUNNER_TEMP/$asset" | cut -d' ' -f1)
+          gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --body "$(printf '%s\n' \
+            "Forge $latest has been released: $url" "" \
+            "To update, set these in docker/forge/Dockerfile and the default tag in the deploy files:" "" \
+            '```' "ARG FORGE_VERSION=$latest" "ARG FORGE_ASSET=$asset" "ARG FORGE_SHA256=$sha" "ARG FORGE_LOCAL=mag1" '```' "" \
+            "The image build re-runs the coverage gate and the arm64 smoke test." "" \
+            "(Checksum taken from the release download by this workflow.)")"
