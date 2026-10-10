@@ -237,12 +237,12 @@ def precon_decks(count: int = 3) -> list[str]:
 
 # ---------- simulation ----------
 
-def time_v(cmd: list[str], log: Path) -> dict:
+def time_v(cmd: list[str], log: Path, timeout: int | None = None) -> dict:
     t0 = time.monotonic()
     with log.open("w") as fh:
         try:
             p = subprocess.run(["/usr/bin/time", "-v", *cmd], cwd=FORGE, stdout=fh,
-                               stderr=subprocess.STDOUT, timeout=RUN_TIMEOUT)
+                               stderr=subprocess.STDOUT, timeout=timeout or RUN_TIMEOUT)
             rc = p.returncode
         except subprocess.TimeoutExpired:
             rc = "timeout"
@@ -264,6 +264,15 @@ def game_results(text: str) -> list[str]:
 
 
 def sim(label: str, xmx: str, decks: list[str], headless: bool, games: int) -> dict:
+    r = _sim(label, xmx, decks, headless, games)
+    tail = (OUT / f"sim-{label}.log").read_text("utf-8", "replace").splitlines()[-25:]
+    print(f"--- {label}: rc={r['rc']} wall={r['wall_s']}s games={r['games_reported']} "
+          f"rss={r['max_rss_mb']}MB s/game={r.get('s_per_game')}", flush=True)
+    print("    " + "\n    ".join(t[:300] for t in tail), flush=True)
+    return r
+
+
+def _sim(label: str, xmx: str, decks: list[str], headless: bool, games: int) -> dict:
     cmd = ["java", f"-Xmx{xmx}", "-jar", str(forge_jar()), "sim", "-D", str(DECKS),
            "-d", *decks, "-f", "Commander", "-n", str(games), "-q"]
     if headless:
@@ -271,7 +280,7 @@ def sim(label: str, xmx: str, decks: list[str], headless: bool, games: int) -> d
     else:
         cmd = ["xvfb-run", "-a", *cmd]
     log = OUT / f"sim-{label}.log"
-    r = time_v(cmd, log)
+    r = time_v(cmd, log, 600 if games == 1 else None)
     text = log.read_text("utf-8", "replace")
     results = game_results(text)
     r.update({"label": label, "xmx": xmx, "headless": headless, "games_requested": games,
@@ -289,16 +298,24 @@ def main() -> None:
     summary: dict = {"forge_dir": FORGE.name, "jar": forge_jar().name,
                      "arch": os.uname().machine, "cpus": os.cpu_count()}
 
-    usage = subprocess.run(["java", "-Djava.awt.headless=true", "-jar", str(forge_jar()), "sim"],
-                           cwd=FORGE, capture_output=True, text=True, timeout=600)
-    (OUT / "sim-usage.txt").write_text(usage.stdout + usage.stderr)
-    summary["sim_usage_mentions_seed"] = bool(re.search(r"seed", usage.stdout + usage.stderr, re.I))
+    try:
+        usage = subprocess.run(["java", "-Djava.awt.headless=true", "-jar", str(forge_jar()), "sim"],
+                               cwd=FORGE, capture_output=True, text=True, timeout=180)
+        utext = usage.stdout + usage.stderr
+    except subprocess.TimeoutExpired as exc:
+        utext = f"(no usage after 180 s) {exc.stdout or ''}{exc.stderr or ''}"
+    (OUT / "sim-usage.txt").write_text(str(utext))
+    print("SIM USAGE:\n" + str(utext)[-3000:], flush=True)
+    summary["sim_usage_mentions_seed"] = bool(re.search(r"seed", str(utext), re.I))
 
     try:
-        summary["coverage"] = coverage()
+        if os.environ.get("SPIKE_MODE") != "sim":
+            summary["coverage"] = coverage()
     except Exception as exc:  # keep going: the sim numbers matter as much
         summary["coverage"] = {"error": repr(exc)}
 
+    if os.environ.get("SPIKE_MODE") == "sim":
+        summary["coverage"] = "skipped"
     if os.environ.get("SPIKE_MODE") == "coverage":
         (OUT / "summary.json").write_text(json.dumps(summary, indent=1))
         (OUT / "summary.md").write_text("# Forge coverage\n\n" + json.dumps(summary["coverage"], indent=1) + "\n")
@@ -318,6 +335,7 @@ def main() -> None:
     if not headless:
         smoke2 = sim("smoke-xvfb", "2g", decks, headless=False, games=1)
         runs.append(smoke2)
+    print("OPPONENTS:", opponents, flush=True)
     for xmx in ("2g", "1g", "768m"):
         runs.append(sim(f"run-{xmx}", xmx, decks, headless=headless, games=GAMES))
     runs.append(sim("repeat-2g", "2g", decks, headless=headless, games=GAMES))

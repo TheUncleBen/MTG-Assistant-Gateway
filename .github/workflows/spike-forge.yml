@@ -36,7 +36,10 @@ jobs:
           find /tmp/forge -maxdepth 2 | head -60
       - name: Run the spike
         env:
-          SPIKE_MODE: coverage
+          SPIKE_MODE: sim
+          SPIKE_GAMES: "5"
+          SPIKE_RUN_TIMEOUT: "1500"
+          PYTHONUNBUFFERED: "1"
         run: |
           jar=$(find /tmp/forge -maxdepth 3 -name '*jar-with-dependencies.jar' | head -1)
           test -n "$jar"
