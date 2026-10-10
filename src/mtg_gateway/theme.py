@@ -24,6 +24,7 @@ from typing import Any
 from starlette.responses import HTMLResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from . import __version__, update_check
 from .mana import SPRITE
 
 THEME_COOKIE = "mtg_theme"
@@ -1030,6 +1031,8 @@ def render(
                 f"<button type='button' data-native='reload'>{icon('refresh')}Reload</button>"
                 f"<button type='button' data-native='openInBrowser'>{icon('link')}Open in browser</button>"
                 f"<button type='button' data-native='changeGateway'>{icon('settings')}Change gateway</button>"
+                f"<button type='button' data-native='checkForUpdates'>{icon('download')}Check for app updates"
+                "</button>"
                 if app
                 else ""
             )
@@ -1089,6 +1092,14 @@ def render(
     else:
         right = ""
     h1 = f"<h1>{html.escape(title)}</h1>" if heading else ""
+    # Admins hear about a newer gateway release on every page (update_check.py); the admin overview
+    # carries the steps, so it shows its own card instead of this line.
+    found = update_check.newer() if signed_in and admin else None
+    if found and "id='updates'" not in body:
+        h1 = (
+            f"<div class='notice warn' role='status'>Gateway {html.escape(found['version'])} is available "
+            f"(this one runs {html.escape(__version__)}). <a href='/admin#updates'>How to update</a></div>"
+        ) + h1
     classes = " ".join(
         c
         for c in (

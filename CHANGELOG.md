@@ -28,6 +28,21 @@ the first signed Android app, and less personal data for assistants.
   environment has its signing secrets, the release carries the signed APK
   and bundle, and the release notes show the signing certificate's SHA-256
   ([ANDROID.md](docs/ANDROID.md)).
+- **The Android app updates itself.** It looks for a newer version in the
+  project's GitHub releases when it opens (at most twice a day) and from
+  **Check for app updates** in its menu. **Update** downloads the release's
+  APK, checks that it is this app signed with the same key, and installs it
+  over the one you have, keeping your settings and sign-in. Android asks once
+  to allow installs from the app; from Android 12 later updates may need no
+  tap. An app from before 0.7.11 was signed with a test key and has to be
+  uninstalled once, then installed from the gateway's `/app` page
+  ([ANDROID.md](docs/ANDROID.md#updates)).
+- **Admins hear about new gateway versions.** Twice a day the gateway asks
+  GitHub for the newest release. When it is newer, admins see a notice on
+  every page, and the admin overview shows the update steps for Portainer,
+  Swarm and docker compose. The gateway never updates itself.
+  `MTG_UPDATE_CHECK=false` turns the check off; nothing else changes for
+  existing deployments.
 - **The connector has its own icon, description and website.** The gateway
   tells apps that connect to it (MCP `serverInfo`) a description, the
   project's website and its icon, served from the gateway itself. Only

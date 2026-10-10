@@ -51,7 +51,9 @@ import java.io.ByteArrayInputStream
  * - a phone-camera scan panel with torch brightness, zoom and exposure ([CameraPanel]), laid over
  *   the /scan page so the page keeps running and reads each photo through [ScanGlue];
  * - file pickers (photo and CSV import) and downloads (CSV export, skill zip);
- * - a floating menu: scan, reload, open in browser, change gateway.
+ * - a floating menu: scan, reload, open in browser, change gateway, check for app updates;
+ * - the app's own updates from the project's GitHub releases ([Updater]): a bar offers a newer
+ *   version, one tap installs it over this one.
  *
  * Navigation policy ([NavPolicy]): pages on the gateway's origin, and on the one identity
  * provider the gateway advertises (`/.well-known/mtg-gateway`; for an older gateway, the one its
@@ -112,6 +114,12 @@ class MainActivity : ComponentActivity() {
     private lateinit var fab: ImageButton
     /** The error box's Retry goes to the gateway's home page instead of reloading a refused page. */
     private var retryHome = false
+    private lateinit var updater: Updater
+    private lateinit var updateBar: View
+    private lateinit var updateText: TextView
+    private lateinit var updateNow: Button
+    private lateinit var updateLater: Button
+    private var updateOffer: AppUpdate.Offer? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -142,6 +150,7 @@ class MainActivity : ComponentActivity() {
         fab = findViewById(R.id.fab)
         fab.setOnClickListener { showMenu(it) }
         fab.visibility = View.GONE // shown by syncFab over pages that are not the gateway's
+        setUpUpdates()
         configureWebView()
         // A link is consumed once: after a restore the saved page wins, not the old intent.
         val signInCode = takeSignInCode(intent)
@@ -206,6 +215,37 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // -- app updates --------------------------------------------------------
+
+    private fun setUpUpdates() {
+        updateBar = findViewById(R.id.update_bar)
+        updateText = findViewById(R.id.update_text)
+        updateNow = findViewById(R.id.update_now)
+        updateLater = findViewById(R.id.update_later)
+        updateLater.setOnClickListener { updateBar.visibility = View.GONE } // asked again at the next check
+        updateNow.setOnClickListener { updateOffer?.let(updater::install) }
+        updater = Updater(this, object : Updater.Ui {
+            override fun showOffer(offer: AppUpdate.Offer) {
+                updateOffer = offer
+                updateText.text = getString(R.string.update_available, offer.version)
+                updateNow.visibility = View.VISIBLE
+                updateLater.visibility = View.VISIBLE
+                updateBar.visibility = View.VISIBLE
+            }
+
+            override fun showWorking(text: String) {
+                updateText.text = text
+                updateNow.visibility = View.GONE
+                updateLater.visibility = View.GONE
+                updateBar.visibility = View.VISIBLE
+            }
+
+            override fun hideOffer() {
+                updateBar.visibility = View.GONE
+            }
+        })
+    }
+
     // -- menu ---------------------------------------------------------------
 
     private fun showMenu(anchor: View) {
@@ -220,6 +260,7 @@ class MainActivity : ComponentActivity() {
                     startActivity(Intent(this, SetupActivity::class.java))
                     finish()
                 }
+                R.id.menu_update -> updater.check(manual = true)
             }
             true
         }
@@ -614,6 +655,7 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         web.onResume()
         camera?.resume()
+        if (this::updater.isInitialized) updater.checkIfDue()
     }
 
     override fun onDestroy() {
@@ -846,6 +888,9 @@ class MainActivity : ComponentActivity() {
 
         @JavascriptInterface
         fun openInBrowser() = onGatewayPage { openExternal(Uri.parse(web.url ?: origin)) }
+
+        @JavascriptInterface
+        fun checkForUpdates() = onGatewayPage { updater.check(manual = true) }
 
         @JavascriptInterface
         fun changeGateway() = onGatewayPage {

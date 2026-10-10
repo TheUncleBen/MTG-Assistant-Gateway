@@ -462,7 +462,7 @@ async def test_android_app_gets_the_app_layout(stack: Stack) -> None:
         assert app.status_code == 200
         assert "<footer class='site'>" not in app.text
         assert re.search(r"<body class='[^']*\bapp\b", app.text)
-        for action in ("openCamera", "reload", "openInBrowser", "changeGateway"):
+        for action in ("openCamera", "reload", "openInBrowser", "changeGateway", "checkForUpdates"):
             assert f"data-native='{action}'" in app.text, action
         assert (
             "href='/app'" not in app.text[app.text.index("<nav class='user'") : app.text.index("</header>")]
