@@ -132,3 +132,10 @@ options, the paired A/B, rules text and Archidekt import text on a deck read,
 structural checks in the statistics, and the precon-style summary in the
 comparison so that this holds; 0.7.3 folded the separate own-deck reader into
 `get_deck` and the separate profile tool into `search_decks`).
+
+## D. Parked
+
+- **Moxfield import by link** (parked 2026-10-10, 0.7.19). Moxfield has no public API, and requests
+  to it were refused from the build environment, so a link import could not be built or
+  checked. A Moxfield export pasted as text imports today (New deck, the deck editor's paste
+  box, or the assistant's `parse_decklist`).

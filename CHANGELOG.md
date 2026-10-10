@@ -17,6 +17,10 @@ with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
   app that let the model press the card still could not act for you. Other proposals keep their
   in-chat Approve card.
 
+### Parked
+- Moxfield import by link: Moxfield has no public API and requests to it were refused from
+  the build environment, so it is not built. A Moxfield export pasted as text imports today.
+
 ## [0.7.18] - 2026-10-10
 
 More of the Archidekt deck page: new views, your own stack order, editing several cards at once and
