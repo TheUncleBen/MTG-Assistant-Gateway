@@ -4,8 +4,9 @@ import android.content.Context
 import android.content.SharedPreferences
 
 /**
- * What the app keeps: which gateway to open, the sign-in origin that gateway advertised, and the
- * verifier of a browser sign-in in progress ([BrowserSignIn]).
+ * What the app keeps: which gateway to open, the sign-in origin that gateway advertised, the
+ * verifier of a browser sign-in in progress ([BrowserSignIn]), and when it last looked for an app
+ * update ([Updater]).
  */
 class Prefs(context: Context) {
     private val p: SharedPreferences = context.getSharedPreferences("mtgassistant", Context.MODE_PRIVATE)
@@ -42,6 +43,13 @@ class Prefs(context: Context) {
         return if (forGateway == gateway && verifier != null && now >= at && now - at <= BrowserSignIn.MAX_AGE_MS) verifier else null
     }
 
+    /** When the last update check finished (epoch ms), 0 for never. */
+    var lastUpdateCheck: Long
+        get() = p.getLong(KEY_UPDATE_CHECK, 0L)
+        set(value) {
+            p.edit().putLong(KEY_UPDATE_CHECK, value).apply()
+        }
+
     companion object {
         private const val KEY_ORIGIN = "gateway_origin"
         private const val KEY_PROVIDER = "idp_origin"
@@ -49,5 +57,6 @@ class Prefs(context: Context) {
         private const val KEY_SIGNIN_FOR = "signin_gateway"
         private const val KEY_SIGNIN_VERIFIER = "signin_verifier"
         private const val KEY_SIGNIN_AT = "signin_started_at"
+        private const val KEY_UPDATE_CHECK = "update_checked_at"
     }
 }

@@ -21,6 +21,14 @@ val versionCodeFromFile = major * 1_000_000 + minor * 1_000 + patch
 // default, claims nothing and works with any gateway address typed at first launch.
 val appLinksHost: String = (findProperty("appLinksHost") as String?)?.trim().orEmpty()
 
+// App updates (Updater.kt): the GitHub repository whose releases the app installs updates from,
+// as owner/name. -PupdateRepo= (or UPDATE_REPO for scripts/build.sh) points a fork at its own
+// releases; an empty value builds an app that never looks for updates.
+val updateRepo: String = ((findProperty("updateRepo") as String?) ?: "TheUncleBen/MTG-Assistant-Gateway").trim()
+require(updateRepo.isEmpty() || Regex("^[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}$").matches(updateRepo)) {
+    "updateRepo must be owner/name, got '$updateRepo'"
+}
+
 android {
     namespace = "local.mtgassistantgateway.app"
     compileSdk = 36
@@ -32,6 +40,7 @@ android {
         targetSdk = 36
         versionCode = versionCodeFromFile
         versionName = versionNameFromFile
+        buildConfigField("String", "UPDATE_REPO", "\"$updateRepo\"")
     }
 
     flavorDimensions += "links"
@@ -85,7 +94,7 @@ android {
         }
     }
 
-    buildFeatures { buildConfig = true } // BuildConfig.VERSION_NAME for the user agent and the bridge
+    buildFeatures { buildConfig = true } // BuildConfig.VERSION_NAME for the user agent and the bridge, UPDATE_REPO
 
     sourceSets["main"].java.srcDirs("src/main/kotlin")
     sourceSets["test"].java.srcDirs("src/test/kotlin")

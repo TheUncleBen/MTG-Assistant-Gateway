@@ -215,6 +215,8 @@ jobs:
           RELEASE_STORE_PASS: ${{ secrets.ANDROID_STORE_PASS }}
           RELEASE_KEY_PASS: ${{ secrets.ANDROID_KEY_PASS }}
           APP_LINKS_HOST: ${{ vars.ANDROID_APP_LINKS_HOST }}
+          # The app updates itself from this repository's releases, the ones this workflow publishes.
+          UPDATE_REPO: ${{ github.repository }}
         run: |
           set -eu
           if [ -z "$KEYSTORE_B64" ]; then

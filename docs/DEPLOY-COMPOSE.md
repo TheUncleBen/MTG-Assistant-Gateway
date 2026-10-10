@@ -103,6 +103,7 @@ Worth a look:
 | `MTG_APPROVAL_MODE_DEFAULT` | `manual` | Same as the code default: a person who has not chosen an approval mode has every change wait for their own press, on the card in the chat or the Apply button on the review page. Each person picks their own mode (`manual`, `semi`: small low-risk edits apply without asking, `auto`: every change) on their Account page |
 | `MTG_APPROVAL_MODE_MAX` | `auto` | No cap on what people may choose; `semi` or `manual` caps it. `MTG_AUTO_APPLY_MAX_ROWS` (`5`) is the row limit of a low-risk edit |
 | `MTG_APPLY_IN_CHAT` | `true` | The Approve/Reject card Claude and ChatGPT show next to a proposal (only its one-time code can apply) and the other cards in the chat: printings, recognised cards, a deck, the account. `false` removes them all, leaving the review page |
+| `MTG_UPDATE_CHECK` | `true` | Admins see a notice when a newer release is out, with the update steps on the admin overview. The gateway never updates itself. `false` turns the check off |
 
 Every other variable is explained in `.env` and in the
 [environment reference](DEPLOY.md#environment-reference). A setting only

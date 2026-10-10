@@ -107,6 +107,7 @@ from .skill_page import add_skill_routes
 from .social import add_social_routes
 from .theme import NoSniffMiddleware, ThemeMiddleware, render
 from .timing import TimingMiddleware
+from .update_check import UpdateChecker
 from .views import deck_brief, deck_out
 
 DeckView = Literal["text", "summary", "cards", "export", "full"]
@@ -530,6 +531,9 @@ def build_mcp_server(state: AppState) -> MCPServer:
             tasks.append(asyncio.create_task(state.sweep.loop()))
         elif state.sweep.why_off():
             logger.warning("%s", state.sweep.why_off())
+        updates = UpdateChecker(s.update_check)
+        if updates.enabled:
+            tasks.append(asyncio.create_task(updates.loop()))
         if s.backup_dir is not None:
             s.backup_dir.mkdir(parents=True, exist_ok=True)
             tasks.append(

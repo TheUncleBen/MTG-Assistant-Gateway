@@ -23,6 +23,7 @@ still the owner's test to report.
 ## Contents
 
 - [1. Getting the app](#1-getting-the-app)
+  - [Updates](#updates)
   - [Adding the app to a gateway](#adding-the-app-to-a-gateway)
 - [2. Using it](#2-using-it)
 - [3. Scanning with the phone camera](#3-scanning-with-the-phone-camera)
@@ -66,10 +67,49 @@ download button. Then:
    address answers as a gateway, saves it, and opens the site. Sign-in then
    opens in your phone's browser ([Sign-in](#2-using-it) below).
 
-**Updates** are the same download again: install the newer file over the old
-one. Settings and sign-in are kept as long as the gateway signs releases with
-the same key ([section 8](#8-signing-your-release-key)). **Change gateway** in
-the app's menu (the round button, bottom right) brings the address screen back.
+**Updates** come to the app by themselves ([Updates](#updates) below): when a
+newer version is out, a bar at the top offers it and **Update** installs it over
+the one you have, keeping your settings and sign-in. **Change gateway** in the
+app's menu (the round button, bottom right) brings the address screen back.
+
+### Updates
+
+The app looks for a newer version of itself in the project's
+[GitHub releases](https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases):
+when it opens, at most twice a day, and when you tap **Check for app updates**
+(in the account menu's **App** section, or the round button's menu). When there
+is one, a bar at the top says **Version x.y.z of the app is available**:
+
+1. Tap **Update**. The app downloads the release's
+   `mtg-assistant-gateway-release.apk` and checks it before installing anything:
+   it must be this app (the same package ID), the version the release names,
+   and signed with the same certificate as the app you have. If any of that
+   fails, nothing is installed and the app says why.
+2. The first time, Android asks you to allow installs from MTG Assistant
+   Gateway ("Install unknown apps"). Allow it, go back, and confirm.
+3. Android installs the update over the app and closes it. Open the app again
+   from its icon. Your gateway address and sign-in are kept.
+
+From Android 12, after that first permission, Android may install later
+updates without asking again, because the app is updating itself
+(`PackageInstaller.SessionParams.setRequireUserAction`). Android still makes
+that call: on some phones and versions it asks every time, and the app shows
+its confirmation when it does. **Later** hides the bar until the next check.
+
+What it sends: one request to GitHub's public releases API without any
+account, cookie or gateway address, and the download from GitHub. Nothing goes
+to your gateway.
+
+**Moving from a test build.** Builds before 0.7.11 were signed with a test
+key, and the release key is different. Android refuses to install an update
+signed with another key, so an app from before 0.7.11 can't update itself to
+it: uninstall it once, then install 0.7.11 from your gateway's `/app` page (and
+type the gateway address again). Every later version updates in place.
+
+A fork or a self-built app looks at the repository it was built for:
+`UPDATE_REPO=owner/name` for `android/scripts/build.sh` (CI sets it to the
+repository it runs in), or `UPDATE_REPO=` (empty) for an app that never looks.
+A release signed with a different key than the installed app is never offered.
 
 If your gateway's `/app` page says there is no app file, the gateway's image
 was built without one: the release build only adds the app when the
@@ -286,9 +326,11 @@ Nothing here costs money or needs an account with anyone:
   under a free and open-source licence, and this project's PolyForm
   Noncommercial licence isn't one. Verify against F-Droid's inclusion policy
   before relying on that.
-- **Obtainium** (a free app that watches a URL for new APKs) can track the
-  project's GitHub releases page once the repository is public. It can't track a
-  gateway's `/app` page, because that page needs the gateway sign-in.
+- **Updates in the app.** The app updates itself from the GitHub releases
+  ([Updates](#updates)), so after the first install nobody downloads it by hand.
+- **Obtainium** (a free app that watches a URL for new APKs) can also track the
+  project's GitHub releases page. It can't track a gateway's `/app` page,
+  because that page needs the gateway sign-in.
 
 ## 7. Building the app
 
@@ -542,10 +584,13 @@ screen is shown without a prefill, so a link can't pick your gateway for you.
 
 ## 13. Privacy and security notes
 
-- The app has no server of its own and no analytics. It stores one setting,
-  the gateway address. It asks for two permissions, internet and camera; the
+- The app has no server of its own and no analytics. It stores the gateway
+  address and when it last looked for an update. It asks for internet and
+  camera, and for the two permissions that let it install its own updates
+  (`REQUEST_INSTALL_PACKAGES`, which Android grants only after you allow
+  installs from this app, and `UPDATE_PACKAGES_WITHOUT_USER_ACTION`); the
   network-state permission one of its libraries declares is removed from the
-  manifest. Sign-in cookies live in the system WebView's cookie store
+  manifest. The update check talks to GitHub only ([Updates](#updates)). Sign-in cookies live in the system WebView's cookie store
   for this app only. None of it is backed up or copied to a new phone: backup
   is off, and from Android 12 the data-extraction rules also exclude everything
   from cloud backup and device-to-device transfer, so a new phone signs in

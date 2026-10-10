@@ -20,6 +20,7 @@ from urllib.parse import parse_qs, quote
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
+from . import update_check
 from .decks import ADMIN_CLIENT, actor_label, current_client
 from .pages import BROWSER_CLIENT_ID, _csrf, _when, browser_session, login_redirect, read_limited
 from .theme import render
@@ -357,6 +358,7 @@ def system_data(state: Any) -> dict[str, Any]:
         if backup_mod.last_run.get("ok") is False:
             out["last_backup_error"] = backup_mod.last_run.get("error")
             out["last_backup_error_at"] = backup_mod.last_run.get("at")
+    out["updates"] = update_check.status()
     # The research service as the health check last found it (Docker probes /healthz regularly).
     proxy = getattr(state, "mf_proxy", None)
     if proxy is None:
@@ -382,6 +384,54 @@ def system_data(state: Any) -> dict[str, Any]:
             "calls_per_member_per_10_min": getattr(settings, "archidekt_calls_per_10_min", None),
         }
     return out
+
+
+def _updates_card(u: dict[str, Any]) -> str:
+    """Whether a newer gateway release is out (update_check.py) and how to move to it."""
+    found = update_check.newer()
+    if u["check"] == "off":
+        state = "off (MTG_UPDATE_CHECK=false)"
+    elif u.get("error"):
+        state = f"last check failed ({u['error']}), trying again within the hour"
+    elif u.get("latest"):
+        state = f"newest release {u['latest']}, checked {_when(u['checked_at'])}"
+    else:
+        state = "not checked yet (the first check runs a minute after start)"
+    head = (
+        f"<div class='notice warn'>Version {html.escape(found['version'])} is available; this gateway "
+        f"runs {html.escape(u['running'])}. Read <a href='{html.escape(found['url'])}' rel='noopener'>its "
+        "release notes</a> first: they say when a release needs a settings change.</div>"
+        if found
+        else ""
+    )
+    tag = html.escape(found["version"]) if found else "&lt;new version&gt;"
+    steps = (
+        "<details><summary>How to update</summary>"
+        "<p>The gateway never updates itself. Take a backup first; it upgrades its database on start, "
+        "and going back means restoring that backup (docs/OPERATIONS.md, Restart or update).</p>"
+        "<p><strong>Portainer (Swarm stack)</strong>: Stacks, your stack, Editor. If "
+        f"<code>MTG_TAG</code> is a version number, change it to <code>{tag}</code> (leave "
+        "<code>latest</code> as it is). Then <strong>Update the stack</strong> with <strong>Re-pull "
+        "image</strong> on.</p>"
+        "<p><strong>Swarm without Portainer</strong>: set <code>MTG_TAG</code> in your variables "
+        "file, load it into the shell as in docs/DEPLOY.md, then run "
+        "<code>docker stack deploy --with-registry-auth -c deploy/portainer-stack.yml mtg</code> "
+        "again (your stack's name in place of <code>mtg</code>).</p>"
+        "<p><strong>docker compose</strong>: in the folder with <code>docker-compose.yml</code>, set "
+        f"<code>MTG_TAG={tag}</code> in <code>.env</code> if it is pinned, then run "
+        "<code>docker compose pull</code> and <code>docker compose up -d</code>.</p>"
+        "<p class='muted small'>Members of the Android app get the matching app update from the "
+        "project's GitHub release on their own.</p></details>"
+    )
+    return (
+        "<div class='card' id='updates'><h2>Updates</h2><dl class='meta'>"
+        + _stat("This gateway", u["running"])
+        + _stat("Update check", state)
+        + "</dl>"
+        + head
+        + steps
+        + "</div>"
+    )
 
 
 def _archidekt_stats(a: dict[str, Any] | None) -> str:
@@ -529,6 +579,7 @@ def _overview_body(state: Any) -> str:
         )
         + "</div>"
     )
+    cards.append(_updates_card(sysd["updates"]))
     rows = []
     for kind, by_day in d["series"].items():
         values = list(by_day.values())
