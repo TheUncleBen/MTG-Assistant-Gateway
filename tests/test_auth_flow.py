@@ -7,6 +7,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
+from mtg_gateway import __version__
 from tests.conftest import GATEWAY, FakeIdP, Harness, make_settings, running, sse_json
 
 
@@ -50,6 +51,19 @@ async def test_full_login_and_whoami(gw: Harness, idp: FakeIdP):
         {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}},
     )
     assert r.status_code == 200, r.text
+    # What an app lists about the connector: name, version, description, website and icons, the
+    # icons on the gateway's own origin (the MCP spec asks clients to refuse others).
+    info = sse_json(r)["result"]["serverInfo"]
+    assert info["version"] == __version__ and info["title"] == "MTG Assistant Gateway"
+    assert (
+        info["description"] and info["websiteUrl"] == "https://github.com/TheUncleBen/MTG-Assistant-Gateway"
+    )
+    assert {i["mimeType"] for i in info["icons"]} == {"image/png", "image/svg+xml"}
+    for icon in info["icons"]:
+        assert icon["src"].startswith(gw.settings.public_url + "/static/gateway-icon")
+        path = icon["src"][len(gw.settings.public_url) :]
+        got = await gw.http.get(path)
+        assert got.status_code == 200 and got.headers["content-type"].startswith(icon["mimeType"])
 
     r = await gw.mcp(tokens["access_token"], "tools/call", {"name": "whoami", "arguments": {}}, rid=2)
     assert r.status_code == 200, r.text
@@ -58,10 +72,39 @@ async def test_full_login_and_whoami(gw: Harness, idp: FakeIdP):
     result = msg["result"]
     assert result.get("isError") is not True, result
     sc = result["structuredContent"]
-    assert sc["sub"] == "user-1"
-    assert sc["email"] == "alice@example.test"
-    assert sc["groups"] == ["mtg-users"]
-    assert sc["client_id"] == client["client_id"]
+    # Minimum disclosure: a display name, the version and the account page; no email, groups,
+    # subject, client or scopes, in the structured result or in the text the model reads.
+    assert sc == {
+        "signed_in": True,
+        "name": "Alice",
+        "gateway_version": __version__,
+        "account_page": gw.settings.public_url + "/account",
+    }
+    text = json.dumps(result)
+    for secret in ("alice@example.test", "mtg-users", "user-1", client["client_id"], "scopes"):
+        assert secret not in text
+
+
+async def test_account_status_tells_the_assistant_only_what_it_needs(gw: Harness):
+    tokens = await gw.tokens_for(await gw.register())
+    r = await gw.mcp(tokens["access_token"], "tools/call", {"name": "account_status", "arguments": {}})
+    sc = sse_json(r)["result"]["structuredContent"]
+    assert set(sc) == {
+        "linked",
+        "archidekt_username",
+        "link_expires_at",
+        "writes_enabled",
+        "account_page",
+        "approval_mode",
+        "approval_mode_label",
+        "approval_mode_note",
+    }
+
+
+async def test_root_icons_are_served_without_sign_in(gw: Harness):
+    for path, kind in (("/favicon.ico", "image/x-icon"), ("/apple-touch-icon.png", "image/png")):
+        r = await gw.http.get(path)
+        assert r.status_code == 200 and r.headers["content-type"] == kind and r.content
 
 
 async def test_two_users_get_distinct_identities(gw: Harness, idp: FakeIdP):
@@ -71,8 +114,8 @@ async def test_two_users_get_distinct_identities(gw: Harness, idp: FakeIdP):
     t2 = await gw.tokens_for(client)
     r1 = sse_json(await gw.mcp(t1["access_token"], "tools/call", {"name": "whoami", "arguments": {}}))
     r2 = sse_json(await gw.mcp(t2["access_token"], "tools/call", {"name": "whoami", "arguments": {}}))
-    assert r1["result"]["structuredContent"]["sub"] == "user-1"
-    assert r2["result"]["structuredContent"]["sub"] == "user-2"
+    assert r1["result"]["structuredContent"]["name"] == "Alice"
+    assert r2["result"]["structuredContent"]["name"] == "Bob"
 
 
 async def test_code_is_single_use_and_pkce_checked(gw: Harness):
@@ -328,7 +371,7 @@ async def test_omitted_scope_gets_the_registered_default(gw: Harness):
     assert r.status_code == 200, r.text
     assert r.json()["scope"] == "mtg"
     r = await gw.mcp(r.json()["access_token"], "tools/call", {"name": "whoami", "arguments": {}}, rid=2)
-    assert sse_json(r)["result"]["structuredContent"]["scopes"] == ["mtg"]
+    assert sse_json(r)["result"]["structuredContent"]["signed_in"] is True
 
 
 async def test_refresh_reuse_revokes_the_successor_family(gw: Harness):
@@ -443,3 +486,18 @@ async def test_replayed_code_revokes_the_tokens_it_gave(gw: Harness):
     assert first.status_code == 200
     assert (await gw.token(client, **form)).status_code == 400
     assert (await gw.mcp(first.json()["access_token"], "tools/list")).status_code == 401
+
+
+async def test_account_page_shows_the_person_what_their_sign_in_shares(gw: Harness, idp: FakeIdP):
+    from tests.test_decks_and_proxy import Browser
+
+    idp.user = {**idp.user, "groups": ["mtg-users", "Other <Service> Admins"]}
+    b = Browser(gw)
+    try:
+        await b.login()
+        page = (await b.http.get("/account")).text
+        assert "What your sign-in shares" in page and "alice@example.test" in page
+        assert "Other &lt;Service&gt; Admins" in page and "<Service>" not in page
+        assert "rel='icon' href='/favicon.ico'" in page
+    finally:
+        await b.aclose()

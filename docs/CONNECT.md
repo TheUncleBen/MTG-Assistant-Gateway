@@ -165,8 +165,7 @@ published descriptions are accepted, see
 1. In a new chat, click the **+** button at the lower left of the message
    box (or type `/`), hover over **Connectors**, and switch **MTG Assistant Gateway**
    on.
-2. Ask: "Use the MTG Assistant Gateway to call whoami." You should see your own name
-   or email.
+2. Ask: "Use the MTG Assistant Gateway to call whoami." You should see your own name.
 
 A connector added on the web or desktop shows up in the Claude iOS and
 Android apps the next time you sign in there (verified). Anthropic calls

@@ -87,8 +87,8 @@ the group, wait a few seconds, and reload a gateway page as them.
   (GUIDs) or `name@domain` forms; use whatever yours actually sends.
 
 **To see what your provider sends**, leave `MTG_REQUIRED_GROUP` empty and set
-`MTG_ALLOW_ANY_IDP_USER=true` for a moment, connect an assistant, and ask it to call `whoami`. It shows the
-groups the gateway received. Put the right one in `MTG_REQUIRED_GROUP` and
+`MTG_ALLOW_ANY_IDP_USER=true` for a moment, sign in at `https://<gateway>/account` and open **What your
+sign-in shares**. It shows the groups the gateway received (assistants never see them). Put the right one in `MTG_REQUIRED_GROUP` and
 remove `MTG_ALLOW_ANY_IDP_USER`, and redeploy.
 
 ## Keycloak
@@ -165,7 +165,7 @@ remove `MTG_ALLOW_ANY_IDP_USER`, and redeploy.
   `groups` to the group that should get in. Only members of a scope-mapped
   group can sign in at all, so the scope map is already an access gate.
 - Kanidm signs ID tokens with ES256 by default, which the gateway accepts.
-- Group names may arrive in `name@domain` form. Check with `whoami`.
+- Group names may arrive in `name@domain` form. Check under **What your sign-in shares** on the account page.
 
 ## Microsoft Entra ID
 
