@@ -17,11 +17,14 @@ globalToolbar, floatingToolbar, footer and panel rules). The theme is chosen wit
 from __future__ import annotations
 
 import html
+from collections.abc import Iterable
 from contextvars import ContextVar
+from typing import Any
 
 from starlette.responses import HTMLResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from . import __version__, update_check
 from .mana import SPRITE
 
 THEME_COOKIE = "mtg_theme"
@@ -34,8 +37,12 @@ FEEDBACK_SCRIPT = "/static/feedback.js"
 # img-src 'self' is for the gateway's own files only (the select arrow, /static/chevron.svg); pages
 # that show card images add cards.scryfall.io in their own policy.
 DEFAULT_CSP = (
-    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; worker-src 'self'; img-src 'self'; "
-    "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+    # The top bar's search box is on every page: connect-src 'self' lets it ask the gateway for
+    # suggestions, and cards.scryfall.io is the small card picture each suggestion shows.
+    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; "
+    "manifest-src 'self'; worker-src 'self'; "
+    "connect-src 'self'; "
+    "img-src 'self' https://cards.scryfall.io; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
 )
 THEMES = ("system", "light", "dark")
 _theme: ContextVar[str] = ContextVar("mtg_theme", default="system")
@@ -193,7 +200,11 @@ details.dd > summary::-webkit-details-marker{display:none}
 .menu{z-index:30;min-width:200px;
   background:var(--surface-2);border-radius:var(--radius-panel);box-shadow:var(--shadow);padding:.25rem 0;
   display:flex;flex-direction:column}
-details.dd .menu{position:absolute;top:calc(100% + .25rem);right:0;max-width:calc(100vw - 16px)}
+/* An absolute panel hanging from a small button would shrink to its min-width and wrap even short
+   items ("Change printing"): it takes its content's width instead, capped so a long item still
+   wraps inside a phone's window (and a desktop menu never runs half the screen wide). */
+details.dd .menu{position:absolute;top:calc(100% + .25rem);right:0;width:max-content;
+  max-width:min(30rem,calc(100vw - 16px))}
 details.dd .menu.left{left:0;right:auto}
 /* Each item rule is written twice, plain and under details.dd: inside the top bar the plain
    .menu rule would lose to .topbar nav a (the bar's white text, 40px, bold) and the account
@@ -241,6 +252,8 @@ h2:not(:first-child){margin-top:1.25rem}
 h3{font-size:1.1rem;font-weight:700;margin:.5rem 0 .4rem}
 h4{font-size:1rem;font-weight:700;margin:0}
 p{margin:.5rem 0}
+details.identity{margin:.6rem 0}details.identity dd{overflow-wrap:anywhere}
+details.identity > summary{cursor:pointer;color:var(--text-muted);font-size:.86rem;padding:.3rem 0}
 .muted{color:var(--text-muted)} .small{font-size:.86rem} .b{font-weight:700} .orange{color:var(--orange-text)}
 ul.plain{list-style:none;margin:0;padding:0}
 
@@ -638,6 +651,10 @@ ul.decklist.skeleton>li{height:230px;list-style:none}
 .tabbar{display:none}
 .topbar .searchbtn{display:none}
 .tabbar details.more{position:relative}
+/* An open top-bar suggestion list or phone More sheet sits above the editor's save bar
+   (z-index 20), so a tap on a row can never land on Save changes underneath. */
+.topbar:focus-within{z-index:25}
+body .tabbar:has(details.more[open]){z-index:25}
 .tabbar details.more summary{list-style:none;cursor:pointer}
 .tabbar details.more summary::-webkit-details-marker{display:none}
 .tabbar details.more .menu.sheet{position:fixed;left:50%;transform:translateX(-50%);top:auto;
@@ -746,6 +763,46 @@ CSS = CSS.replace(
     + "body.app .topbar .brand .word{display:inline}\n",
 )
 
+# The top bar's search box (cards and decks, static/suggest.js in its site mode): in the bar from
+# 900 px and on the touch rail (600 to 899 px); under 600 px folded behind the magnifier
+# (static/sitesearch.js opens it under the bar). A narrow window with a mouse (600 to 899 px)
+# keeps its text links, Search among them, and has no room for the box.
+_TOPSEARCH_CSS = """
+.topbar .topsearch{display:none;margin:0;flex:0 1 20rem;min-width:9rem}
+.topbar .topsearch .box{position:relative;display:block}
+.topbar .topsearch .box > svg.i{position:absolute;left:.75rem;top:50%;transform:translateY(-50%);z-index:1;
+  color:var(--navbar-muted);pointer-events:none}
+.topbar .topsearch .suggest > input{height:36px;padding:0 .9rem 0 2.3rem;border-radius:18px;
+  background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.2);color:var(--navbar-text)}
+.topbar .topsearch .suggest > input::placeholder{color:var(--navbar-muted)}
+.topbar .topsearch .suggest > input:focus{background:var(--surface);color:var(--text);
+  border-color:var(--orange);outline-offset:1px}
+.topbar .topsearch .suggest > input:focus::placeholder{color:var(--text-muted)}
+.topbar .topsearch .box:focus-within > svg.i{color:var(--orange)}
+/* the list keeps the page's text colour and weight, not the bar's white bold */
+.topbar .topsearch .suggest-list{left:auto;right:0;width:min(27rem,calc(100vw - 2rem));
+  max-height:min(26rem,70vh);color:var(--text);font-weight:400;text-align:left}
+@media (min-width:600px) and (max-width:899.98px) and ((pointer:coarse) or (hover:none)){
+  .topbar .topsearch{display:block} }
+@media (min-width:600px){ body.app .topbar .topsearch{display:block} }
+@media (min-width:900px){ .topbar .topsearch{display:block} .topbar .searchbtn{display:none} }
+@media (max-width:599.98px){
+  body.search-open .topbar .topsearch{display:block;position:absolute;left:0;right:0;top:100%;
+    padding:.5rem max(1rem,env(safe-area-inset-right)) .6rem max(1rem,env(safe-area-inset-left));
+    background:var(--navbar-bg);box-shadow:var(--shadow);flex:none;min-width:0}
+  body.search-open .topbar .topsearch .suggest-list{left:0;right:0;width:auto}
+  body.search-open .topbar .searchbtn{color:var(--orange)} }
+/* the site search's groups in the suggestion list */
+.suggest-list li.head{padding:.5rem 1rem .2rem;font-size:.78rem;font-weight:700;text-transform:uppercase;
+  letter-spacing:.04em;color:var(--menu-head);cursor:default}
+.suggest-list li.head:hover{background:none}
+.suggest-list li.head:not(:first-child){border-top:1px solid var(--border-soft);margin-top:.25rem;
+  padding-top:.6rem}
+.suggest-list li.go{display:flex;align-items:center;gap:.6rem}
+.suggest-list li.go svg.i{color:var(--orange);flex:none}
+"""
+CSS += _TOPSEARCH_CSS
+
 
 # Own inline icons (simple 24-unit strokes). None is an Archidekt or Font Awesome path.
 ICONS = {
@@ -842,6 +899,33 @@ def theme_from_cookie(value: str | None) -> str:
 
 def layout_from_cookie(value: str | None) -> str:
     return value if value in LAYOUTS else "auto"
+
+
+# "View as" on the deck page, the deck list and the collection is remembered per browser the same
+# way as the theme: a cookie, so the page that comes back renders the chosen view at once (no
+# flash of the default, no script). The page sets it whenever the view is picked in its address
+# (the toolbar's form puts it there); a visit without one renders the remembered view.
+VIEW_COOKIE = "mtg_view_"
+VIEW_KINDS = ("deck", "decks", "collection")
+
+
+def view_choice(request: Any, kind: str, allowed: Iterable[str], default: str) -> tuple[str, bool]:
+    """The view to render for ``kind``: the address's ``view`` when it is a known one (and True:
+    remember it), else the remembered one, else ``default`` (and False)."""
+    allowed = tuple(allowed)
+    asked = request.query_params.get("view")
+    if asked in allowed:
+        return asked, asked != request.cookies.get(VIEW_COOKIE + kind)
+    saved = request.cookies.get(VIEW_COOKIE + kind)
+    return (saved if saved in allowed else default), False
+
+
+def remember_view(response: Any, kind: str, view: str, *, secure: bool) -> Any:
+    assert kind in VIEW_KINDS
+    response.set_cookie(
+        VIEW_COOKIE + kind, view, max_age=365 * 86400, path="/", secure=secure, httponly=True, samesite="lax"
+    )
+    return response
 
 
 def current_layout() -> str:
@@ -947,6 +1031,8 @@ def render(
                 f"<button type='button' data-native='reload'>{icon('refresh')}Reload</button>"
                 f"<button type='button' data-native='openInBrowser'>{icon('link')}Open in browser</button>"
                 f"<button type='button' data-native='changeGateway'>{icon('settings')}Change gateway</button>"
+                f"<button type='button' data-native='checkForUpdates'>{icon('download')}Check for app updates"
+                "</button>"
                 if app
                 else ""
             )
@@ -972,10 +1058,19 @@ def render(
             + "</nav>"
         )
         search_btn = (
-            f"<a class='icon-btn searchbtn' href='/search' aria-label='Search decks'"
+            f"<a class='icon-btn searchbtn' href='/search' aria-label='Search cards and decks'"
             f"{' aria-current=page' if cur == '/search' else ''}>{icon('search')}</a>"
         )
-        right = f"<nav class='user' aria-label='Account'>{search_btn}{account_menu}</nav>"
+        # The site search (cards and decks; cardsearch.py, static/suggest.js): Enter on plain text
+        # is the deck search, a card row opens /cards for it. Folded behind the magnifier on phones.
+        search_form = (
+            "<form class='topsearch' id='topsearch' role='search' method='get' action='/search'>"
+            "<label for='site-q' class='sr-only'>Search cards and decks</label>"
+            f"<span class='box'>{icon('search')}<input id='site-q' type='search' name='q' maxlength='100' "
+            "placeholder='Search cards and decks' data-suggest='cards' data-suggest-site='/cards?q=' "
+            "autocomplete='off' enterkeyhint='search'></span></form>"
+        )
+        right = f"{search_form}<nav class='user' aria-label='Account'>{search_btn}{account_menu}</nav>"
         more_links = list(MORE_LINKS) + ([("/admin", "Admin", "settings")] if admin else [])
         more_open = cur in {href for href, _l, _i in more_links} and cur != "/"
         tabbar = (
@@ -997,6 +1092,14 @@ def render(
     else:
         right = ""
     h1 = f"<h1>{html.escape(title)}</h1>" if heading else ""
+    # Admins hear about a newer gateway release on every page (update_check.py); the admin overview
+    # carries the steps, so it shows its own card instead of this line.
+    found = update_check.newer() if signed_in and admin else None
+    if found and "id='updates'" not in body:
+        h1 = (
+            f"<div class='notice warn' role='status'>Gateway {html.escape(found['version'])} is available "
+            f"(this one runs {html.escape(__version__)}). <a href='/admin#updates'>How to update</a></div>"
+        ) + h1
     classes = " ".join(
         c
         for c in (
@@ -1010,6 +1113,8 @@ def render(
     )
     viewport = "width=1100" if desktop else "width=device-width, initial-scale=1, viewport-fit=cover"
     main_cls = "wrap panes" if panes else "wrap"
+    # a page with its own web app (the scanner) names its own manifest; a second one would win
+    manifest = "" if "rel='manifest'" in head_extra else "<link rel='manifest' href='/app.webmanifest'>"
     doc = (
         f"<!doctype html><html lang='en'{f' data-theme={theme}' if theme != 'system' else ''}>"
         "<head><meta charset='utf-8'>"
@@ -1017,7 +1122,10 @@ def render(
         "<meta name='referrer' content='no-referrer'>"
         f"<meta name='color-scheme' content='{'dark light' if theme == 'system' else theme}'>"
         "<meta name='theme-color' content='#111111'>"
-        "<link rel='manifest' href='/app.webmanifest'>"
+        f"{manifest}"
+        "<link rel='icon' href='/favicon.ico' sizes='32x32'>"
+        "<link rel='icon' href='/static/gateway-icon.svg' type='image/svg+xml'>"
+        "<link rel='apple-touch-icon' href='/apple-touch-icon.png'>"
         f"<title>{html.escape(title)} · {html.escape(site)}</title><style>{CSS}</style>{head_extra}</head>"
         f"<body class='{classes}'>{SPRITE}"
         "<header class='topbar'><div class='wrap'><div class='left'>"
@@ -1040,7 +1148,8 @@ def render(
         + f"{tabbar}<script src='{FEEDBACK_SCRIPT}' defer></script>"
         "<script src='/static/mana.js' defer></script><script src='/static/suggest.js' defer></script>"
         "<script src='/static/select.js' defer></script>"
-        "</body></html>"
+        + ("<script src='/static/sitesearch.js' defer></script>" if signed_in else "")
+        + "</body></html>"
     )
     return HTMLResponse(
         doc,
