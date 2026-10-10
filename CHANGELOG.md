@@ -7,6 +7,56 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.11] - 2026-10-10
+
+Fixes from the owner's test round on 0.7.10, a search box in the top bar,
+and the first signed Android app.
+
+### Added
+
+- **Search from the top bar.** Every signed-in page has a search box (behind
+  the magnifier on phones). It suggests cards as you type and offers deck
+  searches by name or commander. The new card page (`/cards?q=`) shows
+  matching cards, opens them in the card viewer with their rules text, and
+  adds them to one of your decks through the usual approval path. The deck
+  search form is tidier.
+- **Admin page shows the removed-member clean-up.** It says whether the
+  clean-up is off (and why), hasn't run yet, last ran fine, or last failed
+  (with the reason, for example a group the token can't see). Each successful
+  run also writes one log line.
+- **Signed Android app.** When the repository's `android-release`
+  environment has its signing secrets, the release carries the signed APK
+  and bundle, and the release notes show the signing certificate's SHA-256
+  ([ANDROID.md](docs/ANDROID.md)).
+
+### Fixed
+
+- **Deck legality counts every format rule.** A Commander deck with 101 cards
+  no longer shows the green Legality chip. The chip, the stats panel and the
+  edit API now use the deck checks, deck size included.
+- **History matches what is still on Archidekt.** A backup copy deleted on
+  Archidekt leaves the "Backup copies on Archidekt" panel. Restore uses the
+  gateway's own snapshot, so it still works. A deck that no longer exists
+  offers no Restore, and restoring it fails with a clear message.
+- **Close editor asks in the page.** With unsaved edits, leaving the editor
+  (Close editor, a link or a menu form) asks in the save bar: Keep editing,
+  Discard changes or Save changes. The browser's "Leave site?" box is kept
+  only for closing the tab or reloading.
+- **Views are remembered.** The deck page's View as (text, stacks, grid) and
+  the grid or list view of My decks and the collection stay as you left them.
+- **A dropped connection no longer shows "You're offline" at once.** A page
+  load that fails at the network level is tried twice more first.
+- **The install steps for assistants are served as plain text**
+  (`/install.md`), since some assistants' web readers refuse
+  `text/markdown`.
+- **Sharing a link into the Android app** works from apps such as Discord
+  that send the link inside message text. Archidekt deck links open the
+  gateway's deck page; other links get a clear message.
+- Short menu items stay on one line; the editor's save bar no longer covers
+  the footer links at exactly 600 px wide; a menu-history browser test no
+  longer depends on timing.
+- Docs: the CI, test and release descriptions match what the workflows do.
+
 ## [0.7.10] - 2026-10-09
 
 The 0.7.9 code with a release build that cannot be stopped by Docker Hub's
