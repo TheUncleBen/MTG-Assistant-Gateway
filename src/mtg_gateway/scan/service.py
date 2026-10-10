@@ -785,6 +785,18 @@ class ScanService:
                 raise ScanError(exc.kind, str(exc)) from exc
             raise ScanError("unavailable", str(exc)) from exc
 
+    async def named_raw(self, name: str, *, owner: str | None = None) -> dict[str, Any]:
+        """The whole Scryfall object of one card by exact name (rules text included), through the
+        member's lookup slot and the shared pacer; not cached here (the card page keeps the text
+        it needs in its own bounded cache)."""
+        try:
+            with self._lookup_slot(owner):
+                return await self.scryfall.named_raw(name)
+        except ScryfallError as exc:
+            if exc.kind in ("unavailable", "rate_limited", "not_found"):
+                raise ScanError(exc.kind, str(exc)) from exc
+            raise ScanError("unavailable", str(exc)) from exc
+
     async def suggest(self, query: str, *, owner: str | None = None) -> list[str]:
         """Card names for typed text: from the in-memory catalog (names.py) when it is loaded,
         which costs no Scryfall call; otherwise Scryfall's autocomplete while it loads."""

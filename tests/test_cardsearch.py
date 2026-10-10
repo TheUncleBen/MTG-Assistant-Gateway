@@ -165,3 +165,110 @@ def test_clean_query(raw: str | None, expect: str) -> None:
     from mtg_gateway.cardsearch import clean_query
 
     assert clean_query(raw) == expect
+
+
+# -- the card text the viewer reads on demand (/cards/api/text) ---------------------------------
+def _named_calls(st: Stack) -> int:
+    return sum(1 for _m, u in st.sf.requests if "/cards/named" in u)
+
+
+async def test_card_text_needs_a_sign_in_and_a_name(stack: Stack) -> None:  # noqa: F811
+    r = await stack.h.http.get("/cards/api/text?name=Sol%20Ring")
+    assert r.status_code == 401 and r.json()["error"] == "unauthenticated"
+    b = await linked(stack)
+    try:
+        r = await b.http.get("/cards/api/text?name=s")
+        assert r.status_code == 400 and r.json()["error"] == "invalid"
+    finally:
+        await b.aclose()
+
+
+async def test_card_text_is_read_once_from_scryfall_and_kept(stack: Stack) -> None:  # noqa: F811
+    b = await linked(stack)
+    try:
+        n = _named_calls(stack)
+        r = await b.http.get("/cards/api/text", params={"name": "Sol Ring"})
+        assert r.status_code == 200, r.text
+        card = r.json()["card"]
+        assert card["name"] == "Sol Ring" and "{T}: Add {C}{C}" in card["text"]
+        assert "commander" in card["legal"].split(",") and card["faces"] == [] and card["pt"] == ""
+        assert card["artist"] and card["price"]
+        assert r.headers["cache-control"] == "private, max-age=3600"
+        assert _named_calls(stack) == n + 1
+        # the same card again (any spelling of the spaces and case): the cache answers
+        r = await b.http.get("/cards/api/text", params={"name": "  sol  RING "})
+        assert r.status_code == 200 and r.json()["card"]["name"] == "Sol Ring"
+        assert _named_calls(stack) == n + 1
+        # the persistent slim cache is untouched: nothing of the card went in there
+        assert not any(k.startswith("named:") for k in stack.h.app.state.gateway.scan.scryfall.cards._items)
+    finally:
+        await b.aclose()
+
+
+async def test_a_card_with_two_faces_carries_both(stack: Stack) -> None:  # noqa: F811
+    b = await linked(stack)
+    try:
+        r = await b.http.get("/cards/api/text", params={"name": "Fire // Ice"})
+        assert r.status_code == 200, r.text
+        card = r.json()["card"]
+        assert [f["name"] for f in card["faces"]] == ["Fire", "Ice"]
+        assert all(f["text"] and f["type"] == "Instant" and f["mana"] for f in card["faces"])
+        r = await b.http.get("/cards/api/text", params={"name": "Mountain Goat"})
+        assert r.status_code == 200 and r.json()["card"]["pt"] == "1/1"
+    finally:
+        await b.aclose()
+
+
+async def test_concurrent_openings_share_one_scryfall_request(stack: Stack) -> None:  # noqa: F811
+    import asyncio
+
+    b = await linked(stack)
+    try:
+        n = _named_calls(stack)
+        answers = await asyncio.gather(
+            *(b.http.get("/cards/api/text", params={"name": "Cultivate"}) for _ in range(4))
+        )
+        assert all(r.status_code == 200 for r in answers), [r.status_code for r in answers]
+        assert {r.json()["card"]["name"] for r in answers} == {"Cultivate"}
+        assert _named_calls(stack) == n + 1
+    finally:
+        await b.aclose()
+
+
+async def test_an_unknown_card_is_not_found_and_not_kept(stack: Stack) -> None:  # noqa: F811
+    b = await linked(stack)
+    try:
+        r = await b.http.get("/cards/api/text", params={"name": "No Such Card"})
+        assert r.status_code == 404 and r.json()["error"] == "not_found"
+        assert len(stack.h.app.state.gateway.card_texts) == 0
+    finally:
+        await b.aclose()
+
+
+async def test_text_cache_is_bounded_and_expires() -> None:
+    import asyncio
+
+    from mtg_gateway.cardsearch import TextCache
+
+    calls: list[str] = []
+
+    async def source(name: str) -> dict:
+        calls.append(name)
+        return {"name": name, "oracle_text": "x"}
+
+    cache = TextCache(ttl=0.05, max_items=2)
+    for name in ("A", "B", "C"):
+        assert (await cache.fetch(name, source))["name"] == name
+    assert len(cache) == 2 and cache.get("A") is None and cache.get("C")  # the oldest went
+    assert (await cache.fetch("B", source)) and calls == ["A", "B", "C"]  # B from the cache
+    await asyncio.sleep(0.06)
+    assert cache.get("B") is None  # expired
+    await cache.fetch("B", source)
+    assert calls == ["A", "B", "C", "B"]
+
+    async def failing(name: str) -> dict:
+        raise RuntimeError("down")
+
+    with pytest.raises(RuntimeError):
+        await cache.fetch("D", failing)
+    assert cache.get("D") is None and "d" not in cache._inflight

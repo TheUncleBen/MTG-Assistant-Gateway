@@ -14,13 +14,16 @@ The top bar's search box (theme.py, static/suggest.js in its site mode) brings p
 
 from __future__ import annotations
 
+import asyncio
 import html
 import logging
+import time
+from collections import OrderedDict
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlencode
 
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 
 from .deckpage import DECK_CSS, mana_html
 from .pages import _csrf, browser_session, login_redirect
@@ -99,8 +102,113 @@ CARDS_CSS = """
 """
 
 
+TEXT_TTL = 6 * 3600  # seconds a card's text is kept
+TEXT_MAX = 500  # cards kept at most (each a few hundred bytes)
+NO_STORE = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
+
+
 def _esc(v: Any) -> str:
     return html.escape("" if v is None else str(v), quote=True)
+
+
+def _face(f: dict[str, Any]) -> dict[str, str]:
+    pt = f"{f.get('power')}/{f.get('toughness')}" if f.get("power") or f.get("toughness") else ""
+    return {
+        "name": str(f.get("name") or ""),
+        "mana": str(f.get("mana_cost") or ""),
+        "type": str(f.get("type_line") or ""),
+        "text": str(f.get("oracle_text") or ""),
+        "pt": pt,
+        "loyalty": str(f.get("loyalty") or ""),
+        "flavor": str(f.get("flavor_text") or ""),
+    }
+
+
+def card_text(card: dict[str, Any]) -> dict[str, Any]:
+    """What the card viewer shows beyond the picture, from a whole Scryfall card: the rules text
+    (every face of a double-faced or split card), power and toughness or loyalty, flavour text,
+    artist, price, EDHREC rank and the formats it is legal in (the viewer's own field names)."""
+    faces = [_face(f) for f in card.get("card_faces") or [] if isinstance(f, dict)]
+    own = _face(card)
+    if len(faces) < 2 and faces:
+        own = {**own, **{k: v for k, v in faces[0].items() if v}}
+        faces = []
+    legal = ",".join(sorted(k for k, v in (card.get("legalities") or {}).items() if v == "legal"))
+    prices = card.get("prices") or {}
+    rank = card.get("edhrec_rank")
+    return {
+        "name": str(card.get("name") or ""),
+        "text": own["text"],
+        "pt": own["pt"],
+        "loyalty": own["loyalty"],
+        "flavor": own["flavor"],
+        "faces": faces,
+        "artist": str(card.get("artist") or ""),
+        "price": str(prices.get("usd") or ""),
+        "rank": str(rank) if isinstance(rank, int) else "",
+        "legal": legal,
+        "gc": bool(card.get("game_changer")),
+    }
+
+
+class TextCache:
+    """Card text by name: a small LRU with a time to live, one Scryfall request per card however
+    many viewers open it at once (waiters share the fetch in flight). Nothing persistent: the
+    scan service's day-long card cache stays slim (no rules text) as before."""
+
+    def __init__(self, *, ttl: float = TEXT_TTL, max_items: int = TEXT_MAX):
+        self.ttl = ttl
+        self.max_items = max_items
+        self._items: OrderedDict[str, tuple[float, dict[str, Any]]] = OrderedDict()
+        self._inflight: dict[str, asyncio.Future[dict[str, Any]]] = {}
+
+    @staticmethod
+    def key(name: str) -> str:
+        return " ".join(name.split()).casefold()
+
+    def get(self, name: str) -> dict[str, Any] | None:
+        k = self.key(name)
+        hit = self._items.get(k)
+        if hit is None:
+            return None
+        if hit[0] < time.monotonic():
+            self._items.pop(k, None)
+            return None
+        self._items.move_to_end(k)
+        return hit[1]
+
+    def put(self, name: str, text: dict[str, Any]) -> None:
+        k = self.key(name)
+        self._items[k] = (time.monotonic() + self.ttl, text)
+        self._items.move_to_end(k)
+        while len(self._items) > self.max_items:
+            self._items.popitem(last=False)
+
+    def __len__(self) -> int:
+        return len(self._items)
+
+    async def fetch(self, name: str, source: Any) -> dict[str, Any]:
+        """The text for ``name``: from the cache, from a fetch already in flight for it, or from
+        one new ``await source(name)`` (the whole card) that every concurrent caller shares."""
+        if (hit := self.get(name)) is not None:
+            return hit
+        k = self.key(name)
+        if (waiting := self._inflight.get(k)) is not None:
+            return await asyncio.shield(waiting)
+        fut: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
+        self._inflight[k] = fut
+        try:
+            text = card_text(await source(name))
+            self.put(name, text)
+            fut.set_result(text)
+            return text
+        except BaseException as exc:
+            fut.set_exception(exc)
+            raise
+        finally:
+            self._inflight.pop(k, None)
+            if fut.done() and not fut.cancelled():
+                fut.exception()  # mark it retrieved: the raiser reports it, waiters get their own
 
 
 def clean_query(raw: str | None) -> str:
@@ -160,6 +268,43 @@ def search_box_html(q: str) -> str:
 def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
     s = state.settings
     decks = state.decks
+    texts = TextCache()
+    state.card_texts = texts  # type: ignore[attr-defined]  # tests look at the cache
+
+    @server.custom_route("/cards/api/text", methods=["GET"], include_in_schema=False)
+    async def text_api(request: Request) -> Response:
+        """The rules text and the rest the viewer shows for one card (``name=``, exact), read
+        from Scryfall on demand through the paced client and kept for a while (TextCache)."""
+        sub, _sid = browser_session(state, request)
+        if not sub:
+            return JSONResponse({"ok": False, "error": "unauthenticated"}, 401, headers=NO_STORE)
+        name = clean_query(request.query_params.get("name"))
+        if len(name) < 2 or len(name) > MAX_QUERY:
+            return JSONResponse(
+                {"ok": False, "error": "invalid", "message": "name is required"}, 400, headers=NO_STORE
+            )
+        scan = state.scan
+        if scan is None:
+            return JSONResponse(
+                {"ok": False, "error": "unavailable", "message": "Card lookup is switched off."},
+                503,
+                headers=NO_STORE,
+            )
+
+        async def source(n: str) -> dict[str, Any]:
+            return await scan.named_raw(n, owner=sub)
+
+        try:
+            text = await texts.fetch(name, source)
+        except ScanError as exc:
+            status = {"not_found": 404, "rate_limited": 429, "busy": 429}.get(exc.kind, 503)
+            return JSONResponse(
+                {"ok": False, "error": exc.kind, "message": str(exc)}, status, headers=NO_STORE
+            )
+        return JSONResponse(
+            {"ok": True, "card": text},
+            headers={"Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff"},
+        )
 
     def page(title: str, body: str, *, sub: str, sid: str | None, status: int = 200) -> Response:
         user = state.db.get_user(sub) or {}
