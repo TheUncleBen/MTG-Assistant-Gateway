@@ -115,6 +115,7 @@ async def test_a_failed_lookup_is_reported_and_retried(monkeypatch) -> None:
 
 
 def test_the_off_switch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert make_settings(tmp_path).update_check is False  # the test harness never asks GitHub
     _env(tmp_path, monkeypatch)
     assert load_settings().update_check is True
     monkeypatch.setenv("MTG_UPDATE_CHECK", "false")

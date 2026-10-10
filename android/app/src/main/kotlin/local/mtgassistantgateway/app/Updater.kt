@@ -35,7 +35,8 @@ import java.security.MessageDigest
  *    (PackageInstaller.SessionParams.setRequireUserAction); Android still decides, and when it asks,
  *    [InstallResultReceiver] shows its confirmation. Android itself refuses an APK signed with another key.
  *
- * Nothing about the person or their gateway is sent: GitHub sees an app version in the User-Agent.
+ * Nothing about the person or their gateway is sent: GitHub sees an app version in the User-Agent
+ * and, like any website, the phone's IP address.
  */
 class Updater(private val activity: Activity, private val ui: Ui) {
     interface Ui {
@@ -66,9 +67,10 @@ class Updater(private val activity: Activity, private val ui: Ui) {
         if (busy) return
         busy = true
         Thread {
+            // Recorded whatever the outcome, so an unreachable GitHub is not asked again on every return to the app.
+            prefs.lastUpdateCheck = System.currentTimeMillis()
             val result: () -> Unit = try {
                 val found = latest(api)
-                prefs.lastUpdateCheck = System.currentTimeMillis()
                 when {
                     found == null -> ({ if (manual) toast(activity.getString(R.string.update_none, BuildConfig.VERSION_NAME)) })
                     !AppUpdate.sameSigner(installedCerts(), AppUpdate.metaCert(fetchText(found.meta.url, AppUpdate.MAX_META_BYTES))) ->
@@ -78,6 +80,8 @@ class Updater(private val activity: Activity, private val ui: Ui) {
             } catch (e: IOException) {
                 ({ if (manual) toast(activity.getString(R.string.update_check_failed)) })
             } catch (e: JSONException) {
+                ({ if (manual) toast(activity.getString(R.string.update_check_failed)) })
+            } catch (e: RuntimeException) { // an odd PackageManager answer must not crash the app
                 ({ if (manual) toast(activity.getString(R.string.update_check_failed)) })
             }
             main.post { busy = false; if (!activity.isDestroyed) result() }
@@ -97,10 +101,12 @@ class Updater(private val activity: Activity, private val ui: Ui) {
                 verify(apk, offer)
             } catch (e: IOException) {
                 activity.getString(R.string.update_download_failed)
+            } catch (e: RuntimeException) {
+                activity.getString(R.string.update_not_an_app)
             }
             if (problem != null) {
                 apk.delete()
-                main.post { busy = false; ui.hideOffer(); toast(problem) }
+                main.post { busy = false; if (!activity.isDestroyed) { ui.hideOffer(); toast(problem) } }
                 return@Thread
             }
             main.post { ui.showWorking(activity.getString(R.string.update_installing, offer.version)) }
@@ -109,15 +115,17 @@ class Updater(private val activity: Activity, private val ui: Ui) {
                 null
             } catch (e: IOException) {
                 activity.getString(R.string.update_install_failed, e.message ?: "")
-            } catch (e: SecurityException) {
+            } catch (e: RuntimeException) { // SecurityException included
                 activity.getString(R.string.update_install_failed, e.message ?: "")
             } finally {
                 apk.delete() // the session holds its own copy
             }
             main.post {
                 busy = false
-                ui.hideOffer()
-                toast(installProblem ?: activity.getString(R.string.update_handed_over))
+                if (!activity.isDestroyed) {
+                    ui.hideOffer()
+                    toast(installProblem ?: activity.getString(R.string.update_handed_over))
+                }
             }
         }.start()
     }
@@ -279,23 +287,20 @@ class Updater(private val activity: Activity, private val ui: Ui) {
 
     /**
      * PackageInstaller's answer. When Android wants the person to confirm (or to allow installs
-     * from this app first), it hands over its own confirmation screen, which is shown here. After a
-     * successful update Android restarts nothing: the app was closed by the update and opens again
-     * from its icon.
+     * from this app first), it hands over its own confirmation screen. That is shown at once while
+     * the app is in front; Android does not let an app in the background open a screen, so then it
+     * waits for the app to come back ([showPendingConfirmation]). After a successful update Android
+     * restarts nothing: the update closed the app and it opens again from its icon.
      */
     class InstallResultReceiver : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)) {
                 PackageInstaller.STATUS_PENDING_USER_ACTION -> {
-                    val confirm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
+                    val confirm = confirmation(context, intent) ?: return
+                    if (inFront) {
+                        launch(context, confirm)
                     } else {
-                        @Suppress("DEPRECATION") intent.getParcelableExtra(Intent.EXTRA_INTENT)
-                    } ?: return
-                    try {
-                        context.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                    } catch (e: RuntimeException) {
-                        Toast.makeText(context, R.string.update_confirm_failed, Toast.LENGTH_LONG).show()
+                        pendingConfirmation = confirm
                     }
                 }
                 PackageInstaller.STATUS_SUCCESS -> Unit
@@ -304,6 +309,46 @@ class Updater(private val activity: Activity, private val ui: Ui) {
                     val why = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE).orEmpty()
                     Toast.makeText(context, context.getString(R.string.update_install_failed, "$status $why".trim()), Toast.LENGTH_LONG).show()
                 }
+            }
+        }
+    }
+
+    companion object {
+        /** Whether MainActivity is resumed (set from its onResume/onPause). */
+        @Volatile var inFront = false
+        @Volatile private var pendingConfirmation: Intent? = null
+
+        /** Shows a confirmation Android asked for while the app was in the background. */
+        fun showPendingConfirmation(context: Context) {
+            val confirm = pendingConfirmation ?: return
+            pendingConfirmation = null
+            launch(context, confirm)
+        }
+
+        /**
+         * The confirmation screen PackageInstaller handed over, only if it belongs to a system app
+         * (the platform's installer), with any URI grants removed: this receiver only ever starts
+         * Android's own install confirmation.
+         */
+        private fun confirmation(context: Context, result: Intent): Intent? {
+            val confirm = if (Build.VERSION.SDK_INT >= 34) {
+                result.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
+            } else {
+                @Suppress("DEPRECATION") result.getParcelableExtra(Intent.EXTRA_INTENT)
+            } ?: return null
+            confirm.removeFlags(
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION,
+            )
+            val target = context.packageManager.resolveActivity(confirm, 0)?.activityInfo?.applicationInfo ?: return null
+            return if (target.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM != 0) confirm else null
+        }
+
+        private fun launch(context: Context, confirm: Intent) {
+            try {
+                context.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            } catch (e: RuntimeException) {
+                Toast.makeText(context, R.string.update_confirm_failed, Toast.LENGTH_LONG).show()
             }
         }
     }
