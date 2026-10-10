@@ -15,6 +15,7 @@ Small fixes to the Forge simulation from an independent gap review of 0.7.14.
 - Deleting a deck report now stops its unfinished Forge games (queued or running). Before, the
   games kept the engine busy, and deleting a report freed the "one unfinished Forge run per member"
   limit while its games still ran.
+  The same goes for old reports removed past the 200-per-member limit.
 - The report page's Forge section updates by itself while the games are queued or running (every
   15 seconds while the page is visible), instead of asking to reload the page.
 

@@ -16,7 +16,12 @@
     var fresh = doc.querySelector(".card.forge");
     var card = live();
     if (!fresh || !card) return false;
-    card.replaceWith(document.importNode(fresh, true));
+    // The card itself stays (it is the aria-live region, so screen readers announce the change);
+    // only its contents are swapped, and the live mark goes once the run has ended.
+    card.replaceChildren.apply(card, Array.prototype.map.call(fresh.childNodes, function (n) {
+      return document.importNode(n, true);
+    }));
+    if (!fresh.hasAttribute("data-forge-live")) card.removeAttribute("data-forge-live");
     var md = doc.getElementById("rep-md");
     var area = document.getElementById("rep-md");
     if (md && area) area.value = md.value;

@@ -294,3 +294,19 @@ async def test_forge_health_is_probed_once_and_reports_an_outage() -> None:
     fake.up = False
     client._health = (0.0, True)  # the cached answer has expired
     assert await client.healthy() is False and client._health[1] is False
+
+
+async def test_pruning_old_reports_cancels_their_unfinished_forge_runs(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    fake = FakeForge()
+    reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+    first = await reports.run("alice", "42", games=300, options={"seed": 1})
+    with db.tx() as c:  # make it the oldest report
+        c.execute("UPDATE reports SET taken_at = 1 WHERE id = ?", (first["report_id"],))
+    monkeypatch.setattr(reports_module, "MAX_REPORTS_PER_USER", 1)
+    await reports.run("alice", "42", games=300, options={"seed": 2})  # prunes the first report
+    await asyncio.gather(*reports._forge_cancels)
+    assert fake.cancelled == [first["forge"]["job_id"]]

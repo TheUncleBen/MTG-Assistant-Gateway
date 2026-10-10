@@ -252,11 +252,18 @@ class ReportService:
                 raise DeckError(
                     "not_found", "Your gateway data was deleted while the report ran; nothing was kept."
                 )
-            c.execute(
-                "DELETE FROM reports WHERE owner_sub = ? AND id NOT IN ("
-                "SELECT id FROM reports WHERE owner_sub = ? ORDER BY taken_at DESC, rowid DESC LIMIT ?)",
-                (sub, sub, MAX_REPORTS_PER_USER),
+            keep = (
+                "owner_sub = ? AND id NOT IN ("
+                "SELECT id FROM reports WHERE owner_sub = ? ORDER BY taken_at DESC, rowid DESC LIMIT ?)"
             )
+            limit = (sub, sub, MAX_REPORTS_PER_USER)
+            pruned = c.execute(
+                f"SELECT forge_json FROM reports WHERE {keep} AND forge_json IS NOT NULL", limit
+            )
+            pruned_forge = [json.loads(r["forge_json"]) for r in pruned.fetchall()]
+            c.execute(f"DELETE FROM reports WHERE {keep}", limit)
+        for section in pruned_forge:  # an unfinished run goes with its report, as in delete()
+            self._cancel_forge(section)
         self.db.audit("report_created", sub=sub, detail={"report_id": rid, "deck_id": deck.id})
         if simulate and self.forge is not None:
             seed = options.get("seed")

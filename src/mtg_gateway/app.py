@@ -1634,9 +1634,9 @@ def build_mcp_server(state: AppState) -> MCPServer:
         # the services' names would tell a stranger which project this is. The admin page's System
         # card shows each service.
         forge = state.reports.forge if state.reports is not None else None
-        down = (state.mf_proxy is not None and not await state.mf_proxy.healthy()) or (
-            forge is not None and not await forge.healthy()
-        )
+        probes = [svc.healthy() for svc in (state.mf_proxy, forge) if svc is not None]
+        # at the same time, so two slow services still answer within one probe's deadline
+        down = not all(await asyncio.gather(*probes))
         return JSONResponse({"status": "degraded" if down else "ok"})
 
     @server.custom_route(APP_CONFIG_PATH, methods=["GET"], include_in_schema=False)

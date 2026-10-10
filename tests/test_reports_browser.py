@@ -198,6 +198,8 @@ def test_forge_section_refreshes_itself_until_the_run_ends(server: Server) -> No
         page.wait_for_function("() => !document.querySelector('.card.forge[data-forge-live]')")
         text = page.locator(".card.forge").inner_text()
         assert "Games played: 2 of 2." in text and "running" not in text
+        # the card itself stayed, so it is still the live region screen readers announce
+        assert page.locator(".card.forge[aria-live=polite]").count() == 1
         assert page.evaluate("window.__same_page === true")
         assert "Games played: 2 of 2." in page.locator("#rep-md").input_value()  # Copy as Markdown too
         assert not errors, errors
