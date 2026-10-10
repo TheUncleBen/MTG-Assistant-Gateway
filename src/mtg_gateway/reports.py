@@ -85,6 +85,8 @@ class ReportService:
         self.forge = forge
         self.forge_games = forge_games
         self._forge_task: asyncio.Task[None] | None = None
+        # Held from the one-run-per-member check until the new run is saved (one gateway process).
+        self._forge_start_lock = asyncio.Lock()
         self.min_interval = min_interval
         # One run at a time per (member, deck): a request that arrives while one runs waits for
         # it and then reuses its report instead of starting another simulation.
@@ -257,21 +259,25 @@ class ReportService:
         self.db.audit("report_created", sub=sub, detail={"report_id": rid, "deck_id": deck.id})
         if simulate and self.forge is not None:
             seed = options.get("seed")
-            if self._forge_running(sub, rid):
-                # One unfinished Forge run per member, so nobody can fill the shared engine's queue.
-                self._save_forge(
-                    rid,
-                    {
-                        "state": "skipped",
-                        "error": "Your previous Forge run is still going; this report has no Forge games. "
-                        "Run the report again once it has finished.",
-                    },
-                )
-            else:
-                await self._start_forge(
-                    rid, deck_to_text(deck), deck.name, games, seed if isinstance(seed, int) else None
-                )
+            async with self._forge_start_lock:
+                await self._start_or_skip_forge(sub, rid, deck, games, seed)
         return self.get(sub, rid)
+
+    async def _start_or_skip_forge(self, sub: str, rid: str, deck: Any, games: int, seed: Any) -> None:
+        if self._forge_running(sub, rid):
+            # One unfinished Forge run per member, so nobody can fill the shared engine's queue.
+            self._save_forge(
+                rid,
+                {
+                    "state": "skipped",
+                    "error": "Your previous Forge run is still going; this report has no Forge games. "
+                    "Run the report again once it has finished.",
+                },
+            )
+            return
+        await self._start_forge(
+            rid, deck_to_text(deck), deck.name, games, seed if isinstance(seed, int) else None
+        )
 
     # -- Forge runs (background) ----------------------------------------------
     async def _start_forge(self, rid: str, text: str, name: str, games: int, seed: int | None = None) -> None:

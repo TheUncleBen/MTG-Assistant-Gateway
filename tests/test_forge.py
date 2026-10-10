@@ -10,6 +10,7 @@ from typing import Any
 
 import httpx
 
+from mtg_gateway import reports as reports_module
 from mtg_gateway.archidekt import parse_deck
 from mtg_gateway.db import Database
 from mtg_gateway.forge import ForgeClient, forge_deck, refresh, start_run, summarise, wilson
@@ -164,7 +165,7 @@ async def test_refresh_gives_up_on_an_unexpected_reply() -> None:
     assert (await refresh(client, old))["state"] == "lost"
 
 
-async def test_one_unfinished_forge_run_per_member(tmp_path: Path) -> None:
+async def test_one_unfinished_forge_run_per_member(tmp_path: Path, monkeypatch: Any) -> None:
     db = Database(tmp_path / "t.sqlite")
     db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
     fake = FakeForge()
@@ -178,6 +179,20 @@ async def test_one_unfinished_forge_run_per_member(tmp_path: Path) -> None:
     await asyncio.wait_for(reports._forge_task, timeout=20)
     third = await reports.run("alice", "42", games=300, options={"seed": 3})
     assert third["forge"]["state"] == "running" and len(fake.started) == 2
+    fake.finish(third["forge"]["job_id"], [1])
+    await asyncio.wait_for(reports._forge_task, timeout=20)
+    real_start = reports_module.start_run
+
+    async def slow_start(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        await asyncio.sleep(0.05)  # the engine's network round trips, so two reports overlap
+        return await real_start(*args, **kwargs)
+
+    monkeypatch.setattr(reports_module, "start_run", slow_start)
+    together = await asyncio.gather(
+        # two different decks: the same deck's concurrent runs already share one report
+        *(reports.run("alice", ref, games=300, options={"seed": 4}) for ref in ("42", "43"))
+    )
+    assert sorted(r["forge"]["state"] for r in together) == ["running", "skipped"]  # no race past the limit
 
 
 def test_report_page_and_markdown_show_forge_results() -> None:
