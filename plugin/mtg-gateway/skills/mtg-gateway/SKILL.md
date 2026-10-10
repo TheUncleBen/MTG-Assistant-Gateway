@@ -209,6 +209,9 @@ report again with `get_deck_report` until it is `done`.
 - A card that is legal in no format (joke, playtest or display cards) is
   never played by Forge: say it is not tournament-legal and explain it from
   its text.
+- To compare two decks on Forge, run `run_deck_report` on each with the same
+  `options.seed`: both then play the same precons (check `forge.seats`).
+  `compare_decks` with `simulate=true` is a goldfish A/B, not Forge games.
 
 ## Changing or creating a deck: propose, review, apply
 

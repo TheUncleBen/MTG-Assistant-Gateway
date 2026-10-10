@@ -12,7 +12,7 @@ import sys
 import urllib.request
 
 HEADERS = {"User-Agent": "MTG-Assistant-Gateway-CI/1.0", "Accept": "application/json"}
-COUNT = 12
+COUNT = 20
 
 
 def get(url: str) -> dict:

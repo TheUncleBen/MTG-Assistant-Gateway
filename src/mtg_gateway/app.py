@@ -1144,7 +1144,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "'this precon versus my build'. simulate=true adds a paired goldfish A/B from the research "
             "service (both decks played game for game under the same seeds; per-metric deltas with "
             "confidence intervals and significance), not stored. Does not touch Archidekt beyond reading "
-            "the decks. This is the one tool for deck differences, precon upgrades and A/B simulations."
+            "the decks. This is the one tool for deck differences, precon upgrades and A/B simulations. "
+            "For Forge games of two decks, run run_deck_report on each with the same options.seed."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
     )
@@ -1249,6 +1250,9 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "Reads the deck; changes nothing on Archidekt. A report of an unchanged deck within ten minutes "
             "returns the existing one (not when options are given). options passes the simulator's knobs "
             "through (annotations from goldfish_annotate, combos, seed, until_turn, opponents, mulligan). "
+            "When the gateway runs Forge, a stored report also gets a forge section: real games against "
+            "Commander precons, played in the background (read it again with get_deck_report until its "
+            "state is done), with the cards Forge could not play in not_played. "
             "This is the one tool that "
             "runs goldfish games of one deck; compare_decks with simulate=true is the paired A/B of two. "
             "goldfish_odds (draw odds) and goldfish_annotate (card roles) stay separate."

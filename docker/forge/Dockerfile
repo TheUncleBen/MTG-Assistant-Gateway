@@ -26,10 +26,10 @@ RUN test -n "$FORGE_URL" \
  && ls /opt/forge/forge-gui-desktop-*jar-with-dependencies.jar
 # scryfall-names.json is written by docker/forge/scryfall_names.py before the build (the image
 # workflow does this), so the image knows cards Forge lists under another printed name.
-COPY docker/forge/build_names.py docker/forge/forge_service.py docker/forge/scryfall-names.json \
-     docker/forge/precons.json /tmp/fb/
+COPY docker/forge/build_names.py docker/forge/filter_precons.py docker/forge/forge_service.py \
+     docker/forge/scryfall-names.json docker/forge/precons.json /tmp/fb/
 RUN cd /tmp/fb && python3 build_names.py /opt/forge /opt/forge-index/names.txt scryfall-names.json \
- && cp precons.json /opt/forge-index/precons.json
+ && python3 filter_precons.py precons.json /opt/forge-index/precons.json
 
 FROM mirror.gcr.io/library/eclipse-temurin:17-jre
 ARG FORGE_VERSION
