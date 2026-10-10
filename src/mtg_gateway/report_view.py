@@ -666,7 +666,7 @@ def honesty_html(g: dict[str, Any]) -> str:
     low = h.get("low_impact") or []
     if low:
         parts.append(
-            f"<div class='group'><h3>Modelled but never mattered <small>{_esc(_share(len(low), size))}"
+            f"<div class='group'><h3>Modeled but never mattered <small>{_esc(_share(len(low), size))}"
             "</small></h3>"
             "<p>These cards were understood, drawn and played, and nothing they do changed a game. For lands "
             "and mana rocks that is expected; for anything else it is a fair hint the card underperforms.</p>"
@@ -910,7 +910,7 @@ def report_markdown(r: dict[str, Any]) -> str:
                 lines.append(f"- {grp['label']}: " + ", ".join(front_face(c["name"]) for c in grp["cards"]))
             lines.append("")
         if h["low_impact"]:
-            lines.append(f"Modelled but never mattered — {_share(len(h['low_impact']), size)}:")
+            lines.append(f"Modeled but never mattered — {_share(len(h['low_impact']), size)}:")
             lines.append(", ".join(front_face(n) for n in h["low_impact"]))
             lines.append("")
     if v is not None:

@@ -118,7 +118,7 @@ def _who(created_by: str | None) -> str:
     if label.startswith("app: "):
         # "app: Name (client id)": the name is enough here; the id stays on the Activity page
         name = re.sub(r" \(.+\)$", "", label[5:])
-        return f"the assistant ({name})"
+        return f"the assistant ({name})" if name != label[5:] else "an assistant"
     return ""
 
 

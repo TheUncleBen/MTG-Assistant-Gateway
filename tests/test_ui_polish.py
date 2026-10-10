@@ -55,6 +55,26 @@ def test_event_sentences_and_actor_badges() -> None:
     assert (
         actor_html("browser") == "<span class='badge' title='browser'>browser</span>" and actor_html("") == ""
     )
+    # an app that registered no name is "an assistant" (its id only in the tooltip), never "app: app-1"
+    assert actor_html("app: app-1") == "<span class='badge' title='app: app-1'>an assistant</span>"
+    from mtg_gateway.history_view import _who
+
+    assert _who("app: Claude (c-123)") == "the assistant (Claude)" and _who("app: app-1") == "an assistant"
+    assert _who("browser") == "you"
+
+
+def test_link_preview_image_is_absolute() -> None:
+    from mtg_gateway import theme as t
+
+    old = t.PUBLIC_URL
+    t.PUBLIC_URL = "https://gateway.example.com"
+    try:
+        html = t.render("Decks", "<p>x</p>", site="MTG Assistant Gateway").body.decode()
+    finally:
+        t.PUBLIC_URL = old
+    assert (
+        "<meta property='og:image' content='https://gateway.example.com/static/gateway-icon-512.png'>" in html
+    )
 
 
 def test_est_cost_delta_and_csv_types() -> None:

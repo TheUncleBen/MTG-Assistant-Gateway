@@ -528,7 +528,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         except LoginError as exc:
             return page("Sign-in failed", f"<p>{html.escape(str(exc))}</p>", status=exc.status)
         if identity is None:
-            return page("Sign-in cancelled", "<p>You cancelled at the identity provider.</p>", status=200)
+            return page("Sign-in canceled", "<p>You canceled at the identity provider.</p>", status=200)
         nxt = _safe_next(str(session["params"].get("next", "/account")))
         challenge = session["params"].get("app_challenge")
         if isinstance(challenge, str) and app_signin.CHALLENGE.fullmatch(challenge):
@@ -735,6 +735,8 @@ def actor_html(label: str | None) -> str:
     m = re.fullmatch(r"app: (.+) \((.+)\)", label)
     if m:
         return f"<span class='badge' title='{html.escape(label)}'>app: {html.escape(m.group(1))}</span>"
+    if label.startswith("app: "):  # no registered name: never the raw client id
+        return f"<span class='badge' title='{html.escape(label)}'>an assistant</span>"
     return f"<span class='badge' title='{html.escape(label)}'>{html.escape(label)}</span>"
 
 
@@ -885,7 +887,7 @@ def _apps_card(state: Any, sub: str, csrf_in: str) -> str:
     return (
         "<div class='card'><h2>Connected apps</h2>"
         "<p class='muted small'>Assistants that can use your account now. Disconnect any you don't "
-        "recognise; it then has to be connected and approved again.</p>"
+        "recognize; it then has to be connected and approved again.</p>"
         f"<ul class='plain plist'>{items}</ul>"
         f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='disconnect_all'>"
         "<button class='danger'>Disconnect all apps</button></form></div>"

@@ -11,7 +11,7 @@
   --s-accent:var(--orange,var(--accent,#fa890d)); --s-accent-hover:var(--accent-hover,var(--orange,#fa890d));
   --s-on-accent:var(--on-orange,#181818); --s-raised:var(--surface,var(--bg-raised,#232323));
   --s-raised-2:var(--surface-2,var(--bg-raised,#383838));
-  --s-input:var(--bg,var(--bg-input,#181818)); --s-border:var(--border,#5f5f5f);
+  --s-input:var(--bg,var(--bg-input,#181818)); --s-border:var(--control-border,#868686);
   --s-border-soft:var(--border-soft,var(--border,#323232));
   --s-text:var(--text,#e3e3e3); --s-muted:var(--text-muted,#a8a8a8); --s-radius:var(--radius,5px);
   --s-radius-lg:var(--radius-lg,8px);

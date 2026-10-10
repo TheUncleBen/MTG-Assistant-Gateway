@@ -42,7 +42,7 @@
   function thumb(r, name) {
     var node = r.image ? el("img", { class: "thumb", src: r.image, alt: "", loading: "lazy" }) : el("span", { class: "thumb ph" });
     if (!window.MtgCardView) return node;
-    var btn = el("button", { type: "button", class: "thumbbtn", "aria-label": "Show " + name, onclick: function () {
+    var btn = el("button", { type: "button", class: "thumbbtn", "aria-label": "Show " + name, title: "Show the card", onclick: function () {
       var finish = r.setFinish || r.finish;
       window.MtgCardView.open({ name: name, img: r.image || "", set: r.set ? r.set.toUpperCase() + " " + r.number : "",
         type: r.type, mana: r.mana, text: r.text, pt: r.pt, loyalty: r.loyalty, finish: finish, faces: r.faces }, []);

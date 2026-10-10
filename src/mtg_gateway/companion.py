@@ -58,6 +58,7 @@ from .pages import (
     _csrf,
     _err_code,
     _when,
+    actor_html,
     browser_session,
     login_redirect,
     read_limited,
@@ -870,7 +871,8 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             f"<form method='post' action='/decks/{did}/tags' class='inline'>{csrf_in}"
             "<input type='hidden' name='action' value='remove'>"
             f"<input type='hidden' name='relation_id' value='{int(r['id'])}'>"
-            f"<button class='mini' aria-label='Remove tag {_esc(r.get('name'))}'>{icon('x')}</button>"
+            f"<button class='mini' aria-label='Remove tag {_esc(r.get('name'))}' title='Remove tag'>"
+            f"{icon('x')}</button>"
             "</form></li>"
             for r in deck.tag_relations
             if isinstance(r.get("id"), int) and r.get("name")
@@ -2059,7 +2061,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             who = actor_label(r.get("client_id"), detail.get("client_name"))
             items.append(
                 f"<li><span class='name'>{_esc(event_label(r['event']))}</span>"
-                + (f"<span class='badge'>{_esc(who)}</span>" if who else "")
+                + actor_html(who)
                 + f"<span class='muted small'>{event_detail_html(detail)}</span>"
                 f"<span class='when'>{_when(r['at'])}</span></li>"
             )

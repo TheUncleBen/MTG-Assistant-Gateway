@@ -651,7 +651,7 @@ class GatewayAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             return construct_redirect_uri(
                 client_redirect,
                 error="access_denied",
-                error_description="sign-in was cancelled or denied",
+                error_description="sign-in was canceled or denied",
                 state=params.state,
             )
         gw_code = secrets.token_urlsafe(32)

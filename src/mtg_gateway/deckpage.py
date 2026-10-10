@@ -1719,7 +1719,8 @@ html.cardview-open{overflow:hidden}
 .pbar{position:relative;height:26px;border-radius:3px;background:var(--surface-2);overflow:hidden}
 .pbar .fill{position:absolute;left:0;top:0;bottom:0}
 .pbar b{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:.8rem;
-  background:var(--surface-3);color:#fff;padding:0 .35rem;border-radius:3px}
+  background:var(--surface);color:var(--text);padding:0 .35rem;border-radius:3px;
+  border:1px solid var(--border)}
 .ccard .sub{font-size:.8rem;color:var(--text-muted);text-align:center;margin-top:.2rem}
 .stats .avg{margin:1rem 0 .25rem}
 .curve{display:flex;align-items:flex-end;gap:.5rem;height:9rem;padding:.25rem 0;

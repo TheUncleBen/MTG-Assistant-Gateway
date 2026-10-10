@@ -81,6 +81,9 @@ def test_site_text_tokens_pass_in_light_and_dark() -> None:
             assert ratio(t["focus"], t[bg]) >= 3, (name, "focus", t["focus"], bg)
             assert ratio(t["control-border"], t[bg]) >= 3, (name, "control-border", t["control-border"], bg)
         assert ratio("#fa890d", t["navbar-bg"]) >= 3  # the ring the dark bars switch back to
+        for bg in ("bg", "surface", "surface-2"):  # a checked box or radio against its page
+            assert ratio(t["orange-ctl"], t[bg]) >= 3, (name, "orange-ctl", t["orange-ctl"], bg)
+        assert ratio(t["on-orange"], t["orange-ctl"]) >= 3  # the tick on the checked box (a state mark)
     # The button red is a fill, never text: as text on the dark panel it was 2.55:1.
     assert not re.search(r"[{;]color:var\(--danger-fill\)", deckpage.DECK_CSS + theme.CSS)
     assert ".menu .on{color:var(--toolbar-active)" in theme.CSS  # the shared menu panel class
@@ -88,6 +91,8 @@ def test_site_text_tokens_pass_in_light_and_dark() -> None:
     assert ".topbar,footer.site,.banner{--focus:#fa890d}" in theme.CSS
     assert "a:hover{color:var(--orange-text)}" in theme.CSS
     assert "border:1px solid var(--control-border)" in theme.CSS
+    assert "input[type=radio]:checked{border:.35rem solid var(--orange-ctl)" in theme.CSS
+    assert "input[type=checkbox]:checked{background-color:var(--orange-ctl)" in theme.CSS
     for css, where in ((deckpage.DECK_CSS, "deck"), (theme.CSS, "theme")):
         for rule in re.findall(r"\{[^}]*background:var\(--orange\)[^}]*\}", css):
             assert "color:#fff" not in rule, (where, rule)
@@ -99,6 +104,16 @@ def test_no_white_text_on_orange_anywhere() -> None:
     scan_css = (Path(routes.__file__).parent / "static" / "scan.css").read_text(encoding="utf-8")
     for rule in re.findall(r"\{[^}]*background:var\(--s-accent\)[^}]*\}", scan_css):
         assert "color:#fff" not in rule, rule
+    assert "--s-border:var(--control-border,#868686)" in scan_css  # the Set input's edge, 3:1
+    from mtg_gateway import browse
+
+    browse_src = Path(browse.__file__).read_text(encoding="utf-8")
+    for rule in re.findall(
+        r"\{[^}]*background:var\(--orange\)[^}]*\}", browse_src + deckpage.DECK_CSS + theme.CSS
+    ):
+        assert "#fff" not in rule, rule
+    for src in (theme.CSS, deckpage.DECK_CSS):  # white text never sits on a light surface token
+        assert not re.search(r"background:var\(--surface(-[23])?\);color:#fff", src)
     assert "color:var(--on-orange)" in deckpage.DECK_CSS.split(".soc.on{")[1].split("}")[0]
     assert "color:var(--on-orange)" in deckpage.DECK_CSS.split(".pendingbox summary b{")[1].split("}")[0]
 

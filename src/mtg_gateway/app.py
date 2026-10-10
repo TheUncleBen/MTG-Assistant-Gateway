@@ -41,7 +41,7 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 from starlette.routing import Route, request_response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from . import __version__, deck_stats
+from . import __version__, deck_stats, theme
 from .admin import add_admin_routes
 from .api import add_api_routes
 from .app_page import PROJECT_URL, add_app_routes
@@ -1097,11 +1097,11 @@ def build_mcp_server(state: AppState) -> MCPServer:
         name="deck_stats",
         title="Deck statistics",
         description=(
-            "Mana curve, colour pips against mana sources, type and rarity counts, average mana value, price "
+            "Mana curve, color pips against mana sources, type and rarity counts, average mana value, price "
             "total, format legality problems, game changers, tutors, "
             "extra turns, mass land denial, salt, a "
             "Commander bracket ESTIMATE and structural checks (deck size for the format, commander zone "
-            "and whether each card may command, colour identity violations, singleton violations, "
+            "and whether each card may command, color identity violations, singleton violations, "
             "uncategorised rows: stats.checks), all from Archidekt's own card data in one read (no Mystic "
             "Forge call). deck_ref is an Archidekt id or URL, a snapshot id, or a pasted decklist (then "
             "only counts and structural checks: no card data; lines that are not cards are listed in "
@@ -1363,7 +1363,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
         description=(
             "Step 1 of changing a deck's own settings rather than its cards, for decks the linked account "
             "owns. details holds only the settings to change: name, description, deck_format, "
-            "edh_bracket (null clears it), private, unlisted, and its organisation: folder (an existing "
+            "edh_bracket (null clears it), private, unlisted, and its organization: folder (an existing "
             "folder's name, as list_my_decks shows them), add_tags, remove_tags, cover (a card in the "
             "deck). This is the one tool for those; nothing else moves, tags or re-covers a deck. "
             "Fields already set that way are dropped "
@@ -1644,6 +1644,7 @@ def create_app(
     mf_proxy: MysticForgeProxy | None = None,
     cimd: CimdFetcher | None = None,
 ) -> Starlette:
+    theme.PUBLIC_URL = settings.public_url.rstrip("/")  # link previews point at the site's icon
     db = db or Database(settings.db_path)
     oidc = oidc or OIDCClient(
         settings.oidc_issuer,

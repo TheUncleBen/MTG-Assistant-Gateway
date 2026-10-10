@@ -360,7 +360,7 @@
           dropUnidentified(u); showTab('type');
           const inp = $('#type-input'); if (inp) { inp.value = u.text || ''; inp.dispatchEvent(new Event('input')); inp.focus(); }
         } }, 'Type the name');
-        const dismiss = h('button', { type: 'button', class: 'secondary', 'aria-label': 'Dismiss', onclick: () => dropUnidentified(u) }, '×');
+        const dismiss = h('button', { type: 'button', class: 'secondary', 'aria-label': 'Dismiss', title: 'Dismiss', onclick: () => dropUnidentified(u) }, '×');
         list.append(h('li', null,
           u.strip ? h('img', { class: 'strip', src: u.strip, alt: 'Title strip as read' }) : '',
           h('div', { class: 'read' }, h('span', { class: 'ocr', text: u.text ? 'read: ' + u.text : 'nothing readable' }), chips,
@@ -1102,7 +1102,7 @@
     const foilSw = h('button', { type: 'button', class: 'switch', role: 'switch', 'aria-checked': foil ? 'true' : 'false',
       onclick: () => { foil = !foil; foilSw.setAttribute('aria-checked', foil ? 'true' : 'false'); } },
       h('span', { class: 'knob' }), h('span', { class: 'lbl', text: 'Foil' }));
-    const close = h('button', { type: 'button', class: 'secondary icon close', 'aria-label': 'Close', onclick: closePicker }, '✕');
+    const close = h('button', { type: 'button', class: 'secondary icon close', 'aria-label': 'Close', title: 'Close', onclick: closePicker }, '✕');
     const sheet = h('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Choose a printing' },
       h('div', { class: 'sheet-head' }, h('div', { class: 'ttl' }, h('h3', { text: 'Choose a printing' }), h('div', { class: 'muted', text: card.name || '' })), close),
       h('div', { class: 'sheet-tools' }, filter, foilSw), status, h('div', { class: 'sheet-body' }, grid));

@@ -181,7 +181,7 @@ async def test_history_page_filters_groups_and_pages(stack: Stack) -> None:
         assert "<h2 class='day'><span>Today</span>" in body and "Yesterday" in body
         assert "class='hrow k-report'" in body and "class='hrow k-snapshot'" in body and "k-edit" in body
         assert "href='/decks/42'" in body and "badge ok'>applied" in body and ">rejected</span>" in body
-        assert "by you" in body and "by the assistant" in body
+        assert "by you" in body and "by an assistant" in body and "app-1" not in body  # no raw app id
         assert "<details><summary>Details</summary>" in body
         assert "Restore (review first)" in body and "the change it was taken before" in body
         assert "Trend over 2 reports" in body and "class='tiles'" in body and "<svg class='spark'" in body

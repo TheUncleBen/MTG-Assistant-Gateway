@@ -692,10 +692,10 @@ def row_html(r: dict[str, Any], csrf: str, *, view: str) -> str:
     stepper = (
         f"<form method='post' action='/collection' class='qty' data-id='{rid}'>{csrf_in}"
         "<button name='action' value='dec' class='mini' aria-label='One "
-        f"fewer {_esc(r['name'])}'>{icon('minus')}</button>"
+        f"fewer {_esc(r['name'])}' title='One fewer'>{icon('minus')}</button>"
         f"<output aria-label='Copies'>{int(r['quantity'])}</output>"
         "<button name='action' value='inc' class='mini' aria-label='One "
-        f"more {_esc(r['name'])}'>{icon('plus')}</button>"
+        f"more {_esc(r['name'])}' title='One more'>{icon('plus')}</button>"
         "</form>"
     )
     remove = (
@@ -714,7 +714,8 @@ def row_html(r: dict[str, Any], csrf: str, *, view: str) -> str:
         )
         return (
             f"<li class='c col' data-name='{_esc(r['name'].lower())}' data-id='{rid}'{attrs}>"
-            f"<button type='button' class='pic thumbbtn' aria-label='Show {_esc(r['name'])}'>{body}"
+            f"<button type='button' class='pic thumbbtn' aria-label='Show {_esc(r['name'])}' "
+            f"title='Show the card'>{body}"
             f"<span class='qty'>{int(r['quantity'])}</span>{badges}</button>"
             f"<div class='cap'><span class='name' title='{_esc(r['name'])}'>{_esc(r['name'])}</span><span "
             f"class='set'>{set_line}</span></div>"
@@ -722,7 +723,7 @@ def row_html(r: dict[str, Any], csrf: str, *, view: str) -> str:
         )
     return (
         f"<li class='row col' data-name='{_esc(r['name'].lower())}' data-id='{rid}'{attrs}>"
-        f"<button type='button' class='thumbbtn' aria-label='Show {_esc(r['name'])}'>"
+        f"<button type='button' class='thumbbtn' aria-label='Show {_esc(r['name'])}' title='Show the card'>"
         + (
             f"<img class='thumb' src='{_esc(img)}' alt='' loading='lazy'>"
             if img
@@ -1059,7 +1060,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             "action='/collection' class='controls' id='listform'>"
             "<div class='field filter grow'><label for='q'>Filter</label><span class='search'>"
             f"<input id='q' type='search' name='q' value='{_esc(q)}' placeholder='Card name'>"
-            f"<button type='submit' aria-label='Filter'>{icon('search')}</button></span></div>"
+            f"<button type='submit' aria-label='Filter' title='Filter'>{icon('search')}</button></span></div>"
             + sel("view", {"grid": "Grid", "list": "List"}, view, "View as", "grid")
             + sel("sort", SORTS, sort, "Sort by", "sort")
             + "<div class='field'><span class='lbl'>&nbsp;</span>"

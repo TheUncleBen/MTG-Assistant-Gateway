@@ -81,6 +81,7 @@ _LIGHT = """
     --banner-a:rgba(40,40,40,.82); --banner-b:rgba(40,40,40,.5);
     /* coloured text: at least 4.5:1 on --bg, --surface, --surface-2 and on its own tint */
     --orange-text:#944b00; --green-text:#0d6639; --red-text:#b3262e; --blue-text:#1d55b3;
+    --orange-ctl:#c45f00; /* a checked box or radio: 3.1:1 on --surface-2, 4:1 on --surface */
     --orange-tint:rgba(250,137,13,.16); --green-tint:rgba(30,187,108,.16);
     --red-tint:rgba(255,85,91,.16); --blue-tint:rgba(66,134,244,.14);
     --danger-text:#b3262e; --toolbar-active:#8a4600; /* dark values: #ff8086 and #fa890d */
@@ -156,6 +157,7 @@ CSS = (
   --orange:#fa890d; --green:#1ebb6c; --red:#ff555b; --blue:#4286f4; --purple:#6435c9; --pink:#e03997;
   /* --red-text: Archidekt's #ff555b is 3.7:1 on --surface-2 */
   --orange-text:#fa890d; --green-text:#1ebb6c; --red-text:#ff7a7f; --blue-text:#7fb0ff;
+  --orange-ctl:#fa890d;
   --danger-text:#ff8086; --toolbar-active:#fa890d;
   --control-border:#868686; /* input and select edges: 3.2:1 on --surface-2, 4:1 on --surface */
   --on-color:#ffffff;
@@ -387,7 +389,7 @@ input::placeholder,textarea::placeholder{color:var(--text-muted);opacity:1}
 input[type=checkbox]{appearance:none;-webkit-appearance:none;width:1.15rem;height:1.15rem;margin:0;flex:none;
   border:1px solid var(--control-border);border-radius:3px;background:var(--surface) center/80% no-repeat;
   cursor:pointer;vertical-align:-.2em;display:inline-block;transition:background-color .15s}
-input[type=checkbox]:checked{background-color:var(--orange);border-color:var(--orange);
+input[type=checkbox]:checked{background-color:var(--orange-ctl);border-color:var(--orange-ctl);
   background-image:url(/static/check.svg)}
 input[type=checkbox]:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 input[type=checkbox]:disabled{opacity:.5;cursor:default}
@@ -397,7 +399,7 @@ label:has(> input[type=checkbox]){display:inline-flex;align-items:center;gap:.5r
 input[type=radio]{appearance:none;-webkit-appearance:none;width:1.15rem;height:1.15rem;margin:0;flex:none;
   border:1px solid var(--control-border);border-radius:50%;background:var(--surface);cursor:pointer;
   display:inline-block;vertical-align:-.2em}
-input[type=radio]:checked{border:.35rem solid var(--orange);background:var(--surface)}
+input[type=radio]:checked{border:.35rem solid var(--orange-ctl);background:var(--surface)}
 input[type=radio]:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 /* a choice with a description under its label: the dot sits level with the label's first line */
 .check.mode{align-items:flex-start}
@@ -1084,6 +1086,10 @@ MORE_LINKS = [
 ]
 
 
+# The site's public origin (MTG_PUBLIC_URL), set by create_app: link previews need an absolute image.
+PUBLIC_URL = ""
+
+
 def render(
     title: str,
     body: str,
@@ -1275,7 +1281,7 @@ def render(
         f"<meta property='og:site_name' content='{html.escape(site)}'>"
         f"<meta property='og:title' content='{html.escape(title)} · {html.escape(site)}'>"
         f"<meta property='og:description' content='{html.escape(description)}'>"
-        "<meta property='og:image' content='/static/gateway-icon-512.png'>"
+        f"<meta property='og:image' content='{html.escape(PUBLIC_URL)}/static/gateway-icon-512.png'>"
         f"{manifest}"
         "<link rel='icon' href='/favicon.ico' sizes='32x32'>"
         "<link rel='icon' href='/static/gateway-icon.svg' type='image/svg+xml'>"
