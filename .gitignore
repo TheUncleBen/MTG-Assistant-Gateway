@@ -27,3 +27,4 @@ deploy/compose/secrets/
 deploy/compose/data/
 deploy/compose/backups/
 docker/forge/scryfall-names.json
+docker/forge/precons.json

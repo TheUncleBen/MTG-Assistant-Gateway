@@ -7,6 +7,7 @@ stack's private network.
 
 Endpoints (JSON):
   GET    /health          status, Forge version, busy flag, queue length
+  GET    /precons         the bundled Commander precons a deck entry can name as {"precon": name}
   POST   /check           {"names": [...]} -> each name's spelling in Forge's card list, or null
   POST   /jobs            {"decks": [{"commander": [...], "main": [[count, name], ...]}], "games": n}
   GET    /jobs/<id>       state, games done, per-game winners, cards Forge could not load
@@ -78,6 +79,10 @@ ALIASES: dict[str, str] = (
     if ALIASES_FILE.exists()
     else {}
 )
+
+
+PRECONS_FILE = Path(os.environ.get("FORGE_PRECONS", "/opt/forge-index/precons.json"))
+PRECONS: list[dict[str, Any]] = json.loads(PRECONS_FILE.read_text("utf-8")) if PRECONS_FILE.exists() else []
 
 
 def forge_jar() -> Path:
@@ -281,7 +286,13 @@ def validate(body: dict[str, Any]) -> tuple[list[dict[str, Any]], int, str, list
     unknown: list[str] = []
     for deck in decks:
         if not isinstance(deck, dict):
-            raise ValueError("each deck is an object with commander and main")
+            raise ValueError("each deck is an object with commander and main, or a precon name")
+        if "precon" in deck:
+            # A bundled precon by name (GET /precons), used as an opponent.
+            match = [p for p in PRECONS if p["name"] == deck["precon"]]
+            if not match or fmt != "Commander":
+                raise ValueError(f"no bundled Commander precon named {deck['precon']!r}")
+            deck = match[0]
         commander = deck.get("commander") or []
         main = deck.get("main") or []
         if fmt == "Commander" and not 1 <= len(commander) <= 2:
@@ -349,6 +360,17 @@ class Handler(BaseHTTPRequestHandler):
                     "aliases": len(ALIASES),
                     "busy": busy,
                     "queued": QUEUE.qsize(),
+                },
+            )
+            return
+        if self.path == "/precons":
+            self.send(
+                200,
+                {
+                    "precons": [
+                        {"name": p["name"], "release_date": p["release_date"], "commander": p["commander"]}
+                        for p in PRECONS
+                    ]
                 },
             )
             return

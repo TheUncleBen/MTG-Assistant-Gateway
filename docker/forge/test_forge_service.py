@@ -9,6 +9,13 @@ from pathlib import Path
 _names = Path(tempfile.mkdtemp()) / "names.txt"
 _names.write_text("Liesa, Forgotten Archangel\nFire\nIce\nLim-Dûl's Vault\nSol Ring\nForest\n", "utf-8")
 os.environ["FORGE_NAMES"] = str(_names)
+_precons = _names.parent / "precons.json"
+_precons.write_text(
+    '[{"name": "Test Precon", "release_date": "2026-01-01", "commander": ["Liesa, Forgotten Archangel"],'
+    ' "main": [[99, "Forest"]]}]',
+    "utf-8",
+)
+os.environ["FORGE_PRECONS"] = str(_precons)
 sys.path.insert(0, str(Path(__file__).parent))
 import forge_service as fs  # noqa: E402
 
@@ -31,6 +38,12 @@ class Validate(unittest.TestCase):
         decks, games, fmt, unknown = fs.validate({"games": 3, "decks": [self.deck(), self.deck()]})
         self.assertEqual((games, fmt, unknown), (3, "Commander", []))
         self.assertEqual(decks[0]["main"][0], [1, "Sol Ring"])
+
+    def test_precon_opponent(self):
+        decks = fs.validate({"games": 1, "decks": [self.deck(), {"precon": "Test Precon"}]})[0]
+        self.assertEqual(decks[1]["main"], [[99, "Forest"]])
+        with self.assertRaises(ValueError):
+            fs.validate({"games": 1, "decks": [self.deck(), {"precon": "Nope"}]})
 
     def test_unknown_cards_are_listed(self):
         bad = self.deck(main=[[1, "Not A Card"]])
