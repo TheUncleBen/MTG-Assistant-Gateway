@@ -145,3 +145,33 @@ async def test_report_runs_forge_in_the_background(tmp_path: Path) -> None:
     await asyncio.wait_for(task, timeout=20)
     final = reports.get("alice", out["report_id"])["forge"]
     assert final["state"] == "done" and final["result"]["seats"][0]["wins"] == 3
+
+
+def test_report_page_and_markdown_show_forge_results() -> None:
+    from mtg_gateway.report_view import forge_html, report_markdown
+
+    done = {
+        "state": "done",
+        "seed": 7,
+        "not_played": ["Fake Sticker Card"],
+        "result": {
+            "games": 4,
+            "games_requested": 4,
+            "draws": 1,
+            "stopped_slow": 1,
+            "average_game_seconds": 41.0,
+            "seats": [
+                {"deck": "Liesa <b>", "wins": 2, "win_rate": 0.5, "win_rate_95": [0.15, 0.85]},
+                {"deck": "Precon 1", "wins": 1, "win_rate": 0.25, "win_rate_95": [0.05, 0.7]},
+            ],
+        },
+    }
+    page = forge_html(done)
+    assert "Forge games" in page and "Liesa &lt;b&gt;: 2 wins, 50%" in page
+    assert "Fake Sticker Card" in page and "stopped at the time limit" in page and "Seed: 7." in page
+    running = forge_html({"state": "running", "not_played": []})
+    assert "running" in running and "Reload this page" in running
+    assert "not run" in forge_html({"state": "failed", "error": "Forge does not have this deck's commander"})
+    assert forge_html(None) == ""
+    md = report_markdown({"deck_name": "Liesa", "deck_id": "42", "stats": {}, "forge": done})
+    assert "## Forge games" in md and "Cards Forge could not play: Fake Sticker Card" in md
