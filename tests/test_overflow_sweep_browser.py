@@ -351,6 +351,9 @@ def test_no_page_scrolls_sideways_or_clips_a_control(server: Server, touch: bool
         errors: list[str] = []
         page.on("pageerror", lambda e: errors.append(str(e)))
         for path in _pages(server, pending):
+            # a remembered View as (the mtg_view_* cookies) would carry one address's view into the
+            # next: each address is swept in the view it names, or the default
+            ctx.clear_cookies(name=re.compile(r"^mtg_view_"))
             r = page.goto(f"{server.base}{path}", wait_until="networkidle")
             assert r is not None and r.status == 200, (path, r and r.status)
             for w in WIDTHS:
