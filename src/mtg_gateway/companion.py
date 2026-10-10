@@ -29,6 +29,7 @@ from .decklist import DecklistError, parse_decklist
 from .deckpage import (
     DECK_CSS,
     LIST_ORDERS,
+    VIEWS,
     card_image,
     compare_page_html,
     covers_for,
@@ -66,7 +67,7 @@ from .report_view import (
     report_export_html,
     report_markdown,
 )
-from .theme import VIZ_CSS, icon, render
+from .theme import VIZ_CSS, icon, remember_view, render, view_choice
 from .views import auto_category, cards_by_category
 
 if TYPE_CHECKING:
@@ -241,8 +242,13 @@ DECK_ERR_MESSAGES = {
 }
 
 
+# the deck list's View as choices (deckpage.deck_list_controls_html)
+LIST_VIEWS = ("grid", "list")
+
+
 def add_companion_routes(server: MCPServer, state: AppState, reports: ReportService) -> None:
     s = state.settings
+    secure = s.public_url.startswith("https://")
 
     async def apply_now(sub: str, pid: str, *, ok: str, deck_id: str | None = None) -> Response:
         """A member's own action in the app (new deck, clone, settings) is their approval: the
@@ -357,11 +363,13 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             rows.sort(key=lambda d: (str(d.get("format_name") or ""), str(d.get("name", "")).lower()))
         return rows, folders, total
 
-    def list_query(qp: Any) -> tuple[str, str, str, str]:
-        """The deck list's query parameters, each limited to its known values: (q, order, view, folder)."""
+    def list_query(qp: Any, view: str | None = None) -> tuple[str, str, str, str]:
+        """The deck list's query parameters, each limited to its known values: (q, order, view, folder).
+        ``view``: the one the page already chose (the address's, else the remembered one)."""
         q = (qp.get("q") or "").strip()[:80]
         order = qp.get("order") if qp.get("order") in LIST_ORDERS else "updated"
-        view = qp.get("view") if qp.get("view") in ("grid", "list") else "grid"
+        if view not in LIST_VIEWS:
+            view = qp.get("view") if qp.get("view") in LIST_VIEWS else "grid"
         folder = (qp.get("folder") or "").strip()[:80]
         return q, order, view, folder
 
@@ -388,7 +396,8 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         if not sub:
             return login_redirect("/decks")
         qp = request.query_params
-        q, order, view, folder = list_query(qp)
+        chosen, remember = view_choice(request, "decks", LIST_VIEWS, "grid")
+        q, order, view, folder = list_query(qp, chosen)
         rows, problem, failure = await my_decks(sub, wait=decks.deck_list_wait)
         if failure is not None and (busy := busy_response(failure, request, page, sub=sub, sid=sid)):
             return busy
@@ -440,7 +449,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             )
             + f"<div class='panel'>{open_form}</div>"
         )
-        return page(
+        resp = page(
             "My decks",
             body,
             sub=sub,
@@ -452,6 +461,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             deck_css=True,
             extra_scripts=("decks.js",),
         )
+        return remember_view(resp, "decks", view, secure=secure) if remember else resp
 
     @server.custom_route("/api/decks/mine", methods=["GET"], include_in_schema=False)
     async def my_decks_json(request: Request) -> Response:
@@ -657,6 +667,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         # Archidekt marks each deck card with the copies the signed-in member owns ("owned" on the
         # card when the deck is read with their session); the gateway's green dot is that number.
         owned = {c.name.lower(): c.owned for c in deck.cards if c.owned} if link else None
+        view, remember = view_choice(request, "deck", VIEWS, "text")
         body = deck_page_html(
             deck,
             stats,
@@ -664,13 +675,13 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             csrf=_csrf(s, sid),
             writes_enabled=s.writes_enabled,
             owned=owned or None,
-            view=qp.get("view") or "text",
+            view=view,
             group=qp.get("group") or "category",
             sort=qp.get("sort") or "name",
             q=(qp.get("q") or "").strip()[:80],
             notice=notice,
         )
-        return page(
+        resp = page(
             deck.name or f"Deck {deck.id}",
             body,
             sub=sub,
@@ -682,6 +693,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             heading=False,
             deck_css=True,
         )
+        return remember_view(resp, "deck", view, secure=secure) if remember else resp
 
     @server.custom_route("/decks/{deck_id}/clone", methods=["POST"], include_in_schema=False)
     async def clone_deck(request: Request) -> Response:
