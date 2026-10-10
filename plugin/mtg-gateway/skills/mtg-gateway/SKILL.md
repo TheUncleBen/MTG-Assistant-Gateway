@@ -70,7 +70,8 @@ in `unread_lines`: tell the user they were skipped.
 | A **precon** name | `precon_search`, then `precon_decklist`. |
 | **Photos of physical cards** | Read every card title you can see and call `resolve_cards` with the names (add set code and collector number from the bottom of the card when legible). Ask about every result whose `status` is not `exact` or `printing`; never silently keep a `fuzzy` correction the user did not confirm. In an app that shows cards, the user ticks and picks on the picker card and their choice reaches you as text: wait for it. For an exact printing, `card_printings` shows the pictures and the tap reaches you as text too. |
 | "Find decks for this commander", "show me X's decks", "what are people playing in Y" | `search_decks` (by `commander`, `name`, `owner`, `format`, `colors`; `limit` for how many), then `get_deck` on the ones worth a closer look. Say the results are Archidekt's public decks and give each deck's `url`. For one person's public decks give `owner` with `order_by: "-updatedAt"`. A partial commander name is looked up: `commander_matched` names the commander searched, `commander_suggestions` asks you to pick one and search again. |
-| "Which of these do I own?", "add these to my collection", "what's in my collection?" | `list_collection` (filter with `query`) and `propose_collection_changes` (`add` from names, a pasted list or a `scan_session`, `remove` by id or name). The collection is the user's Collection on Archidekt, so the change is a proposal the user approves (their approval mode applies, like deck edits). Compare a deck's cards with `list_collection` to say what the user still needs. Liking, bookmarking, following and commenting have no tools: those are the user's own buttons on the pages. |
+| "Which of these do I own?", "add these to my collection", "what's in my collection?" | `list_collection` (filter with `query`) and `propose_collection_changes` (`add` from names, a pasted list or a `scan_session`, `remove` by id or name). The collection is the user's Collection on Archidekt, so the change is a proposal the user approves (their approval mode applies, like deck edits). Compare a deck's cards with `list_collection` to say what the user still needs. |
+| "Like this deck", "bookmark it", "follow its owner", "comment on it", "vote on that comment", "delete my deck", "make a folder" | `propose_deck_social`, `propose_comment` (comment ids from `get_deck_comments`), `propose_delete_deck`, `propose_create_folder`. Each is a proposal only the user applies: their own press on the card or the review page, every time, whatever their approval mode. Never call `apply_proposal` for these. Comments are public under the user's Archidekt name: post only words the user asked for, and quote them back. |
 | "I scanned my cards" (on the gateway's `/scan` phone page) | `list_scan_sessions`, then `get_scan_session` with the name or id. Items without a `card` were not recognised; ask the user for them. Its `decklist_text` feeds `propose_new_deck`, its `changes` feed `propose_deck_changes`; or pass the session's id or name as `scan_session` to either tool and skip the copy. |
 
 After loading a deck, say how many cards it has and name the commander, so
@@ -315,8 +316,8 @@ own linked account. Follow every step, in order.
    - for a new deck, the `deck_url` from `result`;
    - how to undo: for an edit, you can restore the deck from that snapshot
      (`propose_restore_snapshot`, see "Rules for writes"), or propose the
-     opposite changes; a new deck is deleted by the user on its deck page
-     (More > Delete deck) or on Archidekt: no tool deletes decks.
+     opposite changes; a new deck the user no longer wants can be deleted
+     with `propose_delete_deck` (the user presses Apply themselves).
 
    Any other answer means the change did not fully happen; act on the error
    code below and never say it worked.
@@ -355,8 +356,8 @@ own linked account. Follow every step, in order.
   snapshot recorded it: the same printing, foil or etched finish, quantity
   and categories, so the commander, sideboard and maybeboard too. It does
   not change the deck's name, description, format or the settings of its
-  custom categories. No tool deletes a deck; the user does that on the
-  deck page or on Archidekt.
+  custom categories. Deleting a deck is `propose_delete_deck`, which only
+  the user's own press applies.
 
 ### When a tool says no
 

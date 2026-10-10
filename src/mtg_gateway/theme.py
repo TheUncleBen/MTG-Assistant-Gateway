@@ -597,6 +597,10 @@ ul.changes{list-style:none;margin:0 0 .75rem;padding:0;border:1px solid var(--bo
   text-decoration-color:var(--red)}
 .changes li.chg{border-left-color:var(--orange);background:var(--orange-tint)}
 .changes li.chg .act,.changes li.chg .qty{color:var(--orange-text);border-color:var(--orange)}
+.changes li.action .name{text-decoration:none;font-weight:700;display:flex;flex-direction:column;gap:.25rem}
+.changes li.action .qty{white-space:normal;max-width:9rem}
+.changes blockquote.said{margin:0;padding:.4rem .6rem;border-left:3px solid var(--border);
+  background:var(--surface);color:var(--text);font-weight:400;white-space:pre-wrap;overflow-wrap:anywhere}
 @media (max-width:420px){
   .changes li{grid-template-columns:4.9rem minmax(0,1fr);gap:.35rem .6rem}
   .changes .qty{grid-column:2;text-align:left}
