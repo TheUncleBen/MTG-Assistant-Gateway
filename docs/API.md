@@ -133,7 +133,9 @@ a bearer token. They answer `401` without a browser session, and `404` to signed
   `{"action": "set_category", "card_name", "category"}`, `{"action": "set_commander", "card_name"}`,
   `{"action": "set_finish", "card_name", "finish"}` (normal, foil or etched, for the copies already in
   the deck) or `{"action": "set_printing", "card_name", "set_code", "collector_number", "finish"?}`
-  (swap every copy for that printing, keeping quantity and categories).
+  (swap every copy for that printing, keeping quantity and categories), or
+  `{"action": "set_label", "card_name", "label", "color"?, "zone"?}` (Archidekt's colour tag on every
+  row of the card; `color` is `#rrggbb`, an empty `label` takes the tag off).
   At most 40 changes; one card takes one kind of change (count, category or printing) per proposal.
 - `new_deck`: `{"name", "format"?, "cards"? | "decklist_text"? | "csv_text"?, "private"?}`.
 - `restore`: `{"snapshot_id"}` puts a deck back exactly as a snapshot recorded it.

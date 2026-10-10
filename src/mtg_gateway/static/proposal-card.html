@@ -227,6 +227,7 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
       case "category": return ["Category", r.name, arrow(r.before, r.after) + (r.leaves ? " (leaves the deck, −" + r.leaves + ")" : "")];
       case "finish": return ["Finish", r.name, arrow(r.before, r.after)];
       case "printing": return ["Printing", r.name, arrow(r.before, r.after)];
+      case "label": return ["Colour tag", r.name, arrow(r.before, r.after)];
       case "commander": return ["Commander", arrow(r.before, r.after), ""];
       case "clone": return ["Copy", "'" + r.source + "' (" + r.cards + " cards) as '" + r.name + "'", ""];
       case "new_deck": return ["New deck", r.name + " (" + r.format + ", " + r.cards + " cards, " + (r.private ? "private" : "public") + ")", ""];
@@ -237,7 +238,7 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
       default: return ["Change", r.text || "", ""];
     }
   }
-  var CARD_KINDS = { add: 1, remove: 1, change: 1, category: 1, finish: 1, printing: 1 };
+  var CARD_KINDS = { add: 1, remove: 1, change: 1, category: 1, finish: 1, printing: 1, label: 1 };
   function cardImage(name) {
     var img = el("img", "pic");
     img.alt = ""; img.loading = "lazy"; img.decoding = "async"; img.referrerPolicy = "no-referrer";
@@ -258,7 +259,7 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
   // Rows are shown grouped by what they do, in this order, so a big edit reads as a summary.
   var GROUPS = [
     ["add", "Added"], ["remove", "Removed"], ["change", "Quantity changed"], ["category", "Moved"],
-    ["finish", "Finish"], ["printing", "Printing"], ["commander", "Commander"]
+    ["finish", "Finish"], ["printing", "Printing"], ["label", "Colour tag"], ["commander", "Commander"]
   ];
   function groupOf(kind) {
     for (var i = 0; i < GROUPS.length; i++) if (GROUPS[i][0] === kind) return i;

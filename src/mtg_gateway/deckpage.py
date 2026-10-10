@@ -24,6 +24,7 @@ from urllib.parse import quote
 
 from .archidekt import VOTE_UP, Deck, DeckCard, featured_scryfall_id, format_label
 from .deck_stats import WUBRG, colour_letter, is_basic_land, is_land, mana_pips
+from .decks import split_label
 from .mana import mana_html as _mana_html
 from .theme import icon, plural
 from .views import auto_category, cards_by_category
@@ -514,13 +515,16 @@ def _finish_badge(card: DeckCard) -> str:
 
 
 def _label_dot(card: DeckCard) -> str:
-    if card.label:
-        colour = card.label.split(",")[-1].strip() if "," in card.label else ""
-        style = (
-            f" style='background:{esc(colour)}'" if re.fullmatch(r"#[0-9a-fA-F]{3,8}", colour or "") else ""
-        )
-        return f"<span class='tagdot'{style} title='{esc(card.label.split(',')[0])}'></span>"
-    return ""
+    """Archidekt's colour tag: a dot in the tag's colour, its name for screen readers and on hover
+    (a tag with no name, Archidekt's empty one, shows nothing)."""
+    name, colour = split_label(card.label)
+    if not name:
+        return ""
+    style = f" style='background:{colour}'" if colour else ""  # split_label lets only #rrggbb through
+    return (
+        f"<span class='tagdot'{style} title='Tag: {esc(name)}'>"
+        f"<span class='sr-only'>tag {esc(name)}</span></span>"
+    )
 
 
 def _owned_dot(card: DeckCard, owned: dict[str, int] | None) -> str:
@@ -633,6 +637,7 @@ def _card_data(card: DeckCard, deck: Deck) -> str:
     return (
         card_view_attrs(card, img=card_image(card))
         + f" data-qty='{card.quantity}' data-zone='{zone}' data-cat='{esc(cat)}'{rel}"
+        + (f" data-label='{esc(card.label)}'" if split_label(card.label)[0] else "")
     )
 
 
@@ -657,7 +662,7 @@ def image_card(card: DeckCard, *, deck: Deck, owned: dict[str, int] | None = Non
         f"<div class='c' data-name='{esc(card.name.lower())}' data-card='{esc(card.name)}'"
         f"{_card_data(card, deck)} "
         f"title='{esc(card.name)}' tabindex='0' role='button'>{body}{qty}{extra}"
-        f"{_finish_badge(card)}{_owned_dot(card, owned)}</div>"
+        f"{_finish_badge(card)}{_owned_dot(card, owned)}{_label_dot(card)}</div>"
     )
 
 
@@ -1588,6 +1593,7 @@ ul.rows .price{font-size:.86rem;color:var(--text-muted);text-align:right;font-va
   font-size:10px;font-weight:900;background:linear-gradient(135deg,#f6d365,#b7e3ff 50%,#f6a5c0);
   color:#111;flex:none}
 .tagdot{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--orange);flex:none}
+.deckview .c .tagdot{position:absolute;right:8px;top:8px;width:14px;height:14px;box-shadow:0 0 0 2px #fff}
 .owned{display:inline-block;width:9px;height:9px;border-radius:50%;background:#1ebb6c;flex:none;
   box-shadow:0 0 0 2px var(--bg)}
 .deckview .c .owned{position:absolute;left:8px;bottom:8px;width:12px;height:12px;box-shadow:0 0 0 2px #fff}
@@ -1611,6 +1617,10 @@ ul.rows .hover img{width:100%;height:100%;display:block}
 .bulkbar .bulktools[hidden],.bulkbar .btn[hidden]{display:none}
 .bulkbar select{width:auto;min-height:36px}
 .bulkbar .count{font-weight:600}
+.bulkbar .tagform{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;flex-basis:100%}
+.bulkbar .tagform[hidden]{display:none}
+.bulkbar .tagform input[type=text]{width:auto;flex:1 1 10rem;min-width:0;max-width:18rem}
+.bulkbar .tagform input[type=color]{width:44px;min-width:44px;height:36px;padding:2px;border-radius:6px}
 .bulkbar .status{margin:0;flex-basis:100%} .bulkbar .status:empty{display:none}
 .deckview.picking .c,.deckview.picking .row{cursor:pointer}
 .deckview.picking .c.picked{outline:3px solid var(--orange);outline-offset:2px}

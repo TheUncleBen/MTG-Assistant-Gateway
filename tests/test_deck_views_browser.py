@@ -119,12 +119,15 @@ def test_bulk_move_finish_and_remove(server: Server, width: int, scheme: str, vi
         assert tools.is_visible()
         assert page.locator(".bulkbar select").first.is_disabled()
         for name in picks:
-            card = page.locator(f".deckview [data-card=\"{name}\"]").first
+            card = page.locator(f'.deckview [data-card="{name}"]').first
             card.scroll_into_view_if_needed()
             card.click()
             assert card.get_attribute("aria-pressed") == "true"
         assert page.locator(".cardview.open").count() == 0  # a tap selects; the viewer stays shut
         assert page.locator(".bulkbar .count").inner_text() == "2 cards selected"
+        # the themed dropdown shows the select's own first entry, and is enabled with cards picked
+        move_btn = page.locator(".bulkbar button[aria-label^='Move the selected']")
+        assert "Move to" in move_btn.inner_text() and move_btn.is_enabled()
         page.locator(".bulkbar").scroll_into_view_if_needed()
         _shot(page, f"deck-bulk-{view}-{width}-{scheme}")
 
@@ -146,7 +149,7 @@ def test_bulk_move_finish_and_remove(server: Server, width: int, scheme: str, vi
         # finish: one change per name; the badge redraws from the answer
         page.locator(".bulkbar button", has_text="Select cards").click()
         for name in picks:
-            page.locator(f".deckview [data-card=\"{name}\"]").first.click()
+            page.locator(f'.deckview [data-card="{name}"]').first.click()
         with page.expect_response(EDIT_URL) as req3:
             page.locator(".bulkbar select[aria-label^='Set the finish']").select_option("foil")
         assert json.loads(req3.value.request.post_data)["changes"] == [
@@ -154,17 +157,17 @@ def test_bulk_move_finish_and_remove(server: Server, width: int, scheme: str, vi
         ]
         page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
         assert all(r["modifier"] == "Foil" for n in picks for r in _rows(server, n))
-        first = page.locator(f".deckview [data-card=\"{picks[0]}\"]").first
+        first = page.locator(f'.deckview [data-card="{picks[0]}"]').first
         assert first.get_attribute("data-finish") == "Foil"
 
         # remove, with Escape leaving selection first to show it clears
         page.locator(".bulkbar button", has_text="Select cards").click()
-        page.locator(f".deckview [data-card=\"{picks[0]}\"]").first.click()
+        page.locator(f'.deckview [data-card="{picks[0]}"]').first.click()
         page.keyboard.press("Escape")
         assert page.locator(".deckview .picked").count() == 0
         page.locator(".bulkbar button", has_text="Select cards").click()
         for name in picks:
-            page.locator(f".deckview [data-card=\"{name}\"]").first.click()
+            page.locator(f'.deckview [data-card="{name}"]').first.click()
         before = page.locator(sel).count()
         with page.expect_response(EDIT_URL):
             page.locator(".bulkbar button", has_text="Remove").click()
@@ -172,5 +175,59 @@ def test_bulk_move_finish_and_remove(server: Server, width: int, scheme: str, vi
         assert all(not _rows(server, n) for n in picks)
         assert page.locator(sel).count() == before - 2
         assert _overflow(page) == 0
+        assert errors == []
+        browser.close()
+
+
+@pytest.mark.parametrize(("width", "scheme"), [(390, "dark"), (1366, "light")])
+def test_colour_tag_from_the_card_menu_and_undo(server: Server, width: int, scheme: str) -> None:
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, color_scheme=scheme)
+        page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+        row = page.locator(".deckview .row[data-card='Cultivate']").first
+        row.scroll_into_view_if_needed()
+        row.click(button="right")
+        page.locator(".ctxmenu [role=menuitem]", has_text="Colour tag").click()
+        form = page.locator(".bulkbar .tagform")
+        assert form.is_visible() and row.get_attribute("aria-pressed") == "true"
+        page.locator(".bulkbar input[aria-label='Tag name']").fill("Have")
+        page.locator(".bulkbar input[aria-label='Tag colour']").evaluate(
+            "e => { e.value = '#2ccce4'; e.dispatchEvent(new Event('input')); }"
+        )
+        _shot(page, f"deck-tag-form-{width}-{scheme}")
+        with page.expect_response(EDIT_URL) as r:
+            page.locator(".bulkbar button", has_text="Apply tag").click()
+        assert json.loads(r.value.request.post_data)["changes"] == [
+            {"action": "set_label", "card_name": "Cultivate", "label": "Have", "color": "#2ccce4"}
+        ]
+        page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
+        assert _rows(server, "Cultivate")[0]["label"] == "Have,#2ccce4"
+        dot = row.locator(".tagdot")
+        assert dot.get_attribute("title") == "Tag: Have"
+        assert dot.evaluate("e => getComputedStyle(e).backgroundColor") == "rgb(44, 204, 228)"
+        assert _overflow(page) == 0
+        _shot(page, f"deck-tagged-{width}-{scheme}")
+        # the page after a reload draws the same tag from Archidekt's row
+        page.reload(wait_until="networkidle")
+        dot = page.locator(".deckview .row[data-card='Cultivate'] .tagdot")
+        assert dot.get_attribute("title") == "Tag: Have"
+        page.locator(".bulkbar button", has_text="Select cards").click()
+        page.locator(".deckview .row[data-card='Cultivate']").first.click()
+        page.locator(".bulkbar button", has_text="Colour tag").click()
+        with page.expect_response(EDIT_URL):
+            page.locator(".bulkbar button", has_text="Take tag off").click()
+        page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
+        assert not _rows(server, "Cultivate")[0].get("label")
+        assert page.locator(".deckview .row[data-card='Cultivate'] .tagdot").count() == 0
+        # Undo puts the tag back
+        with page.expect_response(EDIT_URL) as r2:
+            page.locator(".deck-toast button", has_text="Undo").click()
+        assert json.loads(r2.value.request.post_data)["changes"][0]["label"] == "Have"
+        page.locator(".deck-toast .msg", has_text="Undone").wait_for(timeout=8000)
+        assert _rows(server, "Cultivate")[0]["label"] == "Have,#2ccce4"
         assert errors == []
         browser.close()

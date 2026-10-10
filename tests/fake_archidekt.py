@@ -872,6 +872,8 @@ class FakeArchidekt:
                 if e["action"] == "modify":  # a modify carries the row's categories and finish too
                     rel["categories"] = e.get("categories") or None
                     rel["modifier"] = e["modifications"].get("modifier", rel.get("modifier", "Normal"))
+                    if "label" in e["modifications"]:  # the colour tag, "Name,#rrggbb" ("" clears it)
+                        rel["label"] = e["modifications"]["label"]
             else:
                 self.next_rel_id += 1
                 deck["cards"].append(

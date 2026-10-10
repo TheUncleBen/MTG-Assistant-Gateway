@@ -255,6 +255,29 @@
     badge.title = finish;
     badge.textContent = finish.charAt(0);
   }
+  // Archidekt's colour tag ("Have,#37d67a"): the dot before the name (text rows) or in the
+  // picture's corner (image cards), named for screen readers
+  function splitLabel(label) {
+    var i = (label || "").lastIndexOf(",");
+    var name = (i < 0 ? label || "" : label.slice(0, i)).trim();
+    var colour = i < 0 ? "" : label.slice(i + 1).trim();
+    return { name: name, colour: /^#[0-9a-fA-F]{6}$/.test(colour) ? colour.toLowerCase() : "" };
+  }
+  function setLabel(card, label) {
+    var t = splitLabel(label);
+    var dot = $(".tagdot", card);
+    if (!t.name) { card.removeAttribute("data-label"); if (dot) dot.remove(); return; }
+    card.setAttribute("data-label", label);
+    if (!dot) {
+      dot = el("span", "tagdot");
+      var n = $(".n", card);
+      if (n) n.insertBefore(dot, n.firstChild); else card.appendChild(dot);
+    }
+    dot.title = "Tag: " + t.name;
+    dot.style.background = t.colour || "";
+    dot.textContent = "";
+    dot.appendChild(el("span", "sr-only", "tag " + t.name));
+  }
   function refreshStacks() {
     $$(".stack", cards).forEach(function (st) {
       var items = $$(".c, .row", st);
@@ -318,6 +341,7 @@
       setQty(card, r.qty);
       card.setAttribute("data-zone", r.zone);
       if (r.finish) setFinish(card, r.finish);
+      if (r.label !== undefined) setLabel(card, r.label);
       var cat = (r.categories && r.categories[0]) || "";
       card.setAttribute("data-cat", cat);
       if (r.relation_id !== null && r.relation_id !== undefined) card.setAttribute("data-rel", String(r.relation_id));
@@ -624,6 +648,7 @@
       sub.addEventListener("keydown", function (e) { if (e.key === "ArrowLeft") { stop(e); toggleSub(false); moveBtn.focus(); } });
       m.appendChild(moveBtn);
       m.appendChild(sub);
+      if (window.MtgDeckTag) m.appendChild(menuItem("Colour tag…", "tag", function () { closeMenu(); window.MtgDeckTag(card); }));
       m.appendChild(menuItem("Remove from deck", "x", function () {
         m.classList.add("busy");
         edit(card, "remove").catch(function (err) { if (menu === m) m.classList.remove("busy"); showError(err); });
@@ -768,19 +793,47 @@
       opt.value = o[0];
       finishSel.appendChild(opt);
     });
+    var tagBtn = el("button", "btn", "Colour tag…");
+    tagBtn.type = "button";
+    tagBtn.setAttribute("aria-expanded", "false");
     var rm = el("button", "btn danger", "Remove");
     rm.type = "button";
+    // the colour tag form: a name (the deck's own tags offered), a colour, Apply or Take off
+    var tagForm = el("div", "tagform");
+    tagForm.hidden = true;
+    var tagName = el("input");
+    tagName.type = "text";
+    tagName.maxLength = 40;
+    tagName.placeholder = "Tag name, e.g. Have";
+    tagName.setAttribute("aria-label", "Tag name");
+    tagName.setAttribute("list", "deck-tags");
+    var known = el("datalist");
+    known.id = "deck-tags";
+    var tagColour = el("input");
+    tagColour.type = "color";
+    tagColour.value = "#37d67a";
+    tagColour.setAttribute("aria-label", "Tag colour");
+    var tagApply = el("button", "btn-primary", "Apply tag");
+    tagApply.type = "button";
+    var tagOff = el("button", "btn-ghost small", "Take tag off");
+    tagOff.type = "button";
+    [tagName, known, tagColour, tagApply, tagOff].forEach(function (n) { tagForm.appendChild(n); });
     var done = el("button", "btn-ghost small", "Cancel");
     done.type = "button";
     var status = el("p", "status", "");
     status.setAttribute("role", "status");
-    [count, all, moveSel, finishSel, rm, done].forEach(function (n) { tools.appendChild(n); });
+    [count, all, moveSel, finishSel, tagBtn, rm, done].forEach(function (n) { tools.appendChild(n); });
     bar.appendChild(start);
     bar.appendChild(tools);
+    bar.appendChild(tagForm);
     bar.appendChild(status);
     cards.parentNode.insertBefore(bar, cards);
 
     function picked() { return $$(".c.picked, .row.picked", cards); }
+    // the themed dropdowns (static/select.js) redraw their label and state from the real selects
+    function syncSelects() {
+      if (window.MtgSelect) [moveSel, finishSel].forEach(function (c) { window.MtgSelect.refresh(c); });
+    }
     function fillMoves() {
       moveSel.textContent = "";
       var first = el("option", null, "Move to…");
@@ -799,7 +852,8 @@
     function refresh() {
       var n = picked().length;
       count.textContent = n === 1 ? "1 card selected" : n + " cards selected";
-      [moveSel, finishSel, rm].forEach(function (c) { c.disabled = n === 0 || saving; });
+      [moveSel, finishSel, tagBtn, rm, tagApply, tagOff].forEach(function (c) { c.disabled = n === 0 || saving; });
+      syncSelects();
     }
     function setMode(on) {
       picking = on;
@@ -807,6 +861,7 @@
       start.setAttribute("aria-pressed", on ? "true" : "false");
       start.hidden = on;
       tools.hidden = !on;
+      showTagForm(false);
       $$(".c, .row", cards).forEach(function (c) {
         c.classList.remove("picked");
         if (on) c.setAttribute("aria-pressed", "false"); else c.removeAttribute("aria-pressed");
@@ -843,7 +898,8 @@
       status.className = "status";
       status.textContent = "Saving to Archidekt…";
       refresh();
-      [moveSel, finishSel, rm, all].forEach(function (c) { c.disabled = true; });
+      [moveSel, finishSel, tagBtn, rm, all, tagApply, tagOff].forEach(function (c) { c.disabled = true; });
+      syncSelects();
       saveEdit(changes, inverses).then(function () {
         setMode(false);
         status.textContent = what;
@@ -855,6 +911,79 @@
       });
     }
     function byNameZone(c) { return frontFace(c.getAttribute("data-card")) + "|" + zoneOf(c); }
+    function showTagForm(open) {
+      tagForm.hidden = !open;
+      tagBtn.setAttribute("aria-expanded", open ? "true" : "false");
+      if (!open) return;
+      known.textContent = "";
+      var seen = {};
+      $$("[data-label]", cards).forEach(function (c) {
+        var t = splitLabel(c.getAttribute("data-label"));
+        if (!t.name || seen[t.name]) return;
+        seen[t.name] = t.colour || "#656565";
+        var o = el("option");
+        o.value = t.name;
+        known.appendChild(o);
+      });
+      tagName.oninput = function () { if (seen[tagName.value.trim()]) tagColour.value = seen[tagName.value.trim()]; };
+      tagName.focus();
+    }
+    tagBtn.addEventListener("click", function () { showTagForm(tagForm.hidden); });
+    // One set_label per card name and zone; the Undo puts back each one's old tag, and is only
+    // offered when every row of that card in that zone had the same one.
+    function tagChanges(name, colour) {
+      var list = unique(picked(), byNameZone);
+      var changes = [], inverses = [];
+      list.forEach(function (c) {
+        var ch = { action: "set_label", card_name: c.getAttribute("data-card"), label: name };
+        if (name) ch.color = colour;
+        if (zoneOf(c) === "side") ch.zone = "side";
+        changes.push(ch);
+        if (!inverses) return;
+        var olds = {};
+        $$(".c, .row", cards).forEach(function (o) {
+          if (byNameZone(o) === byNameZone(c)) olds[o.getAttribute("data-label") || ""] = 1;
+        });
+        var keys = Object.keys(olds);
+        if (keys.length !== 1) { inverses = null; return; }
+        var old = splitLabel(keys[0]);
+        var inv = { action: "set_label", card_name: ch.card_name, label: old.name };
+        if (old.name && old.colour) inv.color = old.colour;
+        if (ch.zone) inv.zone = "side";
+        inverses.push(inv);
+      });
+      // a card already carrying exactly this tag is nothing to change (the gateway would refuse)
+      var keep = changes.map(function (ch, i) {
+        var c = list[i], cur = splitLabel(c.getAttribute("data-label") || "");
+        return !(cur.name === name && (!name || cur.colour === (colour || "").toLowerCase()));
+      });
+      return {
+        changes: changes.filter(function (_, i) { return keep[i]; }),
+        inverses: inverses && inverses.filter(function (_, i) { return keep[i]; })
+      };
+    }
+    tagApply.addEventListener("click", function () {
+      var name = tagName.value.trim();
+      if (!name || name.indexOf(",") >= 0) {
+        status.className = "status notice error";
+        status.textContent = "A tag needs a name, without commas.";
+        tagName.focus();
+        return;
+      }
+      var t = tagChanges(name, tagColour.value);
+      if (!t.changes.length) { status.className = "status"; status.textContent = "Those cards already have that tag."; return; }
+      run(t.changes, t.inverses, "Tagged " + name + ".");
+    });
+    tagOff.addEventListener("click", function () {
+      var t = tagChanges("", "");
+      if (!t.changes.length) { status.className = "status"; status.textContent = "Those cards have no tag."; return; }
+      run(t.changes, t.inverses, "Tag taken off.");
+    });
+    window.MtgDeckTag = function (card) {
+      if (!picking) setMode(true);
+      if (!card.classList.contains("picked")) togglePick(card);
+      showTagForm(true);
+    };
     rm.addEventListener("click", function () {
       var list = unique(picked(), byNameZone);
       var changes = [], inverses = [];
@@ -868,6 +997,7 @@
     moveSel.addEventListener("change", function () {
       var to = moveSel.value;
       moveSel.value = "";
+      syncSelects();
       if (!to) return;
       var list = unique(picked(), byNameZone).filter(function (c) { return (byCategory ? stackOf(c) : catOf(c)) !== to; });
       if (!list.length) { status.className = "status"; status.textContent = "Those cards are already in " + to + "."; return; }
@@ -884,8 +1014,11 @@
     finishSel.addEventListener("change", function () {
       var to = finishSel.value;
       finishSel.value = "";
+      syncSelects();
       if (!to) return;
-      var list = unique(picked(), function (c) { return frontFace(c.getAttribute("data-card")); });
+      // the gateway changes the finish of cards in the deck itself; maybeboard rows keep theirs
+      var list = unique(picked().filter(function (c) { return zoneOf(c) === "main"; }), function (c) { return frontFace(c.getAttribute("data-card")); });
+      if (!list.length) { status.className = "status"; status.textContent = "A finish can be set on cards in the deck itself, not on the maybeboard."; return; }
       var changes = [], inverses = [];
       list.forEach(function (c) {
         var name = c.getAttribute("data-card");

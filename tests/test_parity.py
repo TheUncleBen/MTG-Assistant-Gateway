@@ -505,3 +505,39 @@ async def test_settings_for_a_deck_without_a_format_keep_it_unset(stack: Stack) 
         assert ark.decks[42]["description"] == "Only the description changes."
     finally:
         await b.aclose()
+
+
+async def test_set_label_puts_and_takes_off_a_colour_tag(stack: Stack) -> None:
+    """set_label (0.7.19): Archidekt's colour tag on every row of a card, sent in
+    modifications.label as "Name,#rrggbb" (its own editor's shape), verified on the re-read."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+
+    async def propose(change: dict) -> dict:
+        args = {"deck_id": "42", "changes": [change]}
+        return structured(await call(h, token, "propose_deck_changes", args))
+
+    p = await propose({"action": "set_label", "name": "Sol Ring", "label": "Have", "color": "#37D67A"})
+    assert p["ok"], p
+    assert "Sol Ring: colour tag no tag -> Have (#37d67a)" in p["diff"]
+    before = len(ark.patches)
+    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert a["ok"] and a["result"]["verified"] is True, a
+    sent = [e for patch in ark.patches[before:] for e in patch.get("cards", [patch])]
+    assert any(e.get("modifications", {}).get("label") == "Have,#37d67a" for e in sent), sent
+    row = next(c for c in ark.decks[42]["cards"] if c["card"]["oracleCard"]["name"] == "Sol Ring")
+    assert row["label"] == "Have,#37d67a" and row["quantity"] == 1
+    # the same tag again is nothing to change
+    assert not (await propose({"action": "set_label", "name": "Sol Ring", "label": "Have,#37d67a"}))["ok"]
+    # a bad colour or a comma in the name is refused before anything is stored
+    bad = await propose({"action": "set_label", "name": "Sol Ring", "label": "Have", "color": "red"})
+    assert not bad["ok"]
+    bad = await propose({"action": "set_label", "name": "Sol Ring", "label": "a,b", "color": "#000000"})
+    assert not bad["ok"]
+    # an empty label takes the tag off
+    off = await propose({"action": "set_label", "name": "Sol Ring", "label": ""})
+    assert off["ok"] and "Have (#37d67a) -> no tag" in off["diff"], off
+    a = structured(await call(h, token, "apply_proposal", {"proposal_id": off["proposal_id"]}))
+    assert a["ok"] and a["result"]["verified"] is True, a
+    row = next(c for c in ark.decks[42]["cards"] if c["card"]["oracleCard"]["name"] == "Sol Ring")
+    assert not row.get("label")
