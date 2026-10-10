@@ -425,7 +425,8 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
         warn.setAttribute("role", "note");
         a.appendChild(warn);
       }
-      var no = el("button", "danger", "Reject"); no.type = "button"; no.id = "reject";
+      // next to a red Delete, Reject stays a plain button so the two are easy to tell apart
+      var no = el("button", destroy ? "" : "danger", "Reject"); no.type = "button"; no.id = "reject";
       ok.disabled = no.disabled = true; armed = false;
       ok.onclick = function () { decide("approve"); };
       no.onclick = function () { askWhy(true); };

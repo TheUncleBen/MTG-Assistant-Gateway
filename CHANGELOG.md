@@ -22,6 +22,9 @@ colour tags.
   the card. The assistant can propose tags too (`set_label` in `propose_deck_changes`); a tag
   change is low risk, so it follows your approval mode like other small edits.
 
+### Changed
+- The in-chat card for deleting a deck shows Reject as a plain button next to the red Delete.
+
 ### Not built
 - Moxfield import by URL: Moxfield's deck API could not be reached or checked from here, so it
   is not built. A Moxfield export pasted as text already imports.
