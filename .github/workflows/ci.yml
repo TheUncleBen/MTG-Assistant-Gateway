@@ -177,6 +177,14 @@ jobs:
           set -eu
           android/scripts/build.sh debug
           android/scripts/test.sh
+      # The release path (signing, apksigner check, certificate digest) with a throwaway key, so a break
+      # there shows on the pull request instead of in the release build on main.
+      - name: Release build with a throwaway key
+        run: |
+          set -eu
+          android/scripts/build.sh release --throwaway
+          python3 -c 'import json,re,sys; d=json.load(open(sys.argv[1])); assert re.fullmatch(r"[0-9a-f]{64}", d["cert_sha256"]), d' android/out/mtg-assistant-gateway.json
+          rm -f android/out/throwaway.keystore android/out/throwaway.keystore.password
 
   android:
     # The Android app (android/), built with Gradle and the runner's Android SDK by android/scripts/build.sh

@@ -100,10 +100,10 @@ What it sends: one request to GitHub's public releases API without any
 account, cookie or gateway address, and the download from GitHub. Nothing goes
 to your gateway.
 
-**Moving from a test build.** Builds before 0.7.11 were signed with a test
+**Moving from a test build.** Builds before 0.7.12 were signed with a test
 key, and the release key is different. Android refuses to install an update
-signed with another key, so an app from before 0.7.11 can't update itself to
-it: uninstall it once, then install 0.7.11 from your gateway's `/app` page (and
+signed with another key, so an app from before 0.7.12 can't update itself to
+it: uninstall it once, then install 0.7.12 from your gateway's `/app` page (and
 type the gateway address again). Every later version updates in place.
 
 A fork or a self-built app looks at the repository it was built for:
@@ -473,8 +473,9 @@ independent value people compare `/app` against
 ([section 1](#1-getting-the-app)).
 
 Pull requests that change `android/` (and aren't drafts) run a separate
-`android-check` job: a debug build and the unit tests, with no secrets and a
-read-only token, so build-script and Kotlin changes are exercised before they
+`android-check` job: a debug build, the unit tests and a release build signed
+with a throwaway key (which also checks the certificate digest), with no
+secrets and a read-only token, so build-script and Kotlin changes are exercised before they
 are merged rather than first in the signing job. Pull requests that don't touch
 `android/` skip it.
 
