@@ -317,6 +317,8 @@ async def test_app_shell_routes(stack: Stack) -> None:
     assert m.headers["content-type"].startswith("application/manifest+json")
     sw = await h.http.get("/sw.js")
     assert sw.status_code == 200 and "fetch" in sw.text and sw.headers["cache-control"] == "no-store"
+    # one dropped connection doesn't show the offline page: two retries first, GET navigations only
+    assert "RETRY=[300,1000]" in sw.text and "e.request.method!=='GET'" in sw.text
     links = await h.http.get("/.well-known/assetlinks.json")
     assert links.status_code == 200
     assert links.json()[0]["relation"] == ["delegate_permission/common.handle_all_urls"]

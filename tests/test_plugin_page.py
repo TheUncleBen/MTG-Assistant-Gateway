@@ -180,7 +180,7 @@ async def _check_install_pages(harness: Harness, b: Browser) -> None:
 
     md = await harness.http.get("/install.md")
     assert md.status_code == 200
-    assert md.headers["content-type"].startswith("text/markdown")
+    assert md.headers["content-type"].startswith("text/plain")
     assert "claude plugin install mtg-gateway@mtg-gateway" in md.text
     assert f"{GATEWAY}/mcp" in md.text
     assert "never paste a password" in md.text
