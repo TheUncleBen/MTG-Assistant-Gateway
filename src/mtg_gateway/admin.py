@@ -370,6 +370,9 @@ def system_data(state: Any) -> dict[str, Any]:
         out["last_backup_copy_error"] = backup_mod.last_run.get("copy_error")
         newest = backup_mod.newest_backup(copy_dir) if copy_dir.is_dir() else None
         out["last_backup_copy_at"] = int(newest[1]) if newest else None
+    # The hourly removed-member clean-up (idp_sweep.py): off and why, waiting, or its last round.
+    sweep = getattr(state, "sweep", None)
+    out["member_cleanup"] = sweep.status() if sweep is not None else {"state": "not started"}
     # The Archidekt request limits in force and the counters since the gateway started.
     client = getattr(state, "archidekt", None)
     limits = getattr(client, "limits", None)
@@ -393,6 +396,23 @@ def _archidekt_stats(a: dict[str, Any] | None) -> str:
         f"{a['rate_limited']} slowed down by Archidekt"
     )
     return _stat("Archidekt request limits", limits) + _stat("Archidekt requests since start", counts)
+
+
+def _cleanup_text(c: dict[str, Any]) -> str:
+    """The removed-member clean-up's state in one line (idp_sweep.AuthentikSweep.status)."""
+    st = c.get("state")
+    if st == "off":
+        return f"off: {c['reason'].removeprefix('removed-member clean-up is off: ')}"
+    if st == "waiting":
+        return f"on, not run yet (the first round is {c['first_after_seconds'] // 60} minutes after start)"
+    if st == "ok":
+        return (
+            f"last run OK at {_when(c['at'])}: {c['allowed']} allowed member(s), "
+            f"{c['removed']} stored Archidekt session(s) removed"
+        )
+    if st == "failed":
+        return f"last run FAILED at {_when(c['at'])}, nothing deleted: {c['error']}"
+    return "not started yet"
 
 
 def users_data(state: Any) -> list[dict[str, Any]]:
@@ -492,6 +512,7 @@ def _overview_body(state: Any) -> str:
         + _stat("Newest backup", backup)
         + _stat("Newest backup copy", copies)
         + _stat("Research service (Mystic Forge)", sysd["mystic_forge"])
+        + _stat("Removed-member clean-up", _cleanup_text(sysd["member_cleanup"]))
         + _archidekt_stats(sysd.get("archidekt"))
         + _stat("Default approval mode", state.settings.approval_mode_default)
         + _stat("Highest approval mode allowed", state.settings.approval_mode_max)

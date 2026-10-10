@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import html
+import json
 import sqlite3
 from pathlib import Path
 from urllib.parse import urlparse
@@ -148,6 +150,32 @@ async def test_admin_sees_the_pages_and_the_api(gw: Harness) -> None:
         met = (await b.http.get("/api/v1/admin/metrics?days=7")).json()
         assert met["ok"] and met["days"] == 7 and any(t["name"] == "whoami" for t in met["totals"])
         assert (await b.http.get("/api/v1/admin/metrics?days=x")).status_code == 400
+    finally:
+        await b.aclose()
+
+
+async def test_the_overview_shows_whether_the_removed_member_clean_up_works(gw: Harness) -> None:
+    sweep = gw.app.state.gateway.sweep
+    b = await admin_browser(gw)
+    try:
+        r = await b.http.get("/admin", headers=NAVIGATE)
+        assert "Removed-member clean-up" in r.text and "off: no Authentik API token" in r.text
+        o = (await b.http.get("/api/v1/admin/overview")).json()
+        assert o["system"]["member_cleanup"]["state"] == "off"
+
+        sweep._token, sweep.api = "tok-marker-xyz", "https://auth.example.com"  # as if configured
+        r = await b.http.get("/admin", headers=NAVIGATE)
+        assert "on, not run yet (the first round is 2 minutes after start)" in r.text
+        sweep.last.update(ok=True, at=1_800_000_000, removed=1, allowed=4, error=None)
+        r = await b.http.get("/admin", headers=NAVIGATE)
+        assert "last run OK at 2027-01-15 08:00 UTC: 4 allowed member(s), 1 stored" in r.text
+        err = "group 'mtg-users' found 0 times (is the name right, and may the token view that group?)"
+        sweep.last.update(ok=False, at=1_800_003_600, error=err)
+        r = await b.http.get("/admin", headers=NAVIGATE)
+        assert "last run FAILED at 2027-01-15 09:00 UTC, nothing deleted: " + html.escape(err) in r.text
+        o = (await b.http.get("/api/v1/admin/overview")).json()
+        assert o["system"]["member_cleanup"] == {"state": "failed", "at": 1_800_003_600, "error": err}
+        assert "tok-marker-xyz" not in r.text and "tok-marker-xyz" not in json.dumps(o)
     finally:
         await b.aclose()
 
