@@ -514,6 +514,11 @@ def deck_checks(deck: Deck, cards: list[DeckCard], commanders: list[DeckCard], q
         "uncategorised": uncategorised,
         "problems": problems,
         "ok": not problems,
+        # The deck's verdict as archidekt.com's banner gives it: every format rule above met, the
+        # deck size included, not just every card legal. compute() adds the bracket check to
+        # ``problems`` afterwards; that one is advice and does not make a deck illegal.
+        "legal": bool(fmt) and not problems,
+        "legal_problems": list(problems),
     }
     if sideboard is not None:
         out["sideboard"] = sideboard

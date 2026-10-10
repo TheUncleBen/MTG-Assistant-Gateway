@@ -247,20 +247,36 @@ def featured(deck: Deck) -> DeckCard | None:
     return None
 
 
-def legality_chip_html(deck: Deck, stats: dict[str, Any] | None) -> str:
-    """The banner's Legality chip: green when every card is legal in the deck's format, red with
-    the number of problems otherwise, nothing for a deck without a format. Rendered again by the
-    edit endpoint (api.py) so the page can swap it in after a card changes."""
+def legal_problems(stats: dict[str, Any] | None) -> list[str]:
+    """What keeps the deck from being legal in its format, as archidekt.com's banner counts it:
+    every format rule from deck_stats.deck_checks (deck size, command zone, colour identity,
+    copies, card legality...), not only the cards' own legality. Computed from the deck as just
+    read, so an edit made on Archidekt shows on the next view."""
     stats = stats or {}
-    legal_problems = stats.get("legality_problems") or []
+    checks = stats.get("checks")
+    if isinstance(checks, dict) and "legal_problems" in checks:
+        return [str(p) for p in checks["legal_problems"]]
+    return [
+        f"{p.get('name')} ({p.get('status')})" if isinstance(p, dict) else str(p)
+        for p in stats.get("legality_problems") or []
+    ]
+
+
+def legality_chip_html(deck: Deck, stats: dict[str, Any] | None) -> str:
+    """The banner's Legality chip: green when the deck meets every rule of its format (the size
+    too, as on archidekt.com), red with the number of problems otherwise, nothing for a deck
+    without a format. Rendered again by the edit endpoint (api.py) so the page can swap it in
+    after a card changes."""
+    problems = legal_problems(stats)
     if not deck.format:
         return ""
-    if not legal_problems:
+    if not problems:
         return (
             f"<span class='legal ok' title='Legal in {esc(deck.format or 'this format')}'>"
             f"{icon('check')} Legality</span>"
         )
-    return f"<span class='legal bad' title='{len(legal_problems)} problem(s)'>{icon('x')} Legality</span>"
+    title = f"{len(problems)} problem(s): " + "; ".join(problems[:5]) + ("…" if len(problems) > 5 else "")
+    return f"<span class='legal bad' title='{esc(title)}'>{icon('x')} Legality</span>"
 
 
 def banner_html(
@@ -750,6 +766,11 @@ def legality_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
         else (
             f"<div class='legality'><h3>Legality</h3><p class='ok'>{icon('check')} Legal in "
             f"{esc(format_label(deck.format))}</p></div>"
+            if deck.format and not legal_problems(stats)
+            # every card is legal but another rule is not met (the size, say): not "Legal in"
+            else f"<div class='legality'><h3>Legality</h3><p>{icon('x')} Not legal in "
+            f"{esc(format_label(deck.format))}: every card is, but the Deck checks above are not "
+            "all met.</p></div>"
             if deck.format
             else ""
         )
