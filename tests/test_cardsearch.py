@@ -272,3 +272,81 @@ async def test_text_cache_is_bounded_and_expires() -> None:
     with pytest.raises(RuntimeError):
         await cache.fetch("D", failing)
     assert cache.get("D") is None and "d" not in cache._inflight
+
+
+# -- 0.7.16: the viewer's outside links, back face and rulings ----------------------------------
+def test_card_links_and_back_face_come_from_scryfalls_card_data() -> None:
+    from mtg_gateway.cardsearch import back_image, card_links
+
+    card = {
+        "related_uris": {"edhrec": "https://edhrec.com/route/?cc=Delver+of+Secrets"},
+        "purchase_uris": {
+            "tcgplayer": "https://partner.tcgplayer.com/c/4931599/1830156/21018?subId1=api"
+            "&u=https%3A%2F%2Fwww.tcgplayer.com%2Fproduct%2F609611%3Fpage%3D1"
+        },
+        "card_faces": [
+            {"image_uris": {"normal": "https://cards.scryfall.io/normal/front/6/9/x.jpg"}},
+            {"image_uris": {"normal": "https://cards.scryfall.io/normal/back/6/9/x.jpg"}},
+        ],
+    }
+    # the partner link is unwrapped to the product page it forwards to: no referral link shown
+    assert card_links(card) == {
+        "edhrec": "https://edhrec.com/route/?cc=Delver+of+Secrets",
+        "tcgplayer": "https://www.tcgplayer.com/product/609611?page=1",
+    }
+    assert back_image(card) == "https://cards.scryfall.io/normal/back/6/9/x.jpg"
+    # anything not https on the named sites is dropped; a one-picture card has no back
+    bad = {
+        "related_uris": {"edhrec": "javascript:alert(1)"},
+        "purchase_uris": {"tcgplayer": "https://partner.tcgplayer.com/c/1?u=https%3A%2F%2Fevil.example%2F"},
+        "card_faces": [{"name": "Fire"}, {"name": "Ice"}],
+    }
+    assert card_links(bad) == {} and back_image(bad) == ""
+
+
+async def test_rulings_are_read_on_demand_and_kept(stack: Stack) -> None:  # noqa: F811
+    r = await stack.h.http.get("/cards/api/rulings?name=Sol%20Ring")
+    assert r.status_code == 401
+    b = await linked(stack)
+    try:
+        sol = stack.sf.by_name("Sol Ring")
+        stack.sf.rulings[sol["id"]] = [
+            {"object": "ruling", "source": "wotc", "published_at": "2004-10-04", "comment": "Adds {C}{C}."},
+            {"object": "ruling", "source": "scryfall", "published_at": "2020-01-01", "comment": "A note."},
+        ]
+        calls = lambda: sum(1 for _m, u in stack.sf.requests if u.endswith("/rulings"))  # noqa: E731
+        r = await b.http.get("/cards/api/rulings", params={"name": "Sol Ring"})
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d["name"] == "Sol Ring" and d["rulings"] == [
+            {"date": "2004-10-04", "text": "Adds {C}{C}.", "source": "Wizards of the Coast"},
+            {"date": "2020-01-01", "text": "A note.", "source": "Scryfall"},
+        ]
+        assert calls() == 1
+        r = await b.http.get("/cards/api/rulings", params={"name": "sol ring"})
+        assert r.status_code == 200 and calls() == 1  # kept: Scryfall is asked once
+        # the text the viewer reads now carries the id and the outside links
+        card = (await b.http.get("/cards/api/text", params={"name": "Sol Ring"})).json()["card"]
+        assert card["id"] == sol["id"] and isinstance(card["links"], dict)
+        r = await b.http.get("/cards/api/rulings", params={"name": "No Such Card Anywhere"})
+        assert r.status_code == 404
+        r = await b.http.get("/cards/api/rulings", params={"name": "x"})
+        assert r.status_code == 400
+    finally:
+        await b.aclose()
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://evil.example\\@edhrec.com/x",
+        "https://user@edhrec.com/x",
+        "https://edhrec.com:8443/x",
+        "https://edhrec.com/x y",
+        "http://edhrec.com/x",
+    ],
+)
+def test_link_check_refuses_urls_a_browser_reads_differently(url: str) -> None:
+    from mtg_gateway.cardsearch import card_links
+
+    assert card_links({"related_uris": {"edhrec": url}}) == {}

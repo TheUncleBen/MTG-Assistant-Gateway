@@ -7,6 +7,24 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.16] - 2026-10-10
+
+The first of the Archidekt features flagged in the gap review and never built.
+
+### Added
+- Card viewer: a Rulings button lists the card's official rulings (from Scryfall, kept a day), a
+  double-faced card shows its back with Show back / Show front, and EDHREC and TCGplayer links
+  open in a new tab (the TCGplayer link is the product page Scryfall names for the card).
+- Deck comments: Up and Down votes on other members' comments, asked first like the deck's Like,
+  sent to Archidekt under your linked session. Your own and archived comments take no votes.
+- Deck editor: Redo, with Ctrl+Z, Ctrl+Shift+Z and Ctrl+Y (Cmd on a Mac) for Undo and Redo. The
+  keys are left alone while you type in a field or a dialog is open.
+
+### Changed
+- On a phone the editor's save bar keeps one row: Undo and Redo show as arrows (screen readers
+  still hear their names), so the bar and its questions stay inside the screen at 320 px.
+- Opening a card on the card search page reads its text once instead of twice.
+
 ## [0.7.15] - 2026-10-10
 
 Small fixes to the Forge simulation from an independent gap review of 0.7.14.

@@ -926,6 +926,7 @@ ICONS = {
     "check": "<path d='M5 12l4 4L19 6'/>",
     "x": "<path d='M6 6l12 12M18 6L6 18'/>",
     "undo": "<path d='M9 14L4 9l5-5'/><path d='M4 9h10a6 6 0 0 1 0 12h-3'/>",
+    "redo": "<path d='M15 14l5-5-5-5'/><path d='M20 9H10a6 6 0 0 0 0 12h3'/>",
     "settings": "<circle cx='12' cy='12' r='3'/><path d='M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1"
     "M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1'/>",
     "download": "<path d='M12 4v11M7 10l5 5 5-5'/><path d='M4 20h16'/>",

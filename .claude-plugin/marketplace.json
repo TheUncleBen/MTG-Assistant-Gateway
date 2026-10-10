@@ -3,13 +3,13 @@
   "owner": { "name": "MTG Assistant Gateway", "url": "https://github.com/TheUncleBen/MTG-Assistant-Gateway" },
   "metadata": {
     "description": "Plugins for the MTG Assistant Gateway: the end-user plugin (connector plus MTG skill) and the operator plugin (guided deploy and invites). The end-user plugin from this repository reads its gateway address from MTG_GATEWAY_URL; a running gateway serves a filled-in copy at https://<gateway>/plugin/marketplace.json.",
-    "version": "0.7.15"
+    "version": "0.7.16"
   },
   "plugins": [
     {
       "name": "mtg-gateway",
       "description": "Magic: The Gathering research, goldfish simulation and safe Archidekt deck edits through an MTG Assistant Gateway. Connector URL comes from MTG_GATEWAY_URL; run /mtg-gateway:setup-mtg-gateway after installing.",
-      "version": "0.7.15",
+      "version": "0.7.16",
       "category": "productivity",
       "keywords": ["mtg", "magic-the-gathering", "archidekt", "mcp"],
       "source": "./plugin/mtg-gateway"
@@ -17,7 +17,7 @@
     {
       "name": "mtg-gateway-operator",
       "description": "For whoever runs the gateway: /mtg-gateway-operator:deploy walks through the Swarm, Authentik, Portainer and proxy setup with secrets created as Docker secrets; /mtg-gateway-operator:invite adds a user.",
-      "version": "0.7.15",
+      "version": "0.7.16",
       "category": "devops",
       "keywords": ["mtg", "docker-swarm", "portainer", "authentik"],
       "source": "./plugin/mtg-gateway-operator"

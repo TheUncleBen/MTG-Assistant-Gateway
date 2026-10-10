@@ -736,6 +736,11 @@ class FakeArchidekt:
                 return [
                     {
                         **c,
+                        # a comment's score and the reader's vote come from the votes (same store
+                        # as a deck's like, whose thread root is a comment too)
+                        "points": c["points"]
+                        + sum(1 if v == 1 else -1 for (_u, r), v in self.votes.items() if r == c["id"]),
+                        "userInput": self.votes.get((who or "", c["id"]), 0),
                         "childrenCount": len(tree(c["id"])),
                         "children": {"count": 0, "results": tree(c["id"])},
                     }

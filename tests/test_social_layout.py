@@ -215,3 +215,65 @@ async def test_app_and_browser_get_the_same_tab_bar_markup(stack: Stack) -> None
         assert "<nav class='tabbar'" in r.text and "<footer class='site'" in r.text
     finally:
         await b.aclose()
+
+
+async def test_voting_on_a_comment_in_the_thread(stack: Stack) -> None:
+    """0.7.16: up, down and take back a vote on someone's comment (Archidekt's comment vote, the
+    same PUT /comments/vote/{id}/ {up, remove} a deck's like uses); the score follows."""
+    b = await linked(stack)
+    try:
+        stack.ark.private.discard(43)
+        cid = 555001
+        stack.ark.comments[300043] = [
+            {
+                "id": cid,
+                "text": "Try Cultivate.",
+                "owner": {"id": 78, "username": "amy", "avatar": None, "frame": None},
+                "parent": 300043,
+                "originalPost": 300043,
+                "createdAt": "2026-10-10T12:00:00Z",
+                "editedAt": None,
+                "points": 0,
+                "userInput": 0,
+                "childrenCount": 0,
+                "children": {"count": 0, "results": []},
+                "archived": False,
+                "locked": False,
+                "type": 4,
+            }
+        ]
+        r = await post(b, f"/social/api/decks/43/comments/{cid}/vote", {"vote": "up"})
+        assert r.status_code == 200, r.text
+        assert r.json() == {"ok": True, "comment": cid, "vote": 1, "points": 1}
+        assert stack.ark.votes[("alice", cid)] == 1
+        r = await post(b, f"/social/api/decks/43/comments/{cid}/vote", {"vote": "down"})
+        assert r.json()["points"] == -1 and stack.ark.votes[("alice", cid)] == 2
+        got = (await b.http.get("/social/api/decks/43/comments")).json()["comments"][0]
+        assert got["points"] == -1 and got["user_vote"] == 2
+        r = await post(b, f"/social/api/decks/43/comments/{cid}/vote", {"vote": "none"})
+        assert r.json()["points"] == 0 and ("alice", cid) not in stack.ark.votes
+        # the same vote again sends nothing (Archidekt might read it as a toggle)
+        sent = len(stack.ark.votes)
+        r = await post(b, f"/social/api/decks/43/comments/{cid}/vote", {"vote": "none"})
+        assert r.json()["points"] == 0 and len(stack.ark.votes) == sent
+        # your own comment is refused
+        r = await post(b, "/social/api/decks/43/comments", {"text": "Mine."})
+        own = r.json()["comment"]["id"]
+        r = await post(b, f"/social/api/decks/43/comments/{own}/vote", {"vote": "up"})
+        assert r.status_code == 400
+        # a comment outside this deck's thread, a bad vote and a bad id are refused
+        r = await post(b, "/social/api/decks/43/comments/999999/vote", {"vote": "up"})
+        assert r.status_code == 404
+        r = await post(b, f"/social/api/decks/43/comments/{cid}/vote", {"vote": "sideways"})
+        assert r.status_code == 400
+        r = await post(b, "/social/api/decks/43/comments/x/vote", {"vote": "up"})
+        assert r.status_code == 400
+        # CSRF is required like every other social write
+        r = await b.http.post(
+            f"/social/api/decks/43/comments/{cid}/vote",
+            content=json.dumps({"vote": "up"}),
+            headers={"Content-Type": "application/json"},
+        )
+        assert r.status_code == 403
+    finally:
+        await b.aclose()

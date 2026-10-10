@@ -29,6 +29,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import re
 import time
 from typing import Any
 
@@ -267,6 +268,28 @@ class ScryfallClient:
             "GET", "/cards/named", params={"exact": name.strip()}, interval=self.lookup_interval
         )
         return self._card_or_error(resp, name)
+
+    async def rulings(self, card_id: str) -> list[dict[str, str]]:
+        """GET /cards/{id}/rulings: the card's rulings ({date, text, source} each, oldest first as
+        Scryfall lists them). Not cached here; the card viewer keeps them (cardsearch.py)."""
+        if not re.fullmatch(r"[0-9a-f-]{36}", card_id or ""):
+            raise ScryfallError("not_found", "No such card id")
+        resp = await self._request("GET", f"/cards/{card_id}/rulings", interval=self.lookup_interval)
+        data = self._json(resp)
+        if resp.status_code == 404 or data.get("object") == "error":
+            raise ScryfallError("not_found", str(data.get("details") or "No rulings found"))
+        rows = data.get("data")
+        if data.get("object") != "list" or not isinstance(rows, list):
+            raise ScryfallError("contract", "Scryfall rulings returned an unexpected body")
+        return [
+            {
+                "date": str(r.get("published_at") or ""),
+                "text": str(r.get("comment") or ""),
+                "source": "Wizards of the Coast" if r.get("source") == "wotc" else "Scryfall",
+            }
+            for r in rows
+            if isinstance(r, dict) and r.get("comment")
+        ]
 
     async def by_set_number(self, set_code: str, collector_number: str) -> dict[str, Any]:
         key = f"print:{set_code.lower()}:{collector_number.lower()}"

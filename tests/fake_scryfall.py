@@ -59,6 +59,7 @@ class FakeScryfall:
         # /catalog/card-names: None answers 404 (the gateway then falls back to autocomplete).
         self.catalog: list[str] | None = None
         self.fail_with: int | None = None
+        self.rulings: dict[str, list[dict[str, Any]]] = {}  # card id -> Scryfall ruling objects
 
     def client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(transport=httpx.MockTransport(self.handle), base_url="https://scryfall.test")
@@ -123,6 +124,12 @@ class FakeScryfall:
                 )
                 canned = {"object": "catalog", "total_values": len(names), "data": names}
             return httpx.Response(200, json=canned)
+        m = re.fullmatch(r"/cards/([0-9a-f-]{36})/rulings", path)
+        if m:
+            if not any(c["id"] == m.group(1) for c in self.cards):
+                return self.not_found("No card found with the given ID")
+            rows = self.rulings.get(m.group(1), [])
+            return httpx.Response(200, json={"object": "list", "has_more": False, "data": rows})
         m = re.fullmatch(r"/cards/([a-z0-9]+)/([A-Za-z0-9★-]+)", path)
         if m:
             card = self.by_print(m.group(1), m.group(2))

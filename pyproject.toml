@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mtg-gateway"
-version = "0.7.15"
+version = "0.7.16"
 description = "Authenticated MCP gateway for Magic: The Gathering deck research and editing"
 readme = "README.md"
 license = { file = "LICENSE" }
