@@ -78,6 +78,7 @@ from .config import Settings
 from .db import Database
 from .decklist import DecklistError, ListCard, clean_text, parse_decklist, to_text
 from .decks import DeckError, DeckService, _clean_deck_id, current_client, deck_to_text, scopes_allow_writes
+from .forge import ForgeClient
 from .guide import add_guide_routes
 from .home import add_home_routes
 from .idp_sweep import AuthentikSweep
@@ -1430,7 +1431,13 @@ def build_mcp_server(state: AppState) -> MCPServer:
     add_browse_tools(server, state)
     add_home_routes(server, state)
     add_guide_routes(server, state)
-    state.reports = ReportService(state.db, state.decks, state.mf_proxy)
+    state.reports = ReportService(
+        state.db,
+        state.decks,
+        state.mf_proxy,
+        forge=ForgeClient(s.forge_url) if s.forge_url else None,
+        forge_games=s.forge_games,
+    )
     add_api_routes(server, state, state.reports)
     add_companion_routes(server, state, state.reports)
     add_admin_routes(server, state)
