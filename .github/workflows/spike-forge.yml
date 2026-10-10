@@ -29,14 +29,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release view -R Card-Forge/forge --json tagName,assets --jq '.tagName, (.assets[].name)'
-          asset=$(gh release view -R Card-Forge/forge --json assets --jq '.assets[].name' | grep -E '^forge-gui-desktop-.*\.tar\.bz2$' | head -1)
+          asset=$(gh release view -R Card-Forge/forge --json assets --jq '.assets[].name' | grep -E '^forge-(gui-desktop|installer)-.*\.tar\.bz2$' | head -1)
           test -n "$asset"
           gh release download -R Card-Forge/forge --pattern "$asset" --dir /tmp/forge-dl
           mkdir -p /tmp/forge && tar -xjf "/tmp/forge-dl/$asset" -C /tmp/forge
-          ls /tmp/forge | head -50
+          find /tmp/forge -maxdepth 2 | head -60
       - name: Run the spike
         run: |
-          jar=$(find /tmp/forge -maxdepth 3 -name 'forge-gui-desktop-*-jar-with-dependencies.jar' | head -1)
+          jar=$(find /tmp/forge -maxdepth 3 -name '*jar-with-dependencies.jar' | head -1)
           test -n "$jar"
           python3 scripts/spike_forge/run_spike.py "$(dirname "$jar")" out
       - name: Summary

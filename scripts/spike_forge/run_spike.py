@@ -34,7 +34,7 @@ def get(url: str) -> bytes:
 
 
 def forge_jar() -> Path:
-    jars = sorted(FORGE.glob("forge-gui-desktop-*-jar-with-dependencies.jar"))
+    jars = sorted(FORGE.glob("*jar-with-dependencies.jar"))
     if not jars:
         raise SystemExit(f"no Forge jar in {FORGE}: {sorted(p.name for p in FORGE.iterdir())}")
     return jars[-1]
