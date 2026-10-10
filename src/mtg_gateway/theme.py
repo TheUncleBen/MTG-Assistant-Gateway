@@ -34,8 +34,9 @@ FEEDBACK_SCRIPT = "/static/feedback.js"
 # img-src 'self' is for the gateway's own files only (the select arrow, /static/chevron.svg); pages
 # that show card images add cards.scryfall.io in their own policy.
 DEFAULT_CSP = (
-    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; worker-src 'self'; img-src 'self'; "
-    "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+    # cards.scryfall.io: the top bar's search suggestions show a small card picture on every page
+    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; worker-src 'self'; "
+    "img-src 'self' https://cards.scryfall.io; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
 )
 THEMES = ("system", "light", "dark")
 _theme: ContextVar[str] = ContextVar("mtg_theme", default="system")
@@ -746,6 +747,46 @@ CSS = CSS.replace(
     + "body.app .topbar .brand .word{display:inline}\n",
 )
 
+# The top bar's search box (cards and decks, static/suggest.js in its site mode): in the bar from
+# 900 px and on the touch rail (600 to 899 px); under 600 px folded behind the magnifier
+# (static/sitesearch.js opens it under the bar). A narrow window with a mouse (600 to 899 px)
+# keeps its text links, Search among them, and has no room for the box.
+_TOPSEARCH_CSS = """
+.topbar .topsearch{display:none;margin:0;flex:0 1 20rem;min-width:9rem}
+.topbar .topsearch .box{position:relative;display:block}
+.topbar .topsearch .box > svg.i{position:absolute;left:.75rem;top:50%;transform:translateY(-50%);z-index:1;
+  color:var(--navbar-muted);pointer-events:none}
+.topbar .topsearch .suggest > input{height:36px;padding:0 .9rem 0 2.3rem;border-radius:18px;
+  background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.2);color:var(--navbar-text)}
+.topbar .topsearch .suggest > input::placeholder{color:var(--navbar-muted)}
+.topbar .topsearch .suggest > input:focus{background:var(--surface);color:var(--text);
+  border-color:var(--orange);outline-offset:1px}
+.topbar .topsearch .suggest > input:focus::placeholder{color:var(--text-muted)}
+.topbar .topsearch .box:focus-within > svg.i{color:var(--orange)}
+/* the list keeps the page's text colour and weight, not the bar's white bold */
+.topbar .topsearch .suggest-list{left:auto;right:0;width:min(27rem,calc(100vw - 2rem));
+  max-height:min(26rem,70vh);color:var(--text);font-weight:400;text-align:left}
+@media (min-width:600px) and (max-width:899.98px) and ((pointer:coarse) or (hover:none)){
+  .topbar .topsearch{display:block} }
+@media (min-width:600px){ body.app .topbar .topsearch{display:block} }
+@media (min-width:900px){ .topbar .topsearch{display:block} .topbar .searchbtn{display:none} }
+@media (max-width:599.98px){
+  body.search-open .topbar .topsearch{display:block;position:absolute;left:0;right:0;top:100%;
+    padding:.5rem max(1rem,env(safe-area-inset-right)) .6rem max(1rem,env(safe-area-inset-left));
+    background:var(--navbar-bg);box-shadow:var(--shadow);flex:none;min-width:0}
+  body.search-open .topbar .topsearch .suggest-list{left:0;right:0;width:auto}
+  body.search-open .topbar .searchbtn{color:var(--orange)} }
+/* the site search's groups in the suggestion list */
+.suggest-list li.head{padding:.5rem 1rem .2rem;font-size:.78rem;font-weight:700;text-transform:uppercase;
+  letter-spacing:.04em;color:var(--menu-head);cursor:default}
+.suggest-list li.head:hover{background:none}
+.suggest-list li.head:not(:first-child){border-top:1px solid var(--border-soft);margin-top:.25rem;
+  padding-top:.6rem}
+.suggest-list li.go{display:flex;align-items:center;gap:.6rem}
+.suggest-list li.go svg.i{color:var(--orange);flex:none}
+"""
+CSS += _TOPSEARCH_CSS
+
 
 # Own inline icons (simple 24-unit strokes). None is an Archidekt or Font Awesome path.
 ICONS = {
@@ -972,10 +1013,19 @@ def render(
             + "</nav>"
         )
         search_btn = (
-            f"<a class='icon-btn searchbtn' href='/search' aria-label='Search decks'"
+            f"<a class='icon-btn searchbtn' href='/search' aria-label='Search cards and decks'"
             f"{' aria-current=page' if cur == '/search' else ''}>{icon('search')}</a>"
         )
-        right = f"<nav class='user' aria-label='Account'>{search_btn}{account_menu}</nav>"
+        # The site search (cards and decks; cardsearch.py, static/suggest.js): Enter on plain text
+        # is the deck search, a card row opens /cards for it. Folded behind the magnifier on phones.
+        search_form = (
+            "<form class='topsearch' id='topsearch' role='search' method='get' action='/search'>"
+            "<label for='site-q' class='sr-only'>Search cards and decks</label>"
+            f"<span class='box'>{icon('search')}<input id='site-q' type='search' name='q' maxlength='100' "
+            "placeholder='Search cards and decks' data-suggest='cards' data-suggest-site='/cards?q=' "
+            "autocomplete='off' enterkeyhint='search'></span></form>"
+        )
+        right = f"{search_form}<nav class='user' aria-label='Account'>{search_btn}{account_menu}</nav>"
         more_links = list(MORE_LINKS) + ([("/admin", "Admin", "settings")] if admin else [])
         more_open = cur in {href for href, _l, _i in more_links} and cur != "/"
         tabbar = (
@@ -1040,7 +1090,8 @@ def render(
         + f"{tabbar}<script src='{FEEDBACK_SCRIPT}' defer></script>"
         "<script src='/static/mana.js' defer></script><script src='/static/suggest.js' defer></script>"
         "<script src='/static/select.js' defer></script>"
-        "</body></html>"
+        + ("<script src='/static/sitesearch.js' defer></script>" if signed_in else "")
+        + "</body></html>"
     )
     return HTMLResponse(
         doc,

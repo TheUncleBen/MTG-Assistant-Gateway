@@ -1,0 +1,167 @@
+"""The card search (cardsearch.py) and the top bar's search box (theme.py): ``/cards?q=`` lists
+the matching cards with the data the card viewer reads and an Add to deck button that is live
+for a linked member and disabled, with the reason, for one without an Archidekt link; the top
+bar carries the site search on every signed-in page and never on the sign-in page; the deck
+search links to the card search for the same text; hostile text is escaped."""
+
+from __future__ import annotations
+
+import pytest
+
+from .test_browse_collection import Stack, linked, stack  # noqa: F401 - fixture
+from .test_decks_and_proxy import Browser
+
+CATALOG = [
+    "Sol Ring",
+    "Sol Talisman",
+    "Solemn Simulacrum שלום",  # Hebrew in a name
+    "Solar Blaze \U0001F525",  # emoji in a name
+    "Aesi, Tyrant of Gyre Strait",
+    "Okiri, Belligerent Bannerkeeper of the Greatest Grand Army",
+] + [f"Filler Card {i}" for i in range(50)]
+
+
+def _catalog(st: Stack) -> None:
+    st.h.app.state.gateway.scan.names.set_names(CATALOG)
+
+
+async def test_the_card_page_needs_a_sign_in(stack: Stack) -> None:  # noqa: F811
+    r = await stack.h.http.get("/cards?q=sol")
+    assert r.status_code in (302, 303), r.status_code
+    assert r.headers["location"] == "/login?next=/cards?q=sol", r.headers["location"]
+
+
+async def test_matching_cards_are_listed_with_viewer_data_and_a_live_add_button(stack: Stack) -> None:  # noqa: F811
+    _catalog(stack)
+    b = await linked(stack)
+    try:
+        r = await b.http.get("/cards?q=sol")
+        assert r.status_code == 200, r.text
+        t = r.text
+        # the two names the fake Scryfall knows come back with picture, cost and type; the names it
+        # does not know (the hostile ones) are left out rather than shown empty
+        assert "Cards matching “sol”" in t and "2 cards" in t
+        assert "data-card='Sol Ring'" in t and "data-card='Sol Talisman'" in t
+        assert "data-mana='{1}'" in t and "data-type='Artifact'" in t
+        assert "data-img='https://cards.scryfall.io/" in t
+        assert "data-scry='https://scryfall.com/" in t
+        assert "<ul class='cardgrid' id='cardgrid' data-linked>" in t
+        assert "data-add='Sol Ring'>" in t and "disabled" not in t.split("id='cardgrid'")[1]
+        # the page's own script and the shared viewer, and pictures allowed from Scryfall only
+        assert "/static/cardsearch.js" in t and "/static/cardview.js" in t
+        assert "img-src 'self' https://cards.scryfall.io" in r.headers["content-security-policy"]
+        assert "connect-src 'self'" in r.headers["content-security-policy"]
+        # the box keeps the text, suggests as it is typed and offers the deck search for it
+        assert "id='c-q' type='search' name='q' value='sol'" in t and "data-suggest-submit" in t
+        assert "href='/search?name=sol'" in t
+    finally:
+        await b.aclose()
+
+
+async def test_a_member_without_an_archidekt_link_sees_the_add_disabled_with_the_reason(
+    stack: Stack,  # noqa: F811
+) -> None:
+    _catalog(stack)
+    b = Browser(stack.h)
+    await b.login("/cards")
+    try:
+        r = await b.http.get("/cards?q=sol ring")
+        assert r.status_code == 200, r.text
+        t = r.text
+        assert "data-card='Sol Ring'" in t
+        assert "<ul class='cardgrid' id='cardgrid'>" in t  # no data-linked
+        assert "data-add='Sol Ring' disabled title='Link your Archidekt account on the Account page" in t
+        assert "no Archidekt account is linked" in t and "href='/account'" in t
+    finally:
+        await b.aclose()
+
+
+async def test_hostile_text_is_escaped_and_short_text_shows_the_help(stack: Stack) -> None:  # noqa: F811
+    _catalog(stack)
+    b = await linked(stack)
+    try:
+        r = await b.http.get("/cards", params={"q": "<script>alert(1)</script> שלום \U0001F525"})
+        assert r.status_code == 200
+        assert "<script>alert" not in r.text and "&lt;script&gt;alert(1)&lt;/script&gt;" in r.text
+        assert "No card is named like that" in r.text
+        r = await b.http.get("/cards?q=s")
+        assert r.status_code == 200 and "Find a card" in r.text and "id='cardgrid'" not in r.text
+        r = await b.http.get("/cards")
+        assert r.status_code == 200 and "Find a card" in r.text
+        # a very long text is cut to the catalog's limit, not refused
+        r = await b.http.get("/cards", params={"q": "Okiri " * 60})
+        assert r.status_code == 200 and "Cards matching" in r.text
+    finally:
+        await b.aclose()
+
+
+async def test_a_name_the_catalog_knows_but_scryfall_does_not_is_left_out(stack: Stack) -> None:  # noqa: F811
+    _catalog(stack)
+    b = await linked(stack)
+    try:
+        r = await b.http.get("/cards?q=okiri")
+        assert r.status_code == 200
+        assert "0 cards" in r.text and "No card is named like that" in r.text
+    finally:
+        await b.aclose()
+
+
+async def test_card_lookup_switched_off_is_said_plainly(stack: Stack) -> None:  # noqa: F811
+    b = await linked(stack)
+    gw = stack.h.app.state.gateway
+    scan = gw.scan
+    gw.scan = None
+    try:
+        r = await b.http.get("/cards?q=sol")
+        assert r.status_code == 200 and "Card lookup is switched off" in r.text
+    finally:
+        gw.scan = scan
+        await b.aclose()
+
+
+async def test_the_top_bar_carries_the_site_search_on_signed_in_pages_only(stack: Stack) -> None:  # noqa: F811
+    b = await linked(stack)
+    try:
+        for path in ("/decks", "/account", "/search", "/collection", "/proposals"):
+            r = await b.http.get(path)
+            assert r.status_code == 200, (path, r.status_code)
+            t = r.text
+            form = "<form class='topsearch' id='topsearch' role='search' method='get' action='/search'>"
+            assert form in t, path
+            assert "id='site-q' type='search' name='q'" in t and "data-suggest-site='/cards?q='" in t, path
+            assert "/static/sitesearch.js" in t and "/static/suggest.js" in t, path
+            # the phone's magnifier stays a plain link to the deck search without script
+            assert "class='icon-btn searchbtn' href='/search'" in t, path
+            # the thumbnails in the suggestions may come from Scryfall on every page
+            assert "https://cards.scryfall.io" in r.headers["content-security-policy"], path
+    finally:
+        await b.aclose()
+    r = await stack.h.http.get("/signed-out")  # a page rendered without a session
+    assert r.status_code == 200
+    assert "<form class='topsearch'" not in r.text and "sitesearch.js" not in r.text
+
+
+async def test_enter_on_plain_text_is_the_deck_search_and_the_deck_search_links_to_cards(
+    stack: Stack,  # noqa: F811
+) -> None:
+    b = await linked(stack)
+    try:
+        r = await b.http.get("/search?q=Aesi")  # what the top bar's form sends
+        assert r.status_code == 200
+        assert "Decks matching Aesi" in r.text
+        assert "value='Aesi' placeholder='Any part of the name'" in r.text
+        assert "href='/cards?q=Aesi'" in r.text
+        r = await b.http.get("/search", params={"commander": "Aesi, Tyrant of Gyre Strait"})
+        assert r.status_code == 200
+        assert "href='/cards?q=Aesi%2C+Tyrant+of+Gyre+Strait'" in r.text
+        r = await b.http.get("/search")
+        assert "href='/cards'" in r.text
+    finally:
+        await b.aclose()
+
+
+@pytest.mark.parametrize("raw,expect", [(" sol   ring ", "sol ring"), ("x" * 300, "x" * 100), (None, "")])
+def test_clean_query(raw: str | None, expect: str) -> None:
+    from mtg_gateway.cardsearch import clean_query
+
+    assert clean_query(raw) == expect
