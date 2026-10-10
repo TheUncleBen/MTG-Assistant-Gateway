@@ -689,3 +689,25 @@ def test_set_mana_value_is_low_risk_and_works_on_the_maybeboard() -> None:
         "zone": "side",
     }
     assert modes.risk_of("edit", [{"kind": "mana_value", "name": "Sol Ring"}])[0] == "low"
+
+
+async def test_card_notes_and_custom_mana_value_are_shown_read_only(stack: Stack) -> None:
+    """Archidekt's per-card notes and custom mana value (both keys on every live deck card, see
+    tests/fixtures/live/archidekt_deck_blink_sample.json) reach get_deck and the card viewer's
+    data. Notes are read-only: no tool or page writes them."""
+    h, ark = stack.h, stack.ark
+    row = next(c for c in ark.decks[42]["cards"] if c["card"]["oracleCard"]["name"] == "Sol Ring")
+    row["notes"] = "Swap for <Mana Vault> later"
+    row["customCmc"] = 0
+    token = await linked_user(stack)
+    d = structured(await call(h, token, "get_deck", {"deck_ref": "42", "view": "cards"}))
+    sol = next(c for c in d["cards"] if c["name"] == "Sol Ring")
+    assert sol["notes"] == "Swap for <Mana Vault> later" and sol["custom_mana_value"] == 0, sol
+    b = await _linked_browser(stack)
+    try:
+        page = await b.http.get("/decks/42", headers=NAV)
+        assert page.status_code == 200
+        assert "data-notes='Swap for &lt;Mana Vault&gt; later'" in page.text
+        assert "data-mv='0'" in page.text
+    finally:
+        await b.aclose()

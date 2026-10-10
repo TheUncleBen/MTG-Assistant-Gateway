@@ -639,6 +639,7 @@ def _card_data(card: DeckCard, deck: Deck) -> str:
         + f" data-qty='{card.quantity}' data-zone='{zone}' data-cat='{esc(cat)}'{rel}"
         + (f" data-label='{esc(card.label)}'" if split_label(card.label)[0] else "")
         + (f" data-mv='{mana_value_text(card.custom_cmc)}'" if card.custom_cmc is not None else "")
+        + (f" data-notes='{esc(card.notes)}'" if card.notes else "")
     )
 
 
@@ -1724,6 +1725,7 @@ html.cardview-open{overflow:hidden}
   font-size:.9rem;border-top:1px solid var(--border-soft);padding-top:.75rem}
 .cardview .facts dt{color:var(--text-muted);font-weight:700}
 .cardview .facts dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.cardview .facts dd.notes{white-space:pre-wrap}
 .cardview .facts .gc{color:var(--orange-text);font-weight:700}
 .cardview .chips{display:flex;flex-wrap:wrap;gap:.3rem}
 .cardview .chip{display:inline-block;padding:.05rem .5rem;border-radius:1rem;background:var(--surface-2);
