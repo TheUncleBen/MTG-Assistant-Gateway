@@ -783,7 +783,7 @@ class ArchidektClient:
             raise ArchidektError("contract", "unexpected login response shape")
         access = next((body[k] for k in TOKEN_FIELDS if isinstance(body.get(k), str) and body[k]), None)
         if access is None:
-            raise ArchidektError("contract", "Archidekt login did not return a recognised token field")
+            raise ArchidektError("contract", "Archidekt login did not return a recognized token field")
         refresh = next((body[k] for k in REFRESH_FIELDS if isinstance(body.get(k), str)), None)
         user = body.get("user") if isinstance(body.get("user"), dict) else {}
         return {

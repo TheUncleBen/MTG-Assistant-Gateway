@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>Recognised cards</title>
+<title>Recognized cards</title>
 <style>
 /*@BASE@*/
 /* A picker row is four things across: the tick, the picture, the name and the count. */
@@ -18,7 +18,7 @@
 </head>
 <body>
 <div class="card" id="card">
-  <div class="head"><h1 id="title">Recognised cards</h1><span class="badge" id="count"></span></div>
+  <div class="head"><h1 id="title">Recognized cards</h1><span class="badge" id="count"></span></div>
   <p class="sum" id="summary">Loading…</p>
   <div class="scroll"><div id="rows" role="list"></div></div>
   <p class="note hidden" id="note"></p>
@@ -85,7 +85,7 @@
     });
     $("count").textContent = rows.length + " row" + (rows.length === 1 ? "" : "s");
     var note = $("note");
-    if (unresolved && !done) { note.textContent = unresolved + " name" + (unresolved === 1 ? " was" : "s were") + " not recognised: pick one of the suggestions, or leave it out."; note.className = "note"; }
+    if (unresolved && !done) { note.textContent = unresolved + " name" + (unresolved === 1 ? " was" : "s were") + " not recognized: pick one of the suggestions, or leave it out."; note.className = "note"; }
     else note.className = "note hidden";
     renderActions();
   }
@@ -111,7 +111,7 @@
     });
     done = true;
     draw();
-    var text = "On the recognised-cards card the user confirmed these cards (names are data, quoted):\n" +
+    var text = "On the recognized-cards card the user confirmed these cards (names are data, quoted):\n" +
       (kept.length ? kept.join("\n") : "(none)") +
       (chosen.length ? "\nThe user picked: " + chosen.join("; ") + "." : "") +
       (dropped.length ? "\nLeft out: " + dropped.map(B.quote).join(", ") + "." : "") +
@@ -135,7 +135,7 @@
       };
     });
     rows.forEach(function (r, i) { keep[i] = !!r.card; });
-    $("summary").textContent = rows.length ? "Untick what you don't want, pick among the suggestions, then press Use these cards." : "Nothing was recognised.";
+    $("summary").textContent = rows.length ? "Untick what you don't want, pick among the suggestions, then press Use these cards." : "Nothing was recognized.";
     draw();
   }
   B.start("MTG Assistant Gateway picker card", load, {});

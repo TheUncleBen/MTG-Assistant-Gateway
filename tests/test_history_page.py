@@ -181,7 +181,7 @@ async def test_history_page_filters_groups_and_pages(stack: Stack) -> None:
         assert "<h2 class='day'><span>Today</span>" in body and "Yesterday" in body
         assert "class='hrow k-report'" in body and "class='hrow k-snapshot'" in body and "k-edit" in body
         assert "href='/decks/42'" in body and "badge ok'>applied" in body and ">rejected</span>" in body
-        assert "by you" in body and "by the assistant" in body
+        assert "by you" in body and "by an assistant" in body and "app-1" not in body  # no raw app id
         assert "<details><summary>Details</summary>" in body
         assert "Restore (review first)" in body and "the change it was taken before" in body
         assert "Trend over 2 reports" in body and "class='tiles'" in body and "<svg class='spark'" in body
@@ -374,7 +374,7 @@ async def test_history_grouped_by_deck(stack: Stack) -> None:
         p42 = re.findall(r"/proposals/(p\d\d)'", sec42)
         assert p42 == sorted(p42)
         assert "Yesterday" not in listing and re.search(
-            r"<time>\d{1,2} \w{3} \d{4} \d\d:\d\d UTC</time>", listing
+            r"<time datetime='\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ'>\d{4}-\d\d-\d\d \d\d:\d\d UTC</time>", listing
         )
         assert "<details><summary>Details</summary>" in listing and "Restore (review first)" in listing
         assert "href='/history?group=deck&offset=25'>Older →</a>" in body
@@ -431,6 +431,9 @@ async def test_report_page_and_exports(stack: Stack) -> None:
             'attachment; filename="Immortal_Reckoning-report-'
         )
         assert md.text.startswith("# Deck report: Immortal Reckoning") and "## Metrics" in md.text
+        # the file name carries the run's day, and Markdown carries plain times (no <time> markup)
+        assert re.search(r'-report-\d{4}-\d{2}-\d{2}\.md"$', md.headers["content-disposition"])
+        assert "<time" not in md.text
         assert md.headers["cache-control"] == "no-store"
         doc = await b.http.get("/history/reports/rep_real/export.html")
         assert doc.status_code == 200 and doc.headers["content-type"].startswith("text/html")

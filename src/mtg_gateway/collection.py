@@ -32,7 +32,7 @@ from .deckpage import DECK_CSS, image_url, mana_html
 from .decks import DeckError, current_client
 from .pages import _csrf, _safe_next, browser_session, login_redirect, read_limited
 from .schemas import CollectionAdd, CollectionRemove, card_aliases, dumped
-from .theme import icon, remember_view, render, view_choice
+from .theme import display_name, icon, remember_view, render, view_choice
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -692,10 +692,10 @@ def row_html(r: dict[str, Any], csrf: str, *, view: str) -> str:
     stepper = (
         f"<form method='post' action='/collection' class='qty' data-id='{rid}'>{csrf_in}"
         "<button name='action' value='dec' class='mini' aria-label='One "
-        f"fewer {_esc(r['name'])}'>{icon('minus')}</button>"
+        f"fewer {_esc(r['name'])}' title='One fewer'>{icon('minus')}</button>"
         f"<output aria-label='Copies'>{int(r['quantity'])}</output>"
         "<button name='action' value='inc' class='mini' aria-label='One "
-        f"more {_esc(r['name'])}'>{icon('plus')}</button>"
+        f"more {_esc(r['name'])}' title='One more'>{icon('plus')}</button>"
         "</form>"
     )
     remove = (
@@ -714,22 +714,23 @@ def row_html(r: dict[str, Any], csrf: str, *, view: str) -> str:
         )
         return (
             f"<li class='c col' data-name='{_esc(r['name'].lower())}' data-id='{rid}'{attrs}>"
-            f"<button type='button' class='pic thumbbtn' aria-label='Show {_esc(r['name'])}'>{body}"
+            f"<button type='button' class='pic thumbbtn' aria-label='Show {_esc(r['name'])}' "
+            f"title='Show the card'>{body}"
             f"<span class='qty'>{int(r['quantity'])}</span>{badges}</button>"
-            f"<div class='cap'><span class='name'>{_esc(r['name'])}</span><span "
+            f"<div class='cap'><span class='name' title='{_esc(r['name'])}'>{_esc(r['name'])}</span><span "
             f"class='set'>{set_line}</span></div>"
             f"<div class='act'>{stepper}{details}{remove}</div></li>"
         )
     return (
         f"<li class='row col' data-name='{_esc(r['name'].lower())}' data-id='{rid}'{attrs}>"
-        f"<button type='button' class='thumbbtn' aria-label='Show {_esc(r['name'])}'>"
+        f"<button type='button' class='thumbbtn' aria-label='Show {_esc(r['name'])}' title='Show the card'>"
         + (
             f"<img class='thumb' src='{_esc(img)}' alt='' loading='lazy'>"
             if img
             else "<span class='thumb'></span>"
         )
         + "</button>"
-        + f"<span class='n'><span class='name'>{_esc(r['name'])}</span>{badges}"
+        + f"<span class='n'><span class='name' title='{_esc(r['name'])}'>{_esc(r['name'])}{badges}</span>"
         f"<span class='meta'>{set_line}"
         + (f" · {_esc(r.get('set_name'))}" if r.get("set_name") else "")
         + (f" · {_esc(r.get('type_line'))}" if r.get("type_line") else "")
@@ -760,8 +761,8 @@ def details_html(r: dict[str, Any], csrf_in: str) -> str:
     langs = LANGUAGES if not lang or lang in LANGUAGES else (lang, *LANGUAGES)
     tags = "".join(f"<span class='pill'>{_esc(t)}</span>" for t in (r.get("tags") or [])[:8])
     return (
-        f"<details class='dd rowmenu details'><summary class='mini' aria-label='Details of "
-        f"{_esc(r['name'])}'>{icon('more')}</summary>"
+        f"<details class='dd rowmenu details'><summary class='btn mini' aria-label='Details of "
+        f"{_esc(r['name'])}' title='Details'>{icon('more')}</summary>"
         f"<form method='post' action='/collection' class='menu detailsform' data-id='{rid}'>"
         f"{csrf_in}<input type='hidden' name='action' value='details'>"
         f"<div class='head'>{_esc(r['name'])}</div>"
@@ -838,9 +839,25 @@ ul.colllist .n{display:flex;flex-direction:column;min-width:0}
 ul.colllist .n .name{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 ul.colllist .n .meta{font-size:.8rem;color:var(--text-muted);white-space:nowrap;overflow:hidden;
   text-overflow:ellipsis}
-ul.colllist .n .finish,ul.colllist .n .cond{margin-left:.35rem;vertical-align:middle;align-self:flex-start}
+/* the name line carries the finish and condition badges inline after the name */
+ul.colllist .n .name{display:flex;align-items:center;gap:.35rem;min-width:0}
+ul.colllist .n .name .finish,ul.colllist .n .name .cond{flex:none}
+ul.colllist .n .name .cond{font-size:.72rem;padding:0 .3rem;line-height:1.4}
+/* the ⋮ matches the bordered −, + and × beside it */
 ul.colllist details.rowmenu summary.mini,ul.collgrid details.rowmenu summary.mini{display:inline-flex;
-  align-items:center;justify-content:center;width:2.25rem;height:2.25rem;margin:0;padding:0}
+  align-items:center;justify-content:center;width:2.25rem;height:2.25rem;min-height:2.25rem;margin:0;padding:0;
+  border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text)}
+ul.colllist details.rowmenu summary.mini:hover,ul.collgrid details.rowmenu summary.mini:hover{
+  background:var(--surface-2)}
+/* Add and Import fold above the list; the heading opens them */
+.collection details.addfold{margin:0 0 1rem}
+.collection details.addfold > summary{cursor:pointer;font-weight:700;min-height:2.5rem;display:flex;
+  align-items:center;gap:.5rem;list-style:none}
+.collection details.addfold > summary::-webkit-details-marker{display:none}
+.collection details.addfold > summary::before{content:'\\25B8';color:var(--orange)}
+.collection details.addfold[open] > summary::before{content:'\\25BE'}
+.collection details.addfold > summary .chev{margin-left:auto;color:var(--text-muted);font-weight:400;
+  font-size:.86rem}
 details.rowmenu.details .menu{min-width:14rem;padding:.4rem 0 .6rem}
 details.rowmenu.details .menu .field{display:flex;flex-direction:column;gap:.25rem;padding:.35rem .9rem}
 details.rowmenu.details .menu .field select,details.rowmenu.details .menu .field input{margin:0}
@@ -883,7 +900,9 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             signed_in=True,
             csrf=_csrf(s, sid),
             admin=admin,
+            user=display_name(user),
             wide=True,
+            body_class="collection",
             current="/collection",
             scripts=scripts,
             head_extra=f"<style>{DECK_CSS}{COLLECTION_CSS}</style>"
@@ -1001,6 +1020,14 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         except ValueError:
             page_no = 1
         csrf = _csrf(s, sid) or ""
+        # the Add/Import fold opens after an add or import, or on ?add
+        open_add = bool(qp.get("add")) or (qp.get("ok") or qp.get("err")) in (
+            "added",
+            "nothing",
+            "imported",
+            "toomany",
+            "unreadable",
+        )
         try:
             out = await service.page(sub, page=page_no, q=q, sort=sort)
         except CollectionError as exc:
@@ -1033,7 +1060,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             "action='/collection' class='controls' id='listform'>"
             "<div class='field filter grow'><label for='q'>Filter</label><span class='search'>"
             f"<input id='q' type='search' name='q' value='{_esc(q)}' placeholder='Card name'>"
-            f"<button type='submit' aria-label='Filter'>{icon('search')}</button></span></div>"
+            f"<button type='submit' aria-label='Filter' title='Filter'>{icon('search')}</button></span></div>"
             + sel("view", {"grid": "Grid", "list": "List"}, view, "View as", "grid")
             + sel("sort", SORTS, sort, "Sort by", "sort")
             + "<div class='field'><span class='lbl'>&nbsp;</span>"
@@ -1125,7 +1152,15 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             pager += "</nav>"
         resp = page(
             "My collection",
-            notice(qp.get("ok") or qp.get("err")) + totals_html + controls + body + pager + add_box,
+            notice(qp.get("ok") or qp.get("err"))
+            + totals_html
+            + controls
+            + f"<details class='addfold'{' open' if open_add else ''}><summary>{icon('plus')} Add cards or "
+            "import a list<span class='chev'>name, file or scan</span></summary>"
+            + add_box
+            + "</details>"
+            + body
+            + pager,
             sub=sub,
             sid=sid,
             scripts=True,

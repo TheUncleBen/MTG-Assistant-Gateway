@@ -15,8 +15,9 @@ from __future__ import annotations
 import html
 import json
 import re
-import time
 from typing import Any
+
+from .theme import ICON_DATA_URL, time_html, time_text
 
 # The simulator's honesty classes, in plain words.
 HONESTY_CLASSES = {
@@ -27,11 +28,11 @@ HONESTY_CLASSES = {
 }
 # Its standing approximations (the "v1 model shortcuts"), in plain words.
 APPROXIMATIONS = {
-    "any-color": "Treated as producing any colour",
+    "any-color": "Treated as producing any color",
     "creature-producer": "Treated as a plain creature producer",
     "equipment-extra": "Equipment beyond the first is ignored",
     "fetch": "Fetch lands find a basic at once",
-    "hybrid-cost": "Hybrid costs paid with either colour",
+    "hybrid-cost": "Hybrid costs paid with either color",
     "residual-text": "Extra card text ignored",
     "bounce-land": "Bounce lands enter untapped",
     "filter-ignored": "Mana filtering ignored",
@@ -646,7 +647,7 @@ def honesty_html(g: dict[str, Any]) -> str:
     unrec = h.get("unrecognized") or []
     if unrec:
         parts.append(
-            f"<div class='group'><h3>Not recognised <small>{_esc(_share(len(unrec), size))}</small></h3>"
+            f"<div class='group'><h3>Not recognized <small>{_esc(_share(len(unrec), size))}</small></h3>"
             "<p>The simulator has no model for these cards. It drew and cast them as blanks, so anything "
             "they would do in a real game is missing from the numbers above.</p>" + _names(unrec) + "</div>"
         )
@@ -665,7 +666,7 @@ def honesty_html(g: dict[str, Any]) -> str:
     low = h.get("low_impact") or []
     if low:
         parts.append(
-            f"<div class='group'><h3>Modelled but never mattered <small>{_esc(_share(len(low), size))}"
+            f"<div class='group'><h3>Modeled but never mattered <small>{_esc(_share(len(low), size))}"
             "</small></h3>"
             "<p>These cards were understood, drawn and played, and nothing they do changed a game. For lands "
             "and mana rocks that is expected; for anything else it is a fair hint the card underperforms.</p>"
@@ -706,10 +707,7 @@ def validation_html(v: dict[str, Any] | None) -> str:
 
 
 def _when(ts: Any) -> str:
-    try:
-        return time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(int(ts)))
-    except (TypeError, ValueError, OverflowError, OSError):
-        return ""
+    return time_html(ts)
 
 
 def _triggers_html(g: dict[str, Any]) -> str:
@@ -858,7 +856,7 @@ def report_body_html(
         turns = f", through turn {g['until_turn']}" if g.get("until_turn") else ""
         seed = f" (seed {g['seed']})" if g.get("seed") is not None else ""
         meta.append(f"<dt>Games</dt><dd>{_esc(g['games'])}{_esc(turns)}{_esc(seed)}</dd>")
-    meta.append(f"<dt>Run</dt><dd>{_esc(_when(r.get('taken_at')))}</dd>")
+    meta.append(f"<dt>Run</dt><dd>{_when(r.get('taken_at'))}</dd>")
     if standalone:
         title = f"<h1>{name}</h1>"
         back = ""
@@ -960,7 +958,7 @@ def report_markdown(r: dict[str, Any]) -> str:
     if s["commander"]:
         lines.append(f"- Commander: {front_face(s['commander'])}")
     lines.append(f"- Deck: https://archidekt.com/decks/{r.get('deck_id')}")
-    lines.append(f"- Run: {_when(r.get('taken_at'))}")
+    lines.append(f"- Run: {time_text(r.get('taken_at'))}")
     if g and g.get("games"):
         extra = f", through turn {g['until_turn']}" if g.get("until_turn") else ""
         lines.append(f"- Games: {g['games']}{extra}")
@@ -989,7 +987,7 @@ def report_markdown(r: dict[str, Any]) -> str:
         if h["unrecognized"] or h["out_of_scope"] or h["low_impact"]:
             lines += ["## What the simulation could not model", ""]
         if h["unrecognized"]:
-            lines.append(f"Not recognised — {_share(len(h['unrecognized']), size)}:")
+            lines.append(f"Not recognized — {_share(len(h['unrecognized']), size)}:")
             lines.append(", ".join(front_face(c["name"]) for c in h["unrecognized"]))
             lines.append("")
         if h["out_of_scope"]:
@@ -999,7 +997,7 @@ def report_markdown(r: dict[str, Any]) -> str:
                 lines.append(f"- {grp['label']}: " + ", ".join(front_face(c["name"]) for c in grp["cards"]))
             lines.append("")
         if h["low_impact"]:
-            lines.append(f"Modelled but never mattered — {_share(len(h['low_impact']), size)}:")
+            lines.append(f"Modeled but never mattered — {_share(len(h['low_impact']), size)}:")
             lines.append(", ".join(front_face(n) for n in h["low_impact"]))
             lines.append("")
     if v is not None:
@@ -1074,6 +1072,8 @@ def report_export_html(r: dict[str, Any], *, stats_html: str = "", theme_css: st
     return (
         "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        "<meta name='color-scheme' content='light dark'>"
+        f"<link rel='icon' href='{ICON_DATA_URL}' type='image/svg+xml'>"
         f"<title>{title}</title><style>{EXPORT_CSS}{theme_css}{REPORT_CSS}</style></head>"
         f"<body>{body}</body></html>"
     )

@@ -117,7 +117,7 @@ def test_page_speaks_plainly_and_shows_every_panel() -> None:
         "class='charts'",
         "<svg",
         "What the simulation could not model",
-        "Not recognised",
+        "Not recognized",
         "32 of 98 cards (33% of the deck)",
         "Out of scope",
         "Removal and other interaction",
@@ -156,7 +156,7 @@ def test_markdown_and_html_exports() -> None:
     assert md.startswith("# Deck report: Immortal Reckoning\n")
     assert "- Commander: Liesa, Forgotten Archangel" in md and "- Games: 300, through turn 10" in md
     assert "## Goldfish simulation" in md and "40 damage dealt by turn 10: 57% (95% interval 51–62%)" in md
-    assert "Not recognised — 32 of 98 cards (33% of the deck):" in md and "## Validation: issues found" in md
+    assert "Not recognized — 32 of 98 cards (33% of the deck):" in md and "## Validation: issues found" in md
     assert "## Simulation output" in md and "## Metrics" in md and "goldfish_" not in md
     doc = rv.report_export_html(r, stats_html="<p>stats</p>", theme_css=".tiles{display:grid}")
     assert doc.startswith("<!doctype html>") and "<script" not in doc and "href='/" not in doc

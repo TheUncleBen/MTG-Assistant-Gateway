@@ -32,6 +32,7 @@
     var btn = buttons.get(select);
     if (!btn) return;
     btn.firstChild.textContent = labelText(select) || " ";
+    btn.title = labelText(select);  // the whole label when the button has to cut it short
     btn.disabled = !!select.disabled;
   }
   function accessibleName(select, btn) {

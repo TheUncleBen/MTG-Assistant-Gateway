@@ -15,4 +15,13 @@
         <item name="android:textColorPrimary">@color/text</item>
         <item name="android:textColorSecondary">@color/text_muted</item>
     </style>
+
+    <!-- The phone-camera scan panel: dark whatever the phone's setting, because it sits over a black
+         viewfinder. Buttons, toggles and sliders take the dark Material look; its text uses the
+         cam_* colours (values/colors.xml). -->
+    <style name="Theme.MtgAssistantGateway.Camera" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:textColorPrimary">@color/cam_text</item>
+        <item name="android:textColorSecondary">@color/cam_text_muted</item>
+    </style>
 </resources>

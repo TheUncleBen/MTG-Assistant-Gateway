@@ -536,7 +536,7 @@ def _commander_aside(goldfish: dict[str, Any], commander: str | None) -> None:
     honesty["unrecognized"] = kept
     honesty["commander_note"] = (
         f"{commander} is cast from the command zone (never drawn); its abilities beyond combat are "
-        "not modelled"
+        "not modeled"
     )
     text = goldfish.get("text")
     if not isinstance(text, str):

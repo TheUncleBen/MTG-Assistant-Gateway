@@ -74,9 +74,9 @@ OWNER_NOTES: dict[str, str] = {
     "report; compare_decks with simulate=true is the paired A/B of two decks",
     "get_deck": "the gateway's deck reader: any Archidekt deck by id or link, include_text for rules text, "
     "archidekt_text to export in Archidekt's import syntax",
-    "search_decks": "public decks by name, commander, format, colours or owner; owner plus order_by "
+    "search_decks": "public decks by name, commander, format, colors or owner; owner plus order_by "
     "-updatedAt lists one user's public decks, and list_my_decks lists the member's own",
-    "deck_stats": "legality, structural checks, bracket, curve, colours and price from one read",
+    "deck_stats": "legality, structural checks, bracket, curve, colors and price from one read",
     "compare_decks": "the exact adds and cuts between two decks, snapshots or lists, with a precon-style "
     "summary and an optional paired goldfish A/B",
 }

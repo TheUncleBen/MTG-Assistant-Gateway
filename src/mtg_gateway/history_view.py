@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import calendar
 import html
+import re
 import time
 from typing import Any
 from urllib.parse import urlencode
 
 from .decks import actor_label
-from .theme import icon
+from .theme import icon, time_html
 
 PAGE = 25
 MAX_OFFSET = 2000
@@ -115,7 +116,9 @@ def _who(created_by: str | None) -> str:
     if label == "administrator":
         return "an administrator"
     if label.startswith("app: "):
-        return f"the assistant ({label[5:]})"
+        # "app: Name (client id)": the name is enough here; the id stays on the Activity page
+        name = re.sub(r" \(.+\)$", "", label[5:])
+        return f"the assistant ({name})" if name != label[5:] else "an assistant"
     return ""
 
 
@@ -262,10 +265,7 @@ def _row_html(e: dict[str, Any], *, with_day: bool) -> str:
         else f"<span class='kind'>{label}</span>"
     )
     who = f"<span class='who'>by {_esc(e['who'])}</span>" if e.get("who") else ""
-    fmt = "%d %b %Y %H:%M UTC" if with_day else "%H:%M UTC"
-    when = time.strftime(fmt, time.gmtime(e["ts"]))
-    if with_day:
-        when = when.lstrip("0")
+    when = time_html(e["ts"], day=with_day)
     details = (
         f"<details><summary>Details</summary><div class='more'>{e['details']}</div></details>"
         if e.get("details")
@@ -276,7 +276,7 @@ def _row_html(e: dict[str, Any], *, with_day: bool) -> str:
         f"{icon(KIND_ICONS.get(kind, 'edit'))}</span><div class='body'><div class='l1'>{title}{deck_link}"
         f"{_badge(e.get('state') or '')}</div>"
         f"<p class='sum'>{_esc(e['summary'])}</p>{details}</div>"
-        f"<div class='side'><time>{when}</time>{who}</div></li>"
+        f"<div class='side'>{when}{who}</div></li>"
     )
 
 
@@ -374,7 +374,7 @@ def filter_bar_html(query: dict[str, Any], decks: dict[str, str], *, shown: int,
         f"<div class='field'><label for='h-group'>Group by</label><span class='sel'>{icon('layers')}"
         f"<select id='h-group' name='group'>{options(list(GROUPS), query['group'])}</select></span></div>"
         "<div class='field'><label for='h-q'>Search</label><input type='search' id='h-q' name='q' "
-        f"value='{_esc(query['q'])}' placeholder='Deck name or a card in a change' autocomplete='off'></div>"
+        f"value='{_esc(query['q'])}' placeholder='Deck or card name' autocomplete='off'></div>"
         "</div>"
         f"<div class='form-actions'><button type='submit' class='btn-primary'>{icon('filter')} Filter"
         "</button>"

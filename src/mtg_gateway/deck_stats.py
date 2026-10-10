@@ -428,7 +428,8 @@ def deck_checks(deck: Deck, cards: list[DeckCard], commanders: list[DeckCard], q
             if outside and c.color_identity:
                 identity.append({"name": c.name, "outside": outside})
         if identity:
-            problems.append(f"{len(identity)} card(s) outside the commander's colour identity")
+            n = len(identity)
+            problems.append(f"{n} card{'s' if n != 1 else ''} outside the commander's color identity")
     singleton: list[dict[str, Any]] = []
     if fmt in _SINGLETON_FORMATS:
         for c in cards:

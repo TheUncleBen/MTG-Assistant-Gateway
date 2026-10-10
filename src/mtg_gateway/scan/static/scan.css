@@ -9,9 +9,9 @@
    and the result on the right. Every tap target is at least 44px. */
 .scan{
   --s-accent:var(--orange,var(--accent,#fa890d)); --s-accent-hover:var(--accent-hover,var(--orange,#fa890d));
-  --s-on-accent:var(--on-color,#181818); --s-raised:var(--surface,var(--bg-raised,#232323));
+  --s-on-accent:var(--on-orange,#181818); --s-raised:var(--surface,var(--bg-raised,#232323));
   --s-raised-2:var(--surface-2,var(--bg-raised,#383838));
-  --s-input:var(--bg,var(--bg-input,#181818)); --s-border:var(--border,#5f5f5f);
+  --s-input:var(--bg,var(--bg-input,#181818)); --s-border:var(--control-border,#868686);
   --s-border-soft:var(--border-soft,var(--border,#323232));
   --s-text:var(--text,#e3e3e3); --s-muted:var(--text-muted,#a8a8a8); --s-radius:var(--radius,5px);
   --s-radius-lg:var(--radius-lg,8px);
@@ -197,7 +197,23 @@ body.picker-open{overflow:hidden}
 .scan .controls button,.scan .controls .btn{width:auto}
 .scan .shutter{width:4.75rem;height:4.75rem;min-width:4.75rem;border-radius:50%;border:4px solid #fff;
   background:var(--s-accent);box-shadow:0 0 0 3px var(--s-accent),0 2px 8px rgba(0,0,0,.5);padding:0;
-  font-size:0;color:transparent;transition:transform .1s}
+  color:var(--s-on-accent);transition:transform .1s;display:inline-flex;align-items:center;justify-content:center}
+.scan .shutter svg.i{width:2rem;height:2rem;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;
+  stroke-linejoin:round}
+/* the two buttons either side of the shutter look alike: bordered, one height, text labels */
+.scan .controls .ctl,.scan .controls label.ctl{min-height:44px;height:44px;padding:0 1.1rem;margin:0;
+  display:inline-flex;align-items:center;justify-content:center;font-weight:700;border:1px solid var(--s-border);
+  background:var(--s-raised);color:var(--s-text);border-radius:var(--s-radius);cursor:pointer}
+.scan .controls .ctl:hover{background:var(--s-raised-2)}
+/* a yes/no question in place of the browser's confirm box */
+.scan .confirmbar{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.5rem 0;padding:.5rem .75rem;
+  background:var(--s-raised-2);border-left:4px solid var(--s-danger-line);border-radius:var(--s-radius)}
+.scan .confirmbar span{flex:1 1 12rem}
+.scan .confirmbar button{min-height:40px}
+/* phones: the sticky control bar sits above the site's tab bar */
+@media (max-width:599.98px){
+  .has-tabbar .scan .controls{bottom:calc(56px + env(safe-area-inset-bottom));padding-bottom:.6rem}
+}
 .scan .shutter:hover{background:var(--s-accent);filter:brightness(1.1)}
 .scan .shutter:active{transform:scale(.94)}
 .scan .shutter:disabled{opacity:.45;box-shadow:none}
@@ -340,7 +356,7 @@ body.picker-open{overflow:hidden}
 .scan .intro h2,.scan .next h2{margin:0 0 .5rem;font-size:1.15rem}
 .scan .intro .steps{list-style:none;margin:0;padding:0;display:grid;gap:.5rem}
 .scan .intro .steps li{display:flex;gap:.6rem;align-items:flex-start;line-height:1.4}
-.scan .intro .num{flex:0 0 1.6rem;height:1.6rem;border-radius:50%;background:var(--s-accent);color:#fff;
+.scan .intro .num{flex:0 0 1.6rem;height:1.6rem;border-radius:50%;background:var(--s-accent);color:var(--s-on-accent);
   font-weight:900;display:inline-flex;align-items:center;justify-content:center;font-size:.9rem}
 .scan .intro .list-actions{grid-template-columns:1fr}
 .scan .next .nextrow{display:flex;gap:.75rem;align-items:center;justify-content:space-between;
