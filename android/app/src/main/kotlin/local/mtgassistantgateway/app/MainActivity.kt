@@ -51,7 +51,9 @@ import java.io.ByteArrayInputStream
  * - a phone-camera scan panel with torch brightness, zoom and exposure ([CameraPanel]), laid over
  *   the /scan page so the page keeps running and reads each photo through [ScanGlue];
  * - file pickers (photo and CSV import) and downloads (CSV export, skill zip);
- * - a floating menu: scan, reload, open in browser, change gateway.
+ * - a floating menu: scan, reload, open in browser, change gateway, check for app updates;
+ * - the app's own updates from the project's GitHub releases ([Updater]): a bar offers a newer
+ *   version, one tap installs it over this one.
  *
  * Navigation policy ([NavPolicy]): pages on the gateway's origin, and on the one identity
  * provider the gateway advertises (`/.well-known/mtg-gateway`; for an older gateway, the one its
@@ -112,6 +114,12 @@ class MainActivity : ComponentActivity() {
     private lateinit var fab: ImageButton
     /** The error box's Retry goes to the gateway's home page instead of reloading a refused page. */
     private var retryHome = false
+    private lateinit var updater: Updater
+    private lateinit var updateBar: View
+    private lateinit var updateText: TextView
+    private lateinit var updateNow: Button
+    private lateinit var updateLater: Button
+    private var updateOffer: AppUpdate.Offer? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -142,10 +150,11 @@ class MainActivity : ComponentActivity() {
         fab = findViewById(R.id.fab)
         fab.setOnClickListener { showMenu(it) }
         fab.visibility = View.GONE // shown by syncFab over pages that are not the gateway's
+        setUpUpdates()
         configureWebView()
         // A link is consumed once: after a restore the saved page wins, not the old intent.
         val signInCode = takeSignInCode(intent)
-        val linked = if (signInCode != null) null else takeLinkedUrl(intent)?.takeIf { GatewayUrl.isGateway(origin, it) }
+        val linked = if (signInCode != null) null else linkedPage(takeLink(intent))
         when {
             signInCode != null -> if (!finishBrowserSignIn(signInCode)) web.loadUrl(origin + "/")
             savedInstanceState != null -> {
@@ -163,11 +172,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         takeSignInCode(intent)?.let { finishBrowserSignIn(it); return }
-        val url = takeLinkedUrl(intent) ?: return
-        if (!GatewayUrl.isGateway(origin, url)) {
-            Toast.makeText(this, getString(R.string.link_other_gateway), Toast.LENGTH_LONG).show()
-            return
-        }
+        val url = linkedPage(takeLink(intent)) ?: return
         if (camera != null) closeCamera()
         web.loadUrl(url)
     }
@@ -210,6 +215,37 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // -- app updates --------------------------------------------------------
+
+    private fun setUpUpdates() {
+        updateBar = findViewById(R.id.update_bar)
+        updateText = findViewById(R.id.update_text)
+        updateNow = findViewById(R.id.update_now)
+        updateLater = findViewById(R.id.update_later)
+        updateLater.setOnClickListener { updateBar.visibility = View.GONE } // asked again at the next check
+        updateNow.setOnClickListener { updateOffer?.let(updater::install) }
+        updater = Updater(this, object : Updater.Ui {
+            override fun showOffer(offer: AppUpdate.Offer) {
+                updateOffer = offer
+                updateText.text = getString(R.string.update_available, offer.version)
+                updateNow.visibility = View.VISIBLE
+                updateLater.visibility = View.VISIBLE
+                updateBar.visibility = View.VISIBLE
+            }
+
+            override fun showWorking(text: String) {
+                updateText.text = text
+                updateNow.visibility = View.GONE
+                updateLater.visibility = View.GONE
+                updateBar.visibility = View.VISIBLE
+            }
+
+            override fun hideOffer() {
+                updateBar.visibility = View.GONE
+            }
+        })
+    }
+
     // -- menu ---------------------------------------------------------------
 
     private fun showMenu(anchor: View) {
@@ -224,6 +260,7 @@ class MainActivity : ComponentActivity() {
                     startActivity(Intent(this, SetupActivity::class.java))
                     finish()
                 }
+                R.id.menu_update -> updater.check(manual = true)
             }
             true
         }
@@ -555,23 +592,60 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * The https URL an ACTION_VIEW (App Link) or ACTION_SEND intent carries, or null. The intent's
-     * action is cleared so the same link is not followed again on a later recreate.
+     * Where an ACTION_VIEW (App Link) or ACTION_SEND intent leads, or null for any other intent.
+     * A share is searched for its first usable https link: in EXTRA_TEXT, in ClipData (where some
+     * apps put it instead) and in EXTRA_SUBJECT ([SharedLink.resolve]). The intent's action is
+     * cleared so the same link is not followed again on a later recreate.
      */
-    private fun takeLinkedUrl(intent: Intent?): String? {
+    private fun takeLink(intent: Intent?): SharedLink.Target? {
         if (intent == null) return null
-        val raw = when (intent.action) {
-            Intent.ACTION_VIEW -> intent.dataString
-            Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)?.trim()
-            else -> null
-        } ?: return null
+        val target = when (intent.action) {
+            Intent.ACTION_VIEW -> {
+                val raw = intent.dataString?.trim()
+                when {
+                    raw == null -> SharedLink.Target.None
+                    GatewayUrl.isGateway(origin, raw) -> SharedLink.Target.Open(raw)
+                    else -> SharedLink.resolve(origin, listOf(raw))
+                }
+            }
+            Intent.ACTION_SEND -> {
+                val texts = mutableListOf<String?>(intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString())
+                intent.clipData?.let { clip ->
+                    for (i in 0 until clip.itemCount) {
+                        val item = clip.getItemAt(i)
+                        texts.add(item.text?.toString())
+                        texts.add(item.uri?.toString())
+                    }
+                }
+                texts.add(intent.getCharSequenceExtra(Intent.EXTRA_SUBJECT)?.toString())
+                SharedLink.resolve(origin, texts)
+            }
+            else -> return null
+        }
         intent.action = null
-        val uri = Uri.parse(raw)
-        if (uri.scheme?.lowercase() != "https" || uri.host.isNullOrEmpty()) return null
-        return raw
+        return target
+    }
+
+    /**
+     * The gateway page a link leads to, or null; says why when a link arrived but leads nowhere in
+     * the app. Only gateway pages load in the WebView (an archidekt.com deck link becomes the
+     * gateway's page for that deck); any other link is left alone rather than opened inside.
+     */
+    private fun linkedPage(target: SharedLink.Target?): String? = when (target) {
+        null -> null
+        is SharedLink.Target.Open -> target.url
+        is SharedLink.Target.Other -> {
+            Toast.makeText(this, getString(R.string.link_other_gateway, origin.removePrefix("https://")), Toast.LENGTH_LONG).show()
+            null
+        }
+        SharedLink.Target.None -> {
+            Toast.makeText(this, getString(R.string.link_none_shared), Toast.LENGTH_LONG).show()
+            null
+        }
     }
 
     override fun onPause() {
+        Updater.inFront = false
         camera?.pause()
         web.onPause()
         CookieManager.getInstance().flush()
@@ -582,6 +656,9 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         web.onResume()
         camera?.resume()
+        Updater.inFront = true
+        Updater.showPendingConfirmation(this)
+        if (this::updater.isInitialized) updater.checkIfDue()
     }
 
     override fun onDestroy() {
@@ -814,6 +891,9 @@ class MainActivity : ComponentActivity() {
 
         @JavascriptInterface
         fun openInBrowser() = onGatewayPage { openExternal(Uri.parse(web.url ?: origin)) }
+
+        @JavascriptInterface
+        fun checkForUpdates() = onGatewayPage { updater.check(manual = true) }
 
         @JavascriptInterface
         fun changeGateway() = onGatewayPage {

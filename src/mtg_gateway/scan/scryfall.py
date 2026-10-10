@@ -259,6 +259,15 @@ class ScryfallClient:
         self.cards.put(key, card)
         return card
 
+    async def named_raw(self, name: str) -> dict[str, Any]:
+        """One card by exact name, the whole Scryfall object, not cached here: the caller wants
+        the fields ``slim`` drops (rules text, power and toughness, loyalty, flavour) and keeps
+        them in its own small cache (cardsearch.py). Paced like every lookup."""
+        resp = await self._request(
+            "GET", "/cards/named", params={"exact": name.strip()}, interval=self.lookup_interval
+        )
+        return self._card_or_error(resp, name)
+
     async def by_set_number(self, set_code: str, collector_number: str) -> dict[str, Any]:
         key = f"print:{set_code.lower()}:{collector_number.lower()}"
         if (hit := self.cards.get(key)) is not None:

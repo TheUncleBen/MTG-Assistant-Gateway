@@ -81,6 +81,11 @@ logs.
 
 ## Restart or update
 
+The gateway tells you when there is something to update to: twice a day it asks GitHub for the
+project's newest release, and when that is newer, every page shows admins a notice and the admin
+overview (**Admin**, **Updates**) shows these steps with the version filled in. It never pulls an
+image or restarts itself. `MTG_UPDATE_CHECK=false` turns the check off.
+
 In Portainer: **Stacks** → `mtg` → **Update the stack**, with "Re-pull
 image" ticked. With `MTG_TAG=latest` that pulls the newest version; with a
 pinned version (for example `0.6.6`), change `MTG_TAG` first

@@ -2,7 +2,7 @@ name: CI
 
 # What runs where:
 #   pull request   lint + unit tests always; the amd64 container smoke test unless the pull request is a
-#                  draft or touches only documentation. A non-draft pull request that changes android/ also
+#                  draft or touches only documentation and/or android/. A non-draft pull request that changes android/ also
 #                  gets the Android unit tests and a debug build (no secrets). The version check makes sure
 #                  VERSION was raised above every released version (docs/VERSIONS.md). No image is pushed.
 #   push to main   a release. Every update to main is a new version: lint + unit tests, then the tag
@@ -60,7 +60,7 @@ jobs:
           if [ "$EVENT" = "pull_request" ]; then
             files=$(git diff --name-only --no-renames "$BASE" "$HEAD")
             printf '%s\n' "$files"
-            # Only docs/ and root-level Markdown count as documentation; skill/ and plugin/ Markdown ships in the image.
+            # Only docs/ and root-level Markdown count as documentation; plugin/ Markdown (with its skills) ships in the image.
             # The Android app (android/) is not part of the image either, so it skips the image job too,
             # but gets its own cheap check (android-check) below.
             if [ -n "$files" ] && ! printf '%s\n' "$files" | grep -qvE '^docs/|^[^/]+\.md$|^android/'; then docs_only=true; fi
@@ -215,6 +215,8 @@ jobs:
           RELEASE_STORE_PASS: ${{ secrets.ANDROID_STORE_PASS }}
           RELEASE_KEY_PASS: ${{ secrets.ANDROID_KEY_PASS }}
           APP_LINKS_HOST: ${{ vars.ANDROID_APP_LINKS_HOST }}
+          # The app updates itself from this repository's releases, the ones this workflow publishes.
+          UPDATE_REPO: ${{ github.repository }}
         run: |
           set -eu
           if [ -z "$KEYSTORE_B64" ]; then

@@ -23,6 +23,15 @@ def _deck_card(st: Stack, name: str, *, zone: str | None = None) -> list[dict]:
     return rows
 
 
+def _legal_commander_deck(st: Stack) -> None:
+    """Deck 42 as a legal 100-card Commander deck: the CSV fixture has no supertypes, so the
+    commander gets Legendary and the basic lands Basic, as Archidekt's deck JSON carries them."""
+    st.ark.decks[42]["deckFormat"] = 3
+    for name, sup in (("Aesi, Tyrant of Gyre Strait", "Legendary"), ("Forest", "Basic"), ("Island", "Basic")):
+        for row in _deck_card(st, name):
+            row["card"]["oracleCard"]["superTypes"] = [sup]
+
+
 async def test_quantity_remove_and_category_edits_answer_with_fresh_rows_and_checks(stack: Stack) -> None:  # noqa: F811
     stack.ark.decks[42]["deckFormat"] = 3  # Commander: a 100-card deck with legality to report
     b = await linked(stack)
@@ -53,12 +62,13 @@ async def test_quantity_remove_and_category_edits_answer_with_fresh_rows_and_che
         # the checks are computed from the re-read deck: 101 cards now, so the deck size check fails
         st = d["stats"]
         assert st["card_count"] == 101 and st["checks"]["deck_size"]["ok"] is False
-        assert st["legal"] is True and st["problems"] == [] and st["format"] == "commander"
+        # every card is legal, but a 101-card Commander deck is not: the chip says so, as on Archidekt
+        assert st["legal"] is False and st["problems"] == [] and st["format"] == "commander"
         assert "deck has 101 cards" in " ".join(st["checks"]["problems"])
-        assert "class='legal ok'" in d["banner_html"]
+        assert "class='legal bad'" in d["banner_html"] and "deck has 101 cards" in d["banner_html"]
         assert d["checks_html"].startswith("<div class='checks'><h3>Deck checks</h3>")
         assert "101 of 100" in d["checks_html"] and "class='bad'" in d["checks_html"]
-        assert "Legal in Commander" in d["legality_html"]
+        assert "Not legal in Commander" in d["legality_html"]
         # the proposal is in History as applied, with its snapshot
         listed = (await b.http.get("/api/v1/proposals")).json()["proposals"]
         assert listed[0]["id"] == d["proposal_id"] and listed[0]["state"] == "applied"
@@ -134,6 +144,33 @@ async def test_side_zone_edits_target_the_maybeboard_row(stack: Stack) -> None: 
             x["categories"] for x in d["rows"]
         ]
         assert d["stats"]["side_count"] == 0 and d["stats"]["card_count"] == 103
+    finally:
+        await b.aclose()
+
+
+async def test_a_deck_changed_on_archidekt_is_judged_as_it_is_now(stack: Stack) -> None:  # noqa: F811
+    """T-040: the deck is legal, then a card is added on Archidekt (outside the gateway) to make
+    101: the deck page and the API both say it is not legal, though every card still is."""
+    _legal_commander_deck(stack)
+    b = await linked(stack)
+    try:
+        page = await b.http.get("/decks/42", headers={"Accept": "text/html"})
+        assert page.status_code == 200 and "Size: 100" in page.text
+        assert "class='legal ok'" in page.text and "Legal in Commander" in page.text
+        before = (await b.http.get("/api/v1/decks/42/stats")).json()["stats"]
+        assert before["card_count"] == 100 and before["checks"]["legal"] is True
+
+        _deck_card(stack, "Forest")[0]["quantity"] += 1  # the owner's edit on archidekt.com
+        stack.ark.decks[42]["updatedAt"] = "2026-10-10T12:00:00Z"
+
+        page = await b.http.get("/decks/42", headers={"Accept": "text/html"})
+        assert "Size: 101" in page.text and "class='legal ok'" not in page.text
+        assert "class='legal bad'" in page.text and "deck has 101 cards; commander wants 100" in page.text
+        assert "Not legal in Commander" in page.text and "101 of 100" in page.text
+        after = (await b.http.get("/api/v1/decks/42/stats")).json()["stats"]
+        assert after["card_count"] == 101 and after["legality_problems"] == []
+        assert after["checks"]["legal"] is False and after["checks"]["ok"] is False
+        assert after["checks"]["legal_problems"] == ["deck has 101 cards; commander wants 100"]
     finally:
         await b.aclose()
 

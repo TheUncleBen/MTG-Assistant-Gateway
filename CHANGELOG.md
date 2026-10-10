@@ -7,6 +7,102 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.11] - 2026-10-10
+
+Fixes from the owner's test round on 0.7.10, a search box in the top bar,
+the first signed Android app, and less personal data for assistants.
+
+### Added
+
+- **Search from the top bar.** Every signed-in page has a search box (behind
+  the magnifier on phones). It suggests cards as you type and offers deck
+  searches by name or commander. The new card page (`/cards?q=`) shows
+  matching cards, opens them in the card viewer with their rules text, and
+  adds them to one of your decks through the usual approval path. The deck
+  search form is tidier.
+- **Admin page shows the removed-member clean-up.** It says whether the
+  clean-up is off (and why), hasn't run yet, last ran fine, or last failed
+  (with the reason, for example a group the token can't see). Each successful
+  run also writes one log line.
+- **Signed Android app.** When the repository's `android-release`
+  environment has its signing secrets, the release carries the signed APK
+  and bundle, and the release notes show the signing certificate's SHA-256
+  ([ANDROID.md](docs/ANDROID.md)).
+- **The Android app updates itself.** It looks for a newer version in the
+  project's GitHub releases when it opens (at most twice a day) and from
+  **Check for app updates** in its menu. **Update** downloads the release's
+  APK, checks that it is this app signed with the same key, and installs it
+  over the one you have, keeping your settings and sign-in. Android asks once
+  to allow installs from the app; from Android 12 later updates may need no
+  tap. An app from before 0.7.11 was signed with a test key and has to be
+  uninstalled once, then installed from the gateway's `/app` page
+  ([ANDROID.md](docs/ANDROID.md#updates)).
+- **Admins hear about new gateway versions.** Twice a day the gateway asks
+  GitHub for the newest release. When it is newer, admins see a notice on
+  every page, and the admin overview shows the update steps for Portainer,
+  Swarm and docker compose. The gateway never updates itself.
+  `MTG_UPDATE_CHECK=false` turns the check off; nothing else changes for
+  existing deployments.
+- **The connector has its own icon, description and website.** The gateway
+  tells apps that connect to it (MCP `serverInfo`) a description, the
+  project's website and its icon, served from the gateway itself. Only
+  signed-in apps see these. The same icon is the browser tab icon and is
+  served at `/favicon.ico` and `/apple-touch-icon.png`, which apps that draw
+  a connector's icon from its site look for. Before, those addresses
+  answered 404. The home-screen icon of the website matches the Android app.
+
+### Changed
+
+- **Assistants learn only what they need about you.** `whoami` now answers
+  with your display name, the gateway version and your account page, and
+  nothing else: no email, no groups (your sign-in service sends every group
+  you are in, including ones for other services), no IDs, no sign-in scopes
+  or token details. `account_status` no longer says when Archidekt was
+  linked or last used. You can see everything your sign-in service shares
+  with the gateway under **What your sign-in shares** on the Account page;
+  the operator guides now point there instead of `whoami` for checking
+  groups and email.
+- **The setup command is `/setup-mtg-gateway`.** The plugin's setup skill is
+  renamed from `setup` (`/<plugin>:setup-mtg-gateway` in Claude Code). It
+  keeps that name under an owner's own `MTG_SERVER_NAME`. Install the
+  plugin again from `/install` to get it.
+- The plugin names its author (`TheUncleBen`); under an owner's own name it
+  still names the owner and links nowhere.
+
+### Fixed
+
+- **Deck legality counts every format rule.** A Commander deck with 101 cards
+  no longer shows the green Legality chip. The chip, the stats panel and the
+  edit API now use the deck checks, deck size included.
+- **History matches what is still on Archidekt.** A backup copy deleted on
+  Archidekt leaves the "Backup copies on Archidekt" panel. Restore uses the
+  gateway's own snapshot, so it still works. A deck that no longer exists
+  offers no Restore, and restoring it fails with a clear message.
+- **Close editor asks in the page.** With unsaved edits, leaving the editor
+  (Close editor, a link or a menu form) asks in the save bar: Keep editing,
+  Discard changes or Save changes. The browser's "Leave site?" box is kept
+  only for closing the tab or reloading.
+- **Views are remembered.** The deck page's View as (text, stacks, grid) and
+  the grid or list view of My decks and the collection stay as you left them.
+- **A dropped connection no longer shows "You're offline" at once.** A page
+  load that fails at the network level is tried twice more first.
+- **The install steps for assistants are served as plain text**
+  (`/install.md`), since some assistants' web readers refuse
+  `text/markdown`.
+- **Sharing a link into the Android app** works from apps such as Discord
+  that send the link inside message text. Archidekt deck links open the
+  gateway's deck page; other links get a clear message.
+- **Add to home screen works on every page.** The pages' security policy
+  now allows the gateway's own web app manifest (browsers refused it
+  everywhere except the scanner), and the scanner names only its own.
+- **Deck settings no longer change a deck's format by themselves.** A deck
+  with no format shows "No format set"; before, the list showed its first
+  format and saving any other setting applied it.
+- Short menu items stay on one line; the editor's save bar no longer covers
+  the footer links at exactly 600 px wide; a menu-history browser test no
+  longer depends on timing.
+- Docs: the CI, test and release descriptions match what the workflows do.
+
 ## [0.7.10] - 2026-10-09
 
 The 0.7.9 code with a release build that cannot be stopped by Docker Hub's

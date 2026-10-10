@@ -543,21 +543,17 @@ def test_account_card_points_at_what_is_missing() -> None:
                 and "Alice" in card.locator("#facts").inner_text()
             )
             assert card.locator("#open").inner_text() == "Open the Account page"
-            # whoami's shape works too.
+            # whoami's shape works too (a name, the version and the account page; nothing else).
             who = {
-                "sub": "s",
+                "signed_in": True,
                 "name": "Alice",
-                "groups": ["mtg-gateway-users"],
-                "token_expires_in_seconds": 3000,
                 "gateway_version": "0.7.9",
                 "account_page": "https://mtg.test/account",
             }
             card = _open(page, "account-card", {"structuredContent": who})
             card.locator("#open").wait_for()
-            assert (
-                "mtg-gateway-users" in card.locator("#facts").inner_text()
-                and "version 0.7.9" in card.locator("#facts").inner_text()
-            )
+            facts = card.locator("#facts").inner_text()
+            assert "Alice" in facts and "version 0.7.9" in facts
             assert not errors, errors
         finally:
             browser.close()

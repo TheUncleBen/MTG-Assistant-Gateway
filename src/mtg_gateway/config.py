@@ -192,6 +192,9 @@ class Settings:
     # The Approve/Reject card an AI app shows in the chat (MCP Apps) may apply a proposal with
     # its one-time code; false leaves only the review page.
     apply_in_chat: bool = True
+    # Look up the newest release on GitHub twice a day and tell admins when it is newer than this
+    # gateway (update_check.py). Notice only: nothing is downloaded or changed.
+    update_check: bool = True
     # Approval modes (modes.py): the mode of a member who has not chosen one on their Account
     # page, the highest mode members may choose (auto = no cap), and how many review rows an
     # edit may have and still count as low risk in semi mode.
@@ -400,6 +403,7 @@ def load_settings() -> Settings:
             h.strip() for h in (_env("MTG_CIMD_ALLOWED_HOSTS", "") or "").split(",") if h.strip()
         ],
         apply_in_chat=_bool_env("MTG_APPLY_IN_CHAT", True),
+        update_check=_bool_env("MTG_UPDATE_CHECK", True),
         approval_mode_default=_mode_env("MTG_APPROVAL_MODE_DEFAULT", "manual"),
         approval_mode_max=_mode_env("MTG_APPROVAL_MODE_MAX", "auto"),
         auto_apply_max_rows=_int_env("MTG_AUTO_APPLY_MAX_ROWS", 5, lo=1, hi=100),

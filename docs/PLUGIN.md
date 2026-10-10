@@ -10,7 +10,7 @@ What each person types or clicks:
 
 | App | Setup | Then |
 | --- | --- | --- |
-| Claude Code | Paste `https://mtg.example.com/install` and say "install this plugin", or run the two commands below | `/mcp` → Authenticate (signs in through the browser), then `/mtg-gateway:setup` |
+| Claude Code | Paste `https://mtg.example.com/install` and say "install this plugin", or run the two commands below | `/mcp` → Authenticate (signs in through the browser), then `/mtg-gateway:setup-mtg-gateway` |
 | Claude web, desktop, iPhone, Android | Download the plugin from `/install` (`/plugin/mtg-gateway.zip`, or `/plugin/<your-name>.zip` with `MTG_SERVER_NAME` set) and go to Customize → Plugins → Add → Upload plugin; or press **Connect to Claude** on `/install` | Connect the connector, pick **Use Claude's published identity** (Register automatically works too), approve the gateway's consent page if it names Claude and returns to `claude.ai` (Deny otherwise), sign in |
 | ChatGPT (web only) | Developer mode, add an app with the connector URL | Connect, sign in, paste the project instructions from `/skill` |
 | Codex CLI | `codex mcp add` with the connector URL | `codex mcp login mtg-gateway` |
@@ -67,7 +67,7 @@ claude plugin install mtg-gateway@mtg-gateway
 ```
 
 The plugin's skills show up as `/mtg-gateway:mtg-gateway` (the MTG skill)
-and `/mtg-gateway:setup`. The setup skill checks the connector, has the
+and `/mtg-gateway:setup-mtg-gateway`. The setup skill checks the connector, has the
 person sign in through `/mcp`, calls `whoami`, and points them at `/account`
 to link Archidekt. It never asks for a password or token.
 

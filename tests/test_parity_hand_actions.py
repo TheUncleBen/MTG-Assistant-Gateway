@@ -447,6 +447,7 @@ async def test_owner_tools_carry_what_the_hidden_duplicates_had(stack: Stack) ->
             "deck_size", "commander_zone", "colour_identity_violations", "singleton_violations",
             "copy_limit_violations", "uncategorised", "problems", "ok",
             "format_family", "legality", "companion", "bracket",  # every-format checks (0.7.2)
+            "legal", "legal_problems",  # the deck's verdict, as archidekt.com's banner gives it
         }  # fmt: skip
     assert checks["deck_size"]["actual"] == plain["card_count"] and checks["commander_zone"]["count"] == 1
     # compare_decks: a precon-style summary with the basics apart (precon_diff)

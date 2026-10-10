@@ -127,7 +127,21 @@ names the gateway cannot match stay in the box.
 Press **Save changes** and they go to Archidekt straight away (a snapshot
 first, so History can undo); only a large removal asks you to confirm.
 
-## Finding decks
+## Finding cards and decks
+
+The **search box at the top of every page** finds both. Type part of a
+name: the *Cards* group lists matching cards with their cost and type, and
+the *Decks* group offers the deck search for what you typed and, when a
+legendary creature matches, "Decks with commander …". Enter on plain text
+searches decks. On a phone the box is behind the magnifier at the top.
+
+Picking a card opens the **Cards** page (`/cards?q=`), which lists every
+match with its picture; tap one to read it large, and **Add to deck** puts
+it into any of your decks with the copies and category you choose. The add
+is saved exactly like an edit made on the deck page (a snapshot first; the
+same confirmation when a change is large; kept for review while writes are
+off), so nothing skips your approval settings. Without a linked Archidekt
+account the button is disabled and says why.
 
 **Search** finds public decks on Archidekt the way the Archidekt site does:
 by deck name, commander, format, colours or the person who built it,

@@ -16,14 +16,17 @@ import pytest
 from .conftest import MCP_URL, PUBLIC_URL, Env, McpClient, browser_page, gateway_browser_sign_in
 from .test_04_operations import GATEWAY, container_of, sh
 
-# Every other page may load only the gateway's own scripts (feedback.js, the offline service worker)
-# and its own images (the account picture, /account/avatar).
+# Every other page may load only the gateway's own scripts (feedback.js, the offline service worker,
+# the top bar's search box) and web app manifest, ask only the gateway (the search suggestions), and
+# show only its own images (the account picture, /account/avatar) plus the suggestions' card pictures.
 STRICT_CSP = (
-    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; worker-src 'self'; img-src 'self'; "
-    "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; "
+    "manifest-src 'self'; worker-src 'self'; connect-src 'self'; "
+    "img-src 'self' https://cards.scryfall.io; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
 )
 HOME_CSP = (
-    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; "
+    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; "
+    "manifest-src 'self'; connect-src 'self'; "
     "img-src 'self' https://cards.scryfall.io; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 )
 STATE: dict[str, str] = {}
@@ -111,7 +114,7 @@ def test_another_user_cannot_read_the_sessions(clients, env: Env):
     async def go():
         f = clients["bob-test"]
         async with f.session() as s:
-            assert (await f.call(s, "whoami"))["preferred_username"] == "bob-test"
+            assert (await f.call(s, "whoami"))["name"] == "Bob Test"
             assert (await f.call(s, "list_scan_sessions"))["sessions"] == []
             by_id = await f.call(s, "get_scan_session", {"session": STATE["session"]})
             by_name = await f.call(s, "get_scan_session", {"session": "E2E scan"})

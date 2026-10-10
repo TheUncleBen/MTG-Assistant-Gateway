@@ -10,7 +10,8 @@ It is optional. It needs an Authentik API token (MTG_AUTHENTIK_API_TOKEN_FILE, a
 whose user may only view the gateway's groups and its own tokens (``authentik_core.view_group``
 granted on those groups alone, not globally); docs/IDP-AUTHENTIK.md has the steps.
 Without one it stays off; an unreadable token file gives a single warning at start, and
-a working setup logs one line saying it is on.
+a working setup logs one line saying it is on, then one line per round it completes. The admin
+overview shows its state (``status``): off and why, not run yet, or the last round's outcome.
 
 Only direct members count, as in Authentik's default groups claim. A custom scope mapping that
 puts inherited (parent) groups in the claim would let in people this sweep does not see as
@@ -121,7 +122,7 @@ class AuthentikSweep:
         self._token = settings.authentik_api_token
         self._http = http
         self.groups = [g for g in (settings.required_group, settings.admin_group) if g]
-        self.last: dict[str, Any] = {"ok": None, "at": None, "removed": 0, "error": None}
+        self.last: dict[str, Any] = {"ok": None, "at": None, "removed": 0, "allowed": 0, "error": None}
 
     @property
     def enabled(self) -> bool:
@@ -139,6 +140,26 @@ class AuthentikSweep:
         if self._token and not self.settings.required_group:
             return "removed-member clean-up is off: it needs MTG_REQUIRED_GROUP"
         return None
+
+    def status(self) -> dict[str, Any]:
+        """The sweep's state for the admin page: ``state`` is off, waiting (no round yet), ok or
+        failed. Only counts, times and SweepRefused's safe-to-log text: never the token."""
+        if not self.enabled:
+            reason = self.why_off() or (
+                "removed-member clean-up is off: no Authentik API token (MTG_AUTHENTIK_API_TOKEN_FILE); "
+                "it is optional (docs/IDP-AUTHENTIK.md)"
+            )
+            return {"state": "off", "reason": reason}
+        if self.last["ok"] is None:
+            return {"state": "waiting", "first_after_seconds": int(FIRST_DELAY)}
+        if self.last["ok"]:
+            return {
+                "state": "ok",
+                "at": self.last["at"],
+                "removed": self.last["removed"],
+                "allowed": self.last["allowed"],
+            }
+        return {"state": "failed", "at": self.last["at"], "error": self.last["error"]}
 
     async def _group(self, http: httpx.AsyncClient, name: str) -> list[dict[str, Any]]:
         try:
@@ -192,6 +213,8 @@ class AuthentikSweep:
                 removed.append(sub)
         if removed:
             logger.info("removed-member clean-up deleted %d stored Archidekt session(s)", len(removed))
+        # One line every round, so the log shows it works even when nobody was removed.
+        logger.info("removed-member clean-up ran: %d allowed member(s), %d removed", p.allowed, len(removed))
         return Plan(remove=removed, allowed=p.allowed, linked=p.linked)
 
     async def loop(self) -> None:
@@ -201,7 +224,9 @@ class AuthentikSweep:
             await asyncio.sleep(delay)
             try:
                 p = await self.run_once()
-                self.last.update(ok=True, at=int(time.time()), removed=len(p.remove), error=None)
+                self.last.update(
+                    ok=True, at=int(time.time()), removed=len(p.remove), allowed=p.allowed, error=None
+                )
                 failures, delay = 0, INTERVAL
             except SweepRefused as exc:
                 failures += 1

@@ -154,7 +154,6 @@ def add_scan_routes(server: MCPServer, state: AppState, service: ScanService) ->
         }
         body_html = (
             "<link rel='stylesheet' href='/scan/static/scan.css?v=" + version + "'>"
-            "<link rel='manifest' href='/scan/app.webmanifest'>"
             f"<script id='scan-config' type='application/json'>{_json_for_html(config)}</script>"
             "<noscript><div class='notice error'>Scanning needs JavaScript.</div></noscript>"
             "<div id='scan-app' class='scan'>"
@@ -172,6 +171,8 @@ def add_scan_routes(server: MCPServer, state: AppState, service: ScanService) ->
             csrf=_csrf(s, sid),
             current="/scan",
             admin=user_admin,
+            # the scanner is its own installable app: its manifest replaces the gateway's
+            head_extra="<link rel='manifest' href='/scan/app.webmanifest'>",
         )
         resp.headers["Content-Security-Policy"] = SCAN_CSP
         resp.headers["Permissions-Policy"] = "camera=(self)"

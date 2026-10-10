@@ -247,20 +247,36 @@ def featured(deck: Deck) -> DeckCard | None:
     return None
 
 
-def legality_chip_html(deck: Deck, stats: dict[str, Any] | None) -> str:
-    """The banner's Legality chip: green when every card is legal in the deck's format, red with
-    the number of problems otherwise, nothing for a deck without a format. Rendered again by the
-    edit endpoint (api.py) so the page can swap it in after a card changes."""
+def legal_problems(stats: dict[str, Any] | None) -> list[str]:
+    """What keeps the deck from being legal in its format, as archidekt.com's banner counts it:
+    every format rule from deck_stats.deck_checks (deck size, command zone, colour identity,
+    copies, card legality...), not only the cards' own legality. Computed from the deck as just
+    read, so an edit made on Archidekt shows on the next view."""
     stats = stats or {}
-    legal_problems = stats.get("legality_problems") or []
+    checks = stats.get("checks")
+    if isinstance(checks, dict) and "legal_problems" in checks:
+        return [str(p) for p in checks["legal_problems"]]
+    return [
+        f"{p.get('name')} ({p.get('status')})" if isinstance(p, dict) else str(p)
+        for p in stats.get("legality_problems") or []
+    ]
+
+
+def legality_chip_html(deck: Deck, stats: dict[str, Any] | None) -> str:
+    """The banner's Legality chip: green when the deck meets every rule of its format (the size
+    too, as on archidekt.com), red with the number of problems otherwise, nothing for a deck
+    without a format. Rendered again by the edit endpoint (api.py) so the page can swap it in
+    after a card changes."""
+    problems = legal_problems(stats)
     if not deck.format:
         return ""
-    if not legal_problems:
+    if not problems:
         return (
             f"<span class='legal ok' title='Legal in {esc(deck.format or 'this format')}'>"
             f"{icon('check')} Legality</span>"
         )
-    return f"<span class='legal bad' title='{len(legal_problems)} problem(s)'>{icon('x')} Legality</span>"
+    title = f"{len(problems)} problem(s): " + "; ".join(problems[:5]) + ("…" if len(problems) > 5 else "")
+    return f"<span class='legal bad' title='{esc(title)}'>{icon('x')} Legality</span>"
 
 
 def banner_html(
@@ -750,6 +766,11 @@ def legality_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
         else (
             f"<div class='legality'><h3>Legality</h3><p class='ok'>{icon('check')} Legal in "
             f"{esc(format_label(deck.format))}</p></div>"
+            if deck.format and not legal_problems(stats)
+            # every card is legal but another rule is not met (the size, say): not "Legal in"
+            else f"<div class='legality'><h3>Legality</h3><p>{icon('x')} Not legal in "
+            f"{esc(format_label(deck.format))}: every card is, but the Deck checks above are not "
+            "all met.</p></div>"
             if deck.format
             else ""
         )
@@ -1760,6 +1781,11 @@ ul.decklist.list .deck{margin-bottom:.5rem}
 .editbar .backup input{margin:0}
 .editbar .status{margin:0;flex-basis:100%}
 .editbar .status:empty{display:none}
+/* a question in the save bar (Save anyway? / Discard the unsaved changes?): its own full-width row,
+   in the body text colour (--orange-text on the tinted grey bar is 3.9:1 in the light theme) */
+.editbar .confirmbar{flex-basis:100%;display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:0;
+  padding:.5rem .75rem;color:var(--text)}
+.editbar .confirmbar span{flex:1 1 14rem;min-width:0;overflow-wrap:anywhere}
 .pendingbox summary{cursor:pointer;font-weight:700}
 .pendingbox summary b{margin-left:.5rem;background:var(--orange);color:#fff;border-radius:10px;
   padding:0 .5rem}
@@ -1893,10 +1919,15 @@ ul.erows{list-style:none;margin:.5rem 0 0;padding:0}
   .picker .pickbox{width:100%;max-height:94vh;border-radius:var(--radius-panel) var(--radius-panel) 0 0;
     border-bottom:0;padding:.75rem .75rem calc(.75rem + env(safe-area-inset-bottom))}
   .picker .prints{grid-template-columns:repeat(auto-fill,minmax(96px,1fr))} }
-@media (max-width:600px){
-  .editbar{top:auto;bottom:50px;margin:0;position:fixed;left:0;right:0;
+/* Compact width: the save bar sits fixed on top of the bottom tab bar. The same breakpoint as the
+   tab bar (theme.py's __MOBILE__, under 600px): at exactly 600px the rail or the top bar is
+   showing and the bar stays sticky at the top, so nothing is left under a fixed bar with no room
+   kept for it (gate 0.7.10: the footer links at 600px). The footer keeps room for both bars. */
+@media (max-width:599.98px){
+  .editbar{top:auto;bottom:calc(56px + env(safe-area-inset-bottom));margin:0;position:fixed;left:0;right:0;
     padding:.5rem max(1rem,env(safe-area-inset-right)) .5rem max(1rem,env(safe-area-inset-left))}
   .editor{padding-bottom:6rem}
+  body:has(#editor) footer.site{padding-bottom:calc(11rem + env(safe-area-inset-bottom))}
   .editbar .review{flex:1}
   .addbox form.addcard{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
   .addbox form.addcard .grow{grid-column:1 / -1;grid-row:1}

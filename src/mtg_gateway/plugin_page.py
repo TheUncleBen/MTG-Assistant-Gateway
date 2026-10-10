@@ -48,12 +48,17 @@ if TYPE_CHECKING:
 
 PLUGIN_NAME = "mtg-gateway"
 MARKETPLACE_NAME = "mtg-gateway"
+# The setup skill's name, so its command is /<plugin>:setup-mtg-gateway whatever the plugin is called.
+SETUP_SKILL = "setup-mtg-gateway"
 # The product name the plugin's files carry; an owner's MTG_SERVER_NAME replaces it.
 DEFAULT_SITE = "MTG Assistant Gateway"
 SLUG_MAX = 40
 IMAGE_PLUGIN_DIR = Path("/usr/share/mtg-gateway/plugin")
 REPO_PLUGIN_DIR = Path(__file__).resolve().parents[2] / "plugin"
 MAX_FILE_BYTES = 512 * 1024
+# The install steps are Markdown, served as plain text: some assistants' web readers refuse a
+# text/markdown answer, and every reader takes text/plain.
+INSTALL_MD_TYPE = "text/plain; charset=utf-8"
 ZIP_DATE = (2026, 1, 1, 0, 0, 0)
 # The connector files whose ``url`` the gateway fills in with its own address.
 CONNECTOR_FILES = (".mcp.json", "mcp.json")
@@ -87,7 +92,7 @@ def plugin_label(site: str) -> str:
 
 def _renamed(data: bytes, rel: str, site: str, name: str) -> bytes:
     """A text file of the plugin with the product's name and short name replaced by the
-    owner's, and no link to the project's homepage."""
+    owner's, and no link to the project's homepage or its author."""
     try:
         text = data.decode("utf-8")
     except UnicodeDecodeError:
@@ -98,8 +103,12 @@ def _renamed(data: bytes, rel: str, site: str, name: str) -> bytes:
         if isinstance(doc, dict):
             doc.pop("homepage", None)
             doc.pop("repository", None)
+            if "author" in doc:
+                doc["author"] = {"name": DEFAULT_SITE}  # becomes the owner's name below
         text = json.dumps(doc, indent=2) + "\n"
-    return text.replace(DEFAULT_SITE, label).replace(PLUGIN_NAME, name).encode("utf-8")
+    # The setup skill keeps its name under every owner's name: people type it.
+    text = text.replace(SETUP_SKILL, "\0setup\0").replace(DEFAULT_SITE, label).replace(PLUGIN_NAME, name)
+    return text.replace("\0setup\0", SETUP_SKILL).encode("utf-8")
 
 
 def _with_url(raw: bytes, mcp_url: str) -> bytes:
@@ -157,7 +166,7 @@ def marketplace(public_url: str, owner: str, zip_sha256: str) -> dict:
             {
                 "name": name,
                 "description": "Magic: The Gathering research, goldfish simulation and safe Archidekt "
-                f"deck edits through this gateway. Run /{name}:setup after installing.",
+                f"deck edits through this gateway. Run /{name}:{SETUP_SKILL} after installing.",
                 "version": __version__,
                 "category": "productivity",
                 "keywords": ["mtg", "magic-the-gathering", "archidekt", "mcp"],
@@ -236,7 +245,7 @@ def _section_md(client: str, public_url: str, site: str) -> str:
 
 Works on Windows, macOS and Linux. Run these two commands, then tell the
 person to run `/mcp`, choose **{name}** and **Authenticate**, which
-opens the sign-in page in their browser. Then run the `/{name}:setup`
+opens the sign-in page in their browser. Then run the `/{name}:{SETUP_SKILL}`
 skill to finish.
 
 ```
@@ -346,10 +355,9 @@ Connector URL: `{mcp}`
 {sections}
 ## After connecting
 
-Ask your assistant to call `whoami`; it should answer with your name or
-email. To let it read and edit your own Archidekt decks, sign in at
-`{public_url}/account` and link Archidekt once there. Deck changes are
-always shown to you first and applied only after you approve.
+Ask your assistant to call `whoami`; it should answer with your name. To let
+it read and edit your own Archidekt decks, sign in at `{public_url}/account` and link
+Archidekt once there. Deck changes are always shown to you first and applied only after you approve.
 
 {blocked}"""
 
@@ -404,7 +412,7 @@ def add_plugin_routes(server: MCPServer, state: AppState) -> None:
         client = pick_client(request.query_params.get("for"))
         return PlainTextResponse(
             install_markdown(s.public_url, s.server_name, client),
-            media_type="text/markdown; charset=utf-8",
+            media_type=INSTALL_MD_TYPE,
             headers=static,
         )
 
@@ -421,7 +429,7 @@ def add_plugin_routes(server: MCPServer, state: AppState) -> None:
                 return login_redirect(target)
             return PlainTextResponse(
                 install_markdown(s.public_url, s.server_name, client),
-                media_type="text/markdown; charset=utf-8",
+                media_type=INSTALL_MD_TYPE,
                 headers={"Cache-Control": "no-store", "Vary": "Sec-Fetch-Mode, Cookie"},
             )
         e = html.escape
@@ -484,7 +492,7 @@ def _section_html(client: str, public_url: str, site: str, mcp_url: str) -> str:
         return (
             "<div class='card'><h2>Claude Code</h2>"
             "<p>Two commands, then <code>/mcp</code> to sign in in your browser and "
-            f"<code>/{e(name)}:setup</code> to finish.</p>"
+            f"<code>/{e(name)}:{SETUP_SKILL}</code> to finish.</p>"
             f"<pre>claude plugin marketplace add {e(mp)}\nclaude plugin install {e(name)}@{e(name)}</pre>"
             "</div>"
         )

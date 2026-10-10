@@ -43,7 +43,7 @@ ul.facts li b{font-weight:600;text-align:right;overflow-wrap:anywhere}
     }
     var list = $("facts"); list.replaceChildren();
     var todo = [];
-    var who = sc.name || sc.preferred_username || sc.email;
+    var who = sc.name;
     if (who) fact(list, "Signed in as", String(who));
     if ("linked" in sc) {
       fact(list, "Archidekt", sc.linked ? ("linked" + (sc.archidekt_username ? " as " + sc.archidekt_username : "")) : "not linked", sc.linked ? "ok" : "warn");
@@ -54,8 +54,6 @@ ul.facts li b{font-weight:600;text-align:right;overflow-wrap:anywhere}
       if (!sc.writes_enabled) todo.push("ask whoever runs the gateway to turn deck writes on (MTG_WRITES_ENABLED)");
     }
     if (sc.approval_mode) fact(list, "Approval mode", MODES[sc.approval_mode] || String(sc.approval_mode));
-    if (Array.isArray(sc.groups) && sc.groups.length) fact(list, "Groups", sc.groups.join(", "));
-    if (typeof sc.token_expires_in_seconds === "number") fact(list, "This app's sign-in", "renews in " + Math.max(1, Math.round(sc.token_expires_in_seconds / 60)) + " min");
     if (sc.gateway_version) fact(list, "Gateway", "version " + sc.gateway_version);
     var st = $("state");
     if (todo.length) { st.textContent = "setup needed"; st.className = "badge warn"; $("summary").textContent = "To use your assistant with Archidekt: " + todo.join("; ") + "."; }

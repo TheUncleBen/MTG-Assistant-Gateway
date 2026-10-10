@@ -29,6 +29,7 @@ from .decklist import DecklistError, parse_decklist
 from .deckpage import (
     DECK_CSS,
     LIST_ORDERS,
+    VIEWS,
     card_image,
     compare_page_html,
     covers_for,
@@ -38,7 +39,7 @@ from .deckpage import (
     featured,
     precon_by_label,
 )
-from .decks import DeckError, actor_label, current_client
+from .decks import DeckError, actor_label, current_client, mark_gone
 from .history_view import (
     HISTORY_CSS,
     PAGE,
@@ -66,7 +67,7 @@ from .report_view import (
     report_export_html,
     report_markdown,
 )
-from .theme import VIZ_CSS, icon, render
+from .theme import VIZ_CSS, icon, remember_view, render, view_choice
 from .views import auto_category, cards_by_category
 
 if TYPE_CHECKING:
@@ -78,16 +79,19 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
+ICON_HEADERS = {"Cache-Control": "public, max-age=86400", "X-Content-Type-Options": "nosniff"}
 # Pages with the editor load one script from /static; everything else keeps the default CSP.
 DECK_CSP = (
-    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; "
+    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; "
+    "manifest-src 'self'; connect-src 'self'; "
     "img-src 'self' https://cards.scryfall.io; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 )
 DECKS_JSON_TIMEOUT = 25.0  # /api/decks/mine waits this long for a cold list at most
 # Format names the settings and new-deck forms offer, one per Archidekt format id.
 FORMAT_CHOICES = sorted({FORMAT_NAMES[i] for i in FORMAT_NAMES}, key=lambda n: format_label(n).lower())
 EDITOR_CSP = (
-    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; "
+    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; "
+    "manifest-src 'self'; connect-src 'self'; "
     "img-src 'self' https://cards.scryfall.io; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 )
 
@@ -241,8 +245,13 @@ DECK_ERR_MESSAGES = {
 }
 
 
+# the deck list's View as choices (deckpage.deck_list_controls_html)
+LIST_VIEWS = ("grid", "list")
+
+
 def add_companion_routes(server: MCPServer, state: AppState, reports: ReportService) -> None:
     s = state.settings
+    secure = s.public_url.startswith("https://")
 
     async def apply_now(sub: str, pid: str, *, ok: str, deck_id: str | None = None) -> Response:
         """A member's own action in the app (new deck, clone, settings) is their approval: the
@@ -357,11 +366,13 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             rows.sort(key=lambda d: (str(d.get("format_name") or ""), str(d.get("name", "")).lower()))
         return rows, folders, total
 
-    def list_query(qp: Any) -> tuple[str, str, str, str]:
-        """The deck list's query parameters, each limited to its known values: (q, order, view, folder)."""
+    def list_query(qp: Any, view: str | None = None) -> tuple[str, str, str, str]:
+        """The deck list's query parameters, each limited to its known values: (q, order, view, folder).
+        ``view``: the one the page already chose (the address's, else the remembered one)."""
         q = (qp.get("q") or "").strip()[:80]
         order = qp.get("order") if qp.get("order") in LIST_ORDERS else "updated"
-        view = qp.get("view") if qp.get("view") in ("grid", "list") else "grid"
+        if view not in LIST_VIEWS:
+            view = qp.get("view") if qp.get("view") in LIST_VIEWS else "grid"
         folder = (qp.get("folder") or "").strip()[:80]
         return q, order, view, folder
 
@@ -388,7 +399,8 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         if not sub:
             return login_redirect("/decks")
         qp = request.query_params
-        q, order, view, folder = list_query(qp)
+        chosen, remember = view_choice(request, "decks", LIST_VIEWS, "grid")
+        q, order, view, folder = list_query(qp, chosen)
         rows, problem, failure = await my_decks(sub, wait=decks.deck_list_wait)
         if failure is not None and (busy := busy_response(failure, request, page, sub=sub, sid=sid)):
             return busy
@@ -440,7 +452,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             )
             + f"<div class='panel'>{open_form}</div>"
         )
-        return page(
+        resp = page(
             "My decks",
             body,
             sub=sub,
@@ -452,6 +464,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             deck_css=True,
             extra_scripts=("decks.js",),
         )
+        return remember_view(resp, "decks", view, secure=secure) if remember else resp
 
     @server.custom_route("/api/decks/mine", methods=["GET"], include_in_schema=False)
     async def my_decks_json(request: Request) -> Response:
@@ -657,6 +670,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         # Archidekt marks each deck card with the copies the signed-in member owns ("owned" on the
         # card when the deck is read with their session); the gateway's green dot is that number.
         owned = {c.name.lower(): c.owned for c in deck.cards if c.owned} if link else None
+        view, remember = view_choice(request, "deck", VIEWS, "text")
         body = deck_page_html(
             deck,
             stats,
@@ -664,13 +678,13 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             csrf=_csrf(s, sid),
             writes_enabled=s.writes_enabled,
             owned=owned or None,
-            view=qp.get("view") or "text",
+            view=view,
             group=qp.get("group") or "category",
             sort=qp.get("sort") or "name",
             q=(qp.get("q") or "").strip()[:80],
             notice=notice,
         )
-        return page(
+        resp = page(
             deck.name or f"Deck {deck.id}",
             body,
             sub=sub,
@@ -682,6 +696,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             heading=False,
             deck_css=True,
         )
+        return remember_view(resp, "deck", view, secure=secure) if remember else resp
 
     @server.custom_route("/decks/{deck_id}/clone", methods=["POST"], include_in_schema=False)
     async def clone_deck(request: Request) -> Response:
@@ -717,9 +732,15 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         def sel(flag: bool) -> str:
             return " selected" if flag else ""
 
-        fmt_opts = "".join(
-            f"<option value='{_esc(n)}'{sel(fmt_current == n)}>{_esc(format_label(n))}</option>"
-            for n in FORMAT_CHOICES
+        # A deck with no format (or one this list doesn't know) shows that, selected, rather than
+        # the browser falling back to the first format; an empty value leaves the format alone.
+        fmt_opts = (
+            "" if fmt_current in FORMAT_CHOICES else "<option value='' selected>No format set</option>"
+        ) + (
+            "".join(
+                f"<option value='{_esc(n)}'{sel(fmt_current == n)}>{_esc(format_label(n))}</option>"
+                for n in FORMAT_CHOICES
+            )
         )
         bracket_current = v.get("edh_bracket", str(deck.edh_bracket or ""))
         brackets = {
@@ -1825,6 +1846,17 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             reps = reports.list(sub, deck_id, limit=fetch, search=query["q"] or None, since=since)
         client_ids = {r.get("created_by_client") for r in reps if r.get("created_by_client")}
         names = {cid: state.db.client_name(cid) for cid in client_ids if not cid.startswith("__")}
+        if snapshots:
+            # Reconciled with the member's Archidekt deck list, the one the backup copies panel
+            # reads too (cached; no request per snapshot): a deck or a backup copy deleted on
+            # Archidekt is marked, and a deleted deck's snapshots offer no Restore.
+            try:
+                listed = await asyncio.wait_for(
+                    decks.on_archidekt(sub, wait=decks.deck_list_wait), DECKS_JSON_TIMEOUT
+                )
+            except (DeckError, TimeoutError):
+                listed = None  # not linked, or Archidekt unavailable: shown as recorded
+            mark_gone(snapshots, listed)
         csrf_in = f"<input type='hidden' name='csrf' value='{_esc(_csrf(s, sid))}'>"
         events = build_events(proposals, snapshots, reps, csrf_input=csrf_in, client_names=names)
         has_more = len(events) > query["offset"] + PAGE
@@ -1842,7 +1874,8 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         ):
             try:
                 copies = await asyncio.wait_for(
-                    decks.backup_copies(sub, deck_id=deck_id, wait=decks.deck_list_wait), DECKS_JSON_TIMEOUT
+                    decks.backup_copies(sub, deck_id=deck_id, wait=decks.deck_list_wait, prefer_fresh=True),
+                    DECKS_JSON_TIMEOUT,
                 )
             except (DeckError, TimeoutError):
                 copies = []  # not linked, or Archidekt unavailable: the panel is simply absent
@@ -2053,8 +2086,8 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             "background_color": "#181818",
             "theme_color": "#111111",
             "icons": [
-                {"src": "/scan/static/icon-192.png", "sizes": "192x192", "type": "image/png"},
-                {"src": "/scan/static/icon-512.png", "sizes": "512x512", "type": "image/png"},
+                {"src": "/static/gateway-icon-192.png", "sizes": "192x192", "type": "image/png"},
+                {"src": "/static/gateway-icon-512.png", "sizes": "512x512", "type": "image/png"},
             ],
             "shortcuts": [
                 {"name": "My decks", "url": "/decks"},
@@ -2068,15 +2101,20 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
 
     @server.custom_route("/sw.js", methods=["GET"], include_in_schema=False)
     async def service_worker(_request: Request) -> Response:
-        # Network only: the pages are private and must never be served from a cache. When a page
-        # can't be reached at all (no connection), answer with a plain offline page built here
-        # instead of the browser's own error screen.
+        # Network only: the pages are private and must never be served from a cache. A page load
+        # that fails at the network level is tried twice more (after 0.3 s and 1 s) before the
+        # plain offline page built here answers instead of the browser's own error screen, so one
+        # dropped connection on the way in doesn't show "offline". GET navigations only.
         js = (
             "self.addEventListener('install',()=>self.skipWaiting());"
             "self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));"
+            "const RETRY=[300,1000];"
+            "const wait=ms=>new Promise(r=>setTimeout(r,ms));"
+            "const tryFetch=(req,i)=>fetch(req).catch(err=>"
+            "i<RETRY.length?wait(RETRY[i]).then(()=>tryFetch(req,i+1)):Promise.reject(err));"
             "self.addEventListener('fetch',e=>{"
             "if(e.request.mode!=='navigate'||e.request.method!=='GET')return;"
-            "e.respondWith(fetch(e.request).catch(()=>new Response(" + json.dumps(OFFLINE_PAGE) + ","
+            "e.respondWith(tryFetch(e.request,0).catch(()=>new Response(" + json.dumps(OFFLINE_PAGE) + ","
             "{status:503,headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store',"
             "'Content-Security-Policy':\"default-src 'none'; style-src 'unsafe-inline'; "
             "base-uri 'none'; frame-ancestors 'none'\"}})));"
@@ -2094,6 +2132,15 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         except ValueError:
             return JSONResponse([], headers={"Cache-Control": "no-store"})
         return JSONResponse(data, headers={"Cache-Control": "public, max-age=3600"})
+
+    # Browsers, and apps that show a connector's icon from its site, ask for these at the root.
+    @server.custom_route("/favicon.ico", methods=["GET"], include_in_schema=False)
+    async def favicon(_request: Request) -> Response:
+        return FileResponse(STATIC_DIR / "favicon.ico", media_type="image/x-icon", headers=ICON_HEADERS)
+
+    @server.custom_route("/apple-touch-icon.png", methods=["GET"], include_in_schema=False)
+    async def touch_icon(_request: Request) -> Response:
+        return FileResponse(STATIC_DIR / "gateway-icon-180.png", media_type="image/png", headers=ICON_HEADERS)
 
     @server.custom_route("/static/{path:path}", methods=["GET"], include_in_schema=False)
     async def static(request: Request) -> Response:
