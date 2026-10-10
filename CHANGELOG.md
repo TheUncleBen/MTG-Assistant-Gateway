@@ -7,6 +7,19 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.12] - unreleased
+
+### Added
+
+- **Forge simulations (optional, off by default).** A new internal service runs
+  Forge, an established open-source rules engine (GPL-3.0, unmodified), so a
+  deck report can play real games against Commander precons: opponents,
+  combat, the stack and the graveyard. A run happens in the background and
+  the report's `forge` section fills in when it ends. Every card Forge cannot
+  play is named in the report, never dropped silently. Turn it on with
+  `FORGE_REPLICAS=1`, `FORGE_NODE` and `MTG_FORGE_URL` ([DEPLOY.md](docs/DEPLOY.md));
+  nothing changes for an install that leaves it off.
+
 ## [0.7.10] - 2026-10-09
 
 The 0.7.9 code with a release build that cannot be stopped by Docker Hub's

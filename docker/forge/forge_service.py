@@ -50,6 +50,7 @@ MAX_BODY = 256 * 1024
 RESULT = re.compile(r"Game (?P<game>\d+) ended in (?P<ms>\d+) ms\. (?P<rest>.*)$")
 WINNER = re.compile(r"(?P<who>\S.*?) has won", re.IGNORECASE)
 DRAW = re.compile(r"\bdraw\b", re.IGNORECASE)
+STOPPED_SLOW = re.compile(r"Stopping slow match as draw", re.IGNORECASE)
 LOAD_PROBLEM = re.compile(
     r"(could not|cannot|can't|unable to) (find|load)|unsupported|not supported|unknown card", re.IGNORECASE
 )
@@ -218,6 +219,7 @@ def run_job(job: Job) -> None:
         deadline = job.started + JOB_TIMEOUT
         timer = threading.Timer(JOB_TIMEOUT, lambda: _kill(job))
         timer.start()
+        stopped_slow = False
         try:
             assert job.proc.stdout is not None
             for raw in job.proc.stdout:
@@ -225,8 +227,16 @@ def run_job(job: Job) -> None:
                 if not line.strip():
                     continue
                 job.tail = (job.tail + [line[:300]])[-80:]
+                if STOPPED_SLOW.search(line):
+                    stopped_slow = True
                 result = parse_result(line)
                 if result:
+                    if stopped_slow:
+                        # Forge ends a game that runs past its time limit as a draw, yet still prints
+                        # a winner on the result line; count it as the draw it is.
+                        result.update(winner=None, draw=True, stopped_slow=True)
+                        result.pop("winner_text", None)
+                        stopped_slow = False
                     job.results.append(result)
                 elif LOAD_PROBLEM.search(line):
                     job.load_problems.append(line.strip()[:300])

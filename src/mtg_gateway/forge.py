@@ -72,6 +72,9 @@ def summarise(job: dict[str, Any], seats: list[str]) -> dict[str, Any]:
         "games": games,
         "games_requested": job.get("games_requested"),
         "draws": sum(1 for r in results if r.get("draw")),
+        # Games Forge stopped at its time limit (counted as draws): many of them mean the Pi is too slow
+        # for these decks, and the win rates say little.
+        "stopped_slow": sum(1 for r in results if r.get("stopped_slow")),
         "seats": [],
     }
     for i, name in enumerate(seats, start=1):
