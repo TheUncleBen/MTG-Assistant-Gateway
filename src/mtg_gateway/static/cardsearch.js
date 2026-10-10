@@ -86,7 +86,7 @@
   /* The rules text (every face), power and toughness, flavour, price and legality are read when a
      card is opened, once per card for the page's lifetime (the gateway keeps them a while too),
      and drawn into the open viewer when they arrive, if it still shows that card. */
-  var texts = {};      // card name -> promise of the text, or null when it could not be read
+  var texts = Object.create(null);  // card name -> promise of the text (no prototype keys)
   var showing = "";    // the card the viewer shows now
   function textFor(name) {
     if (texts[name]) return texts[name];

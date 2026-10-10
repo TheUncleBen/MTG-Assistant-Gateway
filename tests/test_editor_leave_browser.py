@@ -286,3 +286,60 @@ def test_no_footer_link_under_the_save_bar_at_the_breakpoint(server: Server, tou
             finally:
                 browser.close()
         assert problems == [], "\n".join(problems)
+
+
+# The centre of each visible row of an open list is that row (or inside it), not something on top
+ROWS_ON_TOP = """
+(sel) => [...document.querySelectorAll(sel)].filter(e => e.getClientRects().length).flatMap(e => {
+  const r = e.getBoundingClientRect();
+  const x = r.left + r.width / 2, y = r.top + r.height / 2;
+  if (y < 0 || y > innerHeight) return [];
+  const box = e.closest('[role=listbox], .menu');  // rows scrolled out of their list are hidden anyway
+  if (box) { const b = box.getBoundingClientRect(); if (y < b.top || y > b.bottom) return []; }
+  const hit = document.elementFromPoint(x, y);
+  return hit && (hit === e || e.contains(hit)) ? [] :
+    [`${(e.textContent || '').trim().slice(0, 30)} under ${hit ? hit.className || hit.tagName : 'nothing'}`];
+})
+"""
+
+
+def test_the_top_bar_list_and_the_more_sheet_sit_above_the_save_bar(server: Server) -> None:
+    # Gate 0.7.11: a suggestion row lay under the editor's save bar, so tapping it pressed Save
+    # changes; on phones the More sheet's rows lay under it too.
+    from playwright.sync_api import sync_playwright
+
+    sid = _link(server)
+    server.exe = _exe()
+    with sync_playwright() as p:
+        problems: list[str] = []
+        for width, touch in ((600, True), (720, True), (1366, False)):
+            browser, ctx = _browser(p, server, sid, width, 760, touch=touch)
+            try:
+                page = ctx.new_page()
+                page.goto(f"{server.base}/decks/{DECK}/edit", wait_until="networkidle")
+                _make_a_change(page)
+                box = page.locator("#site-q")
+                if box.is_visible():
+                    box.click()
+                    box.press_sequentially("filler", delay=25)  # a long list
+                    page.locator(".topbar [role=option]").first.wait_for(timeout=3000)
+                    problems += [
+                        f"{width}px: {m}" for m in page.evaluate(ROWS_ON_TOP, ".topbar [role=option]")
+                    ]
+            finally:
+                browser.close()
+        for width in (360, 390, 599):
+            browser, ctx = _browser(p, server, sid, width, 760, touch=True)
+            try:
+                page = ctx.new_page()
+                page.goto(f"{server.base}/decks/{DECK}/edit", wait_until="networkidle")
+                _make_a_change(page)
+                page.locator(".tabbar details.more summary").click()
+                page.wait_for_timeout(150)
+                problems += [
+                    f"{width}px: {m}"
+                    for m in page.evaluate(ROWS_ON_TOP, ".tabbar details.more .menu.sheet a")
+                ]
+            finally:
+                browser.close()
+        assert problems == [], "\n".join(problems)
