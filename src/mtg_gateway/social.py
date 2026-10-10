@@ -159,13 +159,19 @@ class SocialService:
         {up, remove}, the body archidekt.com's own comment vote sends (its bundle, read 2026-10-10).
         The new score is worked out the way the site does, from the thread's points and the
         member's earlier vote."""
-        self._me(sub)
+        uid, _name = self._me(sub)
         thread = await self.comments(sub, deck_id)
         found = _find(thread["comments"], comment_id)
         if found is None:
             raise DeckError(
                 "not_found", "that comment is not in this deck's thread (or not on its first page)"
             )
+        if str(found["owner"]["id"]) == uid:
+            raise DeckError("invalid", "that is your own comment")
+        if found["archived"]:
+            raise DeckError("invalid", "that comment is archived on Archidekt")
+        if found["user_vote"] == want:  # already so: nothing is sent (Archidekt might toggle it)
+            return {"comment": comment_id, "vote": want, "points": found["points"]}
         if want == VOTE_NONE:
             await self.decks._call(sub, lambda t: self.client.vote_deck(t, comment_id, up=True, remove=True))
         else:

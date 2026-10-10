@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
+import re
 import time
 from collections import OrderedDict
 from typing import TYPE_CHECKING, Any
@@ -128,10 +129,11 @@ def _face(f: dict[str, Any]) -> dict[str, str]:
 def _https_on(url: Any, hosts: tuple[str, ...]) -> str:
     """``url`` when it is an https link on one of ``hosts``, else "" (links from Scryfall's card
     data are shown as they are, but only to the sites the viewer names)."""
-    if not isinstance(url, str) or len(url) > 500:
-        return ""
+    if not isinstance(url, str) or len(url) > 500 or re.search(r"[\\@\s\x00-\x1f\x7f]", url):
+        return ""  # a backslash or userinfo reads as another host in a browser than here
     parts = urlsplit(url)
-    return url if parts.scheme == "https" and (parts.hostname or "") in hosts else ""
+    host = parts.hostname or ""
+    return url if parts.scheme == "https" and host in hosts and parts.netloc == host else ""
 
 
 def card_links(card: dict[str, Any]) -> dict[str, str]:

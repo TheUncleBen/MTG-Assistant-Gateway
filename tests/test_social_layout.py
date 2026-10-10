@@ -252,6 +252,15 @@ async def test_voting_on_a_comment_in_the_thread(stack: Stack) -> None:
         assert got["points"] == -1 and got["user_vote"] == 2
         r = await post(b, f"/social/api/decks/43/comments/{cid}/vote", {"vote": "none"})
         assert r.json()["points"] == 0 and ("alice", cid) not in stack.ark.votes
+        # the same vote again sends nothing (Archidekt might read it as a toggle)
+        sent = len(stack.ark.votes)
+        r = await post(b, f"/social/api/decks/43/comments/{cid}/vote", {"vote": "none"})
+        assert r.json()["points"] == 0 and len(stack.ark.votes) == sent
+        # your own comment is refused
+        r = await post(b, "/social/api/decks/43/comments", {"text": "Mine."})
+        own = r.json()["comment"]["id"]
+        r = await post(b, f"/social/api/decks/43/comments/{own}/vote", {"vote": "up"})
+        assert r.status_code == 400
         # a comment outside this deck's thread, a bad vote and a bad id are refused
         r = await post(b, "/social/api/decks/43/comments/999999/vote", {"vote": "up"})
         assert r.status_code == 404

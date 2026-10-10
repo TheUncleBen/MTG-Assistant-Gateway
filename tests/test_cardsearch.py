@@ -334,3 +334,19 @@ async def test_rulings_are_read_on_demand_and_kept(stack: Stack) -> None:  # noq
         assert r.status_code == 400
     finally:
         await b.aclose()
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://evil.example\\@edhrec.com/x",
+        "https://user@edhrec.com/x",
+        "https://edhrec.com:8443/x",
+        "https://edhrec.com/x y",
+        "http://edhrec.com/x",
+    ],
+)
+def test_link_check_refuses_urls_a_browser_reads_differently(url: str) -> None:
+    from mtg_gateway.cardsearch import card_links
+
+    assert card_links({"related_uris": {"edhrec": url}}) == {}

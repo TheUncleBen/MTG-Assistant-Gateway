@@ -76,13 +76,19 @@
     fn();
     render();
   }
+  /* While a save is on its way, or its "Save anyway?" question is up, the changes on screen are
+     the ones being saved: Undo and Redo wait. */
+  var saving = false;
+  function locked() { return saving || !!root.querySelector(".confirmbar"); }
   function undo() {
+    if (locked()) return;
     var s = history.pop();
     if (!s) return;
     future.push(snapshot());
     restore(s);
   }
   function redo() {
+    if (locked()) return;
     var s = future.pop();
     if (!s) return;
     history.push(snapshot());
@@ -611,9 +617,11 @@
     if (!(ev.ctrlKey || ev.metaKey) || ev.altKey) return;
     var t = ev.target, tag = t && t.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (t && t.isContentEditable)) return;
+    // not behind the printing picker or the card viewer, and not while a save is on its way
+    if (!picker.hidden || document.documentElement.classList.contains("cardview-open") || locked()) return;
     var k = (ev.key || "").toLowerCase();
-    if (k === "z" && !ev.shiftKey) { ev.preventDefault(); undo(); }
-    else if ((k === "z" && ev.shiftKey) || k === "y") { ev.preventDefault(); redo(); }
+    if (k === "z" && !ev.shiftKey && history.length) { ev.preventDefault(); undo(); }
+    else if (((k === "z" && ev.shiftKey) || (k === "y" && !ev.metaKey)) && future.length) { ev.preventDefault(); redo(); }
   });
 
   // menus close on outside click / Escape
@@ -683,6 +691,7 @@
   function save(confirmed) {
     var btn = root.querySelector("button.review");
     btn.disabled = true;
+    saving = true;
     var status = root.querySelector(".status");
     status.textContent = confirmed ? "Saving to Archidekt…" : "Saving to Archidekt…";
     status.className = "status";
@@ -704,6 +713,7 @@
         } else if (res.ok && d.needs_confirm) {
           // the proposal exists but nothing was sent: ask, then apply that same proposal
           status.textContent = "";
+          saving = false;  // the question bar now holds the edits until it is answered
           var bar = el("div", { class: "confirmbar notice warn", role: "alertdialog" });
           bar.appendChild(el("span", { text: d.why + " Save anyway?" }));
           var yes = el("button", { type: "button", class: "btn-primary", text: "Save anyway" });
@@ -716,11 +726,11 @@
               method: "POST", credentials: "same-origin", headers: { "X-CSRF-Token": cfg.csrf }
             }).then(function (r) { return r.json(); }).then(function (a) {
               if (a.ok) { root.dataset.leaving = "1"; window.location.href = "/decks/" + encodeURIComponent(cfg.deckId) + "?ok=saved"; return; }
-              bar.remove(); status.textContent = a.message || "Archidekt refused the change; nothing was saved."; status.className = "status notice error"; btn.disabled = false;
-            }).catch(function () { bar.remove(); status.textContent = "Network error; nothing was changed."; status.className = "status notice error"; btn.disabled = false; });
+              bar.remove(); status.textContent = a.message || "Archidekt refused the change; nothing was saved."; status.className = "status notice error"; btn.disabled = false; saving = false;
+            }).catch(function () { bar.remove(); status.textContent = "Network error; nothing was changed."; status.className = "status notice error"; btn.disabled = false; saving = false; });
           });
           no.addEventListener("click", function () {
-            bar.remove(); btn.disabled = false;
+            bar.remove(); btn.disabled = false; saving = false;
             // the proposal made for the check is not wanted: reject it so Proposals stays clean
             fetch("/api/v1/proposals/" + encodeURIComponent(d.proposal_id) + "/reject", {
               method: "POST", credentials: "same-origin", headers: { "X-CSRF-Token": cfg.csrf }
@@ -734,13 +744,13 @@
         } else {
           status.textContent = d.message || "The changes could not be saved.";
           status.className = "status notice error";
-          btn.disabled = false;
+          btn.disabled = false; saving = false;
         }
       })
       .catch(function () {
         status.textContent = "Network error; nothing was changed.";
         status.className = "status notice error";
-        btn.disabled = false;
+        btn.disabled = false; saving = false;
       });
   }
   root.querySelector("button.review").addEventListener("click", function () { save(false); });
