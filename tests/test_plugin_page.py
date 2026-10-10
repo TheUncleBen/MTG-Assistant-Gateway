@@ -75,7 +75,7 @@ async def test_marketplace_and_archive_are_public_and_consistent(harness: Harnes
         "mtg-gateway/mcp.json",
         "mtg-gateway/skills/mtg-gateway/SKILL.md",
         "mtg-gateway/skills/mtg-gateway/reference/tools.md",
-        "mtg-gateway/skills/setup/SKILL.md",
+        "mtg-gateway/skills/setup-mtg-gateway/SKILL.md",
     ):
         assert required in names, required
     assert not any("/.git/" in n for n in names)
@@ -113,7 +113,7 @@ async def test_owner_named_gateway_serves_no_project_name_or_link(
         assert mp["name"] == entry["name"] == "deck-helper"
         sha = entry["source"]["sha256"]
         assert entry["source"]["url"] == f"{GATEWAY}/plugin/deck-helper.zip?v={sha}"
-        assert "/deck-helper:setup" in entry["description"]
+        assert "/deck-helper:setup-mtg-gateway" in entry["description"]
         assert (await h.http.get("/plugin/mtg-gateway.zip")).status_code == 404
 
         z = await h.http.get("/plugin/deck-helper.zip")
@@ -123,7 +123,7 @@ async def test_owner_named_gateway_serves_no_project_name_or_link(
         names = zf.namelist()
         assert all(n.startswith("deck-helper/") for n in names)
         assert "deck-helper/skills/deck-helper/SKILL.md" in names
-        assert "deck-helper/skills/setup/SKILL.md" in names
+        assert "deck-helper/skills/setup-mtg-gateway/SKILL.md" in names
         for connector in ("deck-helper/.mcp.json", "deck-helper/mcp.json"):
             servers = json.loads(zf.read(connector))["mcpServers"]
             assert list(servers) == ["deck-helper"] and servers["deck-helper"]["url"] == f"{GATEWAY}/mcp"
@@ -139,8 +139,12 @@ async def test_owner_named_gateway_serves_no_project_name_or_link(
         texts["/plugin/marketplace.json"] = json.dumps(mp)
         texts["/healthz"] = (await h.http.get("/healthz")).text
         for where, text in texts.items():
+            # The setup skill's command keeps its one name everywhere (the owner asked for it by name).
+            text = text.replace("setup-mtg-gateway", "")
             for needle in ("MTG Assistant Gateway", "mtg-gateway", "TheUncleBen", "MTG-Assistant-Gateway"):
                 assert needle not in text, (where, needle)
+        setup = zf.read("deck-helper/skills/setup-mtg-gateway/SKILL.md").decode()
+        assert setup.startswith("---\nname: setup-mtg-gateway\n")
         assert "claude plugin install deck-helper@deck-helper" in texts["/install.md"]
         assert "codex mcp add deck-helper" in texts["/install.md"]
 

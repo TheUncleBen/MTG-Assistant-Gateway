@@ -189,6 +189,15 @@ def test_backup_export_now_and_restore(http: httpx.Client, ben_tokens, tmp_path:
     db = sqlite3.connect(restored)
     users = {row[0] for row in db.execute("SELECT preferred_username FROM users")}
     assert {"alice-test", "bob-test"} <= users
+    # What Authentik asserted reaches the gateway (assistants are told only the name, test_02).
+    email, groups = db.execute(
+        "SELECT email, groups_json FROM users WHERE preferred_username = 'alice-test'"
+    ).fetchone()
+    assert email == "alice-test@e2e.test" and "MTG Assistant Gateway Users" in json.loads(groups)
+    rows = db.execute("SELECT preferred_username, name, email, groups_json FROM users ORDER BY 1").fetchall()
+    (GEN / "identity-evidence.json").write_text(
+        json.dumps({u: {"name": n, "email": e, "groups": json.loads(g)} for u, n, e, g in rows}, indent=2)
+    )
     assert "guest-test" not in users and "outsider-test" not in users
     assert db.execute("SELECT count(*) FROM oauth_clients").fetchone()[0] >= 3
     assert db.execute("SELECT count(*) FROM tokens WHERE kind='access'").fetchone()[0] >= 1

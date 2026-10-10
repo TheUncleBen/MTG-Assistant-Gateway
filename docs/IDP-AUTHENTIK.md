@@ -363,9 +363,11 @@ gets the member's own picture, nothing more.
 2. In a browser, open `https://mtg.example.com/account`. You get sent to
    Authentik, sign in, and land back on the account page with your name and
    a **Sign out** button.
-3. Connect Claude or ChatGPT ([CONNECT.md](CONNECT.md)) and call the
-   `whoami` tool. It should show your `sub`, `email`, `preferred_username`
-   and a `groups` list containing `MTG Assistant Gateway Users`.
+3. On the account page, open **What your sign-in shares**. It should show
+   your username, email and a `groups` list containing
+   `MTG Assistant Gateway Users`. Then connect Claude or ChatGPT
+   ([CONNECT.md](CONNECT.md)) and call the `whoami` tool: it answers with
+   your name only (assistants never get the email or groups).
 4. Try step 2 with a second account that's **not** in the group. Authentik
    shows *Permission denied* (no binding), or, if that account gets through
    on another bound group, the gateway shows *Your account is not in the
@@ -399,7 +401,7 @@ gets the member's own picture, nothing more.
 | Log says `identity provider issued unusually large tokens …; largest ID token claims: …` | A scope mapping on the provider adds a lot of data (an image, a long attribute, hundreds of groups). The gateway copes, but Authentik repeats it in the access token sent on every group check. Find the named claim under **Advanced protocol settings → Scopes** (or the user's or group's attributes) and trim it. The four mappings in section 4 are all the gateway needs |
 | Log says `largest ID token claims: picture=…` with hundreds of KB, and pages say *The sign-in service can't be reached* (log: `answered userinfo with HTTP 400; the access token is … bytes`) | Authentik 2026.8.0 to 2026.8.2 put the user's avatar in the `picture` claim, embedded as a whole image when the avatar comes from a user attribute (**System → Settings → Avatars** set to `attributes.…`). Authentik copies the claims into its access token too, so it can grow past a megabyte. Fix it in Authentik: upgrade to 2026.8.3 or newer, whose default `profile` mapping leaves embedded images out; or move the `attributes.…` entry after `gravatar` or `initials` in **Avatars**. Then sign in again. To keep showing uploaded pictures after upgrading, add the optional mapping in [Profile pictures](#profile-pictures), which keeps them out of tokens. Since 0.6.6 the gateway sends a token that big in the body of its userinfo request, which proxies such as Nginx Proxy Manager accept, so it keeps working meanwhile, but every check still moves a megabyte |
 | Everyone is suddenly a new user after a provider change | **Subject mode** was changed. Put it back; the gateway can't merge identities |
-| `whoami` shows a name but no email | The account has no email in Authentik, or the `email` scope mapping was removed |
+| **What your sign-in shares** on the account page shows no email | The account has no email in Authentik, or the `email` scope mapping was removed |
 
 ## 11. Versions tested and how
 
@@ -415,7 +417,7 @@ gets the member's own picture, nothing more.
   flows, one application with slug `mtg-gateway`, and two groups bound to
   it. Four users then sign in through Chromium:
   - two members of the bound and required group get separate identities,
-    with `groups` showing in `whoami`;
+    with their own names in `whoami`;
   - a member of a bound group that isn't `MTG_REQUIRED_GROUP` gets through
     Authentik and is refused by the gateway;
   - an account with no binding is refused by Authentik;
