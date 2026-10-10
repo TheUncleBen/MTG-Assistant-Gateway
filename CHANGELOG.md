@@ -26,6 +26,9 @@ The rest of the Archidekt deck features that could be built from Archidekt's own
   on any of them shows only those cards. `deck_stats` returns the same numbers.
 - Report trends on a deck's History page (sparklines and a table across its stored reports), and
   as `trend` in `list_deck_reports` for that deck.
+- More in-chat cards (where the owner has the in-chat card on): a comparison card for
+  `compare_decks`, a statistics card for `deck_stats`, a deck list card for `list_my_decks` and
+  `search_decks`, and a scan session card for `get_scan_session`. The tool results are unchanged.
 
 ### Not built
 - Writing per-card notes: no Archidekt route for it was found, so the gateway does not guess one.
