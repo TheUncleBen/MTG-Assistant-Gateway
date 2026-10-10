@@ -225,6 +225,7 @@ services:
     environment:
       FORGE_XMX: ${FORGE_XMX:-1g}
       FORGE_MAX_GAMES: ${FORGE_MAX_GAMES:-50}
+      FORGE_GAME_SECONDS: ${FORGE_GAME_SECONDS:-600}
       PUID: ${PUID:-1000}
       PGID: ${PGID:-1000}
       TZ: ${TIMEZONE:-UTC}

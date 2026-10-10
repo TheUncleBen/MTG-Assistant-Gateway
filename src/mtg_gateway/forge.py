@@ -138,8 +138,13 @@ class ForgeClient:
             resolved.update((await self._call("POST", "/check", {"names": names[i : i + 500]}))["resolved"])
         return resolved
 
-    async def start(self, decks: list[dict[str, Any]], games: int, fmt: str = "Commander") -> dict[str, Any]:
-        return await self._call("POST", "/jobs", {"decks": decks, "games": games, "format": fmt})
+    async def start(
+        self, decks: list[dict[str, Any]], games: int, fmt: str = "Commander", seed: int | None = None
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"decks": decks, "games": games, "format": fmt}
+        if seed is not None:
+            body["seed"] = seed
+        return await self._call("POST", "/jobs", body)
 
     async def job(self, job_id: str) -> dict[str, Any]:
         return await self._call("GET", f"/jobs/{job_id}")
@@ -149,7 +154,13 @@ class ForgeClient:
 
 
 async def start_run(
-    client: ForgeClient, deck_text: str, deck_name: str, *, games: int, opponents: list[str] | None = None
+    client: ForgeClient,
+    deck_text: str,
+    deck_name: str,
+    *,
+    games: int,
+    opponents: list[str] | None = None,
+    seed: int | None = None,
 ) -> dict[str, Any]:
     """Start a Forge run of the member's deck against bundled precons and return the report's
     ``forge`` section. Cards Forge lacks are removed from the run and named in ``not_played``;
@@ -175,9 +186,10 @@ async def start_run(
     if not chosen:
         return {"state": "failed", "error": "The simulation engine has no opponent decks."}
     seats = [deck_name, *chosen]
-    job = await client.start([deck, *({"precon": p} for p in chosen)], games)
+    job = await client.start([deck, *({"precon": p} for p in chosen)], games, seed=seed)
     return {
         "state": job.get("state", "queued"),
+        "seed": seed,
         "job_id": job["id"],
         "seats": seats,
         "not_played": not_played,

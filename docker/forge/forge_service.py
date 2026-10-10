@@ -39,7 +39,10 @@ XMX = os.environ.get("FORGE_XMX", "1g")
 NICE = int(os.environ.get("FORGE_NICE", "10"))
 MAX_GAMES = int(os.environ.get("FORGE_MAX_GAMES", "50"))
 MAX_QUEUE = int(os.environ.get("FORGE_MAX_QUEUE", "4"))
-JOB_TIMEOUT = int(os.environ.get("FORGE_JOB_TIMEOUT", "1800"))
+JOB_TIMEOUT = int(os.environ.get("FORGE_JOB_TIMEOUT", "7200"))
+# Forge's sim calls a game a draw after this many seconds (its -c flag; Forge's own default is 120,
+# too short for a four-player Commander game on a Raspberry Pi).
+GAME_SECONDS = int(os.environ.get("FORGE_GAME_SECONDS", "600"))
 KEEP_SECONDS = int(os.environ.get("FORGE_KEEP_SECONDS", "3600"))
 FORMATS = {"Commander", "Constructed"}
 MAX_DECKS = 4
@@ -105,7 +108,8 @@ def resolve(name: str) -> str | None:
 
 
 class Job:
-    def __init__(self, decks: list[dict[str, Any]], games: int, fmt: str) -> None:
+    def __init__(self, decks: list[dict[str, Any]], games: int, fmt: str, seed: int | None = None) -> None:
+        self.seed = seed
         self.id = secrets.token_hex(8)
         self.decks = decks
         self.games = games
@@ -132,6 +136,8 @@ class Job:
             "load_problems": self.load_problems[:40],
             "log_tail": self.tail[-40:],
             "returncode": self.returncode,
+            "seed": self.seed,
+            "game_seconds": GAME_SECONDS,
             "queued_s": round((self.started or time.time()) - self.created, 1),
             "run_s": round((self.finished or time.time()) - self.started, 1) if self.started else None,
             "forge_version": VERSION,
@@ -203,6 +209,9 @@ def run_job(job: Job) -> None:
             job.format,
             "-n",
             str(job.games),
+            "-c",
+            str(GAME_SECONDS),
+            *(["-s", str(job.seed)] if job.seed is not None else []),
             "-q",
         ]
         job.started = time.time()
@@ -418,7 +427,12 @@ class Handler(BaseHTTPRequestHandler):
                 if QUEUE.qsize() >= MAX_QUEUE:
                     self.send(429, {"error": "simulation queue is full; try again later"})
                     return
-                job = Job(decks, games, fmt)
+                seed = body.get("seed")
+                if seed is not None and (
+                    not isinstance(seed, int) or isinstance(seed, bool) or not -(2**63) <= seed < 2**63
+                ):
+                    raise ValueError("seed must be a 64-bit whole number")
+                job = Job(decks, games, fmt, seed)
                 with JOBS_LOCK:
                     JOBS[job.id] = job
                 QUEUE.put(job)

@@ -256,14 +256,17 @@ class ReportService:
             )
         self.db.audit("report_created", sub=sub, detail={"report_id": rid, "deck_id": deck.id})
         if simulate and self.forge is not None:
-            await self._start_forge(rid, deck_to_text(deck), deck.name, games)
+            seed = options.get("seed")
+            await self._start_forge(
+                rid, deck_to_text(deck), deck.name, games, seed if isinstance(seed, int) else None
+            )
         return self.get(sub, rid)
 
     # -- Forge runs (background) ----------------------------------------------
-    async def _start_forge(self, rid: str, text: str, name: str, games: int) -> None:
+    async def _start_forge(self, rid: str, text: str, name: str, games: int, seed: int | None = None) -> None:
         assert self.forge is not None
         try:
-            section = await start_run(self.forge, text, name, games=min(games, self.forge_games))
+            section = await start_run(self.forge, text, name, games=min(games, self.forge_games), seed=seed)
         except ForgeError as exc:
             section = {"state": "failed", "error": str(exc), **({"detail": exc.detail} if exc.detail else {})}
         self._save_forge(rid, section)

@@ -587,7 +587,8 @@ default, and an install that leaves it off behaves exactly as before.
   `forge` profile (`COMPOSE_PROFILES=forge`) and set `MTG_FORGE_URL=http://forge:8000`.
 - **Load:** Java starts only while a simulation runs, one at a time, capped by `FORGE_MEMORY_LIMIT`
   (default 1536M) and `FORGE_CPUS` (default 2). `MTG_FORGE_GAMES` (default 10) sets the games per
-  report. An idle Forge service holds no Java memory.
+  report. An idle Forge service holds no Java memory. `FORGE_GAME_SECONDS` (default 600) is how long
+  one game may run before Forge calls it a draw; such games are counted as draws in the report.
 - **No upkeep:** the image carries Forge's card scripts, an index of Scryfall's alternative printed
   names, and the newest Commander precons as opponents. Each image is rebuilt from a Forge release in
   CI; you update it like any other image.

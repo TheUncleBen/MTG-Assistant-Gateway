@@ -135,9 +135,10 @@ async def test_report_runs_forge_in_the_background(tmp_path: Path) -> None:
     db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
     fake = FakeForge()
     reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
-    out = await reports.run("alice", "42", games=300)
+    out = await reports.run("alice", "42", games=300, options={"seed": 7})
     assert out["forge"]["state"] == "running"
     assert fake.started[0]["games"] == 4  # capped for the Pi
+    assert fake.started[0]["seed"] == 7 and out["forge"]["seed"] == 7
     fake.finish(out["forge"]["job_id"], [1, 2, 1, 1])
     task = reports._forge_task
     assert task is not None
