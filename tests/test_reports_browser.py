@@ -147,3 +147,60 @@ def test_report_and_history_pages_fit(server: Server, width: int, scheme: str) -
         assert not errors, errors
         assert not errors, errors
         browser.close()
+
+
+def test_forge_section_refreshes_itself_until_the_run_ends(server: Server) -> None:
+    """A queued or running Forge run: the card updates in place (forge-live.js) once the run is
+    stored as done, without a reload, and the polling then stops."""
+    import json
+
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = server.sign_in_and_link()
+    store_report(server.db, "user-1", "rep_forge")
+
+    def set_forge(section: dict) -> None:
+        with server.db.tx() as c:
+            c.execute(
+                "UPDATE reports SET forge_json = ?, forge_state = ? WHERE id = 'rep_forge'",
+                (json.dumps(section), section["state"]),
+            )
+
+    set_forge({"state": "running", "job_id": "0" * 16, "not_played": []})
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": 360, "height": 900})
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        errors: list[str] = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.clock.install()
+        page.goto(f"{server.base}/history/reports/rep_forge", wait_until="networkidle")
+        assert page.locator(".card.forge[data-forge-live]").count() == 1
+        assert "updates by itself" in page.locator(".card.forge").inner_text()
+        page.evaluate("window.__same_page = true")  # gone if the page reloads
+        set_forge(
+            {
+                "state": "done",
+                "job_id": "0" * 16,
+                "not_played": [],
+                "result": {
+                    "games": 2,
+                    "games_requested": 2,
+                    "seats": [{"deck": "Immortal Reckoning", "wins": 1, "win_rate": 0.5}],
+                },
+            }
+        )
+        page.clock.run_for(16000)
+        page.wait_for_function("() => !document.querySelector('.card.forge[data-forge-live]')")
+        text = page.locator(".card.forge").inner_text()
+        assert "Games played: 2 of 2." in text and "running" not in text
+        # the card itself stayed, so it is still the live region screen readers announce
+        assert page.locator(".card.forge[aria-live=polite]").count() == 1
+        assert page.evaluate("window.__same_page === true")
+        assert "Games played: 2 of 2." in page.locator("#rep-md").input_value()  # Copy as Markdown too
+        assert not errors, errors
+        browser.close()

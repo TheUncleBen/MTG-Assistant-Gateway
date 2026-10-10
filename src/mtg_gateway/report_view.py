@@ -740,8 +740,8 @@ def _triggers_html(g: dict[str, Any]) -> str:
 
 
 FORGE_STATE_TEXT = {
-    "queued": "Waiting for the simulation engine. Reload this page later to see the result.",
-    "running": "Games are being played now. Reload this page later to see the result.",
+    "queued": "Waiting for the simulation engine.",
+    "running": "Games are being played now.",
     "failed": "The games could not run.",
     "timeout": "The games ran out of time before finishing.",
     "cancelled": "The games were stopped.",
@@ -780,8 +780,10 @@ def forge_lines(f: dict[str, Any]) -> list[str]:
     return out
 
 
-def forge_html(f: Any) -> str:
-    """The Forge card: real games against precons (forge.py), or why there are none yet."""
+def forge_html(f: Any, *, live: bool = False) -> str:
+    """The Forge card: real games against precons (forge.py), or why there are none yet. ``live``
+    (the signed-in page, not an export) marks an unfinished run for forge-live.js, which refreshes
+    the card until the run ends."""
     if not isinstance(f, dict):
         return ""
     state = str(f.get("state") or "")
@@ -799,8 +801,15 @@ def forge_html(f: Any) -> str:
         "Forge's AI. Treat the result as a test of the deck against these opponents, "
         "not a prediction for your table.</p>",
     ]
+    pending = state in ("queued", "running")
     if state != "done":
         msg = f.get("error") or FORGE_STATE_TEXT.get(state, "")
+        if msg and pending:
+            msg += (
+                " This section updates by itself when the games finish."
+                if live
+                else " See the gateway for the result."
+            )
         if msg:
             parts.append(
                 f"<p class='notice{' warn' if state not in ('queued', 'running') else ''}'>{_esc(msg)}</p>"
@@ -815,7 +824,8 @@ def forge_html(f: Any) -> str:
             + ", ".join(_esc(n) for n in f["not_played"])
             + "</p></div>"
         )
-    return "<div class='card forge'>" + "".join(parts) + "</div>"
+    attrs = " data-forge-live aria-live='polite'" if live and pending else ""
+    return f"<div class='card forge'{attrs}>" + "".join(parts) + "</div>"
 
 
 def report_sections(r: dict[str, Any]) -> dict[str, Any]:
@@ -882,7 +892,7 @@ def report_body_html(
         + actions_html
         + "</div>"
     )
-    body = head + forge_html(r.get("forge"))
+    body = head + forge_html(r.get("forge"), live=not standalone)
     if g is None and v is None:
         body += (
             "<div class='card'><h2>Goldfish simulation</h2><p class='muted'>The research service was not "
