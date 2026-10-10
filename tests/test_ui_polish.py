@@ -179,7 +179,7 @@ async def test_page_head_and_skip_link(stack: Stack) -> None:  # noqa: F811
         assert (
             "<span class='mark'><svg class='i' viewBox='0 0 24 24' aria-hidden='true'><g transform=" in page
         )
-        assert "title='Search decks'" in page and "title='Account menu'" in page
+        assert "title='Search cards and decks'" in page and "title='Account menu'" in page
         b.http.cookies.set("mtg_theme", "light")
         light = (await b.http.get("/decks", headers=NAV)).text
         assert (

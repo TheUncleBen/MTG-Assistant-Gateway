@@ -69,7 +69,17 @@ from .report_view import (
     report_export_html,
     report_markdown,
 )
-from .theme import ICON_DATA_URL, VIZ_CSS, display_name, icon, plural, remember_view, render, view_choice
+from .theme import (
+    ICON_DATA_URL,
+    VIZ_CSS,
+    display_name,
+    icon,
+    plural,
+    remember_view,
+    render,
+    time_text,
+    view_choice,
+)
 from .views import auto_category, cards_by_category
 
 if TYPE_CHECKING:
@@ -2010,7 +2020,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
 
     def _report_file(r: dict[str, Any], ext: str, body: str, media_type: str) -> Response:
         name = re.sub(r"[^A-Za-z0-9._-]+", "_", r.get("deck_name") or r["deck_id"])[:60]
-        day = _when(r.get("taken_at"))[:10]
+        day = time_text(r.get("taken_at"))[:10]
         return Response(
             body,
             media_type=media_type,

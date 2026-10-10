@@ -168,11 +168,14 @@ async def test_the_overview_shows_whether_the_removed_member_clean_up_works(gw: 
         assert "on, not run yet (the first round is 2 minutes after start)" in r.text
         sweep.last.update(ok=True, at=1_800_000_000, removed=1, allowed=4, error=None)
         r = await b.http.get("/admin", headers=NAVIGATE)
-        assert "last run OK at 2027-01-15 08:00 UTC: 4 allowed member(s), 1 stored" in r.text
+        assert "last run OK at <time datetime='2027-01-15T08:00:00Z'>2027-01-15 08:00 UTC</time>: " in r.text
+        assert "4 allowed members, 1 stored Archidekt session removed" in r.text
+        assert "&lt;time" not in r.text  # times are markup, never escaped into the text
         err = "group 'mtg-users' found 0 times (is the name right, and may the token view that group?)"
         sweep.last.update(ok=False, at=1_800_003_600, error=err)
         r = await b.http.get("/admin", headers=NAVIGATE)
-        assert "last run FAILED at 2027-01-15 09:00 UTC, nothing deleted: " + html.escape(err) in r.text
+        assert "2027-01-15 09:00 UTC</time>, nothing deleted: " + html.escape(err) in r.text
+        assert "&lt;time" not in r.text
         o = (await b.http.get("/api/v1/admin/overview")).json()
         assert o["system"]["member_cleanup"] == {"state": "failed", "at": 1_800_003_600, "error": err}
         assert "tok-marker-xyz" not in r.text and "tok-marker-xyz" not in json.dumps(o)

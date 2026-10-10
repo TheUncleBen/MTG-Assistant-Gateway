@@ -283,7 +283,8 @@ def legality_chip_html(deck: Deck, stats: dict[str, Any] | None) -> str:
             f"<span class='legal ok' title='Legal in {esc(deck.format or 'this format')}'>"
             f"{icon('check')} Legality</span>"
         )
-    title = plural(len(problems), "problem") + ": " + "; ".join(problems[:5]) + ("…" if len(problems) > 5 else "")
+    more = "…" if len(problems) > 5 else ""
+    title = plural(len(problems), "problem") + ": " + "; ".join(problems[:5]) + more
     return f"<span class='legal bad' title='{esc(title)}'>{icon('x')} Legality</span>"
 
 

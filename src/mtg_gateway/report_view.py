@@ -17,7 +17,7 @@ import json
 import re
 from typing import Any
 
-from .theme import ICON_DATA_URL, time_html
+from .theme import ICON_DATA_URL, time_html, time_text
 
 # The simulator's honesty classes, in plain words.
 HONESTY_CLASSES = {
@@ -778,7 +778,7 @@ def report_body_html(
         turns = f", through turn {g['until_turn']}" if g.get("until_turn") else ""
         seed = f" (seed {g['seed']})" if g.get("seed") is not None else ""
         meta.append(f"<dt>Games</dt><dd>{_esc(g['games'])}{_esc(turns)}{_esc(seed)}</dd>")
-    meta.append(f"<dt>Run</dt><dd>{_esc(_when(r.get('taken_at')))}</dd>")
+    meta.append(f"<dt>Run</dt><dd>{_when(r.get('taken_at'))}</dd>")
     if standalone:
         title = f"<h1>{name}</h1>"
         back = ""
@@ -880,7 +880,7 @@ def report_markdown(r: dict[str, Any]) -> str:
     if s["commander"]:
         lines.append(f"- Commander: {front_face(s['commander'])}")
     lines.append(f"- Deck: https://archidekt.com/decks/{r.get('deck_id')}")
-    lines.append(f"- Run: {_when(r.get('taken_at'))}")
+    lines.append(f"- Run: {time_text(r.get('taken_at'))}")
     if g and g.get("games"):
         extra = f", through turn {g['until_turn']}" if g.get("until_turn") else ""
         lines.append(f"- Games: {g['games']}{extra}")

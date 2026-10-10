@@ -97,7 +97,7 @@ CONTRAST = """
 
 
 def _make_a_change(page) -> None:
-    page.locator(".cats.existing .erow button[aria-label='one more']").first.click()
+    page.locator(".cats.existing .erow button[title='One more']").first.click()
     page.locator(".pendingbox .n", has_text="1").wait_for(timeout=3000)
 
 

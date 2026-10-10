@@ -431,6 +431,9 @@ async def test_report_page_and_exports(stack: Stack) -> None:
             'attachment; filename="Immortal_Reckoning-report-'
         )
         assert md.text.startswith("# Deck report: Immortal Reckoning") and "## Metrics" in md.text
+        # the file name carries the run's day, and Markdown carries plain times (no <time> markup)
+        assert re.search(r'-report-\d{4}-\d{2}-\d{2}\.md"$', md.headers["content-disposition"])
+        assert "<time" not in md.text
         assert md.headers["cache-control"] == "no-store"
         doc = await b.http.get("/history/reports/rep_real/export.html")
         assert doc.status_code == 200 and doc.headers["content-type"].startswith("text/html")

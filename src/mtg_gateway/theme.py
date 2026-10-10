@@ -973,6 +973,17 @@ def display_name(user: dict | None) -> str:
     return str(u.get("preferred_username") or u.get("name") or u.get("email") or "")
 
 
+def time_text(ts: int | float | None) -> str:
+    """A timestamp as plain text in UTC (``2027-01-15 08:00 UTC``), for file names, Markdown and
+    anything that is escaped after; pages use time_html."""
+    if not ts:
+        return ""
+    try:
+        return time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(int(ts)))
+    except (TypeError, ValueError, OverflowError, OSError):
+        return ""
+
+
 def time_html(ts: int | float | None, *, day: bool = True) -> str:
     """A timestamp as ``<time datetime>``: the page shows it in UTC, and static/feedback.js
     rewrites it in the viewer's own time zone and locale (``day=False``: the time only)."""
