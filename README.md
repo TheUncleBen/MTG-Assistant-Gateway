@@ -294,6 +294,7 @@ between releases ([docs/VERSIONS.md](docs/VERSIONS.md)).
 | Client and device coverage | See [docs/CONNECT.md](docs/CONNECT.md#which-apps-and-devices-work), which labels each claim as verified, reported or unverified |
 | Deck statistics, stored deck reports and history, compare, companion pages, admin page, JSON API | Built and covered by the test suite against fakes. The companion pages and admin page have not yet had the same live Swarm run-through as the rest; treat that as unverified |
 | Deck deletion, cover image, folders, tags, comment editing, collection details (0.7.2) | Built against Archidekt routes read from its own site code and covered by tests against a fake; not yet exercised live. Each one reads the result back and reports a mismatch rather than trusting Archidekt's answer |
+| Forge games in deck reports (0.7.14, optional, off by default) | Built. The Forge image is built and smoke-tested on arm64 in CI, with a card-coverage gate (99.69% of the cards legal in at least one format; the cards Forge lacks are named in every report). Not yet measured on a Raspberry Pi. Opponents are the newest Commander precons, not chosen by bracket |
 | Watchlists, price history | Not yet (Mystic Forge's own saved goldfish reports stay hidden too; the gateway's stored deck reports replace them) |
 
 ## How it works

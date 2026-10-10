@@ -1627,12 +1627,16 @@ def build_mcp_server(state: AppState) -> MCPServer:
         except Exception:  # only on a broken database file; the detail stays in the log
             logger.exception("health check: database unavailable")
             return JSONResponse({"status": "error", "detail": "database unavailable"}, status_code=503)
-        # The research service (simulations, card research) is reported, not required: the
-        # gateway's own pages and Archidekt tools still work without it, so a Mystic Forge outage
-        # makes the status "degraded" (still HTTP 200, so the container is not restarted for it).
-        # Only the status: anyone can ask, and the version and the research service's name would
-        # tell a stranger which project this is. The admin page's System card shows both.
-        down = state.mf_proxy is not None and not await state.mf_proxy.healthy()
+        # The research service (simulations, card research) and the optional Forge engine are
+        # reported, not required: the gateway's own pages and Archidekt tools still work without
+        # them, so an outage of either makes the status "degraded" (still HTTP 200, so the
+        # container is not restarted for it). Only the status: anyone can ask, and the version and
+        # the services' names would tell a stranger which project this is. The admin page's System
+        # card shows each service.
+        forge = state.reports.forge if state.reports is not None else None
+        down = (state.mf_proxy is not None and not await state.mf_proxy.healthy()) or (
+            forge is not None and not await forge.healthy()
+        )
         return JSONResponse({"status": "degraded" if down else "ok"})
 
     @server.custom_route(APP_CONFIG_PATH, methods=["GET"], include_in_schema=False)

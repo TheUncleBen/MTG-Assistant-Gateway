@@ -385,6 +385,14 @@ def system_data(state: Any) -> dict[str, Any]:
     else:
         at, ok = getattr(proxy, "_health", (0.0, False))
         out["mystic_forge"] = ("answering" if ok else "NOT answering") if at else "not checked yet"
+    # The Forge engine likewise (optional, off unless MTG_FORGE_URL is set).
+    reports = getattr(state, "reports", None)
+    forge = getattr(reports, "forge", None) if reports is not None else None
+    if forge is None:
+        out["forge"] = "not configured"
+    else:
+        at, ok = getattr(forge, "_health", (0.0, False))
+        out["forge"] = ("answering" if ok else "NOT answering") if at else "not checked yet"
     copy_dir = getattr(settings, "backup_copy_dir", None)
     out["backup_copies_enabled"] = copy_dir is not None
     if copy_dir is not None:
@@ -586,6 +594,7 @@ def _overview_body(state: Any) -> str:
         + _stat("Newest backup", backup)
         + _stat("Newest backup copy", copies)
         + _stat("Research service (Mystic Forge)", sysd["mystic_forge"])
+        + _stat("Simulation engine (Forge)", sysd["forge"])
         + _stat("Removed-member clean-up", _cleanup_text(sysd["member_cleanup"]))
         + _archidekt_stats(sysd.get("archidekt"))
         + _stat("Default approval mode", state.settings.approval_mode_default)

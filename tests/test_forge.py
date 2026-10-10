@@ -9,10 +9,12 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import pytest
 
 from mtg_gateway import reports as reports_module
 from mtg_gateway.archidekt import parse_deck
 from mtg_gateway.db import Database
+from mtg_gateway.decks import DeckError
 from mtg_gateway.forge import ForgeClient, forge_deck, refresh, start_run, summarise, wilson
 from mtg_gateway.reports import ReportService
 
@@ -26,9 +28,24 @@ class FakeForge:
         self.missing = missing or set()
         self.jobs: dict[str, dict[str, Any]] = {}
         self.started: list[dict[str, Any]] = []
+        self.cancelled: list[str] = []
+        self.up = True
+        self.health_probes = 0
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
+        if path == "/health":
+            self.health_probes += 1
+            if not self.up:
+                raise httpx.ConnectError("down")
+            return httpx.Response(200, json={"status": "ok", "busy": False, "queued": 0})
+        if path.startswith("/jobs/") and request.method == "DELETE":
+            jid = path.rsplit("/", 1)[1]
+            if jid not in self.jobs:
+                return httpx.Response(404, json={"error": "no such job"})
+            self.cancelled.append(jid)
+            self.jobs[jid]["state"] = "cancelled"
+            return httpx.Response(200, json=self.jobs[jid])
         if path == "/check":
             names = json.loads(request.content)["names"]
             return httpx.Response(
@@ -218,8 +235,62 @@ def test_report_page_and_markdown_show_forge_results() -> None:
     assert "Forge games" in page and "Liesa &lt;b&gt;: 2 wins, 50%" in page
     assert "Fake Sticker Card" in page and "stopped at the time limit" in page and "Seed: 7." in page
     running = forge_html({"state": "running", "not_played": []})
-    assert "running" in running and "Reload this page" in running
+    assert "running" in running and "data-forge-live" not in running  # an export: no refresh
+    live = forge_html({"state": "running", "not_played": []}, live=True)
+    assert "data-forge-live" in live and "updates by itself" in live
+    assert "data-forge-live" not in forge_html(done, live=True)  # a finished run is not refreshed
     assert "not run" in forge_html({"state": "failed", "error": "Forge does not have this deck's commander"})
     assert forge_html(None) == ""
     md = report_markdown({"deck_name": "Liesa", "deck_id": "42", "stats": {}, "forge": done})
     assert "## Forge games" in md and "Cards Forge could not play: Fake Sticker Card" in md
+
+
+async def test_deleting_a_report_cancels_its_unfinished_forge_run(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    fake = FakeForge()
+    reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+    first = await reports.run("alice", "42", games=300, options={"seed": 1})
+    reports.delete("alice", first["report_id"])
+    await asyncio.gather(*reports._forge_cancels)
+    assert fake.cancelled == [first["forge"]["job_id"]]
+    # the member's next run starts: the deleted report no longer holds the one-run slot, and its
+    # job no longer holds the engine
+    second = await reports.run("alice", "42", games=300, options={"seed": 2})
+    assert second["forge"]["state"] == "running" and len(fake.started) == 2
+    fake.finish(second["forge"]["job_id"], [1])
+    await asyncio.wait_for(reports._forge_task, timeout=20)  # type: ignore[arg-type]
+    reports.delete("alice", second["report_id"])  # a finished run has nothing to cancel
+    assert not reports._forge_cancels and len(fake.cancelled) == 1
+
+
+async def test_a_run_whose_report_was_deleted_while_starting_is_cancelled(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    fake = FakeForge()
+    reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+    real_start = reports_module.start_run
+
+    async def start_then_delete(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        section = await real_start(*args, **kwargs)
+        with db.tx() as c:  # the member deletes the report while the engine answers
+            c.execute("DELETE FROM reports")
+        return section
+
+    monkeypatch.setattr(reports_module, "start_run", start_then_delete)
+    with pytest.raises(DeckError):  # the report it would return is gone
+        await reports.run("alice", "42", games=300, options={"seed": 1})
+    await asyncio.gather(*reports._forge_cancels)
+    assert len(fake.cancelled) == 1
+
+
+async def test_forge_health_is_probed_once_and_reports_an_outage() -> None:
+    fake = FakeForge()
+    client = fake.client()
+    assert all(await asyncio.gather(*[client.healthy() for _ in range(10)]))
+    assert fake.health_probes == 1
+    fake.up = False
+    client._health = (0.0, True)  # the cached answer has expired
+    assert await client.healthy() is False and client._health[1] is False
