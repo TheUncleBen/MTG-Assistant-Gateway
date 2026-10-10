@@ -717,6 +717,7 @@
     if (!card) return;
     if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
       stop(e);
+      if (picking) return;
       var r = card.getBoundingClientRect();
       openMenu(card, r.left + Math.min(r.width / 2, 40), r.top + Math.min(r.height / 2, 40));
     }
@@ -886,7 +887,7 @@
       });
       refresh();
     });
-    document.addEventListener("keydown", function (e) { if (picking && e.key === "Escape" && !document.querySelector(".confirmbar, .cardview.open")) setMode(false); });
+    document.addEventListener("keydown", function (e) { if (picking && e.key === "Escape" && !document.querySelector(".confirmbar, .cardview.open, .deck-toast[role=alertdialog]")) setMode(false); });
 
     // One change per card name and zone: two rows of a card in one zone are one Archidekt row
     // set as far as a set_category or a remove is concerned.
@@ -901,9 +902,10 @@
       refresh();
       [moveSel, finishSel, tagBtn, rm, all, tagApply, tagOff].forEach(function (c) { c.disabled = true; });
       syncSelects();
-      saveEdit(changes, inverses).then(function () {
+      saveEdit(changes, inverses).then(function (d) {
         setMode(false);
-        status.textContent = what;
+        // a change still saving (or kept for review) says so in its own message
+        status.textContent = d && d.applied ? what : "";
       }).catch(function (err) {
         all.disabled = false;
         status.className = "status notice error";
@@ -991,6 +993,9 @@
       list.forEach(function (c) {
         var ch = changeFor(c, "remove");
         changes.push(ch);
+        // a remove takes every row of the card in that zone; with two rows (two printings or
+        // categories) an Undo could not put both back as they were, so none is offered
+        if (twinIn(c, zoneOf(c))) inverses = null;
         if (inverses) { var inv = inverseFor(c, ch); if (inv) inverses.push(inv); else inverses = null; }
       });
       run(changes, inverses, window.MtgText ? window.MtgText.plural(list.length, "card") + " removed." : "Removed.");
@@ -1000,7 +1005,7 @@
       moveSel.value = "";
       syncSelects();
       if (!to) return;
-      var list = unique(picked(), byNameZone).filter(function (c) { return (byCategory ? stackOf(c) : catOf(c)) !== to; });
+      var list = unique(picked().filter(function (c) { return (byCategory ? stackOf(c) : catOf(c)) !== to; }), byNameZone);
       if (!list.length) { status.className = "status"; status.textContent = "Those cards are already in " + to + "."; return; }
       var changes = [], inverses = [];
       list.forEach(function (c) {
@@ -1027,7 +1032,7 @@
         if (!inverses) return;
         var olds = {};
         $$(".c, .row", cards).forEach(function (o) {
-          if (frontFace(o.getAttribute("data-card")) === frontFace(name)) olds[(o.getAttribute("data-finish") || "Normal").toLowerCase()] = 1;
+          if (zoneOf(o) === "main" && frontFace(o.getAttribute("data-card")) === frontFace(name)) olds[(o.getAttribute("data-finish") || "Normal").toLowerCase()] = 1;
         });
         var keys = Object.keys(olds);
         if (keys.length === 1) inverses.push({ action: "set_finish", card_name: name, finish: keys[0] });
@@ -1265,6 +1270,8 @@
           var later = stacksNow().filter(function (st) { return original.indexOf(st) < 0; });
           original.concat(later).forEach(function (st) { if (st.parentNode === cards) cards.appendChild(st); });
           reset.hidden = true;
+          var g = $(".stackgrip", cards);
+          if (g) g.focus();  // the button that had focus is gone
           announce("Stacks are back in the deck's own order.");
         });
         cards.parentNode.insertBefore(reset, cards.nextSibling);

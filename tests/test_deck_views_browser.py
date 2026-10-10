@@ -231,3 +231,44 @@ def test_colour_tag_from_the_card_menu_and_undo(server: Server, width: int, sche
         assert _rows(server, "Cultivate")[0]["label"] == "Have,#2ccce4"
         assert errors == []
         browser.close()
+
+
+def test_bulk_edge_cases_at_320(server: Server) -> None:
+    """320 px with a long category name: nothing scrolls sideways. A card on the maybeboard is
+    left out of Set finish (the gateway refinishes the deck itself), and removing a card whose
+    name has two rows in that zone offers no Undo (one could not put both rows back)."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    long_cat = "Card advantage engines and other value <img src=x onerror=alert(1)>"
+    for row in server.ark.decks[42]["cards"]:
+        if row["card"]["oracleCard"]["name"] == "Cultivate":
+            row["categories"] = [long_cat]
+    server.ark.decks[42]["categories"].append({"name": long_cat, "isPremier": False, "includedInDeck": True})
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 320, color_scheme="dark")
+        page.on("dialog", lambda d: errors.append("dialog: " + d.message))
+        page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+        page.locator(".bulkbar button", has_text="Select cards").click()
+        side = page.locator(".deckview .row[data-zone='side'][data-card='Sol Ring']").first
+        side.click()
+        assert _overflow(page) == 0
+        _shot(page, "deck-bulk-320-long-category")
+        page.locator(".bulkbar select[aria-label^='Set the finish']").select_option("foil")
+        assert "not on the maybeboard" in page.locator(".bulkbar .status").inner_text()
+        assert page.locator(".deck-toast").count() == 0  # nothing was sent
+        page.locator(".bulkbar button", has_text="Cancel").click()
+        # two main rows of Sol Ring: the remove goes through, without an Undo
+        page.locator(".bulkbar button", has_text="Select cards").click()
+        page.locator(".deckview .row[data-zone='main'][data-card='Sol Ring']").first.click()
+        page.evaluate(
+            "() => { const r = document.querySelector(\".row[data-zone='main'][data-card='Sol Ring']\");"
+            " const twin = r.cloneNode(true); twin.classList.remove('picked'); r.after(twin); }"
+        )
+        with page.expect_response(EDIT_URL):
+            page.locator(".bulkbar button", has_text="Remove").click()
+        page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
+        assert page.locator(".deck-toast button", has_text="Undo").count() == 0
+        assert errors == []
+        browser.close()

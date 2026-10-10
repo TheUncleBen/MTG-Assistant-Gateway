@@ -1615,7 +1615,8 @@ ul.rows .hover img{width:100%;height:100%;display:block}
 .bulkbar{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin:0 0 .75rem}
 .bulkbar .bulktools{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
 .bulkbar .bulktools[hidden],.bulkbar .btn[hidden]{display:none}
-.bulkbar select{width:auto;min-height:36px}
+.bulkbar select:not(.msel-native){width:auto;max-width:100%;min-width:0;min-height:36px}
+.bulkbar .msel-btn{max-width:100%;min-width:0}
 .bulkbar .count{font-weight:600}
 .bulkbar .tagform{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;flex-basis:100%}
 .bulkbar .tagform[hidden]{display:none}
@@ -1624,6 +1625,10 @@ ul.rows .hover img{width:100%;height:100%;display:block}
 .bulkbar .status{margin:0;flex-basis:100%} .bulkbar .status:empty{display:none}
 .deckview.picking .c,.deckview.picking .row{cursor:pointer}
 .deckview.picking .c.picked{outline:3px solid var(--orange);outline-offset:2px}
+/* a check mark, so a chosen card differs from the focused one (same orange ring) */
+.deckview.picking .c.picked::after{content:'✓';position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:44px;height:44px;border-radius:50%;background:var(--orange);color:#000;font-size:26px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 3px #fff}
 .deckview.picking .row.picked{background:var(--surface-2);box-shadow:inset 4px 0 0 var(--orange)}
 .deckview.picking .row.picked .name{font-weight:700}
 /* Table view: one full-width list per group, a column each for type, mana value, cost, printing */
