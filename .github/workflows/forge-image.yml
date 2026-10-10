@@ -106,6 +106,8 @@ jobs:
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
         with:
           driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
+      - name: Scryfall's printed names, for matching Forge's card list
+        run: python3 docker/forge/scryfall_names.py docker/forge/scryfall-names.json
       - name: Build arm64 image
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
@@ -154,6 +156,8 @@ jobs:
           tags: |
             type=raw,value=${{ needs.pin.outputs.version }}-${{ needs.pin.outputs.local }}
             type=raw,value=latest,enable={{is_default_branch}}
+      - name: Scryfall's printed names, for matching Forge's card list
+        run: python3 docker/forge/scryfall_names.py docker/forge/scryfall-names.json
       - name: Build and push linux/arm64 and linux/amd64
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:

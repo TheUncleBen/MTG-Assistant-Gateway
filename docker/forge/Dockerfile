@@ -4,7 +4,8 @@
 # `sim` mode and reports results. Build context: the repository root.
 #
 # The release archive is downloaded at build time and checked against FORGE_SHA256. The image
-# workflow reads these lines and passes FORGE_URL (the release asset's address).
+# workflow reads these lines and passes FORGE_URL (the release asset's address). Before a
+# local build, run: python3 docker/forge/scryfall_names.py docker/forge/scryfall-names.json
 ARG FORGE_VERSION=2.0.15
 ARG FORGE_ASSET=forge-installer-2.0.15.tar.bz2
 ARG FORGE_SHA256=unpinned
@@ -22,8 +23,10 @@ RUN test -n "$FORGE_URL" \
  && echo "$FORGE_SHA256  /tmp/$FORGE_ASSET" | sha256sum -c - \
  && mkdir -p /opt/forge && tar -xjf "/tmp/$FORGE_ASSET" -C /opt/forge && rm "/tmp/$FORGE_ASSET" \
  && ls /opt/forge/*jar-with-dependencies.jar
-COPY docker/forge/build_names.py /tmp/build_names.py
-RUN python3 /tmp/build_names.py /opt/forge /opt/forge-index/names.txt
+# scryfall-names.json is written by docker/forge/scryfall_names.py before the build (the image
+# workflow does this), so the image knows cards Forge lists under another printed name.
+COPY docker/forge/build_names.py docker/forge/forge_service.py docker/forge/scryfall-names.json /tmp/fb/
+RUN cd /tmp/fb && python3 build_names.py /opt/forge /opt/forge-index/names.txt scryfall-names.json
 
 FROM mirror.gcr.io/library/eclipse-temurin:17-jre
 ARG FORGE_VERSION

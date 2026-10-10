@@ -56,9 +56,9 @@ LOAD_PROBLEM = re.compile(
 
 def norm(name: str) -> str:
     """Case-, accent- and punctuation-insensitive form used to match card names."""
-    text = unicodedata.normalize("NFKD", name)
-    text = "".join(ch for ch in text if not unicodedata.combining(ch))
-    text = text.replace("’", "'").replace("‘", "'").replace("—", "-").replace("–", "-")
+    for a, b in (("\u2019", "'"), ("\u2018", "'"), ("\u2014", "-"), ("\u2013", "-"), ("\ua789", ":")):
+        name = name.replace(a, b)
+    text = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
     return re.sub(r"\s+", " ", text).strip().casefold()
 
 
@@ -72,6 +72,12 @@ def load_names() -> dict[str, str]:
 
 
 NAMES = load_names()
+ALIASES_FILE = Path(os.environ.get("FORGE_ALIASES", "/opt/forge-index/aliases.json"))
+ALIASES: dict[str, str] = (
+    {norm(k): v for k, v in json.loads(ALIASES_FILE.read_text("utf-8")).items()}
+    if ALIASES_FILE.exists()
+    else {}
+)
 
 
 def forge_jar() -> Path:
@@ -83,10 +89,11 @@ def forge_jar() -> Path:
 
 def resolve(name: str) -> str | None:
     """Forge's spelling of ``name``; a split or double-faced card may be given by its front face."""
-    hit = NAMES.get(norm(name))
-    if hit is None and " // " in name:
-        hit = NAMES.get(norm(name.split(" // ")[0]))
-    return hit
+    for candidate in (name, name.split(" // ")[0]):
+        hit = NAMES.get(norm(candidate)) or ALIASES.get(norm(candidate))
+        if hit:
+            return hit
+    return None
 
 
 class Job:
@@ -339,6 +346,7 @@ class Handler(BaseHTTPRequestHandler):
                     "status": "ok",
                     "forge_version": VERSION,
                     "cards": len(NAMES),
+                    "aliases": len(ALIASES),
                     "busy": busy,
                     "queued": QUEUE.qsize(),
                 },
