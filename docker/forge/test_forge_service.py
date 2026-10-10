@@ -74,8 +74,8 @@ class Output(unittest.TestCase):
     def test_parse_win_draw_and_unknown(self):
         win = fs.parse_result("Game 3 ended in 51234 ms. Ai(2)-D2 has won!")
         self.assertEqual((win["game"], win["ms"], win["winner"], win["draw"]), (3, 51234, 2, False))
-        draw = fs.parse_result("Game 1 ended in 900 ms. The game is a draw.")
-        self.assertTrue(draw["draw"])
+        draw = fs.parse_result("Game Result: Game 1 ended in a Draw! Took 600012 ms.")
+        self.assertEqual((draw["game"], draw["ms"], draw["winner"], draw["draw"]), (1, 600012, None, True))
         self.assertIn("unparsed", fs.parse_result("Game 2 ended in 5 ms. something else"))
         self.assertIsNone(fs.parse_result("Turn 4 (Ai(1)-D1)"))
 

@@ -257,9 +257,20 @@ class ReportService:
         self.db.audit("report_created", sub=sub, detail={"report_id": rid, "deck_id": deck.id})
         if simulate and self.forge is not None:
             seed = options.get("seed")
-            await self._start_forge(
-                rid, deck_to_text(deck), deck.name, games, seed if isinstance(seed, int) else None
-            )
+            if self._forge_running(sub, rid):
+                # One unfinished Forge run per member, so nobody can fill the shared engine's queue.
+                self._save_forge(
+                    rid,
+                    {
+                        "state": "skipped",
+                        "error": "Your previous Forge run is still going; this report has no Forge games. "
+                        "Run the report again once it has finished.",
+                    },
+                )
+            else:
+                await self._start_forge(
+                    rid, deck_to_text(deck), deck.name, games, seed if isinstance(seed, int) else None
+                )
         return self.get(sub, rid)
 
     # -- Forge runs (background) ----------------------------------------------
@@ -269,7 +280,24 @@ class ReportService:
             section = await start_run(self.forge, text, name, games=min(games, self.forge_games), seed=seed)
         except ForgeError as exc:
             section = {"state": "failed", "error": str(exc), **({"detail": exc.detail} if exc.detail else {})}
+        except Exception:  # an unexpected reply must not turn a stored report into a tool error
+            logger.exception("starting a Forge run failed for %s", rid)
+            section = {"state": "failed", "error": "The simulation engine gave an unexpected answer."}
         self._save_forge(rid, section)
+        self._ensure_forge_refresher()
+
+    def _forge_running(self, sub: str, rid: str) -> bool:
+        finals = tuple(FINAL_STATES)
+        with self.db._lock:
+            row = self.db._conn.execute(
+                "SELECT 1 FROM reports WHERE owner_sub = ? AND id != ? AND forge_state IS NOT NULL AND "
+                f"forge_state NOT IN ({','.join('?' * len(finals))}) LIMIT 1",
+                (sub, rid, *finals),
+            ).fetchone()
+        return row is not None
+
+    def resume_forge_runs(self) -> None:
+        """At startup: carry on refreshing runs a restart left unfinished."""
         self._ensure_forge_refresher()
 
     def _save_forge(self, rid: str, section: dict[str, Any]) -> None:

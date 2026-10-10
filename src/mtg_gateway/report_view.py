@@ -746,6 +746,7 @@ FORGE_STATE_TEXT = {
     "timeout": "The games ran out of time before finishing.",
     "cancelled": "The games were stopped.",
     "lost": "The simulation engine lost this run.",
+    "skipped": "No Forge games for this report.",
 }
 
 

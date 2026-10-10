@@ -8,6 +8,10 @@ name: Forge image
 on:
   push:
     branches: ["main"]
+    paths:
+      - "docker/forge/**"
+      - "scripts/ci_smoke_forge.sh"
+      - ".github/workflows/forge-image.yml"
   pull_request:
     paths:
       - "docker/forge/**"
@@ -55,11 +59,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ASSET: ${{ steps.pin.outputs.asset }}
           SHA: ${{ steps.pin.outputs.sha256 }}
+          FORGE_VERSION: ${{ steps.pin.outputs.version }}
         run: |
           set -eu
-          url=$(gh api 'repos/Card-Forge/forge/releases?per_page=30' \
-            --jq ".[] | .assets[] | select(.name == \"$ASSET\") | .browser_download_url" | head -n1)
-          test -n "$url" || { echo "no Forge release has the asset $ASSET"; exit 1; }
+          url=$(gh api "repos/Card-Forge/forge/releases/tags/forge-$FORGE_VERSION" \
+            --jq ".assets[] | select(.name == \"$ASSET\") | .browser_download_url" | head -n1)
+          test -n "$url" || { echo "Forge release forge-$FORGE_VERSION has no asset $ASSET"; exit 1; }
           echo "url=$url" >> "$GITHUB_OUTPUT"
           curl -fsSL --retry 3 -o "$RUNNER_TEMP/$ASSET" "$url"
           have=$(sha256sum "$RUNNER_TEMP/$ASSET" | cut -d' ' -f1)

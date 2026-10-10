@@ -147,6 +147,39 @@ async def test_report_runs_forge_in_the_background(tmp_path: Path) -> None:
     assert final["state"] == "done" and final["result"]["seats"][0]["wins"] == 3
 
 
+async def test_negative_seed_maps_onto_forges_range() -> None:
+    fake = FakeForge()
+    section = await start_run(fake.client(), DECK_TEXT, "Liesa", games=1, seed=-5)
+    assert fake.started[0]["seed"] == 2**63 - 5 and section["seed"] == -5
+    assert section["forge_seed"] == 2**63 - 5
+
+
+async def test_refresh_gives_up_on_an_unexpected_reply() -> None:
+    fake = FakeForge()
+    client = fake.client()
+    section = await start_run(client, DECK_TEXT, "Liesa", games=1)
+    fake.jobs[section["job_id"]] = {"id": section["job_id"]}  # no state
+    assert await refresh(client, section) == section  # kept, tried again later
+    old = {**section, "started_at": section["started_at"] - 5 * 3600}
+    assert (await refresh(client, old))["state"] == "lost"
+
+
+async def test_one_unfinished_forge_run_per_member(tmp_path: Path) -> None:
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    fake = FakeForge()
+    reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+    first = await reports.run("alice", "42", games=300, options={"seed": 1})
+    second = await reports.run("alice", "42", games=300, options={"seed": 2})
+    assert first["forge"]["state"] == "running" and second["forge"]["state"] == "skipped"
+    assert len(fake.started) == 1
+    fake.finish(first["forge"]["job_id"], [1])
+    assert reports._forge_task is not None
+    await asyncio.wait_for(reports._forge_task, timeout=20)
+    third = await reports.run("alice", "42", games=300, options={"seed": 3})
+    assert third["forge"]["state"] == "running" and len(fake.started) == 2
+
+
 def test_report_page_and_markdown_show_forge_results() -> None:
     from mtg_gateway.report_view import forge_html, report_markdown
 

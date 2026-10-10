@@ -22,7 +22,7 @@ from .decklist import DecklistError, parse_decklist
 logger = logging.getLogger(__name__)
 
 DEFAULT_OPPONENTS = 3
-FINAL_STATES = frozenset({"done", "failed", "timeout", "cancelled", "lost"})
+FINAL_STATES = frozenset({"done", "failed", "timeout", "cancelled", "lost", "skipped"})
 # A run still unfinished this long after it started is given up (the engine was unreachable).
 GIVE_UP_SECONDS = 4 * 3600
 
@@ -186,10 +186,14 @@ async def start_run(
     if not chosen:
         return {"state": "failed", "error": "The simulation engine has no opponent decks."}
     seats = [deck_name, *chosen]
-    job = await client.start([deck, *({"precon": p} for p in chosen)], games, seed=seed)
+    # Forge takes seeds from 0 to 2**63 - 1 (it reads "-5" as a flag); the gateway's seeds may be
+    # negative, so they are mapped onto that range, the same seed always to the same Forge seed.
+    forge_seed = seed % 2**63 if seed is not None else None
+    job = await client.start([deck, *({"precon": p} for p in chosen)], games, seed=forge_seed)
     return {
         "state": job.get("state", "queued"),
         "seed": seed,
+        **({"forge_seed": forge_seed} if forge_seed != seed else {}),
         "job_id": job["id"],
         "seats": seats,
         "not_played": not_played,
@@ -205,6 +209,8 @@ async def refresh(client: ForgeClient, section: dict[str, Any]) -> dict[str, Any
         return section
     try:
         job = await client.job(section["job_id"])
+        if not isinstance(job, dict) or job.get("state") not in {"queued", "running", *FINAL_STATES}:
+            raise ForgeError("invalid", "The simulation engine gave an unexpected answer.")
     except ForgeError as exc:
         if time.time() - section.get("started_at", time.time()) > GIVE_UP_SECONDS:
             return {
