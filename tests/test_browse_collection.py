@@ -385,14 +385,15 @@ async def test_collection_tools(stack: Stack) -> None:
         p3 = structured(await call(stack.h, token, "propose_collection_changes", {"add": ["Sol Ring"]}))
         refused = structured(await call(stack.h, token, "apply_proposal", {"proposal_id": p3["proposal_id"]}))
         assert refused["ok"] is False and refused["error"] == "browser_required"
-        # no tool exists for social actions (likes, follows, comments are a person's own clicks),
+        # social actions only exist as proposals the member approves each time (R-142),
         # and no tool writes the collection directly
         listing = sse_json(await stack.h.mcp(token, "tools/list"))
         names = {t["name"] for t in listing["result"]["tools"]}
         assert {"list_collection", "propose_collection_changes"} <= names
         assert not {"add_to_collection", "remove_from_collection"} & names
         social = ("vote", "like", "follow", "comment", "bookmark")
-        assert not any(w in n for n in names for w in social), names
+        acting = {n for n in names for w in social if w in n}
+        assert all(n.startswith("propose_") or n == "get_deck_comments" for n in acting), acting
     finally:
         await b.aclose()
 
