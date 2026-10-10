@@ -194,7 +194,7 @@ class DeckChange(_Card):
     )
     label: str | None = Field(
         default=None,
-        max_length=40,
+        max_length=48,  # a name of up to 40 characters, or Archidekt's own "Name,#rrggbb"
         description="For set_label: the colour tag's name, e.g. Have or Proxy; an empty string takes it off.",
     )
     color: str | None = Field(

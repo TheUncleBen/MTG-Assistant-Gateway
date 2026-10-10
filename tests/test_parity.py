@@ -6,6 +6,10 @@ from __future__ import annotations
 import csv
 import io
 
+import pytest
+
+from mtg_gateway import modes
+from mtg_gateway.decks import DeckError, parse_changes, split_label
 from mtg_gateway.scan.scryfall import ScryfallClient
 
 from .fake_scryfall import FakeScryfall
@@ -541,3 +545,79 @@ async def test_set_label_puts_and_takes_off_a_colour_tag(stack: Stack) -> None:
     assert a["ok"] and a["result"]["verified"] is True, a
     row = next(c for c in ark.decks[42]["cards"] if c["card"]["oracleCard"]["name"] == "Sol Ring")
     assert not row.get("label")
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"label": "a,b", "color": "#000000"}, "without commas"),
+        ({"label": "x" * 41}, "at most 40"),
+        ({"label": "Have", "color": "red"}, "#37d67a"),
+        ({"label": "Have", "color": "#12345"}, "#37d67a"),
+        ({}, "needs a label"),
+        ({"label": "Have", "quantity": 2}, "takes only"),
+    ],
+)
+def test_set_label_is_refused_when_malformed(change: dict, message: str) -> None:
+    with pytest.raises(DeckError) as err:
+        parse_changes([{"action": "set_label", "card_name": "Sol Ring", **change}])
+    assert message in str(err.value)
+
+
+def test_set_label_reads_archidekts_own_form_and_short_colours() -> None:
+    (ch,) = parse_changes([{"action": "set_label", "card_name": "Sol Ring", "label": "Have,#37D67A"}])
+    assert ch.label == "Have,#37d67a"
+    assert split_label("Proxy,#fff") == ("Proxy", "#ffffff")
+    assert split_label("X,url(evil)") == ("X", "")  # never reaches a style attribute
+    (side,) = parse_changes([{"action": "set_label", "card_name": "Sol Ring", "label": "", "zone": "side"}])
+    assert side.zone == "side" and side.label == ""
+    assert modes.risk_of("edit", [{"kind": "label", "name": "Sol Ring"}])[0] == "low"
+
+
+async def test_set_label_on_the_maybeboard_keeps_the_companion_and_escapes_the_name(stack: Stack) -> None:
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    ark.add_side_row(42, "Sol Ring")
+    main = next(c for c in ark.decks[42]["cards"] if c["card"]["oracleCard"]["name"] == "Cultivate")
+    main["companion"] = True
+    hostile = "<img src=x onerror=1>'\""
+    for change in (
+        {"action": "set_label", "name": "Sol Ring", "label": hostile[:40], "zone": "side"},
+        {"action": "set_label", "name": "Cultivate", "label": "Have"},
+    ):
+        p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": [change]}))
+        assert p["ok"], p
+        a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+        assert a["ok"] and a["result"]["verified"] is True, a
+    side = [
+        c
+        for c in ark.decks[42]["cards"]
+        if c["card"]["oracleCard"]["name"] == "Sol Ring" and c["categories"] == ["Maybeboard"]
+    ]
+    assert side[0]["label"].startswith("<img")
+    assert main["companion"] is True and main["label"] == "Have,#656565"
+    b = await _linked_browser(stack)
+    try:
+        page = (await b.http.get("/decks/42?view=text", headers=NAV)).text
+        assert "<img src=x" not in page and "&lt;img src=x" in page
+    finally:
+        await b.aclose()
+
+
+async def test_set_label_that_archidekt_ignores_is_not_reported_verified(stack: Stack) -> None:
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    row = next(c for c in ark.decks[42]["cards"] if c["card"]["oracleCard"]["name"] == "Sol Ring")
+    row["label"] = "Have,#37d67a"
+    ark.empty_label_ignored = True
+    p = structured(
+        await call(
+            h,
+            token,
+            "propose_deck_changes",
+            {"deck_id": "42", "changes": [{"action": "set_label", "name": "Sol Ring", "label": ""}]},
+        )
+    )
+    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert not (a.get("ok") and (a.get("result") or {}).get("verified") is True), a
+    assert row["label"] == "Have,#37d67a"

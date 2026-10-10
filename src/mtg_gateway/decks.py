@@ -499,6 +499,8 @@ def split_label(label: str) -> tuple[str, str]:
     colour is left out, so it can never reach a style attribute."""
     name, _, colour = (label or "").rpartition(",") if "," in (label or "") else (label or "", "", "")
     colour = colour.strip()
+    if re.fullmatch(r"#[0-9a-fA-F]{3}", colour):  # #fff is #ffffff
+        colour = "#" + "".join(c * 2 for c in colour[1:])
     return name.strip(), colour.lower() if LABEL_COLOUR.fullmatch(colour) else ""
 
 
@@ -704,7 +706,14 @@ def printing_plan_rows(
         cards = list({c.relation_id: c for c in pool.get(ch.card_name.lower(), [])}.values())
         if not cards:
             raise DeckError(
-                "invalid", f"'{ch.card_name}' is not in the deck, so its printing cannot be changed"
+                "invalid",
+                f"'{ch.card_name}' is not in the deck"
+                + (" (maybeboard or sideboard)" if ch.zone == "side" else "")
+                + (
+                    ", so it cannot be tagged"
+                    if ch.action == "set_label"
+                    else ", so its printing cannot be changed"
+                ),
             )
         if any(c.relation_id is None or c.card_id is None for c in cards):
             raise DeckError("contract", f"Archidekt did not number the deck rows of '{ch.card_name}'.")
@@ -2441,6 +2450,7 @@ class DeckService:
                 for rid in spec["relation_ids"]:
                     entry = _entry("modify", rows[rid], rows[rid].quantity)
                     entry["modifications"]["label"] = spec["label"]
+                    entry["modifications"]["companion"] = bool(rows[rid].companion)  # kept as it is
                     out.append(entry)
                 continue
             if spec.get("set_code"):
@@ -2485,6 +2495,7 @@ class DeckService:
                 for rid in spec["relation_ids"]:
                     entry = _entry("modify", rows[rid], rows[rid].quantity)
                     entry["modifications"]["modifier"] = spec["finish"]
+                    entry["modifications"]["companion"] = bool(rows[rid].companion)  # kept as it is
                     out.append(entry)
         return out
 

@@ -261,6 +261,7 @@
     var i = (label || "").lastIndexOf(",");
     var name = (i < 0 ? label || "" : label.slice(0, i)).trim();
     var colour = i < 0 ? "" : label.slice(i + 1).trim();
+    if (/^#[0-9a-fA-F]{3}$/.test(colour)) colour = "#" + colour.slice(1).replace(/./g, function (c) { return c + c; });  // #fff
     return { name: name, colour: /^#[0-9a-fA-F]{6}$/.test(colour) ? colour.toLowerCase() : "" };
   }
   function setLabel(card, label) {
