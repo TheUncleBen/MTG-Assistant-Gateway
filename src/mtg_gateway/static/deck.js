@@ -373,7 +373,7 @@
     refreshStacks();
   }
   function namesOf(changes) {
-    var seen = {};
+    var seen = Object.create(null);
     return changes.map(function (ch) { return frontFace(ch.card_name); }).filter(function (n) { if (seen[n]) return false; seen[n] = true; return true; });
   }
   var refreshed = false;
@@ -841,7 +841,7 @@
       var first = el("option", null, "Move to…");
       first.value = "";
       moveSel.appendChild(first);
-      var seen = {};
+      var seen = Object.create(null);
       deckCats.concat($$(".stack", cards).map(function (st) { return byCategory ? st.getAttribute("data-group") : ""; }), [sideCat])
         .forEach(function (n) {
           if (!n || seen[n]) return;
@@ -892,7 +892,7 @@
     // One change per card name and zone: two rows of a card in one zone are one Archidekt row
     // set as far as a set_category or a remove is concerned.
     function unique(list, keyOf) {
-      var seen = {};
+      var seen = Object.create(null);
       return list.filter(function (c) { var k = keyOf(c); if (seen[k]) return false; seen[k] = true; return true; });
     }
     function run(changes, inverses, what) {
@@ -919,7 +919,7 @@
       tagBtn.setAttribute("aria-expanded", open ? "true" : "false");
       if (!open) return;
       known.textContent = "";
-      var seen = {};
+      var seen = Object.create(null);
       $$("[data-label]", cards).forEach(function (c) {
         var t = splitLabel(c.getAttribute("data-label"));
         if (!t.name || seen[t.name]) return;
@@ -1285,7 +1285,7 @@
     var original = stacksNow();
     var order = saved();
     if (order) {
-      var rank = {};
+      var rank = Object.create(null);
       order.forEach(function (n, i) { rank[n] = i; });
       original.slice().sort(function (a, b) {
         var ra = nameOf(a) in rank ? rank[nameOf(a)] : 1e6 + original.indexOf(a);
