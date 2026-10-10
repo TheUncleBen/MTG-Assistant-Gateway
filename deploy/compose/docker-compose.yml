@@ -86,6 +86,9 @@ services:
       MTG_LOG_LEVEL: ${MTG_LOG_LEVEL:-INFO}
       # Set to an empty value (and drop the mysticforge service) to run without research tools.
       MTG_MYSTIC_FORGE_URL: ${MTG_MYSTIC_FORGE_URL-http://mysticforge:8000/mcp}
+      # Forge simulations: empty (the default) leaves them off; http://forge:8000 with the forge profile.
+      MTG_FORGE_URL: ${MTG_FORGE_URL:-}
+      MTG_FORGE_GAMES: ${MTG_FORGE_GAMES:-10}
       MTG_WRITES_ENABLED: ${MTG_WRITES_ENABLED:-false}
       MTG_APPROVAL_MODE_DEFAULT: ${MTG_APPROVAL_MODE_DEFAULT:-manual}
       MTG_APPROVAL_MODE_MAX: ${MTG_APPROVAL_MODE_MAX:-auto}
@@ -133,6 +136,7 @@ services:
     networks:
       - mtg
       - mysticforge
+      - forge
     # Least privilege: the entrypoint starts as root only to match PUID/PGID, then drops to
     # that user with setpriv --no-new-privs; these four capabilities are all it needs.
     cap_drop:
@@ -207,6 +211,43 @@ services:
           memory: ${MF_MEMORY_LIMIT:-512M}
           pids: 512 # processes and threads, as for the gateway
 
+  # Forge, the rules engine for deck simulations (docker/forge/, GPL-3.0, unmodified). Optional and
+  # off by default: start it with COMPOSE_PROFILES=forge and set MTG_FORGE_URL=http://forge:8000 for
+  # the gateway. It starts Java only while a simulation runs, one at a time, and needs no internet.
+  forge:
+    profiles: ["forge"]
+    image: ${FORGE_IMAGE:-ghcr.io/theuncleben/mtg-assistant-forge}:${FORGE_TAG:-2.0.15-mag1}
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    environment:
+      FORGE_XMX: ${FORGE_XMX:-1g}
+      FORGE_MAX_GAMES: ${FORGE_MAX_GAMES:-50}
+      FORGE_GAME_SECONDS: ${FORGE_GAME_SECONDS:-600}
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TIMEZONE:-UTC}
+    networks:
+      - forge
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: ${FORGE_MEMORY_LIMIT:-1536M}
+          cpus: "${FORGE_CPUS:-2}"
+          pids: 512
+
 networks:
   mtg:
     name: ${MTG_NETWORK_NAME:-mtg-gateway}
@@ -215,3 +256,6 @@ networks:
   # and processes on this machine can reach a bridge network's containers by their IP, so
   # don't attach other containers to it and don't publish its port.
   mysticforge:
+  # Only the gateway and Forge are on it, and it has no way out: Forge needs no internet.
+  forge:
+    internal: true

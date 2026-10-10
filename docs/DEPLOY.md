@@ -291,7 +291,7 @@ If the packages are public you can skip this step.
 
    | Variable | What to put |
    | --- | --- |
-   | `MTG_IMAGE`, `MTG_TAG` | `ghcr.io/<owner>/mtg-assistant-gateway` and `latest` to follow every new version, or one version to stay on it, for example `0.7.13` ([VERSIONS.md](VERSIONS.md)) |
+   | `MTG_IMAGE`, `MTG_TAG` | `ghcr.io/<owner>/mtg-assistant-gateway` and `latest` to follow every new version, or one version to stay on it, for example `0.7.14` ([VERSIONS.md](VERSIONS.md)) |
    | `MTG_PUBLIC_URL` | `https://mtg.example.com` |
    | `MTG_OIDC_ISSUER` | the issuer URL from step 3 |
    | `MTG_OIDC_CLIENT_ID` | the Client ID from step 3 |
@@ -577,6 +577,28 @@ docker service logs mtg_mtg-assistant-mysticforge
 
 Healthy looks like `Running`, with the logs ending on Uvicorn listening on
 `0.0.0.0:8000`.
+
+## Forge simulations (optional)
+
+Forge ([Card-Forge/forge](https://github.com/Card-Forge/forge), GPL-3.0) is an open-source Magic rules
+engine. The `mtg-assistant-forge` image runs it unmodified behind a small job service, so
+`run_deck_report` can play real games of a deck against current Commander precons. It is off by
+default, and an install that leaves it off behaves exactly as before.
+
+- **Turn it on** (Portainer): set `FORGE_REPLICAS=1`, `FORGE_NODE` to a node with spare memory, and
+  `MTG_FORGE_URL=http://mtg-assistant-forge:8000`, then update the stack. With compose, start the
+  `forge` profile (`COMPOSE_PROFILES=forge`) and set `MTG_FORGE_URL=http://forge:8000`.
+- **Load:** Java starts only while a simulation runs, one at a time, capped by `FORGE_MEMORY_LIMIT`
+  (default 1536M) and `FORGE_CPUS` (default 2). `MTG_FORGE_GAMES` (default 10) sets the games per
+  report. An idle Forge service holds no Java memory. `FORGE_GAME_SECONDS` (default 600) is how long
+  one game may run before Forge calls it a draw; such games are counted as draws in the report.
+- **No upkeep:** the image carries Forge's card scripts, an index of Scryfall's alternative printed
+  names, and the newest Commander precons as opponents. Each image is rebuilt from a Forge release in
+  CI; you update it like any other image.
+- **Privacy:** the service is on its own internal network with no internet access; only the gateway
+  reaches it.
+- Cards Forge cannot play are listed in each report's `forge.not_played`, and the games run without
+  them.
 
 ## Environment reference
 

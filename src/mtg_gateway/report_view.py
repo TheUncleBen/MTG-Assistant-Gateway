@@ -739,6 +739,85 @@ def _triggers_html(g: dict[str, Any]) -> str:
     return out
 
 
+FORGE_STATE_TEXT = {
+    "queued": "Waiting for the simulation engine. Reload this page later to see the result.",
+    "running": "Games are being played now. Reload this page later to see the result.",
+    "failed": "The games could not run.",
+    "timeout": "The games ran out of time before finishing.",
+    "cancelled": "The games were stopped.",
+    "lost": "The simulation engine lost this run.",
+    "skipped": "No Forge games for this report.",
+}
+
+
+def forge_lines(f: dict[str, Any]) -> list[str]:
+    """Forge's result as plain sentences, shared by the page and the Markdown export."""
+    res = f.get("result") or {}
+    out: list[str] = []
+    seats = res.get("seats") or []
+    if res.get("games"):
+        out.append(f"Games played: {res['games']} of {res.get('games_requested') or res['games']}.")
+        for seat in seats:
+            low, high = (seat.get("win_rate_95") or [None, None])[:2]
+            ci = (
+                f" (95% interval {_pct(low)} to {_pct(high)})" if low is not None and high is not None else ""
+            )
+            out.append(
+                f"{front_face(seat.get('deck'))}: {seat.get('wins', 0)} wins, "
+                f"{_pct(seat.get('win_rate'))}{ci}."
+            )
+        if res.get("draws"):
+            slow = (
+                f", {res['stopped_slow']} of them stopped at the time limit"
+                if res.get("stopped_slow")
+                else ""
+            )
+            out.append(f"Draws: {res['draws']}{slow}.")
+        if res.get("average_game_seconds") is not None:
+            out.append(f"Average game: {res['average_game_seconds']} seconds.")
+    if f.get("seed") is not None:
+        out.append(f"Seed: {f['seed']}.")
+    return out
+
+
+def forge_html(f: Any) -> str:
+    """The Forge card: real games against precons (forge.py), or why there are none yet."""
+    if not isinstance(f, dict):
+        return ""
+    state = str(f.get("state") or "")
+    badge = {
+        "done": "",
+        "queued": " <span class='badge'>queued</span>",
+        "running": " <span class='badge'>running</span>",
+    }
+    not_run = " <span class='badge danger'>not run</span>"
+    head = f"<h2>Forge games{badge.get(state, not_run)}</h2>"
+    parts = [
+        head,
+        "<p class='muted small'>Forge, an open-source rules engine, plays the deck against the "
+        "opponent decks below, with combat, the stack and every player's interaction, all piloted by "
+        "Forge's AI. Treat the result as a test of the deck against these opponents, "
+        "not a prediction for your table.</p>",
+    ]
+    if state != "done":
+        msg = f.get("error") or FORGE_STATE_TEXT.get(state, "")
+        if msg:
+            parts.append(
+                f"<p class='notice{' warn' if state not in ('queued', 'running') else ''}'>{_esc(msg)}</p>"
+            )
+    lines = forge_lines(f)
+    if lines:
+        parts.append("<ul class='sumlines'>" + "".join(f"<li>{_esc(ln)}</li>" for ln in lines) + "</ul>")
+    if f.get("not_played"):
+        parts.append(
+            "<div class='honesty'><h3>Cards Forge could not play</h3><p class='muted small'>These were "
+            "left out of the games, so the numbers above do not include them.</p><p>"
+            + ", ".join(_esc(n) for n in f["not_played"])
+            + "</p></div>"
+        )
+    return "<div class='card forge'>" + "".join(parts) + "</div>"
+
+
 def report_sections(r: dict[str, Any]) -> dict[str, Any]:
     """Everything the page, the Markdown and the HTML export share, computed once."""
     stats = r.get("stats") if isinstance(r.get("stats"), dict) else {}
@@ -803,7 +882,7 @@ def report_body_html(
         + actions_html
         + "</div>"
     )
-    body = head
+    body = head + forge_html(r.get("forge"))
     if g is None and v is None:
         body += (
             "<div class='card'><h2>Goldfish simulation</h2><p class='muted'>The research service was not "
@@ -894,6 +973,15 @@ def report_markdown(r: dict[str, Any]) -> str:
         lines.append("")
     elif g and g.get("message"):
         lines += ["## Goldfish simulation", "", g["message"], ""]
+    forge = r.get("forge") if isinstance(r.get("forge"), dict) else None
+    if forge:
+        lines += ["## Forge games", ""]
+        if forge.get("state") != "done":
+            lines += [str(forge.get("error") or FORGE_STATE_TEXT.get(str(forge.get("state")), "")), ""]
+        lines += [f"- {ln}" for ln in forge_lines(forge)]
+        if forge.get("not_played"):
+            lines.append("- Cards Forge could not play: " + ", ".join(forge["not_played"]))
+        lines.append("")
     if g:
         h = g["honesty"]
         size = g.get("deck_size")

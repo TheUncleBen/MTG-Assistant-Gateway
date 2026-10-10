@@ -186,6 +186,10 @@ class Settings:
     # The Android app's package ID: the app the browser sign-in hands back to (app_signin.py).
     android_package: str = "local.mtgassistantgateway.app"
     mystic_forge_url: str | None = None
+    # The Forge simulation service (docker/forge/); unset, reports run the goldfish only.
+    forge_url: str | None = None
+    # Games per Forge run: four-player Commander games are slow on a Pi, so runs stay short.
+    forge_games: int = 10
     cimd_enabled: bool = True
     cimd_allowed_hosts: list[str] = field(default_factory=list)
     writes_enabled: bool = False
@@ -398,6 +402,8 @@ def load_settings() -> Settings:
         backup_copy_dir=backup_copy_dir,
         allowed_hosts=allowed_hosts,
         mystic_forge_url=(_env("MTG_MYSTIC_FORGE_URL", "") or None),
+        forge_url=(_env("MTG_FORGE_URL", "") or None),
+        forge_games=_int_env("MTG_FORGE_GAMES", 10, lo=1, hi=50),
         cimd_enabled=_bool_env("MTG_CIMD_ENABLED", True),
         cimd_allowed_hosts=[
             h.strip() for h in (_env("MTG_CIMD_ALLOWED_HOSTS", "") or "").split(",") if h.strip()

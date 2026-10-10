@@ -189,6 +189,30 @@ history are switched off on this gateway, and so are its `goldfish_run` and
 `goldfish_ab` (`run_deck_report` owns the simulation of one deck,
 `compare_decks` the paired A/B). Do not offer them.
 
+## Simulation (Forge) and card truth
+
+When the gateway runs Forge, a report from `run_deck_report` also has a
+`forge` section: real games of the deck against Commander precons, played by
+Forge's rules engine with opponents, combat and the stack. It runs in the
+background, so `forge.state` is `queued` or `running` at first; read the
+report again with `get_deck_report` until it is `done`.
+
+- Quote `forge.result`: games played, the deck's wins and `win_rate_95`, and
+  the opponent decks (`forge.seats`). These are Forge AI games, not a
+  prediction of a real table; say so.
+- Name every card in `forge.not_played`: Forge could not play those, and the
+  numbers do not include them. Explain each from its exact text.
+- Before reasoning about any card, read its exact text (`get_deck` with
+  `include_text`, `scryfall_card_text`) and its rulings (`scryfall_rulings`);
+  cite rules by number from `rules_get` or `rules_search`. Never describe a
+  card or a rule from memory.
+- A card that is legal in no format (joke, playtest or display cards) is
+  never played by Forge: say it is not tournament-legal and explain it from
+  its text.
+- To compare two decks on Forge, run `run_deck_report` on each with the same
+  `options.seed`: both then play the same precons (check `forge.seats`).
+  `compare_decks` with `simulate=true` is a goldfish A/B, not Forge games.
+
 ## Changing or creating a deck: propose, review, apply
 
 The gateway writes to Archidekt only in two steps, and only to the user's
