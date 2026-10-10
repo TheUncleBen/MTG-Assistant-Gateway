@@ -78,6 +78,10 @@ services:
       MTG_LOG_LEVEL: ${MTG_LOG_LEVEL:-INFO}
       # Research tools are proxied from the Mystic Forge service in this stack.
       MTG_MYSTIC_FORGE_URL: ${MTG_MYSTIC_FORGE_URL-http://mtg-assistant-mysticforge:8000/mcp}
+      # Forge simulations: empty (the default) leaves them off. To turn them on set FORGE_REPLICAS=1
+      # and MTG_FORGE_URL=http://mtg-assistant-forge:8000 (docs/DEPLOY.md).
+      MTG_FORGE_URL: ${MTG_FORGE_URL:-}
+      MTG_FORGE_GAMES: ${MTG_FORGE_GAMES:-10}
       # Kill switch for deck edits on Archidekt. Keep false until you have tested
       # the proposal flow against a disposable deck.
       MTG_WRITES_ENABLED: ${MTG_WRITES_ENABLED:-false}
@@ -140,6 +144,7 @@ services:
       # way to reach Mystic Forge.
       - mtgnet
       - mysticforge
+      - forge
     volumes:
       - type: bind
         source: ${MTG_DATA_DIR:?GATEWAY DATA DIRECTORY REQUIRED}
@@ -234,6 +239,50 @@ services:
         constraints:
           - node.hostname == ${MF_NODE:?set MF_NODE to the Swarm node that runs Mystic Forge}
 
+  # Forge on the node named by FORGE_NODE: the rules engine for deck simulations (GPL-3.0,
+  # unmodified). Off by default (FORGE_REPLICAS=0). It starts Java only while a simulation runs,
+  # one at a time, under a CPU and memory cap, and is on a private network with no way out.
+  mtg-assistant-forge:
+    image: ${FORGE_IMAGE:-ghcr.io/theuncleben/mtg-assistant-forge}:${FORGE_TAG:-2.0.15-mag1}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    environment:
+      FORGE_XMX: ${FORGE_XMX:-1g}
+      FORGE_MAX_GAMES: ${FORGE_MAX_GAMES:-50}
+      PUID: ${PUID:?PUID REQUIRED}
+      PGID: ${PGID:?PGID REQUIRED}
+      TZ: ${TIMEZONE:-UTC}
+      DISABLE_IPV6: "true"
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
+    networks:
+      - forge
+    deploy:
+      replicas: ${FORGE_REPLICAS:-0}
+      resources:
+        limits:
+          memory: ${FORGE_MEMORY_LIMIT:-1536M}
+          cpus: "${FORGE_CPUS:-2}"
+        reservations:
+          memory: 64M
+      restart_policy:
+        condition: any
+      update_config:
+        order: stop-first
+      rollback_config:
+        order: stop-first
+      placement:
+        constraints:
+          - node.hostname == ${FORGE_NODE:-set-FORGE_NODE-when-FORGE_REPLICAS-is-1}
+
 networks:
   mtgnet:
     external: true
@@ -243,3 +292,7 @@ networks:
   # internet access for Scryfall, EDHREC and the rules.
   mysticforge:
     driver: overlay
+  # Created by the stack. Internal: Forge needs no internet, and only the gateway can reach it.
+  forge:
+    driver: overlay
+    internal: true
