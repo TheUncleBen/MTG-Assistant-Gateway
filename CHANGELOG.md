@@ -12,6 +12,9 @@ with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 More of the Archidekt deck page: new views, your own stack order, editing several cards at once and
 colour tags.
 
+0.7.17 was not released on its own (its build stopped on the test fixed below), so its changes
+first ship in this version's image.
+
 ### Added
 - Deck page: Table and Scroll views next to the existing ones.
 - Stacks can be dragged into your own order. The order is kept in this browser for each deck and
