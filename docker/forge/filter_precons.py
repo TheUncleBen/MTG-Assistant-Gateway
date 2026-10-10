@@ -14,12 +14,18 @@ KEEP, MIN = 12, 3
 
 precons = json.loads(open(sys.argv[1], encoding="utf-8").read())
 kept = []
+seen = set()  # a Collector's Edition with the same cards as its precon takes no second slot
 for p in precons:
     names = list(p["commander"]) + [name for _, name in p["main"]]
     missing = sorted({n for n in names if forge_service.resolve(n) is None})
     if missing:
         print(f"left out {p['name']}: Forge lacks {'; '.join(missing)}")
     elif len(kept) < KEEP:
+        cards = (tuple(sorted(p["commander"])), tuple(sorted((n, c) for c, n in p["main"])))
+        if cards in seen:
+            print(f"left out {p['name']}: same cards as a kept precon")
+            continue
+        seen.add(cards)
         kept.append(p)
 print(f"{len(kept)} precons kept: " + "; ".join(p["name"] for p in kept))
 if len(kept) < MIN:
