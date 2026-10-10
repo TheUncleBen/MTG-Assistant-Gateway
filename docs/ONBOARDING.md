@@ -80,7 +80,7 @@ Full step-by-step, error messages and what's been verified are in
 [CONNECT.md](CONNECT.md).
 
 **Check it worked:** in a new chat, turn the connector on and ask "Use the
-MTG Assistant Gateway to call whoami." You should see your own name or email.
+MTG Assistant Gateway to call whoami." You should see your own name.
 
 ## 3. Link your Archidekt account
 

@@ -222,7 +222,7 @@ claude plugin marketplace add https://<gateway host>/plugin/marketplace.json
 claude plugin install mtg-gateway@mtg-gateway
 ```
 
-Then `/mcp`, authenticate, `whoami`. The `/mtg-gateway:setup` skill covers
+Then `/mcp`, authenticate, `whoami`. The `/mtg-gateway:setup-mtg-gateway` skill covers
 the rest, including linking Archidekt.
 
 ### 10. After the first sign-in

@@ -241,6 +241,8 @@ h2:not(:first-child){margin-top:1.25rem}
 h3{font-size:1.1rem;font-weight:700;margin:.5rem 0 .4rem}
 h4{font-size:1rem;font-weight:700;margin:0}
 p{margin:.5rem 0}
+details.identity{margin:.6rem 0}details.identity dd{overflow-wrap:anywhere}
+details.identity > summary{cursor:pointer;color:var(--text-muted);font-size:.86rem;padding:.3rem 0}
 .muted{color:var(--text-muted)} .small{font-size:.86rem} .b{font-weight:700} .orange{color:var(--orange-text)}
 ul.plain{list-style:none;margin:0;padding:0}
 
@@ -1018,6 +1020,9 @@ def render(
         f"<meta name='color-scheme' content='{'dark light' if theme == 'system' else theme}'>"
         "<meta name='theme-color' content='#111111'>"
         "<link rel='manifest' href='/app.webmanifest'>"
+        "<link rel='icon' href='/favicon.ico' sizes='32x32'>"
+        "<link rel='icon' href='/static/gateway-icon.svg' type='image/svg+xml'>"
+        "<link rel='apple-touch-icon' href='/apple-touch-icon.png'>"
         f"<title>{html.escape(title)} · {html.escape(site)}</title><style>{CSS}</style>{head_extra}</head>"
         f"<body class='{classes}'>{SPRITE}"
         "<header class='topbar'><div class='wrap'><div class='left'>"

@@ -7,6 +7,36 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [Unreleased]
+
+### Changed
+
+- **Assistants learn only what they need about you.** `whoami` now answers
+  with your display name, the gateway version and your account page, and
+  nothing else: no email, no groups (your sign-in service sends every group
+  you are in, including ones for other services), no IDs, no sign-in scopes
+  or token details. `account_status` no longer says when Archidekt was
+  linked or last used. You can see everything your sign-in service shares
+  with the gateway under **What your sign-in shares** on the Account page;
+  the operator guides now point there instead of `whoami` for checking
+  groups and email.
+- **The setup command is `/setup-mtg-gateway`.** The plugin's setup skill is
+  renamed from `setup` (`/<plugin>:setup-mtg-gateway` in Claude Code). It
+  keeps that name under an owner's own `MTG_SERVER_NAME`. Install the
+  plugin again from `/install` to get it.
+- The plugin names its author (`TheUncleBen`); under an owner's own name it
+  still names the owner and links nowhere.
+
+### Added
+
+- **The connector has its own icon, description and website.** The gateway
+  tells apps that connect to it (MCP `serverInfo`) a description, the
+  project's website and its icon, served from the gateway itself. Only
+  signed-in apps see these. The same icon is the browser tab icon and is
+  served at `/favicon.ico` and `/apple-touch-icon.png`, which apps that draw
+  a connector's icon from its site look for. Before, those addresses
+  answered 404. The home-screen icon of the website matches the Android app.
+
 ## [0.7.10] - 2026-10-09
 
 The 0.7.9 code with a release build that cannot be stopped by Docker Hub's

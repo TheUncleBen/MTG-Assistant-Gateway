@@ -32,7 +32,7 @@ from mcp.server.auth.routes import (
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
-from mcp_types import CallToolResult, TextContent
+from mcp_types import CallToolResult, Icon, TextContent
 from pydantic import Field
 from starlette.applications import Starlette
 from starlette.datastructures import Headers
@@ -44,7 +44,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from . import __version__, deck_stats
 from .admin import add_admin_routes
 from .api import add_api_routes
-from .app_page import add_app_routes
+from .app_page import PROJECT_URL, add_app_routes
 from .app_signin import AppSignins
 from .approve import (
     APPLY_TOOL_META,
@@ -344,6 +344,36 @@ class LoginCookieMiddleware:
 
 _LOGIN_KEY = re.compile(r"[A-Za-z0-9_-]{43}")
 
+# What an app shows about the connector itself (MCP ``serverInfo``: description, website, icons).
+# Only signed-in clients see it (``initialize`` needs a token), so naming the project here doesn't
+# undo the anonymity of the public pages under an owner's own MTG_SERVER_NAME. The icons are this
+# gateway's own files on its own origin, as the MCP spec asks clients to require.
+SERVER_DESCRIPTION = (
+    "Magic: The Gathering deck research, goldfish testing and safe Archidekt deck edits, "
+    "from a self-hosted gateway."
+)
+ICON_SIZES = (512, 192, 128, 64)
+# What account_status hands the assistant: what it needs to act (linked, as whom on Archidekt,
+# when the link runs out, writes on, the approval mode, where to send the person). When the link
+# was made or last used stays on the Account page.
+ACCOUNT_STATUS_FIELDS = (
+    "linked",
+    "archidekt_username",
+    "link_expires_at",
+    "writes_enabled",
+    "account_page",
+    "approval_mode",
+    "approval_mode_label",
+    "approval_mode_note",
+)
+
+
+def server_icons(public_url: str) -> list[Icon]:
+    return [
+        Icon(src=f"{public_url}/static/gateway-icon-{n}.png", mime_type="image/png", sizes=[f"{n}x{n}"])
+        for n in ICON_SIZES
+    ] + [Icon(src=f"{public_url}/static/gateway-icon.svg", mime_type="image/svg+xml", sizes=["any"])]
+
 
 class MembershipMiddleware:
     """Before any request that carries a browser session or a bearer token is served, ask the
@@ -367,6 +397,8 @@ class MembershipMiddleware:
         "/token",
         "/revoke",
         "/healthz",
+        "/favicon.ico",
+        "/apple-touch-icon.png",
     )
 
     def __init__(self, app: ASGIApp, state: AppState):
@@ -535,6 +567,9 @@ def build_mcp_server(state: AppState) -> MCPServer:
     server = MCPServer(
         name="mtg-gateway",
         title=s.server_name,
+        description=SERVER_DESCRIPTION,
+        website_url=PROJECT_URL,
+        icons=server_icons(s.public_url),
         version=__version__,
         instructions=(
             "Authenticated Magic: The Gathering deck gateway. Call whoami to confirm which account you are "
@@ -572,24 +607,24 @@ def build_mcp_server(state: AppState) -> MCPServer:
     @server.tool(
         name="whoami",
         title="Who am I",
-        description="Return the signed-in user's identity as the gateway sees it.",
+        description=(
+            "Confirm the connection works: the signed-in member's display name, the gateway version "
+            "and their account page. Nothing else about the account is shared with the assistant."
+        ),
         annotations={"readOnlyHint": True, "openWorldHint": False},
         meta=tool_meta(ACCOUNT_CARD_URI) if s.apply_in_chat else None,
     )
     async def whoami() -> dict[str, object]:
+        # Minimum disclosure: the sign-in service also sends an email address, every group the
+        # person is in (including ones for other services) and IDs; none of it helps the
+        # assistant, so none of it leaves the gateway here. The person sees it on their Account page.
         token = get_access_token()
         if token is None or not token.subject:
             raise RuntimeError("no authenticated user on this request")
-        user = state.db.get_user(token.subject)
+        user = state.db.get_user(token.subject) or {}
         return {
-            "sub": token.subject,
-            "name": (user or {}).get("name"),
-            "preferred_username": (user or {}).get("preferred_username"),
-            "email": (user or {}).get("email"),
-            "groups": (user or {}).get("groups", []),
-            "client_id": token.client_id,
-            "scopes": token.scopes,
-            "token_expires_in_seconds": max(0, (token.expires_at or 0) - int(time.time())),
+            "signed_in": True,
+            "name": user.get("name") or user.get("preferred_username"),
             "gateway_version": __version__,
             "account_page": f"{s.public_url}/account",
         }
@@ -638,7 +673,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
         meta=account_card_meta,
     )
     async def account_status() -> dict[str, object]:
-        return state.decks.status(_sub())
+        status = state.decks.status(_sub())
+        return {k: status[k] for k in ACCOUNT_STATUS_FIELDS if k in status}
 
     @server.tool(
         name="list_my_decks",
