@@ -7,6 +7,24 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.15] - 2026-10-10
+
+Small fixes to the Forge simulation from an independent gap review of 0.7.14.
+
+### Fixed
+- Deleting a deck report now stops its unfinished Forge games (queued or running). Before, the
+  games kept the engine busy, and deleting a report freed the "one unfinished Forge run per member"
+  limit while its games still ran.
+  The same goes for old reports removed past the 200-per-member limit.
+- The report page's Forge section updates by itself while the games are queued or running (every
+  15 seconds while the page is visible), instead of asking to reload the page.
+
+### Added
+- The admin page's System card shows whether the Forge engine answers, and `/healthz` reports
+  `degraded` when `MTG_FORGE_URL` is set and Forge does not answer (still status only, still
+  HTTP 200, as for Mystic Forge).
+- README status table: a row for the Forge simulation and what is not yet measured.
+
 ## [0.7.14] - 2026-10-10
 
 ### Added

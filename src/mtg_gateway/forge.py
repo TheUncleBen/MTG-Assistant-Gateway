@@ -10,6 +10,7 @@ explains those from the card's exact text.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 import time
@@ -25,6 +26,11 @@ DEFAULT_OPPONENTS = 3
 FINAL_STATES = frozenset({"done", "failed", "timeout", "cancelled", "lost", "skipped"})
 # A run still unfinished this long after it started is given up (the engine was unreachable).
 GIVE_UP_SECONDS = 4 * 3600
+# The health check's probe of the service (as mf_proxy.py does for Mystic Forge): short, and cached
+# so however often /healthz is asked, the service sees one probe per half minute at most.
+HEALTH_DEADLINE_SECONDS = 3.0
+HEALTH_CACHE_SECONDS = 30.0
+HEALTH_DOWN_CACHE_SECONDS = 5.0
 
 
 class ForgeError(Exception):
@@ -104,6 +110,8 @@ class ForgeClient:
     ):
         self.base_url = base_url.rstrip("/")
         self._client = httpx.AsyncClient(base_url=self.base_url, timeout=timeout, transport=transport)
+        self._health: tuple[float, bool] = (0.0, False)  # (checked at, answering), for the admin page
+        self._health_lock = asyncio.Lock()
 
     async def _call(self, method: str, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
         try:
@@ -128,6 +136,25 @@ class ForgeClient:
 
     async def health(self) -> dict[str, Any]:
         return await self._call("GET", "/health")
+
+    async def healthy(self) -> bool:
+        """Whether the service answers /health now, for the health check; cached like Mystic
+        Forge's probe. A failure is logged once per probe."""
+        at, ok = self._health
+        if time.time() - at < (HEALTH_CACHE_SECONDS if ok else HEALTH_DOWN_CACHE_SECONDS):
+            return ok
+        async with self._health_lock:
+            at, ok = self._health  # another caller may have probed while this one waited
+            if time.time() - at < (HEALTH_CACHE_SECONDS if ok else HEALTH_DOWN_CACHE_SECONDS):
+                return ok
+            try:
+                reply = await asyncio.wait_for(self.health(), HEALTH_DEADLINE_SECONDS)
+                ok = isinstance(reply, dict) and reply.get("status") == "ok"
+            except Exception as exc:
+                logger.warning("health check: Forge is not answering: %s", type(exc).__name__)
+                ok = False
+            self._health = (time.time(), ok)
+            return ok
 
     async def precons(self) -> list[dict[str, Any]]:
         return (await self._call("GET", "/precons")).get("precons") or []

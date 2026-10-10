@@ -85,6 +85,7 @@ class ReportService:
         self.forge = forge
         self.forge_games = forge_games
         self._forge_task: asyncio.Task[None] | None = None
+        self._forge_cancels: set[asyncio.Task[None]] = set()  # held so a pending cancel is not collected
         # Held from the one-run-per-member check until the new run is saved (one gateway process).
         self._forge_start_lock = asyncio.Lock()
         self.min_interval = min_interval
@@ -251,11 +252,18 @@ class ReportService:
                 raise DeckError(
                     "not_found", "Your gateway data was deleted while the report ran; nothing was kept."
                 )
-            c.execute(
-                "DELETE FROM reports WHERE owner_sub = ? AND id NOT IN ("
-                "SELECT id FROM reports WHERE owner_sub = ? ORDER BY taken_at DESC, rowid DESC LIMIT ?)",
-                (sub, sub, MAX_REPORTS_PER_USER),
+            keep = (
+                "owner_sub = ? AND id NOT IN ("
+                "SELECT id FROM reports WHERE owner_sub = ? ORDER BY taken_at DESC, rowid DESC LIMIT ?)"
             )
+            limit = (sub, sub, MAX_REPORTS_PER_USER)
+            pruned = c.execute(
+                f"SELECT forge_json FROM reports WHERE {keep} AND forge_json IS NOT NULL", limit
+            )
+            pruned_forge = [json.loads(r["forge_json"]) for r in pruned.fetchall()]
+            c.execute(f"DELETE FROM reports WHERE {keep}", limit)
+        for section in pruned_forge:  # an unfinished run goes with its report, as in delete()
+            self._cancel_forge(section)
         self.db.audit("report_created", sub=sub, detail={"report_id": rid, "deck_id": deck.id})
         if simulate and self.forge is not None:
             seed = options.get("seed")
@@ -289,7 +297,9 @@ class ReportService:
         except Exception:  # an unexpected reply must not turn a stored report into a tool error
             logger.exception("starting a Forge run failed for %s", rid)
             section = {"state": "failed", "error": "The simulation engine gave an unexpected answer."}
-        self._save_forge(rid, section)
+        if not self._save_forge(rid, section):  # the report was deleted while the run started
+            self._cancel_forge(section)
+            return
         self._ensure_forge_refresher()
 
     def _forge_running(self, sub: str, rid: str) -> bool:
@@ -306,12 +316,39 @@ class ReportService:
         """At startup: carry on refreshing runs a restart left unfinished."""
         self._ensure_forge_refresher()
 
-    def _save_forge(self, rid: str, section: dict[str, Any]) -> None:
+    def _save_forge(self, rid: str, section: dict[str, Any]) -> bool:
+        """Store the report's Forge section; False when the report no longer exists."""
         with self.db.tx() as c:
-            c.execute(
+            cur = c.execute(
                 "UPDATE reports SET forge_json = ?, forge_state = ? WHERE id = ?",
                 (json.dumps(section), section.get("state"), rid),
             )
+        return cur.rowcount > 0
+
+    def _cancel_forge(self, section: Any) -> None:
+        """Best effort: stop the Forge job behind an unfinished section, so a deleted report does
+        not keep a game running (or queued) that nobody will read."""
+        if (
+            self.forge is None
+            or not isinstance(section, dict)
+            or section.get("state") in FINAL_STATES
+            or not section.get("job_id")
+        ):
+            return
+        forge, job_id = self.forge, str(section["job_id"])
+
+        async def cancel() -> None:
+            try:
+                await forge.cancel(job_id)
+            except Exception as exc:  # the job may have finished or been forgotten meanwhile
+                logger.info("cancelling Forge job %s: %s", job_id, exc)
+
+        try:
+            task = asyncio.get_running_loop().create_task(cancel())
+        except RuntimeError:  # no running loop (a synchronous caller); the job ends on its own
+            return
+        self._forge_cancels.add(task)
+        task.add_done_callback(self._forge_cancels.discard)
 
     def _ensure_forge_refresher(self) -> None:
         """Keep one background task refreshing unfinished Forge runs until none is left. Also
@@ -492,9 +529,15 @@ class ReportService:
             sql += " AND created_by_client = ?"
             args += (client_id,)
         with self.db.tx() as c:
+            row = c.execute(sql.replace("DELETE", "SELECT forge_json", 1), args).fetchone()
             cur = c.execute(sql, args)
         if cur.rowcount == 0:
             raise DeckError("not_found", "No such report for your account.")
+        # An unfinished Forge run goes with its report: otherwise it keeps the engine busy, and the
+        # one-unfinished-run-per-member check (which reads only stored reports) would let a member
+        # queue another run by deleting this one.
+        if row is not None and row["forge_json"]:
+            self._cancel_forge(json.loads(row["forge_json"]))
 
     @staticmethod
     def _summary(d: dict[str, Any]) -> dict[str, Any]:

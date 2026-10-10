@@ -271,6 +271,20 @@ async def test_health_and_index(gw: Harness):
     assert r.status_code == 302 and r.headers["location"] == "/login?next=/"
 
 
+async def test_health_reports_a_forge_outage_as_degraded(tmp_path, idp: FakeIdP):
+    """With MTG_FORGE_URL set and Forge not answering, /healthz says "degraded" (status only) and
+    the admin page's System card names the engine."""
+    from mtg_gateway.admin import system_data
+
+    settings = make_settings(tmp_path, forge_url="http://127.0.0.1:9")  # nothing listens there
+    async with running(Harness(settings, idp)) as h:
+        r = await h.http.get("/healthz")
+        assert r.status_code == 200 and r.json() == {"status": "degraded"}
+        assert system_data(h.app.state.gateway)["forge"] == "NOT answering"
+    async with running(Harness(make_settings(tmp_path / "off"), idp)) as h:
+        assert system_data(h.app.state.gateway)["forge"] == "not configured"
+
+
 async def test_app_config_names_the_sign_in_origin_only(gw: Harness):
     # Public and anonymous: the Android app pins the one sign-in origin it keeps in the app.
     r = await gw.http.get("/.well-known/mtg-gateway")

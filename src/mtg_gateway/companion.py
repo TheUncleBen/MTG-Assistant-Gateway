@@ -2014,7 +2014,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             sid=sid,
             heading=False,
             current="/history",
-            extra_scripts=("export.js",),
+            extra_scripts=("export.js", "forge-live.js"),
             extra_css=REPORT_CSS,
         )
 

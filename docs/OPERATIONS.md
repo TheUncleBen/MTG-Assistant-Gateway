@@ -54,13 +54,14 @@ curl -s https://mtg.example.com/healthz
 answers, and HTTP 503 with `"detail":"database unavailable"` otherwise (the
 reason is in the gateway's log, never in the reply). It names no version or
 service, since anyone can ask it and those would tell a stranger which
-project the gateway runs. When Mystic Forge is down, `status` is
+project the gateway runs. When Mystic Forge is down, or the optional Forge
+engine is configured (`MTG_FORGE_URL`) and does not answer, `status` is
 `"degraded"` but the reply is still
 HTTP 200: the gateway's own pages and Archidekt tools keep working without
 it, so the container is not restarted for it; only research and simulations
 fail. The admin page's **System** card shows the version, database size and
 schema, when the newest backup (and the newest backup copy) was written, and
-the research service's state as the health check last found it.
+the research service's and the Forge engine's state as the health check last found them.
 
 The gateway logs one line per notable event to standard output (`MTG_LOG_LEVEL`,
 default `INFO`), and one line per request with its method, route, status and
