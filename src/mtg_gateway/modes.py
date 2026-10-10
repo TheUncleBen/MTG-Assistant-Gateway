@@ -15,8 +15,8 @@ History page. The risk tiers are decided from the proposal's stored review rows,
 proposal is low risk only if what the review page would show is small and safe:
 
 * **low**: an edit to an existing deck with at most ``max_rows`` rows (default 5), where every
-  row adds, removes, changes the quantity, moves the category or changes the finish or
-  printing of a card, no row moves more than ``MAX_COPIES_PER_ROW`` copies (a playset) and none
+  row adds, removes, changes the quantity, moves the category or changes the finish, printing
+  or colour tag of a card, no row moves more than ``MAX_COPIES_PER_ROW`` copies (a playset) and none
   touches the commander; or a clone, which creates a private copy and changes nothing that
   exists.
 * **high**: everything else: more rows than that, any commander change, a new deck, restoring
@@ -74,7 +74,7 @@ AUTO_WARNING = (
 )
 
 # Row kinds (decks.row_line) a low-risk edit may consist of.
-LOW_RISK_ROW_KINDS = frozenset({"add", "remove", "change", "category", "finish", "printing"})
+LOW_RISK_ROW_KINDS = frozenset({"add", "remove", "change", "category", "finish", "printing", "label"})
 
 
 def valid_mode(mode: Any) -> bool:
@@ -122,7 +122,8 @@ def risk_of(
     if any(k not in LOW_RISK_ROW_KINDS for k in kinds):
         return (
             "high",
-            "contains a change that is not a card add, remove, quantity, category, finish or printing",
+            "contains a change that is not a card add, remove, quantity, category, finish, printing or "
+            "colour tag",
         )
     if len(rows) > max_rows:
         return "high", f"changes {len(rows)} rows, more than the {max_rows} a low-risk edit may have"

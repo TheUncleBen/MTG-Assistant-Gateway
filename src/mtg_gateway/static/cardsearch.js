@@ -233,19 +233,28 @@
     }).catch(function () { deckLoad = null; setMsg("No connection; your decks could not be read.", true); });
     return deckLoad;
   }
-  function fillCats(list) {
+  var catDeck = null;  // the deck whose categories the select shows
+  function fillCats(list, id) {
+    var keep = id && id === catDeck ? catSel.value : "";  // a refill of the same deck keeps the choice
+    catDeck = id || null;
     catSel.textContent = "";
     catSel.appendChild(option("", "The deck's default"));
-    (list || []).forEach(function (c) { if (c && c !== "Maybeboard") catSel.appendChild(option(c, c)); });
+    (list || []).forEach(function (c) {
+      if (c && c !== "Maybeboard") { var o = option(c, c); if (c === keep) o.selected = true; catSel.appendChild(o); }
+    });
     if (window.MtgSelect) window.MtgSelect.refresh(catSel);
   }
+  var catLoads = {};  // deck id -> true while its categories are being read, so one read per deck
   function loadCats(id) {
     if (!id) { fillCats([]); return; }
-    if (cats[id]) { fillCats(cats[id]); return; }
-    fillCats([]);
+    if (cats[id]) { fillCats(cats[id], id); return; }
+    fillCats([], id);
+    if (catLoads[id]) return;
+    catLoads[id] = true;
     api("GET", "/api/v1/decks/" + enc(id) + "?cards=0").then(function (d) {
-      if (d.ok && d.categories) { cats[id] = d.categories; if (deckSel.value === id) fillCats(cats[id]); }
-    }).catch(function () { /* the default category still works */ });
+      delete catLoads[id];
+      if (d.ok && d.categories) { cats[id] = d.categories; if (deckSel.value === id) fillCats(cats[id], id); }
+    }).catch(function () { delete catLoads[id]; /* the default category still works */ });
   }
   function openSheet(name) {
     if (!linked || !name) return;

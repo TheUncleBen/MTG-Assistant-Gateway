@@ -56,11 +56,23 @@ from .timing import add_time, archidekt_time
 
 logger = logging.getLogger(__name__)
 
-ACTIONS = ("add", "remove", "set_quantity", "set_category", "set_commander", "set_finish", "set_printing")
+ACTIONS = (
+    "add",
+    "remove",
+    "set_quantity",
+    "set_category",
+    "set_commander",
+    "set_finish",
+    "set_printing",
+    "set_label",
+)
 COUNT_ACTIONS = ("add", "remove", "set_quantity")
 CATEGORY_ACTIONS = ("set_category", "set_commander")
-# Changes to how a card already in the deck is printed: its finish, or the printing itself.
-PRINTING_ACTIONS = ("set_finish", "set_printing")
+# Changes to a card already in the deck, row by row: its finish, the printing itself, or its
+# colour tag (Archidekt's "label", stored on a row as "Name,#rrggbb").
+PRINTING_ACTIONS = ("set_finish", "set_printing", "set_label")
+LABEL_COLOUR = re.compile(r"#[0-9a-fA-F]{6}")
+MAX_LABEL = 40
 COMMANDER = "Commander"
 # The purpose named inside every stored Archidekt session (see DeckService._seal).
 SESSION_PURPOSE = "archidekt_session"
@@ -370,6 +382,8 @@ def row_line(r: dict[str, Any]) -> str:
         return line
     if kind == "finish":
         return f"{r['name']}: finish {r['before']} -> {r['after']}"
+    if kind == "label":
+        return f"{r['name']}: colour tag {r['before']} -> {r['after']}{side}"
     if kind == "printing":
         return f"{r['name']}: printing {r['before']} -> {r['after']}"
     if kind == "clone":
@@ -439,6 +453,8 @@ class Change:
     set_code: str | None = None
     collector_number: str | None = None
     finish: str | None = None
+    # set_label: the colour tag as Archidekt stores it ("Have,#37d67a"); "" takes the tag off
+    label: str | None = None
     # "main" (the deck proper) or "side": the maybeboard and sideboard rows, which count
     # separately. A count or category change names the zone its rows are in.
     zone: str = "main"
@@ -468,9 +484,32 @@ class Change:
             d["collector_number"] = self.collector_number
         if self.finish:
             d["finish"] = self.finish
+        if self.action == "set_label":
+            name, colour = split_label(self.label or "")
+            d["label"] = name
+            if colour:
+                d["color"] = colour
         if self.zone == "side":
             d["zone"] = "side"
         return d
+
+
+def split_label(label: str) -> tuple[str, str]:
+    """('Have', '#37d67a') from Archidekt's 'Have,#37d67a'; a colour that is not a plain hex
+    colour is left out, so it can never reach a style attribute."""
+    name, _, colour = (label or "").rpartition(",") if "," in (label or "") else (label or "", "", "")
+    colour = colour.strip()
+    if re.fullmatch(r"#[0-9a-fA-F]{3}", colour):  # #fff is #ffffff
+        colour = "#" + "".join(c * 2 for c in colour[1:])
+    return name.strip(), colour.lower() if LABEL_COLOUR.fullmatch(colour) else ""
+
+
+def label_text(label: str) -> str:
+    """How a review row names a colour tag: 'Have (#37d67a)', or 'no tag'."""
+    name, colour = split_label(label)
+    if not name:
+        return "no tag"
+    return f"{name} ({colour})" if colour else name
 
 
 ZONES = ("main", "side")
@@ -506,8 +545,11 @@ def parse_changes(raw: Any) -> list[Change]:
             out.append(dataclasses.replace(ch, zone=zone))
             continue
         if action in PRINTING_ACTIONS:
-            if zone == "side":
+            if zone == "side" and action != "set_label":
                 raise DeckError("invalid", f"change {i}: {action} works on the deck proper, not zone side")
+            if action == "set_label":
+                out.append(dataclasses.replace(_parse_label_change(i, name, item), zone=zone))
+                continue
             out.append(_parse_printing_change(i, action, name, item))
             continue
         qty = item.get("quantity")
@@ -568,7 +610,7 @@ def parse_changes(raw: Any) -> list[Change]:
         raise DeckError("invalid", "one set_category or set_commander per card name per proposal")
     reprinted = [key(ch) for ch in out if ch.action in PRINTING_ACTIONS]
     if len(reprinted) != len(set(reprinted)):
-        raise DeckError("invalid", "one set_finish or set_printing per card name per proposal")
+        raise DeckError("invalid", "one set_finish, set_printing or set_label per card name per proposal")
     counted = {key(ch) for ch in out if ch.action in COUNT_ACTIONS}
     clash = sorted((set(categorised) | set(reprinted)) & counted)
     if clash:
@@ -584,6 +626,32 @@ def parse_changes(raw: Any) -> list[Change]:
             "a card cannot be recategorized and reprinted in the same proposal: " + ", ".join(clash),
         )
     return out
+
+
+def _parse_label_change(i: int, name: str, item: dict[str, Any]) -> Change:
+    """``set_label`` ({action, card_name, label, color?, zone?}) puts a colour tag on every row of
+    the card in that zone, as Archidekt's own editor does: a name of up to 40 characters and a
+    colour as #rrggbb (grey when none is given). An empty label takes the tag off."""
+    for key in ("quantity", "category", "set_code", "set", "collector_number", "finish", "modifier", "foil"):
+        if item.get(key) not in (None, "", False):
+            raise DeckError("invalid", f"change {i}: set_label takes only card_name, label, color and zone")
+    raw = item.get("label")
+    if raw is None:
+        raise DeckError("invalid", f"change {i}: set_label needs a label (an empty one takes the tag off)")
+    text = clean_text(str(raw))
+    colour = str(item.get("color") or item.get("colour") or "").strip()
+    if "," in text and not colour:  # Archidekt's own form, "Have,#37d67a"
+        text, colour = text.rsplit(",", 1)[0].strip(), text.rsplit(",", 1)[1].strip()
+    if "," in text or len(text) > MAX_LABEL:
+        raise DeckError("invalid", f"change {i}: a label is at most {MAX_LABEL} characters, without commas")
+    if not text:
+        return Change("set_label", name, label="")
+    if colour and not LABEL_COLOUR.fullmatch(colour):
+        raise DeckError("invalid", f"change {i}: color must be a colour like #37d67a")
+    return Change("set_label", name, label=f"{text},{(colour or DEFAULT_LABEL_COLOUR).lower()}")
+
+
+DEFAULT_LABEL_COLOUR = "#656565"
 
 
 def _parse_printing_change(i: int, action: str, name: str, item: dict[str, Any]) -> Change:
@@ -624,16 +692,28 @@ def printing_plan_rows(
     specs: list[dict[str, Any]] = []
     rows: list[dict[str, Any]] = []
     by_name: dict[str, list[Any]] = {}
+    side_by_name: dict[str, list[Any]] = {}
     for c in deck.main_cards:
         by_name.setdefault(c.name.lower(), []).append(c)
         by_name.setdefault(front_face(c.name).lower(), []).append(c)
+    for c in deck.side_cards:
+        side_by_name.setdefault(c.name.lower(), []).append(c)
+        side_by_name.setdefault(front_face(c.name).lower(), []).append(c)
     for ch in changes:
         if ch.action not in PRINTING_ACTIONS:
             continue
-        cards = list({c.relation_id: c for c in by_name.get(ch.card_name.lower(), [])}.values())
+        pool = side_by_name if ch.zone == "side" else by_name
+        cards = list({c.relation_id: c for c in pool.get(ch.card_name.lower(), [])}.values())
         if not cards:
             raise DeckError(
-                "invalid", f"'{ch.card_name}' is not in the deck, so its printing cannot be changed"
+                "invalid",
+                f"'{ch.card_name}' is not in the deck"
+                + (" (maybeboard or sideboard)" if ch.zone == "side" else "")
+                + (
+                    ", so it cannot be tagged"
+                    if ch.action == "set_label"
+                    else ", so its printing cannot be changed"
+                ),
             )
         if any(c.relation_id is None or c.card_id is None for c in cards):
             raise DeckError("contract", f"Archidekt did not number the deck rows of '{ch.card_name}'.")
@@ -658,7 +738,24 @@ def printing_plan_rows(
             ],
         }
         finishes = sorted({r["finish"] for r in spec["rows"]})
-        if ch.action == "set_finish":
+        if ch.action == "set_label":
+            want = ch.label or ""
+            if all(_same_label(c.label, want) for c in cards):
+                continue
+            before = sorted({label_text(c.label) for c in cards})
+            spec["label"] = want
+            spec["zone"] = ch.zone
+            rows.append(
+                _row(
+                    "label",
+                    name=first.name,
+                    before=" / ".join(before),
+                    after=label_text(want),
+                    colour=split_label(want)[1] or None,
+                    zone="side" if ch.zone == "side" else None,
+                )
+            )
+        elif ch.action == "set_finish":
             before = sorted({c.modifier or "Normal" for c in cards})
             if before == [ch.finish]:
                 continue
@@ -681,6 +778,14 @@ def printing_plan_rows(
             rows.append(_row("printing", name=first.name, before=" / ".join(before), after=after))
         specs.append(spec)
     return specs, rows
+
+
+def _same_label(have: str, want: str) -> bool:
+    """A row already carries the tag: same name and colour, or no tag on either side."""
+    a, b = split_label(have), split_label(want)
+    if not a[0] and not b[0]:
+        return True
+    return a[0] == b[0] and a[1] == b[1]
 
 
 def _parse_category_change(i: int, action: str, name: str, item: dict[str, Any]) -> Change:
@@ -2338,6 +2443,16 @@ class DeckService:
         rows = {c.relation_id: c for c in deck.cards if c.relation_id is not None}
         out: list[dict[str, Any]] = []
         for spec in specs:
+            if "label" in spec:
+                # Archidekt's own editor sends the tag in modifications.label, "Name,#rrggbb"
+                # (its site code, read 2026-10-10); taking a tag off sends an empty one (not
+                # verified live: the re-read after the write checks it)
+                for rid in spec["relation_ids"]:
+                    entry = _entry("modify", rows[rid], rows[rid].quantity)
+                    entry["modifications"]["label"] = spec["label"]
+                    entry["modifications"]["companion"] = bool(rows[rid].companion)  # kept as it is
+                    out.append(entry)
+                continue
             if spec.get("set_code"):
                 card = await self._call(
                     sub,
@@ -2380,6 +2495,7 @@ class DeckService:
                 for rid in spec["relation_ids"]:
                     entry = _entry("modify", rows[rid], rows[rid].quantity)
                     entry["modifications"]["modifier"] = spec["finish"]
+                    entry["modifications"]["companion"] = bool(rows[rid].companion)  # kept as it is
                     out.append(entry)
         return out
 
@@ -3515,6 +3631,12 @@ def _printing_mismatches(verified: Deck, specs: list[dict[str, Any]]) -> list[st
     out: list[str] = []
     for spec in specs:
         rows = [c for c in verified.main_cards if c.name.lower() == spec["name"].lower()]
+        if "label" in spec:
+            pool = verified.side_cards if spec.get("zone") == "side" else verified.main_cards
+            tagged = [c for c in pool if c.name.lower() == spec["name"].lower()]
+            if not tagged or not all(_same_label(c.label, spec["label"]) for c in tagged):
+                out.append(spec["name"])
+            continue
         if spec.get("cardid") is not None:
             new_rows = [c for c in rows if c.card_id == spec["cardid"]]
             got: dict[str, int] = {}

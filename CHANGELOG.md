@@ -7,6 +7,35 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.18] - 2026-10-10
+
+More of the Archidekt deck page: new views, your own stack order, editing several cards at once and
+colour tags.
+
+0.7.17 was not released on its own (its build stopped on the test fixed below), so its changes
+first ship in this version's image.
+
+### Added
+- Deck page: Table and Scroll views next to the existing ones.
+- Stacks can be dragged into your own order. The order is kept in this browser for each deck and
+  grouping, because Archidekt keeps no stack order of its own.
+- Select several cards to move them to another category, change their finish or remove them in
+  one save, with Undo.
+- Colour tags: set, change or clear a card's coloured tag from the deck page, shown as a dot on
+  the card. The assistant can propose tags too (`set_label` in `propose_deck_changes`); a tag
+  change is low risk, so it follows your approval mode like other small edits.
+
+### Fixed
+- Card search's Add to deck: a second read of the same deck's categories no longer resets the
+  category you just picked.
+
+### Changed
+- The in-chat card for deleting a deck shows Reject as a plain button next to the red Delete.
+
+### Not built
+- Moxfield import by URL: Moxfield's deck API could not be reached or checked from here, so it
+  is not built. A Moxfield export pasted as text already imports.
+
 ## [0.7.17] - 2026-10-10
 
 Assistant tools for actions on your Archidekt account. Each one is only a proposal: you apply it

@@ -24,6 +24,7 @@ from urllib.parse import quote
 
 from .archidekt import VOTE_UP, Deck, DeckCard, featured_scryfall_id, format_label
 from .deck_stats import WUBRG, colour_letter, is_basic_land, is_land, mana_pips
+from .decks import split_label
 from .mana import mana_html as _mana_html
 from .theme import icon, plural
 from .views import auto_category, cards_by_category
@@ -31,7 +32,7 @@ from .views import auto_category, cards_by_category
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _SYMBOL = re.compile(r"\{([^{}]+)\}")
 
-VIEWS = {"text": "Text", "stacks": "Stacks", "grid": "Grid"}
+VIEWS = {"text": "Text", "table": "Table", "stacks": "Stacks", "scroll": "Scroll", "grid": "Grid"}
 GROUPS = {
     "category": "Categories",
     "type": "Type",
@@ -514,13 +515,16 @@ def _finish_badge(card: DeckCard) -> str:
 
 
 def _label_dot(card: DeckCard) -> str:
-    if card.label:
-        colour = card.label.split(",")[-1].strip() if "," in card.label else ""
-        style = (
-            f" style='background:{esc(colour)}'" if re.fullmatch(r"#[0-9a-fA-F]{3,8}", colour or "") else ""
-        )
-        return f"<span class='tagdot'{style} title='{esc(card.label.split(',')[0])}'></span>"
-    return ""
+    """Archidekt's colour tag: a dot in the tag's colour, its name for screen readers and on hover
+    (a tag with no name, Archidekt's empty one, shows nothing)."""
+    name, colour = split_label(card.label)
+    if not name:
+        return ""
+    style = f" style='background:{colour}'" if colour else ""  # split_label lets only #rrggbb through
+    return (
+        f"<span class='tagdot'{style} title='Tag: {esc(name)}'>"
+        f"<span class='sr-only'>tag {esc(name)}</span></span>"
+    )
 
 
 def _owned_dot(card: DeckCard, owned: dict[str, int] | None) -> str:
@@ -551,6 +555,35 @@ def text_row(card: DeckCard, *, deck: Deck, owned: dict[str, int] | None = None)
         f"<span class='mc'>{mana_html(card.mana_cost)}</span>"
         f"<span class='set' title='{esc(card.set_code.upper())} {esc(card.collector_number)}'>"
         f"{esc(card.set_code.upper())}</span>"
+        f"<span class='price'>{money(card.price) if card.price is not None else ''}</span>"
+        "</li>"
+    )
+
+
+TABLE_HEAD = (
+    "<li class='th' aria-hidden='true'><span class='q'>Qty</span><span>Name</span>"
+    "<span class='ty'>Type</span>"
+    "<span class='mv'>MV</span><span class='mc'>Cost</span><span class='set'>Set</span>"
+    "<span class='price'>Price</span></li>"
+)
+
+
+def table_row(card: DeckCard, *, deck: Deck, owned: dict[str, int] | None = None) -> str:
+    """One card in the Table view: the Text view's row with the type line, mana value and
+    collector number in columns of their own (Archidekt's Table view, from the same data)."""
+    cls = " side" if not deck.in_deck(card) else ""
+    printing = f"{card.set_code.upper()} {card.collector_number}".strip()
+    mv = f"{card.cmc:g}" if card.cmc is not None else ""
+    return (
+        f"<li class='row{cls}' tabindex='0' role='button' data-name='{esc(card.name.lower())}' "
+        f"data-card='{esc(card.name)}'{_card_data(card, deck)}>"
+        f"<span class='q'>{card.quantity}</span>"
+        f"<span class='n'>{_label_dot(card)}{_owned_dot(card, owned)}<span "
+        f"class='name' title='{esc(card.name)}'>{esc(card.name)}</span>{_finish_badge(card)}</span>"
+        f"<span class='ty' title='{esc(card.type_line)}'>{esc(card.type_line)}</span>"
+        f"<span class='mv'>{mv}</span>"
+        f"<span class='mc'>{mana_html(card.mana_cost)}</span>"
+        f"<span class='set' title='{esc(printing)}'>{esc(printing)}</span>"
         f"<span class='price'>{money(card.price) if card.price is not None else ''}</span>"
         "</li>"
     )
@@ -604,6 +637,7 @@ def _card_data(card: DeckCard, deck: Deck) -> str:
     return (
         card_view_attrs(card, img=card_image(card))
         + f" data-qty='{card.quantity}' data-zone='{zone}' data-cat='{esc(cat)}'{rel}"
+        + (f" data-label='{esc(card.label)}'" if split_label(card.label)[0] else "")
     )
 
 
@@ -628,7 +662,7 @@ def image_card(card: DeckCard, *, deck: Deck, owned: dict[str, int] | None = Non
         f"<div class='c' data-name='{esc(card.name.lower())}' data-card='{esc(card.name)}'"
         f"{_card_data(card, deck)} "
         f"title='{esc(card.name)}' tabindex='0' role='button'>{body}{qty}{extra}"
-        f"{_finish_badge(card)}{_owned_dot(card, owned)}</div>"
+        f"{_finish_badge(card)}{_owned_dot(card, owned)}{_label_dot(card)}</div>"
     )
 
 
@@ -664,6 +698,13 @@ def cards_html(
             body = (
                 "<ul class='plain rows'>"
                 + "".join(text_row(c, deck=deck, owned=owned) for c in cards)
+                + "</ul>"
+            )
+        elif view == "table":
+            body = (
+                "<ul class='plain rows'>"
+                + TABLE_HEAD
+                + "".join(table_row(c, deck=deck, owned=owned) for c in cards)
                 + "</ul>"
             )
         else:
@@ -1552,6 +1593,7 @@ ul.rows .price{font-size:.86rem;color:var(--text-muted);text-align:right;font-va
   font-size:10px;font-weight:900;background:linear-gradient(135deg,#f6d365,#b7e3ff 50%,#f6a5c0);
   color:#111;flex:none}
 .tagdot{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--orange);flex:none}
+.deckview .c .tagdot{position:absolute;right:8px;top:8px;width:14px;height:14px;box-shadow:0 0 0 2px #fff}
 .owned{display:inline-block;width:9px;height:9px;border-radius:50%;background:#1ebb6c;flex:none;
   box-shadow:0 0 0 2px var(--bg)}
 .deckview .c .owned{position:absolute;left:8px;bottom:8px;width:12px;height:12px;box-shadow:0 0 0 2px #fff}
@@ -1562,6 +1604,53 @@ ul.rows .hover img{width:100%;height:100%;display:block}
 @media (max-width:600px){ ul.rows .row{grid-template-columns:1.6rem minmax(0,1fr) auto}
   ul.rows .set,ul.rows .price{display:none} }
 
+/* stack order handles (deck.js): drag, or arrow keys while focused */
+.stackgrip{width:28px;min-width:28px;height:28px;min-height:28px;padding:0;margin:0 .25rem 0 0;cursor:grab;
+  touch-action:none;color:var(--text-muted);font-size:1rem;line-height:1;flex:none}
+.stackgrip:active{cursor:grabbing}
+.stack.moving{outline:2px dashed var(--orange);outline-offset:4px;opacity:.85}
+.stack-reset{margin:.25rem 0 1rem}
+.stackhead .stackgrip ~ .title{flex:1;min-width:0}
+/* select several cards (own deck): the bar above the cards, and the chosen cards ringed */
+.bulkbar{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin:0 0 .75rem}
+.bulkbar .bulktools{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.bulkbar .bulktools[hidden],.bulkbar .btn[hidden]{display:none}
+.bulkbar select:not(.msel-native){width:auto;max-width:100%;min-width:0;min-height:36px}
+.bulkbar .msel-btn{max-width:100%;min-width:0}
+.bulkbar .count{font-weight:600}
+.bulkbar .tagform{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;flex-basis:100%}
+.bulkbar .tagform[hidden]{display:none}
+.bulkbar .tagform input[type=text]{width:auto;flex:1 1 10rem;min-width:0;max-width:18rem}
+.bulkbar .tagform input[type=color]{width:44px;min-width:44px;height:36px;padding:2px;border-radius:6px}
+.bulkbar .status{margin:0;flex-basis:100%} .bulkbar .status:empty{display:none}
+.deckview.picking .c,.deckview.picking .row{cursor:pointer}
+.deckview.picking .c.picked{outline:3px solid var(--orange);outline-offset:2px}
+/* a check mark, so a chosen card differs from the focused one (same orange ring) */
+.deckview.picking .c.picked::after{content:'✓';position:absolute;left:50%;top:50%;
+  transform:translate(-50%,-50%);
+  width:44px;height:44px;border-radius:50%;background:var(--orange);color:#000;font-size:26px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 3px var(--bg)}
+.deckview.picking .row.picked{background:var(--surface-2);box-shadow:inset 4px 0 0 var(--orange)}
+.deckview.picking .row.picked .name{font-weight:700}
+/* Table view: one full-width list per group, a column each for type, mana value, cost, printing */
+.deckview.table .stack{margin-bottom:1rem}
+.deckview.table ul.rows .row,.deckview.table ul.rows .th{
+  grid-template-columns:2rem minmax(0,2fr) minmax(0,1.6fr) 2.5rem minmax(4rem,auto) 5.5rem 4.5rem}
+.deckview.table ul.rows .th{display:grid;align-items:center;gap:.4rem;height:28px;font-size:.78rem;
+  font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted)}
+.deckview.table ul.rows .ty{font-size:.86rem;color:var(--text-muted);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;min-width:0}
+.deckview.table ul.rows .mv{text-align:center;font-variant-numeric:tabular-nums}
+.deckview.table ul.rows .set{text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media (max-width:700px){
+  .deckview.table ul.rows .row,.deckview.table ul.rows .th{
+    grid-template-columns:1.6rem minmax(0,1fr) 2rem auto}
+  .deckview.table ul.rows .ty,.deckview.table ul.rows .set,.deckview.table ul.rows .price{display:none} }
+/* Scroll view: each group one row of whole cards, scrolled sideways inside its own strip */
+.deckview.scroll .stack{margin-bottom:1rem;min-width:0}
+.deckview.scroll .cards{display:flex;gap:.75rem;overflow-x:auto;overscroll-behavior-x:contain;
+  scroll-snap-type:x proximity;padding:.25rem .1rem .75rem}
+.deckview.scroll .c{flex:0 0 clamp(140px,22vw,200px);scroll-snap-align:start}
 /* image cards: stacks and grid (basicCard 5:7, 4.5% radius, 2px border, corner quantity) */
 .deckview.stacks,.deckview.grid{display:grid;gap:1rem;align-items:start}
 .deckview.stacks{grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}

@@ -110,6 +110,7 @@ class FakeArchidekt:
         # Faults a verify must catch: added rows stored without their finish, or with another
         # printing of the same card (card id -> card id to store instead).
         self.add_rows_lose_finish = False
+        self.empty_label_ignored = False
         self.add_rows_swap_printing: dict[int, int] = {}
         self.create_returns_full_deck = True  # live Archidekt does not (verified 2026-10-05)
         self.fail_deck_reads = False  # signed-in deck reads answer 503
@@ -857,6 +858,10 @@ class FakeArchidekt:
             return {k: v for k, v in json.loads(json.dumps(known)).items() if k != "options"}
         raise AssertionError(f"unknown printing id {card_id}")
 
+    def ignore_empty_label_or_set(self, entry: dict[str, Any]) -> bool:
+        """A fault a verify must catch: a modify with an empty label leaves the old tag."""
+        return self.empty_label_ignored and not entry["modifications"]["label"]
+
     def apply_patch(self, deck: dict[str, Any], entries: list[dict[str, Any]]) -> None:
         """Apply entries in the reference shape: action add|modify|remove, cardid, deckRelationId,
         modifications.quantity. A modify also sets the row's categories (an empty list reads back
@@ -872,6 +877,10 @@ class FakeArchidekt:
                 if e["action"] == "modify":  # a modify carries the row's categories and finish too
                     rel["categories"] = e.get("categories") or None
                     rel["modifier"] = e["modifications"].get("modifier", rel.get("modifier", "Normal"))
+                    if "label" in e["modifications"] and not self.ignore_empty_label_or_set(e):
+                        rel["label"] = e["modifications"]["label"]  # the colour tag, "Name,#rrggbb"
+                    if "companion" in e["modifications"]:
+                        rel["companion"] = bool(e["modifications"]["companion"])
             else:
                 self.next_rel_id += 1
                 deck["cards"].append(
