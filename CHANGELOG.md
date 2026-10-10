@@ -7,7 +7,7 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
-## [0.7.14] - 2026-10-10
+## [0.7.13] - 2026-10-10
 
 A polish pass over every page and the Android app, from an inventory of each
 control, icon and message.
