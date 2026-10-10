@@ -27,7 +27,7 @@ from .busy import busy_response
 from .deckpage import DECK_CSS, avatar_html, covers_for, deck_list_html
 from .decks import DeckError
 from .pages import _csrf, browser_session, login_redirect
-from .theme import icon, render
+from .theme import display_name, icon, render
 
 SearchOrder = Literal["-viewCount", "-updatedAt", "-createdAt", "-size", "edhBracket"]  # SEARCH_ORDERS
 
@@ -58,7 +58,7 @@ SEARCH_CSP = (
     "manifest-src 'self'; connect-src 'self'; "
     "img-src 'self' https://cards.scryfall.io; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 )
-COLOURS = (("W", "White"), ("U", "Blue"), ("B", "Black"), ("R", "Red"), ("G", "Green"))
+COLOURS = (("W", "White"), ("U", "Blue"), ("B", "Black"), ("R", "Red"), ("G", "Green"), ("C", "Colorless"))
 FORMAT_OPTIONS = sorted(
     ((str(i), format_label(FORMAT_NAMES[i])) for i in sorted(FORMAT_NAMES)), key=lambda kv: kv[1].lower()
 )
@@ -219,7 +219,7 @@ def search_form_html(query: dict[str, Any]) -> str:
         f"<select id='s-format' name='format'>{fmt_opts}</select></span></div>"
         f"<div class='field'><label for='s-order'>Sort by</label><span class='sel'>{icon('sort')}"
         f"<select id='s-order' name='order'>{order_opts}</select></span></div>"
-        "<div class='foot'><div class='field'><span class='lbl'>Colour "
+        "<div class='foot'><div class='field'><span class='lbl'>Color "
         f"identity</span><div class='colours'>{colours}</div></div>"
         "<div class='form-actions'><button type='submit' "
         f"class='btn-primary'>{icon('search')} Search decks</button>"
@@ -276,6 +276,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             signed_in=True,
             csrf=_csrf(s, sid),
             admin=admin,
+            user=display_name(user),
             wide=True,
             current=current,
             scripts=True,

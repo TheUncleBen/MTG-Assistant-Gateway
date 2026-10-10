@@ -51,6 +51,16 @@
   const why = (err) => (err instanceof TypeError || !navigator.onLine)
     ? 'no connection to the gateway. Check your connection and try again'
     : (err && err.message) || String(err);
+  const text = window.MtgText || {
+    plural: (n, w) => n + ' ' + (Number(n) === 1 ? w : w + 's'),
+    when: (v) => new Date(v).toLocaleString()
+  };
+  const cameraIcon = () => {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true'); svg.setAttribute('class', 'i');
+    svg.innerHTML = "<path d='M4 8h4l2-3h4l2 3h4v11H4z'/><circle cx='12' cy='13' r='3'/>";
+    return svg;
+  };
   const h = (tag, attrs, ...children) => {
     const el = document.createElement(tag);
     if (attrs) {
@@ -279,15 +289,15 @@
     const file = h('input', { type: 'file', accept: 'image/*', capture: 'environment', id: 'photo-file', class: 'sr',
       onchange: (e) => e.target.files[0] && scanFile(e.target.files[0]) });
     const shutter = h('button', { class: 'shutter', id: 'shutter', title: 'Scan card', 'aria-label': 'Scan card',
-      onclick: () => captureFrame(video) }, 'Scan');
+      onclick: () => captureFrame(video) }, cameraIcon(), h('span', { class: 'sr', text: 'Scan' }));
     const controls = h('div', { class: 'controls' },
-      h('label', { class: 'btn secondary', for: 'photo-file', style: 'margin:0' }, 'Photo'), shutter,
-      h('button', { class: 'secondary', onclick: () => showTab('type') }, 'Type'));
+      h('label', { class: 'btn ctl', for: 'photo-file', title: 'Scan a photo from your pictures' }, 'Photo'), shutter,
+      h('button', { class: 'ctl', title: 'Type the card name instead', onclick: () => showTab('type') }, 'Type'));
     // Inside the Android app, its own camera (torch brightness, zoom) is one tap away. The app
     // provides window.MtgNative; a browser has no such object and sees no button.
     const native = window.MtgNative;
     if (native && typeof native.openCamera === 'function') {
-      controls.insertBefore(h('button', { class: 'secondary', id: 'phone-camera', onclick: () => native.openCamera() }, 'Phone camera'), shutter);
+      controls.insertBefore(h('button', { class: 'ctl', id: 'phone-camera', onclick: () => native.openCamera() }, 'Phone camera'), shutter);
     }
     // Status and the match result sit between the preview and the control bar,
     // so on a phone the thing to confirm is right above the thumb.
@@ -401,7 +411,7 @@
       await video.play().catch(() => {});
       syncCameraUi();
     } catch (err) {
-      setStatus('Camera unavailable (' + (err && err.name || 'error') + '). Use the Photo button or type the name.');
+      setStatus('Camera unavailable: ' + cameraProblem(err) + '. Use the Photo button or type the name.');
       const sh = $('#shutter'); if (sh) sh.disabled = true;
       syncCameraUi();
     }
@@ -455,6 +465,35 @@
     const tb = $('#torch');
     if (tb) { tb.hidden = !torchSupported(); tb.setAttribute('aria-pressed', getTorch() ? 'true' : 'false'); }
     const box = $('#cam-ctl'); if (box) renderCameraControls(box);
+  }
+  // A themed yes/no bar next to the button that asked (never the browser's confirm box).
+  function askConfirm(anchor, text, onYes) {
+    const old = anchor.parentNode && anchor.parentNode.querySelector(':scope > .confirmbar');
+    if (old) old.remove();
+    const yes = h('button', { class: 'danger', type: 'button' }, 'Yes');
+    const no = h('button', { class: 'secondary', type: 'button' }, 'Cancel');
+    const bar = h('div', { class: 'confirmbar', role: 'alertdialog', 'aria-label': text }, h('span', { text: text }), yes, no);
+    const done = () => { bar.remove(); anchor.focus(); };
+    no.addEventListener('click', done);
+    yes.addEventListener('click', () => { bar.remove(); onYes(); });
+    bar.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); done(); } });
+    anchor.insertAdjacentElement('afterend', bar);
+    yes.focus();
+  }
+  // Plain words for the camera API's error names.
+  const CAMERA_ERRORS = {
+    NotFoundError: 'no camera was found on this device',
+    DevicesNotFoundError: 'no camera was found on this device',
+    NotAllowedError: 'the browser was not allowed to use the camera',
+    PermissionDeniedError: 'the browser was not allowed to use the camera',
+    NotReadableError: 'another app is using the camera',
+    TrackStartError: 'another app is using the camera',
+    OverconstrainedError: 'no camera matches the requested settings',
+    SecurityError: 'the camera is blocked on this page',
+    AbortError: 'the camera stopped unexpectedly'
+  };
+  function cameraProblem(err) {
+    return (err && CAMERA_ERRORS[err.name]) || 'the camera could not be started';
   }
   function setStatus(text) {
     const s = $('#cam-status'); if (s) s.textContent = text;
@@ -1252,11 +1291,12 @@
     } }, 'Copy decklist');
     const clear = h('button', { class: 'danger', onclick: () => {
       if (!state.items.length && !state.sessionId) return;
-      if (!confirm('Start a new, empty scan? The saved session (if any) stays on the gateway.')) return;
-      state.items = []; state.sessionId = null; state.sessionName = ''; state.dirty = false; saveDraft(); name.value = ''; draw(); renderBadge(); msg.textContent = '';
+      askConfirm(actions, 'Start a new, empty scan? The saved session (if any) stays on the gateway.', () => {
+        state.items = []; state.sessionId = null; state.sessionName = ''; state.dirty = false; saveDraft(); name.value = ''; draw(); renderBadge(); msg.textContent = '';
+      });
     } }, 'New scan');
-    panel.append(h('div', { class: 'card' }, h('label', { for: 'session-name', text: 'Scan name' }), name, summary, ul,
-      h('div', { class: 'list-actions' }, save, copy, clear)), msg);
+    const actions = h('div', { class: 'list-actions' }, save, copy, clear);
+    panel.append(h('div', { class: 'card' }, h('label', { for: 'session-name', text: 'Scan name' }), name, summary, ul, actions), msg);
     if (state.items.length) panel.append(whatNext(msg));
   }
 
@@ -1323,12 +1363,13 @@
       const ul = h('ul', { class: 'sessions items' });
       out.sessions.forEach((s) => ul.append(h('li', null,
         h('a', { href: '#', onclick: async (e) => { e.preventDefault(); const full = await api('/scan/api/sessions/' + encodeURIComponent(s.id)); state.items = full.items; state.sessionId = full.id; state.sessionName = full.name; state.dirty = false; saveDraft(); renderBadge(); showTab('list'); } },
-          h('strong', { text: s.name }), h('small', { style: 'display:block', class: 'muted', text: s.card_count + ' cards · ' + s.status + (s.unresolved ? ' · ' + s.unresolved + ' unresolved' : '') + ' · ' + new Date(s.updated_at * 1000).toLocaleString() })),
-        h('button', { class: 'danger icon', 'aria-label': 'Delete ' + s.name, onclick: async () => {
-          if (!confirm('Delete “' + s.name + '” from the gateway?')) return;
-          await api('/scan/api/sessions/' + encodeURIComponent(s.id), 'DELETE', {});
-          if (state.sessionId === s.id) { state.sessionId = null; state.dirty = true; saveDraft(); }
-          showTab('sessions');
+          h('strong', { text: s.name, title: s.name }), h('small', { style: 'display:block', class: 'muted', text: text.plural(s.card_count, 'card') + ' · ' + s.status + (s.unresolved ? ' · ' + s.unresolved + ' unresolved' : '') + ' · ' + text.when(s.updated_at * 1000) })),
+        h('button', { class: 'danger icon', 'aria-label': 'Delete ' + s.name, title: 'Delete', onclick: (e) => {
+          askConfirm(e.currentTarget, 'Delete “' + s.name + '” from the gateway?', async () => {
+            await api('/scan/api/sessions/' + encodeURIComponent(s.id), 'DELETE', {});
+            if (state.sessionId === s.id) { state.sessionId = null; state.dirty = true; saveDraft(); }
+            showTab('sessions');
+          });
         } }, '✕'))));
       panel.append(h('div', { class: 'card' }, ul));
     } catch (err) { panel.textContent = ''; panel.append(h('div', { class: 'notice error', text: 'Could not load sessions: ' + why(err) })); }

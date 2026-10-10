@@ -17,9 +17,11 @@ globalToolbar, floatingToolbar, footer and panel rules). The theme is chosen wit
 from __future__ import annotations
 
 import html
+import time
 from collections.abc import Iterable
 from contextvars import ContextVar
 from typing import Any
+from urllib.parse import quote
 
 from starlette.responses import HTMLResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -44,6 +46,18 @@ DEFAULT_CSP = (
     "connect-src 'self'; "
     "img-src 'self' https://cards.scryfall.io; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
 )
+# The site icon's art as a data: URL, for documents that cannot load /favicon.ico (the offline
+# page, a downloaded report).
+ICON_DATA_URL = "data:image/svg+xml," + quote(
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 108 108'>"
+    "<rect width='108' height='108' rx='24' fill='#1c1f26'/><g transform='rotate(-8 54 54)'>"
+    "<path d='M36 26h36a4 4 0 0 1 4 4v48a4 4 0 0 1-4 4H36a4 4 0 0 1-4-4V30a4 4 0 0 1 4-4z' "
+    "fill='#232323' stroke='#fa890d' stroke-width='3'/>"
+    "<path d='M54 40l10 14-10 14-10-14z' fill='#fa890d'/>"
+    "<path d='M40 70h28v4H40z' fill='#e3e3e3'/></g></svg>",
+    safe="",
+)
+
 THEMES = ("system", "light", "dark")
 _theme: ContextVar[str] = ContextVar("mtg_theme", default="system")
 _layout: ContextVar[str] = ContextVar("mtg_layout", default="auto")
@@ -58,17 +72,21 @@ APP_UA_MARK = "MTGAssistant/"
 _LIGHT = """
     --bg:#f9fafb; --surface:#fafafa; --surface-2:#dedede; --surface-3:#c1c1c1;
     --border:#bababa; --border-soft:#d4d4d4; --card-border:#5b5b5b;
-    --text:#383838; --link:#2a66c9; /* Archidekt's #4183c4 is 3.8:1 */
+    --text:#383838; --link:#1d55b3; /* 5.2:1 on --surface-2 (the menu); Archidekt's #4183c4 is 3.8:1 */
     /* 4.8:1 on --surface-2 and 6.2:1 on --bg; Archidekt's #727272 is 3.6:1 on --surface-2 */
     --text-muted:#5e5e5e;
     --menu-head:#595959; /* 5.2:1 on --surface-2 */
     --toolbar-bg:#dcdcdc; --toolbar-text:#383838;
     --navbar-bg:#313131; --navbar-text:#ffffff; --navbar-muted:#d6d6d6;
     --banner-a:rgba(40,40,40,.82); --banner-b:rgba(40,40,40,.5);
-    --orange-text:#a65400; --green-text:#117a45; --red-text:#b3262e; --blue-text:#2a66c9;
+    /* coloured text: at least 4.5:1 on --bg, --surface, --surface-2 and on its own tint */
+    --orange-text:#944b00; --green-text:#0d6639; --red-text:#b3262e; --blue-text:#1d55b3;
     --orange-tint:rgba(250,137,13,.16); --green-tint:rgba(30,187,108,.16);
     --red-tint:rgba(255,85,91,.16); --blue-tint:rgba(66,134,244,.14);
     --danger-text:#b3262e; --toolbar-active:#8a4600; /* dark values: #ff8086 and #fa890d */
+    /* the focus ring and the edges of inputs and selects: at least 3:1 (WCAG 1.4.11) on the page;
+       the dark bars (top bar, footer, deck banner) switch the ring back to orange below */
+    --focus:#944b00; --control-border:#7a7a7a;
     --shadow:0 3px 6px rgba(0,0,0,.25); --scrim:rgba(0,0,0,.4);
 """
 
@@ -136,8 +154,10 @@ CSS = (
   --navbar-bg:#111111; --navbar-text:#ffffff; --navbar-muted:#e3e3e3;
   --banner-a:rgba(14,14,14,.82); --banner-b:rgba(14,14,14,.5);
   --orange:#fa890d; --green:#1ebb6c; --red:#ff555b; --blue:#4286f4; --purple:#6435c9; --pink:#e03997;
-  --orange-text:#fa890d; --green-text:#1ebb6c; --red-text:#ff555b; --blue-text:#7fb0ff;
+  /* --red-text: Archidekt's #ff555b is 3.7:1 on --surface-2 */
+  --orange-text:#fa890d; --green-text:#1ebb6c; --red-text:#ff7a7f; --blue-text:#7fb0ff;
   --danger-text:#ff8086; --toolbar-active:#fa890d;
+  --control-border:#868686; /* input and select edges: 3.2:1 on --surface-2, 4:1 on --surface */
   --on-color:#ffffff;
   /* Text on the orange and green fills, and the red used as a fill: WCAG AA (4.5:1) for bold 16px
      labels. White on Archidekt's orange is 2.4:1 and on its red 3.1:1, so those labels were hard to read. */
@@ -160,10 +180,22 @@ html{font-size:14px;scroll-padding:60px 0 120px;-webkit-text-size-adjust:100%;mi
   font-family:Lato,"Helvetica Neue",Arial,Helvetica,sans-serif;line-height:1.15}
 body{margin:0;min-height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text);
   font:inherit;font-size:1rem;line-height:1.35;transition:background-color .25s ease-in}
-a{color:var(--link)} a:hover{color:var(--orange)}
+a{color:var(--link)} a:hover{color:var(--orange-text)}
 :focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+/* the dark bars keep the orange ring in the light theme too (the light ring is made for pale panels) */
+.topbar,footer.site,.banner{--focus:#fa890d}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);
   white-space:nowrap;border:0}
+/* skip link: the first thing Tab reaches; hidden until it has focus, then over the top bar */
+a.skip{position:absolute;left:.5rem;top:-100px;z-index:50;padding:.6rem 1rem;border-radius:var(--radius);
+  background:var(--orange);color:var(--on-orange);font-weight:700;text-decoration:none}
+a.skip:focus-visible{top:.5rem;outline-color:var(--on-orange)}
+main:focus{outline:none}
+/* an image that failed to load (feedback.js marks it): hide it, show the name in its place */
+img.img-broken{display:none}
+.img-fallback{display:flex;align-items:center;justify-content:center;width:100%;height:100%;min-height:2rem;
+  padding:.5rem;text-align:center;font-size:.8rem;font-weight:700;color:var(--text-muted);
+  background:linear-gradient(160deg,var(--surface-3),var(--surface-2));overflow-wrap:anywhere}
 svg.i{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;
   stroke-linejoin:round;vertical-align:-.15em;flex:none}
 @media (prefers-reduced-motion: reduce){ *{transition:none !important;animation:none !important} }
@@ -176,9 +208,11 @@ svg.i{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:2;stroke-l
 .brand{display:inline-flex;align-items:center;gap:.5rem;color:var(--navbar-text);text-decoration:none;
   font-weight:900;font-size:1.15rem;letter-spacing:.01em;white-space:nowrap;margin-right:.75rem}
 .brand:hover{color:var(--orange)}
-.brand .mark{width:25px;height:25px;border-radius:5px;background:var(--orange);display:inline-flex;
-  align-items:center;justify-content:center;color:#fff;flex:none}
-.brand .mark svg{width:17px;height:17px;stroke-width:2.4}
+/* the brand mark is the site icon's art (static/gateway-icon.svg): an orange card on a dark tile */
+.brand .mark{width:25px;height:25px;border-radius:5px;background:#1c1f26;display:inline-flex;
+  align-items:center;justify-content:center;color:var(--orange);flex:none;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.18)}
+.brand .mark svg{width:25px;height:25px;stroke-width:2.4}
 .topbar nav{display:flex;align-items:center;gap:.25rem}
 .topbar nav a,.topbar nav summary,.topbar nav button{display:inline-flex;align-items:center;gap:.4rem;
   height:40px;padding:0 .7rem;margin:0;color:var(--navbar-text);background:transparent;border:0;
@@ -229,6 +263,13 @@ details.dd .menu button:focus-visible{background:var(--border);color:var(--text)
 details.dd .menu button.danger:focus-visible{background:var(--border);color:var(--danger-text)}
 .menu .head{padding:.4rem 1rem .2rem;font-size:.8rem;font-weight:700;color:var(--menu-head);
   text-transform:uppercase;letter-spacing:.04em}
+.menu .head.who{text-transform:none;letter-spacing:0;font-weight:400;font-size:.86rem;
+  padding:.5rem 1rem .4rem;border-bottom:1px solid var(--border);margin-bottom:.25rem;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;max-width:18rem}
+.menu .head.who b{color:var(--text)}
+.topbar .signin{height:34px;min-height:34px;padding:0 .9rem;background:var(--orange);
+  border-color:var(--orange);color:var(--on-orange);white-space:nowrap}
+.topbar .signin:hover{background:var(--orange);color:var(--on-orange);filter:brightness(1.1)}
 .menu form{margin:0;display:contents}
 /* the chosen theme: --orange-text would be 4.0:1 on the light menu */
 .menu .on,details.dd .menu .on{color:var(--toolbar-active);font-weight:700}
@@ -237,7 +278,7 @@ details.dd .menu button.danger:focus-visible{background:var(--border);color:var(
 .field > label,.field > .lbl{font-weight:700;margin:0;font-size:1rem}
 .dd-trigger,details.dd > summary.dd-trigger{display:flex;align-items:center;justify-content:space-between;
   gap:.5rem;height:var(--ctl);min-width:140px;padding:0 .75rem 0 1rem;border-radius:var(--radius);
-  border:1px solid var(--border);background:var(--surface);color:var(--text);font-weight:400;
+  border:1px solid var(--control-border);background:var(--surface);color:var(--text);font-weight:400;
   transition:background-color .2s ease-in-out}
 .dd-trigger:hover,details.dd > summary.dd-trigger:hover{background:var(--surface-2)}
 .dd-trigger .chev{color:var(--orange);font-size:.8rem}
@@ -273,15 +314,17 @@ pre{font-size:.86rem;line-height:1.5;background:var(--bg);border:1px solid var(-
 label{display:block;margin:.9rem 0 .3rem;font-weight:700}
 input[type=text],input[type=password],input[type=email],input[type=search],input[type=number],input[type=url],
 select{width:100%;height:var(--ctl);padding:0 1rem;font:inherit;border-radius:var(--radius);
-  border:1px solid var(--border);background:var(--surface);color:var(--text);
+  border:1px solid var(--control-border);background:var(--surface);color:var(--text);
   transition:background-color .2s ease-in-out}
+/* a field inside a <label> keeps its normal weight: only the label's own text is bold */
+label input,label textarea,label select,label .msel-btn{font-weight:400}
 select{appearance:none;-webkit-appearance:none;padding-right:2rem;cursor:pointer;
   background-image:url(/static/chevron.svg);
   background-repeat:no-repeat;background-position:right .75rem center;background-size:10px 6px}
 input[type=number]{padding-right:.5rem}
 textarea{width:100%;min-height:8rem;padding:.5rem .75rem;font:inherit;font-size:.95rem;line-height:1.45;
-  border-radius:var(--radius);border:1px solid var(--border);background:var(--surface);color:var(--text);
-  resize:vertical}
+  border-radius:var(--radius);border:1px solid var(--control-border);background:var(--surface);
+  color:var(--text);resize:vertical}
 input:focus,textarea:focus,select:focus{outline:2px solid var(--focus);outline-offset:1px;
   border-color:var(--orange)}
 /* themed dropdown lists (static/select.js): the native select is kept for the form and for scripts
@@ -294,7 +337,7 @@ select.msel-native{position:absolute;width:1px;height:1px;margin:-1px;padding:0;
 .msel-btn,.menu button.msel-btn,details.dd .menu button.msel-btn{display:flex;align-items:center;
   justify-content:flex-start;gap:0;width:100%;
   height:var(--ctl);min-height:0;margin:0;padding:0 2rem 0 1rem;font:inherit;font-size:1rem;font-weight:400;
-  text-align:left;white-space:nowrap;border-radius:var(--radius);border:1px solid var(--border);
+  text-align:left;white-space:nowrap;border-radius:var(--radius);border:1px solid var(--control-border);
   color:var(--text);cursor:pointer;background-color:var(--surface);background-image:url(/static/chevron.svg);
   background-repeat:no-repeat;background-position:right .75rem center;background-size:10px 6px;
   transition:background-color .2s ease-in-out}
@@ -339,7 +382,26 @@ details.dd .menu .actions button.primary:hover,details.dd .menu .actions button.
 input::placeholder,textarea::placeholder{color:var(--text-muted);opacity:1}
 .check{display:flex;align-items:center;gap:.6rem;margin:.5rem 0;font-weight:400;min-height:2rem;
   cursor:pointer}
-.check input{width:1.15rem;height:1.15rem;margin:0;accent-color:var(--orange)}
+/* every tick box is themed (never the browser's blue): a bordered square, orange with our own
+   check when on (static/check.svg, so the page's image policy stays 'self') */
+input[type=checkbox]{appearance:none;-webkit-appearance:none;width:1.15rem;height:1.15rem;margin:0;flex:none;
+  border:1px solid var(--control-border);border-radius:3px;background:var(--surface) center/80% no-repeat;
+  cursor:pointer;vertical-align:-.2em;display:inline-block;transition:background-color .15s}
+input[type=checkbox]:checked{background-color:var(--orange);border-color:var(--orange);
+  background-image:url(/static/check.svg)}
+input[type=checkbox]:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+input[type=checkbox]:disabled{opacity:.5;cursor:default}
+label:has(> input[type=checkbox]){display:inline-flex;align-items:center;gap:.5rem;font-weight:400;
+  cursor:pointer}
+.check input{width:1.15rem;height:1.15rem;margin:0}
+input[type=radio]{appearance:none;-webkit-appearance:none;width:1.15rem;height:1.15rem;margin:0;flex:none;
+  border:1px solid var(--control-border);border-radius:50%;background:var(--surface);cursor:pointer;
+  display:inline-block;vertical-align:-.2em}
+input[type=radio]:checked{border:.35rem solid var(--orange);background:var(--surface)}
+input[type=radio]:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+/* a choice with a description under its label: the dot sits level with the label's first line */
+.check.mode{align-items:flex-start}
+.check.mode input{margin-top:.15rem}
 /* toggle switch 40x20, orange when on */
 .switch{position:relative;display:flex;align-items:center;gap:.6rem;cursor:pointer;font-weight:400;
   margin:.5rem 0;min-height:2rem}
@@ -625,7 +687,9 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
 .home .searchbox button{margin:0}
 .home .recent{display:grid;grid-template-columns:repeat(auto-fill,minmax(10rem,1fr));gap:.75rem}
 .home .recent a{display:block;position:relative;aspect-ratio:16/9;border-radius:var(--radius);overflow:hidden;
-  background:var(--surface-3) center/cover no-repeat;color:#fff;text-decoration:none;font-weight:700}
+  background:linear-gradient(135deg,#3a3a3a,#1f1f1f) center/cover no-repeat;color:#fff;text-decoration:none;
+  font-weight:700}
+.home .recent a[style]{background-color:var(--surface-3)}
 .home .recent a span{position:absolute;left:0;right:0;bottom:0;padding:.4rem .5rem;
   background:linear-gradient(to top,rgba(0,0,0,.85),rgba(0,0,0,0));font-size:.9rem;white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis}
@@ -676,6 +740,26 @@ footer.site .links a{color:#fff;text-decoration:none;font-weight:700;text-transf
   letter-spacing:.04em}
 footer.site .links a:hover{color:var(--orange)}
 footer.site .legal{color:#ababab;max-width:60rem}
+/* Windows High Contrast and other forced palettes: the fills that carry state become borders */
+@media (forced-colors: active){
+  .switch .track{border:1px solid ButtonText} .switch input:checked + .track{border-color:Highlight}
+  .switch .track::after{background:ButtonText}
+  .tabbar > a[aria-current=page],.topbar nav a[aria-current=page]{text-decoration:underline}
+  .tabbar > a[aria-current=page]::before{background:Highlight}
+  .home .tile,.card,.panel,.tile,.menu,.toast{border:1px solid CanvasText}
+  :focus-visible,input:focus,select:focus,textarea:focus{outline:2px solid Highlight}
+  input[type=checkbox]:checked{border-color:Highlight;background-color:Highlight}
+  .btn-primary,button.primary,.badge,.pill{forced-color-adjust:none}
+}
+/* print: the page's own content on white, without the bars, menus and the footer */
+@media print{
+  html{scroll-padding:0} body{background:#fff;color:#000;display:block}
+  .topbar,.tabbar,footer.site,a.skip,.editbar,.movebar,.toast,.msel-list,.msel-scrim,.suggest-list,
+  details.dd .menu,.cardview,.picker,button[type=submit],.form-actions,.actions{display:none !important}
+  body.has-tabbar{padding-left:0} main.wrap{padding:0;max-width:none}
+  .card,.panel{border:1px solid #999;break-inside:avoid;box-shadow:none}
+  a{color:inherit;text-decoration:underline}
+}
 """
 )
 
@@ -866,12 +950,50 @@ ICONS = {
     "refresh": "<path d='M20 12a8 8 0 1 1-2.3-5.7'/><path d='M20 4v5h-5'/>",
     "link": "<path d='M10 14a4 4 0 0 1 0-5.7l3-3a4 4 0 0 1 5.7 5.7l-1.5 1.5'/>"
     "<path d='M14 10a4 4 0 0 1 0 5.7l-3 3a4 4 0 0 1-5.7-5.7L6.8 11.5'/>",
+    # the site icon's art (static/gateway-icon.svg) for the top bar's brand mark
+    "brand": "<g transform='rotate(-8 12 12)'><rect x='7' y='5.5' width='10' height='13.5' rx='1.2' "
+    "fill='#232323' stroke='#fa890d' stroke-width='1.1'/><path d='M12 8.6l2.4 3.4-2.4 3.4-2.4-3.4z' "
+    "fill='#fa890d' stroke='none'/><path d='M8.9 16.3h6.2' stroke='#e3e3e3' stroke-width='1'/></g>",
+    "activity": "<path d='M3 12h4l3-7 4 14 3-7h4'/>",
+    "login": "<path d='M10 17l5-5-5-5'/><path d='M15 12H3'/>"
+    "<path d='M12 4h7a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-7'/>",
     "drag": "<circle cx='9' cy='6' r='1.3' fill='currentColor'/>"
     "<circle cx='15' cy='6' r='1.3' fill='currentColor'/><circle cx='9' cy='12' r='1.3' fill='currentColor'/>"
     "<circle cx='15' cy='12' r='1.3' fill='currentColor'/>"
     "<circle cx='9' cy='18' r='1.3' fill='currentColor'/>"
     "<circle cx='15' cy='18' r='1.3' fill='currentColor'/>",
 }
+
+
+def display_name(user: dict | None) -> str:
+    """The name the account menu shows for a member: their username, else their name or email."""
+    u = user or {}
+    return str(u.get("preferred_username") or u.get("name") or u.get("email") or "")
+
+
+def time_html(ts: int | float | None, *, day: bool = True) -> str:
+    """A timestamp as ``<time datetime>``: the page shows it in UTC, and static/feedback.js
+    rewrites it in the viewer's own time zone and locale (``day=False``: the time only)."""
+    if not ts:
+        return ""
+    try:
+        t = time.gmtime(int(ts))
+    except (TypeError, ValueError, OverflowError, OSError):
+        return ""
+    iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", t)
+    shown = time.strftime("%Y-%m-%d %H:%M UTC" if day else "%H:%M UTC", t)
+    return f"<time datetime='{iso}'{'' if day else ' data-fmt=time'}>{shown}</time>"
+
+
+def plural(n: int | float, word: str, plural_word: str | None = None) -> str:
+    """'1 card', '2 cards': a real plural instead of 'card(s)'. ``plural_word`` for irregular
+    nouns (``plural(2, "copy", "copies")``)."""
+    try:
+        one = float(n) == 1
+    except (TypeError, ValueError):
+        one = False
+    count = f"{int(n):,}" if isinstance(n, int) or float(n).is_integer() else f"{n:g}"
+    return f"{count} {word if one else (plural_word or word + 's')}"
 
 
 def icon(name: str, *, cls: str = "i") -> str:
@@ -979,13 +1101,15 @@ def render(
     heading: bool = True,
     head_extra: str = "",
     body_class: str = "",
+    user: str | None = None,
 ) -> HTMLResponse:
     """Render a page. ``form_action`` adds exact origins a form on this page may submit or be
     redirected to (browsers apply form-action to the redirect that follows a POST too).
     ``scripts`` allows the page to load scripts from the gateway's own origin (``script-src
     'self'``; inline script stays forbidden), used by the click guard of clickguard.py and the
     deck pages. ``current`` names the nav link to mark as the current page (its path);
-    ``heading=False`` leaves the <h1> to the body (deck banner)."""
+    ``heading=False`` leaves the <h1> to the body (deck banner). ``user`` is the signed-in
+    member's name for the account menu's "Signed in as" line."""
     theme = current_theme()
     app = in_app()
     # "Use desktop layout" (T-046): a wide fixed viewport, as a browser's "Desktop site" switch
@@ -1006,19 +1130,26 @@ def render(
             return f"<a href='{href}'{aria}{' class=keep' if keep else ''}>{label}</a>"
 
         theme_items = "".join(
-            f"<button name='theme' value='{t}'{' class=on' if theme == t else ''}>"
+            f"<button name='theme' value='{t}'{' class=on' if theme == t else ''} "
+            f"aria-pressed='{'true' if theme == t else 'false'}'>"
             f"{icon('check') if theme == t else '<span class=i></span>'}{label} theme</button>"
             for t, label in (("light", "Light"), ("dark", "Dark"), ("system", "System"))
         )
+        who = (
+            f"<div class='head who' title='{html.escape(user)}'>Signed in as <b>{html.escape(user)}</b></div>"
+            if user
+            else ""
+        )
         account_menu = (
-            "<details class='dd'><summary class='icon-btn' aria-label='Account menu'>"
+            "<details class='dd'><summary class='icon-btn' aria-label='Account menu' title='Account menu'>"
             # The member's own picture (their provider's, else their initials: /account/avatar).
             "<img class='av' src='/account/avatar' alt='' width='28' height='28'></summary><div class='menu'>"
+            f"{who}"
             f"<a href='/'>{icon('home')}Home</a>"
             f"<a href='/account'>{icon('account')}Account</a>"
             f"<a href='/proposals'>{icon('proposals')}Proposals</a>"
             f"<a href='/history'>{icon('history')}History</a>"
-            f"<a href='/activity'>{icon('history')}My activity</a>"
+            f"<a href='/activity'>{icon('activity')}My activity</a>"
             f"<a href='/guide'>{icon('guide')}Guide</a>"
             f"<a href='/skill'>{icon('report')}Assistant skill</a>"
             + (f"<a href='/app'>{icon('download')}Android app</a>" if not app else "")
@@ -1043,9 +1174,11 @@ def render(
             "<div class='sep'></div><div class='head'>Site layout</div>"
             f"<form method='post' action='/layout'>{csrf_in}"
             f"<input type='hidden' name='next' value='{html.escape(current_path())}'>"
-            f"<button name='layout' value='auto'{' class=on' if not desktop else ''}>"
+            f"<button name='layout' value='auto'{' class=on' if not desktop else ''} "
+            f"aria-pressed='{'false' if desktop else 'true'}'>"
             f"{icon('check') if not desktop else '<span class=i></span>'}Fit the screen</button>"
-            f"<button name='layout' value='desktop'{' class=on' if desktop else ''}>"
+            f"<button name='layout' value='desktop'{' class=on' if desktop else ''} "
+            f"aria-pressed='{'true' if desktop else 'false'}'>"
             f"{icon('check') if desktop else '<span class=i></span>'}Desktop layout</button></form>"
             "<div class='sep'></div>"
             f"<form method='post' action='/logout'>{csrf_in}"
@@ -1059,6 +1192,7 @@ def render(
         )
         search_btn = (
             f"<a class='icon-btn searchbtn' href='/search' aria-label='Search cards and decks'"
+            " title='Search cards and decks'"
             f"{' aria-current=page' if cur == '/search' else ''}>{icon('search')}</a>"
         )
         # The site search (cards and decks; cardsearch.py, static/suggest.js): Enter on plain text
@@ -1090,7 +1224,11 @@ def render(
             + "</div></details></nav>"
         )
     else:
-        right = ""
+        # Signed out: the way in sits where the account menu would be.
+        right = (
+            "<nav class='user' aria-label='Account'>"
+            f"<a class='btn signin' href='/login'>{icon('login')} Sign in</a></nav>"
+        )
     h1 = f"<h1>{html.escape(title)}</h1>" if heading else ""
     # Admins hear about a newer gateway release on every page (update_check.py); the admin overview
     # carries the steps, so it shows its own card instead of this line.
@@ -1115,30 +1253,53 @@ def render(
     main_cls = "wrap panes" if panes else "wrap"
     # a page with its own web app (the scanner) names its own manifest; a second one would win
     manifest = "" if "rel='manifest'" in head_extra else "<link rel='manifest' href='/app.webmanifest'>"
+    # The browser's own chrome follows the top bar: the light bar is #313131, the dark one #111111.
+    theme_color = (
+        "<meta name='theme-color' media='(prefers-color-scheme: light)' content='#313131'>"
+        "<meta name='theme-color' media='(prefers-color-scheme: dark)' content='#111111'>"
+        if theme == "system"
+        else f"<meta name='theme-color' content='{'#313131' if theme == 'light' else '#111111'}'>"
+    )
+    description = f"{site}: a private gateway to your Magic: The Gathering decks on Archidekt."
     doc = (
         f"<!doctype html><html lang='en'{f' data-theme={theme}' if theme != 'system' else ''}>"
         "<head><meta charset='utf-8'>"
         f"<meta name='viewport' content='{viewport}'>"
         "<meta name='referrer' content='no-referrer'>"
         f"<meta name='color-scheme' content='{'dark light' if theme == 'system' else theme}'>"
-        "<meta name='theme-color' content='#111111'>"
+        f"{theme_color}"
+        # Nothing here is for search engines (robots.txt says the same); the description and the
+        # Open Graph fields give a pasted link a name and an icon, and never a member's data.
+        "<meta name='robots' content='noindex, nofollow'>"
+        f"<meta name='description' content='{html.escape(description)}'>"
+        f"<meta property='og:site_name' content='{html.escape(site)}'>"
+        f"<meta property='og:title' content='{html.escape(title)} · {html.escape(site)}'>"
+        f"<meta property='og:description' content='{html.escape(description)}'>"
+        "<meta property='og:image' content='/static/gateway-icon-512.png'>"
         f"{manifest}"
         "<link rel='icon' href='/favicon.ico' sizes='32x32'>"
         "<link rel='icon' href='/static/gateway-icon.svg' type='image/svg+xml'>"
         "<link rel='apple-touch-icon' href='/apple-touch-icon.png'>"
         f"<title>{html.escape(title)} · {html.escape(site)}</title><style>{CSS}</style>{head_extra}</head>"
-        f"<body class='{classes}'>{SPRITE}"
+        f"<body class='{classes}'><a class='skip' href='#main'>Skip to content</a>{SPRITE}"
         "<header class='topbar'><div class='wrap'><div class='left'>"
-        f"<a class='brand' href='/'{' aria-current=page' if cur == '/' else ''}>"
-        f"<span class='mark'>{icon('layers')}</span>"
+        f"<a class='brand' href='/'{' aria-current=page' if cur == '/' else ''} title='{html.escape(site)}'>"
+        f"<span class='mark'>{icon('brand')}</span>"
         f"<span class='word'>{html.escape(site)}</span></a>{nav}</div>"
         f"<div class='right'>{right}</div></div></header>"
-        f"<main class='{main_cls}'>{h1}{body}</main>"
+        f"<main class='{main_cls}' id='main' tabindex='-1'>{h1}{body}</main>"
         + (
             # The website footer; the Android app has no footer (its pages end at the tab bar).
-            "<footer class='site'><div class='links'><a href='/decks'>Decks</a><a href='/search'>Search</a>"
-            "<a href='/collection'>Collection</a><a href='/scan'>Scan</a><a href='/guide'>Guide</a>"
-            "<a href='/skill'>Assistant</a><a href='/app'>Apps</a><a href='/account'>Account</a></div>"
+            "<footer class='site'><div class='links'>"
+            + (
+                "<a href='/decks'>Decks</a><a href='/search'>Search</a>"
+                "<a href='/collection'>Collection</a><a href='/scan'>Scan</a>"
+                if signed_in
+                else ""
+            )
+            + "<a href='/guide'>Guide</a><a href='/skill'>Assistant</a><a href='/app'>Apps</a>"
+            + ("<a href='/account'>Account</a>" if signed_in else "<a href='/login'>Sign in</a>")
+            + "</div>"
             "<div class='legal'>Private deck gateway. Nothing on these pages is indexed or shared. "
             "Magic: The Gathering is a trademark of Wizards of the Coast. Card data and images come from "
             "Scryfall; decks live on Archidekt.</div></footer>"

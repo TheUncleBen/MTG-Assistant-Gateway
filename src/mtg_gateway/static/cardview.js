@@ -33,7 +33,7 @@
     viewer = el("div", "cardview");
     viewer.setAttribute("role", "dialog");
     viewer.setAttribute("aria-modal", "true");
-    viewer.setAttribute("aria-label", "Card");
+    viewer.setAttribute("aria-label", "Card");  // replaced by aria-labelledby once a card is shown
     document.body.appendChild(viewer);
     viewer.addEventListener("click", function (e) { if (e.target === viewer) close(); });
     document.addEventListener("keydown", function (e) {
@@ -132,11 +132,14 @@
     var side = el("div", "info");
     var head = el("div", "head");
     var title = el("h3", null, card.name || "");
+    title.id = "cardview-title";
+    v.setAttribute("aria-labelledby", "cardview-title");  // the dialog is named after the card
     if (card.mana) title.appendChild(mana(card.mana));
     head.appendChild(title);
     var closeBtn = el("button", "close icon-only");
     closeBtn.type = "button";
     closeBtn.setAttribute("aria-label", "Close");
+    closeBtn.setAttribute("title", "Close");
     closeBtn.appendChild(el("span", "x", "×"));
     closeBtn.addEventListener("click", close);
     head.appendChild(closeBtn);
@@ -155,7 +158,7 @@
     fact(dl, "Artist", card.artist);
     fact(dl, "Price", card.price ? "$" + card.price : "");
     fact(dl, "Salt", card.salt ? String(card.salt) : "");
-    fact(dl, "EDHREC rank", card.rank ? String(card.rank) : "");
+    fact(dl, "EDHREC rank", card.rank ? Number(card.rank).toLocaleString() : "");
     if (card.gc) fact(dl, "Note", "Game changer", "gc");
     if (card.legal) {
       var chips = el("span", "chips");

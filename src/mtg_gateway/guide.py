@@ -23,7 +23,7 @@ from starlette.responses import Response
 
 from . import modes
 from .pages import _csrf, browser_session, login_redirect
-from .theme import icon, render
+from .theme import display_name, icon, render
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -1082,6 +1082,7 @@ def add_guide_routes(server: MCPServer, state: AppState) -> None:
             signed_in=True,
             csrf=_csrf(s, sid),
             admin=admin,
+            user=display_name(user),
             wide=True,
             scripts=True,
             current="/guide",

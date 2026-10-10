@@ -374,7 +374,7 @@ async def test_history_grouped_by_deck(stack: Stack) -> None:
         p42 = re.findall(r"/proposals/(p\d\d)'", sec42)
         assert p42 == sorted(p42)
         assert "Yesterday" not in listing and re.search(
-            r"<time>\d{1,2} \w{3} \d{4} \d\d:\d\d UTC</time>", listing
+            r"<time datetime='\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ'>\d{4}-\d\d-\d\d \d\d:\d\d UTC</time>", listing
         )
         assert "<details><summary>Details</summary>" in listing and "Restore (review first)" in listing
         assert "href='/history?group=deck&offset=25'>Older →</a>" in body

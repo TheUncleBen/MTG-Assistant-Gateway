@@ -97,7 +97,7 @@ def add_card_resources(apps: Apps, public_url: str) -> None:
         PICKER_CARD_URI,
         card_html("picker-card"),
         name="picker-card",
-        title="Recognised cards",
+        title="Recognized cards",
         description="The cards a list or photo resolved to; keep, drop or pick among the candidates.",
         csp=ResourceCsp(resource_domains=list(CARD_IMAGE_HOSTS)),
         prefers_border=True,

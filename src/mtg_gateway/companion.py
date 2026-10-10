@@ -17,7 +17,7 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, RedirectResponse, Response
@@ -37,6 +37,7 @@ from .deckpage import (
     deck_list_html,
     deck_page_html,
     featured,
+    money,
     precon_by_label,
 )
 from .decks import DeckError, actor_label, current_client, mark_gone
@@ -67,7 +68,7 @@ from .report_view import (
     report_export_html,
     report_markdown,
 )
-from .theme import VIZ_CSS, icon, remember_view, render, view_choice
+from .theme import ICON_DATA_URL, VIZ_CSS, display_name, icon, plural, remember_view, render, view_choice
 from .views import auto_category, cards_by_category
 
 if TYPE_CHECKING:
@@ -133,7 +134,7 @@ def _bars(values: dict[str, Any], *, label: str) -> str:
 
 
 def _pips(pips: dict[str, Any], sources: dict[str, Any] | None) -> str:
-    names = {"W": "White", "U": "Blue", "B": "Black", "R": "Red", "G": "Green", "C": "Colourless"}
+    names = {"W": "White", "U": "Blue", "B": "Black", "R": "Red", "G": "Green", "C": "Colorless"}
     rows = []
     for col in ("W", "U", "B", "R", "G", "C"):
         p = pips.get(col)
@@ -177,7 +178,7 @@ def stats_strip(stats: dict[str, Any] | None) -> str:
         ("Cards", _num(stats.get("card_count"), 0)),
         ("Lands", _num(stats.get("land_count"), 0)),
         ("Avg MV", _num(stats.get("average_mana_value"))),
-        ("Price", f"${_num(stats.get('price_total'))}" if stats.get("price_total") is not None else "–"),
+        ("Price", money(stats.get("price_total")) if stats.get("price_total") is not None else "–"),
         ("Bracket", f"~{bracket.get('bracket')}" if bracket.get("bracket") else "–"),
         ("Game changers", _num(len(stats.get("game_changers") or []), 0)),
     ]
@@ -188,7 +189,7 @@ def stats_strip(stats: dict[str, Any] | None) -> str:
         out.append(
             "<div class='twocol'><div><h3>Mana curve</h3>"
             + _bars(curve, label="Mana curve")
-            + "</div><div><h3>Colours</h3>"
+            + "</div><div><h3>Colors</h3>"
             + _pips(stats.get("colour_pips") or {}, stats.get("mana_sources"))
             + "</div></div>"
         )
@@ -299,6 +300,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             signed_in=True,
             csrf=_csrf(s, sid),
             admin=admin,
+            user=display_name(user),
             wide=two_pane,
             scripts=scripts or bool(extra_scripts),
             current=current,
@@ -373,7 +375,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         order = qp.get("order") if qp.get("order") in LIST_ORDERS else "updated"
         if view not in LIST_VIEWS:
             view = qp.get("view") if qp.get("view") in LIST_VIEWS else "grid"
-        folder = (qp.get("folder") or "").strip()[:80]
+        folder = (qp.get("folder") or "").strip()[:200]  # folder names run to 100 characters
         return q, order, view, folder
 
     def deck_list_skeleton(view: str) -> str:
@@ -434,7 +436,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         else:
             covers = covers_for(rows, state.db.deck_covers([str(d["id"]) for d in rows]))
             listing = (f"<p class='notice error'>{_esc(problem)}</p>" if problem else "") + deck_list_html(
-                rows, covers=covers, q=q, view=view
+                rows, covers=covers, q=q, view=view, folder=folder
             )
         body = (
             notice
@@ -508,7 +510,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             covers = covers_for(shown, state.db.deck_covers([str(d["id"]) for d in shown]))
             out["html"] = (
                 f"<p class='notice error'>{_esc(problem[1])}</p>" if problem else ""
-            ) + deck_list_html(shown, covers=covers, q=q, view=view)
+            ) + deck_list_html(shown, covers=covers, q=q, view=view, folder=folder)
             out["count"], out["total"], out["folders"] = len(shown), total, folders
         for d in rows or []:
             d.setdefault("url", f"https://archidekt.com/decks/{d['id']}")
@@ -1043,7 +1045,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             + f"<form method='post' action='/decks/{did}/delete' class='panel danger deleteform'>"
             f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
             f"<h2>Delete “{_esc(deck.name)}”?</h2>"
-            f"<p>This deletes the deck ({n} cards) from your Archidekt account. {undo}</p>"
+            f"<p>This deletes the deck ({plural(n, 'card')}) from your Archidekt account. {undo}</p>"
             "<label for='typed'>Type the deck's name to confirm</label>"
             f"<input id='typed' type='text' name='name' autocomplete='off' required maxlength='200' "
             f"placeholder='{_esc(deck.name)}'>"
@@ -1370,7 +1372,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             + (
                 # D-02: the extra copy on Archidekt is the member's choice per save; the gateway's own
                 # snapshot (Restore under History) is always kept.
-                "<label class='backup'><input type='checkbox' name='archidekt_backup' checked> "
+                "<label class='backup'><input type='checkbox' name='archidekt_backup' checked>"
                 "Also keep a backup copy on Archidekt</label>"
                 if s.archidekt_backups
                 else ""
@@ -1460,10 +1462,12 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         def block(key: str, title: str, blurb: str, text: str, rows: int) -> str:
             return (
                 f"<div class='exportblock'><div class='head'><h2>{title}</h2>"
-                f"<button type='button' class='btn small copybtn' data-copy='{key}'>"
-                f"{icon('copy')} Copy</button></div>"
+                f"<button type='button' class='btn small copybtn' data-copy='{key}' "
+                f"aria-describedby='{key}-status'>{icon('copy')} <span class='label'>Copy</span></button>"
+                f"<span class='sr-only' id='{key}-status' role='status' aria-live='polite'></span></div>"
                 f"<p class='muted small'>{blurb}</p>"
-                f"<textarea id='{key}' rows='{rows}' readonly>{_esc(text)}</textarea></div>"
+                f"<textarea id='{key}' rows='{rows}' readonly aria-label='{title}'>{_esc(text)}"
+                "</textarea></div>"
             )
 
         body = (
@@ -1510,7 +1514,9 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             f"<a class='btn' href='/decks/{did}/export.pdf' download>PDF</a>"
             "</div></div>"
         )
-        return page(f"Export: {deck.name}", body, sub=sub, sid=sid, extra_scripts=("export.js",))
+        return page(
+            f"Export: {deck.name}", body, sub=sub, sid=sid, extra_scripts=("export.js",), current="/decks"
+        )
 
     @server.custom_route("/decks/{deck_id}/export.archidekt.txt", methods=["GET"], include_in_schema=False)
     async def export_archidekt_txt(request: Request) -> Response:
@@ -2051,15 +2057,10 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             detail = r.get("detail") if isinstance(r.get("detail"), dict) else {}
             # browser or app is decided by the client id, never by the app's chosen name
             who = actor_label(r.get("client_id"), detail.get("client_name"))
-            extra = ", ".join(
-                f"{k} {v}"
-                for k, v in detail.items()
-                if k in ("proposal_id", "deck_id", "via", "error", "archidekt_username", "by")
-            )
             items.append(
-                f"<li><span class='name'>{_esc(r['event'].replace('_', ' '))}</span>"
+                f"<li><span class='name'>{_esc(event_label(r['event']))}</span>"
                 + (f"<span class='badge'>{_esc(who)}</span>" if who else "")
-                + f"<span class='muted small'>{_esc(extra)}</span>"
+                + f"<span class='muted small'>{event_detail_html(detail)}</span>"
                 f"<span class='when'>{_when(r['at'])}</span></li>"
             )
         body = (
@@ -2079,24 +2080,60 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
     async def manifest(_request: Request) -> Response:
         data = {
             "name": s.server_name,
-            "short_name": s.server_name[:12],
+            "short_name": short_name(s.server_name),
+            "description": "Your Magic: The Gathering decks on Archidekt, with an assistant that proposes "
+            "changes you approve.",
+            "id": "/",
             "start_url": "/decks",
             "scope": "/",
             "display": "standalone",
+            # A manifest has one colour set: the dark one, which matches the top bar in both themes
+            # (the pages' own theme-color meta follows the chosen theme).
             "background_color": "#181818",
             "theme_color": "#111111",
             "icons": [
-                {"src": "/static/gateway-icon-192.png", "sizes": "192x192", "type": "image/png"},
-                {"src": "/static/gateway-icon-512.png", "sizes": "512x512", "type": "image/png"},
+                {
+                    "src": "/static/gateway-icon-192.png",
+                    "sizes": "192x192",
+                    "type": "image/png",
+                    "purpose": "any",
+                },
+                {
+                    "src": "/static/gateway-icon-512.png",
+                    "sizes": "512x512",
+                    "type": "image/png",
+                    "purpose": "any",
+                },
+                {
+                    "src": "/static/gateway-icon-maskable-192.png",
+                    "sizes": "192x192",
+                    "type": "image/png",
+                    "purpose": "maskable",
+                },
+                {
+                    "src": "/static/gateway-icon-maskable-512.png",
+                    "sizes": "512x512",
+                    "type": "image/png",
+                    "purpose": "maskable",
+                },
             ],
             "shortcuts": [
-                {"name": "My decks", "url": "/decks"},
-                {"name": "Scan cards", "url": "/scan"},
-                {"name": "Proposals", "url": "/proposals"},
+                {"name": "My decks", "url": "/decks", "icons": [SHORTCUT_ICON]},
+                {"name": "Scan cards", "url": "/scan", "icons": [SHORTCUT_ICON]},
+                {"name": "Proposals", "url": "/proposals", "icons": [SHORTCUT_ICON]},
             ],
         }
         return JSONResponse(
             data, media_type="application/manifest+json", headers={"Cache-Control": "public, max-age=3600"}
+        )
+
+    @server.custom_route("/robots.txt", methods=["GET"], include_in_schema=False)
+    async def robots(_request: Request) -> Response:
+        # Nothing on the gateway is for search engines (every page says noindex too).
+        return Response(
+            "User-agent: *\nDisallow: /\n",
+            media_type="text/plain",
+            headers={"Cache-Control": "public, max-age=86400"},
         )
 
     @server.custom_route("/sw.js", methods=["GET"], include_in_schema=False)
@@ -2104,7 +2141,10 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         # Network only: the pages are private and must never be served from a cache. A page load
         # that fails at the network level is tried twice more (after 0.3 s and 1 s) before the
         # plain offline page built here answers instead of the browser's own error screen, so one
-        # dropped connection on the way in doesn't show "offline". GET navigations only.
+        # dropped connection on the way in doesn't show "offline". GET navigations only. The page
+        # follows the member's chosen theme (the mtg_theme cookie, read through the Cookie Store
+        # where the browser has it). The X-MTG-Offline header tells the Android app this is the
+        # gateway's own offline answer.
         js = (
             "self.addEventListener('install',()=>self.skipWaiting());"
             "self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));"
@@ -2112,12 +2152,18 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             "const wait=ms=>new Promise(r=>setTimeout(r,ms));"
             "const tryFetch=(req,i)=>fetch(req).catch(err=>"
             "i<RETRY.length?wait(RETRY[i]).then(()=>tryFetch(req,i+1)):Promise.reject(err));"
+            "const PAGE=" + json.dumps(OFFLINE_PAGE) + ";"
+            "const theme=()=>(self.cookieStore?self.cookieStore.get('mtg_theme'):Promise.resolve(null))"
+            ".then(c=>c&&(c.value==='light'||c.value==='dark')?c.value:'').catch(()=>'');"
+            "const offline=t=>new Response(PAGE.replace(\"<html lang='en'>\","
+            "t?`<html lang='en' data-theme='${t}'>`:\"<html lang='en'>\"),"
+            "{status:503,headers:{'Content-Type':'text/html; charset=utf-8',"
+            "'Cache-Control':'no-store','X-MTG-Offline':'1',"
+            "'Content-Security-Policy':\"default-src 'none'; style-src 'unsafe-inline'; img-src data:; "
+            "base-uri 'none'; frame-ancestors 'none'\"}});"
             "self.addEventListener('fetch',e=>{"
             "if(e.request.mode!=='navigate'||e.request.method!=='GET')return;"
-            "e.respondWith(tryFetch(e.request,0).catch(()=>new Response(" + json.dumps(OFFLINE_PAGE) + ","
-            "{status:503,headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store',"
-            "'Content-Security-Policy':\"default-src 'none'; style-src 'unsafe-inline'; "
-            "base-uri 'none'; frame-ancestors 'none'\"}})));"
+            "e.respondWith(tryFetch(e.request,0).catch(()=>theme().then(offline)));"
             "});"
         )
         return Response(js, media_type="application/javascript", headers={"Cache-Control": "no-store"})
@@ -2155,20 +2201,130 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         )
 
 
-OFFLINE_PAGE = (
-    "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
-    "<meta name='viewport' content='width=device-width, initial-scale=1'>"
-    "<meta name='color-scheme' content='dark light'><title>You're offline</title>"
-    "<style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;"
-    "font:16px/1.4 Lato,'Helvetica Neue',Arial,sans-serif;background:#181818;color:#e3e3e3;padding:1rem}"
-    "@media (prefers-color-scheme: light){body{background:#f9fafb;color:#383838}}"
-    "main{max-width:28rem;text-align:center}h1{font-size:1.4rem}"
-    "a{display:inline-block;margin-top:1rem;padding:.6rem 1.2rem;border-radius:5px;background:#fa890d;"
-    "color:#111;font-weight:700;text-decoration:none}</style></head><body><main>"
-    "<h1>You're offline</h1><p>The gateway can't be reached right now. If you just pressed a button, "
-    "nothing was sent. Check your connection, then try again.</p>"
-    "<a href=''>Try again</a></main></body></html>"
-)
+SHORTCUT_ICON = {"src": "/static/gateway-icon-maskable-192.png", "sizes": "192x192", "type": "image/png"}
+
+
+def short_name(name: str, limit: int = 12) -> str:
+    """A home-screen name of at most ``limit`` characters that never ends mid-word: the whole
+    name when it fits, else its first and last words ("MTG Assistant Gateway" gives "MTG
+    Gateway"), else the longest run of leading words, else the first word cut."""
+    words = (name or "").split()
+    if not words:
+        return "MTG Gateway"
+    if len(name.strip()) <= limit:
+        return name.strip()
+    if len(words) > 2 and len(f"{words[0]} {words[-1]}") <= limit:
+        return f"{words[0]} {words[-1]}"
+    out = ""
+    for w in words:
+        cand = f"{out} {w}".strip()
+        if len(cand) > limit:
+            break
+        out = cand
+    return out or words[0][:limit]
+
+
+def offline_page(site: str) -> str:
+    """The service worker's offline page: the site's name and icon, the chosen theme (the
+    worker sets data-theme from the mtg_theme cookie; otherwise the system's), one button."""
+    title = html.escape(f"You're offline · {site}")
+    return (
+        "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        f"<meta name='color-scheme' content='dark light'><title>{title}</title>"
+        f"<link rel='icon' href='{ICON_DATA_URL}' type='image/svg+xml'>"
+        "<style>:root{--bg:#181818;--text:#e3e3e3;--muted:#a8a8a8}"
+        "@media (prefers-color-scheme: light){:root:not([data-theme=dark]){--bg:#f9fafb;--text:#383838;"
+        "--muted:#5e5e5e}}"
+        ":root[data-theme=light]{--bg:#f9fafb;--text:#383838;--muted:#5e5e5e}"
+        "body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;"
+        "font:16px/1.4 Lato,'Helvetica Neue',Arial,sans-serif;background:var(--bg);color:var(--text);"
+        "padding:1rem}"
+        "main{max-width:28rem;text-align:center}h1{font-size:1.4rem;margin:.75rem 0 .5rem}"
+        ".site{color:var(--muted);font-weight:700;font-size:.9rem;margin:0}"
+        "img{width:64px;height:64px;border-radius:14px}"
+        "a{display:inline-block;margin-top:1rem;padding:.6rem 1.2rem;border-radius:5px;background:#fa890d;"
+        "color:#111;font-weight:700;text-decoration:none}</style></head><body><main>"
+        f"<img src='{ICON_DATA_URL}' alt=''><p class='site'>{html.escape(site)}</p>"
+        "<h1>You're offline</h1><p>The gateway can't be reached right now. If you just pressed a button, "
+        "nothing was sent. Check your connection, then try again.</p>"
+        "<a href=''>Try again</a></main></body></html>"
+    )
+
+
+OFFLINE_PAGE = offline_page("MTG Assistant Gateway")
+
+
+# Audit event names as sentences for the member's activity page (anything unlisted is shown
+# with its underscores as spaces, first letter capitalised).
+EVENT_LABELS = {
+    "browser_login": "Signed in on the website",
+    "login_ok": "Signed in",
+    "login_denied": "Sign-in refused",
+    "login_rejected_group": "Sign-in refused: not in an allowed group",
+    "login_rejected_disabled": "Sign-in refused: account disabled",
+    "login_rejected_issuer": "Sign-in refused: unexpected identity provider",
+    "tokens_issued": "An assistant connected",
+    "tokens_revoked": "An assistant's access was revoked",
+    "refresh_rejected": "An assistant's expired access was refused",
+    "refresh_reuse_detected": "A reused assistant token was refused",
+    "code_reuse_detected": "A reused sign-in code was refused",
+    "proposal_created": "Proposal created",
+    "proposal_applied": "Proposal applied",
+    "proposal_rejected": "Proposal rejected",
+    "proposal_failed": "Proposal failed",
+    "archidekt_linked": "Archidekt account linked",
+    "archidekt_unlinked": "Archidekt account unlinked",
+    "archidekt_link_failed": "Archidekt link failed",
+    "archidekt_link_expired": "Archidekt link expired",
+    "archidekt_session_refreshed": "Archidekt sign-in renewed",
+    "collection_added": "Cards added to the collection",
+    "collection_removed": "Cards removed from the collection",
+    "collection_changed": "Collection changed",
+    "deck_voted": "Liked a deck",
+    "deck_bookmarked": "Bookmarked a deck",
+    "deck_commented": "Commented on a deck",
+    "user_followed": "Followed a user",
+    "report_created": "Deck simulation run",
+    "scan_session_saved": "Scan saved",
+    "scan_session_deleted": "Scan deleted",
+    "folder_created": "Folder created",
+    "groups_changed": "Your groups changed",
+    "membership_revoked": "Membership removed",
+    "membership_unverifiable": "Membership could not be checked",
+    "disabled_user_refused": "Request refused: account disabled",
+    "not_in_group_refused": "Request refused: not in an allowed group",
+}
+DETAIL_LABELS = {
+    "proposal_id": "proposal",
+    "deck_id": "deck",
+    "via": "via",
+    "error": "error",
+    "archidekt_username": "Archidekt account",
+    "by": "by",
+}
+
+
+def event_label(event: str) -> str:
+    return EVENT_LABELS.get(event) or event.replace("_", " ").capitalize()
+
+
+def event_detail_html(detail: dict[str, Any]) -> str:
+    """The details of an audit row in words: the deck and the proposal become links."""
+    bits = []
+    for k, label in DETAIL_LABELS.items():
+        v = detail.get(k)
+        if v in (None, ""):
+            continue
+        if k == "deck_id":
+            name = detail.get("deck_name")
+            text = _esc(name) if name else f"deck {_esc(v)}"
+            bits.append(f"<a href='/decks/{quote(str(v), safe='')}'>{text}</a>")
+        elif k == "proposal_id":
+            bits.append(f"<a href='/proposals/{quote(str(v), safe='')}'>proposal {_esc(str(v)[:8])}</a>")
+        else:
+            bits.append(f"{label} {_esc(v)}")
+    return " · ".join(bits)
 
 
 def snapshot_deck(state: AppState, sub: str, snapshot_id: str) -> Deck:

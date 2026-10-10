@@ -86,7 +86,7 @@ from .membership import Membership, MembershipChecker
 from .metrics import Metrics
 from .mf_proxy import ALLOWED_TOOLS, MysticForgeProxy
 from .oidc import OIDCClient
-from .pages import BROWSER_CLIENT_ID, SESSION_COOKIE, add_browser_routes
+from .pages import BROWSER_CLIENT_ID, SESSION_COOKIE, _csrf, add_browser_routes, browser_session
 from .plugin_page import add_plugin_routes
 from .reports import ReportService
 from .scan import add_scan
@@ -105,7 +105,7 @@ from .schemas import (
 )
 from .skill_page import add_skill_routes
 from .social import add_social_routes
-from .theme import NoSniffMiddleware, ThemeMiddleware, render
+from .theme import NoSniffMiddleware, ThemeMiddleware, display_name, render
 from .timing import TimingMiddleware
 from .update_check import UpdateChecker
 from .views import deck_brief, deck_out
@@ -401,6 +401,9 @@ class MembershipMiddleware:
         "/healthz",
         "/favicon.ico",
         "/apple-touch-icon.png",
+        "/robots.txt",
+        "/app.webmanifest",
+        "/sw.js",
     )
 
     def __init__(self, app: ASGIApp, state: AppState):
@@ -442,6 +445,7 @@ class MembershipMiddleware:
                     f"<div class='card'><p>{message}</p></div>",
                     site=self.state.settings.server_name,
                     status=503,
+                    **_shell_for(self.state, request),
                 )
             else:
                 resp = JSONResponse(
@@ -1729,6 +1733,20 @@ _MACHINE_PREFIXES = (
 )
 
 
+def _shell_for(state: AppState, request: Request) -> dict[str, Any]:
+    """The signed-in page shell (navigation, account menu, tab bar) for a member whose browser
+    session is valid, so an error page looks like every other page; nothing for a visitor."""
+    try:
+        sub, sid = browser_session(state, request)
+    except Exception:  # the error page must never fail on its own
+        return {}
+    if not sub:
+        return {}
+    user = state.db.get_user(sub) or {}
+    admin = bool(state.settings.admin_group and state.settings.admin_group in (user.get("groups") or []))
+    return {"signed_in": True, "csrf": _csrf(state.settings, sid), "admin": admin, "user": display_name(user)}
+
+
 def _wants_page(request: Request) -> bool:
     path = request.url.path
     if path.startswith(_MACHINE_PREFIXES):
@@ -1752,6 +1770,7 @@ def _friendly_errors(app: Starlette, state: AppState) -> None:
                 "<a class='btn' href='/'>Home</a></div></div>",
                 site=site,
                 status=404,
+                **_shell_for(state, request),
             )
         return JSONResponse(
             {"ok": False, "error": "not_found", "message": "Nothing exists at this address."}, 404
@@ -1771,6 +1790,7 @@ def _friendly_errors(app: Starlette, state: AppState) -> None:
                 "</a></div></div>",
                 site=site,
                 status=500,
+                **_shell_for(state, request),
             )
         return JSONResponse(
             {

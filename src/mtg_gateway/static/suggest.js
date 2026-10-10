@@ -255,9 +255,10 @@
       if (!names.length) {
         var none = document.createElement("li");
         none.className = "none";
-        none.textContent = "No card with that name";
+        var noneText = input.getAttribute("data-suggest") === "static" ? "No match" : "No card with that name";
+        none.textContent = noneText;
         list.appendChild(none);
-        status.textContent = "No card with that name";
+        status.textContent = noneText;
       } else {
         names.forEach(function (n, i) {
           var li = document.createElement("li");

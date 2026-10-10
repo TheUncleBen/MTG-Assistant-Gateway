@@ -507,3 +507,19 @@ def test_admin_group_and_assetlinks_settings(tmp_path: Path, monkeypatch: pytest
         monkeypatch.setenv("MTG_ANDROID_ASSETLINKS", bad)
         with pytest.raises(ConfigError, match="MTG_ANDROID_ASSETLINKS must be a JSON list"):
             load_settings()
+
+
+async def test_admin_tab_titles_name_the_admin_area(gw: Harness) -> None:
+    b = await admin_browser(gw)
+    try:
+        for path, title in (
+            ("/admin", "Admin: overview"),
+            ("/admin/users", "Admin: users"),
+            ("/admin/activity", "Admin: activity"),
+            ("/admin/metrics", "Admin: metrics"),
+        ):
+            page = await b.http.get(path, headers={"Accept": "text/html"})
+            assert page.status_code == 200 and f"<title>{title} · " in page.text, path
+            assert "Signed in as <b>" in page.text
+    finally:
+        await b.aclose()

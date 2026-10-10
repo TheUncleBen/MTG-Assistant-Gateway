@@ -15,8 +15,9 @@ from __future__ import annotations
 import html
 import json
 import re
-import time
 from typing import Any
+
+from .theme import ICON_DATA_URL, time_html
 
 # The simulator's honesty classes, in plain words.
 HONESTY_CLASSES = {
@@ -27,11 +28,11 @@ HONESTY_CLASSES = {
 }
 # Its standing approximations (the "v1 model shortcuts"), in plain words.
 APPROXIMATIONS = {
-    "any-color": "Treated as producing any colour",
+    "any-color": "Treated as producing any color",
     "creature-producer": "Treated as a plain creature producer",
     "equipment-extra": "Equipment beyond the first is ignored",
     "fetch": "Fetch lands find a basic at once",
-    "hybrid-cost": "Hybrid costs paid with either colour",
+    "hybrid-cost": "Hybrid costs paid with either color",
     "residual-text": "Extra card text ignored",
     "bounce-land": "Bounce lands enter untapped",
     "filter-ignored": "Mana filtering ignored",
@@ -646,7 +647,7 @@ def honesty_html(g: dict[str, Any]) -> str:
     unrec = h.get("unrecognized") or []
     if unrec:
         parts.append(
-            f"<div class='group'><h3>Not recognised <small>{_esc(_share(len(unrec), size))}</small></h3>"
+            f"<div class='group'><h3>Not recognized <small>{_esc(_share(len(unrec), size))}</small></h3>"
             "<p>The simulator has no model for these cards. It drew and cast them as blanks, so anything "
             "they would do in a real game is missing from the numbers above.</p>" + _names(unrec) + "</div>"
         )
@@ -706,10 +707,7 @@ def validation_html(v: dict[str, Any] | None) -> str:
 
 
 def _when(ts: Any) -> str:
-    try:
-        return time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(int(ts)))
-    except (TypeError, ValueError, OverflowError, OSError):
-        return ""
+    return time_html(ts)
 
 
 def _triggers_html(g: dict[str, Any]) -> str:
@@ -902,7 +900,7 @@ def report_markdown(r: dict[str, Any]) -> str:
         if h["unrecognized"] or h["out_of_scope"] or h["low_impact"]:
             lines += ["## What the simulation could not model", ""]
         if h["unrecognized"]:
-            lines.append(f"Not recognised — {_share(len(h['unrecognized']), size)}:")
+            lines.append(f"Not recognized — {_share(len(h['unrecognized']), size)}:")
             lines.append(", ".join(front_face(c["name"]) for c in h["unrecognized"]))
             lines.append("")
         if h["out_of_scope"]:
@@ -987,6 +985,8 @@ def report_export_html(r: dict[str, Any], *, stats_html: str = "", theme_css: st
     return (
         "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        "<meta name='color-scheme' content='light dark'>"
+        f"<link rel='icon' href='{ICON_DATA_URL}' type='image/svg+xml'>"
         f"<title>{title}</title><style>{EXPORT_CSS}{theme_css}{REPORT_CSS}</style></head>"
         f"<body>{body}</body></html>"
     )

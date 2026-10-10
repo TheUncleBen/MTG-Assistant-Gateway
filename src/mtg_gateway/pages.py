@@ -11,8 +11,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 import html
+import re
 import secrets
-import time
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, quote
 
@@ -24,7 +24,17 @@ from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
 from .avatars import initials_svg
 from .clickguard import form_stamp, guarded_form, submitted_too_soon
 from .decks import DeckError, current_client, row_label, row_line
-from .theme import LAYOUT_COOKIE, THEME_COOKIE, in_app, layout_from_cookie, render, theme_from_cookie
+from .theme import (
+    LAYOUT_COOKIE,
+    THEME_COOKIE,
+    display_name,
+    in_app,
+    layout_from_cookie,
+    plural,
+    render,
+    theme_from_cookie,
+    time_html,
+)
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -50,6 +60,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         sid: str | None = None,
         scripts: bool = False,
         head_extra: str = "",
+        current: str | None = None,
     ) -> Response:
         return render(
             title,
@@ -61,6 +72,8 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             admin=_is_admin(sub),
             scripts=scripts,
             head_extra=head_extra,
+            current=current,
+            user=display_name(state.db.get_user(sub)) if sub else None,
         )
 
     def _is_admin(sub: str | None) -> bool:
@@ -414,16 +427,12 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 f"<li><a class='name' href='/proposals/{html.escape(r['id'])}'>"
                 f"{html.escape(r['deck_name'] or r['deck_id'])}</a>"
                 f"<span class='badge {_badge(r['state'])}'>{html.escape(r['state'])}</span>"
-                + (
-                    f"<span class='muted small'>{html.escape(r['created_by'])}</span>"
-                    if r.get("created_by")
-                    else ""
-                )
+                + actor_html(r.get("created_by"))
                 + f"<span class='when'>{_when(r['created_at'])}</span></li>"
                 for r in rows
             )
             body = f"<div class='card'><ul class='plain plist'>{items}</ul></div>"
-        return page("Proposals", body, sub=sub, sid=sid)
+        return page("Proposals", body, sub=sub, sid=sid, current="/proposals")
 
     @server.custom_route("/proposals/{pid}", methods=["GET"], include_in_schema=False)
     async def proposal(request: Request) -> Response:
@@ -435,7 +444,12 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             p = state.decks.describe(sub, pid)
         except DeckError:
             return page(
-                "Not found", "<p>No such proposal for your account.</p>", status=404, sub=sub, sid=sid
+                "Not found",
+                "<p>No such proposal for your account.</p>",
+                status=404,
+                sub=sub,
+                sid=sid,
+                current="/proposals",
             )
         notice = _notice(request.query_params.get("ok"), request.query_params.get("err"))
         title = (
@@ -448,6 +462,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             notice + _proposal_body(p, _csrf(s, sid), form_stamp(s.session_secret, f"proposal:{sub}:{pid}")),
             sub=sub,
             sid=sid,
+            current="/proposals",
             scripts=True,  # the click guard on Apply (clickguard.py)
             # While a long apply runs in the background the page reloads itself to show progress.
             # It reloads the plain page, so the "Applying" notice of ?ok=applying goes once it ends.
@@ -709,9 +724,18 @@ def _badge(state: str) -> str:
 
 
 def _when(ts: int | None) -> str:
-    if not ts:
+    return time_html(ts)
+
+
+def actor_html(label: str | None) -> str:
+    """An actor label (decks.actor_label) as a badge: the app's registered name, with its client
+    id in the tooltip; the member's own browser and the administrator as they are."""
+    if not label:
         return ""
-    return time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(ts))
+    m = re.fullmatch(r"app: (.+) \((.+)\)", label)
+    if m:
+        return f"<span class='badge' title='{html.escape(label)}'>app: {html.escape(m.group(1))}</span>"
+    return f"<span class='badge' title='{html.escape(label)}'>{html.escape(label)}</span>"
 
 
 def _account_body(state: Any, sub: str, csrf: str | None, *, disclosure_read: bool = False) -> str:
@@ -817,7 +841,7 @@ def _mode_card(state: Any, sub: str, csrf_in: str) -> str:
         choices.append(
             f"<label class='check mode{'' if allowed else ' muted'}'>"
             f"<input type='radio' name='mode' value='{mode}'{' checked' if mode == current else ''}"
-            f"{'' if allowed else ' disabled'}> <span><strong>{html.escape(modes.MODE_LABELS[mode])}</strong>"
+            f"{'' if allowed else ' disabled'}><span><strong>{html.escape(modes.MODE_LABELS[mode])}</strong>"
             f"<br><span class='small'>{html.escape(modes.MODE_HELP[mode])}"
             f"{'' if allowed else ' (not allowed on this gateway)'}</span></span></label>"
         )
@@ -1123,9 +1147,9 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str = "") -> str:
         if counts["del"]:
             summary.append(f"<span class='del'>{counts['del']} removed</span>")
         if counts["chg"]:
-            summary.append(f"<span class='chg'>{counts['chg']} quantity changed</span>")
+            summary.append(f"<span class='chg'>{plural(counts['chg'], 'count')} changed</span>")
         if counts["cat"]:
-            summary.append(f"<span class='chg'>{counts['cat']} recategorised</span>")
+            summary.append(f"<span class='chg'>{counts['cat']} recategorized</span>")
         summary.append(f"<span>Net {'+' if net > 0 else ''}{net} card{'s' if abs(net) != 1 else ''}</span>")
         heading, aria = "What will change", "Card changes"
     raw = "<pre class='diff'>" + html.escape(p["diff"]) + "</pre>"
@@ -1137,7 +1161,14 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str = "") -> str:
             if p.get("kind") == "create_deck" and p["deck_id"] == "new"
             else "<dt>Target</dt><dd>Your Archidekt collection</dd>"
             if p.get("kind") == "collection"
-            else f"<dt>Deck</dt><dd><code>{html.escape(p['deck_id'])}</code></dd>"
+            else f"<dt>Deck</dt><dd><a href='/decks/{quote(str(p['deck_id']), safe='')}'>"
+            f"{html.escape(str(p.get('deck_name') or p['deck_id']))}</a>"
+            + (
+                f" <span class='muted small'>(deck {html.escape(str(p['deck_id']))})</span>"
+                if p.get("deck_name")
+                else ""
+            )
+            + "</dd>"
         )
         + (
             f"<dt>Archidekt account</dt><dd>{html.escape(str(p['changes']['archidekt_username']))}</dd>"
@@ -1146,7 +1177,7 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str = "") -> str:
             and p["changes"].get("archidekt_username")
             else ""
         )
-        + (f"<dt>Proposed by</dt><dd>{html.escape(p['created_by'])}</dd>" if p.get("created_by") else "")
+        + (f"<dt>Proposed by</dt><dd>{actor_html(p['created_by'])}</dd>" if p.get("created_by") else "")
         + (
             f"<dt>Risk</dt><dd><span class='badge {'warn' if p['risk'] == 'high' else ''}'>"
             f"{html.escape(p['risk'])}</span> <span class='small muted'>"
