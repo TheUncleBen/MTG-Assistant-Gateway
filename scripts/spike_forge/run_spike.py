@@ -47,9 +47,8 @@ def forge_card_names() -> set[str]:
     names: set[str] = set()
 
     def scan(text: str) -> None:
-        # The first Name: is the card (front face); faces after ALTERNATE are other faces.
-        m = re.search(r"^Name:(.+)$", text, re.MULTILINE)
-        if m:
+        # Every face's Name: (front, back, meld result, adventure part).
+        for m in re.finditer(r"^Name:(.+)$", text, re.MULTILINE):
             names.add(m.group(1).strip())
 
     zpath = folder / "cardsfolder.zip"
@@ -83,7 +82,25 @@ def coverage() -> dict:
     (OUT / "forge-card-names.json").write_text(json.dumps(sorted(forge), indent=0))
     forge_low = {n.lower() for n in forge}
     allc = [c for c in scryfall_commander_pool() if c.get("layout") not in NON_CARDS]
+    def playable(c: dict) -> bool:
+        return (c.get("set_type") not in ("funny", "memorabilia", "token", "minigame")
+                and "paper" in (c.get("games") or []))
+    # A missing card whose exact rules text and type line match a card Forge has can be played as
+    # that card (Universes Within renames, reprints under another name).
+    by_text: dict = {}
+    for c in allc:
+        key = ((c.get("oracle_text") or "").replace(c["name"], "~"), c.get("type_line"), c.get("mana_cost"))
+        if key[0]:
+            by_text.setdefault(key, []).append(c["name"])
+    def aliasable(c: dict) -> str | None:
+        key = ((c.get("oracle_text") or "").replace(c["name"], "~"), c.get("type_line"), c.get("mana_cost"))
+        for other in by_text.get(key, []):
+            if other != c["name"] and other.lower() in forge_low:
+                return other
+        return None
     pools = {"all_cards": allc,
+             "playable_paper": [c for c in allc if playable(c)],
+             "playable_paper_or_digital": [c for c in allc if c.get("set_type") not in ("funny", "memorabilia", "token", "minigame")],
              "commander_legal": [c for c in allc
                                  if c.get("legalities", {}).get("commander") in ("legal", "restricted")]}
     out = {"forge_scripts": len(forge)}
@@ -97,8 +114,17 @@ def coverage() -> dict:
                                 "released_at": c.get("released_at"), "layout": c.get("layout")})
         (OUT / f"forge-missing-{label}.json").write_text(json.dumps(missing, indent=1))
         n = len(pool)
+        byname = {c["name"]: c for c in pool}
+        aliases = {m["name"]: a for m in missing if (a := aliasable(byname[m["name"]]))}
+        left = [m["name"] for m in missing if m["name"] not in aliases]
         out[label] = {"pool": n, "missing": len(missing),
-                      "covered_pct": round(100 * (n - len(missing)) / n, 2)}
+                      "covered_pct": round(100 * (n - len(missing)) / n, 2),
+                      "aliasable": len(aliases),
+                      "covered_pct_with_aliases": round(100 * (n - len(left)) / n, 2)}
+        if label != "all_cards":
+            print(f"{label} STILL MISSING ({len(left)}): " + " | ".join(
+                f"{x} [{byname[x].get('set')}/{byname[x].get('set_type')}]" for x in left))
+            print(f"{label} ALIASES: " + " | ".join(f"{k} -> {v}" for k, v in list(aliases.items())[:80]))
     return out
 
 
@@ -228,7 +254,6 @@ def main() -> None:
         (OUT / "summary.json").write_text(json.dumps(summary, indent=1))
         (OUT / "summary.md").write_text("# Forge coverage\n\n" + json.dumps(summary["coverage"], indent=1) + "\n")
         print(json.dumps(summary["coverage"], indent=1))
-        group_report()
         return
 
     (DECKS / "liesa.dck").write_text((HERE / "liesa.dck").read_text())
