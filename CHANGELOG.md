@@ -7,6 +7,26 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.17] - 2026-10-10
+
+Assistant tools for actions on your Archidekt account. Each one is only a proposal: you apply it
+yourself, every time, in every approval mode (R-142).
+
+### Added
+- `get_deck_comments` reads a deck's comment thread.
+- `propose_deck_social` (like, vote down, bookmark, follow the deck's owner, and their undo),
+  `propose_comment` (post, reply, edit or delete your own comment, vote on someone else's),
+  `propose_create_folder` and `propose_delete_deck`. The review card and page show exactly what
+  will happen, with the full comment text; deleting a deck is marked destructive, with a red
+  "Delete this deck on Archidekt" button and the warning that Archidekt has no undo.
+
+### Security
+- R-142: a like, vote, bookmark, follow, comment, new folder or deck deletion is never applied by
+  an assistant, whatever the approval mode. The gateway refuses the assistant's
+  `apply_proposal` for them where proposals are applied (a "consent" risk tier no mode allows,
+  plus a separate refusal for these proposals); only the member's own press on the in-chat card
+  or the review page applies them. The account page, guide and skill say so.
+
 ## [0.7.16] - 2026-10-10
 
 The first of the Archidekt features flagged in the gap review and never built.

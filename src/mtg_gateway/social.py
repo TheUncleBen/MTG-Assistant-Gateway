@@ -331,6 +331,7 @@ def add_social_routes(server: MCPServer, state: AppState) -> SocialService:
     s = state.settings
     service = SocialService(state)
     state.social = service  # type: ignore[attr-defined]
+    state.decks.social = service  # actions.py proposes and applies through it
 
     def who(request: Request, *, write: bool) -> str | Response:
         sub, sid = browser_session(state, request)

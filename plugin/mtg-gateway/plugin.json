@@ -1,6 +1,6 @@
 {
   "name": "mtg-gateway",
-  "version": "0.7.16",
+  "version": "0.7.17",
   "description": "Magic: The Gathering research, goldfish simulation and safe Archidekt deck edits through a self-hosted MTG Assistant Gateway. Adds the gateway connector and the MTG skill.",
   "author": { "name": "TheUncleBen", "url": "https://github.com/TheUncleBen" },
   "homepage": "https://github.com/TheUncleBen/MTG-Assistant-Gateway",
