@@ -7,6 +7,16 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.19] - 2026-10-10
+
+### Security
+- R-142: an Archidekt account action (like, vote, bookmark, follow, comment, new folder, deck
+  deletion) is now approved only on the signed-in review page. Its in-chat card no longer has
+  Approve and Reject buttons; it shows "Approve on the review page", which opens that page. The
+  gateway refuses any other way of applying one, including the in-chat card's own call, so a chat
+  app that let the model press the card still could not act for you. Other proposals keep their
+  in-chat Approve card.
+
 ## [0.7.18] - 2026-10-10
 
 More of the Archidekt deck page: new views, your own stack order, editing several cards at once and

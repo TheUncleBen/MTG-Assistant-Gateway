@@ -62,7 +62,8 @@ snapshot first and is read back to verify.
 **No assistant tool exists for:** renaming folders, linking or unlinking
 Archidekt, approval modes, admin. Social actions and deleting a deck have
 tools since 0.7.17, but only as proposals, and (R-142) the person applies each
-one themselves on its card or review page, in every approval mode: no mode,
+one themselves on its review page, in every approval mode (the in-chat card
+only opens that page, since 0.7.19): no mode,
 setting or batch lets an assistant apply a like, vote, bookmark, follow,
 comment, new folder or deck deletion. The gateway enforces this where proposals
 are applied, not only in the pages.

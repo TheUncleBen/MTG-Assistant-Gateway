@@ -1,11 +1,12 @@
 """Archidekt account actions an assistant can propose (0.7.17): like or vote down a deck,
 bookmark it, follow its owner, post, edit, delete or vote on a comment, delete a deck and create
 a folder. Each is a proposal of kind ``action`` with one review row, so it goes through the same
-approval as every other write: the member's press on the in-chat card or the review page, or
-their approval mode (modes.py). Deleting a deck is never applied by an assistant on its own,
-whatever the mode. The work itself is the code the gateway's own pages already use (the deck
-page's social buttons in social.py, the delete and folder pages in decks.py), so a proposal
-does exactly what the matching button does, with the same checks again at apply time."""
+approval flow as every other write, but (R-142) only the member's press on the signed-in review
+page applies one: never the assistant, whatever the approval mode (modes.py), and not the in-chat
+card, which only opens the review page for these. The work itself is the code the gateway's
+own pages already use (the deck page's social buttons in social.py, the delete and folder
+pages in decks.py), so a proposal does exactly what the matching button
+does, with the same checks again at apply time."""
 
 from __future__ import annotations
 

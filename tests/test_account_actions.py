@@ -1,7 +1,8 @@
 """0.7.17: the Archidekt account actions an assistant can propose (actions.py): like, bookmark
 and follow; post, edit, delete and vote on comments; delete a deck; create a folder. Each is a
 proposal, and (R-142) none of them is ever applied by the assistant, whatever the approval mode:
-the member applies each one with their own press on its card or review page."""
+the member applies each one with their own press on its review page. Since 0.7.19 the in-chat
+card cannot apply one either: it gets no approval code and only opens the review page."""
 
 from __future__ import annotations
 
@@ -12,7 +13,9 @@ from mtg_gateway.approve import APPROVAL_META_KEY
 
 from .conftest import FakeIdP, running
 from .test_approval_modes import _set_mode, _stack_with
-from .test_decks_and_proxy import Stack, call, linked_user, structured
+from .test_decks_and_proxy import Browser, Stack, call, linked_user, structured
+
+SUB = "user-1"  # the signed-in member of linked_user
 
 
 @pytest.fixture
@@ -23,13 +26,24 @@ async def stack(tmp_path, idp: FakeIdP):
         yield Stack(h, ark)
 
 
+async def _browser_apply(h, pid: str) -> dict:
+    """The member's press on the signed-in review page's Apply (session cookie and CSRF token)."""
+    b = Browser(h)
+    try:
+        await b.login()
+        csrf = await b.csrf()
+        r = await b.http.post(f"/api/v1/proposals/{pid}/apply", headers={"X-CSRF-Token": csrf})
+        return r.json()
+    finally:
+        await b.aclose()
+
+
 async def _press(h, token: str, res) -> dict:
-    """The member's press on the in-chat card (its one-time code), which applies the proposal."""
+    """The member's press on the review page, the only place an account action is applied. The
+    in-chat card got no approval code for it."""
     p = structured(res)
-    code = res["_meta"][APPROVAL_META_KEY]
-    out = structured(
-        await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": code})
-    )
+    assert not (res.get("_meta") or {}).get(APPROVAL_META_KEY), res.get("_meta")
+    out = await _browser_apply(h, p["proposal_id"])
     assert out["ok"] and out["state"] == "applied", out
     return out
 
@@ -160,12 +174,9 @@ async def test_delete_deck_waits_for_the_members_press_even_in_auto(stack: Stack
     # someone else's deck cannot be proposed for deletion at all
     other = structured(await call(h, token, "propose_delete_deck", {"deck_id": "43"}))
     assert other["ok"] is False
-    # the member's press on the card deletes it, with a snapshot kept first
-    code = res["_meta"][APPROVAL_META_KEY]
-    done = structured(
-        await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": code})
-    )
-    assert done["ok"] and done["state"] == "applied" and ark.deleted == [42]
+    # the member's press on the review page deletes it, with a snapshot kept first
+    done = await _press(h, token, res)
+    assert ark.deleted == [42]
     assert done["result"]["snapshot_id"]
 
 
@@ -315,14 +326,7 @@ async def test_delete_refuses_a_deck_that_changed_after_the_proposal(stack: Stac
     p = structured(res)
     ark.decks[42]["updatedAt"] = "2026-10-11T00:00:00Z"  # edited on Archidekt meanwhile
     ark.decks[42]["cards"][0]["quantity"] += 1
-    out = structured(
-        await call(
-            h,
-            token,
-            "confirm_proposal",
-            {"proposal_id": p["proposal_id"], "approval": res["_meta"][APPROVAL_META_KEY]},
-        )
-    )
+    out = await _browser_apply(h, p["proposal_id"])
     assert out["ok"] is False and out["error"] == "stale", out
     assert ark.deleted == []
 
@@ -333,14 +337,7 @@ async def test_delete_whose_backup_fails_goes_back_to_pending(stack: Stack) -> N
     ark.fail_backup = True
     res = await call(h, token, "propose_delete_deck", {"deck_id": "42"})
     p = structured(res)
-    out = structured(
-        await call(
-            h,
-            token,
-            "confirm_proposal",
-            {"proposal_id": p["proposal_id"], "approval": res["_meta"][APPROVAL_META_KEY]},
-        )
-    )
+    out = await _browser_apply(h, p["proposal_id"])
     assert out["ok"] is False and out["error"] == "backup_failed", out
     assert ark.deleted == []
     again = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
@@ -356,3 +353,32 @@ async def test_no_vote_proposal_for_an_archived_comment(stack: Stack) -> None:
         await call(h, token, "propose_comment", {"deck_id": "43", "action": "vote_up", "comment_id": 555001})
     )
     assert p["ok"] is False and "archived" in p["message"]
+
+
+@pytest.mark.parametrize(
+    ("tool", "args"), ACCOUNT_ACTIONS, ids=[f"{t}:{a.get('action', 'folder')}" for t, a in ACCOUNT_ACTIONS]
+)
+async def test_the_in_chat_card_cannot_apply_an_account_action(stack: Stack, tool: str, args: dict) -> None:
+    """R-142, 0.7.19: the card's press runs inside the chat app, so for an account action the card
+    gets no approval code, and even a valid code for it is refused: only the review page applies."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    _seed_comment(ark)
+    res = await call(h, token, tool, args)
+    p = structured(res)
+    assert p["ok"] and p["kind"] == "action", p
+    assert not (res.get("_meta") or {}).get(APPROVAL_META_KEY), res.get("_meta")
+    assert "review page" in p["next_step"] and "card or the review page" not in p["next_step"]
+    # a valid code for this proposal, as an older card would have held, is refused all the same
+    decks = h.app.state.gateway.decks
+    row = h.db.get_proposal(p["proposal_id"], SUB)
+    code = decks.approval_for(SUB, row)
+    out = structured(
+        await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": code})
+    )
+    assert out["ok"] is False and out["error"] == "browser_required", out
+    assert ark.votes == {} and ark.deleted == [] and not any(ark.follows.values())
+    assert (
+        structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))["state"]
+        == "pending"
+    )
