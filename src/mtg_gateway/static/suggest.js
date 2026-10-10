@@ -6,7 +6,11 @@
    whose shorter form already came back complete (fewer than the limit) is narrowed locally with
    no request at all. Keyboard: Down/Up move, Enter picks, Escape closes, Tab leaves. Picking
    fills the box and fires a "suggest:pick" event; with data-suggest-submit the form is sent too
-   (the deck editor adds the card at once). Loaded on every page; does nothing without inputs. */
+   (the deck editor adds the card at once). data-suggest-site="/cards?q=" is the top bar's site
+   search: the names become a Cards group whose rows open that page for the card, and a Decks
+   group offers the deck search for the typed text and, once the card details are known, "Decks
+   with commander …" for a legendary creature among the matches; Enter on plain text submits the
+   form (deck search). Loaded on every page; does nothing without inputs. */
 (function () {
   "use strict";
   var LIMIT = 20;
@@ -84,6 +88,8 @@
 
     var items = [], active = -1, timer = null, inflight = null, seq = 0, shownFor = "";
     var rich = input.hasAttribute("data-suggest-rich"), peeking = null;
+    var site = input.getAttribute("data-suggest-site");  // the top bar: card rows open this page, plus a Decks group
+    if (site) rich = true;
     // data-suggest-qty: a count in front ("3 sol ring") is kept out of the lookup and kept on pick
     var qtyMode = input.hasAttribute("data-suggest-qty");
     var pendingEnter = false;  // Enter pressed while the list still showed an older text
@@ -167,14 +173,68 @@
           (d.cards || []).forEach(function (c) { if (c && c.name) cards[fold(c.name)] = c; });
           missing.forEach(function (n) { if (!(fold(n) in cards)) cards[fold(n)] = null; });
           if (shownFor !== shown || list.hidden) return;
-          items.forEach(function (li) { decorate(li, cards[fold(li.getAttribute("data-name"))]); });
+          items.forEach(function (li) { if (!li.hasAttribute("data-href")) decorate(li, cards[fold(li.getAttribute("data-name"))]); });
+          if (site) commanderRows();
           announce();  // the card details (oracle id, picture) are known now
         })
         .catch(function () {});
     }
+    /* The site search's groups. A header row is not an option; the Decks rows are options that
+       carry the page they open, so the keyboard reaches them like any name. */
+    var SVG = { search: "<circle cx='11' cy='11' r='7'/><path d='M20 20l-4-4'/>",
+      decks: "<path d='M4 7h16v13H4z'/><path d='M7 4h13v13'/>" };
+    function head(label) {
+      var li = document.createElement("li");
+      li.className = "head";
+      li.setAttribute("role", "presentation");
+      li.textContent = label;
+      return li;
+    }
+    function goRow(label, href, ic) {
+      var li = document.createElement("li");
+      li.id = id + "-" + items.length;
+      li.setAttribute("role", "option");
+      li.setAttribute("aria-selected", "false");
+      li.setAttribute("data-name", label);
+      li.setAttribute("data-href", href);
+      li.className = "go";
+      var span = document.createElement("span");
+      span.innerHTML = "<svg class='i' viewBox='0 0 24 24' aria-hidden='true'>" + (SVG[ic] || "") + "</svg>";
+      li.appendChild(span.firstChild);
+      li.appendChild(document.createTextNode(label));
+      li.addEventListener("mousedown", function (e) { e.preventDefault(); });
+      var at = items.length;
+      li.addEventListener("click", function () { pick(at); });
+      items.push(li);
+      return li;
+    }
+    function siteRows(names) {
+      var raw = text().trim();
+      if (names.length) list.insertBefore(head("Cards"), list.firstChild);
+      list.appendChild(head("Decks"));
+      list.appendChild(goRow("Search decks named “" + raw + "”", "/search?name=" + encodeURIComponent(raw), "search"));
+      commanderRows();
+      status.textContent = items.length + " suggestion" + (items.length === 1 ? "" : "s");
+    }
+    function commanderRows() {
+      // up to two legendary creatures among the shown cards, once their details are known
+      var shown = 0;
+      items.slice().forEach(function (li) {
+        if (li.hasAttribute("data-href") || shown >= 2) return;
+        var c = cards[fold(li.getAttribute("data-name"))];
+        if (!c || !/Legendary/.test(c.type_line || "") || !/Creature/.test(c.type_line || "")) return;
+        var href = "/search?commander=" + encodeURIComponent(c.name);
+        shown++;
+        if (items.some(function (o) { return o.getAttribute("data-href") === href; })) return;
+        list.appendChild(goRow("Decks with commander " + c.name, href, "decks"));
+      });
+    }
     function pick(i) {
       var name = items[i] ? items[i].getAttribute("data-name") : "";
       if (!name) return;
+      var href = items[i].getAttribute("data-href");  // read before close() empties the rows
+      if (href) { close(); location.href = href; return; }
+      if (site) { input.value = name; close(); location.href = site + encodeURIComponent(name); return; }
       input.value = split(input.value).prefix + name;
       close();
       input.dispatchEvent(new CustomEvent("suggest:pick", { bubbles: true, detail: { name: name, card: cards[fold(name)] || null } }));
@@ -213,6 +273,7 @@
         });
         status.textContent = names.length + " suggestion" + (names.length === 1 ? "" : "s");
       }
+      if (site) siteRows(names);
       list.hidden = false;
       input.setAttribute("aria-expanded", "true");
       shownFor = q;

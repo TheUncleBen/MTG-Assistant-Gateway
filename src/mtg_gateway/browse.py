@@ -62,22 +62,40 @@ FORMAT_OPTIONS = sorted(
     ((str(i), format_label(FORMAT_NAMES[i])) for i in sorted(FORMAT_NAMES)), key=lambda kv: kv[1].lower()
 )
 BROWSE_CSS = """
-.searchbar .controls{display:grid;gap:.9rem 1rem;align-items:end;
-  grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr))}
-.searchbar .controls .field{margin:0}
-.searchbar .foot{grid-column:1 / -1;display:flex;flex-wrap:wrap;align-items:end;
-  justify-content:space-between;gap:.9rem 1.5rem}
-.searchbar .colours{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .9rem;min-height:var(--ctl)}
-.searchbar .colours label{display:inline-flex;align-items:center;gap:.3rem;margin:0;cursor:pointer;
-  font-weight:400;min-height:2rem}
-.searchbar .colours input{width:auto;height:auto;margin:0}
-.searchbar .form-actions{margin:0;flex:1 1 auto;justify-content:flex-end}
+/* The deck search form: one grid of equal-height controls, labels on one baseline, the colour
+   toggles and the buttons on a closing row that stacks on a phone. */
+.searchbar{padding:1.1rem 1.1rem 1rem}
+.searchbar .controls{display:grid;gap:.85rem 1rem;align-items:start;
+  grid-template-columns:repeat(auto-fit,minmax(min(100%,12rem),1fr))}
+.searchbar .controls .field{margin:0;gap:.3rem}
+.searchbar .field > label,.searchbar .field .lbl{display:block;font-size:.93rem;font-weight:700;margin:0;
+  line-height:1.3;color:var(--text)}
+.searchbar .field .lbl{margin-bottom:.3rem}
+.searchbar .field input,.searchbar .field .sel,.searchbar .field select{height:var(--ctl);margin:0}
+.searchbar .field .suggest{display:block}
+.searchbar .foot{grid-column:1 / -1;display:flex;flex-wrap:wrap;align-items:center;
+  justify-content:space-between;gap:.75rem 1.5rem;margin-top:.15rem;padding-top:.9rem;
+  border-top:1px solid var(--border-soft)}
+.searchbar .foot .field{flex:1 1 20rem;min-width:0}
+.searchbar .colours{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .5rem}
+.searchbar .colours label{display:inline-flex;align-items:center;gap:.35rem;margin:0;cursor:pointer;
+  font-weight:400;height:34px;padding:0 .75rem 0 .5rem;border:1px solid var(--border);border-radius:17px;
+  background:var(--surface);transition:border-color .2s ease,background-color .2s ease;user-select:none}
+.searchbar .colours label:hover{border-color:var(--orange)}
+.searchbar .colours label:has(input:checked){border-color:var(--orange);background:var(--orange-tint)}
+.searchbar .colours label:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:2px}
+.searchbar .colours input{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;
+  overflow:hidden;clip:rect(0,0,0,0);opacity:0}
+.searchbar .form-actions{margin:0;flex:0 0 auto;justify-content:flex-end;gap:.5rem}
+.searchbar .form-actions .btn,.searchbar .form-actions button{margin:0;height:var(--ctl)}
 .searchbar .form-actions .btn-primary{min-width:11rem}
-.searchbar .field .lbl{display:block;font-size:1rem;font-weight:700;margin-bottom:.3rem}
+.searchbar .form-actions .cards{gap:.4rem}
 @media (min-width:1200px){ .searchbar .controls{
   grid-template-columns:minmax(0,2fr) minmax(0,2fr) minmax(0,1.5fr) minmax(10rem,1fr) minmax(10rem,1fr)} }
 @media (max-width:600px){ .searchbar .foot{flex-direction:column;align-items:stretch}
-  .searchbar .form-actions{justify-content:stretch} }
+  .searchbar .foot .field{flex:0 0 auto}
+  .searchbar .form-actions{display:grid;grid-template-columns:1fr 1fr}
+  .searchbar .form-actions .btn-primary{grid-column:1 / -1;min-width:0} }
 .results-head{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap;
   margin:0 0 .75rem}
 .results-head .muted{margin:0}
@@ -180,6 +198,9 @@ def search_form_html(query: dict[str, Any]) -> str:
         f"<i class='pip pip-{c}' aria-hidden='true'></i>{n}</label>"
         for c, n in COLOURS
     )
+    # the card search for the same text: a commander's name is a card name, a deck name may be
+    cards_q = query["commander"] or query["name"]
+    cards_link = "/cards" + (f"?{urlencode({'q': cards_q})}" if cards_q else "")
     return (
         "<section class='panel searchbar'><form method='get' "
         "action='/search' class='controls' id='searchform'>"
@@ -201,7 +222,9 @@ def search_form_html(query: dict[str, Any]) -> str:
         f"identity</span><div class='colours'>{colours}</div></div>"
         "<div class='form-actions'><button type='submit' "
         f"class='btn-primary'>{icon('search')} Search decks</button>"
-        "<a class='btn' href='/search'>Clear</a></div></div>"
+        "<a class='btn' href='/search'>Clear</a>"
+        f"<a class='btn cards' href='{_esc(cards_link)}' title='Find a card and add it to a deck'>"
+        f"{icon('image')} Search cards</a></div></div>"
         "</form></section>"
     )
 
