@@ -90,7 +90,7 @@ Edit `.env`. The lines marked **REQUIRED**:
 | `MTG_OIDC_ISSUER` | The issuer URL from step 1 |
 | `MTG_OIDC_CLIENT_ID` | The client ID from step 1 |
 | `MTG_REQUIRED_GROUP` | The group from step 1, exactly as your provider sends it. Required unless you set `MTG_ALLOW_ANY_IDP_USER=true` (see [IDP-OTHERS.md](IDP-OTHERS.md#about-the-group-check)) |
-| `MTG_TAG` | `latest` to follow every new version, or one version to stay on it, for example `0.7.15` ([VERSIONS.md](VERSIONS.md)) |
+| `MTG_TAG` | `latest` to follow every new version, or one version to stay on it, for example `0.7.16` ([VERSIONS.md](VERSIONS.md)) |
 
 Worth a look:
 
