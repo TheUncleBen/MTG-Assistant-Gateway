@@ -242,6 +242,7 @@ class DeckCard:
     faces: list[dict[str, str]] = field(default_factory=list)  # per face: name, mana_cost, type_line, text...
     artist: str = ""
     flavor: str = ""
+    keywords: list[str] = field(default_factory=list)  # Archidekt's oracle ``keywords`` (Flying, Equip...)
 
     @property
     def type_line(self) -> str:
@@ -1682,6 +1683,7 @@ def parse_deck(body: Any) -> Deck:
                 faces=_faces(oracle),
                 artist=str(card.get("artist") or ""),
                 flavor=str(card.get("flavor") or ""),
+                keywords=_str_list(oracle.get("keywords")),
                 owned=_int(card.get("owned")),
             )
         )

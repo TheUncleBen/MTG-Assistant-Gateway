@@ -641,3 +641,96 @@ def test_companion_and_bracket_mismatch_checks() -> None:
     checks = compute(low)["checks"]
     assert checks["bracket"] == {"set": 2, "estimate": 4, "ok": False} and checks["ok"] is False
     assert any("bracket set to 2" in p for p in checks["problems"])
+
+
+# -- Archidekt's extra stats: curve by type or category, lands-only sources, out-of-identity pips,
+# subtype and keyword counts ------------------------------------------------------------------
+
+
+def _extra_deck() -> Deck:
+    return deck(
+        [
+            card("Aesi", 1, categories=["Commander"], types=["Creature"], cmc=6.0, mana_cost="{4}{G}{U}",
+                 color_identity=["Green", "Blue"], subtypes=["Serpent"]),
+            card("Coiling Oracle", 1, categories=["Ramp"], types=["Creature"], cmc=2.0, mana_cost="{G}{U}",
+                 subtypes=["Snake", "Elf", "Druid"]),
+            card("Ornithopter", 1, types=["Artifact", "Creature"], cmc=0.0, subtypes=["Thopter"],
+                 keywords=["Flying"]),
+            card("Bolt", 2, categories=["Removal"], types=["Instant"], cmc=1.0, mana_cost="{R}"),
+            card("Fire // Ice", 1, categories=["Removal"], types=["Instant"], cmc=2.0, mana_cost="{1}{R/U}"),
+            card("Sol Ring", 1, categories=["Ramp"], types=["Artifact"], cmc=1.0, mana_cost="{1}",
+                 mana_production={"C": 2}),
+            card("Mulldrifter", 1, categories=["Draw"], types=["Creature"], cmc=5.0, mana_cost="{4}{U}",
+                 subtypes=["Elemental"], keywords=["Flying", "Evoke"]),
+            card("Forest", 3, categories=["Land"], types=["Land"], supertypes=["Basic"], subtypes=["Forest"],
+                 mana_production={"G": 1}),
+            card("Command Tower", 1, categories=["Land"], types=["Land"], mana_production={"G": 1, "U": 1}),
+        ],
+        categories=[{"name": "Commander", "isPremier": True, "includedInDeck": True}],
+    )  # fmt: skip
+
+
+def test_curve_by_type_and_category_add_up_to_the_curve() -> None:
+    s = compute(_extra_deck())
+    by_type, by_cat = s["mana_curve_by_type"], s["mana_curve_by_category"]
+    assert list(by_type) == list(by_cat) == list(s["mana_curve"])
+    for b, n in s["mana_curve"].items():
+        assert sum(by_type[b].values()) == n == sum(by_cat[b].values())
+    # an Artifact Creature counts once, as a Creature; an uncategorised card under its type
+    assert by_type["0"] == {"Creature": 1} and by_cat["0"] == {"Creature": 1}
+    assert by_type["1"] == {"Instant": 2, "Artifact": 1}
+    assert by_cat["1"] == {"Removal": 2, "Ramp": 1}
+    assert by_cat["6"] == {"Commander": 1} and by_type["7+"] == {}
+
+
+def test_land_only_sources_and_out_of_identity_pips() -> None:
+    s = compute(_extra_deck())
+    assert s["mana_sources"] == {"U": 1, "G": 4, "C": 2}
+    assert s["mana_sources_lands"] == {"U": 1, "G": 4}
+    ooi = s["out_of_identity"]
+    assert ooi["identity"] == ["U", "G"]
+    # two Bolts (a red pip each) and Fire // Ice's hybrid {R/U}, half of it outside
+    assert ooi["pips"] == {"R": 2.5}
+    assert ooi["cards"] == [{"name": "Bolt", "colours": ["R"]}, {"name": "Fire // Ice", "colours": ["R"]}]
+
+
+def test_out_of_identity_is_none_without_a_commander() -> None:
+    d = _extra_deck()
+    for c in d.cards:
+        c.categories = [x for x in c.categories if x != "Commander"]
+    assert compute(d)["out_of_identity"] is None
+
+
+def test_subtype_and_keyword_counts_count_copies() -> None:
+    s = compute(_extra_deck())
+    assert list(s["subtype_counts"])[0] == "Forest" and s["subtype_counts"]["Forest"] == 3
+    assert s["subtype_counts"]["Snake"] == 1 and "Thopter" in s["subtype_counts"]
+    assert s["keyword_counts"] == {"Flying": 2, "Evoke": 1}
+
+
+def test_parse_deck_reads_archidekt_keywords() -> None:
+    d = live("sample")
+    boots = next(c for c in d.cards if c.name == "Swiftfoot Boots")
+    assert boots.keywords == ["Equip"]
+    assert compute(d)["keyword_counts"]["Landfall"] == 9
+
+
+def test_stats_panel_draws_the_controls_and_focus_targets() -> None:
+    from mtg_gateway.deckpage import stats_panel_html
+
+    d = _extra_deck()
+    html = stats_panel_html(d, compute(d))
+    # every variant is drawn; the toolbars wait for the script (hidden); None, Bar and all sources show
+    assert html.count("class='statctl'") == 2 and "aria-label='Mana curve by' hidden" in html
+    for v in ("none", "type", "category"):
+        assert f"data-curve='{v}'" in html
+    assert "data-curve='type' hidden" in html and "data-src='lands' hidden" in html
+    assert "aria-pressed='true'>None</button>" in html and "aria-pressed='true'>Bar</button>" in html
+    assert "data-set='lands' aria-pressed='false'" in html
+    assert "aria-label='Mana curve by type, cards per mana value: 0: 1 (1 Creature); 1: 3" in html
+    assert "<svg viewBox='0 0 100 100' role='img' aria-label='Mana cost by color:" in html
+    assert "aria-label='Production (lands only) by color: Blue 1 mana (20%), Green 4 mana (80%)'" in html
+    assert "2.5 pips outside the commander's color identity" in html
+    assert "data-focus='[&quot;bolt&quot;, &quot;fire // ice&quot;]'" in html
+    assert "Quantity by subtype" in html and "Quantity by keyword" in html
+    assert ">Evoke</button></td><td>1</td>" in html

@@ -687,6 +687,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             csp=DECK_CSP,
             heading=False,
             deck_css=True,
+            extra_scripts=("deckstats.js",),
         )
         return remember_view(resp, "deck", view, secure=secure) if remember else resp
 

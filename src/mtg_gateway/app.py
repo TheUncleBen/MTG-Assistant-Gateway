@@ -1106,9 +1106,10 @@ def build_mcp_server(state: AppState) -> MCPServer:
         name="deck_stats",
         title="Deck statistics",
         description=(
-            "Mana curve, color pips against mana sources, type and rarity counts, average mana value, price "
-            "total, format legality problems, game changers, tutors, "
-            "extra turns, mass land denial, salt, a "
+            "Mana curve (also split by card type and by category), color pips against mana sources (also "
+            "from lands only), pips outside the commander's color identity, type, subtype, keyword and "
+            "rarity counts, average mana value, price total, format legality problems, game changers, "
+            "tutors, extra turns, mass land denial, salt, a "
             "Commander bracket ESTIMATE and structural checks (deck size for the format, commander zone "
             "and whether each card may command, color identity violations, singleton violations, "
             "uncategorised rows: stats.checks), all from Archidekt's own card data in one read (no Mystic "
