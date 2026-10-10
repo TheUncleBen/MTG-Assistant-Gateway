@@ -32,7 +32,7 @@ from .deckpage import DECK_CSS, image_url, mana_html
 from .decks import DeckError, current_client
 from .pages import _csrf, _safe_next, browser_session, login_redirect, read_limited
 from .schemas import CollectionAdd, CollectionRemove, card_aliases, dumped
-from .theme import icon, render
+from .theme import icon, remember_view, render, view_choice
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -994,7 +994,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         qp = request.query_params
         q = _clean(qp.get("q"), 80)
         sort = qp.get("sort") if qp.get("sort") in SORTS else "added"
-        view = qp.get("view") if qp.get("view") in ("grid", "list") else "grid"
+        view, remember = view_choice(request, "collection", ("grid", "list"), "grid")
         try:
             page_no = max(1, min(int(qp.get("page") or 1), 10_000))
         except ValueError:
@@ -1122,13 +1122,16 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             if out["has_next"]:
                 pager += f"<a class='btn' href='{_esc(link_to(page_no + 1))}'>Next</a>"
             pager += "</nav>"
-        return page(
+        resp = page(
             "My collection",
             notice(qp.get("ok") or qp.get("err")) + totals_html + controls + body + pager + add_box,
             sub=sub,
             sid=sid,
             scripts=True,
         )
+        if remember:
+            remember_view(resp, "collection", view, secure=s.public_url.startswith("https://"))
+        return resp
 
     @server.custom_route("/collection", methods=["POST"], include_in_schema=False)
     async def collection_post(request: Request) -> Response:

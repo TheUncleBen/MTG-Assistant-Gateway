@@ -17,7 +17,9 @@ globalToolbar, floatingToolbar, footer and panel rules). The theme is chosen wit
 from __future__ import annotations
 
 import html
+from collections.abc import Iterable
 from contextvars import ContextVar
+from typing import Any
 
 from starlette.responses import HTMLResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -194,7 +196,11 @@ details.dd > summary::-webkit-details-marker{display:none}
 .menu{z-index:30;min-width:200px;
   background:var(--surface-2);border-radius:var(--radius-panel);box-shadow:var(--shadow);padding:.25rem 0;
   display:flex;flex-direction:column}
-details.dd .menu{position:absolute;top:calc(100% + .25rem);right:0;max-width:calc(100vw - 16px)}
+/* An absolute panel hanging from a small button would shrink to its min-width and wrap even short
+   items ("Change printing"): it takes its content's width instead, capped so a long item still
+   wraps inside a phone's window (and a desktop menu never runs half the screen wide). */
+details.dd .menu{position:absolute;top:calc(100% + .25rem);right:0;width:max-content;
+  max-width:min(30rem,calc(100vw - 16px))}
 details.dd .menu.left{left:0;right:auto}
 /* Each item rule is written twice, plain and under details.dd: inside the top bar the plain
    .menu rule would lose to .topbar nav a (the bar's white text, 40px, bold) and the account
@@ -883,6 +889,33 @@ def theme_from_cookie(value: str | None) -> str:
 
 def layout_from_cookie(value: str | None) -> str:
     return value if value in LAYOUTS else "auto"
+
+
+# "View as" on the deck page, the deck list and the collection is remembered per browser the same
+# way as the theme: a cookie, so the page that comes back renders the chosen view at once (no
+# flash of the default, no script). The page sets it whenever the view is picked in its address
+# (the toolbar's form puts it there); a visit without one renders the remembered view.
+VIEW_COOKIE = "mtg_view_"
+VIEW_KINDS = ("deck", "decks", "collection")
+
+
+def view_choice(request: Any, kind: str, allowed: Iterable[str], default: str) -> tuple[str, bool]:
+    """The view to render for ``kind``: the address's ``view`` when it is a known one (and True:
+    remember it), else the remembered one, else ``default`` (and False)."""
+    allowed = tuple(allowed)
+    asked = request.query_params.get("view")
+    if asked in allowed:
+        return asked, asked != request.cookies.get(VIEW_COOKIE + kind)
+    saved = request.cookies.get(VIEW_COOKIE + kind)
+    return (saved if saved in allowed else default), False
+
+
+def remember_view(response: Any, kind: str, view: str, *, secure: bool) -> Any:
+    assert kind in VIEW_KINDS
+    response.set_cookie(
+        VIEW_COOKIE + kind, view, max_age=365 * 86400, path="/", secure=secure, httponly=True, samesite="lax"
+    )
+    return response
 
 
 def current_layout() -> str:
