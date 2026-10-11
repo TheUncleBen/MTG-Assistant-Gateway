@@ -260,6 +260,14 @@ class MemberCache:
         for sub in list(self._entries):
             self.drop(sub)
 
+    async def refreshed(self, sub: str, fetch: Callable[[], Awaitable[Any]], *, wait: float) -> Any | None:
+        """A value fetched now (sharing a fetch already in flight), for the deck sync: unlike
+        ``get`` it never answers a failed fetch with an older value, so the error reaches the
+        caller. None when the fetch takes longer than ``wait`` (it carries on and fills the cache)."""
+        task = self._refresh(sub, fetch)
+        done, _pending = await asyncio.wait({task}, timeout=wait)
+        return task.result() if done else None
+
     def refreshing(self, sub: str) -> bool:
         return sub in self._refreshing
 
@@ -2064,7 +2072,9 @@ class DeckService:
                 background=True,
             )
 
-        rows = await self.deck_lists.get(sub, fetch, wait=wait, prefer_fresh=True)
+        # A page arriving meanwhile shares this read, and with it the sync's terms (no retry, no
+        # unlink); its next load reads again.
+        rows = await self.deck_lists.refreshed(sub, fetch, wait=wait)
         return None if rows is None else [dict(d) for d in rows]
 
     async def sync_read_deck(self, sub: str, deck_id: str) -> Deck:

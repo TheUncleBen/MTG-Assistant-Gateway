@@ -321,6 +321,27 @@ async def test_a_failing_archidekt_costs_the_breaker_one_failure_with_production
     assert got["ok"], got
 
 
+async def test_a_failed_refresh_of_an_older_list_still_ends_the_check(stack: Stack) -> None:
+    """A deck list cached a few minutes ago (no longer fresh) is not used to hide a failed read:
+    the check reports the error, so a round stops there and adds one failure to the breaker."""
+    h, ark = stack.h, stack.ark
+    sync = _sync(stack)
+    client = h.app.state.gateway.decks.client
+    client.retries, client.backoff_base = 2, 0.0
+    token = await linked_user(stack)
+    await _propose(h, token)
+    lists = h.app.state.gateway.decks.deck_lists
+    await sync.check(SUB)  # fills the member's list
+    for sub, (at, wall, value) in list(lists._entries.items()):
+        lists._entries[sub] = (at - 200, wall, value)  # 200 s old: past fresh, not yet dropped
+    assert lists.peek(SUB)[1] == "stale"
+    sent, failures = len(ark.calls), client.pacer._failures
+    ark.inject = [(503, None)] * 3
+    assert await sync.check(SUB) == {"error": "unavailable"}
+    assert len(ark.calls) == sent + 1 and client.pacer._failures == failures + 1
+    ark.inject = []
+
+
 async def test_a_rejected_session_ends_the_check_but_never_unlinks(stack: Stack) -> None:
     """The sync is nobody using the link: a 401 (and a rejected refresh) ends the check and leaves
     the link for the member's own next request to judge."""

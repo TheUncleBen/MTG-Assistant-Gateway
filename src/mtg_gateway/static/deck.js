@@ -2056,7 +2056,7 @@
     // is never sent and EDHPlay's import drops tokens: the note says what the list leaves out
     // (export_formats.to_edhplay)
     var missing = (leftOut ? " Left out because EDHPlay's sideboard holds only 15 cards: " + leftOut + "." : "")
-      + (maybe ? " The maybeboard isn't sent to EDHPlay." : "")
+      + (maybe ? " The maybeboard and other cards kept outside the deck aren't sent to EDHPlay." : "")
       + (tokens ? " EDHPlay doesn't take tokens from a list, so add them there by hand." : "");
     copyNow(link.getAttribute("data-list") || "").then(function (ok) {
       if (ok) note("Deck list copied." + next + missing, false, !!leftOut);

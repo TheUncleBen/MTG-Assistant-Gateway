@@ -100,8 +100,9 @@ One deck:
   the rest of the deck with each card's printing, then a **Sideboard**
   section with your companion and sideboard. EDHPlay's sideboard holds 15
   cards, so anything past that is left out and the note names it. Your
-  maybeboard isn't sent (EDHPlay has none), and EDHPlay doesn't take tokens
-  from a list, so add those there by hand. On EDHPlay choose **Create Deck** with the commander
+  maybeboard, and anything else kept outside the deck, isn't sent (EDHPlay
+  has no maybeboard), and EDHPlay doesn't take tokens from a list, so add
+  those there by hand. On EDHPlay choose **Create Deck** with the commander
   the note names, then **Import**: paste the list and press **Import &
   Replace**. EDHPlay has no way to receive a deck by link, so a later change
   on Archidekt is taken over the same way: press the button again.

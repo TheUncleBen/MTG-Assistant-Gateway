@@ -151,7 +151,7 @@ def test_the_button_copies_the_list_and_opens_edhplay(server: Server, width: int
         assert "Create Deck with Aesi, Tyrant of Gyre Strait as the commander" in note.inner_text()
         assert "Import & Replace" in note.inner_text()
         edh = to_edhplay(parse_deck(server.ark.decks[42]))
-        assert ("maybeboard isn't sent" in note.inner_text()) == (edh.maybeboard > 0)
+        assert ("maybeboard and other cards" in note.inner_text()) == (edh.maybeboard > 0)
         assert "Left out" not in note.inner_text() and edh.left_out == []
         copied = page.evaluate("() => navigator.clipboard.readText()")
         assert copied.replace("\r\n", "\n") == edh.text
@@ -183,7 +183,7 @@ def test_the_note_names_what_was_left_out(server: Server, width: int, scheme: st
         note.wait_for()
         text = note.inner_text()
         assert "Left out because EDHPlay's sideboard holds only 15 cards: 1 Cultivate" in text, text
-        assert text.count("The maybeboard isn't sent to EDHPlay.") == 1
+        assert text.count("The maybeboard and other cards kept outside the deck aren't sent") == 1
         assert text.count("EDHPlay doesn't take tokens") == 1
         copied = page.evaluate("() => navigator.clipboard.readText()").replace("\r\n", "\n")
         assert "15 Cultivate" in copied and "Island" not in copied.split("Sideboard")[1]

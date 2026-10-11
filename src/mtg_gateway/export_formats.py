@@ -137,7 +137,7 @@ def to_edhplay(deck: Deck) -> EdhplayList:
     left_out: list[str] = []
     room = EDHPLAY_SIDEBOARD_MAX
     # the companion first, so a cut never drops it
-    first.sort(key=lambda c: not (c.companion or c.categories[:1] == ["Companion"]))
+    first.sort(key=lambda c: not (c.companion or c.categories[0].casefold() == "companion"))
     for c in first:
         fits = min(c.quantity, room)
         if fits:
