@@ -94,14 +94,14 @@ One deck:
   private deck shows only when that browser is signed in to Archidekt; the
   page keeps an **Open on Archidekt** button for that case.
 - **Play on EDHPlay** takes the deck to [EDHPlay](https://edhplay.com/), the
-  free online table for Commander: it copies the whole deck in EDHPlay's
-  import format and opens EDHPlay in a new tab (in the app, your phone's
-  browser). The list has the commander first (marked as the commander), the
-  rest of the deck with each card's printing, then a **Sideboard** section
-  with everything Archidekt keeps outside the deck (sideboard and maybeboard;
-  EDHPlay has no maybeboard of its own). A category named Tokens is listed
-  under a **Tokens** heading, but EDHPlay's import doesn't add tokens to the
-  deck at the moment. On EDHPlay choose **Create Deck** with the commander
+  free online table for Commander: it copies the deck in EDHPlay's import
+  format and opens EDHPlay in a new tab (in the app, your phone's browser).
+  The list has the commander first (marked as the commander, partners too),
+  the rest of the deck with each card's printing, then a **Sideboard**
+  section with your companion and sideboard. EDHPlay's sideboard holds 15
+  cards, so anything past that is left out and the note names it. Your
+  maybeboard isn't sent (EDHPlay has none), and EDHPlay doesn't take tokens
+  from a list, so add those there by hand. On EDHPlay choose **Create Deck** with the commander
   the note names, then **Import**: paste the list and press **Import &
   Replace**. EDHPlay has no way to receive a deck by link, so a later change
   on Archidekt is taken over the same way: press the button again.

@@ -2023,7 +2023,7 @@
     }
     return Promise.resolve(false);
   }
-  function note(text, bad) {
+  function note(text, bad, keep) {
     var old = document.querySelector(".edhplay-toast");
     if (old) old.remove();
     var t = document.createElement("div");
@@ -2041,16 +2041,25 @@
     x.addEventListener("click", function () { t.remove(); });
     t.appendChild(x);
     document.body.appendChild(t);
-    if (!bad) setTimeout(function () { t.remove(); }, 12000);
+    if (!bad && !keep) setTimeout(function () { t.remove(); }, 12000);  // a list of what was left out stays
   }
   document.addEventListener("click", function (e) {
     var link = e.target.closest && e.target.closest("a[data-edhplay]");
     if (!link) return;
     var commander = link.getAttribute("data-commander") || "";
+    var leftOut = link.getAttribute("data-left-out") || "";
+    var maybe = parseInt(link.getAttribute("data-maybeboard") || "0", 10) || 0;
+    var tokens = parseInt(link.getAttribute("data-tokens") || "0", 10) || 0;
     var next = " On EDHPlay, choose Create Deck" + (commander ? " with " + commander + " as the commander" : "")
       + ", then Import: paste the list and press Import & Replace.";
+    // EDHPlay's sideboard holds 15 cards (it refuses the whole import past that), the maybeboard
+    // is never sent and EDHPlay's import drops tokens: the note says what the list leaves out
+    // (export_formats.to_edhplay)
+    var missing = (leftOut ? " Left out because EDHPlay's sideboard holds only 15 cards: " + leftOut + "." : "")
+      + (maybe ? " The maybeboard isn't sent to EDHPlay." : "")
+      + (tokens ? " EDHPlay doesn't take tokens from a list, so add them there by hand." : "");
     copyNow(link.getAttribute("data-list") || "").then(function (ok) {
-      if (ok) note("Deck list copied." + next);
+      if (ok) note("Deck list copied." + next + missing, false, !!leftOut);
       else note("The deck list couldn't be copied here. Use More, then Export deck, to copy it.", true);
     });
     // the link itself opens EDHPlay (target=_blank): nothing is prevented

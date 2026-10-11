@@ -27,12 +27,15 @@ EDHPlay is the online table, one press away. No new images; the database stays a
   Proposals list, and as `out_of_date` / `out_of_date_since` in `get_proposal` and
   `list_my_proposals`, whose `next_step` says Apply would be refused. Apply itself is unchanged: it
   re-reads the deck and refuses a changed one, marked or not.
-- "Play on EDHPlay" on the deck page copies the whole deck in EDHPlay's import format and opens
-  edhplay.com in a new tab, or the phone's browser in the app: the commander first, marked the way
-  EDHPlay's import recognises, every card with its printing, then a Sideboard section with
-  everything Archidekt keeps outside the deck (EDHPlay has no maybeboard). A Tokens category is
-  listed under its own heading, which EDHPlay's import currently reads but does not add to the deck.
-  A note says what to press on EDHPlay.
+- "Play on EDHPlay" on the deck page copies the deck in EDHPlay's import format and opens
+  edhplay.com in a new tab, or the phone's browser in the app: the commander (or partners) first,
+  marked the way EDHPlay's import recognises, every card with its printing, then a Sideboard
+  section with the deck's companion and sideboard. EDHPlay's sideboard holds 15 cards and refuses
+  the whole import past that, so the list stops at 15 and the note names every card left out. The
+  maybeboard is not sent (EDHPlay has none), and neither are tokens (EDHPlay's import drops them);
+  the note says so. Checked with live imports on an EDHPlay test account: commander, partners,
+  printings and double-faced cards come through, and the marked commander wins over one already
+  picked under Create Deck.
 
 ### Changed
 - `MTG_WRITES_ENABLED=false` now also blocks deleting a deck and creating a folder by hand (the deck

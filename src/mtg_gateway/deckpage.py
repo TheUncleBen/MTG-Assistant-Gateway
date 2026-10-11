@@ -365,12 +365,16 @@ def banner_html(
     # Play on EDHPlay (R-154): EDHPlay is the online table; it has no import by link, so the button
     # copies the whole deck in its import format (export_formats.to_edhplay) and opens the site
     # (deck.js). Without script the link still opens EDHPlay, and Export deck has the list.
-    edh_text, edh_commanders = to_edhplay(deck)
-    edh_list = esc(edh_text).replace("\n", "&#10;")  # one line per card, kept through the attribute
-    edh_commander = esc(" and ".join(edh_commanders))
+    edh = to_edhplay(deck)
+    edh_list = esc(edh.text).replace("\n", "&#10;")  # one line per card, kept through the attribute
+    edh_commander = esc(" and ".join(edh.commanders))
+    # what did not fit EDHPlay's 15-card sideboard, the maybeboard (never sent) and the tokens
+    # EDHPlay drops: the note says so
+    edh_left = esc("; ".join(edh.left_out))
     primary += (
         f"<a class='btn' href='{EDHPLAY_URL}' target='_blank' rel='noreferrer noopener' data-edhplay "
         f"data-list='{edh_list}' data-commander='{edh_commander}' "
+        f"data-left-out='{edh_left}' data-maybeboard='{edh.maybeboard}' data-tokens='{edh.tokens}' "
         "title='Copy this deck list and open EDHPlay to play it online'>"
         f"{icon('play')} Play on EDHPlay</a>"
     )
