@@ -1,7 +1,9 @@
 """0.7.18 in headless Chromium: the deck page's Table and Scroll views; putting stacks in your own
 order (arrow keys on a stack's handle, kept in this browser per deck and grouping, Reset puts the
-deck's order back); selecting several cards and moving, refinishing or removing them in one save
-with one Undo. Screenshots go to MTG_SHOTS when it is set. Skipped without a Chromium build."""
+deck's order back; 0.7.22: dragging a handle by mouse or finger, the page scrolling on near the
+window's edge, a card held and slid to a category off screen); selecting several cards and moving,
+refinishing or removing them in one save with one Undo. Screenshots go to MTG_SHOTS when it is set.
+Skipped without a Chromium build."""
 
 from __future__ import annotations
 
@@ -99,6 +101,154 @@ def test_stack_order_by_keyboard_is_kept_and_reset(server: Server) -> None:
         page.reload(wait_until="networkidle")
         assert page.eval_on_selector_all(".deckview .stack", "l => l.map(s => s.dataset.group)") == names
         assert page.locator(".stack-reset").count() == 0
+        assert errors == []
+        browser.close()
+
+
+ORDER = "() => [...document.querySelectorAll('.deckview .stack')].map(s => s.dataset.group)"
+
+
+def _poll(page, js: str, timeout_ms: int = 6000) -> None:
+    """Wait for a condition while a pointer or finger is held down (no clicks, no locators)."""
+    for _ in range(timeout_ms // 50):
+        if page.evaluate(js):
+            return
+        page.wait_for_timeout(50)
+    raise AssertionError(f"timed out waiting for {js}")
+
+
+def test_stack_drag_by_mouse_scrolls_on_and_lands_where_the_bar_shows(server: Server) -> None:
+    """T-153: the stacks stay put while one is dragged (a bar shows where it lands, its name follows
+    the pointer), the page scrolls on near the window's edge so a stack off screen is reachable, the
+    move happens on letting go and is kept after a reload; Escape puts a dragged stack back."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1440)
+        page.goto(f"{server.base}/decks/42?view=stacks", wait_until="networkidle")
+        names = page.evaluate(ORDER)
+        assert names[0] == "Commander" and len(names) >= 8
+        # the last row of stacks starts below the window
+        last = page.locator(f".stack[data-group='{names[-1]}']")
+        assert last.bounding_box()["y"] > 900
+        g = page.locator(".stack[data-group='Commander'] .stackgrip").bounding_box()
+        x, y = g["x"] + g["width"] / 2, g["y"] + g["height"] / 2
+        page.mouse.move(x, y)
+        page.mouse.down()
+        for i in range(1, 13):
+            page.mouse.move(x + 20 * i / 12, y + (892 - y) * i / 12)
+        assert page.locator(".stacktag").inner_text() == "Commander"
+        assert page.evaluate(ORDER) == names  # nothing moves under the pointer while dragging
+        top = f"document.querySelector(\"[data-group='{names[-1]}']\").getBoundingClientRect().top"
+        _poll(page, f"{top} < 500")
+        page.mouse.move(x + 40, 450)  # out of the edge: the page stops
+        b = last.bounding_box()
+        page.mouse.move(b["x"] + b["width"] * 0.75, min(max(b["y"] + 100, 200), 650), steps=4)
+        page.wait_for_timeout(100)
+        bar = page.locator(".stackdrop")
+        assert bar.evaluate("e => getComputedStyle(e).opacity") == "1"
+        # upright, after the last stack in its row
+        assert "scale(4," in bar.evaluate("e => e.style.transform")
+        _shot(page, "stack-drag-mouse-1440")
+        page.mouse.up()
+        now = page.evaluate(ORDER)
+        assert now == [n for n in names if n != "Commander"] + ["Commander"]
+        assert page.locator(".stackdrop, .stacktag").count() == 0
+        assert f"position {len(names)} of {len(names)}" in page.locator("p.sr-only[aria-live]").inner_text()
+        page.reload(wait_until="networkidle")
+        assert page.evaluate(ORDER) == now
+        # Escape while dragging: the stack stays where it was
+        page.evaluate("scrollTo(0, 0)")
+        g = page.locator(f".stack[data-group='{now[0]}'] .stackgrip").bounding_box()
+        page.mouse.move(g["x"] + 10, g["y"] + 10)
+        page.mouse.down()
+        page.mouse.move(g["x"] + 400, g["y"] + 60, steps=5)
+        assert page.locator(".stackdrop").count() == 1
+        page.keyboard.press("Escape")
+        page.mouse.up()
+        assert page.evaluate(ORDER) == now
+        assert page.locator(".stackdrop, .stacktag, .stack.moving").count() == 0
+        assert "stays where it was" in page.locator("p.sr-only[aria-live]").inner_text()
+        assert errors == []
+        browser.close()
+
+
+def _touch(cdp, kind: str, x: float = 0, y: float = 0) -> None:
+    points = [] if kind == "touchEnd" else [{"x": x, "y": y}]
+    cdp.send("Input.dispatchTouchEvent", {"type": kind, "touchPoints": points})
+
+
+def test_stack_and_card_drag_by_touch_scroll_on_near_the_edge(server: Server) -> None:
+    """T-153 on a phone: a stack's handle takes a 44 px finger; a finger held near the bottom edge
+    scrolls the page on, for a stack and for a held card alike, so a category off screen is
+    reachable; Android's own long press does not open the card menu under a held card."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 390, has_touch=True, is_mobile=True)
+        cdp = page.context.new_cdp_session(page)
+        page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+        grip = page.locator(".stack[data-group='Commander'] .stackgrip")
+        grip.scroll_into_view_if_needed()
+        g = grip.bounding_box()
+        assert g["width"] < 44  # drawn small, but the finger target around it is 44 px
+        hit = f"document.elementFromPoint({g['x'] - 6}, {g['y'] + g['height'] + 6})"
+        assert page.evaluate(f"{hit} === document.querySelector(\"[data-group='Commander'] .stackgrip\")")
+        x, y = g["x"] + g["width"] / 2, g["y"] + g["height"] / 2
+        top0 = page.evaluate("scrollY")
+        _touch(cdp, "touchStart", x, y)
+        for i in range(1, 11):
+            _touch(cdp, "touchMove", x + 2 * i, y + (790 - y) * i / 10)
+            page.wait_for_timeout(16)
+        _poll(page, "document.querySelector(\"[data-group='Instant']\").getBoundingClientRect().top < 600")
+        _touch(cdp, "touchMove", x, 450)
+        page.wait_for_timeout(100)
+        assert page.evaluate("scrollY") > top0 + 1000
+        t = page.locator(".stack[data-group='Instant']").bounding_box()["y"]
+        _touch(cdp, "touchMove", x, t + 20)  # on Instant's header: before it
+        page.wait_for_timeout(100)
+        _shot(page, "stack-drag-touch-390")
+        _touch(cdp, "touchEnd")
+        page.wait_for_timeout(100)
+        now = page.evaluate(ORDER)
+        assert now.index("Commander") == now.index("Instant") - 1 and now[0] != "Commander"
+        page.reload(wait_until="networkidle")
+        assert page.evaluate(ORDER) == now
+
+        # a held card: the long press menu stays shut, and the card slides to a category off screen
+        page.evaluate("try { localStorage.clear() } catch (e) {}")
+        page.reload(wait_until="networkidle")
+        row = page.locator(".stack[data-group='Commander'] .row").first
+        row.scroll_into_view_if_needed()
+        b = row.bounding_box()
+        x, y = b["x"] + 60, b["y"] + b["height"] / 2
+        _touch(cdp, "touchStart", x, y)
+        page.wait_for_timeout(450)
+        page.evaluate(
+            f"""() => document.elementFromPoint({x}, {y}).dispatchEvent(new MouseEvent('contextmenu',
+                {{bubbles: true, cancelable: true, clientX: {x}, clientY: {y}}}))"""
+        )
+        assert page.locator(".ctxmenu").count() == 0
+        for i in range(1, 11):
+            _touch(cdp, "touchMove", x, y + (790 - y) * i / 10)
+            page.wait_for_timeout(16)
+        assert page.locator(".dragghost").count() == 1
+        _poll(page, "document.querySelector(\"[data-group='Sorcery']\").getBoundingClientRect().top < 600")
+        _touch(cdp, "touchMove", x, 450)
+        page.wait_for_timeout(100)
+        t = page.locator(".stack[data-group='Sorcery']").bounding_box()["y"]
+        _touch(cdp, "touchMove", x, t + 40)
+        page.wait_for_timeout(100)
+        _touch(cdp, "touchEnd")
+        page.wait_for_timeout(100)
+        assert page.locator(".dragghost").count() == 0
+        assert "1 card moved" in page.locator(".movebar.show").inner_text()
+        moved = page.locator(".stack[data-group='Sorcery'] .row[data-card='Aesi, Tyrant of Gyre Strait']")
+        assert moved.count() == 1
         assert errors == []
         browser.close()
 

@@ -1919,10 +1919,28 @@ ul.rows .hover img{width:100%;height:100%;display:block}
   ul.rows .set,ul.rows .price{display:none} }
 
 /* stack order handles (deck.js): drag, or arrow keys while focused */
-.stackgrip{width:28px;min-width:28px;height:28px;min-height:28px;padding:0;margin:0 .25rem 0 0;cursor:grab;
-  touch-action:none;color:var(--text-muted);font-size:1rem;line-height:1;flex:none}
-.stackgrip:active{cursor:grabbing}
-.stack.moving{outline:2px dashed var(--orange);outline-offset:4px;opacity:.85}
+.stackgrip{position:relative;width:28px;min-width:28px;height:28px;min-height:28px;padding:0;
+  margin:0 .25rem 0 0;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;
+  -webkit-touch-callout:none;color:var(--text-muted);font-size:1rem;line-height:1;flex:none}
+/* a 44 px target for a finger without making the header taller */
+.stackgrip::before{content:'';position:absolute;inset:-8px}
+/* no press-down nudge (theme buttons move 1 px): in the columns that lays every column out again */
+.stackgrip:active:not(:disabled){cursor:grabbing;transform:none;filter:none}
+/* no opacity here or on a dragged row: in the text and Brewer views' columns a change of opacity
+   lays every column out again, which takes as long as moving the stack itself */
+.stack.moving{outline:2px dashed var(--orange);outline-offset:4px;background:var(--surface-2)}
+/* while a stack is dragged a bar shows where it lands and its name follows the pointer; both, and
+   a card slid by a finger, move by transform only */
+/* nor does a row's hover picture or a stack's fan open under the pointer meanwhile */
+.deckview.sorting ul.rows .row:hover .hover{display:none}
+.deckview.sorting.stacks .c:hover ~ .c{transform:none}
+.stackdrop,.stacktag,.dragghost{position:fixed;left:0;top:0;pointer-events:none;will-change:transform;margin:0}
+.stackdrop{z-index:70;width:1px;height:1px;opacity:0;transform-origin:0 0;background:var(--orange)}
+.stacktag{z-index:71;max-width:60vw;padding:.3rem .6rem;border-radius:var(--radius);background:var(--surface);
+  color:var(--text);border:1px solid var(--orange);box-shadow:var(--shadow);font-size:.9rem;font-weight:700;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dragghost{z-index:70;opacity:.92;box-shadow:var(--shadow);background:var(--surface);border-radius:4.5%}
+.dragghost .row{border-top:0;padding:0 .25rem}
 .stack-reset{margin:.25rem 0 1rem}
 .stackhead .stackgrip ~ .title{flex:1;min-width:0}
 /* select several cards (own deck): the bar above the cards, and the chosen cards ringed */
@@ -2006,6 +2024,7 @@ ul.rows .row.brew{display:flex;align-items:flex-start;gap:.6rem;height:auto;padd
 .deckview.stacks .cards.fanned .c + .c{margin-top:-108%}
 .deckview.stacks .cards.fanned .c{transform:none}
 .deckview .c.dragging{opacity:.4}
+.deckview .row.dragging{outline:2px dashed var(--orange);outline-offset:-2px;background:var(--surface-2)}
 .deckview .stack.dropping{outline:3px dashed var(--orange);outline-offset:4px;border-radius:5px}
 .deckview[data-drop] .stackhead .meta::after{content:' · drag cards here to recategorize';
   color:var(--text-muted)}
