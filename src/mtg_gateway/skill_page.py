@@ -22,7 +22,7 @@ from starlette.responses import RedirectResponse, Response
 from .admin import is_admin
 from .pages import _csrf, _safe_next, browser_session
 from .plugin_page import PLUGIN_NAME, plugin_dir
-from .theme import display_name, render
+from .theme import display_name, icon, render
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -108,9 +108,13 @@ def add_skill_routes(server: MCPServer, state: AppState) -> None:
             )
         gpt = chatgpt_text(base)
         gpt_block = (
-            "<p>Select all the text in the box and copy it.</p>"
-            "<textarea readonly rows='14' class='mono' aria-label='ChatGPT project instructions'>"
-            f"{html.escape(gpt)}</textarea>"
+            "<div class='exportblock'><div class='head'><h3>ChatGPT project instructions</h3>"
+            "<button type='button' class='btn small copybtn' data-copy='gpt-text' "
+            f"aria-describedby='gpt-text-status'>{icon('copy')} <span class='label'>Copy</span></button>"
+            "<span class='sr-only' id='gpt-text-status' role='status' aria-live='polite'></span></div>"
+            "<textarea readonly rows='14' class='mono' id='gpt-text' "
+            "aria-label='ChatGPT project instructions'>"
+            f"{html.escape(gpt)}</textarea></div>"
             if gpt
             else "<p>The ChatGPT instructions are not available on this gateway.</p>"
         )
@@ -119,15 +123,17 @@ def add_skill_routes(server: MCPServer, state: AppState) -> None:
             "to use, how to report simulations honestly, and to show you every deck change before making "
             "it. It is optional but recommended.</p></div>"
             "<div class='card'><h2>Claude</h2>"
-            "<p><a class='btn btn-primary' href='/skill/mtg-gateway.zip'>Download the skill (ZIP)</a></p>"
-            "<ol><li>Turn on Code execution and file creation in Claude's settings "
-            "(Settings, Capabilities).</li>"
+            "<ol><li>Download the skill. Do not unzip it.<div class='actions'>"
+            "<a class='btn btn-primary' href='/skill/mtg-gateway.zip'>Download the skill (ZIP)</a></div></li>"
+            "<li>In Claude's settings, open Capabilities and turn on Code execution and file creation.</li>"
             "<li>On claude.ai or in the desktop app, open Customize, then Skills.</li>"
-            "<li>Click +, then Create skill, then Upload a skill, and choose the ZIP. Do not unzip it.</li>"
+            "<li>Click +, then Create skill, then Upload a skill, and choose the ZIP file.</li>"
             "</ol></div>"
             "<div class='card'><h2>ChatGPT</h2>"
-            "<p>Create a project, open its Project settings, and paste this into the project's "
-            "instructions. Then chat inside that project with the MTG Assistant Gateway connector on.</p>"
+            "<ol><li>On chatgpt.com, create a project.</li>"
+            "<li>Open the project's menu, then Project settings.</li>"
+            "<li>Press Copy below and paste the text into the project's instructions.</li>"
+            f"<li>Chat inside that project with the {html.escape(s.server_name)} connector on.</li></ol>"
             "<p class='muted small'>ChatGPT supports custom connectors on the web only, not in its phone "
             "apps.</p>"
             f"{gpt_block}</div>"
@@ -136,6 +142,8 @@ def add_skill_routes(server: MCPServer, state: AppState) -> None:
             "Assistant skill",
             body,
             site=s.server_name,
+            scripts=True,  # export.js: the Copy button
+            head_extra="<script src='/static/export.js' defer></script>",
             signed_in=True,
             csrf=_csrf(s, sid),
             admin=is_admin(state, sub),

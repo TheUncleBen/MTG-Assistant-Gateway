@@ -593,9 +593,12 @@ engine. The `mtg-assistant-forge` image runs it unmodified behind a small job se
 `run_deck_report` can play real games of a deck against current Commander precons. It is off by
 default, and an install that leaves it off behaves exactly as before.
 
-- **Turn it on** (Portainer): set `FORGE_REPLICAS=1`, `FORGE_NODE` to a node with spare memory, and
-  `MTG_FORGE_URL=http://mtg-assistant-forge:8000`, then update the stack. With compose, start the
-  `forge` profile (`COMPOSE_PROFILES=forge`) and set `MTG_FORGE_URL=http://forge:8000`.
+- **Turn it on**, in one of two ways depending on how you deploy (the two addresses are
+  alternatives, not two steps; use only the one for your setup):
+  - Portainer or Swarm stack: set `FORGE_REPLICAS=1`, `FORGE_NODE` to a node with spare memory, and
+    `MTG_FORGE_URL=http://mtg-assistant-forge:8000`, then update the stack.
+  - Docker Compose: start the `forge` profile (`COMPOSE_PROFILES=forge`) and set
+    `MTG_FORGE_URL=http://forge:8000`.
 - **Load:** Java starts only while a simulation runs, one at a time, capped by `FORGE_MEMORY_LIMIT`
   (default 1536M) and `FORGE_CPUS` (default 2). `MTG_FORGE_GAMES` (default 10) sets the games per
   report. An idle Forge service holds no Java memory. `FORGE_GAME_SECONDS` (default 600) is how long

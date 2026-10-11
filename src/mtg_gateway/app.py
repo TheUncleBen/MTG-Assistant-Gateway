@@ -98,7 +98,7 @@ from .metrics import Metrics
 from .mf_proxy import ALLOWED_TOOLS, BUSY_PREFIX, MysticForgeProxy
 from .oidc import OIDCClient
 from .pages import BROWSER_CLIENT_ID, SESSION_COOKIE, _csrf, add_browser_routes, browser_session
-from .plugin_page import add_plugin_routes
+from .plugin_page import CONNECTOR_ICON_PATH, CONNECTOR_ICON_PX, SERVER_DESCRIPTION, add_plugin_routes
 from .reports import ReportService
 from .scan import add_scan
 from .schemas import (
@@ -418,11 +418,8 @@ _LOGIN_KEY = re.compile(r"[A-Za-z0-9_-]{43}")
 # What an app shows about the connector itself (MCP ``serverInfo``: description, website, icons).
 # Only signed-in clients see it (``initialize`` needs a token), so naming the project here doesn't
 # undo the anonymity of the public pages under an owner's own MTG_SERVER_NAME. The icons are this
-# gateway's own files on its own origin, as the MCP spec asks clients to require.
-SERVER_DESCRIPTION = (
-    "Magic: The Gathering deck research, goldfish testing and safe Archidekt deck edits, "
-    "from a self-hosted gateway."
-)
+# gateway's own files on its own origin, as the MCP spec asks clients to require. The description is
+# SERVER_DESCRIPTION (plugin_page.py), which the install page also offers to copy into ChatGPT.
 ICON_SIZES = (512, 192, 128, 64)
 # What account_status hands the assistant: what it needs to act (linked, as whom on Archidekt,
 # when the link runs out, writes on, the approval mode, where to send the person). When the link
@@ -440,10 +437,21 @@ ACCOUNT_STATUS_FIELDS = (
 
 
 def server_icons(public_url: str) -> list[Icon]:
-    return [
-        Icon(src=f"{public_url}/static/gateway-icon-{n}.png", mime_type="image/png", sizes=[f"{n}x{n}"])
-        for n in ICON_SIZES
-    ] + [Icon(src=f"{public_url}/static/gateway-icon.svg", mime_type="image/svg+xml", sizes=["any"])]
+    # The small connector PNG first: it is under ChatGPT's 10 KB upload limit, so a client that
+    # takes only the first icon gets one every app accepts.
+    connector = Icon(
+        src=public_url + CONNECTOR_ICON_PATH,
+        mime_type="image/png",
+        sizes=[f"{CONNECTOR_ICON_PX}x{CONNECTOR_ICON_PX}"],
+    )
+    return (
+        [connector]
+        + [
+            Icon(src=f"{public_url}/static/gateway-icon-{n}.png", mime_type="image/png", sizes=[f"{n}x{n}"])
+            for n in ICON_SIZES
+        ]
+        + [Icon(src=f"{public_url}/static/gateway-icon.svg", mime_type="image/svg+xml", sizes=["any"])]
+    )
 
 
 class MembershipMiddleware:
