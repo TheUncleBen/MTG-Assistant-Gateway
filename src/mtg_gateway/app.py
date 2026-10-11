@@ -1780,7 +1780,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
                 set_code=c.set_code,
                 collector_number=c.collector_number,
                 categories=c.categories,
-                foil=c.finish == "Foil",
+                foil=c.finish in ("Foil", "Etched"),
+                finish=c.finish if c.finish in ("Foil", "Etched") else "",
                 zone="side" if c.category in ("Maybeboard", "Sideboard") else "main",
                 board=c.category if c.category in ("Maybeboard", "Sideboard") else "",
             )

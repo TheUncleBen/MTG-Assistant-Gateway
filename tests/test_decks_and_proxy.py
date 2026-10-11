@@ -595,6 +595,14 @@ async def test_parse_deck_export_reads_column_aliases_and_names_the_rest(stack: 
     assert both["cards"][0]["set"] == "m21" and both["unknown_columns"] == ["Set"], both
 
 
+async def test_parse_deck_export_keeps_an_etched_finish(stack: Stack) -> None:
+    h = stack.h
+    token = await mcp_token(h)
+    csv_text = "Quantity,Name,Finish,Edition Code,Collector Number\n1,Sol Ring,Etched,cmm,410\n"
+    out = structured(await call(h, token, "parse_deck_export", {"csv_text": csv_text}))
+    assert out["ok"] and out["decklist_text"] == "1 Sol Ring (cmm) 410 *E*\n", out
+
+
 async def test_archidekt_nodeck_rows_stay_out_of_a_new_deck_count(stack: Stack) -> None:
     """Archidekt's import text (format_archidekt's and the gateway's own) marks a maybeboard row
     ``[Maybeboard{noDeck}{noPrice}]``: written, parsed and proposed, the row is kept as a
