@@ -2348,9 +2348,39 @@ class DeckService:
             )
         return out
 
+    def _review_page_only(self, sub: str, row: dict[str, Any]) -> DeckError:
+        """The refusal for any caller but the review page's own form that tries to apply an
+        Archidekt account action (R-142), with the row's real risk tier (consent, or destructive
+        for a deck deletion). Audited as ``apply_needs_user``."""
+        risk, _why = modes.risk_of("action", row.get("rows"))
+        self._audit(
+            "apply_needs_user",
+            sub=sub,
+            detail={"proposal_id": row["id"], "deck_id": row["deck_id"], "risk": risk},
+        )
+        return DeckError(
+            "browser_required",
+            "This is an action on the user's Archidekt account (a like, vote, bookmark, follow, "
+            "comment, folder, collaborator change or deck deletion). Each one needs the user's "
+            "own approval on the review page (review_url), in every approval mode. Nothing was sent to "
+            "Archidekt; do not retry.",
+            review_url=f"{self.settings.public_url}/proposals/{row['id']}",
+            state=row["state"],
+            approval_mode=self.mode_of(sub),
+            risk=risk,
+        )
+
     def approval_for(self, sub: str, row: dict[str, Any]) -> str:
         """The in-chat card's one-time code for a proposal (approve.py), bound to the proposal,
-        its owner, the app that made it and its creation time."""
+        its owner, the app that made it and its creation time. An account action has no code
+        (R-142: only its review page applies it), so asking for one is refused here, at the source."""
+        if row.get("kind") == "action":
+            raise DeckError(
+                "browser_required",
+                "An action on the user's Archidekt account has no in-chat approval code; only its "
+                "review page applies it.",
+                review_url=f"{self.settings.public_url}/proposals/{row['id']}",
+            )
         return approval_code(
             self.settings.session_secret,
             proposal_id=row["id"],
@@ -2365,6 +2395,8 @@ class DeckService:
         row = self.db.get_proposal(proposal_id, sub)
         if row is None:
             raise DeckError("not_found", "No such proposal for your account.")
+        if row.get("kind") == "action":  # R-142: no code exists for it, whatever was sent
+            raise self._review_page_only(sub, row)
         creator = row.get("created_by_client")
         if (
             not creator
@@ -2418,28 +2450,16 @@ class DeckService:
         # (approve.py); "browser" is a member's own page (hand edits, the JSON API with a
         # session); REVIEW_PAGE is the review page's form; "auto" is never a caller's choice.
         if not review_page and row.get("kind") == "action":
-            # R-142: an Archidekt account action (social, folder, delete deck) is applied only by
-            # the member's own press on the signed-in review page, whatever the mode. Not the
-            # assistant's apply_proposal, and not the in-chat card either: the card's press runs
-            # inside the chat app, where the model's own calls run too. Checked here as well as by
-            # its risk tier.
-            self._audit(
-                "apply_needs_user",
-                sub=sub,
-                detail={"proposal_id": proposal_id, "deck_id": row["deck_id"], "risk": "consent"},
-            )
-            raise DeckError(
-                "browser_required",
-                "This is an action on the user's Archidekt account (a like, vote, bookmark, follow, "
-                "comment, folder, collaborator change or deck deletion). Each one needs the user's "
-                "own approval on the review page (review_url), in every approval mode. Nothing was sent to "
-                "Archidekt; do not retry.",
-                review_url=f"{self.settings.public_url}/proposals/{proposal_id}",
-                state=row["state"],
-                approval_mode=self.mode_of(sub),
-                risk="consent",
-            )
+            # R-142: an Archidekt account action (social, folder, collaborator, delete deck) is
+            # applied only by the member's own press on the signed-in review page, whatever the
+            # mode. Not the assistant's apply_proposal, not the REST API, and not the in-chat card
+            # either: the card's press runs inside the chat app, where the model's own calls run
+            # too. This is the one check that decides it, for every route.
+            raise self._review_page_only(sub, row)
         if via == "mcp":
+            # The risk tier (L1) decides only the assistant's own applies of ordinary proposals:
+            # for an account action it is display only (what the assistant is told), because the
+            # check above has already refused every caller but the review page.
             kind = row.get("kind", "edit")
             risk, why = modes.risk_of(kind, row.get("rows"), max_rows=self.settings.auto_apply_max_rows)
             mode = self.mode_of(sub)
@@ -3141,14 +3161,14 @@ class DeckService:
 
     def reject(self, sub: str, proposal_id: str, *, via: str | None = None) -> dict[str, Any]:
         """Close a pending proposal without applying it (owner only). From the member's browser
-        (the review page, or the API with the session cookie) any of their proposals; from a
-        connected app (``via`` "mcp", "app" for its card, "api", or any non-browser client) only
-        the proposals that app made itself, the same rule as apply."""
+        (the review page's form, which passes REVIEW_PAGE, or the API with the session cookie) any
+        of their proposals; from a connected app (``via`` "mcp", "app" for its card, "api", or any
+        non-browser client) only the proposals that app made itself, the same rule as apply."""
         row = self.db.get_proposal(proposal_id, sub)
         if row is None:
             raise DeckError("not_found", "No such proposal for your account.")
         actor = current_client.get()
-        from_browser = actor == BROWSER_CLIENT and via in (None, "browser")
+        from_browser = actor == BROWSER_CLIENT and via in (None, "browser", REVIEW_PAGE)
         creator = row.get("created_by_client")
         if not from_browser and (not creator or creator != actor):
             raise DeckError(
@@ -3160,7 +3180,7 @@ class DeckService:
         # Who closed it, kept in its result so describe() can say so: the member's own pages, the
         # card's Reject (via "app"), the assistant's reject_proposal (via "mcp") or the API.
         if from_browser:
-            by = "review_page" if via is None else "browser"
+            by = "review_page" if via == REVIEW_PAGE else "browser"
         else:
             by = {"app": "card", "mcp": "assistant"}.get(via or "", "api")
         closed = {"rejected_by": by, **({"client": actor} if actor and not from_browser else {})}
@@ -3574,14 +3594,24 @@ class DeckService:
             raise DeckError("invalid", "A folder name is 1 to 100 characters.")
         return clean
 
-    async def create_folder(self, sub: str, name: str, parent_id: int | None = None) -> dict[str, Any]:
+    async def check_new_folder(
+        self, sub: str, name: str, parent_id: int | None = None
+    ) -> tuple[str, dict[str, Any]]:
+        """(clean name, parent folder) for a new folder, refused as create_folder would refuse it;
+        nothing is created. The Folders page's confirmation asks about what this returns."""
         name = self._folder_name(name)
         info = await self.folders(sub)
         parent = int(parent_id) if parent_id is not None else int(info["root_id"])
-        if parent not in {f["id"] for f in info["folders"]}:
+        found = next((f for f in info["folders"] if f["id"] == parent), None)
+        if found is None:
             raise DeckError("not_found", "That parent folder is not in your Archidekt account.")
         if any(f["parent"] == parent and f["name"].casefold() == name.casefold() for f in info["folders"]):
             raise DeckError("invalid", f"There is already a folder called '{name}' there.")
+        return name, found
+
+    async def create_folder(self, sub: str, name: str, parent_id: int | None = None) -> dict[str, Any]:
+        name, found = await self.check_new_folder(sub, name, parent_id)
+        parent = int(found["id"])
         made = await self._call(sub, lambda token, *_: self.client.create_folder(token, name, parent))
         after, folder = await self._folder_in(sub, int(made["id"]))
         self._audit("folder_created", sub=sub, detail={"folder_id": folder["id"], "parent": parent})

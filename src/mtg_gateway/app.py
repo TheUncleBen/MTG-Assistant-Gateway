@@ -230,6 +230,13 @@ WRITE_TOOLS = frozenset(
         "propose_restore_snapshot",
         "propose_deck_details",
         "propose_clone_deck",
+        # the Archidekt account actions (actions.py): proposals too, even though none of them is
+        # ever applied by an assistant (R-142)
+        "propose_deck_social",
+        "propose_comment",
+        "propose_delete_deck",
+        "propose_create_folder",
+        "propose_collaborator",
         "apply_proposal",
         "confirm_proposal",
         "reject_proposal",

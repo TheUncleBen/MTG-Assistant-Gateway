@@ -102,6 +102,61 @@ async def _thread_comment(decks: DeckService, sub: str, deck_id: str, comment_id
     return {**found, "_me": thread.get("me")}
 
 
+async def collaborator_target(
+    decks: DeckService, sub: str, deck: Any, action: str, username: Any
+) -> tuple[int, str]:
+    """(user id, username) of the person a collaborator add or remove on the member's own ``deck``
+    is about, checked against Archidekt as it is now: someone the member follows who is not a
+    collaborator yet (add), or one of the deck's collaborators (remove)."""
+    social = _social(decks)
+    want = clean_text(str(username or "")).lstrip("@")
+    if not want:
+        raise DeckError("invalid", "username is required: the Archidekt username of the person")
+    current = await social.collaborators(sub, deck.id, owned=True)
+    if action == "collaborator_add":
+        people = await social.following_names(sub)
+        hits = [i for i, n in people.items() if n.casefold() == want.casefold()]
+        if not hits:  # followed a moment ago, after the short-lived list was read
+            people = await social.following_names(sub, fresh=True)
+            hits = [i for i, n in people.items() if n.casefold() == want.casefold()]
+        if not hits:
+            raise DeckError(
+                "not_found",
+                f"{want} is not among the people you follow on Archidekt (the gateway reads the "
+                f"first {FOLLOWING_PAGES} pages of that list). Collaborators are added from the "
+                "people you follow, as on Archidekt's own settings page.",
+            )
+        user_id, name = hits[0], people[hits[0]]
+        if any(c["user_id"] == user_id for c in current):
+            raise DeckError("invalid", f"{name} is already a collaborator on this deck")
+        return user_id, name
+    found = next((c for c in current if c["username"].casefold() == want.casefold()), None)
+    if found is None:
+        names = ", ".join(c["username"] for c in current) or "none"
+        raise DeckError("not_found", f"{want} is not a collaborator on this deck (collaborators: {names})")
+    return found["user_id"], found["username"]
+
+
+async def collaborator_by_hand(
+    decks: DeckService, sub: str, deck_id: str, action: str, username: Any
+) -> dict[str, Any]:
+    """The member's own confirmed press on the deck settings page's Collaborators form (0.7.24):
+    applied at once, like the page's delete and new-folder forms, through the same code an
+    approved proposal runs. Never an assistant's path: the route takes only the signed-in browser
+    session with the page's CSRF token, and the deck must be the member's own."""
+    if action not in COLLABORATOR_ACTIONS:
+        raise DeckError("invalid", "Pick add or remove.")
+    social = _social(decks)
+    social._me(sub)
+    deck = await decks.get_own_deck(sub, _clean_deck_id(str(deck_id or "")))
+    user_id, name = await collaborator_target(decks, sub, deck, action, username)
+    if action == "collaborator_add":
+        result = await social.add_collaborator(sub, deck.id, user_id)
+    else:
+        result = await social.remove_collaborator(sub, deck.id, user_id)
+    return {**result, "user_id": user_id, "username": name}
+
+
 async def propose(decks: DeckService, sub: str, action: str, params: dict[str, Any]) -> dict[str, Any]:
     """Check the action against Archidekt as it is now, store it as a pending proposal with one
     review row saying exactly what will happen, and return the proposal."""
@@ -222,36 +277,11 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         where_to = "your top level" if not parent["depth"] else f"'{parent['name']}'"
         row["text"] = f"Create the folder '{name}' in {where_to}"
     elif action in COLLABORATOR_ACTIONS:
-        want = clean_text(str(params.get("username") or "")).lstrip("@")
-        if not want:
-            raise DeckError("invalid", "username is required: the Archidekt username of the person")
-        current = await social.collaborators(sub, deck.id, owned=True)
+        user_id, name = await collaborator_target(decks, sub, deck, action, params.get("username"))
         if action == "collaborator_add":
-            people = await social.following_names(sub)
-            hits = [i for i, n in people.items() if n.casefold() == want.casefold()]
-            if not hits:  # followed a moment ago, after the short-lived list was read
-                people = await social.following_names(sub, fresh=True)
-                hits = [i for i, n in people.items() if n.casefold() == want.casefold()]
-            if not hits:
-                raise DeckError(
-                    "not_found",
-                    f"{want} is not among the people you follow on Archidekt (the gateway reads the "
-                    f"first {FOLLOWING_PAGES} pages of that list). Collaborators are added from the "
-                    "people you follow, as on Archidekt's own settings page.",
-                )
-            user_id, name = hits[0], people[hits[0]]
-            if any(c["user_id"] == user_id for c in current):
-                raise DeckError("invalid", f"{name} is already a collaborator on this deck")
             row["text"] = f"Let {name} edit your deck on Archidekt as a collaborator"
             row["note"] = COLLABORATOR_NOTE
         else:
-            found = next((c for c in current if c["username"].casefold() == want.casefold()), None)
-            if found is None:
-                names = ", ".join(c["username"] for c in current) or "none"
-                raise DeckError(
-                    "not_found", f"{want} is not a collaborator on this deck (collaborators: {names})"
-                )
-            user_id, name = found["user_id"], found["username"]
             row["text"] = f"Stop {name} editing your deck on Archidekt"
         changes.update(user_id=user_id, username=name)
     if action in CANNOT_UNDO:
