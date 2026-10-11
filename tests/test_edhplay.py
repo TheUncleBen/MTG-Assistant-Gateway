@@ -17,6 +17,7 @@ from mtg_gateway.export_formats import EDHPLAY_SIDEBOARD_MAX, EDHPLAY_URL, to_ed
 
 from .fake_archidekt import FakeArchidekt
 from .test_deck_menu_browser import Server, _chromium, _overflow, _page
+from .test_deck_views_browser import _shot
 
 
 def _deck():
@@ -159,7 +160,8 @@ def test_the_button_copies_the_list_and_opens_edhplay(server: Server, width: int
         browser.close()
 
 
-def test_the_note_names_what_was_left_out(server: Server) -> None:
+@pytest.mark.parametrize(("width", "scheme"), [(390, "dark"), (1366, "light")])
+def test_the_note_names_what_was_left_out(server: Server, width: int, scheme: str) -> None:
     """A sideboard past 15, a maybeboard and tokens: the note says each, once, and stays up."""
     from playwright.sync_api import sync_playwright
 
@@ -170,7 +172,9 @@ def test_the_note_names_what_was_left_out(server: Server) -> None:
     ark.add_side_row(42, "Forest", quantity=1, category="Tokens")
     sid = server.sign_in_and_link()
     with sync_playwright() as p:
-        browser, page, errors = _page(p, server, sid, 390, permissions=["clipboard-read", "clipboard-write"])
+        browser, page, errors = _page(
+            p, server, sid, width, color_scheme=scheme, permissions=["clipboard-read", "clipboard-write"]
+        )
         page.context.route(re.compile(r"https://edhplay\.com/.*"), lambda route: route.fulfill(status=200))
         page.goto(f"{server.base}/decks/42", wait_until="networkidle")
         with page.context.expect_page():
@@ -185,4 +189,5 @@ def test_the_note_names_what_was_left_out(server: Server) -> None:
         assert "15 Cultivate" in copied and "Island" not in copied.split("Sideboard")[1]
         assert "Forest" not in copied.split("Sideboard")[1] and "Tokens" not in copied
         assert _overflow(page) <= 0 and errors == []
+        _shot(page, f"edhplay-note-cut-{width}-{scheme}")
         browser.close()
