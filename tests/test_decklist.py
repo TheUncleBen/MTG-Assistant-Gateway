@@ -90,11 +90,49 @@ def test_archidekt_syntax_round_trips_through_the_parser() -> None:
         sol.quantity == 2 and sol.finish == "Etched" and sol.foil and sol.categories == ["Ramp", "Artifact"]
     )
     assert sol.label == "Upgrade,#ff0000"
-    assert (
-        opt.categories == ["Maybeboard"] and opt.zone == "main"
-    )  # a category row: Archidekt decides the zone
+    # {noDeck} keeps the row out of the deck, as Archidekt does
+    assert opt.categories == ["Maybeboard"] and opt.zone == "side" and opt.board == "Maybeboard"
     assert negate.zone == "side" and negate.board == "Sideboard" and negate.categories == []
     assert custom.categories == ["Custom"] and custom.zone == "side" and custom.board == "Sideboard"
     # rendering the parsed list keeps both finish marks
     rendered = to_text(parse_decklist(text))
     assert "1 Aesi, Tyrant of Gyre Strait (cmr) 365 *F*" in rendered and "2 Sol Ring (cmr) 1 *E*" in rendered
+
+
+def test_archidekt_nodeck_flag_keeps_the_row_out_of_the_deck() -> None:
+    """Archidekt's own export writes a maybeboard row as ``[Maybeboard{noDeck}{noPrice}]``: the row
+    stays out of the deck (zone side, counted apart), keeps its category and says it is unpriced."""
+    cards = parse_decklist(
+        "1 Sol Ring\n2 Sol Ring\n1 Island [Commander{top}]\n1 Arcane Signet [Maybeboard{noDeck}{noPrice}]"
+    )
+    by_name = {c.name: c for c in cards}
+    signet = by_name["Arcane Signet"]
+    assert signet.zone == "side" and signet.board == "Maybeboard" and signet.categories == ["Maybeboard"]
+    assert signet.no_price and not by_name["Sol Ring"].no_price
+    assert sum(c.quantity for c in cards if c.zone == "main") == 4
+    assert "Arcane Signet" not in to_text(cards)
+    assert to_text(cards, zone="side") == "1 Arcane Signet [Maybeboard]\n"
+    # the flag belongs to the category: a line naming that category without the flag is outside
+    # too, and only the first (primary) category decides, as on Archidekt
+    text = "1 Opt [Considering{noDeck}]\n1 Negate [Considering]\n1 Ponder [Draw,Considering{noDeck}]"
+    by_name = {c.name: c for c in parse_decklist(text)}
+    assert by_name["Opt"].zone == "side" and by_name["Negate"].zone == "side"
+    assert by_name["Ponder"].zone == "main"
+
+
+def test_cmdr_marker_names_the_commander() -> None:
+    cards = parse_decklist("1 Aesi, Tyrant of Gyre Strait *CMDR*\n1 Sol Ring\n1 Arcane Signet\n97 Island")
+    aesi = cards[0]
+    assert aesi.name == "Aesi, Tyrant of Gyre Strait" and aesi.categories == ["Commander"]
+    assert to_text(cards).splitlines()[0] == "1 Aesi, Tyrant of Gyre Strait [Commander]"
+    # after a printing and finish, or before categories, it still marks the commander
+    foil = parse_decklist("1 Aesi, Tyrant of Gyre Strait (cmr) 365 *F* *CMDR* [Lands]")[0]
+    assert foil.categories == ["Commander", "Lands"] and foil.finish == "Foil" and foil.set_code == "cmr"
+
+
+@pytest.mark.parametrize("line", ["-1 Island", "1.5 Island", "1,5x Island", "SB: -2 Negate"])
+def test_signed_or_fractional_quantity_is_refused(line: str) -> None:
+    with pytest.raises(DecklistError, match="bad quantity on line"):
+        parse_decklist(f"1 Sol Ring\n{line}\n")
+    # a card whose name starts with a sign is still a name
+    assert parse_decklist("1 +2 Mace")[0].name == "+2 Mace"

@@ -560,6 +560,119 @@ async def test_parse_deck_export_tool(stack: Stack) -> None:
     assert out["ok"] and out["card_count"] == 100 and "Commander" in out["categories"]
     assert out["decklist_text"].startswith("1 Aesi, Tyrant of Gyre Strait (cmr) 365 *F* [Commander]\n")
     assert len(out["decklist_text"].splitlines()) == 72 and out["sideboard_text"] == ""
+    assert out["unknown_columns"] == []  # Archidekt's own header is read whole
+
+
+async def test_parse_deck_export_reads_column_aliases_and_names_the_rest(stack: Stack) -> None:
+    """Set and Categories (a JSON list or comma-separated) are read like Edition code and Category;
+    a column it does not read is named in unknown_columns; decklist_text keeps the categories."""
+    h = stack.h
+    token = await mcp_token(h)
+    csv_text = (
+        "Quantity,Name,Set,Categories,Collector Number,Tradelist Count\n"
+        '1,"Aesi, Tyrant of Gyre Strait",cmr,Commander,365,0\n'
+        '1,Sol Ring,ltc,"[""Ramp"",""Artifact""]",284,0\n'
+        "2,Island,m21,Lands,265,0\n"
+        "1,Opt,m21,Maybeboard,59,0\n"
+    )
+    out = structured(await call(h, token, "parse_deck_export", {"csv_text": csv_text}))
+    assert out["ok"] and out["unknown_columns"] == ["Tradelist Count"], out
+    sol = next(c for c in out["cards"] if c["name"] == "Sol Ring")
+    assert sol["set"] == "ltc" and sol["categories"] == ["Ramp", "Artifact"]
+    assert out["decklist_text"] == (
+        "1 Aesi, Tyrant of Gyre Strait (cmr) 365 [Commander]\n"
+        "1 Sol Ring (ltc) 284 [Ramp,Artifact]\n"
+        "2 Island (m21) 265 [Lands]\n"
+    )
+    assert out["card_count"] == 4 and out["sideboard_text"] == "1 Opt (m21) 59 [Maybeboard]\n"
+    # Archidekt's own spelling wins over an alias given as well; the alias is named as not read
+    both = structured(
+        await call(
+            h, token, "parse_deck_export", {"csv_text": "Quantity,Name,Edition Code,Set\n1,Opt,m21,xyz\n"}
+        )
+    )
+    assert both["cards"][0]["set"] == "m21" and both["unknown_columns"] == ["Set"], both
+
+
+async def test_archidekt_nodeck_rows_stay_out_of_a_new_deck_count(stack: Stack) -> None:
+    """Archidekt's import text (format_archidekt's and the gateway's own) marks a maybeboard row
+    ``[Maybeboard{noDeck}{noPrice}]``: written, parsed and proposed, the row is kept as a
+    maybeboard row and never counted as a deck card."""
+    from mtg_gateway.archidekt import FORMAT_NAMES, Deck, DeckCard
+    from mtg_gateway.decks import deck_to_archidekt_text
+
+    h = stack.h
+    token = await linked_user(stack)
+
+    def card(name: str, cats: list[str]) -> DeckCard:
+        return DeckCard(
+            relation_id=None, card_id=None, name=name, quantity=1, categories=cats, modifier="Normal",
+            set_code="", collector_number="",
+        )  # fmt: skip
+
+    deck = Deck(
+        id="1", name="t", owner="o", updated_at="", raw={}, format_id=3, format=FORMAT_NAMES[3],
+        categories=[{"name": "Maybeboard", "includedInDeck": False}],
+        cards=[card("Sol Ring", []), card("Arcane Signet", ["Maybeboard"])],
+    )  # fmt: skip
+    text = deck_to_archidekt_text(deck)
+    assert "1x Arcane Signet [Maybeboard{noDeck}{noPrice}]" in text
+    parsed = structured(await call(h, token, "parse_decklist", {"text": text}))
+    assert parsed["card_count"] == 1 and parsed["sideboard_count"] == 1, parsed
+    assert parsed["decklist_text"] == "1 Sol Ring\n"
+    assert parsed["sideboard_text"] == "1 Arcane Signet [Maybeboard]\n"
+    p = structured(
+        await call(
+            h, token, "propose_new_deck", {"name": "No deck", "deck_format": "custom", "decklist_text": text}
+        )
+    )
+    assert p["ok"], p
+    assert p["diff"].splitlines()[0] == (
+        "New custom deck 'No deck' (1 cards, 1 more in the maybeboard or sideboard, private)"
+    )
+    assert "+1 Arcane Signet [Maybeboard] (maybeboard/sideboard)" in p["diff"]
+    signet = next(c for c in p["changes"]["cards"] if c["name"] == "Arcane Signet")
+    assert (
+        signet["categories"] == ["Maybeboard"] and signet["in_deck"] is False and signet["no_price"] is True
+    )
+    sol = next(c for c in p["changes"]["cards"] if c["name"] == "Sol Ring")
+    assert "in_deck" not in sol and "no_price" not in sol
+
+
+def test_new_deck_inputs_mark_rows_outside_the_deck() -> None:
+    """Every input of propose_new_deck says which rows sit outside the deck the same way."""
+    from mtg_gateway.decks import normalise_cards
+
+    csv_rows = normalise_cards(csv_text="Quantity,Name,Category\n1,Sol Ring,Ramp\n1,Opt,Maybeboard\n")
+    assert [c.get("in_deck", True) for c in csv_rows] == [True, False]
+    deck_json = json.dumps(
+        {
+            "cards": [
+                {"name": "Sol Ring", "quantity": 1},
+                {"name": "Opt", "categories": ["Maybe"], "in_deck": False},
+            ]
+        }
+    )
+    assert [c.get("in_deck", True) for c in normalise_cards(json_text=deck_json)] == [True, False]
+    listed = normalise_cards(decklist_text="1 Sol Ring\nSB: 1 Negate\n1 Opt [Later{noDeck}]\n")
+    assert [c.get("in_deck", True) for c in listed] == [True, False, False]
+    assert listed[1]["categories"] == ["Sideboard"] and listed[2]["categories"] == ["Later"]
+
+
+async def test_cmdr_marker_reads_as_the_commander_everywhere(stack: Stack) -> None:
+    """A trailing *CMDR* (which goldfish_annotate accepts) marks the commander for every tool that
+    reads a pasted list, so a list checked there is not refused by the report tools."""
+    h = stack.h
+    token = await linked_user(stack)
+    text = "1 Aesi, Tyrant of Gyre Strait *CMDR*\n1 Sol Ring\n1 Arcane Signet\n97 Island"
+    parsed = structured(await call(h, token, "parse_decklist", {"text": text}))
+    assert parsed["ok"] and parsed["decklist_text"].startswith("1 Aesi, Tyrant of Gyre Strait [Commander]\n")
+    rep = structured(await call(h, token, "run_deck_report", {"deck_ref": text, "games": 20}))
+    assert rep["ok"] and rep["stats"]["commanders"] == ["Aesi, Tyrant of Gyre Strait"], rep
+    cmp = structured(await call(h, token, "compare_decks", {"a_list": text, "b_list": text}))
+    assert cmp["ok"], cmp
+    bad = structured(await call(h, token, "parse_decklist", {"text": "1 Sol Ring\n-1 Island"}))
+    assert bad["ok"] is False and "-1 Island" in bad["message"], bad
 
 
 # -- ingest and import ------------------------------------------------------------
@@ -625,7 +738,10 @@ async def test_propose_new_deck_from_decklist_and_apply(stack: Stack) -> None:
         )
     )
     assert p["ok"] and p["kind"] == "create_deck" and p["deck_id"] == "new" and p["state"] == "pending"
-    assert p["diff"].splitlines()[0] == "New commander deck 'Test import' (5 cards, private)"
+    # the SB: row is created too, but is not a deck card
+    assert p["diff"].splitlines()[0] == (
+        "New commander deck 'Test import' (4 cards, 1 more in the maybeboard or sideboard, private)"
+    )
     assert "+1 Sol Ring [Ramp]" in p["diff"] and "+1 Island [Sideboard]" in p["diff"]
     assert len(ark.decks) == 2  # nothing created yet
     a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
