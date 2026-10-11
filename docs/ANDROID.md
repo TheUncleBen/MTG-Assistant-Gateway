@@ -76,9 +76,14 @@ app's menu (the round button, bottom right) brings the address screen back.
 
 The app looks for a newer version of itself in the project's
 [GitHub releases](https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases):
-when it opens, at most twice a day, and when you tap **Check for app updates**
-(in the account menu's **App** section, or the round button's menu). When there
-is one, a bar at the top says **Version x.y.z of the app is available**:
+each time it starts and right after you sign in (at most once an hour, so
+GitHub's limit for requests without an account is never reached), when you come
+back to it after 12 hours, and whenever you tap **Check for app updates**. That
+button is on the **Account** page's **App** card, which also shows the installed
+version, and in the account menu's **App** section (or the round button's menu).
+Inside the app the Account page shows this card instead of **Get the Android
+app**. When there is a newer version, a bar at the top says **Version x.y.z of
+the app is available**:
 
 1. Tap **Update**. The app downloads the release's
    `mtg-assistant-gateway-release.apk` and checks it before installing anything:
@@ -166,8 +171,9 @@ The app shows the gateway's pages: home, account, proposals, scan, and whatever
 else your gateway serves. A few things are native:
 
 - **The App section of the account menu** (the person icon, top right):
-  *Scan with phone camera*, *Reload*, *Open in browser*, *Change gateway*.
-  The same four actions sit on a round button at the bottom right while a
+  *Scan with phone camera*, *Reload*, *Open in browser*, *Open a copied link*,
+  *Change gateway*, *Check for app updates*.
+  The same actions sit on a round button at the bottom right while a
   page that is not the gateway's is showing (the sign-in service, say); on
   the gateway's own pages the button stays out of the way of the bottom tab
   bar.
@@ -186,8 +192,15 @@ else your gateway serves. A few things are native:
   just tap the link. Sharing a whole message works too (from Discord, say): the
   app opens the first link in it that is either on your gateway or an
   `archidekt.com/decks/...` deck link, which opens that deck's page on your
-  gateway. Any other link is not opened, and the app says which links it
-  takes; share those to your browser instead.
+  gateway. Any other link is not opened, and the app says where the link it
+  got goes (its site) and which links it takes; share those to your browser
+  instead. Discord's **Share** on a whole message may hand over only a link to
+  the message on discord.com; the app then says so. Long-press the
+  archidekt.com link inside the message and share that link, or copy it.
+- **Open a copied link** (account menu, **App**) opens the link on the
+  clipboard under the same rules: a page on your gateway, or an
+  `archidekt.com/decks/...` deck link as that deck's page on your gateway.
+  Nothing else is opened, and the app says what the clipboard held.
 - **Links to other sites** (Archidekt, Scryfall) open in your browser. Pages on
   the gateway, and on the one sign-in service the gateway's sign-in redirects
   you to, stay in the app. Links to other apps (`mailto:` and the like) open
@@ -228,8 +241,10 @@ else your gateway serves. A few things are native:
   The camera screen is always dark, over the black viewfinder.
 - **Launcher.** The icon's label is "MTG Gateway" (the full name does not fit
   most launchers). Long-press the icon for shortcuts to **My decks**, **Scan
-  cards** and **Proposals** on your gateway; they appear once the app has been
-  opened and the gateway address is set.
+  cards** and **Proposals** on your gateway. They are there from install, before
+  the app has been opened; each opens that page on the gateway address you
+  saved, or the address screen if none is set yet. If the app was open, the
+  page it was showing is replaced, so save an edit in progress first.
 - **If the gateway never loads** (moved, gone, mistyped port), the error
   screen offers **Change gateway** next to **Retry**, so another address can
   be typed without clearing the app's data. **Back** on the address screen
@@ -554,7 +569,10 @@ sideloaded, not published in a store, so it doesn't need one:
 It lives in one file, `android/app/application-id.txt`; the Gradle build reads it from
 there. Change it and rebuild, and set `MTG_ANDROID_PACKAGE` on your gateway to the same
 ID so the browser sign-in hands back to your build
-([DEPLOY.md](DEPLOY.md#environment-reference)); nothing else needs editing. The Kotlin package name
+([DEPLOY.md](DEPLOY.md#environment-reference)). The launcher shortcuts in
+`android/app/src/main/res/xml/shortcuts.xml` name the ID too (Android reads them without the
+app's resources, so it is written out there): change it there as well; the app's unit tests
+fail until both match. The Kotlin package name
 (`local.mtgassistantgateway.app`, where the source lives) stays as it is: the manifest
 names the app's screens in full, so they don't depend on the package ID. Operators who sign
 their own builds should pick their own ID

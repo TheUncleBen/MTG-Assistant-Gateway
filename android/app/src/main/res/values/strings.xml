@@ -23,6 +23,7 @@
     <string name="menu_browser">Open in browser</string>
     <string name="menu_gateway">Change gateway</string>
     <string name="menu_update">Check for app updates</string>
+    <string name="menu_paste">Open a copied link</string>
 
     <string name="update_available">Version %1$s of the app is available.</string>
     <string name="update_now">Update</string>
@@ -63,8 +64,13 @@
     <string name="scan_page_slow">The scan page did not answer in time. Tap Done and check the page.</string>
     <string name="scan_page_missing">This gateway has no scan page.</string>
     <string name="page_elsewhere">A page from another site tried to open inside the app and was stopped. Tap Retry to go back to your gateway.</string>
-    <string name="link_other_gateway">This app opens links to your gateway (%1$s) and archidekt.com deck links. That link is neither, so it was not opened.</string>
-    <string name="link_none_shared">There was no https link in what was shared. Share a link to your gateway or an archidekt.com deck link.</string>
+    <!-- A share or a copied link the app does not open. %1$s is the link's host, %2$s the gateway's. -->
+    <string name="link_other_gateway">The link that arrived goes to %1$s. This app opens links to your gateway (%2$s) and archidekt.com deck links, so it was not opened.</string>
+    <string name="link_discord_message">Discord shared a link to the message (%1$s), not the deck link. Long-press the archidekt.com link itself and share that, or copy it and choose Open a copied link in the account menu, under App.</string>
+    <string name="link_none_shared">There was no https link in what was shared. Share a link to your gateway or an archidekt.com deck link, or copy it and choose Open a copied link in the account menu, under App.</string>
+    <string name="link_file_shared">A file arrived, not a link. Share a link to your gateway or an archidekt.com deck link, or copy it and choose Open a copied link in the account menu, under App.</string>
+    <string name="clip_other">The copied link goes to %1$s. This app opens links to your gateway (%2$s) and archidekt.com deck links.</string>
+    <string name="clip_none">There is no link on the clipboard. Copy an archidekt.com deck link or a link to your gateway, then try again.</string>
 
     <string name="camera_title">Scan a card</string>
     <string name="shoot">Shoot</string>

@@ -13,8 +13,13 @@ package local.mtgassistantgateway.app
 object AppUpdate {
     const val APK_ASSET = "mtg-assistant-gateway-release.apk"
     const val META_ASSET = "mtg-assistant-gateway.json"
-    /** How often the app looks on its own: on launch, then at most twice a day. */
+    /** How often the app looks on its own while it stays open: at most twice a day. */
     const val INTERVAL_MS = 12L * 3600 * 1000
+    /**
+     * The floor for the checks at set points (each cold launch, just after a sign-in): at most once
+     * an hour, so GitHub's limit on unauthenticated requests is never reached. A manual check always runs.
+     */
+    const val MIN_GAP_MS = 3600L * 1000
     /** Upper bounds on what is read: GitHub's release answer, the metadata file, the APK. */
     const val MAX_API_BYTES = 1_000_000
     const val MAX_META_BYTES = 16 * 1024
@@ -87,8 +92,9 @@ object AppUpdate {
         return installed.mapNotNull(::fingerprint).contains(p)
     }
 
-    /** Whether an automatic check is due: [lastCheck] is when the last one ran (0 = never). */
-    fun due(lastCheck: Long, now: Long): Boolean = lastCheck <= 0 || now < lastCheck || now - lastCheck >= INTERVAL_MS
+    /** Whether an automatic check is due: [lastCheck] is when the last one ran (0 = never), [every] the gap. */
+    fun due(lastCheck: Long, now: Long, every: Long = INTERVAL_MS): Boolean =
+        lastCheck <= 0 || now < lastCheck || now - lastCheck >= every
 
     /** The certificate SHA-256 in the build's metadata file ([META_ASSET]); no JSON library needed. */
     fun metaCert(json: String): String? =
