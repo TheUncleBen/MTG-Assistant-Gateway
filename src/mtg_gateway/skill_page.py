@@ -1,28 +1,23 @@
-"""The assistant skill download page.
+"""The assistant skill download.
 
-Signed-in people can download the Claude skill as a ZIP and copy the ChatGPT
-instructions. Both live in the assistant plugin, ``plugin/mtg-gateway`` in the
-repository (``skills/mtg-gateway/SKILL.md`` and ``chatgpt-instructions.md``),
-which the image copies under ``/usr/share/mtg-gateway/plugin``; ``MTG_PLUGIN_DIR``
-overrides the location, as it does for the plugin routes. The ZIP is built in
-memory on first request and cached.
+Signed-in people download the Claude skill as a ZIP here; its steps and the ChatGPT instructions
+to copy are the setup hub's skill section (``/install?for=skill``, setup_hub.py), where ``/skill``
+leads. Both live in the assistant plugin, ``plugin/mtg-gateway`` in the repository
+(``skills/mtg-gateway/SKILL.md`` and ``chatgpt-instructions.md``), which the image copies under
+``/usr/share/mtg-gateway/plugin``; ``MTG_PLUGIN_DIR`` overrides the location, as it does for the
+plugin routes. The ZIP is built in memory on first request (plugin_page's ZIP builder) and cached.
 """
 
 from __future__ import annotations
 
-import html
-import io
-import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from .admin import is_admin
-from .pages import _csrf, _safe_next, browser_session
-from .plugin_page import PLUGIN_NAME, plugin_dir
-from .theme import display_name, icon, render
+from .pages import _safe_next, browser_session
+from .plugin_page import MAX_FILE_BYTES, PLUGIN_NAME, plugin_dir, shipped_files, zip_bytes
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -32,9 +27,6 @@ if TYPE_CHECKING:
 SKILL_NAME = "mtg-gateway"
 # Inside the plugin root: the skill folder and the ChatGPT text.
 SKILLS_SUBDIR = "skills"
-MAX_FILE_BYTES = 512 * 1024
-# Fixed timestamp so the same files always give the same ZIP bytes.
-ZIP_DATE = (2026, 1, 1, 0, 0, 0)
 
 
 def skill_dir() -> Path | None:
@@ -52,19 +44,7 @@ def build_zip(base: Path) -> bytes:
     Only regular files are included; symlinks and oversized files are skipped.
     """
     root = base / SKILLS_SUBDIR / SKILL_NAME
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        for path in sorted(root.rglob("*")):
-            if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_FILE_BYTES:
-                continue
-            rel = path.relative_to(root.parent).as_posix()
-            if any(part.startswith(".") for part in path.relative_to(root).parts):
-                continue
-            info = zipfile.ZipInfo(rel, date_time=ZIP_DATE)
-            info.compress_type = zipfile.ZIP_DEFLATED
-            info.external_attr = 0o644 << 16
-            zf.writestr(info, path.read_bytes())
-    return buf.getvalue()
+    return zip_bytes((p.relative_to(root.parent).as_posix(), p.read_bytes()) for p in shipped_files(root))
 
 
 def chatgpt_text(base: Path) -> str | None:
@@ -79,7 +59,6 @@ def chatgpt_text(base: Path) -> str | None:
 
 
 def add_skill_routes(server: MCPServer, state: AppState) -> None:
-    s = state.settings
     cache: dict[str, bytes] = {}
 
     def signed_in(request: Request) -> tuple[str | None, str | None]:
@@ -90,65 +69,11 @@ def add_skill_routes(server: MCPServer, state: AppState) -> None:
 
     @server.custom_route("/skill", methods=["GET"], include_in_schema=False)
     async def skill(request: Request) -> Response:
-        sub, sid = signed_in(request)
+        """The skill's steps are the setup hub's skill section (setup_hub.py)."""
+        sub, _sid = signed_in(request)
         if not sub:
             return to_login("/skill")
-        base = skill_dir()
-        if base is None:
-            body = "<div class='card'><p>The assistant skill is not installed on this gateway.</p></div>"
-            return render(
-                "Assistant skill",
-                body,
-                site=s.server_name,
-                status=503,
-                signed_in=True,
-                csrf=_csrf(s, sid),
-                admin=is_admin(state, sub),
-                user=display_name(state.db.get_user(sub)),
-            )
-        gpt = chatgpt_text(base)
-        gpt_block = (
-            "<div class='exportblock'><div class='head'><h3>ChatGPT project instructions</h3>"
-            "<button type='button' class='btn small copybtn' data-copy='gpt-text' "
-            f"aria-describedby='gpt-text-status'>{icon('copy')} <span class='label'>Copy</span></button>"
-            "<span class='sr-only' id='gpt-text-status' role='status' aria-live='polite'></span></div>"
-            "<textarea readonly rows='14' class='mono' id='gpt-text' "
-            "aria-label='ChatGPT project instructions'>"
-            f"{html.escape(gpt)}</textarea></div>"
-            if gpt
-            else "<p>The ChatGPT instructions are not available on this gateway.</p>"
-        )
-        body = (
-            "<div class='card'><p>The MTG skill teaches your assistant to use this gateway well: which tool "
-            "to use, how to report simulations honestly, and to show you every deck change before making "
-            "it. It is optional but recommended.</p></div>"
-            "<div class='card'><h2>Claude</h2>"
-            "<ol><li>Download the skill. Do not unzip it.<div class='actions'>"
-            "<a class='btn btn-primary' href='/skill/mtg-gateway.zip'>Download the skill (ZIP)</a></div></li>"
-            "<li>In Claude's settings, open Capabilities and turn on Code execution and file creation.</li>"
-            "<li>On claude.ai or in the desktop app, open Customize, then Skills.</li>"
-            "<li>Click +, then Create skill, then Upload a skill, and choose the ZIP file.</li>"
-            "</ol></div>"
-            "<div class='card'><h2>ChatGPT</h2>"
-            "<ol><li>On chatgpt.com, create a project.</li>"
-            "<li>Open the project's menu, then Project settings.</li>"
-            "<li>Press Copy below and paste the text into the project's instructions.</li>"
-            f"<li>Chat inside that project with the {html.escape(s.server_name)} connector on.</li></ol>"
-            "<p class='muted small'>ChatGPT supports custom connectors on the web only, not in its phone "
-            "apps.</p>"
-            f"{gpt_block}</div>"
-        )
-        return render(
-            "Assistant skill",
-            body,
-            site=s.server_name,
-            scripts=True,  # export.js: the Copy button
-            head_extra="<script src='/static/export.js' defer></script>",
-            signed_in=True,
-            csrf=_csrf(s, sid),
-            admin=is_admin(state, sub),
-            user=display_name(state.db.get_user(sub)),
-        )
+        return RedirectResponse("/install?for=skill", status_code=302)
 
     @server.custom_route("/skill/mtg-gateway.zip", methods=["GET"], include_in_schema=False)
     async def skill_zip(request: Request) -> Response:

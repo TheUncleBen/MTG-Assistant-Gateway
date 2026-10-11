@@ -156,6 +156,23 @@ async def test_a_deck_read_under_way_during_a_write_is_not_kept(stack: Stack) ->
     assert await decks.page_deck("u2", "42") == {"read": 3}
 
 
+async def test_reload_skips_the_shared_read_cache_for_a_deck_read_without_a_link(stack: Stack) -> None:
+    """Bug 11: a member with no linked account reads decks anonymously, through the client's
+    shared 60-second cache; the page's Reload (page_deck fresh) now asks Archidekt again."""
+    decks = stack.h.app.state.gateway.decks
+    seen: list[dict] = []
+    real = decks.client.get_deck
+
+    async def get_deck(token, deck_id, **kw):
+        seen.append({"token": token, **kw})
+        return await real(token, deck_id, **kw)
+
+    decks.client.get_deck = get_deck  # type: ignore[method-assign]
+    await decks.page_deck("nobody-linked", "42")
+    await decks.page_deck("nobody-linked", "42", fresh=True)
+    assert seen == [{"token": None}, {"token": None, "fresh": True}]
+
+
 async def test_page_deck_off_when_the_cache_is_off(stack: Stack) -> None:
     decks = stack.h.app.state.gateway.decks
     decks.page_deck_seconds = 0.0

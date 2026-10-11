@@ -60,12 +60,18 @@ def front_face(name: Any) -> str:
     return text.split(" // ")[0].strip() or text
 
 
+# The simulator's low-impact heading adds "(only this group supports 'the sim agrees this card
+# underperforms')": a goldfish game has no opponent, so it supports no such claim (QA-005).
+UNDERPERFORMS = re.compile(r"\s*\(only this group supports 'the sim agrees this card underperforms'\)")
+
+
 def plain_words(text: str) -> str:
     """The simulator's text without the assistant tool names it mentions (``goldfish_report``,
     ``goldfish_annotate``): the page speaks to a person, not to an assistant."""
     text = re.sub(r'Full report: goldfish_report\("([^"]*)"\)', r"Run id: \1", text)
     text = re.sub(r"\s*\(candidates for annotation; see goldfish_annotate\)", " (could be annotated)", text)
     text = re.sub(r"goldfish_report\((\"?)([^)\"]*)\1\)", r"run \2", text)
+    text = UNDERPERFORMS.sub("", text)
     return re.sub(r"\bgoldfish_([a-z_]+)", lambda m: m.group(1).replace("_", " "), text)
 
 
@@ -504,6 +510,21 @@ def speed_numbers(block: Any) -> dict[str, Any]:
     return out
 
 
+def goldfish_settings(block: Any) -> dict[str, Any]:
+    """How a stored simulation was run, as its result says: games, seed, last simulated turn and
+    whether it was a 60-card game (``constructed``). Only what a successful run stated; a missing
+    value is None."""
+    g = parse_goldfish(block)
+    if not g or not g["ok"]:
+        return {}
+    return {
+        "games": g["games"] if isinstance(g.get("games"), int) else None,
+        "seed": g["seed"] if isinstance(g.get("seed"), int) else None,
+        "until_turn": g["until_turn"] if isinstance(g.get("until_turn"), int) else None,
+        "constructed": g.get("format") == "constructed",
+    }
+
+
 # -- drawing -----------------------------------------------------------------------
 def _tile(t: dict[str, Any]) -> str:
     rate = t.get("rate")
@@ -682,11 +703,37 @@ def _names(cards: list[dict[str, Any]]) -> str:
     return f"<ul class='names'>{''.join(items)}</ul>"
 
 
+def coverage(g: dict[str, Any]) -> dict[str, Any] | None:
+    """One figure for how much of the deck the simulator modeled: the deck's cards less those it
+    did not recognize and those out of its scope. The panel names each card once, which counts the
+    cards of a singleton Commander deck but not those of a 60-card deck holding several copies of a
+    card, so a 60-card game gets no figure."""
+    h = g.get("honesty") or {}
+    size = g.get("deck_size")
+    if g.get("format") == "constructed" or not isinstance(size, int) or size <= 0:
+        return None
+    left = len(h.get("unrecognized") or []) + sum(len(grp["cards"]) for grp in h.get("out_of_scope") or [])
+    modeled = max(0, size - left)
+    return {"modeled": modeled, "deck_size": size, "pct": round(100 * modeled / size)}
+
+
+def coverage_text(g: dict[str, Any]) -> str:
+    c = coverage(g)
+    if c is None:
+        return ""
+    return (
+        f"Modeled: {c['modeled']} of {c['deck_size']} cards ({c['pct']}% of the deck); the rest are "
+        "listed below."
+    )
+
+
 def honesty_html(g: dict[str, Any]) -> str:
     """The "what the simulation could not model" panel body, or '' when there is nothing to say."""
     h = g.get("honesty") or {}
     size = g.get("deck_size")
     parts: list[str] = []
+    if (h.get("unrecognized") or h.get("out_of_scope")) and coverage_text(g):
+        parts.append(f"<p class='b coverage'>{_esc(coverage_text(g))}</p>")
     unrec = h.get("unrecognized") or []
     if unrec:
         parts.append(
@@ -711,10 +758,9 @@ def honesty_html(g: dict[str, Any]) -> str:
         parts.append(
             f"<div class='group'><h3>Modeled but never mattered <small>{_esc(_share(len(low), size))}"
             "</small></h3>"
-            "<p>These cards were understood, drawn and played, and nothing they do changed a game. For lands "
-            "and mana rocks that is expected; for anything else it is a fair hint the card underperforms.</p>"
-            + _names([{"name": n} for n in low])
-            + "</div>"
+            "<p>These cards were understood, drawn and played, and nothing they do changed a goldfish game. "
+            "A goldfish game has no opponent and no interaction, so this says nothing about how the card "
+            "does at a real table.</p>" + _names([{"name": n} for n in low]) + "</div>"
         )
     approx = h.get("approximations") or []
     if approx:
@@ -791,6 +837,18 @@ FORGE_STATE_TEXT = {
     "cancelled": "The games were stopped.",
     "lost": "The simulation engine lost this run.",
     "skipped": "No Forge games for this report.",
+    "busy": "The simulation engine is busy with other runs; this one waits in the queue.",
+}
+# A report without Forge games (Forge off, or left out of this report) says so where Forge's games
+# would be (reports.PREFLIGHT_ONLY).
+PREFLIGHT_ONLY = "Preflight only (no rules engine)"
+# The overall status (reports.report_status) in words, for the page head and the Markdown.
+STATUS_TEXT = {
+    "complete": "complete",
+    "running": "running: Forge games are playing",
+    "queued": "queued: Forge games are waiting to start",
+    "partial": "partial: some parts did not run",
+    "failed": "failed: nothing beyond the deck statistics came back",
 }
 
 
@@ -799,7 +857,10 @@ def forge_lines(f: dict[str, Any]) -> list[str]:
     res = f.get("result") or {}
     out: list[str] = []
     ahead = f.get("waiting_for") if isinstance(f.get("waiting_for"), dict) else None
-    if f.get("waiting") and f.get("state") == "queued":
+    if f.get("engine_busy") and f.get("state") == "queued":
+        every = f" every {f['retry_after']} seconds" if f.get("retry_after") else ""
+        out.append(f"The gateway asks the engine again{every} and starts the games when it has room.")
+    elif f.get("waiting") and f.get("state") == "queued":
         place = f"Number {f['position']} in your queue" if f.get("position") else "In your queue"
         behind = (
             f", behind your report of {front_face(ahead.get('deck_name')) or 'another deck'}"
@@ -858,6 +919,8 @@ def forge_html(f: Any, *, live: bool = False) -> str:
     if not isinstance(f, dict):
         return ""
     state = str(f.get("state") or "")
+    if state == "skipped":
+        return preflight_html(f)
     badge = {
         "done": "",
         "queued": " <span class='badge'>queued</span>",
@@ -874,7 +937,7 @@ def forge_html(f: Any, *, live: bool = False) -> str:
     ]
     pending = state in ("queued", "running")
     if state != "done":
-        msg = f.get("error") or FORGE_STATE_TEXT.get("waiting" if f.get("waiting") else state, "")
+        msg = f.get("error") or FORGE_STATE_TEXT.get(_forge_key(f), "")
         if msg and pending:
             msg += (
                 " This section updates by itself when the games finish."
@@ -903,6 +966,52 @@ def forge_html(f: Any, *, live: bool = False) -> str:
         )
     attrs = " data-forge-live aria-live='polite'" if live and pending else ""
     return f"<div class='card forge'{attrs}>" + "".join(parts) + "</div>"
+
+
+def _forge_key(f: dict[str, Any]) -> str:
+    if f.get("engine_busy"):
+        return "busy"
+    return "waiting" if f.get("waiting") else str(f.get("state"))
+
+
+def preflight_html(f: dict[str, Any] | None) -> str:
+    """The card in Forge's place when a report has no rules-engine games: Forge off on this
+    gateway (``f`` None) or left out of this report (a "skipped" section, with its reason)."""
+    if f is None:
+        why = (
+            "Forge, the rules engine, was not set up on this gateway, or not asked for, when this report ran."
+        )
+        warn = ""
+    else:
+        why = str(f.get("note") or "")
+        warn = str(f.get("error") or "")
+    body = (
+        f"<p class='muted small'>{_esc(why)} The report holds the deck statistics and, when the research "
+        "service ran, the goldfish games and the validation.</p>"
+        if why
+        else ""
+    )
+    if warn:
+        body += f"<p class='notice warn'>{_esc(warn)}</p>"
+    return f"<div class='card forge preflight'><h2>{PREFLIGHT_ONLY}</h2>{body}</div>"
+
+
+def engine_html(r: dict[str, Any], *, live: bool = False) -> str:
+    """The Forge card of a report, or the preflight-only card when it has no Forge games."""
+    f = r.get("forge")
+    if not isinstance(f, dict):
+        return preflight_html(None)
+    return forge_html(f, live=live)
+
+
+def status_html(status: Any) -> str:
+    if not isinstance(status, str) or status not in STATUS_TEXT:
+        return ""
+    cls = {"complete": "ok", "partial": "warn", "failed": "danger"}.get(status, "")
+    return (
+        f"<dt>Status</dt><dd id='rep-status'><span class='badge {cls}'>{_esc(status)}</span> "
+        f"<span class='muted small'>{_esc(STATUS_TEXT[status].partition(': ')[2])}</span></dd>"
+    )
 
 
 def report_sections(r: dict[str, Any]) -> dict[str, Any]:
@@ -945,6 +1054,7 @@ def report_body_html(
         seed = f" (seed {g['seed']})" if g.get("seed") is not None else ""
         meta.append(f"<dt>Games</dt><dd>{_esc(g['games'])}{_esc(turns)}{_esc(seed)}</dd>")
     meta.append(f"<dt>Run</dt><dd>{_when(r.get('taken_at'))}</dd>")
+    meta.append(status_html(r.get("status")))
     if standalone:
         title = f"<h1>{name}</h1>"
         back = ""
@@ -969,7 +1079,7 @@ def report_body_html(
         + actions_html
         + "</div>"
     )
-    body = head + forge_html(r.get("forge"), live=not standalone)
+    body = head + engine_html(r, live=not standalone)
     if g is None and v is None:
         body += (
             "<div class='card'><h2>Goldfish simulation</h2><p class='muted'>The research service was not "
@@ -1047,6 +1157,8 @@ def report_markdown(r: dict[str, Any]) -> str:
         lines.append(f"- Commander: {front_face(s['commander'])}")
     lines.append(f"- Deck: https://archidekt.com/decks/{r.get('deck_id')}")
     lines.append(f"- Run: {time_text(r.get('taken_at'))}")
+    if r.get("status") in STATUS_TEXT:
+        lines.append(f"- Status: {STATUS_TEXT[r['status']]}")
     if g and g.get("games"):
         extra = f", through turn {g['until_turn']}" if g.get("until_turn") else ""
         lines.append(f"- Games: {g['games']}{extra}")
@@ -1061,18 +1173,17 @@ def report_markdown(r: dict[str, Any]) -> str:
     elif g and g.get("message"):
         lines += ["## Goldfish simulation", "", g["message"], ""]
     forge = r.get("forge") if isinstance(r.get("forge"), dict) else None
-    if forge:
+    if forge is None or forge.get("state") == "skipped":
+        why = (
+            "Forge, the rules engine, was not set up on this gateway, or not asked for, when this report ran."
+            if forge is None
+            else " ".join(str(x) for x in (forge.get("note"), forge.get("error")) if x)
+        )
+        lines += [f"## {PREFLIGHT_ONLY}", "", why, ""]
+    elif forge:
         lines += ["## Forge games", ""]
         if forge.get("state") != "done":
-            lines += [
-                str(
-                    forge.get("error")
-                    or FORGE_STATE_TEXT.get(
-                        "waiting" if forge.get("waiting") else str(forge.get("state")), ""
-                    )
-                ),
-                "",
-            ]
+            lines += [str(forge.get("error") or FORGE_STATE_TEXT.get(_forge_key(forge), "")), ""]
         lines += [f"- {ln}" for ln in forge_lines(forge)]
         if forge.get("not_played"):
             lines.append("- Cards Forge could not play: " + ", ".join(forge["not_played"]))
@@ -1082,6 +1193,8 @@ def report_markdown(r: dict[str, Any]) -> str:
         size = g.get("deck_size")
         if h["unrecognized"] or h["out_of_scope"] or h["low_impact"]:
             lines += ["## What the simulation could not model", ""]
+            if (h["unrecognized"] or h["out_of_scope"]) and coverage_text(g):
+                lines += [coverage_text(g), ""]
         if h["unrecognized"]:
             lines.append(f"Not recognized — {_share(len(h['unrecognized']), size)}:")
             lines.append(", ".join(front_face(c["name"]) for c in h["unrecognized"]))

@@ -489,6 +489,10 @@ class Change:
     # "main" (the deck proper) or "side": the maybeboard and sideboard rows, which count
     # separately. A count or category change names the zone its rows are in.
     zone: str = "main"
+    # add: every category the new row goes in, in order (the first is ``category``, the row's
+    # primary one). The deck page's Undo of a removal sends it, so a card filed under several
+    # categories comes back under all of them.
+    categories: tuple[str, ...] = ()
 
     @property
     def pinned(self) -> bool:
@@ -509,6 +513,8 @@ class Change:
             d["quantity"] = self.quantity
         if self.category:
             d["category"] = self.category
+        if self.categories:
+            d["categories"] = list(self.categories)
         if self.set_code:
             d["set_code"] = self.set_code
         if self.collector_number:
@@ -601,6 +607,11 @@ def parse_changes(raw: Any) -> list[Change]:
         cat = clean_text(item.get("category") or "") or None
         if cat and len(cat) > MAX_CATEGORY:
             raise DeckError("invalid", f"change {i}: category is longer than {MAX_CATEGORY} characters")
+        cats = _parse_add_categories(i, action, item.get("categories"))
+        if cats:
+            if cat and cat != cats[0]:
+                raise DeckError("invalid", f"change {i}: category must be the first of categories")
+            cat = cats[0]
         set_code = str(item.get("set_code") or item.get("set") or "").strip().lower() or None
         number = str(item.get("collector_number") or "").strip() or None
         finish_raw = item.get("finish") or item.get("modifier")
@@ -621,7 +632,7 @@ def parse_changes(raw: Any) -> list[Change]:
             raise DeckError(
                 "invalid", f"change {i}: a pinned printing is added to the deck proper, not zone side"
             )
-        out.append(Change(action, name, qty, cat, set_code, number, finish, zone=zone))
+        out.append(Change(action, name, qty, cat, set_code, number, finish, zone=zone, categories=cats))
     pinned = [ch.card_name.lower() for ch in out if ch.pinned]
     if len(pinned) != len(set(pinned)):
         raise DeckError("invalid", "one pinned printing per card name per proposal")
@@ -665,6 +676,40 @@ def parse_changes(raw: Any) -> list[Change]:
             "a card cannot be recategorized and reprinted in the same proposal: " + ", ".join(clash),
         )
     return out
+
+
+MAX_ADD_CATEGORIES = 10
+
+
+def _all_categories(chs: list[Change]) -> list[str]:
+    """The categories a new row made by these adds of one card goes in: the first add's full
+    ``categories`` when one names them, else the first ``category`` given (or none)."""
+    named = next((c.categories for c in chs if c.categories), ())
+    if named:
+        return list(named)
+    cat = next((c.category for c in chs if c.category), None)
+    return [cat] if cat else []
+
+
+def _parse_add_categories(i: int, action: str, raw: Any) -> tuple[str, ...]:
+    """An add's ``categories``: the row's categories in order (each one line, as ``category``),
+    duplicates dropped. Only an add takes them."""
+    if raw is None or raw == []:
+        return ()
+    if action != "add":
+        raise DeckError("invalid", f"change {i}: categories apply to add only")
+    if not isinstance(raw, list) or len(raw) > MAX_ADD_CATEGORIES or not all(isinstance(c, str) for c in raw):
+        raise DeckError(
+            "invalid", f"change {i}: categories must be a list of up to {MAX_ADD_CATEGORIES} names"
+        )
+    out: list[str] = []
+    for c in raw:
+        cat = clean_text(c)
+        if not cat or len(cat) > MAX_CATEGORY:
+            raise DeckError("invalid", f"change {i}: each category is 1 to {MAX_CATEGORY} characters")
+        if cat not in out:
+            out.append(cat)
+    return tuple(out)
 
 
 def _parse_label_change(i: int, name: str, item: dict[str, Any]) -> Change:
@@ -1097,7 +1142,7 @@ def plan_zones(
         labels = {n: chs[0].printing_label() for n, chs in adds_by_name.items() if len(chs) == 1}
         # the category an add puts a new row in (Commander, Maybeboard...) is part of what is reviewed
         if zone == "main":
-            cats = {n: next((c.category for c in chs if c.category), None) for n, chs in adds_by_name.items()}
+            cats = {n: ", ".join(_all_categories(chs)) or None for n, chs in adds_by_name.items()}
         else:
             cats = {n: side_category_for(deck, chs[0]) for n, chs in adds_by_name.items()}
         pinned_names = {n for n, chs in adds_by_name.items() if any(c.pinned for c in chs)}
@@ -1946,11 +1991,12 @@ class DeckService:
             )
         return deck
 
-    async def get_any_deck(self, sub: str | None, deck_ref: str) -> Deck:
+    async def get_any_deck(self, sub: str | None, deck_ref: str, *, fresh: bool = False) -> Deck:
         """Read a deck. A member with a linked account reads with their session first, which is
         how Archidekt reports the deck as that person sees it (private decks, the copies they own
         of each card, their vote and bookmark); when that fails, or there is no link, the deck is
-        read anonymously (public or unlisted)."""
+        read anonymously (public or unlisted), through the client's shared read cache unless
+        ``fresh`` (the deck page's Reload) asks Archidekt again."""
         deck_id = _clean_deck_id(deck_ref)
         if sub and self.db.get_link(sub):
             try:
@@ -1960,6 +2006,8 @@ class DeckService:
                     raise
         async with self.archidekt_slot(sub):
             try:
+                if fresh:
+                    return await self.client.get_deck(None, deck_id, fresh=True)
                 return await self.client.get_deck(None, deck_id)
             except ArchidektError as exc:
                 raise DeckError(exc.kind, str(exc)) from exc
@@ -1981,7 +2029,11 @@ class DeckService:
         if hit is not None and not fresh and time.monotonic() - hit[0] < ttl:
             return pickle.loads(hit[1])  # a copy of its own: the page may change it
         gen = self._page_decks_gen
-        deck = await self.get_any_deck(sub, deck_ref)
+        # A Reload skips the client's shared 60-second read cache too (decks read without the
+        # member's own link: someone else's public deck, or any deck with no account linked).
+        deck = await (
+            self.get_any_deck(sub, deck_ref, fresh=True) if fresh else self.get_any_deck(sub, deck_ref)
+        )
         if ttl > 0 and gen == self._page_decks_gen:
             if len(self._page_decks) >= PAGE_DECKS_MAX:
                 oldest = min(self._page_decks, key=lambda k: self._page_decks[k][0])
@@ -2348,9 +2400,39 @@ class DeckService:
             )
         return out
 
+    def _review_page_only(self, sub: str, row: dict[str, Any]) -> DeckError:
+        """The refusal for any caller but the review page's own form that tries to apply an
+        Archidekt account action (R-142), with the row's real risk tier (consent, or destructive
+        for a deck deletion). Audited as ``apply_needs_user``."""
+        risk, _why = modes.risk_of("action", row.get("rows"))
+        self._audit(
+            "apply_needs_user",
+            sub=sub,
+            detail={"proposal_id": row["id"], "deck_id": row["deck_id"], "risk": risk},
+        )
+        return DeckError(
+            "browser_required",
+            "This is an action on the user's Archidekt account (a like, vote, bookmark, follow, "
+            "comment, folder, collaborator change or deck deletion). Each one needs the user's "
+            "own approval on the review page (review_url), in every approval mode. Nothing was sent to "
+            "Archidekt; do not retry.",
+            review_url=f"{self.settings.public_url}/proposals/{row['id']}",
+            state=row["state"],
+            approval_mode=self.mode_of(sub),
+            risk=risk,
+        )
+
     def approval_for(self, sub: str, row: dict[str, Any]) -> str:
         """The in-chat card's one-time code for a proposal (approve.py), bound to the proposal,
-        its owner, the app that made it and its creation time."""
+        its owner, the app that made it and its creation time. An account action has no code
+        (R-142: only its review page applies it), so asking for one is refused here, at the source."""
+        if row.get("kind") == "action":
+            raise DeckError(
+                "browser_required",
+                "An action on the user's Archidekt account has no in-chat approval code; only its "
+                "review page applies it.",
+                review_url=f"{self.settings.public_url}/proposals/{row['id']}",
+            )
         return approval_code(
             self.settings.session_secret,
             proposal_id=row["id"],
@@ -2365,6 +2447,8 @@ class DeckService:
         row = self.db.get_proposal(proposal_id, sub)
         if row is None:
             raise DeckError("not_found", "No such proposal for your account.")
+        if row.get("kind") == "action":  # R-142: no code exists for it, whatever was sent
+            raise self._review_page_only(sub, row)
         creator = row.get("created_by_client")
         if (
             not creator
@@ -2418,28 +2502,16 @@ class DeckService:
         # (approve.py); "browser" is a member's own page (hand edits, the JSON API with a
         # session); REVIEW_PAGE is the review page's form; "auto" is never a caller's choice.
         if not review_page and row.get("kind") == "action":
-            # R-142: an Archidekt account action (social, folder, delete deck) is applied only by
-            # the member's own press on the signed-in review page, whatever the mode. Not the
-            # assistant's apply_proposal, and not the in-chat card either: the card's press runs
-            # inside the chat app, where the model's own calls run too. Checked here as well as by
-            # its risk tier.
-            self._audit(
-                "apply_needs_user",
-                sub=sub,
-                detail={"proposal_id": proposal_id, "deck_id": row["deck_id"], "risk": "consent"},
-            )
-            raise DeckError(
-                "browser_required",
-                "This is an action on the user's Archidekt account (a like, vote, bookmark, follow, "
-                "comment, folder, collaborator change or deck deletion). Each one needs the user's "
-                "own approval on the review page (review_url), in every approval mode. Nothing was sent to "
-                "Archidekt; do not retry.",
-                review_url=f"{self.settings.public_url}/proposals/{proposal_id}",
-                state=row["state"],
-                approval_mode=self.mode_of(sub),
-                risk="consent",
-            )
+            # R-142: an Archidekt account action (social, folder, collaborator, delete deck) is
+            # applied only by the member's own press on the signed-in review page, whatever the
+            # mode. Not the assistant's apply_proposal, not the REST API, and not the in-chat card
+            # either: the card's press runs inside the chat app, where the model's own calls run
+            # too. This is the one check that decides it, for every route.
+            raise self._review_page_only(sub, row)
         if via == "mcp":
+            # The risk tier (L1) decides only the assistant's own applies of ordinary proposals:
+            # for an account action it is display only (what the assistant is told), because the
+            # check above has already refused every caller but the review page.
             kind = row.get("kind", "edit")
             risk, why = modes.risk_of(kind, row.get("rows"), max_rows=self.settings.auto_apply_max_rows)
             mode = self.mode_of(sub)
@@ -2654,7 +2726,9 @@ class DeckService:
         new_cats: dict[str, list[str]] = {}
         side_cats: dict[str, list[str]] = {}
         for key, chs in side_adds.items():
-            side_cats[key] = [side_category_for(deck, chs[0])]
+            side_cat = side_category_for(deck, chs[0])
+            # an add naming every category (an Undo of a removal) keeps the others beside it
+            side_cats[key] = [side_cat] + [c for c in _all_categories(chs)[1:] if c != side_cat]
             if after_side.get(key, 0) > 0 and key.lower() not in have_side:
                 card = await self._call(sub, self.client.resolve_card, key)
                 resolve[key] = card["id"]
@@ -2664,9 +2738,9 @@ class DeckService:
                         card["options"], foil=finish == "Foil", etched=finish == "Etched"
                     )
         for key, chs in adds.items():
-            cat = next((c.category for c in chs if c.category), None)
-            if cat:
-                new_cats[key] = [cat]
+            cats = _all_categories(chs)
+            if cats:
+                new_cats[key] = cats
             for ch in (c for c in chs if c.pinned):
                 card = await self._call(
                     sub,
@@ -3141,14 +3215,14 @@ class DeckService:
 
     def reject(self, sub: str, proposal_id: str, *, via: str | None = None) -> dict[str, Any]:
         """Close a pending proposal without applying it (owner only). From the member's browser
-        (the review page, or the API with the session cookie) any of their proposals; from a
-        connected app (``via`` "mcp", "app" for its card, "api", or any non-browser client) only
-        the proposals that app made itself, the same rule as apply."""
+        (the review page's form, which passes REVIEW_PAGE, or the API with the session cookie) any
+        of their proposals; from a connected app (``via`` "mcp", "app" for its card, "api", or any
+        non-browser client) only the proposals that app made itself, the same rule as apply."""
         row = self.db.get_proposal(proposal_id, sub)
         if row is None:
             raise DeckError("not_found", "No such proposal for your account.")
         actor = current_client.get()
-        from_browser = actor == BROWSER_CLIENT and via in (None, "browser")
+        from_browser = actor == BROWSER_CLIENT and via in (None, "browser", REVIEW_PAGE)
         creator = row.get("created_by_client")
         if not from_browser and (not creator or creator != actor):
             raise DeckError(
@@ -3160,7 +3234,7 @@ class DeckService:
         # Who closed it, kept in its result so describe() can say so: the member's own pages, the
         # card's Reject (via "app"), the assistant's reject_proposal (via "mcp") or the API.
         if from_browser:
-            by = "review_page" if via is None else "browser"
+            by = "review_page" if via == REVIEW_PAGE else "browser"
         else:
             by = {"app": "card", "mcp": "assistant"}.get(via or "", "api")
         closed = {"rejected_by": by, **({"client": actor} if actor and not from_browser else {})}
@@ -3574,14 +3648,24 @@ class DeckService:
             raise DeckError("invalid", "A folder name is 1 to 100 characters.")
         return clean
 
-    async def create_folder(self, sub: str, name: str, parent_id: int | None = None) -> dict[str, Any]:
+    async def check_new_folder(
+        self, sub: str, name: str, parent_id: int | None = None
+    ) -> tuple[str, dict[str, Any]]:
+        """(clean name, parent folder) for a new folder, refused as create_folder would refuse it;
+        nothing is created. The Folders page's confirmation asks about what this returns."""
         name = self._folder_name(name)
         info = await self.folders(sub)
         parent = int(parent_id) if parent_id is not None else int(info["root_id"])
-        if parent not in {f["id"] for f in info["folders"]}:
+        found = next((f for f in info["folders"] if f["id"] == parent), None)
+        if found is None:
             raise DeckError("not_found", "That parent folder is not in your Archidekt account.")
         if any(f["parent"] == parent and f["name"].casefold() == name.casefold() for f in info["folders"]):
             raise DeckError("invalid", f"There is already a folder called '{name}' there.")
+        return name, found
+
+    async def create_folder(self, sub: str, name: str, parent_id: int | None = None) -> dict[str, Any]:
+        name, found = await self.check_new_folder(sub, name, parent_id)
+        parent = int(found["id"])
         made = await self._call(sub, lambda token, *_: self.client.create_folder(token, name, parent))
         after, folder = await self._folder_in(sub, int(made["id"]))
         self._audit("folder_created", sub=sub, detail={"folder_id": folder["id"], "parent": parent})

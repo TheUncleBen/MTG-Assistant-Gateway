@@ -47,7 +47,10 @@ async def test_signed_in_user_gets_page_and_apk(harness: Harness) -> None:
     b = Browser(harness)
     try:
         await b.login("/app")
-        page = await b.http.get("/app")
+        # D11: /app leads to the setup hub's Android section
+        r = await b.http.get("/app")
+        assert r.status_code == 302 and r.headers["location"] == "/install?for=android"
+        page = await b.http.get("/install?for=android")
         assert page.status_code == 200
         assert "/app/mtg-assistant-gateway.apk" in page.text
         assert "0.1.0" in page.text
@@ -82,7 +85,7 @@ async def test_gateway_without_the_app(tmp_path: Path, idp: FakeIdP, monkeypatch
         b = Browser(h)
         try:
             await b.login("/app")
-            page = await b.http.get("/app")
+            page = await b.http.get("/install?for=android")
             assert page.status_code == 200  # a friendly page, not an error (Q18)
             assert "No app file on this gateway" in page.text and "phone's browser" in page.text
             r = await b.http.get("/app/mtg-assistant-gateway.apk")
@@ -106,11 +109,49 @@ async def test_page_without_a_recorded_certificate(
         b = Browser(h)
         try:
             await b.login("/app")
-            page = await b.http.get("/app")
+            page = await b.http.get("/install?for=android")
             assert page.status_code == 200
             assert "nope" not in page.text
             assert "Signing certificate SHA-256" not in page.text
             assert "did not record its signing certificate" in page.text
             assert "Install anyway" not in page.text
+        finally:
+            await b.aclose()
+
+
+async def test_latest_json_for_the_apps_update_check(harness: Harness) -> None:
+    """D10: the app asks its own gateway for the newest app, behind the APK's sign-in."""
+    r = await harness.http.get("/app/latest.json")
+    assert r.status_code == 401 and r.json() == {"ok": False, "error": "unauthenticated"}
+    b = Browser(harness)
+    try:
+        await b.login("/app")
+        r = await b.http.get("/app/latest.json")
+        assert r.status_code == 200 and r.headers["cache-control"] == "no-store"
+        assert r.json() == {
+            "ok": True,
+            "version_name": "0.1.0",
+            "version_code": 1,
+            "size": len(FAKE_APK),
+            "sha256": hashlib.sha256(FAKE_APK).hexdigest(),
+            "cert_sha256": FAKE_CERT,
+            "apk_url": "https://mtg.test/app/mtg-assistant-gateway.apk",
+        }
+        # the file it names downloads with the same session
+        assert (await b.http.get("/app/mtg-assistant-gateway.apk")).content == FAKE_APK
+    finally:
+        await b.aclose()
+
+
+async def test_latest_json_without_the_app(
+    tmp_path: Path, idp: FakeIdP, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MTG_APP_DIR", str(tmp_path / "nowhere"))
+    async with running(Harness(make_settings(tmp_path), idp)) as h:
+        b = Browser(h)
+        try:
+            await b.login("/app")
+            r = await b.http.get("/app/latest.json")
+            assert r.status_code == 404 and r.json()["error"] == "not_found"
         finally:
             await b.aclose()

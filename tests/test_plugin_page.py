@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from mtg_gateway import plugin_page
+from mtg_gateway import plugin_page, setup_hub
 
 from .conftest import GATEWAY, FakeIdP, Harness, make_settings, running
 from .test_decks_and_proxy import Browser
@@ -163,7 +163,7 @@ async def test_install_pages(harness: Harness) -> None:
 async def _check_install_pages(harness: Harness, b: Browser) -> None:
     picker = await b.http.get("/install")
     assert picker.status_code == 200
-    for key in plugin_page.CLIENTS:
+    for key in setup_hub.CLIENTS:
         assert f"href='/install?for={key}'" in picker.text
     assert "claude plugin install" not in picker.text  # steps only after a client is picked
     # A signed-in page: the member's navigation is on it (tab bar on phones and in the app, rail,

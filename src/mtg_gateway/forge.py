@@ -240,7 +240,6 @@ async def start_run(
     deck_name: str,
     *,
     games: int,
-    opponents: list[str] | None = None,
     seed: int | None = None,
     bracket: int | None = None,
     bracket_source: str | None = None,
@@ -269,11 +268,7 @@ async def start_run(
         }
     deck["main"] = [[n, name] for n, name in deck["main"] if resolved.get(name)]
     precons = [p for p in await client.precons() if isinstance(p, dict) and isinstance(p.get("name"), str)]
-    available = [p["name"] for p in precons]
-    chosen = [p for p in (opponents or []) if p in available]
-    choice: dict[str, Any] = {"rule": "asked", "note": "The opponents asked for play."}
-    if not chosen:
-        chosen, choice = pick_opponents(precons, bracket, bracket_source)
+    chosen, choice = pick_opponents(precons, bracket, bracket_source)
     if not chosen:
         return {"state": "failed", "error": "The simulation engine has no opponent decks."}
     seats = [deck_name, *chosen]

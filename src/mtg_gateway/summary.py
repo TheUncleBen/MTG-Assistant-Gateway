@@ -4,20 +4,24 @@ reports finished, proposals waiting and applied.
 The gateway writes it from its own data with fixed sentences; it has no AI model and does not
 call one (that would need a paid model API). The member's own assistant can turn it into a
 written summary on a schedule of their choosing through the read-only ``get_summary`` tool
-(docs/USING.md). Members who choose daily or weekly summaries on their Account page get them
-through ntfy when notifications are on (notify.py); the Account page always shows the summary.
+(docs/USING.md). Members who choose daily or weekly summaries in the Notifications card of their
+Account page get them through ntfy (notify.py); without a notification server there is no schedule
+to choose. With watchlists off (MTG_WATCHLISTS_ENABLED) the summary has no prices or deck values.
 """
 
 from __future__ import annotations
 
 import datetime as _dt
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from . import prices as _prices
 from .prices import day_of, days_before, money, pct_change
 
 if TYPE_CHECKING:
+    from mcp.server.mcpserver import MCPServer
+
+    from .app import AppState
     from .db import Database
     from .notify import Notifier
     from .prices import PriceService
@@ -32,7 +36,7 @@ def _start_ts(day: str) -> int:
 
 
 class Summaries:
-    def __init__(self, db: Database, prices: PriceService, notifier: Notifier | None, public_url: str):
+    def __init__(self, db: Database, prices: PriceService | None, notifier: Notifier | None, public_url: str):
         self.db = db
         self.prices = prices
         self.notifier = notifier
@@ -46,7 +50,8 @@ class Summaries:
         since = days_before(today, PERIODS[period])
         since_ts = _start_ts(since)
         cards = []
-        for w in self.prices.watched_cards(sub):
+        watched = self.prices is not None  # watchlists on (MTG_WATCHLISTS_ENABLED)
+        for w in self.prices.watched_cards(sub) if self.prices is not None else []:
             view = self.prices.card_view(w, PERIODS[period] + 31)
             hist = [h for h in view["history"] if h["price"] is not None]
             if not hist:
@@ -64,7 +69,7 @@ class Summaries:
             )
         cards.sort(key=lambda c: -abs(c["change_pct"] or 0))
         decks = []
-        for d in self.prices.watched_decks(sub):
+        for d in self.prices.watched_decks(sub) if self.prices is not None else []:
             rows = [r for r in self.prices.deck_series(sub, d["deck_id"], PERIODS[period] + 31) if r["usd"]]
             if not rows:
                 continue
@@ -114,6 +119,7 @@ class Summaries:
             ],
             "proposals_waiting": waiting,
             "proposals_applied": applied,
+            "watchlists": watched,
             "account_url": f"{self.public_url}/account#summary",
             "written_by": "the gateway, from its own data (no AI)",
         }
@@ -163,7 +169,9 @@ def text(s: dict[str, Any]) -> str:
     """The summary in plain sentences (what the Account page shows and get_summary returns)."""
     span = "today" if s["period"] == "day" else "this week"
     lines = [f"Summary for {s['from_day']} to {s['to_day']}."]
-    if s["cards"]:
+    if s.get("watchlists") is False:
+        pass  # watchlists are off on this gateway: no prices to report
+    elif s["cards"]:
         moves = [c for c in s["cards"] if c["change_pct"]]
         lines.append(f"Watched cards: {len(s['cards'])}, {len(moves)} changed price {span}.")
         for c in s["cards"][:5]:
@@ -205,4 +213,27 @@ def short_text(s: dict[str, Any]) -> str:
     return "; ".join(parts) + "."
 
 
-__all__ = ["PERIODS", "Summaries", "short_text", "text"]
+def add_summary_tool(server: MCPServer, state: AppState) -> None:
+    """The read-only ``get_summary`` tool, there whether or not watchlists or notifications are on."""
+    from mcp.server.auth.middleware.auth_context import get_access_token
+
+    @server.tool(
+        name="get_summary",
+        title="Get my summary",
+        description=(
+            "The member's plain summary of the last day or week (period: day or week): watched card "
+            "prices that moved and watched deck values (when the gateway has watchlists on), deck reports "
+            "finished, proposals waiting and applied, plus the same as sentences in `text`. Written by the "
+            "gateway from its own data, without AI; turn it into your own words for the member (for example "
+            "in a scheduled task). Read-only."
+        ),
+        annotations={"readOnlyHint": True, "openWorldHint": False},
+    )
+    async def get_summary(period: Literal["day", "week"] = "week") -> dict[str, object]:
+        token = get_access_token()
+        if token is None or not token.subject:
+            raise RuntimeError("no authenticated user on this request")
+        return {"ok": True, **state.summaries.build(token.subject, period)}
+
+
+__all__ = ["PERIODS", "Summaries", "add_summary_tool", "short_text", "text"]

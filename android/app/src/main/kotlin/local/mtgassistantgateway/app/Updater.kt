@@ -11,6 +11,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.webkit.CookieManager
 import android.widget.Toast
 import org.json.JSONException
 import org.json.JSONObject
@@ -21,24 +22,24 @@ import java.net.URL
 import java.security.MessageDigest
 
 /**
- * The app updates itself from the project's GitHub releases, so nobody has to uninstall and
+ * The app updates itself from the gateway it is set up for, so nobody has to uninstall and
  * reinstall to move to a new version ([AppUpdate] holds the rules).
  *
  * 1. Check: at each cold launch and just after a sign-in (at most every [AppUpdate.MIN_GAP_MS]),
  *    on returning to the app (at most every [AppUpdate.INTERVAL_MS]), or when asked from the menu
- *    or the Account page: one anonymous request to GitHub's "latest release" API for
- *    [BuildConfig.UPDATE_REPO]. A newer
- *    release is offered only when its published signing certificate is one this app is signed with.
- * 2. Download, when the person taps Update: the release's APK into the app's cache, then checked
- *    before anything is installed: same package, the offered version, signed by this app's own
- *    certificate.
+ *    or the Account page: one request to the gateway's [AppUpdate.LATEST_PATH], with the sign-in
+ *    the app's pages already hold (the gateway serves its APK only to its members). A newer app is
+ *    offered only when its signing certificate is one this app is signed with.
+ * 2. Download, when the person taps Update: the gateway's APK into the app's cache, then checked
+ *    before anything is installed: the size and SHA-256 the gateway gave, same package, the offered
+ *    version, signed by this app's own certificate.
  * 3. Install through Android's PackageInstaller. Android asks once to allow installs from this app
  *    ("Install unknown apps"). From Android 12, an app updating itself may skip the confirmation
  *    (PackageInstaller.SessionParams.setRequireUserAction); Android still decides, and when it asks,
  *    [InstallResultReceiver] shows its confirmation. Android itself refuses an APK signed with another key.
  *
- * Nothing about the person or their gateway is sent: GitHub sees an app version in the User-Agent
- * and, like any website, the phone's IP address.
+ * Nothing goes anywhere but the member's own gateway. A build with an empty UPDATE_REPO
+ * (build.gradle.kts) never looks for updates.
  */
 class Updater(private val activity: Activity, private val ui: Ui) {
     interface Ui {
@@ -49,10 +50,13 @@ class Updater(private val activity: Activity, private val ui: Ui) {
 
     private val main = Handler(Looper.getMainLooper())
     private val prefs = Prefs(activity)
-    private val repo = BuildConfig.UPDATE_REPO
     @Volatile private var busy = false
 
-    val enabled: Boolean get() = AppUpdate.latestApi(repo) != null
+    /** The gateway's update answer, or null when this build looks for no updates or no gateway is set. */
+    private fun latestUrl(): String? =
+        if (BuildConfig.UPDATE_REPO.isEmpty()) null else AppUpdate.latestUrl(prefs.gatewayOrigin)
+
+    val enabled: Boolean get() = latestUrl() != null
 
     /** The automatic check: only when one is due, and silent unless there is something to install. */
     fun checkIfDue() {
@@ -69,7 +73,7 @@ class Updater(private val activity: Activity, private val ui: Ui) {
 
     /** Looks now; [manual] also says when there is nothing new or the check failed. */
     fun check(manual: Boolean) {
-        val api = AppUpdate.latestApi(repo)
+        val api = latestUrl()
         if (api == null) {
             if (manual) toast(activity.getString(R.string.update_off))
             return
@@ -77,13 +81,13 @@ class Updater(private val activity: Activity, private val ui: Ui) {
         if (busy) return
         busy = true
         Thread {
-            // Recorded whatever the outcome, so an unreachable GitHub is not asked again on every return to the app.
+            // Recorded whatever the outcome, so an unreachable gateway is not asked again on every return to the app.
             prefs.lastUpdateCheck = System.currentTimeMillis()
             val result: () -> Unit = try {
                 val found = latest(api)
                 when {
                     found == null -> ({ if (manual) toast(activity.getString(R.string.update_none, BuildConfig.VERSION_NAME)) })
-                    !AppUpdate.sameSigner(installedCerts(), AppUpdate.metaCert(fetchText(found.meta.url, AppUpdate.MAX_META_BYTES))) ->
+                    !AppUpdate.sameSigner(installedCerts(), found.cert) ->
                         ({ if (manual) toast(activity.getString(R.string.update_other_key, found.version)) })
                     else -> ({ ui.showOffer(found) })
                 }
@@ -107,7 +111,7 @@ class Updater(private val activity: Activity, private val ui: Ui) {
         val apk = File(dir, "update.apk")
         Thread {
             val problem: String? = try {
-                download(offer.apk, apk)
+                download(offer, apk)
                 verify(apk, offer)
             } catch (e: IOException) {
                 activity.getString(R.string.update_download_failed)
@@ -140,47 +144,59 @@ class Updater(private val activity: Activity, private val ui: Ui) {
         }.start()
     }
 
-    // -- GitHub -------------------------------------------------------------
+    // -- the gateway --------------------------------------------------------
 
+    /** The gateway's answer at [api] as an offer; null when it ships nothing newer (404 included). */
     private fun latest(api: String): AppUpdate.Offer? {
-        val o = JSONObject(fetchText(api, AppUpdate.MAX_API_BYTES))
-        val list = o.optJSONArray("assets")
-        val assets = (0 until (list?.length() ?: 0)).mapNotNull { i ->
-            val a = list!!.optJSONObject(i) ?: return@mapNotNull null
-            AppUpdate.Asset(a.optString("name"), a.optString("browser_download_url"), a.optLong("size"))
+        val origin = api.removeSuffix(AppUpdate.LATEST_PATH)
+        val text = try {
+            fetchText(api, AppUpdate.MAX_API_BYTES)
+        } catch (e: NotShipped) {
+            return null
         }
+        val o = JSONObject(text)
         return AppUpdate.offer(
-            repo,
+            origin,
             BuildConfig.VERSION_CODE,
-            o.optString("tag_name").ifEmpty { null },
-            o.optBoolean("draft"),
-            o.optBoolean("prerelease"),
-            o.optString("html_url").ifEmpty { null },
-            assets,
+            o.optString("version_name").ifEmpty { null },
+            if (o.has("version_code") && !o.isNull("version_code")) o.optInt("version_code") else null,
+            o.optLong("size"),
+            o.optString("sha256").ifEmpty { null },
+            o.optString("cert_sha256").ifEmpty { null },
         )
     }
 
-    private fun open(url: String): HttpURLConnection {
+    /** The gateway ships no app (404): nothing to offer, not a failed check. */
+    private class NotShipped : IOException("no app on this gateway")
+
+    /**
+     * A GET on the gateway with the session cookie the app's pages hold. Redirects are not followed:
+     * the gateway answers a request without a session with a sign-in redirect (or a 401), and the
+     * check then fails quietly until the person signs in again.
+     */
+    private fun open(url: String, accept: String): HttpURLConnection {
         val conn = URL(url).openConnection() as HttpURLConnection
-        conn.instanceFollowRedirects = true // release files redirect to GitHub's download host (https only)
-        conn.useCaches = false
-        conn.connectTimeout = 15_000
-        conn.readTimeout = 30_000
-        conn.setRequestProperty("Accept", if (url.startsWith("https://api.github.com/")) "application/vnd.github+json" else "application/octet-stream")
-        conn.setRequestProperty("User-Agent", "MTGAssistant/" + BuildConfig.VERSION_NAME + " update-check")
-        if (conn.responseCode != 200) {
-            conn.disconnect()
-            throw IOException("HTTP ${conn.responseCode}")
-        }
         if (conn.url.protocol != "https") {
             conn.disconnect()
             throw IOException("not https")
+        }
+        conn.instanceFollowRedirects = false
+        conn.useCaches = false
+        conn.connectTimeout = 15_000
+        conn.readTimeout = 30_000
+        conn.setRequestProperty("Accept", accept)
+        conn.setRequestProperty("User-Agent", "MTGAssistant/" + BuildConfig.VERSION_NAME + " update-check")
+        CookieManager.getInstance().getCookie(url)?.let { conn.setRequestProperty("Cookie", it) }
+        val code = conn.responseCode
+        if (code != 200) {
+            conn.disconnect()
+            throw if (code == 404) NotShipped() else IOException("HTTP $code")
         }
         return conn
     }
 
     private fun fetchText(url: String, max: Int): String {
-        val conn = open(url)
+        val conn = open(url, "application/json")
         try {
             val out = java.io.ByteArrayOutputStream()
             conn.inputStream.use { input ->
@@ -198,10 +214,12 @@ class Updater(private val activity: Activity, private val ui: Ui) {
         }
     }
 
-    private fun download(asset: AppUpdate.Asset, to: File) {
-        val conn = open(asset.url)
+    private fun download(offer: AppUpdate.Offer, to: File) {
+        val asset = offer.apk
+        val conn = open(asset.url, "application/octet-stream")
         try {
             var total = 0L
+            val digest = MessageDigest.getInstance("SHA-256")
             conn.inputStream.use { input ->
                 to.outputStream().use { out ->
                     val buf = ByteArray(64 * 1024)
@@ -210,11 +228,14 @@ class Updater(private val activity: Activity, private val ui: Ui) {
                         if (n < 0) break
                         total += n
                         if (total > asset.size || total > AppUpdate.MAX_APK_BYTES) throw IOException("larger than published")
+                        digest.update(buf, 0, n)
                         out.write(buf, 0, n)
                     }
                 }
             }
             if (total != asset.size) throw IOException("incomplete download")
+            val sum = digest.digest().joinToString("") { "%02x".format(it) }
+            if (sum != offer.sha256) throw IOException("not the file the gateway described")
         } finally {
             conn.disconnect()
         }

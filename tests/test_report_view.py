@@ -256,3 +256,41 @@ def test_front_face_and_plain_words() -> None:
     assert rv.plain_words('Full report: goldfish_report("abc")') == "Run id: abc"
     assert rv.plain_words("see goldfish_annotate") == "see annotate"
     assert "goldfish_" not in rv.plain_words(GOLDFISH)
+
+
+def test_no_causal_claim_and_one_coverage_figure() -> None:
+    """QA-005: "a fair hint the card underperforms" claimed a cause a goldfish game cannot show; it
+    is gone. The panel now leads with one coverage figure (the deck less the cards not recognized
+    and out of scope: 98 - 32 - 17 = 49), for Commander games only (60-card decks hold copies)."""
+    html = rv.report_body_html(report())
+    assert "underperforms" not in html and "says nothing about how the card does" in html
+    assert "Modeled: 49 of 98 cards (50% of the deck); the rest are listed below." in html
+    md = rv.report_markdown(report())
+    assert "underperforms" not in md and "Modeled: 49 of 98 cards (50% of the deck)" in md
+    g = rv.parse_goldfish({"ok": True, "text": GOLDFISH})
+    assert (
+        rv.coverage({**g, "format": "constructed"}) is None and rv.coverage({**g, "deck_size": None}) is None
+    )
+
+
+def test_preflight_only_label_and_overall_status() -> None:
+    """D16: a report without Forge games (Forge off, or left out of this report) says "Preflight only
+    (no rules engine)" where the Forge games would be. QA-010: its overall status is in the head."""
+    html = rv.report_body_html(report(status="complete"))  # Forge was not set up
+    assert "<h2>Preflight only (no rules engine)</h2>" in html and "was not set up" in html
+    assert "id='rep-status'><span class='badge ok'>complete</span>" in html
+    skipped = {"state": "skipped", "reason": "not_commander", "note": "Forge plays Commander games only."}
+    html = rv.report_body_html(report(forge=skipped, status="complete"))
+    assert "<h2>Preflight only (no rules engine)</h2>" in html and "Commander games only." in html
+    assert "Forge games" not in html and "not run" not in html.split("Goldfish simulation")[0]
+    full = {"state": "skipped", "error": "You already have a Forge run going and 2 reports waiting."}
+    html = rv.report_body_html(report(forge=full, status="partial"))
+    assert "Preflight only" in html and "notice warn'>You already have" in html
+    assert "badge warn'>partial</span>" in html
+    running = rv.report_body_html(report(forge={"state": "running"}, status="running"))
+    assert "Preflight only" not in running and "<h2>Forge games" in running
+    assert "id='rep-status'><span class='badge '>running</span>" in running
+    md = rv.report_markdown(report(forge=skipped, status="complete"))
+    assert "## Preflight only (no rules engine)" in md and "- Status: complete" in md
+    assert "## Preflight only (no rules engine)" in rv.report_markdown(report())
+    assert "## Forge games" in rv.report_markdown(report(forge={"state": "running"}, status="running"))

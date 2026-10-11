@@ -95,3 +95,13 @@ def _glob_match(rel: str, pattern: str) -> bool:
         return fnmatch.fnmatch(rel, pattern.replace("**/", "*"))
     # a single * never crosses a folder boundary, as in setuptools
     return rel.count("/") == pattern.count("/") and fnmatch.fnmatch(rel, pattern)
+
+
+@pytest.mark.parametrize("name", ["deploy/stack.env.example", "deploy/compose/.env.example"])
+def test_example_env_keeps_watchlists_off(name: str):
+    assert _env(ROOT / name)["MTG_WATCHLISTS_ENABLED"] == "false"
+
+
+@pytest.mark.parametrize("name", ["deploy/portainer-stack.yml", "deploy/compose/docker-compose.yml"])
+def test_stack_files_pass_watchlists_off_by_default(name: str):
+    assert "MTG_WATCHLISTS_ENABLED: ${MTG_WATCHLISTS_ENABLED:-false}\n" in (ROOT / name).read_text()

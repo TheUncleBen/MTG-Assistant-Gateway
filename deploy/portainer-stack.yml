@@ -79,6 +79,9 @@ services:
       # /run/secrets/mtg_ntfy_token once that secret is listed above (docs/DEPLOY.md).
       MTG_NTFY_URL: ${MTG_NTFY_URL:-}
       MTG_NTFY_TOKEN_FILE: ${MTG_NTFY_TOKEN_FILE:-}
+      # Watchlists and prices, off by default: with false the Watchlist pages, the price buttons,
+      # the five watch tools and the daily price check are absent (stored watches are kept).
+      MTG_WATCHLISTS_ENABLED: ${MTG_WATCHLISTS_ENABLED:-false}
       # Watchlists: cards and decks per member, days of daily prices kept, and the hour (UTC) of
       # the daily price check. Nothing is asked of Scryfall while nobody watches anything.
       MTG_WATCH_MAX_CARDS: ${MTG_WATCH_MAX_CARDS:-200}

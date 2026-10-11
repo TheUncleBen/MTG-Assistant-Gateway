@@ -18,7 +18,7 @@ pytest.importorskip("playwright")
 
 @pytest.fixture
 def server(tmp_path: Path):
-    s = Server(tmp_path)
+    s = Server(tmp_path, watchlists_enabled=True)
     s.app.state.gateway.scan.names.set_names(["Sol Ring", *s.sf.catalog])
     s.start()
     try:
@@ -64,3 +64,39 @@ def test_card_viewer_watches_a_card_and_shows_its_price(server: Server) -> None:
         assert errors == []
         browser.close()
     assert [w["name"] for w in server.app.state.gateway.prices.watched_cards("user-1")] == ["Sol Ring"]
+
+
+def test_card_viewer_has_no_price_buttons_with_watchlists_off(tmp_path: Path) -> None:
+    """MTG_WATCHLISTS_ENABLED off (the default): the viewer offers no Price history."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    server = Server(tmp_path)
+    server.app.state.gateway.scan.names.set_names(["Sol Ring", *server.sf.catalog])
+    server.start()
+    try:
+        sid = server.sign_in()
+        with sync_playwright() as p:
+            browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+            ctx = browser.new_context(viewport={"width": 390, "height": 800})
+            ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+            ctx.route(
+                re.compile(r"https://cards\.scryfall\.io/.*"),
+                lambda route: route.fulfill(status=200, content_type="image/png", body=PNG),
+            )
+            page = ctx.new_page()
+            errors: list[str] = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.goto(f"{server.base}/cards?q=Sol Ring", wait_until="networkidle")
+            page.locator(".cardgrid .pic[data-card='Sol Ring']").first.click()
+            page.wait_for_selector(".cardview.open", timeout=3000)
+            page.wait_for_load_state("networkidle")
+            assert page.get_by_role("button", name="Rulings").count() == 1
+            assert page.get_by_role("button", name="Price history").count() == 0
+            assert page.locator("#cardview-prices").count() == 0
+            assert errors == []
+            browser.close()
+    finally:
+        server.stop()

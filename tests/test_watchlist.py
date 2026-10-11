@@ -79,6 +79,7 @@ class Stack:
 
 
 def _harness(tmp_path: Path, idp: FakeIdP, ark: FakeArchidekt, **over: object) -> Harness:
+    over.setdefault("watchlists_enabled", True)  # off by default (MTG_WATCHLISTS_ENABLED); see below
     settings = make_settings(tmp_path, writes_enabled=True, archidekt_base="https://ark.test/api", **over)
     client = ArchidektClient(settings.archidekt_base, "test-agent", Pacer(0.0), http=ark.client())
     return Harness(settings, idp, archidekt=client)
@@ -369,7 +370,11 @@ async def test_notifications_are_off_and_harmless_without_a_server(plain: Stack)
     try:
         page = (await b.http.get("/account")).text
         assert "This gateway has no notification server set up" in page
-        assert "id='summary'" in page and "no AI" in page
+        # bug 10: no summary schedule without a server to send it through
+        assert "id='summary'" not in page and "summary_every" not in page
+        r = await _post(b, "/account", {"action": "summary_save", "summary_every": "daily"})
+        assert r.headers["location"] == "/account?err=summary_off#summary"
+        assert notify.prefs(plain.h.db, "user-1")["summary_every"] == "off"
         assert plain.gw.notifier.enabled is False
         assert plain.gw.decks.on_proposal_saved is None  # nothing hooked
     finally:
@@ -611,3 +616,134 @@ def test_raw_sqlite_rows_survive(tmp_path: Path) -> None:
             )
     finally:
         db.close()
+
+
+# -- the switch (MTG_WATCHLISTS_ENABLED, off by default) -----------------------------------------
+
+WATCH_TOOLS = {"watch_card", "watch_deck", "unwatch", "list_watchlist", "card_price_history"}
+
+
+def _record_daily_jobs(monkeypatch: pytest.MonkeyPatch) -> list[tuple]:
+    """Each DailyJobs app.py builds at start, as (prices, summaries)."""
+    from mtg_gateway import app as app_module
+
+    made: list[tuple] = []
+
+    class Recorder(prices.DailyJobs):
+        def __init__(self, p, s, hour_utc):
+            super().__init__(p, s, hour_utc)
+            made.append((p, s))
+
+        async def loop(self) -> None:  # never runs a round in a test
+            return None
+
+    monkeypatch.setattr(app_module, "DailyJobs", Recorder)
+    return made
+
+
+def test_the_switch_is_off_by_default(monkeypatch, tmp_path: Path) -> None:
+    _env(monkeypatch, tmp_path)
+    assert load_settings().watchlists_enabled is False
+    monkeypatch.setenv("MTG_WATCHLISTS_ENABLED", "true")
+    assert load_settings().watchlists_enabled is True
+
+
+async def test_watchlists_off_hide_the_page_links_tools_and_daily_job(
+    tmp_path: Path, idp: FakeIdP, monkeypatch
+) -> None:
+    made = _record_daily_jobs(monkeypatch)
+    ark = FakeArchidekt()
+    h = _harness(tmp_path, idp, ark, watchlists_enabled=False)
+    # a member's watch from when the switch was on stays in the database
+    h.db.upsert_user("user-1", email="u@example.test", name="U", preferred_username="u", groups=[])
+    with h.db.tx() as c:
+        c.execute(
+            "INSERT INTO watch_cards (id, sub, name, created_at) VALUES ('w1', 'user-1', 'Sol Ring', 0)"
+        )
+    async for st in _stack(h, ark):
+        assert st.gw.prices is None and made == []  # no price service, no daily job
+        b = await _browser(st)
+        try:
+            for path in ("/watchlist", "/watchlist/api/card?name=Sol+Ring"):
+                assert (await b.http.get(path)).status_code == 404, path
+            r = await b.http.post("/watchlist/api/watch", json={"name": "Sol Ring"})
+            assert r.status_code in (404, 405)
+            page = (await b.http.get("/decks")).text
+            assert "href='/watchlist'" not in page and "data-watchlist" not in page
+            account = (await b.http.get("/account")).text
+            assert "price alert" not in account and "watched card" not in account
+        finally:
+            await b.aclose()
+        token = await mcp_token(h)
+        names = {t["name"] for t in (await h.mcp(token, "tools/list")).json()["result"]["tools"]}
+        assert not names & WATCH_TOOLS and "get_summary" in names
+        s = structured(await call(h, token, "get_summary", {"period": "day"}))
+        assert s["ok"] and s["watchlists"] is False and s["cards"] == [] and s["decks"] == []
+        assert "Watched cards" not in s["text"] and "Proposals waiting for you" in s["text"]
+        assert h.db._conn.execute("SELECT COUNT(*) FROM watch_cards").fetchone()[0] == 1
+
+
+async def test_watchlists_off_with_ntfy_keep_the_summary_without_prices(
+    tmp_path: Path, idp: FakeIdP, monkeypatch
+) -> None:
+    clock = Clock(monkeypatch)
+    made = _record_daily_jobs(monkeypatch)
+    ark = FakeArchidekt()
+    h = _harness(tmp_path, idp, ark, watchlists_enabled=False, ntfy_url="https://ntfy.test")
+    async for st in _stack(h, ark):
+        assert [p for p, _s in made] == [None]  # the daily job runs the summaries only
+        b = await _browser(st)
+        try:
+            await _opt_in(b)
+            page = (await b.http.get("/account")).text
+            assert "id='summary'" in page and "summary_every" in page
+            assert "watched prices" not in page and "price alert" not in page
+            assert "<pre>" not in page  # no summary is built for a member who chose none
+            r = await _post(b, "/account", {"action": "summary_save", "summary_every": "daily"})
+            assert r.headers["location"] == "/account?ok=summary_saved#summary"
+            page = (await b.http.get("/account")).text
+            assert "<pre>Summary for" in page and "Watched cards" not in page
+        finally:
+            await b.aclose()
+        clock.next_day()
+        out = await prices.DailyJobs(None, st.gw.summaries, hour_utc=6).run_due()
+        assert "prices" not in out and out["summaries"] == 1
+        assert st.ntfy.messages[-1]["title"] == "Your daily summary"
+
+
+async def test_watchlists_on_show_the_links_and_tools(stack: Stack) -> None:
+    b = await _browser(stack)
+    try:
+        page = (await b.http.get("/decks")).text
+        assert "href='/watchlist'" in page and "data-watchlist" in page
+        assert (await b.http.get("/watchlist")).status_code == 200
+    finally:
+        await b.aclose()
+    token = await mcp_token(stack.h)
+    names = {t["name"] for t in (await stack.h.mcp(token, "tools/list")).json()["result"]["tools"]}
+    assert WATCH_TOOLS | {"get_summary"} <= names
+    js = (Path(prices.__file__).parent / "static" / "cardview.js").read_text(encoding="utf-8")
+    assert 'document.body.hasAttribute("data-watchlist") ? priceButton(card) : null' in js
+
+
+async def test_watchlists_on_start_the_daily_job(tmp_path: Path, idp: FakeIdP, monkeypatch) -> None:
+    made = _record_daily_jobs(monkeypatch)
+    ark = FakeArchidekt()
+    async for st in _stack(_harness(tmp_path, idp, ark), ark):
+        assert len(made) == 1 and made[0][0] is st.gw.prices
+        assert st.gw.prices is not None
+
+
+async def test_each_deck_value_names_its_price_source(stack: Stack, monkeypatch) -> None:
+    """The watchlist's deck value (Scryfall's prices) and the deck page's estimated cost
+    (Archidekt's) differ, so each says where its prices come from; the numbers are unchanged."""
+    Clock(monkeypatch)
+    b = await _browser(stack, link=True)
+    try:
+        assert (await _post(b, "/watchlist", {"action": "add_deck", "deck": "42"})).status_code == 303
+        page = (await b.http.get("/watchlist")).text
+        assert "Sample Commander Deck" in page and "(Scryfall prices)" in page
+        deck = (await b.http.get("/decks/42")).text
+        assert "(Archidekt prices)</span>" in deck and "<span>Est cost (Archidekt)</span>" in deck
+    finally:
+        await b.aclose()

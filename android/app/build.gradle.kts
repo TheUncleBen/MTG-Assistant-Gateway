@@ -21,9 +21,9 @@ val versionCodeFromFile = major * 1_000_000 + minor * 1_000 + patch
 // default, claims nothing and works with any gateway address typed at first launch.
 val appLinksHost: String = (findProperty("appLinksHost") as String?)?.trim().orEmpty()
 
-// App updates (Updater.kt): the GitHub repository whose releases the app installs updates from,
-// as owner/name. -PupdateRepo= (or UPDATE_REPO for scripts/build.sh) points a fork at its own
-// releases; an empty value builds an app that never looks for updates.
+// App updates (Updater.kt): the app asks the gateway it is set up for (/app/latest.json) and installs
+// the APK that gateway ships. -PupdateRepo= (or UPDATE_REPO for scripts/build.sh) empty builds an app
+// that never looks for updates; any owner/name value (CI passes its repository) leaves the check on.
 val updateRepo: String = ((findProperty("updateRepo") as String?) ?: "TheUncleBen/MTG-Assistant-Gateway").trim()
 require(updateRepo.isEmpty() || Regex("^[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}$").matches(updateRepo)) {
     "updateRepo must be owner/name, got '$updateRepo'"

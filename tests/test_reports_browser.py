@@ -181,6 +181,7 @@ def test_forge_section_refreshes_itself_until_the_run_ends(server: Server) -> No
         page.goto(f"{server.base}/history/reports/rep_forge", wait_until="networkidle")
         assert page.locator(".card.forge[data-forge-live]").count() == 1
         assert "updates by itself" in page.locator(".card.forge").inner_text()
+        assert page.locator("#rep-status").inner_text().startswith("running")  # the overall status
         page.evaluate("window.__same_page = true")  # gone if the page reloads
         set_forge(
             {
@@ -201,6 +202,7 @@ def test_forge_section_refreshes_itself_until_the_run_ends(server: Server) -> No
         # the card itself stayed, so it is still the live region screen readers announce
         assert page.locator(".card.forge[aria-live=polite]").count() == 1
         assert page.evaluate("window.__same_page === true")
+        assert page.locator("#rep-status").inner_text().startswith("complete")  # follows the run
         assert "Games played: 2 of 2." in page.locator("#rep-md").input_value()  # Copy as Markdown too
         assert not errors, errors
         browser.close()

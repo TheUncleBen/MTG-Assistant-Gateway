@@ -78,7 +78,10 @@ async def test_cover_tags_and_folder_from_the_settings_page(stack: Stack) -> Non
         r = await _form(b, "/decks/42/tags", {"action": "remove", "relation_id": "777"})
         assert r.status_code == 400 and stack.ark.deck_tags[43]
         # folders: create, rename, move the deck, back to the top level
-        r = await _form(b, "/folders", {"action": "create", "name": "Cube"}, follow=True)
+        # 0.7.24 (D9): a new folder asks once, then the confirmation creates it
+        r = await _form(b, "/folders", {"action": "create", "name": "Cube"})
+        assert r.status_code == 200 and "Create the folder" in r.text
+        r = await _form(b, "/folders", {"action": "create", "name": "Cube", "confirmed": "1"}, follow=True)
         assert "Folder created" in r.text and "Cube" in r.text
         folder = stack.ark.folders["alice"][-1]
         r = await _form(b, "/folders", {"action": "create", "name": "cube"})

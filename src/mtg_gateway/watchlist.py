@@ -1,10 +1,12 @@
-"""The Watchlist page, the card viewer's price history, the Account page's Notifications and
-Summary cards, and the assistant's tools for the same (prices.py, notify.py, summary.py).
+"""The Watchlist page, the card viewer's price history, and the assistant's tools for the same
+(prices.py). They exist only when the operator turned watchlists on (MTG_WATCHLISTS_ENABLED);
+off, nothing here is registered, so the pages answer 404 and the tools are not listed.
 
 Both paths reach the same service: ``/watchlist`` (watch or remove cards and decks, set alerts,
 see each price over time as a small chart and as a table) and the MCP tools ``watch_card``,
-``watch_deck``, ``unwatch``, ``list_watchlist``, ``card_price_history`` and ``get_summary``.
-Watching changes only the member's own gateway data, never Archidekt, so it needs no proposal.
+``watch_deck``, ``unwatch``, ``list_watchlist`` and ``card_price_history``. Watching changes
+only the member's own gateway data, never Archidekt, so it needs no proposal. The Account page's
+Notifications card (with the summary) is notify.py's, and ``get_summary`` is summary.py's.
 """
 
 from __future__ import annotations
@@ -20,7 +22,6 @@ from pydantic import Field
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import notify
 from .decks import DeckError
 from .history_view import _trend_svg
 from .pages import _csrf, browser_session, login_redirect, read_limited
@@ -59,8 +60,6 @@ WATCH_CSS = """
 .wrow th[scope=row],.wrow thead th:first-child{text-align:left}
 .wrow .acts{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.5rem;align-items:center}
 .wrow .acts form{margin:0}
-.summary pre{white-space:pre-wrap;font-family:inherit;margin:.5rem 0 0;padding:.6rem .8rem;
-  background:var(--surface-2);border-radius:3px;overflow-wrap:anywhere}
 """
 
 OK_NOTES = {
@@ -156,7 +155,9 @@ def _card_row(v: dict[str, Any], csrf_in: str) -> str:
 
 def _deck_row(v: dict[str, Any], csrf_in: str) -> str:
     price = (
-        f"<b>{_esc(money(v['price']))}</b> on {_esc(v['day'])}"
+        # The deck page's "Est cost" totals Archidekt's prices; this value is Scryfall's, so each says
+        # where its prices come from.
+        f"<b>{_esc(money(v['price']))}</b> on {_esc(v['day'])} <span class='muted'>(Scryfall prices)</span>"
         if v.get("price") is not None
         else "<span class='muted'>No value yet</span>"
     )
@@ -212,150 +213,20 @@ def watchlist_body(state: AppState, sub: str, csrf: str | None, *, ok: str = "",
         "<div class='field wide'><label for='w-deck'>Archidekt deck link or number</label>"
         "<input id='w-deck' name='deck' maxlength='200' autocomplete='off' required></div>"
         "<button class='primary'>Watch deck</button></form>"
-        "<p class='muted small'>A watched deck is read again once a day, so its value follows its cards.</p>"
+        "<p class='muted small'>A watched deck is read again once a day, so its value follows its cards. "
+        "Its value uses Scryfall's prices, so it can differ from the deck page's estimated cost, which "
+        "uses Archidekt's.</p>"
         + (f"<ul class='plain wlist'>{decks}</ul>" if decks else "<p class='muted'>No decks watched yet.</p>")
         + "</section>"
     )
-
-
-# -- Account page: notifications and summary ---------------------------------------------------
-
-
-def notify_card_html(state: AppState, sub: str, csrf_in: str) -> str:
-    n = state.notifier
-    p = notify.prefs(state.db, sub)
-    if n is None or not n.enabled:
-        return (
-            "<div class='card' id='notifications'><h2>Notifications</h2><p class='muted'>This gateway has no "
-            "notification server set up. Its operator can add one (an ntfy server); then you can get a "
-            "message on your phone when a proposal waits for you, a deck report finishes, a watched card "
-            "crosses your alert, or your summary is ready.</p></div>"
-        )
-
-    def box(name: str, label: str) -> str:
-        return (
-            f"<label class='check'><input type='checkbox' name='{name}' value='1'"
-            f"{' checked' if p[name] else ''}> <span>{_esc(label)}</span></label>"
-        )
-
-    topic = p["ntfy_topic"] or ""
-    where = (
-        f"<dl class='meta'><dt>Server</dt><dd><code>{_esc(n.url)}</code></dd>"
-        f"<dt>Your topic</dt><dd><code>{_esc(topic)}</code></dd></dl>"
-        "<p class='muted small'>In the ntfy app, add a subscription to this topic on this server (use "
-        "another server, not ntfy.sh, if the server above is not ntfy.sh). If the operator protects the "
-        "server, sign in in the app with the user they gave you. Keep the topic to yourself: anyone who "
-        "knows it and may read the server can read your notifications.</p>"
-        if topic
-        else ""
-    )
-    test = (
-        f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='notify_test'>"
-        "<button>Send test</button></form>"
-        f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='notify_new_topic'>"
-        "<button class='inline'>New random topic</button></form>"
-        if p["ntfy_on"] and topic
-        else ""
-    )
-    return (
-        "<div class='card' id='notifications'><h2>Notifications</h2>"
-        "<p>Get a short message on your phone through ntfy. Each one says only what happened and links "
-        "to the page here: never your deck's cards.</p>"
-        f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='notify_save'>"
-        f"{box('ntfy_on', 'Send me notifications')}"
-        "<fieldset><legend>When</legend>"
-        f"{box('on_proposals', 'A proposal waits for my approval')}"
-        f"{box('on_reports', 'A deck report finished (Forge runs that waited included)')}"
-        f"{box('on_prices', 'A watched card crossed my price alert')}</fieldset>"
-        "<label for='n-topic'>Topic (empty: a random one nobody can guess)</label>"
-        f"<input id='n-topic' name='ntfy_topic' maxlength='64' autocomplete='off' value='{_esc(topic)}' "
-        "pattern='mtg-[A-Za-z0-9_\\-]{12,60}' title='mtg- and then 12 to 60 letters, digits, - or _'>"
-        "<button class='primary'>Save notifications</button></form>"
-        f"{where}<div class='form-actions'>{test}</div></div>"
-    )
-
-
-def summary_card_html(state: AppState, sub: str, csrf_in: str) -> str:
-    p = notify.prefs(state.db, sub)
-    every = p["summary_every"]
-    period = "day" if every == "daily" else "week"
-    s = state.summaries.build(sub, period)
-    opts = "".join(
-        f"<option value='{v}'{' selected' if v == every else ''}>{label}</option>"
-        for v, label in (("off", "Off"), ("daily", "Every day"), ("weekly", "Every week (Mondays)"))
-    )
-    n = state.notifier
-    via = (
-        "It is sent through your notifications when they are on."
-        if n is not None and n.enabled
-        else "This gateway has no notification server, so it is shown here only."
-    )
-    return (
-        "<div class='card summary' id='summary'><h2>Summary</h2>"
-        "<p>A plain summary of your watched prices, deck values, finished reports and proposals, "
-        f"written by the gateway from its own data (no AI). {via} Your assistant can read it with "
-        "<code>get_summary</code> and write you its own version on a schedule.</p>"
-        f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='summary_save'>"
-        "<label for='s-every'>Send my summary</label>"
-        f"<select id='s-every' name='summary_every'>{opts}</select>"
-        "<button class='primary'>Save summary</button></form>"
-        f"<h3>{'Today' if period == 'day' else 'The last 7 days'}</h3><pre>{_esc(s['text'])}</pre></div>"
-    )
-
-
-async def account_action(state: AppState, sub: str, action: str, data: dict[str, str]) -> str | None:
-    """Handle the Notifications and Summary forms of the Account page. Returns the redirect's
-    query (``ok=...`` or ``err=...``), or None for an action that is not one of these."""
-    if action == "notify_save":
-        on = data.get("ntfy_on") == "1"
-        topic = data.get("ntfy_topic", "").strip()
-        current = notify.prefs(state.db, sub)["ntfy_topic"]
-        if on and not topic:
-            topic = current or notify.new_topic()
-        try:
-            notify.save_prefs(
-                state.db,
-                sub,
-                ntfy_on=on,
-                on_proposals=data.get("on_proposals") == "1",
-                on_reports=data.get("on_reports") == "1",
-                on_prices=data.get("on_prices") == "1",
-                **({"ntfy_topic": topic} if topic else {}),
-            )
-        except ValueError:
-            return "err=notify_topic_invalid"
-        return "ok=notify_saved" if on else "ok=notify_off"
-    if action == "notify_new_topic":
-        notify.save_prefs(state.db, sub, ntfy_topic=notify.new_topic())
-        return "ok=notify_topic"
-    if action == "notify_test":
-        n = state.notifier
-        p = notify.prefs(state.db, sub)
-        if n is None or not n.enabled or not p["ntfy_on"] or not p["ntfy_topic"]:
-            return "err=notify_test_failed"
-        if not n.test_allowed(sub):
-            return "err=notify_test_wait"
-        ok = n is not None and await n.send(
-            sub,
-            "test",
-            "Test from your MTG gateway",
-            "Notifications work. This is the only test message.",
-            "/account",
-        )
-        return "ok=notify_test_sent" if ok else "err=notify_test_failed"
-    if action == "summary_save":
-        try:
-            notify.save_prefs(state.db, sub, summary_every=data.get("summary_every", "off"))
-        except ValueError:
-            return "err=notify_topic_invalid"
-        return "ok=summary_saved"
-    return None
 
 
 # -- routes --------------------------------------------------------------------------------------
 
 
 def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
+    if state.prices is None:  # watchlists are off on this gateway
+        return
     s = state.settings
 
     def page(body: str, *, sub: str, sid: str | None, status: int = 200) -> Response:
@@ -481,6 +352,8 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
 
 
 def add_watchlist_tools(server: MCPServer, state: AppState) -> None:
+    if state.prices is None:  # watchlists are off: the five tools are not listed
+        return
     from mcp.server.auth.middleware.auth_context import get_access_token
 
     def _sub() -> str:
@@ -636,25 +509,5 @@ def add_watchlist_tools(server: MCPServer, state: AppState) -> None:
             )
         return {"ok": True, "cards": [state.prices.card_view(w, days) for w in rows]}
 
-    @server.tool(
-        name="get_summary",
-        title="Get my summary",
-        description=(
-            "The member's plain summary of the last day or week (period: day or week): watched card "
-            "prices that moved, watched deck values, deck reports finished, proposals waiting and applied, "
-            "plus the same as sentences in `text`. Written by the gateway from its own data, without AI; "
-            "turn it into your own words for the member (for example in a scheduled task). Read-only."
-        ),
-        annotations={"readOnlyHint": True, "openWorldHint": False},
-    )
-    async def get_summary(period: Literal["day", "week"] = "week") -> dict[str, object]:
-        return {"ok": True, **state.summaries.build(_sub(), period)}
 
-
-__all__ = [
-    "account_action",
-    "add_watchlist_routes",
-    "add_watchlist_tools",
-    "notify_card_html",
-    "summary_card_html",
-]
+__all__ = ["add_watchlist_routes", "add_watchlist_tools", "history_html"]

@@ -59,6 +59,7 @@ async def test_quantity_remove_and_category_edits_answer_with_fresh_rows_and_che
                 "finish": "Normal",
                 "label": "",
                 "mana_value": None,
+                "notes": "",
             }
         ]
         assert _deck_card(stack, "Cultivate")[0]["quantity"] == 2
@@ -106,11 +107,54 @@ async def test_quantity_remove_and_category_edits_answer_with_fresh_rows_and_che
                 "finish": "Normal",
                 "label": "",
                 "mana_value": None,
+                "notes": "",
             }
         ]
         assert _deck_card(stack, "Acidic Slime")[0]["categories"] == ["Removal"]
     finally:
         await b.aclose()
+
+
+async def test_an_add_puts_a_card_back_under_every_category(stack: Stack) -> None:  # noqa: F811
+    """Bug 7: the deck page's Undo of a removal names every category the row had; the add goes
+    in under all of them, the primary first. The rows also carry the card's notes (read-only)."""
+    row = _deck_card(stack, "Cultivate")[0]
+    row.update(categories=["Ramp", "Value"], notes="fetches both")
+    b = await linked(stack)
+    try:
+        r = await api(b, "POST", "/api/v1/decks/42/edit", {"changes": [{"action": "set_quantity",
+                      "card_name": "Cultivate", "quantity": 2}]})  # fmt: skip
+        assert r.status_code == 201 and r.json()["rows"][0]["notes"] == "fetches both", r.text
+        r = await api(
+            b, "POST", "/api/v1/decks/42/edit", {"changes": [{"action": "remove", "card_name": "Cultivate"}]}
+        )
+        assert r.status_code == 201 and _deck_card(stack, "Cultivate") == [], r.text
+        add = {"action": "add", "card_name": "Cultivate", "quantity": 2, "category": "Ramp",
+               "categories": ["Ramp", "Value"]}  # fmt: skip
+        r = await api(b, "POST", "/api/v1/decks/42/edit", {"changes": [add]})
+        assert r.status_code == 201, r.text
+        assert [x["categories"] for x in r.json()["rows"]] == [["Ramp", "Value"]]
+        back = _deck_card(stack, "Cultivate")
+        assert len(back) == 1 and back[0]["categories"] == ["Ramp", "Value"] and back[0]["quantity"] == 2
+        # categories go with an add only, and the first is the category
+        for bad in (
+            {"action": "set_quantity", "card_name": "Cultivate", "quantity": 1, "categories": ["Ramp"]},
+            {"action": "add", "card_name": "Opt", "category": "Draw", "categories": ["Ramp", "Draw"]},
+            {"action": "add", "card_name": "Opt", "categories": "Ramp"},
+        ):
+            r = await api(b, "POST", "/api/v1/decks/42/edit", {"changes": [bad]})
+            assert r.status_code == 400 and r.json()["error"] == "invalid", (bad, r.text)
+    finally:
+        await b.aclose()
+
+
+def test_add_categories_round_trip_through_the_stored_proposal() -> None:
+    from mtg_gateway.decks import parse_changes
+
+    ch = parse_changes([{"action": "add", "card_name": "Opt", "categories": ["Draw", "Cantrip", "Draw"]}])[0]
+    assert ch.category == "Draw" and ch.categories == ("Draw", "Cantrip")
+    assert parse_changes([ch.as_dict()]) == [ch]
+    assert "categories" not in parse_changes([{"action": "add", "card_name": "Opt"}])[0].as_dict()
 
 
 async def test_side_zone_edits_target_the_maybeboard_row(stack: Stack) -> None:  # noqa: F811

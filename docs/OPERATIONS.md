@@ -617,8 +617,9 @@ on what the review page would show, not on what the assistant says:
 
 | Tier | Proposals |
 |---|---|
-| Low | An edit to an existing deck, or to the member's collection, with at most `MTG_AUTO_APPLY_MAX_ROWS` rows (default 5), each a card add, remove, quantity change, category move, finish or printing change, no row moving more than four copies, none touching the commander. Cloning a deck (a copy; nothing that exists changes). |
-| High | Everything else: more rows than that, any commander change, creating a new deck, restoring a snapshot, and deck details (name, format, description, visibility, and the folder, tags and cover). |
+| Low | A small edit to an existing deck or to your collection: at most 5 card rows, each a card added or removed, or a new quantity, category, finish, printing, color tag or custom mana value, no more than 4 copies a row and never the commander; and a private copy of a deck (a clone), which changes nothing that exists. (The row limit is `MTG_AUTO_APPLY_MAX_ROWS`, default 5.) |
+| High | Everything else: more rows than that, a commander change, a new deck, restoring a snapshot, and the deck's details (name, format, bracket, description, visibility, folder, tags and cover). |
+| Consent, destructive (R-142) | Actions on your Archidekt account (likes, votes, bookmarks, follows, comments, new folders and collaborator changes) and deleting a deck are never applied by an assistant: each one waits for your own press on its review page, in every mode. |
 
 Every proposal result carries `approval_mode`, `risk`, `risk_reason` and
 `assistant_may_apply`, and `next_step` tells the assistant whether to call
@@ -679,7 +680,7 @@ The gateway is built to be light on Archidekt. For everyone together:
 - a member's card lookups are reused for that member for
   `MTG_ARCHIDEKT_CARD_CACHE_SECONDS` (an hour; an answer fetched with one
   member's sign-in is never served to another), and anonymous public deck reads and deck searches for
-  `MTG_ARCHIDEKT_CACHE_SECONDS` (a minute). Anything the gateway sends to
+  `MTG_ARCHIDEKT_CACHE_SECONDS` (a minute; the deck page's Reload reads such a deck again). Anything the gateway sends to
   Archidekt clears the deck and search copies. Reads of decks made with a
   member's own sign-in are reused only to show the same member's deck page
   again within 20 seconds (another view, Back), never for a proposal or an
@@ -808,6 +809,14 @@ token, the refresh itself is rejected, or a freshly refreshed token is
 rejected too.
 
 ## Watchlists, prices and notifications
+
+Watchlists are off by default. Set `MTG_WATCHLISTS_ENABLED=true` to turn them
+on; while it is off the Watchlist page answers 404, its links, the card
+viewer's price buttons and the five watch tools are gone, and no daily price
+check runs. Stored watches and prices stay in the database (the hourly
+clean-up still deletes prices older than `MTG_PRICE_HISTORY_DAYS`), so turning
+it back on picks up where it left off. Summaries need ntfy only; without
+watchlists they leave prices out.
 
 Members watch cards and decks on the Watchlist page (or through their
 assistant). Once a day at `MTG_PRICE_HOUR_UTC` (default 06:00 UTC) the

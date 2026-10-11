@@ -171,14 +171,15 @@ so:
    - **The assistant applies it** (only if you chose that): on your
      Account page you can switch your own **approval mode** from "Ask me
      every time" to Semi-auto (small deck or collection edits up to the
-     row limit, 5 card rows by default, added, removed, moved or changed, no
-     more than 4 copies a row, never the commander, and private copies of a
-     deck) or Full auto (the deck and collection changes it proposes). Then
-     the assistant applies what your mode allows and tells you what it did.
-     Actions on your Archidekt account (likes, votes, bookmarks, follows,
-     comments, new folders, collaborators) and deleting a deck are never
-     applied by the assistant in any mode: they wait for your press on the
-     review page. Be aware that an assistant can be tricked by text it
+     row limit, 5 card rows by default, each a card added or removed, or a
+     new quantity, category, finish, printing, color tag or custom mana
+     value, no more than 4 copies a row, never the commander, and private
+     copies of a deck) or Full auto (the deck and collection changes it
+     proposes). Then the assistant applies what your mode allows and tells
+     you what it did. Actions on your Archidekt account (likes, votes,
+     bookmarks, follows, comments, new folders and collaborator changes) and
+     deleting a deck are never applied by an assistant: each one waits for
+     your own press on its review page, in every mode. Be aware that an assistant can be tricked by text it
      reads into proposing a change you did not ask for; in an auto mode
      that change lands without your press. Every change keeps a snapshot
      you can restore from the History page.

@@ -104,3 +104,11 @@ def test_facts_match_the_current_pages() -> None:
     assert "framed on a gateway page" not in page
     off = _page(writes_enabled=False, archidekt_backups=False)
     assert "switched off on this gateway" in off and "no tick box is offered" in off
+
+
+def test_hand_play_names_the_goldfish_page_too() -> None:
+    """Consolidation bug 5: the guide still called Archidekt's playtester the one place to play a
+    deck by hand, though the gateway's own Goldfish page does that since 0.7.23."""
+    page = _page()
+    assert "one place to draw and play" not in page
+    assert "two places to draw and play a deck by hand: the gateway's own <strong>Goldfish</strong>" in page

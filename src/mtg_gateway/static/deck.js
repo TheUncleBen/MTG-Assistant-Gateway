@@ -7,9 +7,11 @@
      large and what can be done with it (grid view, stacks, text rows alike);
    - a right-click, a press and hold, or Shift+F10 on a card opens the card's own menu (open it,
      one more or one fewer copy, move to a category, remove, edit) in place of the browser's;
-   - on the member's own deck the menu, the viewer and a drag between categories save through
-     the deck page's edit endpoint (one proposal applied at once, with a snapshot); the answer
-     redraws the touched cards, the Legality chip and the Deck checks in place, with Undo. */
+   - on the member's own deck the menu, the viewer, Select cards and a drag between categories
+     save through the deck page's edit endpoint (one proposal applied at once, with a snapshot);
+     the answer redraws the touched cards, the Legality chip and the Deck checks in place. One
+     Undo and Redo history covers every one of those saves (the buttons, the toast's Undo, and
+     the editor's keys: Ctrl+Z, Ctrl+Shift+Z or Ctrl+Y, Cmd on a Mac). */
 (function () {
   "use strict";
   var $ = function (sel, root) { return (root || document).querySelector(sel); };
@@ -136,6 +138,13 @@
   function qtyOf(card) { return parseInt(card.getAttribute("data-qty"), 10) || 0; }
   function zoneOf(card) { return card.getAttribute("data-zone") === "side" ? "side" : "main"; }
   function catOf(card) { return card.getAttribute("data-cat") || ""; }
+  // every category of the row, in order (data-allcats when it has more than one)
+  function catsOf(card) {
+    var all = null;
+    try { all = JSON.parse(card.getAttribute("data-allcats") || "null"); } catch (e) { all = null; }
+    if (Array.isArray(all) && all.length) return all.filter(function (c) { return typeof c === "string" && c; });
+    return catOf(card) ? [catOf(card)] : [];
+  }
   function stackOf(card) { var st = card.closest(".stack"); return st ? st.getAttribute("data-group") : ""; }
   function money(n) { return "$" + Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
   function stop(e) { e.preventDefault(); e.stopPropagation(); }
@@ -194,9 +203,10 @@
       yes.focus();
     });
   }
-  /* changes: the proposal's changes; undo: the inverse changes (null for none, as for an undo
-     itself). Resolves with the endpoint's answer once applied and drawn; rejects with an Error whose
-     message is shown, or with {cancelled: true} when the person said no to the confirmation. */
+  /* changes: the proposal's changes; undo: the inverse changes (null when the change cannot be
+     put back). opts.replay marks an Undo or Redo step, which the history itself records. Resolves
+     with the endpoint's answer once applied and drawn; rejects with an Error whose message is
+     shown, or with {cancelled: true} when the person said no to the confirmation. */
   function saveEdit(changes, undoChanges, opts) {
     opts = opts || {};
     if (saving) return Promise.reject(new Error("Another change is still saving; one moment."));
@@ -205,14 +215,14 @@
     return api(editUrl, body).then(function (d) {
       if (d.ok && d.applied) {
         saving = false;
-        applyAnswer(d, changes, undoChanges);
+        applyAnswer(d, changes, undoChanges, opts.replay);
         return d;
       }
       if (d.ok && d.needs_confirm) {
         saving = false;
         return askConfirm(d.why, d.proposal_id).then(function (yes) {
           if (!yes) { var c = new Error("Nothing was changed."); c.cancelled = true; throw c; }
-          return saveEdit(changes, undoChanges, { proposalId: d.proposal_id });
+          return saveEdit(changes, undoChanges, { proposalId: d.proposal_id, replay: opts.replay });
         });
       }
       saving = false;
@@ -415,6 +425,9 @@
       if (r.mana_value !== undefined) setManaValue(card, r.mana_value);
       var cat = (r.categories && r.categories[0]) || "";
       card.setAttribute("data-cat", cat);
+      if (r.categories && r.categories.length > 1) card.setAttribute("data-allcats", JSON.stringify(r.categories));
+      else card.removeAttribute("data-allcats");
+      if (r.notes !== undefined) { if (r.notes) card.setAttribute("data-notes", r.notes); else card.removeAttribute("data-notes"); }
       if (r.relation_id !== null && r.relation_id !== undefined) card.setAttribute("data-rel", String(r.relation_id));
       card.classList.toggle("side", r.zone === "side" && card.classList.contains("row"));
       if (byCategory && cat && stackOf(card) !== cat) {
@@ -461,28 +474,104 @@
     });
     return steps.filter(function (s) { return s.length; });
   }
+  // -- Undo and Redo: one history for every save made on this page -----------------------------
+  // Each save that can be put back is an entry {changes, inverse}. Undo sends the inverse (in the
+  // steps undoSteps makes), Redo sends the changes again; both are saves of their own, with their
+  // own snapshot under History. A save that cannot be put back ends the history before it.
+  var past = [], future = [], histBusy = false;
+  var undoBtnEl = null, redoBtnEl = null;
+  function syncHist() {
+    if (undoBtnEl) undoBtnEl.disabled = histBusy || !past.length;
+    if (redoBtnEl) redoBtnEl.disabled = histBusy || !future.length;
+  }
+  function record(changes, inverse) {
+    future = [];
+    if (inverse && inverse.length) {
+      past.push({ changes: changes, inverse: inverse });
+      if (past.length > 50) past.shift();
+    } else past = [];
+    syncHist();
+  }
+  function historyLink() {
+    var hist = el("a", "", "History");
+    hist.href = "/history?deck_id=" + enc(deckId);
+    return hist;
+  }
+  function histButton(label, fn) {
+    var b = el("button", "btn", label);
+    b.type = "button";
+    b.addEventListener("click", function () { b.disabled = true; fn(); });
+    return b;
+  }
+  function undoLast() {
+    if (histBusy || saving || !past.length) return;
+    var entry = past.pop(), done = 0;
+    histBusy = true;
+    syncHist();
+    undoSteps(entry.inverse).reduce(function (p, step) {
+      return p.then(function () { return saveEdit(step, null, { replay: true }).then(function () { done++; }); });
+    }, Promise.resolve()).then(function () {
+      histBusy = false;
+      future.push(entry);
+      syncHist();
+      toast("Undone. Snapshots are under History.", { actions: [histButton("Redo", redoLast), historyLink()] });
+    }).catch(function (err) {
+      histBusy = false;
+      // nothing saved: the entry stays; part of it saved: the deck is between two states
+      if (!done) past.push(entry); else { past = []; future = []; }
+      syncHist();
+      showError(err);
+    });
+  }
+  function redoLast() {
+    if (histBusy || saving || !future.length) return;
+    var entry = future.pop();
+    histBusy = true;
+    syncHist();
+    saveEdit(entry.changes, null, { replay: true }).then(function () {
+      histBusy = false;
+      past.push(entry);
+      syncHist();
+      toast("Redone. Snapshot kept under History", { actions: [histButton("Undo", undoLast), historyLink()] });
+    }).catch(function (err) {
+      histBusy = false;
+      future.push(entry);
+      syncHist();
+      showError(err);
+    });
+  }
+  if (own && deckId) {
+    // the editor's keys: Ctrl+Z, Ctrl+Shift+Z or Ctrl+Y (Cmd on a Mac), never while typing in a
+    // field, behind the card menu or viewer, or while a question is up
+    document.addEventListener("keydown", function (ev) {
+      if (!(ev.ctrlKey || ev.metaKey) || ev.altKey) return;
+      var t = ev.target, tag = t && t.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (t && t.isContentEditable)) return;
+      if (menu || document.documentElement.classList.contains("cardview-open") || $(".deck-toast[role=alertdialog]")) return;
+      var k = (ev.key || "").toLowerCase();
+      if (k === "z" && !ev.shiftKey) { if (past.length) { ev.preventDefault(); undoLast(); } }
+      else if ((k === "z" && ev.shiftKey) || (k === "y" && !ev.metaKey)) { if (future.length) { ev.preventDefault(); redoLast(); } }
+    });
+  }
+
   var refreshed = false;
-  function applyAnswer(d, changes, undoChanges) {
+  function applyAnswer(d, changes, undoChanges, replay) {
     var names = namesOf(changes);
     drawRows(d.rows, names);
     drawStats(d);
     if (menu) closeMenu();
-    var actions = [];
-    if (undoChanges && undoChanges.length) {
-      var undo = el("button", "btn", "Undo");
-      undo.type = "button";
-      undo.addEventListener("click", function () {
-        undo.disabled = true;
-        undo.textContent = "Undoing…";
-        undoSteps(undoChanges).reduce(function (p, step) {
-          return p.then(function () { return saveEdit(step, null); });
-        }, Promise.resolve()).then(function () { toast("Undone. Both steps are under History."); }).catch(showError);
-      });
-      actions.push(undo);
+    if (replay) {
+      // an Undo or Redo step: the history says what was done; a stale read is read once more
+      if (d.stale) setTimeout(function () {
+        api(editUrl, { refresh: true, names: names }).then(function (r) { if (r.ok) { drawRows(r.rows, names); drawStats(r); } }).catch(function () { /* the next view shows it */ });
+      }, 1500);
+      return;
     }
-    var hist = el("a", "", "History");
-    hist.href = "/history?deck_id=" + enc(deckId);
-    actions.push(hist);
+    record(changes, undoChanges);
+    var actions = [];
+    // the toast's Undo is the history's Undo: the same as the Undo button and Ctrl+Z
+    if (past.length) actions.push(histButton("Undo", undoLast));
+    actions.push(historyLink());
     if (d.stale && !refreshed) {
       // Archidekt's read still showed the old rows: read once more in a moment, then draw that
       refreshed = true;
@@ -522,11 +611,14 @@
     var inv;
     if (ch.action === "set_quantity") inv = { action: "set_quantity", card_name: name, quantity: qty };
     else if (ch.action === "remove") {
-      // put the row back as it was: its printing (the deck proper only; a maybeboard add takes
-      // no pinned printing), finish, color tag and custom mana value, not just name and category
+      // put the row back as it was: every one of its categories (in order, the primary first),
+      // its printing (the deck proper only; a maybeboard add takes no pinned printing), finish,
+      // color tag and custom mana value, not just name and category. Its notes cannot come back:
+      // Archidekt has no way for the gateway to write them (confirmNotes warns first).
       inv = { action: "add", card_name: name, quantity: qty };
-      var cat = catOf(card);
-      if (cat) inv.category = cat;
+      var cats = catsOf(card);
+      if (cats.length) inv.category = cats[0];
+      if (cats.length > 1) inv.categories = cats;
       var pr = (card.getAttribute("data-set") || "").trim().split(/\s+/);
       if (zone === "main" && pr.length === 2 && pr[0] && pr[1]) { inv.set_code = pr[0].toLowerCase(); inv.collector_number = pr[1]; }
       var fin = (card.getAttribute("data-finish") || "").toLowerCase();
@@ -539,6 +631,9 @@
       if (zone === "side") more.forEach(function (m) { m.zone = "side"; });
       return more;
     } else if (ch.action === "set_category") {
+      // a move files the card under that one category; a card filed under several could not
+      // get all of them back by a move, so it has no Undo
+      if (catsOf(card).length > 1) return null;
       inv = { action: "set_category", card_name: name, category: catOf(card) || stackOf(card) };
       // after the move the row sits in the zone its new category puts it in
       zone = excluded.indexOf(ch.category) >= 0 ? "side" : "main";
@@ -550,7 +645,37 @@
   function edit(card, action, value) {
     var ch = changeFor(card, action, value);
     var inv = inverseFor(card, ch);
-    return saveEdit([ch], inv ? [].concat(inv) : null);
+    var go = function () { return saveEdit([ch], inv ? [].concat(inv) : null); };
+    if (action !== "remove") return go();
+    return confirmNotes([card]).then(function (yes) {
+      if (!yes) { var c = new Error("Nothing was changed."); c.cancelled = true; throw c; }
+      return go();
+    });
+  }
+  // Before a card with notes is removed: Archidekt keeps a card's notes on its row, and the
+  // gateway has no way to write them, so neither an Undo nor anything else here brings them back.
+  function confirmNotes(list) {
+    var seen = Object.create(null);
+    var noted = list.filter(function (c) {
+      var n = c.getAttribute("data-card");
+      if (!c.getAttribute("data-notes") || seen[n]) return false;
+      seen[n] = true;
+      return true;
+    });
+    if (!noted.length) return Promise.resolve(true);
+    return new Promise(function (resolve) {
+      var yes = el("button", "btn-danger", "Remove anyway");
+      yes.type = "button";
+      var no = el("button", "", "Cancel");
+      no.type = "button";
+      var done = function (v) { dismissToast(); resolve(v); };
+      yes.addEventListener("click", function () { done(true); });
+      no.addEventListener("click", function () { done(false); });
+      var who = noted.length === 1 ? noted[0].getAttribute("data-card") + " has a card note" : noted.length + " of these cards have card notes";
+      toast(who + " on Archidekt. Removing deletes the note for good: Undo puts the card back without it (the gateway cannot write notes).",
+        { warn: true, dialog: true, sticky: true, actions: [yes, no], onDismiss: function () { resolve(false); } });
+      no.focus();
+    });
   }
   function stepQty(card, delta) {
     var q = qtyOf(card) + delta;
@@ -929,7 +1054,23 @@
     var status = el("p", "status", "");
     status.setAttribute("role", "status");
     [count, all, moveSel, finishSel, tagBtn, rm, done].forEach(function (n) { tools.appendChild(n); });
+    // Undo and Redo for every save made on this page (the history above), with the editor's keys
+    var hist = el("span", "histtools");
+    hist.setAttribute("role", "group");
+    hist.setAttribute("aria-label", "Undo and Redo");
+    undoBtnEl = el("button", "btn-ghost small", "Undo");
+    undoBtnEl.type = "button";
+    undoBtnEl.title = "Undo the last change saved on this page (Ctrl+Z)";
+    undoBtnEl.addEventListener("click", undoLast);
+    redoBtnEl = el("button", "btn-ghost small", "Redo");
+    redoBtnEl.type = "button";
+    redoBtnEl.title = "Redo the change you undid (Ctrl+Shift+Z or Ctrl+Y)";
+    redoBtnEl.addEventListener("click", redoLast);
+    hist.appendChild(undoBtnEl);
+    hist.appendChild(redoBtnEl);
+    syncHist();
     bar.appendChild(start);
+    bar.appendChild(hist);
     bar.appendChild(tools);
     bar.appendChild(tagForm);
     bar.appendChild(status);
@@ -1102,7 +1243,9 @@
         if (twinIn(c, zoneOf(c))) inverses = null;
         if (inverses) { var inv = inverseFor(c, ch); inverses = inv ? inverses.concat(inv) : null; }
       });
-      run(changes, inverses, window.MtgText ? window.MtgText.plural(list.length, "card") + " removed." : "Removed.");
+      confirmNotes(list).then(function (yes) {
+        if (yes) run(changes, inverses, window.MtgText ? window.MtgText.plural(list.length, "card") + " removed." : "Removed.");
+      });
     });
     moveSel.addEventListener("change", function () {
       var to = moveSel.value;
@@ -1146,101 +1289,31 @@
     });
   })();
 
-  // -- own deck: drag cards between categories; the drops are saved in one go ------------------
+  // -- own deck: drag cards between categories; each drop is saved to Archidekt at once ---------
+  // The same save as the card menu's "Move to" (one proposal applied with its snapshot, the
+  // member's own hand edit; the assistant never reaches this path), with the page's Undo and
+  // Redo. A side row names its zone so the move targets the maybeboard row and not a copy of
+  // the same card in the deck.
   var moveCardFn = null;  // set below when this grouping takes drops
   if (own && deckId && canDrag) {
-  var moves = {}; // relation id (or name) -> {card, name, from, to}
-  var bar = document.createElement("div");
-  bar.className = "movebar";
-  bar.setAttribute("role", "region");
-  bar.setAttribute("aria-label", "Pending category moves");
-  var review = el("button", "btn-primary", "Save moves");
-  review.type = "button";
-  var undo = el("button", null, "Undo all");
-  undo.type = "button";
-  var count = el("span", "count", "");
-  var status = el("p", "status", "");
-  status.setAttribute("role", "status");
-  bar.appendChild(review);
-  bar.appendChild(undo);
-  bar.appendChild(count);
-  bar.appendChild(status);
-  cards.parentNode.insertBefore(bar, cards.nextSibling);
-
-  function refreshBar() {
-    var n = Object.keys(moves).length;
-    bar.classList.toggle("show", n > 0);
-    count.textContent = n === 1 ? "1 card moved" : n + " cards moved";
-    review.disabled = n === 0;
-    if (!n) status.textContent = "";
-  }
-  function keyOf(card) { return card.getAttribute("data-rel") || (card.getAttribute("data-card") + "|" + zoneOf(card)); }
   moveCardFn = moveCard;
   function moveCard(card, target) {
     var from = card.closest(".stack");
-    if (!target || target === from) return;
-    var key = keyOf(card);
-    var original = moves[key] ? moves[key].from : from.getAttribute("data-group");
+    if (!target || !from || target === from) return;
     var to = target.getAttribute("data-group");
-    $(".cards, .rows", target).appendChild(card);
-    if (to === original) delete moves[key];
-    else moves[key] = { card: card, name: card.getAttribute("data-card"), from: original, to: to };
-    refreshBar();
-  }
-  // Undo all puts every pending card back where it was; nothing was sent yet
-  undo.addEventListener("click", function () {
-    Object.keys(moves).forEach(function (k) {
-      var mv = moves[k];
-      var st = stackByName(mv.from) || ensureStack(mv.from);
-      if (st) $(".cards, .rows", st).appendChild(mv.card);
-    });
-    moves = {};
-    refreshStacks();
-    refreshBar();
-  });
-  // The member's own moves are saved to Archidekt at once (one proposal, applied with its
-  // snapshot); the assistant never reaches this path. A side row names its zone so the move
-  // targets the maybeboard row and not a copy of the same card in the deck.
-  function moveChanges() {
-    return Object.keys(moves).map(function (k) {
-      var mv = moves[k];
-      var ch = { action: "set_category", card_name: mv.name, category: mv.to };
-      if (zoneOf(mv.card) === "side") ch.zone = "side";
-      return ch;
+    var ch = changeFor(card, "set_category", to);
+    var inv = inverseFor(card, ch);  // from where the card is now, before it moves
+    var next = card.nextSibling;
+    $(".cards, .rows", target).appendChild(card);  // shown where it was dropped while it saves
+    saveEdit([ch], inv ? [inv] : null).catch(function (err) {
+      // nothing was saved: the card goes back where it was
+      var back = from.isConnected ? from : ensureStack(from.getAttribute("data-group"));
+      var list = back && $(".cards, .rows", back);
+      if (list) list.insertBefore(card, next && next.parentNode === list ? next : null);
+      refreshStacks();
+      showError(err);
     });
   }
-  function moveInverse() {
-    var out = [];
-    var ok = Object.keys(moves).every(function (k) {
-      var mv = moves[k];
-      var zone = excluded.indexOf(mv.to) >= 0 ? "side" : "main";
-      if (twinIn(mv.card, zone)) return false;
-      var ch = { action: "set_category", card_name: mv.name, category: mv.from };
-      if (zone === "side") ch.zone = "side";
-      out.push(ch);
-      return true;
-    });
-    return ok ? out : null;
-  }
-  review.addEventListener("click", function () {
-    var changes = moveChanges();
-    if (!changes.length) return;
-    review.disabled = true;
-    undo.disabled = true;
-    status.className = "status";
-    status.textContent = "Saving to Archidekt…";
-    saveEdit(changes, moveInverse()).then(function () {
-      moves = {};
-      undo.disabled = false;
-      status.textContent = "";
-      refreshBar();
-    }).catch(function (err) {
-      review.disabled = false;
-      undo.disabled = false;
-      status.className = "status notice error";
-      status.textContent = err && err.cancelled ? "" : "Could not save: " + ((err && err.message) || "no connection");
-    });
-  });
 
   // mouse drag (native drag and drop)
   $$(".c, .row", cards).forEach(function (c) { c.setAttribute("draggable", "true"); });
@@ -1384,7 +1457,8 @@
 
   // -- stack order: drag a stack's handle (mouse, touch or pen), or focus it and press the arrow
   // keys, to put the stacks in your own order. Archidekt keeps no stack order of its own that the
-  // gateway could find, so the order is remembered in this browser, per deck and per grouping.
+  // gateway could find, so the order is remembered in this browser, per deck and per grouping:
+  // on this device only (it is not a deck save, has no Undo, and the handle and Reset say so).
   if (cards && cards.classList.contains("deckview")) (function () {
     var key = "mtg-stack-order:" + cards.getAttribute("data-deck") + ":" + (cards.getAttribute("data-grouping") || "");
     function stacksNow() { return $$(".stack", cards); }
@@ -1399,8 +1473,10 @@
     var reset = null;
     function showReset() {
       if (!reset) {
-        reset = el("button", "btn-ghost small stack-reset", "Reset stack order");
+        reset = el("button", "btn-ghost small stack-reset", "Reset stack order (this device only)");
         reset.type = "button";
+        reset.title = "Your stack order is kept in this browser on this device only, not on Archidekt; " +
+          "this puts the deck's own order back";
         reset.addEventListener("click", function () {
           try { localStorage.removeItem(key); } catch (e) { /* nothing kept */ }
           var later = stacksNow().filter(function (st) { return original.indexOf(st) < 0; });
@@ -1435,8 +1511,9 @@
       if (!head || $(".stackgrip", head)) return;
       var grip = el("button", "stackgrip icon-only btn-ghost", "⠿");
       grip.type = "button";
-      grip.setAttribute("aria-label", "Move the stack " + nameOf(st) + " (drag, or use the arrow keys)");
-      grip.title = "Drag to reorder; arrow keys move it too";
+      grip.setAttribute("aria-label", "Move the stack " + nameOf(st) + " (drag, or use the arrow keys; " +
+        "the order is kept on this device only)");
+      grip.title = "Drag to reorder (kept on this device only); arrow keys move it too";
       head.insertBefore(grip, head.firstChild);
       grip.addEventListener("keydown", function (e) {
         var list = stacksNow(), i = list.indexOf(st);

@@ -4,29 +4,29 @@ package local.mtgassistantgateway.app
  * The rules of the app's own update check ([Updater] does the network and the install), kept free
  * of Android types so the unit tests can drive them.
  *
- * Updates come from the project's GitHub releases: the release job attaches the signed APK
- * ([APK_ASSET]) and the build's metadata ([META_ASSET], with the signing certificate's SHA-256).
- * An update is offered only when the release is newer than this app and is signed with the same
- * certificate as the installed app; Android refuses any other update anyway, so a fork signed with
- * its own key is never nagged about releases it cannot install.
+ * Updates come from the gateway the app is set up for: it serves the APK it ships at [APK_PATH]
+ * and the build's facts about it at [LATEST_PATH] (version, size, the file's SHA-256 and the
+ * signing certificate's), both behind the same sign-in as its pages. An update is offered only
+ * when that APK is newer than this app and is signed with the same certificate as the installed
+ * app; Android refuses any other update anyway, so an app signed with another key is never nagged
+ * about a file it cannot install. A self-hoster who builds their own APK is offered their own.
  */
 object AppUpdate {
-    const val APK_ASSET = "mtg-assistant-gateway-release.apk"
-    const val META_ASSET = "mtg-assistant-gateway.json"
+    /** The gateway's JSON about the app it ships (app_page.py), and the APK itself. */
+    const val LATEST_PATH = "/app/latest.json"
+    const val APK_PATH = "/app/mtg-assistant-gateway.apk"
     /** How often the app looks on its own while it stays open: at most twice a day. */
     const val INTERVAL_MS = 12L * 3600 * 1000
     /**
      * The floor for the checks at set points (each cold launch, just after a sign-in): at most once
-     * an hour, so GitHub's limit on unauthenticated requests is never reached. A manual check always runs.
+     * an hour, so the gateway is not asked on every launch. A manual check always runs.
      */
     const val MIN_GAP_MS = 3600L * 1000
-    /** Upper bounds on what is read: GitHub's release answer, the metadata file, the APK. */
-    const val MAX_API_BYTES = 1_000_000
-    const val MAX_META_BYTES = 16 * 1024
+    /** Upper bounds on what is read: the gateway's answer, the APK. */
+    const val MAX_API_BYTES = 16 * 1024
     const val MAX_APK_BYTES = 100L * 1024 * 1024
 
     private val SEMVER = Regex("""^v?(0|[1-9]\d{0,2})\.(0|[1-9]\d{0,2})\.(0|[1-9]\d{0,2})$""")
-    private val REPO = Regex("""^[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}$""")
 
     /** `0.7.12` or `v0.7.12` to the versionCode the build gives that version (build.gradle.kts). */
     fun versionCode(tag: String?): Int? {
@@ -35,45 +35,38 @@ object AppUpdate {
         return major * 1_000_000 + minor * 1_000 + patch
     }
 
-    /** GitHub's "latest release" address for [repo] (`owner/name`), or null when updates are off. */
-    fun latestApi(repo: String): String? =
-        if (REPO.matches(repo)) "https://api.github.com/repos/$repo/releases/latest" else null
-
-    /** Assets are fetched only from [repo]'s own release downloads. */
-    fun isReleaseDownload(repo: String, url: String?): Boolean =
-        url != null && REPO.matches(repo) &&
-            url.startsWith("https://github.com/$repo/releases/download/", ignoreCase = true) &&
-            !url.contains("..") && !url.contains('?') && !url.contains('#')
+    /** Where the gateway at [origin] (`https://host[:port]`) answers the check, or null for no gateway. */
+    fun latestUrl(origin: String?): String? =
+        if (origin != null && origin.startsWith("https://")) origin.trimEnd('/') + LATEST_PATH else null
 
     data class Asset(val name: String, val url: String, val size: Long)
 
-    /** A newer release this app can install. */
-    data class Offer(val version: String, val versionCode: Int, val apk: Asset, val meta: Asset, val page: String)
+    /** A newer app the gateway offers: the APK at [apk], with its file and certificate SHA-256s. */
+    data class Offer(val version: String, val versionCode: Int, val apk: Asset, val sha256: String, val cert: String, val page: String)
 
     /**
-     * The update GitHub's latest release offers over [installedCode], or null: drafts, pre-releases,
-     * tags that are not MAJOR.MINOR.PATCH, releases no newer than this app and releases without both
-     * files from [repo]'s downloads are skipped.
+     * The update the gateway at [origin] offers over [installedCode], or null: a version that is not
+     * MAJOR.MINOR.PATCH, a version code that does not match it, an app no newer than this one, an odd
+     * size, or a missing file or certificate SHA-256. The APK is always fetched from [origin] itself.
      */
     fun offer(
-        repo: String,
+        origin: String,
         installedCode: Int,
-        tag: String?,
-        draft: Boolean,
-        prerelease: Boolean,
-        page: String?,
-        assets: List<Asset>,
+        versionName: String?,
+        versionCodeGiven: Int?,
+        size: Long,
+        sha256: String?,
+        cert: String?,
     ): Offer? {
-        if (draft || prerelease) return null
-        val code = versionCode(tag) ?: return null
+        val code = versionCode(versionName) ?: return null
+        if (versionCodeGiven != null && versionCodeGiven != code) return null
         if (code <= installedCode) return null
-        fun asset(name: String) = assets.firstOrNull { it.name == name && isReleaseDownload(repo, it.url) }
-        val apk = asset(APK_ASSET) ?: return null
-        val meta = asset(META_ASSET) ?: return null
-        if (apk.size <= 0 || apk.size > MAX_APK_BYTES) return null
-        val releases = "https://github.com/$repo/releases"
-        val link = if (page != null && page.startsWith("$releases/tag/", ignoreCase = true)) page else releases
-        return Offer(tag!!.trim().removePrefix("v"), code, apk, meta, link)
+        if (size <= 0 || size > MAX_APK_BYTES) return null
+        val fileSum = fingerprint(sha256) ?: return null
+        val certSum = fingerprint(cert) ?: return null
+        val base = origin.trimEnd('/')
+        val apk = Asset(APK_PATH.substringAfterLast('/'), base + APK_PATH, size)
+        return Offer(versionName!!.trim().removePrefix("v"), code, apk, fileSum, certSum, "$base/app")
     }
 
     /** A SHA-256 as 64 lower-case hex digits, from either `ab:cd:..` or plain hex; null otherwise. */
@@ -85,7 +78,7 @@ object AppUpdate {
     /**
      * Is the published certificate one the installed app is signed with? [installed] are the
      * SHA-256s of the app's signers. A future key rotation (APK signature scheme v3) is not handled:
-     * the rotated release would not be offered, and people would install it from the /app page once.
+     * the rotated app would not be offered, and people would install it from the gateway's setup page once.
      */
     fun sameSigner(installed: Collection<String>, published: String?): Boolean {
         val p = fingerprint(published) ?: return false
@@ -95,8 +88,4 @@ object AppUpdate {
     /** Whether an automatic check is due: [lastCheck] is when the last one ran (0 = never), [every] the gap. */
     fun due(lastCheck: Long, now: Long, every: Long = INTERVAL_MS): Boolean =
         lastCheck <= 0 || now < lastCheck || now - lastCheck >= every
-
-    /** The certificate SHA-256 in the build's metadata file ([META_ASSET]); no JSON library needed. */
-    fun metaCert(json: String): String? =
-        Regex("\"cert_sha256\"\\s*:\\s*\"([0-9a-fA-F:]{64,95})\"").find(json)?.groupValues?.get(1)?.let(::fingerprint)
 }

@@ -16,14 +16,15 @@ proposal is low risk only if what the review page would show is small and safe:
 
 * **low**: an edit to an existing deck or to the collection with at most ``max_rows`` rows
   (default 5), where every row adds, removes, changes the quantity, moves the category or
-  changes the finish, printing or colour tag of a card, no row moves more than
+  changes the finish, printing, color tag or custom mana value of a card, no row moves more than
   ``MAX_COPIES_PER_ROW`` copies (a playset) and none touches the commander; or a clone, which
   creates a private copy and changes nothing that exists.
 * **high**: everything else: more rows than that, any commander change, a new deck, restoring
   a snapshot, deck details (name, format, description, visibility).
 * **consent** (R-142): the Archidekt account actions of actions.py: likes, votes, bookmarks,
-  follows, posting, editing, deleting and voting on comments, and creating a folder. Each one
-  waits for the member's own press on its review page, in every mode (0.7.19: not the in-chat card).
+  follows, posting, editing, deleting and voting on comments, creating a folder, and adding or
+  removing a deck's collaborators. Each one waits for the member's own press on its review page,
+  in every mode (0.7.19: not the in-chat card).
 * **destructive** (R-142): deleting a deck. Like consent, no mode lets an assistant apply it.
 
 The operator may set the default mode for members who have not chosen (``MTG_APPROVAL_MODE_DEFAULT``)
@@ -42,36 +43,86 @@ DEFAULT_MODE = "manual"
 DEFAULT_MAX_ROWS = 5
 MAX_COPIES_PER_ROW = 4  # a row that adds, removes or changes more copies than this is not small
 
+# Row kinds (decks.row_line) a low-risk edit may consist of, each with the word the wording below
+# uses for it, so the list risk_of checks and the list the member reads are one list.
+LOW_RISK_ROW_WORDS = {
+    "add": "added",
+    "remove": "removed",
+    "change": "quantity",
+    "category": "category",
+    "finish": "finish",
+    "printing": "printing",
+    "label": "color tag",
+    "mana_value": "custom mana value",
+}
+LOW_RISK_ROW_KINDS = frozenset(LOW_RISK_ROW_WORDS)
+
+# -- The approval-mode wording, written once (0.7.24). The Account page, the guide, the proposal
+# results (approval_mode_note) and docs/ say what each mode applies by itself and what always
+# waits; every copy comes from here, and docs/ quotes these sentences exactly (a test checks it).
+
+# What a low-risk row may change: "a card added or removed, or a new quantity, ... or custom mana value".
+_CHANGED = [w for k, w in LOW_RISK_ROW_WORDS.items() if k not in ("add", "remove")]
+LOW_RISK_CHANGES = "a card added or removed, or a new " + ", ".join(_CHANGED[:-1]) + " or " + _CHANGED[-1]
+# The Archidekt account actions of actions.py (R-142), in the member's words.
+ACCOUNT_ACTIONS_TEXT = "likes, votes, bookmarks, follows, comments, new folders and collaborator changes"
 # What each mode means, in the member's words, for the Account page and the docs.
 MODE_LABELS = {
     "manual": "Ask me every time",
     "semi": "Apply small, low-risk edits without asking",
     "auto": "Apply deck and collection changes without asking",
 }
-MODE_HELP = {
-    "manual": (
-        "Every change waits for your own press on the card in the chat or on the review page. "
-        "The safest choice, and the default."
-    ),
-    "semi": (
-        "Your assistant applies low-risk changes itself: a small edit to a deck or your collection "
-        "(at most {rows} card rows added, removed, moved or changed, no more than "
-        f"{MAX_COPIES_PER_ROW} copies each, never the commander) and a private copy of a deck (a "
-        "clone, which changes nothing that exists). A new deck built from a list, restores, deck "
-        "details, commander changes, bigger edits, and anything on your Archidekt account (likes, "
-        "votes, bookmarks, follows, comments, new folders, deleting a deck) still wait for your press."
-    ),
-    "auto": (
-        "Your assistant applies the deck and collection changes it proposes, without asking you. "
-        "Likes, votes, bookmarks, follows, comments, new folders and deleting a deck still wait for "
-        "your own press, every time, in every mode."
-    ),
-}
+
+
+def _rows(max_rows: int) -> str:
+    return f"{max_rows} card row{'s' if max_rows != 1 else ''}"
+
+
+def low_risk_text(max_rows: int = DEFAULT_MAX_ROWS) -> str:
+    """Which proposals are low risk (risk_of), as one sentence."""
+    return (
+        f"A small edit to an existing deck or to your collection: at most {_rows(max_rows)}, each "
+        f"{LOW_RISK_CHANGES}, no more than {MAX_COPIES_PER_ROW} copies a row and never the "
+        "commander; and a private copy of a deck (a clone), which changes nothing that exists."
+    )
+
+
+# Which proposals are high risk (risk_of), as one sentence.
+HIGH_RISK_TEXT = (
+    "Everything else: more rows than that, a commander change, a new deck, restoring a snapshot, "
+    "and the deck's details (name, format, bracket, description, visibility, folder, tags and cover)."
+)
+# What no mode lets an assistant apply (MEMBER_ONLY), as one sentence.
+MEMBER_ONLY_TEXT = (
+    f"Actions on your Archidekt account ({ACCOUNT_ACTIONS_TEXT}) and deleting a deck are never "
+    "applied by an assistant: each one waits for your own press on its review page, in every mode."
+)
 
 
 def mode_help(mode: str, *, max_rows: int = DEFAULT_MAX_ROWS) -> str:
-    """MODE_HELP for ``mode`` with this gateway's row limit for a low-risk edit filled in."""
-    return MODE_HELP[mode].replace("{rows}", str(max_rows))
+    """What ``mode`` means, in the member's words, with this gateway's row limit for a low-risk edit."""
+    if mode == "manual":
+        return (
+            "Every change waits for your own press on the card in the chat or on the review page "
+            "(an action on your Archidekt account, or deleting a deck: on the review page). "
+            "The safest choice, and the default."
+        )
+    if mode == "semi":
+        return (
+            "Your assistant applies low-risk changes itself: a small edit to a deck or your collection "
+            f"(at most {_rows(max_rows)}, each {LOW_RISK_CHANGES}, no more than {MAX_COPIES_PER_ROW} "
+            "copies each, never the commander) and a private copy of a deck (a clone, which changes "
+            "nothing that exists). A new deck built from a list, restores, deck details, commander "
+            f"changes, bigger edits, and anything on your Archidekt account ({ACCOUNT_ACTIONS_TEXT}) "
+            "or deleting a deck still wait for your press."
+        )
+    return (
+        "Your assistant applies the deck and collection changes it proposes, without asking you. "
+        + MEMBER_ONLY_TEXT
+    )
+
+
+MODE_HELP = {mode: mode_help(mode) for mode in MODES}
 
 
 # Shown next to the semi and auto choices, because turning them on has a real cost.
@@ -80,11 +131,6 @@ AUTO_WARNING = (
     "list) into making changes you did not ask for. With either auto mode such a change lands "
     "on Archidekt without your press. Every change still keeps a snapshot you can restore from "
     "the History page."
-)
-
-# Row kinds (decks.row_line) a low-risk edit may consist of.
-LOW_RISK_ROW_KINDS = frozenset(
-    {"add", "remove", "change", "category", "finish", "printing", "label", "mana_value"}
 )
 
 

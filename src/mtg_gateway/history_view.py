@@ -229,7 +229,8 @@ def build_events(
                 "deck_id": r.get("deck_id"),
                 "deck_name": r.get("deck_name") or r.get("deck_id"),
                 "href": f"/history/reports/{_esc(r['report_id'])}",
-                "state": "",
+                # the report's overall status (reports.report_status), shown unless complete
+                "state": r["status"] if r.get("status") and r.get("status") != "complete" else "",
                 "summary": (", ".join(bits) + f" · {sim}") if bits else sim,
                 "who": who,
                 "details": f"<p><a class='btn small' href='/history/reports/{_esc(r['report_id'])}'>"
@@ -241,7 +242,15 @@ def build_events(
 
 
 def _badge(state: str) -> str:
-    cls = {"applied": "ok", "pending": "warn", "failed": "danger", "applying": "warn"}.get(state, "")
+    cls = {
+        "applied": "ok",
+        "pending": "warn",
+        "failed": "danger",
+        "applying": "warn",
+        "partial": "warn",
+        "queued": "warn",
+        "running": "warn",
+    }.get(state, "")
     return f"<span class='badge {cls}'>{_esc(state)}</span>" if state else ""
 
 
@@ -488,6 +497,25 @@ def _trend_svg(values: list[Any], label: str, *, width: int = 120, height: int =
     )
 
 
+def settings_text(settings: Any) -> str:
+    """A report's run settings (reports.run_settings) in a few words, for the trend table."""
+    if not isinstance(settings, dict):
+        return "–"
+    bits = []
+    mode = {"commander": "Commander", "constructed": "60-card"}.get(str(settings.get("mode")))
+    if mode:
+        bits.append(mode)
+    if settings.get("games") is not None:
+        bits.append(f"{settings['games']} games")
+    if settings.get("until_turn") is not None:
+        bits.append(f"to turn {settings['until_turn']}")
+    if settings.get("seed") is not None:
+        bits.append(f"seed {settings['seed']}")
+    engines = settings.get("engines") or []
+    bits.append("Forge" if "forge" in engines else "no rules engine")
+    return " · ".join(bits)
+
+
 def trend_html(trend: dict[str, Any] | None) -> str:
     """The "Report trends" card of a deck's history: one sparkline per metric its stored reports
     hold (ReportService.trend, the same numbers list_deck_reports gives the assistant), each with
@@ -505,33 +533,54 @@ def trend_html(trend: dict[str, Any] | None) -> str:
             f"{m['label']} over {m['reports']} reports: {first} on {_day(m['first_at'])}, "
             f"{latest} on {_day(m['latest_at'])}, {change}."
         )
+        values = [p.get(m["key"]) for p in series]
+        broke = ""
+        if m.get("left_out"):
+            # the series breaks where the simulation's settings changed: only the latest stretch
+            # is drawn and compared, never 40-life numbers against 20-life ones
+            since = next((i for i, p in enumerate(series) if p["report_id"] == m.get("since_report_id")), 0)
+            values = [None] * since + values[since:]
+            many = m["left_out"] != 1
+            broke = (
+                f"<p class='delta'>{m['left_out']} earlier report{'s' if many else ''} ran with other "
+                f"settings (game or turns) and {'are' if many else 'is'} left out.</p>"
+            )
         items.append(
             f"<li class='tmetric'><h3>{_esc(m['label'])}</h3>"
-            f"{_trend_svg([p.get(m['key']) for p in series], said)}"
+            f"{_trend_svg(values, said)}"
             f"<p class='now'><b>{_esc(latest)}</b> <span>latest, {time_html(m['latest_at'])}</span></p>"
             f"<p class='delta'>{_esc(change[:1].upper() + change[1:])} since {_esc(first)} on "
-            f"{time_html(m['first_at'])}</p></li>"
+            f"{time_html(m['first_at'])}</p>{broke}</li>"
         )
     shown = trend["metrics"]
     turns = any(isinstance(p.get("until_turn"), int) for p in series)
     head = "".join(f"<th scope='col'>{_esc(m['label'])}</th>" for m in shown)
     head += "<th scope='col'>Turns simulated</th>" if turns else ""
+    head += "<th scope='col'>Settings</th>"
     rows = []
     for p in series:
         cells = "".join(f"<td>{_esc(_trend_value(p.get(m['key']), m['unit']))}</td>" for m in shown)
         if turns:
             cells += f"<td>{_esc(p.get('until_turn') if p.get('until_turn') is not None else '–')}</td>"
+        cells += f"<td class='settings'>{_esc(settings_text(p.get('settings')))}</td>"
         rows.append(
             f"<tr><th scope='row'><a href='/history/reports/{_esc(p['report_id'])}'>"
             f"{time_html(p['taken_at'])}</a></th>{cells}</tr>"
         )
     n = trend["reports"]
+    changed = (
+        "<p class='notice warn'>The run settings changed between these reports (see Settings in the "
+        "numbers by report). A simulation number is only compared across reports run the same way.</p>"
+        if trend.get("settings_changes")
+        else ""
+    )
     return (
         "<section class='card trend' aria-labelledby='trend-h'><h2 id='trend-h'>Report trends</h2>"
         f"<p class='muted'>How this deck's {n} most recent stored reports moved, oldest to newest, from "
         f"{time_html(trend['first_at'])} to {time_html(trend['latest_at'])}. The goldfish numbers come "
         "from the reports that ran a simulation.</p>"
-        f"<ul class='plain tmetrics'>{''.join(items)}</ul>"
+        + changed
+        + f"<ul class='plain tmetrics'>{''.join(items)}</ul>"
         "<details class='tdata'><summary>The numbers by report</summary>"
         "<div class='tbl' role='region' aria-label='Report numbers, oldest first' tabindex='0'>"
         f"<table><caption class='sr-only'>Each report's numbers, oldest first</caption><thead><tr>"

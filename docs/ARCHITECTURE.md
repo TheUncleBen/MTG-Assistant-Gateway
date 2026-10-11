@@ -264,8 +264,13 @@ For the exact devices and plans tested, see
   Account page in the browser, never over MCP or the API: `manual` (the
   default: ask every time), `semi` (the assistant may apply a low-risk edit
   itself: at most `MTG_AUTO_APPLY_MAX_ROWS` review rows of card adds,
-  removes, quantity, category, finish or printing changes of at most four
-  copies each, never the commander; or a clone) or `auto` (the assistant may apply everything).
+  removes, quantity, category, finish, printing, color tag or custom mana
+  value changes of at most four copies each, never the commander; or a
+  clone) or `auto` (the assistant may apply every deck and collection
+  change). No mode lets an assistant apply an Archidekt account action
+  (likes, votes, bookmarks, follows, comments, new folders and collaborator
+  changes) or a deck deletion (R-142). The wording every page and doc uses
+  for the modes comes from `modes.py`.
   The mode is read by the member's id when an apply is attempted, so one
   member's choice never reaches another's proposals, decks or apps; the
   operator can cap it with `MTG_APPROVAL_MODE_MAX` and set the mode of

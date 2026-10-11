@@ -353,7 +353,7 @@ def test_viewer_quantity_buttons_and_remove(server: Server) -> None:
 
 def test_drag_between_stacks_saves_set_category_with_the_zone(server: Server) -> None:
     """Text view, where the Maybeboard and Commander stacks share the window: Chromium's own drag
-    and drop moves the row, Undo all puts it back without a reload, and Save moves sends one
+    and drop moves the row and saves it at once (D4, no "Save moves" bar any more): one
     set_category change with ``category`` and the side zone through the page's endpoint."""
     from playwright.sync_api import sync_playwright
 
@@ -381,34 +381,16 @@ def test_drag_between_stacks_saves_set_category_with_the_zone(server: Server) ->
         assert page.evaluate("document.activeElement.getAttribute('data-card')") == "Cultivate"
         target = page.locator(".stack[data-group='Commander']")
         assert page.locator(source).count() == 1
-        page.drag_and_drop(source, ".stack[data-group='Commander'] .stackhead")
-        page.wait_for_timeout(200)
-        assert target.locator(".row[data-card='Sol Ring']").count() == 1
-        bar = page.locator(".movebar.show")
-        assert bar.count() == 1 and "1 card moved" in bar.inner_text()
-        # Undo all puts the card back without a reload
-        bar.locator("button", has_text="Undo all").click()
-        page.wait_for_timeout(100)
-        assert page.url == url and page.locator(".movebar.show").count() == 0
-        assert page.locator(".stack[data-group='Maybeboard'] .row[data-card='Sol Ring']").count() == 1
-        # drag again and save: set_category with category (not categories) and the side zone
-        # (a fresh page: headless Chromium does not start a second drag in the same one)
-        page.close()
-        page = browser.contexts[0].new_page()
-        page.on("pageerror", lambda e: errors.append(str(e)))
-        page.goto(url, wait_until="networkidle")
-        target = page.locator(".stack[data-group='Commander']")
-        page.drag_and_drop(source, ".stack[data-group='Commander'] .stackhead")
-        page.wait_for_timeout(200)
+        # the drop saves at once: set_category with category (not categories) and the side zone
         with page.expect_request(EDIT_URL) as req:
-            page.locator(".movebar button", has_text="Save moves").click()
+            page.drag_and_drop(source, ".stack[data-group='Commander'] .stackhead")
         body = json.loads(req.value.post_data)
         assert body["changes"] == [
             {"action": "set_category", "card_name": "Sol Ring", "category": "Commander", "zone": "side"}
         ]
         page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
         page.wait_for_timeout(200)
-        assert page.url == url and page.locator(".movebar.show").count() == 0
+        assert page.url == url and page.locator(".movebar").count() == 0  # no staging bar
         moved = target.locator(".row[data-card='Sol Ring']")
         assert moved.count() == 1 and moved.get_attribute("data-zone") == "main"
         assert moved.get_attribute("data-cat") == "Commander" and "side" not in (
@@ -422,6 +404,7 @@ def test_drag_between_stacks_saves_set_category_with_the_zone(server: Server) ->
         # the deck now holds two Sol Ring rows, so a set_category back would move both: no Undo
         assert page.locator(".deck-toast button", has_text="Undo").count() == 0
         assert page.locator(".deck-toast a", has_text="History").count() == 1
+        assert page.locator(".histtools button", has_text="Undo").is_disabled()  # nor in the history
         assert errors == []
         browser.close()
 
@@ -519,5 +502,155 @@ def test_a_declined_confirmation_rejects_the_proposal_it_made(server: Server) ->
         assert rejected == ["POST"] * 3  # one reject per declined question, never two
         assert page.locator(".deckview .c[data-card='Cultivate']").count() == 1  # nothing changed
         assert server.quantity("Cultivate") == 1
+        assert errors == []
+        browser.close()
+
+
+def _file_under(server: Server, name: str, cats: list[str], **fields) -> None:
+    """Give the deck's ``name`` row these categories (made deck categories, counted in the deck)."""
+    deck = server.ark.decks[42]
+    for cat in cats:
+        if not any(c["name"] == cat for c in deck["categories"]):
+            deck["categories"].append({"name": cat, "isPremier": False, "includedInDeck": True})
+    row = next(c for c in deck["cards"] if c["card"]["oracleCard"]["name"] == name)
+    row.update(categories=list(cats), **fields)
+
+
+def _cats(server: Server, name: str) -> list[str]:
+    row = next(c for c in server.ark.decks[42]["cards"] if c["card"]["oracleCard"]["name"] == name)
+    return row["categories"]
+
+
+def _edits(page) -> list[list[dict]]:
+    """The changes of every request the page sends to its edit endpoint, in order."""
+    sent: list[list[dict]] = []
+    page.on(
+        "request",
+        lambda r: sent.append(json.loads(r.post_data)["changes"]) if EDIT_URL.search(r.url) else None,
+    )
+    return sent
+
+
+def test_drag_saves_at_once_with_undo_and_redo_buttons_and_keys(server: Server) -> None:
+    """D4: a drag between categories saves at once, as the card menu's Move to does, and the
+    page's one history undoes and redoes it with the Undo and Redo buttons, the toast's Undo and
+    the editor's keys (Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y); the keys do nothing while typing in a field."""
+    from playwright.sync_api import sync_playwright
+
+    # Lands sits above Ramp (headless Chromium's drag finds a stack above the card reliably)
+    _file_under(server, "Rampant Growth", ["Lands"])
+    _file_under(server, "Cultivate", ["Ramp"])
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1366)
+        page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+        sent = _edits(page)
+        undo = page.locator(".histtools button", has_text="Undo")
+        redo = page.locator(".histtools button", has_text="Redo")
+        assert undo.is_disabled() and redo.is_disabled()
+        page.drag_and_drop(
+            ".stack[data-group='Ramp'] .row[data-card='Cultivate']", ".stack[data-group='Lands'] .stackhead"
+        )
+        page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
+        assert sent == [[{"action": "set_category", "card_name": "Cultivate", "category": "Lands"}]]
+        assert _cats(server, "Cultivate") == ["Lands"] and page.locator(".movebar").count() == 0
+        assert page.locator(".stack[data-group='Lands'] .row[data-card='Cultivate']").count() == 1
+        assert not undo.is_disabled() and redo.is_disabled()
+
+        def wait_for(text: str) -> None:
+            page.locator(".deck-toast .msg", has_text=text).wait_for(timeout=8000)
+            page.wait_for_timeout(150)
+
+        # Ctrl+Z with the focus on the page (not in a field) undoes the drop
+        page.locator("h1.deckname").click()
+        page.keyboard.press("Control+z")
+        wait_for("Undone")
+        assert sent[-1] == [{"action": "set_category", "card_name": "Cultivate", "category": "Ramp"}]
+        assert _cats(server, "Cultivate") == ["Ramp"]
+        assert page.locator(".stack[data-group='Ramp'] .row[data-card='Cultivate']").count() == 1
+        assert undo.is_disabled() and not redo.is_disabled()
+        # Ctrl+Shift+Z redoes it
+        page.keyboard.press("Control+Shift+z")
+        wait_for("Redone")
+        assert sent[-1] == [{"action": "set_category", "card_name": "Cultivate", "category": "Lands"}]
+        assert _cats(server, "Cultivate") == ["Lands"]
+        # the Undo button, then Ctrl+Y
+        undo.click()
+        wait_for("Undone")
+        assert _cats(server, "Cultivate") == ["Ramp"]
+        page.locator("h1.deckname").click()
+        page.keyboard.press("Control+y")
+        wait_for("Redone")
+        assert _cats(server, "Cultivate") == ["Lands"]
+        # the toast's Undo is the same history's Undo; then the Redo button
+        page.locator(".deck-toast button", has_text="Undo").click()
+        wait_for("Undone")
+        assert _cats(server, "Cultivate") == ["Ramp"]
+        redo.click()
+        wait_for("Redone")
+        assert _cats(server, "Cultivate") == ["Lands"]
+        assert len(sent) == 7
+        # typing in a field: Ctrl+Z belongs to the field, nothing is sent
+        page.locator("#q").click()
+        page.keyboard.press("Control+z")
+        page.wait_for_timeout(600)
+        assert len(sent) == 7 and _cats(server, "Cultivate") == ["Lands"]
+        assert errors == []
+        browser.close()
+
+
+def test_undo_of_a_remove_restores_every_category_and_a_note_is_warned_about(server: Server) -> None:
+    """Bug 7: the Undo of a removal put the card back under its first category only; it now sends
+    every category. Archidekt keeps a card's notes on its row and the gateway cannot write them,
+    so removing a card with a note asks first, and Cancel sends nothing."""
+    from playwright.sync_api import sync_playwright
+
+    _file_under(server, "Cultivate", ["Ramp", "Value"], notes="Keep: fetches both basics")
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1366)
+        page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+        sent = _edits(page)
+        card = page.locator(".deckview .row[data-card='Cultivate']").first
+        assert json.loads(card.get_attribute("data-allcats")) == ["Ramp", "Value"]
+        dialog = page.locator(".deck-toast[role='alertdialog']")
+        menu = page.locator(".ctxmenu[role=menu]")
+        # Cancel: nothing is sent and the card stays
+        card.click(button="right")
+        menu.wait_for(timeout=3000)
+        menu.locator("[role=menuitem]", has_text="Remove from deck").click()
+        dialog.wait_for(timeout=5000)
+        assert "has a card note" in dialog.inner_text() and "cannot write notes" in dialog.inner_text()
+        dialog.locator("button", has_text="Cancel").click()
+        page.wait_for_timeout(400)
+        assert sent == [] and server.quantity("Cultivate") == 1
+        page.keyboard.press("Escape")
+        # Remove anyway: the removal goes out
+        card.click(button="right")
+        menu.wait_for(timeout=3000)
+        menu.locator("[role=menuitem]", has_text="Remove from deck").click()
+        dialog.wait_for(timeout=5000)
+        dialog.locator("button", has_text="Remove anyway").click()
+        page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
+        assert sent == [[{"action": "remove", "card_name": "Cultivate"}]]
+        assert server.quantity("Cultivate") == 0
+        # Undo: the add names both categories, the primary one first
+        page.locator(".deck-toast button", has_text="Undo").click()
+        page.locator(".deck-toast .msg", has_text="Undone").wait_for(timeout=8000)
+        add = sent[1][0]
+        assert add["action"] == "add" and add["category"] == "Ramp", add
+        assert add["categories"] == ["Ramp", "Value"], add
+        assert _cats(server, "Cultivate") == ["Ramp", "Value"]
+        back = page.locator(".deckview .row[data-card='Cultivate']").first
+        assert json.loads(back.get_attribute("data-allcats")) == ["Ramp", "Value"]
+        assert back.get_attribute("data-notes") is None  # the note did not come back
+        # Redo removes it again without asking (it has no note any more)
+        page.locator("h1.deckname").click()
+        page.keyboard.press("Control+Shift+z")
+        page.locator(".deck-toast .msg", has_text="Redone").wait_for(timeout=8000)
+        assert sent[-1] == [{"action": "remove", "card_name": "Cultivate"}]
+        assert server.quantity("Cultivate") == 0
         assert errors == []
         browser.close()

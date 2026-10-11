@@ -55,6 +55,13 @@ def today() -> str:
     return datetime.now(UTC).date().isoformat()
 
 
+# The "newest released paper printing" rule: is_released, on_paper, good_default and
+# default_printing below are its one owner in the gateway (scan/service.py, the card search and the
+# printing picker all call these). The research image carries its own copy of the same rule in
+# docker/mystic-forge/patches/0005-scryfall-default-printing-and-finish.patch (_good_default,
+# _default_printing); change both together. Removing that copy needs a new research image.
+
+
 def is_released(card: dict[str, Any]) -> bool:
     """Out already: released today or earlier (a card with no date counts as released)."""
     released = card.get("released_at")

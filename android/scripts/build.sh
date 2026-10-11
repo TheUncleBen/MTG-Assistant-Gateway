@@ -16,7 +16,7 @@
 #
 # App Links: set APP_LINKS_HOST=mtg.example.com to build the applinks flavor, which claims https links
 # to that one gateway (docs/ANDROID.md, "App Links"). Unset, the plain flavor is built.
-# UPDATE_REPO=owner/name sets where the app looks for its own updates (docs/ANDROID.md, "Updates").
+# UPDATE_REPO= (empty) builds an app that never looks for updates (docs/ANDROID.md, "Updates").
 #
 # Prerequisites: a JDK (17 or newer), curl, unzip, and keytool from the JDK for --throwaway.
 set -euo pipefail
@@ -71,8 +71,8 @@ if [ -n "${APP_LINKS_HOST:-}" ]; then
   FLAVOR=applinks
   GRADLE_ARGS+=("-PappLinksHost=$APP_LINKS_HOST")
 fi
-# UPDATE_REPO=owner/name: the GitHub repository whose releases the app updates itself from (unset:
-# this project's; set but empty: no update check). See docs/ANDROID.md, "Updates".
+# UPDATE_REPO=owner/name leaves the app's update check on (it asks the gateway, not GitHub); set but
+# empty: no update check. See docs/ANDROID.md, "Updates".
 if [ -n "${UPDATE_REPO+x}" ]; then
   GRADLE_ARGS+=("-PupdateRepo=$UPDATE_REPO")
 fi

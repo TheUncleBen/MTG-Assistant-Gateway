@@ -287,6 +287,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                         "finish": c.modifier or "Normal",
                         "label": c.label,
                         "mana_value": c.custom_cmc,
+                        "notes": c.notes or "",
                     }
                     for c in deck.cards
                     if front_face(c.name).casefold() in touched
@@ -294,7 +295,8 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                 "stats": {
                     # the banner's verdict: every format rule met, the deck size included
                     "legal": bool(deck.format) and not legal_problems(stats),
-                    "problems": stats.get("legality_problems") or [],
+                    # the cards deck_checks finds not legal (the one legality engine)
+                    "problems": deck_stats.card_legality_problems(checks),
                     "checks": checks,
                     "checks_ok": bool(checks.get("ok", True)),
                     "card_count": stats.get("card_count", 0),
@@ -444,17 +446,10 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
     @route("/proposals/{pid}/apply", "POST", write=True)
     async def apply(request: Request, who: Caller) -> Response:
         pid = request.path_params["pid"]
-        row = decks.db.get_proposal(pid, who.sub)
-        if row is not None and row.get("kind") == "action":
-            # R-142: an account action is applied only from its review page's own form, which
-            # also carries the page's click-timing guard; this API is not that page.
-            raise DeckError(
-                "browser_required",
-                "An action on your Archidekt account is applied only on its review page.",
-                review_url=f"{decks.settings.public_url}/proposals/{pid}",
-            )
         # A bearer token applies under the member's approval mode, exactly like apply_proposal
-        # over MCP (decks.apply decides); the browser session is the member's own press.
+        # over MCP (decks.apply decides); the browser session is the member's own press. An
+        # account action is refused inside decks.apply for both (R-142: only the review page's
+        # own form applies one), with browser_required (403) and its review_url.
         return ok(await decks.apply(who.sub, pid, via="browser" if who.via == "browser" else "mcp"))
 
     @route("/proposals/{pid}/reject", "POST", write=True)
@@ -497,12 +492,15 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         if isinstance(data, Response):
             return data
         games = data.get("games", 300)
+        forge = data.get("forge")
         return ok(
             await reports.run(
                 who.sub,
                 str(data.get("deck_id") or data.get("deck_ref") or ""),
                 simulate=data.get("simulate", True) is not False,
                 games=games if isinstance(games, int) else 300,
+                # Forge games apart from the goldfish ones; unset follows simulate
+                forge=forge if isinstance(forge, bool) else None,
             ),
             201,
         )

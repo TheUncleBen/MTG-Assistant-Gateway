@@ -215,8 +215,6 @@ def guide_body(
         if archidekt_backups
         else "The backup copy on Archidekt is switched off on this gateway, so no tick box is offered."
     )
-    rows = f"{max_rows} card row{'s' if max_rows != 1 else ''}"
-
     # -- Tutorials --------------------------------------------------------------------------------
     tut_start = (
         f"<p>{_esc(site)} is a private companion to <strong>Archidekt</strong>. Everything you can do on "
@@ -374,8 +372,12 @@ def guide_body(
         "quick edits keep the gateway snapshot only, without the backup copy on Archidekt. On someone "
         "else's deck the menu offers Open card and Open on Scryfall.</li>"
         "<li><strong>Drag a card</strong> onto another category: with a mouse, or press and hold on a "
-        "touch screen and slide, then press <strong>Save moves</strong>: they go to Archidekt at once; "
-        "<strong>Undo all</strong> puts the cards back without reloading.</li>"
+        "touch screen and slide. The move is saved to Archidekt when you let go, like a change from the "
+        "menu.</li>"
+        "<li><strong>Undo</strong> and <strong>Redo</strong> (beside Select cards, and the toast's Undo) "
+        "take back or redo any change saved on the page, with the editor's keys: Ctrl+Z, and Ctrl+Shift+Z "
+        "or Ctrl+Y. Removing a card that has notes asks first: Archidekt gives the gateway no way to "
+        "write notes, so they do not come back. Your own stack order is kept on this device only.</li>"
         "<li><strong>Quick add</strong> types a card name and takes you to the editor with it filled "
         "in.</li></ul>"
         f"<p class='tip'>{_esc(writes)}</p>"
@@ -694,10 +696,9 @@ def guide_body(
         "<th>Notes</th></tr></thead><tbody>"
         + "".join(f"<tr><td>{c}</td><td>{t}</td><td>{w}</td><td>{n}</td></tr>" for c, t, w, n in cap_rows)
         + "</tbody></table></div>"
-        "<p><strong>Your own approval, every time:</strong> an assistant can propose a like, vote, "
-        "bookmark, follow, comment (post, reply, edit, delete, vote), a new folder or deleting a deck, "
-        "but each one waits for your press on its review page, in every approval mode (its in-chat "
-        "card only opens that page); no setting lets an assistant apply them. "
+        f"<p><strong>Your own approval, every time:</strong> {_esc(modes.MEMBER_ONLY_TEXT)} An "
+        "assistant can propose them, but its in-chat card only opens that review page, and no "
+        "setting lets an assistant apply them. "
         "<strong>No assistant tool exists for:</strong> renaming "
         "folders, linking or unlinking Archidekt, approval modes, admin.</p>"
         "<p><strong>Only the assistant does:</strong> research lookups (Scryfall, EDHREC, combos, rules), "
@@ -725,7 +726,8 @@ def guide_body(
         (
             "One deck",
             "<code>/decks/&lt;id&gt;</code>",
-            "views, grouping, sorting, filter, the whole card on tap, the card menu, drag and Save moves, "
+            "views, grouping, sorting, filter, the whole card on tap, the card menu, drag to move, Undo and "
+            "Redo, "
             "Quick add, Playtest, Goldfish, Run simulation, statistics with Probability of draw and Deck "
             "checks, "
             "description, comments, like, bookmark, follow; More: Settings, Compare, Export, History, "
@@ -800,31 +802,33 @@ def guide_body(
         "History, Guide, Account and Admin); Search is the magnifier at the top. From 600 px on a touch "
         "screen the tabs are a rail down the left edge; a wider browser has the links in the top bar.</p>"
     )
+    on_review_page = "<td>you press Apply on its review page</td>"  # R-142, in every mode
     ref_approval = (
         "<p>Your approval mode on the <a href='/account'>Account</a> page says how much your assistant "
         "may change on Archidekt without asking you first. It is your own setting and applies to nobody "
         "else; the gateway may cap the choices.</p>"
         "<div class='tbl'><table><thead><tr><th>Mode</th><th>Low-risk proposal</th><th>High-risk proposal"
-        "</th></tr></thead><tbody>"
+        "</th><th>Account action or deck deletion</th></tr></thead><tbody>"
         f"<tr><td><strong>Manual</strong> (default): {_esc(modes.MODE_LABELS['manual'])}</td>"
-        "<td>you press Approve or Apply</td><td>you press</td></tr>"
+        "<td>you press Approve or Apply</td><td>you press</td>"
+        f"{on_review_page}</tr>"
         f"<tr><td><strong>Semi-auto</strong>: {_esc(modes.MODE_LABELS['semi'])}</td>"
-        "<td>the assistant applies it</td><td>you press</td></tr>"
+        "<td>the assistant applies it</td><td>you press</td>"
+        f"{on_review_page}</tr>"
         f"<tr><td><strong>Full auto</strong>: {_esc(modes.MODE_LABELS['auto'])}</td>"
-        "<td>the assistant applies it</td><td>the assistant applies it</td></tr>"
+        f"<td>the assistant applies it</td><td>the assistant applies it</td>{on_review_page}</tr>"
         "</tbody></table></div>"
-        f"<p><strong>Low risk:</strong> an edit to an existing deck of at most {rows}, each adding, "
-        f"removing or moving no more than {modes.MAX_COPIES_PER_ROW} copies, with only add, remove, "
-        "quantity, category, finish or printing changes and no commander change; cloning a deck. "
-        "<strong>High risk:</strong> anything over those limits, a commander change, a new deck, a "
-        "snapshot restore, deck details (name, description, format, bracket, privacy, folder, tags, "
-        "cover). Every applied proposal keeps a snapshot first and is read back to verify.</p>"
+        f"<p><strong>Low risk:</strong> {_esc(modes.low_risk_text(max_rows))} "
+        f"<strong>High risk:</strong> {_esc(modes.HIGH_RISK_TEXT)} "
+        f"<strong>Always your own press:</strong> {_esc(modes.MEMBER_ONLY_TEXT)} "
+        "Every applied proposal keeps a snapshot first and is read back to verify.</p>"
         f"<p class='tip'>{_esc(modes.AUTO_WARNING)}</p>"
         f"{_h4('ref-approval-hand', 'Your own saves')}"
         "<p>A hand save needs no approval: pressing Save is it. It still keeps a snapshot, and asks "
         "“are you sure” only for a restore, a commander change, or a removal of "
         f"{modes.HAND_EDIT_CONFIRM_ROWS} or more different cards or more than "
-        f"{modes.HAND_EDIT_CONFIRM_COPIES} copies in one go; deleting a deck asks for its name.</p>"
+        f"{modes.HAND_EDIT_CONFIRM_COPIES} copies in one go; deleting a deck asks for its name, and "
+        "adding or removing a collaborator or creating a folder asks once more before it is sent.</p>"
     )
     key_rows = [
         ("Deck page", "<kbd>Tab</kbd>", "moves through the cards; a focused card has an outline"),
@@ -995,9 +999,11 @@ def guide_body(
         "included; your decks on Archidekt are not touched.</li></ul>"
     )
     exp_playtest = (
-        "<p>Archidekt's playtester is the one place to draw and play a deck by hand, and it only shows a "
-        "private deck to a browser signed in to Archidekt. The gateway used to frame it on a page of its "
-        "own, but a frame cannot carry your Archidekt sign-in, so private decks came up empty and the "
+        "<p>There are two places to draw and play a deck by hand: the gateway's own <strong>Goldfish"
+        "</strong> page, which plays the deck in your browser, and Archidekt's playtester, which only "
+        "shows a private deck to a browser signed in to Archidekt. The gateway used to frame "
+        "Archidekt's playtester on a page of its own, but a frame cannot carry your Archidekt sign-in, "
+        "so private decks came up empty and the "
         "page was a step for nothing. <strong>Playtest</strong> therefore opens the playtester in its own "
         "tab, where your Archidekt sign-in lives; the Android app hands it to the phone's browser for the "
         "same reason. Old links to the framed page are sent on to Archidekt.</p>"

@@ -7,6 +7,79 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.24] - 2026-10-11
+
+Consolidation: one owner per job instead of several copies, the bugs a review of 0.7.14 to 0.7.23
+found, and the simulation fixes. No new images: the research service stays `1.3.2-mag4` and Forge
+`2.0.15-mag2` (from 0.7.23). The database stays at schema 12. **Watchlists and prices are now off
+unless you set `MTG_WATCHLISTS_ENABLED=true`.**
+
+### Added
+- Reports can leave Forge out (`forge: false` on `run_deck_report` and `POST /api/v1/reports`, and
+  "Quick simulation (no Forge)" under More on the deck page when Forge is set up) for a quick
+  goldfish-only run. A report without Forge games is labelled "Preflight only (no rules engine)".
+- Every report has an overall status (queued, running, complete, partial, failed) in
+  `get_deck_report`, `list_deck_reports` and the report page, which keeps it current while Forge runs.
+- Undo and Redo on the deck page for every change saved there (card menu, card viewer, Select cards
+  and dragging), with the editor's keys: Ctrl+Z, Ctrl+Shift+Z or Ctrl+Y (Cmd on a Mac).
+- One setup page at `/install` for Claude, Claude Code, ChatGPT, Codex, the assistant skill and the
+  Android app; its page and its Markdown (`/install.md`) come from one step list. `/skill` and `/app`
+  lead to their sections; every download keeps its address.
+- `/app/latest.json` (same sign-in as the APK): the Android app now checks its own gateway for
+  updates instead of GitHub.
+
+### Changed
+- Watchlists and prices are an operator setting, `MTG_WATCHLISTS_ENABLED`, off by default. While off,
+  the Watchlist page, its links, the card viewer's price buttons, the five watch tools and the daily
+  price check are absent; stored watches are kept.
+- Summaries are part of the Notifications card on the Account page and appear only when ntfy is set
+  up. `get_summary` stays, and leaves prices out while watchlists are off.
+- The deck page has one save model: dragging a card to another category saves to Archidekt as soon
+  as you let go, like the card menu and Select cards. The "Save moves" bar is gone.
+- On a deck's settings page, adding or removing a collaborator is one press and a confirmation, like
+  creating a folder (which now asks once too); deleting a deck keeps its typed-name check.
+  Assistants' account-action proposals still wait for your press on the review page, in every mode.
+- The approval-mode wording on the Account page, the guide and the docs comes from one place and
+  agrees everywhere: color tags, custom mana value and collection edits are low risk, and
+  collaborators are among the account actions that always wait for you.
+- Report trends record each report's run settings and never mix 40-life and 20-life numbers;
+  History shows where the settings changed.
+- When the Forge engine is busy, a report's games wait in the queue and start by themselves instead
+  of failing. A busy research call says when to retry (`retry_after`).
+- The ChatGPT plugin file is labelled "Business/Enterprise admins only"; Plus and Pro accounts use
+  the connector. The web account menu no longer has "Open a copied link" and "Check for app
+  updates"; they stay in the app's own menu and on the Account page's App card.
+- Deck values say where their prices come from: Archidekt on the deck page, Scryfall on the
+  watchlist. Run simulation's tooltip says "300 simulated games"; the stack order is labelled
+  "this device only".
+- One legality check, one row builder for the Table, Text and Brewer views, one type and category
+  helper (Type grouping now puts a card with none of the eight main types, such as a Scheme or a
+  Plane, under "Other", as the automatic category already did), and one archive builder for the plugin and skill ZIPs (byte-for-byte the same files).
+- The REST apply route no longer has its own account-action check; the shared apply refuses it with
+  the same 403 `browser_required`, now with `review_url` and `risk`.
+
+### Fixed
+- A connection made read-only could create like, comment, folder, collaborator and deck-delete
+  proposals (it could never apply them); these tools now need full access like every proposal.
+- A report for a 60-card deck no longer starts or queues a Forge run that was bound to fail.
+- `compare_decks` no longer suggests that two Forge runs with the same seed compare decks like for
+  like: each deck meets precons of its own bracket, and the goldfish A/B is the like-for-like test.
+- `run_deck_report` accepts one of your own snapshot ids, as it said it did.
+- Legality everywhere (`deck_stats`, the report's stats strip, the deck page's edit answers, pasted
+  lists) matches the deck page's Archidekt-style check: one restricted card is not illegal, and the
+  sideboard counts where the format counts it.
+- A card's custom mana value counts in the curve, average, Mana value grouping and sorting, the
+  Table view and Probability of draw.
+- Undo after removing a card puts it back under every category it had; removing a card with notes
+  warns first that the note cannot come back.
+- Reload reads someone else's public deck (or any deck with no account linked) from Archidekt again
+  instead of a copy up to a minute old.
+- A direct `validate_decklist` reads double-faced cards by their front face. Reports no longer say a
+  card "underperforms" from goldfish games, and show how much of a Commander deck was modeled.
+- Refusing an assistant's deck-deletion apply reports it as destructive, not consent; dead
+  deck-delete branches were removed from the in-chat card. The guide names the Goldfish page for
+  playing by hand.
+
 ## [0.7.23] - 2026-10-11
 
 Everything left over, skipped or parked after 0.7.22 that can be built, plus faster pages.

@@ -84,34 +84,51 @@ def _round(value: float) -> float:
     return round(value + 0.0, 2)
 
 
-# A card's one type for a split curve, in the order Archidekt picks a card's auto category
-# (views._AUTO_TYPES), so an Artifact Creature counts once, as a Creature.
+# A card's one type, in the order Archidekt picks a card's auto category, so an Artifact
+# Creature counts once, as a Creature. The one owner of that order: the deck page's Type grouping
+# and sorting, the split curve, the auto category and get_deck's ``shown_under`` all use it.
 PRIMARY_TYPES = (
     "Creature", "Planeswalker", "Battle", "Instant", "Sorcery", "Artifact", "Enchantment", "Land",
 )  # fmt: skip
 CURVE_BUCKETS = ("0", "1", "2", "3", "4", "5", "6", "7+")
+_TYPE_WORD = re.compile(r"[\s,/]+")
 
 
 def primary_type(card: DeckCard) -> str:
-    """The card's first type in PRIMARY_TYPES order ('Other' when it has none of them)."""
-    have = {t.casefold() for t in card.types}
+    """The card's first type in PRIMARY_TYPES order ('Other' when it has none of them). A type is
+    matched as a word in any case, so "Kindred Instant" or "artifact" count too."""
+    have = {w.casefold() for t in card.types for w in _TYPE_WORD.split(t) if w}
     return next((t for t in PRIMARY_TYPES if t.casefold() in have), "Other")
+
+
+def auto_category(card: DeckCard) -> str:
+    """The category Archidekt shows an uncategorised card under: its oracle ``defaultCategory``
+    when the deck JSON carried one, else the card's primary type, else 'Other'."""
+    return card.default_category or primary_type(card)
 
 
 def primary_category(card: DeckCard) -> str:
     """The row's first category (Archidekt's primary category); an uncategorised card counts
-    under Archidekt's auto category for it, else its primary type."""
-    if card.categories:
-        return card.categories[0]
-    return card.default_category or primary_type(card)
+    under its auto category."""
+    return card.categories[0] if card.categories else auto_category(card)
+
+
+def mana_value(card: DeckCard) -> float | None:
+    """The mana value the deck counts a card at: the deck's own override (Archidekt's custom mana
+    value, ``customCmc``) when it has one, else the card's printed mana value. Used wherever a
+    figure is worked out from mana value (curve, average, grouping, sorting, draw odds); the
+    format rules (legality, companions, brackets) keep the printed one."""
+    custom = getattr(card, "custom_cmc", None)
+    return card.cmc if custom is None else custom
 
 
 def curve_bucket(card: DeckCard) -> str | None:
     """The mana curve column of a nonland card ('0' to '6', '7+'); None for lands and cards
     without a mana value."""
-    if is_land(card) or card.cmc is None:
+    mv = mana_value(card)
+    if is_land(card) or mv is None:
         return None
-    return _curve_bucket(card.cmc)
+    return _curve_bucket(mv)
 
 
 def curve_by(cards: list[DeckCard], key: Any) -> dict[str, dict[str, int]]:
@@ -219,12 +236,12 @@ def compute(deck: Deck) -> dict[str, Any]:
     nonlands = [c for c in cards if not is_land(c)]
     qty = sum(c.quantity for c in cards)
 
-    mv_total = sum(c.cmc * c.quantity for c in nonlands if c.cmc is not None)
-    mv_count = sum(c.quantity for c in nonlands if c.cmc is not None)
+    valued = [(c, mv) for c in nonlands if (mv := mana_value(c)) is not None]
+    mv_total = sum(mv * c.quantity for c, mv in valued)
+    mv_count = sum(c.quantity for c, _mv in valued)
     curve: Counter[str] = Counter({**{str(i): 0 for i in range(7)}, "7+": 0})
-    for c in nonlands:
-        if c.cmc is not None:
-            curve[_curve_bucket(c.cmc)] += c.quantity
+    for c, mv in valued:
+        curve[_curve_bucket(mv)] += c.quantity
 
     pips: dict[str, float] = {}
     for c in cards:
@@ -258,20 +275,9 @@ def compute(deck: Deck) -> dict[str, Any]:
     priced = [c for c in cards if c.price is not None]
     price_total = sum(c.price * c.quantity for c in priced if c.price is not None)
 
-    problems: list[dict[str, str]] = []
-    unknown = 0
-    if deck.format:
-        for c in cards:
-            status = c.legalities.get(deck.format)
-            if deck.format == "paupercommander" and deck.is_commander(c) and status != "banned":
-                # An uncommon leader is "not_legal" in Pauper Commander's per-card flag (that flag is
-                # for the 99); deck_checks judges the commander, so only a banned one is listed here
-                # (and, as there, a leader with no flag is not counted as unknown).
-                continue
-            if status is None:
-                unknown += 1
-            elif status != "legal":
-                problems.append({"name": c.name, "status": status})
+    # Card legality comes from deck_checks, the one legality engine (archidekt.com's rules: the
+    # sideboard where the format counts it, restricted cards judged by their copies).
+    checks = deck_checks(deck, cards, commanders, qty)
 
     out: dict[str, Any] = {
         "card_count": qty,
@@ -292,8 +298,8 @@ def compute(deck: Deck) -> dict[str, Any]:
         "price_total": _round(price_total),
         "priced_cards": len(priced),
         "format": deck.format,
-        "legality_problems": problems,
-        "legality_unknown": unknown,
+        "legality_problems": card_legality_problems(checks),
+        "legality_unknown": int((checks.get("legality") or {}).get("unknown") or 0),
         "game_changers": sorted({c.name for c in cards if c.game_changer}),
         "tutors": sum(c.quantity for c in cards if c.tutor),
         "extra_turns": sum(c.quantity for c in cards if c.extra_turns),
@@ -304,7 +310,7 @@ def compute(deck: Deck) -> dict[str, Any]:
         "out_of_identity": out_of_identity(cards, commanders),
         "bracket_estimate": bracket_estimate(cards, deck.format),
         "archidekt_bracket": deck.edh_bracket,
-        "checks": deck_checks(deck, cards, commanders, qty),
+        "checks": checks,
     }
     # The bracket set on the deck is checked in deck_checks as archidekt.com checks it; the
     # estimate is shown beside it.
@@ -697,8 +703,8 @@ def deck_checks(deck: Deck, cards: list[DeckCard], commanders: list[DeckCard], q
                 "no card in the Commander category"
                 + (" (Brawl wants a creature or planeswalker there)" if brawl and fmt != "tlr" else "")
             )
-        elif zone["count"] > 2:
-            zone_problems.append(f"{zone['count']} cards in the Commander category (expected 1 or 2)")
+        elif too_many := _zone_count_problem(zone["count"]):
+            zone_problems.append(too_many)
         elif fmt == "brawl" and len(commanders) > 1:
             zone_problems.append("Standard Brawl allows one commander")
         if fmt == "competitivebrawl":
@@ -791,10 +797,7 @@ def deck_checks(deck: Deck, cards: list[DeckCard], commanders: list[DeckCard], q
     def over_limit(pool: list[DeckCard], limit: int) -> list[dict[str, Any]]:
         out: dict[str, dict[str, Any]] = {}
         for c in pool:
-            key = _match_key(c.name)
-            if key in _BASIC_KEYS or key in _ANY_NUMBER_NAMES or _ANY_NUMBER in c.oracle_text.lower():
-                continue
-            if copies_by_name[c.name] > max(limit, _UP_TO.get(key, 0)):
+            if _over_copy_limit(c.name, copies_by_name[c.name], limit, c.oracle_text):
                 out.setdefault(c.name, {"name": c.name, "quantity": copies_by_name[c.name]})
         return list(out.values())
 
@@ -929,10 +932,55 @@ def deck_checks(deck: Deck, cards: list[DeckCard], commanders: list[DeckCard], q
     return out
 
 
+def _over_copy_limit(name: str, copies: int, limit: int, oracle_text: str = "") -> bool:
+    """Whether ``copies`` of a card break a ``limit``-copies rule, as deck_checks counts it: the
+    basic lands and the cards a deck may hold any number of are exempt, Seven Dwarves and Nazgûl
+    may have up to seven and nine. Shared with the pasted-list check, which has names only."""
+    key = _match_key(name)
+    if key in _BASIC_KEYS or key in _ANY_NUMBER_NAMES or _ANY_NUMBER in (oracle_text or "").lower():
+        return False
+    return copies > max(limit, _UP_TO.get(key, 0))
+
+
+def _zone_count_problem(count: int) -> str | None:
+    """deck_checks' words for a Commander category holding more than two cards."""
+    return f"{count} cards in the Commander category (expected 1 or 2)" if count > 2 else None
+
+
+def card_legality_problems(checks: dict[str, Any] | None) -> list[dict[str, str]]:
+    """The cards deck_checks finds not legal in the format, as ``{name, status}`` rows (status
+    "banned", "not_legal", or "restricted" for a restricted card held in more than one copy).
+    This is what ``compute``'s ``legality_problems`` holds, so every reader of it (the report's
+    stats strip, the deck page's edit answers) gives the deck page's verdict."""
+    legality = (checks or {}).get("legality") or {}
+    return (
+        [{"name": str(n), "status": "banned"} for n in legality.get("banned") or []]
+        + [{"name": str(n), "status": "not_legal"} for n in legality.get("not_legal") or []]
+        + [
+            {"name": str(r.get("name")), "status": "restricted"}
+            for r in legality.get("restricted_violations") or []
+            if isinstance(r, dict)
+        ]
+    )
+
+
+def legality_problems_of(stats: dict[str, Any] | None) -> list[Any]:
+    """``legality_problems`` of stored statistics, from their deck_checks block when they have
+    one (statistics stored before the two engines were merged kept an older list that flagged
+    restricted cards and left the sideboard out); else the stored list as it is."""
+    stats = stats or {}
+    checks = stats.get("checks")
+    if isinstance(checks, dict) and isinstance(checks.get("legality"), dict):
+        return card_legality_problems(checks)
+    return list(stats.get("legality_problems") or [])
+
+
 def compute_from_text(cards: list[ListCard]) -> dict[str, Any]:
     """What can be said about a pasted list from its names and counts alone (no card data):
     sizes, the commander by its Commander category, singleton and uncategorised checks, and
-    ``card_data: "unavailable"`` so a reader knows why the rest of ``compute`` is missing."""
+    ``card_data: "unavailable"`` so a reader knows why the rest of ``compute`` is missing. A list
+    with a commander is held to deck_checks' Commander rules, in its words (size, the Commander
+    category, the singleton rule over the deck proper)."""
     main = [c for c in cards if c.zone == "main"]
     side = [c for c in cards if c.zone != "main"]
     commanders = [c.name for c in main if "Commander" in c.categories]
@@ -941,10 +989,10 @@ def compute_from_text(cards: list[ListCard]) -> dict[str, Any]:
     dupes = singleton_from_counts(counts_from_text(cards))
     if commanders and dupes:
         problems.append("more than one copy in a singleton format: " + _names(dupes))
-    if commanders and qty != 100:
-        problems.append(f"deck has {qty} cards; a Commander deck wants 100")
-    if len(commanders) > 2:
-        problems.append(f"{len(commanders)} cards under Commander; a deck has one or two")
+    if commanders and (size := size_problem("commander", qty)):
+        problems.append(size)
+    if too_many := _zone_count_problem(len(commanders)):
+        problems.append(too_many)
     uncategorised = sorted({c.name for c in main if not c.categories})
     return {
         "card_count": qty,
@@ -979,15 +1027,8 @@ def counts_from_text(cards: list[ListCard]) -> dict[str, int]:
 def singleton_from_counts(counts: dict[str, int]) -> list[dict[str, Any]]:
     """The names a singleton deck holds more than one copy of, from names and counts alone (a
     pasted list): copies summed by name over rows, the basic lands and the cards a deck may hold
-    any number of (or up to seven or nine) left out, as in ``deck_checks``."""
-    out = []
-    for name, n in counts.items():
-        key = _match_key(name)
-        if key in _BASIC_KEYS or key in _ANY_NUMBER_NAMES:
-            continue
-        if n > _UP_TO.get(key, 1):
-            out.append({"name": name, "quantity": n})
-    return out
+    any number of (or up to seven or nine) left out, by deck_checks' own rule."""
+    return [{"name": name, "quantity": n} for name, n in counts.items() if _over_copy_limit(name, n, 1)]
 
 
 def validation_gateway_checks(decklist: str) -> tuple[list[dict[str, Any]], str] | None:

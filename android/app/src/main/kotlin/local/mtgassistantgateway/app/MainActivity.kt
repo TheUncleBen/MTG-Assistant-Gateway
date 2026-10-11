@@ -56,7 +56,7 @@ import java.io.ByteArrayInputStream
  * - file pickers (photo and CSV import) and downloads (CSV export, skill zip);
  * - a floating menu: scan, reload, open in browser, open a copied link, change gateway, check for
  *   app updates;
- * - the app's own updates from the project's GitHub releases ([Updater]): a bar offers a newer
+ * - the app's own updates from the gateway it is set up for ([Updater]): a bar offers a newer
  *   version, one tap installs it over this one. Checked at each cold launch and just after a
  *   sign-in (at most once an hour), on returning to the app (at most twice a day) and on request.
  *

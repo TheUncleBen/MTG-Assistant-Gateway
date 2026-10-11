@@ -395,3 +395,91 @@ async def test_deleting_my_data_forgets_the_mode(stack: Stack) -> None:
     await b.aclose()
     user = h.db.get_user("user-1")
     assert user is None or user.get("approval_mode") is None
+
+
+# -- 0.7.24: one source for the approval-mode wording (D2, bug 6) ---------------------------------
+
+
+def _flat(text: str) -> str:
+    import html
+    import re
+
+    return re.sub(r"\s+", " ", html.unescape(text))
+
+
+def test_the_low_risk_wording_is_the_list_risk_of_checks() -> None:
+    """Every row kind risk_of accepts as low risk has its word in the wording, and only those."""
+    assert set(modes.LOW_RISK_ROW_WORDS) == modes.LOW_RISK_ROW_KINDS
+    for word in modes.LOW_RISK_ROW_WORDS.values():
+        assert word in modes.LOW_RISK_CHANGES, word
+    for kind in ("label", "mana_value", "change", "category", "finish", "printing"):
+        rows = [{"kind": kind, "name": "Sol Ring", "before": 1, "after": 1}]
+        assert modes.risk_of("edit", rows)[0] == "low", kind
+        assert modes.risk_of("collection", rows)[0] == "low", kind
+    for text in (modes.low_risk_text(), modes.mode_help("semi")):
+        assert "color tag" in text and "custom mana value" in text and "collection" in text
+
+
+def test_the_account_actions_wording_names_every_account_action() -> None:
+    """Each action of actions.py is named in the member-only wording (collaborators included), and
+    every mode's help says these wait, matching MEMBER_ONLY."""
+    from mtg_gateway.actions import LABELS
+
+    words = {
+        "deck_vote": "likes",
+        "deck_bookmark": "bookmarks",
+        "follow": "follows",
+        "comment_post": "comments",
+        "comment_edit": "comments",
+        "comment_delete": "comments",
+        "comment_vote": "votes",
+        "create_folder": "new folders",
+        "collaborator_add": "collaborator changes",
+        "collaborator_remove": "collaborator changes",
+        "delete_deck": "deleting a deck",
+    }
+    assert set(words) == set(LABELS)
+    for action, word in words.items():
+        assert word in modes.MEMBER_ONLY_TEXT, action
+        assert modes.risk_of("action", [{"action": action}])[0] in modes.MEMBER_ONLY
+    for mode in modes.MODES:
+        assert "Archidekt account" in modes.mode_help(mode) and "deleting a deck" in modes.mode_help(mode)
+    assert modes.MODE_HELP["semi"] == modes.mode_help("semi")
+
+
+async def test_the_account_page_and_guide_use_the_one_wording(stack: Stack) -> None:
+    from mtg_gateway.guide import guide_body
+
+    h = stack.h
+    await linked_user(stack)
+    b = Browser(h)
+    try:
+        await b.login()
+        page = _flat((await b.http.get("/account")).text)
+    finally:
+        await b.aclose()
+    guide = _flat(guide_body(site="Gateway", writes_enabled=True, has_collection=True, max_rows=3))
+    for text in (page, guide):
+        assert modes.HIGH_RISK_TEXT in text and modes.MEMBER_ONLY_TEXT in text
+    assert modes.low_risk_text(5) in page and modes.low_risk_text(3) in guide
+    assert "Account action or deck deletion" in guide  # the mode table has the column (bug 6)
+
+
+@pytest.mark.parametrize(
+    ("doc", "low", "member_only"),
+    [
+        ("CAPABILITIES.md", True, True),
+        ("OPERATIONS.md", True, True),
+        ("CONNECT.md", False, True),
+        ("ONBOARDING.md", False, True),
+    ],
+)
+def test_docs_quote_the_one_wording(doc: str, low: bool, member_only: bool) -> None:
+    from pathlib import Path
+
+    text = _flat((Path(__file__).resolve().parents[1] / "docs" / doc).read_text(encoding="utf-8"))
+    if low:
+        assert modes.low_risk_text(modes.DEFAULT_MAX_ROWS) in text and modes.HIGH_RISK_TEXT in text
+    if member_only:
+        assert modes.MEMBER_ONLY_TEXT in text
+    assert modes.LOW_RISK_CHANGES in text

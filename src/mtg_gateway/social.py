@@ -1,10 +1,11 @@
 """Archidekt's social actions for the signed-in person: like a deck (a vote on its comment thread),
 bookmark it, follow its owner, read and post comments.
 
-These are a person's own clicks, so they exist only as browser routes: every write needs the
-browser session and the page's CSRF token, every call runs under that member's own linked
-Archidekt session, and no MCP tool exists for any of them. An assistant can therefore never like,
-follow or comment on anyone's behalf. The page asks for a confirmation before each write.
+These routes are a person's own clicks: every write needs the browser session and the page's
+CSRF token, every call runs under that member's own linked Archidekt session, and the page asks
+for a confirmation before each write. Since 0.7.17 an assistant can propose the same actions
+(propose_deck_social, propose_comment; actions.py), but it can never apply one: each is applied
+only by the member's own press on its review page (R-142), which then runs the code here.
 
 Routes and bodies are the ones archidekt.com's own pages send (read from its bundle on
 2026-10-07; see the notes on ``ArchidektClient.vote_deck`` and friends).
