@@ -548,6 +548,11 @@ class Pacer:
         self._next_allowed = time.monotonic() + self.min_interval
         self._lock.release()
 
+    def busy(self) -> bool:
+        """Whether a call is being sent or waiting its turn right now (the deck sync, sync.py,
+        steps aside while one is)."""
+        return self._lock.locked()
+
     def record(self, ok: bool, retry_after: float | None = None) -> None:
         if ok:
             self._failures = 0

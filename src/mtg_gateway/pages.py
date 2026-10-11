@@ -432,6 +432,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 f"<li><a class='name' href='/proposals/{html.escape(r['id'])}'>"
                 f"{html.escape(r['deck_name'] or r['deck_id'])}</a>"
                 f"<span class='badge {_badge(r['state'])}'>{html.escape(r['state'])}</span>"
+                + ("<span class='badge danger'>out of date</span>" if r.get("out_of_date") else "")
                 + actor_html(r.get("created_by"))
                 + f"<span class='when'>{_when(r['created_at'])}</span></li>"
                 for r in rows
@@ -614,6 +615,9 @@ def browser_session(state: Any, request: Request) -> tuple[str | None, str | Non
         return None, None  # a disabled account keeps no browser session either
     if not state.settings.grants_access(user["groups"]):
         return None, None
+    sync = getattr(state, "sync", None)
+    if sync is not None:
+        sync.opened(sub)  # opening the app checks the member's decks on Archidekt (sync.py)
     return sub, sid
 
 
@@ -1142,6 +1146,13 @@ def _detail_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, int
     return "".join(items), len(items)
 
 
+# The review page's words for a proposal the deck sync (sync.py) saw go out of date.
+OUT_OF_DATE_PAGE = (
+    "Out of date: this deck changed after the proposal was made, so Apply will be refused and nothing "
+    "will be sent. Reject it and ask your assistant for a new one."
+)
+
+
 def _page_step(p: dict[str, Any]) -> str:
     """What happens next, said to the person reading the review page. next_step speaks to the
     assistant (call this tool, do not call that one), so the page words it on its own."""
@@ -1149,6 +1160,8 @@ def _page_step(p: dict[str, Any]) -> str:
     result = p.get("result") if isinstance(p.get("result"), dict) else {}
     if state == "pending" and not p.get("writes_enabled"):
         return "Review only: deck writes are turned off on this gateway, so this can't be applied yet."
+    if state == "pending" and p.get("out_of_date"):
+        return OUT_OF_DATE_PAGE
     if state == "pending":
         retry = (
             "The last try stopped before anything changed, because Archidekt's backup copy couldn't be made. "
@@ -1276,8 +1289,13 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str = "") -> str:
         + f"<dt>Created</dt><dd>{_when(p['created_at'])}</dd>"
         f"<dt>Expires</dt><dd>{_when(p['expires_at'])}</dd></dl>"
     )
+    stale = (
+        f"<p class='notice warn' role='status'>{html.escape(OUT_OF_DATE_PAGE)}</p>"
+        if p["state"] == "pending" and p.get("out_of_date")
+        else ""
+    )
     body = (
-        f"<div class='card'>{meta}<h2>{heading}</h2>"
+        f"<div class='card'>{stale}{meta}<h2>{heading}</h2>"
         f"<div class='summary'>{''.join(summary)}</div>"
         f"<ul class='changes' aria-label='{aria}'>{rows}</ul>"
         f"<details class='raw'><summary>Plain-text diff</summary>{raw}</details>"

@@ -39,6 +39,7 @@ from .deck_stats import (
     primary_type,
 )
 from .decks import mana_value_text, split_label
+from .export_formats import EDHPLAY_URL, to_edhplay
 from .mana import mana_html as _mana_html
 from .theme import icon, plural
 from .views import cards_by_category
@@ -360,6 +361,18 @@ def banner_html(
         # browser, on the deck this page read (static/goldfish.js).
         f"<a class='btn' href='/decks/{did}/goldfish' title='Shuffle, draw an opening hand and play "
         f"turns by hand, here on the gateway'>{icon('layers')} Goldfish</a>"
+    )
+    # Play on EDHPlay (R-154): EDHPlay is the online table; it has no import by link, so the button
+    # copies the whole deck in its import format (export_formats.to_edhplay) and opens the site
+    # (deck.js). Without script the link still opens EDHPlay, and Export deck has the list.
+    edh_text, edh_commanders = to_edhplay(deck)
+    edh_list = esc(edh_text).replace("\n", "&#10;")  # one line per card, kept through the attribute
+    edh_commander = esc(" and ".join(edh_commanders))
+    primary += (
+        f"<a class='btn' href='{EDHPLAY_URL}' target='_blank' rel='noreferrer noopener' data-edhplay "
+        f"data-list='{edh_list}' data-commander='{edh_commander}' "
+        "title='Copy this deck list and open EDHPlay to play it online'>"
+        f"{icon('play')} Play on EDHPlay</a>"
     )
     if csrf:
         # The same run as the assistant's run_deck_report: statistics, validation and 300

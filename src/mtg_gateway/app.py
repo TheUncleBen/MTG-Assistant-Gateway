@@ -121,6 +121,7 @@ from .setup_hub import add_setup_routes
 from .skill_page import add_skill_routes
 from .social import add_social_routes
 from .summary import Summaries, add_summary_tool
+from .sync import DeckSync
 from .theme import NoSniffMiddleware, ThemeMiddleware, display_name, render
 from .timing import TimingMiddleware
 from .update_check import UpdateChecker
@@ -152,6 +153,7 @@ class AppState:
     prices: PriceService | None = None  # watchlists and price history (prices.py)
     summaries: Summaries | None = None  # members' plain summaries (summary.py)
     app_signins: AppSignins = field(default_factory=AppSignins)  # the Android app's browser sign-in
+    sync: DeckSync | None = None  # automatic Archidekt -> gateway deck sync (sync.py)
 
 
 def _tool_error(exc: DeckError) -> dict[str, object]:
@@ -649,6 +651,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
             tasks.append(
                 asyncio.create_task(DailyJobs(state.prices, state.summaries, s.price_hour_utc).loop())
             )
+        if state.sync is not None and state.sync.enabled:
+            tasks.append(asyncio.create_task(state.sync.loop()))
         updates = UpdateChecker(s.update_check)
         if updates.enabled:
             tasks.append(asyncio.create_task(updates.loop()))
@@ -2175,6 +2179,9 @@ def create_app(
         mf_proxy=mf_proxy,
         membership=membership,
     )
+    if settings.deck_sync_minutes > 0:
+        state.sync = DeckSync(state.decks, settings.deck_sync_minutes)
+        state.decks.out_of_date = state.sync.out_of_date
     state.metrics = Metrics(
         db, known_tool=lambda name: server._tool_manager.get_tool(name) is not None or name in ALLOWED_TOOLS
     )

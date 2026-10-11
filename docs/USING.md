@@ -93,6 +93,17 @@ One deck:
   archidekt.com's playtester, so a game plays the same as on the site. A
   private deck shows only when that browser is signed in to Archidekt; the
   page keeps an **Open on Archidekt** button for that case.
+- **Play on EDHPlay** takes the deck to [EDHPlay](https://edhplay.com/), the
+  free online table for Commander: it copies the whole deck in EDHPlay's
+  import format and opens EDHPlay in a new tab (in the app, your phone's
+  browser). The list has the commander first (marked as the commander), the
+  rest of the deck with each card's printing, then a **Sideboard** section
+  with everything Archidekt keeps outside the deck (sideboard and maybeboard;
+  EDHPlay has no maybeboard of its own) and a **Tokens** section for a
+  category named Tokens. On EDHPlay choose **Create Deck** with the commander
+  the note names, then **Import**: paste the list and press **Import &
+  Replace**. EDHPlay has no way to receive a deck by link, so a later change
+  on Archidekt is taken over the same way: press the button again.
 - **Goldfish** plays the deck by hand on a gateway page, in your browser:
   the deck is shuffled and you get seven cards. Keep the hand or take a
   mulligan (London rules: the hand goes back, you draw seven again, and
@@ -293,6 +304,14 @@ assistant applies what that mode allows, always with a snapshot.
   the meantime, saves a **snapshot** and puts a backup copy of the deck in
   an "MTG Gateway backups" folder on your Archidekt account, then reads the
   deck back to confirm.
+- **Out of date**: Archidekt is the master copy of your decks. When you open
+  the app, and every 30 minutes while proposals are waiting, the gateway
+  checks your decks on Archidekt (it only reads). If a deck changed after a
+  proposal for it was made, on archidekt.com, in another app or by another
+  change applied here, the proposal is marked **out of date** at once: Apply
+  would be refused and nothing sent, so reject it and ask for a new one.
+  The check never changes a deck, a proposal, a snapshot or your undo
+  history, and it waits while you or your assistant are working.
 - **History** shows proposals, snapshots and deck reports over time.
   **Restore** puts a deck back exactly as a snapshot had it, cards and the
   deck's own name, description, format, bracket and privacy alike (another

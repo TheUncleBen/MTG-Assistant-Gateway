@@ -7,6 +7,7 @@ sell, so a paper-only card is simply not found on import there. Nothing here con
 
 from __future__ import annotations
 
+import re
 import zlib
 from xml.sax.saxutils import quoteattr
 
@@ -45,6 +46,83 @@ def to_arena(deck: Deck) -> str:
         if rows:
             blocks.append(title + "\n" + "\n".join(_arena_line(c) for c in _sorted(rows)))
     return "\n\n".join(blocks) + "\n"
+
+
+EDHPLAY_URL = "https://edhplay.com/"
+
+
+# EDHPlay's Bulk Import reads "(SET) NUMBER" only when both match these (its parser, below).
+_EDH_SET = re.compile(r"[A-Za-z0-9]+")
+_EDH_NUMBER = re.compile(r"[A-Za-z0-9-]+")
+# Archidekt categories that EDHPlay keeps in a zone of their own (EDHPlay's Tokens section).
+_EDH_TOKEN_CATEGORIES = {"token", "tokens"}
+
+
+def _edh_line(c: DeckCard, *, commander: bool = False) -> str:
+    """``1 Name (SET) 123``, with ``[Commander{top}]`` on a commander: the marker EDHPlay's parser
+    looks for (it takes Archidekt's own export syntax for the commander)."""
+    name = " ".join(c.name.replace("[", "(").replace("]", ")").split())
+    line = f"{c.quantity} {name}"
+    if c.set_code and c.collector_number and _EDH_SET.fullmatch(c.set_code):
+        if _EDH_NUMBER.fullmatch(c.collector_number):
+            line += f" ({c.set_code.upper()}) {c.collector_number}"
+    return line + (" [Commander{top}]" if commander else "")
+
+
+def to_edhplay(deck: Deck) -> tuple[str, list[str]]:
+    """The whole deck as EDHPlay's Bulk Import reads it, and the commander names (for the note).
+
+    Verified 2026-10-11 against EDHPlay itself: its help page ('Click "Create Deck", choose your
+    format and commander. Add cards by searching or use "Bulk Import" to paste your decklist (e.g.,
+    "1 Sol Ring", "1 Command Tower")'), the import dialog's own text ("1 Sol Ring (C18) 222": "Use
+    set code and collector number to specify exact printing") and the parser the dialog runs in
+    the browser (edhplay.com/assets/DeckEditorSkeleton-*.js, functions ``tc``/``Vs``/``bn``):
+
+    - each line is ``N Name``, an optional ``x`` after N, then optional ``(SET) NUMBER``;
+    - a line carrying ``[...Commander{top}...]`` is the commander, a second one the partner;
+    - lines before the first ``Sideboard``, ``Tokens``, ``Attractions`` or ``Stickers`` heading are
+      the main deck; each heading's section runs to the next blank line;
+    - EDHPlay has no maybeboard: a ``Maybeboard`` heading is skipped and its cards would count as
+      main deck, and its import never sets a companion.
+
+    So: commander(s) first, marked; then the main deck; then, after a blank line, ``Sideboard``
+    with every row Archidekt keeps outside the deck (sideboard, maybeboard, companion and other
+    such categories, which EDHPlay can only hold there); then ``Tokens`` for rows in a category
+    named Tokens. Printings keep their set and number when EDHPlay's parser can read them. A deck
+    with no commander starts with a line of several copies when it has one, because EDHPlay's
+    parser takes a first line of quantity 1 as the commander.
+    Not verified (needs an EDHPlay account): how its server matches names, and how a pasted
+    commander combines with one already picked under Create Deck."""
+    commanders: list[str] = []
+    head: list[str] = []
+    main: list[str] = []
+    side: list[str] = []
+    tokens: list[str] = []
+    for c in sorted(deck.cards, key=lambda c: (c.name.casefold(), c.set_code, c.collector_number)):
+        if not c.name.strip() or c.quantity <= 0:
+            continue
+        if deck.in_deck(c) and deck.is_commander(c):
+            head.append(_edh_line(c, commander=True))
+            if c.name not in commanders:
+                commanders.append(c.name)
+        elif deck.in_deck(c):
+            main.append(_edh_line(c))
+        elif any(cat.strip().casefold() in _EDH_TOKEN_CATEGORIES for cat in c.categories):
+            tokens.append(_edh_line(c))
+        else:
+            side.append(_edh_line(c))
+    if not head:
+        # With no marked commander EDHPlay's parser takes a first line of quantity 1 as the
+        # commander; a line of several copies first (a basic land, usually) keeps it from that.
+        several = next((i for i, line in enumerate(main) if not line.startswith("1 ")), None)
+        if several:
+            main.insert(0, main.pop(several))
+    text = "\n".join(head + main) + "\n"
+    if side:
+        text += "\nSideboard\n" + "\n".join(side) + "\n"
+    if tokens:
+        text += "\nTokens\n" + "\n".join(tokens) + "\n"
+    return text, commanders
 
 
 def to_mtgo_dek(deck: Deck) -> str:

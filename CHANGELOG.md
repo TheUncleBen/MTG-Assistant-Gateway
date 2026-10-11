@@ -7,6 +7,34 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.25] - 2026-10-11
+
+Deck sync and online play. Archidekt is the master copy of every deck: the gateway now checks it on
+its own, read-only, and marks a waiting proposal out of date as soon as its deck changes elsewhere.
+EDHPlay is the online table, one press away. No new images; the database stays at schema 12.
+
+### Added
+- Automatic deck sync (`MTG_DECK_SYNC_MINUTES`, 30 by default; `0` turns it off). Opening the app
+  (any signed-in page, at most once in 5 minutes) checks the member's decks on Archidekt, and every
+  30 minutes the gateway checks members who have proposals waiting. A check is one deck-list
+  request; a deck is read only when it has a waiting proposal and Archidekt says it changed (at most
+  five per check). The sync only reads, waits until no member's Archidekt work is running, leaves a
+  deck alone while it is being applied or restored, and uses none of the members' own limits.
+- A waiting proposal whose deck changed after it was made (on archidekt.com, in another app, or by
+  another change applied here) is marked **out of date** at once: on its review page, in the
+  Proposals list, and as `out_of_date` / `out_of_date_since` in `get_proposal` and
+  `list_my_proposals`, whose `next_step` says Apply would be refused. Apply itself is unchanged: it
+  re-reads the deck and refuses a changed one, marked or not.
+- "Play on EDHPlay" on the deck page copies the whole deck in EDHPlay's import format and opens
+  edhplay.com in a new tab, or the phone's browser in the app: the commander first, marked the way
+  EDHPlay's import recognises, every card with its printing, then a Sideboard section with
+  everything Archidekt keeps outside the deck (EDHPlay has no maybeboard) and a Tokens section. A
+  note says what to press on EDHPlay.
+
+### Changed
+- `MTG_WRITES_ENABLED=false` now also blocks deleting a deck and creating a folder by hand (the deck
+  settings page and the Folders page), as it already blocked every proposal.
+
 ## [0.7.24] - 2026-10-11
 
 Consolidation: one owner per job instead of several copies, the bugs a review of 0.7.14 to 0.7.23

@@ -537,7 +537,9 @@ can be applied. The code default is off; the example env files
   variables in Portainer and update the stack. Any other value, or leaving it
   unset, keeps writes off.
 - **To turn writes off:** set it to `false` (or remove it) and update the
-  stack. It kicks in when the service restarts.
+  stack. It kicks in when the service restarts. Since 0.7.25 it also covers
+  deleting a deck and creating a folder by hand (the deck settings page and
+  the Folders page).
 
 With writes off, people can still sign in, link Archidekt, use research
 tools, and make and review proposals. Applying returns "Deck writes are
@@ -706,6 +708,26 @@ project) from your server's address. The gateway doesn't hide or disguise
 where they come from. The admin page's System card shows these limits and
 how many requests were sent, answered from the cache, retried and slowed
 down since the gateway started.
+
+**Deck sync.** Archidekt has no webhooks, so the gateway asks it
+(`MTG_DECK_SYNC_MINUTES`, 30 by default; `0` turns it off). Every 30 minutes
+it checks the members who have proposals waiting, and a member opening the
+app (any signed-in page) starts a check for them at most once in 5 minutes.
+A check is one deck-list request; a deck is read only when it has a waiting
+proposal and its "updated" time on Archidekt moved, at most five per check.
+A waiting proposal whose deck no longer matches is marked **out of date** on
+its review page, in the Proposals list and in `get_proposal` /
+`list_my_proposals`. The sync only reads: it never writes to Archidekt and
+never changes, applies, rejects or deletes a proposal or snapshot (Apply
+still re-reads the deck and decides for itself). Before each request it
+waits until no member's Archidekt work is running or queued and gives up
+until the next check if that takes more than 10 seconds; a deck being
+applied or restored is left alone; it uses none of the member limits below;
+a failure ends that check quietly. The out-of-date marks live in memory and
+are rebuilt by the first checks after a restart (two minutes after start).
+Not yet confirmed live: whether Archidekt moves a deck's "updated" time on
+every card change. If it doesn't, a change can go unmarked, and Apply still
+refuses the proposal as before.
 
 Each member also has their own limits, so one looping assistant can't keep
 Archidekt busy for everyone:

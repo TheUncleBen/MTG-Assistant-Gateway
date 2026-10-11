@@ -1997,3 +1997,62 @@
     });
   }
 })();
+
+/* Play on EDHPlay (R-154): the press copies the whole deck in EDHPlay's import format (the
+   data-list text, made by export_formats.to_edhplay) and lets the link open edhplay.com in a new
+   tab (in the Android app, the phone's browser). The copy is made inside the press itself, the
+   way the app's WebView allows it; a short note says what to do next on EDHPlay. */
+(function () {
+  "use strict";
+  function copyNow(text) {
+    // execCommand first: it works inside the press in the app's WebView, where the async
+    // clipboard API may be refused; the async API is the fallback for browsers that dropped it.
+    var area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.top = "-1000px";
+    document.body.appendChild(area);
+    area.select();
+    var ok = false;
+    try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+    area.remove();
+    if (ok) return Promise.resolve(true);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).then(function () { return true; }, function () { return false; });
+    }
+    return Promise.resolve(false);
+  }
+  function note(text, bad) {
+    var old = document.querySelector(".edhplay-toast");
+    if (old) old.remove();
+    var t = document.createElement("div");
+    t.className = "toast deck-toast edhplay-toast" + (bad ? " error" : "");
+    t.setAttribute("role", bad ? "alert" : "status");
+    var msg = document.createElement("span");
+    msg.className = "msg";
+    msg.textContent = text;
+    t.appendChild(msg);
+    var x = document.createElement("button");
+    x.type = "button";
+    x.className = "close icon-only";
+    x.setAttribute("aria-label", "Dismiss");
+    x.textContent = "×";
+    x.addEventListener("click", function () { t.remove(); });
+    t.appendChild(x);
+    document.body.appendChild(t);
+    if (!bad) setTimeout(function () { t.remove(); }, 12000);
+  }
+  document.addEventListener("click", function (e) {
+    var link = e.target.closest && e.target.closest("a[data-edhplay]");
+    if (!link) return;
+    var commander = link.getAttribute("data-commander") || "";
+    var next = " On EDHPlay, choose Create Deck" + (commander ? " with " + commander + " as the commander" : "")
+      + ", then Import: paste the list and press Import & Replace.";
+    copyNow(link.getAttribute("data-list") || "").then(function (ok) {
+      if (ok) note("Deck list copied." + next);
+      else note("The deck list couldn't be copied here. Use More, then Export deck, to copy it.", true);
+    });
+    // the link itself opens EDHPlay (target=_blank): nothing is prevented
+  });
+})();
