@@ -102,7 +102,7 @@ from .oidc import OIDCClient
 from .pages import BROWSER_CLIENT_ID, SESSION_COOKIE, _csrf, add_browser_routes, browser_session
 from .plugin_page import CONNECTOR_ICON_PATH, CONNECTOR_ICON_PX, SERVER_DESCRIPTION, add_plugin_routes
 from .prices import DailyJobs, PriceService
-from .reports import ReportService
+from .reports import ReportService, sim_mode
 from .scan import add_scan
 from .schemas import (
     AbOptions,
@@ -1334,8 +1334,9 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "Use it for 'what changed since this snapshot', 'my deck versus the EDHREC average deck' or "
             "'this precon versus my build'. simulate=true adds a paired goldfish A/B from the research "
             "service (both decks played game for game under the same seeds; per-metric deltas with "
-            "confidence intervals and significance), not stored. Does not touch Archidekt beyond reading "
-            "the decks. This is the one tool for deck differences, precon upgrades and A/B simulations. "
+            "confidence intervals and significance; two Commander decks or two 60-card decks), not "
+            "stored. Does not touch Archidekt beyond reading the decks. This is the one tool for deck "
+            "differences, precon upgrades and A/B simulations. "
             "For Forge games of two decks, run run_deck_report on each with the same options.seed."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
@@ -1358,9 +1359,9 @@ def build_mcp_server(state: AppState) -> MCPServer:
     ) -> dict[str, object]:
         unread: dict[str, list[str]] = {}
 
-        def as_list(side: str, text: str) -> tuple[Any, str, bool]:
+        def as_list(side: str, text: str) -> tuple[Any, str, str]:
             """The pasted list's counts, the mainboard text the simulators read (commander first,
-            no headers, sideboard left out) and whether it names a commander."""
+            no headers, sideboard left out) and how the simulator plays it (reports.sim_mode)."""
             missed: list[str] = []
             cards = parse_decklist(text, missed)
             if missed:
@@ -1369,10 +1370,9 @@ def build_mcp_server(state: AppState) -> MCPServer:
             for c in cards:
                 if c.zone == "main":  # one name over several printings counts once, summed
                     counts[c.name] = counts.get(c.name, 0) + c.quantity
-            has_commander = any("Commander" in c.categories for c in cards if c.zone == "main")
-            return counts, to_text(cards), has_commander
+            return counts, to_text(cards), sim_mode(deck_stats.compute_from_text(cards))
 
-        async def load(side: str, ref: str | None, text: str | None) -> tuple[Any, str, bool]:
+        async def load(side: str, ref: str | None, text: str | None) -> tuple[Any, str, str]:
             if ref and text:
                 raise DeckError("invalid", f"give {side} or {side}_list, not both")
             if text:
@@ -1382,7 +1382,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
                 raise DeckError("invalid", f"give {side} (a deck id, link or snapshot id) or {side}_list")
             snap = _own_snapshot(_sub(), ref)
             if snap is not None:
-                return snap, deck_to_text(snap), bool(deck_stats.compute(snap)["commanders"])
+                return snap, deck_to_text(snap), sim_mode(deck_stats.compute(snap))
             try:
                 deck_id = _clean_deck_id(ref)
             except DeckError as exc:
@@ -1396,7 +1396,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
                     f"ids; pass a pasted list as {side}_list",
                 ) from exc
             deck = await state.decks.get_any_deck(_sub(), deck_id)
-            return deck, deck_to_text(deck), bool(deck_stats.compute(deck)["commanders"])
+            return deck, deck_to_text(deck), sim_mode(deck_stats.compute(deck))
 
         try:
             deck_a, text_a, cmd_a = await load("a", a, a_list)
@@ -1414,7 +1414,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
         if simulate:
             try:
                 ab = await state.reports.ab(
-                    _sub(), text_a, text_b, games=games, options=dumped(options), commanders=(cmd_a, cmd_b)
+                    _sub(), text_a, text_b, games=games, options=dumped(options), modes=(cmd_a, cmd_b)
                 )
             except DeckError as exc:
                 return _tool_error(exc)
@@ -1435,8 +1435,12 @@ def build_mcp_server(state: AppState) -> MCPServer:
         title="Run and store a deck report",
         description=(
             "Test a deck and keep the numbers: deck_stats plus, when the research service is available, a "
-            "goldfish simulation (games, default 300) and a decklist validation. deck_ref is an Archidekt "
-            "id or URL, a snapshot id, or a pasted decklist (as parse_decklist reads it; the commander "
+            "goldfish simulation (games, default 300) and a decklist validation. A deck with a commander "
+            "plays from the command zone at 40 life; a deck without one and with at least 60 cards "
+            "(Standard, Modern, Pioneer, Legacy, Pauper and the like) plays a 60-card game: 7-card "
+            "London mulligan with no free one, 20 life, on the play, sideboard left out. deck_ref is an "
+            "Archidekt id or URL, a snapshot id, or a pasted decklist (as parse_decklist reads it; the "
+            "commander "
             "marked [Commander] or *CMDR*). A deck's report is stored for the user (see "
             "list_deck_reports and the gateway's History page) so results can be compared over time; a "
             "pasted list is simulated the same way but returned with stored=false and not kept. "
@@ -1444,8 +1448,9 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "returns the existing one (not when options are given). options passes the simulator's knobs "
             "through (annotations from goldfish_annotate, combos, seed, until_turn, opponents, mulligan). "
             "When the gateway runs Forge, a stored report also gets a forge section: real games against "
-            "Commander precons, played in the background, one run at a time per member (a report made "
-            "while an earlier one is still playing is queued behind it, state queued with position and "
+            "Commander precons (Commander decks only), played in the background, one run at a time per "
+            "member (a report made while an earlier one is still playing is queued behind it, state queued "
+            "with position and "
             "waiting_for, and starts by itself; at most two wait, then a report gets no Forge games), "
             "with the seed Forge used, the cards it could not play in not_played and forge_status "
             "(state, games_done of games_requested, expected_seconds). Poll with get_deck_report "
@@ -1494,9 +1499,10 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "The user's stored deck reports, newest first, with the trend numbers (card count, average mana "
             "value, lands, price, salt) per report. Filter by deck_id. With deck_id and two or more "
             "reports, trend is the deck's History-page trend: its last 60 reports oldest first (series, "
-            "with the goldfish speed numbers: commander median cast turn, median 40-damage turn, share "
-            "of games dealing 40 damage by until_turn) and per metric the first and latest values, "
-            "their dates and the change; otherwise null. get_deck_report returns one in full."
+            "with the goldfish speed numbers: commander median cast turn, median turn lethal damage was "
+            "dealt (40, or 20 in a 60-card game), share of games dealing it by until_turn) and per "
+            "metric the first and latest values, their dates and the change; otherwise null. get_deck_report "
+            "returns one in full."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": False},
     )

@@ -404,8 +404,16 @@ class Handler(BaseHTTPRequestHandler):
             self.send(
                 200,
                 {
+                    # newest first, with each precon's estimated bracket (precons.py) when the
+                    # image has one, so the gateway can seat opponents of the deck's bracket
                     "precons": [
-                        {"name": p["name"], "release_date": p["release_date"], "commander": p["commander"]}
+                        {
+                            "name": p["name"],
+                            "release_date": p["release_date"],
+                            "commander": p["commander"],
+                            **({"bracket": p["bracket"]} if isinstance(p.get("bracket"), int) else {}),
+                            **({"game_changers": p["game_changers"]} if p.get("game_changers") else {}),
+                        }
                         for p in PRECONS
                     ]
                 },

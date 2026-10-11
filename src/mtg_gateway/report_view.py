@@ -38,7 +38,9 @@ APPROXIMATIONS = {
     "filter-ignored": "Mana filtering ignored",
     "ramp-widened": "Ramp counted as finding a land",
 }
-# The milestones the simulator tracks as "reached by turn N", in plain words and plot order.
+# The milestones the simulator tracks as "reached by turn N", in plain words and plot order. A
+# 60-card game (no commander, 20 life) has no commander milestones and its kill is 20 damage.
+COMMANDER_MILESTONES = ("commander_cast", "cmdr21")
 MILESTONES = (
     ("commander_cast", "Commander cast"),
     ("table_lethal", "Lethal power on board"),
@@ -245,6 +247,7 @@ def parse_goldfish(block: Any, *, deck_size: int | None = None) -> dict[str, Any
     out: dict[str, Any] = {
         "ok": ok,
         "commander": None,
+        "format": None,  # "constructed" for a 60-card game
         "deck_size": deck_size,
         "games": None,
         "seed": None,
@@ -276,6 +279,9 @@ def parse_goldfish(block: Any, *, deck_size: int | None = None) -> dict[str, Any
                 out["deck_size"] = _int(val.split()[0]) or out["deck_size"]
             elif key == "commander" and val:
                 out["commander"] = val
+            elif key == "format" and val:
+                # "Format: 60-card (no commander, 20 life, on the play)"
+                out["format"] = "constructed" if val.startswith("60-card") else val
             elif key == "run_id" and val:
                 out["run_id"] = val
             else:
@@ -392,6 +398,11 @@ def _cumulative(hist: Any, turns: int) -> list[float | None]:
     return [sum(n for t, n in counts.items() if t <= turn) for turn in range(1, turns + 1)]  # type: ignore[misc]
 
 
+def kill_damage(g: dict[str, Any]) -> int:
+    """The damage the simulation's kill stands for: the opponent's starting life."""
+    return 20 if g.get("format") == "constructed" else 40
+
+
 def tiles_for(g: dict[str, Any]) -> list[dict[str, Any]]:
     """The headline numbers: label, value, interval, note."""
     m = g.get("metrics") or {}
@@ -400,7 +411,7 @@ def tiles_for(g: dict[str, Any]) -> list[dict[str, Any]]:
     cc = m.get("commander_cast") if isinstance(m.get("commander_cast"), dict) else {}
     reached = _rate(cc.get("reached_pct"))
     med = cc.get("median_among_reached")
-    if med is not None or reached:
+    if (med is not None or reached) and g.get("format") != "constructed":
         out.append(
             {
                 "label": "Commander cast (median turn)",
@@ -409,7 +420,7 @@ def tiles_for(g: dict[str, Any]) -> list[dict[str, Any]]:
                 "note": f"cast in {_pct(reached['value'])} of games by turn {turns}" if reached else "",
             }
         )
-    for key, label in (("kill", "40 damage dealt"), ("table_lethal", "Lethal power on board")):
+    for key, label in (("kill", f"{kill_damage(g)} damage dealt"), ("table_lethal", "Lethal power on board")):
         d = m.get(key) if isinstance(m.get(key), dict) else {}
         r = _rate(d.get("reached_pct"))
         if r:
@@ -469,7 +480,8 @@ def tiles_for(g: dict[str, Any]) -> list[dict[str, Any]]:
 
 def speed_numbers(block: Any) -> dict[str, Any]:
     """The simulation's speed numbers a deck's report trend follows (reports.TREND_METRICS):
-    the commander's median cast turn, the median turn 40 damage was dealt when it was, and the
+    the commander's median cast turn, the median turn lethal damage (40, or 20 in a 60-card game)
+    was dealt when it was, and the
     share of games (in percent) that dealt it by the last simulated turn (``until_turn``). Only
     what a successful simulation stored; a missing number is None, never guessed."""
     g = parse_goldfish(block)
@@ -605,6 +617,10 @@ def charts_for(g: dict[str, Any]) -> list[tuple[str, str, str]]:
     if turns and games:
         series = []
         for key, label in MILESTONES:
+            if g.get("format") == "constructed" and key in COMMANDER_MILESTONES:
+                continue
+            if key == "kill":
+                label = f"{kill_damage(g)} damage dealt"
             d = m.get(key) if isinstance(m.get(key), dict) else None
             if d and isinstance(d.get("histogram"), dict):
                 counts = _cumulative(d["histogram"], turns)
@@ -820,6 +836,13 @@ def forge_lines(f: dict[str, Any]) -> list[str]:
             out.append(f"Draws: {res['draws']}{slow}.")
         if res.get("average_game_seconds") is not None:
             out.append(f"Average game: {res['average_game_seconds']} seconds.")
+    # Why these opponents (forge.pick_opponents): the deck's bracket, where it came from, and
+    # each precon's bracket, or the fallback to the newest precons.
+    choice = f.get("opponent_choice") if isinstance(f.get("opponent_choice"), dict) else {}
+    if choice.get("note"):
+        rated = choice.get("opponent_brackets") if isinstance(choice.get("opponent_brackets"), dict) else {}
+        seated = ", ".join(f"{front_face(n)} (bracket {b})" for n, b in rated.items())
+        out.append(f"Opponents: {choice['note']}" + (f" Seated: {seated}." if seated else ""))
     if f.get("seed") is not None:
         chosen = " (chosen by the gateway; pass it as options.seed to replay these games)"
         out.append(f"Seed: {f['seed']}{chosen if f.get('seed_source') == 'gateway' else ''}.")

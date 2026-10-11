@@ -232,7 +232,7 @@ services:
   # the gateway. It starts Java only while a simulation runs, one at a time, and needs no internet.
   forge:
     profiles: ["forge"]
-    image: ${FORGE_IMAGE:-ghcr.io/theuncleben/mtg-assistant-forge}:${FORGE_TAG:-2.0.15-mag1}
+    image: ${FORGE_IMAGE:-ghcr.io/theuncleben/mtg-assistant-forge}:${FORGE_TAG:-2.0.15-mag2}
     restart: unless-stopped
     logging:
       driver: json-file

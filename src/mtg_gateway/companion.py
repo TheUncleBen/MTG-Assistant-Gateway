@@ -28,6 +28,7 @@ from .busy import busy_json_response, busy_response, busy_text_response
 from .decklist import DecklistError, parse_decklist
 from .deckpage import (
     DECK_CSS,
+    GOLDFISH_CSS,
     LIST_ORDERS,
     VIEWS,
     card_image,
@@ -37,6 +38,7 @@ from .deckpage import (
     deck_list_html,
     deck_page_html,
     featured,
+    goldfish_page_html,
     money,
     precon_by_label,
 )
@@ -1809,6 +1811,43 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         if not deck_id.isdigit():
             return RedirectResponse("/decks", status_code=303)
         return RedirectResponse(f"https://archidekt.com/playtester-v2/{deck_id}", status_code=303)
+
+    @server.custom_route("/decks/{deck_id}/goldfish", methods=["GET"], include_in_schema=False)
+    async def goldfish_page(request: Request) -> Response:
+        """Goldfish by hand: the deck shuffled, an opening hand with London mulligans, then draw,
+        play, tap and next turn, played in the browser (static/goldfish.js) on the deck read for
+        this page. The page sends nothing back and keeps nothing."""
+        deck_id = request.path_params["deck_id"]
+        sub, sid = browser_session(state, request)
+        if not sub:
+            return login_redirect(f"/decks/{deck_id}/goldfish")
+        try:
+            deck = await decks.get_any_deck(sub, deck_id)
+        except DeckError as exc:
+            if busy := busy_response(exc, request, page, sub=sub, sid=sid):
+                return busy
+            return page(
+                "Deck not found",
+                f"<div class='panel'><p>{_esc(exc)}</p>"
+                "<a class='btn' href='/decks'>Back to my decks</a></div>",
+                sub=sub,
+                sid=sid,
+                status=404 if exc.kind == "not_found" else 400,
+            )
+        return page(
+            f"Goldfish: {deck.name or deck.id}",
+            goldfish_page_html(deck),
+            sub=sub,
+            sid=sid,
+            two_pane=True,
+            current="/decks",
+            csp=DECK_CSP,
+            scripts=True,
+            heading=False,
+            deck_css=True,  # the card viewer's styles
+            extra_css=GOLDFISH_CSS,
+            extra_scripts=("goldfish.js",),
+        )
 
     @server.custom_route("/decks/{deck_id}/compare", methods=["GET"], include_in_schema=False)
     async def compare_page(request: Request) -> Response:

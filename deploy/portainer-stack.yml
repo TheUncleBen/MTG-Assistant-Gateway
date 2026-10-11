@@ -260,7 +260,7 @@ services:
   # unmodified). Off by default (FORGE_REPLICAS=0). It starts Java only while a simulation runs,
   # one at a time, under a CPU and memory cap, and is on a private network with no way out.
   mtg-assistant-forge:
-    image: ${FORGE_IMAGE:-ghcr.io/theuncleben/mtg-assistant-forge}:${FORGE_TAG:-2.0.15-mag1}
+    image: ${FORGE_IMAGE:-ghcr.io/theuncleben/mtg-assistant-forge}:${FORGE_TAG:-2.0.15-mag2}
     logging:
       driver: json-file
       options:
