@@ -360,7 +360,7 @@ address and shared CI runners hit that limit. As a fallback for anything a
 build still fetches from Docker Hub, the image jobs sign in to Docker Hub when
 the repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (a
 read-only access token) exist; without them the step is skipped. The
-Mystic Forge image is built once per tag (`1.3.2-mag3`) and not rebuilt by
+Mystic Forge image is built once per tag (`1.3.2-mag4`) and not rebuilt by
 later releases; a manual run of its workflow from `main` rebuilds it with
 current base patches. GitHub
 Actions are pinned by commit, Python dependencies by version
@@ -512,9 +512,9 @@ licence, from upstream). It's built from upstream commit
 rules, precon and goldfish tools, and the gateway relays an allowlisted set
 of them to signed-in users.
 
-Upstream code is unchanged apart from four small patches in
-`docker/mystic-forge/patches/`, which is where the `-mag3` in the image tag
-`1.3.2-mag3` comes from:
+Upstream code is unchanged apart from six small patches in
+`docker/mystic-forge/patches/`, which is where the `-mag4` in the image tag
+`1.3.2-mag4` comes from:
 
 - `0001-archidekt-null-categories.patch`: Archidekt sends
   `"categories": null` for cards that never got a category (it happens in
@@ -541,6 +541,16 @@ Upstream code is unchanged apart from four small patches in
   name are found by the goldfish tools; precon lists add up split basic land
   lines; and the simulation's honesty report no longer files played lands
   and mana rocks as low-impact.
+- `0005-scryfall-default-printing-and-finish.patch`: a card given without a
+  set used Scryfall's newest printing, which can be a preview that is not out
+  yet (no paper, no prices). Price lists and `format_archidekt` now use the
+  newest printing already out on paper, in the finish asked for, and say when
+  a card does not come in that finish.
+- `0006-goldfish-skipped-copies-and-named-printing.patch`: the simulation's
+  "not recognized by Scryfall, skipped" warning says how many copies of each
+  card were left out ("2 Foo"), and `scryfall_named` without a set shows the
+  same printing as the other lookups (the newest out on paper) and says which
+  one it is.
 
 What to know about it:
 
@@ -571,7 +581,7 @@ What to know about it:
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `MF_IMAGE` | `ghcr.io/theuncleben/mtg-assistant-mysticforge` | Image. A fork that builds its own images sets `ghcr.io/<owner>/mtg-assistant-mysticforge` |
-| `MF_TAG` | `1.3.2-mag3` | Image tag |
+| `MF_TAG` | `1.3.2-mag4` | Image tag |
 | `MF_PUBLIC_BASE` | `http://mtg-assistant-mysticforge:8000` | Base URL Mystic Forge uses in links (its own default points at the upstream author's site, so keep this) |
 | `MF_NODE` | none, required | Hostname of the node it runs on. The stack won't start without it |
 | `MF_MEMORY_LIMIT` | `512M` | Memory cap |

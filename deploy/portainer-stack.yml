@@ -179,7 +179,7 @@ services:
   # Only the gateway can talk to it: it is on this stack's private network, not on the shared one
   # the reverse proxy and other containers use. Do not add an NPM proxy host for it.
   mtg-assistant-mysticforge:
-    image: ${MF_IMAGE:-ghcr.io/theuncleben/mtg-assistant-mysticforge}:${MF_TAG:-1.3.2-mag3}
+    image: ${MF_IMAGE:-ghcr.io/theuncleben/mtg-assistant-mysticforge}:${MF_TAG:-1.3.2-mag4}
     # Docker keeps container logs forever by default (json-file max-size -1); cap them so a
     # small disk (a Raspberry Pi SD card) can't fill up.
     logging:
