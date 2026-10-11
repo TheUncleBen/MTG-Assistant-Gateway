@@ -7,6 +7,140 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.22] - 2026-10-11
+
+Fixes from the owner's 0.7.21 checklist, an adversarial QA run from ChatGPT and the live test of
+0.7.21. **Update the research service image to `1.3.2-mag3` when you update the gateway** (the
+deploy files already name it).
+
+### Added
+- A deck report made while your previous Forge run is still playing now waits in a queue (up to
+  two) and starts by itself when the run ahead finishes, also after a gateway restart. The report
+  page and `get_deck_report` show its place, the report it waits for and the expected time (from
+  the measured game time on your server).
+- `get_deck_report` takes `view: "forge"` for a small progress answer, and every report carries
+  `forge_status`.
+- `get_deck` card rows without a category say which category archidekt.com shows them under
+  (`shown_under`).
+- Guided setup for ChatGPT: Copy buttons for the connector name (your `MTG_SERVER_NAME`),
+  description and URL, and a download button for a connector icon small enough for ChatGPT (under
+  10 KB) at `/static/gateway-icon-connector.png`, which needs no sign-in. The connector's MCP icon
+  list starts with this small PNG.
+- The skill page's ChatGPT instructions have a Copy button.
+- Android app: inside the app, the Account page has an App card with the installed app version,
+  Check for app updates and Open a copied link. It replaces "Get the Android app" there.
+- Android app: the app looks for an update each time it starts and right after you sign in (at
+  most once an hour), as well as when you come back to it after 12 hours.
+- Android app: Open a copied link opens a copied link to your gateway or an archidekt.com deck
+  link.
+- TROUBLESHOOTING: what "bind source path does not exist" means on Swarm, and the fix for an NPM
+  502 when the proxy isn't on the gateway's network.
+
+### Changed
+- Deck legality follows archidekt.com's own checks for every format, and the deck page's Legality
+  chip and panel list every failing rule with its cards: deck size per format, sideboard rows not
+  counted in the deck, copies counted by name across printings and the sideboard, legendary
+  commander and matching partner kinds, Pauper EDH commanders, Duel Commander's
+  banned-as-commander list, Canadian Highlander points, companion conditions, and the bracket set
+  on the deck.
+- Mana sources count only the commander's colours (plus colourless) in Commander formats.
+- Every Forge run records the seed it used.
+- `archidekt_bracket` is described as the bracket set on the deck, and the estimate as a floor
+  counting only game changers, mass land denial, extra turns, tutors and two-card combos.
+- When no set is given, card lookups (`resolve_cards`, `save_scan_session`, the price list,
+  `format_archidekt` with set codes) use the newest printing that is already released and sold on
+  paper, not Scryfall's newest printing, which can be an unreleased preview. Skipped newer
+  printings are listed in `newer_printings`.
+- `card_printings` lists released paper printings first and marks previews (`unreleased`) and
+  printings not sold on paper (`paper: false`); adds `matching_total`, `returned_count` and
+  `sets_scope`.
+- Commander card searches (`scryfall_search` with a colour identity, `commander:`,
+  `f:commander` or `is:commander`) leave out cards that exist only on Arena or MTGO. Add a
+  `game:` term to choose otherwise.
+- Semi-automatic approval mode says exactly what it applies without asking: small deck or
+  collection edits (up to the row limit, at most 4 copies a row, no commander change) and private
+  copies of a deck (clones). A new deck from a list, restores, deck details, bigger edits and
+  account actions still wait for your press.
+- Every tool refusal carries an `error_code` (`NOT_FOUND`, `BUSY`, `RATE_LIMITED`,
+  `UNAVAILABLE`, `INVALID_ARGUMENT`, `PERMISSION_DENIED`, `FAILED_PRECONDITION`, …) and
+  `retryable`, plus `retry_after` when known (collection tools included). Existing `error` values
+  are unchanged.
+- `parse_deck_export` also reads `Count`, `Set` and `Categories` columns, and returns
+  `unknown_columns` naming any column it did not read.
+- The Mystic Forge image tag is `1.3.2-mag3`; deploy defaults and docs are updated.
+- Every guided-setup page (Claude, Claude Code, ChatGPT, Codex, the skill page and the Android app
+  page) is numbered steps with one action each; the plain-text `install.md` matches.
+- The admin page's "Removed-member clean-up" row says what to do next in every state, including
+  each reason a check failed. IDP-AUTHENTIK.md section 12 is one start-to-finish procedure with a
+  table of what the row says and how to fix it.
+- CONNECT.md explains why Claude shows a generic tile for custom connectors (developer reports;
+  nothing a server can set today). DEPLOY.md says the two Forge URLs are alternatives, not two
+  steps.
+- Android app: long-pressing the app icon shows My decks, Scan cards and Proposals from install.
+  They open that page on your saved gateway (or the address screen before setup).
+- Deck page: the stack handle has a 44 px finger target, and dragging a stack in the Text and
+  Brewer views no longer causes extra full-page relayouts.
+
+### Fixed
+- The in-chat proposal card no longer shows Approve and Reject for a proposal that was already
+  rejected, applied or expired: it checks the proposal when shown and says what happened and who
+  closed it. A press on a closed proposal shows its state instead of a bare refusal.
+- A refusal to apply or reject a closed proposal includes its current state, when it closed and
+  who closed it. `assistant_may_apply` is false once a proposal is no longer pending.
+- A proposal rejected by the assistant's own `reject_proposal` is no longer described as
+  "Rejected by the user"; the result and the review page say whether the assistant, the card, the
+  review page, the API or an app disconnect closed it.
+- A second report no longer ends up with no Forge games because an earlier run was still going.
+- `validate_decklist` no longer says PASSED for a list with duplicate cards: a Gateway checks
+  section flags them (also in deck reports).
+- Stored reports no longer keep the simulation text twice (about half the size).
+- A set and collector number that are a different card from the name (Island with LTC #284) come
+  back as `conflict`: listed for review, kept out of the decklist and the changes, unticked and
+  labelled on the card picker and the scan page; `save_scan_session` stores them as unresolved.
+- `format_archidekt` no longer marks a card foil (`*F*`) on a printing without foil: it picks a
+  printing that has the finish, or warns which finishes exist. `resolve_cards` no longer claims
+  foil there either.
+- `scryfall_price` says when a printing exists but not in the requested finish, instead of "No
+  results found".
+- In the price list, a line naming a printing no longer stands in for a line of the same card that
+  names none.
+- Archidekt's own `{noDeck}` and `{noPrice}` category flags (as in
+  `1x Arcane Signet [Maybeboard{noDeck}{noPrice}]`) are kept: such a card is read as a maybeboard
+  card, not counted in the deck, and a new-deck proposal lists it apart.
+- In a new-deck proposal, sideboard and maybeboard rows from a pasted list, a CSV or the gateway's
+  JSON no longer count toward the deck's card total or its deck-size warning.
+- A trailing `*CMDR*` on a decklist line marks the commander in `parse_decklist`, `deck_stats`,
+  `run_deck_report` and `compare_decks`, as `goldfish_annotate` already did.
+- Lines such as `-1 Island` or `1.5 Island` are refused with the line quoted, instead of being
+  read as a card called "-1 Island".
+- `parse_deck_export`'s `decklist_text` keeps each card's categories (for example `[Ramp]`) and
+  keeps etched rows etched.
+- `goldfish_annotate` works on your own private Archidekt decks: the gateway reads the deck with
+  your linked account, as `get_deck` does. When a deck can't be found, the message says it may be
+  someone else's private deck or needs your account linked.
+- Simulation text no longer says "the stored copy is under History" for pasted lists that were
+  never stored.
+- Research service image 1.3.2-mag3 (patches 0004 and 0005): `edhrec_precon_upgrade` shows real
+  percentages again and names the precon's own commander apart from the commanders of upgraded
+  builds; `edhrec_salt` shows salt scores; `edhrec_top_cards` shows section headings, says the
+  limit is per section and that the period is ignored when a colour is given;
+  `edhrec_recommendations` only suggests cutting cards you gave it; `spellbook_card_combos` no
+  longer says "None total"; `precon_decklist` and `precon_export` merge split basic land lines;
+  goldfish tools find double-faced cards given by their full name, and annotate says how many
+  copies were skipped; the honesty report no longer lists played lands and mana rocks as
+  low-impact; land drops per turn are named as such (new `avg_land_drops_by_turn`;
+  `avg_lands_by_turn` kept).
+- Deck page: dragging a stack's handle no longer reshuffles the page under the pointer. A bar
+  shows where the stack will land, its name follows the pointer, and the stack moves once you let
+  go; Escape puts it back.
+- Deck page: holding a stack or a card near the top or bottom of the window scrolls the page, so
+  stacks and categories off screen can be reached by mouse or finger.
+- Deck page on Android: holding a card no longer sometimes opens the card menu by itself, which
+  used to scroll the page instead of moving the card.
+- Android app: when a share can't be opened, the message says where the link went. A Discord
+  message link gets its own explanation (share or copy the archidekt.com link itself). Shares that
+  put the link in HTML text or the title now open too.
+
 ## [0.7.21] - 2026-10-10
 
 ### Security
