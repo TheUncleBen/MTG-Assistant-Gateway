@@ -3,7 +3,8 @@
 The gateway lists an explicit set of Mystic Forge tools as its own and forwards
 calls to the internal Mystic Forge MCP endpoint. Stateful or passphrase-keyed
 tools (watchlists, stored goldfish reports, interactive games, price history)
-are not exposed until the gateway can record ownership for them.
+are not exposed; the gateway keeps watchlists and price history itself, per
+member (prices.py).
 """
 
 from __future__ import annotations

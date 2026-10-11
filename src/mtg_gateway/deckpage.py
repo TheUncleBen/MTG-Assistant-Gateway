@@ -2084,6 +2084,9 @@ html.cardview-open{overflow:hidden}
 .cardview .rulings time{font-weight:700;color:var(--text-muted);font-size:.82rem;display:block}
 .cardview .rulings p{margin:.1rem 0;line-height:1.45;overflow-wrap:anywhere}
 .cardview .rulings .src{font-size:.8rem}
+.cardview .prices table{border-collapse:collapse;font-variant-numeric:tabular-nums;margin:.3rem 0}
+.cardview .prices th,.cardview .prices td{padding:.15rem .6rem .15rem 0;text-align:left;
+  border-bottom:1px solid var(--border-soft)}
 .cardview .acts{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:auto;padding-top:.25rem}
 .cardview .acts .btn,.cardview .acts button{margin:0;flex:1 1 auto}
 @media (max-width:700px){

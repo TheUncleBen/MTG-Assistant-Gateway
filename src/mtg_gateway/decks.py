@@ -1449,6 +1449,9 @@ class DeckService:
         self.archidekt_budget = RateBudget(settings.archidekt_calls_per_10_min)
         # sub -> {matched card name (lower case): what the scan read}; set when scanning is on
         self.guessed_names: Callable[[str], dict[str, str]] | None = None
+        # (member, proposal id) for each proposal an assistant saves; set by app.py to notify the
+        # member when it waits for their approval (notify.py). Never stops the proposal.
+        self.on_proposal_saved: Callable[[str, str], None] | None = None
         # Set by collection.py: applies a ``collection`` proposal's stored changes against the
         # member's Archidekt Collection and returns the result rows (DeckService itself knows only
         # decks). None while the collection pages are not loaded.
@@ -2276,6 +2279,11 @@ class DeckService:
         if not saved:
             self._room_for_proposal(row["owner_sub"])
             raise DeckError("rate_limited", "Too many pending proposals; apply or reject some first.")
+        if self.on_proposal_saved and current_client.get() not in (None, BROWSER_CLIENT, ADMIN_CLIENT):
+            try:
+                self.on_proposal_saved(row["owner_sub"], row["id"])
+            except Exception:
+                logger.exception("proposal notification failed")
 
     def list_proposals(self, sub: str, *, full: bool = False, **narrow: Any) -> list[dict[str, Any]]:
         """Newest first; ``narrow`` is passed to the database (deck_id, kinds, states, search,

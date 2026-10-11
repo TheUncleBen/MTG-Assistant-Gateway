@@ -109,6 +109,9 @@ class ReportService:
         # Held from the one-run-per-member check until the new run is saved (one gateway process).
         self._forge_start_lock = asyncio.Lock()
         self.min_interval = min_interval
+        # (member, report id) once a report is finished, its Forge games included; set by app.py
+        # to notify the member (notify.py).
+        self.on_finished: Any = None
         # One run at a time per (member, deck): a request that arrives while one runs waits for
         # it and then reuses its report instead of starting another simulation.
         self._runs: dict[tuple[str, str], _Flight] = {}
@@ -290,6 +293,8 @@ class ReportService:
             seed = options.get("seed")
             async with self._forge_start_lock:
                 await self._start_or_queue_forge(sub, rid, deck, games, seed)
+        else:
+            self._finished(rid)
         return self.get(sub, rid)
 
     async def _start_or_queue_forge(self, sub: str, rid: str, deck: Any, games: int, seed: Any) -> None:
@@ -448,13 +453,29 @@ class ReportService:
         self._ensure_forge_refresher()
 
     def _save_forge(self, rid: str, section: dict[str, Any]) -> bool:
-        """Store the report's Forge section; False when the report no longer exists."""
+        """Store the report's Forge section; False when the report no longer exists. A section
+        that reaches a final state (done, failed, skipped...) finishes its report."""
+        final = section.get("state") in FINAL_STATES
         with self.db.tx() as c:
+            was = c.execute("SELECT forge_state FROM reports WHERE id = ?", (rid,)).fetchone()
             cur = c.execute(
                 "UPDATE reports SET forge_json = ?, forge_state = ? WHERE id = ?",
                 (json.dumps(section), section.get("state"), rid),
             )
+        if cur.rowcount > 0 and final and (was is None or was[0] not in FINAL_STATES):
+            self._finished(rid)
         return cur.rowcount > 0
+
+    def _finished(self, rid: str) -> None:
+        if self.on_finished is None:
+            return
+        with self.db._lock:
+            row = self.db._conn.execute("SELECT owner_sub FROM reports WHERE id = ?", (rid,)).fetchone()
+        if row is not None:
+            try:
+                self.on_finished(row[0], rid)
+            except Exception:
+                logger.exception("report notification failed")
 
     def _cancel_forge(self, section: Any) -> None:
         """Best effort: stop the Forge job behind an unfinished section, so a deleted report does

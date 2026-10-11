@@ -1095,7 +1095,7 @@ NAV_LINKS = [
 # The tabs, as Material's navigation bar (3 to 5 destinations) and rail (up to 7) have them: on a
 # compact screen Decks, Scan, Collection, Proposals and More, with Search as the icon in the top
 # bar; the rail has room for Search as a sixth tab. More opens a sheet with the remaining pages
-# (Home, History, Guide, Admin, Account) so nothing is more than two taps away.
+# (Home, History, Watchlist, Guide, Admin, Account) so nothing is more than two taps away.
 TAB_LINKS = [
     ("/decks", "Decks", "decks", ""),
     ("/search", "Search", "search", "railonly"),
@@ -1106,6 +1106,7 @@ TAB_LINKS = [
 MORE_LINKS = [
     ("/", "Home", "home"),
     ("/history", "History", "history"),
+    ("/watchlist", "Watchlist", "stats"),
     ("/guide", "Guide", "guide"),
     ("/account", "Account", "account"),
 ]
@@ -1180,6 +1181,7 @@ def render(
             f"<a href='/account'>{icon('account')}Account</a>"
             f"<a href='/proposals'>{icon('proposals')}Proposals</a>"
             f"<a href='/history'>{icon('history')}History</a>"
+            f"<a href='/watchlist'>{icon('stats')}Watchlist</a>"
             f"<a href='/activity'>{icon('activity')}My activity</a>"
             f"<a href='/guide'>{icon('guide')}Guide</a>"
             f"<a href='/skill'>{icon('report')}Assistant skill</a>"

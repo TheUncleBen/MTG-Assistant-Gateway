@@ -58,10 +58,12 @@ snapshot first and is read back to verify.
 | Delete one of your decks | `propose_delete_deck` | proposal (destructive) | never applied by the assistant in any mode; snapshot and backup copy first |
 | Create a folder | `propose_create_folder` | proposal (consent) | never applied by the assistant in any mode; renaming a folder stays a hand action |
 | See, add or remove a deck's collaborators (people who may edit it) | `get_deck_collaborators`, `propose_collaborator`; deck settings page | proposal (consent) | changes who can edit the deck, so it is an account action: approved only on the review page, never applied by the assistant in any mode. Only people you follow can be added, as on Archidekt |
+| Watch cards (a name, or one printing and finish) and decks; their daily prices and values over time; price alerts | `watch_card`, `watch_deck`, `unwatch`, `list_watchlist`, `card_price_history` | the member's own watchlist (no proposal) | changes only the member's gateway data, never Archidekt; prices from Scryfall once a day; the Watchlist page is the hand path |
+| A plain summary of the last day or week: watched prices and deck values, reports finished, proposals waiting and applied | `get_summary` | no | written by the gateway without AI; an assistant's scheduled task can turn it into its own words ([USING.md](USING.md#notifications-and-summaries)) |
 | Proposals: list, read, approve with the card's code, reject (with a reason on the card), apply | `list_my_proposals`, `get_proposal`, `confirm_proposal`, `reject_proposal`, `apply_proposal` | apply writes | `apply_proposal` succeeds only when the mode allows |
 
 **No assistant tool exists for:** renaming folders, linking or unlinking
-Archidekt, approval modes, admin. Social actions and deleting a deck have
+Archidekt, approval modes, notification and summary settings, admin. Social actions and deleting a deck have
 tools since 0.7.17, but only as proposals, and (R-142) the person applies each
 one themselves on its review page, in every approval mode (the in-chat card
 only opens that page, since 0.7.19): no mode,
@@ -89,7 +91,8 @@ deleting a deck asks for its name.
 | Collection | the Archidekt Collection: filter, sort, grid or list, add, quantity, per-row details (finish, condition, language, price paid), the whole card from a thumbnail, remove, CSV export, import from a CSV or a card list (pasted or a file) |
 | Proposals | review page with Approve, Apply, Reject; the in-chat card opens the same proposal |
 | History | proposals, snapshots (Restore), reports (open one in full) |
-| Account | link or unlink Archidekt, approval mode, hand-edit confirmation, theme, sign out, delete my data |
+| Watchlist | watch cards (name, or set and number, finish) and decks; today's price and the change over 1, 7 and 30 days; a chart and a table of each price over time; price alerts; remove. The card viewer's Price history and Watch this card reach the same |
+| Account | link or unlink Archidekt, approval mode, hand-edit confirmation, notifications through ntfy (on or off, which events, topic, Send test; only when the operator set up a server), summary (off, daily, weekly; the latest shown on the page), theme, sign out, delete my data |
 | Admin (admin group only) | members (disable, revoke, unlink, delete data), activity, metrics; System card with the newest backup and backup copy and the research service's state |
 | Guide | tutorials, how-to guides, reference (this map in the user's words) and explanation, with a contents rail and a search box |
 
@@ -122,7 +125,8 @@ and a form question for ambiguous names.
   simulation of one deck and the comparison of two are both paths: Run
   simulation and Compare on the deck page for people, `run_deck_report` and
   `compare_decks` for the assistant, same engine and settings.
-- **Only a person does:** link Archidekt and set approval modes, approve a
+- **Only a person does:** link Archidekt and set approval modes, turn
+  notifications and summaries on or off, approve a
   high-risk proposal in manual or semi-auto mode, approve a like, vote,
   bookmark, follow, comment, new folder, collaborator change or deck deletion (an assistant may
   propose these; the person approves each one on its review page, in every
@@ -130,7 +134,9 @@ and a form question for ambiguous names.
 - **Both reach:** reading decks and collections, statistics, creating and
   editing decks, deck settings (folder, tags and cover included), cloning,
   restoring snapshots, collection changes, scan drafts. The person's path applies at once; the assistant's path is a
-  proposal under the member's mode.
+  proposal under the member's mode. Watching cards and decks and reading
+  their prices and the summary are the same on both paths and need no
+  proposal (they change nothing on Archidekt).
 
 Nothing was orphaned by hiding the Mystic Forge duplicates: each hidden tool's
 inputs and outputs are carried by its owner (0.7.2 added the simulator's
@@ -153,6 +159,7 @@ later; none is promised.
   the gateway does not guess one.
 - **Deck reports:** goldfish runs for 60-card formats; an interactive goldfish game you play
   turn by turn. (Trends across a deck's reports shipped in 0.7.20.)
-- **Watchlists and price history:** no price ingest and no watchlist.
-- **Notifications and summaries:** sign-in protected ntfy notifications;
-  scheduled AI summaries.
+- **AI-written summaries by the gateway itself** (0.7.23). The gateway has no AI model and the
+  project uses only free services, so it writes the summary with fixed sentences; a member's own
+  assistant can write it in its words on a schedule (`get_summary`). Watchlists, price history and
+  ntfy notifications shipped in 0.7.23.

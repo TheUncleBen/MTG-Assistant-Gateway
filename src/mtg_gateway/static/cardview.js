@@ -272,6 +272,8 @@
       });
     });
     more.appendChild(rbtn);
+    var pbtn = priceButton(card);
+    more.appendChild(pbtn);
     more.appendChild(outLink("EDHREC", card.links && card.links.edhrec || edhrecUrl(card.name || "")));
     function offerLinks(links) {
       if (links && links.tcgplayer && !more.querySelector("[data-shop]")) {
@@ -283,6 +285,7 @@
     if (card.name) {
       side.appendChild(more);
       side.appendChild(rbox);
+      side.appendChild(pbtn.box);
     }
     offerLinks(card.links);
     offerBack(card.back_img);
@@ -303,6 +306,95 @@
     box.appendChild(side);
     v.appendChild(box);
     return closeBtn;
+  }
+  /* Price history: the member's own watches of this card (/watchlist/api/card), the daily prices
+     the gateway stored, newest first; a card not watched yet gets a Watch button. Nothing here
+     asks Scryfall; watching does once (the same as the Watchlist page). */
+  function money(v, cur) {
+    if (v === null || v === undefined) return "no price";
+    return (cur === "eur" ? "€" : "$") + Number(v).toFixed(2);
+  }
+  function priceButton(card) {
+    var btn = el("button", "btn small", "Price history");
+    btn.type = "button";
+    btn.setAttribute("aria-expanded", "false");
+    var box = el("div", "rulings prices");
+    box.hidden = true;
+    box.id = "cardview-prices";
+    btn.setAttribute("aria-controls", box.id);
+    btn.box = box;
+    var name = card.name || "";
+    var fin = (card.finish || "").toLowerCase();
+    fin = fin === "foil" || fin === "etched" ? fin : "nonfoil";
+    function show(watches) {
+      box.textContent = "";
+      if (!watches.length) {
+        box.appendChild(el("p", "muted", "This card is not on your watchlist. Watch it to keep its price once a day."));
+        var csrf = document.querySelector("input[name=csrf]");
+        if (!csrf) return;
+        var w = el("button", "btn small", "Watch this card");
+        w.type = "button";
+        w.addEventListener("click", function () {
+          w.disabled = true;
+          fetch("/watchlist/api/watch", { method: "POST", credentials: "same-origin",
+            headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf.value, Accept: "application/json" },
+            body: JSON.stringify({ name: name, finish: fin }) })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+              if (d && d.ok) { show([d.watch]); return; }
+              w.disabled = false;
+              box.appendChild(el("p", "notice error", (d && d.message) || "The card could not be watched."));
+            })
+            .catch(function () { w.disabled = false; box.appendChild(el("p", "notice error", "No connection.")); });
+        });
+        box.appendChild(w);
+        return;
+      }
+      watches.forEach(function (v) {
+        var where = [(v.set || "").toUpperCase(), v.collector_number || ""].filter(Boolean).join(" ") || "any printing";
+        box.appendChild(el("p", null, where + " · " + v.finish + ": " + money(v.price, v.currency) + (v.day ? " on " + v.day : "")));
+        var rows = (v.history || []).filter(function (h) { return h.price !== null; }).reverse().slice(0, 30);
+        if (!rows.length) { box.appendChild(el("p", "muted", "No price yet; it comes with the next daily check.")); return; }
+        var table = el("table");
+        var head = el("tr");
+        head.appendChild(el("th", null, "Day"));
+        head.appendChild(el("th", null, "Price"));
+        head.childNodes.forEach(function (th) { th.setAttribute("scope", "col"); });
+        table.appendChild(head);
+        rows.forEach(function (h) {
+          var tr = el("tr");
+          var th = el("th", null, h.day);
+          th.setAttribute("scope", "row");
+          tr.appendChild(th);
+          tr.appendChild(el("td", null, money(h.price, v.currency)));
+          table.appendChild(tr);
+        });
+        box.appendChild(table);
+      });
+      var a = el("a", null, "Open the watchlist");
+      a.href = "/watchlist";
+      box.appendChild(a);
+    }
+    btn.addEventListener("click", function () {
+      var opening = box.hidden;
+      box.hidden = !opening;
+      btn.setAttribute("aria-expanded", opening ? "true" : "false");
+      if (!opening) return;
+      box.textContent = "";
+      box.appendChild(el("p", "muted", "Reading the price history…"));
+      getJSON("/watchlist/api/card?name=" + encodeURIComponent(name)).then(function (x) {
+        if (!x.ok || !x.d || !x.d.ok) {
+          box.textContent = "";
+          box.appendChild(el("p", "notice error", "The price history could not be read. Press Price history again to retry."));
+          return;
+        }
+        show(x.d.watches || []);
+      }).catch(function () {
+        box.textContent = "";
+        box.appendChild(el("p", "notice error", "No connection. Press Price history again to retry."));
+      });
+    });
+    return btn;
   }
   /* Reads the data-* attributes the server puts on card rows and image cards. */
   function fromElement(node) {
