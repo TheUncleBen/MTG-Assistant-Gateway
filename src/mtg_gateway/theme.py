@@ -16,11 +16,14 @@ globalToolbar, floatingToolbar, footer and panel rules). The theme is chosen wit
 
 from __future__ import annotations
 
+import functools
+import hashlib
 import html
 import re
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from contextvars import ContextVar
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
@@ -38,11 +41,12 @@ FEEDBACK_SCRIPT = "/static/feedback.js"
 # The Content-Security-Policy of every page render() builds (some pages replace it with their own,
 # which keeps the same frame-ancestors and base-uri). form-action is last so sources can follow it.
 # img-src 'self' is for the gateway's own files only (the select arrow, /static/chevron.svg); pages
-# that show card images add cards.scryfall.io in their own policy.
+# that show card images add cards.scryfall.io in their own policy. style-src 'self' is for the
+# shared stylesheets (/static/site.css, /static/deck.css); every policy that replaces this one keeps it.
 DEFAULT_CSP = (
     # The top bar's search box is on every page: connect-src 'self' lets it ask the gateway for
     # suggestions, and cards.scryfall.io is the small card picture each suggestion shows.
-    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; "
+    "default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; "
     "manifest-src 'self'; worker-src 'self'; "
     "connect-src 'self'; "
     "img-src 'self' https://cards.scryfall.io; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
@@ -897,6 +901,17 @@ _TOPSEARCH_CSS = """
 """
 CSS += _TOPSEARCH_CSS
 
+# The navigation bar (static/feedback.js): a thin line along the top of the window from the tap on
+# a link to another page until that page replaces this one, so a slow answer never looks like a
+# missed tap. It creeps towards the end and never finishes on its own.
+CSS += """
+.navprogress{position:fixed;top:0;left:0;right:0;height:3px;z-index:1000;pointer-events:none;
+  background:var(--orange);transform-origin:0 50%;transform:scaleX(0);opacity:0}
+html.navigating .navprogress{opacity:1;animation:navprogress 8s cubic-bezier(.1,.7,.3,1) forwards}
+@keyframes navprogress{from{transform:scaleX(.08)}to{transform:scaleX(.92)}}
+@media (prefers-reduced-motion:reduce){html.navigating .navprogress{animation:none;transform:scaleX(.6)}}
+"""
+
 
 # Own inline icons (simple 24-unit strokes). None is an Archidekt or Font Awesome path.
 ICONS = {
@@ -1114,6 +1129,52 @@ MORE_LINKS = [
 # The site's public origin (MTG_PUBLIC_URL), set by create_app: link previews need an absolute image.
 PUBLIC_URL = ""
 
+STATIC_DIR = Path(__file__).parent / "static"
+
+
+def _deck_css() -> str:
+    from .deckpage import DECK_CSS  # deckpage imports this module
+
+    return DECK_CSS
+
+
+# Stylesheets the pages share, served from memory at /static/<name> (companion.py's static route)
+# instead of inline in every page: the browser keeps them, so a page brings only its own markup.
+STYLESHEETS: dict[str, Callable[[], str]] = {"site.css": lambda: CSS, "deck.css": _deck_css}
+
+
+def stylesheet_link(name: str) -> str:
+    return f"<link rel='stylesheet' href='/static/{name}'>"
+
+
+@functools.cache
+def static_version(name: str) -> str | None:
+    """A short digest of a /static file (or shared stylesheet), None for one that doesn't exist.
+    The files only change with a new image, so each is read once."""
+    if name in STYLESHEETS:
+        data = STYLESHEETS[name]().encode()
+    else:
+        try:
+            data = (STATIC_DIR / name).read_bytes()
+        except OSError:
+            return None
+    return hashlib.sha256(data).hexdigest()[:12]
+
+
+_STATIC_REF = re.compile(r"((?:src|href)=')/static/([A-Za-z0-9_.-]{1,80})'")
+
+
+def versioned_static(doc: str) -> str:
+    """Every ``src='/static/x'`` and ``href='/static/x'`` in a page gets ``?v=<digest>``: the
+    static route lets the browser keep a file asked for by its current digest for a year without
+    asking again, and a new release changes the address of every file it changes."""
+
+    def add(m: re.Match[str]) -> str:
+        v = static_version(m.group(2))
+        return f"{m.group(1)}/static/{m.group(2)}?v={v}'" if v else m.group(0)
+
+    return _STATIC_REF.sub(add, doc)
+
 
 def render(
     title: str,
@@ -1313,7 +1374,8 @@ def render(
         "<link rel='icon' href='/favicon.ico' sizes='32x32'>"
         "<link rel='icon' href='/static/gateway-icon.svg' type='image/svg+xml'>"
         "<link rel='apple-touch-icon' href='/apple-touch-icon.png'>"
-        f"<title>{html.escape(title)} · {html.escape(site)}</title><style>{CSS}</style>{head_extra}</head>"
+        f"<title>{html.escape(title)} · {html.escape(site)}</title>"
+        f"{stylesheet_link('site.css')}{head_extra}</head>"
         f"<body class='{classes}'><a class='skip' href='#main'>Skip to content</a>{SPRITE}"
         "<header class='topbar'><div class='wrap'><div class='left'>"
         f"<a class='brand' href='/'{' aria-current=page' if cur == '/' else ''} title='{html.escape(site)}'>"
@@ -1346,7 +1408,7 @@ def render(
         + "</body></html>"
     )
     return HTMLResponse(
-        doc,
+        versioned_static(doc),
         status_code=status,
         headers={
             "Cache-Control": "no-store",

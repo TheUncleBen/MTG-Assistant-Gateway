@@ -10,9 +10,12 @@ column below; internal links never open a new tab; external sites (Archidekt, Sc
 from __future__ import annotations
 
 import asyncio
+import functools
+import gzip
 import html
 import json
 import logging
+import mimetypes
 import re
 from datetime import UTC, datetime
 from pathlib import Path
@@ -27,7 +30,6 @@ from .archidekt import FORMAT_NAMES, ArchidektError, Deck, featured_scryfall_id,
 from .busy import busy_json_response, busy_response, busy_text_response
 from .decklist import DecklistError, parse_decklist
 from .deckpage import (
-    DECK_CSS,
     LIST_ORDERS,
     VIEWS,
     card_image,
@@ -72,12 +74,15 @@ from .report_view import (
 )
 from .theme import (
     ICON_DATA_URL,
+    STYLESHEETS,
     VIZ_CSS,
     display_name,
     icon,
     plural,
     remember_view,
     render,
+    static_version,
+    stylesheet_link,
     time_text,
     view_choice,
 )
@@ -95,7 +100,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 ICON_HEADERS = {"Cache-Control": "public, max-age=86400", "X-Content-Type-Options": "nosniff"}
 # Pages with the editor load one script from /static; everything else keeps the default CSP.
 DECK_CSP = (
-    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; "
+    "default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; "
     "manifest-src 'self'; connect-src 'self'; "
     "img-src 'self' https://cards.scryfall.io; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 )
@@ -103,7 +108,7 @@ DECKS_JSON_TIMEOUT = 25.0  # /api/decks/mine waits this long for a cold list at 
 # Format names the settings and new-deck forms offer, one per Archidekt format id.
 FORMAT_CHOICES = sorted({FORMAT_NAMES[i] for i in FORMAT_NAMES}, key=lambda n: format_label(n).lower())
 EDITOR_CSP = (
-    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; "
+    "default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; "
     "manifest-src 'self'; connect-src 'self'; "
     "img-src 'self' https://cards.scryfall.io; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 )
@@ -295,7 +300,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             scripts=scripts or bool(extra_scripts),
             current=current,
             heading=heading,
-            head_extra=(f"<style>{DECK_CSS}</style>" if deck_css else "")
+            head_extra=(stylesheet_link("deck.css") if deck_css else "")
             + (f"<style>{extra_css}</style>" if extra_css else "")
             + (
                 "<script src='/static/cardview.js' defer></script>"
@@ -632,8 +637,10 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         sub, sid = browser_session(state, request)
         if not sub:
             return login_redirect(f"/decks/{deck_id}")
+        # The browser's Reload sends max-age=0 (no-cache for a hard reload): read Archidekt again.
+        reload = re.search(r"max-age=0|no-cache", request.headers.get("cache-control", "")) is not None
         try:
-            deck = await decks.get_any_deck(sub, deck_id)
+            deck = await decks.page_deck(sub, deck_id, fresh=reload)
         except DeckError as exc:
             if busy := busy_response(exc, request, page, sub=sub, sid=sid):
                 return busy
@@ -2200,10 +2207,14 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         # dropped connection on the way in doesn't show "offline". GET navigations only. The page
         # follows the member's chosen theme (the mtg_theme cookie, read through the Cookie Store
         # where the browser has it). The X-MTG-Offline header tells the Android app this is the
-        # gateway's own offline answer.
+        # gateway's own offline answer. Navigation preload: the browser asks for the page while the
+        # worker is still starting (a browser stops an idle worker after a short while, and starting
+        # it again on a phone takes a noticeable moment), and the worker answers with that same
+        # response instead of making the request only once it runs.
         js = (
             "self.addEventListener('install',()=>self.skipWaiting());"
-            "self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));"
+            "self.addEventListener('activate',e=>e.waitUntil(Promise.all([self.clients.claim(),"
+            "self.registration.navigationPreload?self.registration.navigationPreload.enable():null])));"
             "const RETRY=[300,1000];"
             "const wait=ms=>new Promise(r=>setTimeout(r,ms));"
             "const tryFetch=(req,i)=>fetch(req).catch(err=>"
@@ -2219,7 +2230,8 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             "base-uri 'none'; frame-ancestors 'none'\"}});"
             "self.addEventListener('fetch',e=>{"
             "if(e.request.mode!=='navigate'||e.request.method!=='GET')return;"
-            "e.respondWith(tryFetch(e.request,0).catch(()=>theme().then(offline)));"
+            "e.respondWith(Promise.resolve(e.preloadResponse).catch(()=>null)"
+            ".then(r=>r||tryFetch(e.request,0)).catch(()=>theme().then(offline)));"
             "});"
         )
         return Response(js, media_type="application/javascript", headers={"Cache-Control": "no-store"})
@@ -2249,12 +2261,50 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         rel = request.path_params["path"]
         if not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", rel):
             return Response("not found", 404)
-        target = (STATIC_DIR / rel).resolve()
-        if not str(target).startswith(str(STATIC_DIR.resolve()) + "/") or not target.is_file():
+        if rel not in STYLESHEETS:
+            target = (STATIC_DIR / rel).resolve()
+            if not str(target).startswith(str(STATIC_DIR.resolve()) + "/") or not target.is_file():
+                return Response("not found", 404)
+        version = static_version(rel)
+        if version is None:
             return Response("not found", 404)
-        return FileResponse(
-            target, headers={"Cache-Control": "public, max-age=300", "X-Content-Type-Options": "nosniff"}
-        )
+        # Pages ask for each file by its digest (theme.versioned_static): that address never
+        # changes content, so the browser keeps it for a year and doesn't ask again. Asked for
+        # without it (or by an older digest), five minutes, then a check that costs no body.
+        headers = {
+            "Cache-Control": "public, max-age=31536000, immutable"
+            if request.query_params.get("v") == version
+            else "public, max-age=300",
+            "ETag": f'W/"{version}"',
+            "X-Content-Type-Options": "nosniff",
+        }
+        body, gz, media_type = _static_payload(rel)
+        if gz is not None:
+            headers["Vary"] = "Accept-Encoding"
+        if headers["ETag"] in request.headers.get("if-none-match", ""):
+            return Response(status_code=304, headers=headers)
+        if gz is not None and "gzip" in request.headers.get("accept-encoding", ""):
+            headers["Content-Encoding"] = "gzip"
+            return Response(gz, media_type=media_type, headers=headers)
+        return Response(body, media_type=media_type, headers=headers)
+
+
+_COMPRESSIBLE = (".js", ".css", ".svg", ".json", ".html")
+
+
+@functools.cache
+def _static_payload(rel: str) -> tuple[bytes, bytes | None, str]:
+    """A /static file (or shared stylesheet) as served: its bytes, a gzipped copy for the text
+    files (scripts and styles shrink to a quarter), and its type. Read and compressed once."""
+    if rel in STYLESHEETS:
+        body = STYLESHEETS[rel]().encode()
+    else:
+        body = (STATIC_DIR / rel).read_bytes()
+    media_type = mimetypes.guess_type(rel)[0] or "application/octet-stream"
+    if rel.endswith(".js"):
+        media_type = "text/javascript"
+    gz = gzip.compress(body, 9, mtime=0) if rel.endswith(_COMPRESSIBLE) else None
+    return body, gz if gz is not None and len(gz) < len(body) else None, media_type
 
 
 SHORTCUT_ICON = {"src": "/static/gateway-icon-maskable-192.png", "sizes": "192x192", "type": "image/png"}

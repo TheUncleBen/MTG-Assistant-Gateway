@@ -59,7 +59,10 @@ One deck:
 
 - **View as** text, stacks or grid; **Group by** category, type, mana value,
   colour or none; **Sort by** name, mana value, price and more. The page
-  updates as soon as you change a choice.
+  updates as soon as you change a choice. Switching views, or coming back to
+  the deck, within 20 seconds shows it as just read without asking Archidekt
+  again; a change made on archidekt.com shows after that, or at once when
+  you reload the page.
 - **Filter** narrows the cards on the page as you type.
 - Tap a card (or a stack on a phone, which fans it out) to read the whole
   card: the image, every face with its mana cost, type line, rules text,

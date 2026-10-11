@@ -680,8 +680,12 @@ The gateway is built to be light on Archidekt. For everyone together:
   member's sign-in is never served to another), and anonymous public deck reads and deck searches for
   `MTG_ARCHIDEKT_CACHE_SECONDS` (a minute). Anything the gateway sends to
   Archidekt clears the deck and search copies. Reads of decks made with a
-  member's own sign-in are never reused, so a proposal or apply always sees
-  the live deck. The precon list is kept for an hour;
+  member's own sign-in are reused only to show the same member's deck page
+  again within 20 seconds (another view, Back), never for a proposal or an
+  apply, which always see the live deck; anything the gateway sends to
+  Archidekt and the browser's Reload drop that copy, and
+  `MTG_ARCHIDEKT_CACHE_SECONDS=0` turns it off. The precon list is kept for
+  an hour;
 - searches fetch one page per call, and a collection export stops at 50
   pages.
 
