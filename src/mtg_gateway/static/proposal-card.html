@@ -80,9 +80,6 @@ ul.changes li.more-row{display:block;padding:0;border-left-color:var(--border)}
 .badges{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;flex:0 1 auto;min-width:min-content}
 .badge.risk.high,.badge.risk.consent{background:var(--amber-bg);color:var(--amber)}
 .badge.risk.destructive{background:var(--red-bg);color:var(--red)}
-button.destroy{background:var(--red-bg);color:var(--red);border:2px solid var(--red)}
-.warnline{margin:10px 0 0;padding:8px 10px;border-radius:var(--radius);background:var(--red-bg);color:var(--red);
-  font-size:13px;font-weight:600;overflow-wrap:anywhere}
 .note{margin:8px 0 0;font-size:13px;color:var(--muted);overflow-wrap:anywhere}
 .foot{margin:10px 0 0;font-size:12px;color:var(--muted);overflow-wrap:anywhere}
 .actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;align-items:center}
@@ -471,18 +468,12 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
     var a = $("actions"); a.replaceChildren();
     if (!proposal) return;
     var p = proposal;
+    // Only a proposal the member may approve in the chat has a code. An account action (a like, a
+    // comment, a deck deletion...) never gets one (R-142), so it takes the "review page" branch below.
     if (p.state === "pending" && p.writes_enabled && approval) {
-      var destroy = p.risk === "destructive";
-      var ok = el("button", destroy ? "destroy" : "primary",
-        destroy ? "Delete this deck on Archidekt" : p.kind === "action" ? "Approve: do this on Archidekt" : "Approve: apply to Archidekt");
+      var ok = el("button", "primary", "Approve: apply to Archidekt");
       ok.type = "button"; ok.id = "approve";
-      if (destroy) {
-        var warn = el("p", "warnline", "Deleting a deck can't be undone on Archidekt. The gateway keeps a snapshot first.");
-        warn.setAttribute("role", "note");
-        a.appendChild(warn);
-      }
-      // next to a red Delete, Reject stays a plain button so the two are easy to tell apart
-      var no = el("button", destroy ? "" : "danger", "Reject"); no.type = "button"; no.id = "reject";
+      var no = el("button", "danger", "Reject"); no.type = "button"; no.id = "reject";
       ok.disabled = no.disabled = true; armed = false;
       ok.onclick = function () { decide("approve"); };
       no.onclick = function () { askWhy(true); };

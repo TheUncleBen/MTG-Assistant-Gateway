@@ -507,7 +507,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         current_client.set(BROWSER_CLIENT_ID)  # the audit rows name the browser as the actor
         try:
             if action == "reject":
-                state.decks.reject(sub, pid)
+                state.decks.reject(sub, pid, via=REVIEW_PAGE)
             else:
                 result = await state.decks.apply(sub, pid, via=REVIEW_PAGE)  # R-142: the one path
         except DeckError as exc:
@@ -657,8 +657,8 @@ OK_MESSAGES = {
     "mode_manual": "Saved: your assistant asks you every time.",
     "mode_semi": "Saved: your assistant applies small, low-risk edits without asking and asks for "
     "everything else.",
-    "mode_auto": "Saved: your assistant applies deck and collection changes without asking (account "
-    "actions and deck deletion still wait for you). Each change keeps a "
+    "mode_auto": "Saved: your assistant applies deck and collection changes without asking (actions on "
+    "your Archidekt account and deleting a deck still wait for you). Each change keeps a "
     "snapshot you can restore from History.",
 }
 ERR_MESSAGES = {
@@ -895,13 +895,9 @@ def _mode_card(state: Any, sub: str, csrf_in: str) -> str:
         "and to nobody else.</p>"
         f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='approval_mode'>"
         f"{''.join(choices)}"
-        f"<p class='muted small'>A small, low-risk edit changes at most {rows} card row"
-        f"{'s' if rows != 1 else ''} of a deck or your collection: cards added, removed, moved to "
-        "another category, or with a new quantity, finish or printing, no more than four copies each. "
-        "A private copy of a deck (a clone) is low risk too: it changes nothing that exists. "
-        "Everything else counts as high risk: more rows than that, "
-        "the commander, a new deck built from a list, a restore, and the deck's name, format, "
-        "description or visibility.</p>"
+        f"<p class='muted small'><strong>Low risk:</strong> {html.escape(modes.low_risk_text(rows))} "
+        f"<strong>High risk:</strong> {html.escape(modes.HIGH_RISK_TEXT)}</p>"
+        f"<p class='muted small'>{html.escape(modes.MEMBER_ONLY_TEXT)}</p>"
         f"<div class='notice warn'>{html.escape(modes.AUTO_WARNING)}</div>"
         "<button class='primary'>Save approval mode</button></form></div>"
     )

@@ -235,13 +235,15 @@ a form.
 your assistant may do without asking: *Manual* (every change waits for
 your press; the default), *Semi-auto* (it applies a small deck or
 collection edit itself: up to the row limit, 5 card rows by default,
-added, removed, moved or changed, no more than 4 copies a row, never the
-commander; it also makes a private copy of a deck; a new deck, a restore,
-the deck's details and bigger edits still ask you) or *Full auto* (it applies the deck
-and collection changes it proposes). In every mode, actions on your
-Archidekt account (likes, votes, bookmarks, follows, comments, new
-folders, collaborators) and deleting a deck are never applied by the
-assistant: they wait for your press on the review page. It is your own setting:
+each a card added or removed, or a new quantity, category, finish,
+printing, color tag or custom mana value, no more than 4 copies a row,
+never the commander; it also makes a private copy of a deck; a new deck,
+a restore, the deck's details and bigger edits still ask you) or *Full
+auto* (it applies the deck and collection changes it proposes).
+Actions on your Archidekt account (likes, votes, bookmarks, follows,
+comments, new folders and collaborator changes) and deleting a deck are
+never applied by an assistant: each one waits for your own press on its
+review page, in every mode. It is your own setting:
 it covers only your account, your decks and the apps you connected, and
 only you can change it, in your browser. In either auto mode the assistant
 applies what the mode allows with `apply_proposal` and tells you; the card

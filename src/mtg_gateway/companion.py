@@ -26,6 +26,7 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, RedirectResponse, Response
 
 from . import deck_stats
+from .actions import COLLABORATOR_NOTE, collaborator_by_hand, collaborator_target
 from .archidekt import FORMAT_NAMES, ArchidektError, Deck, featured_scryfall_id, format_label, parse_deck
 from .busy import busy_json_response, busy_response, busy_text_response
 from .decklist import DecklistError, parse_decklist
@@ -222,6 +223,8 @@ SETTINGS_OK_MESSAGES = {
     "tag_added": "Tag added on Archidekt.",
     "tag_removed": "Tag removed on Archidekt.",
     "moved": "Deck moved to that folder on Archidekt.",
+    "collaborator_added": "Collaborator added on Archidekt.",
+    "collaborator_removed": "Collaborator removed on Archidekt.",
 }
 # Notices My decks shows (?ok=).
 LIST_OK_MESSAGES = {
@@ -916,9 +919,9 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         )
 
     def collaborator_section(deck: Deck, csrf: str | None, rows: list[dict[str, Any]] | None) -> str:
-        """Archidekt's deck collaborators. Adding or removing one changes who can edit the deck,
-        so (R-142) both forms make a proposal and open its review page: the member's Apply there
-        is what changes Archidekt, as for every other account action."""
+        """Archidekt's deck collaborators. Adding or removing one changes who can edit the deck, so
+        each form asks once more (a confirmation page) before it is sent to Archidekt. These are the
+        member's own presses; an assistant's proposal for the same thing waits on its review page."""
         did = _esc(deck.id)
         csrf_in = f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
         if rows is None:
@@ -949,10 +952,9 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             "<div class='field grow'><label for='collabname'>Add someone you follow on Archidekt</label>"
             "<input id='collabname' type='text' name='username' maxlength='60' autocomplete='off' "
             "placeholder='Archidekt username' required>"
-            f"</div><button>{icon('check')} Review</button></form>"
+            f"</div><button>{icon('plus')} Add</button></form>"
             "<p class='muted small'>A collaborator can make any change to this deck that you can, except "
-            "its main settings. Each change opens a review page; nothing changes on Archidekt until you "
-            "press Apply there.</p></section>"
+            "its main settings. You confirm each change once before it is sent to Archidekt.</p></section>"
         )
 
     async def collaborators_or_none(sub: str, deck_id: str) -> list[dict[str, Any]] | None:
@@ -1012,9 +1014,10 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         )
 
     async def hand_action(request: Request, deck_id: str, run: Any, *, ok: str, anchor: str) -> Response:
-        """One of the settings page's own forms (cover, tags, folder): the member's click is the
-        approval. On success the settings page reopens with a notice; a refusal re-renders it with
-        the message next to the form."""
+        """One of the settings page's own forms (cover, tags, folder, collaborators): the member's
+        click is the approval. On success the settings page reopens with a notice; a refusal
+        re-renders it with the message next to the form. ``run`` may answer with a page of its own
+        instead (the collaborator form's confirmation)."""
         sub, sid = browser_session(state, request)
         if not sub:
             return login_redirect(f"/decks/{deck_id}/settings")
@@ -1023,7 +1026,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             return page("Deck settings", EXPIRED, sub=sub, sid=sid, status=403)
         current_client.set(BROWSER_CLIENT_ID)
         try:
-            code = await run(sub, data) or ok
+            code = await run(sub, data, sid) or ok
         except DeckError as exc:
             try:
                 deck = await decks.get_own_deck(sub, deck_id)
@@ -1045,20 +1048,65 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
                 csp=DECK_CSP,
                 deck_css=True,
             )
-        if code.startswith("/proposals/"):  # an account action: its review page holds the Apply
-            return RedirectResponse(code, status_code=303)
+        if isinstance(code, Response):
+            return code
         return RedirectResponse(f"/decks/{_esc(deck_id)}/settings?ok={code}#{anchor}", status_code=303)
+
+    def confirm_form(
+        action_url: str,
+        csrf: str | None,
+        fields: dict[str, str],
+        question: str,
+        note: str,
+        yes: str,
+        back: str,
+    ) -> str:
+        """The second step of a one-press account action on the member's own pages (0.7.24): the
+        question, then a form that sends the same fields again with ``confirmed`` and the page's
+        CSRF token, or Cancel back where they came from. Deleting a deck has its own typed-name form."""
+        hidden = "".join(
+            f"<input type='hidden' name='{_esc(k)}' value='{_esc(v)}'>" for k, v in fields.items()
+        )
+        return (
+            f"<form method='post' action='{_esc(action_url)}' class='panel confirmform'>"
+            f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>{hidden}"
+            "<input type='hidden' name='confirmed' value='1'>"
+            f"<h2>{_esc(question)}</h2>"
+            + (f"<p class='muted small'>{_esc(note)}</p>" if note else "")
+            + f"<div class='actions'><button class='primary'>{icon('check')} {_esc(yes)}</button>"
+            f"<a class='btn' href='{_esc(back)}'>Cancel</a></div></form>"
+        )
 
     @server.custom_route("/decks/{deck_id}/collaborators", methods=["POST"], include_in_schema=False)
     async def collaborators_post(request: Request) -> Response:
+        """Add or remove a collaborator of the member's own deck: one press, then a confirmation,
+        then it is sent to Archidekt (0.7.24; before, the form made a proposal to apply on its
+        review page). The member's own click with their session and CSRF token, like the delete and
+        new-folder forms; an assistant's propose_collaborator still needs the review page (R-142)."""
         deck_id = request.path_params["deck_id"]
 
-        async def run(sub: str, data: dict[str, str]) -> str:
+        async def run(sub: str, data: dict[str, str], sid: str | None) -> str | Response:
             kind = {"add": "collaborator_add", "remove": "collaborator_remove"}.get(data.get("action") or "")
             if kind is None:
                 raise DeckError("invalid", "Pick add or remove.")
-            made = await decks.propose_action(sub, kind, deck_id=deck_id, username=data.get("username") or "")
-            return "/proposals/" + quote(str(made["proposal_id"]), safe="")
+            if data.get("confirmed") == "1":
+                await collaborator_by_hand(decks, sub, deck_id, kind, data.get("username") or "")
+                return "collaborator_added" if kind == "collaborator_add" else "collaborator_removed"
+            deck = await decks.get_own_deck(sub, deck_id)
+            _uid, name = await collaborator_target(decks, sub, deck, kind, data.get("username") or "")
+            adding = kind == "collaborator_add"
+            body = confirm_form(
+                f"/decks/{deck.id}/collaborators",
+                _csrf(s, sid),
+                {"action": data.get("action") or "", "username": name},
+                f"Let {name} edit “{deck.name}” on Archidekt?"
+                if adding
+                else f"Stop {name} editing “{deck.name}” on Archidekt?",
+                COLLABORATOR_NOTE if adding else "",
+                f"Add {name}" if adding else f"Remove {name}",
+                f"/decks/{deck.id}/settings#collaborators",
+            )
+            return page("Confirm collaborator", body, sub=sub, sid=sid, current="/decks", deck_css=True)
 
         return await hand_action(request, deck_id, run, ok="collaborators", anchor="collaborators")
 
@@ -1066,7 +1114,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
     async def cover_post(request: Request) -> Response:
         deck_id = request.path_params["deck_id"]
 
-        async def run(sub: str, data: dict[str, str]) -> str:
+        async def run(sub: str, data: dict[str, str], _sid: str | None) -> str:
             uid = (data.get("card") or "").strip() or None
             await decks.set_cover(sub, deck_id, uid)
             if uid:
@@ -1081,7 +1129,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
     async def tags_post(request: Request) -> Response:
         deck_id = request.path_params["deck_id"]
 
-        async def run(sub: str, data: dict[str, str]) -> str:
+        async def run(sub: str, data: dict[str, str], _sid: str | None) -> str:
             if data.get("action") == "remove":
                 rid = data.get("relation_id") or ""
                 if not re.fullmatch(r"[0-9]{1,12}", rid):
@@ -1097,7 +1145,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
     async def move_post(request: Request) -> Response:
         deck_id = request.path_params["deck_id"]
 
-        async def run(sub: str, data: dict[str, str]) -> str:
+        async def run(sub: str, data: dict[str, str], _sid: str | None) -> str:
             fid = (data.get("folder_id") or "").strip()
             if not re.fullmatch(r"[0-9]{1,12}", fid):
                 raise DeckError("invalid", "Pick a folder.")
@@ -1268,6 +1316,19 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             else:
                 pid = (data.get("parent_id") or "").strip()
                 parent = int(pid) if re.fullmatch(r"[0-9]{1,12}", pid) else None
+                if data.get("confirmed") != "1":  # one press, then this confirmation (0.7.24)
+                    name, inside = await decks.check_new_folder(sub, data.get("name") or "", parent)
+                    where = "your top level" if not inside["depth"] else f"“{inside['name']}”"
+                    body = confirm_form(
+                        "/folders",
+                        _csrf(s, sid),
+                        {"action": "create", "name": name, "parent_id": str(inside["id"])},
+                        f"Create the folder “{name}” in {where} on Archidekt?",
+                        "Folders live on Archidekt; deleting one is done there.",
+                        "Create folder",
+                        "/folders",
+                    )
+                    return page("Confirm new folder", body, sub=sub, sid=sid, current="/decks", deck_css=True)
                 await decks.create_folder(sub, data.get("name") or "", parent)
                 ok = "folder_created"
         except DeckError as exc:

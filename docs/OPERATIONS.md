@@ -617,8 +617,9 @@ on what the review page would show, not on what the assistant says:
 
 | Tier | Proposals |
 |---|---|
-| Low | An edit to an existing deck, or to the member's collection, with at most `MTG_AUTO_APPLY_MAX_ROWS` rows (default 5), each a card add, remove, quantity change, category move, finish or printing change, no row moving more than four copies, none touching the commander. Cloning a deck (a copy; nothing that exists changes). |
-| High | Everything else: more rows than that, any commander change, creating a new deck, restoring a snapshot, and deck details (name, format, description, visibility, and the folder, tags and cover). |
+| Low | A small edit to an existing deck or to your collection: at most 5 card rows, each a card added or removed, or a new quantity, category, finish, printing, color tag or custom mana value, no more than 4 copies a row and never the commander; and a private copy of a deck (a clone), which changes nothing that exists. (The row limit is `MTG_AUTO_APPLY_MAX_ROWS`, default 5.) |
+| High | Everything else: more rows than that, a commander change, a new deck, restoring a snapshot, and the deck's details (name, format, bracket, description, visibility, folder, tags and cover). |
+| Consent, destructive (R-142) | Actions on your Archidekt account (likes, votes, bookmarks, follows, comments, new folders and collaborator changes) and deleting a deck are never applied by an assistant: each one waits for your own press on its review page, in every mode. |
 
 Every proposal result carries `approval_mode`, `risk`, `risk_reason` and
 `assistant_may_apply`, and `next_step` tells the assistant whether to call

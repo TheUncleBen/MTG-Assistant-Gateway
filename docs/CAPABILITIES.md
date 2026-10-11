@@ -26,11 +26,19 @@ assistant:
 | Semi-auto | the assistant applies it (`apply_proposal`) | the member presses |
 | Full-auto | the assistant applies it | the assistant applies it |
 
-Low risk: up to 5 card rows, at most 4 copies moved per row, only add,
-remove, quantity, category, finish or printing changes, no commander change;
-cloning a deck. High risk: anything over those limits, a commander change, a
-new deck, a snapshot restore, deck details. Every applied proposal keeps a
-snapshot first and is read back to verify.
+Low risk (`MTG_AUTO_APPLY_MAX_ROWS` sets the row limit, 5 here): A small edit
+to an existing deck or to your collection: at most 5 card rows, each a card
+added or removed, or a new quantity, category, finish, printing, color tag or
+custom mana value, no more than 4 copies a row and never the commander; and a
+private copy of a deck (a clone), which changes nothing that exists.
+High risk: Everything else: more rows than that, a commander change, a new
+deck, restoring a snapshot, and the deck's details (name, format, bracket,
+description, visibility, folder, tags and cover).
+Always the member's own press: Actions on your Archidekt account (likes,
+votes, bookmarks, follows, comments, new folders and collaborator changes) and
+deleting a deck are never applied by an assistant: each one waits for your own
+press on its review page, in every mode.
+Every applied proposal keeps a snapshot first and is read back to verify.
 
 | Capability | The one tool | Writes? | Notes |
 | --- | --- | --- | --- |
@@ -57,7 +65,7 @@ snapshot first and is read back to verify.
 | Read a deck's comments; post, reply, edit or delete your own, vote on others' | `get_deck_comments`, `propose_comment` | proposal (consent) | the full comment text is on the review card; never applied by the assistant in any mode |
 | Delete one of your decks | `propose_delete_deck` | proposal (destructive) | never applied by the assistant in any mode; snapshot and backup copy first |
 | Create a folder | `propose_create_folder` | proposal (consent) | never applied by the assistant in any mode; renaming a folder stays a hand action |
-| See, add or remove a deck's collaborators (people who may edit it) | `get_deck_collaborators`, `propose_collaborator`; deck settings page | proposal (consent) | changes who can edit the deck, so it is an account action: approved only on the review page, never applied by the assistant in any mode. Only people you follow can be added, as on Archidekt |
+| See, add or remove a deck's collaborators (people who may edit it) | `get_deck_collaborators`, `propose_collaborator`; deck settings page | proposal (consent) | changes who can edit the deck, so it is an account action: the assistant's proposal is approved only on the review page, never applied by the assistant in any mode (the member's own form on the settings page applies after one confirmation). Only people you follow can be added, as on Archidekt |
 | Watch cards (a name, or one printing and finish) and decks; their daily prices and values over time; price alerts | `watch_card`, `watch_deck`, `unwatch`, `list_watchlist`, `card_price_history` | the member's own watchlist (no proposal) | changes only the member's gateway data, never Archidekt; prices from Scryfall once a day; the Watchlist page is the hand path |
 | A plain summary of the last day or week: watched prices and deck values, reports finished, proposals waiting and applied | `get_summary` | no | written by the gateway without AI; an assistant's scheduled task can turn it into its own words ([USING.md](USING.md#notifications-and-summaries)) |
 | Proposals: list, read, approve with the card's code, reject (with a reason on the card), apply | `list_my_proposals`, `get_proposal`, `confirm_proposal`, `reject_proposal`, `apply_proposal` | apply writes | `apply_proposal` succeeds only when the mode allows |
@@ -85,7 +93,7 @@ deleting a deck asks for its name.
 | Decks | the linked account's decks (grid or list, filter, sort), New deck (name, pasted list, CSV, the gateway's .json, a chosen file, scan), Folders (create, rename) |
 | One deck | views (text, table, brewer, stacks, scroll, grid), grouping, sorting, filter, your own stack order (drag a stack's handle or use the arrow keys; kept in this browser, Reset puts the deck's order back), Select cards on your own deck to move, refinish, colour-tag or remove several in one save with one Undo (Color tag… and Mana value… are in the card menu too), the whole card on tap (image, every face's mana cost, type line, rules text, power/toughness or loyalty, flavour, printing, rarity, artist, price, salt, legal formats, custom mana value, the card's notes (read-only); Scryfall, mark owned, move category), drag cards between categories and Save moves, Quick add, Playtest (Archidekt's own playtester in a new tab, or the phone's browser from the app, where the person's Archidekt sign-in lives), Goldfish (0.7.23: play the deck by hand in the browser: shuffle, an opening hand of seven with London mulligans, draw, play to the battlefield, graveyard or exile, tap and untap, next turn; a Commander deck starts with its commander in the command zone; nothing is sent or kept), Run simulation (the same statistics, validation and 300-game goldfish run as `run_deck_report`, opened and filed under History), statistics with Probability of draw and Deck checks (curve by type or category, colours as bars or a pie, lands only, pips outside the commander's identity, subtypes and keywords; a click shows only those cards), description, comments (post, edit and delete your own), like, bookmark, follow the owner; More: Settings, Compare with another deck (a precon from Archidekt's list, any deck or a pasted list; the same comparison as `compare_decks`), Export (Archidekt import text, plain text, sideboard, each with Copy; downloads as Archidekt .txt, plain .txt, .csv, .json, and one-way Arena .txt, MTGO .dek, PDF; see [EXPORT-IMPORT.md](EXPORT-IMPORT.md)), Open on Archidekt, Delete deck |
 | Editor | quantities, categories, finish, printing, add cards (deck or maybeboard), maybeboard and sideboard rows, paste a list (Archidekt's syntax: printing, `*F*`/`*E*`, `[Category]`, `# Sideboard`), the whole card from a thumbnail, remove, undo, Save changes |
-| Deck settings | name, format, bracket, description, private, unlisted; cover image; tags; folder; collaborators (add or remove opens a review page to Apply); Delete this deck |
+| Deck settings | name, format, bracket, description, private, unlisted; cover image; tags; folder; collaborators (add or remove, then confirm once; 0.7.24); Delete this deck (type its name) |
 | Search | public decks by name, commander, format, colours, owner; a user's profile page; Precons by set |
 | Scan | phone camera or photos to a draft; set lock, foil, printing picker; save as a new deck, into a deck, or to the collection |
 | Collection | the Archidekt Collection: filter, sort, grid or list, add, quantity, per-row details (finish, condition, language, price paid), the whole card from a thumbnail, remove, CSV export, import from a CSV or a card list (pasted or a file) |
