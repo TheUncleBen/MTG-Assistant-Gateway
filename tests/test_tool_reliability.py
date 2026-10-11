@@ -229,6 +229,59 @@ async def test_arguments_that_do_not_fit_get_a_flagged_structured_refusal(stack:
     # a refusal from the tool itself carries the error flag too
     res = await call(stack.h, token, "get_deck", {"deck_ref": "not a deck"})
     assert res.get("isError") is True and structured(res)["ok"] is False
+    assert structured(res)["error_code"] == "INVALID_ARGUMENT" and structured(res)["retryable"] is False
+    assert out["error_code"] == "INVALID_ARGUMENT"
+    # something that does not exist is NOT_FOUND, not a wrong argument
+    res = structured(await call(stack.h, token, "get_proposal", {"proposal_id": "nope"}))
+    assert res["error"] == "not_found" and res["error_code"] == "NOT_FOUND" and res["retryable"] is False
+
+
+async def test_refusals_carry_an_error_code_by_kind() -> None:
+    """The QA round saw busy, not_found and an unreachable Scryfall all as INVALID_ARGUMENT. Each
+    kind keeps its ``error`` and gets its own error_code; busy and unavailable are retryable."""
+    from types import SimpleNamespace
+
+    from mtg_gateway.app import _tool_error, error_code, schema_error_middleware
+    from mtg_gateway.decks import DeckError
+    from mtg_gateway.mf_proxy import _busy
+
+    mw = schema_error_middleware()
+    ctx = SimpleNamespace(method="tools/call")
+
+    async def run(result):
+        async def call_next(_ctx):
+            return result
+
+        return await mw(ctx, call_next)
+
+    def refusal(kind: str, **extra) -> dict:
+        sc = {"ok": False, "error": kind, "message": "m", **extra}
+        return {"content": [{"type": "text", "text": json.dumps(sc)}], "structuredContent": sc}
+
+    for kind, code, retry in [
+        ("not_found", "NOT_FOUND", False),
+        ("busy", "BUSY", True),
+        ("unavailable", "UNAVAILABLE", True),
+        ("rate_limited", "RATE_LIMITED", True),
+        ("invalid", "INVALID_ARGUMENT", False),
+        ("not_pending", "FAILED_PRECONDITION", False),
+        ("browser_required", "PERMISSION_DENIED", False),
+        ("insufficient_scope", "PERMISSION_DENIED", False),
+    ]:
+        out = (await run(refusal(kind)))["structuredContent"]
+        assert (out["error"], out["error_code"], out["retryable"]) == (kind, code, retry), out
+    out = await run(refusal("rate_limited", retry_after=120))
+    assert out["isError"] is True and out["structuredContent"]["retry_after"] == 120
+    assert _tool_error(DeckError("rate_limited", "wait", retry_after=30))["retry_after"] == 30
+    assert error_code("something_new") == "UNKNOWN"
+    # the research proxy's busy answer is plain text: it gets the same structured refusal
+    out = await run(_busy())
+    sc = out["structuredContent"]
+    assert out["isError"] is True and sc["error"] == "busy" and sc["error_code"] == "BUSY" and sc["retryable"]
+    assert sc["message"].startswith("2 research calls") and "busy: " in out["content"][0]["text"]
+    # a success is left alone
+    ok = {"content": [{"type": "text", "text": "{}"}], "structuredContent": {"ok": True}}
+    assert await run(ok) is ok
 
 
 # -- deck reads ---------------------------------------------------------------------------------

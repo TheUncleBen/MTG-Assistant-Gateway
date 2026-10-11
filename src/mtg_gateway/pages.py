@@ -844,7 +844,7 @@ def _mode_card(state: Any, sub: str, csrf_in: str) -> str:
             f"<label class='check mode{'' if allowed else ' muted'}'>"
             f"<input type='radio' name='mode' value='{mode}'{' checked' if mode == current else ''}"
             f"{'' if allowed else ' disabled'}><span><strong>{html.escape(modes.MODE_LABELS[mode])}</strong>"
-            f"<br><span class='small'>{html.escape(modes.MODE_HELP[mode])}"
+            f"<br><span class='small'>{html.escape(modes.mode_help(mode, max_rows=s.auto_apply_max_rows))}"
             f"{'' if allowed else ' (not allowed on this gateway)'}</span></span></label>"
         )
     rows = s.auto_apply_max_rows
@@ -856,11 +856,12 @@ def _mode_card(state: Any, sub: str, csrf_in: str) -> str:
         f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='approval_mode'>"
         f"{''.join(choices)}"
         f"<p class='muted small'>A small, low-risk edit changes at most {rows} card row"
-        f"{'s' if rows != 1 else ''}: cards added, removed, moved to another category, or with a new "
-        "quantity, finish or printing, no more than four copies each. Everything else counts as high "
-        "risk: more rows than that, "
-        "the commander, a new deck, a restore, and the deck's name, format, description or "
-        "visibility.</p>"
+        f"{'s' if rows != 1 else ''} of a deck or your collection: cards added, removed, moved to "
+        "another category, or with a new quantity, finish or printing, no more than four copies each. "
+        "A private copy of a deck (a clone) is low risk too: it changes nothing that exists. "
+        "Everything else counts as high risk: more rows than that, "
+        "the commander, a new deck built from a list, a restore, and the deck's name, format, "
+        "description or visibility.</p>"
         f"<div class='notice warn'>{html.escape(modes.AUTO_WARNING)}</div>"
         "<button class='primary'>Save approval mode</button></form></div>"
     )
@@ -1153,7 +1154,15 @@ def _page_step(p: dict[str, Any]) -> str:
             "Nothing else was changed. Ask your assistant for a new proposal if you still want these edits."
         )
     if state == "rejected":
-        return "This proposal was rejected. Nothing was changed."
+        by = {
+            "assistant": " by your assistant (its reject_proposal call)",
+            "card": " on the proposal card in your chat",
+            "review_page": " here, on the review page",
+            "browser": " in the gateway's pages",
+            "api": " through the gateway's API",
+            "disconnected": " when you disconnected the app that made it",
+        }.get(str(p.get("closed_by") or ""), "")
+        return f"This proposal was rejected{by}. Nothing was changed."
     return "This proposal can no longer be applied."
 
 
@@ -1293,15 +1302,19 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str = "") -> str:
             "<input type='hidden' name='action' value='reject'>"
             "<button class='btn'>Reject this proposal</button></form>"
         )
-    if p.get("result"):
-        url = p["result"].get("deck_url") if isinstance(p["result"], dict) else None
+    # who rejected it (closed_by, said above) is not a result worth a box of its own
+    result = p.get("result")
+    if isinstance(result, dict):
+        result = {k: v for k, v in result.items() if k not in ("rejected_by", "client")}
+    if result:
+        url = result.get("deck_url") if isinstance(result, dict) else None
         if url:
             link = (
                 f"<a class='btn btn-primary' href='{html.escape(url)}' rel='noreferrer'>"
                 "Open the deck on Archidekt</a>"
             )
             body += f"<p>{link}</p>"
-        body += f"<h2>Result</h2><pre>{html.escape(_pretty(p['result']))}</pre>"
+        body += f"<h2>Result</h2><pre>{html.escape(_pretty(result))}</pre>"
     return body + "</div>"
 
 
