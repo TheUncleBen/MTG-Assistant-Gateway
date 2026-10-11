@@ -40,8 +40,8 @@ snapshot first and is read back to verify.
 | Read any deck, the member's own private ones included: cards (type line, power/toughness, loyalty), zones, stats, plain list, Archidekt import text, picked with `view`; rules text, faces, flavour and artist on request | `get_deck` | no | the deck card in the chat shows the deck by category with pictures and rules text; hides Mystic Forge `archidekt_deck`, `archidekt_export`; `owner` says whose deck it is |
 | Read a pasted list or an Archidekt CSV export | `parse_decklist`, `parse_deck_export` | no | |
 | Statistics, legality, structural checks, bracket estimate; curve by type or category, land-only colour sources, pips outside the commander's identity, subtype and keyword counts | `deck_stats` | no | hides `validate_archidekt_deck` |
-| Diff two decks, snapshots or lists (precon upgrades included), with an optional paired goldfish A/B | `compare_decks` | no | hides `precon_diff`, `goldfish_ab`; the deck page's Compare view is the hand path |
-| Goldfish simulation of one deck or pasted list, stored with its stats and validation (a pasted list is returned, not stored); trends across a deck's reports | `run_deck_report` (+ `list_deck_reports` with its `trend`, `get_deck_report`) | stores a report | hides `goldfish_run`; takes the simulator's options; the deck page's Run simulation is the hand path, its History page draws the trends |
+| Diff two decks, snapshots or lists (precon upgrades included), with an optional paired goldfish A/B | `compare_decks` | no | hides `precon_diff`, `goldfish_ab`; the A/B takes two Commander decks or two 60-card decks; the deck page's Compare view is the hand path |
+| Goldfish simulation of one deck or pasted list, stored with its stats and validation (a pasted list is returned, not stored); trends across a deck's reports | `run_deck_report` (+ `list_deck_reports` with its `trend`, `get_deck_report`) | stores a report | hides `goldfish_run`; takes the simulator's options; a Commander deck plays from the command zone at 40 life, a deck without a commander and with 60 or more cards (Standard, Modern, Pioneer, Legacy, Vintage, Pauper...) plays a 60-card game (0.7.23: 20 life, London mulligan with no free one, on the play, sideboard left out); Forge games (Commander decks) seat precons of the deck's bracket and say why (0.7.23); the deck page's Run simulation is the hand path, its History page draws the trends |
 | Draw odds; what the engine models for a deck | `goldfish_odds`, `goldfish_annotate` (Mystic Forge) | no | annotations feed `run_deck_report`; the deck page's Probability of draw is the hand path to the same odds |
 | Validate a pasted list that is not a deck yet | `validate_decklist` (Mystic Forge) | no | an Archidekt deck's checks are in `deck_stats` |
 | Card lookups, rulings, prices, rules, EDHREC, combos, precon lists | the Mystic Forge research tools | no | the full list is in the tool reference |
@@ -58,10 +58,12 @@ snapshot first and is read back to verify.
 | Delete one of your decks | `propose_delete_deck` | proposal (destructive) | never applied by the assistant in any mode; snapshot and backup copy first |
 | Create a folder | `propose_create_folder` | proposal (consent) | never applied by the assistant in any mode; renaming a folder stays a hand action |
 | See, add or remove a deck's collaborators (people who may edit it) | `get_deck_collaborators`, `propose_collaborator`; deck settings page | proposal (consent) | changes who can edit the deck, so it is an account action: approved only on the review page, never applied by the assistant in any mode. Only people you follow can be added, as on Archidekt |
+| Watch cards (a name, or one printing and finish) and decks; their daily prices and values over time; price alerts | `watch_card`, `watch_deck`, `unwatch`, `list_watchlist`, `card_price_history` | the member's own watchlist (no proposal) | changes only the member's gateway data, never Archidekt; prices from Scryfall once a day; the Watchlist page is the hand path |
+| A plain summary of the last day or week: watched prices and deck values, reports finished, proposals waiting and applied | `get_summary` | no | written by the gateway without AI; an assistant's scheduled task can turn it into its own words ([USING.md](USING.md#notifications-and-summaries)) |
 | Proposals: list, read, approve with the card's code, reject (with a reason on the card), apply | `list_my_proposals`, `get_proposal`, `confirm_proposal`, `reject_proposal`, `apply_proposal` | apply writes | `apply_proposal` succeeds only when the mode allows |
 
 **No assistant tool exists for:** renaming folders, linking or unlinking
-Archidekt, approval modes, admin. Social actions and deleting a deck have
+Archidekt, approval modes, notification and summary settings, admin. Social actions and deleting a deck have
 tools since 0.7.17, but only as proposals, and (R-142) the person applies each
 one themselves on its review page, in every approval mode (the in-chat card
 only opens that page, since 0.7.19): no mode,
@@ -81,7 +83,7 @@ deleting a deck asks for its name.
 | --- | --- |
 | Home | newest decks with covers, search, tiles to every section |
 | Decks | the linked account's decks (grid or list, filter, sort), New deck (name, pasted list, CSV, the gateway's .json, a chosen file, scan), Folders (create, rename) |
-| One deck | views (text, table, brewer, stacks, scroll, grid), grouping, sorting, filter, your own stack order (drag a stack's handle or use the arrow keys; kept in this browser, Reset puts the deck's order back), Select cards on your own deck to move, refinish, colour-tag or remove several in one save with one Undo (Colour tag… and Mana value… are in the card menu too), the whole card on tap (image, every face's mana cost, type line, rules text, power/toughness or loyalty, flavour, printing, rarity, artist, price, salt, legal formats, custom mana value, the card's notes (read-only); Scryfall, mark owned, move category), drag cards between categories and Save moves, Quick add, Playtest (Archidekt's own playtester in a new tab, or the phone's browser from the app, where the person's Archidekt sign-in lives), Run simulation (the same statistics, validation and 300-game goldfish run as `run_deck_report`, opened and filed under History), statistics with Probability of draw and Deck checks (curve by type or category, colours as bars or a pie, lands only, pips outside the commander's identity, subtypes and keywords; a click shows only those cards), description, comments (post, edit and delete your own), like, bookmark, follow the owner; More: Settings, Compare with another deck (a precon from Archidekt's list, any deck or a pasted list; the same comparison as `compare_decks`), Export (Archidekt import text, plain text, sideboard, each with Copy; downloads as Archidekt .txt, plain .txt, .csv, .json, and one-way Arena .txt, MTGO .dek, PDF; see [EXPORT-IMPORT.md](EXPORT-IMPORT.md)), Open on Archidekt, Delete deck |
+| One deck | views (text, table, brewer, stacks, scroll, grid), grouping, sorting, filter, your own stack order (drag a stack's handle or use the arrow keys; kept in this browser, Reset puts the deck's order back), Select cards on your own deck to move, refinish, colour-tag or remove several in one save with one Undo (Color tag… and Mana value… are in the card menu too), the whole card on tap (image, every face's mana cost, type line, rules text, power/toughness or loyalty, flavour, printing, rarity, artist, price, salt, legal formats, custom mana value, the card's notes (read-only); Scryfall, mark owned, move category), drag cards between categories and Save moves, Quick add, Playtest (Archidekt's own playtester in a new tab, or the phone's browser from the app, where the person's Archidekt sign-in lives), Goldfish (0.7.23: play the deck by hand in the browser: shuffle, an opening hand of seven with London mulligans, draw, play to the battlefield, graveyard or exile, tap and untap, next turn; a Commander deck starts with its commander in the command zone; nothing is sent or kept), Run simulation (the same statistics, validation and 300-game goldfish run as `run_deck_report`, opened and filed under History), statistics with Probability of draw and Deck checks (curve by type or category, colours as bars or a pie, lands only, pips outside the commander's identity, subtypes and keywords; a click shows only those cards), description, comments (post, edit and delete your own), like, bookmark, follow the owner; More: Settings, Compare with another deck (a precon from Archidekt's list, any deck or a pasted list; the same comparison as `compare_decks`), Export (Archidekt import text, plain text, sideboard, each with Copy; downloads as Archidekt .txt, plain .txt, .csv, .json, and one-way Arena .txt, MTGO .dek, PDF; see [EXPORT-IMPORT.md](EXPORT-IMPORT.md)), Open on Archidekt, Delete deck |
 | Editor | quantities, categories, finish, printing, add cards (deck or maybeboard), maybeboard and sideboard rows, paste a list (Archidekt's syntax: printing, `*F*`/`*E*`, `[Category]`, `# Sideboard`), the whole card from a thumbnail, remove, undo, Save changes |
 | Deck settings | name, format, bracket, description, private, unlisted; cover image; tags; folder; collaborators (add or remove opens a review page to Apply); Delete this deck |
 | Search | public decks by name, commander, format, colours, owner; a user's profile page; Precons by set |
@@ -89,7 +91,8 @@ deleting a deck asks for its name.
 | Collection | the Archidekt Collection: filter, sort, grid or list, add, quantity, per-row details (finish, condition, language, price paid), the whole card from a thumbnail, remove, CSV export, import from a CSV or a card list (pasted or a file) |
 | Proposals | review page with Approve, Apply, Reject; the in-chat card opens the same proposal |
 | History | proposals, snapshots (Restore), reports (open one in full) |
-| Account | link or unlink Archidekt, approval mode, hand-edit confirmation, theme, sign out, delete my data |
+| Watchlist | watch cards (name, or set and number, finish) and decks; today's price and the change over 1, 7 and 30 days; a chart and a table of each price over time; price alerts; remove. The card viewer's Price history and Watch this card reach the same |
+| Account | link or unlink Archidekt, approval mode, hand-edit confirmation, notifications through ntfy (on or off, which events, topic, Send test; only when the operator set up a server), summary (off, daily, weekly; the latest shown on the page), theme, sign out, delete my data |
 | Admin (admin group only) | members (disable, revoke, unlink, delete data), activity, metrics; System card with the newest backup and backup copy and the research service's state |
 | Guide | tutorials, how-to guides, reference (this map in the user's words) and explanation, with a contents rail and a search box |
 
@@ -111,6 +114,18 @@ add nothing to what the assistant reads.
 An app without cards (Claude Code, older clients) gets the same text results,
 and a form question for ambiguous names.
 
+**How an assistant gets connected.** Every app adds the same connector (the
+gateway's `/mcp` address); the guided setup at `/install` has the steps. Two
+files bundle the connector with the MTG skill, both built for each gateway
+and downloadable without signing in: the Claude plugin
+(`/plugin/<name>.zip`, uploaded on claude.ai or installed in Claude Code) and
+the ChatGPT plugin (`/plugin/<name>-chatgpt.zip`, Agent Plugins format).
+OpenAI's help pages say workspace owners and admins on ChatGPT Business and
+Enterprise upload the ChatGPT plugin in the admin console (reported, not yet
+tested); individual Plus and Pro accounts have no plugin upload (checked on a
+Pro account, 2026-10-11) and add the connector by hand, which gives the same
+tools.
+
 - **Shared backend, one set of rules.** A hand save and an applied proposal
   travel the same path: a proposal record, a snapshot, the Archidekt write,
   a read-back, an audit row. The review page and the in-chat card open the
@@ -118,11 +133,15 @@ and a form question for ambiguous names.
   `run_deck_report` are the same reports on the same History page.
 - **Only the assistant does:** research lookups (Scryfall, EDHREC, combos,
   rules), the paired goldfish A/B with the simulator's options, reading card
-  photos into names, proposing changes it worked out itself. The goldfish
+  photos into names, proposing changes it worked out itself.
+- **Only a person plays:** the deck page's Goldfish, a game played by hand in
+  the browser. It is a playtable, not a tool result, so the assistant has no
+  counterpart; its simulated games are `run_deck_report`. The goldfish
   simulation of one deck and the comparison of two are both paths: Run
   simulation and Compare on the deck page for people, `run_deck_report` and
   `compare_decks` for the assistant, same engine and settings.
-- **Only a person does:** link Archidekt and set approval modes, approve a
+- **Only a person does:** link Archidekt and set approval modes, turn
+  notifications and summaries on or off, approve a
   high-risk proposal in manual or semi-auto mode, approve a like, vote,
   bookmark, follow, comment, new folder, collaborator change or deck deletion (an assistant may
   propose these; the person approves each one on its review page, in every
@@ -130,7 +149,9 @@ and a form question for ambiguous names.
 - **Both reach:** reading decks and collections, statistics, creating and
   editing decks, deck settings (folder, tags and cover included), cloning,
   restoring snapshots, collection changes, scan drafts. The person's path applies at once; the assistant's path is a
-  proposal under the member's mode.
+  proposal under the member's mode. Watching cards and decks and reading
+  their prices and the summary are the same on both paths and need no
+  proposal (they change nothing on Archidekt).
 
 Nothing was orphaned by hiding the Mystic Forge duplicates: each hidden tool's
 inputs and outputs are carried by its owner (0.7.2 added the simulator's
@@ -149,10 +170,12 @@ later; none is promised.
   checked. A Moxfield export pasted as text imports today (New deck, the deck editor's paste
   box, or the assistant's `parse_decklist`).
 - **Per-card notes can be read, not written** (0.7.20). Notes show in the card viewer and in
-  `get_deck`, but no Archidekt route that writes them was found in Archidekt's own site code, so
-  the gateway does not guess one.
-- **Deck reports:** goldfish runs for 60-card formats; an interactive goldfish game you play
-  turn by turn. (Trends across a deck's reports shipped in 0.7.20.)
-- **Watchlists and price history:** no price ingest and no watchlist.
-- **Notifications and summaries:** sign-in protected ntfy notifications;
-  scheduled AI summaries.
+  `get_deck`. Archidekt's own deck editor no longer saves (or shows) per-card deck notes: its save
+  request (`modifyCards/v2`) carries quantity, finish, custom mana value, companion, flip and colour
+  tag but no notes, and no other deck route writes them (site code re-checked 2026-10-11, 0.7.23).
+  Note text exists on Archidekt only for pinned cards and inside the playtester, so the gateway
+  does not guess a route.
+- **AI-written summaries by the gateway itself** (0.7.23). The gateway has no AI model and the
+  project uses only free services, so it writes the summary with fixed sentences; a member's own
+  assistant can write it in its words on a schedule (`get_summary`). Watchlists, price history and
+  ntfy notifications shipped in 0.7.23.

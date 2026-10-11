@@ -169,6 +169,14 @@ async def test_a_deck_changed_on_archidekt_is_judged_as_it_is_now(stack: Stack) 
         _deck_card(stack, "Forest")[0]["quantity"] += 1  # the owner's edit on archidekt.com
         stack.ark.decks[42]["updatedAt"] = "2026-10-10T12:00:00Z"
 
+        # 0.7.23: for a few seconds a plain view shows the deck as just read (a run of view
+        # switches asks Archidekt once); the browser's Reload reads it again at once
+        page = await b.http.get("/decks/42", headers={"Accept": "text/html"})
+        assert "Size: 100" in page.text
+        # ... and once those seconds are over, a plain view reads it again
+        decks = stack.h.app.state.gateway.decks
+        decks._page_decks = {k: (t - decks.page_deck_seconds, d) for k, (t, d) in decks._page_decks.items()}
+
         page = await b.http.get("/decks/42", headers={"Accept": "text/html"})
         assert "Size: 101" in page.text and "class='legal ok'" not in page.text
         assert "class='legal bad'" in page.text and "deck has 101 cards; commander wants 100" in page.text
@@ -177,6 +185,13 @@ async def test_a_deck_changed_on_archidekt_is_judged_as_it_is_now(stack: Stack) 
         assert after["card_count"] == 101 and after["legality_problems"] == []
         assert after["checks"]["legal"] is False and after["checks"]["ok"] is False
         assert after["checks"]["legal_problems"] == ["deck has 101 cards; commander wants 100"]
+
+        # the browser's Reload (max-age=0) never waits those seconds out
+        _deck_card(stack, "Forest")[0]["quantity"] += 1
+        page = await b.http.get("/decks/42", headers={"Accept": "text/html"})
+        assert "Size: 101" in page.text
+        page = await b.http.get("/decks/42", headers={"Accept": "text/html", "Cache-Control": "max-age=0"})
+        assert "Size: 102" in page.text
     finally:
         await b.aclose()
 

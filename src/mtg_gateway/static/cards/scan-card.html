@@ -29,7 +29,7 @@
   var B = Bridge, el = B.el, $ = B.$;
   var GATEWAY = "@GATEWAY@";
   var MAX_IMAGES = 120, MAX_ROWS = 400;
-  var FLAGS = { not_found: "not recognised", ambiguous: "which one?", deferred: "not looked up yet", error: "lookup failed", fuzzy: "name corrected" };
+  var FLAGS = { not_found: "not recognized", ambiguous: "which one?", deferred: "not looked up yet", error: "lookup failed", fuzzy: "name corrected" };
 
   function num(v) { var n = Number(v); return isFinite(n) && n > 0 ? n : 1; }
   function needsLook(it) { return !it.card || ["not_found", "ambiguous", "deferred", "error"].indexOf(it.status) >= 0; }
@@ -46,7 +46,7 @@
     var items = Array.isArray(sc.items) ? sc.items.filter(function (it) { return it && typeof it === "object"; }) : [];
     var flagged = items.filter(needsLook), known = items.filter(function (it) { return !needsLook(it); });
     var cards = 0; known.forEach(function (it) { cards += num(it.quantity); });
-    $("summary").textContent = cards + (cards === 1 ? " card" : " cards") + " recognised" +
+    $("summary").textContent = cards + (cards === 1 ? " card" : " cards") + " recognized" +
       (flagged.length ? ", " + flagged.length + (flagged.length === 1 ? " item needs" : " items need") + " a look." : ".");
     var list = $("list"); list.replaceChildren();
     if (!items.length) list.appendChild(el("div", "row", "This scan has no cards yet."));
@@ -59,7 +59,7 @@
       else li.appendChild(el("span", "pic none"));
       var n = el("span");
       var name = el("span", "name", String((card && card.name) || it.name || "(no name)"));
-      var label = FLAGS[it.status] || (flag ? "not recognised" : "");
+      var label = FLAGS[it.status] || (flag ? "not recognized" : "");
       if (label) name.appendChild(el("span", "pill" + (flag ? "" : " warn"), label));
       n.appendChild(name);
       var sub = [];

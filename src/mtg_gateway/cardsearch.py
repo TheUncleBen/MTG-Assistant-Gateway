@@ -26,10 +26,10 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from .deckpage import DECK_CSS, mana_html
+from .deckpage import mana_html
 from .pages import _csrf, browser_session, login_redirect
 from .scan.service import ScanError
-from .theme import icon, render
+from .theme import icon, render, stylesheet_link
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -39,7 +39,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 CARDS_CSP = (
-    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; "
+    "default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; "
     "manifest-src 'self'; connect-src 'self'; "
     "img-src 'self' https://cards.scryfall.io; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 )
@@ -433,8 +433,9 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
             current="/search",
             scripts=True,
             head_extra=(
-                # DECK_CSS carries the card viewer's own styles (the dialog, its bottom sheet on phones)
-                f"<style>{DECK_CSS}{CARDS_CSS}</style><script src='/static/cardview.js' defer></script>"
+                # deck.css carries the card viewer's own styles (the dialog, its bottom sheet on phones)
+                f"{stylesheet_link('deck.css')}<style>{CARDS_CSS}</style>"
+                "<script src='/static/cardview.js' defer></script>"
                 "<script src='/static/cardsearch.js' defer></script>"
             ),
         )

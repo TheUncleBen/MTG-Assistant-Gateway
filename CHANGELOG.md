@@ -7,6 +7,99 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.23] - 2026-10-11
+
+Everything left over, skipped or parked after 0.7.22 that can be built, plus faster pages.
+**When you update, also update the research service image to `1.3.2-mag4` and the Forge image to
+`2.0.15-mag2`** (the deploy files already name them). Still not possible, with the reason in
+[docs/CAPABILITIES.md](docs/CAPABILITIES.md): writing per-card notes (Archidekt's own editor has no
+way to save them), Moxfield import by link (parked), Forge's Unfinity stickers, Attractions and
+Alchemy cards (Forge itself), and AI-written summaries by the gateway itself (it would need a paid
+model; your assistant can write them from `get_summary`).
+
+### Added
+- Watchlists: watch cards (by name, optionally a printing and finish) and whole decks. The gateway
+  keeps daily USD/EUR prices on a new Watchlist page and in the card viewer ("Price history",
+  "Watch this card"), deck value over time, and optional alerts on a % move or a price line. MCP
+  tools `watch_card`, `watch_deck`, `unwatch`, `list_watchlist`, `card_price_history`.
+- Optional ntfy notifications (`MTG_NTFY_URL`, `MTG_NTFY_TOKEN_FILE`, both off by default):
+  members opt in on the Account page with an unguessable topic (a chosen one starts with `mtg-`)
+  and can press Send test (once a minute). `MTG_NTFY_URL` may not hold a user name or password; the
+  token goes in its secret. Events: a
+  proposal waiting for approval, a finished deck report (also queued Forge runs), price alerts,
+  summaries. DEPLOY.md covers a self-hosted ntfy with access control.
+- Plain daily or weekly summaries (written by the gateway from its own data, not AI), opt-in on the
+  Account page, sent by ntfy when set up and readable with the new `get_summary` tool, so a Claude
+  or ChatGPT scheduled task can turn it into an AI-written summary.
+- Settings `MTG_WATCH_MAX_CARDS` (200), `MTG_WATCH_MAX_DECKS` (10), `MTG_PRICE_HISTORY_DAYS`
+  (365), `MTG_PRICE_HOUR_UTC` (6).
+- Goldfish runs for 60-card decks: a deck without a commander and with 60 or more cards plays a
+  60-card game (7-card London mulligan with no free one, 20 life, on the play, sideboard left
+  out); `compare_decks` can compare two 60-card decks.
+- A Goldfish page from the deck page: play the deck by hand in the browser (mulligans, draw,
+  battlefield, graveyard or exile, tap, next turn, new game). A Commander deck starts with its
+  commander in the command zone. Nothing is sent or kept.
+- Forge seats precons of your deck's bracket (the bracket set on Archidekt, else the gateway's
+  estimate), then the nearest bracket, then the newest precons; the report names the opponents and
+  why. Needs the Forge image `2.0.15-mag2`.
+- A ChatGPT plugin file for each gateway at `/plugin/<name>-chatgpt.zip`: the connector and the MTG
+  skill in one file, with your gateway's name, address and icon, in the format OpenAI's own plugin
+  loader reads. The guided setup's ChatGPT section links it. Per OpenAI's help pages only workspace
+  owners and admins on ChatGPT Business and Enterprise can upload a plugin; individual Plus and Pro
+  accounts have no upload and keep adding the connector.
+- REVERSE-PROXY.md: "Page speed through NPM", with checks for HTTP/2 and compression (pages stay
+  uncompressed on purpose, because they carry a form token).
+
+### Changed
+- Pages move faster, above all in the Android app: the site's styles and scripts are downloaded
+  once per release and kept, compressed, instead of with every page (pages are 70-85% smaller);
+  switching a deck's views, or coming back to it within 20 seconds, no longer waits for Archidekt
+  (Reload always shows the latest); the offline helper starts loading a page at once instead of
+  waking up first; tapping a link shows a thin bar at the top straight away.
+- Database schema 12 (watchlist, price, notification and job tables); the upgrade is automatic.
+- The daily price job asks Scryfall only about watched cards, in batches of 75 on the shared
+  pacing, and sends nothing when nobody watches anything.
+- A Commander-format deck without a commander, a list of 99 to 101 cards with no set format (or
+  Custom) and no commander marked, or a deck under 60 cards, is refused by the simulation with the
+  reason. Trend labels say "Lethal damage".
+- Dragging a stack or card near the top or bottom of the deck page scrolls at the same speed on any
+  screen (about 1,200 px a second at the very edge, slower further in). Before, a 120 Hz phone
+  scrolled about twice as fast and a busy phone about half as fast.
+- US spelling in what people see: "Color tag…", "Colors", "recognized", "gray", and in the
+  assistant's tool descriptions. Field names in tool results are unchanged.
+- Full auto approval mode is described as applying deck and collection changes without asking:
+  account actions and deck deletion always wait for your press on the review page, in every
+  mode. The approval-mode docs match the Account page's own help.
+- The docs and setup page say ChatGPT on the web (Pro) was checked against the gateway with every
+  tool, and that the companion and admin pages were checked on a real deployment.
+- Card notes stay read-only: a fresh check of Archidekt's site found no way to save a deck card's
+  notes (CAPABILITIES.md says what was checked).
+- Research service image `1.3.2-mag4` (patches 0007 and 0008); Forge image `2.0.15-mag2`.
+
+### Fixed
+- A 60-card list was simulated as a 59-card Commander deck with its first card as the commander,
+  or refused.
+- Deck reports and comparisons say how many copies of each unrecognized card were left out of the
+  simulation ("skipped: 2 Bera, 1 Hamer").
+- `scryfall_named` without a set shows the newest printing already out on paper, like the
+  gateway's other lookups, and says which printing it is.
+- An odds question the research service can't answer (for example more draws than cards in the
+  deck) comes back as an error with the reason, not as an answer.
+- A backup folder whose name differs only in capitals ("MTG Gateway Backups") is reused instead of
+  a second one being made beside it.
+- Undo after removing a card on the deck page brings back its printing, finish, color tag and
+  custom mana value, not just the card.
+- With large text (a phone's font size, or 200% text zoom), the main pages no longer scroll
+  sideways or push buttons and menus off the screen, on phones and a foldable's inner screen.
+- The Android app follows the phone's font size setting.
+- The test suite runs fully offline; a test that tries to reach the internet fails.
+
+### Security
+- The ntfy token is read only from a Docker secret file and is never logged. Notifications carry
+  minimal detail and a link, never deck contents.
+- Page policies also allow stylesheets from the gateway itself (`style-src 'self'`); nothing else
+  is loosened.
+
 ## [0.7.22] - 2026-10-11
 
 Fixes from the owner's 0.7.21 checklist, an adversarial QA run from ChatGPT and the live test of

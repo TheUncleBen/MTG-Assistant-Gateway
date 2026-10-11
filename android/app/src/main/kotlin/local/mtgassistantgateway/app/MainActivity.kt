@@ -234,6 +234,10 @@ class MainActivity : ComponentActivity() {
         s.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
         s.safeBrowsingEnabled = true
         s.setSupportZoom(false)
+        // Large text: the pages follow the phone's font size setting. WebView starts from it too,
+        // but saying so keeps it that way; a change of the setting recreates the activity (fontScale
+        // is not in the manifest's configChanges), so this runs again with the new scale.
+        s.textZoom = Math.round(resources.configuration.fontScale * 100)
         s.userAgentString = s.userAgentString + " MTGAssistant/" + BuildConfig.VERSION_NAME
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, false)

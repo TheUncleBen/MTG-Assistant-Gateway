@@ -149,6 +149,26 @@ A `502 Bad Gateway` from NPM means it can't reach the gateway. Check that
 NPM is on the same Docker network (the exact name, it's case-sensitive) and
 was redeployed after you added it, and that the forward hostname is right.
 
+### Page speed through NPM
+
+The gateway compresses its own scripts and stylesheets and names each by
+its content, so a browser or the Android app downloads each once per
+release and keeps it. Two settings on the proxy host decide the rest:
+
+- **HTTP/2** (SSL tab) lets a page's files share one connection. Check:
+  `curl -sI https://mtg.example.com/healthz | head -1` should print
+  `HTTP/2 200`; `HTTP/1.1 200` means it is off.
+- The gateway does not compress the pages themselves (70 to 230 KB each),
+  on purpose: its pages carry a form token, and compressed pages with a
+  secret in them are what the BREACH attack works on. We recommend leaving
+  page compression off in NPM. Check:
+  `curl -s -o /dev/null -D - -H 'Accept-Encoding: gzip' https://mtg.example.com/signed-out | grep -i content-encoding`
+  prints nothing when pages go out uncompressed.
+- A file the gateway already compressed passes through as it is. Check:
+  `curl -s -o /dev/null -D - -H 'Accept-Encoding: gzip' https://mtg.example.com/static/feedback.js | grep -i -E 'content-encoding|cache-control'`
+  prints `content-encoding: gzip` and `cache-control: public, max-age=300`
+  (a page asks for it with `?v=`, which gives a year).
+
 ## Checking it
 
 ```bash

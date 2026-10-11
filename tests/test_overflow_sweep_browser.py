@@ -138,6 +138,7 @@ def _pages(server: Server, pending: str) -> list[str]:
         f"/users/{LONG64}",
         "/history",
         "/history/reports/r1",
+        "/watchlist",
         "/activity",
         "/proposals",
         f"/proposals/{pending}",
@@ -330,6 +331,30 @@ def _seed(server: Server) -> tuple[str, str]:
 
     seed_history(server.db, "user-1", now=int(time.time()))
     store_report(server.db, "user-1", "r1", deck_name=LONGER)
+    # a watchlist with long, unbroken names and a few days of prices (prices.py)
+    with server.db.tx() as c:
+        for i, name in enumerate(CARDS[-2:]):
+            c.execute(
+                "INSERT INTO watch_cards (id, sub, name, set_code, collector_number, finish, scryfall_id, "
+                "alert_pct, created_at) VALUES (?, 'user-1', ?, 'cmm', '1234', 'etched', ?, 12.5, 0)",
+                (f"w{i}", name, f"id-{i}"),
+            )
+            for d in range(5):
+                c.execute(
+                    "INSERT INTO price_points (scryfall_id, day, usd_etched) VALUES (?, date('now', ?), ?)",
+                    (f"id-{i}", f"-{d} day", 1234.5 + d),
+                )
+        c.execute(
+            "INSERT INTO watch_decks (sub, deck_id, deck_name, cards_json, created_at) "
+            "VALUES ('user-1', '45', ?, '[]', 0)",
+            (UNBROKEN,),
+        )
+        for d in range(3):
+            c.execute(
+                "INSERT INTO deck_values (sub, deck_id, day, usd, eur) "
+                "VALUES ('user-1', '45', date('now', ?), ?, 1)",
+                (f"-{d} day", 9876.5 + d),
+            )
     pending = next(p["id"] for p in server.db.list_proposals("user-1", limit=100) if p["state"] == "pending")
     return sid, pending
 

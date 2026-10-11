@@ -88,7 +88,7 @@ def test_old_metrics_and_deck_covers_are_purged(tmp_path: Path):
 
 def test_purge_indexes_exist_and_are_used(tmp_path: Path):
     db = Database(tmp_path / "g.sqlite")
-    assert db.schema_version == db_module.SCHEMA_VERSION == 11
+    assert db.schema_version == db_module.SCHEMA_VERSION == 12
     with db.tx() as c:
         names = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
         assert {
@@ -310,7 +310,7 @@ async def test_every_page_loads_the_feedback_script_and_offline_worker(gw: Harne
         csp = page.headers["content-security-policy"]
         script_src = csp.split("script-src")[1].split(";")[0]
         assert script_src.strip() == "'self'"
-        assert "<script src='/static/feedback.js' defer></script>" in page.text
+        assert re.search(r"<script src='/static/feedback.js\?v=[0-9a-f]{12}' defer></script>", page.text)
         js = await b.http.get("/static/feedback.js")
         assert js.status_code == 200 and "aria-busy" in js.text and "/sw.js" in js.text
         sw = await b.http.get("/sw.js")

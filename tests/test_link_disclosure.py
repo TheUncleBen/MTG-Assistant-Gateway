@@ -8,6 +8,7 @@ import base64
 import html
 import json
 import logging
+import re
 import time
 from pathlib import Path
 
@@ -123,7 +124,7 @@ async def test_disclosure_is_shown_in_full_and_must_be_ticked_before_linking(sta
     detail = f"<details class='disclosure-detail' id='{link_disclosure.DETAIL_ID}' open data-must-open>"
     assert detail in page
     assert page.index("In short") < page.index(detail)
-    assert f"<script src='{link_disclosure.SCRIPT}' defer></script>" in page
+    assert re.search(rf"<script src='{link_disclosure.SCRIPT}\?v=[0-9a-f]{{12}}' defer></script>", page)
     assert "aria-describedby='accept-risk-hint'" in page and "id='accept-risk-hint' hidden" in page
     # the form comes after the disclosure, so it is read first
     assert page.index("archidekt-disclosure") < page.index("name='archidekt_password'")

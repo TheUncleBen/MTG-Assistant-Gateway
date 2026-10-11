@@ -24,15 +24,24 @@
   }
   // While something is dragged: how far to scroll the page this frame when the pointer or finger
   // rests near the window's top or bottom edge (faster the closer it is), so a far stack is reachable;
-  // never past the ends of `box` (the cards), where there is nothing left to drop on.
+  // never past the ends of `box` (the cards), where there is nothing left to drop on. Null when the
+  // pointer is not in the zone; 0 is a frame too short for a whole pixel. The speed is per second,
+  // not per frame, so a 120 Hz phone or a busy one scrolls as fast as a 60 Hz screen does.
+  var EDGE_SPEED = 1200, edgeAt = 0, edgeRest = 0;  // px/s at the very edge; last step's time; part pixel
   function edgeStep(y, box) {
     var zone = Math.min(96, window.innerHeight * 0.15), h = window.innerHeight;
     var d = y < zone ? -(zone - y) : y > h - zone ? y - (h - zone) : 0;
     if (d && box) {
       var r = box.getBoundingClientRect();
-      if ((d < 0 && r.top >= zone) || (d > 0 && r.bottom <= h - zone)) return 0;
+      if ((d < 0 && r.top >= zone) || (d > 0 && r.bottom <= h - zone)) d = 0;
     }
-    return Math.round(Math.max(-1, Math.min(1, d / zone)) * 22);
+    var now = performance.now(), ms = edgeAt && now - edgeAt < 100 ? now - edgeAt : 1000 / 60;
+    edgeAt = d ? now : 0;
+    if (!d) { edgeRest = 0; return null; }
+    var px = Math.max(-1, Math.min(1, d / zone)) * EDGE_SPEED * ms / 1000 + edgeRest;
+    var step = px < 0 ? Math.ceil(px) : Math.floor(px);
+    edgeRest = px - step;
+    return step;
   }
 
   // -- forms that apply on change ----------------------------------------------------------
@@ -437,6 +446,21 @@
     var seen = Object.create(null);
     return changes.map(function (ch) { return frontFace(ch.card_name); }).filter(function (n) { if (seen[n]) return false; seen[n] = true; return true; });
   }
+  // An Undo that puts a removed row back also puts back its color tag and custom mana value. The
+  // gateway tags only a card already in the deck, and takes one of those per card per save, so
+  // the add goes first and each tag change follows in its own save (at most three in all).
+  function undoSteps(list) {
+    var steps = [[]];
+    list.forEach(function (ch) {
+      if (ch.action !== "set_label" && ch.action !== "set_mana_value") { steps[0].push(ch); return; }
+      var key = frontFace(ch.card_name) + (ch.zone === "side" ? " side" : "");
+      for (var i = 1; i < steps.length; i++) {
+        if (!steps[i].some(function (o) { return frontFace(o.card_name) + (o.zone === "side" ? " side" : "") === key; })) { steps[i].push(ch); return; }
+      }
+      steps.push([ch]);
+    });
+    return steps.filter(function (s) { return s.length; });
+  }
   var refreshed = false;
   function applyAnswer(d, changes, undoChanges) {
     var names = namesOf(changes);
@@ -450,7 +474,9 @@
       undo.addEventListener("click", function () {
         undo.disabled = true;
         undo.textContent = "Undoing…";
-        saveEdit(undoChanges, null).then(function () { toast("Undone. Both steps are under History."); }).catch(showError);
+        undoSteps(undoChanges).reduce(function (p, step) {
+          return p.then(function () { return saveEdit(step, null); });
+        }, Promise.resolve()).then(function () { toast("Undone. Both steps are under History."); }).catch(showError);
       });
       actions.push(undo);
     }
@@ -496,9 +522,22 @@
     var inv;
     if (ch.action === "set_quantity") inv = { action: "set_quantity", card_name: name, quantity: qty };
     else if (ch.action === "remove") {
+      // put the row back as it was: its printing (the deck proper only; a maybeboard add takes
+      // no pinned printing), finish, color tag and custom mana value, not just name and category
       inv = { action: "add", card_name: name, quantity: qty };
       var cat = catOf(card);
       if (cat) inv.category = cat;
+      var pr = (card.getAttribute("data-set") || "").trim().split(/\s+/);
+      if (zone === "main" && pr.length === 2 && pr[0] && pr[1]) { inv.set_code = pr[0].toLowerCase(); inv.collector_number = pr[1]; }
+      var fin = (card.getAttribute("data-finish") || "").toLowerCase();
+      if (fin === "foil" || fin === "etched") inv.finish = fin;
+      var more = [inv];
+      var tag = splitLabel(card.getAttribute("data-label") || "");
+      if (tag.name) more.push({ action: "set_label", card_name: name, label: tag.name, color: tag.colour || undefined });
+      var mv = card.getAttribute("data-mv");
+      if (/^\d+$/.test(mv || "")) more.push({ action: "set_mana_value", card_name: name, mana_value: Number(mv) });
+      if (zone === "side") more.forEach(function (m) { m.zone = "side"; });
+      return more;
     } else if (ch.action === "set_category") {
       inv = { action: "set_category", card_name: name, category: catOf(card) || stackOf(card) };
       // after the move the row sits in the zone its new category puts it in
@@ -511,7 +550,7 @@
   function edit(card, action, value) {
     var ch = changeFor(card, action, value);
     var inv = inverseFor(card, ch);
-    return saveEdit([ch], inv ? [inv] : null);
+    return saveEdit([ch], inv ? [].concat(inv) : null);
   }
   function stepQty(card, delta) {
     var q = qtyOf(card) + delta;
@@ -710,7 +749,7 @@
       sub.addEventListener("keydown", function (e) { if (e.key === "ArrowLeft") { stop(e); toggleSub(false); moveBtn.focus(); } });
       m.appendChild(moveBtn);
       m.appendChild(sub);
-      if (window.MtgDeckTag) m.appendChild(menuItem("Colour tag…", "tag", function () { closeMenu(); window.MtgDeckTag(card); }));
+      if (window.MtgDeckTag) m.appendChild(menuItem("Color tag…", "tag", function () { closeMenu(); window.MtgDeckTag(card); }));
       m.appendChild(menuItem("Mana value…", "edit", function () { manaValueForm(card, m); }));
       m.appendChild(menuItem("Remove from deck", "x", function () {
         m.classList.add("busy");
@@ -860,7 +899,7 @@
       opt.value = o[0];
       finishSel.appendChild(opt);
     });
-    var tagBtn = el("button", "btn", "Colour tag…");
+    var tagBtn = el("button", "btn", "Color tag…");
     tagBtn.type = "button";
     tagBtn.setAttribute("aria-expanded", "false");
     var rm = el("button", "btn danger", "Remove");
@@ -879,7 +918,7 @@
     var tagColour = el("input");
     tagColour.type = "color";
     tagColour.value = "#37d67a";
-    tagColour.setAttribute("aria-label", "Tag colour");
+    tagColour.setAttribute("aria-label", "Tag color");
     var tagApply = el("button", "btn-primary", "Apply tag");
     tagApply.type = "button";
     var tagOff = el("button", "btn-ghost small", "Take tag off");
@@ -1061,7 +1100,7 @@
         // a remove takes every row of the card in that zone; with two rows (two printings or
         // categories) an Undo could not put both back as they were, so none is offered
         if (twinIn(c, zoneOf(c))) inverses = null;
-        if (inverses) { var inv = inverseFor(c, ch); if (inv) inverses.push(inv); else inverses = null; }
+        if (inverses) { var inv = inverseFor(c, ch); inverses = inv ? inverses.concat(inv) : null; }
       });
       run(changes, inverses, window.MtgText ? window.MtgText.plural(list.length, "card") + " removed." : "Removed.");
     });
@@ -1285,7 +1324,7 @@
       if (st) st.classList.add("dropping");
       lastTarget = st;
     }
-    if (dy) touchFrame = requestAnimationFrame(touchTick);  // a resting finger keeps the page scrolling
+    if (dy !== null) touchFrame = requestAnimationFrame(touchTick);  // a resting finger keeps the page scrolling
   }
   cards.addEventListener("touchstart", function (e) {
     var card = e.target.closest(".c, .row");
@@ -1457,7 +1496,7 @@
       dragTag.style.transform = "translate3d(" + Math.round(tx) + "px," + Math.round(drag.y + (drag.finger ? -56 : 12)) + "px,0)";
       findSpot();
       drawBar();
-      if (dy) dragFrame = requestAnimationFrame(dragTick);  // a resting pointer keeps the page scrolling
+      if (dy !== null) dragFrame = requestAnimationFrame(dragTick);  // a resting pointer keeps the page scrolling
     }
     function findSpot() {
       // the stack under the pointer, or the nearest one when it is in a gap, in the page margin or

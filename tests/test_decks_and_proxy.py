@@ -34,6 +34,7 @@ class _GoldfishRunInput(BaseModel):
     mulligan: dict[str, object] | None = None
     annotations: list[dict[str, object]] | None = None
     combos: list[object] | None = None
+    constructed: bool = False
 
 
 class _GoldfishAbInput(BaseModel):
@@ -48,12 +49,17 @@ class _GoldfishAbInput(BaseModel):
     annotations_b: list[dict[str, object]] | None = None
     combos: list[object] | None = None
     allow_different_commanders: bool = False
+    constructed: bool = False
 
 
 class _ValidateDecklistInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     decklist: str = Field(min_length=1)
     commander: str | None = None
+
+
+# The simulator calls the fake received, (tool, params), for tests that check what was sent.
+SIM_CALLS: list[tuple[str, dict[str, object]]] = []
 
 
 def fake_mystic_forge() -> MCPServer:
@@ -68,13 +74,22 @@ def fake_mystic_forge() -> MCPServer:
     # error.
     @mf.tool(name="goldfish_run", description="goldfish simulation")
     async def goldfish_run(params: _GoldfishRunInput) -> str:
+        SIM_CALLS.append(("goldfish_run", params.model_dump()))
         first = params.deck.strip().splitlines()[0]
+        if params.constructed:
+            # Mystic Forge's header for a 60-card game (patch 0007)
+            size = sum(int(line.split()[0]) for line in params.deck.strip().splitlines())
+            return (
+                f"# Goldfish run\nDeck: {size} cards | Format: 60-card (no commander, 20 life, on the "
+                f"play) | {params.n} games\n\n## Metrics\n```json\n{{}}\n```"
+            )
         if "Unknown" in first:
             return f"Commander '{first}' was not recognized by Scryfall; fix the name and rerun."
         return f"# Goldfish run\nCommander: {first} | {params.n} games\n\n## Metrics\n```json\n{{}}\n```"
 
     @mf.tool(name="goldfish_ab", description="paired goldfish A/B")
     async def goldfish_ab(params: _GoldfishAbInput) -> str:
+        SIM_CALLS.append(("goldfish_ab", params.model_dump()))
         return f"# Goldfish A/B\n{params.n} paired games\n\n## Deltas (A − B)\n(none)"
 
     @mf.tool(name="validate_decklist", description="validate a decklist")
@@ -1522,14 +1537,14 @@ async def test_simulation_calls_take_the_shape_mystic_forge_accepts(stack: Stack
     )
     assert out["ok"], out
     assert out["goldfish_ab"]["ok"] is True and "## Deltas" in out["goldfish_ab"]["text"], out["goldfish_ab"]
-    # A list with no commander is not simulated: Mystic Forge would silently take the first line
-    # as the commander and simulate a 59-card deck.
-    plain = "24 Forest\n36 Grizzly Bears\n"
+    # A short list with no commander is not simulated: Mystic Forge would silently take the first
+    # line as the commander (a list of 60 or more is a 60-card game, see test_sixty_card_decks_...).
+    plain = "20 Forest\n20 Grizzly Bears\n"
     out = structured(
         await call(h, token, "compare_decks", {"a": plain, "b": plain, "simulate": True, "games": 20})
     )
     # the A/B was asked for and refused, so the result fails at the top (the diff is still there)
-    assert out["ok"] is False and out["error"] == "simulation_failed" and "Commander" in out["message"], out
+    assert out["ok"] is False and out["error"] == "simulation_failed" and "60 cards" in out["message"], out
     assert out["goldfish_ab"]["ok"] is False and "added" in out, out
     # Mystic Forge answers an unknown commander with a sentence, not a tool error; the report
     # records that as a failed simulation rather than a successful one.
@@ -1542,6 +1557,78 @@ async def test_simulation_calls_take_the_shape_mystic_forge_accepts(stack: Stack
         await call(h, token, "run_deck_report", {"deck_ref": "42", "games": 20, "options": {"opponents": 9}})
     )
     assert bad["ok"] is False and "opponents" in bad["message"], bad
+
+
+async def test_sixty_card_decks_are_simulated_as_sixty_card_games(stack: Stack) -> None:
+    """A deck without a commander and with 60 or more cards (Modern here) is simulated as a 60-card
+    game: Mystic Forge gets constructed=true and the main deck only, never the sideboard. A short
+    list, and a Commander-format deck missing its commander, are refused with a reason; Commander
+    decks are unchanged."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    modern = json.loads(json.dumps(ark.decks[42]))
+    modern.update(
+        id=44,
+        name="Modern deck",
+        deckFormat=2,
+        categories=[{"name": "Sideboard", "isPremier": False, "includedInDeck": False}],
+    )
+    for row in modern["cards"]:
+        row["categories"] = None
+    modern["cards"][0]["categories"] = ["Sideboard"]  # one sideboard card, never simulated
+    sideboard_name = modern["cards"][0]["card"]["oracleCard"]["name"]
+    ark.decks[44] = modern
+    ark.users["alice"]["decks"].append(44)
+    SIM_CALLS.clear()
+    rep = structured(await call(h, token, "run_deck_report", {"deck_ref": "44", "games": 20}))
+    assert rep["ok"], rep
+    assert rep["goldfish"]["ok"] is True and "Format: 60-card" in rep["goldfish"]["text"], rep["goldfish"]
+    ((tool, sent),) = SIM_CALLS
+    assert tool == "goldfish_run" and sent["constructed"] is True, sent
+    assert sideboard_name not in str(sent["deck"]) and "Commander" not in str(sent["deck"]), sent
+    # the stored report reads back as a 60-card game
+    got = structured(await call(h, token, "get_deck_report", {"report_id": rep["report_id"]}))
+    assert "Format: 60-card" in got["goldfish"]["text"], got
+    # The same deck under the Commander format, without a commander: refused, not guessed.
+    ark.decks[44]["deckFormat"] = 3
+    ark.decks[44]["updatedAt"] = "2026-10-03T00:00:00Z"
+    SIM_CALLS.clear()
+    rep = structured(await call(h, token, "run_deck_report", {"deck_ref": "44", "games": 20}))
+    assert rep["ok"] is False and rep["error"] == "simulation_failed" and "Commander" in rep["message"], rep
+    assert SIM_CALLS == []
+    # Pasted lists: 60 cards plays, 40 is refused, a Commander list keeps its commander game.
+    sixty = "4 Lightning Bolt\n20 Mountain\n36 Goblin Guide\nSideboard\n2 Smash to Smithereens\n"
+    rep = structured(await call(h, token, "run_deck_report", {"deck_ref": sixty, "games": 20}))
+    assert rep["ok"] and rep["stored"] is False, rep
+    assert SIM_CALLS[-1][1]["constructed"] is True and "Smash" not in str(SIM_CALLS[-1][1]["deck"])
+    short = "4 Lightning Bolt\n20 Mountain\n16 Goblin Guide\n"
+    rep = structured(await call(h, token, "run_deck_report", {"deck_ref": short, "games": 20}))
+    assert rep["ok"] is False and "at least 60 cards" in rep["message"] and "has 40" in rep["message"], rep
+    commander = "Commander\n1 Aesi, Tyrant of Gyre Strait\n\n99 Island\n"
+    rep = structured(await call(h, token, "run_deck_report", {"deck_ref": commander, "games": 20}))
+    assert rep["ok"] and SIM_CALLS[-1][1]["constructed"] is False, rep
+    # A 100-card paste with no commander marked is a Commander deck, not a 60-card game.
+    calls = len(SIM_CALLS)
+    unmarked = "1 Aesi, Tyrant of Gyre Strait\n99 Island\n"
+    rep = structured(await call(h, token, "run_deck_report", {"deck_ref": unmarked, "games": 20}))
+    assert rep["ok"] is False and "commander unmarked" in rep["message"], rep
+    assert len(SIM_CALLS) == calls
+    # A/B: two 60-card lists compare as 60-card games; a Commander list against a 60-card one
+    # is refused.
+    other = sixty.replace("36 Goblin Guide", "35 Goblin Guide\n1 Monastery Swiftspear")
+    out = structured(
+        await call(
+            h, token, "compare_decks", {"a_list": sixty, "b_list": other, "simulate": True, "games": 20}
+        )
+    )
+    assert out["ok"] and out["goldfish_ab"]["ok"], out
+    assert SIM_CALLS[-1][0] == "goldfish_ab" and SIM_CALLS[-1][1]["constructed"] is True
+    out = structured(
+        await call(
+            h, token, "compare_decks", {"a_list": sixty, "b_list": commander, "simulate": True, "games": 20}
+        )
+    )
+    assert out["ok"] is False and "one deck has a commander" in out["message"], out
 
 
 async def test_another_users_decks_are_the_public_listing_only(stack: Stack) -> None:
@@ -1587,11 +1674,12 @@ async def test_pasted_lists_are_reported_but_not_stored(stack: Stack) -> None:
     assert "Enduring Angel // Angelic Enforcer" in rep["decklist_text"]  # the member's own list keeps both
     after = structured(await call(h, token, "list_deck_reports", {}))["reports"]
     assert len(after) == len(before)
-    # No commander: the structural checks still come back, the simulation is refused as such.
-    plain = structured(await call(h, token, "run_deck_report", {"deck_ref": "24 Forest\n36 Grizzly Bears\n"}))
+    # No commander and under 60 cards: the structural checks still come back, the simulation is
+    # refused as such (60 or more is a 60-card game, see test_sixty_card_decks_...).
+    plain = structured(await call(h, token, "run_deck_report", {"deck_ref": "24 Forest\n26 Grizzly Bears\n"}))
     assert plain["ok"] is False and plain["error"] == "simulation_failed", plain
     assert "Commander" in plain["message"] and plain["stats"]["checks"], plain
-    assert plain["goldfish"]["ok"] is False and "Commander" in plain["goldfish"]["text"], plain
+    assert plain["goldfish"]["ok"] is False and "at least 60 cards" in plain["goldfish"]["text"], plain
     stats = structured(
         await call(
             h,

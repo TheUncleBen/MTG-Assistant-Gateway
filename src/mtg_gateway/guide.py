@@ -34,6 +34,7 @@ _esc = html.escape
 
 GUIDE_CSS = """
 .guide{display:grid;grid-template-columns:minmax(0,1fr);gap:1rem;align-items:start}
+.guide h2,.guide h3,.guide h4{overflow-wrap:anywhere}
 .guide .gside{min-width:0}
 .gsearch{margin:0 0 .75rem}
 .gsearch label{display:block;font-weight:700;margin-bottom:.25rem}
@@ -318,7 +319,8 @@ def guide_body(
     )
     tut_first_sim = (
         "<p>A simulation tells you how the deck plays on its own: how fast the commander lands, how "
-        "often the mana flows, how much damage goldfishing deals.</p>"
+        "often the mana flows, how much damage goldfishing deals. A deck without a commander and with 60 "
+        "or more cards plays a 60-card game instead (20 life, on the play).</p>"
         "<ol class='steps'>"
         "<li><span>Open one of your decks and press <strong>Run simulation</strong>. The button says the "
         "run takes up to a minute and shows “Simulating…” while it does.</span></li>"
@@ -513,6 +515,9 @@ def guide_body(
         "app. A private deck shows there when that browser is signed in to Archidekt, so sign in on "
         "archidekt.com once in the browser you use. <a href='#exp-playtest'>Why Playtest opens Archidekt "
         "in a new tab</a> explains.</p>"
+        "<p><strong>Goldfish</strong>, next to it, plays the deck by hand here on the gateway: seven cards "
+        "with London mulligans, then draw, play, tap and next turn, all in your browser. A Commander deck "
+        "starts with its commander in the command zone.</p>"
     )
     how_layout = (
         "<ul>"
@@ -566,7 +571,7 @@ def guide_body(
             "",
         ),
         (
-            "Search public decks (name, commander, partial commander names, format, colours, owner), and "
+            "Search public decks (name, commander, partial commander names, format, colors, owner), and "
             "one user's public decks (<code>owner</code>, newest first)",
             "<code>search_decks</code>",
             "no",
@@ -721,7 +726,8 @@ def guide_body(
             "One deck",
             "<code>/decks/&lt;id&gt;</code>",
             "views, grouping, sorting, filter, the whole card on tap, the card menu, drag and Save moves, "
-            "Quick add, Playtest, Run simulation, statistics with Probability of draw and Deck checks, "
+            "Quick add, Playtest, Goldfish, Run simulation, statistics with Probability of draw and Deck "
+            "checks, "
             "description, comments, like, bookmark, follow; More: Settings, Compare, Export, History, "
             "Open on Archidekt, Delete deck",
         ),
@@ -742,7 +748,7 @@ def guide_body(
             "a precon, any deck or a pasted list against this deck",
         ),
         ("Export", "<code>/decks/&lt;id&gt;/export</code>", "import text, plain list, sideboard, downloads"),
-        ("Search", "<code>/search</code>", "public decks by name, commander, format, colours, owner"),
+        ("Search", "<code>/search</code>", "public decks by name, commander, format, colors, owner"),
         ("Cards", "<code>/cards</code>", "cards by name, with picture, cost and type; add one to a deck"),
         (
             "A member of Archidekt",
@@ -950,7 +956,7 @@ def guide_body(
         "and Reject (Reject can carry a reason), the printings of a card as pictures to tap, the cards "
         "read from your photos to keep or drop, a deck by category with pictures and rules text, and "
         "your account's setup. A comparison of two decks, a deck's statistics, a list of decks and a "
-        "scan's recognised cards show as cards too, to read at a glance. "
+        "scan's recognized cards show as cards too, to read at a glance. "
         "A tap is passed to the assistant as text and it carries on from there; "
         "nothing changes until a proposal you approve. The only card that acts by itself is the proposal "
         "card, whose Approve and Reject both use its one-time code. Claude Code and older apps show the "

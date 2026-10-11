@@ -37,7 +37,9 @@ screen, such as an unfolded foldable or a tablet, and in the Android app
 from 600 px, the same five sit in a rail down the left edge; a desktop
 browser shows them in the top bar. The layout follows the window as you
 fold, rotate or split the screen. The account menu is the person icon at
-the top right; a tap anywhere else closes it.
+the top right; a tap anywhere else closes it. Large text works too: the
+pages follow the phone's font size (the Android app included) and a
+browser's text zoom up to 200%, wrapping rather than running off the screen.
 
 ## Home
 
@@ -59,7 +61,10 @@ One deck:
 
 - **View as** text, stacks or grid; **Group by** category, type, mana value,
   colour or none; **Sort by** name, mana value, price and more. The page
-  updates as soon as you change a choice.
+  updates as soon as you change a choice. Switching views, or coming back to
+  the deck, within 20 seconds shows it as just read without asking Archidekt
+  again; a change made on archidekt.com shows after that, or at once when
+  you reload the page.
 - **Filter** narrows the cards on the page as you type.
 - Tap a card (or a stack on a phone, which fans it out) to read the whole
   card: the image, every face with its mana cost, type line, rules text,
@@ -78,10 +83,35 @@ One deck:
   archidekt.com's playtester, so a game plays the same as on the site. A
   private deck shows only when that browser is signed in to Archidekt; the
   page keeps an **Open on Archidekt** button for that case.
+- **Goldfish** plays the deck by hand on a gateway page, in your browser:
+  the deck is shuffled and you get seven cards. Keep the hand or take a
+  mulligan (London rules: the hand goes back, you draw seven again, and
+  keeping puts one card on the bottom of the library for each mulligan; in a
+  Commander deck the first mulligan is free). Then **Draw a card**, select a
+  card to play it to the battlefield, the graveyard or exile, tap and untap
+  it, or put it back; **Next turn** untaps everything and draws (the game is
+  on the play, so turn 1 has no draw), and **New game** starts again. A
+  Commander deck starts with its commander in the command zone; other decks
+  have none. The page shows the library count and works with a mouse, a
+  finger or the keyboard. Nothing is sent to Archidekt and nothing is kept.
 - **Run simulation** runs the statistics, the decklist validation and the
   goldfish simulation (300 games) and opens the result, filed under
   History. It is the same run the assistant's `run_deck_report` makes, so
-  the numbers match whichever way it is started.
+  the numbers match whichever way it is started. A Commander deck is played
+  from the command zone against 40 life. A deck without a commander and with
+  at least 60 cards (Standard, Modern, Pioneer, Legacy, Vintage, Pauper and
+  the like) is played as a 60-card game: seven-card London mulligan with no
+  free one, 20 life, on the play, sideboard left out. A Commander-format
+  deck without a card in its Commander category, or a smaller deck without
+  one, is not simulated and the report says why.
+- When the gateway runs Forge, a Commander deck's report also has Forge
+  games against three precons. They are precons of the deck's bracket: the
+  bracket set on the deck in Archidekt, or else the gateway's estimate. Each
+  precon's bracket comes from the game changers it holds. When there are not
+  enough precons of that bracket, the nearest bracket fills in, and an older
+  Forge image without precon brackets plays the newest precons; the report
+  names the opponents, their brackets and why they were picked. Forge does not
+  run 60-card decks (its opponents are Commander precons).
 - **Compare with another deck…** (More menu) pits the deck against a
   preconstructed deck (pick one from Archidekt's list), any deck id or
   link, or a pasted list: what the build took out of the other deck, what
@@ -245,6 +275,61 @@ assistant applies what that mode allows, always with a snapshot.
   proposal you approve).
 - **Reports** store a deck's statistics, a legality check and a goldfish
   simulation so you can follow how it develops.
+
+## Watchlist and prices
+
+The **Watchlist** page (in the account menu, and under More on a phone)
+keeps the price of cards and decks you choose, once a day:
+
+- **Watch a card** by name, or one printing by its set code and number, in
+  non-foil, foil or etched. A name alone follows the printing Scryfall gives
+  for that name. The card viewer has the same: **Price history** shows the
+  prices kept for that card, and **Watch this card** adds it.
+- **Watch a deck** by its Archidekt link or number (your own or a public
+  one). The gateway reads it again once a day, so its value follows the
+  cards it holds.
+- Each card and deck shows today's price, how much it moved over 1, 7 and
+  30 days, a small chart of its price over time, and the same numbers as a
+  table under **Price history table**.
+- **Price alert**: a move of more than a percentage from one day to the
+  next, or a price it rises above or falls below. Alerts reach you through
+  notifications (below).
+
+Prices come from Scryfall (TCGplayer in dollars, Cardmarket in euros) and
+are checked once a day; the operator sets how many cards and decks you may
+watch and how long prices are kept (a year unless they changed it). Your
+assistant has the same: `watch_card`, `watch_deck`, `unwatch`,
+`list_watchlist` and `card_price_history`. Watching changes nothing on
+Archidekt, so it needs no proposal.
+
+## Notifications and summaries
+
+When the operator has set up a notification server (ntfy), the
+**Notifications** card on your Account page can send a short message to
+your phone when a proposal waits for your approval, a deck report finishes
+(Forge runs that waited in the queue included), or a watched card crosses
+your price alert. Tick **Send me notifications**, choose which of these you
+want, and save: you get a topic of your own that nobody can guess (or type
+your own). Install the ntfy app, add the server shown there and subscribe to
+your topic; if the operator protects the server, sign in in the app with
+the user they gave you (check your app for where). **Send test** checks it.
+Messages say only what happened and link to the page here; they never list
+a deck's cards.
+
+The **Summary** card shows a plain summary of today or the last 7 days:
+watched prices that moved, your watched decks' values, deck reports
+finished, and proposals waiting and applied. Choose **Every day** or
+**Every week (Mondays)** and it is also sent to you as a notification when
+notifications are on. The gateway writes it with fixed sentences from its
+own data. It does not write an AI summary itself: that would need a paid AI
+model service, and the gateway uses only free ones.
+
+For a summary in your assistant's own words, use the assistant you already
+have. Its `get_summary` tool returns the same summary (with `period` day or
+week). Claude and ChatGPT can both run a prompt on a schedule (check your
+app for scheduled tasks); a prompt such as "Every Monday morning, call
+get_summary from my MTG gateway and tell me in a few lines what changed and
+what needs me" does it. The tool is read-only.
 
 ## With an AI assistant
 

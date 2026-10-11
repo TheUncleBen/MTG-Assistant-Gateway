@@ -367,6 +367,10 @@ def banner_html(
         f"<a class='btn' href='https://archidekt.com/playtester-v2/{did}' target='_blank' "
         "rel='noreferrer noopener' title='Draw and play this deck by hand in Archidekt&#39;s playtester, "
         f"in a new tab'>{icon('play')} Playtest</a>"
+        # The gateway's own goldfish: shuffle, mulligan, draw and play turns by hand in this
+        # browser, on the deck this page read (static/goldfish.js).
+        f"<a class='btn' href='/decks/{did}/goldfish' title='Shuffle, draw an opening hand and play "
+        f"turns by hand, here on the gateway'>{icon('layers')} Goldfish</a>"
     )
     if csrf:
         # The same run as the assistant's run_deck_report: statistics, validation and 300
@@ -1582,6 +1586,138 @@ def compare_page_html(
     )
 
 
+# -- goldfish page --------------------------------------------------------------------------------
+
+
+def goldfish_data(deck: Deck) -> dict[str, Any]:
+    """The deck as static/goldfish.js plays it: the commanders (they start in the command zone)
+    and the rest of the main deck, one entry per row with its count. The sideboard and
+    maybeboard are left out. Each card carries what the shared card viewer shows."""
+
+    def entry(card: DeckCard) -> dict[str, Any]:
+        out = {
+            "name": card.name,
+            "qty": card.quantity,
+            "img": card_image(card) or "",
+            "set": f"{card.set_code.upper()} {card.collector_number}".strip(),
+            "type": card.type_line,
+            "mana": card.mana_cost,
+            "text": card.oracle_text,
+            "pt": f"{card.power}/{card.toughness}" if card.power or card.toughness else "",
+            "loyalty": card.loyalty,
+            "faces": [
+                {
+                    "name": f["name"],
+                    "mana": f["mana_cost"],
+                    "type": f["type_line"],
+                    "text": f["text"],
+                    "pt": f"{f['power']}/{f['toughness']}" if f["power"] or f["toughness"] else "",
+                    "loyalty": f["loyalty"],
+                }
+                for f in card.faces
+            ],
+            "land": "Land" in card.types,
+        }
+        return {k: v for k, v in out.items() if v not in ("", [], False)}
+
+    main = [c for c in deck.cards if deck.in_deck(c) and c.quantity > 0]
+    commanders = [c for c in main if deck.is_commander(c)]
+    return {
+        "commanders": [{**entry(c), "qty": 1} for c in commanders],
+        # A commander row with more than one copy (it should not have) keeps the rest in the library.
+        "library": [
+            entry(c) if not deck.is_commander(c) else {**entry(c), "qty": c.quantity - 1}
+            for c in main
+            if not deck.is_commander(c) or c.quantity > 1
+        ],
+    }
+
+
+def goldfish_page_html(deck: Deck) -> str:
+    """Goldfish by hand: shuffle, an opening hand with London mulligans, then draw, play, tap and
+    pass turns, all in the browser (static/goldfish.js) on the deck already read for the page.
+    Nothing is sent anywhere and nothing is kept."""
+    did = esc(deck.id)
+    name = esc(deck.name or f"Deck {deck.id}")
+    data = goldfish_data(deck)
+    commander = bool(data["commanders"])
+    size = sum(c["qty"] for c in data["library"]) + len(data["commanders"])
+    rules = (
+        "Commander game: the commander starts in the command zone and the first mulligan is free."
+        if commander
+        else "No commander: no command zone, and every mulligan puts one more card on the bottom."
+    )
+    zone = (
+        "<section class='gf-zone' id='gf-{id}' aria-labelledby='gf-{id}-h'>"
+        "<h2 id='gf-{id}-h'>{label} <span class='gf-n'></span></h2><div class='gf-row'></div></section>"
+    )
+    js_data = json.dumps(data, separators=(",", ":")).replace("<", "\\u003c")
+    return (
+        "<section class='panel gf-head'>"
+        f"<div><a href='/decks/{did}'>← {name}</a><span class='muted small'> · goldfish</span></div>"
+        "<h1>Goldfish</h1>"
+        f"<p class='muted small'>{plural(size, 'card')}. {rules} The game is on the play: no draw on "
+        "turn 1. Select a card to play it, tap it or move it. Everything happens in this browser; "
+        "nothing is saved or sent to Archidekt.</p>"
+        "<p class='gf-status' id='gf-status'></p>"
+        "<p class='gf-hint' id='gf-hint'></p>"
+        "<div class='gf-controls' role='group' aria-label='Game'>"
+        "<button type='button' class='btn-primary' data-act='keep' hidden>Keep hand</button>"
+        "<button type='button' data-act='mulligan' hidden>Mulligan</button>"
+        "<button type='button' class='btn-primary' data-act='bottom' hidden>Put on bottom</button>"
+        "<button type='button' class='btn-primary' data-act='draw' hidden>Draw a card</button>"
+        "<button type='button' data-act='next' hidden>Next turn</button>"
+        "<button type='button' data-act='untap' hidden>Untap all</button>"
+        f"<button type='button' data-act='reset'>{icon('refresh')} New game</button>"
+        "</div>"
+        "<p class='sr-only' id='gf-live' aria-live='polite'></p>"
+        "<noscript><p class='notice error'>The goldfish needs JavaScript.</p></noscript>"
+        "</section>"
+        + (zone.format(id="command", label="Command zone") if commander else "")
+        + zone.format(id="battlefield", label="Battlefield")
+        + zone.format(id="hand", label="Hand")
+        + "<div class='gf-piles'>"
+        + zone.format(id="graveyard", label="Graveyard")
+        + zone.format(id="exile", label="Exile")
+        + "</div>"
+        + f"<script type='application/json' id='goldfish-data'>{js_data}</script>"
+    )
+
+
+GOLDFISH_CSS = """
+.gf-head h1{margin:.25rem 0 .5rem;font-size:1.6rem}
+.gf-status{font-weight:700;margin:.5rem 0 .25rem}
+.gf-hint{margin:0 0 .75rem;min-height:1.4em}
+.gf-controls{display:flex;flex-wrap:wrap;gap:.5rem}
+.gf-controls [hidden]{display:none}
+.gf-zone{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-panel);
+  padding:.75rem;margin:0 0 1rem;min-width:0}
+.gf-zone h2{font-size:1.1rem;margin:0 0 .5rem}
+.gf-zone .gf-n{color:var(--text-muted);font-weight:400}
+.gf-row{display:flex;flex-wrap:wrap;gap:.5rem;align-items:flex-start;min-height:2rem}
+.gf-row + .gf-row{margin-top:.75rem;padding-top:.75rem;border-top:1px dashed var(--border)}
+.gf-empty{color:var(--text-muted);margin:0}
+#gf-hand .gf-row{flex-wrap:nowrap;overflow-x:auto;padding-bottom:.5rem}
+.gf-piles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr));gap:0 1rem}
+.gf-card{--w:clamp(68px,21vw,130px);position:relative;flex:none;width:var(--w);height:calc(var(--w)*88/63);
+  min-height:0;padding:0;border:1px solid var(--card-border);border-radius:calc(var(--w)*.05);
+  background:var(--surface-2);color:var(--text);overflow:hidden;display:block;cursor:pointer;
+  transition:transform .15s}
+.gf-card img{width:100%;height:100%;object-fit:cover;display:block}
+.gf-card .ph{display:flex;flex-direction:column;justify-content:space-between;height:100%;padding:.35rem;
+  font-size:.78rem;text-align:left;line-height:1.2}
+.gf-card .ph .ty{color:var(--text-muted)}
+.gf-card:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+/* a tapped permanent turns sideways, with room kept for its new width */
+.gf-card.tapped{transform:rotate(90deg);margin:0 calc(var(--w)*.2)}
+.gf-card .tag{position:absolute;left:0;right:0;bottom:0;padding:.15rem .25rem;font-size:.75rem;
+  font-weight:700;background:var(--orange);color:var(--on-orange);text-align:center}
+.gf-card[aria-pressed=true]{outline:3px solid var(--orange-ctl);outline-offset:2px}
+.gf-card[aria-pressed=true]:focus-visible{outline-color:var(--focus)}
+@media (prefers-reduced-motion:reduce){.gf-card{transition:none}}
+"""
+
+
 # -- deck list ------------------------------------------------------------------------------------
 
 LIST_ORDERS = {"updated": "Updated at", "created": "Created at", "name": "Name", "format": "Deck format"}
@@ -2084,6 +2220,9 @@ html.cardview-open{overflow:hidden}
 .cardview .rulings time{font-weight:700;color:var(--text-muted);font-size:.82rem;display:block}
 .cardview .rulings p{margin:.1rem 0;line-height:1.45;overflow-wrap:anywhere}
 .cardview .rulings .src{font-size:.8rem}
+.cardview .prices table{border-collapse:collapse;font-variant-numeric:tabular-nums;margin:.3rem 0}
+.cardview .prices th,.cardview .prices td{padding:.15rem .6rem .15rem 0;text-align:left;
+  border-bottom:1px solid var(--border-soft)}
 .cardview .acts{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:auto;padding-top:.25rem}
 .cardview .acts .btn,.cardview .acts button{margin:0;flex:1 1 auto}
 @media (max-width:700px){
@@ -2268,11 +2407,12 @@ table.qty td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-
 .listbar .field.grow{min-width:12rem}
 .listbar .field .btn{margin:0}
 .listbar .apply{margin-top:.5rem}
-@media (max-width:1000px){ .listbar .controls{grid-template-columns:1fr 1fr;align-items:start}
+@media (max-width:1000px){ .listbar .controls{grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+    align-items:start}
   .listbar .field:last-of-type{grid-column:1 / -1;display:flex;flex-direction:row;flex-wrap:wrap;gap:.5rem;
     align-items:center}
-  .listbar .field:last-of-type .lbl{margin-right:auto} }
-@media (max-width:600px){ .listbar .controls{grid-template-columns:1fr} }
+  .listbar .field:last-of-type .lbl{margin-right:auto} .listbar .field.grow{min-width:0} }
+@media (max-width:600px){ .listbar .controls{grid-template-columns:minmax(0,1fr)} }
 /* minmax(0,1fr), never 1fr: a long deck name (the "Copy of - …" names the app itself makes) must shrink
    and ellipsise inside its tile, not widen the track and scroll the page sideways. */
 ul.decklist.grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:25px;margin-bottom:1.25rem}
@@ -2505,6 +2645,24 @@ ul.erows{list-style:none;margin:.5rem 0 0;padding:0}
   .erow .sel{grid-column:2;grid-row:2}
   .erow details.dd,.erow button.remove{grid-column:3;grid-row:2;justify-self:end}
 }
+/* A card row also stacks by the room its list has, so large text (a phone's font scale, 200%
+   zoom) stacks it on a wider screen too: the category and menu under the name, then, in a still
+   narrower list, the count on a row of its own. The widths are in rem, so they grow with the
+   text; at the normal text size neither applies where the rule above does not. */
+ul.erows{container-type:inline-size}
+@container (max-width:30rem){
+  .erow{grid-template-columns:40px minmax(0,1fr) auto;grid-template-rows:auto auto}
+  .erow .sel{grid-column:2;grid-row:2}
+  .erow details.dd,.erow button.remove{grid-column:3;grid-row:2;justify-self:end}
+}
+@container (max-width:20rem){
+  .erow .qty{grid-column:2 / -1;grid-row:2}
+  .erow .sel{grid-row:3}
+  .erow details.dd,.erow button.remove{grid-row:3}
+}
+/* The phone's one-row save bar wraps with large text rather than run off the screen. */
+.editor{container-type:inline-size}
+@container (max-width:17rem){ .editbar{flex-wrap:wrap} .editbar .review{flex:1 1 auto} }
 """
 
 __all__ = [

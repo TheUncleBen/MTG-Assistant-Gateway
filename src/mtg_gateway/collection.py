@@ -28,11 +28,11 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 from .approve import CARD_TOOL_META, proposal_tool_result
 from .archidekt import COLLECTION_PAGE_SIZE, ArchidektError, _faces, _oracle_text, _pt
 from .busy import busy_response
-from .deckpage import DECK_CSS, image_url, mana_html
+from .deckpage import image_url, mana_html
 from .decks import DeckError, current_client
 from .pages import _csrf, _safe_next, browser_session, login_redirect, read_limited
 from .schemas import CollectionAdd, CollectionRemove, card_aliases, dumped
-from .theme import display_name, icon, remember_view, render, view_choice
+from .theme import display_name, icon, remember_view, render, stylesheet_link, view_choice
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -53,7 +53,7 @@ CONDITIONS = ("", "NM", "LP", "MP", "HP", "DMG")
 # ``editionDate`` was seen in the site's requests, the default is Archidekt's newest-first).
 SORTS = {"added": "Recently added", "edition": "Set release"}
 COLLECTION_CSP = (
-    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; "
+    "default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; "
     "manifest-src 'self'; connect-src 'self'; "
     "img-src 'self' https://cards.scryfall.io; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 )
@@ -804,8 +804,10 @@ COLLECTION_CSS = """
 @media (max-width:600px){ .addbox form.addcard{grid-template-columns:1fr 1fr}
   .addbox form.addcard .grow,.addbox form.addcard button{grid-column:1 / -1} }
 /* A card is at least 170px wide so its controls row (minus, count, plus, Details, remove:
-   about 158px) always fits inside it instead of touching the next card. */
-ul.collgrid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:1rem}
+   about 158px) always fits inside it instead of touching the next card; with large text it
+   grows with the text (12rem), never wider than the list, and the row wraps if it must. */
+ul.collgrid{list-style:none;margin:0;padding:0;display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(min(100%,max(170px,12rem)),1fr));gap:1rem}
 ul.collgrid .col .pic{position:relative;display:block;width:100%;box-sizing:border-box;aspect-ratio:5/7;
   border-radius:4.5%;
   overflow:hidden;
@@ -823,7 +825,7 @@ ul.collgrid .col .pic .cond{position:absolute;left:6px;bottom:6px;font-size:.7re
 ul.collgrid .col .cap{display:flex;flex-direction:column;margin:.35rem 0 .25rem;min-width:0}
 ul.collgrid .col .cap .name{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 ul.collgrid .col .cap .set{font-size:.8rem;color:var(--text-muted)}
-ul.collgrid .col .act,ul.colllist .act{display:flex;align-items:center;gap:.25rem;min-width:0}
+ul.collgrid .col .act,ul.colllist .act{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem;min-width:0}
 form.qty{display:inline-flex;align-items:center;gap:.15rem;margin:0}
 form.qty button.mini,form.rm button.mini{margin:0;width:2.25rem;height:2.25rem;padding:0;display:inline-flex;
   align-items:center;justify-content:center}
@@ -858,7 +860,7 @@ ul.colllist details.rowmenu summary.mini:hover,ul.collgrid details.rowmenu summa
 .collection details.addfold[open] > summary::before{content:'\\25BE'}
 .collection details.addfold > summary .chev{margin-left:auto;color:var(--text-muted);font-weight:400;
   font-size:.86rem}
-details.rowmenu.details .menu{min-width:14rem;padding:.4rem 0 .6rem}
+details.rowmenu.details .menu{min-width:min(14rem,calc(100vw - 16px));padding:.4rem 0 .6rem}
 details.rowmenu.details .menu .field{display:flex;flex-direction:column;gap:.25rem;padding:.35rem .9rem}
 details.rowmenu.details .menu .field select,details.rowmenu.details .menu .field input{margin:0}
 details.rowmenu.details .menu .tags .tagline{display:flex;flex-wrap:wrap;gap:.3rem}
@@ -868,7 +870,8 @@ details.rowmenu.details .menu .actions button{width:100%;margin:0}
   1fr) auto auto} ul.colllist .mc{display:none}
   ul.colllist form.rm{grid-column:4;grid-row:2;justify-self:end}
   ul.colllist details.rowmenu{grid-column:3;grid-row:2;justify-self:end}
-  ul.colllist form.qty{grid-column:2;grid-row:2} ul.colllist .n{grid-column:2 / span 3} }
+  ul.colllist form.qty{grid-column:2;grid-row:2;flex-wrap:wrap;min-width:0}
+  ul.colllist .n{grid-column:2 / span 3} }
 .pager{display:flex;justify-content:center;gap:.5rem;margin:1rem 0}
 .pager .btn{margin:0}
 .coll-empty{text-align:center;padding:2rem 1rem}
@@ -905,7 +908,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             body_class="collection",
             current="/collection",
             scripts=scripts,
-            head_extra=f"<style>{DECK_CSS}{COLLECTION_CSS}</style>"
+            head_extra=f"{stylesheet_link('deck.css')}<style>{COLLECTION_CSS}</style>"
             + (
                 "<script src='/static/cardview.js' defer></script>"
                 "<script src='/static/deck.js' defer></script><script "

@@ -162,6 +162,9 @@ class Server:
         self.sf = FakeScryfall()
         service = self.app.state.gateway.scan
         service.scryfall = ScryfallClient("https://scryfall.test", min_interval=0.0, http=self.sf.client())
+        # The art gallery's card images stay offline too: the image host answers 404, so a gallery
+        # build fails as it would without a network (test_scan_art.py covers the matching).
+        service.art.http = httpx.AsyncClient(transport=httpx.MockTransport(lambda _r: httpx.Response(404)))
         self.server = uvicorn.Server(
             uvicorn.Config(self.app, host="127.0.0.1", port=self.port, log_level="warning")
         )

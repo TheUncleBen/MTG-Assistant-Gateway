@@ -79,7 +79,7 @@ async def test_home_shows_the_full_navigation_and_every_section(stack: Stack) ->
         # Deck covers come from Scryfall, so the home page carries the deck pages' CSP (the e2e
         # suite checks the deployed header against the same string).
         assert r.headers["content-security-policy"] == (
-            "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; manifest-src 'self'; "
+            "default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; manifest-src 'self'; "
             "connect-src 'self'; img-src 'self' https://cards.scryfall.io; form-action 'self'; "
             "base-uri 'none'; frame-ancestors 'none'"
         )
@@ -117,7 +117,8 @@ async def test_deck_toolbar_selects_sit_inside_their_own_form(stack: Stack) -> N
         # the banner art is painted by a ::before layer, so the banner itself no longer clips the
         # More menu (the old rule was .banner{overflow:hidden})
         banner_rule = ".banner{position:relative;margin:0 -1rem 1rem;color:#fff;isolation:isolate;z-index:2}"
-        assert ".banner::before{" in r.text and banner_rule in r.text
+        css = (await b.http.get(re.search(r"href='(/static/deck\.css\?v=[0-9a-f]{12})'", r.text)[1])).text
+        assert ".banner::before{" in css and banner_rule in css
         # stacks view groups the cards by category with drag-and-drop hooks on the owner's deck
         r = await b.http.get("/decks/42?view=stacks", headers=NAV)
         assert "class='deckview stacks'" in r.text and "data-own='1'" in r.text
@@ -441,7 +442,7 @@ async def test_guide_is_end_user_documentation(stack: Stack) -> None:
             "Use the Android app",
         ):
             assert word in r.text, word
-        assert "<nav aria-label='Guide contents'>" in r.text and "src='/static/guide.js'" in r.text
+        assert "<nav aria-label='Guide contents'>" in r.text and "src='/static/guide.js?v=" in r.text
         js = await b.http.get("/static/guide.js")
         assert js.status_code == 200 and "guide-q" in js.text
         for banned in ("docker", "Docker", "MTG_", "Portainer", "compose"):

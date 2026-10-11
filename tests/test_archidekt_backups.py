@@ -31,6 +31,19 @@ async def test_folder_is_created_once_then_found() -> None:
     assert [c for c in ark.calls if c == ("POST", "/api/decks/folders/")] == [("POST", "/api/decks/folders/")]
 
 
+async def test_folder_differing_only_in_capitals_is_reused() -> None:
+    """QA F22: "MTG Gateway Backups" sat beside "MTG Gateway backups". The folder is matched
+    without regard to capitals, so an existing one is reused and no second one is made."""
+    ark, client, token = await _client()
+    ark.folders["alice"] = [{"id": 77, "name": BACKUP_FOLDER_NAME.upper(), "private": True}]
+    found = await client.ensure_folder(token)
+    assert found == {"id": "77", "name": BACKUP_FOLDER_NAME.upper()}
+    assert ("POST", "/api/decks/folders/") not in ark.calls and len(ark.folders["alice"]) == 1
+    # with both spellings present, the exact one wins
+    ark.folders["alice"].append({"id": 78, "name": BACKUP_FOLDER_NAME, "private": True})
+    assert (await client.ensure_folder(token))["id"] == "78"
+
+
 async def test_backup_copy_keeps_every_card_and_lands_in_the_folder() -> None:
     ark, client, token = await _client()
     deck = await client.get_deck(token, "42")

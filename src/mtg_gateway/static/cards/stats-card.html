@@ -37,7 +37,7 @@ ul.facts li b{font-weight:600;text-align:right;overflow-wrap:anywhere}
   <div class="head"><h1 id="title">Deck statistics</h1><span class="badge" id="state"></span></div>
   <p class="sum" id="summary"></p>
   <div id="curvebox" class="hidden"><h2 id="curvehead">Mana curve (nonland cards)</h2><div class="bars" id="curve" role="img"></div></div>
-  <div id="colourbox" class="hidden"><h2>Colours: mana symbols and sources</h2><ul class="colours" id="colours"></ul></div>
+  <div id="colourbox" class="hidden"><h2>Colors: mana symbols and sources</h2><ul class="colours" id="colours"></ul></div>
   <h2>Numbers</h2>
   <ul class="facts" id="facts"></ul>
   <div class="verdict hidden" id="verdict"></div>
@@ -52,7 +52,7 @@ ul.facts li b{font-weight:600;text-align:right;overflow-wrap:anywhere}
   var B = Bridge, el = B.el, $ = B.$;
   var GATEWAY = "@GATEWAY@";
   var KEYS = ["0", "1", "2", "3", "4", "5", "6", "7+"];
-  var NAMES = { W: "White", U: "Blue", B: "Black", R: "Red", G: "Green", C: "Colourless" };
+  var NAMES = { W: "White", U: "Blue", B: "Black", R: "Red", G: "Green", C: "Colorless" };
   var MAX_PROBLEMS = 8;
 
   function num(v) { var n = Number(v); return isFinite(n) ? n : 0; }
@@ -141,7 +141,7 @@ ul.facts li b{font-weight:600;text-align:right;overflow-wrap:anywhere}
       fact(facts, "Cards", String(num(st.card_count)));
       fact(facts, "Different cards", String(num(st.distinct)));
       if (st.sideboard_count) fact(facts, "Sideboard", String(num(st.sideboard_count)));
-      $("note").textContent = "A pasted list has names and counts only: no curve, colours or prices.";
+      $("note").textContent = "A pasted list has names and counts only: no curve, colors or prices.";
       $("note").className = "note";
     } else {
       if (st.mana_curve) drawCurve(st.mana_curve);

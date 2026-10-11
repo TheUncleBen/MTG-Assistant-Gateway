@@ -81,6 +81,7 @@ from .cards import (
     with_card,
 )
 from .cardsearch import add_cardsearch_routes
+from .chatgpt_plugin import add_chatgpt_plugin_route
 from .cimd import CimdFetcher
 from .clickguard import form_stamp, guarded_form, submitted_too_soon
 from .collection import add_collection
@@ -96,10 +97,12 @@ from .idp_sweep import AuthentikSweep
 from .membership import Membership, MembershipChecker
 from .metrics import Metrics
 from .mf_proxy import ALLOWED_TOOLS, BUSY_PREFIX, MysticForgeProxy
+from .notify import Notifier
 from .oidc import OIDCClient
 from .pages import BROWSER_CLIENT_ID, SESSION_COOKIE, _csrf, add_browser_routes, browser_session
 from .plugin_page import CONNECTOR_ICON_PATH, CONNECTOR_ICON_PX, SERVER_DESCRIPTION, add_plugin_routes
-from .reports import ReportService
+from .prices import DailyJobs, PriceService
+from .reports import ReportService, sim_mode
 from .scan import add_scan
 from .schemas import (
     AbOptions,
@@ -116,10 +119,12 @@ from .schemas import (
 )
 from .skill_page import add_skill_routes
 from .social import add_social_routes
+from .summary import Summaries
 from .theme import NoSniffMiddleware, ThemeMiddleware, display_name, render
 from .timing import TimingMiddleware
 from .update_check import UpdateChecker
 from .views import deck_brief, deck_out
+from .watchlist import add_watchlist_routes, add_watchlist_tools
 
 DeckView = Literal["text", "summary", "cards", "export", "full"]
 # Cards a deck of each format holds: (count, True when it is a minimum rather than an exact size).
@@ -142,6 +147,9 @@ class AppState:
     metrics: Metrics | None = None
     membership: MembershipChecker | None = None
     sweep: AuthentikSweep | None = None  # removed-member clean-up (idp_sweep.py)
+    notifier: Notifier | None = None  # ntfy notifications (notify.py)
+    prices: PriceService | None = None  # watchlists and price history (prices.py)
+    summaries: Summaries | None = None  # members' plain summaries (summary.py)
     app_signins: AppSignins = field(default_factory=AppSignins)  # the Android app's browser sign-in
 
 
@@ -228,6 +236,9 @@ WRITE_TOOLS = frozenset(
         "run_deck_report",
         "save_scan_session",
         "propose_collection_changes",
+        "watch_card",
+        "watch_deck",
+        "unwatch",
     }
 )
 
@@ -624,6 +635,11 @@ def build_mcp_server(state: AppState) -> MCPServer:
             tasks.append(asyncio.create_task(state.sweep.loop()))
         elif state.sweep.why_off():
             logger.warning("%s", state.sweep.why_off())
+        if state.prices is not None:
+            # the daily price check and summaries: nothing is asked of Scryfall while nobody watches
+            tasks.append(
+                asyncio.create_task(DailyJobs(state.prices, state.summaries, s.price_hour_utc).loop())
+            )
         updates = UpdateChecker(s.update_check)
         if updates.enabled:
             tasks.append(asyncio.create_task(updates.loop()))
@@ -648,6 +664,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
             await state.oidc.aclose()
             await state.provider.cimd.aclose()
             await state.archidekt.aclose()
+            if state.notifier is not None:
+                await state.notifier.drain()
             if state.scan is not None:
                 state.scan.names.close()
                 await state.scan.scryfall.aclose()
@@ -686,7 +704,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "Any deck can be ingested with get_deck (Archidekt id or URL), parse_decklist (pasted text) or "
             "parse_deck_export (CSV); each returns decklist_text for "
             "the simulation tools. deck_stats answers "
-            "curve, colours, price, legality and bracket questions from one read; run_deck_report stores a "
+            "curve, colors, price, legality and bracket questions from one read; run_deck_report stores a "
             "test run the user can see later on the gateway's History page. "
             "If your app refuses, hides or blocks a tool (rather than the gateway returning an error), do "
             "not call it again in this conversation. For apply_proposal, give the user the proposal's "
@@ -857,7 +875,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
         title="Parse a pasted decklist",
         description=(
             'Parse plain decklist text ("1 Sol Ring", "1x Sol Ring (cmr) 436 [Ramp]", section headers, '
-            "SB: lines) into cards plus a normalised decklist_text. A commander is marked by a Commander "
+            "SB: lines) into cards plus a normalized decklist_text. A commander is marked by a Commander "
             "section header, a [Commander] category or a trailing *CMDR*; Archidekt's {noDeck} category "
             "flag (as in [Maybeboard{noDeck}{noPrice}]) puts the card in the sideboard. Quantities are "
             "whole numbers from 1 to 999. Repeated lines for a card are added "
@@ -972,7 +990,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "a pinned printing must exist on Archidekt and be that card, or applying refuses with "
             "not_found and changes nothing. "
             "To add a card in a particular printing or finish, put those on the add itself: set_finish "
-            "and set_printing change copies already in the deck. set_label puts Archidekt's colour tag "
+            "and set_printing change copies already in the deck. set_label puts Archidekt's color tag "
             "(label up to 40 characters, color #rrggbb) on every row of a card, in zone main or side; "
             "an empty label takes it off. set_mana_value sets Archidekt's custom mana value (mana_value "
             "0 to 20, null takes it off) on every row of a card in that zone. set_category and "
@@ -1316,8 +1334,9 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "Use it for 'what changed since this snapshot', 'my deck versus the EDHREC average deck' or "
             "'this precon versus my build'. simulate=true adds a paired goldfish A/B from the research "
             "service (both decks played game for game under the same seeds; per-metric deltas with "
-            "confidence intervals and significance), not stored. Does not touch Archidekt beyond reading "
-            "the decks. This is the one tool for deck differences, precon upgrades and A/B simulations. "
+            "confidence intervals and significance; two Commander decks or two 60-card decks), not "
+            "stored. Does not touch Archidekt beyond reading the decks. This is the one tool for deck "
+            "differences, precon upgrades and A/B simulations. "
             "For Forge games of two decks, run run_deck_report on each with the same options.seed."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
@@ -1340,9 +1359,9 @@ def build_mcp_server(state: AppState) -> MCPServer:
     ) -> dict[str, object]:
         unread: dict[str, list[str]] = {}
 
-        def as_list(side: str, text: str) -> tuple[Any, str, bool]:
+        def as_list(side: str, text: str) -> tuple[Any, str, str]:
             """The pasted list's counts, the mainboard text the simulators read (commander first,
-            no headers, sideboard left out) and whether it names a commander."""
+            no headers, sideboard left out) and how the simulator plays it (reports.sim_mode)."""
             missed: list[str] = []
             cards = parse_decklist(text, missed)
             if missed:
@@ -1351,10 +1370,9 @@ def build_mcp_server(state: AppState) -> MCPServer:
             for c in cards:
                 if c.zone == "main":  # one name over several printings counts once, summed
                     counts[c.name] = counts.get(c.name, 0) + c.quantity
-            has_commander = any("Commander" in c.categories for c in cards if c.zone == "main")
-            return counts, to_text(cards), has_commander
+            return counts, to_text(cards), sim_mode(deck_stats.compute_from_text(cards))
 
-        async def load(side: str, ref: str | None, text: str | None) -> tuple[Any, str, bool]:
+        async def load(side: str, ref: str | None, text: str | None) -> tuple[Any, str, str]:
             if ref and text:
                 raise DeckError("invalid", f"give {side} or {side}_list, not both")
             if text:
@@ -1364,7 +1382,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
                 raise DeckError("invalid", f"give {side} (a deck id, link or snapshot id) or {side}_list")
             snap = _own_snapshot(_sub(), ref)
             if snap is not None:
-                return snap, deck_to_text(snap), bool(deck_stats.compute(snap)["commanders"])
+                return snap, deck_to_text(snap), sim_mode(deck_stats.compute(snap))
             try:
                 deck_id = _clean_deck_id(ref)
             except DeckError as exc:
@@ -1378,7 +1396,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
                     f"ids; pass a pasted list as {side}_list",
                 ) from exc
             deck = await state.decks.get_any_deck(_sub(), deck_id)
-            return deck, deck_to_text(deck), bool(deck_stats.compute(deck)["commanders"])
+            return deck, deck_to_text(deck), sim_mode(deck_stats.compute(deck))
 
         try:
             deck_a, text_a, cmd_a = await load("a", a, a_list)
@@ -1396,7 +1414,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
         if simulate:
             try:
                 ab = await state.reports.ab(
-                    _sub(), text_a, text_b, games=games, options=dumped(options), commanders=(cmd_a, cmd_b)
+                    _sub(), text_a, text_b, games=games, options=dumped(options), modes=(cmd_a, cmd_b)
                 )
             except DeckError as exc:
                 return _tool_error(exc)
@@ -1417,8 +1435,12 @@ def build_mcp_server(state: AppState) -> MCPServer:
         title="Run and store a deck report",
         description=(
             "Test a deck and keep the numbers: deck_stats plus, when the research service is available, a "
-            "goldfish simulation (games, default 300) and a decklist validation. deck_ref is an Archidekt "
-            "id or URL, a snapshot id, or a pasted decklist (as parse_decklist reads it; the commander "
+            "goldfish simulation (games, default 300) and a decklist validation. A deck with a commander "
+            "plays from the command zone at 40 life; a deck without one and with at least 60 cards "
+            "(Standard, Modern, Pioneer, Legacy, Pauper and the like) plays a 60-card game: 7-card "
+            "London mulligan with no free one, 20 life, on the play, sideboard left out. deck_ref is an "
+            "Archidekt id or URL, a snapshot id, or a pasted decklist (as parse_decklist reads it; the "
+            "commander "
             "marked [Commander] or *CMDR*). A deck's report is stored for the user (see "
             "list_deck_reports and the gateway's History page) so results can be compared over time; a "
             "pasted list is simulated the same way but returned with stored=false and not kept. "
@@ -1426,8 +1448,9 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "returns the existing one (not when options are given). options passes the simulator's knobs "
             "through (annotations from goldfish_annotate, combos, seed, until_turn, opponents, mulligan). "
             "When the gateway runs Forge, a stored report also gets a forge section: real games against "
-            "Commander precons, played in the background, one run at a time per member (a report made "
-            "while an earlier one is still playing is queued behind it, state queued with position and "
+            "Commander precons (Commander decks only), played in the background, one run at a time per "
+            "member (a report made while an earlier one is still playing is queued behind it, state queued "
+            "with position and "
             "waiting_for, and starts by itself; at most two wait, then a report gets no Forge games), "
             "with the seed Forge used, the cards it could not play in not_played and forge_status "
             "(state, games_done of games_requested, expected_seconds). Poll with get_deck_report "
@@ -1476,9 +1499,10 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "The user's stored deck reports, newest first, with the trend numbers (card count, average mana "
             "value, lands, price, salt) per report. Filter by deck_id. With deck_id and two or more "
             "reports, trend is the deck's History-page trend: its last 60 reports oldest first (series, "
-            "with the goldfish speed numbers: commander median cast turn, median 40-damage turn, share "
-            "of games dealing 40 damage by until_turn) and per metric the first and latest values, "
-            "their dates and the change; otherwise null. get_deck_report returns one in full."
+            "with the goldfish speed numbers: commander median cast turn, median turn lethal damage was "
+            "dealt (40, or 20 in a 60-card game), share of games dealing it by until_turn) and per "
+            "metric the first and latest values, their dates and the change; otherwise null. get_deck_report "
+            "returns one in full."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": False},
     )
@@ -1836,6 +1860,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
     add_skill_routes(server, state)
     add_app_routes(server, state)
     add_plugin_routes(server, state)
+    add_chatgpt_plugin_route(server, state)
     add_scan(server, state)
     if state.cards is not None:
         add_card_routes(server, state, state.cards)
@@ -1856,6 +1881,20 @@ def build_mcp_server(state: AppState) -> MCPServer:
     add_api_routes(server, state, state.reports)
     add_companion_routes(server, state, state.reports)
     add_admin_routes(server, state)
+    # Watchlists, price history, notifications and summaries (prices.py, notify.py, summary.py).
+    state.notifier = Notifier(s.ntfy_url, s.ntfy_token, state.db, s.public_url)
+    state.prices = PriceService(
+        s,
+        state.db,
+        state.decks,
+        lambda: state.scan.scryfall if state.scan is not None else None,
+        state.notifier,
+    )
+    state.summaries = Summaries(state.db, state.prices, state.notifier, s.public_url)
+    state.db.price_days = s.price_history_days
+    _notify_events(state)
+    add_watchlist_routes(server, state)
+    add_watchlist_tools(server, state)
     # Every tool's input schema self-contained: nested shapes (a deck change, the simulator's
     # options) are written out where the parameter is, not behind a $ref an app might not follow;
     # and without the generated titles and null branches, which only cost tokens.
@@ -2010,6 +2049,41 @@ def build_mcp_server(state: AppState) -> MCPServer:
         )
 
     return server
+
+
+def _notify_events(state: AppState) -> None:
+    """Hook the member's notifications (notify.py) to the events they may ask for: a proposal an
+    assistant made that waits for their own approval, and a deck report that finished."""
+    notifier = state.notifier
+    if notifier is None or not notifier.enabled:
+        return
+
+    def proposal_saved(sub: str, proposal_id: str) -> None:
+        try:
+            p = state.decks.describe(sub, proposal_id)
+        except DeckError:
+            return
+        if p["state"] == "pending" and not p["assistant_may_apply"]:
+            notifier.soon(
+                sub,
+                "proposals",
+                "A proposal waits for you",
+                "Your assistant proposed a change. Open it to review, then apply or reject it.",
+                f"/proposals/{proposal_id}",
+            )
+
+    def report_finished(sub: str, report_id: str) -> None:
+        notifier.soon(
+            sub,
+            "reports",
+            "Deck report finished",
+            "A deck report is ready to read.",
+            f"/history/reports/{report_id}",
+        )
+
+    state.decks.on_proposal_saved = proposal_saved  # type: ignore[attr-defined]
+    if state.reports is not None:
+        state.reports.on_finished = report_finished
 
 
 def create_app(

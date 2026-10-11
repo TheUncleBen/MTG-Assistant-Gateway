@@ -1009,9 +1009,19 @@ class ArchidektClient:
         tree = await self._request("GET", "/decks/folderTree/", token=token)
         if not isinstance(tree, dict) or not isinstance(tree.get("id"), int):
             raise ArchidektError("contract", "unexpected folder tree shape")
-        for child in tree.get("children") or []:
-            if isinstance(child, dict) and child.get("name") == name and isinstance(child.get("id"), int):
-                return {"id": str(child["id"]), "name": name}
+        # A folder whose name differs only in capitals (one made by hand, or under an earlier
+        # folder setting) is reused rather than a second one made beside it; an exact match first.
+        found = [
+            c
+            for c in tree.get("children") or []
+            if isinstance(c, dict)
+            and isinstance(c.get("name"), str)
+            and c["name"].casefold() == name.casefold()
+            and isinstance(c.get("id"), int)
+        ]
+        if found:
+            child = next((c for c in found if c["name"] == name), found[0])
+            return {"id": str(child["id"]), "name": child["name"]}
         made = await self._request(
             "POST",
             "/decks/folders/",

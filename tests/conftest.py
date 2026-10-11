@@ -6,9 +6,12 @@ import asyncio
 import base64
 import contextlib
 import hashlib
+import ipaddress
 import json
+import os
 import re
 import secrets
+import socket
 import time
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlencode, urlparse
@@ -22,11 +25,14 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
 
+from mtg_gateway import scan as scan_pkg
 from mtg_gateway.app import create_app
 from mtg_gateway.config import Settings
 from mtg_gateway.db import Database
 from mtg_gateway.oidc import OIDCClient
 from mtg_gateway.scan import scryfall as scan_scryfall
+
+from .fake_scryfall import FakeScryfall
 
 IDP = "https://idp.test/application/o/mtg"
 GATEWAY = "https://mtg.test"
@@ -394,6 +400,107 @@ TODAY = "2026-10-11"
 @pytest.fixture(autouse=True)
 def _fixed_today(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(scan_scryfall, "today", lambda: TODAY)
+
+
+# Tests stay offline. A gateway built without a Scryfall client of its own (create_app makes one)
+# gets one that answers from the recorded fixtures, so its start-up download of the card-name
+# catalog never reaches api.scryfall.com; and any request that still heads for a host other than
+# this machine is refused and fails the test that made it (SCAN_LIVE=1 lets the opt-in live
+# check in test_scan.py through). The end-to-end suite (tests/e2e/run.sh test, which sets
+# E2E_PUBLIC_URL) talks to its deployed stack by name, so the guard stands aside for it.
+OUTBOUND: list[str] = []
+E2E = bool(os.environ.get("E2E_PUBLIC_URL"))
+ONLINE = bool(os.environ.get("SCAN_LIVE")) or E2E
+
+
+def _this_machine(host: str | bytes | None) -> bool:
+    if ONLINE:
+        return True
+    host = (host.decode() if isinstance(host, bytes) else host or "").strip("[]")
+    if host in ("", "localhost", "testserver"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _reserved(host: str | None) -> bool:
+    """A name under the reserved .test domain (RFC 2606, such as the fake identity provider
+    idp.test) never resolves, so a request to it fails as it would offline: refused, not counted."""
+    return (host or "").rstrip(".").lower().endswith(".test")
+
+
+def _refuse(where: str, host: str | None = None) -> None:
+    if not _reserved(host):
+        OUTBOUND.append(where)
+    raise httpx.ConnectError(f"tests stay offline, refused: {where}")
+
+
+_real_async_send = httpx.AsyncHTTPTransport.handle_async_request
+_real_send = httpx.HTTPTransport.handle_request
+_real_connect = socket.socket.connect
+
+
+async def _offline_async_send(self: httpx.AsyncHTTPTransport, request: httpx.Request) -> httpx.Response:
+    if not _this_machine(request.url.host):
+        _refuse(str(request.url), request.url.host)
+    return await _real_async_send(self, request)
+
+
+def _offline_send(self: httpx.HTTPTransport, request: httpx.Request) -> httpx.Response:
+    if not _this_machine(request.url.host):
+        _refuse(str(request.url), request.url.host)
+    return _real_send(self, request)
+
+
+def _offline_connect(self: socket.socket, address: object) -> None:
+    if self.family in (socket.AF_INET, socket.AF_INET6) and not _this_machine(address[0]):  # type: ignore[index]
+        OUTBOUND.append(f"{address}")
+        raise OSError(f"tests stay offline, refused: {address}")
+    return _real_connect(self, address)  # type: ignore[arg-type]
+
+
+httpx.AsyncHTTPTransport.handle_async_request = _offline_async_send  # type: ignore[method-assign]
+httpx.HTTPTransport.handle_request = _offline_send  # type: ignore[method-assign]
+socket.socket.connect = _offline_connect  # type: ignore[method-assign]
+
+try:
+    from playwright.sync_api import BrowserType
+except ImportError:  # the browser tests skip
+    BrowserType = None
+
+if BrowserType is not None and not ONLINE:
+    # The browser tests' Chromium finds no host but this machine and uses no proxy: what a page
+    # loads from elsewhere (card pictures) a test serves itself with page.route, or it fails.
+    _real_launch = BrowserType.launch
+
+    def _offline_launch(self, **kwargs):
+        if self.name == "chromium":
+            rules = "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1"
+            kwargs["args"] = [*(kwargs.get("args") or []), "--no-proxy-server", rules]
+        return _real_launch(self, **kwargs)
+
+    BrowserType.launch = _offline_launch  # type: ignore[method-assign]
+
+
+@pytest.fixture(autouse=True)
+def _offline(monkeypatch: pytest.MonkeyPatch):
+    if E2E:
+        yield
+        return
+    real = scan_pkg.ScryfallClient
+
+    def recorded(*args, **kwargs):
+        if kwargs.get("http") is None:
+            kwargs.update(base="https://scryfall.test", http=FakeScryfall().client())
+            args = args[1:]
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(scan_pkg, "ScryfallClient", recorded)
+    before = len(OUTBOUND)
+    yield
+    assert OUTBOUND[before:] == [], "a test reached the network"
 
 
 @contextlib.asynccontextmanager
