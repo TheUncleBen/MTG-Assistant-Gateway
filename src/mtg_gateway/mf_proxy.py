@@ -112,6 +112,30 @@ TEXT_REWRITES: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 
 
+# A scryfall_search in a Commander context (a colour identity or a commander term, or Commander
+# legality) is about paper decks, so it leaves out cards that exist only on Arena or MTGO: the
+# gateway adds game:paper unless the query already names a game. Said in the tool's description.
+_COMMANDER_QUERY = re.compile(
+    r"(?<![\w-])-?(?:id|identity|ci|commander)(?:<=|>=|<|>|=|:)|\b(?:f|format|legal|is):commander\b",
+    re.IGNORECASE,
+)
+_GAME_TERM = re.compile(r"(?<![\w])-?game[:=]", re.IGNORECASE)
+SEARCH_QUERY_MAX = 500  # Mystic Forge's own limit on scryfall_search's query
+PAPER_SEARCH_NOTE = (
+    " In a Commander search (a colour identity such as id<=wu, commander:, f:commander or "
+    "is:commander in the query) the gateway adds game:paper, so cards that exist only on Arena or "
+    "MTGO are left out; put a game: term in the query (e.g. game:arena) to choose otherwise."
+)
+
+
+def paper_search_query(query: str) -> str:
+    """``query`` with game:paper added when it is a Commander search that names no game."""
+    if not _COMMANDER_QUERY.search(query) or _GAME_TERM.search(query):
+        return query
+    paper = f"{query.rstrip()} game:paper"
+    return paper if len(paper) <= SEARCH_QUERY_MAX else query
+
+
 def rewrite_text(text: str) -> str:
     """``text`` with every hidden Mystic Forge tool replaced by the gateway tool that owns its job."""
     for pattern, replacement in TEXT_REWRITES:
@@ -392,6 +416,8 @@ class MysticForgeProxy:
                 d["inputSchema"] = compact_schema(flat if flat is not None else d.get("inputSchema") or {})
                 if isinstance(d.get("description"), str):
                     d["description"] = rewrite_text(d["description"])
+                    if t.name == "scryfall_search":
+                        d["description"] = d["description"].rstrip() + PAPER_SEARCH_NOTE
                 # Advertise as read-only research tools; none of them writes to Archidekt.
                 d.setdefault("annotations", {}).update({"readOnlyHint": True, "openWorldHint": True})
                 tools.append(d)
@@ -436,6 +462,12 @@ class MysticForgeProxy:
             and isinstance(arguments["params"], dict)
         ):
             arguments = arguments["params"]
+        if (
+            name == "scryfall_search"
+            and isinstance(arguments, dict)
+            and isinstance(arguments.get("query"), str)
+        ):
+            arguments = {**arguments, "query": paper_search_query(arguments["query"])}
         problem = argument_problem(name, arguments)
         if problem:
             return _refusal(f"{name} refused: {problem}; nothing was sent to the research service")

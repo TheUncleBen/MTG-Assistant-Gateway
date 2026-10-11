@@ -122,7 +122,10 @@ def add_scan_tools(server: MCPServer, service: ScanService, *, links: CardLinks 
             "Scryfall. Give either `cards` (list of {name, set?, collector_number?, quantity?}) or `text` "
             "(one card per line, e.g. '2 Sol Ring (CMR) 472'). Each result has a status: exact, printing "
             "(matched by set and number), fuzzy (name corrected; confirm with the user), ambiguous or "
-            "not_found (with suggestions). Returns a decklist and `changes` ready for propose_deck_changes. "
+            "not_found (with suggestions), or conflict (the set and number are a different card, shown in "
+            "`requested`; ask which is meant). Without a set, a card gets its newest printing that is out "
+            "on paper (in foil when foil is asked for); newer previews are listed in `newer_printings`. "
+            "Returns a decklist and `changes` ready for propose_deck_changes, without conflicts. "
             "In an app that shows cards, the user sees the recognized cards with pictures, can drop some, "
             "pick among suggestions and confirm; wait for that before proposing. "
             "Does not touch Archidekt."
@@ -194,11 +197,15 @@ def add_scan_tools(server: MCPServer, service: ScanService, *, links: CardLinks 
         title="List the printings of a card",
         description=(
             "The printings of one Magic card (set, set name, collector number, release date, rarity, "
-            "finishes), newest first, from Scryfall, with `sets` (one row per set). Give `oracle_id` from a "
-            "resolve_cards result, or `name`. Narrow it with `set_code` (e.g. cmr) and `finish` (foil or "
-            "etched: printings that come in it); `limit` caps the rows (default 25; `matching` says how "
-            "many matched). In an app that shows cards, the user sees every printing's picture and taps "
-            "the one they mean; wait for that pick. Does not touch Archidekt."
+            "finishes) from Scryfall: released paper printings first, newest first (the first is the "
+            "default when no set is named), then previews not out yet (`unreleased: true`) and printings "
+            "not sold on paper (`paper: false`). Give `oracle_id` from a resolve_cards result, or `name`. "
+            "Narrow it with `set_code` (e.g. cmr) and `finish` (foil or etched: printings that come in it). "
+            "`matching_total` printings match, `returned_count` of them are in `cards`; `limit` caps the "
+            "rows (default 25) and `truncated` means that cap cut the list. `sets` lists every set the card "
+            "was printed in, not narrowed by set_code or finish. In an app that shows cards, the user sees "
+            "every printing's picture and taps the one they mean; wait for that pick. Does not touch "
+            "Archidekt."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
         meta=tool_meta(PRINTINGS_CARD_URI) if links is not None else None,
@@ -233,17 +240,22 @@ def add_scan_tools(server: MCPServer, service: ScanService, *, links: CardLinks 
         if finish:
             cards = [c for c in cards if finish in (c.get("finishes") or [])]
         shown = max(1, min(int(limit or 25), 175))
+        rows = [_slim(c) for c in cards[:shown]]
         data = {
             "ok": True,
             "oracle_id": oracle_id,
             "name": name or (cards[0].get("name") if cards else None),
-            "matching": len(cards),
-            "cards": [_slim(c) for c in cards[:shown]],
+            "matching": len(cards),  # kept for older clients; matching_total says the same
+            "matching_total": len(cards),
+            "returned_count": len(rows),
+            "cards": rows,
+            # this tool's own limit cut the matching rows; nothing to do with Scryfall's pages
             "truncated": len(cards) > shown,
             # Scryfall shows 175 printings a page; past that, filters only see the newest 175
             "has_more": bool(out.get("has_more")),
-            "total_cards": out.get("total_cards"),
+            "total_cards": out.get("total_cards"),  # every printing of the card, before any filter
             "sets": sets,
+            "sets_scope": "every set the card was printed in, not narrowed by set_code or finish",
             "note": (
                 "Every printing with its picture is on the card in the chat, where the user can tap the "
                 "one they mean. Without the card, ask which set, then call again with set_code."
@@ -277,13 +289,15 @@ def add_scan_tools(server: MCPServer, service: ScanService, *, links: CardLinks 
             if not inputs:
                 raise ScanError("invalid", "give `cards` or `text` with at least one card")
             results = await service.resolve(inputs, owner=_sub())
+            # A conflict (the printing named is a different card) is saved without a card, so it
+            # is listed as unresolved and stays out of the session's changes until someone picks.
             items = [
                 {
                     "quantity": r.input.quantity,
                     "name": (r.card or {}).get("name") or r.input.name,
                     "status": r.status,
                     "note": r.note,
-                    "card": r.card,
+                    "card": None if r.status == "conflict" else r.card,
                 }
                 for r in results
             ]
