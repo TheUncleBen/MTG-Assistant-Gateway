@@ -416,7 +416,7 @@ def banner_html(
         f"<span>{esc(format_label(deck.format))}</span>{legality}{own_bracket}{est_bracket}"
         "</div><div class='row'>"
         f"<span>Size: {stats.get('card_count', sum(c.quantity for c in deck.main_cards))}</span>"
-        f"<span>Est cost: <b class='orange'>{est_cost_html(stats)}</b></span>"
+        f"<span>Est cost: <b class='orange'>{est_cost_html(stats)}</b> (Archidekt prices)</span>"
         f"<span>Salt sum: <b class='orange'>{esc(salt)}</b></span>"
         "</div>"
         f"<div class='tags'>{icon('tag')} {tags}</div>"
@@ -1346,7 +1346,7 @@ def stats_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
         f"<div class='tiles'><div class='tile'><b>{stats.get('card_count', 0)}</b>"
         "<span>Deck size</span></div>"
         f"<div class='tile'><b>{stats.get('land_count', 0)}</b><span>Lands</span></div>"
-        f"<div class='tile'><b>{est_cost_html(stats)}</b><span>Est cost</span></div>"
+        f"<div class='tile'><b>{est_cost_html(stats)}</b><span>Est cost (Archidekt)</span></div>"
         f"<div class='tile'><b>{stats.get('priced_cards', 0)}</b><span>Priced cards</span></div></div>"
         f"<h3>Quantity of types</h3><table class='qty'><tbody>{type_rows or no_types}</tbody></table>"
         + (f"<h3>Rarity</h3><table class='qty'><tbody>{rarity_rows}</tbody></table>" if rarity_rows else "")

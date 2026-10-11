@@ -279,9 +279,12 @@ class Settings:
     authentik_api_token: str | None = field(default=None, repr=False)
     authentik_api_token_problem: str | None = None
     authentik_api_url: str | None = None
-    # Watchlists and price history (prices.py): how many cards and decks one member may watch, how
-    # many days of daily prices are kept, and the hour (UTC) the daily price check and the
-    # members' summaries run. Nothing is fetched while nobody watches anything.
+    # Watchlists and price history (prices.py), off unless MTG_WATCHLISTS_ENABLED is true: off, the
+    # Watchlist page, its links, the card viewer's price buttons, the five watch tools and the daily
+    # price check are gone (stored watches and prices stay in the database). Then how many cards and
+    # decks one member may watch, how many days of daily prices are kept, and the hour (UTC) the
+    # daily price check and the members' summaries run. Nothing is fetched while nobody watches.
+    watchlists_enabled: bool = False
     watch_max_cards: int = 200
     watch_max_decks: int = 10
     price_history_days: int = 365
@@ -466,6 +469,7 @@ def load_settings() -> Settings:
         authentik_api_token=sweep_token,
         authentik_api_token_problem=sweep_problem,
         authentik_api_url=_authentik_api_url(oidc_issuer),
+        watchlists_enabled=_bool_env("MTG_WATCHLISTS_ENABLED", False),
         watch_max_cards=_int_env("MTG_WATCH_MAX_CARDS", 200, lo=0, hi=5000),
         watch_max_decks=_int_env("MTG_WATCH_MAX_DECKS", 10, lo=0, hi=200),
         price_history_days=_int_env("MTG_PRICE_HISTORY_DAYS", 365, lo=30, hi=3650),

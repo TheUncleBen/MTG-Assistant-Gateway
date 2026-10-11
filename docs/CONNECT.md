@@ -25,9 +25,14 @@ either fails on mobile data but works on your home Wi‑Fi, the owner has a
 checklist in [TROUBLESHOOTING.md](TROUBLESHOOTING.md#the-site-doesnt-load)
 (the "couldn't reach this address" row).
 
-The gateway's install page can show just the steps for your app:
-`https://mtg.example.com/install?for=claude`, `?for=claude-code`,
-`?for=chatgpt` or `?for=codex`.
+The gateway's setup hub, `https://mtg.example.com/install` (signed in), has
+every way in on one page, with numbered steps and Copy buttons, and can show
+just one section: `?for=claude`, `?for=claude-code`, `?for=chatgpt`,
+`?for=codex`, the assistant skill (`https://mtg.example.com/install?for=skill`)
+or the Android app (`https://mtg.example.com/install?for=android`). The same
+steps as plain text are at `https://mtg.example.com/install.md`, for an AI
+agent you hand the link to. The older `/skill` and `/app` addresses lead to
+their section of the hub.
 
 You never need a client ID, client secret or API key. The gateway sets up
 each AI client automatically, and you prove who you are by signing in to
@@ -306,10 +311,10 @@ buttons for the name, description and URL, and the icon to download.
     (`MTG_CIMD_ALLOWED_HOSTS`).
 12. Sign in with your sign-in account when the browser opens.
 
-### The ChatGPT plugin file (workspace admins only)
+### The ChatGPT plugin file (Business/Enterprise admins only)
 
-**Download the ChatGPT plugin (ZIP)** from the ChatGPT steps of the
-gateway's install page, or directly at
+**Download the ChatGPT plugin (ZIP)** from the ChatGPT section of the
+gateway's setup hub, or directly at
 `https://mtg.example.com/plugin/mtg-gateway-chatgpt.zip` (the name follows
 the owner's `MTG_SERVER_NAME`, as the Claude plugin's does). It holds the
 connector (this gateway's address) and the MTG skill in one file, in the
@@ -321,9 +326,9 @@ Who can install it:
 - **Workspace owners and admins on ChatGPT Business and Enterprise** upload
   it under Plugins in the admin console (reported from OpenAI's help pages,
   not yet tested with this gateway).
-- **Individual Plus and Pro accounts have no plugin upload** (checked by the
-  owner on a Pro account, 2026-10-11). Add the connector as above instead;
-  it works the same.
+- **Plus and Pro accounts have no plugin upload** (checked by the owner on
+  a Pro account, 2026-10-11): they use the connector, added as above; it
+  works the same.
 
 ### Use it in a chat
 

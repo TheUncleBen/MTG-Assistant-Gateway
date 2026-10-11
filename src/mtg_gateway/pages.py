@@ -409,9 +409,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                     sid=sid,
                 )
             return RedirectResponse("/account?ok=linked", status_code=303)
-        from .watchlist import account_action
-
-        done = await account_action(state, sub, action or "", data)
+        done = await notify.account_action(state, sub, action or "", data)
         if done is not None:
             anchor = "#summary" if action == "summary_save" else "#notifications"
             return RedirectResponse(f"/account?{done}{anchor}", status_code=303)
@@ -803,10 +801,7 @@ def _account_body(state: Any, sub: str, csrf: str | None, *, disclosure_read: bo
     out.append(_mode_card(state, sub, csrf_in))
     out.append(_apps_card(state, sub, csrf_in))
     if getattr(state, "summaries", None) is not None:
-        from .watchlist import notify_card_html, summary_card_html
-
-        out.append(notify_card_html(state, sub, csrf_in))
-        out.append(summary_card_html(state, sub, csrf_in))
+        out.append(notify.account_card_html(state, sub, csrf_in))  # the summary is inside, with ntfy on
     if info["linked"]:
         expires = _when(info.get("link_expires_at"))
         out.append(

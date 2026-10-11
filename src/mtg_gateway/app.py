@@ -117,9 +117,10 @@ from .schemas import (
     inline_refs,
     new_deck_card_for_service,
 )
+from .setup_hub import add_setup_routes
 from .skill_page import add_skill_routes
 from .social import add_social_routes
-from .summary import Summaries
+from .summary import Summaries, add_summary_tool
 from .theme import NoSniffMiddleware, ThemeMiddleware, display_name, render
 from .timing import TimingMiddleware
 from .update_check import UpdateChecker
@@ -642,8 +643,9 @@ def build_mcp_server(state: AppState) -> MCPServer:
             tasks.append(asyncio.create_task(state.sweep.loop()))
         elif state.sweep.why_off():
             logger.warning("%s", state.sweep.why_off())
-        if state.prices is not None:
-            # the daily price check and summaries: nothing is asked of Scryfall while nobody watches
+        if state.prices is not None or (state.notifier is not None and state.notifier.enabled):
+            # the daily price check (watchlists on; nothing is asked of Scryfall while nobody
+            # watches) and the scheduled summaries (sent only through notifications)
             tasks.append(
                 asyncio.create_task(DailyJobs(state.prices, state.summaries, s.price_hour_utc).loop())
             )
@@ -1898,6 +1900,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
     add_skill_routes(server, state)
     add_app_routes(server, state)
     add_plugin_routes(server, state)
+    add_setup_routes(server, state)  # /install and /install.md, the setup hub
     add_chatgpt_plugin_route(server, state)
     add_scan(server, state)
     if state.cards is not None:
@@ -1919,20 +1922,24 @@ def build_mcp_server(state: AppState) -> MCPServer:
     add_api_routes(server, state, state.reports)
     add_companion_routes(server, state, state.reports)
     add_admin_routes(server, state)
-    # Watchlists, price history, notifications and summaries (prices.py, notify.py, summary.py).
+    # Notifications and summaries (notify.py, summary.py), and the watchlists and price history
+    # (prices.py), which exist only with MTG_WATCHLISTS_ENABLED: off, there is no price service, so
+    # no Watchlist page or API, no watch tools and no daily price check. Stored rows stay.
     state.notifier = Notifier(s.ntfy_url, s.ntfy_token, state.db, s.public_url)
-    state.prices = PriceService(
-        s,
-        state.db,
-        state.decks,
-        lambda: state.scan.scryfall if state.scan is not None else None,
-        state.notifier,
-    )
+    if s.watchlists_enabled:
+        state.prices = PriceService(
+            s,
+            state.db,
+            state.decks,
+            lambda: state.scan.scryfall if state.scan is not None else None,
+            state.notifier,
+        )
     state.summaries = Summaries(state.db, state.prices, state.notifier, s.public_url)
     state.db.price_days = s.price_history_days
     _notify_events(state)
     add_watchlist_routes(server, state)
     add_watchlist_tools(server, state)
+    add_summary_tool(server, state)
     # Every tool's input schema self-contained: nested shapes (a deck change, the simulator's
     # options) are written out where the parameter is, not behind a $ref an app might not follow;
     # and without the generated titles and null branches, which only cost tokens.
@@ -2134,6 +2141,7 @@ def create_app(
     cimd: CimdFetcher | None = None,
 ) -> Starlette:
     theme.PUBLIC_URL = settings.public_url.rstrip("/")  # link previews point at the site's icon
+    theme.WATCHLISTS = settings.watchlists_enabled  # the Watchlist links and price buttons
     db = db or Database(settings.db_path)
     oidc = oidc or OIDCClient(
         settings.oidc_issuer,

@@ -11,26 +11,34 @@ runs that waited in the queue included), a price alert they set, and their sched
 Each message carries the least that is useful: a short title and line, and a link to the
 gateway page. Deck contents are never sent. The token is sent only in the Authorization header
 and never logged; a failed publish is logged with the HTTP status alone.
+
+The Account page's Notifications card is here too (``account_card_html``, ``account_action``):
+the opt-in, the events, the topic, Send test, and the member's scheduled summary (summary.py),
+which is offered only when a notification server is set up, since ntfy is how it is sent.
 """
 
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 import re
 import secrets
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
 from .db import Database
 
+if TYPE_CHECKING:
+    from .app import AppState
+
 logger = logging.getLogger(__name__)
 
 EVENTS = ("proposals", "reports", "prices")  # the kinds a member can switch off one by one
 SUMMARY_CHOICES = ("off", "daily", "weekly")
-# The Account page's notices for the Notifications and Summary cards (pages.py shows them).
+# The Account page's notices for the Notifications card and its summary (pages.py shows them).
 ACCOUNT_OK = {
     "notify_saved": "Notifications saved.",
     "notify_off": "Notifications are off.",
@@ -44,6 +52,7 @@ ACCOUNT_ERR = {
     "notify_topic_invalid": "That topic is not allowed or another member has it. Use mtg- and then 12 to "
     "60 letters, digits, - or _, or leave it empty for a random one.",
     "notify_test_wait": "A test was just sent. Wait a minute before sending another.",
+    "summary_off": "Summaries are sent through notifications, and this gateway has no notification server.",
 }
 # Members' topics all start with mtg-, so an operator's ntfy grant can be limited to 'mtg-*' and
 # a member can never make the gateway publish to the operator's other topics.
@@ -205,3 +214,163 @@ class Notifier:
         """Wait for background sends (tests, shutdown)."""
         while self._tasks:
             await asyncio.gather(*list(self._tasks), return_exceptions=True)
+
+
+# -- Account page: the Notifications card, with the summary ----------------------------------------
+
+SUMMARY_CSS = (
+    "<style>#summary pre{white-space:pre-wrap;font-family:inherit;margin:.5rem 0 0;padding:.6rem .8rem;"
+    "background:var(--surface-2);border-radius:3px;overflow-wrap:anywhere}</style>"
+)
+
+
+def _esc(v: Any) -> str:
+    return html.escape(str(v if v is not None else ""), quote=True)
+
+
+def _summary_html(state: AppState, sub: str, p: dict[str, Any], csrf_in: str) -> str:
+    """The summary part of the card (only with a notification server: ntfy is how it is sent).
+    The latest summary is built only for a member who chose one, not on every page view."""
+    every = p["summary_every"]
+    period = "day" if every == "daily" else "week"
+    opts = "".join(
+        f"<option value='{v}'{' selected' if v == every else ''}>{label}</option>"
+        for v, label in (("off", "Off"), ("daily", "Every day"), ("weekly", "Every week (Mondays)"))
+    )
+    what = (
+        "your watched prices, deck values, finished reports and proposals"
+        if state.prices is not None
+        else "your finished reports and proposals"
+    )
+    latest = ""
+    if every != "off" and state.summaries is not None:
+        built = state.summaries.build(sub, period)
+        latest = (
+            f"<h4>{'Today' if period == 'day' else 'The last 7 days'}</h4><pre>{_esc(built['text'])}</pre>"
+        )
+    return (
+        f"<div class='summary' id='summary'>{SUMMARY_CSS}<h3>Summary</h3>"
+        f"<p>A plain summary of {what}, written by the gateway from its own data (no AI) and sent "
+        "through your notifications when they are on. Your assistant can read it with "
+        "<code>get_summary</code> and write you its own version on a schedule.</p>"
+        f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='summary_save'>"
+        "<label for='s-every'>Send my summary</label>"
+        f"<select id='s-every' name='summary_every'>{opts}</select>"
+        f"<button class='primary'>Save summary</button></form>{latest}</div>"
+    )
+
+
+def account_card_html(state: AppState, sub: str, csrf_in: str) -> str:
+    """The Account page's Notifications card: a note when the operator set up no ntfy server,
+    otherwise the member's choices, their topic, Send test and the summary schedule."""
+    n = state.notifier
+    if n is None or not n.enabled:
+        watched = "a watched card crosses your alert, " if state.prices is not None else ""
+        return (
+            "<div class='card' id='notifications'><h2>Notifications</h2><p class='muted'>This gateway has no "
+            "notification server set up. Its operator can add one (an ntfy server); then you can get a "
+            f"message on your phone when a proposal waits for you, a deck report finishes, {watched}"
+            "or your summary is ready.</p></div>"
+        )
+    p = prefs(state.db, sub)
+
+    def box(name: str, label: str) -> str:
+        return (
+            f"<label class='check'><input type='checkbox' name='{name}' value='1'"
+            f"{' checked' if p[name] else ''}> <span>{_esc(label)}</span></label>"
+        )
+
+    topic = p["ntfy_topic"] or ""
+    where = (
+        f"<dl class='meta'><dt>Server</dt><dd><code>{_esc(n.url)}</code></dd>"
+        f"<dt>Your topic</dt><dd><code>{_esc(topic)}</code></dd></dl>"
+        "<p class='muted small'>In the ntfy app, add a subscription to this topic on this server (use "
+        "another server, not ntfy.sh, if the server above is not ntfy.sh). If the operator protects the "
+        "server, sign in in the app with the user they gave you. Keep the topic to yourself: anyone who "
+        "knows it and may read the server can read your notifications.</p>"
+        if topic
+        else ""
+    )
+    test = (
+        f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='notify_test'>"
+        "<button>Send test</button></form>"
+        f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='notify_new_topic'>"
+        "<button class='inline'>New random topic</button></form>"
+        if p["ntfy_on"] and topic
+        else ""
+    )
+    # With watchlists off there is no price alert to choose; a choice made earlier is kept as it was.
+    prices_box = (
+        box("on_prices", "A watched card crossed my price alert")
+        if state.prices is not None
+        else ("<input type='hidden' name='on_prices' value='1'>" if p["on_prices"] else "")
+    )
+    return (
+        "<div class='card' id='notifications'><h2>Notifications</h2>"
+        "<p>Get a short message on your phone through ntfy. Each one says only what happened and links "
+        "to the page here: never your deck's cards.</p>"
+        f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='notify_save'>"
+        f"{box('ntfy_on', 'Send me notifications')}"
+        "<fieldset><legend>When</legend>"
+        f"{box('on_proposals', 'A proposal waits for my approval')}"
+        f"{box('on_reports', 'A deck report finished (Forge runs that waited included)')}"
+        f"{prices_box}</fieldset>"
+        "<label for='n-topic'>Topic (empty: a random one nobody can guess)</label>"
+        f"<input id='n-topic' name='ntfy_topic' maxlength='64' autocomplete='off' value='{_esc(topic)}' "
+        "pattern='mtg-[A-Za-z0-9_\\-]{12,60}' title='mtg- and then 12 to 60 letters, digits, - or _'>"
+        "<button class='primary'>Save notifications</button></form>"
+        f"{where}<div class='form-actions'>{test}</div>"
+        f"{_summary_html(state, sub, p, csrf_in)}</div>"
+    )
+
+
+async def account_action(state: AppState, sub: str, action: str, data: dict[str, str]) -> str | None:
+    """Handle the Notifications card's forms on the Account page. Returns the redirect's query
+    (``ok=...`` or ``err=...``), or None for an action that is not one of these."""
+    if action == "notify_save":
+        on = data.get("ntfy_on") == "1"
+        topic = data.get("ntfy_topic", "").strip()
+        current = prefs(state.db, sub)["ntfy_topic"]
+        if on and not topic:
+            topic = current or new_topic()
+        try:
+            save_prefs(
+                state.db,
+                sub,
+                ntfy_on=on,
+                on_proposals=data.get("on_proposals") == "1",
+                on_reports=data.get("on_reports") == "1",
+                on_prices=data.get("on_prices") == "1",
+                **({"ntfy_topic": topic} if topic else {}),
+            )
+        except ValueError:
+            return "err=notify_topic_invalid"
+        return "ok=notify_saved" if on else "ok=notify_off"
+    if action == "notify_new_topic":
+        save_prefs(state.db, sub, ntfy_topic=new_topic())
+        return "ok=notify_topic"
+    if action == "notify_test":
+        n = state.notifier
+        p = prefs(state.db, sub)
+        if n is None or not n.enabled or not p["ntfy_on"] or not p["ntfy_topic"]:
+            return "err=notify_test_failed"
+        if not n.test_allowed(sub):
+            return "err=notify_test_wait"
+        ok = await n.send(
+            sub,
+            "test",
+            "Test from your MTG gateway",
+            "Notifications work. This is the only test message.",
+            "/account",
+        )
+        return "ok=notify_test_sent" if ok else "err=notify_test_failed"
+    if action == "summary_save":
+        # Summaries go out only through ntfy: without a server there is no schedule to choose.
+        if state.notifier is None or not state.notifier.enabled:
+            return "err=summary_off"
+        try:
+            save_prefs(state.db, sub, summary_every=data.get("summary_every", "off"))
+        except ValueError:
+            return "err=notify_topic_invalid"
+        return "ok=summary_saved"
+    return None

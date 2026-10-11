@@ -810,6 +810,14 @@ rejected too.
 
 ## Watchlists, prices and notifications
 
+Watchlists are off by default. Set `MTG_WATCHLISTS_ENABLED=true` to turn them
+on; while it is off the Watchlist page answers 404, its links, the card
+viewer's price buttons and the five watch tools are gone, and no daily price
+check runs. Stored watches and prices stay in the database (the hourly
+clean-up still deletes prices older than `MTG_PRICE_HISTORY_DAYS`), so turning
+it back on picks up where it left off. Summaries need ntfy only; without
+watchlists they leave prices out.
+
 Members watch cards and decks on the Watchlist page (or through their
 assistant). Once a day at `MTG_PRICE_HOUR_UTC` (default 06:00 UTC) the
 gateway asks Scryfall for today's prices of the watched printings only, 75
