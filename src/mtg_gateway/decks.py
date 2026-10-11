@@ -489,6 +489,10 @@ class Change:
     # "main" (the deck proper) or "side": the maybeboard and sideboard rows, which count
     # separately. A count or category change names the zone its rows are in.
     zone: str = "main"
+    # add: every category the new row goes in, in order (the first is ``category``, the row's
+    # primary one). The deck page's Undo of a removal sends it, so a card filed under several
+    # categories comes back under all of them.
+    categories: tuple[str, ...] = ()
 
     @property
     def pinned(self) -> bool:
@@ -509,6 +513,8 @@ class Change:
             d["quantity"] = self.quantity
         if self.category:
             d["category"] = self.category
+        if self.categories:
+            d["categories"] = list(self.categories)
         if self.set_code:
             d["set_code"] = self.set_code
         if self.collector_number:
@@ -601,6 +607,11 @@ def parse_changes(raw: Any) -> list[Change]:
         cat = clean_text(item.get("category") or "") or None
         if cat and len(cat) > MAX_CATEGORY:
             raise DeckError("invalid", f"change {i}: category is longer than {MAX_CATEGORY} characters")
+        cats = _parse_add_categories(i, action, item.get("categories"))
+        if cats:
+            if cat and cat != cats[0]:
+                raise DeckError("invalid", f"change {i}: category must be the first of categories")
+            cat = cats[0]
         set_code = str(item.get("set_code") or item.get("set") or "").strip().lower() or None
         number = str(item.get("collector_number") or "").strip() or None
         finish_raw = item.get("finish") or item.get("modifier")
@@ -621,7 +632,7 @@ def parse_changes(raw: Any) -> list[Change]:
             raise DeckError(
                 "invalid", f"change {i}: a pinned printing is added to the deck proper, not zone side"
             )
-        out.append(Change(action, name, qty, cat, set_code, number, finish, zone=zone))
+        out.append(Change(action, name, qty, cat, set_code, number, finish, zone=zone, categories=cats))
     pinned = [ch.card_name.lower() for ch in out if ch.pinned]
     if len(pinned) != len(set(pinned)):
         raise DeckError("invalid", "one pinned printing per card name per proposal")
@@ -665,6 +676,40 @@ def parse_changes(raw: Any) -> list[Change]:
             "a card cannot be recategorized and reprinted in the same proposal: " + ", ".join(clash),
         )
     return out
+
+
+MAX_ADD_CATEGORIES = 10
+
+
+def _all_categories(chs: list[Change]) -> list[str]:
+    """The categories a new row made by these adds of one card goes in: the first add's full
+    ``categories`` when one names them, else the first ``category`` given (or none)."""
+    named = next((c.categories for c in chs if c.categories), ())
+    if named:
+        return list(named)
+    cat = next((c.category for c in chs if c.category), None)
+    return [cat] if cat else []
+
+
+def _parse_add_categories(i: int, action: str, raw: Any) -> tuple[str, ...]:
+    """An add's ``categories``: the row's categories in order (each one line, as ``category``),
+    duplicates dropped. Only an add takes them."""
+    if raw is None or raw == []:
+        return ()
+    if action != "add":
+        raise DeckError("invalid", f"change {i}: categories apply to add only")
+    if not isinstance(raw, list) or len(raw) > MAX_ADD_CATEGORIES or not all(isinstance(c, str) for c in raw):
+        raise DeckError(
+            "invalid", f"change {i}: categories must be a list of up to {MAX_ADD_CATEGORIES} names"
+        )
+    out: list[str] = []
+    for c in raw:
+        cat = clean_text(c)
+        if not cat or len(cat) > MAX_CATEGORY:
+            raise DeckError("invalid", f"change {i}: each category is 1 to {MAX_CATEGORY} characters")
+        if cat not in out:
+            out.append(cat)
+    return tuple(out)
 
 
 def _parse_label_change(i: int, name: str, item: dict[str, Any]) -> Change:
@@ -1097,7 +1142,7 @@ def plan_zones(
         labels = {n: chs[0].printing_label() for n, chs in adds_by_name.items() if len(chs) == 1}
         # the category an add puts a new row in (Commander, Maybeboard...) is part of what is reviewed
         if zone == "main":
-            cats = {n: next((c.category for c in chs if c.category), None) for n, chs in adds_by_name.items()}
+            cats = {n: ", ".join(_all_categories(chs)) or None for n, chs in adds_by_name.items()}
         else:
             cats = {n: side_category_for(deck, chs[0]) for n, chs in adds_by_name.items()}
         pinned_names = {n for n, chs in adds_by_name.items() if any(c.pinned for c in chs)}
@@ -1946,11 +1991,12 @@ class DeckService:
             )
         return deck
 
-    async def get_any_deck(self, sub: str | None, deck_ref: str) -> Deck:
+    async def get_any_deck(self, sub: str | None, deck_ref: str, *, fresh: bool = False) -> Deck:
         """Read a deck. A member with a linked account reads with their session first, which is
         how Archidekt reports the deck as that person sees it (private decks, the copies they own
         of each card, their vote and bookmark); when that fails, or there is no link, the deck is
-        read anonymously (public or unlisted)."""
+        read anonymously (public or unlisted), through the client's shared read cache unless
+        ``fresh`` (the deck page's Reload) asks Archidekt again."""
         deck_id = _clean_deck_id(deck_ref)
         if sub and self.db.get_link(sub):
             try:
@@ -1960,6 +2006,8 @@ class DeckService:
                     raise
         async with self.archidekt_slot(sub):
             try:
+                if fresh:
+                    return await self.client.get_deck(None, deck_id, fresh=True)
                 return await self.client.get_deck(None, deck_id)
             except ArchidektError as exc:
                 raise DeckError(exc.kind, str(exc)) from exc
@@ -1981,7 +2029,11 @@ class DeckService:
         if hit is not None and not fresh and time.monotonic() - hit[0] < ttl:
             return pickle.loads(hit[1])  # a copy of its own: the page may change it
         gen = self._page_decks_gen
-        deck = await self.get_any_deck(sub, deck_ref)
+        # A Reload skips the client's shared 60-second read cache too (decks read without the
+        # member's own link: someone else's public deck, or any deck with no account linked).
+        deck = await (
+            self.get_any_deck(sub, deck_ref, fresh=True) if fresh else self.get_any_deck(sub, deck_ref)
+        )
         if ttl > 0 and gen == self._page_decks_gen:
             if len(self._page_decks) >= PAGE_DECKS_MAX:
                 oldest = min(self._page_decks, key=lambda k: self._page_decks[k][0])
@@ -2654,7 +2706,9 @@ class DeckService:
         new_cats: dict[str, list[str]] = {}
         side_cats: dict[str, list[str]] = {}
         for key, chs in side_adds.items():
-            side_cats[key] = [side_category_for(deck, chs[0])]
+            side_cat = side_category_for(deck, chs[0])
+            # an add naming every category (an Undo of a removal) keeps the others beside it
+            side_cats[key] = [side_cat] + [c for c in _all_categories(chs)[1:] if c != side_cat]
             if after_side.get(key, 0) > 0 and key.lower() not in have_side:
                 card = await self._call(sub, self.client.resolve_card, key)
                 resolve[key] = card["id"]
@@ -2664,9 +2718,9 @@ class DeckService:
                         card["options"], foil=finish == "Foil", etched=finish == "Etched"
                     )
         for key, chs in adds.items():
-            cat = next((c.category for c in chs if c.category), None)
-            if cat:
-                new_cats[key] = [cat]
+            cats = _all_categories(chs)
+            if cats:
+                new_cats[key] = cats
             for ch in (c for c in chs if c.pinned):
                 card = await self._call(
                     sub,

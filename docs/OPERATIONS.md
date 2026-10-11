@@ -679,7 +679,7 @@ The gateway is built to be light on Archidekt. For everyone together:
 - a member's card lookups are reused for that member for
   `MTG_ARCHIDEKT_CARD_CACHE_SECONDS` (an hour; an answer fetched with one
   member's sign-in is never served to another), and anonymous public deck reads and deck searches for
-  `MTG_ARCHIDEKT_CACHE_SECONDS` (a minute). Anything the gateway sends to
+  `MTG_ARCHIDEKT_CACHE_SECONDS` (a minute; the deck page's Reload reads such a deck again). Anything the gateway sends to
   Archidekt clears the deck and search copies. Reads of decks made with a
   member's own sign-in are reused only to show the same member's deck page
   again within 20 seconds (another view, Back), never for a proposal or an

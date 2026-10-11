@@ -374,8 +374,12 @@ def guide_body(
         "quick edits keep the gateway snapshot only, without the backup copy on Archidekt. On someone "
         "else's deck the menu offers Open card and Open on Scryfall.</li>"
         "<li><strong>Drag a card</strong> onto another category: with a mouse, or press and hold on a "
-        "touch screen and slide, then press <strong>Save moves</strong>: they go to Archidekt at once; "
-        "<strong>Undo all</strong> puts the cards back without reloading.</li>"
+        "touch screen and slide. The move is saved to Archidekt when you let go, like a change from the "
+        "menu.</li>"
+        "<li><strong>Undo</strong> and <strong>Redo</strong> (beside Select cards, and the toast's Undo) "
+        "take back or redo any change saved on the page, with the editor's keys: Ctrl+Z, and Ctrl+Shift+Z "
+        "or Ctrl+Y. Removing a card that has notes asks first: Archidekt gives the gateway no way to "
+        "write notes, so they do not come back. Your own stack order is kept on this device only.</li>"
         "<li><strong>Quick add</strong> types a card name and takes you to the editor with it filled "
         "in.</li></ul>"
         f"<p class='tip'>{_esc(writes)}</p>"
@@ -725,7 +729,8 @@ def guide_body(
         (
             "One deck",
             "<code>/decks/&lt;id&gt;</code>",
-            "views, grouping, sorting, filter, the whole card on tap, the card menu, drag and Save moves, "
+            "views, grouping, sorting, filter, the whole card on tap, the card menu, drag to move, Undo and "
+            "Redo, "
             "Quick add, Playtest, Goldfish, Run simulation, statistics with Probability of draw and Deck "
             "checks, "
             "description, comments, like, bookmark, follow; More: Settings, Compare, Export, History, "

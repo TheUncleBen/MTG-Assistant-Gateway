@@ -26,19 +26,22 @@ from urllib.parse import quote
 from .archidekt import VOTE_UP, Deck, DeckCard, featured_scryfall_id, format_label
 from .deck_stats import (
     CURVE_BUCKETS,
+    PRIMARY_TYPES,
     WUBRG,
+    auto_category,
     colour_letter,
     curve_bucket,
     is_basic_land,
     is_land,
     mana_pips,
+    mana_value,
     primary_category,
+    primary_type,
 )
-from .deck_stats import primary_type as curve_type
 from .decks import mana_value_text, split_label
 from .mana import mana_html as _mana_html
 from .theme import icon, plural
-from .views import auto_category, cards_by_category
+from .views import cards_by_category
 
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _SYMBOL = re.compile(r"\{([^{}]+)\}")
@@ -70,16 +73,7 @@ SORTS = {
     "edhrec": "EDHREC rank",
 }
 COLOUR_NAMES = {"W": "White", "U": "Blue", "B": "Black", "R": "Red", "G": "Green", "C": "Colorless"}
-TYPE_ORDER = [
-    "Creature",
-    "Planeswalker",
-    "Battle",
-    "Instant",
-    "Sorcery",
-    "Artifact",
-    "Enchantment",
-    "Land",
-]
+TYPE_ORDER = list(PRIMARY_TYPES)  # deck_stats owns the order (and primary_type, auto_category)
 RARITY_ORDER = {"mythic": 0, "rare": 1, "uncommon": 2, "common": 3, "special": 4}
 
 
@@ -139,13 +133,6 @@ def ago(iso: str) -> str:
     return "just now"
 
 
-def primary_type(card: DeckCard) -> str:
-    for t in TYPE_ORDER:
-        if t in card.types:
-            return t
-    return card.types[0] if card.types else "Other"
-
-
 def colour_group(card: DeckCard) -> str:
     cols = [c for c in WUBRG if c in {colour_letter(x) for x in card.colors}]
     if not cols:
@@ -154,11 +141,18 @@ def colour_group(card: DeckCard) -> str:
 
 
 def mv_group(card: DeckCard) -> str:
+    """The Mana value grouping's stack: the deck's custom mana value when the card has one."""
+    mv = mana_value(card)
     if is_land(card):
         return "Land"
-    if card.cmc is None:
+    if mv is None:
         return "No mana value"
-    return f"{int(card.cmc) if card.cmc == int(card.cmc) else card.cmc} mana value"
+    return f"{int(mv) if mv == int(mv) else mv} mana value"
+
+
+def _mv_or(card: DeckCard, default: float) -> float:
+    mv = mana_value(card)
+    return default if mv is None else mv
 
 
 def _colour_rank(card: DeckCard) -> tuple[int, str]:
@@ -170,16 +164,10 @@ def _colour_rank(card: DeckCard) -> tuple[int, str]:
 
 def sort_cards(cards: list[DeckCard], key: str) -> list[DeckCard]:
     if key == "mv":
-        return sorted(cards, key=lambda c: (is_land(c), c.cmc if c.cmc is not None else 99, c.name.lower()))
+        return sorted(cards, key=lambda c: (is_land(c), _mv_or(c, 99), c.name.lower()))
     if key == "type":
-        return sorted(
-            cards,
-            key=lambda c: (
-                primary_type(c) not in TYPE_ORDER,
-                TYPE_ORDER.index(primary_type(c)) if primary_type(c) in TYPE_ORDER else 99,
-                c.name.lower(),
-            ),
-        )
+        rank = {t: i for i, t in enumerate(TYPE_ORDER)}
+        return sorted(cards, key=lambda c: (rank.get(primary_type(c), 99), c.name.lower()))
     if key == "price":
         return sorted(cards, key=lambda c: (-(c.price or 0), c.name.lower()))
     if key == "color":
@@ -374,12 +362,13 @@ def banner_html(
     )
     if csrf:
         # The same run as the assistant's run_deck_report: statistics, validation and 300
-        # goldfish games on the research service, stored under History.
+        # simulated games on the research service, stored under History. "Simulated", not
+        # "goldfish": Goldfish is the button beside it, where the member plays by hand (D3).
         primary += (
             f"<form method='post' action='/decks/{did}/report' class='inline'>{csrf_in}"
-            "<button type='submit' data-busy-label='Simulating…' title='300 goldfish games, a decklist check "
-            "and the deck statistics, saved under History. The run takes up to a minute; the result page "
-            f"opens when it is done.'>{icon('stats')} Run simulation</button></form>"
+            "<button type='submit' data-busy-label='Simulating…' title='300 simulated games, a decklist "
+            "check and the deck statistics, saved under History. The run takes up to a minute; the result "
+            f"page opens when it is done.'>{icon('stats')} Run simulation</button></form>"
         )
     more_items = []
     if own and csrf:
@@ -563,77 +552,67 @@ def front_name(name: str) -> str:
     return name.split(" // ")[0].strip() if " // " in name else name
 
 
-def text_row(card: DeckCard, *, deck: Deck, owned: dict[str, int] | None = None) -> str:
-    img = card_image(card)
-    hover = f"<span class='hover'><img src='{esc(img)}' alt='' loading='lazy'></span>" if img else ""
-    cls = " side" if not deck.in_deck(card) else ""
-    return (
-        f"<li class='row{cls}' tabindex='0' role='button' data-name='{esc(card.name.lower())}' "
-        f"data-card='{esc(card.name)}'{_card_data(card, deck)}>"
-        f"<span class='q'>{card.quantity}</span>"
-        f"<span class='n'>{_label_dot(card)}{_owned_dot(card, owned)}<span "
-        f"class='name' title='{esc(card.name)}'>{esc(card.name)}</span>"
-        f"{_finish_badge(card)}{hover}</span>"
-        f"<span class='mc'>{mana_html(card.mana_cost)}</span>"
-        f"<span class='set' title='{esc(card.set_code.upper())} {esc(card.collector_number)}'>"
-        f"{esc(card.set_code.upper())}</span>"
-        f"<span class='price'>{money(card.price) if card.price is not None else ''}</span>"
-        "</li>"
-    )
-
-
 TABLE_HEAD = (
     "<li class='th' aria-hidden='true'><span class='q'>Qty</span><span>Name</span>"
     "<span class='ty'>Type</span>"
     "<span class='mv'>MV</span><span class='mc'>Cost</span><span class='set'>Set</span>"
     "<span class='price'>Price</span></li>"
 )
+ROW_VIEWS = ("text", "table", "brewer")
 
 
-def table_row(card: DeckCard, *, deck: Deck, owned: dict[str, int] | None = None) -> str:
-    """One card in the Table view: the Text view's row with the type line, mana value and
-    collector number in columns of their own (Archidekt's Table view, from the same data)."""
+def card_row(card: DeckCard, *, deck: Deck, view: str = "text", owned: dict[str, int] | None = None) -> str:
+    """One card as a row of the list views, from the same data as Archidekt's: Text (count, name,
+    cost, set, price, the picture on hover), Table (the Text row with the type line, mana value
+    and collector number in columns of their own) and Brewer (a small picture beside the name and
+    cost, the type line and the rules text, so a deck can be read without opening every card,
+    as read from Archidekt's site code). The Table's mana value is the deck's custom one when the
+    card has one, the printed one on hover."""
     cls = " side" if not deck.in_deck(card) else ""
-    printing = f"{card.set_code.upper()} {card.collector_number}".strip()
-    mv = f"{card.cmc:g}" if card.cmc is not None else ""
+    qty = f"<span class='q'>{card.quantity}</span>"
+    marks = f"{_label_dot(card)}{_owned_dot(card, owned)}"
+    name = f"<span class='name' title='{esc(card.name)}'>{esc(card.name)}</span>{_finish_badge(card)}"
+    cost = f"<span class='mc'>{mana_html(card.mana_cost)}</span>"
+    price = f"<span class='price'>{money(card.price) if card.price is not None else ''}</span>"
+    if view == "brewer":
+        img = card_image(card)
+        pic = (
+            f"<img class='art' src='{esc(img)}' alt='' loading='lazy'>"
+            if img
+            else "<span class='art ph' aria-hidden='true'></span>"
+        )
+        cls = " brew" + cls
+        body = (
+            f"{pic}<span class='bd'><span class='n'>{qty}{marks}{name}{cost}</span>"
+            f"<span class='ty'>{esc(card.type_line)}</span>"
+            + (f"<span class='tx'>{esc(card.oracle_text)}</span>" if card.oracle_text else "")
+            + f"{price}</span>"
+        )
+    elif view == "table":
+        printing = f"{card.set_code.upper()} {card.collector_number}".strip()
+        mv = mana_value(card)
+        printed = (
+            f" title='Custom mana value; printed {card.cmc:g}'"
+            if card.custom_cmc is not None and card.cmc is not None
+            else ""
+        )
+        body = (
+            f"{qty}<span class='n'>{marks}{name}</span>"
+            f"<span class='ty' title='{esc(card.type_line)}'>{esc(card.type_line)}</span>"
+            f"<span class='mv'{printed}>{f'{mv:g}' if mv is not None else ''}</span>{cost}"
+            f"<span class='set' title='{esc(printing)}'>{esc(printing)}</span>{price}"
+        )
+    else:
+        img = card_image(card)
+        hover = f"<span class='hover'><img src='{esc(img)}' alt='' loading='lazy'></span>" if img else ""
+        body = (
+            f"{qty}<span class='n'>{marks}{name}{hover}</span>{cost}"
+            f"<span class='set' title='{esc(card.set_code.upper())} {esc(card.collector_number)}'>"
+            f"{esc(card.set_code.upper())}</span>{price}"
+        )
     return (
         f"<li class='row{cls}' tabindex='0' role='button' data-name='{esc(card.name.lower())}' "
-        f"data-card='{esc(card.name)}'{_card_data(card, deck)}>"
-        f"<span class='q'>{card.quantity}</span>"
-        f"<span class='n'>{_label_dot(card)}{_owned_dot(card, owned)}<span "
-        f"class='name' title='{esc(card.name)}'>{esc(card.name)}</span>{_finish_badge(card)}</span>"
-        f"<span class='ty' title='{esc(card.type_line)}'>{esc(card.type_line)}</span>"
-        f"<span class='mv'>{mv}</span>"
-        f"<span class='mc'>{mana_html(card.mana_cost)}</span>"
-        f"<span class='set' title='{esc(printing)}'>{esc(printing)}</span>"
-        f"<span class='price'>{money(card.price) if card.price is not None else ''}</span>"
-        "</li>"
-    )
-
-
-def brewer_row(card: DeckCard, *, deck: Deck, owned: dict[str, int] | None = None) -> str:
-    """One card in the Brewer view: a small picture beside the name and cost, the type line and
-    the rules text, with the count and price (Archidekt's Brewer view, as read from its site code:
-    a list that shows each card's text so a deck can be read without opening every card)."""
-    img = card_image(card)
-    pic = (
-        f"<img class='art' src='{esc(img)}' alt='' loading='lazy'>"
-        if img
-        else "<span class='art ph' aria-hidden='true'></span>"
-    )
-    cls = " side" if not deck.in_deck(card) else ""
-    text = card.oracle_text
-    return (
-        f"<li class='row brew{cls}' tabindex='0' role='button' data-name='{esc(card.name.lower())}' "
-        f"data-card='{esc(card.name)}'{_card_data(card, deck)}>"
-        f"{pic}<span class='bd'>"
-        f"<span class='n'><span class='q'>{card.quantity}</span>{_label_dot(card)}{_owned_dot(card, owned)}"
-        f"<span class='name' title='{esc(card.name)}'>{esc(card.name)}</span>{_finish_badge(card)}"
-        f"<span class='mc'>{mana_html(card.mana_cost)}</span></span>"
-        f"<span class='ty'>{esc(card.type_line)}</span>"
-        + (f"<span class='tx'>{esc(text)}</span>" if text else "")
-        + f"<span class='price'>{money(card.price) if card.price is not None else ''}</span>"
-        "</span></li>"
+        f"data-card='{esc(card.name)}'{_card_data(card, deck)}>{body}</li>"
     )
 
 
@@ -678,13 +657,19 @@ def _card_data(card: DeckCard, deck: Deck) -> str:
     """Data attributes the page script reads for the card viewer and for its own edits (the card
     menu, the viewer's quantity buttons, dragging between stacks): the row's count, zone (main
     or side), first category (empty when Archidekt has none) and relation id, which pick the row
-    an edit targets when the same card sits in the deck and on the maybeboard."""
+    an edit targets when the same card sits in the deck and on the maybeboard. A row in more than
+    one category lists them all in data-allcats, so an Undo of its removal puts every one back."""
     zone = "main" if deck.in_deck(card) else "side"
     cat = card.categories[0] if card.categories else ""
     rel = f" data-rel='{card.relation_id}'" if card.relation_id is not None else ""
+    allcats = (
+        f" data-allcats='{esc(json.dumps(list(card.categories), separators=(',', ':')))}'"
+        if len(card.categories) > 1
+        else ""
+    )
     return (
         card_view_attrs(card, img=card_image(card))
-        + f" data-qty='{card.quantity}' data-zone='{zone}' data-cat='{esc(cat)}'{rel}"
+        + f" data-qty='{card.quantity}' data-zone='{zone}' data-cat='{esc(cat)}'{rel}{allcats}"
         + (f" data-label='{esc(card.label)}'" if split_label(card.label)[0] else "")
         + (f" data-mv='{mana_value_text(card.custom_cmc)}'" if card.custom_cmc is not None else "")
         + (f" data-notes='{esc(card.notes)}'" if card.notes else "")
@@ -744,33 +729,20 @@ def cards_html(
             f"{menu}</h2>"
             f"<div class='meta'>Qty: {qty}" + (f" · Price: {money(price)}" if price else "") + "</div></div>"
         )
-        if view == "text":
+        if view in ROW_VIEWS:
             body = (
                 "<ul class='plain rows'>"
-                + "".join(text_row(c, deck=deck, owned=owned) for c in cards)
-                + "</ul>"
-            )
-        elif view == "table":
-            body = (
-                "<ul class='plain rows'>"
-                + TABLE_HEAD
-                + "".join(table_row(c, deck=deck, owned=owned) for c in cards)
-                + "</ul>"
-            )
-        elif view == "brewer":
-            body = (
-                "<ul class='plain rows'>"
-                + "".join(brewer_row(c, deck=deck, owned=owned) for c in cards)
+                + (TABLE_HEAD if view == "table" else "")
+                + "".join(card_row(c, deck=deck, view=view, owned=owned) for c in cards)
                 + "</ul>"
             )
         else:
             imgs = "".join(image_card(c, deck=deck, owned=owned) for c in cards)
             body = f"<div class='cards'>{imgs}</div>"
         sections.append(f"<section class='stack' data-group='{esc(name)}'>{head}{body}</section>")
-    # data-own and data-group let deck.js offer drag-and-drop between categories on the member's
-    # own deck (the drops become one proposal, applied from the review page like every other edit).
     # data-own marks the member's own deck (the card menu and the viewer offer edits); data-drop
-    # the category grouping on it, where cards drag between stacks. The card menu's "Move to" list
+    # the category grouping on it, where cards drag between stacks. Every one of those edits is
+    # saved to Archidekt at once (the edit endpoint), with Undo and Redo. The card menu's "Move to" list
     # (deck.js) names the deck's own categories whatever the grouping, and knows the maybeboard.
     cats = [c["name"] for c in deck.categories if isinstance(c.get("name"), str)]
     droppable = (
@@ -833,8 +805,9 @@ def _odds_groups(cards: list[DeckCard]) -> dict[str, dict[str, int]]:
             groups["Types"][t] += c.quantity
         for t in c.subtypes:
             groups["Sub types"][t] += c.quantity
-        if c.cmc is not None and not is_land(c):
-            groups["Mana value"][f"{c.cmc:g}"] += c.quantity
+        mv = mana_value(c)  # the deck's custom mana value when it has one, as the curve counts it
+        if mv is not None and not is_land(c):
+            groups["Mana value"][f"{mv:g}"] += c.quantity
     return {k: dict(sorted(v.items(), key=lambda kv: (-kv[1], kv[0]))) for k, v in groups.items() if v}
 
 
@@ -1060,7 +1033,7 @@ def _curve_variant(cards: list[DeckCard], mode: str) -> str:
     """One mana curve: plain bars ("none") or bars stacked by primary type or primary category,
     with a legend. The bars are a picture (role=img, every number in its label and on the bar);
     the mana value buttons under them and the legend's buttons focus the cards."""
-    key = {"type": curve_type, "category": primary_category}.get(mode)
+    key = {"type": primary_type, "category": primary_category}.get(mode)
     cols: dict[str, list[DeckCard]] = {b: [] for b in CURVE_BUCKETS}
     for c in cards:
         b = curve_bucket(c)
@@ -1322,7 +1295,7 @@ def stats_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
     if not stats:
         return ""
     cards = deck.main_cards
-    mv_total = sum(c.cmc * c.quantity for c in cards if c.cmc is not None and not is_land(c))
+    mv_total = sum(_mv_or(c, 0) * c.quantity for c in cards if not is_land(c))
     types = stats.get("type_counts") or {}
     rarities = stats.get("rarity_counts") or {}
     type_rows = _qty_rows(types, cards, "types")
@@ -2086,6 +2059,7 @@ ul.rows .hover img{width:100%;height:100%;display:block}
 .bulkbar select:not(.msel-native){width:auto;max-width:100%;min-width:0;min-height:36px}
 .bulkbar .msel-btn{max-width:100%;min-width:0}
 .bulkbar .count{font-weight:600}
+.bulkbar .histtools{display:inline-flex;gap:.25rem}
 .bulkbar .tagform{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;flex-basis:100%}
 .bulkbar .tagform[hidden]{display:none}
 .bulkbar .tagform input[type=text]{width:auto;flex:1 1 10rem;min-width:0;max-width:18rem}
@@ -2289,15 +2263,6 @@ html.cardview-open{overflow:hidden}
 .cardview .acts .qtyctl .n{min-width:2rem;text-align:center;font-size:1.1rem;
   font-variant-numeric:tabular-nums}
 .cardview .acts .qtyctl.busy{opacity:.6}
-/* pending category moves (own deck, stacks or grid): a bar like the editor's */
-.movebar{position:sticky;bottom:0;z-index:20;display:none;align-items:center;gap:.5rem;flex-wrap:wrap;
-  background:var(--toolbar-bg);color:var(--toolbar-text);padding:.5rem 1rem;margin:1rem -1rem 0;
-  box-shadow:0 -2px 6px rgba(0,0,0,.35)}
-.movebar.show{display:flex}
-.movebar button{margin:0} .movebar .count{opacity:.85}
-.movebar .status{margin:0;flex-basis:100%} .movebar .status:empty{display:none}
-@media (max-width:900px){ .has-tabbar .movebar{position:fixed;left:0;right:0;
-  bottom:calc(56px + env(safe-area-inset-bottom));margin:0} }
 /* grid view: cards about 170 to 230 px wide, as many per row as fit (five in a 1366 px window) */
 .deckview.grid .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:1rem}
 @media (max-width:600px){ .deckview.grid .cards{grid-template-columns:repeat(2,minmax(0,1fr))}

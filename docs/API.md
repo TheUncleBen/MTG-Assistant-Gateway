@@ -63,7 +63,7 @@ Request bodies are JSON objects of at most 2 MB.
 | `GET /api/v1/decks/{id}?cards=0` | One deck (own or public) with cards, categories, format, description, bracket, commanders and `stats`; `cards=0` leaves the card list out |
 | `GET /api/v1/decks/{id}/stats` | `deck` brief plus `stats` (curve, pips, types, lands, prices, salt, bracket estimate) |
 | `GET /api/decks/mine` | Browser session only: the signed-in member's deck list as server-rendered HTML for the Home and My decks pages while a cold list loads (`no-store`; backup copies left out) |
-| `POST /api/v1/decks/{id}/edit` | Browser session only (CSRF header): the deck page's own save. `{"changes": [...], "confirmed": false}` proposes, applies with a snapshot and answers the touched rows, fresh checks and the re-rendered Legality chip and Deck checks panel; a big removal answers `needs_confirm` with `proposal_id`, and `{"proposal_id": ...}` applies it (a cancelled confirmation rejects it; only a pending proposal this endpoint made is accepted, never an assistant's). `{"refresh": true, "names": [...]}` reads the deck again, writing nothing |
+| `POST /api/v1/decks/{id}/edit` | Browser session only (CSRF header): the deck page's own save. `{"changes": [...], "confirmed": false}` proposes, applies with a snapshot and answers the touched rows (with every category and the read-only notes), fresh checks and the re-rendered Legality chip and Deck checks panel; a big removal answers `needs_confirm` with `proposal_id`, and `{"proposal_id": ...}` applies it (a cancelled confirmation rejects it; only a pending proposal this endpoint made is accepted, never an assistant's). `{"refresh": true, "names": [...]}` reads the deck again, writing nothing |
 | `GET /api/v1/decks/{id}/history` | Everything stored about one deck: `proposals`, `snapshots`, `reports` and a `series` of report metrics over time |
 | `GET /api/v1/compare?a=&b=` | Differences between two decks; each side is a deck id or link, or a snapshot id |
 | `GET /api/v1/proposals?state=` | The user's proposals, optionally filtered by state |
@@ -128,7 +128,9 @@ a bearer token. They answer `401` without a browser session, and `404` to signed
 `POST /api/v1/proposals` takes a `kind`:
 
 - `edit` (default): `{"deck_id": "...", "changes": [...]}`. Each change is one of
-  `{"action": "add", "card_name", "quantity", "category"?, "set_code"?, "collector_number"?, "finish"?}`,
+  `{"action": "add", "card_name", "quantity", "category"?, "categories"?, "set_code"?, "collector_number"?, "finish"?}`
+  (`categories`: every category the new row goes in, the first one being `category`; the deck page's
+  Undo of a removal sends it),
   `{"action": "remove", "card_name"}`, `{"action": "set_quantity", "card_name", "quantity"}`,
   `{"action": "set_category", "card_name", "category"}`, `{"action": "set_commander", "card_name"}`,
   `{"action": "set_finish", "card_name", "finish"}` (normal, foil or etched, for the copies already in

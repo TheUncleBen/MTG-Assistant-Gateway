@@ -6,7 +6,6 @@ assistant, the companion web app and the Android app see the same fields.
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from . import deck_stats
@@ -145,19 +144,9 @@ def deck_brief(deck: Deck) -> dict[str, Any]:
     }
 
 
-_AUTO_TYPES = ("Creature", "Planeswalker", "Battle", "Instant", "Sorcery", "Artifact", "Enchantment", "Land")
-
-
-def auto_category(card: DeckCard) -> str:
-    """The category Archidekt shows an uncategorised card under: its oracle ``defaultCategory``
-    when the deck JSON carried one, else the card's primary type, else 'Other'."""
-    if card.default_category:
-        return card.default_category
-    words = {w for t in card.types for w in re.split(r"[\s,/]+", t) if w}
-    for t in _AUTO_TYPES:
-        if t in words:
-            return t
-    return "Other"
+# The category Archidekt shows an uncategorised card under (deck_stats owns the rule and the
+# type order; the deck page, the stats and get_deck's shown_under all use that one).
+auto_category = deck_stats.auto_category
 
 
 def cards_by_category(deck: Deck) -> list[tuple[str, list[DeckCard]]]:

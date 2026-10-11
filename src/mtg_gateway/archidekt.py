@@ -677,9 +677,11 @@ class ArchidektClient:
         scheme: str = "JWT",
         json_body: Any | None = None,
         params: dict[str, Any] | None = None,
+        fresh: bool = False,
     ) -> Any:
+        """``fresh`` skips a cached answer (the read still refreshes the cache)."""
         key = self._cache_key(method, path, token, params)
-        if key is not None:
+        if key is not None and not fresh:
             found, value = self._cache_get(key, path)
             if found:
                 self.stats["cache_hits"] += 1
@@ -946,9 +948,10 @@ class ArchidektClient:
         first = found["decks"][0]
         return {"username": first["owner"], "id": first.get("owner_id"), "decks": found}
 
-    async def get_deck(self, token: str | None, deck_id: str) -> Deck:
-        """Fetch a deck. With ``token=None`` this is an anonymous read of a public deck."""
-        body = await self._request("GET", f"/decks/{deck_id}/", token=token)
+    async def get_deck(self, token: str | None, deck_id: str, *, fresh: bool = False) -> Deck:
+        """Fetch a deck. With ``token=None`` this is an anonymous read of a public deck, served
+        from the shared read cache unless ``fresh`` (the deck page's Reload) asks Archidekt again."""
+        body = await self._request("GET", f"/decks/{deck_id}/", token=token, fresh=fresh)
         return parse_deck(body)
 
     async def create_deck(

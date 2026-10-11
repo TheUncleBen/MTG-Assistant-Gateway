@@ -243,10 +243,14 @@ def test_stack_and_card_drag_by_touch_scroll_on_near_the_edge(server: Server) ->
         t = page.locator(".stack[data-group='Sorcery']").bounding_box()["y"]
         _touch(cdp, "touchMove", x, t + 40)
         page.wait_for_timeout(100)
-        _touch(cdp, "touchEnd")
+        # the drop is saved at once (D4), as the card menu's Move to is
+        with page.expect_request(EDIT_URL) as req:
+            _touch(cdp, "touchEnd")
+        assert json.loads(req.value.post_data)["changes"] == [
+            {"action": "set_category", "card_name": "Aesi, Tyrant of Gyre Strait", "category": "Sorcery"}
+        ]
         page.wait_for_timeout(100)
         assert page.locator(".dragghost").count() == 0
-        assert "1 card moved" in page.locator(".movebar.show").inner_text()
         moved = page.locator(".stack[data-group='Sorcery'] .row[data-card='Aesi, Tyrant of Gyre Strait']")
         assert moved.count() == 1
         assert errors == []
