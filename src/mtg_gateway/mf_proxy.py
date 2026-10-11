@@ -20,6 +20,7 @@ from mcp import Client
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.context import CallNext, ServerRequestContext
 
+from . import deck_stats
 from .schemas import compact_schema, flatten_params
 
 logger = logging.getLogger(__name__)
@@ -156,6 +157,35 @@ def _rewrite_result(result: types.CallToolResult) -> types.CallToolResult:
         update["structured_content"] = _rewrite_strings(result.structured_content)
     if upstream_failed(result):
         update["is_error"] = True  # so the assistant sees a failure, not an answer
+    return result.model_copy(update=update)
+
+
+def _validation_checks(result: types.CallToolResult, arguments: Any) -> types.CallToolResult:
+    """validate_decklist checks names, size and color identity only, so a list with two Sol Rings
+    "PASSED". The gateway adds its own singleton check as a "Gateway checks" section, and a
+    failure there turns the headline to ISSUES FOUND (the same check deck_stats makes)."""
+    params = arguments.get("params") if isinstance(arguments, dict) and "params" in arguments else arguments
+    decklist = params.get("decklist") if isinstance(params, dict) else None
+    if result.is_error or not isinstance(decklist, str):
+        return result
+    checked = deck_stats.validation_gateway_checks(decklist)
+    if checked is None:
+        return result
+    dupes, section = checked
+
+    def amend(text: str) -> str:
+        if dupes:
+            text = text.replace("Validation: PASSED", "Validation: ISSUES FOUND", 1)
+        return text.rstrip() + "\n\n" + section
+
+    content = [
+        c.model_copy(update={"text": amend(c.text)}) if isinstance(c, types.TextContent) else c
+        for c in result.content
+    ]
+    update: dict[str, Any] = {"content": content}
+    structured = result.structured_content
+    if isinstance(structured, dict) and isinstance(structured.get("result"), str):
+        update["structured_content"] = {**structured, "result": amend(structured["result"])}
     return result.model_copy(update=update)
 
 
@@ -453,7 +483,10 @@ class MysticForgeProxy:
                     await self.tools()  # learn which tools take a params object
                 if name in self._wrapped:
                     arguments = {"params": arguments}
-            return _rewrite_result(await self._forward(name, arguments))
+            result = _rewrite_result(await self._forward(name, arguments))
+            if name == "validate_decklist":
+                result = _validation_checks(result, arguments)
+            return result
         finally:
             if owner is not None:
                 left = self._in_flight.get(owner, 1) - 1

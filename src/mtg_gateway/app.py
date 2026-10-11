@@ -745,7 +745,9 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "bracket, counts and commanders. view picks the rest: 'text' (default: statistics plus "
             "decklist_text, one card per line with its categories, for the research and simulation "
             "tools, and sideboard_text), 'summary' (statistics only), 'cards' (statistics plus one row "
-            "per card: set, collector number, finish, categories, in_deck, mana cost, types, price), "
+            "per card: set, collector number, finish, categories, in_deck, mana cost, types, price; a "
+            "card with no category of the member's own has categories [] and shown_under, the "
+            "category archidekt.com shows it under: Archidekt's auto category, else its type), "
             "'export' (archidekt_text: Archidekt's own import syntax with finishes, categories and "
             "labels, which pastes back into Archidekt as the same deck) or 'full' (everything; large). "
             "include_text=true adds each card's rules text (oracle_text) to the card rows: set it "
@@ -1121,17 +1123,24 @@ def build_mcp_server(state: AppState) -> MCPServer:
         name="deck_stats",
         title="Deck statistics",
         description=(
-            "Mana curve (also split by card type and by category), color pips against mana sources (also "
-            "from lands only), pips outside the commander's color identity, type, subtype, keyword and "
-            "rarity counts, average mana value, price total, format legality problems, game changers, "
-            "tutors, extra turns, mass land denial, salt, a "
-            "Commander bracket ESTIMATE and structural checks (deck size for the format, commander zone "
-            "and whether each card may command, color identity violations, singleton violations, "
-            "uncategorised rows: stats.checks), all from Archidekt's own card data in one read (no Mystic "
-            "Forge call). deck_ref is an Archidekt id or URL, a snapshot id, or a pasted decklist (then "
-            "only counts and structural checks: no card data; lines that are not cards are listed in "
-            "unread_lines). Say 'estimate' when you quote the bracket. This is the one tool for an "
-            "Archidekt deck's legality and structure; validate_decklist checks a pasted list card by card."
+            "Mana curve (also split by card type and by category; a card with no category of the "
+            "member's own counts under Archidekt's auto category for it, else its type, as archidekt.com "
+            "shows it), color pips against mana sources (also from lands only; in the commander formats "
+            "only sources of the commanders' colors and colorless count, so an any-color land adds no "
+            "off-color source), pips outside the commander's color identity, type, subtype, keyword and "
+            "rarity counts, average mana value, price total, game changers, tutors, extra turns, mass "
+            "land denial, salt, archidekt_bracket (the bracket set on the deck: the owner's setting), a "
+            "Commander bracket ESTIMATE (a floor that counts only game changers, mass land denial, extra "
+            "turns, tutors and two-card combos) and the deck's legality as archidekt.com checks it "
+            "(stats.checks: deck size for the format, the commander and whether it may lead, partners, "
+            "color identity, singleton or copy limits counted by name, banned, not legal and restricted "
+            "cards, sideboard size, the companion and its condition, the set bracket against the cards; "
+            "legal is the verdict and legal_problems names every failing rule with its cards), all from "
+            "Archidekt's own card data in one read (no Mystic Forge call). deck_ref is an Archidekt id "
+            "or URL, a snapshot id, or a pasted decklist (then only counts and structural checks: no "
+            "card data; lines that are not cards are listed in unread_lines). Say 'estimate' when you "
+            "quote the bracket estimate. This is the one tool for an Archidekt deck's legality and "
+            "structure; validate_decklist checks a pasted list card by card."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
         meta=stats_card_meta,
@@ -1325,8 +1334,12 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "returns the existing one (not when options are given). options passes the simulator's knobs "
             "through (annotations from goldfish_annotate, combos, seed, until_turn, opponents, mulligan). "
             "When the gateway runs Forge, a stored report also gets a forge section: real games against "
-            "Commander precons, played in the background (read it again with get_deck_report until its "
-            "state is done), with the cards Forge could not play in not_played. "
+            "Commander precons, played in the background, one run at a time per member (a report made "
+            "while an earlier one is still playing is queued behind it, state queued with position and "
+            "waiting_for, and starts by itself; at most two wait, then a report gets no Forge games), "
+            "with the seed Forge used, the cards it could not play in not_played and forge_status "
+            "(state, games_done of games_requested, expected_seconds). Poll with get_deck_report "
+            "view='forge' until the state is done. "
             "This is the one tool that "
             "runs goldfish games of one deck; compare_decks with simulate=true is the paired A/B of two. "
             "goldfish_odds (draw odds) and goldfish_annotate (card roles) stay separate."
@@ -1387,11 +1400,23 @@ def build_mcp_server(state: AppState) -> MCPServer:
     @server.tool(
         name="get_deck_report",
         title="Get a stored deck report",
-        description="One stored report in full: statistics, the simulation result and the validation.",
+        description=(
+            "One stored report: view 'full' (default) is the whole report (statistics, the simulation "
+            "result, the validation and the forge section); view 'forge' is only forge_status (state, "
+            "games_done of games_requested, job_id, and while queued its position, the report it waits "
+            "for and expected_seconds), small enough to poll while the Forge games play."
+        ),
         annotations={"readOnlyHint": True, "openWorldHint": False},
     )
-    async def get_deck_report(report_id: str) -> dict[str, object]:
+    async def get_deck_report(
+        report_id: str,
+        view: Annotated[
+            Literal["full", "forge"], Field(description="'full' (default) or 'forge' (progress only).")
+        ] = "full",
+    ) -> dict[str, object]:
         try:
+            if view == "forge":
+                return {"ok": True, **state.reports.forge_only(_sub(), report_id)}
             return {"ok": True, **state.reports.get(_sub(), report_id)}
         except DeckError as exc:
             return _tool_error(exc)

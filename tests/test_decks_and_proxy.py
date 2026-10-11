@@ -1457,3 +1457,29 @@ async def test_pasted_lists_are_reported_but_not_stored(stack: Stack) -> None:
     assert checks["singleton_violations"] == [{"name": "Opt", "quantity": 2}] and checks["ok"] is False
     bad = structured(await call(h, token, "deck_stats", {"deck_ref": "not a list at all"}))
     assert bad["ok"] is False, bad
+
+
+async def test_validate_decklist_gets_the_gateways_singleton_check() -> None:
+    """validate_decklist (Mystic Forge) checks names, size and color identity only, so a 100-card
+    list with two Sol Rings came back PASSED while deck_stats flagged it (F04). The gateway adds a
+    Gateway checks section and turns the headline to ISSUES FOUND."""
+    passed = "# Validation: PASSED\n\nAll 3 unique cards verified on Scryfall.\nDeck size: 100 cards."
+    mf = MCPServer(name="mystic-forge-validate")
+
+    @mf.tool(name="validate_decklist", description="validate a decklist")
+    async def validate_decklist(params: _ValidateDecklistInput) -> str:
+        return passed
+
+    proxy = MysticForgeProxy("http://mf.test/mcp", client_factory=lambda: Client(mf))
+    two = "1 Aesi, Tyrant of Gyre Strait\n2 Sol Ring\n97 Island"
+    bad = await proxy.call("validate_decklist", {"decklist": two, "commander": "Aesi"})
+    text = bad.content[0].text
+    assert text.startswith("# Validation: ISSUES FOUND") and "## Gateway checks" in text, text
+    assert "**more than one copy (singleton):** Sol Ring ×2" in text
+    assert bad.structured_content is None or "ISSUES FOUND" in json.dumps(bad.structured_content)
+    one = "1 Aesi, Tyrant of Gyre Strait\n1 Sol Ring\n98 Island\n"
+    text = (await proxy.call("validate_decklist", {"decklist": one})).content[0].text
+    assert text.startswith("# Validation: PASSED") and "Singleton: no card has more than one copy." in text
+    # basic lands and cards allowed in any number are not duplicates
+    rats = await proxy.call("validate_decklist", {"decklist": "1 Aesi\n30 Relentless Rats\n69 Island"})
+    assert rats.content[0].text.startswith("# Validation: PASSED")
