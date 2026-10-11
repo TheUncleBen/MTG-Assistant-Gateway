@@ -69,7 +69,7 @@ class EdhplayList:
 
     text: str
     commanders: list[str]
-    left_out: list[str]  # "2 Cultivate" lines that did not fit EDHPlay's 15-card sideboard
+    left_out: list[tuple[int, str]]  # (copies, name) that did not fit EDHPlay's 15-card sideboard
     maybeboard: int  # maybeboard cards, never sent (Ben, 23:21Z 2026-10-11)
     tokens: int  # token cards left out (EDHPlay's import drops them)
 
@@ -134,7 +134,7 @@ def to_edhplay(deck: Deck) -> EdhplayList:
         else:  # the maybeboard, or another category kept outside the deck
             maybeboard += c.quantity
     side: list[str] = []
-    left_out: list[str] = []
+    left_out: list[tuple[int, str]] = []
     room = EDHPLAY_SIDEBOARD_MAX
     # the companion first, so a cut never drops it
     first.sort(key=lambda c: not (c.companion or c.categories[0].casefold() == "companion"))
@@ -144,7 +144,7 @@ def to_edhplay(deck: Deck) -> EdhplayList:
             side.append(_edh_line(c, quantity=fits))
             room -= fits
         if fits < c.quantity:
-            left_out.append(_edh_line(c, quantity=c.quantity - fits))
+            left_out.append((c.quantity - fits, c.name))
     if not head:
         # With no marked commander EDHPlay's parser takes a first line of quantity 1 as the
         # commander; a line of several copies first (a basic land, usually) keeps it from that.

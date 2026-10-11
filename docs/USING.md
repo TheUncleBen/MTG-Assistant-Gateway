@@ -99,12 +99,13 @@ One deck:
   The list has the commander first (marked as the commander, partners too),
   the rest of the deck with each card's printing, then a **Sideboard**
   section with your companion and sideboard. EDHPlay's sideboard holds 15
-  cards, so anything past that is left out and the note names it. Your
+  cards, so anything past that is left out and a note names it. Your
   maybeboard, and anything else kept outside the deck, isn't sent (EDHPlay
   has no maybeboard), and EDHPlay doesn't take tokens from a list, so add
-  those there by hand. On EDHPlay choose **Create Deck** with the commander
-  the note names, then **Import**: paste the list and press **Import &
-  Replace**. EDHPlay has no way to receive a deck by link, so a later change
+  those there by hand. The first time you press the button, a short tip
+  repeats these limits until you close it. On EDHPlay choose **Create
+  Deck**, then **Import**: paste the list and press **Import & Replace**
+  (the list sets the commander). EDHPlay has no way to receive a deck by link, so a later change
   on Archidekt is taken over the same way: press the button again.
 - **Goldfish** plays the deck by hand on a gateway page, in your browser:
   the deck is shuffled and you get seven cards. Keep the hand or take a

@@ -31,9 +31,10 @@ EDHPlay is the online table, one press away. No new images; the database stays a
   edhplay.com in a new tab, or the phone's browser in the app: the commander (or partners) first,
   marked the way EDHPlay's import recognises, every card with its printing, then a Sideboard
   section with the deck's companion and sideboard. EDHPlay's sideboard holds 15 cards and refuses
-  the whole import past that, so the list stops at 15 and the note names every card left out. The
+  the whole import past that, so the list stops at 15 and a one-line note names every card left out. The
   maybeboard and other cards kept outside the deck are not sent (EDHPlay has no maybeboard), and
-  neither are tokens (EDHPlay's import drops them); the note says so. Checked with live imports on an EDHPlay test account: commander, partners,
+  neither are tokens (EDHPlay's import drops them). The first press on a device shows a short tip
+  on these limits, kept until it is closed. Checked with live imports on an EDHPlay test account: commander, partners,
   printings and double-faced cards come through, and the marked commander wins over one already
   picked under Create Deck.
 

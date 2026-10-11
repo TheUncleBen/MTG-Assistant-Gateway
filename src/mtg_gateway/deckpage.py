@@ -367,14 +367,14 @@ def banner_html(
     # (deck.js). Without script the link still opens EDHPlay, and Export deck has the list.
     edh = to_edhplay(deck)
     edh_list = esc(edh.text).replace("\n", "&#10;")  # one line per card, kept through the attribute
-    edh_commander = esc(" and ".join(edh.commanders))
-    # what did not fit EDHPlay's 15-card sideboard, the maybeboard (never sent) and the tokens
-    # EDHPlay drops: the note says so
-    edh_left = esc("; ".join(edh.left_out))
+    # what did not fit EDHPlay's 15-card sideboard: the note names it (deck.js). The maybeboard
+    # (never sent) and tokens (EDHPlay drops them) are in the first-time tip.
+    edh_left = esc(", ".join(name if n == 1 else f"{n} {name}" for n, name in edh.left_out))
+    edh_left_count = sum(n for n, _name in edh.left_out)
     primary += (
         f"<a class='btn' href='{EDHPLAY_URL}' target='_blank' rel='noreferrer noopener' data-edhplay "
-        f"data-list='{edh_list}' data-commander='{edh_commander}' "
-        f"data-left-out='{edh_left}' data-maybeboard='{edh.maybeboard}' data-tokens='{edh.tokens}' "
+        f"data-list='{edh_list}' "
+        f"data-left-out='{edh_left}' data-left-count='{edh_left_count}' "
         "title='Copy this deck list and open EDHPlay to play it online'>"
         f"{icon('play')} Play on EDHPlay</a>"
     )
@@ -2283,6 +2283,8 @@ html.cardview-open{overflow:hidden}
 .deck-toast .close{width:2rem;min-height:2rem;height:2rem;padding:0;margin:0 0 0 auto;border:0;
   background:transparent;font-size:1.3rem;line-height:1;color:var(--text-muted)}
 .deck-toast .close:hover{color:var(--text)}
+/* Play on EDHPlay's note: one line per point (deck.js) */
+.edhplay-toast .msg span{display:block} .edhplay-toast .msg span+span{margin-top:.3rem}
 @media (max-width:600px){ .deck-toast{right:.5rem;left:.5rem;bottom:.5rem;width:auto;max-width:none} }
 @media (max-width:900px){ .has-tabbar .deck-toast{bottom:calc(64px + env(safe-area-inset-bottom))} }
 /* the viewer's own copies control: one fewer, the count, one more */

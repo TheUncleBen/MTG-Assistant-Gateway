@@ -2001,7 +2001,9 @@
 /* Play on EDHPlay (R-154): the press copies the whole deck in EDHPlay's import format (the
    data-list text, made by export_formats.to_edhplay) and lets the link open edhplay.com in a new
    tab (in the Android app, the phone's browser). The copy is made inside the press itself, the
-   way the app's WebView allows it; a short note says what to do next on EDHPlay. */
+   way the app's WebView allows it; a short note says what to do next on EDHPlay, names any
+   sideboard cards left out to fit EDHPlay's 15-card limit, and on a device's first press adds a
+   tip on EDHPlay's import limits that stays until it is closed. */
 (function () {
   "use strict";
   function copyNow(text) {
@@ -2023,44 +2025,70 @@
     }
     return Promise.resolve(false);
   }
-  function note(text, bad, keep) {
+  var TIP_SEEN = "mtg.edhplay.tip";  // this device has seen (and closed) the first-time tip
+  function tipSeen() { try { return localStorage.getItem(TIP_SEEN) === "1"; } catch (e) { return false; } }
+  function rememberTip() { try { localStorage.setItem(TIP_SEEN, "1"); } catch (e) { /* private window */ } }
+  // lines: the note's text, one per line; kind: "", "warn" or "error"; tip: a first-time tip,
+  // which stays until it is closed and is then not shown again on this device
+  function note(lines, kind, tip) {
     var old = document.querySelector(".edhplay-toast");
     if (old) old.remove();
     var t = document.createElement("div");
-    t.className = "toast deck-toast edhplay-toast" + (bad ? " error" : "");
-    t.setAttribute("role", bad ? "alert" : "status");
-    var msg = document.createElement("span");
+    t.className = "toast deck-toast edhplay-toast" + (kind ? " " + kind : "");
+    t.setAttribute("role", kind === "error" ? "alert" : "status");
+    var msg = document.createElement("div");
     msg.className = "msg";
-    msg.textContent = text;
+    lines.forEach(function (line) {
+      var l = document.createElement("span");
+      l.textContent = line;
+      msg.appendChild(l);
+    });
     t.appendChild(msg);
+    function close() { t.remove(); if (tip) rememberTip(); }
+    if (tip) {
+      var acts = document.createElement("span");
+      acts.className = "acts";
+      var ok = document.createElement("button");
+      ok.type = "button";
+      ok.textContent = "Got it";
+      ok.addEventListener("click", close);
+      acts.appendChild(ok);
+      t.appendChild(acts);
+    }
     var x = document.createElement("button");
     x.type = "button";
     x.className = "close icon-only";
     x.setAttribute("aria-label", "Dismiss");
     x.textContent = "×";
-    x.addEventListener("click", function () { t.remove(); });
+    x.addEventListener("click", close);
     t.appendChild(x);
     document.body.appendChild(t);
-    if (!bad && !keep) setTimeout(function () { t.remove(); }, 12000);  // a list of what was left out stays
+    if (!kind && !tip) setTimeout(function () { t.remove(); }, 8000);  // a cut list or a tip stays
   }
   document.addEventListener("click", function (e) {
     var link = e.target.closest && e.target.closest("a[data-edhplay]");
     if (!link) return;
-    var commander = link.getAttribute("data-commander") || "";
     var leftOut = link.getAttribute("data-left-out") || "";
-    var maybe = parseInt(link.getAttribute("data-maybeboard") || "0", 10) || 0;
-    var tokens = parseInt(link.getAttribute("data-tokens") || "0", 10) || 0;
-    var next = " On EDHPlay, choose Create Deck" + (commander ? " with " + commander + " as the commander" : "")
-      + ", then Import: paste the list and press Import & Replace.";
-    // EDHPlay's sideboard holds 15 cards (it refuses the whole import past that), the maybeboard
-    // is never sent and EDHPlay's import drops tokens: the note says what the list leaves out
-    // (export_formats.to_edhplay)
-    var missing = (leftOut ? " Left out because EDHPlay's sideboard holds only 15 cards: " + leftOut + "." : "")
-      + (maybe ? " The maybeboard and other cards kept outside the deck aren't sent to EDHPlay." : "")
-      + (tokens ? " EDHPlay doesn't take tokens from a list, so add them there by hand." : "");
+    var cut = parseInt(link.getAttribute("data-left-count") || "0", 10) || 0;
+    var tip = !tipSeen();
     copyNow(link.getAttribute("data-list") || "").then(function (ok) {
-      if (ok) note("Deck list copied." + next + missing, false, !!leftOut);
-      else note("The deck list couldn't be copied here. Use More, then Export deck, to copy it.", true);
+      if (!ok) {
+        note(["The deck list couldn't be copied here. Use More, then Export deck, to copy it."], "error");
+        return;
+      }
+      var lines = ["Deck list copied. On EDHPlay: Create Deck, then Import, paste and Import & Replace."];
+      // only what this deck runs into (export_formats.to_edhplay): EDHPlay refuses an import whose
+      // sideboard passes 15 cards, so the rest was left out of the list
+      if (cut) {
+        lines.push((cut === 1 ? "1 sideboard card didn't" : cut + " sideboard cards didn't")
+          + " fit EDHPlay's 15-card limit: " + leftOut + ".");
+      }
+      // the first press on this device: EDHPlay's import limits, once
+      if (tip) {
+        lines.push("Good to know: EDHPlay's sideboard holds 15 cards, the maybeboard isn't sent,"
+          + " and tokens are added on EDHPlay by hand.");
+      }
+      note(lines, cut ? "warn" : "", tip);
     });
     // the link itself opens EDHPlay (target=_blank): nothing is prevented
   });
