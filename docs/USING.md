@@ -230,7 +230,7 @@ removal asks you to confirm. An **assistant's** edit, new deck, clone,
 settings change, restore or collection change is first saved as a
 **proposal**: the exact list of what would change. Approve it on the card
 in the chat or on the review page, or pick an approval mode on your Account
-page (Manual, Semi-auto for small low-risk edits, Full auto) and the
+page (Manual, Semi-auto for small deck or collection edits and copies of a deck, Full auto) and the
 assistant applies what that mode allows, always with a snapshot.
 
 - **Proposals** lists what is waiting. Open one to read the diff and press

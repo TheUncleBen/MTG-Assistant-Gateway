@@ -608,7 +608,7 @@ of mode is in the audit log as `approval_mode_set`.
 | Mode | What the assistant may apply with `apply_proposal` |
 |---|---|
 | `manual` (default) | Nothing. Every proposal waits for the member's press on the card or the review page; `apply_proposal` answers `browser_required`. |
-| `semi` | Low-risk proposals only. High-risk ones wait for the member's press as in manual. |
+| `semi` | Low-risk proposals only (small deck or collection edits and clones; see below). High-risk ones wait for the member's press as in manual. |
 | `auto` | Every proposal. |
 
 The risk of a proposal comes from its stored review rows, so it is judged
@@ -616,7 +616,7 @@ on what the review page would show, not on what the assistant says:
 
 | Tier | Proposals |
 |---|---|
-| Low | An edit to an existing deck with at most `MTG_AUTO_APPLY_MAX_ROWS` rows (default 5), each a card add, remove, quantity change, category move, finish or printing change, no row moving more than four copies, none touching the commander. Cloning a deck (a copy; nothing that exists changes). |
+| Low | An edit to an existing deck, or to the member's collection, with at most `MTG_AUTO_APPLY_MAX_ROWS` rows (default 5), each a card add, remove, quantity change, category move, finish or printing change, no row moving more than four copies, none touching the commander. Cloning a deck (a copy; nothing that exists changes). |
 | High | Everything else: more rows than that, any commander change, creating a new deck, restoring a snapshot, and deck details (name, format, description, visibility, and the folder, tags and cover). |
 
 Every proposal result carries `approval_mode`, `risk`, `risk_reason` and
