@@ -1940,6 +1940,8 @@ def create_app(
     if mf_proxy is not None:
         # proxied archidekt_* research calls draw on the member's Archidekt budget too
         mf_proxy.archidekt_budget = state.decks.budget_refusal
+        # a deck id or link given to a research tool is read here, with the member's own access
+        mf_proxy.deck_reader = state.decks.research_deck_text
         server.middleware.append(mf_proxy.middleware())
     transport_security = TransportSecuritySettings(
         enable_dns_rebinding_protection=True,

@@ -20,6 +20,7 @@ from mcp import Client
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.context import CallNext, ServerRequestContext
 
+from .decks import DeckError
 from .schemas import compact_schema, flatten_params
 
 logger = logging.getLogger(__name__)
@@ -81,6 +82,9 @@ OWNER_NOTES: dict[str, str] = {
     "summary and an optional paired goldfish A/B",
 }
 
+# What a simulation's "Full report: goldfish_report(...)" line becomes (see TEXT_REWRITES).
+FULL_REPORT = "This is the full report."
+
 # Mystic Forge text names its own tools; where one is hidden here, the gateway tool that owns the
 # job is named instead (in tool descriptions and in tool results), so an assistant is never sent to
 # a tool it cannot call. Whole sentences first, then the bare names.
@@ -97,10 +101,8 @@ TEXT_REWRITES: tuple[tuple[re.Pattern[str], str], ...] = (
         re.compile(r"pass them to\s+goldfish_run as `annotations`"),
         "pass them to run_deck_report, or compare_decks with simulate=true, as options.annotations",
     ),
-    (
-        re.compile(r"Full report: goldfish_report\([^)]*\)\.?"),
-        "This is the full report; the stored copy is under History (get_deck_report).",
-    ),
+    # Where the stored copy is, the gateway says itself, and only when it stored one (reports.py).
+    (re.compile(r"Full report: goldfish_report\([^)]*\)\.?"), FULL_REPORT),
     (re.compile(r"\bgoldfish_run/goldfish_ab\b"), "run_deck_report / compare_decks"),
     (re.compile(r"\bgoldfish_ab\b"), "compare_decks (simulate=true)"),
     (re.compile(r"\bgoldfish_run\b"), "run_deck_report"),
@@ -117,6 +119,15 @@ def rewrite_text(text: str) -> str:
     for pattern, replacement in TEXT_REWRITES:
         text = pattern.sub(replacement, text)
     return text
+
+
+# Added to a listed tool's description: what its own description leaves out.
+DESCRIPTION_NOTES: dict[str, str] = {
+    "edhrec_top_cards": "limit is per section (Top Cards, Creatures, Instants, ...). With color, period "
+    "is ignored: EDHREC's colour pages count all decks, with no time period.",
+    "goldfish_annotate": "A deck id or link is read with the member's own Archidekt access (their "
+    "private decks too), like get_deck.",
+}
 
 
 # Mystic Forge answers a failed upstream request (Scryfall, EDHREC, Archidekt, Commander
@@ -285,12 +296,16 @@ def reads_archidekt(name: str, arguments: dict[str, Any] | None) -> bool:
     given = arguments or {}
     if isinstance(given.get("params"), dict):  # the gateway's own calls wrap the tool's model
         given = {**given["params"], **{k: v for k, v in given.items() if k != "params"}}
-    for key in DECK_ARGUMENTS:
-        value = given.get(key)
-        if isinstance(value, int) and not isinstance(value, bool):
-            return True
-        if isinstance(value, str) and (value.strip().isdigit() or "archidekt.com" in value.lower()):
-            return True
+    return any(names_deck(given.get(key)) for key in DECK_ARGUMENTS)
+
+
+def names_deck(value: Any) -> bool:
+    """Whether a deck argument names an Archidekt deck (an id or a link) rather than holding a list."""
+    if isinstance(value, int) and not isinstance(value, bool):
+        return True
+    if isinstance(value, str):
+        value = value.strip()
+        return value.isdigit() or ("archidekt.com" in value.lower() and "\n" not in value)
     return False
 
 
@@ -344,6 +359,10 @@ class MysticForgeProxy:
         # Set by the app: spends one unit of a member's Archidekt budget, returning the refusal
         # text when it is used up (None to go ahead).
         self.archidekt_budget: Any = None
+        # Set by the app: reads an Archidekt deck as the member sees it (their private decks
+        # too) and returns its decklist text, commander first; raises DeckError. Mystic Forge
+        # itself reads Archidekt anonymously, so a member's private deck was "not found" there.
+        self.deck_reader: Any = None
         self._health: tuple[float, bool] = (0.0, False)
         self._health_lock = anyio.Lock()  # one probe at a time, however many /healthz calls wait
 
@@ -392,6 +411,8 @@ class MysticForgeProxy:
                 d["inputSchema"] = compact_schema(flat if flat is not None else d.get("inputSchema") or {})
                 if isinstance(d.get("description"), str):
                     d["description"] = rewrite_text(d["description"])
+                    if t.name in DESCRIPTION_NOTES:
+                        d["description"] = d["description"].rstrip() + "\n\n" + DESCRIPTION_NOTES[t.name]
                 # Advertise as read-only research tools; none of them writes to Archidekt.
                 d.setdefault("annotations", {}).update({"readOnlyHint": True, "openWorldHint": True})
                 tools.append(d)
@@ -439,6 +460,15 @@ class MysticForgeProxy:
         problem = argument_problem(name, arguments)
         if problem:
             return _refusal(f"{name} refused: {problem}; nothing was sent to the research service")
+        if owner is not None and self.deck_reader is not None and not internal:
+            for key in DECK_ARGUMENTS:
+                ref = arguments.get(key) if isinstance(arguments, dict) else None
+                if names_deck(ref):
+                    try:
+                        text = await self.deck_reader(owner, str(ref).strip())
+                    except DeckError as exc:
+                        return _refusal(str(exc))
+                    arguments = {**arguments, key: text}  # read here: nothing for the budget below
         if owner is not None and self.archidekt_budget is not None and reads_archidekt(name, arguments):
             refused = self.archidekt_budget(owner)
             if refused:

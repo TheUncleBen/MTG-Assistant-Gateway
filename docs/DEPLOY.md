@@ -360,7 +360,7 @@ address and shared CI runners hit that limit. As a fallback for anything a
 build still fetches from Docker Hub, the image jobs sign in to Docker Hub when
 the repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (a
 read-only access token) exist; without them the step is skipped. The
-Mystic Forge image is built once per tag (`1.3.2-mag2`) and not rebuilt by
+Mystic Forge image is built once per tag (`1.3.2-mag3`) and not rebuilt by
 later releases; a manual run of its workflow from `main` rebuilds it with
 current base patches. GitHub
 Actions are pinned by commit, Python dependencies by version
@@ -512,9 +512,9 @@ licence, from upstream). It's built from upstream commit
 rules, precon and goldfish tools, and the gateway relays an allowlisted set
 of them to signed-in users.
 
-Upstream code is unchanged apart from three small patches in
-`docker/mystic-forge/patches/`, which is where the `-mag2` in the image tag
-`1.3.2-mag2` comes from:
+Upstream code is unchanged apart from four small patches in
+`docker/mystic-forge/patches/`, which is where the `-mag3` in the image tag
+`1.3.2-mag3` comes from:
 
 - `0001-archidekt-null-categories.patch`: Archidekt sends
   `"categories": null` for cards that never got a category (it happens in
@@ -533,6 +533,14 @@ Upstream code is unchanged apart from three small patches in
 - `0003-edhrec-current-page-shape.patch`: EDHREC changed its average-deck
   data, so `edhrec_average_deck` came back empty and `edhrec_commander`
   showed "? decks". The patch reads the new shape.
+- `0004-research-output-live-shapes.patch`: fixes found in the 2026-10-11
+  live run. EDHREC's precon, salt and top-card pages changed too
+  (`edhrec_precon_upgrade` showed "?%", `edhrec_salt` no scores,
+  `edhrec_top_cards` no section headings); recommendations no longer suggest
+  cutting cards that were not given; double-faced cards given by their full
+  name are found by the goldfish tools; precon lists add up split basic land
+  lines; and the simulation's honesty report no longer files played lands
+  and mana rocks as low-impact.
 
 What to know about it:
 
@@ -563,7 +571,7 @@ What to know about it:
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `MF_IMAGE` | `ghcr.io/theuncleben/mtg-assistant-mysticforge` | Image. A fork that builds its own images sets `ghcr.io/<owner>/mtg-assistant-mysticforge` |
-| `MF_TAG` | `1.3.2-mag2` | Image tag |
+| `MF_TAG` | `1.3.2-mag3` | Image tag |
 | `MF_PUBLIC_BASE` | `http://mtg-assistant-mysticforge:8000` | Base URL Mystic Forge uses in links (its own default points at the upstream author's site, so keep this) |
 | `MF_NODE` | none, required | Hostname of the node it runs on. The stack won't start without it |
 | `MF_MEMORY_LIMIT` | `512M` | Memory cap |

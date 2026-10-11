@@ -103,5 +103,4 @@ def test_the_commander_is_taken_out_of_the_unrecognized_list() -> None:
 def test_goldfish_report_is_never_named_in_a_result() -> None:
     # goldfish_report is a hidden Mystic Forge tool; its text used to send the assistant to it.
     out = rewrite_text('Full report: goldfish_report("wjyxinfngo4dg")\nValidation')
-    assert "goldfish_report" not in out and out.startswith("This is the full report")
-    assert out.endswith("(get_deck_report).\nValidation")
+    assert "goldfish_report" not in out and out == "This is the full report.\nValidation"

@@ -24,7 +24,7 @@ from .db import Database, _like
 from .decklist import DecklistError, front_faces, parse_decklist, to_text
 from .decks import DeckError, DeckService, _clean_deck_id, current_client, deck_to_text
 from .forge import FINAL_STATES, ForgeClient, ForgeError, refresh, start_run
-from .mf_proxy import MysticForgeProxy, is_busy
+from .mf_proxy import FULL_REPORT, MysticForgeProxy, is_busy
 from .report_view import speed_numbers
 
 logger = logging.getLogger(__name__)
@@ -240,6 +240,7 @@ class ReportService:
             elif simulate:
                 goldfish = await self._mf(sub, "goldfish_run", {"deck": text, "n": games, **options})
                 _commander_aside(goldfish, commander)
+                _stored_note(goldfish)
         rid = "rep_" + secrets.token_urlsafe(9)
         with self.db.tx() as c:
             # Stored only while the member exists: a report still running when they deleted
@@ -649,6 +650,18 @@ def _succeeded(row: dict[str, Any]) -> bool:
 RUN_OPTIONS = ("annotations", "combos", "seed", "until_turn", "opponents", "mulligan")
 AB_OPTIONS = ("annotations", "annotations_a", "annotations_b", "combos", "seed", "until_turn")
 AB_FLAGS = ("allow_different_commanders",)
+
+
+STORED_NOTE = "The stored copy is under History (get_deck_report)."
+
+
+def _stored_note(goldfish: dict[str, Any]) -> None:
+    """Point the simulation text of a report the gateway stores at its stored copy. Only a stored
+    report says so: a pasted list's run (run_text) is returned and kept nowhere."""
+    for holder, key in ((goldfish, "text"), (goldfish.get("data") or {}, "result")):
+        value = holder.get(key)
+        if isinstance(value, str) and FULL_REPORT in value and STORED_NOTE not in value:
+            holder[key] = value.replace(FULL_REPORT, f"{FULL_REPORT} {STORED_NOTE}", 1)
 
 
 def _front_face(name: str | None) -> str | None:

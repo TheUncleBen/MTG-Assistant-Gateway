@@ -51,7 +51,15 @@ from .archidekt import (
 from .archidekt_csv import CsvError, parse_export
 from .config import Settings
 from .db import Database
-from .decklist import DecklistError, ListCard, clean_category, clean_text, parse_decklist, to_text
+from .decklist import (
+    DecklistError,
+    ListCard,
+    clean_category,
+    clean_text,
+    front_faces,
+    parse_decklist,
+    to_text,
+)
 from .timing import add_time, archidekt_time
 
 logger = logging.getLogger(__name__)
@@ -1933,6 +1941,41 @@ class DeckService:
                 return await self.client.get_deck(None, deck_id)
             except ArchidektError as exc:
                 raise DeckError(exc.kind, str(exc)) from exc
+
+    async def research_deck_text(self, sub: str, deck_ref: str) -> str:
+        """The decklist text a research tool (goldfish_annotate) is given in place of a deck id or
+        link: read as the member sees the deck (get_any_deck), so their own private decks work,
+        where Mystic Forge reads Archidekt anonymously. Commander first, as the simulators expect;
+        double-faced cards by their front face, the one name Scryfall's collection lookup finds.
+        Archidekt answers "not found" both for a deck that does not exist and for someone else's
+        private deck, so the refusal says which of those is possible for this member."""
+        try:
+            deck = await self.get_any_deck(sub, deck_ref)
+        except DeckError as exc:
+            if exc.kind != "not_found":
+                raise
+            deck_id = _clean_deck_id(deck_ref)
+            link = self.db.get_link(sub)
+            if link:
+                raise DeckError(
+                    "not_found",
+                    f"Archidekt shows no deck {deck_id} to your linked account "
+                    f"({link['archidekt_username']}) or to the public: the id is wrong, or the deck is "
+                    "someone else's private deck, which only its owner can read.",
+                ) from exc
+            raise DeckError(
+                "not_found",
+                f"Archidekt has no public deck {deck_id}: the id is wrong, or the deck is private. If it "
+                f"is your own private deck, link your Archidekt account at {self.settings.public_url}"
+                "/account and try again.",
+            ) from exc
+        if not any(deck.is_commander(c) for c in deck.cards):
+            raise DeckError(
+                "invalid",
+                f"Deck {deck.id} has no card in a Commander (premier) category, so its commander is not "
+                "known. Put the commander in that category, or paste the list with the commander first.",
+            )
+        return front_faces(deck_to_text(deck))
 
     async def search_decks(self, sub: str | None, **query: Any) -> dict[str, Any]:
         """Search Archidekt's public decks anonymously (see ArchidektClient.search_decks). Counts
