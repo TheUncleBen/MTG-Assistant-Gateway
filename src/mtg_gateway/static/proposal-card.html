@@ -227,7 +227,7 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
       case "category": return ["Category", r.name, arrow(r.before, r.after) + (r.leaves ? " (leaves the deck, −" + r.leaves + ")" : "")];
       case "finish": return ["Finish", r.name, arrow(r.before, r.after)];
       case "printing": return ["Printing", r.name, arrow(r.before, r.after)];
-      case "label": return ["Colour tag", r.name, arrow(r.before, r.after)];
+      case "label": return ["Color tag", r.name, arrow(r.before, r.after)];
       case "mana_value": return ["Mana value", r.name, arrow(r.before, r.after)];
       case "commander": return ["Commander", arrow(r.before, r.after), ""];
       case "clone": return ["Copy", "'" + r.source + "' (" + r.cards + " cards) as '" + r.name + "'", ""];
@@ -260,7 +260,7 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
   // Rows are shown grouped by what they do, in this order, so a big edit reads as a summary.
   var GROUPS = [
     ["add", "Added"], ["remove", "Removed"], ["change", "Quantity changed"], ["category", "Moved"],
-    ["finish", "Finish"], ["printing", "Printing"], ["label", "Colour tag"], ["mana_value", "Mana value"],
+    ["finish", "Finish"], ["printing", "Printing"], ["label", "Color tag"], ["mana_value", "Mana value"],
     ["commander", "Commander"]
   ];
   function groupOf(kind) {

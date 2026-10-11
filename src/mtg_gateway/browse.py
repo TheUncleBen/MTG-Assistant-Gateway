@@ -77,7 +77,7 @@ BROWSE_CSS = """
 .searchbar .foot{grid-column:1 / -1;display:flex;flex-wrap:wrap;align-items:center;
   justify-content:space-between;gap:.75rem 1.5rem;margin-top:.15rem;padding-top:.9rem;
   border-top:1px solid var(--border-soft)}
-.searchbar .foot .field{flex:1 1 20rem;min-width:0}
+.searchbar .foot .field{flex:1 1 min(100%,20rem);min-width:0}
 .searchbar .colours{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .5rem}
 .searchbar .colours label{display:inline-flex;align-items:center;gap:.35rem;margin:0;cursor:pointer;
   font-weight:400;height:34px;padding:0 .75rem 0 .5rem;border:1px solid var(--border);border-radius:17px;
@@ -87,7 +87,8 @@ BROWSE_CSS = """
 .searchbar .colours label:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:2px}
 .searchbar .colours input{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;
   overflow:hidden;clip:rect(0,0,0,0);opacity:0}
-.searchbar .form-actions{margin:0;flex:0 0 auto;justify-content:flex-end;gap:.5rem}
+.searchbar .form-actions{margin:0;flex:0 0 auto;max-width:100%;flex-wrap:wrap;justify-content:flex-end;
+  gap:.5rem}
 .searchbar .form-actions .btn,.searchbar .form-actions button{margin:0;height:var(--ctl)}
 .searchbar .form-actions .btn-primary{min-width:11rem}
 .searchbar .form-actions .cards{gap:.4rem}
@@ -95,7 +96,7 @@ BROWSE_CSS = """
   grid-template-columns:minmax(0,2fr) minmax(0,2fr) minmax(0,1.5fr) minmax(10rem,1fr) minmax(10rem,1fr)} }
 @media (max-width:600px){ .searchbar .foot{flex-direction:column;align-items:stretch}
   .searchbar .foot .field{flex:0 0 auto}
-  .searchbar .form-actions{display:grid;grid-template-columns:1fr 1fr}
+  .searchbar .form-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,9rem),1fr))}
   .searchbar .form-actions .btn-primary{grid-column:1 / -1;min-width:0} }
 .results-head{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap;
   margin:0 0 .75rem}
@@ -137,7 +138,7 @@ BROWSE_CSS = """
 .preconset .decklist{margin-bottom:0}
 .listbar .controls{display:flex;flex-wrap:wrap;gap:1rem;align-items:end}
 .listbar .controls .field{margin:0}
-.listbar .controls .grow{flex:1 1 16rem}
+.listbar .controls .grow{flex:1 1 min(100%,16rem);min-width:0}
 """
 
 

@@ -396,7 +396,7 @@ def row_line(r: dict[str, Any]) -> str:
     if kind == "finish":
         return f"{r['name']}: finish {r['before']} -> {r['after']}"
     if kind == "label":
-        return f"{r['name']}: colour tag {r['before']} -> {r['after']}{side}"
+        return f"{r['name']}: color tag {r['before']} -> {r['after']}{side}"
     if kind == "mana_value":
         return f"{r['name']}: custom mana value {r['before']} -> {r['after']}{side}"
     if kind == "printing":
@@ -680,7 +680,7 @@ def _parse_label_change(i: int, name: str, item: dict[str, Any]) -> Change:
     if not text:
         return Change("set_label", name, label="")
     if colour and not LABEL_COLOUR.fullmatch(colour):
-        raise DeckError("invalid", f"change {i}: color must be a colour like #37d67a")
+        raise DeckError("invalid", f"change {i}: color must be a color like #37d67a")
     return Change("set_label", name, label=f"{text},{(colour or DEFAULT_LABEL_COLOUR).lower()}")
 
 

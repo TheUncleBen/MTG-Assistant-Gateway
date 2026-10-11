@@ -686,7 +686,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "Any deck can be ingested with get_deck (Archidekt id or URL), parse_decklist (pasted text) or "
             "parse_deck_export (CSV); each returns decklist_text for "
             "the simulation tools. deck_stats answers "
-            "curve, colours, price, legality and bracket questions from one read; run_deck_report stores a "
+            "curve, colors, price, legality and bracket questions from one read; run_deck_report stores a "
             "test run the user can see later on the gateway's History page. "
             "If your app refuses, hides or blocks a tool (rather than the gateway returning an error), do "
             "not call it again in this conversation. For apply_proposal, give the user the proposal's "
@@ -857,7 +857,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
         title="Parse a pasted decklist",
         description=(
             'Parse plain decklist text ("1 Sol Ring", "1x Sol Ring (cmr) 436 [Ramp]", section headers, '
-            "SB: lines) into cards plus a normalised decklist_text. A commander is marked by a Commander "
+            "SB: lines) into cards plus a normalized decklist_text. A commander is marked by a Commander "
             "section header, a [Commander] category or a trailing *CMDR*; Archidekt's {noDeck} category "
             "flag (as in [Maybeboard{noDeck}{noPrice}]) puts the card in the sideboard. Quantities are "
             "whole numbers from 1 to 999. Repeated lines for a card are added "
@@ -972,7 +972,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "a pinned printing must exist on Archidekt and be that card, or applying refuses with "
             "not_found and changes nothing. "
             "To add a card in a particular printing or finish, put those on the add itself: set_finish "
-            "and set_printing change copies already in the deck. set_label puts Archidekt's colour tag "
+            "and set_printing change copies already in the deck. set_label puts Archidekt's color tag "
             "(label up to 40 characters, color #rrggbb) on every row of a card, in zone main or side; "
             "an empty label takes it off. set_mana_value sets Archidekt's custom mana value (mana_value "
             "0 to 20, null takes it off) on every row of a card in that zone. set_category and "

@@ -317,11 +317,13 @@ icon to set.
     if client == "chatgpt":
         return f"""## ChatGPT
 
-What OpenAI's pages say (not yet tested with this gateway):
+What OpenAI's pages say, and what was checked: on 2026-10-10 the owner
+connected ChatGPT on the web (Pro plan) to this gateway, and ChatGPT used
+every tool, deck proposals included. Other plans are as OpenAI's pages say.
 
 - **Works:** chatgpt.com in a computer's web browser, on Plus, Pro,
   Business, Enterprise or Edu, with Developer mode on. Write tools may be
-  blocked on Plus and Pro (reported).
+  blocked on Plus (reported); on Pro they worked in the owner's check.
 - **Does not work:** the Free plan (no Developer mode) and the ChatGPT
   iPhone and Android apps ("web only"). Use Claude there instead
   (`{public_url}/install?for=claude`).
@@ -650,8 +652,8 @@ def _section_html(client: str, public_url: str, site: str, mcp_url: str) -> str:
         return (
             "<div class='card'><h2>ChatGPT</h2>"
             "<p><strong>Works on:</strong> chatgpt.com in a computer's web browser, on Plus, Pro, Business, "
-            "Enterprise or Edu, with Developer mode on (OpenAI's pages; not yet tested with this "
-            "gateway).</p>"
+            "Enterprise or Edu, with Developer mode on (OpenAI's pages). Checked with this gateway "
+            "on the Pro plan on 2026-10-10: ChatGPT used every tool, deck proposals included.</p>"
             "<p><strong>Does not work on:</strong> the ChatGPT iPhone and Android apps, or the Free plan. "
             "Use <a href='/install?for=claude'>Claude</a> there instead, whose phone apps work.</p></div>"
             "<div class='card'><h2>Add the connector</h2><ol class='setup'>"

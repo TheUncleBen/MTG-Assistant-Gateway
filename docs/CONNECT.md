@@ -53,7 +53,7 @@ tested end to end with this gateway yet; the owner keeps those results.
 | Claude web (claude.ai) | Yes (verified) | Yes (verified) |
 | Claude desktop app | Yes (verified; Anthropic doesn't separate Windows and Mac) | Yes (verified) |
 | Claude iOS and Android | Beta, and not documented for custom connectors (unverified). Add it on the web or desktop instead | Yes, once added on the web or desktop (verified) |
-| ChatGPT web, Pro plan | Yes, in Developer mode (reported) | Read and fetch tools only (reported) |
+| ChatGPT web, Pro plan | Yes, in Developer mode (verified 2026-10-10) | Yes, every tool, deck proposals included (verified 2026-10-10) |
 | ChatGPT web, Plus plan | OpenAI's pages disagree (reported) | OpenAI's pages disagree (reported) |
 | ChatGPT desktop app | Unverified; OpenAI's pages only mention the web | Unverified |
 | ChatGPT iOS and Android apps | **No, OpenAI doesn't support it** (reported: "No - web only") | **No, OpenAI doesn't support it** (reported) |
@@ -63,13 +63,14 @@ In plain terms:
 
 - **Claude works on every device.** Add the connector once on claude.ai or
   in the desktop app and it works on your phone too.
-- **ChatGPT is web only, with tool limits on Pro and Plus.** OpenAI says
-  custom connectors are web only, so the ChatGPT phone apps can't use this
-  gateway. Its help center says Pro gets read and fetch tools only, and full
-  support (including tools that change things) is for Business, Enterprise
-  and Edu. OpenAI's developer guide says Plus and Pro get read and write
-  tools on the web. The help center is newer and narrower, and doesn't
-  mention Plus at all.
+- **ChatGPT is web only.** OpenAI says custom connectors are web only, so
+  the ChatGPT phone apps can't use this gateway. Its help center says Pro
+  gets read and fetch tools only, and full support (including tools that
+  change things) is for Business, Enterprise and Edu. OpenAI's developer
+  guide says Plus and Pro get read and write tools on the web. On
+  2026-10-10 the owner checked ChatGPT on the web with a Pro plan against
+  this gateway: it used every tool, creating proposals included (verified).
+  Plus is still untested.
 - **What that means for deck changes in ChatGPT.** The gateway marks every
   tool as read-only except six: `apply_proposal`, `confirm_proposal`,
   `reject_proposal`, `run_deck_report`, `save_scan_session` and
@@ -77,9 +78,10 @@ In plain terms:
   Making a proposal only records it, so even if ChatGPT limits you to
   read-only tools you should still be able to propose changes and then press
   Approve on the card ChatGPT shows with the proposal, or Apply on the
-  gateway's review page in your browser. Whether ChatGPT's "read/fetch"
-  limit actually follows those markings, and whether it shows the card for
-  a connector added in developer mode, hasn't been tested yet.
+  gateway's review page in your browser. On Pro no such limit showed in the
+  owner's check. Whether a plan with the "read/fetch" limit follows those
+  markings, and whether ChatGPT shows the card for a connector added in
+  developer mode, hasn't been tested yet.
 - **On ChatGPT Plus and Android? Use Claude for deck edits.** Claude's free
   plan allows one custom connector (verified), and it works in Claude's
   Android app once added on the web. ChatGPT might still work for you in a
@@ -230,10 +232,16 @@ session; Claude Code shows the text instead and asks about unsure names with
 a form.
 
 **Your approval mode.** On the gateway's Account page you choose how much
-your assistant may do without asking: *Ask me every time* (the default),
-*Apply small, low-risk edits without asking* (a few cards added, removed,
-moved or changed, never the commander, a new deck, a restore or the deck's
-details) or *Apply every change without asking*. It is your own setting:
+your assistant may do without asking: *Manual* (every change waits for
+your press; the default), *Semi-auto* (it applies a small deck or
+collection edit itself: up to the row limit, 5 card rows by default,
+added, removed, moved or changed, no more than 4 copies a row, never the
+commander; it also makes a private copy of a deck; a new deck, a restore,
+the deck's details and bigger edits still ask you) or *Full auto* (it applies the deck
+and collection changes it proposes). In every mode, actions on your
+Archidekt account (likes, votes, bookmarks, follows, comments, new
+folders, collaborators) and deleting a deck are never applied by the
+assistant: they wait for your press on the review page. It is your own setting:
 it covers only your account, your decks and the apps you connected, and
 only you can change it, in your browser. In either auto mode the assistant
 applies what the mode allows with `apply_proposal` and tells you; the card
@@ -254,8 +262,8 @@ records proposals.
 ## ChatGPT
 
 Read [Which apps and devices work](#which-apps-and-devices-work) first.
-ChatGPT supports this gateway on the **web only**, and on Pro (and maybe
-Plus) only for read and fetch tools.
+ChatGPT supports this gateway on the **web only**. On Pro every tool
+worked when the owner checked it on 2026-10-10 (verified); Plus is untested.
 
 ### Add the connector (ChatGPT on the web)
 

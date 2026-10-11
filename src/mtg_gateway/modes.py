@@ -134,7 +134,7 @@ def risk_of(
         return (
             "high",
             "contains a change that is not a card add, remove, quantity, category, finish, printing, "
-            "colour tag or custom mana value",
+            "color tag or custom mana value",
         )
     if len(rows) > max_rows:
         return "high", f"changes {len(rows)} rows, more than the {max_rows} a low-risk edit may have"

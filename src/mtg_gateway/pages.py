@@ -1033,7 +1033,7 @@ def _change_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, dic
             out.append(
                 _li(
                     "chg",
-                    "Colour tag" if kind == "label" else "Custom mana value",
+                    "Color tag" if kind == "label" else "Custom mana value",
                     name + html.escape(where),
                     _was_now(r.get("before", ""), r.get("after", "")),
                 )
