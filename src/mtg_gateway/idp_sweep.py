@@ -113,6 +113,64 @@ def plan(groups: dict[str, list[dict[str, Any]]], linked: list[str], known: list
     return Plan(remove=remove, allowed=len(allowed), linked=len(linked))
 
 
+# What to do about a round that deleted nothing, by a phrase in its SweepRefused text, first match
+# wins (the admin overview shows it after the error). docs/IDP-AUTHENTIK.md section 12 has the same.
+SETUP = "docs/IDP-AUTHENTIK.md section 12"
+NEXT_STEPS = (
+    (
+        "Authentik could not be reached",
+        "Check that the gateway can reach Authentik's address "
+        "(MTG_AUTHENTIK_API_URL, or the issuer's when that is empty). It tries again by itself.",
+    ),
+    (
+        "Authentik answered HTTP 401",
+        f"The token was refused: it expired or was deleted. Make a new "
+        f"token and Docker secret ({SETUP}, steps 5 to 7).",
+    ),
+    (
+        "Authentik answered HTTP 403",
+        f"The token was refused: it expired, was deleted, or its service "
+        f"account was deactivated. Make a new token and Docker secret ({SETUP}, steps 5 to 7).",
+    ),
+    (
+        "Authentik answered HTTP",
+        "Authentik had a problem or sent the request elsewhere. It tries again "
+        "by itself; if this stays, check MTG_AUTHENTIK_API_URL.",
+    ),
+    (
+        " found ",
+        f"Check that MTG_REQUIRED_GROUP and MTG_ADMIN_GROUP match the Authentik group names "
+        f"exactly, and that the role has Can view Group on each of them ({SETUP}, step 4).",
+    ),
+    (
+        "Authentik says nobody is in the groups",
+        f"Check that the groups have members and that the role "
+        f"has Can view Group on each of them ({SETUP}, step 4).",
+    ),
+    (
+        "nobody the gateway knows",
+        "In Authentik, set the gateway provider's Subject mode to Based on "
+        "the User's hashed ID, and check the group names.",
+    ),
+    (
+        "it would delete",
+        "If you removed those people on purpose, press Disable for each of them on the "
+        "Users page; otherwise check the provider's Subject mode and the group names.",
+    ),
+)
+NEXT_STEP_OTHER = "Check that MTG_AUTHENTIK_API_URL points at Authentik itself, then see the gateway's log."
+
+
+def next_step(error: str) -> str:
+    """The fix to show next to a failed round's error text."""
+    for phrase, step in NEXT_STEPS:
+        if phrase in error:
+            return step
+    if error == "unexpected error":
+        return "See the gateway's log for the error. It tries again by itself."
+    return NEXT_STEP_OTHER
+
+
 class AuthentikSweep:
     def __init__(self, settings: Any, db: Any, decks: Any, http: httpx.AsyncClient | None = None):
         self.settings = settings
@@ -143,13 +201,20 @@ class AuthentikSweep:
 
     def status(self) -> dict[str, Any]:
         """The sweep's state for the admin page: ``state`` is off, waiting (no round yet), ok or
-        failed. Only counts, times and SweepRefused's safe-to-log text: never the token."""
+        failed; when off, ``cause`` is no-token, token-unreadable or no-group. Only counts, times
+        and SweepRefused's safe-to-log text: never the token."""
         if not self.enabled:
             reason = self.why_off() or (
                 "removed-member clean-up is off: no Authentik API token (MTG_AUTHENTIK_API_TOKEN_FILE); "
                 "it is optional (docs/IDP-AUTHENTIK.md)"
             )
-            return {"state": "off", "reason": reason}
+            if self.settings.authentik_api_token_problem:
+                cause = "token-unreadable"
+            elif self._token and not self.settings.required_group:
+                cause = "no-group"
+            else:
+                cause = "no-token"
+            return {"state": "off", "cause": cause, "reason": reason}
         if self.last["ok"] is None:
             return {"state": "waiting", "first_after_seconds": int(FIRST_DELAY)}
         if self.last["ok"]:

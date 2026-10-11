@@ -147,6 +147,23 @@ If sign-in gets stuck on that page, remove the connector, add it again with
 Claude can't change a connector's sign-in settings after it's added
 (verified). To switch options, remove the connector and add it again.
 
+### The connector's icon in Claude
+
+Claude shows a generic tile for this connector (a globe, a letter, or the
+favicon of the gateway's parent domain), not the gateway's own icon. Nothing
+on the gateway can change that today. The gateway does send its icons the
+way the MCP standard describes (`serverInfo.icons`), but developers report
+that claude.ai doesn't read them for custom connectors yet
+([anthropics/claude-ai-mcp issue #152](https://github.com/anthropics/claude-ai-mcp/issues/152),
+open with no reply from Anthropic; this is a report, not Anthropic's
+documentation). The same reports say Claude takes the favicon that Google
+has for the last two parts of the connector's host name, the parent domain
+(`example.com` for `mtg.example.com`), and shows a letter or placeholder
+when there is none. A self-hoster who wants the MTG icon there would have
+to make it the favicon of that parent domain's own website. That changes
+the favicon of that whole site too, and the same reports say it is
+unreliable, so we don't recommend it; it is the owner's call.
+
 On a **Team or Enterprise** plan, only an organization owner can add custom
 connectors (Organization settings → Connectors). Once they've added it, you
 connect and sign in from Customize → Connectors.
@@ -243,25 +260,41 @@ Plus) only for read and fetch tools.
 ### Add the connector (ChatGPT on the web)
 
 The menu path comes from OpenAI's developer guide (reported); the field
-names are **unverified**.
+names are **unverified**. The gateway's own page,
+`https://mtg.example.com/install?for=chatgpt`, has the same steps with Copy
+buttons for the name, description and URL, and the icon to download.
 
-1. Open **Settings → Security and login** (reported, OpenAI developer docs
+1. On a computer, open chatgpt.com and sign in.
+2. Download the connector icon:
+   `https://mtg.example.com/static/gateway-icon-connector.png`. It's a PNG
+   under 10 KB; ChatGPT's form refuses a larger one (seen in the form,
+   2026-10-11). It needs no sign-in, so it downloads on a phone too.
+3. Open **Settings → Security and login** (reported, OpenAI developer docs
    seen 2026-10-05) and turn on **Developer mode**. Not there? Look under
    Apps, then Advanced settings. If it's missing everywhere, your plan may
    not offer it (see the table above).
-2. Open **Plugins** in the sidebar and press **+** (reported, OpenAI
+4. Open **Plugins** in the sidebar and press **+** (reported, OpenAI
    developer docs seen 2026-10-05; older pages call this Apps, then Create).
-3. Name: `MTG Assistant Gateway`. MCP server URL: the connector URL above, exactly as
-   shown. Authentication: **OAuth**. Leave any client ID and secret fields
-   empty. OpenAI says ChatGPT uses a published client identity (a "client
-   ID metadata document") when the server supports one, and otherwise
+5. Name: the gateway's name as the owner set it (`MTG Assistant Gateway`
+   unless they changed it; the install page shows the right one).
+6. Description: `Magic: The Gathering deck research, goldfish testing and
+   safe Archidekt deck edits, from a self-hosted gateway.` This is the
+   description the gateway also gives apps itself.
+7. MCP server URL: the connector URL above, exactly as shown.
+8. Icon: the file from step 2. Set it now: ChatGPT reportedly lets you set
+   the icon only while creating the connector (a user report on GitHub,
+   not OpenAI's documentation).
+9. Authentication: **OAuth**. Leave any client ID and secret fields empty.
+   OpenAI says ChatGPT uses a published client identity (a "client ID
+   metadata document") when the server supports one, and otherwise
    registers itself (reported). The gateway supports both, so either works.
-   Accept the risk notice and create it.
-4. Click **Connect** and sign in with your sign-in account when the browser
-   opens. The gateway first shows a **Connect an application** page: check that "After sign-in you go to" says `chatgpt.com`, then
-   approve. If sign-in fails saying the client isn't allowed, tell the
-   owner: their gateway might be limited to Claude's published identity
-   (`MTG_CIMD_ALLOWED_HOSTS`).
+10. Accept the risk notice and create it.
+11. Click **Connect**. The gateway first shows a **Connect an application**
+    page: check that "After sign-in you go to" says `chatgpt.com`, then
+    approve. If sign-in fails saying the client isn't allowed, tell the
+    owner: their gateway might be limited to Claude's published identity
+    (`MTG_CIMD_ALLOWED_HOSTS`).
+12. Sign in with your sign-in account when the browser opens.
 
 ### Use it in a chat
 
