@@ -144,6 +144,22 @@ async def test_a_repeat_search_is_a_cache_hit_with_no_upstream_call() -> None:
     assert _reads(ark, "/api/decks/v3/") == 2
 
 
+async def test_a_fresh_deck_read_skips_the_shared_cache_and_refreshes_it() -> None:
+    """Bug 11: the deck page's Reload asks Archidekt again for a deck read without the member's
+    own link, instead of being served the shared cache's copy for up to a minute."""
+    ark = FakeArchidekt()
+    client = _client(ark, cache_seconds=60)
+    await client.get_deck(None, "42")
+    await client.get_deck(None, "42")
+    assert _reads(ark, "/api/decks/42/") == 1
+    ark.decks[42]["name"] = "Renamed on Archidekt"
+    assert (await client.get_deck(None, "42", fresh=True)).name == "Renamed on Archidekt"
+    assert _reads(ark, "/api/decks/42/") == 2
+    # the fresh answer is what the cache serves from then on
+    assert (await client.get_deck(None, "42")).name == "Renamed on Archidekt"
+    assert _reads(ark, "/api/decks/42/") == 2
+
+
 async def test_cached_values_are_copies() -> None:
     ark = FakeArchidekt()
     client = _client(ark, cache_seconds=60)

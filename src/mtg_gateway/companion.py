@@ -191,7 +191,8 @@ def stats_strip(stats: dict[str, Any] | None) -> str:
             + _pips(stats.get("colour_pips") or {}, stats.get("mana_sources"))
             + "</div></div>"
         )
-    problems = stats.get("legality_problems") or []
+    # the deck page's verdict (deck_checks), also for a report stored before the engines merged
+    problems = deck_stats.legality_problems_of(stats)
     if problems:
         out.append(
             "<p class='notice warn'>Not legal in this format: "

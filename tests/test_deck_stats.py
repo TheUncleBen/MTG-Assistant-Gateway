@@ -267,7 +267,9 @@ def test_compute_curve_price_and_legality() -> None:
     assert s["rarity_counts"] == {"rare": 2, "mythic": 1}
     assert s["price_total"] == 13.5 and s["priced_cards"] == 2
     assert s["legality_problems"] == [{"name": "Banned", "status": "banned"}]
-    assert s["legality_unknown"] == 3  # Big, Mid and Unknown carry no commander entry
+    # Big, Mid (two copies) and Unknown carry no commander entry: counted in copies, as
+    # deck_checks (the one legality engine) and the deck page count them
+    assert s["legality_unknown"] == 4 == s["checks"]["legality"]["unknown"]
 
 
 def test_compute_skips_legality_when_format_unknown() -> None:
@@ -926,3 +928,154 @@ def test_legality_chip_and_panel_list_every_failing_rule() -> None:
     assert "Not legal in Commander:" in panel
     for p in problems:
         assert f"<li>{p}</li>" in panel.replace("&#x27;", "'"), p
+
+
+# -- 0.7.24 consolidation: one legality engine, custom mana value, one type helper ------------------
+_SIDE = [{"name": "Sideboard", "isPremier": False, "includedInDeck": False}]
+
+
+def test_legality_problems_come_from_deck_checks() -> None:
+    """Bug 8: deck_stats' legality_problems (the report strip, the edit API, the deck_stats tool)
+    flagged a single restricted card and ignored the sideboard; it is now deck_checks' verdict."""
+    from mtg_gateway.deck_stats import card_legality_problems
+
+    lands = card("Island", 59, types=["Land"], supertypes=["Basic"], legalities={"vintage": "legal"})
+    one = deck(
+        [
+            card("Black Lotus", 1, legalities={"vintage": "restricted"}),
+            lands,
+            card("Mental Misstep", 1, categories=["Sideboard"], legalities={"vintage": "banned"}),
+        ],
+        format_id=5,
+        categories=_SIDE,
+    )
+    s = compute(one)
+    # one restricted copy is legal; the banned card in the sideboard is counted, as on Archidekt
+    assert s["legality_problems"] == [{"name": "Mental Misstep", "status": "banned"}]
+    assert s["legality_problems"] == card_legality_problems(s["checks"])
+    two = deck([card("Black Lotus", 2, legalities={"vintage": "restricted"}), lands], format_id=5)
+    assert compute(two)["legality_problems"] == [{"name": "Black Lotus", "status": "restricted"}]
+    # Archidekt's free format is not checked at all
+    free = compute(deck([card("x", legalities={"custom": "banned"})], format_id=7))
+    assert free["legality_problems"] == [] and free["legality_unknown"] == 0
+
+
+def test_stored_statistics_are_read_with_the_deck_checks_verdict() -> None:
+    """A report stored before the merge kept the old list; the stats strip reads its checks."""
+    from mtg_gateway.companion import stats_strip
+    from mtg_gateway.deck_stats import legality_problems_of
+
+    old = {
+        "legality_problems": [{"name": "Black Lotus", "status": "restricted"}],
+        "checks": {"legality": {"banned": [], "not_legal": [], "restricted_violations": [], "unknown": 0}},
+    }
+    assert legality_problems_of(old) == []
+    assert "Not legal" not in stats_strip({**old, "card_count": 60})
+    older = {"legality_problems": [{"name": "Mana Crypt", "status": "banned"}]}  # no checks stored
+    assert legality_problems_of(older) == older["legality_problems"]
+    assert "Not legal in this format: Mana Crypt" in stats_strip({**older, "card_count": 100})
+
+
+def test_a_pasted_list_is_held_to_deck_checks_rules_in_its_words() -> None:
+    from mtg_gateway.deck_stats import compute_from_text, size_problem, validation_gateway_checks
+
+    lst = [
+        ListCard(1, "Aesi", categories=["Commander"]),
+        ListCard(7, "Seven Dwarves"),
+        ListCard(2, "Sol Ring"),
+    ]
+    lst += [ListCard(80, "Island")]
+    checks = compute_from_text(lst)["checks"]
+    assert checks["singleton_violations"] == [{"name": "Sol Ring", "quantity": 2}]  # the dwarves may
+    assert size_problem("commander", 90) in checks["problems"]
+    assert "deck has 90 cards; commander wants 100" in checks["problems"]
+    three = [ListCard(1, n, categories=["Commander"]) for n in ("A", "B", "C")] + [ListCard(97, "Island")]
+    assert (
+        "3 cards in the Commander category (expected 1 or 2)"
+        in compute_from_text(three)["checks"]["problems"]
+    )
+    dupes, _text = validation_gateway_checks("1 Sol Ring\n1 Sol Ring\n9 Nazgûl\n10 Nazgûl\n30 Forest")
+    assert dupes == [{"name": "Sol Ring", "quantity": 2}, {"name": "Nazgûl", "quantity": 19}]
+
+
+def test_custom_mana_value_drives_curve_average_and_split_curves() -> None:
+    """Bug 9: Archidekt's custom mana value (customCmc) was saved but ignored by every figure."""
+    from mtg_gateway.deck_stats import curve_bucket, mana_value
+
+    big = card("Big", 1, cmc=9.0, custom_cmc=2.0, types=["Creature"])
+    zero = card("Zero", 1, cmc=3.0, custom_cmc=0.0, types=["Instant"])  # 0 is a real override
+    plain = card("Plain", 1, cmc=4.0, types=["Sorcery"])
+    assert mana_value(big) == 2.0 and mana_value(zero) == 0.0 and mana_value(plain) == 4.0
+    assert curve_bucket(big) == "2" and curve_bucket(zero) == "0"
+    s = compute(deck([big, zero, plain]))
+    assert s["mana_curve"]["2"] == 1 and s["mana_curve"]["7+"] == 0 and s["mana_curve"]["0"] == 1
+    assert s["average_mana_value"] == 2.0
+    assert s["mana_curve_by_type"]["2"] == {"Creature": 1}
+    # the format rules keep the printed value (a companion's condition, Maular's exemption...)
+    assert big.cmc == 9.0
+
+
+def test_custom_mana_value_on_the_deck_page() -> None:
+    from mtg_gateway.deckpage import _odds_groups, card_row, group_cards, sort_cards
+
+    big = card("Big", 1, cmc=9.0, custom_cmc=2.0, types=["Creature"])
+    two = card("Two", 1, cmc=2.0, types=["Creature"])
+    one = card("One", 1, cmc=1.0, types=["Instant"])
+    d = deck([big, two, one])
+    groups = dict(group_cards(d, "mv", "name"))
+    assert [c.name for c in groups["2 mana value"]] == ["Big", "Two"] and "9 mana value" not in groups
+    assert [c.name for c in sort_cards([big, two, one], "mv")] == ["One", "Big", "Two"]
+    assert _odds_groups(d.cards)["Mana value"] == {"2": 2, "1": 1}
+    row = card_row(big, deck=d, view="table")
+    assert "<span class='mv' title='Custom mana value; printed 9'>2</span>" in row
+    assert "<span class='mv'>2</span>" in card_row(two, deck=d, view="table")
+
+
+def test_one_type_order_and_auto_category() -> None:
+    """D2: the deck page, the stats and get_deck's shown_under share one helper."""
+    from mtg_gateway import deckpage, views
+    from mtg_gateway.deck_stats import PRIMARY_TYPES, auto_category, primary_category, primary_type
+
+    assert views.auto_category is auto_category and deckpage.TYPE_ORDER == list(PRIMARY_TYPES)
+    assert primary_type(card("a", types=["Artifact", "Creature"])) == "Creature"
+    assert primary_type(card("k", types=["Kindred Instant"])) == "Instant"  # a word, as views had it
+    assert primary_type(card("l", types=["land"])) == "Land"  # any case, as deck_stats had it
+    assert primary_type(card("s", types=["Scheme"])) == "Other"
+    assert auto_category(card("d", default_category="Ramp", types=["Sorcery"])) == "Ramp"
+    assert primary_category(card("c", categories=["Draw", "Ramp"])) == "Draw"
+    odd = card("Odd", types=["Conspiracy"])
+    d = deck([odd, card("Bear", types=["Creature"])])
+    assert [n for n, _ in deckpage.group_cards(d, "type", "name")] == ["Creature", "Other"]
+    assert views.card_out(d, odd)["shown_under"] == "Other"
+
+
+def test_list_rows_come_from_one_builder() -> None:
+    """D2: Text, Table and Brewer rows are one builder; the markup each view had is kept."""
+    from mtg_gateway.deckpage import TABLE_HEAD, card_row, cards_html
+
+    c = card("Opt", 2, cmc=1.0, mana_cost="{U}", types=["Instant"], set_code="xln",
+             collector_number="65", price=0.25, oracle_text="Scry 1.\nDraw a card.")  # fmt: skip
+    d = deck([c])
+    text = card_row(c, deck=d, view="text")
+    assert text.startswith("<li class='row' tabindex='0' role='button' data-name='opt' data-card='Opt'")
+    assert "<span class='q'>2</span><span class='n'><span class='name' title='Opt'>Opt</span></span>" in text
+    assert "<span class='set' title='XLN 65'>XLN</span><span class='price'>$0.25</span></li>" in text
+    table = card_row(c, deck=d, view="table")
+    assert (
+        "<span class='ty' title='Instant'>Instant</span><span class='mv'>1</span><span class='mc'>" in table
+    )
+    brew = card_row(c, deck=d, view="brewer")
+    assert (
+        brew.startswith("<li class='row brew' ") and "<span class='tx'>Scry 1.\nDraw a card.</span>" in brew
+    )
+    page = cards_html(d, view="table", group="none", sort="name", q="", own=False)
+    assert TABLE_HEAD + table in page
+
+
+def test_the_simulation_button_says_simulated_games() -> None:
+    """D3: the manual page keeps the name Goldfish; the simulation's tooltip says simulated games."""
+    from mtg_gateway.deckpage import banner_html
+
+    html = banner_html(deck([card("Opt")]), {}, own=True, csrf="t", writes_enabled=True)
+    assert "300 simulated games" in html and "goldfish games" not in html
+    assert " Goldfish</a>" in html and "Playtest</a>" in html  # names kept

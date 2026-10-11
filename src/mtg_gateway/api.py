@@ -287,6 +287,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                         "finish": c.modifier or "Normal",
                         "label": c.label,
                         "mana_value": c.custom_cmc,
+                        "notes": c.notes or "",
                     }
                     for c in deck.cards
                     if front_face(c.name).casefold() in touched
@@ -294,7 +295,8 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                 "stats": {
                     # the banner's verdict: every format rule met, the deck size included
                     "legal": bool(deck.format) and not legal_problems(stats),
-                    "problems": stats.get("legality_problems") or [],
+                    # the cards deck_checks finds not legal (the one legality engine)
+                    "problems": deck_stats.card_legality_problems(checks),
                     "checks": checks,
                     "checks_ok": bool(checks.get("ok", True)),
                     "card_count": stats.get("card_count", 0),

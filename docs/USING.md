@@ -73,8 +73,18 @@ One deck:
   it on Scryfall, mark it as owned, or move it to another category. The same
   viewer opens from a thumbnail in the editor and in the collection.
 - On your own deck, **drag a card** onto another category: with a mouse, or
-  press and hold on a touch screen and slide. Press **Save moves** and the
-  moves go to Archidekt at once, with a snapshot taken first.
+  press and hold on a touch screen and slide. The move goes to Archidekt
+  when you let go, with a snapshot taken first, as a change from the card
+  menu or **Select cards** does.
+- **Undo** and **Redo** (beside **Select cards**, and **Undo** on the
+  message after each save) take back or redo any of those changes, each a
+  save of its own; the editor's keys work too: Ctrl+Z, and Ctrl+Shift+Z or
+  Ctrl+Y (Cmd on a Mac), except while you type in a field. A card's notes
+  cannot come back: Archidekt gives the gateway no way to write them, so
+  removing a card that has a note asks first.
+- Drag a stack's handle to put the stacks in your own order. That order is
+  kept in this browser on this device only (Archidekt has no stack order);
+  **Reset stack order** puts the deck's own order back.
 - **Quick add** types a card name and takes you to the editor with it
   filled in.
 - **Playtest** shows the deck in Archidekt's own playtester (draw an
