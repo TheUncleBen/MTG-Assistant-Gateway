@@ -28,11 +28,11 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 from .approve import CARD_TOOL_META, proposal_tool_result
 from .archidekt import COLLECTION_PAGE_SIZE, ArchidektError, _faces, _oracle_text, _pt
 from .busy import busy_response
-from .deckpage import DECK_CSS, image_url, mana_html
+from .deckpage import image_url, mana_html
 from .decks import DeckError, current_client
 from .pages import _csrf, _safe_next, browser_session, login_redirect, read_limited
 from .schemas import CollectionAdd, CollectionRemove, card_aliases, dumped
-from .theme import display_name, icon, remember_view, render, view_choice
+from .theme import display_name, icon, remember_view, render, stylesheet_link, view_choice
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -53,7 +53,7 @@ CONDITIONS = ("", "NM", "LP", "MP", "HP", "DMG")
 # ``editionDate`` was seen in the site's requests, the default is Archidekt's newest-first).
 SORTS = {"added": "Recently added", "edition": "Set release"}
 COLLECTION_CSP = (
-    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; "
+    "default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; "
     "manifest-src 'self'; connect-src 'self'; "
     "img-src 'self' https://cards.scryfall.io; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 )
@@ -905,7 +905,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             body_class="collection",
             current="/collection",
             scripts=scripts,
-            head_extra=f"<style>{DECK_CSS}{COLLECTION_CSS}</style>"
+            head_extra=f"{stylesheet_link('deck.css')}<style>{COLLECTION_CSS}</style>"
             + (
                 "<script src='/static/cardview.js' defer></script>"
                 "<script src='/static/deck.js' defer></script><script "

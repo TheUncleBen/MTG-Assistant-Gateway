@@ -24,10 +24,10 @@ from starlette.responses import Response
 
 from .archidekt import FORMAT_IDS, FORMAT_NAMES, SEARCH_ORDERS, format_label, list_row
 from .busy import busy_response
-from .deckpage import DECK_CSS, avatar_html, covers_for, deck_list_html
+from .deckpage import avatar_html, covers_for, deck_list_html
 from .decks import DeckError
 from .pages import _csrf, browser_session, login_redirect
-from .theme import display_name, icon, render
+from .theme import display_name, icon, render, stylesheet_link
 
 SearchOrder = Literal["-viewCount", "-updatedAt", "-createdAt", "-size", "edhBracket"]  # SEARCH_ORDERS
 
@@ -54,7 +54,7 @@ async def commander_names(state: Any, text: str) -> list[str]:
 
 
 SEARCH_CSP = (
-    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; "
+    "default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; "
     "manifest-src 'self'; connect-src 'self'; "
     "img-src 'self' https://cards.scryfall.io; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 )
@@ -281,7 +281,8 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             wide=True,
             current=current,
             scripts=True,
-            head_extra=f"<style>{DECK_CSS}{BROWSE_CSS}</style><script src='/static/deck.js' defer></script>",
+            head_extra=f"{stylesheet_link('deck.css')}<style>{BROWSE_CSS}</style>"
+            "<script src='/static/deck.js' defer></script>",
         )
         resp.headers["Content-Security-Policy"] = SEARCH_CSP
         return resp

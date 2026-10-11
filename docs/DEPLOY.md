@@ -757,7 +757,7 @@ gateway's `environment:` in the stack file, or it has no effect.
 | `MTG_ARCHIDEKT_MAX_PER_MINUTE` | no, *stack* | `40` | Archidekt requests in any 60 seconds, for everyone together; past it requests wait their turn (1 to 120) |
 | `MTG_ARCHIDEKT_RETRIES` | no, *stack* | `2` | Retries for a read that timed out or got a server error (0 to 4). Writes and "slow down" answers are never retried |
 | `MTG_ARCHIDEKT_BACKOFF_BASE` | no, *stack* | `1.0` | Seconds; a retry waits a random time up to this x 2, 4... (capped at 10) (0.1 to 10) |
-| `MTG_ARCHIDEKT_CACHE_SECONDS` | no, *stack* | `60` | How long anonymous public deck reads and deck searches are reused; cleared by any write the gateway sends (0 turns it off, up to 900) |
+| `MTG_ARCHIDEKT_CACHE_SECONDS` | no, *stack* | `60` | How long anonymous public deck reads and deck searches are reused; cleared by any write the gateway sends (0 turns it off, up to 900). A member's deck page is also shown again from memory for up to 20 seconds (or this, if shorter) |
 | `MTG_ARCHIDEKT_CARD_CACHE_SECONDS` | no, *stack* | `3600` | How long card lookups are reused (0 to 86400) |
 | `MTG_ARCHIDEKT_BACKUPS` | no, *stack* | `true` | Before every applied edit or restore, copy the deck as a private deck into the user's backup folder on Archidekt (using Archidekt's own copy feature, so printings, finishes and categories are kept). If the copy fails, nothing changes and the proposal stays pending |
 | `MTG_ARCHIDEKT_BACKUP_FOLDER` | no, *stack* | `MTG Gateway backups` | Name of that folder (at most 100 characters), created in the account's root folder the first time. Decks in it are left out of the assistant's deck list |

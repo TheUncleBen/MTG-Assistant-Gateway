@@ -310,7 +310,7 @@ async def test_every_page_loads_the_feedback_script_and_offline_worker(gw: Harne
         csp = page.headers["content-security-policy"]
         script_src = csp.split("script-src")[1].split(";")[0]
         assert script_src.strip() == "'self'"
-        assert "<script src='/static/feedback.js' defer></script>" in page.text
+        assert re.search(r"<script src='/static/feedback.js\?v=[0-9a-f]{12}' defer></script>", page.text)
         js = await b.http.get("/static/feedback.js")
         assert js.status_code == 200 and "aria-busy" in js.text and "/sw.js" in js.text
         sw = await b.http.get("/sw.js")

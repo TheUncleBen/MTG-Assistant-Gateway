@@ -21,6 +21,7 @@ import dataclasses
 import json
 import logging
 import math
+import pickle
 import re
 import secrets
 import time
@@ -157,6 +158,11 @@ DECK_LIST_STALE = 15 * 60.0
 # How long a page waits for a cold deck list before it renders with a placeholder the browser
 # fills from /api/decks/mine (the fetch carries on and lands in the cache either way).
 DECK_LIST_COLD_WAIT = 1.5
+# A deck page shows the deck as read for its last view for this long (DeckService.page_deck):
+# long enough for a run of view switches and a Back, short enough that a change made on
+# archidekt.com shows on the next view soon after. MTG_ARCHIDEKT_CACHE_SECONDS=0 turns it off.
+PAGE_DECK_SECONDS = 20.0
+PAGE_DECKS_MAX = 200  # reads kept at most, the oldest go first
 TOUCH_LINK_INTERVAL = 60.0  # the link's last_used_at is written at most this often per member
 # Archidekt work one member may start per ARCHIDEKT_BUDGET_WINDOW seconds (each deck read,
 # proposal, apply or proxied archidekt_* research call counts once), on top of the concurrency
@@ -1461,6 +1467,12 @@ class DeckService:
         # dropped by every write the gateway sends for that member.
         self.deck_lists = MemberCache(DECK_LIST_FRESH, DECK_LIST_STALE)
         self.deck_list_wait = DECK_LIST_COLD_WAIT
+        # (member, deck id) -> (when read, the deck): what a deck page showed, for the next view of
+        # it (page_deck). Every write the gateway sends empties it; the counter tells a read that
+        # was under way during a write not to keep what it got.
+        self._page_decks: dict[tuple[str, str], tuple[float, bytes]] = {}
+        self._page_decks_gen = 0
+        self.page_deck_seconds = min(PAGE_DECK_SECONDS, float(settings.archidekt_cache_seconds))
         # Other member caches (the collection's first page) hear about writes here: (sub, path).
         self.write_hooks: list[Callable[[str, str], None]] = []
         listeners = getattr(self.client, "write_listeners", None)  # a test double may lack it
@@ -1471,6 +1483,8 @@ class DeckService:
     def _on_archidekt_write(self, path: str) -> None:
         """A write is about to go to Archidekt with some member's session: whatever the gateway
         remembers for that member about what the write changes is stale from now on."""
+        # Deck pages of every member: a collaborator's change shows on the owner's next view too.
+        self._forget_page_decks()
         sub = _acting_sub.get()
         if not sub:
             return
@@ -1482,6 +1496,7 @@ class DeckService:
     def forget_member(self, sub: str) -> None:
         """Drop everything cached for a member (their link changed or their data was deleted)."""
         self.deck_lists.drop(sub)
+        self._forget_page_decks()
         for hook in self.write_hooks:
             hook(sub, "")
 
@@ -1948,6 +1963,31 @@ class DeckService:
                 return await self.client.get_deck(None, deck_id)
             except ArchidektError as exc:
                 raise DeckError(exc.kind, str(exc)) from exc
+
+    def _forget_page_decks(self) -> None:
+        self._page_decks.clear()
+        self._page_decks_gen += 1
+
+    async def page_deck(self, sub: str, deck_ref: str, *, fresh: bool = False) -> Deck:
+        """``get_any_deck`` for showing a deck page. Switching between the deck's views, or coming
+        back to it, within PAGE_DECK_SECONDS shows the deck as last read instead of asking Archidekt
+        again (each ask waits its turn in the pacer shared by every member). Any write the gateway
+        sends forgets every such read, and ``fresh`` (the browser's Reload) always asks, so a change
+        made on archidekt.com shows at once on a reload. Only for showing a deck: proposals and
+        applies read it themselves."""
+        ttl = self.page_deck_seconds
+        key = (sub, _clean_deck_id(deck_ref))
+        hit = self._page_decks.get(key)
+        if hit is not None and not fresh and time.monotonic() - hit[0] < ttl:
+            return pickle.loads(hit[1])  # a copy of its own: the page may change it
+        gen = self._page_decks_gen
+        deck = await self.get_any_deck(sub, deck_ref)
+        if ttl > 0 and gen == self._page_decks_gen:
+            if len(self._page_decks) >= PAGE_DECKS_MAX:
+                oldest = min(self._page_decks, key=lambda k: self._page_decks[k][0])
+                self._page_decks.pop(oldest, None)
+            self._page_decks[key] = (time.monotonic(), pickle.dumps(deck))
+        return deck
 
     async def research_deck_text(self, sub: str, deck_ref: str) -> str:
         """The decklist text a research tool (goldfish_annotate) is given in place of a deck id or
