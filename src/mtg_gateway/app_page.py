@@ -1,4 +1,4 @@
-"""The Android app download page.
+"""The Android app download (its page is the setup hub's Android section, setup_hub.py).
 
 Each gateway can hand out the MTG Assistant Gateway Android app itself, so people get it from the
 deployment they use and never need an app store. The image ships the APK that the
@@ -11,7 +11,9 @@ intact, and the page asks people to compare the certificate fingerprint with the
 published in the project's GitHub release before installing.
 
 Both routes need the browser sign-in, like every other page: the gateway is private,
-and the app is only useful to people with an account on it.
+and the app is only useful to people with an account on it. So does ``/app/latest.json``, the
+same facts as JSON: the app's own update check asks its gateway there (with the session the app
+already holds) instead of asking GitHub, and downloads the APK from ``/app/<APK_NAME>``.
 """
 
 from __future__ import annotations
@@ -23,11 +25,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from starlette.requests import Request
-from starlette.responses import FileResponse, RedirectResponse, Response
+from starlette.responses import FileResponse, JSONResponse, RedirectResponse, Response
 
-from .admin import is_admin
-from .pages import _csrf, _safe_next, browser_session
-from .theme import display_name, render
+from .pages import _safe_next, browser_session
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -41,6 +41,7 @@ PROJECT_URL = "https://github.com/TheUncleBen/MTG-Assistant-Gateway"
 RELEASES_URL = f"{PROJECT_URL}/releases"
 MAX_META_BYTES = 16 * 1024
 APK_MEDIA_TYPE = "application/vnd.android.package-archive"
+LATEST_PATH = "/app/latest.json"
 
 
 def app_dir() -> Path | None:
@@ -83,6 +84,28 @@ def _fingerprint(value: Any) -> str | None:
     return hexdigits
 
 
+def android_facts() -> dict[str, Any] | None:
+    """What the setup hub's Android section shows about the app this gateway ships: the build's
+    facts as a list (version, size, file and certificate SHA-256), and the certificate alone; None
+    when no APK is shipped."""
+    base = app_dir()
+    if base is None:
+        return None
+    meta = app_meta(base)
+    cert = _fingerprint(meta.get("cert_sha256"))
+    facts = "".join(
+        f"<li>{html.escape(label)}: <code>{html.escape(str(value))}</code></li>"
+        for label, value in (
+            ("Version", meta.get("version_name")),
+            ("Size", _mb(int(meta["size"]))),
+            ("File SHA-256 (download check)", _fingerprint(meta.get("sha256"))),
+            ("Signing certificate SHA-256", cert),
+        )
+        if value
+    )
+    return {"cert_sha256": cert, "facts_html": f"<ul>{facts}</ul>"}
+
+
 def add_app_routes(server: MCPServer, state: AppState) -> None:
     s = state.settings
 
@@ -94,102 +117,40 @@ def add_app_routes(server: MCPServer, state: AppState) -> None:
 
     @server.custom_route("/app", methods=["GET"], include_in_schema=False)
     async def app(request: Request) -> Response:
-        sub, sid = signed_in(request)
+        """The Android app's page is the setup hub's Android section (setup_hub.py)."""
+        sub, _sid = signed_in(request)
         if not sub:
             return to_login("/app")
+        return RedirectResponse("/install?for=android", status_code=302)
+
+    @server.custom_route(LATEST_PATH, methods=["GET"], include_in_schema=False)
+    async def latest(request: Request) -> Response:
+        """The app this gateway ships, for the Android app's update check (Updater.kt): version,
+        size, the file's SHA-256 and the signing certificate's, and where to download it. Signed in
+        like the APK itself; a 401 (not a sign-in redirect) tells the app it has no session."""
+        headers = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
+        sub, _sid = signed_in(request)
+        if not sub:
+            return JSONResponse({"ok": False, "error": "unauthenticated"}, 401, headers=headers)
         base = app_dir()
-        intro = (
-            "<div class='card'><p>The MTG Assistant Gateway app is the Android app for this gateway: "
-            "the same pages as here, "
-            "full screen, plus a phone-camera scan screen with torch brightness, zoom and exposure. "
-            "It is free, has no app store and no account of its own, and on first launch you type this "
-            "gateway's address.</p></div>"
-        )
         if base is None:
-            # No APK is bundled on this gateway: a normal page that says so, not an error page.
-            body = (
-                intro + "<div class='card'><h2>No app file on this gateway</h2>"
-                "<p>Whoever runs this gateway has not added the Android app file yet, so there is nothing "
-                "to download here. Everything works in your phone's browser in the meantime: open this "
-                "address and add it to your home screen.</p>"
-                "<p>If you run the gateway: build the app from the "
-                f"<a href='{PROJECT_URL}' rel='noopener'>project repository</a> (docs/ANDROID.md) and put "
-                "the file where docs/DEPLOY.md describes; this page then offers it.</p>"
-                "<div class='actions'><a class='btn' href='/decks'>Back to decks</a></div></div>"
-            )
-            return render(
-                "Android app",
-                body,
-                site=s.server_name,
-                status=200,
-                signed_in=True,
-                csrf=_csrf(s, sid),
-                admin=is_admin(state, sub),
-                user=display_name(state.db.get_user(sub)),
+            return JSONResponse(
+                {"ok": False, "error": "not_found", "message": "This gateway ships no app."},
+                404,
+                headers=headers,
             )
         meta = app_meta(base)
-        version = meta.get("version_name")
-        cert = _fingerprint(meta.get("cert_sha256"))
-        facts = "".join(
-            f"<li>{html.escape(label)}: <code>{html.escape(str(value))}</code></li>"
-            for label, value in (
-                ("Version", version),
-                ("Size", _mb(int(meta["size"]))),
-                ("File SHA-256 (download check)", _fingerprint(meta.get("sha256"))),
-                ("Signing certificate SHA-256", cert),
-            )
-            if value
-        )
-        if cert:
-            verify = (
-                "<p>Compare the signing certificate SHA-256 above with the one in the "
-                f"<a href='{RELEASES_URL}' rel='noopener'>project's GitHub release</a> for this version "
-                "(in the release notes and its <code>mtg-assistant-gateway.json</code>), or with one "
-                "the owner of this gateway gave you some other way. If they differ, do not install the "
-                "app; tell the owner.</p>"
-            )
-        else:
-            verify = (
-                "<p>This build did not record its signing certificate, so the page cannot show one. Ask the "
-                "owner of this gateway for the certificate SHA-256 before installing.</p>"
-            )
-        note = (
-            "<p class='muted small'>Both values on this page come from this gateway, the same place as the "
-            "file. The file SHA-256 only shows the download arrived intact; it does not show who made the "
-            "app. For a stronger check, on a computer run <code>apksigner verify --print-certs "
-            f"{APK_NAME}</code> and compare its certificate SHA-256 digest with the published one.</p>"
-        )
-        body = (
-            intro + "<div class='card'><h2>Install</h2>"
-            f"<p><a class='btn btn-primary' href='/app/{APK_NAME}'>Download the app (APK)</a></p>"
-            f"<ul>{facts}</ul>"
-            "<ol><li>Press <strong>Download the app (APK)</strong> above, on your Android phone.</li>"
-            f"<li>Check that it is the real app. {verify}</li>"
-            "<li>Open the downloaded file. Android asks once to allow installs from your browser: allow "
-            "it.</li>"
-            "<li>Play Protect may warn that the developer is unknown or unverified. That is expected: the "
-            "app is signed by whoever runs this gateway, not by an app store. Only continue if the signing "
-            "certificate matched in step 2. If Play Protect says the app is harmful, or you are unsure, do "
-            "not install it and ask the owner of this gateway.</li>"
-            "<li>Open MTG Assistant Gateway and type this gateway's address: "
-            f"<code>{html.escape(s.public_url)}</code>.</li>"
-            "</ol>"
-            f"{note}"
-            "<p class='muted small'>Updates: the app looks for new versions in the project's GitHub "
-            "releases and offers them itself; Update installs one over the app you have. Android only "
-            "accepts an update signed with the same key as the installed app, so your settings and "
-            "sign-in are kept, and a file signed by anyone else is refused. An app from before 0.7.12 "
-            "was signed with a test key: uninstall it once and install this file.</p></div>"
-        )
-        return render(
-            "Android app",
-            body,
-            site=s.server_name,
-            signed_in=True,
-            csrf=_csrf(s, sid),
-            admin=is_admin(state, sub),
-            user=display_name(state.db.get_user(sub)),
-        )
+        version_code = meta.get("version_code")
+        out = {
+            "ok": True,
+            "version_name": meta.get("version_name") if isinstance(meta.get("version_name"), str) else None,
+            "version_code": version_code if isinstance(version_code, int) else None,
+            "size": (base / APK_NAME).stat().st_size,
+            "sha256": _fingerprint(meta.get("sha256")),
+            "cert_sha256": _fingerprint(meta.get("cert_sha256")),
+            "apk_url": f"{s.public_url}/app/{APK_NAME}",
+        }
+        return JSONResponse(out, headers=headers)
 
     @server.custom_route(f"/app/{APK_NAME}", methods=["GET"], include_in_schema=False)
     async def apk(request: Request) -> Response:

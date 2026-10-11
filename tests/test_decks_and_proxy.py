@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -1719,3 +1720,75 @@ async def test_validate_decklist_gets_the_gateways_singleton_check() -> None:
     # basic lands and cards allowed in any number are not duplicates
     rats = await proxy.call("validate_decklist", {"decklist": "1 Aesi\n30 Relentless Rats\n69 Island"})
     assert rats.content[0].text.startswith("# Validation: PASSED")
+
+
+async def test_direct_validate_decklist_reads_front_faces(stack: Stack) -> None:
+    """QA-004: reports sent double-faced cards by their front face, but a direct validate_decklist
+    passed "A // B" through, and the research service (Scryfall's collection lookup) did not find
+    them. The proxy now sends front faces too, with the same helper."""
+    h = stack.h
+    token = await mcp_token(h)
+    faces = (
+        "1 Enduring Angel // Angelic Enforcer\n1 Elbrus, the Binding Blade // Withengar Unbound\n98 Plains"
+    )
+    out = await call(
+        h, token, "validate_decklist", {"decklist": faces, "commander": "Enduring Angel // Angelic Enforcer"}
+    )
+    text = out["content"][0]["text"]
+    assert text.startswith("Validated 3 lines") and "not found" not in text, text
+
+
+async def test_a_busy_research_refusal_says_when_to_retry() -> None:
+    """QA-008: the busy refusal is structured (error busy) and now carries retry_after: the seconds
+    until the member's oldest running call is stopped at the latest (the call deadline)."""
+    from mtg_gateway.mf_proxy import busy_retry_after, is_busy
+
+    proxy = MysticForgeProxy("http://mf.test/mcp", client_factory=lambda: Client(fake_mystic_forge()))
+    proxy._listed = True
+    proxy._in_flight["u1"] = 2
+    proxy._started["u1"] = [time.monotonic() - 20, time.monotonic() - 5]
+    out = await proxy.call("scryfall_named", {"name": "Sol Ring"}, owner="u1")
+    assert is_busy(out) and out.structured_content["error"] == "busy"
+    assert 99 <= busy_retry_after(out) <= 100  # 120 s deadline, 20 s gone
+    assert out.structured_content["message"].startswith("2 research calls")
+    # a call that ran and ended frees its slot and its start time
+    proxy._in_flight.clear()
+    proxy._started.clear()
+    ok = await proxy.call("scryfall_named", {"name": "Sol Ring"}, owner="u1")
+    assert not ok.is_error and proxy._started == {} and proxy._in_flight == {}
+
+
+async def test_run_deck_report_takes_the_members_own_snapshot(stack: Stack) -> None:
+    """Consolidation bug 4: run_deck_report said it took a snapshot id and refused one. It now
+    reports the member's own snapshot (as compare_decks reads it), filed under its deck with the
+    snapshot id in its settings; another member's snapshot is refused."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    sub = h.db._one("SELECT sub FROM users", ())["sub"]
+    old = json.loads(json.dumps(ark.decks[42]))
+    old["name"] = "Aesi as it was"
+    h.db.save_snapshot("snaptest1", owner_sub=sub, deck_id="42", proposal_id=None, fingerprint="f", deck=old)
+    h.db.save_snapshot(
+        "snaptest2", owner_sub="someone-else", deck_id="42", proposal_id=None, fingerprint="f", deck=old
+    )
+    rep = structured(await call(h, token, "run_deck_report", {"deck_ref": "snap_snaptest1", "games": 20}))
+    assert rep["ok"] and rep["deck_id"] == "42" and rep["deck_name"] == "Aesi as it was", rep
+    assert rep["settings"]["snapshot_id"] == "snap_snaptest1" and rep["status"] == "complete"
+    refused = structured(await call(h, token, "run_deck_report", {"deck_ref": "snaptest2", "games": 20}))
+    assert refused["ok"] is False and refused["error"] == "invalid", refused
+
+
+async def test_compare_advice_is_true_to_bracket_matched_forge(stack: Stack) -> None:
+    """Consolidation bug 3: since 0.7.23 each deck meets Forge opponents of its own bracket, so
+    "the same options.seed in Forge" is no like-for-like comparison. The advice now says so and
+    names the goldfish A/B as the like-for-like one; run_deck_report takes forge apart from simulate."""
+    h = stack.h
+    token = await mcp_token(h)
+    r = await h.mcp(token, "tools/list", {}, rid=3)
+    tools = {t["name"]: t for t in sse_json(r)["result"]["tools"]}
+    compare = tools["compare_decks"]["description"]
+    assert "run run_deck_report on each with the same options.seed" not in compare
+    assert "like-for-like" in compare and "own bracket" in compare
+    report = tools["run_deck_report"]
+    assert "forge" in report["inputSchema"]["properties"] and "Preflight only" in report["description"]
+    assert "60-card deck's report never starts it" in report["description"]

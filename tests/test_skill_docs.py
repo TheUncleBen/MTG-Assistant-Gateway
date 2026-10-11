@@ -51,7 +51,8 @@ NOT_TOOLS = {
 
 
 async def _local_tools(tmp_path: Path, idp: FakeIdP) -> set[str]:
-    async with running(Harness(make_settings(tmp_path), idp)) as h:
+    # watchlists on: the catalogue documents the optional watch tools too
+    async with running(Harness(make_settings(tmp_path, watchlists_enabled=True), idp)) as h:
         client = await h.register()
         token = (await h.tokens_for(client))["access_token"]
         r = await h.mcp(token, "tools/list")

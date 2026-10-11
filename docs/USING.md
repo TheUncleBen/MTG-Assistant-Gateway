@@ -73,8 +73,18 @@ One deck:
   it on Scryfall, mark it as owned, or move it to another category. The same
   viewer opens from a thumbnail in the editor and in the collection.
 - On your own deck, **drag a card** onto another category: with a mouse, or
-  press and hold on a touch screen and slide. Press **Save moves** and the
-  moves go to Archidekt at once, with a snapshot taken first.
+  press and hold on a touch screen and slide. The move goes to Archidekt
+  when you let go, with a snapshot taken first, as a change from the card
+  menu or **Select cards** does.
+- **Undo** and **Redo** (beside **Select cards**, and **Undo** on the
+  message after each save) take back or redo any of those changes, each a
+  save of its own; the editor's keys work too: Ctrl+Z, and Ctrl+Shift+Z or
+  Ctrl+Y (Cmd on a Mac), except while you type in a field. A card's notes
+  cannot come back: Archidekt gives the gateway no way to write them, so
+  removing a card that has a note asks first.
+- Drag a stack's handle to put the stacks in your own order. That order is
+  kept in this browser on this device only (Archidekt has no stack order);
+  **Reset stack order** puts the deck's own order back.
 - **Quick add** types a card name and takes you to the editor with it
   filled in.
 - **Playtest** shows the deck in Archidekt's own playtester (draw an
@@ -110,8 +120,22 @@ One deck:
   precon's bracket comes from the game changers it holds. When there are not
   enough precons of that bracket, the nearest bracket fills in, and an older
   Forge image without precon brackets plays the newest precons; the report
-  names the opponents, their brackets and why they were picked. Forge does not
-  run 60-card decks (its opponents are Commander precons).
+  names the opponents, their brackets and why they were picked. Forge plays
+  10 games per report by default (`MTG_FORGE_GAMES`) and shows each win rate
+  with its 95% range. Forge does not run 60-card decks (its opponents are
+  Commander precons): their reports never start or queue a Forge run and say
+  why. When the Forge engine is busy
+  with other runs, a report waits in the queue and starts by itself. Because
+  each deck meets precons of its own bracket, two decks' Forge win rates are
+  not a like-for-like comparison; the paired goldfish A/B of `compare_decks`
+  is.
+- A report without Forge games (Forge not set up, a 60-card deck, or Forge
+  left out of the report) is labelled **Preflight only (no rules engine)**
+  where the Forge games would be. Each report shows its status: queued,
+  running, complete, partial (some part did not run) or failed.
+- A deck's report trends on its History page compare a simulation number
+  only across reports run the same way (Commander or 60-card game, same last
+  turn), and the table of numbers shows each report's settings.
 - **Compare with another deck…** (More menu) pits the deck against a
   preconstructed deck (pick one from Archidekt's list), any deck id or
   link, or a pasted list: what the build took out of the other deck, what
@@ -278,6 +302,9 @@ assistant applies what that mode allows, always with a snapshot.
 
 ## Watchlist and prices
 
+Watchlists are off unless the operator turns them on; until then the page,
+the card viewer's price buttons and the watch tools below are not there.
+
 The **Watchlist** page (in the account menu, and under More on a phone)
 keeps the price of cards and decks you choose, once a day:
 
@@ -316,17 +343,18 @@ the user they gave you (check your app for where). **Send test** checks it.
 Messages say only what happened and link to the page here; they never list
 a deck's cards.
 
-The **Summary** card shows a plain summary of today or the last 7 days:
-watched prices that moved, your watched decks' values, deck reports
-finished, and proposals waiting and applied. Choose **Every day** or
-**Every week (Mondays)** and it is also sent to you as a notification when
-notifications are on. The gateway writes it with fixed sentences from its
+The summary is part of the **Notifications** card, so it is there only when
+the operator has set up ntfy. Choose **Every day** or **Every week
+(Mondays)** and the card shows a plain summary of today or the last 7 days
+(watched prices that moved and your watched decks' values when watchlists
+are on, deck reports finished, and proposals waiting and applied), and it is
+also sent to you as a notification when notifications are on. The gateway writes it with fixed sentences from its
 own data. It does not write an AI summary itself: that would need a paid AI
 model service, and the gateway uses only free ones.
 
 For a summary in your assistant's own words, use the assistant you already
 have. Its `get_summary` tool returns the same summary (with `period` day or
-week). Claude and ChatGPT can both run a prompt on a schedule (check your
+week), with or without ntfy. Claude and ChatGPT can both run a prompt on a schedule (check your
 app for scheduled tasks); a prompt such as "Every Monday morning, call
 get_summary from my MTG gateway and tell me in a few lines what changed and
 what needs me" does it. The tool is read-only.

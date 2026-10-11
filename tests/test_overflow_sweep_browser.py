@@ -60,7 +60,7 @@ LONG_CATS = [
 
 @pytest.fixture
 def server(tmp_path: Path):
-    s = Server(tmp_path)
+    s = Server(tmp_path, watchlists_enabled=True)  # the sweep covers the Watchlist page too
     long_cards = ((9801, CARDS[-2]), (9802, CARDS[-1]))
     for cid, name in long_cards:
         FA.CARD_DB.setdefault(name.lower(), {"id": cid, "oracleCard": {"name": name}})

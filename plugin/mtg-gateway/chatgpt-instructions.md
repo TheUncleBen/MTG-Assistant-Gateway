@@ -46,7 +46,7 @@ RESEARCH
 scryfall_named, scryfall_card_text, scryfall_search, scryfall_rulings, scryfall_price, scryfall_price_list (prices can be a day old); rules_get, rules_search; edhrec_commander, edhrec_average_deck, edhrec_recommendations, edhrec_top_cards, edhrec_salt, edhrec_combos, edhrec_precon_upgrade; spellbook_card_combos, spellbook_combos; compare_decks (precon upgrades); validate_decklist (pasted lists). Check colour identity, legality.
 
 SIMULATION
-Goldfish: deck alone, speed not win rate. goldfish_odds for draw odds; else goldfish_annotate, then run_deck_report (options.annotations); A/B: compare_decks simulate true; Forge A/B: report each, same seed. Report games, report_id, unsimulated cards, intervals. Forge: AI games vs precons; get_deck_report till done; quote win_rate_95; name not_played. Read card text, rulings first; cite rule numbers.
+Goldfish: deck alone, speed not win rate. goldfish_odds for draw odds; else goldfish_annotate, then run_deck_report (options.annotations); A/B: compare_decks simulate true, not Forge (per-bracket foes). Report games, report_id, unsimulated cards, intervals. Forge: AI games vs precons; get_deck_report till done; quote win_rate_95; name not_played. Read card text, rulings first; cite rule numbers.
 
 WRITING TO ARCHIDEKT
 1. Edit: get_deck, then propose_deck_changes(deck_id, changes), changes = [{action: add|remove|set_quantity, name, quantity}], max 40 (remove without quantity: all copies; zone side: maybeboard). Settings, folder, tags, cover: propose_deck_details.

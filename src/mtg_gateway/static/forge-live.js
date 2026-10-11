@@ -1,6 +1,6 @@
 "use strict";
 // Report page: while the Forge games are queued or running (the card carries data-forge-live),
-// fetch this page again every 15 seconds and swap in the new Forge card and Markdown copy, until
+// fetch this page again every 15 seconds and swap in the new Forge card, status and Markdown copy, until
 // the run ends. No polling while the tab is hidden; it stops for good after a failed fetch or
 // after five hours (the gateway gives a run up after four).
 (function () {
@@ -22,6 +22,10 @@
       return document.importNode(n, true);
     }));
     if (!fresh.hasAttribute("data-forge-live")) card.removeAttribute("data-forge-live");
+    // the report's overall status in its head follows the run (queued, running, then complete...)
+    var status = doc.getElementById("rep-status");
+    var shown = document.getElementById("rep-status");
+    if (status && shown) shown.innerHTML = status.innerHTML;
     var md = doc.getElementById("rep-md");
     var area = document.getElementById("rep-md");
     if (md && area) area.value = md.value;

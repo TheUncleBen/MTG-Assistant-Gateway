@@ -74,22 +74,23 @@ app's menu (the round button, bottom right) brings the address screen back.
 
 ### Updates
 
-The app looks for a newer version of itself in the project's
-[GitHub releases](https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases):
-each time it starts and right after you sign in (at most once an hour, so
-GitHub's limit for requests without an account is never reached), when you come
-back to it after 12 hours, and whenever you tap **Check for app updates**. That
-button is on the **Account** page's **App** card, which also shows the installed
-version, and in the account menu's **App** section (or the round button's menu).
+The app asks the gateway it is set up for whether it has a newer version of
+the app (`/app/latest.json`, the same facts the gateway's Android app page shows,
+behind the same sign-in): each time it starts and right after you sign in (at
+most once an hour), when you come back to it after 12 hours, and whenever you
+tap **Check for app updates**. That button is on the **Account** page's **App**
+card, which also shows the installed version, and in the app's own menu (the
+round button).
 Inside the app the Account page shows this card instead of **Get the Android
 app**. When there is a newer version, a bar at the top says **Version x.y.z of
 the app is available**:
 
-1. Tap **Update**. The app downloads the release's
-   `mtg-assistant-gateway-release.apk` and checks it before installing anything:
-   it must be this app (the same package ID), the version the release names,
-   and signed with the same certificate as the app you have. If any of that
-   fails, nothing is installed and the app says why.
+1. Tap **Update**. The app downloads the gateway's
+   `/app/mtg-assistant-gateway.apk` and checks it before installing anything:
+   it must have the size and SHA-256 the gateway gave, be this app (the same
+   package ID) in the version the gateway names, and be signed with the same
+   certificate as the app you have. If any of that fails, nothing is installed
+   and the app says why.
 2. The first time, Android asks you to allow installs from MTG Assistant
    Gateway ("Install unknown apps"). Allow it, go back, and confirm.
 3. Android installs the update over the app and closes it. Open the app again
@@ -101,9 +102,10 @@ updates without asking again, because the app is updating itself
 that call: on some phones and versions it asks every time, and the app shows
 its confirmation when it does. **Later** hides the bar until the next check.
 
-What it sends: one request to GitHub's public releases API without any
-account, cookie or gateway address, and the download from GitHub. Nothing goes
-to your gateway.
+What it sends: one request to your own gateway, with the sign-in the app
+already holds, and the download from the same gateway. Nothing goes to GitHub
+or anywhere else. A gateway older than 0.7.24 has no `/app/latest.json`, so the
+app finds no update there; install a newer app from its Android app page once.
 
 **Moving from a test build.** Builds before 0.7.12 were signed with a test
 key, and the release key is different. Android refuses to install an update
@@ -111,10 +113,11 @@ signed with another key, so an app from before 0.7.12 can't update itself to
 it: uninstall it once, then install 0.7.12 from your gateway's `/app` page (and
 type the gateway address again). Every later version updates in place.
 
-A fork or a self-built app looks at the repository it was built for:
-`UPDATE_REPO=owner/name` for `android/scripts/build.sh` (CI sets it to the
-repository it runs in), or `UPDATE_REPO=` (empty) for an app that never looks.
-A release signed with a different key than the installed app is never offered.
+A fork or a self-built app gets its updates from the gateway that serves it,
+so a self-hoster who builds their own APK offers their own. `UPDATE_REPO=`
+(empty) for `android/scripts/build.sh` builds an app that never looks; any other
+value (CI sets the repository it runs in) leaves the check on. An app signed
+with a different key than the installed app is never offered.
 
 If your gateway's `/app` page says there is no app file, the gateway's image
 was built without one: the release build only adds the app when the
@@ -171,8 +174,9 @@ The app shows the gateway's pages: home, account, proposals, scan, and whatever
 else your gateway serves. A few things are native:
 
 - **The App section of the account menu** (the person icon, top right):
-  *Scan with phone camera*, *Reload*, *Open in browser*, *Open a copied link*,
-  *Change gateway*, *Check for app updates*.
+  *Scan with phone camera*, *Reload*, *Open in browser*, *Change gateway*.
+  *Open a copied link* and *Check for app updates* are on the Account page's
+  **App** card and in the round button's menu.
   The same actions sit on a round button at the bottom right while a
   page that is not the gateway's is showing (the sign-in service, say); on
   the gateway's own pages the button stays out of the way of the bottom tab
@@ -197,7 +201,8 @@ else your gateway serves. A few things are native:
   instead. Discord's **Share** on a whole message may hand over only a link to
   the message on discord.com; the app then says so. Long-press the
   archidekt.com link inside the message and share that link, or copy it.
-- **Open a copied link** (account menu, **App**) opens the link on the
+- **Open a copied link** (the Account page's **App** card, or the round
+  button's menu) opens the link on the
   clipboard under the same rules: a page on your gateway, or an
   `archidekt.com/decks/...` deck link as that deck's page on your gateway.
   Nothing else is opened, and the app says what the clipboard held.
@@ -337,9 +342,9 @@ Chromium against the real page with synthetic card photos.
 Nothing here costs money or needs an account with anyone:
 
 - **From each gateway.** The gateway image ships the APK the release build
-  produced and serves it at `/app/mtg-assistant-gateway.apk` behind the normal sign-in, with a
-  `/app` page that shows the version, the file checksum and the signing
-  certificate fingerprint. Self-hosters therefore give out
+  produced and serves it at `/app/mtg-assistant-gateway.apk` behind the normal sign-in, with the
+  setup page's Android section (`/install?for=android`; `/app` leads there) showing the version,
+  the file checksum and the signing certificate fingerprint. Self-hosters therefore give out
   the app from their own deployment. `MTG_APP_DIR` points the gateway at a
   different folder if you build your own ([DEPLOY.md](DEPLOY.md#environment-reference)).
 - **From the GitHub release.** The release workflow attaches
@@ -354,11 +359,11 @@ Nothing here costs money or needs an account with anyone:
   under a free and open-source licence, and this project's PolyForm
   Noncommercial licence isn't one. Verify against F-Droid's inclusion policy
   before relying on that.
-- **Updates in the app.** The app updates itself from the GitHub releases
-  ([Updates](#updates)), so after the first install nobody downloads it by hand.
+- **Updates in the app.** The app updates itself from the gateway it is set up
+  for ([Updates](#updates)), so after the first install nobody downloads it by hand.
 - **Obtainium** (a free app that watches a URL for new APKs) can also track the
-  project's GitHub releases page. It can't track a gateway's `/app` page,
-  because that page needs the gateway sign-in.
+  project's GitHub releases page. It can't track a gateway's download,
+  because that needs the gateway sign-in.
 
 ## 7. Building the app
 
@@ -622,7 +627,7 @@ screen is shown without a prefill, so a link can't pick your gateway for you.
   (`REQUEST_INSTALL_PACKAGES`, which Android grants only after you allow
   installs from this app, and `UPDATE_PACKAGES_WITHOUT_USER_ACTION`); the
   network-state permission one of its libraries declares is removed from the
-  manifest. The update check talks to GitHub only ([Updates](#updates)). Sign-in cookies live in the system WebView's cookie store
+  manifest. The update check talks to the app's own gateway only ([Updates](#updates)). Sign-in cookies live in the system WebView's cookie store
   for this app only. None of it is backed up or copied to a new phone: backup
   is off, and from Android 12 the data-extraction rules also exclude everything
   from cloud backup and device-to-device transfer, so a new phone signs in

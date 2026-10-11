@@ -21,9 +21,7 @@ name, text and skill folder follow it, and the project's homepage and author are
 from __future__ import annotations
 
 import hashlib
-import io
 import json
-import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -33,15 +31,15 @@ from starlette.responses import PlainTextResponse, Response
 from . import __version__
 from .plugin_page import (
     DEFAULT_SITE,
-    MAX_FILE_BYTES,
     PLUGIN_NAME,
     SERVER_DESCRIPTION,
-    ZIP_DATE,
     _renamed,
     chatgpt_zip_name,
     plugin_dir,
     plugin_label,
     plugin_slug,
+    shipped_files,
+    zip_bytes,
 )
 
 if TYPE_CHECKING:
@@ -115,26 +113,15 @@ def build_zip(base: Path, mcp_url: str, public_url: str, site: str = DEFAULT_SIT
         "mcp.json": (json.dumps(mcp_config(site, mcp_url), indent=2) + "\n").encode(),
     }
     skill = base / PLUGIN_NAME / "skills" / PLUGIN_NAME
-    for path in sorted(skill.rglob("*")):
-        if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_FILE_BYTES:
-            continue
+    for path in shipped_files(skill):
         rel = path.relative_to(skill).as_posix()
-        if any(part.startswith(".") for part in rel.split("/")):
-            continue
         data = path.read_bytes()
         if site != DEFAULT_SITE:
             data = _renamed(data, rel, site, name)
         files[f"skills/{name}/{rel}"] = data
     for rel, src in ASSETS.items():
         files[rel] = src.read_bytes()
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        for rel, data in files.items():
-            info = zipfile.ZipInfo(rel, date_time=ZIP_DATE)
-            info.compress_type = zipfile.ZIP_DEFLATED
-            info.external_attr = 0o644 << 16
-            zf.writestr(info, data)
-    return buf.getvalue()
+    return zip_bytes(files.items())
 
 
 def add_chatgpt_plugin_route(server: MCPServer, state: AppState) -> None:

@@ -63,18 +63,18 @@ Request bodies are JSON objects of at most 2 MB.
 | `GET /api/v1/decks/{id}?cards=0` | One deck (own or public) with cards, categories, format, description, bracket, commanders and `stats`; `cards=0` leaves the card list out |
 | `GET /api/v1/decks/{id}/stats` | `deck` brief plus `stats` (curve, pips, types, lands, prices, salt, bracket estimate) |
 | `GET /api/decks/mine` | Browser session only: the signed-in member's deck list as server-rendered HTML for the Home and My decks pages while a cold list loads (`no-store`; backup copies left out) |
-| `POST /api/v1/decks/{id}/edit` | Browser session only (CSRF header): the deck page's own save. `{"changes": [...], "confirmed": false}` proposes, applies with a snapshot and answers the touched rows, fresh checks and the re-rendered Legality chip and Deck checks panel; a big removal answers `needs_confirm` with `proposal_id`, and `{"proposal_id": ...}` applies it (a cancelled confirmation rejects it; only a pending proposal this endpoint made is accepted, never an assistant's). `{"refresh": true, "names": [...]}` reads the deck again, writing nothing |
+| `POST /api/v1/decks/{id}/edit` | Browser session only (CSRF header): the deck page's own save. `{"changes": [...], "confirmed": false}` proposes, applies with a snapshot and answers the touched rows (with every category and the read-only notes), fresh checks and the re-rendered Legality chip and Deck checks panel; a big removal answers `needs_confirm` with `proposal_id`, and `{"proposal_id": ...}` applies it (a cancelled confirmation rejects it; only a pending proposal this endpoint made is accepted, never an assistant's). `{"refresh": true, "names": [...]}` reads the deck again, writing nothing |
 | `GET /api/v1/decks/{id}/history` | Everything stored about one deck: `proposals`, `snapshots`, `reports` and a `series` of report metrics over time |
 | `GET /api/v1/compare?a=&b=` | Differences between two decks; each side is a deck id or link, or a snapshot id |
 | `GET /api/v1/proposals?state=` | The user's proposals, optionally filtered by state |
 | `POST /api/v1/proposals` | Create a proposal (see kinds below). Answers `201` with the proposal, its `diff` and `review_url`. The browser session may add `apply: true` and `archidekt_backup: false` (skip the extra backup copy on Archidekt for that save; the gateway's own snapshot is always kept) |
 | `GET /api/v1/proposals/{pid}` | One proposal with `state`, `diff`, `changes`, `snapshot_id`, `result`, `next_step` |
-| `POST /api/v1/proposals/{pid}/apply` | Apply it: snapshot, Archidekt backup copy, write, re-read verification. A bearer caller applies only what the member's approval mode allows (`manual`: nothing, `browser_required`; `semi`: low-risk proposals; `auto`: everything), judged inside the apply; the in-chat card uses the `confirm_proposal` MCP tool instead, not this route |
+| `POST /api/v1/proposals/{pid}/apply` | Apply it: snapshot, Archidekt backup copy, write, re-read verification. A bearer caller applies only what the member's approval mode allows (`manual`: nothing, `browser_required`; `semi`: low-risk proposals; `auto`: everything), judged inside the apply; the in-chat card uses the `confirm_proposal` MCP tool instead, not this route. An Archidekt account action (a proposal of kind `action`) is never applied here, with a bearer token or the browser session: `403 browser_required` with its `review_url` and `risk` (R-142: only the review page's own form applies one) |
 | `POST /api/v1/proposals/{pid}/reject` | Mark a pending proposal rejected. A bearer caller can reject only proposals its own app made; others answer `other_client` |
 | `GET /api/v1/snapshots?deck_id=` | Deck snapshots taken before applies (and on demand) |
 | `GET /api/v1/snapshots/{sid}` | One snapshot with the full deck as it was |
 | `GET /api/v1/reports?deck_id=` | Stored deck reports, newest first, with their trend `metrics` |
-| `POST /api/v1/reports` | Run a report: `{"deck_id": "...", "simulate": true, "games": 300}`. Stats always; validation and goldfish simulation when Mystic Forge is configured. An unchanged deck within ten minutes returns the existing report with `reused: true` |
+| `POST /api/v1/reports` | Run a report: `{"deck_id": "...", "simulate": true, "games": 300}`. Stats always; validation and goldfish simulation when Mystic Forge is configured. `"forge": false` leaves the Forge games out (default: as `simulate`); a 60-card deck never runs Forge. An unchanged deck within ten minutes returns the existing report with `reused: true`. A report has `status` (`queued`, `running`, `complete`, `partial`, `failed`), `engine_label` and its run `settings` |
 | `GET /api/v1/reports/{rid}` | One report with `stats`, `goldfish`, `validation` |
 | `DELETE /api/v1/reports/{rid}` | Delete a report. With a bearer token only a report that same app ran; the browser session may delete any of the member's reports |
 | `GET /api/v1/activity?limit=50` | The user's own audit trail |
@@ -128,7 +128,9 @@ a bearer token. They answer `401` without a browser session, and `404` to signed
 `POST /api/v1/proposals` takes a `kind`:
 
 - `edit` (default): `{"deck_id": "...", "changes": [...]}`. Each change is one of
-  `{"action": "add", "card_name", "quantity", "category"?, "set_code"?, "collector_number"?, "finish"?}`,
+  `{"action": "add", "card_name", "quantity", "category"?, "categories"?, "set_code"?, "collector_number"?, "finish"?}`
+  (`categories`: every category the new row goes in, the first one being `category`; the deck page's
+  Undo of a removal sends it),
   `{"action": "remove", "card_name"}`, `{"action": "set_quantity", "card_name", "quantity"}`,
   `{"action": "set_category", "card_name", "category"}`, `{"action": "set_commander", "card_name"}`,
   `{"action": "set_finish", "card_name", "finish"}` (normal, foil or etched, for the copies already in
