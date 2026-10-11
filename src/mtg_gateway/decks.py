@@ -402,7 +402,7 @@ def row_line(r: dict[str, Any]) -> str:
     if kind == "finish":
         return f"{r['name']}: finish {r['before']} -> {r['after']}"
     if kind == "label":
-        return f"{r['name']}: colour tag {r['before']} -> {r['after']}{side}"
+        return f"{r['name']}: color tag {r['before']} -> {r['after']}{side}"
     if kind == "mana_value":
         return f"{r['name']}: custom mana value {r['before']} -> {r['after']}{side}"
     if kind == "printing":
@@ -686,7 +686,7 @@ def _parse_label_change(i: int, name: str, item: dict[str, Any]) -> Change:
     if not text:
         return Change("set_label", name, label="")
     if colour and not LABEL_COLOUR.fullmatch(colour):
-        raise DeckError("invalid", f"change {i}: color must be a colour like #37d67a")
+        raise DeckError("invalid", f"change {i}: color must be a color like #37d67a")
     return Change("set_label", name, label=f"{text},{(colour or DEFAULT_LABEL_COLOUR).lower()}")
 
 
@@ -4113,7 +4113,7 @@ def _next_step(
         return "Review only: deck writes are disabled on this gateway, so this cannot be applied yet."
     if state == "pending" and may_apply:
         chose = (
-            "to apply every change without asking"
+            "to apply deck and collection changes without asking"
             if mode == "auto"
             else f"to apply low-risk edits without asking, and this one is low risk ({risk_reason})"
         )

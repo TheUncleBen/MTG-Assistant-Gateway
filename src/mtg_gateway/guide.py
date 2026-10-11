@@ -34,6 +34,7 @@ _esc = html.escape
 
 GUIDE_CSS = """
 .guide{display:grid;grid-template-columns:minmax(0,1fr);gap:1rem;align-items:start}
+.guide h2,.guide h3,.guide h4{overflow-wrap:anywhere}
 .guide .gside{min-width:0}
 .gsearch{margin:0 0 .75rem}
 .gsearch label{display:block;font-weight:700;margin-bottom:.25rem}
@@ -570,7 +571,7 @@ def guide_body(
             "",
         ),
         (
-            "Search public decks (name, commander, partial commander names, format, colours, owner), and "
+            "Search public decks (name, commander, partial commander names, format, colors, owner), and "
             "one user's public decks (<code>owner</code>, newest first)",
             "<code>search_decks</code>",
             "no",
@@ -747,7 +748,7 @@ def guide_body(
             "a precon, any deck or a pasted list against this deck",
         ),
         ("Export", "<code>/decks/&lt;id&gt;/export</code>", "import text, plain list, sideboard, downloads"),
-        ("Search", "<code>/search</code>", "public decks by name, commander, format, colours, owner"),
+        ("Search", "<code>/search</code>", "public decks by name, commander, format, colors, owner"),
         ("Cards", "<code>/cards</code>", "cards by name, with picture, cost and type; add one to a deck"),
         (
             "A member of Archidekt",
@@ -955,7 +956,7 @@ def guide_body(
         "and Reject (Reject can carry a reason), the printings of a card as pictures to tap, the cards "
         "read from your photos to keep or drop, a deck by category with pictures and rules text, and "
         "your account's setup. A comparison of two decks, a deck's statistics, a list of decks and a "
-        "scan's recognised cards show as cards too, to read at a glance. "
+        "scan's recognized cards show as cards too, to read at a glance. "
         "A tap is passed to the assistant as text and it carries on from there; "
         "nothing changes until a proposal you approve. The only card that acts by itself is the proposal "
         "card, whose Approve and Reject both use its one-time code. Claude Code and older apps show the "

@@ -657,7 +657,8 @@ OK_MESSAGES = {
     "mode_manual": "Saved: your assistant asks you every time.",
     "mode_semi": "Saved: your assistant applies small, low-risk edits without asking and asks for "
     "everything else.",
-    "mode_auto": "Saved: your assistant applies every change without asking. Each change keeps a "
+    "mode_auto": "Saved: your assistant applies deck and collection changes without asking (account "
+    "actions and deck deletion still wait for you). Each change keeps a "
     "snapshot you can restore from History.",
 }
 ERR_MESSAGES = {
@@ -1049,7 +1050,7 @@ def _change_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, dic
             out.append(
                 _li(
                     "chg",
-                    "Colour tag" if kind == "label" else "Custom mana value",
+                    "Color tag" if kind == "label" else "Custom mana value",
                     name + html.escape(where),
                     _was_now(r.get("before", ""), r.get("after", "")),
                 )

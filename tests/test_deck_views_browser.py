@@ -455,11 +455,11 @@ def test_colour_tag_from_the_card_menu_and_undo(server: Server, width: int, sche
         row = page.locator(".deckview .row[data-card='Cultivate']").first
         row.scroll_into_view_if_needed()
         row.click(button="right")
-        page.locator(".ctxmenu [role=menuitem]", has_text="Colour tag").click()
+        page.locator(".ctxmenu [role=menuitem]", has_text="Color tag").click()
         form = page.locator(".bulkbar .tagform")
         assert form.is_visible() and row.get_attribute("aria-pressed") == "true"
         page.locator(".bulkbar input[aria-label='Tag name']").fill("Have")
-        page.locator(".bulkbar input[aria-label='Tag colour']").evaluate(
+        page.locator(".bulkbar input[aria-label='Tag color']").evaluate(
             "e => { e.value = '#2ccce4'; e.dispatchEvent(new Event('input')); }"
         )
         _shot(page, f"deck-tag-form-{width}-{scheme}")
@@ -481,7 +481,7 @@ def test_colour_tag_from_the_card_menu_and_undo(server: Server, width: int, sche
         assert dot.get_attribute("title") == "Tag: Have"
         page.locator(".bulkbar button", has_text="Select cards").click()
         page.locator(".deckview .row[data-card='Cultivate']").first.click()
-        page.locator(".bulkbar button", has_text="Colour tag").click()
+        page.locator(".bulkbar button", has_text="Color tag").click()
         with page.expect_response(EDIT_URL):
             page.locator(".bulkbar button", has_text="Take tag off").click()
         page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)

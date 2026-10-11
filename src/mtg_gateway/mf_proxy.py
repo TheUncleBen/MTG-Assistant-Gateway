@@ -126,7 +126,7 @@ _COMMANDER_QUERY = re.compile(
 _GAME_TERM = re.compile(r"(?<![\w])-?game[:=]", re.IGNORECASE)
 SEARCH_QUERY_MAX = 500  # Mystic Forge's own limit on scryfall_search's query
 PAPER_SEARCH_NOTE = (
-    " In a Commander search (a colour identity such as id<=wu, commander:, f:commander or "
+    " In a Commander search (a color identity such as id<=wu, commander:, f:commander or "
     "is:commander in the query) the gateway adds game:paper, so cards that exist only on Arena or "
     "MTGO are left out; put a game: term in the query (e.g. game:arena) to choose otherwise."
 )
@@ -150,7 +150,7 @@ def rewrite_text(text: str) -> str:
 # Added to a listed tool's description: what its own description leaves out.
 DESCRIPTION_NOTES: dict[str, str] = {
     "edhrec_top_cards": "limit is per section (Top Cards, Creatures, Instants, ...). With color, period "
-    "is ignored: EDHREC's colour pages count all decks, with no time period.",
+    "is ignored: EDHREC's color pages count all decks, with no time period.",
     "goldfish_annotate": "A deck id or link is read with the member's own Archidekt access (their "
     "private decks too), like get_deck.",
 }
@@ -171,6 +171,32 @@ def upstream_failed(result: types.CallToolResult) -> bool:
         return False
     first = result.content[0]
     return isinstance(first, types.TextContent) and bool(UPSTREAM_FAILURE.match(first.text.lstrip()))
+
+
+# Mystic Forge also answers arguments it cannot use with plain text and no error flag (seen in QA
+# for goldfish_odds). These whole texts are refusals: the gateway flags them and adds the same
+# structured refusal its own tools give (error invalid, error_code INVALID_ARGUMENT).
+INVALID_ARGUMENT_TEXT = re.compile(
+    r"^(draws cannot exceed deck_size\.?|group copies exceed deck size\.?"
+    r"|Provide exactly one of `copies` \(flat mode\) or `groups`.*)$",
+    re.DOTALL,
+)
+
+
+def research_refusal(result: types.CallToolResult) -> types.CallToolResult:
+    """``result`` as a flagged, structured refusal when it is one of Mystic Forge's known
+    wrong-argument texts; any other result as it is."""
+    if result.is_error or len(result.content) != 1 or not isinstance(result.content[0], types.TextContent):
+        return result
+    text = result.content[0].text.strip()
+    if not INVALID_ARGUMENT_TEXT.match(text):
+        return result
+    out = {"ok": False, "error": "invalid", "message": f"the research service refused the arguments: {text}"}
+    return types.CallToolResult(
+        content=[types.TextContent(type="text", text=json.dumps(out, indent=2))],
+        structured_content=out,
+        isError=True,
+    )
 
 
 def _rewrite_strings(value: Any) -> Any:
@@ -557,7 +583,7 @@ class MysticForgeProxy:
                     await self.tools()  # learn which tools take a params object
                 if name in self._wrapped:
                     arguments = {"params": arguments}
-            result = _rewrite_result(await self._forward(name, arguments))
+            result = research_refusal(_rewrite_result(await self._forward(name, arguments)))
             if name == "validate_decklist":
                 result = _validation_checks(result, arguments)
             return result

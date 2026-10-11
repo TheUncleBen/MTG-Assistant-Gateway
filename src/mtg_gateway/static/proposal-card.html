@@ -227,7 +227,7 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
       case "category": return ["Category", r.name, arrow(r.before, r.after) + (r.leaves ? " (leaves the deck, −" + r.leaves + ")" : "")];
       case "finish": return ["Finish", r.name, arrow(r.before, r.after)];
       case "printing": return ["Printing", r.name, arrow(r.before, r.after)];
-      case "label": return ["Colour tag", r.name, arrow(r.before, r.after)];
+      case "label": return ["Color tag", r.name, arrow(r.before, r.after)];
       case "mana_value": return ["Mana value", r.name, arrow(r.before, r.after)];
       case "commander": return ["Commander", arrow(r.before, r.after), ""];
       case "clone": return ["Copy", "'" + r.source + "' (" + r.cards + " cards) as '" + r.name + "'", ""];
@@ -260,7 +260,7 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
   // Rows are shown grouped by what they do, in this order, so a big edit reads as a summary.
   var GROUPS = [
     ["add", "Added"], ["remove", "Removed"], ["change", "Quantity changed"], ["category", "Moved"],
-    ["finish", "Finish"], ["printing", "Printing"], ["label", "Colour tag"], ["mana_value", "Mana value"],
+    ["finish", "Finish"], ["printing", "Printing"], ["label", "Color tag"], ["mana_value", "Mana value"],
     ["commander", "Commander"]
   ];
   function groupOf(kind) {
@@ -286,7 +286,7 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
     if (p.state !== "pending" || !p.writes_enabled) return "";
     if (p.assistant_may_apply) {
       return p.approval_mode === "auto"
-        ? "Your approval mode applies every change without asking: your assistant applies this itself."
+        ? "Your approval mode applies deck and collection changes without asking: your assistant applies this itself."
         : "Low-risk edit (" + (p.risk_reason || "") + "): your approval mode lets your assistant apply it without asking.";
     }
     if (p.risk === "destructive") return "This deletes the deck from your Archidekt account. Only you can approve it, on the review page, in every approval mode.";

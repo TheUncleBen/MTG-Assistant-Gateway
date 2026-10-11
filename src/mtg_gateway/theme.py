@@ -272,7 +272,7 @@ details.dd .menu button:focus-visible{background:var(--border);color:var(--text)
 .menu button.danger:hover,.menu button.danger:focus-visible,details.dd .menu button.danger:hover,
 details.dd .menu button.danger:focus-visible{background:var(--border);color:var(--danger-text)}
 .menu .head{padding:.4rem 1rem .2rem;font-size:.8rem;font-weight:700;color:var(--menu-head);
-  text-transform:uppercase;letter-spacing:.04em}
+  text-transform:uppercase;letter-spacing:.04em;overflow-wrap:anywhere}
 .menu .head.who{text-transform:none;letter-spacing:0;font-weight:400;font-size:.86rem;
   padding:.5rem 1rem .4rem;border-bottom:1px solid var(--border);margin-bottom:.25rem;white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis;max-width:18rem}
@@ -455,8 +455,10 @@ button.icon-only{width:var(--ctl);padding:0}
 form{margin:0}
 form > button,form .btn{margin-top:1rem}
 button.thumbbtn{all:unset;display:block;cursor:pointer;line-height:0;border-radius:3px}
-.exportblock .head{display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-top:1.25rem}
-.exportblock .head h2{margin:0} .exportblock textarea{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+.exportblock .head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.5rem;
+  margin-top:1.25rem}
+.exportblock .head h2{margin:0;min-width:0;overflow-wrap:anywhere}
+.exportblock textarea{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
   font-size:.85rem}
 button.thumbbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .choice{display:flex;flex-direction:column;gap:.6rem;margin-top:1rem}
@@ -686,7 +688,8 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
   margin:0 0 1rem}
 .home .hero h1{margin:0;font-size:1.6rem}
 .home .hero .sub{color:var(--text-muted);margin:.2rem 0 0}
-.home .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(14rem,1fr));gap:1rem;margin:0 0 1rem}
+.home .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,14rem),1fr));gap:1rem;
+  margin:0 0 1rem}
 .home .tile{display:flex;flex-direction:column;gap:.35rem;padding:1rem;background:var(--surface);
   border:1px solid var(--border);border-radius:var(--radius-panel);color:var(--text);text-decoration:none;
   min-height:7.5rem;transition:border-color .2s ease}
@@ -699,7 +702,7 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
 .home .searchbox{display:flex;gap:.5rem;align-items:end;flex-wrap:wrap}
 .home .searchbox .field{flex:1 1 14rem;margin:0}
 .home .searchbox button{margin:0}
-.home .recent{display:grid;grid-template-columns:repeat(auto-fill,minmax(10rem,1fr));gap:.75rem}
+.home .recent{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,10rem),1fr));gap:.75rem}
 .home .recent a{display:block;position:relative;aspect-ratio:16/9;border-radius:var(--radius);overflow:hidden;
   background:linear-gradient(135deg,#3a3a3a,#1f1f1f) center/cover no-repeat;color:#fff;text-decoration:none;
   font-weight:700}
@@ -710,7 +713,8 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
 .home details.connect summary{cursor:pointer;font-weight:700;display:flex;flex-wrap:wrap;gap:.25rem .75rem;
   align-items:baseline}
 .home details.connect summary .addr{font-weight:400;font-size:.9rem;word-break:break-all}
-.home .panel-head{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin:0 0 .75rem}
+.home .panel-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;
+  gap:.5rem 1rem;margin:0 0 .75rem}
 .home .panel-head h2{margin:0}
 /* placeholders while a deck list is still being read (decks.js swaps the real list in) */
 .skeleton>*{display:block;background:var(--surface-2);border:1px solid var(--border);
@@ -788,8 +792,8 @@ _MOBILE_RULES = """
   body{b} .tabbar > a.railonly{display:none}
   body{b}.has-tabbar main.wrap{padding-bottom:calc(5.5rem + env(safe-area-inset-bottom))}
   body{b}.has-tabbar footer{padding-bottom:calc(5.5rem + env(safe-area-inset-bottom))}
-  body{b} .tabbar{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;position:fixed;left:0;right:0;
-    bottom:0;z-index:8;background:var(--toolbar-bg);color:var(--toolbar-text);
+  body{b} .tabbar{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);position:fixed;
+    left:0;right:0;bottom:0;z-index:8;background:var(--toolbar-bg);color:var(--toolbar-text);
     border-top:1px solid var(--border);
     padding-bottom:env(safe-area-inset-bottom);box-shadow:0 -2px 10px rgba(0,0,0,.08)}
   body{b} .tabbar > a{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.2rem;
@@ -806,9 +810,12 @@ _MOBILE_RULES = """
     justify-content:center;gap:.2rem;height:56px;color:var(--toolbar-text);font-weight:700;font-size:11px;
     position:relative;-webkit-tap-highlight-color:transparent}
   body{b} .tabbar details.more summary svg{width:22px;height:22px}
+  /* large text (a phone's font scale): a label wraps inside its tab and the bar grows */
+  body{b} .tabbar > a,body{b} .tabbar details.more summary{min-width:0;height:auto;min-height:56px;
+    text-align:center;line-height:1.15;overflow-wrap:anywhere;hyphens:auto}
   body{b} .tabbar details.more summary.on,
   body{b} .tabbar details.more[open] summary{color:var(--toolbar-active)}
-  body{b} details.dd .menu{min-width:14rem}
+  body{b} details.dd .menu{min-width:min(14rem,calc(100vw - 16px))}
 """
 # The medium layout: the same tabs as a navigation rail (80px wide, icon in a pill with the label
 # under it, as Material's rail draws it) fixed to the left edge; the top bar keeps the brand and
@@ -845,7 +852,7 @@ _RAIL_RULES = """
   body{b} .tabbar details.more[open] summary::before{background:rgba(255,111,0,.22)}
   body{b} .tabbar details.more .menu.sheet{left:calc(84px + env(safe-area-inset-left));transform:none;
     bottom:auto;top:calc(7rem + env(safe-area-inset-top) + 4 * 64px)}
-  body{b} details.dd .menu{min-width:14rem}
+  body{b} details.dd .menu{min-width:min(14rem,calc(100vw - 16px))}
 """
 CSS = CSS.replace(
     "__MOBILE__",

@@ -2407,11 +2407,12 @@ table.qty td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-
 .listbar .field.grow{min-width:12rem}
 .listbar .field .btn{margin:0}
 .listbar .apply{margin-top:.5rem}
-@media (max-width:1000px){ .listbar .controls{grid-template-columns:1fr 1fr;align-items:start}
+@media (max-width:1000px){ .listbar .controls{grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+    align-items:start}
   .listbar .field:last-of-type{grid-column:1 / -1;display:flex;flex-direction:row;flex-wrap:wrap;gap:.5rem;
     align-items:center}
-  .listbar .field:last-of-type .lbl{margin-right:auto} }
-@media (max-width:600px){ .listbar .controls{grid-template-columns:1fr} }
+  .listbar .field:last-of-type .lbl{margin-right:auto} .listbar .field.grow{min-width:0} }
+@media (max-width:600px){ .listbar .controls{grid-template-columns:minmax(0,1fr)} }
 /* minmax(0,1fr), never 1fr: a long deck name (the "Copy of - …" names the app itself makes) must shrink
    and ellipsise inside its tile, not widen the track and scroll the page sideways. */
 ul.decklist.grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:25px;margin-bottom:1.25rem}
@@ -2644,6 +2645,24 @@ ul.erows{list-style:none;margin:.5rem 0 0;padding:0}
   .erow .sel{grid-column:2;grid-row:2}
   .erow details.dd,.erow button.remove{grid-column:3;grid-row:2;justify-self:end}
 }
+/* A card row also stacks by the room its list has, so large text (a phone's font scale, 200%
+   zoom) stacks it on a wider screen too: the category and menu under the name, then, in a still
+   narrower list, the count on a row of its own. The widths are in rem, so they grow with the
+   text; at the normal text size neither applies where the rule above does not. */
+ul.erows{container-type:inline-size}
+@container (max-width:30rem){
+  .erow{grid-template-columns:40px minmax(0,1fr) auto;grid-template-rows:auto auto}
+  .erow .sel{grid-column:2;grid-row:2}
+  .erow details.dd,.erow button.remove{grid-column:3;grid-row:2;justify-self:end}
+}
+@container (max-width:20rem){
+  .erow .qty{grid-column:2 / -1;grid-row:2}
+  .erow .sel{grid-row:3}
+  .erow details.dd,.erow button.remove{grid-row:3}
+}
+/* The phone's one-row save bar wraps with large text rather than run off the screen. */
+.editor{container-type:inline-size}
+@container (max-width:17rem){ .editbar{flex-wrap:wrap} .editbar .review{flex:1 1 auto} }
 """
 
 __all__ = [

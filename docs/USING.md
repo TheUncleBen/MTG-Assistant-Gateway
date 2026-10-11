@@ -37,7 +37,9 @@ screen, such as an unfolded foldable or a tablet, and in the Android app
 from 600 px, the same five sit in a rail down the left edge; a desktop
 browser shows them in the top bar. The layout follows the window as you
 fold, rotate or split the screen. The account menu is the person icon at
-the top right; a tap anywhere else closes it.
+the top right; a tap anywhere else closes it. Large text works too: the
+pages follow the phone's font size (the Android app included) and a
+browser's text zoom up to 200%, wrapping rather than running off the screen.
 
 ## Home
 
