@@ -18,7 +18,7 @@ on:
         description: "Numeric id of a public Archidekt deck to read (defaults to the LIVE_SMOKE_DECK_ID repository variable)"
         default: ""
       mystic_forge_tag:
-        description: "Mystic Forge image tag to test (empty = the tag this branch's Dockerfile builds, e.g. 1.3.2-mag3)"
+        description: "Mystic Forge image tag to test (empty = the tag this branch's Dockerfile builds, e.g. 1.3.2-mag4)"
         default: ""
 
 permissions:

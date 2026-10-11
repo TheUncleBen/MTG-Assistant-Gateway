@@ -291,7 +291,7 @@ If the packages are public you can skip this step.
 
    | Variable | What to put |
    | --- | --- |
-   | `MTG_IMAGE`, `MTG_TAG` | `ghcr.io/<owner>/mtg-assistant-gateway` and `latest` to follow every new version, or one version to stay on it, for example `0.7.22` ([VERSIONS.md](VERSIONS.md)) |
+   | `MTG_IMAGE`, `MTG_TAG` | `ghcr.io/<owner>/mtg-assistant-gateway` and `latest` to follow every new version, or one version to stay on it, for example `0.7.23` ([VERSIONS.md](VERSIONS.md)) |
    | `MTG_PUBLIC_URL` | `https://mtg.example.com` |
    | `MTG_OIDC_ISSUER` | the issuer URL from step 3 |
    | `MTG_OIDC_CLIENT_ID` | the Client ID from step 3 |
@@ -360,7 +360,7 @@ address and shared CI runners hit that limit. As a fallback for anything a
 build still fetches from Docker Hub, the image jobs sign in to Docker Hub when
 the repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (a
 read-only access token) exist; without them the step is skipped. The
-Mystic Forge image is built once per tag (`1.3.2-mag3`) and not rebuilt by
+Mystic Forge image is built once per tag (`1.3.2-mag4`) and not rebuilt by
 later releases; a manual run of its workflow from `main` rebuilds it with
 current base patches. GitHub
 Actions are pinned by commit, Python dependencies by version
@@ -512,9 +512,9 @@ licence, from upstream). It's built from upstream commit
 rules, precon and goldfish tools, and the gateway relays an allowlisted set
 of them to signed-in users.
 
-Upstream code is unchanged apart from four small patches in
-`docker/mystic-forge/patches/`, which is where the `-mag3` in the image tag
-`1.3.2-mag3` comes from:
+Upstream code is unchanged apart from seven small patches in
+`docker/mystic-forge/patches/`, which is where the `-mag4` in the image tag
+`1.3.2-mag4` comes from:
 
 - `0001-archidekt-null-categories.patch`: Archidekt sends
   `"categories": null` for cards that never got a category (it happens in
@@ -541,6 +541,22 @@ Upstream code is unchanged apart from four small patches in
   name are found by the goldfish tools; precon lists add up split basic land
   lines; and the simulation's honesty report no longer files played lands
   and mana rocks as low-impact.
+- `0005-scryfall-default-printing-and-finish.patch`: a card given without a
+  set used Scryfall's newest printing, which can be a preview that is not out
+  yet (no paper, no prices). Price lists and `format_archidekt` now use the
+  newest printing already out on paper, in the finish asked for, and say when
+  a card does not come in that finish.
+- `0007-goldfish-constructed-games.patch`: the goldfish simulator modelled
+  Commander games only and took a list's first line as the commander. The
+  patch adds `constructed` to `goldfish_run`, `goldfish_ab` and
+  `goldfish_annotate`: no commander, 20 life, no free mulligan and on the
+  play (no draw on turn 1). The gateway sets it for a deck without a
+  commander and with 60 or more cards. Commander games are unchanged.
+- `0008-goldfish-skipped-copies-and-named-printing.patch`: the simulation's
+  "not recognized by Scryfall, skipped" warning says how many copies of each
+  card were left out ("2 Foo"), and `scryfall_named` without a set shows the
+  same printing as the other lookups (the newest out on paper) and says which
+  one it is.
 
 What to know about it:
 
@@ -571,7 +587,7 @@ What to know about it:
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `MF_IMAGE` | `ghcr.io/theuncleben/mtg-assistant-mysticforge` | Image. A fork that builds its own images sets `ghcr.io/<owner>/mtg-assistant-mysticforge` |
-| `MF_TAG` | `1.3.2-mag3` | Image tag |
+| `MF_TAG` | `1.3.2-mag4` | Image tag |
 | `MF_PUBLIC_BASE` | `http://mtg-assistant-mysticforge:8000` | Base URL Mystic Forge uses in links (its own default points at the upstream author's site, so keep this) |
 | `MF_NODE` | none, required | Hostname of the node it runs on. The stack won't start without it |
 | `MF_MEMORY_LIMIT` | `512M` | Memory cap |
@@ -604,12 +620,93 @@ default, and an install that leaves it off behaves exactly as before.
   report. An idle Forge service holds no Java memory. `FORGE_GAME_SECONDS` (default 600) is how long
   one game may run before Forge calls it a draw; such games are counted as draws in the report.
 - **No upkeep:** the image carries Forge's card scripts, an index of Scryfall's alternative printed
-  names, and the newest Commander precons as opponents. Each image is rebuilt from a Forge release in
-  CI; you update it like any other image.
+  names, and the newest Commander precons as opponents, each with a bracket estimated from the game
+  changers it holds (Scryfall's list, read once when CI builds the image). The gateway seats the
+  precons of the tested deck's bracket. Each image is rebuilt from a Forge release in CI; you update
+  it like any other image.
 - **Privacy:** the service is on its own internal network with no internet access; only the gateway
   reaches it.
 - Cards Forge cannot play are listed in each report's `forge.not_played`, and the games run without
   them.
+
+## Notifications through ntfy (optional)
+
+Members can get a short message on their phone when a proposal waits for their approval, a deck
+report finishes (Forge runs that waited in the queue included), a watched card crosses a price
+alert they set, or their daily or weekly summary is ready. The gateway sends them through an
+[ntfy](https://ntfy.sh/) server. It is off by default: with `MTG_NTFY_URL` empty nothing is sent,
+the Account page says the gateway has no notification server, and nothing else changes. ntfy is
+free and open source; the gateway uses no paid service for this.
+
+What a message holds: a title, one short line and a link to the gateway page (the proposal, the
+report, the watchlist, the Account page's summary). Never a deck's cards. A price alert names the
+watched card and its old and new price; a summary gives counts and totals and the card that moved
+most. The access token is read from a Docker secret file, sent only in the `Authorization` header
+and never written to the log; a refused message is logged with its HTTP status alone.
+
+Each member turns notifications on in the **Notifications** card of their Account page. They get
+their own topic, `mtg-` and 22 random characters (128 bits) that nobody can guess, or choose one:
+`mtg-` and then 12 to 60 letters, digits, `-` or `_` (the prefix keeps members inside an
+`mtg-*` grant); two members can't have the same topic. **Send test** sends one message to check
+it, at most once a minute.
+
+### Self-hosted ntfy with access control (recommended)
+
+Run ntfy next to the gateway with `auth-default-access: deny-all`, so nobody can read or publish
+without a user and a grant. The ntfy image is `binwiederhier/ntfy` (pin a release tag); the
+settings below are its documented `server.yml` keys, also accepted as `NTFY_*` environment
+variables:
+
+```yaml
+# server.yml (or NTFY_BASE_URL, NTFY_AUTH_FILE, NTFY_AUTH_DEFAULT_ACCESS, NTFY_BEHIND_PROXY)
+base-url: https://ntfy.example.com
+auth-file: /var/lib/ntfy/user.db
+auth-default-access: deny-all
+behind-proxy: true
+```
+
+Then, inside the ntfy container (`docker exec -it <ntfy container> sh`):
+
+```bash
+# 1. A user for the gateway that may only publish, and a token for it.
+ntfy user add gateway                     # asks for a password; you won't need it again
+ntfy access gateway 'mtg-*' write-only    # or '*' when this server is only for the gateway
+ntfy token add gateway                    # prints tk_...; that is the token
+
+# 2. One user per member who wants notifications, allowed to read only their own topic
+#    (the member reads it on their Account page once they turned notifications on).
+ntfy user add alice
+ntfy access alice mtg-AbCdEf... read-only
+```
+
+Put the token in a Docker secret and point the gateway at the server:
+
+```bash
+printf '%s' 'tk_...' | docker secret create mtg_ntfy_token -
+```
+
+In the stack file remove the `# ` from the `mtg_ntfy_token` lines (under `secrets:` at the top and
+in the gateway's `secrets:` list), then set `MTG_NTFY_URL=https://ntfy.example.com` and
+`MTG_NTFY_TOKEN_FILE=/run/secrets/mtg_ntfy_token` and update the stack. For Docker Compose, write
+the token to `secrets/mtg_ntfy_token.txt` and uncomment the same lines in
+`deploy/compose/docker-compose.yml`. When ntfy runs on the same Docker network, `MTG_NTFY_URL` may
+be its internal `http://` address, but the link members subscribe with is the one they can reach,
+so give ntfy a public `https://` address through your reverse proxy and use that. A member who
+chooses their own topic needs it to start with `mtg-` for the `mtg-*` grant above, or a grant of
+its own.
+
+Members subscribe in the ntfy app on their phone: add this server, sign in with the user you gave
+them, and subscribe to their topic (the app's own help shows where; it differs between Android
+and iOS).
+
+### ntfy.sh instead (no server to run)
+
+`MTG_NTFY_URL=https://ntfy.sh` with no token works too, free. The trade-off is privacy: ntfy.sh is
+a public service run by someone else, a topic there is open to anyone who knows its name, and
+messages pass through and are kept on its servers for a while. The random topic is then the only
+protection, so members should keep it to themselves. Messages carry little (see above), but a price
+alert does name a card and a summary its biggest mover. ntfy.sh also limits how many messages one
+address may send.
 
 ## Environment reference
 
@@ -671,7 +768,7 @@ gateway's `environment:` in the stack file, or it has no effect.
 | `MTG_ARCHIDEKT_MAX_PER_MINUTE` | no, *stack* | `40` | Archidekt requests in any 60 seconds, for everyone together; past it requests wait their turn (1 to 120) |
 | `MTG_ARCHIDEKT_RETRIES` | no, *stack* | `2` | Retries for a read that timed out or got a server error (0 to 4). Writes and "slow down" answers are never retried |
 | `MTG_ARCHIDEKT_BACKOFF_BASE` | no, *stack* | `1.0` | Seconds; a retry waits a random time up to this x 2, 4... (capped at 10) (0.1 to 10) |
-| `MTG_ARCHIDEKT_CACHE_SECONDS` | no, *stack* | `60` | How long anonymous public deck reads and deck searches are reused; cleared by any write the gateway sends (0 turns it off, up to 900) |
+| `MTG_ARCHIDEKT_CACHE_SECONDS` | no, *stack* | `60` | How long anonymous public deck reads and deck searches are reused; cleared by any write the gateway sends (0 turns it off, up to 900). A member's deck page is also shown again from memory for up to 20 seconds (or this, if shorter) |
 | `MTG_ARCHIDEKT_CARD_CACHE_SECONDS` | no, *stack* | `3600` | How long card lookups are reused (0 to 86400) |
 | `MTG_ARCHIDEKT_BACKUPS` | no, *stack* | `true` | Before every applied edit or restore, copy the deck as a private deck into the user's backup folder on Archidekt (using Archidekt's own copy feature, so printings, finishes and categories are kept). If the copy fails, nothing changes and the proposal stays pending |
 | `MTG_ARCHIDEKT_BACKUP_FOLDER` | no, *stack* | `MTG Gateway backups` | Name of that folder (at most 100 characters), created in the account's root folder the first time. Decks in it are left out of the assistant's deck list |
@@ -680,6 +777,12 @@ gateway's `environment:` in the stack file, or it has no effect.
 | `MTG_TRUSTED_PROXIES` | no, *stack* | private networks (`10/8`, `172.16/12`, `192.168/16`, loopback) | Comma-separated IPs or CIDR ranges whose `X-Forwarded-*` headers are trusted. Recommended: narrow it to NPM's address or the overlay subnet (see [step 7](#7-reverse-proxy)) |
 | `MTG_CIMD_ENABLED` | no, *stack* | `true` | Accept clients that identify themselves with a Client ID Metadata Document URL (Claude's "Use Claude's published identity" and, reportedly, ChatGPT). `false` leaves only automatic registration |
 | `MTG_CIMD_ALLOWED_HOSTS` | no, *stack* | empty (any https host) | Comma-separated hostnames whose metadata documents are accepted, subdomains included. **Leave it empty** unless you know every client's host: listing only Claude's can lock ChatGPT out. Details in [OPERATIONS.md](OPERATIONS.md#which-ai-clients-may-connect) |
+| `MTG_NTFY_URL` | no, *stack* | empty (off) | The ntfy server notifications are sent through, such as `https://ntfy.example.com` or `https://ntfy.sh` (an `http://` address works for a server on the same private network). Empty sends nothing. See [Notifications through ntfy](#notifications-through-ntfy-optional) |
+| `MTG_NTFY_TOKEN_FILE` | no, *stack* | empty | File holding the ntfy access token the gateway publishes with (`/run/secrets/mtg_ntfy_token`, an optional secret). Needed for a server with access control; never logged |
+| `MTG_WATCH_MAX_CARDS` | no, *stack* | `200` | Cards one member may watch (0 to 5000; 0 turns card watching off) |
+| `MTG_WATCH_MAX_DECKS` | no, *stack* | `10` | Decks one member may watch (0 to 200; 0 turns deck watching off). Each watched deck is read from Archidekt once a day, paced like every read |
+| `MTG_PRICE_HISTORY_DAYS` | no, *stack* | `365` | Days of daily prices and deck values kept (30 to 3650); older ones go in the hourly clean-up |
+| `MTG_PRICE_HOUR_UTC` | no, *stack* | `6` | Hour (UTC) of the daily price check and the members' summaries, 0 to 23. The check asks Scryfall only for watched printings (`POST /cards/collection`, 75 a request, at the single-lookup pace above) and makes no request at all while nobody watches anything |
 | `MTG_SCRYFALL_LOOKUP_INTERVAL` | no, *stack* | `0.5` | Seconds between single-card Scryfall lookups for card scanning, 0.1 to 5 |
 | *(no setting)* | — | — | Typed card-name suggestions come from Scryfall's card-name catalog (`GET https://api.scryfall.com/catalog/card-names`, about 700 KB), downloaded in the background at start-up and again once a day, and kept in memory (a few MB). Until it has loaded, or if Scryfall is unreachable, suggestions fall back to Scryfall's autocomplete at the interval above; nothing else changes |
 | `MTG_PLUGIN_DIR` | no | `/usr/share/mtg-gateway/plugin` | Folder holding the assistant plugin shipped in the image; serves `/skill`, `/install` and `/plugin/` |

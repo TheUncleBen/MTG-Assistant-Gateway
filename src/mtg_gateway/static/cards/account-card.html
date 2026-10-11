@@ -28,7 +28,7 @@ ul.facts li b{font-weight:600;text-align:right;overflow-wrap:anywhere}
 (function () {
   "use strict";
   var B = Bridge, el = B.el, $ = B.$;
-  var MODES = { manual: "Ask me every time", semi: "Apply small edits without asking", auto: "Apply every change without asking" };
+  var MODES = { manual: "Ask me every time", semi: "Apply small edits without asking", auto: "Apply deck and collection changes without asking" };
 
   function fact(list, k, v, cls) {
     var li = el("li"); li.appendChild(el("span", "", k));

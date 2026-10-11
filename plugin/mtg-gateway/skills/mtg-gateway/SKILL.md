@@ -189,7 +189,8 @@ cannot value interaction, removal, politics or an opponent's deck.
 
 Mystic Forge's own stored reports and step-by-step games (`goldfish_report`,
 `goldfish_start`, `goldfish_step`, `goldfish_state`), watchlists and price
-history are switched off on this gateway, and so are its `goldfish_run` and
+history are switched off on this gateway (the gateway's own `watch_card`,
+`list_watchlist` and `card_price_history` replace the last two), and so are its `goldfish_run` and
 `goldfish_ab` (`run_deck_report` owns the simulation of one deck,
 `compare_decks` the paired A/B). Do not offer them.
 

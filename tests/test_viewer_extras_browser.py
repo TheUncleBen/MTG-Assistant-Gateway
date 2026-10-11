@@ -121,11 +121,11 @@ def test_viewer_rulings_links_and_back_face(server: Server, width: int, scheme: 
         assert page.locator(".cardview .pane img").get_attribute("src") == front
         rb = page.locator(".cardview .more button", has_text="Rulings")
         rb.click()
-        page.locator(".cardview .rulings li").first.wait_for(timeout=3000)
-        assert page.locator(".cardview .rulings li").count() == 2
+        page.locator("#cardview-rulings li").first.wait_for(timeout=3000)
+        assert page.locator("#cardview-rulings li").count() == 2
         assert rb.get_attribute("aria-expanded") == "true"
-        assert page.locator(".cardview .rulings li time").first.inner_text() == "2004-10-04"
-        assert page.locator(".cardview .rulings .pip").count() >= 1  # {C} drawn as a symbol
+        assert page.locator("#cardview-rulings li time").first.inner_text() == "2004-10-04"
+        assert page.locator("#cardview-rulings .pip").count() >= 1  # {C} drawn as a symbol
         over = page.evaluate(
             "() => { const b = document.querySelector('.cardview .box');"
             " return [b.scrollWidth - b.clientWidth, document.documentElement.scrollWidth - innerWidth]; }"
@@ -133,7 +133,7 @@ def test_viewer_rulings_links_and_back_face(server: Server, width: int, scheme: 
         assert over == [0, 0], over
         _shot(page, f"viewer-rulings-{width}-{scheme}")
         rb.click()
-        assert page.locator(".cardview .rulings").is_hidden()
+        assert page.locator("#cardview-rulings").is_hidden()
         assert errors == []
         browser.close()
 

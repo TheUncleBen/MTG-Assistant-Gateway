@@ -523,7 +523,7 @@ async def test_set_label_puts_and_takes_off_a_colour_tag(stack: Stack) -> None:
 
     p = await propose({"action": "set_label", "name": "Sol Ring", "label": "Have", "color": "#37D67A"})
     assert p["ok"], p
-    assert "Sol Ring: colour tag no tag -> Have (#37d67a)" in p["diff"]
+    assert "Sol Ring: color tag no tag -> Have (#37d67a)" in p["diff"]
     before = len(ark.patches)
     a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     assert a["ok"] and a["result"]["verified"] is True, a

@@ -60,6 +60,10 @@ class FakeScryfall:
         self.catalog: list[str] | None = None
         self.fail_with: int | None = None
         self.rulings: dict[str, list[dict[str, Any]]] = {}  # card id -> Scryfall ruling objects
+        # Today's prices by card id, set by a test to move prices from day to day (prices.py);
+        # cards not named keep their recorded prices. collection_bodies: every identifier list.
+        self.prices: dict[str, dict[str, str | None]] = {}
+        self.collection_bodies: list[list[dict[str, str]]] = []
 
     def client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(transport=httpx.MockTransport(self.handle), base_url="https://scryfall.test")
@@ -171,12 +175,17 @@ class FakeScryfall:
             body = json.loads(request.content)
             idents = body["identifiers"]
             assert len(idents) <= 75
+            self.collection_bodies.append(idents)
             found, missing = [], []
             for ident in idents:
-                if "collector_number" in ident:
+                if "id" in ident:
+                    card = next((c for c in self.cards if c["id"] == ident["id"]), None)
+                elif "collector_number" in ident:
                     card = self.by_print(ident["set"], ident["collector_number"])
                 else:
                     card = self.by_name(ident["name"], ident.get("set"))
+                if card and card["id"] in self.prices:
+                    card = {**card, "prices": {**(card.get("prices") or {}), **self.prices[card["id"]]}}
                 (found.append(card) if card else missing.append(ident))
             return httpx.Response(200, json={"object": "list", "not_found": missing, "data": found})
         return httpx.Response(404, json={"object": "error", "details": f"unknown path {path}"})

@@ -930,9 +930,9 @@ def test_scan_card_flags_unrecognised_items_and_links_the_scan_page_at_320px() -
         assert rows.count() == 3
         assert "flag" in rows.first.get_attribute("class")  # the unrecognised item comes first
         assert ("Zzyzx " + HOSTILE) in rows.first.inner_text()
-        assert "not recognised" in rows.first.inner_text()
+        assert "not recognized" in rows.first.inner_text()
         assert "read as Islnad" in card.locator("#list").inner_text()
-        assert card.locator("#summary").inner_text() == "3 cards recognised, 1 item needs a look."
+        assert card.locator("#summary").inner_text() == "3 cards recognized, 1 item needs a look."
         assert _keyboard_open(page, card, "Open the Scan page") == "https://mtg.test/scan"
 
     _display_card("scan-card", {"structuredContent": SCAN}, "#list .row", check)

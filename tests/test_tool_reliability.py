@@ -48,6 +48,17 @@ class FormatInput(BaseModel):
     cards: list[NamedInput] = Field(description="The cards.")
 
 
+class OddsGroup(BaseModel):
+    copies: int = Field(ge=0)
+
+
+class OddsInput(BaseModel):
+    deck_size: int = Field(ge=1)
+    draws: int = Field(ge=0)
+    copies: int | None = Field(default=None, ge=0)
+    groups: list[OddsGroup] | None = None
+
+
 def real_shaped_mystic_forge() -> MCPServer:
     mf = MCPServer(name="mystic-forge-shaped")
 
@@ -67,6 +78,20 @@ def real_shaped_mystic_forge() -> MCPServer:
     )
     async def format_archidekt(params: FormatInput) -> str:
         return f"{len(params.cards)} cards; next call goldfish_run"
+
+    @mf.tool(name="goldfish_odds", description="Hypergeometric odds")
+    async def goldfish_odds(params: OddsInput) -> str:
+        # the real Mystic Forge's answers to arguments it cannot use: plain text, no error flag
+        if (params.copies is None) == (params.groups is None):
+            return (
+                "Provide exactly one of `copies` (flat mode) or `groups` "
+                "(joint mode: [{copies, min_successes}, ...])."
+            )
+        if params.draws > params.deck_size:
+            return "draws cannot exceed deck_size."
+        if params.groups and sum(g.copies for g in params.groups) > params.deck_size:
+            return "group copies exceed deck size"
+        return f"P(>=1 of {params.copies} copies in top {params.draws} of {params.deck_size}) = 20.00%"
 
     return mf
 
@@ -213,6 +238,27 @@ async def test_mystic_forge_upstream_failure_is_flagged_as_an_error(stack: Stack
     token = await mcp_token(stack.h)
     out = await call(stack.h, token, "precon_search", {"query": "Aesi"})
     assert out.get("isError") is True and "ProxyError" in json.dumps(out), out
+
+
+async def test_research_service_argument_refusals_are_flagged_and_structured(stack: Stack) -> None:
+    """QA F17: goldfish_odds answered "draws cannot exceed deck_size." and the like as a success
+    (isError false). They come back as the gateway's own refusal: flagged, error invalid,
+    error_code INVALID_ARGUMENT, with the research service's reason in the message."""
+    token = await mcp_token(stack.h)
+    for args, reason in [
+        ({"deck_size": 10, "draws": 11, "copies": 1}, "draws cannot exceed deck_size"),
+        ({"deck_size": 10, "draws": 2, "copies": 1, "groups": [{"copies": 1}]}, "Provide exactly one"),
+        ({"deck_size": 10, "draws": 2, "groups": [{"copies": 8}, {"copies": 8}]}, "group copies exceed"),
+    ]:
+        res = await call(stack.h, token, "goldfish_odds", args)
+        out = structured(res)
+        assert res.get("isError") is True, res
+        assert out["ok"] is False and out["error"] == "invalid", out
+        assert out["error_code"] == "INVALID_ARGUMENT" and out["retryable"] is False, out
+        assert reason in out["message"] and json.loads(res["content"][0]["text"]) == out
+    # an answer stays an answer
+    res = await call(stack.h, token, "goldfish_odds", {"deck_size": 10, "draws": 2, "copies": 1})
+    assert not res.get("isError") and "20.00%" in json.dumps(res), res
 
 
 async def test_arguments_that_do_not_fit_get_a_flagged_structured_refusal(stack: Stack) -> None:

@@ -181,6 +181,59 @@ class ForgeClient:
         return await self._call("DELETE", f"/jobs/{job_id}")
 
 
+BRACKET_SOURCES = {
+    "archidekt": "the bracket set on the deck in Archidekt",
+    "estimate": "the gateway's bracket estimate for the deck",
+}
+
+
+def pick_opponents(
+    precons: list[dict[str, Any]], bracket: int | None, source: str | None
+) -> tuple[list[str], dict[str, Any]]:
+    """The precons to seat against a deck, and why: those of the deck's bracket first, then the
+    nearest brackets, newest first within a bracket (the Forge service lists its precons newest
+    first). A precon's bracket comes from the Forge image (docker/forge/precons.py: the game
+    changers it holds). Without a bracket for the deck, or precons that carry none (an older
+    Forge image), the newest precons play and ``opponent_choice`` says so."""
+    newest = [p["name"] for p in precons][:DEFAULT_OPPONENTS]
+    rated = [p for p in precons if isinstance(p.get("bracket"), int)]
+    if bracket is None:
+        return newest, {
+            "rule": "newest",
+            "note": "The deck has no bracket (none set on Archidekt and no estimate), so the newest "
+            "precons play.",
+        }
+    why = BRACKET_SOURCES.get(source or "", "the deck's bracket")
+    if not rated:
+        return newest, {
+            "bracket": bracket,
+            "source": source,
+            "rule": "newest",
+            "note": f"Bracket {bracket} ({why}), but this Forge image's precons carry no bracket, so "
+            "the newest precons play. A newer Forge image matches opponents by bracket.",
+        }
+    order = sorted(range(len(rated)), key=lambda i: (abs(rated[i]["bracket"] - bracket), i))
+    chosen = [rated[i] for i in order[:DEFAULT_OPPONENTS]]
+    exact = sum(1 for p in chosen if p["bracket"] == bracket)
+    if exact == len(chosen):
+        note = f"Opponents are bracket {bracket} precons, matching {why}."
+    else:
+        others = sorted({p["bracket"] for p in chosen if p["bracket"] != bracket})
+        nearest = f"the nearest bracket{'s' if len(others) != 1 else ''} ({', '.join(map(str, others))})"
+        if exact:
+            have = f"{exact} bracket {bracket} precon{'s are' if exact != 1 else ' is'} here"
+            note = f"Bracket {bracket} ({why}): only {have}; the rest come from {nearest}."
+        else:
+            note = f"Bracket {bracket} ({why}): no bracket {bracket} precon is here, so {nearest} play."
+    return [p["name"] for p in chosen], {
+        "bracket": bracket,
+        "source": source,
+        "rule": "bracket" if exact == len(chosen) else "nearest",
+        "opponent_brackets": {p["name"]: p["bracket"] for p in chosen},
+        "note": note,
+    }
+
+
 async def start_run(
     client: ForgeClient,
     deck_text: str,
@@ -189,6 +242,8 @@ async def start_run(
     games: int,
     opponents: list[str] | None = None,
     seed: int | None = None,
+    bracket: int | None = None,
+    bracket_source: str | None = None,
 ) -> dict[str, Any]:
     """Start a Forge run of the member's deck against bundled precons and return the report's
     ``forge`` section. Cards Forge lacks are removed from the run and named in ``not_played``;
@@ -199,7 +254,9 @@ async def start_run(
     if not deck["commander"]:
         return {
             "state": "failed",
-            "error": "The deck has no card in a Commander category, so Forge can't seat it.",
+            # Forge's opponents are the bundled Commander precons; there are no 60-card ones.
+            "error": "Forge plays Commander games against Commander precons, and this deck has no "
+            "card in a Commander category, so Forge doesn't run it.",
         }
     names = list(dict.fromkeys(deck["commander"] + [name for _, name in deck["main"]]))
     resolved = await client.check(names)
@@ -211,8 +268,12 @@ async def start_run(
             "error": "Forge does not have this deck's commander, so it can't run the game.",
         }
     deck["main"] = [[n, name] for n, name in deck["main"] if resolved.get(name)]
-    available = [p["name"] for p in await client.precons()]
-    chosen = [p for p in (opponents or []) if p in available] or available[:DEFAULT_OPPONENTS]
+    precons = [p for p in await client.precons() if isinstance(p, dict) and isinstance(p.get("name"), str)]
+    available = [p["name"] for p in precons]
+    chosen = [p for p in (opponents or []) if p in available]
+    choice: dict[str, Any] = {"rule": "asked", "note": "The opponents asked for play."}
+    if not chosen:
+        chosen, choice = pick_opponents(precons, bracket, bracket_source)
     if not chosen:
         return {"state": "failed", "error": "The simulation engine has no opponent decks."}
     seats = [deck_name, *chosen]
@@ -231,6 +292,7 @@ async def start_run(
         **({"forge_seed": forge_seed} if forge_seed != seed else {}),
         "job_id": job["id"],
         "seats": seats,
+        "opponent_choice": choice,
         "not_played": not_played,
         "games_requested": games,
         "forge_version": job.get("forge_version"),

@@ -196,12 +196,12 @@ class DeckChange(_Card):
     label: str | None = Field(
         default=None,
         max_length=48,  # a name of up to 40 characters, or Archidekt's own "Name,#rrggbb"
-        description="For set_label: the colour tag's name, e.g. Have or Proxy; an empty string takes it off.",
+        description="For set_label: the color tag's name, e.g. Have or Proxy; an empty string takes it off.",
     )
     color: str | None = Field(
         default=None,
         pattern=r"^#[0-9a-fA-F]{6}$",
-        description="For set_label: the tag's colour as #rrggbb (grey when left out).",
+        description="For set_label: the tag's color as #rrggbb (gray when left out).",
     )
     mana_value: StrictInt | None = Field(
         default=None,

@@ -147,7 +147,7 @@ def add_card_resources(apps: Apps, public_url: str) -> None:
         card_html("stats-card", public_url),
         name="stats-card",
         title="Deck statistics",
-        description="A deck's mana curve, colours, price, legality and bracket estimate.",
+        description="A deck's mana curve, colors, price, legality and bracket estimate.",
         csp=ResourceCsp(),
         prefers_border=True,
     )
@@ -165,7 +165,7 @@ def add_card_resources(apps: Apps, public_url: str) -> None:
         card_html("scan-card", public_url),
         name="scan-card",
         title="Scan session",
-        description="The cards a scan recognised, the items that need a look, and a link to the Scan page.",
+        description="The cards a scan recognized, the items that need a look, and a link to the Scan page.",
         csp=ResourceCsp(resource_domains=list(CARD_IMAGE_HOSTS)),
         prefers_border=True,
     )
@@ -313,7 +313,7 @@ def deck_card_data(deck: Deck, *, public_url: str, snapshot: dict[str, Any] | No
     groups: dict[str, list[dict[str, Any]]] = {}
     order: list[str] = [c["name"] for c in deck.categories if isinstance(c.get("name"), str)]
     for c in deck.cards:
-        cat = c.categories[0] if c.categories else (c.default_category or "Uncategorised")
+        cat = c.categories[0] if c.categories else (c.default_category or "Uncategorized")
         groups.setdefault(cat, []).append(
             {
                 "name": c.name,

@@ -64,7 +64,7 @@ async def test_login_in_the_app_asks_for_the_browser_sign_in(harness: Harness) -
         assert r.status_code == 200
         assert r.headers["cache-control"] == "no-store"
         assert "id='app-signin'" in r.text and "data-next='/decks'" in r.text
-        assert "<script src='/static/app-signin.js'></script>" in r.text
+        assert re.search(r"<script src='/static/app-signin.js\?v=[0-9a-f]{12}'></script>", r.text)
         # An older app (no signInWithBrowser) follows this link to the in-app sign-in, as before.
         assert "data-inapp='/login?next=/decks&amp;inapp=1'" in r.text
         assert "script-src 'self'" in r.headers["content-security-policy"]

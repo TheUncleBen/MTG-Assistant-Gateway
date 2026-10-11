@@ -12,6 +12,7 @@ import pytest
 
 from mtg_gateway.approve import APPROVAL_META_KEY, card_html
 
+from .test_cards_browser import PNG
 from .test_consent_browser import _chromium_or_skip, _launch
 
 pytest.importorskip("playwright")
@@ -84,6 +85,8 @@ window.teardown = () => { frame.contentWindow.postMessage(
 
 
 def _open(page, result: dict, confirm_reply: dict | None = None, get_reply: dict | None = None):
+    # the card's pictures come from Scryfall: a stand-in picture keeps the test offline
+    page.route("https://api.scryfall.com/**", lambda r: r.fulfill(content_type="image/png", body=PNG))
     page.set_content(HOST)
     page.evaluate("(r) => { window.toolResult = r; }", result)
     page.evaluate("(r) => { window.confirmReply = r; }", confirm_reply)

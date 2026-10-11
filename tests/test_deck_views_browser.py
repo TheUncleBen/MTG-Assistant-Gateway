@@ -253,6 +253,120 @@ def test_stack_and_card_drag_by_touch_scroll_on_near_the_edge(server: Server) ->
         browser.close()
 
 
+# Every frame's scroll position and when each pointer or finger move arrived, on the page's clock.
+SCROLL_LOG = """() => {
+  window.__s = []; window.__ev = [];
+  (function f() { __s.push([performance.now(), scrollY]); requestAnimationFrame(f); })();
+  for (const k of ['pointermove', 'touchmove'])
+    document.addEventListener(k, () => __ev.push(performance.now()), true);
+}"""
+
+# A screen that draws `hz` frames a second (headless Chromium draws 60).
+FRAME_RATE = """(() => {
+  const ms = 1000 / %s;
+  window.requestAnimationFrame = cb => setTimeout(() => cb(performance.now()), ms);
+  window.cancelAnimationFrame = id => clearTimeout(id);
+})()"""
+
+
+def _scroll_at(log: list, t: float) -> float:
+    return [y for when, y in log if when <= t][-1]
+
+
+def _edge_run(log: list, t_in: float, t_out: float, t_next: float) -> dict:
+    """How the page scrolled while the pointer rested in the edge zone from t_in to t_out, and
+    after it left until t_next: delay to the first step (ms), speed (px/s), the slowest and
+    fastest 200 ms stretch against that speed, and how long it kept going after t_out (ms)."""
+    y_in = _scroll_at(log, t_in)
+    first = next(when for when, y in log if when > t_in and y != y_in)
+    speed = (_scroll_at(log, t_out) - y_in) / (t_out - first) * 1000
+    stretches = [
+        (_scroll_at(log, t + 200) - _scroll_at(log, t)) / (speed / 5)
+        for t in range(int(first) + 20, int(t_out) - 200, 100)
+    ]
+    pairs = zip(log[1:], log[:-1], strict=True)
+    moved = [when for (when, y), (_w, prev) in pairs if t_out < when < t_next and y != prev]
+    return {
+        "delay": round(first - t_in),
+        "speed": round(speed),
+        "steady": (round(min(stretches), 2), round(max(stretches), 2)),
+        "after": round(moved[-1] - t_out) if moved else 0,
+    }
+
+
+@pytest.mark.parametrize(
+    ("how", "hz"), [("mouse", None), ("finger", None), ("card", None), ("mouse", 120), ("finger", 30)]
+)
+def test_edge_auto_scroll_is_measured(server: Server, how: str, hz: int | None) -> None:
+    """0.7.22's edge scrolling while something is dragged, measured: a stack's handle by mouse and
+    by finger in every view, a held card by finger, and on a 120 Hz and a 30 Hz screen. Resting
+    near the bottom edge, the page starts on the next frame, scrolls at a steady speed (about
+    1,200 px/s at the very edge, half that halfway into the zone) whatever the frame rate, and
+    stops as soon as the pointer leaves the zone or is let go."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    views = ["text"] if how == "card" or hz else ["text", "table", "brewer", "stacks", "scroll", "grid"]
+    with sync_playwright() as p:
+        touch = {"has_touch": True, "is_mobile": True} if how != "mouse" else {}
+        browser, page, errors = _page(p, server, sid, 390, **touch)
+        if hz:
+            page.context.add_init_script(FRAME_RATE % hz)
+        cdp = page.context.new_cdp_session(page)
+
+        def move(x: float, y: float) -> float:
+            """Move there; the page's clock just before the move (the move's own time is the
+            first event after it)."""
+            t = page.evaluate("performance.now()")
+            page.mouse.move(x, y) if how == "mouse" else _touch(cdp, "touchMove", x, y)
+            return t
+
+        for view in views:
+            page.goto(f"{server.base}/decks/42?view={view}", wait_until="networkidle")
+            h = page.evaluate("innerHeight")
+            zone = min(96, h * 0.15)
+            what = page.locator(".stack .row" if how == "card" else ".stack .stackgrip").first
+            what.scroll_into_view_if_needed()
+            b = what.bounding_box()
+            x, y = b["x"] + min(b["width"] / 2, 60), b["y"] + b["height"] / 2
+            if how == "mouse":
+                page.mouse.move(x, y)
+                page.mouse.down()
+            else:
+                _touch(cdp, "touchStart", x, y)
+                if how == "card":
+                    page.wait_for_timeout(450)  # held: the card is picked up
+            move(x + 4, y + 10)
+            move(x + 8, h / 2)
+            page.wait_for_timeout(150)
+            page.evaluate(SCROLL_LOG)
+            # at the very edge, out of the zone, halfway into it, out, and let go at the edge
+            times = []
+            for at, wait in [(h - 8, 600), (h / 2, 250), (h - zone / 2, 600), (h / 2, 250), (h - 8, 250)]:
+                times.append(move(x + 8, at))
+                page.wait_for_timeout(wait)
+            t_up = page.evaluate("performance.now()")
+            page.mouse.up() if how == "mouse" else _touch(cdp, "touchEnd")
+            page.wait_for_timeout(400)
+            log, events = page.evaluate("__s"), page.evaluate("__ev")
+            times = [next(e for e in events if e >= t) for t in times]
+            edge = _edge_run(log, times[0], times[1], times[2])
+            half = _edge_run(log, times[2], times[3], times[4])
+            settled = {y for t, y in log if t > t_up + 50}
+            label = f"{how} at {hz or 'native'} Hz, {view} view: edge {edge}, halfway {half}"
+            print(label)
+            assert edge["delay"] < 100 and half["delay"] < 100, label  # starts on the next frames
+            assert 900 < edge["speed"] < 1500, label
+            assert 0.35 < half["speed"] / edge["speed"] < 0.65, label  # faster the closer to the edge
+            assert edge["steady"][0] > 0.6 and edge["steady"][1] < 1.4, label  # not in jumps
+            assert edge["after"] < 100 and half["after"] < 100, label  # stops on leaving the zone
+            assert len(settled) == 1, label  # and once let go
+            assert page.locator(".stackdrop, .stacktag, .dragghost").count() == 0
+        assert errors == []
+        browser.close()
+
+
 @pytest.mark.parametrize(("width", "scheme", "view"), [(390, "dark", "text"), (1366, "light", "grid")])
 def test_bulk_move_finish_and_remove(server: Server, width: int, scheme: str, view: str) -> None:
     from playwright.sync_api import sync_playwright
@@ -341,11 +455,11 @@ def test_colour_tag_from_the_card_menu_and_undo(server: Server, width: int, sche
         row = page.locator(".deckview .row[data-card='Cultivate']").first
         row.scroll_into_view_if_needed()
         row.click(button="right")
-        page.locator(".ctxmenu [role=menuitem]", has_text="Colour tag").click()
+        page.locator(".ctxmenu [role=menuitem]", has_text="Color tag").click()
         form = page.locator(".bulkbar .tagform")
         assert form.is_visible() and row.get_attribute("aria-pressed") == "true"
         page.locator(".bulkbar input[aria-label='Tag name']").fill("Have")
-        page.locator(".bulkbar input[aria-label='Tag colour']").evaluate(
+        page.locator(".bulkbar input[aria-label='Tag color']").evaluate(
             "e => { e.value = '#2ccce4'; e.dispatchEvent(new Event('input')); }"
         )
         _shot(page, f"deck-tag-form-{width}-{scheme}")
@@ -367,7 +481,7 @@ def test_colour_tag_from_the_card_menu_and_undo(server: Server, width: int, sche
         assert dot.get_attribute("title") == "Tag: Have"
         page.locator(".bulkbar button", has_text="Select cards").click()
         page.locator(".deckview .row[data-card='Cultivate']").first.click()
-        page.locator(".bulkbar button", has_text="Colour tag").click()
+        page.locator(".bulkbar button", has_text="Color tag").click()
         with page.expect_response(EDIT_URL):
             page.locator(".bulkbar button", has_text="Take tag off").click()
         page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)

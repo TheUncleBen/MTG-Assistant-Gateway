@@ -16,11 +16,14 @@ globalToolbar, floatingToolbar, footer and panel rules). The theme is chosen wit
 
 from __future__ import annotations
 
+import functools
+import hashlib
 import html
 import re
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from contextvars import ContextVar
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
@@ -38,11 +41,12 @@ FEEDBACK_SCRIPT = "/static/feedback.js"
 # The Content-Security-Policy of every page render() builds (some pages replace it with their own,
 # which keeps the same frame-ancestors and base-uri). form-action is last so sources can follow it.
 # img-src 'self' is for the gateway's own files only (the select arrow, /static/chevron.svg); pages
-# that show card images add cards.scryfall.io in their own policy.
+# that show card images add cards.scryfall.io in their own policy. style-src 'self' is for the
+# shared stylesheets (/static/site.css, /static/deck.css); every policy that replaces this one keeps it.
 DEFAULT_CSP = (
     # The top bar's search box is on every page: connect-src 'self' lets it ask the gateway for
     # suggestions, and cards.scryfall.io is the small card picture each suggestion shows.
-    "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; "
+    "default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; "
     "manifest-src 'self'; worker-src 'self'; "
     "connect-src 'self'; "
     "img-src 'self' https://cards.scryfall.io; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
@@ -268,7 +272,7 @@ details.dd .menu button:focus-visible{background:var(--border);color:var(--text)
 .menu button.danger:hover,.menu button.danger:focus-visible,details.dd .menu button.danger:hover,
 details.dd .menu button.danger:focus-visible{background:var(--border);color:var(--danger-text)}
 .menu .head{padding:.4rem 1rem .2rem;font-size:.8rem;font-weight:700;color:var(--menu-head);
-  text-transform:uppercase;letter-spacing:.04em}
+  text-transform:uppercase;letter-spacing:.04em;overflow-wrap:anywhere}
 .menu .head.who{text-transform:none;letter-spacing:0;font-weight:400;font-size:.86rem;
   padding:.5rem 1rem .4rem;border-bottom:1px solid var(--border);margin-bottom:.25rem;white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis;max-width:18rem}
@@ -451,8 +455,10 @@ button.icon-only{width:var(--ctl);padding:0}
 form{margin:0}
 form > button,form .btn{margin-top:1rem}
 button.thumbbtn{all:unset;display:block;cursor:pointer;line-height:0;border-radius:3px}
-.exportblock .head{display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-top:1.25rem}
-.exportblock .head h2{margin:0} .exportblock textarea{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+.exportblock .head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.5rem;
+  margin-top:1.25rem}
+.exportblock .head h2{margin:0;min-width:0;overflow-wrap:anywhere}
+.exportblock textarea{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
   font-size:.85rem}
 button.thumbbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .choice{display:flex;flex-direction:column;gap:.6rem;margin-top:1rem}
@@ -682,7 +688,8 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
   margin:0 0 1rem}
 .home .hero h1{margin:0;font-size:1.6rem}
 .home .hero .sub{color:var(--text-muted);margin:.2rem 0 0}
-.home .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(14rem,1fr));gap:1rem;margin:0 0 1rem}
+.home .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,14rem),1fr));gap:1rem;
+  margin:0 0 1rem}
 .home .tile{display:flex;flex-direction:column;gap:.35rem;padding:1rem;background:var(--surface);
   border:1px solid var(--border);border-radius:var(--radius-panel);color:var(--text);text-decoration:none;
   min-height:7.5rem;transition:border-color .2s ease}
@@ -695,7 +702,7 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
 .home .searchbox{display:flex;gap:.5rem;align-items:end;flex-wrap:wrap}
 .home .searchbox .field{flex:1 1 14rem;margin:0}
 .home .searchbox button{margin:0}
-.home .recent{display:grid;grid-template-columns:repeat(auto-fill,minmax(10rem,1fr));gap:.75rem}
+.home .recent{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,10rem),1fr));gap:.75rem}
 .home .recent a{display:block;position:relative;aspect-ratio:16/9;border-radius:var(--radius);overflow:hidden;
   background:linear-gradient(135deg,#3a3a3a,#1f1f1f) center/cover no-repeat;color:#fff;text-decoration:none;
   font-weight:700}
@@ -706,7 +713,8 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
 .home details.connect summary{cursor:pointer;font-weight:700;display:flex;flex-wrap:wrap;gap:.25rem .75rem;
   align-items:baseline}
 .home details.connect summary .addr{font-weight:400;font-size:.9rem;word-break:break-all}
-.home .panel-head{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin:0 0 .75rem}
+.home .panel-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;
+  gap:.5rem 1rem;margin:0 0 .75rem}
 .home .panel-head h2{margin:0}
 /* placeholders while a deck list is still being read (decks.js swaps the real list in) */
 .skeleton>*{display:block;background:var(--surface-2);border:1px solid var(--border);
@@ -784,8 +792,8 @@ _MOBILE_RULES = """
   body{b} .tabbar > a.railonly{display:none}
   body{b}.has-tabbar main.wrap{padding-bottom:calc(5.5rem + env(safe-area-inset-bottom))}
   body{b}.has-tabbar footer{padding-bottom:calc(5.5rem + env(safe-area-inset-bottom))}
-  body{b} .tabbar{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;position:fixed;left:0;right:0;
-    bottom:0;z-index:8;background:var(--toolbar-bg);color:var(--toolbar-text);
+  body{b} .tabbar{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);position:fixed;
+    left:0;right:0;bottom:0;z-index:8;background:var(--toolbar-bg);color:var(--toolbar-text);
     border-top:1px solid var(--border);
     padding-bottom:env(safe-area-inset-bottom);box-shadow:0 -2px 10px rgba(0,0,0,.08)}
   body{b} .tabbar > a{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.2rem;
@@ -802,9 +810,12 @@ _MOBILE_RULES = """
     justify-content:center;gap:.2rem;height:56px;color:var(--toolbar-text);font-weight:700;font-size:11px;
     position:relative;-webkit-tap-highlight-color:transparent}
   body{b} .tabbar details.more summary svg{width:22px;height:22px}
+  /* large text (a phone's font scale): a label wraps inside its tab and the bar grows */
+  body{b} .tabbar > a,body{b} .tabbar details.more summary{min-width:0;height:auto;min-height:56px;
+    text-align:center;line-height:1.15;overflow-wrap:anywhere;hyphens:auto}
   body{b} .tabbar details.more summary.on,
   body{b} .tabbar details.more[open] summary{color:var(--toolbar-active)}
-  body{b} details.dd .menu{min-width:14rem}
+  body{b} details.dd .menu{min-width:min(14rem,calc(100vw - 16px))}
 """
 # The medium layout: the same tabs as a navigation rail (80px wide, icon in a pill with the label
 # under it, as Material's rail draws it) fixed to the left edge; the top bar keeps the brand and
@@ -841,7 +852,7 @@ _RAIL_RULES = """
   body{b} .tabbar details.more[open] summary::before{background:rgba(255,111,0,.22)}
   body{b} .tabbar details.more .menu.sheet{left:calc(84px + env(safe-area-inset-left));transform:none;
     bottom:auto;top:calc(7rem + env(safe-area-inset-top) + 4 * 64px)}
-  body{b} details.dd .menu{min-width:14rem}
+  body{b} details.dd .menu{min-width:min(14rem,calc(100vw - 16px))}
 """
 CSS = CSS.replace(
     "__MOBILE__",
@@ -896,6 +907,17 @@ _TOPSEARCH_CSS = """
 .suggest-list li.go svg.i{color:var(--orange);flex:none}
 """
 CSS += _TOPSEARCH_CSS
+
+# The navigation bar (static/feedback.js): a thin line along the top of the window from the tap on
+# a link to another page until that page replaces this one, so a slow answer never looks like a
+# missed tap. It creeps towards the end and never finishes on its own.
+CSS += """
+.navprogress{position:fixed;top:0;left:0;right:0;height:3px;z-index:1000;pointer-events:none;
+  background:var(--orange);transform-origin:0 50%;transform:scaleX(0);opacity:0}
+html.navigating .navprogress{opacity:1;animation:navprogress 8s cubic-bezier(.1,.7,.3,1) forwards}
+@keyframes navprogress{from{transform:scaleX(.08)}to{transform:scaleX(.92)}}
+@media (prefers-reduced-motion:reduce){html.navigating .navprogress{animation:none;transform:scaleX(.6)}}
+"""
 
 
 # Own inline icons (simple 24-unit strokes). None is an Archidekt or Font Awesome path.
@@ -1095,7 +1117,7 @@ NAV_LINKS = [
 # The tabs, as Material's navigation bar (3 to 5 destinations) and rail (up to 7) have them: on a
 # compact screen Decks, Scan, Collection, Proposals and More, with Search as the icon in the top
 # bar; the rail has room for Search as a sixth tab. More opens a sheet with the remaining pages
-# (Home, History, Guide, Admin, Account) so nothing is more than two taps away.
+# (Home, History, Watchlist, Guide, Admin, Account) so nothing is more than two taps away.
 TAB_LINKS = [
     ("/decks", "Decks", "decks", ""),
     ("/search", "Search", "search", "railonly"),
@@ -1106,6 +1128,7 @@ TAB_LINKS = [
 MORE_LINKS = [
     ("/", "Home", "home"),
     ("/history", "History", "history"),
+    ("/watchlist", "Watchlist", "stats"),
     ("/guide", "Guide", "guide"),
     ("/account", "Account", "account"),
 ]
@@ -1113,6 +1136,52 @@ MORE_LINKS = [
 
 # The site's public origin (MTG_PUBLIC_URL), set by create_app: link previews need an absolute image.
 PUBLIC_URL = ""
+
+STATIC_DIR = Path(__file__).parent / "static"
+
+
+def _deck_css() -> str:
+    from .deckpage import DECK_CSS  # deckpage imports this module
+
+    return DECK_CSS
+
+
+# Stylesheets the pages share, served from memory at /static/<name> (companion.py's static route)
+# instead of inline in every page: the browser keeps them, so a page brings only its own markup.
+STYLESHEETS: dict[str, Callable[[], str]] = {"site.css": lambda: CSS, "deck.css": _deck_css}
+
+
+def stylesheet_link(name: str) -> str:
+    return f"<link rel='stylesheet' href='/static/{name}'>"
+
+
+@functools.cache
+def static_version(name: str) -> str | None:
+    """A short digest of a /static file (or shared stylesheet), None for one that doesn't exist.
+    The files only change with a new image, so each is read once."""
+    if name in STYLESHEETS:
+        data = STYLESHEETS[name]().encode()
+    else:
+        try:
+            data = (STATIC_DIR / name).read_bytes()
+        except OSError:
+            return None
+    return hashlib.sha256(data).hexdigest()[:12]
+
+
+_STATIC_REF = re.compile(r"((?:src|href)=')/static/([A-Za-z0-9_.-]{1,80})'")
+
+
+def versioned_static(doc: str) -> str:
+    """Every ``src='/static/x'`` and ``href='/static/x'`` in a page gets ``?v=<digest>``: the
+    static route lets the browser keep a file asked for by its current digest for a year without
+    asking again, and a new release changes the address of every file it changes."""
+
+    def add(m: re.Match[str]) -> str:
+        v = static_version(m.group(2))
+        return f"{m.group(1)}/static/{m.group(2)}?v={v}'" if v else m.group(0)
+
+    return _STATIC_REF.sub(add, doc)
 
 
 def render(
@@ -1180,6 +1249,7 @@ def render(
             f"<a href='/account'>{icon('account')}Account</a>"
             f"<a href='/proposals'>{icon('proposals')}Proposals</a>"
             f"<a href='/history'>{icon('history')}History</a>"
+            f"<a href='/watchlist'>{icon('stats')}Watchlist</a>"
             f"<a href='/activity'>{icon('activity')}My activity</a>"
             f"<a href='/guide'>{icon('guide')}Guide</a>"
             f"<a href='/skill'>{icon('report')}Assistant skill</a>"
@@ -1313,7 +1383,8 @@ def render(
         "<link rel='icon' href='/favicon.ico' sizes='32x32'>"
         "<link rel='icon' href='/static/gateway-icon.svg' type='image/svg+xml'>"
         "<link rel='apple-touch-icon' href='/apple-touch-icon.png'>"
-        f"<title>{html.escape(title)} · {html.escape(site)}</title><style>{CSS}</style>{head_extra}</head>"
+        f"<title>{html.escape(title)} · {html.escape(site)}</title>"
+        f"{stylesheet_link('site.css')}{head_extra}</head>"
         f"<body class='{classes}'><a class='skip' href='#main'>Skip to content</a>{SPRITE}"
         "<header class='topbar'><div class='wrap'><div class='left'>"
         f"<a class='brand' href='/'{' aria-current=page' if cur == '/' else ''} title='{html.escape(site)}'>"
@@ -1346,7 +1417,7 @@ def render(
         + "</body></html>"
     )
     return HTMLResponse(
-        doc,
+        versioned_static(doc),
         status_code=status,
         headers={
             "Cache-Control": "no-store",

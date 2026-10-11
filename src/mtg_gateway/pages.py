@@ -19,7 +19,7 @@ from urllib.parse import parse_qs, quote
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from . import app_signin, link_disclosure, modes
+from . import app_signin, link_disclosure, modes, notify
 from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
 from .avatars import initials_svg
 from .clickguard import form_stamp, guarded_form, submitted_too_soon
@@ -409,6 +409,12 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                     sid=sid,
                 )
             return RedirectResponse("/account?ok=linked", status_code=303)
+        from .watchlist import account_action
+
+        done = await account_action(state, sub, action or "", data)
+        if done is not None:
+            anchor = "#summary" if action == "summary_save" else "#notifications"
+            return RedirectResponse(f"/account?{done}{anchor}", status_code=303)
         return page("Account", _err("Unknown action."), status=400, sub=sub, sid=sid)
 
     # -- proposals ----------------------------------------------------------
@@ -651,7 +657,8 @@ OK_MESSAGES = {
     "mode_manual": "Saved: your assistant asks you every time.",
     "mode_semi": "Saved: your assistant applies small, low-risk edits without asking and asks for "
     "everything else.",
-    "mode_auto": "Saved: your assistant applies every change without asking. Each change keeps a "
+    "mode_auto": "Saved: your assistant applies deck and collection changes without asking (account "
+    "actions and deck deletion still wait for you). Each change keeps a "
     "snapshot you can restore from History.",
 }
 ERR_MESSAGES = {
@@ -708,8 +715,12 @@ def _err(msg: str) -> str:
 def _notice(ok: str | None, err: str | None) -> str:
     if ok in OK_MESSAGES:
         return f"<div class='notice ok'>{html.escape(OK_MESSAGES[ok])}</div>"
+    if ok in notify.ACCOUNT_OK:
+        return f"<div class='notice ok'>{html.escape(notify.ACCOUNT_OK[ok])}</div>"
     if err in ERR_MESSAGES:
         return _err(ERR_MESSAGES[err])
+    if err in notify.ACCOUNT_ERR:
+        return _err(notify.ACCOUNT_ERR[err])
     return ""
 
 
@@ -791,6 +802,11 @@ def _account_body(state: Any, sub: str, csrf: str | None, *, disclosure_read: bo
         out.append(_app_card())
     out.append(_mode_card(state, sub, csrf_in))
     out.append(_apps_card(state, sub, csrf_in))
+    if getattr(state, "summaries", None) is not None:
+        from .watchlist import notify_card_html, summary_card_html
+
+        out.append(notify_card_html(state, sub, csrf_in))
+        out.append(summary_card_html(state, sub, csrf_in))
     if info["linked"]:
         expires = _when(info.get("link_expires_at"))
         out.append(
@@ -934,7 +950,8 @@ def _delete_card(csrf_in: str, backup_days: int | None = None) -> str:
     return (
         "<div class='card'><h2>Delete my data</h2>"
         "<p>Delete everything this gateway keeps for your account: proposals, snapshots, test "
-        "reports, scan sessions, your Archidekt link, connected apps and your sign-in. Your decks on "
+        "reports, scan sessions, your watchlist and notification choices, your Archidekt link, "
+        "connected apps and your sign-in. Your decks on "
         f"Archidekt are not touched. This can't be undone.{kept}</p>"
         f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='delete_data'>"
         "<label class='check'><input type='checkbox' name='confirm' value='yes' required> "
@@ -1033,7 +1050,7 @@ def _change_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, dic
             out.append(
                 _li(
                     "chg",
-                    "Colour tag" if kind == "label" else "Custom mana value",
+                    "Color tag" if kind == "label" else "Custom mana value",
                     name + html.escape(where),
                     _was_now(r.get("before", ""), r.get("after", "")),
                 )

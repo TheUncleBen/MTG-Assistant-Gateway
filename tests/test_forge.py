@@ -15,7 +15,8 @@ from mtg_gateway import reports as reports_module
 from mtg_gateway.archidekt import parse_deck
 from mtg_gateway.db import Database
 from mtg_gateway.decks import DeckError
-from mtg_gateway.forge import ForgeClient, forge_deck, refresh, start_run, summarise, wilson
+from mtg_gateway.forge import ForgeClient, forge_deck, pick_opponents, refresh, start_run, summarise, wilson
+from mtg_gateway.report_view import forge_lines
 from mtg_gateway.reports import ReportService
 
 from .fake_archidekt import FakeArchidekt
@@ -24,8 +25,11 @@ from .fake_archidekt import FakeArchidekt
 class FakeForge:
     """The Forge service's HTTP API, enough for the gateway: /check, /precons, /jobs."""
 
-    def __init__(self, *, missing: set[str] | None = None) -> None:
+    def __init__(self, *, missing: set[str] | None = None, brackets: dict[str, int] | None = None) -> None:
         self.missing = missing or set()
+        # precon name -> bracket, as a Forge image built since 0.7.23 lists them (newest first);
+        # None: an older image, four precons with no bracket
+        self.brackets = brackets
         self.jobs: dict[str, dict[str, Any]] = {}
         self.started: list[dict[str, Any]] = []
         self.cancelled: list[str] = []
@@ -52,6 +56,12 @@ class FakeForge:
                 200, json={"resolved": {n: None if n in self.missing else n for n in names}}
             )
         if path == "/precons":
+            if self.brackets is not None:
+                listed = [
+                    {"name": n, "release_date": "2026", "commander": [], "bracket": b}
+                    for n, b in self.brackets.items()
+                ]
+                return httpx.Response(200, json={"precons": listed})
             return httpx.Response(
                 200,
                 json={
@@ -144,8 +154,75 @@ async def test_refresh_finishes_and_reports_a_lost_job() -> None:
 
 
 class _Decks:
+    def __init__(self, **change: Any) -> None:
+        self.change = change
+
     async def get_any_deck(self, sub: str | None, ref: str) -> Any:
-        return parse_deck(FakeArchidekt().decks[42])
+        raw = FakeArchidekt().decks[42]
+        raw.update(self.change)
+        return parse_deck(raw)
+
+
+BRACKETED = {"New 2": 2, "New 3": 3, "Old 4": 4, "Mid 3": 3, "Older 2": 2, "Oldest 3": 3}
+
+
+def test_pick_opponents_by_bracket_nearest_then_newest() -> None:
+    precons = [{"name": n, "bracket": b} for n, b in BRACKETED.items()]
+    names, why = pick_opponents(precons, 3, "archidekt")
+    assert names == ["New 3", "Mid 3", "Oldest 3"] and why["rule"] == "bracket"
+    assert "bracket 3 precons, matching the bracket set on the deck in Archidekt" in why["note"]
+    names, why = pick_opponents(precons, 4, "estimate")
+    assert names == ["Old 4", "New 3", "Mid 3"] and why["rule"] == "nearest"
+    assert "only 1 bracket 4 precon is here; the rest come from the nearest bracket (3)" in why["note"], why
+    assert "estimate" in why["note"]
+    names, why = pick_opponents(precons, 1, "archidekt")  # no bracket 1 precons: the nearest, 2
+    assert names == ["New 2", "Older 2", "New 3"] and "so the nearest brackets (2, 3) play" in why["note"]
+    plain = [{"name": f"Precon {i}"} for i in (1, 2, 3, 4)]
+    names, why = pick_opponents(plain, 3, "archidekt")
+    assert names == ["Precon 1", "Precon 2", "Precon 3"] and why["rule"] == "newest"
+    assert "carry no bracket" in why["note"]
+    names, why = pick_opponents(precons, None, None)
+    assert names == ["New 2", "New 3", "Old 4"] and "no bracket" in why["note"]
+
+
+async def test_report_seats_precons_of_the_decks_bracket(tmp_path: Path) -> None:
+    """A deck with bracket 3 set on Archidekt plays the bracket 3 precons, a queued run as well;
+    without a set bracket the gateway's estimate decides, and the report says which and why."""
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    fake = FakeForge(brackets=BRACKETED)
+    reports = ReportService(db, _Decks(edhBracket=3), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+    reports.forge_interval = 0.05
+    first = await reports.run("alice", "42", games=300, options={"seed": 1})
+    second = await reports.run("alice", "42", games=300, options={"seed": 2})
+    assert [d["precon"] for d in fake.started[0]["decks"][1:]] == ["New 3", "Mid 3", "Oldest 3"]
+    choice = first["forge"]["opponent_choice"]
+    assert choice["bracket"] == 3 and choice["source"] == "archidekt" and choice["rule"] == "bracket"
+    assert second["forge"]["state"] == "queued"
+    fake.finish(first["forge"]["job_id"], [1])
+    for _ in range(200):
+        if len(fake.started) == 2:
+            break
+        await asyncio.sleep(0.02)
+    assert [d["precon"] for d in fake.started[1]["decks"][1:]] == ["New 3", "Mid 3", "Oldest 3"]
+    fake.finish(reports.get("alice", second["report_id"])["forge"]["job_id"], [1])
+    await asyncio.wait_for(reports._forge_task, timeout=20)
+    # the report says why these opponents
+    lines = forge_lines(reports.get("alice", first["report_id"])["forge"])
+    assert any(
+        ln.startswith("Opponents: Opponents are bracket 3 precons") and "New 3 (bracket 3)" in ln
+        for ln in lines
+    )
+    # no bracket set: the estimate (deck 42 holds no game changers: bracket 2)
+    fake2 = FakeForge(brackets=BRACKETED)
+    estimated = ReportService(
+        db, _Decks(updatedAt="2026-10-05T00:00:00Z"), None, forge=fake2.client(), forge_games=4
+    )  # type: ignore[arg-type]
+    out = await estimated.run("alice", "42", games=300, options={"seed": 5})
+    assert out["forge"]["opponent_choice"]["source"] == "estimate"
+    assert out["forge"]["opponent_choice"]["bracket"] == out["stats"]["bracket_estimate"]["bracket"] == 2
+    assert [d["precon"] for d in fake2.started[0]["decks"][1:]] == ["New 2", "Older 2", "New 3"]
+    estimated._forge_task.cancel()
 
 
 async def test_report_runs_forge_in_the_background(tmp_path: Path) -> None:

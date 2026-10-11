@@ -6,6 +6,7 @@ import hashlib
 import html
 import io
 import json
+import re
 import zipfile
 from pathlib import Path
 
@@ -264,8 +265,10 @@ async def test_chatgpt_steps_offer_the_name_description_url_and_icon_to_copy(
         assert f"<input id='gpt-url' type='text' readonly value='{GATEWAY}/mcp'>" in text
         for key in ("gpt-name", "gpt-desc", "gpt-url"):
             assert f"data-copy='{key}'" in text
-        assert "<script src='/static/export.js' defer></script>" in text  # what runs the Copy buttons
-        assert f"href='{plugin_page.CONNECTOR_ICON_PATH}' download='deck-helper-icon.png'" in text
+        # what runs the Copy buttons
+        assert re.search(r"<script src='/static/export.js\?v=[0-9a-f]{12}' defer></script>", text)
+        icon = plugin_page.CONNECTOR_ICON_PATH
+        assert re.search(rf"href='{icon}\?v=[0-9a-f]{{12}}' download='deck-helper-icon.png'", text)
         # Numbered steps, the same in the page and the plain-text version.
         assert text.count("<li>") >= 12 and "12. Sign in with the account the owner gave you." in md
 

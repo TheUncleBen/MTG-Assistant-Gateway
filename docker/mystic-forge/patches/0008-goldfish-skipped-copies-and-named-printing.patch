@@ -1,0 +1,214 @@
+Subject: Goldfish warnings count skipped copies; scryfall_named's default printing
+
+Found after the gateway's 0.7.22 release (Mystic Forge 1.3.2-mag3):
+
+- goldfish_run, goldfish_ab and goldfish_start warned "not recognized by
+  Scryfall, skipped: Bera, Hamer" with names only, so a reader could not
+  tell how many cards the simulation left out (two copies of a typo are two
+  cards fewer in the library). goldfish_annotate already said "2 Bera"
+  (patch 0004); the other three now say it too: "skipped: 2 Bera, 1 Hamer".
+- scryfall_named with no set_code showed Scryfall's default printing, which
+  is its newest: on 2026-10-11 "Swamp" was Marvel: Darkhold Destiny #296, a
+  preview released 2027-04-09 with games: [] and no prices. It now shows the
+  printing every other lookup uses when no set is named (patch 0005's
+  _default_printing: the newest printing released by today that is sold on
+  paper; one oracleid search, only when Scryfall's default is no good), and
+  a line says which printing it is: "Printing: FDN #281, the newest printing
+  out on paper. Pass set_code for another printing." With set_code the
+  output is unchanged.
+Tests: tests/test_goldfish_skipped_copies.py,
+tests/test_named_default_printing.py.
+
+Upstream: Kautiontape/mystic-forge at dd82cd1 (main, 2026-10-04) has neither
+fix, and no open pull request touches this code. Drop this patch when it
+does. Needs patches 0004 and 0005 (it reuses 0005's _default_printing).
+
+diff --git a/server.py b/server.py
+--- a/server.py
++++ b/server.py
+@@ -567,7 +567,11 @@
+ class NamedInput(BaseModel):
+     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+     name: str = Field(..., description="Card name to look up.", min_length=1, max_length=200)
+-    set_code: Optional[str] = Field(default=None, description="Optional set code (e.g. 'bbd', 'eld').", min_length=2, max_length=6)
++    set_code: Optional[str] = Field(
++        default=None,
++        description=("Optional set code (e.g. 'bbd', 'eld'). Without one, the newest "
++                     "printing already out on paper is shown, not a preview."),
++        min_length=2, max_length=6)
+ 
+ 
+ class RandomInput(BaseModel):
+@@ -665,15 +669,31 @@
+         return _scryfall_error(e)
+ 
+ 
++async def _named_printing(card: dict, set_code: Optional[str]) -> str:
++    """The card as scryfall_named shows it. With no set named, that is the
++    newest printing already out on paper (as the other lookups use), not
++    Scryfall's newest, which can be a preview; a line says which it is."""
++    if set_code:
++        return _format_card(card, verbose=True)
++    card, _finishes = await _default_printing(card)
++    which = ("the newest printing out on paper" if _good_default(card)
++             else "Scryfall's default printing; none is out on paper yet")
++    return (_format_card(card, verbose=True)
++            + f"\nPrinting: {(card.get('set') or '?').upper()} "
++              f"#{card.get('collector_number', '?')}, {which}. "
++              f"Pass set_code for another printing.")
++
++
+ @mcp.tool(name="scryfall_named")
+ async def scryfall_named(params: NamedInput) -> str:
+-    """Look up a single card by name. Tries exact match first, then fuzzy."""
++    """Look up a single card by name. Tries exact match first, then fuzzy.
++    With no set_code, shows the newest printing already out on paper."""
+     api_params: Dict[str, str] = {"exact": params.name}
+     if params.set_code:
+         api_params["set"] = params.set_code
+     try:
+         data = await _scryfall_get("/cards/named", params=api_params)
+-        return _format_card(data, verbose=True)
++        return await _named_printing(data, params.set_code)
+     except httpx.HTTPStatusError as first_err:
+         if first_err.response.status_code == 404:
+             fuzzy_params: Dict[str, str] = {"fuzzy": params.name}
+@@ -681,7 +701,7 @@
+                 fuzzy_params["set"] = params.set_code
+             try:
+                 data = await _scryfall_get("/cards/named", params=fuzzy_params)
+-                return "(Fuzzy match)\n" + _format_card(data, verbose=True)
++                return "(Fuzzy match)\n" + await _named_printing(data, params.set_code)
+             except Exception as e2:
+                 return _scryfall_error(e2)
+         return _scryfall_error(first_err)
+@@ -4461,7 +4481,8 @@
+     Returns (cards_pool, deck_names, commander, commander_note, card_scopes,
+     approx_by_card, not_found, unmatched_anns). ``deck_names`` is the
+     LIBRARY: one commander copy removed (it starts in the command zone) and
+-    Scryfall-unrecognized names dropped (reported via ``not_found``).
++    Scryfall-unrecognized names dropped (reported via ``not_found``, each
++    with how many copies were skipped: "2 Bera").
+     ``card_scopes`` feeds metrics.aggregate's honesty split: name -> D9
+     scope class, "unrecognized" (needs annotation, none supplied), or None
+     (modeled). ``unmatched_anns`` names client annotations that matched no
+@@ -4528,8 +4549,11 @@
+             "No recognized cards besides the commander; nothing to simulate."
+             if commander is not None else
+             "No recognized cards; nothing to simulate.")
++    # The warnings say how many copies were skipped, as goldfish_annotate does.
++    copies = Counter(names)
++    skipped = [f"{max(copies[n], 1)} {n}" for n in not_found]
+     return (cards_pool, library, commander, cmdr_note, card_scopes,
+-            approx_by_card, not_found, unmatched_anns)
++            approx_by_card, skipped, unmatched_anns)
+ 
+ 
+ def _goldfish_check_combos(combos: list, valid_names: set[str]) -> str | None:
+diff --git a/tests/test_goldfish_skipped_copies.py b/tests/test_goldfish_skipped_copies.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_goldfish_skipped_copies.py
+@@ -0,0 +1,28 @@
++"""The goldfish warnings for names Scryfall does not recognize say how many
++copies of each were skipped ("2 Bera"), not only the names."""
++import json
++
++import server as srv
++from tests.goldfish.helpers import _patch_fetch_minideck
++
++# The mini deck with two lines Scryfall does not know (2 + 1 copies).
++DECK = "1 Boss\n20 Plains\n17 Mountain\n28 Bear\n20 Runner\n11 Hammer\n2 Bera\n1 Hamer"
++
++
++async def test_goldfish_run_says_how_many_copies_were_skipped(monkeypatch):
++    _patch_fetch_minideck(monkeypatch)
++    out = await srv.goldfish_run(srv.GoldfishRunInput(deck=DECK, n=5, seed=1, until_turn=3))
++    assert "Warning — not recognized by Scryfall, skipped: 2 Bera, 1 Hamer" in out
++
++
++async def test_goldfish_ab_says_how_many_copies_were_skipped(monkeypatch):
++    _patch_fetch_minideck(monkeypatch)
++    out = await srv.goldfish_ab(srv.GoldfishAbInput(
++        deck_a=DECK, deck_b=DECK.replace("\n2 Bera\n1 Hamer", ""), n=5, seed=1, until_turn=3))
++    assert "Warning — deck A names not recognized by Scryfall, skipped: 2 Bera, 1 Hamer" in out
++
++
++async def test_goldfish_start_says_how_many_copies_were_skipped(monkeypatch):
++    _patch_fetch_minideck(monkeypatch)
++    res = json.loads(await srv.goldfish_start(srv.GoldfishStartInput(deck=DECK, seed=1)))
++    assert "Not recognized by Scryfall, skipped: 2 Bera, 1 Hamer" in res["warnings"]
+diff --git a/tests/test_named_default_printing.py b/tests/test_named_default_printing.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_named_default_printing.py
+@@ -0,0 +1,69 @@
++"""scryfall_named with no set shows the newest printing already out on paper,
++as the other lookups do, and says which printing it is."""
++import httpx
++import pytest
++
++import server
++from tests.test_default_printing import CARDS
++
++
++def _not_found(endpoint):
++    request = httpx.Request("GET", f"https://api.scryfall.com{endpoint}")
++    response = httpx.Response(404, json={"object": "error", "details": "No cards found."}, request=request)
++    return httpx.HTTPStatusError("404", request=request, response=response)
++
++
++@pytest.fixture
++def scryfall(monkeypatch):
++    calls = []
++
++    async def get(endpoint, params=None):
++        calls.append((endpoint, dict(params or {})))
++        if endpoint == "/cards/named":
++            name = params.get("exact") or params.get("fuzzy")
++            if "fuzzy" in params:
++                name = {"swmap": "Swamp"}.get(name.lower(), name)
++            # Scryfall answers with its newest printing (of the set, when one is given).
++            found = [c for c in CARDS if c["name"] == name and params.get("set") in (None, c["set"])]
++            if not found or ("exact" in params and params["exact"] != found[0]["name"]):
++                raise _not_found(endpoint)
++            return found[0]
++        assert endpoint == "/cards/search" and params["q"].startswith("oracleid:")
++        found = [c for c in CARDS if c["oracle_id"] == params["q"].split(":", 1)[1]]
++        return {"object": "list", "total_cards": len(found), "data": found}
++
++    monkeypatch.setattr(server, "_scryfall_get", get)
++    monkeypatch.setattr(server, "_today", lambda: "2026-10-11")
++    return calls
++
++
++async def test_named_skips_a_preview_and_says_which_printing(scryfall):
++    out = await server.scryfall_named(server.NamedInput(name="Swamp"))
++    assert "Set: FDN (common)" in out                  # not the MDD preview or the Arena printing
++    assert "Printing: FDN #281, the newest printing out on paper." in out
++    assert "MDD" not in out
++
++
++async def test_named_fuzzy_match_gets_the_same_printing(scryfall):
++    out = await server.scryfall_named(server.NamedInput(name="swmap"))
++    assert out.startswith("(Fuzzy match)\n")
++    assert "Printing: FDN #281, the newest printing out on paper." in out
++
++
++async def test_named_keeps_a_good_default_without_a_search(scryfall):
++    out = await server.scryfall_named(server.NamedInput(name="Sol Ring"))
++    assert "Printing: FRC #21, the newest printing out on paper." in out
++    assert [c for c in scryfall if c[0] == "/cards/search"] == []
++
++
++async def test_named_with_a_set_shows_that_printing(scryfall):
++    out = await server.scryfall_named(server.NamedInput(name="Swamp", set_code="mdd"))
++    assert "Set: MDD (common)" in out and "Printing:" not in out
++
++
++async def test_named_says_when_no_printing_is_out_on_paper(scryfall, monkeypatch):
++    monkeypatch.setattr(server, "_today", lambda: "2020-01-01")
++    out = await server.scryfall_named(server.NamedInput(name="Mountain Goat"))
++    assert "Printing: 6ED #195, the newest printing out on paper." in out
++    out = await server.scryfall_named(server.NamedInput(name="Sol Ring"))
++    assert "Printing: FRC #21, Scryfall's default printing; none is out on paper yet." in out

@@ -51,6 +51,12 @@ def test_goldfish_header_summary_and_metrics_are_read() -> None:
     assert g["message"] is None
     # the warning line is one sentence with back faces dropped (names hold commas, so no split)
     assert g["warnings"] == ["Not recognized by Scryfall, skipped: Elbrus, the Binding Blade, Enduring Angel"]
+    # Mystic Forge 1.3.2-mag4 says how many copies of each were skipped
+    counted = GOLDFISH.replace("skipped: Elbrus", "skipped: 2 Elbrus").replace(", Enduring", ", 1 Enduring")
+    g = rv.parse_goldfish({"tool": "goldfish_run", "ok": True, "text": counted})
+    assert g["warnings"] == [
+        "Not recognized by Scryfall, skipped: 2 Elbrus, the Binding Blade, 1 Enduring Angel"
+    ]
 
 
 def test_honesty_report_comes_from_the_json_with_text_fallback() -> None:
@@ -106,6 +112,38 @@ def test_tiles_and_charts_from_the_metrics() -> None:
     assert "<script" not in lines and "style=" not in lines  # colours come from the theme's classes
     cols = charts[1][2]
     assert "<rect class='col'" in cols and "T6" in cols
+
+
+def test_sixty_card_run_reads_as_a_sixty_card_game() -> None:
+    """A 60-card game (Mystic Forge's constructed run: no commander, 20 life) names its kill as 20
+    damage and draws no commander milestones; the trend's speed numbers still read."""
+    head, rest = GOLDFISH_PRECON.split("\n", 2)[1:]
+    assert head.startswith("Deck: 100 cards including commander")
+    head = (
+        "Deck: 60 cards | Format: 60-card (no commander, 20 life, on the play) | 300 games, seed 42, "
+        "through turn 10"
+    )
+    rest = rest.replace("Kill (40 damage)", "Kill (20 damage)")
+    rest = "\n".join(line for line in rest.split("\n") if not line.startswith("- Commander cast"))
+    before, js, after = rest.partition("```json\n")[0], *rest.partition("```json\n")[2].split("\n```", 1)
+    payload = json.loads(js)
+    payload["metrics"]["commander_cast"].update(
+        histogram={}, median_among_reached=None, reached_pct={"value": 0.0, "ci": [0.0, 0.01]}
+    )
+    text = f"# Goldfish run\n{head}\n{before}```json\n{json.dumps(payload)}\n```{after}"
+    g = rv.parse_goldfish({"ok": True, "text": text})
+    assert g["format"] == "constructed" and g["commander"] is None and g["deck_size"] == 60
+    tiles = {t["label"]: t for t in rv.tiles_for(g)}
+    assert "20 damage dealt by turn 10" in tiles and "40 damage dealt by turn 10" not in tiles
+    assert not any("Commander" in label for label in tiles)
+    charts = rv.charts_for(g)
+    assert [t for t, _b, _svg in charts][0] == "Reaching the milestones"
+    assert "When the commander comes down" not in [t for t, _b, _svg in charts]
+    assert "Commander cast" not in charts[0][2] and "20 damage dealt" in charts[0][2]
+    speed = rv.speed_numbers({"ok": True, "text": text})
+    assert speed["commander_cast_median_turn"] is None and speed["kill_pct"] == 62.7
+    # A Commander run keeps its 40.
+    assert rv.parse_goldfish({"ok": True, "text": GOLDFISH_PRECON})["format"] is None
 
 
 def test_page_speaks_plainly_and_shows_every_panel() -> None:

@@ -432,13 +432,19 @@ class ScryfallClient:
         self.names.put(key, out)
         return out[:limit]
 
-    async def collection(self, identifiers: list[dict[str, str]]) -> tuple[list[dict[str, Any]], list[dict]]:
-        """Resolve up to 75 identifiers per request. Returns (cards, not_found identifiers)."""
+    async def collection(
+        self, identifiers: list[dict[str, str]], *, interval: float | None = None
+    ) -> tuple[list[dict[str, Any]], list[dict]]:
+        """Resolve up to 75 identifiers per request. Returns (cards, not_found identifiers).
+        ``interval`` spaces the requests further apart than the batch pacer (the daily price
+        check uses the single-lookup pace: it is in no hurry)."""
         found: list[dict[str, Any]] = []
         missing: list[dict[str, Any]] = []
         for i in range(0, len(identifiers), COLLECTION_MAX):
             chunk = identifiers[i : i + COLLECTION_MAX]
-            resp = await self._request("POST", "/cards/collection", json={"identifiers": chunk})
+            resp = await self._request(
+                "POST", "/cards/collection", json={"identifiers": chunk}, interval=interval
+            )
             data = self._json(resp)
             if data.get("object") != "list" or not isinstance(data.get("data"), list):
                 raise ScryfallError("contract", str(data.get("details") or "unexpected collection reply"))

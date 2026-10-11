@@ -67,6 +67,20 @@ def _authentik_api_url(issuer: str) -> str | None:
     return f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else None
 
 
+def _ntfy_url_env(name: str) -> str | None:
+    """The ntfy server's address (https, or http for a server on the same private network)."""
+    raw = (_env(name, "") or "").strip().rstrip("/")
+    if not raw:
+        return None
+    parsed = urlparse(raw)
+    if parsed.scheme not in ("https", "http") or not parsed.netloc or parsed.query or parsed.fragment:
+        raise ConfigError(f"{name} must be the ntfy server's address, such as https://ntfy.example.com")
+    if parsed.username or parsed.password:
+        # members see this address on their Account page; the token goes in its Docker secret
+        raise ConfigError(f"{name} must not hold a user name or password; use the mtg_ntfy_token secret")
+    return raw
+
+
 def _bool_env(name: str, default: bool) -> bool:
     """1/true/yes (any case) is True, anything else False; unset or empty is ``default``."""
     raw = _env(name)
@@ -265,6 +279,17 @@ class Settings:
     authentik_api_token: str | None = field(default=None, repr=False)
     authentik_api_token_problem: str | None = None
     authentik_api_url: str | None = None
+    # Watchlists and price history (prices.py): how many cards and decks one member may watch, how
+    # many days of daily prices are kept, and the hour (UTC) the daily price check and the
+    # members' summaries run. Nothing is fetched while nobody watches anything.
+    watch_max_cards: int = 200
+    watch_max_decks: int = 10
+    price_history_days: int = 365
+    price_hour_utc: int = 6
+    # Optional notifications through an ntfy server (notify.py): its address and an access token
+    # the gateway publishes with. Unset, the gateway sends no notifications.
+    ntfy_url: str | None = None
+    ntfy_token: str | None = field(default=None, repr=False)
 
     def grants_access(self, groups: list[str] | None) -> bool:
         """May someone in ``groups`` use the gateway? Members of MTG_REQUIRED_GROUP may, and so
@@ -324,6 +349,8 @@ def load_settings() -> Settings:
         sweep_token = _read_secret("MTG_AUTHENTIK_API_TOKEN_FILE", required=False)
     except ConfigError as exc:
         sweep_problem = str(exc)
+    # Optional, like the sweep token: the ntfy access token (notify.py). Never logged.
+    ntfy_token = _read_secret("MTG_NTFY_TOKEN_FILE", required=False)
     if len(session_secret) < 32:
         raise ConfigError("MTG_SESSION_SECRET_FILE must contain at least 32 characters")
 
@@ -439,6 +466,12 @@ def load_settings() -> Settings:
         authentik_api_token=sweep_token,
         authentik_api_token_problem=sweep_problem,
         authentik_api_url=_authentik_api_url(oidc_issuer),
+        watch_max_cards=_int_env("MTG_WATCH_MAX_CARDS", 200, lo=0, hi=5000),
+        watch_max_decks=_int_env("MTG_WATCH_MAX_DECKS", 10, lo=0, hi=200),
+        price_history_days=_int_env("MTG_PRICE_HISTORY_DAYS", 365, lo=30, hi=3650),
+        price_hour_utc=_int_env("MTG_PRICE_HOUR_UTC", 6, lo=0, hi=23),
+        ntfy_url=_ntfy_url_env("MTG_NTFY_URL"),
+        ntfy_token=ntfy_token,
         scryfall_lookup_interval=_float_env("MTG_SCRYFALL_LOOKUP_INTERVAL", 0.5, lo=0.1, hi=5.0),
         scan_fuzzy_min_similarity=_float_env("MTG_SCAN_FUZZY_MIN_SIMILARITY", 0.65, lo=0.3, hi=1.0),
         scan_fuzzy_confident_similarity=_float_env(

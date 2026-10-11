@@ -47,6 +47,11 @@ browser tests need a Chromium (Playwright's own, or one found under
 Install with `-c constraints.txt` as above: it pins packages some tests and
 scripts import directly.
 
+The tests need no network. A request to any host but this machine is refused
+and fails the test that made it, and the browser tests' Chromium resolves no
+other host; fakes and recorded fixtures stand in (`tests/fake_scryfall.py`,
+`tests/fake_archidekt.py`, a picture served with `page.route`).
+
 Opt-in extras: `SCAN_LIVE=1` runs one scan test against the real Scryfall API;
 `MTG_CARD_SHOTS=<dir>` saves card screenshots; `SWEEP_OUT=<file>` writes the
 page-overflow sweep's findings to a file.

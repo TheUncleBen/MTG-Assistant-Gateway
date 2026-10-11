@@ -46,7 +46,7 @@ MAX_COPIES_PER_ROW = 4  # a row that adds, removes or changes more copies than t
 MODE_LABELS = {
     "manual": "Ask me every time",
     "semi": "Apply small, low-risk edits without asking",
-    "auto": "Apply every change without asking",
+    "auto": "Apply deck and collection changes without asking",
 }
 MODE_HELP = {
     "manual": (
@@ -134,7 +134,7 @@ def risk_of(
         return (
             "high",
             "contains a change that is not a card add, remove, quantity, category, finish, printing, "
-            "colour tag or custom mana value",
+            "color tag or custom mana value",
         )
     if len(rows) > max_rows:
         return "high", f"changes {len(rows)} rows, more than the {max_rows} a low-risk edit may have"

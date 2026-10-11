@@ -159,7 +159,8 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
 - **Deck reports and history.** `run_deck_report` stores the statistics
   together with a decklist validation and a goldfish simulation (when Mystic
   Forge is up; the simulator's options such as annotations, seed, turns,
-  opponents and mulligan rules pass through) so a deck's numbers can be followed over time with
+  opponents and mulligan rules pass through; a deck without a commander and with 60 or more cards
+  plays a 60-card game) so a deck's numbers can be followed over time with
   `list_deck_reports` and `get_deck_report`, or on the `/history` page next
   to the deck's proposals and snapshots.
 - **Compare decks.** `compare_decks` lists the cards added, removed and
@@ -294,9 +295,9 @@ between releases ([docs/VERSIONS.md](docs/VERSIONS.md)).
 | Sign-in, research, deck import, account linking, proposals, scanning | Built. Tested against fakes, recorded Archidekt and Scryfall responses, and a real Swarm stack with Authentik in CI |
 | Applying edits, creating decks, backups and restores on Archidekt | Built, and run live against a throwaway Archidekt account (create, add, remove, quantities, categories, commander, backup folder and copy). The code default is off (`MTG_WRITES_ENABLED=false`); the example env files turn writes on (each change is still applied only by the member's own press, the Approve button on the in-chat card or the Apply button on the review page, unless the member chose a looser approval mode on their Account page; an Archidekt account action, such as a like, comment, new folder or deck deletion, is approved only on the review page, in every mode). Try your first edit on a deck you don't care about |
 | Client and device coverage | See [docs/CONNECT.md](docs/CONNECT.md#which-apps-and-devices-work), which labels each claim as verified, reported or unverified |
-| Deck statistics, stored deck reports and history, compare, companion pages, admin page, JSON API | Built and covered by the test suite against fakes. The companion pages and admin page have not yet had the same live Swarm run-through as the rest; treat that as unverified |
+| Deck statistics, stored deck reports and history, compare, companion pages, admin page, JSON API | Built and covered by the test suite against fakes. The companion pages and admin page were also checked by the owner on his own deployment on 2026-10-10 and 2026-10-11 (speed, backup copies, the redesigned pages, edit and restore) |
 | Deck deletion, cover image, folders, tags, comment editing, collection details (0.7.2); comment votes, colour tags and the assistant's account-action proposals (likes, bookmarks, follows, comments, folders, deck deletion; 0.7.16 to 0.7.19); custom mana value and deck collaborators (0.7.20) | Built against Archidekt routes read from its own site code and covered by tests against a fake; not yet exercised live (taking a colour tag off a card is also unverified). Each one reads the result back and reports a mismatch rather than trusting Archidekt's answer |
-| Forge games in deck reports (0.7.14, optional, off by default) | Built. The Forge image is built and smoke-tested on arm64 in CI, with a card-coverage gate (99.69% of the cards legal in at least one format; the cards Forge lacks are named in every report). Not yet measured on a Raspberry Pi. Opponents are the newest Commander precons, not chosen by bracket |
+| Forge games in deck reports (0.7.14, optional, off by default) | Built. The Forge image is built and smoke-tested on arm64 in CI, with a card-coverage gate (99.69% of the cards legal in at least one format; the cards Forge lacks are named in every report). Not yet measured on a Raspberry Pi. Opponents are Commander precons of the deck's bracket (0.7.23; the bracket set on Archidekt, else the gateway's estimate; a precon's bracket counts only its game changers; the nearest bracket fills in, and the report says which and why). Commander decks only: there are no 60-card opponent decks |
 | Watchlists, price history; other features not built yet | Not yet; the full list is in [docs/CAPABILITIES.md](docs/CAPABILITIES.md#d-parked) (Mystic Forge's own saved goldfish reports stay hidden too; the gateway's stored deck reports replace them) |
 
 ## How it works

@@ -688,7 +688,8 @@ async def test_a_used_up_archidekt_budget_is_one_shared_429_page_everywhere(stac
         first = await b.http.get("/decks/42", headers=NAV)
         assert first.status_code == 200  # the one call of the window
         for path in BUSY_PAGES:
-            r = await b.http.get(path, headers=NAV)
+            # as Reload asks (a deck page just read would be shown again from memory, no call)
+            r = await b.http.get(path, headers={**NAV, "Cache-Control": "max-age=0"})
             _assert_busy_page(r, path, status=429, title="Archidekt is busy", max_wait=600)
             assert "used up for a few minutes" in r.text and "work again shortly" in r.text, path
             assert "Your account has used its 1 Archidekt actions" in r.text, path

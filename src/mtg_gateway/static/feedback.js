@@ -247,6 +247,37 @@
   window.addEventListener("hashchange", reveal);
   reveal();
 
+  // 7. A tap on a link to another gateway page shows a thin bar along the top at once (styled in
+  //    theme.py), so a page that takes a moment to answer never looks like a missed tap. Links a
+  //    page script handles itself, new tabs, downloads and anchors on the same page are left alone.
+  var bar = null;
+  function navStart() {
+    if (!bar) {
+      bar = document.createElement("div");
+      bar.className = "navprogress";
+      bar.setAttribute("aria-hidden", "true");
+      document.body.appendChild(bar);
+    }
+    document.documentElement.classList.add("navigating");
+    clearTimeout(navStart.timer);
+    navStart.timer = setTimeout(navEnd, 20000); // a download or a stopped load: never stuck on
+  }
+  function navEnd() { document.documentElement.classList.remove("navigating"); }
+  document.addEventListener("click", function (e) {
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    var a = e.target instanceof Element ? e.target.closest("a[href]") : null;
+    if (!a || (a.target && a.target !== "_self") || a.hasAttribute("download")) return;
+    var url;
+    try { url = new URL(a.href, location.href); } catch (err) { return; }
+    if (url.origin !== location.origin || !/^https?:$/.test(url.protocol)) return;
+    if (url.pathname === location.pathname && url.search === location.search) return; // same page
+    if (/\.[A-Za-z0-9]{2,8}$/.test(url.pathname)) return; // a file: export.csv, the skill's zip
+    // after the event has run its course: a page script may still take it over
+    setTimeout(function () { if (!e.defaultPrevented) navStart(); }, 0);
+  });
+  // Back to this page from memory (the Back button): nothing is loading any more.
+  window.addEventListener("pageshow", function (e) { if (e.persisted) navEnd(); });
+
   if ("serviceWorker" in navigator && window.isSecureContext) {
     navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(function () {});
   }

@@ -295,7 +295,7 @@ async def test_consent_buttons_start_disabled_behind_a_strict_csp(gw: Harness):
     guarded = page.text.split("<noscript>")[0]
     assert re.search(r"<button[^>]*value='approve'[^>]*disabled data-guard", guarded)
     assert re.search(r"<button[^>]*value='deny'[^>]*disabled data-guard", guarded)
-    assert "<script src='/static/clickguard.js' defer></script>" in page.text
+    assert re.search(r"<script src='/static/clickguard.js\?v=[0-9a-f]{12}' defer></script>", page.text)
     assert "<script>" not in page.text  # no inline script
     csp = page.headers["content-security-policy"]
     assert (
@@ -367,7 +367,7 @@ async def test_review_page_apply_is_guarded(stack: Stack):
     page = await b.http.get(url)
     guarded = page.text.split("<noscript>")[0]
     assert re.search(r"<button[^>]*value='apply'[^>]*disabled data-guard", guarded)
-    assert "<script src='/static/clickguard.js' defer></script>" in page.text
+    assert re.search(r"<script src='/static/clickguard.js\?v=[0-9a-f]{12}' defer></script>", page.text)
     assert "script-src 'self'" in page.headers["content-security-policy"]
     csrf = await b.csrf(url)
     shown = re.search(r"name='shown' value='([^']+)'", page.text).group(1)  # type: ignore[union-attr]
