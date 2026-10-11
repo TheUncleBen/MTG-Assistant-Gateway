@@ -1136,6 +1136,9 @@ MORE_LINKS = [
 
 # The site's public origin (MTG_PUBLIC_URL), set by create_app: link previews need an absolute image.
 PUBLIC_URL = ""
+# Whether watchlists are on (MTG_WATCHLISTS_ENABLED), set by create_app: off, no page links to
+# /watchlist and the card viewer offers no price history (static/cardview.js reads data-watchlist).
+WATCHLISTS = False
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -1249,24 +1252,21 @@ def render(
             f"<a href='/account'>{icon('account')}Account</a>"
             f"<a href='/proposals'>{icon('proposals')}Proposals</a>"
             f"<a href='/history'>{icon('history')}History</a>"
-            f"<a href='/watchlist'>{icon('stats')}Watchlist</a>"
-            f"<a href='/activity'>{icon('activity')}My activity</a>"
+            + (f"<a href='/watchlist'>{icon('stats')}Watchlist</a>" if WATCHLISTS else "")
+            + f"<a href='/activity'>{icon('activity')}My activity</a>"
             f"<a href='/guide'>{icon('guide')}Guide</a>"
             f"<a href='/skill'>{icon('report')}Assistant skill</a>"
             + (f"<a href='/app'>{icon('download')}Android app</a>" if not app else "")
             + (
                 # The Android app's own actions (its floating button offers them over other pages);
-                # feedback.js calls window.MtgNative for each data-native button.
+                # feedback.js calls window.MtgNative for each data-native button. Open a copied link
+                # and Check for app updates live in the app's own menu and the Account page's App card.
                 "<div class='sep'></div><div class='head'>App</div>"
                 f"<button type='button' data-native='openCamera'>{icon('camera')}Scan with phone camera"
                 "</button>"
                 f"<button type='button' data-native='reload'>{icon('refresh')}Reload</button>"
                 f"<button type='button' data-native='openInBrowser'>{icon('link')}Open in browser</button>"
-                f"<button type='button' data-native='openCopiedLink'>{icon('link')}Open a copied link"
-                "</button>"
                 f"<button type='button' data-native='changeGateway'>{icon('settings')}Change gateway</button>"
-                f"<button type='button' data-native='checkForUpdates'>{icon('download')}Check for app updates"
-                "</button>"
                 if app
                 else ""
             )
@@ -1308,7 +1308,9 @@ def render(
             "autocomplete='off' enterkeyhint='search'></span></form>"
         )
         right = f"{search_form}<nav class='user' aria-label='Account'>{search_btn}{account_menu}</nav>"
-        more_links = list(MORE_LINKS) + ([("/admin", "Admin", "settings")] if admin else [])
+        more_links = [m for m in MORE_LINKS if WATCHLISTS or m[0] != "/watchlist"] + (
+            [("/admin", "Admin", "settings")] if admin else []
+        )
         more_open = cur in {href for href, _l, _i in more_links} and cur != "/"
         tabbar = (
             "<nav class='tabbar' aria-label='Sections'>"
@@ -1385,7 +1387,8 @@ def render(
         "<link rel='apple-touch-icon' href='/apple-touch-icon.png'>"
         f"<title>{html.escape(title)} · {html.escape(site)}</title>"
         f"{stylesheet_link('site.css')}{head_extra}</head>"
-        f"<body class='{classes}'><a class='skip' href='#main'>Skip to content</a>{SPRITE}"
+        f"<body class='{classes}'{' data-watchlist' if WATCHLISTS else ''}>"
+        f"<a class='skip' href='#main'>Skip to content</a>{SPRITE}"
         "<header class='topbar'><div class='wrap'><div class='left'>"
         f"<a class='brand' href='/'{' aria-current=page' if cur == '/' else ''} title='{html.escape(site)}'>"
         f"<span class='mark'>{icon('brand')}</span>"

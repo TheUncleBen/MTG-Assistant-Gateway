@@ -28,6 +28,11 @@ Tests: tests/test_default_printing.py.
 Upstream: Kautiontape/mystic-forge at dd82cd1 (main, 2026-10-04) has no fix,
 and no open pull request touches this code. Drop this patch when it does.
 
+The same "newest released paper printing" rule is owned in the gateway by
+src/mtg_gateway/scan/scryfall.py (is_released, on_paper, good_default,
+default_printing); _good_default and _default_printing below are a copy of
+it. Change both together; removing this copy needs a new research image.
+
 diff --git a/server.py b/server.py
 --- a/server.py
 +++ b/server.py

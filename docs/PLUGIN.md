@@ -26,11 +26,11 @@ page we could read says.
 
 | Path | Sign-in | What it is |
 | --- | --- | --- |
-| `/install` | yes, in a browser | Asks which app you use, then (`?for=claude`, `claude-code`, `chatgpt` or `codex`) shows only the steps that work there, with the Connect to Claude button and the plugin download |
+| `/install` | yes, in a browser | Asks which app you use, then (`?for=claude`, `claude-code`, `chatgpt` or `codex`) shows only the steps that work there, with the Connect to Claude button and the plugin download; `?for=skill` and `?for=android` are the skill and Android app sections. Page and Markdown come from one step list (`setup_hub.py`) |
 | `/install.md` | no | The same thing as Markdown, for an AI agent handed the link (an agent fetching `/install` itself gets this too, since only browser page loads are sent to sign in): every app unless `?for=` narrows it, plus rules not to retry a step or tool the platform doesn't support, and the browser fallbacks for blocked write tools |
 | `/plugin/marketplace.json` | no | A Claude Code marketplace with one plugin, source type `archive`, pinned by SHA-256 |
 | `/plugin/mtg-gateway.zip` (`/plugin/<slug of MTG_SERVER_NAME>.zip` when that is set) | no | The plugin from `plugin/mtg-gateway/`, with the gateway's own `/mcp` URL written into `.mcp.json` and `mcp.json` |
-| `/skill` | yes | The skill ZIP on its own, and the ChatGPT project instructions |
+| `/skill` | yes | Leads to `/install?for=skill`: the skill ZIP on its own (`/skill/mtg-gateway.zip`), and the ChatGPT project instructions |
 
 The archive is built once per process from the files in the image and comes
 out byte-for-byte the same every time, so the digest in the marketplace file
@@ -129,8 +129,8 @@ verified:
   so the same ZIP is in the right shape. Importing a marketplace from GitHub
   into ChatGPT is documented for workspace admins (Business and
   Enterprise), and the repository's `.claude-plugin/marketplace.json` is one
-  of the accepted formats. Whether a Plus or Pro user can import a plugin
-  from a repository or a ZIP: unknown.
+  of the accepted formats. The setup page therefore labels the ChatGPT ZIP
+  "Business/Enterprise admins only"; Plus and Pro accounts use the connector.
 - Custom MCP apps for individuals: Developer mode, web only, OAuth with
   automatic registration. Pro accounts are documented as read and fetch
   tools only. The gateway marks every tool read-only except

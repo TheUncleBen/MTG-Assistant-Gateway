@@ -278,6 +278,9 @@ assistant applies what that mode allows, always with a snapshot.
 
 ## Watchlist and prices
 
+Watchlists are off unless the operator turns them on; until then the page,
+the card viewer's price buttons and the watch tools below are not there.
+
 The **Watchlist** page (in the account menu, and under More on a phone)
 keeps the price of cards and decks you choose, once a day:
 
@@ -316,17 +319,18 @@ the user they gave you (check your app for where). **Send test** checks it.
 Messages say only what happened and link to the page here; they never list
 a deck's cards.
 
-The **Summary** card shows a plain summary of today or the last 7 days:
-watched prices that moved, your watched decks' values, deck reports
-finished, and proposals waiting and applied. Choose **Every day** or
-**Every week (Mondays)** and it is also sent to you as a notification when
-notifications are on. The gateway writes it with fixed sentences from its
+The summary is part of the **Notifications** card, so it is there only when
+the operator has set up ntfy. Choose **Every day** or **Every week
+(Mondays)** and the card shows a plain summary of today or the last 7 days
+(watched prices that moved and your watched decks' values when watchlists
+are on, deck reports finished, and proposals waiting and applied), and it is
+also sent to you as a notification when notifications are on. The gateway writes it with fixed sentences from its
 own data. It does not write an AI summary itself: that would need a paid AI
 model service, and the gateway uses only free ones.
 
 For a summary in your assistant's own words, use the assistant you already
 have. Its `get_summary` tool returns the same summary (with `period` day or
-week). Claude and ChatGPT can both run a prompt on a schedule (check your
+week), with or without ntfy. Claude and ChatGPT can both run a prompt on a schedule (check your
 app for scheduled tasks); a prompt such as "Every Monday morning, call
 get_summary from my MTG gateway and tell me in a few lines what changed and
 what needs me" does it. The tool is read-only.

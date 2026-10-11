@@ -35,10 +35,14 @@ async def test_signed_in_user_gets_page_and_zip(harness: Harness) -> None:
     b = Browser(harness)
     try:
         await b.login("/skill")
-        page = await b.http.get("/skill")
+        # D11: /skill leads to the setup hub's skill section
+        r = await b.http.get("/skill")
+        assert r.status_code == 302 and r.headers["location"] == "/install?for=skill"
+        page = await b.http.get("/install?for=skill")
         assert page.status_code == 200
         assert "/skill/mtg-gateway.zip" in page.text
-        assert "<textarea readonly" in page.text
+        assert "<textarea id='gpt-text' rows='14' readonly>" in page.text
+        assert "data-copy='gpt-text'" in page.text
         expected = skill_page.chatgpt_text(REPO_SKILL)
         assert expected and expected.splitlines()[0][:40] in page.text
         assert "default-src 'none'" in page.headers["content-security-policy"]
@@ -91,7 +95,9 @@ async def test_missing_skill_files_give_a_clear_503(
         b = Browser(h)
         try:
             await b.login("/skill")
-            assert (await b.http.get("/skill")).status_code == 503
+            page = await b.http.get("/install?for=skill")
+            assert page.status_code == 200
+            assert "The ChatGPT instructions are not available on this gateway." in page.text
             assert (await b.http.get("/skill/mtg-gateway.zip")).status_code == 503
         finally:
             await b.aclose()

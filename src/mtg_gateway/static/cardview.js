@@ -272,8 +272,9 @@
       });
     });
     more.appendChild(rbtn);
-    var pbtn = priceButton(card);
-    more.appendChild(pbtn);
+    // Price history and Watch this card only when the gateway has watchlists on (theme.py marks <body>)
+    var pbtn = document.body.hasAttribute("data-watchlist") ? priceButton(card) : null;
+    if (pbtn) more.appendChild(pbtn);
     more.appendChild(outLink("EDHREC", card.links && card.links.edhrec || edhrecUrl(card.name || "")));
     function offerLinks(links) {
       if (links && links.tcgplayer && !more.querySelector("[data-shop]")) {
@@ -285,7 +286,7 @@
     if (card.name) {
       side.appendChild(more);
       side.appendChild(rbox);
-      side.appendChild(pbtn.box);
+      if (pbtn) side.appendChild(pbtn.box);
     }
     offerLinks(card.links);
     offerBack(card.back_img);

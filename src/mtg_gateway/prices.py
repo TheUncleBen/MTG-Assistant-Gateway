@@ -720,20 +720,23 @@ def _alerts(pct: Any, above: Any, below: Any) -> tuple[float | None, float | Non
 class DailyJobs:
     """The daily price check and the members' scheduled summaries, run once a day at
     ``MTG_PRICE_HOUR_UTC`` (summaries right after the prices, so they include them). Which day
-    each last ran is kept in the database, so a restart neither repeats nor skips one."""
+    each last ran is kept in the database, so a restart neither repeats nor skips one. With
+    watchlists off ``prices`` is None and only the summaries run (app.py starts this only when
+    watchlists or notifications are on)."""
 
-    def __init__(self, prices: PriceService, summaries: Any, hour_utc: int):
+    def __init__(self, prices: PriceService | None, summaries: Any, hour_utc: int):
         self.prices = prices
         self.summaries = summaries
         self.hour = hour_utc
+        self.db = prices.db if prices is not None else summaries.db
 
     def _last_day(self, name: str) -> str | None:
-        with self.prices.db._lock:
-            row = self.prices.db._conn.execute("SELECT day FROM job_runs WHERE name = ?", (name,)).fetchone()
+        with self.db._lock:
+            row = self.db._conn.execute("SELECT day FROM job_runs WHERE name = ?", (name,)).fetchone()
         return row[0] if row else None
 
     def _mark(self, name: str, day: str, detail: dict[str, Any]) -> None:
-        with self.prices.db.tx() as c:
+        with self.db.tx() as c:
             c.execute(
                 "INSERT OR REPLACE INTO job_runs (name, day, at, detail_json) VALUES (?,?,?,?)",
                 (name, day, int(now()), json.dumps(detail)),
@@ -746,7 +749,7 @@ class DailyJobs:
         if _dt.datetime.fromtimestamp(t, _dt.UTC).hour < self.hour:
             return {}
         out: dict[str, Any] = {}
-        if self._last_day("prices") != day:
+        if self.prices is not None and self._last_day("prices") != day:
             try:
                 out["prices"] = await self.prices.run_daily(day)
             except Exception as exc:  # Scryfall down or busy: try again at the next round
