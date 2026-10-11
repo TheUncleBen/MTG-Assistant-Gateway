@@ -118,10 +118,13 @@ async def test_resolve_requires_input_and_handles_scryfall_outage(stack: Stack) 
         "ok": False,
         "error": "invalid",
         "message": "give `cards` or `text` with at least one card",
+        "error_code": "INVALID_ARGUMENT",
+        "retryable": False,
     }
     stack.sf.fail_with = 503
     out = (await call(h, token, "resolve_cards", {"text": "Sol Ring"}))["structuredContent"]
     assert out["ok"] is False and out["error"] == "unavailable"
+    assert out["error_code"] == "UNAVAILABLE" and out["retryable"] is True  # not INVALID_ARGUMENT
 
 
 async def test_scryfall_client_caches_and_paces() -> None:
@@ -455,7 +458,13 @@ async def test_resolve_caps_names_per_call(stack: Stack) -> None:
     token = await mcp_token(stack.h)
     names = [{"name": "Sol Ring"}] * (MAX_RESOLVE_CARDS + 1)
     out = (await call(stack.h, token, "resolve_cards", {"cards": names}))["structuredContent"]
-    assert out == {"ok": False, "error": "invalid", "message": f"at most {MAX_RESOLVE_CARDS} cards per call"}
+    assert out == {
+        "ok": False,
+        "error": "invalid",
+        "message": f"at most {MAX_RESOLVE_CARDS} cards per call",
+        "error_code": "INVALID_ARGUMENT",
+        "retryable": False,
+    }
     assert not any(m == "POST" for m, _ in stack.sf.requests)  # rejected before any Scryfall traffic
 
 

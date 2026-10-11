@@ -497,7 +497,8 @@ async def test_browser_reject_closes_a_pending_proposal(stack: Stack) -> None:
     # Nothing was sent, the assistant sees the state, and a later apply is refused.
     assert ark.patches == []
     got = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
-    assert got["state"] == "rejected" and "Rejected by the user" in got["next_step"]
+    assert got["state"] == "rejected" and "Rejected by the user on the review page" in got["next_step"]
+    assert got["closed_by"] == "review_page" and "closed_by_app" not in got
     r = await b.http.post(url, data={"csrf": await b.csrf(url), "action": "apply"})
     assert r.status_code == 303 and "err=" in r.headers["location"] and ark.patches == []
     r = await b.http.post(url, data={"csrf": await b.csrf(url), "action": "reject"})

@@ -248,6 +248,22 @@ async def test_every_proposal_kind_has_a_tier(stack: Stack, tool: str, args: dic
         assert out["ok"] is False and out["error"] == "browser_required"
 
 
+async def test_semi_mode_note_says_what_it_applies(stack: Stack) -> None:
+    """account_status's note matches the tiers: clones and small deck or collection edits apply
+    without the member's press in semi mode (a clone is low risk by design); a new deck from a list
+    waits."""
+    h = stack.h
+    token = await linked_user(stack)
+    await _set_mode(h, "semi")
+    note = structured(await call(h, token, "account_status"))["approval_mode_note"]
+    assert "at most 5 card rows" in note and f"{modes.MAX_COPIES_PER_ROW} copies each" in note
+    assert "a private copy of a deck (a clone" in note and "collection" in note
+    assert "A new deck built from a list" in note and "New decks" not in note
+    assert "{rows}" not in modes.mode_help("semi", max_rows=3) and "at most 3" in modes.mode_help(
+        "semi", max_rows=3
+    )
+
+
 async def test_restore_is_high_risk(stack: Stack) -> None:
     h = stack.h
     token = await linked_user(stack)
@@ -269,6 +285,12 @@ async def test_auto_mode_applies_everything_with_a_snapshot(stack: Stack) -> Non
     a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     sent = len(ark.patches)
     assert a["ok"] and a["state"] == "applied" and a["snapshot_id"] and sent >= 1
+    # "May apply now": false once the proposal is closed; the policy fields stay as they were.
+    assert a["assistant_may_apply"] is False and a["approval_mode"] == "auto" and a["risk"] == "high"
+    r = structured(await _adds(h, token, 1))
+    assert r["assistant_may_apply"] is True
+    r = structured(await call(h, token, "reject_proposal", {"proposal_id": r["proposal_id"]}))
+    assert r["state"] == "rejected" and r["assistant_may_apply"] is False and r["risk"] == "low"
     snaps = structured(await call(h, token, "list_snapshots"))["snapshots"]
     assert [s["snapshot_id"] for s in snaps] == [a["snapshot_id"]]
     # The REST API applies under the same mode (same service path).
