@@ -149,8 +149,11 @@ later; none is promised.
   checked. A Moxfield export pasted as text imports today (New deck, the deck editor's paste
   box, or the assistant's `parse_decklist`).
 - **Per-card notes can be read, not written** (0.7.20). Notes show in the card viewer and in
-  `get_deck`, but no Archidekt route that writes them was found in Archidekt's own site code, so
-  the gateway does not guess one.
+  `get_deck`. Archidekt's own deck editor no longer saves (or shows) per-card deck notes: its save
+  request (`modifyCards/v2`) carries quantity, finish, custom mana value, companion, flip and colour
+  tag but no notes, and no other deck route writes them (site code re-checked 2026-10-11, 0.7.23).
+  Note text exists on Archidekt only for pinned cards and inside the playtester, so the gateway
+  does not guess a route.
 - **Deck reports:** goldfish runs for 60-card formats; an interactive goldfish game you play
   turn by turn. (Trends across a deck's reports shipped in 0.7.20.)
 - **Watchlists and price history:** no price ingest and no watchlist.
