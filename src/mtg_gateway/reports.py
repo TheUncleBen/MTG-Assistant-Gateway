@@ -23,9 +23,9 @@ from .archidekt import Deck
 from .db import Database, _like
 from .decklist import DecklistError, front_faces, parse_decklist, to_text
 from .decks import DeckError, DeckService, _clean_deck_id, current_client, deck_to_text
-from .forge import FINAL_STATES, ForgeClient, ForgeError, refresh, start_run
-from .mf_proxy import FULL_REPORT, MysticForgeProxy, is_busy
-from .report_view import speed_numbers
+from .forge import FINAL_STATES, GIVE_UP_SECONDS, ForgeClient, ForgeError, refresh, start_run
+from .mf_proxy import FULL_REPORT, MysticForgeProxy, busy_retry_after, is_busy
+from .report_view import PREFLIGHT_ONLY, goldfish_settings, speed_numbers
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +75,22 @@ TREND_LIMIT = 60
 # "queued" with no engine job yet, and starts by itself when the runs ahead of it end, the queue
 # kept in the reports table so a gateway restart carries on with it. At most this many wait.
 MAX_FORGE_WAITING = 2
+# Where a report keeps its run's settings: a key of the stored statistics (no column of its own),
+# taken out again when the report is read (``settings``).
+RUN_KEY = "_run"
+# Why a report has no Forge games although the gateway runs Forge (a "skipped" section's note).
+FORGE_NOT_ASKED = "Forge was not asked for this report (a quick goldfish-only run)."
+FORGE_CONSTRUCTED = (
+    "Forge plays Commander games against Commander precons only, so it does not run a 60-card deck."
+)
+FORGE_NO_COMMANDER = (
+    "Forge plays Commander games against Commander precons only, and this deck has no commander in "
+    "its Commander category, so Forge does not run it."
+)
+FORGE_BUSY_GAVE_UP = (
+    "The simulation engine stayed busy with other runs for four hours, so this run was given up. "
+    "Run the report again later."
+)
 
 
 class _Flight:
@@ -137,15 +153,21 @@ class ReportService:
         simulate: bool = True,
         games: int = DEFAULT_GAMES,
         options: dict[str, Any] | None = None,
+        forge: bool | None = None,
+        deck: Deck | None = None,
+        snapshot_id: str | None = None,
     ) -> dict[str, Any]:
         """Read the deck, compute its statistics, optionally simulate and validate it, store
         the result and return it. Refuses a second report of an unchanged deck within
         ``min_interval`` seconds (returns the existing one instead) unless ``options`` (the
-        simulator's knobs, see ``sim_options``) are given, since they change the simulation."""
+        simulator's knobs, see ``sim_options``) are given, since they change the simulation.
+        ``forge`` asks for Forge games apart from the goldfish ones (None: as ``simulate``).
+        ``deck`` is a deck already read (one of the member's snapshots, ``snapshot_id``), filed
+        under its Archidekt deck like any other report."""
         if not isinstance(games, int) or isinstance(games, bool) or games < 10 or games > MAX_GAMES:
             raise DeckError("invalid", f"games must be an integer from 10 to {MAX_GAMES}")
         options = sim_options(options)
-        key = (sub, _clean_deck_id(deck_ref))
+        key = (sub, f"snapshot:{snapshot_id}" if deck is not None else _clean_deck_id(deck_ref))
         flight = self._runs.setdefault(key, _Flight())
         flight.users += 1
         seen = flight.finished
@@ -161,7 +183,16 @@ class ReportService:
                     ):
                         out["reused"] = True
                         return out
-                out = await self._run(sub, deck_ref, simulate=simulate, games=games, options=options)
+                out = await self._run(
+                    sub,
+                    deck_ref,
+                    simulate=simulate,
+                    games=games,
+                    options=options,
+                    forge=simulate if forge is None else bool(forge),
+                    deck=deck,
+                    snapshot_id=snapshot_id,
+                )
                 flight.report_id = out["report_id"]
                 flight.finished += 1
                 return out
@@ -218,9 +249,19 @@ class ReportService:
         }
 
     async def _run(
-        self, sub: str, deck_ref: str, *, simulate: bool, games: int, options: dict[str, Any]
+        self,
+        sub: str,
+        deck_ref: str,
+        *,
+        simulate: bool,
+        games: int,
+        options: dict[str, Any],
+        forge: bool = True,
+        deck: Deck | None = None,
+        snapshot_id: str | None = None,
     ) -> dict[str, Any]:
-        deck = await self.decks.get_any_deck(sub, deck_ref)
+        if deck is None:
+            deck = await self.decks.get_any_deck(sub, deck_ref)
         latest = self._latest(sub, deck.id)
         now = int(time.time())
         if (
@@ -231,11 +272,14 @@ class ReportService:
             and _succeeded(latest)
             # a run that asks to simulate never reuses one made without a simulation
             and not (simulate and self.mf is not None and latest.get("goldfish_json") is None)
+            # nor does one that asks for Forge reuse one whose Forge games were not asked for
+            and not (forge and self.forge is not None and _forge_not_asked(latest.get("forge_json")))
         ):
             out = self.get(sub, latest["id"])
             out["reused"] = True
             return out
         stats = deck_stats.compute(deck)
+        mode = sim_mode(stats)
         goldfish: dict[str, Any] | None = None
         validation: dict[str, Any] | None = None
         if self.mf is not None:
@@ -243,7 +287,6 @@ class ReportService:
             text = front_faces(deck_to_text(deck))
             commander = _front_face((stats.get("commanders") or [None])[0])
             validation = await self._mf(sub, "validate_decklist", {"decklist": text, "commander": commander})
-            mode = sim_mode(stats)
             if simulate and mode not in SIM_MODES:
                 goldfish = {"tool": "goldfish_run", "ok": False, "text": mode}
             elif simulate:
@@ -251,6 +294,20 @@ class ReportService:
                 _commander_aside(goldfish, commander)
                 _stored_note(goldfish)
         rid = "rep_" + secrets.token_urlsafe(9)
+        # The run's own settings, kept with the statistics (no column of their own) and read back
+        # as the report's ``settings``: what the trend compares (run_settings).
+        stored_stats = {
+            **stats,
+            RUN_KEY: {
+                "mode": mode if mode in SIM_MODES else None,
+                "simulate": bool(simulate),
+                "forge": bool(forge),
+                "games": games if simulate else None,
+                "seed": options.get("seed"),
+                "until_turn": options.get("until_turn"),
+                **({"snapshot_id": snapshot_id} if snapshot_id else {}),
+            },
+        }
         with self.db.tx() as c:
             # Stored only while the member exists: a report still running when they deleted
             # their data is dropped, not written back for the deleted account.
@@ -265,7 +322,7 @@ class ReportService:
                     deck.name,
                     deck.fingerprint(),
                     now,
-                    json.dumps(stats),
+                    json.dumps(stored_stats),
                     json.dumps(goldfish) if goldfish is not None else None,
                     json.dumps(validation) if validation is not None else None,
                     current_client.get(),
@@ -289,12 +346,20 @@ class ReportService:
         for section in pruned_forge:  # an unfinished run goes with its report, as in delete()
             self._cancel_forge(section)
         self.db.audit("report_created", sub=sub, detail={"report_id": rid, "deck_id": deck.id})
-        if simulate and self.forge is not None:
+        if self.forge is None:
+            self._finished(rid)
+        elif not forge:
+            # Asked for without Forge (a quick goldfish-only run): no engine job, no queue place.
+            self._save_forge(rid, {"state": "skipped", "reason": "not_requested", "note": FORGE_NOT_ASKED})
+        elif mode != "commander":
+            # Forge plays Commander games against Commander precons only: a 60-card deck (or one
+            # with no commander marked) never starts a run that is bound to fail, nor takes a place.
+            note = FORGE_CONSTRUCTED if mode == "constructed" else FORGE_NO_COMMANDER
+            self._save_forge(rid, {"state": "skipped", "reason": "not_commander", "note": note})
+        else:
             seed = options.get("seed")
             async with self._forge_start_lock:
                 await self._start_or_queue_forge(sub, rid, deck, games, seed, forge_bracket(deck, stats))
-        else:
-            self._finished(rid)
         return self.get(sub, rid)
 
     async def _start_or_queue_forge(
@@ -316,26 +381,24 @@ class ReportService:
                     },
                 )
                 return
-            self._save_forge(
-                rid,
-                {
-                    "state": "queued",
-                    "waiting": True,
-                    "queued_at": int(time.time()),
-                    "games_requested": min(games, self.forge_games),
-                    # What starting it later takes; kept with the report, never shown.
-                    "start": {
-                        "text": text,
-                        "name": deck.name,
-                        "games": games,
-                        "seed": seed,
-                        "bracket": bracket,
-                    },
-                },
-            )
+            self._save_forge(rid, self._waiting_section(text, deck.name, games, seed, bracket))
             self._ensure_forge_refresher()
             return
         await self._start_forge(rid, text, deck.name, games, seed, bracket)
+
+    def _waiting_section(
+        self, text: str, name: str, games: int, seed: int | None, bracket: Any, **extra: Any
+    ) -> dict[str, Any]:
+        """A Forge section waiting in the gateway's queue, with no engine job yet."""
+        return {
+            "state": "queued",
+            "waiting": True,
+            "queued_at": int(time.time()),
+            "games_requested": min(games, self.forge_games),
+            # What starting it later takes; kept with the report, never shown.
+            "start": {"text": text, "name": name, "games": games, "seed": seed, "bracket": bracket},
+            **extra,
+        }
 
     # -- Forge runs (background) ----------------------------------------------
     async def _start_forge(
@@ -346,6 +409,7 @@ class ReportService:
         games: int,
         seed: int | None = None,
         bracket: Any = (None, None),
+        busy_since: int | None = None,
     ) -> None:
         assert self.forge is not None
         level, source = bracket if isinstance(bracket, (list, tuple)) and len(bracket) == 2 else (None, None)
@@ -360,7 +424,30 @@ class ReportService:
                 bracket_source=source if isinstance(source, str) else None,
             )
         except ForgeError as exc:
-            section = {"state": "failed", "error": str(exc), **({"detail": exc.detail} if exc.detail else {})}
+            if exc.kind == "busy":
+                # The engine's own queue (FORGE_MAX_QUEUE, shared by the whole gateway) is full:
+                # the run waits in the gateway's queue instead of failing, and the refresher asks
+                # again on its next round (forge_interval) until GIVE_UP_SECONDS after the first try.
+                since = busy_since if isinstance(busy_since, int) else int(time.time())
+                if time.time() - since > GIVE_UP_SECONDS:
+                    section = {"state": "failed", "error": FORGE_BUSY_GAVE_UP}
+                else:
+                    section = self._waiting_section(
+                        text,
+                        name,
+                        games,
+                        seed,
+                        bracket,
+                        engine_busy=True,
+                        busy_since=since,
+                        retry_after=max(1, round(self.forge_interval)),
+                    )
+            else:
+                section = {
+                    "state": "failed",
+                    "error": str(exc),
+                    **({"detail": exc.detail} if exc.detail else {}),
+                }
         except Exception:  # an unexpected reply must not turn a stored report into a tool error
             logger.exception("starting a Forge run failed for %s", rid)
             section = {"state": "failed", "error": "The simulation engine gave an unexpected answer."}
@@ -425,6 +512,7 @@ class ReportService:
                     int(start.get("games") or self.forge_games),
                     start.get("seed") if isinstance(start.get("seed"), int) else None,
                     start.get("bracket") or (None, None),
+                    busy_since=section.get("busy_since") if section.get("engine_busy") else None,
                 )
 
     def measured_game_seconds(self) -> float | None:
@@ -610,6 +698,7 @@ class ReportService:
                 "rate_limited",
                 "Research calls for your account are still running; wait for them to finish and run "
                 "the report again.",
+                retry_after=busy_retry_after(result),
             )
         out: dict[str, Any] = {"tool": tool, "ok": not result.is_error}
         texts = [c.text for c in result.content if getattr(c, "type", "") == "text"]
@@ -639,7 +728,7 @@ class ReportService:
     def _latest(self, sub: str, deck_id: str) -> dict[str, Any] | None:
         with self.db._lock:
             row = self.db._conn.execute(
-                "SELECT id, fingerprint, taken_at, goldfish_json, validation_json FROM reports "
+                "SELECT id, fingerprint, taken_at, goldfish_json, validation_json, forge_json FROM reports "
                 "WHERE owner_sub = ? AND deck_id = ? "
                 "ORDER BY taken_at DESC, rowid DESC LIMIT 1",
                 (sub, deck_id),
@@ -687,7 +776,7 @@ class ReportService:
             raise DeckError("not_found", "No such report for your account.")
         d = dict(row)
         out = self._summary(d)
-        out["stats"] = json.loads(d["stats_json"])
+        out["stats"] = {k: v for k, v in json.loads(d["stats_json"]).items() if k != RUN_KEY}
         out["goldfish"] = _compact(json.loads(d["goldfish_json"])) if d.get("goldfish_json") else None
         out["validation"] = _compact(json.loads(d["validation_json"])) if d.get("validation_json") else None
         forge = json.loads(d["forge_json"]) if d.get("forge_json") else None
@@ -700,7 +789,7 @@ class ReportService:
     def forge_only(self, sub: str, report_id: str) -> dict[str, Any]:
         """A report's Forge progress alone (get_deck_report view "forge"), for polling."""
         full = self.get(sub, report_id)
-        keys = ("report_id", "deck_id", "deck_name", "taken_at", "forge_status")
+        keys = ("report_id", "deck_id", "deck_name", "taken_at", "status", "engine_label", "forge_status")
         return {k: full.get(k) for k in keys}
 
     def decks_seen(self, sub: str) -> dict[str, str]:
@@ -717,7 +806,7 @@ class ReportService:
         limit = max(1, min(int(limit), MAX_REPORTS_PER_USER))
         with self.db._lock:
             rows = self.db._conn.execute(
-                "SELECT id, taken_at, stats_json, goldfish_json FROM reports "
+                "SELECT id, taken_at, stats_json, goldfish_json, forge_json FROM reports "
                 "WHERE owner_sub = ? AND deck_id = ? ORDER BY taken_at DESC, rowid DESC LIMIT ?",
                 (sub, str(deck_id), limit),
             ).fetchall()
@@ -725,12 +814,14 @@ class ReportService:
         for r in reversed(rows):
             stats = json.loads(r["stats_json"]) if r["stats_json"] else {}
             goldfish = json.loads(r["goldfish_json"]) if r["goldfish_json"] else None
+            forge = json.loads(r["forge_json"]) if r["forge_json"] else None
             out.append(
                 {
                     "report_id": r["id"],
                     "taken_at": r["taken_at"],
                     **{k: stats.get(k) for k in TREND_KEYS},
                     **speed_numbers(goldfish),
+                    "settings": run_settings(stats, goldfish, forge),
                 }
             )
         return out
@@ -745,28 +836,41 @@ class ReportService:
         metrics = []
         for key, label, unit in TREND_METRICS:
             held = [p for p in series if _number(p.get(key))]
+            left_out = 0
+            if key in GOLDFISH_TREND_KEYS and held:
+                # A simulation number is only compared with ones run the same way: the series
+                # breaks where the game (Commander at 40 life, or 60-card at 20) or the last
+                # simulated turn changed, and only the latest stretch is followed.
+                same = _comparable(held[-1])
+                start = len(held) - 1
+                while start > 0 and _comparable(held[start - 1]) == same:
+                    start -= 1
+                left_out, held = start, held[start:]
             if len(held) < 2:
                 continue
             first, latest = held[0], held[-1]
-            metrics.append(
-                {
-                    "key": key,
-                    "label": label,
-                    "unit": unit,
-                    "reports": len(held),
-                    "first": first[key],
-                    "first_at": first["taken_at"],
-                    "latest": latest[key],
-                    "latest_at": latest["taken_at"],
-                    "change": round(latest[key] - first[key], 2),
-                }
-            )
+            metric = {
+                "key": key,
+                "label": label,
+                "unit": unit,
+                "reports": len(held),
+                "first": first[key],
+                "first_at": first["taken_at"],
+                "latest": latest[key],
+                "latest_at": latest["taken_at"],
+                "change": round(latest[key] - first[key], 2),
+            }
+            if left_out:
+                metric["left_out"] = left_out
+                metric["since_report_id"] = first["report_id"]
+            metrics.append(metric)
         return {
             "deck_id": str(deck_id),
             "reports": len(series),
             "first_at": series[0]["taken_at"],
             "latest_at": series[-1]["taken_at"],
             "metrics": metrics,
+            "settings_changes": settings_changes(series),
             "series": series,
         }
 
@@ -795,6 +899,9 @@ class ReportService:
         metrics = {k: stats.get(k) for k in TREND_KEYS}
         goldfish = json.loads(d["goldfish_json"]) if d.get("goldfish_json") else None
         validation = json.loads(d["validation_json"]) if d.get("validation_json") else None
+        forge = json.loads(d["forge_json"]) if d.get("forge_json") else None
+        forge = forge if isinstance(forge, dict) else None
+        preflight = forge is None or forge.get("state") == "skipped"
         return {
             "report_id": d["id"],
             "deck_id": d["deck_id"],
@@ -807,11 +914,102 @@ class ReportService:
             "has_validation": bool(validation and validation.get("ok")),
             "bracket_estimate": (stats.get("bracket_estimate") or {}).get("bracket"),
             "created_by_client": d.get("created_by_client"),
+            "status": report_status(goldfish, validation, forge),
+            "engine": "preflight_only" if preflight else "forge",
+            "engine_label": PREFLIGHT_ONLY if preflight else "Forge rules engine",
+            "settings": run_settings(stats, goldfish, forge),
         }
 
 
 def _number(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+# The trend numbers that come from the goldfish simulation, so depend on how it was run.
+GOLDFISH_TREND_KEYS = ("commander_cast_median_turn", "kill_median_turn", "kill_pct")
+# The settings settings_changes compares between consecutive reports.
+SETTING_KEYS = ("mode", "games", "seed", "until_turn", "engines")
+# Forge states that mean no rules-engine games came or will come.
+_FORGE_NONE = ("skipped", "failed", "timeout", "cancelled", "lost")
+
+
+def run_settings(stats: dict[str, Any], goldfish: Any, forge: Any) -> dict[str, Any]:
+    """How a report was run, for its trend point and its reader: the game (``mode``: commander or
+    constructed, None when not simulated), the goldfish games, seed and last turn (read from the
+    stored result, else from what was asked), the engines that played (goldfish, forge) and
+    Forge's games. Reports stored before 0.7.24 kept no settings: theirs come from the result."""
+    asked = stats.get(RUN_KEY) if isinstance(stats.get(RUN_KEY), dict) else {}
+    ran = goldfish_settings(goldfish)
+    mode = asked.get("mode") if RUN_KEY in stats else sim_mode(stats)
+    if ran.get("constructed"):
+        mode = "constructed"
+    engines = []
+    if isinstance(goldfish, dict) and goldfish.get("ok"):
+        engines.append("goldfish")
+    if isinstance(forge, dict) and forge.get("state") not in _FORGE_NONE:
+        engines.append("forge")
+    out = {
+        "mode": mode if mode in SIM_MODES else None,
+        "games": ran.get("games") if ran.get("games") is not None else asked.get("games"),
+        "seed": ran.get("seed") if ran.get("seed") is not None else asked.get("seed"),
+        "until_turn": ran.get("until_turn") if ran.get("until_turn") is not None else asked.get("until_turn"),
+        "engines": engines,
+        "forge_games": forge.get("games_requested") if "forge" in engines else None,
+    }
+    if "goldfish" not in engines:
+        out.update(games=None, seed=None, until_turn=None)
+    if asked.get("snapshot_id"):
+        out["snapshot_id"] = asked["snapshot_id"]
+    return out
+
+
+def _comparable(point: dict[str, Any]) -> tuple[Any, Any]:
+    settings = point.get("settings") or {}
+    return settings.get("mode"), settings.get("until_turn")
+
+
+def settings_changes(series: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Where a deck's run settings changed from one report to the next (each setting compared
+    only when both reports hold it): the report, and per changed setting [before, after]."""
+    out = []
+    last: dict[str, Any] = {}
+    for p in series:
+        settings = p.get("settings") or {}
+        changed = {}
+        for key in SETTING_KEYS:
+            value = settings.get(key)
+            if value is None or value == []:
+                continue
+            if key in last and last[key] != value:
+                changed[key] = [last[key], value]
+            last[key] = value
+        if changed:
+            out.append({"report_id": p["report_id"], "taken_at": p["taken_at"], "changed": changed})
+    return out
+
+
+def report_status(goldfish: Any, validation: Any, forge: Any) -> str:
+    """One word for where a report stands: "queued" or "running" while its Forge games wait or
+    play, else "complete" when every part asked for came back, "partial" when some did not (a
+    failed simulation or validation, Forge games that failed or found no place), "failed" when
+    none did. Forge left out on purpose (not asked for, or a 60-card deck) is not a failure."""
+    if isinstance(forge, dict) and forge.get("state") not in FINAL_STATES:
+        return "running" if forge.get("state") == "running" else "queued"
+    parts = [bool(b.get("ok")) for b in (goldfish, validation) if isinstance(b, dict)]
+    if isinstance(forge, dict) and forge.get("reason") not in ("not_requested", "not_commander"):
+        parts.append(forge.get("state") == "done")
+    if parts and not any(parts):
+        return "failed"
+    return "complete" if all(parts) else "partial"
+
+
+def _forge_not_asked(forge_json: Any) -> bool:
+    """Whether a stored report has no Forge games because none were asked for (or none could be
+    the gateway ran no Forge then): a later report that asks for them does not reuse it."""
+    if not forge_json:
+        return True
+    section = json.loads(forge_json) if isinstance(forge_json, str) else forge_json
+    return isinstance(section, dict) and section.get("reason") == "not_requested"
 
 
 def _waiting(section: dict[str, Any]) -> bool:
@@ -850,7 +1048,18 @@ def forge_status(section: dict[str, Any] | None) -> dict[str, Any] | None:
         "games_done": _done_games(section),
         "games_requested": section.get("games_requested"),
     }
-    for key in ("job_id", "position", "waiting_for", "expected_seconds", "expected_start_seconds", "error"):
+    for key in (
+        "job_id",
+        "position",
+        "waiting_for",
+        "engine_busy",
+        "retry_after",
+        "expected_seconds",
+        "expected_start_seconds",
+        "reason",
+        "note",
+        "error",
+    ):
         if section.get(key) is not None:
             out[key] = section[key]
     return out

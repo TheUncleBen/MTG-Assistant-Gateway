@@ -110,8 +110,22 @@ One deck:
   precon's bracket comes from the game changers it holds. When there are not
   enough precons of that bracket, the nearest bracket fills in, and an older
   Forge image without precon brackets plays the newest precons; the report
-  names the opponents, their brackets and why they were picked. Forge does not
-  run 60-card decks (its opponents are Commander precons).
+  names the opponents, their brackets and why they were picked. Forge plays
+  10 games per report by default (`MTG_FORGE_GAMES`) and shows each win rate
+  with its 95% range. Forge does not run 60-card decks (its opponents are
+  Commander precons): their reports never start or queue a Forge run and say
+  why. When the Forge engine is busy
+  with other runs, a report waits in the queue and starts by itself. Because
+  each deck meets precons of its own bracket, two decks' Forge win rates are
+  not a like-for-like comparison; the paired goldfish A/B of `compare_decks`
+  is.
+- A report without Forge games (Forge not set up, a 60-card deck, or Forge
+  left out of the report) is labelled **Preflight only (no rules engine)**
+  where the Forge games would be. Each report shows its status: queued,
+  running, complete, partial (some part did not run) or failed.
+- A deck's report trends on its History page compare a simulation number
+  only across reports run the same way (Commander or 60-card game, same last
+  turn), and the table of numbers shows each report's settings.
 - **Compare with another deck…** (More menu) pits the deck against a
   preconstructed deck (pick one from Archidekt's list), any deck id or
   link, or a pasted list: what the build took out of the other deck, what

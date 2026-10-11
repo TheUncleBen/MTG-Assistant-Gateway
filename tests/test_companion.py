@@ -205,6 +205,35 @@ async def test_reports_are_stored_and_listed(stack: Stack) -> None:
         await b.aclose()
 
 
+async def test_the_rest_and_page_routes_can_leave_forge_out(stack: Stack) -> None:
+    """D17: the REST route takes "forge": false and the deck page's report form forge=0, each passed
+    to the report as forge=False; without either, Forge follows simulate as before (forge None)."""
+    h = stack.h
+    b = await linked_browser(stack)
+    reports = h.app.state.gateway.reports
+    real_run, seen = reports.run, []
+
+    async def recording(*args, **kwargs):
+        seen.append(kwargs.get("forge"))
+        return await real_run(*args, **kwargs)
+
+    reports.run = recording
+    try:
+        auth = {"Authorization": f"Bearer {await mcp_token(h)}"}
+        r = await h.http.post("/api/v1/reports", json={"deck_id": "42", "forge": False}, headers=auth)
+        assert r.status_code == 201, r.text
+        assert r.json()["engine_label"] == "Preflight only (no rules engine)" and r.json()["status"]
+        await h.http.post("/api/v1/reports", json={"deck_id": "42"}, headers=auth)
+        csrf = await b.csrf("/account")
+        ran = await b.http.post("/decks/42/report", data={"csrf": csrf, "forge": "0"})
+        assert ran.status_code == 303
+        await b.http.post("/decks/42/report", data={"csrf": csrf})
+        assert seen == [False, None, False, None]
+    finally:
+        reports.run = real_run
+        await b.aclose()
+
+
 # -- new MCP tools ----------------------------------------------------------------
 async def test_new_tools_are_listed_and_work(stack: Stack) -> None:
     h = stack.h

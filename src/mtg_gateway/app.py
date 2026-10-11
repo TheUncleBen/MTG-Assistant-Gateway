@@ -1336,8 +1336,10 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "service (both decks played game for game under the same seeds; per-metric deltas with "
             "confidence intervals and significance; two Commander decks or two 60-card decks), not "
             "stored. Does not touch Archidekt beyond reading the decks. This is the one tool for deck "
-            "differences, precon upgrades and A/B simulations. "
-            "For Forge games of two decks, run run_deck_report on each with the same options.seed."
+            "differences, precon upgrades and A/B simulations; its goldfish A/B is the like-for-like "
+            "comparison of two decks. Forge seats each deck against precons of its own bracket, so two "
+            "decks' Forge win rates (one run_deck_report each) are each against their own bracket's table, "
+            "not the same opponents, even with the same options.seed."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
         meta=compare_card_meta,
@@ -1448,13 +1450,18 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "returns the existing one (not when options are given). options passes the simulator's knobs "
             "through (annotations from goldfish_annotate, combos, seed, until_turn, opponents, mulligan). "
             "When the gateway runs Forge, a stored report also gets a forge section: real games against "
-            "Commander precons (Commander decks only), played in the background, one run at a time per "
+            "Commander precons of the deck's bracket, played in the background, one run at a time per "
             "member (a report made while an earlier one is still playing is queued behind it, state queued "
             "with position and "
-            "waiting_for, and starts by itself; at most two wait, then a report gets no Forge games), "
+            "waiting_for, and starts by itself; at most two wait, then a report gets no Forge games; when "
+            "the engine itself is busy the run waits too, engine_busy with retry_after seconds), "
             "with the seed Forge used, the cards it could not play in not_played and forge_status "
             "(state, games_done of games_requested, expected_seconds). Poll with get_deck_report "
-            "view='forge' until the state is done. "
+            "view='forge' until the state is done. Forge plays Commander decks only: a 60-card deck's "
+            "report never starts it (forge state skipped, with the reason). forge=false leaves Forge out "
+            "for a quick goldfish-only report (default: as simulate). A report without Forge games is "
+            "labelled engine_label 'Preflight only (no rules engine)'. status is the report's overall "
+            "state: queued, running, complete, partial or failed. "
             "This is the one tool that "
             "runs goldfish games of one deck; compare_decks with simulate=true is the paired A/B of two. "
             "goldfish_odds (draw odds) and goldfish_annotate (card roles) stay separate."
@@ -1463,11 +1470,19 @@ def build_mcp_server(state: AppState) -> MCPServer:
     )
     async def run_deck_report(
         deck_ref: Annotated[
-            str, Field(description="Archidekt deck id or URL, a snapshot id, or pasted decklist text.")
+            str,
+            Field(
+                description="Archidekt deck id or URL, one of your snapshot ids (list_snapshots), or "
+                "pasted decklist text."
+            ),
         ],
         games: Annotated[int, Field(description="Games to simulate (10 to 2000).")] = 300,
         simulate: Annotated[bool, Field(description="Run the goldfish simulation.")] = True,
         options: Annotated[RunOptions | None, Field(description="Simulator options.")] = None,
+        forge: Annotated[
+            bool | None,
+            Field(description="Run Forge games when the gateway has Forge (default: as simulate)."),
+        ] = None,
     ) -> dict[str, object]:
         options = dumped(options)
         try:
@@ -1476,8 +1491,19 @@ def build_mcp_server(state: AppState) -> MCPServer:
                     _sub(), deck_ref, simulate=simulate, games=games, options=options
                 )
             else:
+                # A snapshot id is one of the member's own snapshots (as compare_decks reads it),
+                # reported as the deck stood then; anything else is an Archidekt deck.
+                ref = str(deck_ref or "").strip()
+                snap = _own_snapshot(_sub(), ref)
                 report = await state.reports.run(
-                    _sub(), deck_ref, simulate=simulate, games=games, options=options
+                    _sub(),
+                    ref,
+                    simulate=simulate,
+                    games=games,
+                    options=options,
+                    forge=forge,
+                    deck=snap,
+                    snapshot_id=ref if snap is not None else None,
                 )
             failed = _simulation_failure(report.get("goldfish")) if simulate else None
             if failed:
@@ -1501,8 +1527,12 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "reports, trend is the deck's History-page trend: its last 60 reports oldest first (series, "
             "with the goldfish speed numbers: commander median cast turn, median turn lethal damage was "
             "dealt (40, or 20 in a 60-card game), share of games dealing it by until_turn) and per "
-            "metric the first and latest values, their dates and the change; otherwise null. get_deck_report "
-            "returns one in full."
+            "metric the first and latest values, their dates and the change; otherwise null. Each report "
+            "and series point carries settings (mode commander or constructed, games, seed, until_turn, "
+            "engines): a simulation number is only trended across reports with the same mode and until_turn "
+            "(left_out says how many earlier ones were not compared) and settings_changes lists where the "
+            "settings changed. Each report has its status and engine_label. get_deck_report returns one in "
+            "full."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": False},
     )
@@ -1517,7 +1547,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
         name="get_deck_report",
         title="Get a stored deck report",
         description=(
-            "One stored report: view 'full' (default) is the whole report (statistics, the simulation "
+            "One stored report: view 'full' (default) is the whole report (status: queued, running, "
+            "complete, partial or failed; engine_label; settings; statistics, the simulation "
             "result, the validation and the forge section); view 'forge' is only forge_status (state, "
             "games_done of games_requested, job_id, and while queued its position, the report it waits "
             "for and expected_seconds), small enough to poll while the Forge games play."

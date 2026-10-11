@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -512,3 +513,181 @@ async def test_report_keeps_a_text_result_once(tmp_path: Path) -> None:
     with db.tx() as c:
         c.execute("UPDATE reports SET goldfish_json = ? WHERE id = ?", (json.dumps(old), out["report_id"]))
     assert "data" not in reports.get("alice", out["report_id"])["goldfish"]
+
+
+class _SixtyCardDecks:
+    """Deck 42 as a 60-card Modern deck: no commander, no Commander category."""
+
+    async def get_any_deck(self, sub: str | None, ref: str) -> Any:
+        raw = json.loads(json.dumps(FakeArchidekt().decks[42]))
+        raw.update(deckFormat=2, categories=[])
+        for row in raw["cards"]:
+            row["categories"] = None
+        return parse_deck(raw)
+
+
+async def test_a_sixty_card_report_never_starts_or_queues_forge(tmp_path: Path) -> None:
+    """Consolidation bug 2: every 60-card report started a Forge run bound to fail, which could take
+    a waiting place. Now it never reaches the engine, takes no place, and says why."""
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    fake = FakeForge()
+    reports = ReportService(db, _SixtyCardDecks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+    finished: list[str] = []
+    reports.on_finished = lambda sub, rid: finished.append(rid)
+    out = await reports.run("alice", "42", games=300, options={"seed": 1})
+    assert fake.started == [] and out["forge"]["state"] == "skipped"
+    assert out["forge"]["reason"] == "not_commander" and "60-card deck" in out["forge"]["note"]
+    assert out["engine"] == "preflight_only" and out["engine_label"] == "Preflight only (no rules engine)"
+    assert out["status"] == "complete" and out["settings"]["mode"] == "constructed"
+    assert finished == [out["report_id"]]  # the report is finished at once
+    # no place taken: a Commander report of the same member starts at once
+    commander = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+    ran = await commander.run("alice", "42", games=300, options={"seed": 2})
+    assert ran["forge"]["state"] == "running" and len(fake.started) == 1
+    assert ran["engine"] == "forge" and ran["status"] == "running"
+    commander._forge_task.cancel()
+
+
+async def test_a_report_can_leave_forge_out(tmp_path: Path) -> None:
+    """D17: forge=False runs a quick report without Forge games (simulate is no longer the one switch
+    for both); unset, Forge follows simulate as before. A later report that asks for Forge does
+    not reuse one that left it out."""
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    fake = FakeForge()
+    reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+    quick = await reports.run("alice", "42", games=300, forge=False)
+    assert fake.started == [] and quick["forge"]["reason"] == "not_requested"
+    assert quick["engine_label"] == "Preflight only (no rules engine)" and quick["status"] == "complete"
+    assert "forge" not in quick["settings"]["engines"]
+    # the same unchanged deck with Forge asked for: a new report, not the quick one again
+    full = await reports.run("alice", "42", games=300)
+    assert full["report_id"] != quick["report_id"] and not full.get("reused")
+    assert full["forge"]["state"] == "running" and len(fake.started) == 1
+    # and a second quick one reuses that full report (it holds more, nothing less)
+    again = await reports.run("alice", "42", games=300, forge=False)
+    assert again.get("reused") and again["report_id"] == full["report_id"]
+    # simulate=False without forge: Forge off as before
+    none = await reports.run("alice", "42", games=300, simulate=False, options={"seed": 3})
+    assert none["forge"]["reason"] == "not_requested" and len(fake.started) == 1
+    reports._forge_task.cancel()
+
+
+class _BusyForge(FakeForge):
+    """The Forge service with its own queue full (FORGE_MAX_QUEUE): 429 until ``busy`` is cleared."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.busy = True
+        self.refused = 0
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/jobs" and request.method == "POST" and self.busy:
+            self.refused += 1
+            return httpx.Response(429, json={"error": "simulation queue is full; try again later"})
+        return super().handler(request)
+
+
+async def test_an_engine_busy_run_waits_and_is_retried(tmp_path: Path) -> None:
+    """QA-002/QA-008: when the Forge service said its queue was full, the run ended failed. It now
+    waits in the gateway's queue (engine_busy, retry_after: the refresher's interval) and the
+    refresher starts it once the engine has room; after GIVE_UP_SECONDS it is given up."""
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    fake = _BusyForge()
+    reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+    reports.forge_interval = 0.05
+    out = await reports.run("alice", "42", games=300, options={"seed": 9})
+    forge = out["forge"]
+    assert forge["state"] == "queued" and forge["engine_busy"] is True and forge["retry_after"] == 1
+    assert out["status"] == "queued" and out["forge_status"]["engine_busy"] is True
+    assert "start" not in forge
+    assert any("asks the engine again" in ln for ln in forge_lines(forge)), forge_lines(forge)
+    # a second report of the member waits behind it, not beside it
+    second = await reports.run("alice", "42", games=300, options={"seed": 10})
+    assert second["forge"]["state"] == "queued" and second["forge"]["position"] == 2
+    for _ in range(100):  # tried again on each round while the engine stays busy
+        if fake.refused >= 3:
+            break
+        await asyncio.sleep(0.02)
+    assert fake.refused >= 3 and fake.started == []
+    fake.busy = False
+    for _ in range(200):
+        if fake.started:
+            break
+        await asyncio.sleep(0.02)
+    assert len(fake.started) == 1 and fake.started[0]["seed"] == 9
+    now = reports.get("alice", out["report_id"])
+    assert now["forge"]["state"] == "running" and "engine_busy" not in now["forge"]
+    reports._forge_task.cancel()
+    # four hours of busy answers: given up, with the reason
+    fake.busy = True
+    since = int(time.time()) - reports_module.GIVE_UP_SECONDS - 10
+    await reports._start_forge(
+        second["report_id"], DECK_TEXT, "Liesa", 4, None, (None, None), busy_since=since
+    )
+    gave_up = reports.get("alice", second["report_id"])["forge"]
+    assert gave_up["state"] == "failed" and "four hours" in gave_up["error"]
+
+
+def test_forge_games_default_and_win_rate_range() -> None:
+    """D15: ten Forge games a report by default, each win rate shown with its 95% range."""
+    from mtg_gateway.config import Settings
+
+    assert Settings.__dataclass_fields__["forge_games"].default == 10
+    lines = forge_lines(
+        {
+            "state": "done",
+            "result": {
+                "games": 10,
+                "games_requested": 10,
+                "seats": [{"deck": "Liesa", "wins": 4, "win_rate": 0.4, "win_rate_95": [0.17, 0.69]}],
+            },
+        }
+    )
+    assert "Liesa: 4 wins, 40% (95% interval 17% to 69%)." in lines
+
+
+def test_start_run_has_no_opponents_parameter() -> None:
+    import inspect
+
+    assert "opponents" not in inspect.signature(start_run).parameters
+
+
+def test_report_status_and_run_settings() -> None:
+    """QA-010: one overall status per report; QA-009: each report's run settings."""
+    from mtg_gateway.reports import report_status, run_settings
+
+    ok = {"ok": True, "text": "x"}
+    bad = {"ok": False, "text": "x"}
+    assert report_status(ok, ok, None) == "complete"
+    assert report_status(ok, ok, {"state": "running"}) == "running"
+    assert report_status(ok, ok, {"state": "queued", "waiting": True}) == "queued"
+    assert report_status(ok, ok, {"state": "done"}) == "complete"
+    assert report_status(ok, ok, {"state": "failed"}) == "partial"
+    assert report_status(ok, ok, {"state": "skipped", "error": "queue full"}) == "partial"
+    assert report_status(ok, ok, {"state": "skipped", "reason": "not_commander"}) == "complete"
+    assert report_status(bad, ok, None) == "partial"
+    assert report_status(bad, bad, {"state": "lost"}) == "failed"
+    assert report_status(None, None, None) == "complete"  # statistics only, nothing else asked
+    text = (
+        "# Goldfish run\nCommander: Aesi | 300 games, seed 42, through turn 10\n\n"
+        "## Metrics\n```json\n{}\n```"
+    )
+    settings = run_settings(
+        {"commanders": ["Aesi"], "_run": {"mode": "commander", "games": 300}},
+        {"ok": True, "text": text},
+        {"state": "done", "games_requested": 10},
+    )
+    assert settings == {
+        "mode": "commander",
+        "games": 300,
+        "seed": 42,
+        "until_turn": 10,
+        "engines": ["goldfish", "forge"],
+        "forge_games": 10,
+    }
+    # an old report kept no settings: they come from its result and statistics
+    old = run_settings({"commanders": ["Aesi"], "card_count": 100}, {"ok": True, "text": text}, None)
+    assert old["mode"] == "commander" and old["games"] == 300 and old["engines"] == ["goldfish"]

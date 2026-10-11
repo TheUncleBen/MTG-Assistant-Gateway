@@ -539,3 +539,57 @@ async def test_report_trends_on_a_decks_history(stack: Stack) -> None:
         assert "Report trends" not in (await b.http.get("/history", headers=NAV)).text
     finally:
         await b.aclose()
+
+
+async def test_trends_never_mix_simulations_run_differently(stack: Stack) -> None:
+    """QA-009: every trend point carries its run settings, a simulation number is compared only
+    across reports run the same way (a deck that turned from a Commander game at 40 life into a
+    60-card game at 20 breaks the series), and the change is listed and shown, never silent."""
+    h = stack.h
+    b = await linked_browser(stack)
+    try:
+        token = await mcp_token(h)
+        gw = h.app.state.gateway
+        sub = gw.db._one("SELECT sub FROM users", ())["sub"]
+        now = int(time.time())
+        store_report(gw.db, sub, "rep_c1", taken_at=now - 9 * DAY)
+        sixty = {"_run": {"mode": "constructed", "games": 300}}
+        store_report(gw.db, sub, "rep_s1", taken_at=now - 5 * DAY, stats=sixty, goldfish=GOLDFISH_PRECON)
+        store_report(gw.db, sub, "rep_s2", taken_at=now - DAY, stats=sixty)
+
+        out = structured(await call(h, token, "list_deck_reports", {"deck_id": "42"}))
+        trend = out["trend"]
+        assert [p["settings"]["mode"] for p in trend["series"]] == ["commander", "constructed", "constructed"]
+        assert (
+            trend["series"][0]["settings"]["games"] == 300
+            and "goldfish" in trend["series"][0]["settings"]["engines"]
+        )
+        assert trend["settings_changes"] == [
+            {
+                "report_id": "rep_s1",
+                "taken_at": now - 5 * DAY,
+                "changed": {"mode": ["commander", "constructed"]},
+            }
+        ]
+        by_key = {m["key"]: m for m in trend["metrics"]}
+        kill = by_key["kill_pct"]
+        assert kill["reports"] == 2 and kill["left_out"] == 1 and kill["since_report_id"] == "rep_s1"
+        assert (kill["first"], kill["latest"]) == (62.7, 57.0)  # the 60-card reports only
+        assert "left_out" not in by_key["average_mana_value"]  # the statistics do not depend on it
+        # each listed report says how it ran, its status and its engine
+        listed = out["reports"][0]
+        assert listed["status"] == "complete" and listed["engine_label"] == "Preflight only (no rules engine)"
+        assert listed["settings"]["mode"] == "constructed"
+        got = structured(await call(h, token, "get_deck_report", {"report_id": "rep_s2"}))
+        assert "_run" not in got["stats"] and got["settings"]["mode"] == "constructed"
+
+        page = await b.http.get("/history?deck_id=42", headers=NAV)
+        body = page.text.split("<main")[1]
+        assert "The run settings changed between these reports" in body
+        assert "1 earlier report ran with other settings (game or turns) and is left out." in body
+        table = body.split("<table>")[1].split("</table>")[0]
+        assert "<th scope='col'>Settings</th>" in table
+        assert "Commander · 300 games · to turn 10" in table and "60-card · 300 games" in table
+        assert "no rules engine" in table
+    finally:
+        await b.aclose()

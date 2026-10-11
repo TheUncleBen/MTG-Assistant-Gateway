@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import time
 from typing import Any
@@ -22,6 +23,7 @@ from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.context import CallNext, ServerRequestContext
 
 from . import deck_stats
+from .decklist import front_faces
 from .decks import DeckError
 from .schemas import compact_schema, flatten_params
 
@@ -105,6 +107,8 @@ TEXT_REWRITES: tuple[tuple[re.Pattern[str], str], ...] = (
     ),
     # Where the stored copy is, the gateway says itself, and only when it stored one (reports.py).
     (re.compile(r"Full report: goldfish_report\([^)]*\)\.?"), FULL_REPORT),
+    # A goldfish game has no opponent, so it supports no "this card underperforms" claim (QA-005).
+    (re.compile(r"\s*\(only this group supports 'the sim agrees this card underperforms'\)"), ""),
     (re.compile(r"\bgoldfish_run/goldfish_ab\b"), "run_deck_report / compare_decks"),
     (re.compile(r"\bgoldfish_ab\b"), "compare_decks (simulate=true)"),
     (re.compile(r"\bgoldfish_run\b"), "run_deck_report"),
@@ -314,17 +318,28 @@ DECK_ARGUMENTS = ("deck", "deck_a", "deck_b")
 BUSY_PREFIX = "busy: "
 
 
-def _busy() -> types.CallToolResult:
+def _busy(limit: int = MAX_CALLS_PER_USER, retry_after: int | None = None) -> types.CallToolResult:
+    """The refusal for a member who already runs their share of calls: text (BUSY_PREFIX) and, as
+    structured content, error busy with ``retry_after``: the seconds until their oldest call is
+    stopped at the latest (each call's deadline), so a slot is free by then."""
+    message = (
+        f"{limit} research calls for your account are still running; wait for one to finish and try again"
+    )
+    structured: dict[str, Any] = {"ok": False, "error": "busy", "message": message}
+    if retry_after is not None:
+        structured["retry_after"] = retry_after
     return types.CallToolResult(
-        content=[
-            types.TextContent(
-                type="text",
-                text=f"{BUSY_PREFIX}{MAX_CALLS_PER_USER} research calls for your account are still running; "
-                "wait for one to finish and try again",
-            )
-        ],
+        content=[types.TextContent(type="text", text=f"{BUSY_PREFIX}{message}")],
+        structured_content=structured,
         isError=True,
     )
+
+
+def busy_retry_after(result: types.CallToolResult) -> int | None:
+    """The ``retry_after`` (seconds) of a busy refusal (``_busy``), or None."""
+    structured = result.structured_content
+    value = structured.get("retry_after") if isinstance(structured, dict) else None
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 def _refusal(text: str) -> types.CallToolResult:
@@ -412,6 +427,17 @@ def owned_elsewhere_text(name: str) -> str | None:
     )
 
 
+def _front_face_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
+    """validate_decklist's arguments with the decklist and commander named by front faces only
+    (decklist.front_faces, the helper reports use)."""
+    out = dict(arguments)
+    if isinstance(out.get("decklist"), str):
+        out["decklist"] = front_faces(out["decklist"])
+    if isinstance(out.get("commander"), str):
+        out["commander"] = out["commander"].split(" // ", 1)[0]
+    return out
+
+
 def is_busy(result: types.CallToolResult) -> bool:
     """True for the refusal ``call`` gives when the owner already runs their share of calls."""
     if not result.is_error or not result.content:
@@ -439,6 +465,7 @@ class MysticForgeProxy:
         self.max_calls_per_user = max_calls_per_user
         self.deadline = deadline
         self._in_flight: dict[str, int] = {}
+        self._started: dict[str, list[float]] = {}  # when each of a member's running calls began
         self._client_factory = client_factory or (lambda: Client(url))
         self._tools: list[dict[str, Any]] = []
         self._tools_at = 0.0
@@ -575,8 +602,14 @@ class MysticForgeProxy:
                 return _refusal(refused)
         if owner is not None:
             if self._in_flight.get(owner, 0) >= self.max_calls_per_user:
-                return _busy()
+                return _busy(self.max_calls_per_user, self._retry_after(owner))
             self._in_flight[owner] = self._in_flight.get(owner, 0) + 1
+            started = time.monotonic()
+            self._started.setdefault(owner, []).append(started)
+        if name == "validate_decklist" and isinstance(arguments, dict):
+            # Scryfall's collection lookup (how the research service reads a list) knows a
+            # double-faced or split card by its front face only, as reports already send it.
+            arguments = _front_face_arguments(arguments)
         try:
             if isinstance(arguments, dict):
                 if not self._listed:
@@ -594,6 +627,20 @@ class MysticForgeProxy:
                     self._in_flight[owner] = left
                 else:
                     self._in_flight.pop(owner, None)
+                starts = self._started.get(owner) or []
+                if started in starts:
+                    starts.remove(started)
+                if not starts:
+                    self._started.pop(owner, None)
+
+    def _retry_after(self, owner: str) -> int | None:
+        """Seconds until the member's oldest running call is stopped at the latest: its deadline,
+        plus the tool listing's own when the tools were not listed yet (``call`` lists them first)."""
+        starts = self._started.get(owner)
+        if not starts:
+            return None
+        bound = self.deadline + (0 if self._listed else LIST_DEADLINE_SECONDS)
+        return max(1, math.ceil(bound - (time.monotonic() - min(starts))))
 
     async def _forward(self, name: str, arguments: dict[str, Any] | None) -> types.CallToolResult:
         try:
@@ -647,4 +694,11 @@ class MysticForgeProxy:
         return _mw
 
 
-__all__ = ["ALLOWED_TOOLS", "BLOCKED_TOOLS", "OWNED_ELSEWHERE", "MysticForgeProxy", "is_busy"]
+__all__ = [
+    "ALLOWED_TOOLS",
+    "BLOCKED_TOOLS",
+    "OWNED_ELSEWHERE",
+    "MysticForgeProxy",
+    "busy_retry_after",
+    "is_busy",
+]

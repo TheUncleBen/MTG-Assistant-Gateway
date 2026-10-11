@@ -214,9 +214,15 @@ report again with `get_deck_report` until it is `done`.
 - A card that is legal in no format (joke, playtest or display cards) is
   never played by Forge: say it is not tournament-legal and explain it from
   its text.
-- To compare two decks on Forge, run `run_deck_report` on each with the same
-  `options.seed`: both then play the same precons (check `forge.seats`).
-  `compare_decks` with `simulate=true` is a goldfish A/B, not Forge games.
+- To compare two decks like for like, use `compare_decks` with
+  `simulate=true` (a goldfish A/B, not Forge games). Forge seats each deck
+  against precons of its own bracket, so two decks' Forge win rates (one
+  `run_deck_report` each) are each against their own bracket's table, not the
+  same opponents, even with the same `options.seed` (check `forge.seats`).
+- Forge plays Commander decks only: a 60-card deck's report has
+  `forge.state: "skipped"` with the reason. `forge=false` leaves Forge out for
+  a quick goldfish-only report. A report without Forge games says
+  `engine_label: "Preflight only (no rules engine)"`; say so.
 
 ## Changing or creating a deck: propose, review, apply
 
@@ -389,6 +395,7 @@ flagged as an error too: say the lookup failed. Act on the code:
 | `too_large` | The pasted list or export is too big (lists over 200 kB, CSV over 2 MB). Ask for a smaller one. |
 | `not_found` | No such deck, card printing or proposal for this user. |
 | `rate_limited`, `unavailable` | Archidekt is busy or unreachable. Wait and try once later; do not loop. |
+| `busy` | Two research calls for the user are still running. Wait `retry_after` seconds (when given) and try once more; do not loop. |
 | `contract`, `internal` | Something unexpected (for example Archidekt did not say who owns a deck). Show the message, change nothing else, and suggest the user tell the gateway owner. |
 
 If an apply fails partway through creating a deck, a partly filled deck may

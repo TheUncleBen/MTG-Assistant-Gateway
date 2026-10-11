@@ -497,12 +497,15 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         if isinstance(data, Response):
             return data
         games = data.get("games", 300)
+        forge = data.get("forge")
         return ok(
             await reports.run(
                 who.sub,
                 str(data.get("deck_id") or data.get("deck_ref") or ""),
                 simulate=data.get("simulate", True) is not False,
                 games=games if isinstance(games, int) else 300,
+                # Forge games apart from the goldfish ones; unset follows simulate
+                forge=forge if isinstance(forge, bool) else None,
             ),
             201,
         )

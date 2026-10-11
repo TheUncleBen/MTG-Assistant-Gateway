@@ -995,9 +995,11 @@ def guide_body(
         "included; your decks on Archidekt are not touched.</li></ul>"
     )
     exp_playtest = (
-        "<p>Archidekt's playtester is the one place to draw and play a deck by hand, and it only shows a "
-        "private deck to a browser signed in to Archidekt. The gateway used to frame it on a page of its "
-        "own, but a frame cannot carry your Archidekt sign-in, so private decks came up empty and the "
+        "<p>There are two places to draw and play a deck by hand: the gateway's own <strong>Goldfish"
+        "</strong> page, which plays the deck in your browser, and Archidekt's playtester, which only "
+        "shows a private deck to a browser signed in to Archidekt. The gateway used to frame "
+        "Archidekt's playtester on a page of its own, but a frame cannot carry your Archidekt sign-in, "
+        "so private decks came up empty and the "
         "page was a step for nothing. <strong>Playtest</strong> therefore opens the playtester in its own "
         "tab, where your Archidekt sign-in lives; the Android app hands it to the phone's browser for the "
         "same reason. Old links to the framed page are sent on to Archidekt.</p>"

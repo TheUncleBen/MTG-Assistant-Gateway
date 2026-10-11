@@ -1802,8 +1802,10 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
                 status=403,
             )
         current_client.set(BROWSER_CLIENT_ID)
+        # forge=0 runs the report without Forge games (a quick goldfish-only run)
+        no_forge = str(data.get("forge", "")).strip().lower() in ("0", "false", "off", "no")
         try:
-            report = await reports.run(sub, deck_id)
+            report = await reports.run(sub, deck_id, forge=False if no_forge else None)
         except DeckError as exc:
             code = exc.kind if exc.kind in DECK_ERR_MESSAGES else "report_failed"
             return RedirectResponse(f"/decks/{deck_id}?err={code}", status_code=303)

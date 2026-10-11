@@ -74,7 +74,7 @@ Request bodies are JSON objects of at most 2 MB.
 | `GET /api/v1/snapshots?deck_id=` | Deck snapshots taken before applies (and on demand) |
 | `GET /api/v1/snapshots/{sid}` | One snapshot with the full deck as it was |
 | `GET /api/v1/reports?deck_id=` | Stored deck reports, newest first, with their trend `metrics` |
-| `POST /api/v1/reports` | Run a report: `{"deck_id": "...", "simulate": true, "games": 300}`. Stats always; validation and goldfish simulation when Mystic Forge is configured. An unchanged deck within ten minutes returns the existing report with `reused: true` |
+| `POST /api/v1/reports` | Run a report: `{"deck_id": "...", "simulate": true, "games": 300}`. Stats always; validation and goldfish simulation when Mystic Forge is configured. `"forge": false` leaves the Forge games out (default: as `simulate`); a 60-card deck never runs Forge. An unchanged deck within ten minutes returns the existing report with `reused: true`. A report has `status` (`queued`, `running`, `complete`, `partial`, `failed`), `engine_label` and its run `settings` |
 | `GET /api/v1/reports/{rid}` | One report with `stats`, `goldfish`, `validation` |
 | `DELETE /api/v1/reports/{rid}` | Delete a report. With a bearer token only a report that same app ran; the browser session may delete any of the member's reports |
 | `GET /api/v1/activity?limit=50` | The user's own audit trail |
