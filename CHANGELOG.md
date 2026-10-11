@@ -47,12 +47,14 @@ unless you set `MTG_WATCHLISTS_ENABLED=true`.**
 - When the Forge engine is busy, a report's games wait in the queue and start by themselves instead
   of failing. A busy research call says when to retry (`retry_after`).
 - The ChatGPT plugin file is labelled "Business/Enterprise admins only"; Plus and Pro accounts use
-  the connector. The web account menu no longer repeats the Android app's own menu actions.
+  the connector. The web account menu no longer has "Open a copied link" and "Check for app
+  updates"; they stay in the app's own menu and on the Account page's App card.
 - Deck values say where their prices come from: Archidekt on the deck page, Scryfall on the
   watchlist. Run simulation's tooltip says "300 simulated games"; the stack order is labelled
   "this device only".
 - One legality check, one row builder for the Table, Text and Brewer views, one type and category
-  helper, and one archive builder for the plugin and skill ZIPs (byte-for-byte the same files).
+  helper (Type grouping now puts a card with none of the eight main types, such as a Scheme or a
+  Plane, under "Other", as the automatic category already did), and one archive builder for the plugin and skill ZIPs (byte-for-byte the same files).
 - The REST apply route no longer has its own account-action check; the shared apply refuses it with
   the same 403 `browser_required`, now with `review_url` and `risk`.
 

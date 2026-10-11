@@ -146,6 +146,13 @@ async def collaborator_by_hand(
     session with the page's CSRF token, and the deck must be the member's own."""
     if action not in COLLABORATOR_ACTIONS:
         raise DeckError("invalid", "Pick add or remove.")
+    # Before 0.7.24 this form made a proposal, which the writes switch held back; keep it so.
+    if not decks.settings.writes_enabled:
+        raise DeckError(
+            "writes_disabled",
+            "Deck writes are switched off on this gateway (MTG_WRITES_ENABLED is false); nothing was "
+            "sent to Archidekt.",
+        )
     social = _social(decks)
     social._me(sub)
     deck = await decks.get_own_deck(sub, _clean_deck_id(str(deck_id or "")))

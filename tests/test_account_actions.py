@@ -849,3 +849,28 @@ async def test_folders_page_new_folder_takes_one_press_and_a_confirmation(stack:
         assert nope.status_code == 403 and all(f["name"] != "X" for f in ark.folders.get("alice", []))
     finally:
         await b.aclose()
+
+
+async def test_settings_page_collaborators_respect_the_writes_switch(stack: Stack) -> None:
+    """0.7.24 review: the hand collaborator form used to make a proposal, which MTG_WRITES_ENABLED
+    held back; applied at once now, it checks the switch itself and sends nothing."""
+    import dataclasses
+
+    h, ark = stack.h, stack.ark
+    await linked_user(stack)
+    ark.follows["alice"] = {78}
+    ark.editors[42] = [_amy_row()]
+    decks = h.app.state.gateway.decks
+    decks.settings = dataclasses.replace(decks.settings, writes_enabled=False)
+    b = Browser(h)
+    try:
+        await b.login()
+        csrf = await b.csrf()
+        r = await b.http.post(
+            "/decks/42/collaborators",
+            data={"csrf": csrf, "action": "remove", "username": "amy", "confirmed": "1"},
+        )
+        assert r.status_code == 400 and "switched off" in r.text, r.text
+        assert len(ark.editors[42]) == 1
+    finally:
+        await b.aclose()

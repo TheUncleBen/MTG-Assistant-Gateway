@@ -691,3 +691,16 @@ def test_report_status_and_run_settings() -> None:
     # an old report kept no settings: they come from its result and statistics
     old = run_settings({"commanders": ["Aesi"], "card_count": 100}, {"ok": True, "text": text}, None)
     assert old["mode"] == "commander" and old["games"] == 300 and old["engines"] == ["goldfish"]
+
+
+def test_a_forge_run_that_ended_without_games_is_labelled_preflight_only() -> None:
+    """0.7.24 review: a failed, timed-out, cancelled or lost Forge run brought no rules-engine games."""
+    import json
+
+    from mtg_gateway.reports import PREFLIGHT_ONLY, ReportService
+
+    row = {"id": "rep_x", "deck_id": "1", "deck_name": "D", "taken_at": "t", "fingerprint": "f"}
+    for state, engine in (("failed", "preflight_only"), ("lost", "preflight_only"), ("done", "forge")):
+        s = ReportService._summary({**row, "forge_json": json.dumps({"state": state})})
+        assert s["engine"] == engine, state
+        assert (s["engine_label"] == PREFLIGHT_ONLY) is (engine == "preflight_only")

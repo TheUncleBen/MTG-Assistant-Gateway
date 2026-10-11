@@ -901,7 +901,8 @@ class ReportService:
         validation = json.loads(d["validation_json"]) if d.get("validation_json") else None
         forge = json.loads(d["forge_json"]) if d.get("forge_json") else None
         forge = forge if isinstance(forge, dict) else None
-        preflight = forge is None or forge.get("state") == "skipped"
+        # No rules-engine games came or will come: not run, skipped, or the Forge run ended without games.
+        preflight = forge is None or forge.get("state") in _FORGE_NONE
         return {
             "report_id": d["id"],
             "deck_id": d["deck_id"],
