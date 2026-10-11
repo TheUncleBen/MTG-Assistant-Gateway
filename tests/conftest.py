@@ -406,9 +406,11 @@ def _fixed_today(monkeypatch: pytest.MonkeyPatch) -> None:
 # gets one that answers from the recorded fixtures, so its start-up download of the card-name
 # catalog never reaches api.scryfall.com; and any request that still heads for a host other than
 # this machine is refused and fails the test that made it (SCAN_LIVE=1 lets the opt-in live
-# check in test_scan.py through).
+# check in test_scan.py through). The end-to-end suite (tests/e2e/run.sh test, which sets
+# E2E_PUBLIC_URL) talks to its deployed stack by name, so the guard stands aside for it.
 OUTBOUND: list[str] = []
-ONLINE = bool(os.environ.get("SCAN_LIVE"))
+E2E = bool(os.environ.get("E2E_PUBLIC_URL"))
+ONLINE = bool(os.environ.get("SCAN_LIVE")) or E2E
 
 
 def _this_machine(host: str | bytes | None) -> bool:
@@ -484,6 +486,9 @@ if BrowserType is not None and not ONLINE:
 
 @pytest.fixture(autouse=True)
 def _offline(monkeypatch: pytest.MonkeyPatch):
+    if E2E:
+        yield
+        return
     real = scan_pkg.ScryfallClient
 
     def recorded(*args, **kwargs):
