@@ -302,8 +302,8 @@ def legality_chip_html(deck: Deck, stats: dict[str, Any] | None) -> str:
             f"<span class='legal ok' title='Legal in {esc(deck.format or 'this format')}'>"
             f"{icon('check')} Legality</span>"
         )
-    more = "…" if len(problems) > 5 else ""
-    title = plural(len(problems), "problem") + ": " + "; ".join(problems[:5]) + more
+    # every failing rule with its reason, as archidekt.com's legality list shows them
+    title = plural(len(problems), "problem") + ": " + "; ".join(problems)
     return f"<span class='legal bad' title='{esc(title)}'>{icon('x')} Legality</span>"
 
 
@@ -862,33 +862,23 @@ def _odds_html(deck: Deck, cards: list[DeckCard]) -> str:
 
 
 def legality_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
-    """The stats panel's Legality block: the cards that are not legal in the deck's format, or
-    one green line. Re-rendered by the edit endpoint after a card changes."""
-    stats = stats or {}
-    problems = stats.get("legality_problems") or []
-    problems_html = (
-        "<div class='legality'><h3>Legality</h3><ul>"
-        + "".join(
-            f"<li><b>{esc(p.get('name') if isinstance(p, dict) else p)}</b> "
-            f"<span class='muted'>{esc(p.get('status', '') if isinstance(p, dict) else '')}</span></li>"
-            for p in problems[:30]
-        )
-        + (f"<li class='muted'>…and {len(problems) - 30} more</li>" if len(problems) > 30 else "")
-        + "</ul></div>"
-        if problems
-        else (
+    """The stats panel's Legality block: every rule of the deck's format it does not meet, each
+    with its reason and cards (as archidekt.com's legality list gives them), or one green line.
+    Re-rendered by the edit endpoint after a card changes."""
+    if not deck.format:
+        return ""
+    problems = legal_problems(stats)
+    if not problems:
+        return (
             f"<div class='legality'><h3>Legality</h3><p class='ok'>{icon('check')} Legal in "
             f"{esc(format_label(deck.format))}</p></div>"
-            if deck.format and not legal_problems(stats)
-            # every card is legal but another rule is not met (the size, say): not "Legal in"
-            else f"<div class='legality'><h3>Legality</h3><p>{icon('x')} Not legal in "
-            f"{esc(format_label(deck.format))}: every card is, but the Deck checks above are not "
-            "all met.</p></div>"
-            if deck.format
-            else ""
         )
+    return (
+        f"<div class='legality'><h3>Legality</h3><p>{icon('x')} Not legal in "
+        f"{esc(format_label(deck.format))}:</p><ul>"
+        + "".join(f"<li>{esc(p)}</li>" for p in problems)
+        + "</ul></div>"
     )
-    return problems_html
 
 
 def checks_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
@@ -1000,8 +990,13 @@ def checks_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
             rows.append(
                 (
                     "Bracket",
-                    f"set to {br['set']}"
-                    + (f", cards suggest {br['estimate']} (estimate)" if br.get("estimate") else ""),
+                    f"set on the deck to {br['set']}"
+                    + (f", cards suggest {br['estimate']} (estimate)" if br.get("estimate") else "")
+                    + (
+                        " · not allowed there: " + esc("; ".join(br["mismatches"]))
+                        if br.get("mismatches")
+                        else ""
+                    ),
                     br.get("ok", True),
                 )
             )

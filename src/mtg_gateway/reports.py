@@ -70,6 +70,11 @@ TREND_METRICS = (
     ("kill_pct", "Games dealing 40 damage by the last simulated turn", "%"),
 )
 TREND_LIMIT = 60
+# A member's Forge runs go one at a time (the engine plays one game at a time for the whole
+# gateway). A report made while one of theirs is unfinished waits for it: its Forge section is
+# "queued" with no engine job yet, and starts by itself when the runs ahead of it end, the queue
+# kept in the reports table so a gateway restart carries on with it. At most this many wait.
+MAX_FORGE_WAITING = 2
 
 
 class _Flight:
@@ -98,6 +103,7 @@ class ReportService:
         self.mf = mf
         self.forge = forge
         self.forge_games = forge_games
+        self.forge_interval = 15.0  # seconds between refreshes of unfinished Forge runs
         self._forge_task: asyncio.Task[None] | None = None
         self._forge_cancels: set[asyncio.Task[None]] = set()  # held so a pending cancel is not collected
         # Held from the one-run-per-member check until the new run is saved (one gateway process).
@@ -283,24 +289,40 @@ class ReportService:
         if simulate and self.forge is not None:
             seed = options.get("seed")
             async with self._forge_start_lock:
-                await self._start_or_skip_forge(sub, rid, deck, games, seed)
+                await self._start_or_queue_forge(sub, rid, deck, games, seed)
         return self.get(sub, rid)
 
-    async def _start_or_skip_forge(self, sub: str, rid: str, deck: Any, games: int, seed: Any) -> None:
+    async def _start_or_queue_forge(self, sub: str, rid: str, deck: Any, games: int, seed: Any) -> None:
+        text, seed = deck_to_text(deck), seed if isinstance(seed, int) else None
         if self._forge_running(sub, rid):
-            # One unfinished Forge run per member, so nobody can fill the shared engine's queue.
+            # One unfinished Forge run per member, so nobody can fill the shared engine's queue:
+            # this one waits for theirs (MAX_FORGE_WAITING at most).
+            waiting = sum(1 for _, _, s in self._member_runs(sub) if _waiting(s))
+            if waiting >= MAX_FORGE_WAITING:
+                self._save_forge(
+                    rid,
+                    {
+                        "state": "skipped",
+                        "error": f"You already have a Forge run going and {waiting} reports waiting for "
+                        "theirs, the most the gateway keeps; this report has no Forge games. Run the "
+                        "report again once one of them has finished.",
+                    },
+                )
+                return
             self._save_forge(
                 rid,
                 {
-                    "state": "skipped",
-                    "error": "Your previous Forge run is still going; this report has no Forge games. "
-                    "Run the report again once it has finished.",
+                    "state": "queued",
+                    "waiting": True,
+                    "queued_at": int(time.time()),
+                    "games_requested": min(games, self.forge_games),
+                    # What starting it later takes; kept with the report, never shown.
+                    "start": {"text": text, "name": deck.name, "games": games, "seed": seed},
                 },
             )
+            self._ensure_forge_refresher()
             return
-        await self._start_forge(
-            rid, deck_to_text(deck), deck.name, games, seed if isinstance(seed, int) else None
-        )
+        await self._start_forge(rid, text, deck.name, games, seed)
 
     # -- Forge runs (background) ----------------------------------------------
     async def _start_forge(self, rid: str, text: str, name: str, games: int, seed: int | None = None) -> None:
@@ -326,6 +348,100 @@ class ReportService:
                 (sub, rid, *finals),
             ).fetchone()
         return row is not None
+
+    def _member_runs(self, sub: str) -> list[tuple[str, str, dict[str, Any]]]:
+        """The member's unfinished Forge runs, oldest report first: (report id, deck name, section).
+        The first that is not waiting is the one playing; the waiting ones follow in turn."""
+        finals = tuple(FINAL_STATES)
+        with self.db._lock:
+            rows = self.db._conn.execute(
+                "SELECT id, deck_name, forge_json FROM reports WHERE owner_sub = ? AND forge_state IS NOT "
+                f"NULL AND forge_state NOT IN ({','.join('?' * len(finals))}) ORDER BY taken_at, rowid",
+                (sub, *finals),
+            ).fetchall()
+        out = []
+        for r in rows:
+            try:
+                section = json.loads(r["forge_json"])
+            except (TypeError, ValueError):
+                continue
+            if isinstance(section, dict):
+                out.append((str(r["id"]), str(r["deck_name"] or ""), section))
+        return out
+
+    async def _start_waiting_runs(self) -> None:
+        """Start each member's next waiting Forge run once nothing of theirs is playing."""
+        with self.db._lock:
+            subs = [
+                r["owner_sub"]
+                for r in self.db._conn.execute(
+                    "SELECT DISTINCT owner_sub FROM reports WHERE forge_state = 'queued'"
+                ).fetchall()
+            ]
+        for sub in subs:
+            async with self._forge_start_lock:
+                runs = self._member_runs(sub)
+                if not runs or not _waiting(runs[0][2]):
+                    continue  # one of theirs is still playing (or nothing waits)
+                rid, _, section = runs[0]
+                start = section.get("start") or {}
+                if not isinstance(start.get("text"), str):
+                    self._save_forge(rid, {"state": "failed", "error": "This waiting run lost its deck."})
+                    continue
+                await self._start_forge(
+                    rid,
+                    start["text"],
+                    str(start.get("name") or ""),
+                    int(start.get("games") or self.forge_games),
+                    start.get("seed") if isinstance(start.get("seed"), int) else None,
+                )
+
+    def measured_game_seconds(self) -> float | None:
+        """The average Forge game time of the latest finished run on this gateway, for estimates."""
+        with self.db._lock:
+            rows = self.db._conn.execute(
+                "SELECT forge_json FROM reports WHERE forge_state = 'done' ORDER BY taken_at DESC LIMIT 10"
+            ).fetchall()
+        for r in rows:
+            try:
+                seconds = (json.loads(r["forge_json"]).get("result") or {}).get("average_game_seconds")
+            except (TypeError, ValueError, AttributeError):
+                continue
+            if _number(seconds) and seconds > 0:
+                return float(seconds)
+        return None
+
+    def _forge_view(self, sub: str, rid: str, section: dict[str, Any]) -> dict[str, Any]:
+        """The Forge section as a reader sees it: without what starting it takes, and while it is
+        unfinished, with its place in the member's queue (``position``, the report and job it waits
+        for) and the expected time left, from the measured average game time when known."""
+        out = {k: v for k, v in section.items() if k != "start"}
+        if out.get("state") in FINAL_STATES:
+            return out
+        runs = self._member_runs(sub)
+        ids = [r[0] for r in runs]
+        mine = ids.index(rid) if rid in ids else len(ids)
+        # this run's own average once it has played a game, else the gateway's latest measure
+        per_game = (out.get("result") or {}).get("average_game_seconds") if _done_games(out) else None
+        if not (_number(per_game) and per_game > 0):
+            per_game = self.measured_game_seconds()
+        left = 0
+        for _, _, s in runs[:mine]:
+            left += _games_left(s)
+        if _waiting(out):
+            waiting = [r for r in runs if _waiting(r[2])]
+            out["position"] = 1 + next((i for i, r in enumerate(waiting) if r[0] == rid), len(waiting))
+            if mine > 0:
+                ahead_id, ahead_name, ahead = runs[mine - 1]
+                out["waiting_for"] = {"report_id": ahead_id, "deck_name": ahead_name}
+                if ahead.get("job_id"):
+                    out["waiting_for"]["job_id"] = ahead["job_id"]
+            if per_game:
+                out["expected_start_seconds"] = round(left * per_game)
+        if per_game:
+            out["expected_seconds"] = round((left + _games_left(out)) * per_game)
+            out["average_game_seconds_measured"] = per_game
+        return out
 
     def resume_forge_runs(self) -> None:
         """At startup: carry on refreshing runs a restart left unfinished."""
@@ -375,7 +491,7 @@ class ReportService:
         except RuntimeError:  # no running loop (a synchronous caller); the next async one starts it
             pass
 
-    async def _refresh_forge_runs(self, interval: float = 15.0) -> None:
+    async def _refresh_forge_runs(self) -> None:
         assert self.forge is not None
         finals = tuple(FINAL_STATES)
         while True:
@@ -389,11 +505,17 @@ class ReportService:
                 return
             for row in rows:
                 try:
-                    section = await refresh(self.forge, json.loads(row["forge_json"]))
-                    self._save_forge(row["id"], section)
+                    section = json.loads(row["forge_json"])
+                    if _waiting(section):
+                        continue  # no engine job yet; started below when its turn comes
+                    self._save_forge(row["id"], await refresh(self.forge, section))
                 except Exception:  # one bad row must not stop the others
                     logger.exception("forge refresh failed for %s", row["id"])
-            await asyncio.sleep(interval)
+            try:
+                await self._start_waiting_runs()
+            except Exception:
+                logger.exception("starting a waiting Forge run failed")
+            await asyncio.sleep(self.forge_interval)
 
     async def ab(
         self,
@@ -438,9 +560,10 @@ class ReportService:
                 "the report again.",
             )
         out: dict[str, Any] = {"tool": tool, "ok": not result.is_error}
-        if result.structured_content:
-            out["data"] = result.structured_content
         texts = [c.text for c in result.content if getattr(c, "type", "") == "text"]
+        if result.structured_content and result.structured_content != {"result": "\n".join(texts)}:
+            # (a tool that returns text sends it again as {"result": text}: kept once, as text)
+            out["data"] = result.structured_content
         if texts:
             text = "\n".join(texts)
             out["text"] = text[:60_000]
@@ -513,12 +636,20 @@ class ReportService:
         d = dict(row)
         out = self._summary(d)
         out["stats"] = json.loads(d["stats_json"])
-        out["goldfish"] = json.loads(d["goldfish_json"]) if d.get("goldfish_json") else None
-        out["validation"] = json.loads(d["validation_json"]) if d.get("validation_json") else None
-        out["forge"] = json.loads(d["forge_json"]) if d.get("forge_json") else None
+        out["goldfish"] = _compact(json.loads(d["goldfish_json"])) if d.get("goldfish_json") else None
+        out["validation"] = _compact(json.loads(d["validation_json"])) if d.get("validation_json") else None
+        forge = json.loads(d["forge_json"]) if d.get("forge_json") else None
+        out["forge"] = self._forge_view(sub, d["id"], forge) if isinstance(forge, dict) else None
+        out["forge_status"] = forge_status(out["forge"])
         if out["forge"] and out["forge"].get("state") not in FINAL_STATES:
             self._ensure_forge_refresher()
         return out
+
+    def forge_only(self, sub: str, report_id: str) -> dict[str, Any]:
+        """A report's Forge progress alone (get_deck_report view "forge"), for polling."""
+        full = self.get(sub, report_id)
+        keys = ("report_id", "deck_id", "deck_name", "taken_at", "forge_status")
+        return {k: full.get(k) for k in keys}
 
     def decks_seen(self, sub: str) -> dict[str, str]:
         """The decks the member has reports for: id -> last known name."""
@@ -629,6 +760,48 @@ class ReportService:
 
 def _number(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _waiting(section: dict[str, Any]) -> bool:
+    """A Forge run waiting in the gateway's queue for the member's earlier one (no engine job)."""
+    return section.get("state") == "queued" and bool(section.get("waiting")) and not section.get("job_id")
+
+
+def _done_games(section: dict[str, Any]) -> int:
+    games = (section.get("result") or {}).get("games")
+    return games if isinstance(games, int) else 0
+
+
+def _games_left(section: dict[str, Any]) -> int:
+    requested = section.get("games_requested")
+    return max(0, requested - _done_games(section)) if isinstance(requested, int) else 0
+
+
+def _compact(block: Any) -> Any:
+    """A stored research block without ``data`` when it only repeats the text ({"result": text}):
+    reports stored before 0.7.22 kept both, about twice the size."""
+    data = block.get("data") if isinstance(block, dict) else None
+    if isinstance(data, dict) and set(data) == {"result"} and isinstance(data["result"], str):
+        if data["result"][:60_000] == block.get("text"):
+            return {k: v for k, v in block.items() if k != "data"}
+    return block
+
+
+def forge_status(section: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The few numbers a poller needs about a report's Forge run: state, games done of those
+    asked for, and while it waits its place in the queue and the report it waits for, with the
+    expected time left when the gateway has measured a game."""
+    if not isinstance(section, dict):
+        return None
+    out: dict[str, Any] = {
+        "state": section.get("state"),
+        "games_done": _done_games(section),
+        "games_requested": section.get("games_requested"),
+    }
+    for key in ("job_id", "position", "waiting_for", "expected_seconds", "expected_start_seconds", "error"):
+        if section.get(key) is not None:
+            out[key] = section[key]
+    return out
 
 
 def _succeeded(row: dict[str, Any]) -> bool:
