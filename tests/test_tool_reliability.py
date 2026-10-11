@@ -690,3 +690,43 @@ async def test_a_report_without_a_simulation_is_not_reused_for_one_that_asks(sta
     # the earlier report had no simulation, so this one runs it instead of reporting a failure
     assert second.get("reused") is not True and "goldfish_run" in ran, second
     assert second.get("error") != "simulation_failed", second
+
+
+# -- Commander searches leave out Arena- and MTGO-only cards ------------------------------------
+class SearchInput(BaseModel):
+    query: str = Field(description="Scryfall search query.")
+
+
+def test_paper_search_query_only_for_commander_searches_without_a_game() -> None:
+    from mtg_gateway.mf_proxy import paper_search_query
+
+    for q in ("t:angel id<=wu", "o:flying commander:wu", "t:dragon f:commander", "is:commander t:angel"):
+        assert paper_search_query(q) == q + " game:paper", q
+    for q in (
+        "t:angel",
+        'o:"commander"',
+        "t:angel id<=wu game:arena",
+        "id<=wu -game:mtgo",
+        "t:angel ID<=W Game:paper",
+    ):
+        assert paper_search_query(q) == q, q
+    long = "id<=wu " + "x" * 490
+    assert paper_search_query(long) == long  # adding it would pass the query limit
+
+
+async def test_a_commander_search_through_the_proxy_asks_for_paper_cards() -> None:
+    mf = MCPServer(name="search-shaped")
+
+    @mf.tool(name="scryfall_search", description="Search for cards.")
+    async def scryfall_search(params: SearchInput) -> str:
+        return f"query={params.query}"
+
+    proxy = MysticForgeProxy("http://mf.test/mcp", client_factory=lambda: Client(mf))
+    listed = {t["name"]: t for t in await proxy.tools()}
+    assert "adds game:paper" in listed["scryfall_search"]["description"]
+    out = await proxy.call("scryfall_search", {"query": "t:angel id<=w"})
+    assert out.content[0].text == "query=t:angel id<=w game:paper"
+    out = await proxy.call("scryfall_search", {"params": {"query": "t:angel id<=w game:arena"}})
+    assert out.content[0].text == "query=t:angel id<=w game:arena"
+    out = await proxy.call("scryfall_search", {"query": "t:angel"})
+    assert out.content[0].text == "query=t:angel"

@@ -1,0 +1,471 @@
+Subject: Scryfall: default to a released paper printing, honour finishes
+
+A line that names no set used Scryfall's default printing, which is its
+newest: on 2026-10-11 "Swamp" was Marvel: Darkhold Destiny #296, a preview
+released 2027-04-09 with games: [] and no prices, so scryfall_price_list
+listed it as "no price" and format_archidekt with include_set_codes wrote
+"(mdd) 296". format_archidekt also put *F* on whatever printing came back:
+"1x Sol Ring (frc) 21 *F*", but FRC #21 only exists nonfoil. And in
+scryfall_price_list a pinned line ("2x Sol Ring (ltc) 284") answered for an
+unpinned line of the same card ("1 Sol Ring"), because both shared one
+/cards/collection request and the result index is first-card-wins by name.
+
+This patch:
+- picks, for lines that name no set, the newest printing released by today
+  (UTC) that is sold on paper, in the line's finish when a printing has it
+  (one oracleid search, only when Scryfall's default is no good);
+- format_archidekt: the printing named with include_set_codes comes in the
+  finish asked for; when no printing of the card has that finish, the line
+  gets no marker and a warning naming the finishes it does come in (also
+  without include_set_codes);
+- scryfall_price_list: asks about name-only lines in requests of their own,
+  so a pinned line of the same card cannot stand in;
+- scryfall_price: when a finish filter finds nothing but the printing exists,
+  says "LTC #284 exists, but not in foil: it only comes nonfoil" with the
+  printing's details, instead of "No results found".
+Tests: tests/test_default_printing.py.
+
+Upstream: Kautiontape/mystic-forge at dd82cd1 (main, 2026-10-04) has no fix,
+and no open pull request touches this code. Drop this patch when it does.
+
+diff --git a/server.py b/server.py
+--- a/server.py
++++ b/server.py
+@@ -373,6 +373,58 @@
+         return resp.json()
+ 
+ 
++from datetime import datetime, timezone
++
++
++def _today() -> str:
++    """Today in UTC, as Scryfall writes released_at (YYYY-MM-DD). Tests replace it."""
++    return datetime.now(timezone.utc).date().isoformat()
++
++
++def _good_default(card: dict, finish: Optional[str] = None) -> bool:
++    """A printing that may stand in when no set was named: released by today,
++    sold on paper (a preview has games: [] until it is out), and in `finish`
++    when one was asked for."""
++    released = card.get("released_at") or ""
++    games = card.get("games")
++    return ((not released or released <= _today())
++            and (not isinstance(games, list) or "paper" in games)
++            and (not finish or not card.get("finishes") or finish in card["finishes"]))
++
++
++async def _default_printing(card: dict, finish: Optional[str] = None) -> tuple[dict, list[str]]:
++    """The printing to use for a line that named no set, and every finish the
++    card comes in.
++
++    Scryfall's default printing is its newest, which can be a preview that is
++    not out yet (no paper, no prices) or a digital-only printing. This returns
++    the newest released paper printing, in `finish` when one was asked for and
++    some printing has it; else the newest released paper printing; else the
++    card as Scryfall gave it. Costs one search, and only when the default
++    printing is no good.
++    """
++    finishes = sorted(card.get("finishes") or [])
++    if _good_default(card, finish):
++        return card, finishes
++    faces = card.get("card_faces") or [{}]
++    oracle_id = card.get("oracle_id") or faces[0].get("oracle_id")
++    if not oracle_id:
++        return card, finishes
++    try:
++        data = await _scryfall_get("/cards/search", params={
++            "q": f"oracleid:{oracle_id}", "unique": "prints",
++            "order": "released", "dir": "desc"})
++    except Exception:
++        return card, finishes      # keep Scryfall's choice rather than fail the line
++    prints = [c for c in data.get("data", []) if isinstance(c, dict)]
++    finishes = sorted({f for c in prints for f in c.get("finishes") or []} | set(finishes))
++    for want in ([finish, None] if finish else [None]):
++        pick = next((c for c in prints if _good_default(c, want)), None)
++        if pick is not None:
++            return pick, finishes
++    return card, finishes
++
++
+ def _format_face(face: dict) -> list[str]:
+     """Format a single card face (front or back of a DFC)."""
+     lines: list[str] = []
+@@ -567,8 +619,9 @@
+             "Decklist text, one card per line. Plain names work ('1 Sol Ring'), "
+             "and so do full Archidekt/Moxfield lines naming a printing and "
+             "finish ('1x Sol Ring (ltc) 284 *F* [Ramp]'). Lines with a set code "
+-            "are priced at that exact printing; lines without one use Scryfall's "
+-            "default printing and are flagged separately in the output. "
++            "are priced at that exact printing; lines without one use the newest "
++            "printing that is already out on paper (in the finish asked for), "
++            "not a preview, and are flagged separately in the output. "
+             "Max 500 lines."
+         ),
+         min_length=1, max_length=50000,
+@@ -747,6 +800,33 @@
+     return sorted(cards, key=sort_key)
+ 
+ 
++async def _finish_not_found(params: "PriceInput") -> Optional[str]:
++    """When a finish filter found nothing, whether the printings exist in other
++    finishes: 'LTC #284 exists, but not in foil' beats a bare 'no results'.
++    None when they do not exist at all (or the second lookup fails)."""
++    try:
++        data = await _scryfall_get("/cards/search", params={
++            "q": _price_query(params.model_copy(update={"finish": None})),
++            "unique": "prints"})
++    except Exception:
++        return None
++    cards = data.get("data", [])
++    if not cards:
++        return None
++    finish = params.finish.value
++    has = sorted({f for c in cards for f in c.get("finishes") or []})
++    if params.set_code and params.collector_number and len(cards) == 1:
++        card = cards[0]
++        return (f"{card.get('name', params.name)} "
++                f"{(card.get('set') or '?').upper()} #{card.get('collector_number', '?')} "
++                f"exists, but not in {finish}: it only comes "
++                f"{', '.join(has) or 'in no listed finish'}.\n\n"
++                + _format_single_printing(card, None))
++    return (f"No printing of {cards[0].get('name', params.name)}"
++            f"{_describe_price_filters(params.model_copy(update={'finish': None}))} "
++            f"comes in {finish}. They come: {', '.join(has) or 'in no listed finish'}.")
++
++
+ @mcp.tool(name="scryfall_price")
+ async def scryfall_price(params: PriceInput) -> str:
+     """Get current market prices for a card, optionally for one specific printing.
+@@ -774,10 +854,16 @@
+             },
+         )
+     except Exception as e:
++        missing = isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 404
++        if missing and params.finish:
++            return await _finish_not_found(params) or _scryfall_error(e)
+         return _scryfall_error(e)
+ 
+     cards = data.get("data", [])
+     if not cards:
++        if params.finish:
++            return (await _finish_not_found(params)
++                    or f"No printings found for '{params.name}' with those filters.")
+         return f"No printings found for '{params.name}' with those filters."
+ 
+     finish = params.finish.value if params.finish else None
+@@ -821,7 +907,8 @@
+     """Price a decklist and total it, honoring the printing on each line.
+ 
+     '1x Sol Ring (ltc) 284 *F*' is priced as that exact printing in that exact
+-    finish. Lines naming no set use Scryfall's default printing and are listed
++    finish. Lines naming no set use the newest printing already out on paper
++    (in the line's finish when one has it), never a preview, and are listed
+     separately so the total is honest about what it guessed.
+ 
+     Never substitutes a different finish: if the requested finish has no price,
+@@ -835,13 +922,21 @@
+         return f"Too many lines ({len(entries)}). Maximum is 500."
+ 
+     identifiers = _dedupe_identifiers(entries)
++    # Name-only lines are asked about in batches of their own: a pinned line of
++    # the same card ('2x Sol Ring (ltc) 284' next to '1 Sol Ring') must not
++    # stand in for the default printing.
++    pinned = [i for i in identifiers if "set" in i]
++    by_name = [i for i in identifiers if "set" not in i]
+ 
+     found_cards: list[dict] = []
++    name_cards: list[dict] = []
+     not_found: list[dict] = []
+     unchecked: list[dict] = []
+     errors: list[str] = []
+ 
+-    for batch in _chunk(identifiers, 75):   # Scryfall's hard per-request cap
++    batches = [(b, found_cards) for b in _chunk(pinned, 75)]   # Scryfall's hard per-request cap
++    batches += [(b, name_cards) for b in _chunk(by_name, 75)]
++    for batch, into in batches:
+         try:
+             data = await _scryfall_post("/cards/collection", {"identifiers": batch})
+         except Exception as e:
+@@ -851,14 +946,25 @@
+             unchecked.extend(batch)
+             errors.append(_scryfall_error(e))
+             continue
+-        found_cards.extend(data.get("data", []))
++        into.extend(data.get("data", []))
+         not_found.extend(data.get("not_found", []))
+ 
+-    if unchecked and not found_cards:
++    if unchecked and not found_cards and not name_cards:
+         return errors[0]
+ 
++    name_index = _index_collection_results(name_cards)
++    defaults: dict = {}
++    for entry in entries:
++        key = (entry.name.lower().strip(), entry.finish)
++        if entry.set_code or key in defaults:
++            continue
++        card = _lookup_entry(name_index, entry)
++        if card is not None:
++            defaults[key] = (await _default_printing(card, entry.finish))[0]
++
+     sections = _build_price_sections(
+-        entries, _index_collection_results(found_cards), not_found, unchecked)
++        entries, _index_collection_results(found_cards + name_cards), not_found, unchecked,
++        defaults=defaults)
+ 
+     total_cards = sum(e.quantity for e in entries)
+     parts: list[str] = []
+@@ -871,7 +977,7 @@
+         parts.append("")
+ 
+     if sections["defaulted"]:
+-        parts.append("**No printing specified — Scryfall's default printing used:**")
++        parts.append("**No printing specified — newest printing out on paper used:**")
+         parts.extend(f"- {line}" for line in sections["defaulted"])
+         parts.append("")
+ 
+@@ -2021,7 +2127,9 @@
+         default=None,
+         description=(
+             "Card finish. 'foil' emits *F* and 'etched' emits *E* on the line, "
+-            "which Archidekt imports as that finish. Omit for a normal card."
++            "which Archidekt imports as that finish. Omit for a normal card. "
++            "With include_set_codes the printing named comes in this finish; "
++            "a card with no printing in it gets no marker and a warning."
+         ),
+     )
+     category: Optional[str] = Field(default=None, description="Category name (e.g., 'Ramp', 'Draw', 'Removal', 'Lands').")
+@@ -2041,7 +2149,10 @@
+     )
+     include_set_codes: bool = Field(
+         default=False,
+-        description="If true, look up and include set codes from Scryfall. Slower but useful for specific printings.",
++        description=(
++            "If true, look up and include set codes from Scryfall: the newest "
++            "printing already out on paper (not a preview), in the card's finish "
++            "when one is given. Slower but useful for specific printings."),
+     )
+ 
+ 
+@@ -2087,6 +2198,7 @@
+ 
+     lines: list[str] = []
+     warnings: list[str] = []
++    printings: dict = {}    # (name, finish) -> (printing, finishes), one lookup each
+ 
+     for entry in params.cards:
+         scryfall_card = found.get(entry.name.lower())
+@@ -2098,11 +2210,24 @@
+             card_name = entry.name
+             warnings.append(f"# WARNING: '{entry.name}' not found on Scryfall")
+ 
++        finish = entry.finish.value if entry.finish else None
+         set_code = ""
+         collector = ""
+-        if params.include_set_codes and scryfall_card:
+-            set_code = scryfall_card.get("set", "")
+-            collector = scryfall_card.get("collector_number", "")
++        if scryfall_card and (params.include_set_codes or finish not in (None, "nonfoil")):
++            key = (scryfall_card["name"], finish)
++            if key not in printings:
++                printings[key] = await _default_printing(scryfall_card, finish)
++            printing, finishes = printings[key]
++            if finish and printing.get("finishes") and finish not in printing["finishes"]:
++                if finish != "nonfoil":
++                    warnings.append(
++                        f"# WARNING: no printing of '{card_name}' comes in {finish} "
++                        f"(it comes: {', '.join(finishes) or 'no listed finish'}); "
++                        f"listed without the {_finish_marker(finish)} marker")
++                finish = None
++            if params.include_set_codes:
++                set_code = printing.get("set", "")
++                collector = printing.get("collector_number", "")
+ 
+         # Category annotation
+         cat_annotation = ""
+@@ -2126,7 +2251,7 @@
+             name=card_name,
+             set_code=set_code,
+             collector=collector,
+-            finish=entry.finish.value if entry.finish else None,
++            finish=finish,
+             category=cat_annotation,
+             labels=label_text,
+         )
+@@ -2453,11 +2578,14 @@
+     index: dict,
+     not_found: list[dict],
+     unchecked: Optional[list[dict]] = None,
++    defaults: Optional[dict] = None,
+ ) -> dict:
+     """Sort priced lines into sections and total only what was actually priced.
+ 
+     Returns lists of preformatted strings plus the total, so the tool body is
+     assembly only and this logic stays testable without network access.
++    `defaults` maps (lowercased name, finish) to the printing chosen for lines
++    that named no set.
+     """
+     priced: list[tuple[Decimal, str]] = []
+     defaulted: list[tuple[Decimal, str]] = []
+@@ -2471,7 +2599,10 @@
+     priced_cards = 0
+ 
+     for entry in entries:
+-        card = _lookup_entry(index, entry)
++        card = None
++        if defaults and not entry.set_code:
++            card = defaults.get((entry.name.lower().strip(), entry.finish))
++        card = card or _lookup_entry(index, entry)
+         if card is None:
+             entry_key = _identifier_key(_entry_identifier(entry))
+             if entry_key in unchecked_keys:
+diff --git a/tests/test_default_printing.py b/tests/test_default_printing.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_default_printing.py
+@@ -0,0 +1,145 @@
++"""Lines that name no set use the newest printing already out on paper, in the
++finish asked for; a finish no printing has is said plainly, never marked."""
++import re
++
++import httpx
++import pytest
++
++import server
++
++SOL = "6ad8011d-3471-4369-9d68-b264cc027487"
++SWAMP = "56719f6a-1a6c-4c0a-8d21-18f7d7350b68"
++GOAT = "031cd561-d9b1-4a0e-bc38-bc09e80563c3"
++
++
++def _card(name, oracle, set_code, number, released, games, finishes, usd=None, usd_foil=None):
++    return {"object": "card", "name": name, "oracle_id": oracle, "set": set_code,
++            "set_name": set_code.upper(), "collector_number": number, "rarity": "common",
++            "released_at": released, "games": games, "finishes": finishes,
++            "prices": {"usd": usd, "usd_foil": usd_foil}}
++
++
++# Newest first, as Scryfall lists printings; the first of each name is its default.
++CARDS = [
++    _card("Swamp", SWAMP, "mdd", "296", "2027-04-09", [], ["nonfoil", "foil"]),
++    _card("Swamp", SWAMP, "ea1", "71", "2026-08-12", ["arena"], ["nonfoil"]),
++    _card("Swamp", SWAMP, "fdn", "281", "2024-11-15", ["paper", "arena"], ["nonfoil", "foil"], "0.10"),
++    _card("Sol Ring", SOL, "frc", "21", "2026-10-02", ["paper"], ["nonfoil"], "1.48"),
++    _card("Sol Ring", SOL, "ltc", "284", "2023-06-23", ["paper"], ["nonfoil"], "3.51"),
++    _card("Sol Ring", SOL, "c21", "263", "2021-04-23", ["paper"], ["nonfoil", "foil"], "2.00", "9.00"),
++    _card("Mountain Goat", GOAT, "6ed", "195", "1999-04-21", ["paper"], ["nonfoil"], "0.25"),
++]
++
++
++def _not_found():
++    request = httpx.Request("GET", "https://api.scryfall.com/cards/search")
++    response = httpx.Response(404, json={"object": "error", "details": "Your query didn't match any cards."},
++                              request=request)
++    return httpx.HTTPStatusError("404", request=request, response=response)
++
++
++@pytest.fixture
++def scryfall(monkeypatch):
++    calls = []
++
++    async def post(endpoint, body):
++        assert endpoint == "/cards/collection"
++        data, missing = [], []
++        for ident in body["identifiers"]:
++            if "collector_number" in ident:
++                hit = [c for c in CARDS if (c["set"], c["collector_number"])
++                       == (ident["set"], ident["collector_number"])]
++            else:
++                hit = [c for c in CARDS if c["name"].lower() == ident["name"].lower()
++                       and ident.get("set") in (None, c["set"])]
++            (data.append(hit[0]) if hit else missing.append(ident))
++        calls.append(("post", [dict(i) for i in body["identifiers"]]))
++        return {"object": "list", "data": data, "not_found": missing}
++
++    async def get(endpoint, params=None):
++        assert endpoint == "/cards/search"
++        q = params["q"]
++        calls.append(("get", q))
++        if q.startswith("oracleid:"):
++            found = [c for c in CARDS if c["oracle_id"] == q.split(":", 1)[1]]
++        else:
++            name = re.search(r'!"([^"]+)"', q).group(1)
++            found = [c for c in CARDS if c["name"] == name]
++            for key, field in (("set", "set"), ("cn", "collector_number")):
++                m = re.search(rf"\b{key}:(\S+)", q)
++                if m:
++                    found = [c for c in found if c[field] == m.group(1)]
++            m = re.search(r"\bis:(foil|etched|nonfoil)\b", q)
++            if m:
++                found = [c for c in found if m.group(1) in c["finishes"]]
++        if not found:
++            raise _not_found()
++        return {"object": "list", "total_cards": len(found), "data": found}
++
++    monkeypatch.setattr(server, "_scryfall_post", post)
++    monkeypatch.setattr(server, "_scryfall_get", get)
++    monkeypatch.setattr(server, "_today", lambda: "2026-10-11")
++    return calls
++
++
++async def test_format_archidekt_names_a_released_paper_printing_in_the_finish(scryfall):
++    out = await server.format_archidekt(server.FormatDeckInput(include_set_codes=True, cards=[
++        server.DeckCardEntry(name="Swamp", quantity=30),
++        server.DeckCardEntry(name="Sol Ring", category="Ramp", finish="foil"),
++        server.DeckCardEntry(name="Mountain Goat", finish="foil"),
++        server.DeckCardEntry(name="Sol Ring", category="Spare"),
++    ]))
++    lines = out.splitlines()
++    assert "30x Swamp (fdn) 281" in lines                 # not the MDD preview
++    assert "1x Sol Ring (c21) 263 *F* [Ramp]" in lines    # FRC #21 has no foil
++    assert "1x Sol Ring (frc) 21 [Spare]" in lines        # newest, released, no finish asked
++    assert "1x Mountain Goat (6ed) 195" in lines          # never *F* on a nonfoil-only card
++    assert ("# WARNING: no printing of 'Mountain Goat' comes in foil (it comes: nonfoil); "
++            "listed without the *F* marker") in lines
++
++
++async def test_format_archidekt_checks_the_finish_without_set_codes(scryfall):
++    out = await server.format_archidekt(server.FormatDeckInput(cards=[
++        server.DeckCardEntry(name="Mountain Goat", finish="foil"),
++        server.DeckCardEntry(name="Sol Ring", finish="foil"),
++    ]))
++    lines = out.splitlines()
++    assert "1x Mountain Goat" in lines and "1x Sol Ring *F*" in lines
++    assert any("no printing of 'Mountain Goat' comes in foil" in line for line in lines)
++
++
++async def test_format_archidekt_skips_the_search_when_the_default_is_good(scryfall):
++    await server.format_archidekt(server.FormatDeckInput(include_set_codes=True, cards=[
++        server.DeckCardEntry(name="Sol Ring")]))
++    assert [c for c in scryfall if c[0] == "get"] == []
++
++
++async def test_price_list_defaults_to_a_released_paper_printing(scryfall):
++    out = await server.scryfall_price_list(server.PriceListInput(
++        decklist="2x Sol Ring (ltc) 284\n1 Sol Ring\n1 Swamp\n1 Sol Ring *F*"))
++    assert "- 2x Sol Ring (LTC #284, nonfoil) — $3.51 ea → $7.02" in out
++    # The pinned LTC line does not stand in for the unpinned one.
++    assert "- 1x Sol Ring (FRC #21, nonfoil) — $1.48 ea → $1.48" in out
++    assert "- 1x Swamp (FDN #281, nonfoil) — $0.10 ea → $0.10" in out
++    assert "- 1x Sol Ring (C21 #263, foil) — $9.00 ea → $9.00" in out
++    assert "MDD" not in out and "newest printing out on paper used" in out
++    posts = [c[1] for c in scryfall if c[0] == "post"]
++    assert posts[0] == [{"set": "ltc", "collector_number": "284"}]  # pinned lines asked apart
++
++
++async def test_price_says_a_pinned_printing_exists_but_not_in_that_finish(scryfall):
++    out = await server.scryfall_price(server.PriceInput(
++        name="Sol Ring", set_code="ltc", collector_number="284", finish="foil"))
++    assert out.startswith("Sol Ring LTC #284 exists, but not in foil: it only comes nonfoil.")
++    assert "Available finishes: nonfoil $3.51" in out
++
++
++async def test_price_says_no_printing_comes_in_that_finish(scryfall):
++    out = await server.scryfall_price(server.PriceInput(name="Mountain Goat", finish="foil"))
++    assert out == "No printing of Mountain Goat comes in foil. They come: nonfoil."
++
++
++async def test_price_still_says_no_results_for_a_printing_that_does_not_exist(scryfall):
++    out = await server.scryfall_price(server.PriceInput(
++        name="Sol Ring", set_code="ltc", collector_number="999", finish="foil"))
++    assert out.startswith("No results found.")
