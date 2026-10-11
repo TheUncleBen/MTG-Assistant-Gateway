@@ -1,7 +1,9 @@
 package local.mtgassistantgateway.app
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SharedLinkTest {
@@ -63,6 +65,33 @@ class SharedLinkTest {
         assertNull(SharedLink.archidektDeckId("https://me@archidekt.com/decks/1"))
         assertNull(SharedLink.archidektDeckId("http://archidekt.com/decks/1"))
         assertNull(SharedLink.archidektDeckId("https://notarchidekt.com/decks/1"))
+    }
+
+    @Test fun discordMessageLinkIsNamed() {
+        // What Discord's Share on a message hands over: a link to the message, not the deck link.
+        val target = SharedLink.resolve(gw, listOf("https://discord.com/channels/1/2/3")) as SharedLink.Target.Other
+        assertEquals("discord.com", SharedLink.hostOf(target.first))
+        assertTrue(SharedLink.isDiscord(target.first))
+        assertTrue(SharedLink.isDiscord("https://canary.discord.com/channels/1/2/3"))
+        assertTrue(SharedLink.isDiscord("https://discordapp.com/channels/1/2/3"))
+        assertFalse(SharedLink.isDiscord("https://discord.com.evil.example/x"))
+        assertFalse(SharedLink.isDiscord("https://notdiscord.com/x"))
+        assertEquals("example.org", SharedLink.hostOf("https://Example.org/a"))
+    }
+
+    @Test fun ownersDeckLinkOpens() =
+        assertEquals("$gw/decks/27095317", open("https://archidekt.com/decks/27095317/immortal_reckoning"))
+
+    @Test fun deckLinkInHtmlTextOpens() =
+        assertEquals("$gw/decks/8", open(null, "<a href=\"https://archidekt.com/decks/8/x\">deck</a>"))
+
+    @Test fun fileWithoutLink() {
+        assertEquals(SharedLink.Target.File, SharedLink.resolve(gw, listOf(null, "content://media/1"), file = true))
+        assertEquals("$gw/decks/3", open("https://archidekt.com/decks/3"))
+        assertEquals(
+            SharedLink.Target.Open("$gw/decks/3"),
+            SharedLink.resolve(gw, listOf("https://archidekt.com/decks/3"), file = true),
+        )
     }
 
     @Test fun urlsInFindsAllInOrder() =

@@ -101,4 +101,14 @@ class AppUpdateTest {
         assertTrue(AppUpdate.due(now - AppUpdate.INTERVAL_MS, now))
         assertTrue(AppUpdate.due(now + 60_000, now)) // the clock went back
     }
+
+    @Test fun setPointChecksAreHourlyAtMost() {
+        // Cold launch and sign-in: due after an hour, not after twelve; a check minutes ago blocks it.
+        val now = 1_800_000_000_000L
+        assertTrue(AppUpdate.due(0, now, AppUpdate.MIN_GAP_MS))
+        assertFalse(AppUpdate.due(now - 10 * 60_000, now, AppUpdate.MIN_GAP_MS))
+        assertTrue(AppUpdate.due(now - AppUpdate.MIN_GAP_MS, now, AppUpdate.MIN_GAP_MS))
+        assertFalse(AppUpdate.due(now - AppUpdate.MIN_GAP_MS, now))
+        assertTrue(AppUpdate.MIN_GAP_MS >= 3600_000L) // GitHub allows 60 unauthenticated requests an hour
+    }
 }

@@ -27,6 +27,7 @@ from .decks import REVIEW_PAGE, DeckError, current_client, row_label, row_line
 from .theme import (
     LAYOUT_COOKIE,
     THEME_COOKIE,
+    app_version,
     display_name,
     in_app,
     layout_from_cookie,
@@ -740,6 +741,26 @@ def actor_html(label: str | None) -> str:
     return f"<span class='badge' title='{html.escape(label)}'>{html.escape(label)}</span>"
 
 
+def _app_card() -> str:
+    """The Android app's own card on the Account page, shown only inside the app.
+
+    The version comes from the app's user agent. The buttons call the app (window.MtgNative through
+    feedback.js, like the account menu's App section) and stay hidden in an app too old to have them.
+    """
+    version = app_version()
+    return (
+        "<div class='card' id='app'><h2>App</h2><dl class='meta'>"
+        f"<dt>Installed version</dt><dd>{html.escape(version or 'unknown')}</dd></dl>"
+        "<p class='muted small'>The app looks for a new version on its own each time it starts and "
+        "after you sign in (at most once an hour), and when you come back to it after 12 hours. "
+        "When there is one, a bar at the top offers Update.</p>"
+        "<div class='form-actions'>"
+        "<button type='button' data-native='checkForUpdates'>Check for app updates</button>"
+        "<button type='button' class='inline' data-native='openCopiedLink'>Open a copied link</button>"
+        "</div></div>"
+    )
+
+
 def _account_body(state: Any, sub: str, csrf: str | None, *, disclosure_read: bool = False) -> str:
     info = state.decks.status(sub)
     user = state.db.get_user(sub) or {}
@@ -759,12 +780,15 @@ def _account_body(state: Any, sub: str, csrf: str | None, *, disclosure_read: bo
         f"{_identity_details(user)}"
         "<div class='form-actions'>"
         "<a class='btn' href='/skill'>Get the assistant skill for Claude or ChatGPT</a>"
-        "<a class='btn' href='/app'>Get the Android app</a>"
-        f"<form method='post' action='/logout'>{csrf_in}"
+        # Inside the app the App card below takes its place: the app is already installed.
+        + ("" if in_app() else "<a class='btn' href='/app'>Get the Android app</a>")
+        + f"<form method='post' action='/logout'>{csrf_in}"
         "<button class='inline' data-busy-text='Signing out…'>Sign out</button>"
         "<button class='inline' name='everywhere' value='1' data-busy-text='Signing out…'>"
         "Sign out on all my devices</button></form></div></div>"
     ]
+    if in_app():
+        out.append(_app_card())
     out.append(_mode_card(state, sub, csrf_in))
     out.append(_apps_card(state, sub, csrf_in))
     if info["linked"]:

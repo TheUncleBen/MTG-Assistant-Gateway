@@ -53,6 +53,8 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Long-press shortcuts to My decks, Scan cards and Proposals (res/xml/shortcuts.xml). -->
+            <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
             <!-- The phone's browser handing a sign-in back (BrowserSignIn.kt). The gateway's page
                  opens it through an intent: link naming this app's package. -->
             <intent-filter>
