@@ -23,7 +23,9 @@ model; your assistant can write them from `get_summary`).
   "Watch this card"), deck value over time, and optional alerts on a % move or a price line. MCP
   tools `watch_card`, `watch_deck`, `unwatch`, `list_watchlist`, `card_price_history`.
 - Optional ntfy notifications (`MTG_NTFY_URL`, `MTG_NTFY_TOKEN_FILE`, both off by default):
-  members opt in on the Account page with an unguessable topic and can press Send test. Events: a
+  members opt in on the Account page with an unguessable topic (a chosen one starts with `mtg-`)
+  and can press Send test (once a minute). `MTG_NTFY_URL` may not hold a user name or password; the
+  token goes in its secret. Events: a
   proposal waiting for approval, a finished deck report (also queued Forge runs), price alerts,
   summaries. DEPLOY.md covers a self-hosted ntfy with access control.
 - Plain daily or weekly summaries (written by the gateway from its own data, not AI), opt-in on the
@@ -45,7 +47,8 @@ model; your assistant can write them from `get_summary`).
   loader reads. The guided setup's ChatGPT section links it. Per OpenAI's help pages only workspace
   owners and admins on ChatGPT Business and Enterprise can upload a plugin; individual Plus and Pro
   accounts have no upload and keep adding the connector.
-- REVERSE-PROXY.md: "Page speed through NPM", with checks for HTTP/2 and compression.
+- REVERSE-PROXY.md: "Page speed through NPM", with checks for HTTP/2 and compression (pages stay
+  uncompressed on purpose, because they carry a form token).
 
 ### Changed
 - Pages move faster, above all in the Android app: the site's styles and scripts are downloaded
@@ -56,8 +59,8 @@ model; your assistant can write them from `get_summary`).
 - Database schema 12 (watchlist, price, notification and job tables); the upgrade is automatic.
 - The daily price job asks Scryfall only about watched cards, in batches of 75 on the shared
   pacing, and sends nothing when nobody watches anything.
-- A Commander-format deck without a commander, or a deck under 60 cards, is refused by the
-  simulation with the reason. Trend labels say "Lethal damage".
+- A Commander-format deck without a commander, a list of 99 to 101 cards with no format and no
+  commander marked, or a deck under 60 cards, is refused by the simulation with the reason. Trend labels say "Lethal damage".
 - Dragging a stack or card near the top or bottom of the deck page scrolls at the same speed on any
   screen (about 1,200 px a second at the very edge, slower further in). Before, a 120 Hz phone
   scrolled about twice as fast and a busy phone about half as fast.

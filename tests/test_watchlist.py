@@ -246,6 +246,7 @@ async def test_a_scryfall_429_stops_the_check_and_it_runs_again_later(stack: Sta
     stack.sf.fail_with = 429
     out = await jobs.run_due()
     assert "error" in out["prices"]
+    assert "summaries" in out  # a failed price check does not hold back the day's summaries
     stack.sf.fail_with = None
     stack.gw.scan.scryfall._retry_until = 0  # the back-off has passed
     out = await jobs.run_due()
@@ -391,6 +392,12 @@ async def test_opt_in_topic_test_button_and_the_token_never_logged(stack: Stack,
         msg = stack.ntfy.messages[-1]
         assert msg["topic"] == topic and msg["click"] == "https://mtg.test/account"
         assert stack.ntfy.auth[-1] == f"Bearer {TOKEN}"
+        # one test a minute per member
+        sent = len(stack.ntfy.messages)
+        r = await _post(b, "/account", {"action": "notify_test"})
+        assert r.headers["location"] == "/account?err=notify_test_wait#notifications"
+        assert len(stack.ntfy.messages) == sent
+        stack.gw.notifier._last_test.clear()
         # a refusal from the server is said plainly, and logged with its status alone
         stack.ntfy.status = 403
         r = await _post(b, "/account", {"action": "notify_test"})
@@ -401,10 +408,12 @@ async def test_opt_in_topic_test_button_and_the_token_never_logged(stack: Stack,
         # a chosen topic must be long enough and nobody else's
         r = await _opt_in(b, ntfy_topic="short")
         assert r.headers["location"].startswith("/account?err=notify_topic_invalid")
-        r = await _opt_in(b, ntfy_topic="my-own-topic-1234")
-        assert notify.prefs(stack.h.db, "user-1")["ntfy_topic"] == "my-own-topic-1234"
+        r = await _opt_in(b, ntfy_topic="my-own-topic-1234")  # no mtg- prefix
+        assert r.headers["location"].startswith("/account?err=notify_topic_invalid")
+        r = await _opt_in(b, ntfy_topic="mtg-my-own-topic-1234")
+        assert notify.prefs(stack.h.db, "user-1")["ntfy_topic"] == "mtg-my-own-topic-1234"
         r = await _post(b, "/account", {"action": "notify_new_topic"})
-        assert notify.prefs(stack.h.db, "user-1")["ntfy_topic"] != "my-own-topic-1234"
+        assert notify.prefs(stack.h.db, "user-1")["ntfy_topic"] != "mtg-my-own-topic-1234"
     finally:
         await b.aclose()
 
@@ -568,6 +577,10 @@ def test_settings_default_off_and_the_token_comes_from_a_file(monkeypatch, tmp_p
     monkeypatch.setenv("MTG_NTFY_URL", "ftp://ntfy.example.com")
     with pytest.raises(ConfigError, match="MTG_NTFY_URL"):
         load_settings()
+    # members see the address, so it may not carry credentials
+    monkeypatch.setenv("MTG_NTFY_URL", "https://user:pass@ntfy.example.com")
+    with pytest.raises(ConfigError, match="user name or password"):
+        load_settings()
 
 
 def test_purge_keeps_the_configured_days(tmp_path: Path) -> None:
@@ -588,12 +601,13 @@ def test_raw_sqlite_rows_survive(tmp_path: Path) -> None:
     try:
         for sub in ("a", "b"):
             db.upsert_user(sub, email=None, name=None, preferred_username=None, groups=[])
-        notify.save_prefs(db, "a", ntfy_topic="the-same-topic-123")
+        notify.save_prefs(db, "a", ntfy_topic="mtg-the-same-topic-123")
         with pytest.raises(ValueError, match="taken"):
-            notify.save_prefs(db, "b", ntfy_topic="the-same-topic-123")
+            notify.save_prefs(db, "b", ntfy_topic="mtg-the-same-topic-123")
         with pytest.raises(sqlite3.IntegrityError):
             db._conn.execute(
-                "INSERT INTO notify_prefs (sub, ntfy_topic, updated_at) VALUES ('c', 'the-same-topic-123', 0)"
+                "INSERT INTO notify_prefs (sub, ntfy_topic, updated_at) "
+                "VALUES ('c', 'mtg-the-same-topic-123', 0)"
             )
     finally:
         db.close()

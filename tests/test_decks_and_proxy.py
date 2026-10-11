@@ -1607,6 +1607,12 @@ async def test_sixty_card_decks_are_simulated_as_sixty_card_games(stack: Stack) 
     commander = "Commander\n1 Aesi, Tyrant of Gyre Strait\n\n99 Island\n"
     rep = structured(await call(h, token, "run_deck_report", {"deck_ref": commander, "games": 20}))
     assert rep["ok"] and SIM_CALLS[-1][1]["constructed"] is False, rep
+    # A 100-card paste with no commander marked is a Commander deck, not a 60-card game.
+    calls = len(SIM_CALLS)
+    unmarked = "1 Aesi, Tyrant of Gyre Strait\n99 Island\n"
+    rep = structured(await call(h, token, "run_deck_report", {"deck_ref": unmarked, "games": 20}))
+    assert rep["ok"] is False and "commander unmarked" in rep["message"], rep
+    assert len(SIM_CALLS) == calls
     # A/B: two 60-card lists compare as 60-card games; a Commander list against a 60-card one
     # is refused.
     other = sixty.replace("36 Goblin Guide", "35 Goblin Guide\n1 Monastery Swiftspear")

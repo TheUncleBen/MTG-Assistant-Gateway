@@ -9,6 +9,7 @@ Watching changes only the member's own gateway data, never Archidekt, so it need
 
 from __future__ import annotations
 
+import hmac
 import html
 import json
 import logging
@@ -268,7 +269,7 @@ def notify_card_html(state: AppState, sub: str, csrf_in: str) -> str:
         f"{box('on_prices', 'A watched card crossed my price alert')}</fieldset>"
         "<label for='n-topic'>Topic (empty: a random one nobody can guess)</label>"
         f"<input id='n-topic' name='ntfy_topic' maxlength='64' autocomplete='off' value='{_esc(topic)}' "
-        "pattern='[A-Za-z0-9_\\-]{12,64}' title='12 to 64 letters, digits, - or _'>"
+        "pattern='mtg-[A-Za-z0-9_\\-]{12,60}' title='mtg- and then 12 to 60 letters, digits, - or _'>"
         "<button class='primary'>Save notifications</button></form>"
         f"{where}<div class='form-actions'>{test}</div></div>"
     )
@@ -329,6 +330,8 @@ async def account_action(state: AppState, sub: str, action: str, data: dict[str,
         return "ok=notify_topic"
     if action == "notify_test":
         n = state.notifier
+        if n is not None and not n.test_allowed(sub):
+            return "err=notify_test_wait"
         ok = n is not None and await n.send(
             sub,
             "test",
@@ -383,7 +386,7 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
         raw = await read_limited(request, MAX_FORM)
         data = {k: v[0] for k, v in parse_qs((raw or b"").decode("utf-8", "replace")).items()}
         csrf = _csrf(s, sid) or ""
-        if raw is None or not csrf or data.get("csrf") != csrf:
+        if raw is None or not csrf or not hmac.compare_digest(data.get("csrf", "").encode(), csrf.encode()):
             return page(
                 watchlist_body(state, sub, csrf, err="This form expired. Reload the page and try again."),
                 sub=sub,
@@ -445,7 +448,8 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
         if not sub:
             return JSONResponse({"ok": False, "error": "unauthenticated"}, 401, headers=NO_STORE)
         expected = _csrf(s, sid) or ""
-        if not expected or request.headers.get("X-CSRF-Token", "") != expected:
+        given = request.headers.get("X-CSRF-Token", "")
+        if not expected or not hmac.compare_digest(given.encode(), expected.encode()):
             return JSONResponse(
                 {"ok": False, "error": "csrf", "message": "Reload the page and retry."}, 403, headers=NO_STORE
             )

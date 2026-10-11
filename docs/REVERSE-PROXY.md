@@ -158,14 +158,12 @@ release and keeps it. Two settings on the proxy host decide the rest:
 - **HTTP/2** (SSL tab) lets a page's files share one connection. Check:
   `curl -sI https://mtg.example.com/healthz | head -1` should print
   `HTTP/2 200`; `HTTP/1.1 200` means it is off.
-- The gateway does not compress the pages themselves (70 to 230 KB each,
-  about a fifth of that compressed). Check whether NPM does:
+- The gateway does not compress the pages themselves (70 to 230 KB each),
+  on purpose: its pages carry a form token, and compressed pages with a
+  secret in them are what the BREACH attack works on. We recommend leaving
+  page compression off in NPM. Check:
   `curl -s -o /dev/null -D - -H 'Accept-Encoding: gzip' https://mtg.example.com/signed-out | grep -i content-encoding`
-  prints `content-encoding: gzip` when it does. If it prints nothing,
-  `gzip on;` on its own line in the Advanced tab turns it on for pages.
-  Compressed pages that carry a form token are what the BREACH attack
-  works on, which also needs someone who can watch your traffic and make
-  your browser send many requests; weigh that for your network.
+  prints nothing when pages go out uncompressed.
 - A file the gateway already compressed passes through as it is. Check:
   `curl -s -o /dev/null -D - -H 'Accept-Encoding: gzip' https://mtg.example.com/static/feedback.js | grep -i -E 'content-encoding|cache-control'`
   prints `content-encoding: gzip` and `cache-control: public, max-age=300`

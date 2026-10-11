@@ -60,7 +60,7 @@ ASSETS = {
 # Suggested first messages: at most 3, each at most 128 characters (OpenAI's loader drops the rest).
 DEFAULT_PROMPTS = [
     "List my Archidekt decks.",
-    "Check my Commander deck's curve, colours and legality.",
+    "Check my Commander deck's curve, colors and legality.",
     "Goldfish my deck and tell me how fast it is.",
 ]
 

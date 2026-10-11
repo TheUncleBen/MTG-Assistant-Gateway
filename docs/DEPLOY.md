@@ -645,9 +645,10 @@ most. The access token is read from a Docker secret file, sent only in the `Auth
 and never written to the log; a refused message is logged with its HTTP status alone.
 
 Each member turns notifications on in the **Notifications** card of their Account page. They get
-their own topic, `mtg-` and 22 random characters (128 bits) that nobody can guess, or choose one
-of 12 to 64 letters, digits, `-` or `_`; two members can't have the same topic. **Send test**
-sends one message to check it.
+their own topic, `mtg-` and 22 random characters (128 bits) that nobody can guess, or choose one:
+`mtg-` and then 12 to 60 letters, digits, `-` or `_` (the prefix keeps members inside an
+`mtg-*` grant); two members can't have the same topic. **Send test** sends one message to check
+it, at most once a minute.
 
 ### Self-hosted ntfy with access control (recommended)
 

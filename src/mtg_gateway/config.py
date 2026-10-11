@@ -75,6 +75,9 @@ def _ntfy_url_env(name: str) -> str | None:
     parsed = urlparse(raw)
     if parsed.scheme not in ("https", "http") or not parsed.netloc or parsed.query or parsed.fragment:
         raise ConfigError(f"{name} must be the ntfy server's address, such as https://ntfy.example.com")
+    if parsed.username or parsed.password:
+        # members see this address on their Account page; the token goes in its Docker secret
+        raise ConfigError(f"{name} must not hold a user name or password; use the mtg_ntfy_token secret")
     return raw
 
 

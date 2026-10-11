@@ -41,11 +41,15 @@ ACCOUNT_OK = {
 ACCOUNT_ERR = {
     "notify_test_failed": "The test could not be sent. Check that notifications are on; if they are, the "
     "notification server did not accept it (the operator can see why in the gateway's log).",
-    "notify_topic_invalid": "That topic is not allowed or another member has it. Use 12 to 64 letters, "
-    "digits, - or _, or leave it empty for a random one.",
+    "notify_topic_invalid": "That topic is not allowed or another member has it. Use mtg- and then 12 to "
+    "60 letters, digits, - or _, or leave it empty for a random one.",
+    "notify_test_wait": "A test was just sent. Wait a minute before sending another.",
 }
-TOPIC_RE = re.compile(r"^[A-Za-z0-9_-]{12,64}$")
+# Members' topics all start with mtg-, so an operator's ntfy grant can be limited to 'mtg-*' and
+# a member can never make the gateway publish to the operator's other topics.
+TOPIC_RE = re.compile(r"^mtg-[A-Za-z0-9_-]{12,60}$")
 TIMEOUT = 10.0
+TEST_COOLDOWN = 60.0  # seconds between one member's Send test presses
 
 
 def new_topic() -> str:
@@ -82,7 +86,7 @@ def save_prefs(db: Database, sub: str, **values: Any) -> None:
         raise ValueError("summary_every must be off, daily or weekly")
     topic = values.get("ntfy_topic")
     if topic is not None and not TOPIC_RE.fullmatch(topic):
-        raise ValueError("a topic is 12 to 64 letters, digits, - or _")
+        raise ValueError("a topic is mtg- and then 12 to 60 letters, digits, - or _")
     with db.tx() as c:
         if topic is not None:
             taken = c.execute(
@@ -121,6 +125,18 @@ class Notifier:
         self._http: httpx.AsyncClient | None = http
         self._tasks: set[asyncio.Task[Any]] = set()  # held so a pending send is not collected
         self.sent = 0
+        self._last_test: dict[str, float] = {}
+
+    def test_allowed(self, sub: str) -> bool:
+        """True (and the member's next test held back for TEST_COOLDOWN) unless they pressed
+        Send test less than TEST_COOLDOWN seconds ago."""
+        now = time.monotonic()
+        if now - self._last_test.get(sub, -TEST_COOLDOWN) < TEST_COOLDOWN:
+            return False
+        if len(self._last_test) > 1000:
+            self._last_test = {k: t for k, t in self._last_test.items() if now - t < TEST_COOLDOWN}
+        self._last_test[sub] = now
+        return True
 
     def __repr__(self) -> str:  # the token stays out of any printed or logged object
         return f"Notifier(url={self.url!r})"

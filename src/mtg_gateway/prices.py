@@ -407,21 +407,30 @@ class PriceService:
             c.executemany("DELETE FROM watch_cards WHERE id = ? AND sub = ?", [(w["id"], sub) for w in rows])
         return [w["name"] for w in rows]
 
+    def _check_deck_limit(self, sub: str, deck_id: str, c: Any = None) -> None:
+        sql, args = "SELECT deck_id FROM watch_decks WHERE sub = ?", (sub,)
+        if c is None:
+            have = [r["deck_id"] for r in self._rows(sql, args)]
+        else:
+            have = [r[0] for r in c.execute(sql, args).fetchall()]
+        if str(deck_id) not in {str(d) for d in have} and len(have) >= self.settings.watch_max_decks:
+            raise DeckError(
+                "rate_limited",
+                f"You watch {len(have)} decks, the most this gateway keeps per member. Remove one first.",
+            )
+
     async def watch_deck(self, sub: str, deck_ref: str) -> dict[str, Any]:
         """Watch a deck's value: read it now (as the member sees it), price its cards and store
         today's value."""
         deck_id = _clean_deck_id(deck_ref)
         if self.settings.watch_max_decks <= 0:
             raise DeckError("invalid", "Watching decks is switched off on this gateway.")
-        have = self._rows("SELECT deck_id FROM watch_decks WHERE sub = ?", (sub,))
-        if deck_id not in {r["deck_id"] for r in have} and len(have) >= self.settings.watch_max_decks:
-            raise DeckError(
-                "rate_limited",
-                f"You watch {len(have)} decks, the most this gateway keeps per member. Remove one first.",
-            )
+        self._check_deck_limit(sub, deck_id)
         deck = await self.decks.get_any_deck(sub, deck_id)
         t = int(now())
         with self.db.tx() as c:
+            # counted again in the same transaction as the insert, so parallel watches cannot pass it
+            self._check_deck_limit(sub, deck.id, c)
             stored = c.execute(
                 "INSERT INTO watch_decks (sub, deck_id, deck_name, cards_json, refreshed_at, created_at) "
                 "SELECT ?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM users WHERE sub = ?) "
@@ -472,7 +481,7 @@ class PriceService:
         async with self._run_lock:
             if not self.anything_watched():
                 return {"day": day, "watched": False, "requests": 0}
-            refreshed = await self._refresh_decks()
+            refreshed = await self._refresh_decks(day)
             before = self._scry().requests
             priced = await self._price_missing(day)
             self._store_deck_values(day)
@@ -489,11 +498,14 @@ class PriceService:
             "alerts": len(alerts),
         }
 
-    async def _refresh_decks(self) -> int:
-        """Read each watched deck again (paced like every Archidekt read). A deck that cannot be
-        read keeps its last card list."""
+    async def _refresh_decks(self, day: str) -> int:
+        """Read each watched deck again (paced like every Archidekt read), once a day: a deck
+        already read on ``day`` (watched today, or a retry after Scryfall failed) is not read
+        again. A deck that cannot be read keeps its last card list."""
         n = 0
-        for d in self._rows("SELECT sub, deck_id FROM watch_decks ORDER BY refreshed_at"):
+        for d in self._rows("SELECT sub, deck_id, refreshed_at FROM watch_decks ORDER BY refreshed_at"):
+            if day_of(d["refreshed_at"]) == day:
+                continue
             try:
                 deck = await self.decks.get_any_deck(d["sub"], d["deck_id"])
             except Exception as exc:
@@ -740,8 +752,8 @@ class DailyJobs:
             except Exception as exc:  # Scryfall down or busy: try again at the next round
                 logger.warning("daily price check failed, trying again later: %s", exc.__class__.__name__)
                 out["prices"] = {"error": exc.__class__.__name__}
-                return out
-            self._mark("prices", day, out["prices"])
+            else:
+                self._mark("prices", day, out["prices"])
         if self.summaries is not None and self._last_day("summaries") != day:
             out["summaries"] = await self.summaries.send_due(day)
             self._mark("summaries", day, {"sent": out["summaries"]})
