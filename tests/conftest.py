@@ -423,8 +423,15 @@ def _this_machine(host: str | bytes | None) -> bool:
         return False
 
 
-def _refuse(where: str) -> None:
-    OUTBOUND.append(where)
+def _reserved(host: str | None) -> bool:
+    """A name under the reserved .test domain (RFC 2606, such as the fake identity provider
+    idp.test) never resolves, so a request to it fails as it would offline: refused, not counted."""
+    return (host or "").rstrip(".").lower().endswith(".test")
+
+
+def _refuse(where: str, host: str | None = None) -> None:
+    if not _reserved(host):
+        OUTBOUND.append(where)
     raise httpx.ConnectError(f"tests stay offline, refused: {where}")
 
 
@@ -435,13 +442,13 @@ _real_connect = socket.socket.connect
 
 async def _offline_async_send(self: httpx.AsyncHTTPTransport, request: httpx.Request) -> httpx.Response:
     if not _this_machine(request.url.host):
-        _refuse(str(request.url))
+        _refuse(str(request.url), request.url.host)
     return await _real_async_send(self, request)
 
 
 def _offline_send(self: httpx.HTTPTransport, request: httpx.Request) -> httpx.Response:
     if not _this_machine(request.url.host):
-        _refuse(str(request.url))
+        _refuse(str(request.url), request.url.host)
     return _real_send(self, request)
 
 
