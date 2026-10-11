@@ -59,8 +59,9 @@ model; your assistant can write them from `get_summary`).
 - Database schema 12 (watchlist, price, notification and job tables); the upgrade is automatic.
 - The daily price job asks Scryfall only about watched cards, in batches of 75 on the shared
   pacing, and sends nothing when nobody watches anything.
-- A Commander-format deck without a commander, a list of 99 to 101 cards with no format and no
-  commander marked, or a deck under 60 cards, is refused by the simulation with the reason. Trend labels say "Lethal damage".
+- A Commander-format deck without a commander, a list of 99 to 101 cards with no set format (or
+  Custom) and no commander marked, or a deck under 60 cards, is refused by the simulation with the
+  reason. Trend labels say "Lethal damage".
 - Dragging a stack or card near the top or bottom of the deck page scrolls at the same speed on any
   screen (about 1,200 px a second at the very edge, slower further in). Before, a 120 Hz phone
   scrolled about twice as fast and a busy phone about half as fast.

@@ -330,7 +330,10 @@ async def account_action(state: AppState, sub: str, action: str, data: dict[str,
         return "ok=notify_topic"
     if action == "notify_test":
         n = state.notifier
-        if n is not None and not n.test_allowed(sub):
+        p = notify.prefs(state.db, sub)
+        if n is None or not n.enabled or not p["ntfy_on"] or not p["ntfy_topic"]:
+            return "err=notify_test_failed"
+        if not n.test_allowed(sub):
             return "err=notify_test_wait"
         ok = n is not None and await n.send(
             sub,

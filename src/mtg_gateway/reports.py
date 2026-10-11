@@ -967,11 +967,12 @@ SMALL_DECK_TEXT = (
     "{min} cards in the main deck (this one has {count}). For a Commander deck, put the "
     "commander in the deck's Commander (premier) category."
 )
-# A list with no format and about 100 cards is almost always a Commander deck whose commander
-# is not marked; playing it as a 60-card game would report the wrong game.
+# A list with no set format (or Archidekt's Custom) and about 100 cards is almost always a
+# Commander deck whose commander is not marked; playing it as a 60-card game would report the
+# wrong game.
 COMMANDER_SIZED = range(99, 102)
 UNMARKED_COMMANDER_TEXT = (
-    "Not simulated: this {count}-card list has no format and no commander, so it looks like a "
+    "Not simulated: this {count}-card list has no set format and no commander, so it looks like a "
     "Commander deck with its commander unmarked. Put the commander in the deck's Commander "
     '(premier) category, or under a "Commander" heading in a pasted list, and run again.'
 )
@@ -992,7 +993,7 @@ def sim_mode(stats: dict[str, Any]) -> str:
         # Mystic Forge would take the first line as the commander and simulate a 99-card deck.
         return NO_COMMANDER_TEXT
     count = stats.get("card_count") or 0
-    if not stats.get("format") and count in COMMANDER_SIZED:
+    if stats.get("format") in (None, "", "custom") and count in COMMANDER_SIZED:
         return UNMARKED_COMMANDER_TEXT.format(count=count)
     if count < MIN_CONSTRUCTED:
         return SMALL_DECK_TEXT.format(min=MIN_CONSTRUCTED, count=count)
