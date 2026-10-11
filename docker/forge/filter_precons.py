@@ -10,7 +10,7 @@ import sys
 
 import forge_service
 
-KEEP, MIN = 12, 3
+KEEP, MIN = 24, 3  # 24: a few precons of each bracket for the gateway to match (forge.pick_opponents)
 
 precons = json.loads(open(sys.argv[1], encoding="utf-8").read())
 kept = []

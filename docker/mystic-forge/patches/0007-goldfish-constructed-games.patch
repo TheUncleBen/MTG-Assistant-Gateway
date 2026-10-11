@@ -1,0 +1,702 @@
+Subject: Goldfish games for 60-card decks (no commander)
+
+The goldfish simulator only modelled Commander games: the deck's commander
+starts in the command zone, opponents have 40 life and the first mulligan
+is free. A decklist without a commander had its first line taken as the
+commander, so a Standard or Modern deck was simulated as a 59-card deck
+with one of its cards cast from the command zone. The gateway therefore
+refused to simulate any deck without a commander.
+
+goldfish_run, goldfish_ab and goldfish_annotate take `constructed` (default
+false, so every existing call and run_id is unchanged). A constructed game:
+
+- has no commander: every listed card is in the library, ' *CMDR*' markers
+  are only stripped, and an Archidekt deck's premier category is not read;
+- starts each opponent at 20 life (the kill is 20 damage);
+- has no free first mulligan (London mulligan; mulligan.free_first still
+  overrides);
+- is on the play: no draw on turn 1.
+
+The summary, the run header and the HTML report leave out the commander
+lines and name the format instead. The run_id folds in "constructed" only
+when it is set. Interactive games (goldfish_start) stay Commander-only.
+
+Tests: tests/goldfish/test_constructed.py; the commander-note test in
+tests/goldfish/test_server_tools.py follows _goldfish_load_deck's new
+argument.
+
+Upstream: Kautiontape/mystic-forge at dd82cd1 (main, 2026-10-04) simulates
+Commander only. Drop this patch when upstream models 60-card games.
+
+diff --git a/mystic_forge/goldfish/engine.py b/mystic_forge/goldfish/engine.py
+--- a/mystic_forge/goldfish/engine.py
++++ b/mystic_forge/goldfish/engine.py
+@@ -62,7 +62,7 @@
+     battlefield: list                 # [Permanent]
+     graveyard: list
+     command: list
+-    commander_name: str
++    commander_name: str | None        # None in a constructed (60-card) game
+     opponents: list                   # life totals
+     cmdr_damage: list
+     turn: int = 0
+@@ -83,6 +83,10 @@
+     kept_hand_lands: int | None = None
+     kept_hand_sources: int | None = None
+     won_turn: int | None = None
++    draw_on_turn_one: bool = True     # False in a constructed game: the player
++                                      # on the play skips turn 1's draw. Not
++                                      # serialized: interactive games
++                                      # (goldfish_start) are Commander games
+     life_gained: int = 0              # opponents never attack in goldfish games, so
+                                       # gained life has no total to raise; it
+                                       # accumulates here for metrics
+@@ -247,16 +251,24 @@
+     return cards
+ 
+ 
+-def new_game(cards: dict, deck: list, commander: str, seed: int,
+-             opponents: int = 1, combos: list | None = None) -> Game:
++def new_game(cards: dict, deck: list, commander: str | None, seed: int,
++             opponents: int = 1, combos: list | None = None,
++             constructed: bool = False) -> Game:
++    """A shuffled game with a 7-card hand. Commander (default): the commander
++    starts in the command zone and each opponent has 40 life. ``constructed``
++    (a 60-card format): no commander (``commander`` is None), 20 life each,
++    and the player is on the play, so turn 1 has no draw."""
+     ensure_synthetic_cards(cards)
+     rng = random.Random(seed)
+     library = list(deck)
+     rng.shuffle(library)
+     hand, library = library[:7], library[7:]
+     g = Game(cards=cards, library=library, hand=hand, battlefield=[],
+-             graveyard=[], command=[commander], commander_name=commander,
+-             opponents=[40] * opponents, cmdr_damage=[0] * opponents,
++             graveyard=[], command=[commander] if commander else [],
++             commander_name=commander,
++             opponents=[20 if constructed else 40] * opponents,
++             cmdr_damage=[0] * opponents,
++             draw_on_turn_one=not constructed,
+              combos=list(combos or []))
+     g.combo_wins = [bool(c.get("wins")) if isinstance(c, dict) else False
+                     for c in g.combos]
+@@ -1490,8 +1502,10 @@
+     g.emit(f"turn {g.turn} begins")
+     fire(g, "upkeep")
+     # This solitaire format always draws — turn 1 included: the hypergeometric
+-    # acceptance tests count 7 + N cards seen by turn N.
+-    execute_verb(g, None, "draw", count=1)
++    # acceptance tests count 7 + N cards seen by turn N. A constructed game is
++    # on the play instead: no draw on turn 1 (7 + N - 1 cards by turn N).
++    if g.turn > 1 or g.draw_on_turn_one:
++        execute_verb(g, None, "draw", count=1)
+     _record_activations(g)            # turn start, after upkeep/draw (Task 10's
+                                       # turn-one entry reuses this path); step()
+                                       # records again post-action — idempotent
+diff --git a/mystic_forge/goldfish/report.py b/mystic_forge/goldfish/report.py
+--- a/mystic_forge/goldfish/report.py
++++ b/mystic_forge/goldfish/report.py
+@@ -277,12 +277,15 @@
+             f'<div class="tci">95% CI {_ci(p)}</div></div>')
+ 
+ 
+-def _stat_tiles(m: dict, until_turn: int) -> str:
+-    tiles = [
++def _stat_tiles(m: dict, until_turn: int, constructed: bool = False) -> str:
++    tiles = [] if constructed else [
+         _tile(f"Commander cast by T{until_turn}",
+               m["commander_cast"]["reached_pct"]),
+         _tile("Commander cast by T4", m["commander_cast"]["pct_by_turn"]["4"]),
+-        _tile(f"Kill (40 damage) by T{until_turn}", m["kill"]["reached_pct"]),
++    ]
++    tiles += [
++        _tile(f"Kill ({20 if constructed else 40} damage) by T{until_turn}",
++              m["kill"]["reached_pct"]),
+         _tile("Games mulliganed", m["mulligans"]["pct_mulliganed"]),
+         _tile("On-curve through T5", m["on_curve"]["pct_all_drops_through_t5"]),
+         _tile("4+-spell turn by T6", m["casts"]["pct_4plus_turn_by_t6"]),
+@@ -486,28 +489,38 @@
+     m = result["metrics"]
+     until_turn = int(inputs.get("until_turn", m.get("until_turn", 10)))
+     n = int(m.get("n", inputs.get("n", 0)))
++    constructed = bool(inputs.get("constructed"))
+     commander = str(inputs.get("commander", "(unknown)"))
+     note = result.get("commander_note")
+-    deck_n = len(inputs.get("library", ())) + 1
+-    rows = [("Deck", f"{deck_n} cards including commander"),
+-            ("Commander", f"{commander} {note}" if note else commander),
+-            *_common_rows(inputs, code)]
++    if constructed:
++        rows = [("Deck", f"{len(inputs.get('library', ()))} cards"),
++                ("Format", "60-card (no commander, 20 life, on the play)"),
++                *_common_rows(inputs, code)]
++    else:
++        deck_n = len(inputs.get("library", ())) + 1
++        rows = [("Deck", f"{deck_n} cards including commander"),
++                ("Commander", f"{commander} {note}" if note else commander),
++                *_common_rows(inputs, code)]
+     cc = m["commander_cast"]
++    cmdr_charts = [] if constructed else [
++        "<figure>" + _svg_hist(cc["histogram"], "Commander cast turn")
++        + "</figure>",
++        "<figure>" + _svg_reached_curve(
++            _cum_pct(cc["histogram"], n, until_turn),
++            "Commander cast — cumulative % of games") + "</figure>",
++    ]
+     body = [
+         "<h1>Goldfish run report</h1>",
+         _fingerprint(rows),
+         f'<p class="repro">{_esc(_REPRO_LINE)}</p>',
+         "<h2>Headline</h2>",
+-        _stat_tiles(m, until_turn),
++        _stat_tiles(m, until_turn, constructed),
+         "<h2>Charts</h2>",
+-        "<figure>" + _svg_hist(cc["histogram"], "Commander cast turn")
+-        + "</figure>",
+-        "<figure>" + _svg_reached_curve(
+-            _cum_pct(cc["histogram"], n, until_turn),
+-            "Commander cast — cumulative % of games") + "</figure>",
++        *cmdr_charts,
+         "<figure>" + _svg_reached_curve(
+             _cum_pct(m["kill"]["histogram"], n, until_turn),
+-            "Kill (40 damage) — cumulative % of games") + "</figure>",
++            f"Kill ({20 if constructed else 40} damage) — cumulative % of "
++            "games") + "</figure>",
+         "<figure>" + _svg_bars(
+             "bars",
+             list(range(1, len(m["on_curve"]["avg_lands_by_turn"]) + 1)),
+diff --git a/mystic_forge/goldfish/runner.py b/mystic_forge/goldfish/runner.py
+--- a/mystic_forge/goldfish/runner.py
++++ b/mystic_forge/goldfish/runner.py
+@@ -173,18 +173,19 @@
+ def play_one_game(
+     cards: dict,
+     deck: list,
+-    commander: str,
++    commander: str | None,
+     game_seed: int,
+     until_turn: int,
+     opponents: int = 1,
+     combos: list | None = None,
+     rules: MulliganRules | None = None,
++    constructed: bool = False,
+ ) -> tuple[GameRecord, list]:
+     """Play one policy-driven game to ``until_turn`` (or a win) and return
+     (record, log)."""
+     g = new_game(
+         cards, deck, commander, seed=game_seed,
+-        opponents=opponents, combos=combos,
++        opponents=opponents, combos=combos, constructed=constructed,
+     )
+     auto_mulligan(g, rules or MulliganRules())
+     # Kept-hand snapshot (the Game doesn't store it): auto_mulligan ends by
+@@ -347,13 +348,14 @@
+ def run_batch(
+     cards: dict,
+     deck: list,
+-    commander: str,
++    commander: str | None,
+     n: int,
+     seed: int,
+     until_turn: int,
+     opponents: int = 1,
+     combos: list | None = None,
+     rules: MulliganRules | None = None,
++    constructed: bool = False,
+ ) -> dict:
+     """Run ``n`` policy-driven games with per-game seeds derived from
+     ``(seed, index)`` (spec §Architecture: batches are order-independent and
+@@ -364,7 +366,7 @@
+             cards, deck, commander,
+             game_seed=derive_seed(seed, i),
+             until_turn=until_turn, opponents=opponents,
+-            combos=combos, rules=rules,
++            combos=combos, rules=rules, constructed=constructed,
+         )
+         records.append(rec)
+     return {
+@@ -506,10 +508,10 @@
+ def run_ab(
+     cards_a: dict,
+     deck_a: list,
+-    commander_a: str,
++    commander_a: str | None,
+     cards_b: dict,
+     deck_b: list,
+-    commander_b: str,
++    commander_b: str | None,
+     n: int,
+     seed: int,
+     until_turn: int,
+@@ -517,6 +519,7 @@
+     combos: list | None = None,
+     rules: MulliganRules | None = None,
+     allow_different_commanders: bool = False,
++    constructed: bool = False,
+ ) -> dict:
+     """Paired A/B run (spec §Statistics): align the decks position-stably,
+     run both arms game-for-game under identical ``derive_seed(seed, i)``
+@@ -533,10 +536,12 @@
+     batch_a = run_batch(
+         cards_a, aligned_a, commander_a, n, seed, until_turn,
+         opponents=opponents, combos=combos, rules=rules,
++        constructed=constructed,
+     )
+     batch_b = run_batch(
+         cards_b, aligned_b, commander_b, n, seed, until_turn,
+         opponents=opponents, combos=combos, rules=rules,
++        constructed=constructed,
+     )
+     scalars_a = _ab_scalars(batch_a["records"], until_turn)
+     scalars_b = _ab_scalars(batch_b["records"], until_turn)
+diff --git a/server.py b/server.py
+--- a/server.py
++++ b/server.py
+@@ -3983,9 +3983,14 @@
+     return f"{n} card" + ("" if n == 1 else "s")
+ 
+ 
+-async def _goldfish_load_deck(deck: str) -> tuple[list[str], str, str | None]:
++async def _goldfish_load_deck(
++    deck: str, constructed: bool = False,
++) -> tuple[list[str], str | None, str | None]:
+     """Resolve a deck reference into (flat card-name list, commander name,
+     commander_note).
++
++    ``constructed`` (a 60-card format) has no commander: every card is in
++    the list, the commander is None and ' *CMDR*' markers are only stripped.
+ 
+     Decklist text — anything containing a newline or starting with a count
+     like '2 Plains' — is parsed directly: the FIRST line's card is the
+@@ -4000,6 +4005,12 @@
+     is_text = "\n" in text or _GOLDFISH_COUNT_RE.match(text) is not None
+     if not is_text and _GOLDFISH_ARCHIDEKT_RE.search(text):
+         data = await _archidekt_get(f"/decks/{_parse_deck_id(text)}/")
++        if constructed:
++            counts = _archidekt_in_deck_cards(data)
++            names = [n for n, qty in counts.items() for _ in range(qty)]
++            if not names:
++                raise ValueError("Deck has no cards.")
++            return names, None, None
+         premier = _goldfish_archidekt_commanders(data)
+         if not premier:
+             raise ValueError(
+@@ -4030,6 +4041,8 @@
+         names.extend([name] * qty)
+     if not names:
+         raise ValueError("Deck has no cards (every quantity is zero).")
++    if constructed:
++        return names, None, None
+     if commander is None:
+         commander = names[0]        # first line's card (marker-free deck)
+     return names, commander, None
+@@ -4116,6 +4129,10 @@
+                     "(or mark its line with a trailing ' *CMDR*').",
+         min_length=1,
+     )
++    constructed: bool = Field(
++        default=False,
++        description="A 60-card deck (Standard, Modern, Pioneer, ...) with no "
++                    "commander: every listed card is in the library.")
+ 
+ 
+ # ── Goldfish Tools ───────────────────────────────────────────────────────────
+@@ -4173,7 +4190,8 @@
+     text, list your commander first; a line ending in ' *CMDR*' overrides.
+     """
+     try:
+-        names, commander, cmdr_note = await _goldfish_load_deck(params.deck)
++        names, commander, cmdr_note = await _goldfish_load_deck(
++            params.deck, params.constructed)
+     except ValueError as e:
+         return str(e)
+     except httpx.HTTPError as e:
+@@ -4208,9 +4226,17 @@
+     parts: list[str] = []
+     parts.append("# Goldfish annotation pre-flight")
+     cmdr_display = f"{commander} {cmdr_note}" if cmdr_note else commander
+-    parts.append(f"Commander: {cmdr_display} | "
+-                 f"Deck: {_goldfish_n_cards(total)} including commander")
+-    if total != 100:
++    if commander is None:
++        parts.append(f"Deck: {_goldfish_n_cards(total)} | No commander "
++                     f"(60-card game)")
++        if total < 60:
++            parts.append(f"Warning: {_goldfish_n_cards(total)} — constructed "
++                         f"decks have at least 60. Simulating anyway if "
++                         f"that's intended.")
++    else:
++        parts.append(f"Commander: {cmdr_display} | "
++                     f"Deck: {_goldfish_n_cards(total)} including commander")
++    if commander is not None and total != 100:
+         parts.append(f"Warning: {_goldfish_n_cards(total)} including commander "
+                      f"— EDH decks are 100. Simulating anyway if that's intended.")
+     if not_found:
+@@ -4425,8 +4451,8 @@
+ 
+ 
+ async def _goldfish_prepare(
+-    deck_str: str, annotations: list[dict],
+-) -> tuple[dict[str, SimCard], list[str], str, str | None,
++    deck_str: str, annotations: list[dict], constructed: bool = False,
++) -> tuple[dict[str, SimCard], list[str], str | None, str | None,
+            dict[str, str | None], dict[str, list[str]], list[str], list[str]]:
+     """Shared goldfish_run/goldfish_ab prep: validate client annotations
+     (pure, fails fast before any network) -> load deck -> fetch -> derive ->
+@@ -4446,11 +4472,12 @@
+     the existing error helpers."""
+     client_anns = validate_annotations(annotations)   # AnnotationError -> up
+     try:
+-        names, commander, cmdr_note = await _goldfish_load_deck(deck_str)
++        names, commander, cmdr_note = await _goldfish_load_deck(
++            deck_str, constructed)
+     except httpx.HTTPError as e:
+         raise ValueError(_archidekt_error(e)) from e
+     fetch_names = list(names)
+-    if commander not in fetch_names:
++    if commander is not None and commander not in fetch_names:
+         fetch_names.append(commander)
+     try:
+         cards_raw, not_found = await _goldfish_fetch_cards(fetch_names)
+@@ -4489,16 +4516,18 @@
+             approx_by_card[req_name] = list(d.approx_notes)
+     unmatched_anns = sorted(set(client_anns) - matched_anns)
+ 
+-    if commander not in cards_pool:
++    if commander is not None and commander not in cards_pool:
+         raise ValueError(
+             f"Commander {commander!r} was not recognized by Scryfall; fix "
+             "the name and rerun.")
+     library = [n for n in names if n in cards_pool]
+-    if commander in library:
++    if commander is not None and commander in library:
+         library.remove(commander)     # one copy starts in the command zone
+     if not library:
+         raise ValueError(
+-            "No recognized cards besides the commander; nothing to simulate.")
++            "No recognized cards besides the commander; nothing to simulate."
++            if commander is not None else
++            "No recognized cards; nothing to simulate.")
+     return (cards_pool, library, commander, cmdr_note, card_scopes,
+             approx_by_card, not_found, unmatched_anns)
+ 
+@@ -4530,20 +4559,25 @@
+     return "n/a" if v is None else f"T{v}"
+ 
+ 
+-def _goldfish_summary_lines(m: dict, until_turn: int) -> list[str]:
++def _goldfish_summary_lines(m: dict, until_turn: int,
++                            constructed: bool = False) -> list[str]:
+     """The 8-line headline summary (D4): commander cast, kill, damage,
+-    mulligans, on-curve, top-3 trigger table lines."""
++    mulligans, on-curve, top-3 trigger table lines. A constructed game has
++    no commander line and its kill is 20 damage."""
+     cc = m["commander_cast"]
+     by = cc["pct_by_turn"]
+     kill = m["kill"]
+     dmg = m["damage"]
+     mull = m["mulligans"]
+-    lines = [
++    lines = [] if constructed else [
+         (f"- Commander cast: median {_goldfish_fmt_turn(cc['median_among_reached'])} "
+          f"(reached {_goldfish_fmt_prop(cc['reached_pct'])}); "
+          f"by T4 {_goldfish_fmt_prop(by['4'])}, T5 {_goldfish_fmt_prop(by['5'])}, "
+          f"T6 {_goldfish_fmt_prop(by['6'])}"),
+-        (f"- Kill (40 damage): reached {_goldfish_fmt_prop(kill['reached_pct'])} "
++    ]
++    lines += [
++        (f"- Kill ({20 if constructed else 40} damage): reached "
++         f"{_goldfish_fmt_prop(kill['reached_pct'])} "
+          f"by T{until_turn}; median {_goldfish_fmt_turn(kill['median_among_reached'])} "
+          f"among reached"),
+         (f"- Damage by T{until_turn}: avg {dmg['avg_total']:.1f} total "
+@@ -4666,6 +4700,13 @@
+         description="Minimum actual lands in a kept 7-card hand (default 2).")
+ 
+ 
++_GOLDFISH_CONSTRUCTED_HELP = (
++    "A 60-card deck (Standard, Modern, Pioneer, ...) with no commander: every "
++    "listed card is in the library, opponents start at 20 life, the first "
++    "mulligan is not free (unless mulligan.free_first says so) and the game "
++    "is on the play (no draw on turn 1).")
++
++
+ class GoldfishRunInput(BaseModel):
+     model_config = ConfigDict(extra="forbid")
+     deck: str = Field(
+@@ -4691,6 +4732,8 @@
+         default_factory=GoldfishMulliganInput,
+         description="MulliganRules overrides: min_sources, max_sources, "
+                     "lands_only, free_first, min_real_lands.")
++    constructed: bool = Field(
++        default=False, description=_GOLDFISH_CONSTRUCTED_HELP)
+ 
+ 
+ class GoldfishAbInput(BaseModel):
+@@ -4723,6 +4766,8 @@
+         default=False,
+         description="Compare decks with different commanders anyway "
+                     "(cross-commander deltas confound every metric).")
++    constructed: bool = Field(
++        default=False, description=_GOLDFISH_CONSTRUCTED_HELP)
+ 
+ 
+ @mcp.tool(name="goldfish_run")
+@@ -4738,7 +4783,7 @@
+     try:
+         (cards_pool, library, commander, cmdr_note, card_scopes,
+          approx_by_card, not_found, unmatched_anns) = await _goldfish_prepare(
+-            params.deck, params.annotations)
++            params.deck, params.annotations, params.constructed)
+     except ValueError as e:
+         return str(e)      # AnnotationError message verbatim: self-correction
+     combo_err = _goldfish_check_combos(
+@@ -4746,13 +4791,16 @@
+     if combo_err:
+         return combo_err
+     mull_overrides = params.mulligan.model_dump(exclude_none=True)
+-    rules = MulliganRules(**mull_overrides)
++    # The free first mulligan is a Commander rule; constructed has none.
++    rules = MulliganRules(**({"free_first": False} if params.constructed
++                             else {}) | mull_overrides)
+     until_turn = params.until_turn
+ 
+     def _run() -> dict:
+         result = run_batch(
+             cards_pool, library, commander, params.n, params.seed, until_turn,
+-            opponents=params.opponents, combos=params.combos, rules=rules)
++            opponents=params.opponents, combos=params.combos, rules=rules,
++            constructed=params.constructed)
+         # run_batch aggregates without card scopes; re-aggregate WITH them so
+         # the honesty split lands in the metrics. One extra aggregate pass
+         # (~100ms at n=10k) — accepted, and it stays off the event loop here.
+@@ -4777,6 +4825,8 @@
+               "combos": params.combos, "n": params.n, "seed": params.seed,
+               "until_turn": until_turn, "opponents": params.opponents,
+               "mulligan": mull_overrides, "engine_version": ENGINE_VERSION}
++    if params.constructed:
++        inputs["constructed"] = True    # absent otherwise: run_ids unchanged
+     run_id = report.run_code(inputs)
+     # Fold in what the report renders beyond runner output (D11 honesty
+     # standing notes + header note); stored alongside metrics, records-free.
+@@ -4789,10 +4839,14 @@
+ 
+     m = result["metrics"]
+     cmdr_display = f"{commander} {cmdr_note}" if cmdr_note else commander
++    deck_part = (
++        f"Deck: {_goldfish_n_cards(len(library))} | Format: 60-card (no "
++        f"commander, 20 life, on the play)" if commander is None else
++        f"Deck: {_goldfish_n_cards(len(library) + 1)} including commander | "
++        f"Commander: {cmdr_display}")
+     parts = [
+         "# Goldfish run",
+-        (f"Deck: {_goldfish_n_cards(len(library) + 1)} including commander | "
+-         f"Commander: {cmdr_display} | {params.n} games, seed {params.seed}, "
++        (f"{deck_part} | {params.n} games, seed {params.seed}, "
+          f"through turn {until_turn} | run_id: {run_id}"),
+     ]
+     if unmatched_anns:
+@@ -4802,7 +4856,7 @@
+         parts += ["", "Warning — not recognized by Scryfall, skipped: "
+                   + ", ".join(not_found)]
+     parts += ["", "## Summary"]
+-    parts += _goldfish_summary_lines(m, until_turn)
++    parts += _goldfish_summary_lines(m, until_turn, params.constructed)
+     payload = {"n": result["n"], "seed": result["seed"],
+                "until_turn": result["until_turn"], "run_id": run_id,
+                "metrics": m}
+@@ -4827,13 +4881,15 @@
+     try:
+         (cards_a, lib_a, cmdr_a, _note_a, scopes_a, approx_a,
+          nf_a, unmatched_a) = await _goldfish_prepare(
+-            params.deck_a, params.annotations + params.annotations_a)
++            params.deck_a, params.annotations + params.annotations_a,
++            params.constructed)
+     except ValueError as e:
+         return f"Deck A: {e}"
+     try:
+         (cards_b, lib_b, cmdr_b, _note_b, scopes_b, approx_b,
+          nf_b, unmatched_b) = await _goldfish_prepare(
+-            params.deck_b, params.annotations + params.annotations_b)
++            params.deck_b, params.annotations + params.annotations_b,
++            params.constructed)
+     except ValueError as e:
+         return f"Deck B: {e}"
+     if len(lib_a) != len(lib_b):
+@@ -4842,7 +4898,7 @@
+                 f"deck B has {len(lib_b)} (excluding commanders and any "
+                 f"Scryfall-unrecognized names).")
+     combo_err = _goldfish_check_combos(
+-        params.combos, set(lib_a) | set(lib_b) | {cmdr_a, cmdr_b})
++        params.combos, set(lib_a) | set(lib_b) | ({cmdr_a, cmdr_b} - {None}))
+     if combo_err:
+         return combo_err
+     until_turn = params.until_turn
+@@ -4851,7 +4907,9 @@
+         result = run_ab(
+             cards_a, lib_a, cmdr_a, cards_b, lib_b, cmdr_b,
+             params.n, params.seed, until_turn, combos=params.combos,
+-            allow_different_commanders=params.allow_different_commanders)
++            rules=MulliganRules(free_first=False) if params.constructed else None,
++            allow_different_commanders=params.allow_different_commanders,
++            constructed=params.constructed)
+         # Same re-aggregation as goldfish_run: run_ab's per-arm metrics lack
+         # card scopes; redo them so both honesty reports exist. Off-loop.
+         result["metrics_a"] = metrics.aggregate(
+@@ -4880,6 +4938,8 @@
+               "until_turn": until_turn,
+               "allow_different_commanders": params.allow_different_commanders,
+               "engine_version": ENGINE_VERSION}
++    if params.constructed:
++        inputs["constructed"] = True    # absent otherwise: run_ids unchanged
+     run_id = report.run_code(inputs)
+     banner = _goldfish_scope_banner(lib_a, lib_b, scopes_a, scopes_b)
+     # The report re-emits the banner verbatim and the standing notes (D11).
+@@ -4893,8 +4953,9 @@
+ 
+     # SCOPE BANNER FIRST (spec §Statistics) — nothing may precede it.
+     parts = [banner, ""]
+-    cmdrs = (f"Commander: {cmdr_a}" if cmdr_a == cmdr_b
+-             else f"Commanders: A {cmdr_a} vs B {cmdr_b}")
++    cmdrs = ("Format: 60-card (no commander, 20 life, on the play)"
++             if params.constructed else f"Commander: {cmdr_a}"
++             if cmdr_a == cmdr_b else f"Commanders: A {cmdr_a} vs B {cmdr_b}")
+     parts.append(f"# Goldfish A/B\n{cmdrs} | {params.n} paired games, "
+                  f"seed {params.seed}, through turn {until_turn} | "
+                  f"run_id: {run_id}")
+diff --git a/tests/goldfish/test_constructed.py b/tests/goldfish/test_constructed.py
+new file mode 100644
+--- /dev/null
++++ b/tests/goldfish/test_constructed.py
+@@ -0,0 +1,117 @@
++"""Constructed (60-card) goldfish games: no commander, 20 life, no free
++mulligan, on the play (patch 0007)."""
++import json
++
++import server as srv
++from mystic_forge.goldfish.engine import MulliganRules, auto_mulligan, new_game
++from mystic_forge.goldfish.runner import run_batch
++from tests.goldfish.helpers import MINI_DECK_TEXT, _patch_fetch_minideck, mini_cards
++
++# 60 cards, no commander line: the first line is an ordinary card.
++SIXTY = "4 Runner\n20 Mountain\n4 Plains\n24 Bear\n8 Hammer"
++
++
++def _deck60():
++    return ["Runner"] * 4 + ["Mountain"] * 20 + ["Plains"] * 4 + ["Bear"] * 24 + ["Hammer"] * 8
++
++
++def _json_payload(out: str) -> dict:
++    return json.loads(out.split("```json")[1].split("```")[0])
++
++
++def test_new_game_constructed_has_no_commander_and_20_life():
++    g = new_game(mini_cards(), _deck60(), None, seed=3, opponents=2, constructed=True)
++    assert g.command == []
++    assert g.commander_name is None
++    assert g.opponents == [20, 20]
++    assert len(g.hand) == 7 and len(g.library) == 53
++    # The commander default is unchanged.
++    c = new_game(mini_cards(), _deck60(), "Boss", seed=3)
++    assert c.command == ["Boss"] and c.opponents == [40]
++
++
++def test_constructed_is_on_the_play():
++    g = new_game(mini_cards(), _deck60(), None, seed=5, constructed=True)
++    auto_mulligan(g, MulliganRules(free_first=False))
++    assert g.turn == 1
++    assert len(g.hand) == g.kept_hand_size          # no draw on turn 1
++    c = new_game(mini_cards(), _deck60(), "Boss", seed=5)
++    auto_mulligan(c, MulliganRules())
++    assert len(c.hand) == c.kept_hand_size + 1      # commander games always draw
++
++
++def test_run_batch_constructed_never_casts_a_commander():
++    out = run_batch(mini_cards(), _deck60(), None, n=30, seed=1, until_turn=6,
++                    rules=MulliganRules(free_first=False), constructed=True)
++    assert all(r.commander_cast_turn is None for r in out["records"])
++    assert out["metrics"]["commander_cast"]["reached_pct"]["value"] == 0
++
++
++async def test_load_deck_constructed_keeps_every_card():
++    names, commander, note = await srv._goldfish_load_deck(SIXTY, constructed=True)
++    assert commander is None and note is None
++    assert len(names) == 60 and names.count("Runner") == 4
++    # Without the flag the first line is still the commander.
++    names, commander, _ = await srv._goldfish_load_deck(SIXTY)
++    assert commander == "Runner"
++
++
++async def test_goldfish_run_constructed(monkeypatch):
++    _patch_fetch_minideck(monkeypatch)
++    out = await srv.goldfish_run(srv.GoldfishRunInput(
++        deck=SIXTY, n=20, seed=4, until_turn=6, constructed=True))
++    assert "Deck: 60 cards | Format: 60-card (no commander, 20 life, on the play)" in out
++    assert "Commander" not in out.split("## Metrics")[0]
++    assert "Kill (20 damage)" in out
++    payload = _json_payload(out)
++    assert payload["metrics"]["commander_cast"]["reached_pct"]["value"] == 0
++    stored = srv._GOLDFISH_RUNS[payload["run_id"]]
++    assert stored["inputs"]["constructed"] is True
++    assert stored["inputs"]["commander"] is None
++    assert len(stored["inputs"]["library"]) == 60
++    html = srv._goldfish_entry_html(stored)
++    assert "Kill (20 damage)" in html and "Commander cast" not in html
++
++
++async def test_goldfish_run_constructed_has_no_free_mulligan(monkeypatch):
++    _patch_fetch_minideck(monkeypatch)
++    seen = {}
++    real = srv.run_batch
++
++    def spy(*args, **kw):
++        seen.update(kw)
++        return real(*args, **kw)
++
++    monkeypatch.setattr(srv, "run_batch", spy)
++    await srv.goldfish_run(srv.GoldfishRunInput(deck=SIXTY, n=5, constructed=True))
++    assert seen["rules"].free_first is False and seen["constructed"] is True
++    await srv.goldfish_run(srv.GoldfishRunInput.model_validate(
++        {"deck": SIXTY, "n": 5, "constructed": True, "mulligan": {"free_first": True}}))
++    assert seen["rules"].free_first is True             # an explicit override wins
++
++
++async def test_commander_run_id_unchanged_by_the_new_field(monkeypatch):
++    _patch_fetch_minideck(monkeypatch)
++    out = await srv.goldfish_run(srv.GoldfishRunInput(deck=MINI_DECK_TEXT, n=5, seed=9))
++    stored = srv._GOLDFISH_RUNS[_json_payload(out)["run_id"]]
++    assert "constructed" not in stored["inputs"]
++    assert "Commander: Boss" in out and "Kill (40 damage)" in out
++
++
++async def test_goldfish_ab_constructed(monkeypatch):
++    _patch_fetch_minideck(monkeypatch)
++    out = await srv.goldfish_ab(srv.GoldfishAbInput(
++        deck_a=SIXTY, deck_b=SIXTY, n=10, seed=2, constructed=True))
++    assert "Format: 60-card" in out
++    payload = _json_payload(out)
++    assert all(d["mean"] == 0.0 for d in payload["deltas"].values())
++
++
++async def test_annotate_constructed_header(monkeypatch):
++    _patch_fetch_minideck(monkeypatch)
++    out = await srv.goldfish_annotate(srv.GoldfishAnnotateInput(deck=SIXTY, constructed=True))
++    assert "Deck: 60 cards | No commander (60-card game)" in out
++    assert "EDH decks are 100" not in out
++    short = await srv.goldfish_annotate(srv.GoldfishAnnotateInput(
++        deck="20 Mountain\n20 Bear", constructed=True))
++    assert "at least 60" in short
+diff --git a/tests/goldfish/test_server_tools.py b/tests/goldfish/test_server_tools.py
+--- a/tests/goldfish/test_server_tools.py
++++ b/tests/goldfish/test_server_tools.py
+@@ -350,8 +350,8 @@
+     _patch_fetch_minideck(monkeypatch)
+     real_load = srv._goldfish_load_deck
+ 
+-    async def fake_load(deck):
+-        names, commander, _ = await real_load(deck)
++    async def fake_load(deck, constructed=False):
++        names, commander, _ = await real_load(deck, constructed)
+         return names, commander, "(first of 2 premier cards — v1 simulates a single commander)"
+ 
+     monkeypatch.setattr(srv, "_goldfish_load_deck", fake_load)

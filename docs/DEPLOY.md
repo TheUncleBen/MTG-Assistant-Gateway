@@ -541,6 +541,12 @@ Upstream code is unchanged apart from four small patches in
   name are found by the goldfish tools; precon lists add up split basic land
   lines; and the simulation's honesty report no longer files played lands
   and mana rocks as low-impact.
+- `0007-goldfish-constructed-games.patch`: the goldfish simulator modelled
+  Commander games only and took a list's first line as the commander. The
+  patch adds `constructed` to `goldfish_run`, `goldfish_ab` and
+  `goldfish_annotate`: no commander, 20 life, no free mulligan and on the
+  play (no draw on turn 1). The gateway sets it for a deck without a
+  commander and with 60 or more cards. Commander games are unchanged.
 
 What to know about it:
 
@@ -604,8 +610,10 @@ default, and an install that leaves it off behaves exactly as before.
   report. An idle Forge service holds no Java memory. `FORGE_GAME_SECONDS` (default 600) is how long
   one game may run before Forge calls it a draw; such games are counted as draws in the report.
 - **No upkeep:** the image carries Forge's card scripts, an index of Scryfall's alternative printed
-  names, and the newest Commander precons as opponents. Each image is rebuilt from a Forge release in
-  CI; you update it like any other image.
+  names, and the newest Commander precons as opponents, each with a bracket estimated from the game
+  changers it holds (Scryfall's list, read once when CI builds the image). The gateway seats the
+  precons of the tested deck's bracket. Each image is rebuilt from a Forge release in CI; you update
+  it like any other image.
 - **Privacy:** the service is on its own internal network with no internet access; only the gateway
   reaches it.
 - Cards Forge cannot play are listed in each report's `forge.not_played`, and the games run without

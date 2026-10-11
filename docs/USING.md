@@ -78,10 +78,35 @@ One deck:
   archidekt.com's playtester, so a game plays the same as on the site. A
   private deck shows only when that browser is signed in to Archidekt; the
   page keeps an **Open on Archidekt** button for that case.
+- **Goldfish** plays the deck by hand on a gateway page, in your browser:
+  the deck is shuffled and you get seven cards. Keep the hand or take a
+  mulligan (London rules: the hand goes back, you draw seven again, and
+  keeping puts one card on the bottom of the library for each mulligan; in a
+  Commander deck the first mulligan is free). Then **Draw a card**, select a
+  card to play it to the battlefield, the graveyard or exile, tap and untap
+  it, or put it back; **Next turn** untaps everything and draws (the game is
+  on the play, so turn 1 has no draw), and **New game** starts again. A
+  Commander deck starts with its commander in the command zone; other decks
+  have none. The page shows the library count and works with a mouse, a
+  finger or the keyboard. Nothing is sent to Archidekt and nothing is kept.
 - **Run simulation** runs the statistics, the decklist validation and the
   goldfish simulation (300 games) and opens the result, filed under
   History. It is the same run the assistant's `run_deck_report` makes, so
-  the numbers match whichever way it is started.
+  the numbers match whichever way it is started. A Commander deck is played
+  from the command zone against 40 life. A deck without a commander and with
+  at least 60 cards (Standard, Modern, Pioneer, Legacy, Vintage, Pauper and
+  the like) is played as a 60-card game: seven-card London mulligan with no
+  free one, 20 life, on the play, sideboard left out. A Commander-format
+  deck without a card in its Commander category, or a smaller deck without
+  one, is not simulated and the report says why.
+- When the gateway runs Forge, a Commander deck's report also has Forge
+  games against three precons. They are precons of the deck's bracket: the
+  bracket set on the deck in Archidekt, or else the gateway's estimate. Each
+  precon's bracket comes from the game changers it holds. When there are not
+  enough precons of that bracket, the nearest bracket fills in, and an older
+  Forge image without precon brackets plays the newest precons; the report
+  names the opponents, their brackets and why they were picked. Forge does not
+  run 60-card decks (its opponents are Commander precons).
 - **Compare with another deck…** (More menu) pits the deck against a
   preconstructed deck (pick one from Archidekt's list), any deck id or
   link, or a pasted list: what the build took out of the other deck, what

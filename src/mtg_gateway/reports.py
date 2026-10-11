@@ -66,8 +66,8 @@ TREND_METRICS = (
     ("price_total", "Deck price", "$"),
     ("salt_total", "Salt total", ""),
     ("commander_cast_median_turn", "Commander cast (median turn)", "turn"),
-    ("kill_median_turn", "40 damage dealt (median turn, when dealt)", "turn"),
-    ("kill_pct", "Games dealing 40 damage by the last simulated turn", "%"),
+    ("kill_median_turn", "Lethal damage dealt (median turn, when dealt)", "turn"),
+    ("kill_pct", "Games dealing lethal damage by the last simulated turn", "%"),
 )
 TREND_LIMIT = 60
 # A member's Forge runs go one at a time (the engine plays one game at a time for the whole
@@ -189,6 +189,7 @@ class ReportService:
         stats = deck_stats.compute_from_text(cards)
         main = to_text(cards)
         commander = (stats.get("commanders") or [None])[0]
+        mode = sim_mode(stats)
         goldfish: dict[str, Any] | None = None
         validation: dict[str, Any] | None = None
         if self.mf is not None:
@@ -198,10 +199,10 @@ class ReportService:
             validation = await self._mf(
                 sub, "validate_decklist", {"decklist": sim_text, "commander": sim_commander}
             )
-            if simulate and commander is None:
-                goldfish = {"tool": "goldfish_run", "ok": False, "text": NO_COMMANDER_TEXT}
+            if simulate and mode not in SIM_MODES:
+                goldfish = {"tool": "goldfish_run", "ok": False, "text": mode}
             elif simulate:
-                goldfish = await self._mf(sub, "goldfish_run", {"deck": sim_text, "n": games, **options})
+                goldfish = await self._mf(sub, "goldfish_run", _run_args(sim_text, games, options, mode))
                 _commander_aside(goldfish, sim_commander)
         return {
             "stored": False,
@@ -239,12 +240,11 @@ class ReportService:
             text = front_faces(deck_to_text(deck))
             commander = _front_face((stats.get("commanders") or [None])[0])
             validation = await self._mf(sub, "validate_decklist", {"decklist": text, "commander": commander})
-            if simulate and commander is None:
-                # Mystic Forge's text path would take the first line as the commander and
-                # simulate a 59-card deck; refuse plainly instead.
-                goldfish = {"tool": "goldfish_run", "ok": False, "text": NO_COMMANDER_TEXT}
+            mode = sim_mode(stats)
+            if simulate and mode not in SIM_MODES:
+                goldfish = {"tool": "goldfish_run", "ok": False, "text": mode}
             elif simulate:
-                goldfish = await self._mf(sub, "goldfish_run", {"deck": text, "n": games, **options})
+                goldfish = await self._mf(sub, "goldfish_run", _run_args(text, games, options, mode))
                 _commander_aside(goldfish, commander)
                 _stored_note(goldfish)
         rid = "rep_" + secrets.token_urlsafe(9)
@@ -289,10 +289,12 @@ class ReportService:
         if simulate and self.forge is not None:
             seed = options.get("seed")
             async with self._forge_start_lock:
-                await self._start_or_queue_forge(sub, rid, deck, games, seed)
+                await self._start_or_queue_forge(sub, rid, deck, games, seed, forge_bracket(deck, stats))
         return self.get(sub, rid)
 
-    async def _start_or_queue_forge(self, sub: str, rid: str, deck: Any, games: int, seed: Any) -> None:
+    async def _start_or_queue_forge(
+        self, sub: str, rid: str, deck: Any, games: int, seed: Any, bracket: tuple[int | None, str | None]
+    ) -> None:
         text, seed = deck_to_text(deck), seed if isinstance(seed, int) else None
         if self._forge_running(sub, rid):
             # One unfinished Forge run per member, so nobody can fill the shared engine's queue:
@@ -317,18 +319,41 @@ class ReportService:
                     "queued_at": int(time.time()),
                     "games_requested": min(games, self.forge_games),
                     # What starting it later takes; kept with the report, never shown.
-                    "start": {"text": text, "name": deck.name, "games": games, "seed": seed},
+                    "start": {
+                        "text": text,
+                        "name": deck.name,
+                        "games": games,
+                        "seed": seed,
+                        "bracket": bracket,
+                    },
                 },
             )
             self._ensure_forge_refresher()
             return
-        await self._start_forge(rid, text, deck.name, games, seed)
+        await self._start_forge(rid, text, deck.name, games, seed, bracket)
 
     # -- Forge runs (background) ----------------------------------------------
-    async def _start_forge(self, rid: str, text: str, name: str, games: int, seed: int | None = None) -> None:
+    async def _start_forge(
+        self,
+        rid: str,
+        text: str,
+        name: str,
+        games: int,
+        seed: int | None = None,
+        bracket: Any = (None, None),
+    ) -> None:
         assert self.forge is not None
+        level, source = bracket if isinstance(bracket, (list, tuple)) and len(bracket) == 2 else (None, None)
         try:
-            section = await start_run(self.forge, text, name, games=min(games, self.forge_games), seed=seed)
+            section = await start_run(
+                self.forge,
+                text,
+                name,
+                games=min(games, self.forge_games),
+                seed=seed,
+                bracket=level if isinstance(level, int) else None,
+                bracket_source=source if isinstance(source, str) else None,
+            )
         except ForgeError as exc:
             section = {"state": "failed", "error": str(exc), **({"detail": exc.detail} if exc.detail else {})}
         except Exception:  # an unexpected reply must not turn a stored report into a tool error
@@ -394,6 +419,7 @@ class ReportService:
                     str(start.get("name") or ""),
                     int(start.get("games") or self.forge_games),
                     start.get("seed") if isinstance(start.get("seed"), int) else None,
+                    start.get("bracket") or (None, None),
                 )
 
     def measured_game_seconds(self) -> float | None:
@@ -525,21 +551,26 @@ class ReportService:
         *,
         games: int = DEFAULT_GAMES,
         options: dict[str, Any] | None = None,
-        commanders: tuple[bool, bool] = (True, True),
+        modes: tuple[str, str] = ("commander", "commander"),
     ) -> dict[str, Any] | None:
         """A paired goldfish A/B of two decklists (game for game under the same seeds, with the
         deltas' confidence intervals and significance), as the research service reports it.
         Not stored: it is a comparison, not a report of one deck. None without the service.
-        ``commanders`` says whether each list has a known commander; without one the simulator
-        would take the first line as the commander, so the A/B is refused instead."""
+        ``modes`` is each list's ``sim_mode``: the A/B is refused when one is not simulated, or
+        when a Commander deck is compared with a 60-card one."""
         if self.mf is None:
             return None
         if not isinstance(games, int) or isinstance(games, bool) or games < 10 or games > MAX_GAMES:
             raise DeckError("invalid", f"games must be an integer from 10 to {MAX_GAMES}")
         opts = sim_options(options, ab=True)
-        if not all(commanders):
-            return {"tool": "goldfish_ab", "ok": False, "text": NO_COMMANDER_TEXT}
+        refused = next((m for m in modes if m not in SIM_MODES), None)
+        if refused is None and modes[0] != modes[1]:
+            refused = MIXED_MODES_TEXT
+        if refused is not None:
+            return {"tool": "goldfish_ab", "ok": False, "text": refused}
         args = {"deck_a": text_a, "deck_b": text_b, "n": games, **opts}
+        if modes[0] == "constructed":
+            args["constructed"] = True
         return await self._mf(sub, "goldfish_ab", args)
 
     async def _mf(self, sub: str, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -905,6 +936,54 @@ NO_COMMANDER_TEXT = (
     "Not simulated: the goldfish simulator models Commander decks and needs one card in the "
     "deck's Commander (premier) category. Put the commander in that category and run again."
 )
+# A deck without a commander is played as a 60-card game: Mystic Forge's ``constructed`` games
+# (docker/mystic-forge/patches/0007): no command zone, 20 life, a 7-card London mulligan with no
+# free one, and on the play (no draw on turn 1). The sideboard is never in the simulated deck.
+SIM_MODES = ("commander", "constructed")
+MIN_CONSTRUCTED = 60
+SMALL_DECK_TEXT = (
+    "Not simulated: a deck without a commander is played as a 60-card game and needs at least "
+    "{min} cards in the main deck (this one has {count}). For a Commander deck, put the "
+    "commander in the deck's Commander (premier) category."
+)
+MIXED_MODES_TEXT = (
+    "Not simulated: one deck has a commander and the other does not. The A/B compares two "
+    "Commander decks or two 60-card decks."
+)
+
+
+def sim_mode(stats: dict[str, Any]) -> str:
+    """How the goldfish simulator plays a deck, from its statistics (``deck_stats.compute`` or
+    ``compute_from_text``): "commander", "constructed" (no commander, at least 60 cards and not
+    a Commander-style format), or else the sentence saying why it is not simulated."""
+    if stats.get("commanders"):
+        return "commander"
+    if stats.get("format") in deck_stats._COMMANDER_FORMATS:
+        # Mystic Forge would take the first line as the commander and simulate a 99-card deck.
+        return NO_COMMANDER_TEXT
+    count = stats.get("card_count") or 0
+    if count < MIN_CONSTRUCTED:
+        return SMALL_DECK_TEXT.format(min=MIN_CONSTRUCTED, count=count)
+    return "constructed"
+
+
+def forge_bracket(deck: Any, stats: dict[str, Any]) -> tuple[int | None, str | None]:
+    """The bracket Forge matches opponents to, and where it came from: the bracket set on the
+    deck in Archidekt, else the gateway's estimate (deck_stats.bracket_estimate)."""
+    own = getattr(deck, "edh_bracket", None)
+    if isinstance(own, int) and not isinstance(own, bool) and 1 <= own <= 5:
+        return own, "archidekt"
+    est = (stats.get("bracket_estimate") or {}).get("bracket")
+    if isinstance(est, int) and not isinstance(est, bool):
+        return est, "estimate"
+    return None, None
+
+
+def _run_args(text: str, games: int, options: dict[str, Any], mode: str) -> dict[str, Any]:
+    args = {"deck": text, "n": games, **options}
+    if mode == "constructed":
+        args["constructed"] = True
+    return args
 
 
 def sim_options(options: dict[str, Any] | None, *, ab: bool = False) -> dict[str, Any]:
@@ -945,4 +1024,4 @@ def deck_summary_for(deck: Deck) -> dict[str, Any]:
     }
 
 
-__all__ = ["ReportService", "TREND_KEYS", "TREND_METRICS", "deck_summary_for", "sim_options"]
+__all__ = ["ReportService", "TREND_KEYS", "TREND_METRICS", "deck_summary_for", "sim_mode", "sim_options"]

@@ -318,7 +318,8 @@ def guide_body(
     )
     tut_first_sim = (
         "<p>A simulation tells you how the deck plays on its own: how fast the commander lands, how "
-        "often the mana flows, how much damage goldfishing deals.</p>"
+        "often the mana flows, how much damage goldfishing deals. A deck without a commander and with 60 "
+        "or more cards plays a 60-card game instead (20 life, on the play).</p>"
         "<ol class='steps'>"
         "<li><span>Open one of your decks and press <strong>Run simulation</strong>. The button says the "
         "run takes up to a minute and shows “Simulating…” while it does.</span></li>"
@@ -513,6 +514,9 @@ def guide_body(
         "app. A private deck shows there when that browser is signed in to Archidekt, so sign in on "
         "archidekt.com once in the browser you use. <a href='#exp-playtest'>Why Playtest opens Archidekt "
         "in a new tab</a> explains.</p>"
+        "<p><strong>Goldfish</strong>, next to it, plays the deck by hand here on the gateway: seven cards "
+        "with London mulligans, then draw, play, tap and next turn, all in your browser. A Commander deck "
+        "starts with its commander in the command zone.</p>"
     )
     how_layout = (
         "<ul>"
@@ -721,7 +725,8 @@ def guide_body(
             "One deck",
             "<code>/decks/&lt;id&gt;</code>",
             "views, grouping, sorting, filter, the whole card on tap, the card menu, drag and Save moves, "
-            "Quick add, Playtest, Run simulation, statistics with Probability of draw and Deck checks, "
+            "Quick add, Playtest, Goldfish, Run simulation, statistics with Probability of draw and Deck "
+            "checks, "
             "description, comments, like, bookmark, follow; More: Settings, Compare, Export, History, "
             "Open on Archidekt, Delete deck",
         ),
