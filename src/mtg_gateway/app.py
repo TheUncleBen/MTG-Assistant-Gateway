@@ -81,6 +81,7 @@ from .cards import (
     with_card,
 )
 from .cardsearch import add_cardsearch_routes
+from .chatgpt_plugin import add_chatgpt_plugin_route
 from .cimd import CimdFetcher
 from .clickguard import form_stamp, guarded_form, submitted_too_soon
 from .collection import add_collection
@@ -1836,6 +1837,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
     add_skill_routes(server, state)
     add_app_routes(server, state)
     add_plugin_routes(server, state)
+    add_chatgpt_plugin_route(server, state)
     add_scan(server, state)
     if state.cards is not None:
         add_card_routes(server, state, state.cards)

@@ -111,6 +111,18 @@ add nothing to what the assistant reads.
 An app without cards (Claude Code, older clients) gets the same text results,
 and a form question for ambiguous names.
 
+**How an assistant gets connected.** Every app adds the same connector (the
+gateway's `/mcp` address); the guided setup at `/install` has the steps. Two
+files bundle the connector with the MTG skill, both built for each gateway
+and downloadable without signing in: the Claude plugin
+(`/plugin/<name>.zip`, uploaded on claude.ai or installed in Claude Code) and
+the ChatGPT plugin (`/plugin/<name>-chatgpt.zip`, Agent Plugins format).
+OpenAI's help pages say workspace owners and admins on ChatGPT Business and
+Enterprise upload the ChatGPT plugin in the admin console (reported, not yet
+tested); individual Plus and Pro accounts have no plugin upload (checked on a
+Pro account, 2026-10-11) and add the connector by hand, which gives the same
+tools.
+
 - **Shared backend, one set of rules.** A hand save and an applied proposal
   travel the same path: a proposal record, a snapshot, the Archidekt write,
   a read-back, an audit row. The review page and the in-chat card open the

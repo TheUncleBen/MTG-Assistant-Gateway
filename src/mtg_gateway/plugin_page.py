@@ -96,6 +96,11 @@ def plugin_slug(site: str) -> str:
     return slug or PLUGIN_NAME
 
 
+def chatgpt_zip_name(site: str) -> str:
+    """The ChatGPT plugin archive's file name (chatgpt_plugin.py builds it)."""
+    return f"{plugin_slug(site)}-chatgpt.zip"
+
+
 def plugin_label(site: str) -> str:
     """The owner's name as the plugin's text may carry it: letters, digits, spaces and . _ ' -
     only, so it can't break the skills' front matter or the JSON it is written into."""
@@ -368,6 +373,15 @@ You will copy three things into ChatGPT:
 3. Open the project's menu, then **Project settings**, and paste them into
    the instructions.
 4. Chat inside that project with the {site} connector on.
+
+**ChatGPT plugin file (workspace admins only)**
+
+[Download the ChatGPT plugin (ZIP)]({public_url}/plugin/{chatgpt_zip_name(site)}):
+the connector and the MTG skill in one file. OpenAI's help pages say
+workspace owners and admins on ChatGPT Business and Enterprise upload it
+under Plugins in the admin console (reported, not yet tested with this
+gateway). Individual Plus and Pro accounts have no plugin upload (checked
+on a Pro account, 2026-10-11): add the connector as above.
 
 If ChatGPT will not run `apply_proposal`, deck edits still work: see "If a
 tool is blocked" below.
@@ -683,6 +697,13 @@ def _section_html(client: str, public_url: str, site: str, mcp_url: str) -> str:
             "<li>Open the project's menu, then <strong>Project settings</strong>, and paste them into the "
             "instructions.</li>"
             f"<li>Chat inside that project with the {e(site)} connector on.</li></ol></div>"
+            "<div class='card'><h2>ChatGPT plugin file (workspace admins only)</h2>"
+            "<p>The connector and the MTG skill in one file. OpenAI's help pages say workspace owners "
+            "and admins on ChatGPT Business and Enterprise upload it under Plugins in the admin console "
+            "(reported, not yet tested with this gateway). Individual Plus and Pro accounts have no "
+            "plugin upload (checked on a Pro account, 2026-10-11): add the connector as above.</p>"
+            f"<div class='actions'><a class='btn' href='/plugin/{e(chatgpt_zip_name(site))}'>"
+            f"{icon('download')} Download the ChatGPT plugin (ZIP)</a></div></div>"
             "<div class='card'><h2>If ChatGPT blocks write tools</h2>"
             "<p>OpenAI's pages report this may happen on Plus and Pro. Research, simulation, reading decks, "
             "scanning and deck proposals still work. To apply a proposal, open its review link or your "
@@ -706,6 +727,7 @@ __all__ = [
     "CLIENTS",
     "add_plugin_routes",
     "build_zip",
+    "chatgpt_zip_name",
     "claude_connect_link",
     "install_markdown",
     "marketplace",
