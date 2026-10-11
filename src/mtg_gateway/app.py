@@ -96,9 +96,11 @@ from .idp_sweep import AuthentikSweep
 from .membership import Membership, MembershipChecker
 from .metrics import Metrics
 from .mf_proxy import ALLOWED_TOOLS, BUSY_PREFIX, MysticForgeProxy
+from .notify import Notifier
 from .oidc import OIDCClient
 from .pages import BROWSER_CLIENT_ID, SESSION_COOKIE, _csrf, add_browser_routes, browser_session
 from .plugin_page import CONNECTOR_ICON_PATH, CONNECTOR_ICON_PX, SERVER_DESCRIPTION, add_plugin_routes
+from .prices import DailyJobs, PriceService
 from .reports import ReportService
 from .scan import add_scan
 from .schemas import (
@@ -116,10 +118,12 @@ from .schemas import (
 )
 from .skill_page import add_skill_routes
 from .social import add_social_routes
+from .summary import Summaries
 from .theme import NoSniffMiddleware, ThemeMiddleware, display_name, render
 from .timing import TimingMiddleware
 from .update_check import UpdateChecker
 from .views import deck_brief, deck_out
+from .watchlist import add_watchlist_routes, add_watchlist_tools
 
 DeckView = Literal["text", "summary", "cards", "export", "full"]
 # Cards a deck of each format holds: (count, True when it is a minimum rather than an exact size).
@@ -142,6 +146,9 @@ class AppState:
     metrics: Metrics | None = None
     membership: MembershipChecker | None = None
     sweep: AuthentikSweep | None = None  # removed-member clean-up (idp_sweep.py)
+    notifier: Notifier | None = None  # ntfy notifications (notify.py)
+    prices: PriceService | None = None  # watchlists and price history (prices.py)
+    summaries: Summaries | None = None  # members' plain summaries (summary.py)
     app_signins: AppSignins = field(default_factory=AppSignins)  # the Android app's browser sign-in
 
 
@@ -228,6 +235,9 @@ WRITE_TOOLS = frozenset(
         "run_deck_report",
         "save_scan_session",
         "propose_collection_changes",
+        "watch_card",
+        "watch_deck",
+        "unwatch",
     }
 )
 
@@ -624,6 +634,11 @@ def build_mcp_server(state: AppState) -> MCPServer:
             tasks.append(asyncio.create_task(state.sweep.loop()))
         elif state.sweep.why_off():
             logger.warning("%s", state.sweep.why_off())
+        if state.prices is not None:
+            # the daily price check and summaries: nothing is asked of Scryfall while nobody watches
+            tasks.append(
+                asyncio.create_task(DailyJobs(state.prices, state.summaries, s.price_hour_utc).loop())
+            )
         updates = UpdateChecker(s.update_check)
         if updates.enabled:
             tasks.append(asyncio.create_task(updates.loop()))
@@ -648,6 +663,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
             await state.oidc.aclose()
             await state.provider.cimd.aclose()
             await state.archidekt.aclose()
+            if state.notifier is not None:
+                await state.notifier.drain()
             if state.scan is not None:
                 state.scan.names.close()
                 await state.scan.scryfall.aclose()
@@ -1856,6 +1873,20 @@ def build_mcp_server(state: AppState) -> MCPServer:
     add_api_routes(server, state, state.reports)
     add_companion_routes(server, state, state.reports)
     add_admin_routes(server, state)
+    # Watchlists, price history, notifications and summaries (prices.py, notify.py, summary.py).
+    state.notifier = Notifier(s.ntfy_url, s.ntfy_token, state.db, s.public_url)
+    state.prices = PriceService(
+        s,
+        state.db,
+        state.decks,
+        lambda: state.scan.scryfall if state.scan is not None else None,
+        state.notifier,
+    )
+    state.summaries = Summaries(state.db, state.prices, state.notifier, s.public_url)
+    state.db.price_days = s.price_history_days
+    _notify_events(state)
+    add_watchlist_routes(server, state)
+    add_watchlist_tools(server, state)
     # Every tool's input schema self-contained: nested shapes (a deck change, the simulator's
     # options) are written out where the parameter is, not behind a $ref an app might not follow;
     # and without the generated titles and null branches, which only cost tokens.
@@ -2010,6 +2041,41 @@ def build_mcp_server(state: AppState) -> MCPServer:
         )
 
     return server
+
+
+def _notify_events(state: AppState) -> None:
+    """Hook the member's notifications (notify.py) to the events they may ask for: a proposal an
+    assistant made that waits for their own approval, and a deck report that finished."""
+    notifier = state.notifier
+    if notifier is None or not notifier.enabled:
+        return
+
+    def proposal_saved(sub: str, proposal_id: str) -> None:
+        try:
+            p = state.decks.describe(sub, proposal_id)
+        except DeckError:
+            return
+        if p["state"] == "pending" and not p["assistant_may_apply"]:
+            notifier.soon(
+                sub,
+                "proposals",
+                "A proposal waits for you",
+                "Your assistant proposed a change. Open it to review, then apply or reject it.",
+                f"/proposals/{proposal_id}",
+            )
+
+    def report_finished(sub: str, report_id: str) -> None:
+        notifier.soon(
+            sub,
+            "reports",
+            "Deck report finished",
+            "A deck report is ready to read.",
+            f"/history/reports/{report_id}",
+        )
+
+    state.decks.on_proposal_saved = proposal_saved  # type: ignore[attr-defined]
+    if state.reports is not None:
+        state.reports.on_finished = report_finished
 
 
 def create_app(

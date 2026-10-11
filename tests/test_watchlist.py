@@ -1,0 +1,599 @@
+"""Watchlists and price history (prices.py), ntfy notifications (notify.py) and the members'
+summaries (summary.py): the Watchlist page and the card viewer's price history, the assistant's
+tools, the daily check (batched, gentle, free when nobody watches), alerts, notifications through
+a fake ntfy server with a token that is never logged, the scheduled summary, the Account page's
+cards, retention, limits and the upgrade from the 0.7.22 schema. Time is moved by replacing
+prices.now."""
+
+from __future__ import annotations
+
+import datetime as dt
+import json
+import logging
+import re
+import sqlite3
+from pathlib import Path
+
+import httpx
+import pytest
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
+from starlette.routing import Route
+
+from mtg_gateway import db as db_module
+from mtg_gateway import notify, prices
+from mtg_gateway.archidekt import ArchidektClient, Pacer
+from mtg_gateway.config import ConfigError, load_settings
+from mtg_gateway.db import Database
+from mtg_gateway.scan.scryfall import ScryfallClient
+
+from .conftest import FakeIdP, Harness, make_settings, running
+from .fake_archidekt import FakeArchidekt
+from .fake_scryfall import FakeScryfall
+from .test_decks_and_proxy import Browser, call, mcp_token, structured
+
+SOL_RING = "Sol Ring"  # frc 21 in the fixtures: $1.28, €1.13, non-foil only
+TOKEN = "tk_secret_ntfy_token_value"
+
+
+class FakeNtfy:
+    """An ntfy server that records what was published and who published it."""
+
+    def __init__(self) -> None:
+        self.messages: list[dict] = []
+        self.auth: list[str] = []
+        self.status = 200
+        self.app = Starlette(routes=[Route("/", self.publish, methods=["POST"])])
+
+    async def publish(self, req: Request) -> Response:
+        self.auth.append(req.headers.get("authorization", ""))
+        if self.status != 200:
+            return Response("forbidden", status_code=self.status)
+        self.messages.append(json.loads(await req.body()))
+        return JSONResponse({"id": "m1", "event": "message"})
+
+
+class Clock:
+    """prices.now, moved a day at a time from 2026-10-12 07:00 UTC (a Monday)."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self.t = dt.datetime(2026, 10, 12, 7, 0, tzinfo=dt.UTC).timestamp()
+        monkeypatch.setattr(prices, "now", lambda: self.t)
+
+    def next_day(self, days: int = 1) -> None:
+        self.t += days * 86400
+
+    @property
+    def day(self) -> str:
+        return prices.day_of(self.t)
+
+
+class Stack:
+    def __init__(self, h: Harness, ark: FakeArchidekt, sf: FakeScryfall, ntfy: FakeNtfy):
+        self.h, self.ark, self.sf, self.ntfy = h, ark, sf, ntfy
+
+    @property
+    def gw(self):
+        return self.h.app.state.gateway
+
+
+def _harness(tmp_path: Path, idp: FakeIdP, ark: FakeArchidekt, **over: object) -> Harness:
+    settings = make_settings(tmp_path, writes_enabled=True, archidekt_base="https://ark.test/api", **over)
+    client = ArchidektClient(settings.archidekt_base, "test-agent", Pacer(0.0), http=ark.client())
+    return Harness(settings, idp, archidekt=client)
+
+
+async def _stack(h: Harness, ark: FakeArchidekt):
+    sf, ntfy = FakeScryfall(), FakeNtfy()
+    async with running(h):
+        gw = h.app.state.gateway
+        gw.scan.scryfall = ScryfallClient("https://scryfall.test", min_interval=0.0, http=sf.client())
+        gw.notifier._http = httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=ntfy.app), base_url="https://ntfy.test"
+        )
+        yield Stack(h, ark, sf, ntfy)
+
+
+@pytest.fixture
+async def stack(tmp_path: Path, idp: FakeIdP):
+    ark = FakeArchidekt()
+    h = _harness(tmp_path, idp, ark, ntfy_url="https://ntfy.test", ntfy_token=TOKEN)
+    async for st in _stack(h, ark):
+        yield st
+
+
+@pytest.fixture
+async def plain(tmp_path: Path, idp: FakeIdP):
+    """A gateway as a self-hoster runs it without setting anything new: no ntfy server."""
+    ark = FakeArchidekt()
+    async for st in _stack(_harness(tmp_path, idp, ark), ark):
+        yield st
+
+
+async def _browser(st: Stack, *, link: bool = False) -> Browser:
+    b = Browser(st.h)
+    await b.login("/account")
+    if link:
+        r = await b.link("alice", "pw-alice")
+        assert r.status_code == 303, r.text
+    return b
+
+
+async def _post(b: Browser, path: str, data: dict) -> httpx.Response:
+    return await b.http.post(path, data={"csrf": await b.csrf(path), **data})
+
+
+async def _watch(b: Browser, **fields: str) -> httpx.Response:
+    return await _post(b, "/watchlist", {"action": "add_card", **fields})
+
+
+# -- schema ---------------------------------------------------------------------------------------
+
+
+def test_a_0_7_22_database_is_upgraded_and_keeps_its_rows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    path = tmp_path / "old.sqlite"
+    monkeypatch.setattr(db_module, "MIGRATIONS", db_module.MIGRATIONS[:11])
+    old = Database(path)
+    assert old.schema_version == 11
+    old.upsert_user("u1", email="u1@example.test", name="U", preferred_username="u", groups=[])
+    old.close()
+    monkeypatch.undo()
+    new = Database(path)
+    try:
+        assert new.schema_version == db_module.SCHEMA_VERSION == 12
+        assert new.get_user("u1") is not None
+        tables = {r[0] for r in new._conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        assert {
+            "watch_cards",
+            "watch_decks",
+            "price_points",
+            "deck_values",
+            "notify_prefs",
+            "job_runs",
+        } <= tables
+    finally:
+        new.close()
+
+
+# -- the daily check ----------------------------------------------------------------------------
+
+
+async def test_the_daily_check_costs_nothing_when_nobody_watches(plain: Stack, monkeypatch) -> None:
+    clock = Clock(monkeypatch)
+    jobs = prices.DailyJobs(plain.gw.prices, plain.gw.summaries, hour_utc=6)
+    out = await jobs.run_due()
+    assert out["prices"] == {"day": clock.day, "watched": False, "requests": 0}
+    assert plain.sf.requests == []  # not one request to Scryfall
+    assert await jobs.run_due() == {}  # done for today
+    clock.t -= 2 * 3600  # 05:00 the next day... before the hour: nothing yet
+    clock.next_day()
+    assert await jobs.run_due() == {}
+
+
+async def test_a_watched_card_is_priced_daily_and_shows_its_history(stack: Stack, monkeypatch) -> None:
+    clock = Clock(monkeypatch)
+    b = await _browser(stack)
+    try:
+        r = await _watch(b, name="sol ring", set_code="FRC", collector_number="21")
+        assert r.status_code == 303 and r.headers["location"] == "/watchlist?ok=card_added", r.text
+        page = (await b.http.get("/watchlist")).text
+        assert "Sol Ring" in page and "FRC 21" in page and "$1.28" in page and clock.day in page
+        assert "No cards watched yet" not in page
+        sol = next(c for c in stack.sf.cards if c["name"] == SOL_RING and c["set"] == "frc")
+        # three more days, the price moving; one batched request a day
+        for usd in ("1.40", "1.10", "2.00"):
+            clock.next_day()
+            stack.sf.prices[sol["id"]] = {"usd": usd}
+            before = len(stack.sf.collection_bodies)
+            out = await stack.gw.prices.run_daily()
+            assert out["requests"] == 1 and len(stack.sf.collection_bodies) == before + 1
+            assert stack.sf.collection_bodies[-1] == [{"id": sol["id"]}]
+        page = (await b.http.get("/watchlist")).text
+        assert "$2.00" in page
+        # the chart has words for a screen reader, and the same numbers are in a table
+        assert "class='tspark'" in page and "role='img'" in page
+        assert "Sol Ring: $1.28 on 2026-10-12, $2.00 on 2026-10-15." in page
+        assert "<th scope='row'>2026-10-13</th><td>$1.40</td>" in page
+        assert "1 day: up 81.8%" in page
+        # the card viewer's Price history reads the same, with nothing asked of Scryfall
+        asked = len(stack.sf.requests)
+        api = (await b.http.get("/watchlist/api/card", params={"name": "Sol Ring"})).json()
+        assert [p["price"] for p in api["watches"][0]["history"]] == [1.28, 1.4, 1.1, 2.0]
+        assert len(stack.sf.requests) == asked
+    finally:
+        await b.aclose()
+
+
+async def test_the_check_asks_scryfall_in_batches_of_75_at_the_single_lookup_pace(
+    stack: Stack, monkeypatch
+) -> None:
+    Clock(monkeypatch)
+    b = await _browser(stack)
+    await b.aclose()
+    sub = "user-1"
+    with stack.h.db.tx() as c:
+        for i in range(80):
+            c.execute(
+                "INSERT INTO watch_cards (id, sub, name, scryfall_id, created_at) VALUES (?,?,?,?,0)",
+                (f"w{i}", sub, f"Card {i}", f"00000000-0000-0000-0000-{i:012d}"),
+            )
+    paced: list[float | None] = []
+    client = stack.gw.scan.scryfall
+    real = client._request
+
+    async def spy(method, path, *, interval=None, **kw):
+        paced.append(interval)
+        return await real(method, path, interval=interval, **kw)
+
+    monkeypatch.setattr(client, "_request", spy)
+    client.lookup_interval = 0.01
+    out = await stack.gw.prices.run_daily()
+    assert out["requests"] == 2
+    assert [len(x) for x in stack.sf.collection_bodies] == [75, 5]
+    assert paced == [0.01, 0.01]  # the slower pace, through the shared client and its pacer
+
+
+async def test_a_scryfall_429_stops_the_check_and_it_runs_again_later(stack: Stack, monkeypatch) -> None:
+    clock = Clock(monkeypatch)
+    b = await _browser(stack)
+    try:
+        assert (await _watch(b, name="Sol Ring")).status_code == 303
+    finally:
+        await b.aclose()
+    clock.next_day()
+    jobs = prices.DailyJobs(stack.gw.prices, stack.gw.summaries, hour_utc=6)
+    stack.sf.fail_with = 429
+    out = await jobs.run_due()
+    assert "error" in out["prices"]
+    stack.sf.fail_with = None
+    stack.gw.scan.scryfall._retry_until = 0  # the back-off has passed
+    out = await jobs.run_due()
+    assert out["prices"]["watched"] is True  # not marked done after the failure
+
+
+# -- watching ----------------------------------------------------------------------------------
+
+
+async def test_watch_refusals_limits_and_unknown_cards(tmp_path: Path, idp: FakeIdP, monkeypatch) -> None:
+    Clock(monkeypatch)
+    ark = FakeArchidekt()
+    async for st in _stack(_harness(tmp_path, idp, ark, watch_max_cards=1), ark):
+        b = await _browser(st)
+        try:
+            r = await _watch(b, name="No Such Card Anywhere")
+            assert r.status_code == 404 and "Scryfall knows no card named" in r.text
+            r = await _watch(b, name="Sol Ring", finish="foil")
+            assert r.status_code == 400 and "not printed in foil" in r.text
+            r = await _watch(b, name="Sol Ring", collector_number="21")
+            assert r.status_code == 400 and "goes with a set code" in r.text
+            assert (await _watch(b, name="Sol Ring")).status_code == 303
+            r = await _watch(b, name="Command Tower")
+            assert r.status_code == 429 and "the most this gateway keeps per member" in r.text
+            # no form token: refused
+            r = await b.http.post("/watchlist", data={"action": "add_card", "name": "Opt"})
+            assert r.status_code == 403
+        finally:
+            await b.aclose()
+
+
+async def test_card_viewer_watch_button_needs_the_form_token(stack: Stack, monkeypatch) -> None:
+    Clock(monkeypatch)
+    b = await _browser(stack)
+    try:
+        body = json.dumps({"name": "Sol Talisman", "finish": "foil"})
+        r = await b.http.post(
+            "/watchlist/api/watch", content=body, headers={"Content-Type": "application/json"}
+        )
+        assert r.status_code == 403
+        csrf = await b.csrf("/watchlist")
+        r = await b.http.post(
+            "/watchlist/api/watch",
+            content=body,
+            headers={"Content-Type": "application/json", "X-CSRF-Token": csrf},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["watch"]["price"] == 2.59 and r.json()["watch"]["finish"] == "foil"
+    finally:
+        await b.aclose()
+    # the viewer offers it (static/cardview.js)
+    js = (Path(prices.__file__).parent / "static" / "cardview.js").read_text(encoding="utf-8")
+    assert "/watchlist/api/card?name=" in js and "/watchlist/api/watch" in js
+
+
+async def test_assistant_tools_watch_list_history_and_unwatch(stack: Stack, monkeypatch) -> None:
+    clock = Clock(monkeypatch)
+    h = stack.h
+    b = await _browser(stack, link=True)
+    await b.aclose()
+    token = await mcp_token(h)
+    out = structured(
+        await call(h, token, "watch_card", {"name": "Sol Talisman", "finish": "foil", "alert_pct": 10})
+    )
+    assert out["ok"] and out["watch"]["price"] == 2.59 and out["watch"]["alerts"] == {"pct": 10.0}
+    deck = structured(await call(h, token, "watch_deck", {"deck_id": "42"}))
+    assert deck["ok"] and deck["deck"]["name"] == "Sample Commander Deck" and deck["deck"]["cards"] > 0
+    assert deck["deck"]["price"] is not None  # the cards Scryfall knows are priced at once
+    clock.next_day()
+    await stack.gw.prices.run_daily()
+    listed = structured(await call(h, token, "list_watchlist"))
+    assert [c["name"] for c in listed["cards"]] == ["Sol Talisman"]
+    assert "history" not in listed["cards"][0] and listed["limits"] == {"cards": 200, "decks": 10}
+    hist = structured(await call(h, token, "card_price_history", {"card": "sol talisman"}))
+    assert [p["day"] for p in hist["cards"][0]["history"]] == ["2026-10-12", "2026-10-13"]
+    dh = structured(await call(h, token, "card_price_history", {"deck_id": "42"}))
+    assert len(dh["deck"]["history"]) == 2
+    gone = structured(await call(h, token, "unwatch", {"card": "Sol Talisman", "deck_id": "42"}))
+    assert gone == {"ok": True, "cards_removed": ["Sol Talisman"], "deck_removed": "Sample Commander Deck"}
+    missing = structured(await call(h, token, "card_price_history", {"card": "Sol Talisman"}))
+    assert missing["ok"] is False and missing["error"] == "not_found"
+    # a read-only connection may not watch
+    tools = (await h.mcp(token, "tools/list")).json()["result"]["tools"]
+    by = {t["name"]: t for t in tools}
+    assert by["list_watchlist"]["annotations"]["readOnlyHint"] is True
+    assert by["get_summary"]["annotations"]["readOnlyHint"] is True
+    assert by["watch_card"]["annotations"]["readOnlyHint"] is False
+
+
+async def test_old_points_age_out_and_delete_my_data_removes_watches(stack: Stack, monkeypatch) -> None:
+    Clock(monkeypatch)
+    b = await _browser(stack)
+    try:
+        assert (await _watch(b, name="Sol Ring")).status_code == 303
+        db = stack.h.db
+        with db.tx() as c:
+            c.execute("INSERT INTO price_points (scryfall_id, day, usd) VALUES ('x', '2000-01-01', 1.0)")
+        db.purge_expired()
+        assert (
+            db._conn.execute("SELECT COUNT(*) FROM price_points WHERE day = '2000-01-01'").fetchone()[0] == 0
+        )
+        assert db._conn.execute("SELECT COUNT(*) FROM price_points").fetchone()[0] == 1  # today's stays
+        notify.save_prefs(db, "user-1", ntfy_on=True, ntfy_topic=notify.new_topic())
+        out = db.delete_member_data("user-1")
+        assert out["watch_cards"] == 1 and out["notify_prefs"] == 1
+    finally:
+        await b.aclose()
+
+
+# -- notifications ------------------------------------------------------------------------------
+
+
+async def _opt_in(b: Browser, **extra: str) -> httpx.Response:
+    data = {"action": "notify_save", "ntfy_on": "1", "on_proposals": "1", "on_reports": "1", "on_prices": "1"}
+    return await _post(b, "/account", {**data, **extra})
+
+
+async def test_notifications_are_off_and_harmless_without_a_server(plain: Stack) -> None:
+    b = await _browser(plain)
+    try:
+        page = (await b.http.get("/account")).text
+        assert "This gateway has no notification server set up" in page
+        assert "id='summary'" in page and "no AI" in page
+        assert plain.gw.notifier.enabled is False
+        assert plain.gw.decks.on_proposal_saved is None  # nothing hooked
+    finally:
+        await b.aclose()
+
+
+async def test_opt_in_topic_test_button_and_the_token_never_logged(stack: Stack, caplog) -> None:
+    caplog.set_level(logging.DEBUG)
+    b = await _browser(stack)
+    try:
+        r = await _opt_in(b)
+        assert r.status_code == 303 and r.headers["location"] == "/account?ok=notify_saved#notifications"
+        topic = notify.prefs(stack.h.db, "user-1")["ntfy_topic"]
+        assert re.fullmatch(r"mtg-[A-Za-z0-9_-]{22}", topic)
+        page = (await b.http.get("/account")).text
+        assert topic in page and "https://ntfy.test" in page and "Send test" in page
+        assert TOKEN not in page
+        r = await _post(b, "/account", {"action": "notify_test"})
+        assert r.headers["location"] == "/account?ok=notify_test_sent#notifications"
+        msg = stack.ntfy.messages[-1]
+        assert msg["topic"] == topic and msg["click"] == "https://mtg.test/account"
+        assert stack.ntfy.auth[-1] == f"Bearer {TOKEN}"
+        # a refusal from the server is said plainly, and logged with its status alone
+        stack.ntfy.status = 403
+        r = await _post(b, "/account", {"action": "notify_test"})
+        assert r.headers["location"] == "/account?err=notify_test_failed#notifications"
+        assert "ntfy publish refused: HTTP 403" in caplog.text
+        assert TOKEN not in caplog.text
+        assert TOKEN not in repr(stack.gw.settings) and TOKEN not in repr(stack.gw.notifier)
+        # a chosen topic must be long enough and nobody else's
+        r = await _opt_in(b, ntfy_topic="short")
+        assert r.headers["location"].startswith("/account?err=notify_topic_invalid")
+        r = await _opt_in(b, ntfy_topic="my-own-topic-1234")
+        assert notify.prefs(stack.h.db, "user-1")["ntfy_topic"] == "my-own-topic-1234"
+        r = await _post(b, "/account", {"action": "notify_new_topic"})
+        assert notify.prefs(stack.h.db, "user-1")["ntfy_topic"] != "my-own-topic-1234"
+    finally:
+        await b.aclose()
+
+
+async def test_a_proposal_waiting_for_the_member_and_a_finished_report_notify(stack: Stack) -> None:
+    h = stack.h
+    b = await _browser(stack, link=True)
+    try:
+        await _opt_in(b)
+    finally:
+        await b.aclose()
+    token = await mcp_token(h)
+    p = structured(
+        await call(
+            h,
+            token,
+            "propose_deck_changes",
+            {"deck_id": "42", "changes": [{"action": "add", "card_name": "Arcane Signet"}]},
+        )
+    )
+    assert p["state"] == "pending" and p["assistant_may_apply"] is False  # manual mode: it waits
+    await stack.gw.notifier.drain()
+    msg = stack.ntfy.messages[-1]
+    assert msg["title"] == "A proposal waits for you"
+    assert msg["click"] == f"https://mtg.test/proposals/{p['proposal_id']}"
+    assert "Arcane Signet" not in json.dumps(msg) and "Sample Commander" not in json.dumps(msg)
+    rep = structured(await call(h, token, "run_deck_report", {"deck_ref": "42", "simulate": False}))
+    await stack.gw.notifier.drain()
+    msg = stack.ntfy.messages[-1]
+    assert msg["title"] == "Deck report finished"
+    assert msg["click"] == f"https://mtg.test/history/reports/{rep['report_id']}"
+    # switched off one by one
+    b = await _browser(stack)
+    try:
+        await _post(b, "/account", {"action": "notify_save", "ntfy_on": "1", "on_prices": "1"})
+    finally:
+        await b.aclose()
+    n = len(stack.ntfy.messages)
+    await call(h, token, "run_deck_report", {"deck_ref": "42", "simulate": False})
+    await stack.gw.notifier.drain()
+    assert len(stack.ntfy.messages) == n
+
+
+async def test_a_queued_forge_run_notifies_when_it_ends(stack: Stack) -> None:
+    rs = stack.gw.reports
+    b = await _browser(stack)
+    try:
+        await _opt_in(b)
+    finally:
+        await b.aclose()
+    with stack.h.db.tx() as c:
+        c.execute(
+            "INSERT INTO reports (id, owner_sub, deck_id, deck_name, fingerprint, taken_at, stats_json, "
+            "forge_json, forge_state) VALUES ('rep_q', 'user-1', '42', 'D', 'f', 0, '{}', '{}', 'queued')"
+        )
+    assert rs._save_forge("rep_q", {"state": "running"})
+    await stack.gw.notifier.drain()
+    assert stack.ntfy.messages == []
+    assert rs._save_forge("rep_q", {"state": "done"})
+    await stack.gw.notifier.drain()
+    assert [m["title"] for m in stack.ntfy.messages] == ["Deck report finished"]
+    rs._save_forge("rep_q", {"state": "done"})  # saved again: not sent twice
+    await stack.gw.notifier.drain()
+    assert len(stack.ntfy.messages) == 1
+
+
+async def test_price_alerts_reach_the_member(stack: Stack, monkeypatch) -> None:
+    clock = Clock(monkeypatch)
+    b = await _browser(stack)
+    try:
+        await _opt_in(b)
+        assert (await _watch(b, name="Sol Ring", set_code="frc", collector_number="21")).status_code == 303
+        wid = stack.gw.prices.watched_cards("user-1")[0]["id"]
+        r = await _post(
+            b, "/watchlist", {"action": "alerts", "watch_id": wid, "alert_pct": "10", "alert_above": "1.5"}
+        )
+        assert r.headers["location"] == "/watchlist?ok=card_updated"
+        r = await _post(b, "/watchlist", {"action": "alerts", "watch_id": wid, "alert_pct": "-3"})
+        assert r.status_code == 400 and "more than 0" in r.text
+    finally:
+        await b.aclose()
+    sol = next(c for c in stack.sf.cards if c["name"] == SOL_RING and c["set"] == "frc")
+    clock.next_day()
+    stack.sf.prices[sol["id"]] = {"usd": "1.30"}  # +1.6%: quiet
+    assert (await stack.gw.prices.run_daily())["alerts"] == 0
+    clock.next_day()
+    stack.sf.prices[sol["id"]] = {"usd": "1.60"}  # +23% and above $1.50
+    assert (await stack.gw.prices.run_daily())["alerts"] == 1
+    msg = stack.ntfy.messages[-1]
+    assert msg["title"] == "Price alert" and msg["click"] == "https://mtg.test/watchlist"
+    assert msg["message"] == "Sol Ring rose 23.1% and rose above $1.50: $1.30 to $1.60."
+
+
+# -- summaries ----------------------------------------------------------------------------------
+
+
+async def test_summary_on_the_account_page_by_tool_and_on_schedule(stack: Stack, monkeypatch) -> None:
+    clock = Clock(monkeypatch)  # a Monday
+    h = stack.h
+    b = await _browser(stack, link=True)
+    try:
+        await _opt_in(b)
+        r = await _post(b, "/account", {"action": "summary_save", "summary_every": "weekly"})
+        assert r.headers["location"] == "/account?ok=summary_saved#summary"
+        r = await _post(b, "/account", {"action": "summary_save", "summary_every": "hourly"})
+        assert "err=" in r.headers["location"]
+        assert (await _watch(b, name="Sol Ring", set_code="frc", collector_number="21")).status_code == 303
+    finally:
+        await b.aclose()
+    sol = next(c for c in stack.sf.cards if c["name"] == SOL_RING and c["set"] == "frc")
+    jobs = prices.DailyJobs(stack.gw.prices, stack.gw.summaries, hour_utc=6)
+    for usd in ("1.30", "1.35", "1.40", "1.45", "1.50", "1.55", "1.60"):
+        clock.next_day()
+        stack.sf.prices[sol["id"]] = {"usd": usd}
+        out = await jobs.run_due()
+        # weekly: only the next Monday sends
+        assert out["summaries"] == (1 if clock.day == "2026-10-19" else 0), clock.day
+    msg = stack.ntfy.messages[-1]
+    assert msg["title"] == "Your weekly summary" and msg["click"] == "https://mtg.test/account#summary"
+    assert "1 watched cards, biggest move Sol Ring +25%" in msg["message"]
+    token = await mcp_token(h)
+    s = structured(await call(h, token, "get_summary", {"period": "week"}))
+    assert s["ok"] and s["cards"][0]["from"] == 1.28 and s["cards"][0]["to"] == 1.6
+    assert "Sol Ring: $1.28 to $1.60 (+25%)" in s["text"] and "no AI" in s["written_by"]
+    b = await _browser(stack)
+    try:
+        page = (await b.http.get("/account")).text
+        assert "Sol Ring: $1.28 to $1.60 (+25%)" in page and "selected>Every week" in page
+    finally:
+        await b.aclose()
+
+
+# -- configuration ------------------------------------------------------------------------------
+
+
+def _env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from cryptography.fernet import Fernet
+
+    for name, value in (("fernet", Fernet.generate_key().decode()), ("session", "s" * 40), ("oidc", "x")):
+        (tmp_path / name).write_text(value)
+    monkeypatch.setenv("MTG_PUBLIC_URL", "https://gateway.example.com")
+    monkeypatch.setenv("MTG_OIDC_ISSUER", "https://idp.example.com/o/mtg/")
+    monkeypatch.setenv("MTG_OIDC_CLIENT_ID", "c")
+    monkeypatch.setenv("MTG_OIDC_CLIENT_SECRET_FILE", str(tmp_path / "oidc"))
+    monkeypatch.setenv("MTG_FERNET_KEY_FILE", str(tmp_path / "fernet"))
+    monkeypatch.setenv("MTG_SESSION_SECRET_FILE", str(tmp_path / "session"))
+    monkeypatch.setenv("MTG_ALLOW_ANY_IDP_USER", "true")
+
+
+def test_settings_default_off_and_the_token_comes_from_a_file(monkeypatch, tmp_path: Path) -> None:
+    _env(monkeypatch, tmp_path)
+    s = load_settings()
+    assert s.ntfy_url is None and s.ntfy_token is None
+    assert (s.watch_max_cards, s.watch_max_decks, s.price_history_days, s.price_hour_utc) == (200, 10, 365, 6)
+    (tmp_path / "ntfy").write_text(TOKEN + "\n")
+    monkeypatch.setenv("MTG_NTFY_URL", "https://ntfy.example.com/")
+    monkeypatch.setenv("MTG_NTFY_TOKEN_FILE", str(tmp_path / "ntfy"))
+    s = load_settings()
+    assert s.ntfy_url == "https://ntfy.example.com" and s.ntfy_token == TOKEN
+    assert TOKEN not in repr(s)
+    monkeypatch.setenv("MTG_NTFY_URL", "ftp://ntfy.example.com")
+    with pytest.raises(ConfigError, match="MTG_NTFY_URL"):
+        load_settings()
+
+
+def test_purge_keeps_the_configured_days(tmp_path: Path) -> None:
+    db = Database(tmp_path / "p.sqlite")
+    try:
+        db.price_days = 30
+        old = prices.days_before(prices.day_of(prices.time.time()), 40)
+        db._conn.execute("INSERT INTO price_points (scryfall_id, day, usd) VALUES ('a', ?, 1)", (old,))
+        db.purge_expired()
+        assert db._conn.execute("SELECT COUNT(*) FROM price_points").fetchone()[0] == 0
+    finally:
+        db.close()
+
+
+def test_raw_sqlite_rows_survive(tmp_path: Path) -> None:
+    # sanity for the migration test above: the schema's UNIQUE topic is enforced
+    db = Database(tmp_path / "u.sqlite")
+    try:
+        for sub in ("a", "b"):
+            db.upsert_user(sub, email=None, name=None, preferred_username=None, groups=[])
+        notify.save_prefs(db, "a", ntfy_topic="the-same-topic-123")
+        with pytest.raises(ValueError, match="taken"):
+            notify.save_prefs(db, "b", ntfy_topic="the-same-topic-123")
+        with pytest.raises(sqlite3.IntegrityError):
+            db._conn.execute(
+                "INSERT INTO notify_prefs (sub, ntfy_topic, updated_at) VALUES ('c', 'the-same-topic-123', 0)"
+            )
+    finally:
+        db.close()

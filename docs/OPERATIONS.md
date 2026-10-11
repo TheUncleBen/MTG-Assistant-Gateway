@@ -39,6 +39,7 @@ the gateway's user.
 - [Archidekt links and relinking](#archidekt-links-and-relinking)
 - [Deck writes and the kill switch](#deck-writes-and-the-kill-switch)
 - [The admin page](#the-admin-page)
+- [Watchlists, prices and notifications](#watchlists-prices-and-notifications)
 - [Looking at proposals, snapshots, links and the audit log](#looking-at-proposals-snapshots-links-and-the-audit-log)
 
 ## Logs and health
@@ -801,6 +802,36 @@ is healthy. The link is only marked revoked, with an `archidekt_link_expired`
 row and a "relink at /account" message to the user, when there is no refresh
 token, the refresh itself is rejected, or a freshly refreshed token is
 rejected too.
+
+## Watchlists, prices and notifications
+
+Members watch cards and decks on the Watchlist page (or through their
+assistant). Once a day at `MTG_PRICE_HOUR_UTC` (default 06:00 UTC) the
+gateway asks Scryfall for today's prices of the watched printings only, 75
+to a request through the same paced Scryfall client the card scan uses,
+spaced at `MTG_SCRYFALL_LOOKUP_INTERVAL`; a "slow down" answer stops the
+check and it is tried again at the next quarter hour. Each watched deck is
+read from Archidekt once a day through the usual pacer. While nobody watches
+anything, the check makes no request. Which day it last ran is kept in the
+database (`job_runs`), so a restart neither repeats nor skips a day; the
+members' daily or weekly summaries go out right after it.
+
+Storage is small: one row per watched printing a day (shared by every member
+who watches it) and one per watched deck a day, deleted after
+`MTG_PRICE_HISTORY_DAYS` (default 365) by the hourly clean-up. Limits per
+member: `MTG_WATCH_MAX_CARDS` (200) and `MTG_WATCH_MAX_DECKS` (10). "Delete
+my data" removes a member's watches, deck values and notification choices.
+
+Notifications are off until you set `MTG_NTFY_URL` (and, for a server with
+access control, `MTG_NTFY_TOKEN_FILE`); setup, the self-hosted ntfy with
+`auth-default-access: deny-all` and the ntfy.sh trade-off are in
+[DEPLOY.md](DEPLOY.md#notifications-through-ntfy-optional). The token never
+appears in a log line; a message ntfy refuses is logged as
+`ntfy publish refused: HTTP <status>`, one that cannot be sent as
+`ntfy publish failed: <error type>`. The gateway has no AI model and writes
+summaries with fixed sentences; members who want an AI-written one use their
+own assistant's scheduled task with the read-only `get_summary` tool
+([USING.md](USING.md#notifications-and-summaries)).
 
 ## Looking at proposals, snapshots, links and the audit log
 

@@ -167,6 +167,9 @@ SNAPSHOTS_KEEP_PER_DECK = 25
 # Per-day usage counters and remembered deck covers are kept this long.
 METRICS_RETENTION_SECONDS = 400 * 86400
 DECK_COVER_RETENTION_SECONDS = 180 * 86400
+# Daily price points and watched decks' values are kept this many days (Database.price_days, set
+# from MTG_PRICE_HISTORY_DAYS by create_app).
+PRICE_RETENTION_DAYS = 365
 # How long a write waits for another connection (such as `mtg-gateway backup`) to finish.
 BUSY_TIMEOUT_MS = 5000
 
@@ -309,6 +312,87 @@ def _step_11(conn: sqlite3.Connection) -> None:
     _add_column(conn, "users", "approval_mode", "TEXT")
 
 
+def _step_12(conn: sqlite3.Connection) -> None:
+    """Watchlists, price history and notifications (prices.py, notify.py): the cards and decks a
+    member watches, one price point per watched printing a day (shared: a price is not personal),
+    each watched deck's value a day, the member's notification and summary choices, and the day
+    each daily job last ran."""
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS watch_cards (
+            id TEXT PRIMARY KEY,
+            sub TEXT NOT NULL,
+            name TEXT NOT NULL,
+            set_code TEXT NOT NULL DEFAULT '',
+            collector_number TEXT NOT NULL DEFAULT '',
+            finish TEXT NOT NULL DEFAULT 'nonfoil',
+            scryfall_id TEXT,
+            alert_pct REAL,
+            alert_above REAL,
+            alert_below REAL,
+            created_at INTEGER NOT NULL,
+            UNIQUE (sub, name, set_code, collector_number, finish)
+        )"""
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS watch_cards_sub ON watch_cards(sub)")
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS watch_decks (
+            sub TEXT NOT NULL,
+            deck_id TEXT NOT NULL,
+            deck_name TEXT NOT NULL DEFAULT '',
+            cards_json TEXT NOT NULL DEFAULT '[]',
+            refreshed_at INTEGER,
+            created_at INTEGER NOT NULL,
+            PRIMARY KEY (sub, deck_id)
+        )"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS price_points (
+            scryfall_id TEXT NOT NULL,
+            day TEXT NOT NULL,
+            usd REAL,
+            usd_foil REAL,
+            usd_etched REAL,
+            eur REAL,
+            eur_foil REAL,
+            PRIMARY KEY (scryfall_id, day)
+        )"""
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS price_points_day ON price_points(day)")
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS deck_values (
+            sub TEXT NOT NULL,
+            deck_id TEXT NOT NULL,
+            day TEXT NOT NULL,
+            usd REAL,
+            eur REAL,
+            cards INTEGER NOT NULL DEFAULT 0,
+            priced INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (sub, deck_id, day)
+        )"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS notify_prefs (
+            sub TEXT PRIMARY KEY,
+            ntfy_on INTEGER NOT NULL DEFAULT 0,
+            ntfy_topic TEXT UNIQUE,
+            on_proposals INTEGER NOT NULL DEFAULT 1,
+            on_reports INTEGER NOT NULL DEFAULT 1,
+            on_prices INTEGER NOT NULL DEFAULT 1,
+            summary_every TEXT NOT NULL DEFAULT 'off',
+            summary_sent_day TEXT,
+            updated_at INTEGER NOT NULL
+        )"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS job_runs (
+            name TEXT PRIMARY KEY,
+            day TEXT NOT NULL,
+            at INTEGER NOT NULL,
+            detail_json TEXT
+        )"""
+    )
+
+
 # Applied in order; ``PRAGMA user_version`` records how many have run. Append, never edit.
 MIGRATIONS = [
     _step_1,
@@ -322,6 +406,7 @@ MIGRATIONS = [
     _step_9,
     _step_10,
     _step_11,
+    _step_12,
 ]
 SCHEMA_VERSION = len(MIGRATIONS)
 
@@ -344,6 +429,7 @@ class Database:
             self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._anonymous_audit_inserts = 0
+        self.price_days = PRICE_RETENTION_DAYS
         self._conn = sqlite3.connect(str(self.path), check_same_thread=False, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
         with self._lock:
@@ -827,6 +913,9 @@ class Database:
             n += c.execute(
                 "DELETE FROM deck_covers WHERE updated_at < ?", (now - DECK_COVER_RETENTION_SECONDS,)
             ).rowcount
+            oldest_day = self._since_day(self.price_days)
+            n += c.execute("DELETE FROM price_points WHERE day < ?", (oldest_day,)).rowcount
+            n += c.execute("DELETE FROM deck_values WHERE day < ?", (oldest_day,)).rowcount
             n += c.execute(
                 "UPDATE proposals SET state = 'expired' WHERE state = 'pending' AND expires_at < ?", (now,)
             ).rowcount
@@ -1114,6 +1203,10 @@ class Database:
         ("browser_sessions", "sub"),
         ("idp_grants", "sub"),
         ("metrics", "sub"),
+        ("watch_cards", "sub"),
+        ("watch_decks", "sub"),
+        ("deck_values", "sub"),
+        ("notify_prefs", "sub"),
         ("users", "sub"),
     )
 

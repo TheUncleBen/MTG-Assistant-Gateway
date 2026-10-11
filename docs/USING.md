@@ -246,6 +246,61 @@ assistant applies what that mode allows, always with a snapshot.
 - **Reports** store a deck's statistics, a legality check and a goldfish
   simulation so you can follow how it develops.
 
+## Watchlist and prices
+
+The **Watchlist** page (in the account menu, and under More on a phone)
+keeps the price of cards and decks you choose, once a day:
+
+- **Watch a card** by name, or one printing by its set code and number, in
+  non-foil, foil or etched. A name alone follows the printing Scryfall gives
+  for that name. The card viewer has the same: **Price history** shows the
+  prices kept for that card, and **Watch this card** adds it.
+- **Watch a deck** by its Archidekt link or number (your own or a public
+  one). The gateway reads it again once a day, so its value follows the
+  cards it holds.
+- Each card and deck shows today's price, how much it moved over 1, 7 and
+  30 days, a small chart of its price over time, and the same numbers as a
+  table under **Price history table**.
+- **Price alert**: a move of more than a percentage from one day to the
+  next, or a price it rises above or falls below. Alerts reach you through
+  notifications (below).
+
+Prices come from Scryfall (TCGplayer in dollars, Cardmarket in euros) and
+are checked once a day; the operator sets how many cards and decks you may
+watch and how long prices are kept (a year unless they changed it). Your
+assistant has the same: `watch_card`, `watch_deck`, `unwatch`,
+`list_watchlist` and `card_price_history`. Watching changes nothing on
+Archidekt, so it needs no proposal.
+
+## Notifications and summaries
+
+When the operator has set up a notification server (ntfy), the
+**Notifications** card on your Account page can send a short message to
+your phone when a proposal waits for your approval, a deck report finishes
+(Forge runs that waited in the queue included), or a watched card crosses
+your price alert. Tick **Send me notifications**, choose which of these you
+want, and save: you get a topic of your own that nobody can guess (or type
+your own). Install the ntfy app, add the server shown there and subscribe to
+your topic; if the operator protects the server, sign in in the app with
+the user they gave you (check your app for where). **Send test** checks it.
+Messages say only what happened and link to the page here; they never list
+a deck's cards.
+
+The **Summary** card shows a plain summary of today or the last 7 days:
+watched prices that moved, your watched decks' values, deck reports
+finished, and proposals waiting and applied. Choose **Every day** or
+**Every week (Mondays)** and it is also sent to you as a notification when
+notifications are on. The gateway writes it with fixed sentences from its
+own data. It does not write an AI summary itself: that would need a paid AI
+model service, and the gateway uses only free ones.
+
+For a summary in your assistant's own words, use the assistant you already
+have. Its `get_summary` tool returns the same summary (with `period` day or
+week). Claude and ChatGPT can both run a prompt on a schedule (check your
+app for scheduled tasks); a prompt such as "Every Monday morning, call
+get_summary from my MTG gateway and tell me in a few lines what changed and
+what needs me" does it. The tool is read-only.
+
 ## With an AI assistant
 
 Connect Claude or ChatGPT from the home page ([CONNECT.md](CONNECT.md)).

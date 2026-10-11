@@ -19,6 +19,11 @@ secrets:
   # remove the "# " from the next two lines and from "# - mtg_authentik_api_token" below.
   # mtg_authentik_api_token:
   #   external: true
+  # Optional: the access token the gateway publishes notifications with, for an ntfy server with
+  # access control (docs/DEPLOY.md, "Optional: notifications through ntfy"). After creating it,
+  # remove the "# " from the next two lines and from "# - mtg_ntfy_token" below.
+  # mtg_ntfy_token:
+  #   external: true
 
 services:
   # The gateway's SQLite database lives on the node named by MTG_NODE.
@@ -47,6 +52,7 @@ services:
       - mtg_session_secret
       - mtg_oidc_client_secret
       # - mtg_authentik_api_token
+      # - mtg_ntfy_token
     environment:
       MTG_PUBLIC_URL: ${MTG_PUBLIC_URL:?PUBLIC HTTPS URL REQUIRED e.g. https://mtg.example.com}
       MTG_OIDC_ISSUER: ${MTG_OIDC_ISSUER:?OIDC ISSUER URL REQUIRED}
@@ -69,6 +75,16 @@ services:
       # is created and listed above. Empty = off. The API URL defaults to the issuer's address.
       MTG_AUTHENTIK_API_TOKEN_FILE: ${MTG_AUTHENTIK_API_TOKEN_FILE:-}
       MTG_AUTHENTIK_API_URL: ${MTG_AUTHENTIK_API_URL:-}
+      # Optional notifications through an ntfy server (empty = off), and its token file:
+      # /run/secrets/mtg_ntfy_token once that secret is listed above (docs/DEPLOY.md).
+      MTG_NTFY_URL: ${MTG_NTFY_URL:-}
+      MTG_NTFY_TOKEN_FILE: ${MTG_NTFY_TOKEN_FILE:-}
+      # Watchlists: cards and decks per member, days of daily prices kept, and the hour (UTC) of
+      # the daily price check. Nothing is asked of Scryfall while nobody watches anything.
+      MTG_WATCH_MAX_CARDS: ${MTG_WATCH_MAX_CARDS:-200}
+      MTG_WATCH_MAX_DECKS: ${MTG_WATCH_MAX_DECKS:-10}
+      MTG_PRICE_HISTORY_DAYS: ${MTG_PRICE_HISTORY_DAYS:-365}
+      MTG_PRICE_HOUR_UTC: ${MTG_PRICE_HOUR_UTC:-6}
       MTG_DATA_DIR: /data
       MTG_BACKUP_DIR: /backups
       # Copies every backup here too; off unless MTG_BACKUP_COPY_DIR names a host folder (below).
