@@ -281,7 +281,7 @@ async def test_auto_mode_applies_everything_with_a_snapshot(stack: Stack) -> Non
     token = await linked_user(stack)
     await _set_mode(h, "auto")
     p = structured(await _adds(h, token, 6))
-    assert p["risk"] == "high" and p["assistant_may_apply"] is True and "every change" in p["next_step"]
+    assert p["risk"] == "high" and p["assistant_may_apply"] is True and "deck and collection changes" in p["next_step"]
     a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     sent = len(ark.patches)
     assert a["ok"] and a["state"] == "applied" and a["snapshot_id"] and sent >= 1
