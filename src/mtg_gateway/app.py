@@ -297,7 +297,17 @@ def schema_error_middleware():
             return result
         structured = data.get("structuredContent")
         if isinstance(structured, dict) and structured.get("ok") is False:
-            return {**data, "structuredContent": _with_error_code(structured), "isError": True}
+            coded = _with_error_code(structured)
+            content = list(data.get("content") or [])
+            if content and isinstance(content[0], dict) and isinstance(content[0].get("text"), str):
+                try:
+                    same = json.loads(content[0]["text"]) == structured
+                except ValueError:
+                    same = False
+                if same:  # the text is the same JSON, so clients that read only the text get the code too
+                    text = pydantic_core.to_json(coded, fallback=str, indent=2).decode()
+                    content[0] = {**content[0], "text": text}
+            return {**data, "content": content, "structuredContent": coded, "isError": True}
         if not data.get("isError") or structured:
             return result
         content = data.get("content") or []
@@ -936,6 +946,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
                 json_text=json_text,
                 private=private,
             )
+            warnings += made.pop("warnings", [])
             size = sum(
                 int(r.get("qty") or 0)
                 for r in made.get("rows", [])

@@ -648,6 +648,29 @@ async def test_archidekt_nodeck_rows_stay_out_of_a_new_deck_count(stack: Stack) 
     assert "in_deck" not in sol and "no_price" not in sol
 
 
+async def test_custom_nodeck_category_counts_in_a_new_deck_with_a_warning(stack: Stack) -> None:
+    """A new deck gets only category names, so a custom category flagged {noDeck} is made as a
+    plain category and its cards count in the deck: the proposal counts them there and says so,
+    instead of promising a split the created deck would not have."""
+    token = await linked_user(stack)
+    text = "1 Sol Ring\n1 Opt [Considering{noDeck}{noPrice}]\n1 Negate [Maybeboard{noDeck}]\n"
+    p = structured(
+        await call(
+            stack.h,
+            token,
+            "propose_new_deck",
+            {"name": "Flags", "deck_format": "custom", "decklist_text": text},
+        )
+    )
+    assert p["ok"], p
+    assert p["diff"].splitlines()[0] == (
+        "New custom deck 'Flags' (2 cards, 1 more in the maybeboard or sideboard, private)"
+    )
+    opt = next(c for c in p["changes"]["cards"] if c["name"] == "Opt")
+    assert "in_deck" not in opt and opt["categories"] == ["Considering"]
+    assert any("Considering" in w and "count in the deck" in w for w in p["warnings"]), p["warnings"]
+
+
 def test_new_deck_inputs_mark_rows_outside_the_deck() -> None:
     """Every input of propose_new_deck says which rows sit outside the deck the same way."""
     from mtg_gateway.decks import normalise_cards

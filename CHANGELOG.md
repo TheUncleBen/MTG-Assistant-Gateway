@@ -63,8 +63,8 @@ deploy files already name it).
   account actions still wait for your press.
 - Every tool refusal carries an `error_code` (`NOT_FOUND`, `BUSY`, `RATE_LIMITED`,
   `UNAVAILABLE`, `INVALID_ARGUMENT`, `PERMISSION_DENIED`, `FAILED_PRECONDITION`, …) and
-  `retryable`, plus `retry_after` when known (collection tools included). Existing `error` values
-  are unchanged.
+  `retryable`, plus `retry_after` when known (collection tools and deck reads for research tools
+  included), in the structured result and in its JSON text. Existing `error` values are unchanged.
 - `parse_deck_export` also reads `Count`, `Set` and `Categories` columns, and returns
   `unknown_columns` naming any column it did not read.
 - The Mystic Forge image tag is `1.3.2-mag3`; deploy defaults and docs are updated.
@@ -106,13 +106,15 @@ deploy files already name it).
   names none.
 - Archidekt's own `{noDeck}` and `{noPrice}` category flags (as in
   `1x Arcane Signet [Maybeboard{noDeck}{noPrice}]`) are kept: such a card is read as a maybeboard
-  card, not counted in the deck, and a new-deck proposal lists it apart.
+  card, not counted in the deck, and a new-deck proposal lists it apart. A new deck gets only
+  category names, so a custom category flagged `{noDeck}` is made as a plain category: the proposal
+  counts its cards in the deck and warns about it.
 - In a new-deck proposal, sideboard and maybeboard rows from a pasted list, a CSV or the gateway's
   JSON no longer count toward the deck's card total or its deck-size warning.
 - A trailing `*CMDR*` on a decklist line marks the commander in `parse_decklist`, `deck_stats`,
   `run_deck_report` and `compare_decks`, as `goldfish_annotate` already did.
-- Lines such as `-1 Island` or `1.5 Island` are refused with the line quoted, instead of being
-  read as a card called "-1 Island".
+- Lines such as `-1 Island`, `1.5 Island` or `1000x Island` are refused with the line quoted,
+  instead of being read as a card called "-1 Island".
 - `parse_deck_export`'s `decklist_text` keeps each card's categories (for example `[Ramp]`) and
   keeps etched rows etched.
 - `goldfish_annotate` works on your own private Archidekt decks: the gateway reads the deck with

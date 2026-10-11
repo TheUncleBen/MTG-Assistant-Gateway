@@ -232,8 +232,11 @@ async def test_arguments_that_do_not_fit_get_a_flagged_structured_refusal(stack:
     assert structured(res)["error_code"] == "INVALID_ARGUMENT" and structured(res)["retryable"] is False
     assert out["error_code"] == "INVALID_ARGUMENT"
     # something that does not exist is NOT_FOUND, not a wrong argument
-    res = structured(await call(stack.h, token, "get_proposal", {"proposal_id": "nope"}))
+    raw = await call(stack.h, token, "get_proposal", {"proposal_id": "nope"})
+    res = structured(raw)
     assert res["error"] == "not_found" and res["error_code"] == "NOT_FOUND" and res["retryable"] is False
+    # clients that read only the text get the same fields
+    assert json.loads(raw["content"][0]["text"]) == res
 
 
 async def test_refusals_carry_an_error_code_by_kind() -> None:

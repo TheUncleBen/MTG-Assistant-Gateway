@@ -2045,6 +2045,17 @@ class DeckService:
         )
         _token, link = self._token(sub)  # must be linked before we store a proposal that needs it
         self._room_for_proposal(sub)
+        # A new deck gets only category names, so only Maybeboard and Sideboard (which Archidekt
+        # keeps out of the deck itself) stay apart. A custom category flagged {noDeck} is made as
+        # a plain category, so its cards count in the deck, and the proposal says so.
+        flagged = [
+            c
+            for c in entries
+            if c.get("in_deck") is False and c["categories"][:1] and c["categories"][0] not in SIDE_CATEGORIES
+        ]
+        flags_dropped = sorted({c["categories"][0] for c in flagged})
+        for c in flagged:
+            del c["in_deck"]
         # Maybeboard and sideboard rows (in_deck false) are created too, but not counted as deck cards.
         total = sum(c["quantity"] for c in entries if c.get("in_deck", True))
         side = sum(c["quantity"] for c in entries) - total
@@ -2086,7 +2097,14 @@ class DeckService:
             rows,
         )
         self._audit("proposal_created", sub=sub, detail={"proposal_id": pid, "kind": "create_deck"})
-        return self.describe(sub, pid)
+        out = self.describe(sub, pid)
+        if flags_dropped:
+            out["warnings"] = [
+                f"Category {', '.join(flags_dropped)} is kept out of the deck in your list, but a new "
+                "Archidekt deck gets it as a plain category, so its cards count in the deck. Move "
+                "them to Maybeboard or Sideboard, or set the category's flag on archidekt.com after."
+            ]
+        return out
 
     def describe(self, sub: str, proposal_id: str) -> dict[str, Any]:
         row = self.db.get_proposal(proposal_id, sub)
@@ -4159,6 +4177,9 @@ def cards_from_json(text: str) -> list[dict[str, Any]]:
             }
         )
     return out
+
+
+SIDE_CATEGORIES = ("Maybeboard", "Sideboard")
 
 
 def normalise_cards(

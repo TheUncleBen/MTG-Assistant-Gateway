@@ -65,9 +65,10 @@ NOT_A_CARD = re.compile(
 LINK = re.compile(r"://|^www\.", re.I)
 # A trailing *CMDR* (which the research service's goldfish tools accept) marks the commander.
 CMDR_MARK = re.compile(r"\s+\*CMDR\*(?=\s|$)", re.I)
-# A quantity that is negative or not whole ("-1 Island", "1.5 Island"): refused rather than read
-# as part of the card name.
-BAD_QUANTITY = re.compile(r"^(?:SB:\s*)?(?:-\d+|\d+[.,]\d+)\s*[xX]?\s")
+# A quantity that is negative, not whole or too big ("-1 Island", "1.5 Island", "1000x Island"):
+# refused rather than read as part of the card name. A bare four-digit number is left alone, since
+# it can start a card name (1996 World Champion).
+BAD_QUANTITY = re.compile(r"^(?:SB:\s*)?(?:(?:-\d+|\d+[.,]\d+)\s*[xX]?|\d{4,}\s*[xX])\s")
 CATEGORY_FLAG = re.compile(r"\{(.*?)\}")
 MAX_LINE_CHARS = 300  # no card line is anywhere near this; it also bounds the regex work per line
 MAX_LINES = 5000

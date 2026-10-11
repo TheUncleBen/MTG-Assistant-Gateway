@@ -304,6 +304,17 @@ def _refusal(text: str) -> types.CallToolResult:
     return types.CallToolResult(content=[types.TextContent(type="text", text=text)], isError=True)
 
 
+def _deck_refusal(exc: DeckError) -> types.CallToolResult:
+    """A failed deck read as the gateway's own tools report it: the message as text, and the kind
+    (and retry_after for a used-up Archidekt budget) as structured content for its error_code."""
+    out: dict[str, Any] = {"ok": False, "error": exc.kind, "message": str(exc)}
+    if exc.retry_after is not None:
+        out["retry_after"] = exc.retry_after
+    return types.CallToolResult(
+        content=[types.TextContent(type="text", text=str(exc))], structured_content=out, isError=True
+    )
+
+
 def argument_problem(name: str, arguments: dict[str, Any] | None) -> str | None:
     """Why ``arguments`` are out of bounds for proxied tool ``name`` (see GOLDFISH_LIMITS), or None."""
     try:
@@ -529,7 +540,7 @@ class MysticForgeProxy:
                     try:
                         text = await self.deck_reader(owner, str(ref).strip())
                     except DeckError as exc:
-                        return _refusal(str(exc))
+                        return _deck_refusal(exc)
                     arguments = {**arguments, key: text}  # read here: nothing for the budget below
         if owner is not None and self.archidekt_budget is not None and reads_archidekt(name, arguments):
             refused = self.archidekt_budget(owner)

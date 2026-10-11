@@ -110,6 +110,7 @@ async def test_annotate_tells_someone_elses_private_deck_from_a_missing_link(sta
     out = await call(stack.h, token, "goldfish_annotate", {"deck": "43"})
     assert out.get("isError") is True, out
     assert "someone else's private deck" in _text(out) and "alice" in _text(out), out
+    assert structured(out)["error_code"] == "NOT_FOUND", out  # the deck read's kind is kept
     # a member with no linked account is told their own private deck needs the link
     stack.h.idp.user = {
         **stack.h.idp.user,
@@ -167,3 +168,17 @@ async def test_descriptions_say_what_upstream_leaves_out(stack: Stack) -> None:
     top = tools["edhrec_top_cards"]["description"]
     assert "limit is per section" in top and "period is ignored" in top, top
     assert "private decks" in tools["goldfish_annotate"]["description"]
+
+
+def test_a_rate_limited_deck_read_keeps_its_kind_and_wait() -> None:
+    from mtg_gateway.decks import DeckError
+    from mtg_gateway.mf_proxy import _deck_refusal
+
+    out = _deck_refusal(DeckError("rate_limited", "Archidekt budget used up", retry_after=30))
+    assert out.is_error and out.content[0].text == "Archidekt budget used up"
+    assert out.structured_content == {
+        "ok": False,
+        "error": "rate_limited",
+        "message": "Archidekt budget used up",
+        "retry_after": 30,
+    }

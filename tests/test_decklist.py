@@ -130,9 +130,14 @@ def test_cmdr_marker_names_the_commander() -> None:
     assert foil.categories == ["Commander", "Lands"] and foil.finish == "Foil" and foil.set_code == "cmr"
 
 
-@pytest.mark.parametrize("line", ["-1 Island", "1.5 Island", "1,5x Island", "SB: -2 Negate"])
+@pytest.mark.parametrize(
+    "line", ["-1 Island", "1.5 Island", "1,5x Island", "SB: -2 Negate", "1000x Island", "1000 x Island"]
+)
 def test_signed_or_fractional_quantity_is_refused(line: str) -> None:
     with pytest.raises(DecklistError, match="bad quantity on line"):
         parse_decklist(f"1 Sol Ring\n{line}\n")
-    # a card whose name starts with a sign is still a name
+    # a card whose name starts with a sign or a year is still a name
     assert parse_decklist("1 +2 Mace")[0].name == "+2 Mace"
+    assert [(c.quantity, c.name) for c in parse_decklist("1996 World Champion")] == [
+        (1, "1996 World Champion")
+    ]
