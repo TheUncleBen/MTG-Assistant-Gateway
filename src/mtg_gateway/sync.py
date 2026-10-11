@@ -3,10 +3,13 @@
 Archidekt is the master copy of every deck. It has no webhooks, so the gateway asks it: when a
 member opens the app (any signed-in page, at most once per OPEN_GAP) and every
 ``MTG_DECK_SYNC_MINUTES`` (30 by default) for members whose proposals are waiting. A check is one
-deck-list request for the member (Archidekt's ``/decks/v3/?ownerId=...``, the list every deck page
-already reads, with each deck's ``updatedAt``), plus a full read of a deck only when it has a
-waiting proposal and its ``updatedAt`` moved since the last check (at most MAX_DECK_READS per
-check). The fresh list lands in the member's deck-list cache, so the app shows the current decks.
+read of the member's deck list (Archidekt's ``/decks/v3/?ownerId=...``, the list every deck page
+already reads, with each deck's ``updatedAt``; one request per 50 decks, at most MAX_LIST_PAGES)
+plus a full read of a deck only when it has a waiting proposal and its ``updatedAt`` moved since
+the last check (at most MAX_DECK_READS per check). Only the member's own decks are in that list,
+so proposals on someone else's deck (a clone of a public deck, a collaborator's deck) are not
+checked; Apply still compares those as before. The fresh list lands in the member's deck-list
+cache, so the app shows the current decks.
 
 What it does with a changed deck: a waiting proposal whose deck no longer matches the deck the
 proposal was made from (the same fingerprint Apply compares, decks.py ``_current_deck_for``) is
@@ -17,14 +20,19 @@ Rules it keeps (COMPARISON.md section 7, R1-R5):
 - Read-only. It never writes to Archidekt and never changes, applies, rejects or deletes a
   proposal, snapshot or undo entry. The flag lives in memory next to the proposal; Apply still
   re-reads the live deck and decides for itself, so a missed or wrong flag cannot lose data.
-- Members and assistants go first. Before each request it waits for every member's Archidekt
-  work, every apply and the shared pacer to be idle, and skips the rest of the check (until the
-  next one) rather than queue behind them. All checks share one lock, so at most one background
-  request is ever in the pacer. It uses no member's Archidekt slot or budget.
+- Members and assistants go first. Before the list read and before each deck read it waits for
+  every member's Archidekt work, every apply and the shared pacer to be idle, and skips the rest
+  of the check (until the next one) rather than queue behind them; a member arriving while one
+  of its requests is in the pacer waits for that one request. All checks share one lock, so at
+  most one background request is ever in the pacer. It uses no member's Archidekt slot or budget.
 - A deck with an apply or restore running is left alone until that ends.
-- Fails quietly: any error ends that member's check (so it adds at most one failure to the
-  pacer's breaker); the last good list stays and the next check tries again. An expired sign-in
-  is handled as on every other read (the member is asked to link again).
+- Fails quietly: every request is sent once, never retried, and nothing is sent while the
+  pacer's breaker or a Retry-After pause is on. Any error ends that member's check, and Archidekt
+  being unavailable or asking us to slow down ends the whole round, so a round adds at most one
+  failure to the breaker. The last good list stays and the next check tries again.
+- Never unlinks: a session Archidekt rejects ends the check; the link is kept and the member's
+  own next request decides, as before. A token refresh it needs is stored like any other and
+  audited as the deck sync's.
 
 After a restart the flags are rebuilt by the first checks (no database change, schema stays 12).
 Unknown (needs a live check by Ben): whether Archidekt moves ``updatedAt`` on every card edit. If
@@ -80,14 +88,16 @@ class DeckSync:
         last = self._checked.get(sub)
         if last is not None and time.monotonic() - last < OPEN_GAP:
             return
-        if self.db.get_link(sub) is None:
-            return
-        self._checked[sub] = time.monotonic()  # a burst of page loads starts one check
         try:
-            # nobody's request: a fresh context, so no request's client id or timing carries over
-            task = asyncio.get_running_loop().create_task(self.check(sub), context=contextvars.Context())
+            loop = asyncio.get_running_loop()
         except RuntimeError:  # no running loop (a synchronous test client): nothing to schedule
             return
+        # a burst of page loads starts one check; a member with no link is looked up once a gap
+        self._checked[sub] = time.monotonic()
+        if self.db.get_link(sub) is None:
+            return
+        # nobody's request: a fresh context, so no request's client id or timing carries over
+        task = loop.create_task(self.check(sub), context=contextvars.Context())
         self._tasks[sub] = task
 
         def done(t: asyncio.Task[Any]) -> None:
@@ -116,13 +126,18 @@ class DeckSync:
             if self.db.get_link(sub) is None:
                 continue
             self._checked[sub] = time.monotonic()
-            await self.check(sub)
+            result = await self.check(sub)
             n += 1
+            if result.get("error") in ("unavailable", "rate_limited"):
+                break  # Archidekt is struggling: the rest wait for the next round
         return n
 
     # -- one member's check -----------------------------------------------------------------------
     async def _idle(self) -> bool:
-        """Wait (up to IDLE_WAIT) until no member's Archidekt work is running or waiting."""
+        """Wait (up to IDLE_WAIT) until no member's Archidekt work is running or waiting. False
+        when that takes longer, or while the pacer refuses calls (breaker or Retry-After)."""
+        if self.decks.client.pacer.paused():
+            return False
         deadline = time.monotonic() + IDLE_WAIT
         while self.decks.archidekt_busy():
             if time.monotonic() >= deadline:

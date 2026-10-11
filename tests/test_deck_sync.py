@@ -6,6 +6,7 @@ never break or overwrite what a member or an assistant does from the gateway (R1
 from __future__ import annotations
 
 import asyncio
+import time
 
 import httpx
 import pytest
@@ -290,6 +291,48 @@ async def test_a_failed_check_is_quiet_and_the_member_carries_on(stack: Stack) -
     assert sync.out_of_date(pid) is None and h.db.get_proposal(pid, SUB)["state"] == "pending"
     got = structured(await call(h, token, "list_my_decks"))
     assert got["ok"] and [d["id"] for d in got["decks"]] == ["42"], got
+
+
+async def test_a_failing_archidekt_costs_the_breaker_one_failure_with_production_retries(
+    stack: Stack,
+) -> None:
+    """R5 with the shipped retry setting (two retries for a member's read): the sync sends each
+    request once, so a check adds one failure to the shared breaker, and while the breaker or a
+    Retry-After pause is on it sends nothing at all."""
+    h, ark = stack.h, stack.ark
+    sync = _sync(stack)
+    client = h.app.state.gateway.decks.client
+    client.retries, client.backoff_base = 2, 0.0
+    token = await linked_user(stack)
+    await _propose(h, token)
+    _later(stack)
+    sent = len(ark.calls)
+    ark.inject = [(503, None)] * 3
+    assert await sync.check(SUB) == {"error": "unavailable"}
+    assert len(ark.calls) == sent + 1 and client.pacer._failures == 1
+    ark.inject = []
+    client.pacer._open_until = time.monotonic() + 60  # the breaker is open
+    sent = len(ark.calls)
+    assert await sync.check(SUB) == {"skipped": "busy"} and len(ark.calls) == sent
+    client.pacer._open_until = 0.0
+    # a member's own read still gets the retries
+    ark.inject = [(503, None)]
+    got = structured(await call(h, token, "list_my_decks"))
+    assert got["ok"], got
+
+
+async def test_a_rejected_session_ends_the_check_but_never_unlinks(stack: Stack) -> None:
+    """The sync is nobody using the link: a 401 (and a rejected refresh) ends the check and leaves
+    the link for the member's own next request to judge."""
+    h, ark = stack.h, stack.ark
+    sync = _sync(stack)
+    token = await linked_user(stack)
+    pid = await _propose(h, token)
+    _later(stack)
+    ark.inject = [(401, None), (401, None)]  # the listing, then the refresh
+    assert await sync.check(SUB) == {"error": "not_linked"}
+    assert h.db.get_link(SUB) is not None and h.db.get_proposal(pid, SUB)["state"] == "pending"
+    assert not h.db.audit_seen("archidekt_link_expired")
 
 
 async def test_a_new_proposal_on_an_unchanged_deck_is_not_read_again(stack: Stack) -> None:

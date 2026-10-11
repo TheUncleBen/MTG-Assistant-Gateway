@@ -47,6 +47,7 @@ from .archidekt import (
     finish_modifier,
     front_face,
     jwt_exp,
+    no_retry,
     parse_deck,
 )
 from .archidekt_csv import CsvError, parse_export
@@ -1783,12 +1784,17 @@ class DeckService:
         async with self.archidekt_slot(sub):
             return await self._call_unslotted(sub, fn, *args)
 
-    async def _call_unslotted(self, sub: str, fn: Any, *args: Any, touch: bool = True) -> Any:
+    async def _call_unslotted(self, sub: str, fn: Any, *args: Any, background: bool = False) -> Any:
         """Run ``fn(token, *args)`` with the user's Archidekt session. The access token is
         refreshed ahead of time when its ``exp`` is unreadable or within five minutes, and once
         more if Archidekt still answers 401. The new pair is stored under the same link (same
         Fernet, same username and user id). The link is revoked only when no refresh token is
-        stored, the refresh itself is rejected, or a freshly refreshed token is rejected too."""
+        stored, the refresh itself is rejected, or a freshly refreshed token is rejected too.
+
+        ``background`` (the deck sync, sync.py): nobody is using the link, so it is never revoked
+        (a rejected session ends the check as ``not_linked`` and the member's next own request
+        decides), it is not marked as used, a refresh is audited as the sync's, and every GET is
+        sent once with no retry."""
         token, row = self._token(sub)
         refresh = (row.get("_secret") or {}).get("refresh")
         # The stored session this call works with. Every write below is conditional on the link
@@ -1797,6 +1803,8 @@ class DeckService:
         stored = {"secret_enc": row["secret_enc"]}
 
         def expire(reason: str) -> DeckError:
+            if background:
+                return DeckError("not_linked", "Archidekt did not accept the stored session.")
             if self.db.revoke_link(sub, only_secret=stored["secret_enc"]):
                 self._audit("archidekt_link_expired", sub=sub, detail={"reason": reason})
             return DeckError(
@@ -1832,13 +1840,15 @@ class DeckService:
                     f" (the link is managed at {self.settings.public_url}/account).",
                 )
             stored["secret_enc"] = new_enc
-            self._audit("archidekt_session_refreshed", sub=sub, detail={"reason": reason})
+            detail = {"reason": reason, **({"by": "deck sync"} if background else {})}
+            self._audit("archidekt_session_refreshed", sub=sub, detail=detail)
             return access
 
         exp = jwt_exp(token)
         if exp is None or exp - time.time() < 300:
             token = await refreshed("expiring")
         acting = _acting_sub.set(sub)
+        quiet = no_retry.set(background)
         try:
             try:
                 result = await fn(token, *args)
@@ -1852,8 +1862,9 @@ class DeckService:
                 raise expire("rejected after refresh") from exc
             raise DeckError(exc.kind, str(exc)) from exc
         finally:
+            no_retry.reset(quiet)
             _acting_sub.reset(acting)
-        if touch:  # the deck sync's background reads are not the member using their link
+        if not background:  # the deck sync's background reads are not the member using their link
             self._touch(sub)
         return result
 
@@ -2050,7 +2061,7 @@ class DeckService:
                 lambda token, *_: self.client.list_decks(
                     token, row["archidekt_username"], row.get("archidekt_user_id"), backup_folder=folder
                 ),
-                touch=False,
+                background=True,
             )
 
         rows = await self.deck_lists.get(sub, fetch, wait=wait, prefer_fresh=True)
@@ -2060,7 +2071,7 @@ class DeckService:
         """One live read of the member's deck for the deck sync (never cached, like every read
         with the member's session); outside their slot and budget, like sync_deck_list."""
         deck_id = _clean_deck_id(deck_id)
-        deck: Deck = await self._call_unslotted(sub, self.client.get_deck, deck_id, touch=False)
+        deck: Deck = await self._call_unslotted(sub, self.client.get_deck, deck_id, background=True)
         return deck
 
     def _out_of_date_since(self, proposal_id: str) -> int | None:

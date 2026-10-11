@@ -16,10 +16,12 @@ EDHPlay is the online table, one press away. No new images; the database stays a
 ### Added
 - Automatic deck sync (`MTG_DECK_SYNC_MINUTES`, 30 by default; `0` turns it off). Opening the app
   (any signed-in page, at most once in 5 minutes) checks the member's decks on Archidekt, and every
-  30 minutes the gateway checks members who have proposals waiting. A check is one deck-list
-  request; a deck is read only when it has a waiting proposal and Archidekt says it changed (at most
-  five per check). The sync only reads, waits until no member's Archidekt work is running, leaves a
-  deck alone while it is being applied or restored, and uses none of the members' own limits.
+  30 minutes the gateway checks members who have proposals waiting. A check reads the member's deck
+  list (one request per 50 decks); a deck is read only when it has a waiting proposal and Archidekt
+  says it changed (at most five per check). The sync never writes to Archidekt, waits until no
+  member's Archidekt work is running, leaves a deck alone while it is being applied or restored,
+  uses none of the members' own limits, never retries, sends nothing while Archidekt is failing or
+  asking us to slow down, and never unlinks an account. Only the member's own decks are checked.
 - A waiting proposal whose deck changed after it was made (on archidekt.com, in another app, or by
   another change applied here) is marked **out of date** at once: on its review page, in the
   Proposals list, and as `out_of_date` / `out_of_date_since` in `get_proposal` and
@@ -28,8 +30,9 @@ EDHPlay is the online table, one press away. No new images; the database stays a
 - "Play on EDHPlay" on the deck page copies the whole deck in EDHPlay's import format and opens
   edhplay.com in a new tab, or the phone's browser in the app: the commander first, marked the way
   EDHPlay's import recognises, every card with its printing, then a Sideboard section with
-  everything Archidekt keeps outside the deck (EDHPlay has no maybeboard) and a Tokens section. A
-  note says what to press on EDHPlay.
+  everything Archidekt keeps outside the deck (EDHPlay has no maybeboard). A Tokens category is
+  listed under its own heading, which EDHPlay's import currently reads but does not add to the deck.
+  A note says what to press on EDHPlay.
 
 ### Changed
 - `MTG_WRITES_ENABLED=false` now also blocks deleting a deck and creating a folder by hand (the deck

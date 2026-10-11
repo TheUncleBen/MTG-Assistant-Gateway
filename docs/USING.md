@@ -99,8 +99,9 @@ One deck:
   browser). The list has the commander first (marked as the commander), the
   rest of the deck with each card's printing, then a **Sideboard** section
   with everything Archidekt keeps outside the deck (sideboard and maybeboard;
-  EDHPlay has no maybeboard of its own) and a **Tokens** section for a
-  category named Tokens. On EDHPlay choose **Create Deck** with the commander
+  EDHPlay has no maybeboard of its own). A category named Tokens is listed
+  under a **Tokens** heading, but EDHPlay's import doesn't add tokens to the
+  deck at the moment. On EDHPlay choose **Create Deck** with the commander
   the note names, then **Import**: paste the list and press **Import &
   Replace**. EDHPlay has no way to receive a deck by link, so a later change
   on Archidekt is taken over the same way: press the button again.

@@ -54,7 +54,8 @@ EDHPLAY_URL = "https://edhplay.com/"
 # EDHPlay's Bulk Import reads "(SET) NUMBER" only when both match these (its parser, below).
 _EDH_SET = re.compile(r"[A-Za-z0-9]+")
 _EDH_NUMBER = re.compile(r"[A-Za-z0-9-]+")
-# Archidekt categories that EDHPlay keeps in a zone of their own (EDHPlay's Tokens section).
+# Archidekt categories listed under EDHPlay's Tokens heading. EDHPlay's import reads that section
+# but (2026-10-11) does not pass it on to the deck, so tokens are listed and not imported.
 _EDH_TOKEN_CATEGORIES = {"token", "tokens"}
 
 
@@ -88,9 +89,10 @@ def to_edhplay(deck: Deck) -> tuple[str, list[str]]:
     So: commander(s) first, marked; then the main deck; then, after a blank line, ``Sideboard``
     with every row Archidekt keeps outside the deck (sideboard, maybeboard, companion and other
     such categories, which EDHPlay can only hold there); then ``Tokens`` for rows in a category
-    named Tokens. Printings keep their set and number when EDHPlay's parser can read them. A deck
-    with no commander starts with a line of several copies when it has one, because EDHPlay's
-    parser takes a first line of quantity 1 as the commander.
+    named Tokens (read by EDHPlay's import, not yet added to the deck). Printings keep their set
+    and number when EDHPlay's parser can read them. A deck with no commander starts with a line of
+    several copies when it has one, because EDHPlay's parser takes a first line of quantity 1 as
+    the commander.
     Not verified (needs an EDHPlay account): how its server matches names, and how a pasted
     commander combines with one already picked under Create Deck."""
     commanders: list[str] = []
