@@ -682,6 +682,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             own=own,
             csrf=_csrf(s, sid),
             writes_enabled=s.writes_enabled,
+            forge_on=bool(s.forge_url),
             owned=owned or None,
             view=view,
             group=qp.get("group") or "category",

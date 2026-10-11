@@ -302,6 +302,7 @@ def banner_html(
     own: bool,
     csrf: str | None,
     writes_enabled: bool,
+    forge_on: bool = False,
 ) -> str:
     stats = stats or {}
     art = featured(deck)
@@ -371,6 +372,15 @@ def banner_html(
             f"page opens when it is done.'>{icon('stats')} Run simulation</button></form>"
         )
     more_items = []
+    if csrf and forge_on:
+        # D17: the same run without the Forge games, for a quick result (forge=0, companion.py).
+        more_items.append(
+            f"<form method='post' action='/decks/{did}/report'>{csrf_in}"
+            "<input type='hidden' name='forge' value='0'>"
+            "<button type='submit' data-busy-label='Simulating…' title='The same run without Forge games: "
+            f"300 simulated games, the decklist check and the statistics'>{icon('stats')} "
+            "Quick simulation (no Forge)</button></form>"
+        )
     if own and csrf:
         more_items.append(f"<a href='/decks/{did}/settings'>{icon('settings')} Deck settings</a>")
     more_items.append(f"<a href='/decks/{did}/export'>{icon('download')} Export deck</a>")
@@ -1382,12 +1392,13 @@ def deck_page_html(
     q: str,
     notice: str = "",
     owned: dict[str, int] | None = None,
+    forge_on: bool = False,
 ) -> str:
     view = view if view in VIEWS else "text"
     group = group if group in GROUPS else "category"
     sort = sort if sort in SORTS else "name"
     return (
-        banner_html(deck, stats, own=own, csrf=csrf, writes_enabled=writes_enabled)
+        banner_html(deck, stats, own=own, csrf=csrf, writes_enabled=writes_enabled, forge_on=forge_on)
         + notice
         + toolbar_html(deck, own=own, view=view, group=group, sort=sort, q=q)
         + cards_html(deck, view=view, group=group, sort=sort, q=q, own=own, owned=owned)

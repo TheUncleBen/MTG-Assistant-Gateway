@@ -1079,3 +1079,17 @@ def test_the_simulation_button_says_simulated_games() -> None:
     html = banner_html(deck([card("Opt")]), {}, own=True, csrf="t", writes_enabled=True)
     assert "300 simulated games" in html and "goldfish games" not in html
     assert " Goldfish</a>" in html and "Playtest</a>" in html  # names kept
+
+
+def test_quick_simulation_without_forge_is_offered_only_when_forge_is_on() -> None:
+    """D17: with Forge set up, More offers the same run without Forge games (forge=0)."""
+    from mtg_gateway.deckpage import banner_html
+
+    off = banner_html(deck([card("Opt")]), {}, own=True, csrf="t", writes_enabled=True)
+    on = banner_html(deck([card("Opt")]), {}, own=True, csrf="t", writes_enabled=True, forge_on=True)
+    assert "Quick simulation (no Forge)" not in off
+    assert "Quick simulation (no Forge)" in on and "name='forge' value='0'" in on
+    signed_out = banner_html(
+        deck([card("Opt")]), {}, own=False, csrf=None, writes_enabled=True, forge_on=True
+    )
+    assert "Quick simulation" not in signed_out
