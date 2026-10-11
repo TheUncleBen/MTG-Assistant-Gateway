@@ -399,7 +399,8 @@ def row_line(r: dict[str, Any]) -> str:
         return f"Commander: {r['before']} -> {r['after']}"
     if kind == "new_deck":
         visibility = "private" if r.get("private") else "public"
-        return f"New {r['format']} deck '{r['name']}' ({r['cards']} cards, {visibility})"
+        side = f", {r['side_cards']} more in the maybeboard or sideboard" if r.get("side_cards") else ""
+        return f"New {r['format']} deck '{r['name']}' ({r['cards']} cards{side}, {visibility})"
     if kind == "restore":
         return f"Restore to snapshot {r['snapshot_id']} taken {r['taken']} ({r['rows']} rows)"
     if kind == "description":
@@ -1998,10 +1999,22 @@ class DeckService:
         )
         _token, link = self._token(sub)  # must be linked before we store a proposal that needs it
         self._room_for_proposal(sub)
-        total = sum(c["quantity"] for c in entries)
-        rows = [_row("new_deck", name=name, format=fmt, cards=total, private=bool(private))]
+        # Maybeboard and sideboard rows (in_deck false) are created too, but not counted as deck cards.
+        total = sum(c["quantity"] for c in entries if c.get("in_deck", True))
+        side = sum(c["quantity"] for c in entries) - total
+        rows = [
+            _row(
+                "new_deck", name=name, format=fmt, cards=total, side_cards=side or None, private=bool(private)
+            )
+        ]
         rows += [
-            _row("add", name=c["name"], qty=c["quantity"], category=", ".join(c["categories"]) or None)
+            _row(
+                "add",
+                name=c["name"],
+                qty=c["quantity"],
+                category=", ".join(c["categories"]) or None,
+                zone=None if c.get("in_deck", True) else "side",
+            )
             for c in entries
         ]
         pid = secrets.token_urlsafe(12)
@@ -3990,7 +4003,7 @@ def _next_step(
 def cards_from_json(text: str) -> list[dict[str, Any]]:
     """Rows from the gateway's own deck JSON (what get_deck returns and the Export page's .json
     download holds): an object with ``cards`` (or a bare list), each ``{name, quantity, categories,
-    set, collector_number, finish}``. Only those six fields are read; the rest of a deck read
+    set, collector_number, finish, in_deck}``. Only those fields are read; the rest of a deck read
     (stats, prices, text) is ignored. Raises DeckError when the text is not that shape."""
     if len(text) > 4_000_000:
         raise DeckError("invalid", "deck JSON larger than 4 MB")
@@ -4034,6 +4047,8 @@ def cards_from_json(text: str) -> list[dict[str, Any]]:
                 "finish": finish if finish in ("Foil", "Etched") else "",
                 "set_code": set_code,
                 "collector_number": number,
+                # get_deck's rows say in_deck: false for a maybeboard or sideboard row
+                **({"in_deck": False} if row.get("in_deck") is False else {}),
             }
         )
     return out
@@ -4048,7 +4063,9 @@ def normalise_cards(
 ) -> list[dict[str, Any]]:
     """Turn any of the accepted inputs into [{name, quantity, categories, foil, finish, ...}].
     Sideboard and maybeboard rows are kept under their category (Archidekt stores them as
-    categories outside the deck), so a pasted list, CSV or the gateway's JSON round-trips whole."""
+    categories outside the deck), so a pasted list, CSV or the gateway's JSON round-trips whole.
+    Such a row also gets ``in_deck: False`` (and ``no_price: True`` for Archidekt's {noPrice}),
+    so the proposal counts it apart from the deck proper."""
     for label, value in (("decklist_text", decklist_text), ("csv_text", csv_text), ("json_text", json_text)):
         if value is not None and not isinstance(value, str):
             raise DeckError("invalid", f"{label} must be a string")
@@ -4074,6 +4091,8 @@ def normalise_cards(
                         "finish": c.finish if c.finish in ("Foil", "Etched") else "",
                         "set_code": c.set_code,
                         "collector_number": c.collector_number,
+                        # the same rule as parse_deck_export: these two categories sit outside the deck
+                        **({"in_deck": False} if c.category in ("Maybeboard", "Sideboard") else {}),
                     }
                 )
         except CsvError as exc:
@@ -4092,6 +4111,8 @@ def normalise_cards(
                         "finish": c.finish,
                         "set_code": c.set_code,
                         "collector_number": c.collector_number,
+                        **({"in_deck": False} if c.zone == "side" else {}),
+                        **({"no_price": True} if c.no_price else {}),
                     }
                 )
         except DecklistError as exc:

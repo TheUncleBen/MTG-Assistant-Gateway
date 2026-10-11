@@ -777,7 +777,10 @@ def build_mcp_server(state: AppState) -> MCPServer:
         title="Parse a pasted decklist",
         description=(
             'Parse plain decklist text ("1 Sol Ring", "1x Sol Ring (cmr) 436 [Ramp]", section headers, '
-            "SB: lines) into cards plus a normalised decklist_text. Repeated lines for a card are added "
+            "SB: lines) into cards plus a normalised decklist_text. A commander is marked by a Commander "
+            "section header, a [Commander] category or a trailing *CMDR*; Archidekt's {noDeck} category "
+            "flag (as in [Maybeboard{noDeck}{noPrice}]) puts the card in the sideboard. Quantities are "
+            "whole numbers from 1 to 999. Repeated lines for a card are added "
             "together. Lines that are not cards (a 'Total: 100 cards' footer, a link) are skipped and "
             "listed in unread_lines: tell the user. Card names are not checked against any database; "
             "validate_decklist does that. Does not contact any service."
@@ -863,7 +866,11 @@ def build_mcp_server(state: AppState) -> MCPServer:
                 json_text=json_text,
                 private=private,
             )
-            size = sum(int(r.get("qty") or 0) for r in made.get("rows", []) if r.get("kind") == "add")
+            size = sum(
+                int(r.get("qty") or 0)
+                for r in made.get("rows", [])
+                if r.get("kind") == "add" and r.get("zone") != "side"  # maybeboard rows do not count
+            )
             problem = deck_stats.size_problem(str(deck_format).lower(), size)
             if problem:
                 warnings.append(problem)
@@ -1210,7 +1217,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "both sides are Archidekt decks or snapshots, stats_delta (the difference in their "
             "statistics; a pasted list has no card data for it). Give each side once: a or b is an "
             "Archidekt deck id or URL, or a snapshot id from list_snapshots; a_list or b_list is pasted "
-            "decklist text (one card per line, such as precon_decklist's or edhrec_average_deck's). A "
+            "decklist text (one card per line as parse_decklist reads it, the commander marked [Commander] "
+            "or *CMDR*, such as precon_decklist's or edhrec_average_deck's). A "
             "reference that is none of those is refused rather than guessed. Lines of a list that are not "
             "cards (a 'Total: 100' footer, a link) are skipped and listed in unread_lines: tell the user. "
             "Use it for 'what changed since this snapshot', 'my deck versus the EDHREC average deck' or "
@@ -1318,7 +1326,8 @@ def build_mcp_server(state: AppState) -> MCPServer:
         description=(
             "Test a deck and keep the numbers: deck_stats plus, when the research service is available, a "
             "goldfish simulation (games, default 300) and a decklist validation. deck_ref is an Archidekt "
-            "id or URL, a snapshot id, or a pasted decklist. A deck's report is stored for the user (see "
+            "id or URL, a snapshot id, or a pasted decklist (as parse_decklist reads it; the commander "
+            "marked [Commander] or *CMDR*). A deck's report is stored for the user (see "
             "list_deck_reports and the gateway's History page) so results can be compared over time; a "
             "pasted list is simulated the same way but returned with stored=false and not kept. "
             "Reads the deck; changes nothing on Archidekt. A report of an unchanged deck within ten minutes "
@@ -1658,16 +1667,20 @@ def build_mcp_server(state: AppState) -> MCPServer:
         title="Parse an Archidekt CSV export",
         description=(
             "Parse the text of an Archidekt CSV deck export (any column selection) into cards with quantity, "
-            "name, set, categories, mana cost and price. Tolerates the export's quirks. Does not contact "
-            "Archidekt."
+            "name, set, categories, mana cost and price, plus decklist_text (categories kept in [brackets]) "
+            "for the simulation tools. Reads Archidekt's column names (Quantity, Name, Edition code, "
+            "Category, Secondary categories, Collector number...) and also Count, Set and Categories. "
+            "Columns it does not read are listed in unknown_columns: tell the user. Tolerates the "
+            "export's quirks. Does not contact Archidekt."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": False},
     )
     async def parse_deck_export(csv_text: str) -> dict[str, object]:
         if len(csv_text) > 2_000_000:
             return {"ok": False, "error": "too_large", "message": "export larger than 2 MB"}
+        unknown: list[str] = []
         try:
-            cards = parse_export(csv_text)
+            cards = parse_export(csv_text, unknown)
         except CsvError as exc:
             return {"ok": False, "error": "invalid", "message": str(exc)}
         listed = [
@@ -1676,14 +1689,16 @@ def build_mcp_server(state: AppState) -> MCPServer:
                 name=c.name,
                 set_code=c.set_code,
                 collector_number=c.collector_number,
-                categories=[cat for cat in c.categories if cat == "Commander"],
+                categories=c.categories,
                 foil=c.finish == "Foil",
                 zone="side" if c.category in ("Maybeboard", "Sideboard") else "main",
+                board=c.category if c.category in ("Maybeboard", "Sideboard") else "",
             )
             for c in cards
         ]
         return {
             "ok": True,
+            "unknown_columns": unknown,
             "card_count": sum(c.quantity for c in listed if c.zone == "main"),
             "side_count": sum(c.quantity for c in listed if c.zone == "side"),
             "distinct": len(cards),

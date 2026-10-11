@@ -8,6 +8,8 @@ Arena exports:
     1 Sol Ring (cmr) 436
     1 Sol Ring (CMR) 436 *F* [Ramp]
     1 Sol Ring [Ramp{top}]
+    1 Opt [Maybeboard{noDeck}{noPrice}]   (Archidekt's flags: {noDeck} keeps the row out of the deck)
+    1 Aesi, Tyrant of Gyre Strait *CMDR*  (a trailing *CMDR* marks the commander)
     Sol Ring                      (quantity defaults to 1)
     Commander:  /  // Lands  /  Sideboard   (section headers become the category)
     SB: 1 Negate                  (MTGO sideboard prefix)
@@ -61,6 +63,12 @@ NOT_A_CARD = re.compile(
     r"^(?:total|cards?|count|deck size|main ?deck|sideboard|maybeboard)\b[^A-Za-z]*\d", re.I
 )
 LINK = re.compile(r"://|^www\.", re.I)
+# A trailing *CMDR* (which the research service's goldfish tools accept) marks the commander.
+CMDR_MARK = re.compile(r"\s+\*CMDR\*(?=\s|$)", re.I)
+# A quantity that is negative or not whole ("-1 Island", "1.5 Island"): refused rather than read
+# as part of the card name.
+BAD_QUANTITY = re.compile(r"^(?:SB:\s*)?(?:-\d+|\d+[.,]\d+)\s*[xX]?\s")
+CATEGORY_FLAG = re.compile(r"\{(.*?)\}")
 MAX_LINE_CHARS = 300  # no card line is anywhere near this; it also bounds the regex work per line
 MAX_LINES = 5000
 
@@ -80,7 +88,8 @@ class ListCard:
     zone: str = "main"
     finish: str = ""  # "Foil", "Etched" or "" (normal); ``foil`` is True for either premium finish
     label: str = ""  # Archidekt's ^label^ (a note with a colour), kept apart from the categories
-    board: str = ""  # for zone "side": the Archidekt category it came from, "Sideboard" or "Maybeboard"
+    board: str = ""  # for zone "side": the Archidekt category it came from (Sideboard, Maybeboard...)
+    no_price: bool = False  # Archidekt's {noPrice}: the row's category is left out of the deck's price
 
 
 def _header(line: str) -> str | None:
@@ -97,9 +106,12 @@ def _header(line: str) -> str | None:
 def parse_decklist(text: str, unread: list[str] | None = None) -> list[ListCard]:
     """The cards of a pasted list. Lines that are clearly not cards (a "Total: 100 cards"
     footer, a link) are skipped; pass a list as ``unread`` to collect them so the caller can say
-    which lines were not read."""
+    which lines were not read. A row whose first (primary) category carries Archidekt's
+    ``{noDeck}`` flag goes to zone "side", as Archidekt leaves it out of the deck."""
     cards: list[ListCard] = []
     section: str | None = None
+    no_deck: set[str] = set()  # category names flagged {noDeck} (and {noPrice}) anywhere in the text
+    no_price: set[str] = set()
     lines = text.replace("\r", "").split("\n")
     if len(lines) > MAX_LINES:
         raise DecklistError(f"decklist has more than {MAX_LINES} lines")
@@ -117,6 +129,9 @@ def parse_decklist(text: str, unread: list[str] | None = None) -> list[ListCard]
             continue
         if line.startswith("#") or line.startswith("//"):
             continue  # a comment
+        if BAD_QUANTITY.match(line):
+            raise DecklistError(f"bad quantity on line (a whole number from 1 to 999): {line[:80]}")
+        line, commander_marks = CMDR_MARK.subn("", line)
         m = LINE.match(line)
         if not m or not m.group("name").strip():
             raise DecklistError(f"could not read line: {line[:80]}")
@@ -130,8 +145,18 @@ def parse_decklist(text: str, unread: list[str] | None = None) -> list[ListCard]
             raise DecklistError(f"bad quantity on line: {line[:80]}")
         cats: list[str] = []
         if m.group("cats"):
-            cats = [re.sub(r"\{.*?\}", "", c).strip() for c in m.group("cats").split(",")]
-            cats = [c for c in cats if c]
+            for raw_cat in m.group("cats").split(","):
+                cat = CATEGORY_FLAG.sub("", raw_cat).strip()
+                if not cat:
+                    continue
+                cats.append(cat)
+                flags = {f.strip().lower() for f in CATEGORY_FLAG.findall(raw_cat)}
+                if "nodeck" in flags:
+                    no_deck.add(cat)
+                if "noprice" in flags:
+                    no_price.add(cat)
+        if commander_marks:
+            cats = ["Commander", *(c for c in cats if c != "Commander")]
         label = (m.group("caret") or "").strip()
         board = ""
         finish = FINISH_MARKS.get((m.group("foil") or "").upper(), "")
@@ -159,6 +184,10 @@ def parse_decklist(text: str, unread: list[str] | None = None) -> list[ListCard]
         )
     if not cards:
         raise DecklistError("no cards found in the text")
+    for c in cards:
+        if c.zone == "main" and c.categories and c.categories[0] in no_deck:
+            c.zone, c.board = "side", c.categories[0]
+        c.no_price = any(cat in no_price for cat in c.categories[:1])
     return merge(cards)
 
 
