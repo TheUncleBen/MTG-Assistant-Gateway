@@ -15,6 +15,7 @@ import pytest
 from mtg_gateway.archidekt_csv import parse_export, to_deck_json
 
 from . import fake_archidekt as FA
+from .test_deck_menu_browser import PNG
 from .test_editor_browser import _link
 from .test_overflow_sweep_browser import MEASURE
 from .test_scan_browser import _chromium_path
@@ -121,6 +122,7 @@ def _chromium() -> str | None:
 def _page(p, server: Server, sid: str, width: int, theme: str, exe: str | None):
     browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
     ctx = browser.new_context(viewport={"width": width, "height": 860}, has_touch=width < 900)
+    ctx.route("https://cards.scryfall.io/**", lambda r: r.fulfill(content_type="image/png", body=PNG))
     ctx.add_cookies(
         [
             {"name": "mtg_session", "value": sid, "url": server.base},
