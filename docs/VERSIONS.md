@@ -52,10 +52,10 @@ declared ready; until then a MINOR step (`0.5.0` → `0.6.0`) is the mid-sized
 release and a PATCH step the small fix.
 
 Mystic Forge, the research service, has its own image tag
-(`<upstream version>-mag<n>`, for example `1.3.2-mag3`) that changes only when
+(`<upstream version>-mag<n>`, for example `1.3.2-mag4`) that changes only when
 its build changes. The stack file names the right one. The first `main` commit
 that carries a new Mystic Forge tag publishes it and marks it with the git tag
-`mystic-forge-1.3.2-mag3`, so later commits never rebuild or overwrite it. The
+`mystic-forge-1.3.2-mag4`, so later commits never rebuild or overwrite it. The
 same build also moves the image's `latest` tag and adds a tag carrying the
 short commit SHA; deploy the versioned tag the stack file names.
 

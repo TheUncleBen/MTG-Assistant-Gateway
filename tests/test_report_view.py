@@ -51,6 +51,12 @@ def test_goldfish_header_summary_and_metrics_are_read() -> None:
     assert g["message"] is None
     # the warning line is one sentence with back faces dropped (names hold commas, so no split)
     assert g["warnings"] == ["Not recognized by Scryfall, skipped: Elbrus, the Binding Blade, Enduring Angel"]
+    # Mystic Forge 1.3.2-mag4 says how many copies of each were skipped
+    counted = GOLDFISH.replace("skipped: Elbrus", "skipped: 2 Elbrus").replace(", Enduring", ", 1 Enduring")
+    g = rv.parse_goldfish({"tool": "goldfish_run", "ok": True, "text": counted})
+    assert g["warnings"] == [
+        "Not recognized by Scryfall, skipped: 2 Elbrus, the Binding Blade, 1 Enduring Angel"
+    ]
 
 
 def test_honesty_report_comes_from_the_json_with_text_fallback() -> None:

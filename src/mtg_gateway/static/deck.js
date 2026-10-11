@@ -24,15 +24,24 @@
   }
   // While something is dragged: how far to scroll the page this frame when the pointer or finger
   // rests near the window's top or bottom edge (faster the closer it is), so a far stack is reachable;
-  // never past the ends of `box` (the cards), where there is nothing left to drop on.
+  // never past the ends of `box` (the cards), where there is nothing left to drop on. Null when the
+  // pointer is not in the zone; 0 is a frame too short for a whole pixel. The speed is per second,
+  // not per frame, so a 120 Hz phone or a busy one scrolls as fast as a 60 Hz screen does.
+  var EDGE_SPEED = 1200, edgeAt = 0, edgeRest = 0;  // px/s at the very edge; last step's time; part pixel
   function edgeStep(y, box) {
     var zone = Math.min(96, window.innerHeight * 0.15), h = window.innerHeight;
     var d = y < zone ? -(zone - y) : y > h - zone ? y - (h - zone) : 0;
     if (d && box) {
       var r = box.getBoundingClientRect();
-      if ((d < 0 && r.top >= zone) || (d > 0 && r.bottom <= h - zone)) return 0;
+      if ((d < 0 && r.top >= zone) || (d > 0 && r.bottom <= h - zone)) d = 0;
     }
-    return Math.round(Math.max(-1, Math.min(1, d / zone)) * 22);
+    var now = performance.now(), ms = edgeAt && now - edgeAt < 100 ? now - edgeAt : 1000 / 60;
+    edgeAt = d ? now : 0;
+    if (!d) { edgeRest = 0; return null; }
+    var px = Math.max(-1, Math.min(1, d / zone)) * EDGE_SPEED * ms / 1000 + edgeRest;
+    var step = px < 0 ? Math.ceil(px) : Math.floor(px);
+    edgeRest = px - step;
+    return step;
   }
 
   // -- forms that apply on change ----------------------------------------------------------
@@ -1285,7 +1294,7 @@
       if (st) st.classList.add("dropping");
       lastTarget = st;
     }
-    if (dy) touchFrame = requestAnimationFrame(touchTick);  // a resting finger keeps the page scrolling
+    if (dy !== null) touchFrame = requestAnimationFrame(touchTick);  // a resting finger keeps the page scrolling
   }
   cards.addEventListener("touchstart", function (e) {
     var card = e.target.closest(".c, .row");
@@ -1457,7 +1466,7 @@
       dragTag.style.transform = "translate3d(" + Math.round(tx) + "px," + Math.round(drag.y + (drag.finger ? -56 : 12)) + "px,0)";
       findSpot();
       drawBar();
-      if (dy) dragFrame = requestAnimationFrame(dragTick);  // a resting pointer keeps the page scrolling
+      if (dy !== null) dragFrame = requestAnimationFrame(dragTick);  // a resting pointer keeps the page scrolling
     }
     function findSpot() {
       // the stack under the pointer, or the nearest one when it is in a gap, in the page margin or
