@@ -296,6 +296,25 @@ buttons for the name, description and URL, and the icon to download.
     (`MTG_CIMD_ALLOWED_HOSTS`).
 12. Sign in with your sign-in account when the browser opens.
 
+### The ChatGPT plugin file (workspace admins only)
+
+**Download the ChatGPT plugin (ZIP)** from the ChatGPT steps of the
+gateway's install page, or directly at
+`https://mtg.example.com/plugin/mtg-gateway-chatgpt.zip` (the name follows
+the owner's `MTG_SERVER_NAME`, as the Claude plugin's does). It holds the
+connector (this gateway's address) and the MTG skill in one file, in the
+Agent Plugins format that OpenAI's plugins use. It needs no sign-in to
+download: it holds nothing secret.
+
+Who can install it:
+
+- **Workspace owners and admins on ChatGPT Business and Enterprise** upload
+  it under Plugins in the admin console (reported from OpenAI's help pages,
+  not yet tested with this gateway).
+- **Individual Plus and Pro accounts have no plugin upload** (checked by the
+  owner on a Pro account, 2026-10-11). Add the connector as above instead;
+  it works the same.
+
 ### Use it in a chat
 
 Start a new chat on the web, open the tools menu next to the message box,

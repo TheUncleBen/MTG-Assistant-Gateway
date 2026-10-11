@@ -1,0 +1,5 @@
+plugin.schema.json and mcp.schema.json are copied unchanged from the Agent Plugins
+specification, schemas/1.0.0/, at commit ff8ab5e392cc87bd88d87c060815a87490e51003 of
+https://github.com/agentplugins/agent-plugins-spec (schemas are under the Apache License
+2.0, per that repository's LICENSE.md). tests/test_chatgpt_plugin.py checks the gateway's
+ChatGPT plugin files against them.
