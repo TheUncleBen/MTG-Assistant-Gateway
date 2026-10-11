@@ -142,7 +142,7 @@ def add_app_routes(server: MCPServer, state: AppState) -> None:
         )
         if cert:
             verify = (
-                "<p>Before installing, compare the signing certificate SHA-256 above with the one in the "
+                "<p>Compare the signing certificate SHA-256 above with the one in the "
                 f"<a href='{RELEASES_URL}' rel='noopener'>project's GitHub release</a> for this version "
                 "(in the release notes and its <code>mtg-assistant-gateway.json</code>), or with one "
                 "the owner of this gateway gave you some other way. If they differ, do not install the "
@@ -153,7 +153,7 @@ def add_app_routes(server: MCPServer, state: AppState) -> None:
                 "<p>This build did not record its signing certificate, so the page cannot show one. Ask the "
                 "owner of this gateway for the certificate SHA-256 before installing.</p>"
             )
-        verify += (
+        note = (
             "<p class='muted small'>Both values on this page come from this gateway, the same place as the "
             "file. The file SHA-256 only shows the download arrived intact; it does not show who made the "
             "app. For a stronger check, on a computer run <code>apksigner verify --print-certs "
@@ -163,16 +163,18 @@ def add_app_routes(server: MCPServer, state: AppState) -> None:
             intro + "<div class='card'><h2>Install</h2>"
             f"<p><a class='btn btn-primary' href='/app/{APK_NAME}'>Download the app (APK)</a></p>"
             f"<ul>{facts}</ul>"
-            f"{verify}"
-            "<ol><li>Open the downloaded file. Android asks you to allow installs from your browser "
-            "once.</li>"
-            "<li>Play Protect may warn that the developer is unknown or unverified: the app is signed by "
-            "whoever runs this gateway, not by an app store. Only continue if you downloaded the file from "
-            "this page and the signing certificate matches the published one. If Play Protect says the app "
-            "is harmful, or you are unsure, do not install it and ask the owner of this gateway.</li>"
+            "<ol><li>Press <strong>Download the app (APK)</strong> above, on your Android phone.</li>"
+            f"<li>Check that it is the real app. {verify}</li>"
+            "<li>Open the downloaded file. Android asks once to allow installs from your browser: allow "
+            "it.</li>"
+            "<li>Play Protect may warn that the developer is unknown or unverified. That is expected: the "
+            "app is signed by whoever runs this gateway, not by an app store. Only continue if the signing "
+            "certificate matched in step 2. If Play Protect says the app is harmful, or you are unsure, do "
+            "not install it and ask the owner of this gateway.</li>"
             "<li>Open MTG Assistant Gateway and type this gateway's address: "
             f"<code>{html.escape(s.public_url)}</code>.</li>"
             "</ol>"
+            f"{note}"
             "<p class='muted small'>Updates: the app looks for new versions in the project's GitHub "
             "releases and offers them itself; Update installs one over the app you have. Android only "
             "accepts an update signed with the same key as the installed app, so your settings and "

@@ -437,6 +437,28 @@ async def test_every_successful_round_logs_one_line_and_the_status_follows_it(
 def test_status_when_off_gives_the_reason() -> None:
     off = AuthentikSweep(_settings(token=None), None, None).status()
     assert off["state"] == "off" and "MTG_AUTHENTIK_API_TOKEN_FILE" in off["reason"]
+    assert off["cause"] == "no-token"
     problem = _settings(token=None, authentik_api_token_problem="secret file is empty")
     bad = AuthentikSweep(problem, None, None)
-    assert bad.status() == {"state": "off", "reason": bad.why_off()}
+    assert bad.status() == {"state": "off", "cause": "token-unreadable", "reason": bad.why_off()}
+    assert AuthentikSweep(_settings(required_group=None), None, None).status()["cause"] == "no-group"
+
+
+# Every reason a round deletes nothing has its own next step for the admin overview (T-120).
+NEXT_STEP_CASES = {
+    "Authentik could not be reached (ConnectError)": "can reach Authentik's address",
+    "Authentik answered HTTP 403": "Make a new token and Docker secret",
+    "Authentik answered HTTP 401": "Make a new token and Docker secret",
+    "Authentik answered HTTP 502": "It tries again by itself",
+    f"group {USERS!r} found 0 times (is the name right, and may the token view it?)": "Can view Group",
+    "Authentik says nobody is in the groups; not trusting an empty answer": "have members",
+    "nobody the gateway knows is among the members Authentik lists: check ...": "Subject mode",
+    "it would delete 9 of 10 stored Archidekt sessions at once; check ...": "press Disable",
+    "unexpected error": "gateway's log",
+    "Authentik's answer was split into pages": "MTG_AUTHENTIK_API_URL",
+}
+
+
+@pytest.mark.parametrize("error", sorted(NEXT_STEP_CASES))
+def test_each_failure_names_its_next_step(error: str) -> None:
+    assert NEXT_STEP_CASES[error] in idp_sweep.next_step(error)

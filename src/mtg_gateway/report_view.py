@@ -341,6 +341,8 @@ def parse_validation(block: Any) -> dict[str, Any] | None:
             elif "issue" in low or "fail" in low or "problem" in low:
                 verdict = "issues"
             continue
+        if s.startswith("#"):  # a later section ("## Gateway checks") reads as a plain line
+            s = s.lstrip("# ").strip()
         s = re.sub(r"\*\*(.+?)\*\*", r"\1", s)
         if s.startswith(("- ", "* ")):
             s = s[2:].strip()
@@ -766,6 +768,7 @@ def _triggers_html(g: dict[str, Any]) -> str:
 
 FORGE_STATE_TEXT = {
     "queued": "Waiting for the simulation engine.",
+    "waiting": "Waiting for your earlier Forge run to finish.",
     "running": "Games are being played now.",
     "failed": "The games could not run.",
     "timeout": "The games ran out of time before finishing.",
@@ -779,6 +782,23 @@ def forge_lines(f: dict[str, Any]) -> list[str]:
     """Forge's result as plain sentences, shared by the page and the Markdown export."""
     res = f.get("result") or {}
     out: list[str] = []
+    ahead = f.get("waiting_for") if isinstance(f.get("waiting_for"), dict) else None
+    if f.get("waiting") and f.get("state") == "queued":
+        place = f"Number {f['position']} in your queue" if f.get("position") else "In your queue"
+        behind = (
+            f", behind your report of {front_face(ahead.get('deck_name')) or 'another deck'}"
+            f" ({ahead.get('report_id')})"
+            if ahead
+            else ""
+        )
+        out.append(f"{place}{behind}: it starts by itself when the run ahead of it ends.")
+    elif f.get("state") == "running" and f.get("games_requested"):
+        out.append(f"Games finished so far: {res.get('games') or 0} of {f['games_requested']}.")
+    if f.get("state") in ("queued", "running") and f.get("expected_seconds"):
+        minutes = max(1, round(f["expected_seconds"] / 60))
+        per = f.get("average_game_seconds_measured")
+        basis = f" (at the measured {per} seconds a game)" if per else ""
+        out.append(f"Expected to finish in about {minutes} minute{'s' if minutes != 1 else ''}{basis}.")
     seats = res.get("seats") or []
     if res.get("games"):
         out.append(f"Games played: {res['games']} of {res.get('games_requested') or res['games']}.")
@@ -801,7 +821,10 @@ def forge_lines(f: dict[str, Any]) -> list[str]:
         if res.get("average_game_seconds") is not None:
             out.append(f"Average game: {res['average_game_seconds']} seconds.")
     if f.get("seed") is not None:
-        out.append(f"Seed: {f['seed']}.")
+        chosen = " (chosen by the gateway; pass it as options.seed to replay these games)"
+        out.append(f"Seed: {f['seed']}{chosen if f.get('seed_source') == 'gateway' else ''}.")
+    elif f.get("state") in ("done", "running") and f.get("job_id"):
+        out.append("Seed: none recorded (this run was started without one).")
     return out
 
 
@@ -828,7 +851,7 @@ def forge_html(f: Any, *, live: bool = False) -> str:
     ]
     pending = state in ("queued", "running")
     if state != "done":
-        msg = f.get("error") or FORGE_STATE_TEXT.get(state, "")
+        msg = f.get("error") or FORGE_STATE_TEXT.get("waiting" if f.get("waiting") else state, "")
         if msg and pending:
             msg += (
                 " This section updates by itself when the games finish."
@@ -848,6 +871,12 @@ def forge_html(f: Any, *, live: bool = False) -> str:
             "left out of the games, so the numbers above do not include them.</p><p>"
             + ", ".join(_esc(n) for n in f["not_played"])
             + "</p></div>"
+        )
+    ahead = f.get("waiting_for") if isinstance(f.get("waiting_for"), dict) else None
+    if live and pending and ahead and ahead.get("report_id"):
+        parts.append(
+            f"<p class='small'><a href='/history/reports/{_esc(ahead['report_id'])}'>Open the report "
+            "it is waiting for</a></p>"
         )
     attrs = " data-forge-live aria-live='polite'" if live and pending else ""
     return f"<div class='card forge'{attrs}>" + "".join(parts) + "</div>"
@@ -1012,7 +1041,15 @@ def report_markdown(r: dict[str, Any]) -> str:
     if forge:
         lines += ["## Forge games", ""]
         if forge.get("state") != "done":
-            lines += [str(forge.get("error") or FORGE_STATE_TEXT.get(str(forge.get("state")), "")), ""]
+            lines += [
+                str(
+                    forge.get("error")
+                    or FORGE_STATE_TEXT.get(
+                        "waiting" if forge.get("waiting") else str(forge.get("state")), ""
+                    )
+                ),
+                "",
+            ]
         lines += [f"- {ln}" for ln in forge_lines(forge)]
         if forge.get("not_played"):
             lines.append("- Cards Forge could not play: " + ", ".join(forge["not_played"]))

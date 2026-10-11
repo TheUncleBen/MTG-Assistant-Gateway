@@ -17,7 +17,7 @@ from ..db import Database
 from ..decklist import ListCard, to_text
 from .art import art_owner
 from .names import NameCatalog
-from .scryfall import ScryfallClient, ScryfallError, summarize
+from .scryfall import ScryfallClient, ScryfallError, default_printing, good_default, summarize
 from .store import ScanStore
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,8 @@ MAX_SESSION_BYTES = 600_000  # one saved scan session as stored JSON (500 full c
 MAX_CALL_SECONDS = 40.0  # wall-clock budget per resolve call, under proxy and client timeouts
 MIN_PREFIX = 4
 AMBIGUITY_MARGIN = 0.05  # default; see ScanThresholds
-STATUSES = ("exact", "printing", "fuzzy", "ambiguous", "not_found", "deferred", "error")
+STATUSES = ("exact", "printing", "fuzzy", "ambiguous", "not_found", "deferred", "error", "conflict")
+MAX_NEWER = 3  # newer printings passed over for the default (previews, digital only) named on a result
 
 
 @dataclass(frozen=True)
@@ -153,10 +154,15 @@ class Resolution:
     # by name only and a page must not add it without a look (the note says what the number was).
     conflict: bool = False
     art: dict[str, Any] | None = None  # the art matcher's opinion (status, distance, margin, note)
+    # Status "conflict": the printing asked for (set, collector_number and the card it really is),
+    # kept apart from ``card``, which is what the name alone matched.
+    requested: dict[str, Any] | None = None
+    # Newer printings passed over for the default (not out yet, or not on paper), newest first.
+    newer: list[dict[str, Any]] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         self._note_foil_disagreement()
-        return {
+        out = {
             "input": self.input.as_dict(),
             "quantity": self.input.quantity,
             "status": self.status,
@@ -167,6 +173,13 @@ class Resolution:
             "conflict": self.conflict,
             "art": self.art,
         }
+        if self.requested:
+            out["requested"] = self.requested
+        if self.newer:
+            out["newer_printings"] = self.newer
+        if self.finish_unavailable:
+            out["finish_unavailable"] = True
+        return out
 
     @property
     def foil(self) -> bool | None:
@@ -180,13 +193,24 @@ class Resolution:
             return True
         if finishes == ["nonfoil"]:
             return False
+        if self.input.foil and finishes and "foil" not in finishes:
+            return False  # foil asked for on a printing with no foil finish (nonfoil and etched)
         return self.input.foil
+
+    @property
+    def finish_unavailable(self) -> bool:
+        """Foil was asked for and the matched printing does not come in foil."""
+        return bool(self.card) and self.input.foil is True and self.foil is False
 
     def _note_foil_disagreement(self) -> None:
         got = self.foil
         if self.input.foil is not None and got is not None and got != self.input.foil:
-            what = "foil" if got else "non-foil"
-            msg = f"this printing only exists {what}; the foil read was ignored"
+            finishes = (self.card or {}).get("finishes") or []
+            if len(finishes) == 1:
+                what = "foil" if got else "non-foil"
+                msg = f"this printing only exists {what}; the foil read was ignored"
+            else:
+                msg = f"this printing has no foil (it comes {', '.join(finishes)}); the foil read was ignored"
             if msg not in (self.note or ""):
                 self.note = f"{self.note}; {msg}" if self.note else msg
 
@@ -522,6 +546,23 @@ class ScanService:
             if i in checks:
                 res = self._settle_printing(inputs[i], checks[i], res)
             results[i] = res
+        # 2b. A card matched by name stands on Scryfall's default printing, its newest, which can be
+        # a preview that is not out yet or a printing that is not on paper. Swap in the newest
+        # released paper one (in foil when foil was asked for): one printings lookup per such card,
+        # within the call's deadline. Past the deadline the rest keep Scryfall's choice.
+        for i, inp in enumerate(inputs):
+            res = results[i]
+            if res is None or budget.expired or not _wants_default(inp, res):
+                continue
+            try:
+                async with asyncio.timeout(max(0.0, budget.deadline - time.monotonic())):
+                    results[i] = await self._prefer_released(inp, res)
+            except TimeoutError:
+                break
+            except ScanError as exc:
+                if exc.kind != "rate_limited":
+                    raise
+                break
         # 3. Optional second opinion on the printing, for cards matched by name only. It shares
         # the call's lookup and time budget: each match costs one lookup and ends at the deadline.
         if self.art_matcher is not None:
@@ -558,11 +599,20 @@ class ScanService:
             or _similarity(inp.name, by_name.card["name"]) >= self.t.fuzzy_confident_similarity
         )
         if confident:
+            # Not settled: the card the name matched is kept, with the printing asked for beside it,
+            # until someone picks one. A conflict is never ready to use.
             assert by_name.card is not None
             note = f"{where} is {printed['name']}, which does not match '{inp.name}'; matched by name instead"
             if by_name.note:
                 note += f"; {by_name.note}"
-            return Resolution(inp, by_name.status, by_name.card, note, by_name.suggestions, conflict=True)
+            requested = {
+                "set": inp.set_code,
+                "collector_number": inp.collector_number,
+                "name": printed["name"],
+            }
+            return Resolution(
+                inp, "conflict", by_name.card, note, by_name.suggestions, conflict=True, requested=requested
+            )
         names = [printed["name"]] + ([by_name.card["name"]] if by_name.card else []) + by_name.suggestions
         sugg: list[str] = []
         for n in names:
@@ -575,6 +625,52 @@ class ScanService:
             suggestions=sugg[:MAX_SUGGESTIONS],
             conflict=True,
         )
+
+    async def _prefer_released(self, inp: CardInput, res: Resolution) -> Resolution:
+        """``res`` moved to the newest released paper printing of its card (in foil when foil was
+        asked for), with the newer printings passed over listed on it. If Scryfall cannot list the
+        printings now, the match keeps the printing it has and says nothing new."""
+        card = res.card
+        assert card is not None
+        try:
+            prints = (await self.scryfall.prints(str(card["oracle_id"])))["cards"]
+        except ScryfallError as exc:
+            if exc.kind == "rate_limited":
+                raise ScanError("rate_limited", str(exc)) from exc
+            logger.info("printings lookup for a default printing failed: %s", exc.kind)
+            return res
+        finish = "foil" if inp.foil else None
+        pick = default_printing(prints, finish)
+        notes: list[str] = []
+        if pick is None and finish:
+            have = ", ".join(sorted({f for c in prints for f in c.get("finishes") or []})) or "none listed"
+            notes.append(f"no printing of {card['name']} comes in foil (finishes: {have})")
+            pick = default_printing(prints)
+        if pick is None:
+            if not good_default(card):
+                notes.append(f"{card['name']} has no printing out on paper yet; kept {_where(card)}")
+        elif pick.get("scryfall_id") != card.get("scryfall_id"):
+            newer: list[dict[str, Any]] = []
+            for c in prints:
+                if c is pick:
+                    break
+                if not good_default(c):
+                    row = {k: c[k] for k in ("set", "collector_number", "released_at") if c.get(k)}
+                    row.update({k: c[k] for k in ("unreleased", "paper") if k in c})
+                    newer.append(row)
+            res.newer = newer[:MAX_NEWER]
+            if card.get("unreleased"):
+                notes.append(
+                    f"Scryfall's newest printing {_where(card)} is not out until {card.get('released_at')}; "
+                    f"using {_where(pick)}"
+                )
+            elif not good_default(card):
+                notes.append(f"{_where(card)} is not sold on paper; using {_where(pick)}")
+            else:
+                notes.append(f"using {_where(pick)}, the newest printing in foil")
+            res.card = pick
+        res.note = "; ".join(n for n in [res.note, *notes] if n)
+        return res
 
     async def _apply_art_match(self, inp: CardInput, res: Resolution, budget: _Budget) -> Resolution:
         """Let the optional art matcher pick the printing when only the name was matched."""
@@ -769,7 +865,9 @@ class ScanService:
             return []
 
     async def printings(self, oracle_id: str, *, owner: str | None = None) -> dict[str, Any]:
-        """Every printing of one card for the picker, as card summaries, newest first.
+        """Every printing of one card for the picker, as card summaries: the released paper
+        printings first, newest first, then the rest (previews marked ``unreleased``, printings
+        not sold on paper marked ``paper: false``), also newest first. So the first is the default.
 
         ``{"cards": [...], "has_more": bool, "total_cards": int}``; ``has_more`` means the card has
         more printings than the one page shown (Scryfall pages at 175).
@@ -779,7 +877,8 @@ class ScanService:
             raise ScanError("invalid", "oracle_id must be a Scryfall oracle id")
         try:
             with self._lookup_slot(owner):
-                return await self.scryfall.prints(oid)
+                out = await self.scryfall.prints(oid)
+                return {**out, "cards": sorted(out["cards"], key=lambda c: not good_default(c))}
         except ScryfallError as exc:
             if exc.kind in ("unavailable", "rate_limited", "not_found"):
                 raise ScanError(exc.kind, str(exc)) from exc
@@ -867,18 +966,31 @@ class ScanService:
         counts = {s: 0 for s in STATUSES}
         for r in results:
             counts[r.status] = counts.get(r.status, 0) + 1
-        resolved = [it for it in items if it["card"]]
+        # A conflict keeps the card its name matched, for review, but is not ready to use: it stays
+        # out of the counts, the decklist and the changes until someone picks the card.
+        resolved = [it for it in items if it["card"] and it["status"] != "conflict"]
         deferred = counts.get("deferred", 0)
+        conflicts = counts.get("conflict", 0)
         out = {
-            "complete": deferred == 0,
+            "complete": deferred == 0 and conflicts == 0,
             "card_count": sum(it["quantity"] for it in resolved),
             "distinct": len(resolved),
-            "needs_review": [i for i, r in enumerate(results) if r.status not in ("exact", "printing")],
+            "needs_review": [
+                i
+                for i, r in enumerate(results)
+                if r.status not in ("exact", "printing") or r.finish_unavailable
+            ],
             "status_counts": {k: v for k, v in counts.items() if v},
             "cards": items,
             "decklist_text": decklist_text(resolved),
             **change_fields(resolved),
         }
+        if conflicts:
+            out["conflicts"] = conflicts
+            out["conflicts_note"] = (
+                f"{conflicts} of {len(results)} cards name a printing that is a different card. They are "
+                "left out of decklist_text and changes until the user says which card they mean."
+            )
         if deferred:
             n = self.scryfall.retry_in()
             out["deferred"] = deferred
@@ -993,6 +1105,22 @@ class ScanService:
             "decklist_text": decklist_text(items),
             **change_fields(resolved),
         }
+
+
+def _wants_default(inp: CardInput, res: Resolution) -> bool:
+    """A match whose printing nobody chose (no set given, or not found in the set given), on a
+    printing that is no good as a default: not out yet, not on paper, or not in foil when foil
+    was asked for."""
+    card = res.card
+    if not card or res.status == "printing" or not card.get("oracle_id"):
+        return False
+    if inp.set_code and str(card.get("set") or "").lower() == inp.set_code:
+        return False
+    return not good_default(card, "foil" if inp.foil else None)
+
+
+def _where(card: dict[str, Any]) -> str:
+    return f"{str(card.get('set') or '').upper()} #{card.get('collector_number')}"
 
 
 def _matches_ident(card: dict[str, Any], ident: dict[str, Any]) -> bool:

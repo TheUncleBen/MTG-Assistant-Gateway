@@ -51,7 +51,15 @@ from .archidekt import (
 from .archidekt_csv import CsvError, parse_export
 from .config import Settings
 from .db import Database
-from .decklist import DecklistError, ListCard, clean_category, clean_text, parse_decklist, to_text
+from .decklist import (
+    DecklistError,
+    ListCard,
+    clean_category,
+    clean_text,
+    front_faces,
+    parse_decklist,
+    to_text,
+)
 from .timing import add_time, archidekt_time
 
 logger = logging.getLogger(__name__)
@@ -399,7 +407,8 @@ def row_line(r: dict[str, Any]) -> str:
         return f"Commander: {r['before']} -> {r['after']}"
     if kind == "new_deck":
         visibility = "private" if r.get("private") else "public"
-        return f"New {r['format']} deck '{r['name']}' ({r['cards']} cards, {visibility})"
+        side = f", {r['side_cards']} more in the maybeboard or sideboard" if r.get("side_cards") else ""
+        return f"New {r['format']} deck '{r['name']}' ({r['cards']} cards{side}, {visibility})"
     if kind == "restore":
         return f"Restore to snapshot {r['snapshot_id']} taken {r['taken']} ({r['rows']} rows)"
     if kind == "description":
@@ -438,6 +447,8 @@ def actor_label(client_id: str | None, name: str | None = None) -> str:
 # The ``via`` of DeckService.apply that only the review page's own form (pages.py) passes: the
 # one caller that may apply an Archidekt account action (R-142).
 REVIEW_PAGE = "review_page"
+# Who rejected a proposal (DeckService.reject records it; describe() shows it as closed_by).
+REJECTED_BY = ("assistant", "card", "review_page", "browser", "api", "disconnected")
 
 
 class DeckError(Exception):
@@ -1594,7 +1605,8 @@ class DeckService:
         return {
             "approval_mode": mode,
             "approval_mode_label": modes.MODE_LABELS[mode],
-            "approval_mode_note": modes.MODE_HELP[mode] + " Change it on the account page.",
+            "approval_mode_note": modes.mode_help(mode, max_rows=self.settings.auto_apply_max_rows)
+            + " Change it on the account page.",
         }
 
     # The stored session is sealed to the member it belongs to: the encrypted blob names its
@@ -1934,6 +1946,41 @@ class DeckService:
             except ArchidektError as exc:
                 raise DeckError(exc.kind, str(exc)) from exc
 
+    async def research_deck_text(self, sub: str, deck_ref: str) -> str:
+        """The decklist text a research tool (goldfish_annotate) is given in place of a deck id or
+        link: read as the member sees the deck (get_any_deck), so their own private decks work,
+        where Mystic Forge reads Archidekt anonymously. Commander first, as the simulators expect;
+        double-faced cards by their front face, the one name Scryfall's collection lookup finds.
+        Archidekt answers "not found" both for a deck that does not exist and for someone else's
+        private deck, so the refusal says which of those is possible for this member."""
+        try:
+            deck = await self.get_any_deck(sub, deck_ref)
+        except DeckError as exc:
+            if exc.kind != "not_found":
+                raise
+            deck_id = _clean_deck_id(deck_ref)
+            link = self.db.get_link(sub)
+            if link:
+                raise DeckError(
+                    "not_found",
+                    f"Archidekt shows no deck {deck_id} to your linked account "
+                    f"({link['archidekt_username']}) or to the public: the id is wrong, or the deck is "
+                    "someone else's private deck, which only its owner can read.",
+                ) from exc
+            raise DeckError(
+                "not_found",
+                f"Archidekt has no public deck {deck_id}: the id is wrong, or the deck is private. If it "
+                f"is your own private deck, link your Archidekt account at {self.settings.public_url}"
+                "/account and try again.",
+            ) from exc
+        if not any(deck.is_commander(c) for c in deck.cards):
+            raise DeckError(
+                "invalid",
+                f"Deck {deck.id} has no card in a Commander (premier) category, so its commander is not "
+                "known. Put the commander in that category, or paste the list with the commander first.",
+            )
+        return front_faces(deck_to_text(deck))
+
     async def search_decks(self, sub: str | None, **query: Any) -> dict[str, Any]:
         """Search Archidekt's public decks anonymously (see ArchidektClient.search_decks). Counts
         against the member's Archidekt budget like any other read."""
@@ -1998,10 +2045,33 @@ class DeckService:
         )
         _token, link = self._token(sub)  # must be linked before we store a proposal that needs it
         self._room_for_proposal(sub)
-        total = sum(c["quantity"] for c in entries)
-        rows = [_row("new_deck", name=name, format=fmt, cards=total, private=bool(private))]
+        # A new deck gets only category names, so only Maybeboard and Sideboard (which Archidekt
+        # keeps out of the deck itself) stay apart. A custom category flagged {noDeck} is made as
+        # a plain category, so its cards count in the deck, and the proposal says so.
+        flagged = [
+            c
+            for c in entries
+            if c.get("in_deck") is False and c["categories"][:1] and c["categories"][0] not in SIDE_CATEGORIES
+        ]
+        flags_dropped = sorted({c["categories"][0] for c in flagged})
+        for c in flagged:
+            del c["in_deck"]
+        # Maybeboard and sideboard rows (in_deck false) are created too, but not counted as deck cards.
+        total = sum(c["quantity"] for c in entries if c.get("in_deck", True))
+        side = sum(c["quantity"] for c in entries) - total
+        rows = [
+            _row(
+                "new_deck", name=name, format=fmt, cards=total, side_cards=side or None, private=bool(private)
+            )
+        ]
         rows += [
-            _row("add", name=c["name"], qty=c["quantity"], category=", ".join(c["categories"]) or None)
+            _row(
+                "add",
+                name=c["name"],
+                qty=c["quantity"],
+                category=", ".join(c["categories"]) or None,
+                zone=None if c.get("in_deck", True) else "side",
+            )
             for c in entries
         ]
         pid = secrets.token_urlsafe(12)
@@ -2027,7 +2097,14 @@ class DeckService:
             rows,
         )
         self._audit("proposal_created", sub=sub, detail={"proposal_id": pid, "kind": "create_deck"})
-        return self.describe(sub, pid)
+        out = self.describe(sub, pid)
+        if flags_dropped:
+            out["warnings"] = [
+                f"Category {', '.join(flags_dropped)} is kept out of the deck in your list, but a new "
+                "Archidekt deck gets it as a plain category, so its cards count in the deck. Move "
+                "them to Maybeboard or Sideboard, or set the category's flag on archidekt.com after."
+            ]
+        return out
 
     def describe(self, sub: str, proposal_id: str) -> dict[str, Any]:
         row = self.db.get_proposal(proposal_id, sub)
@@ -2039,7 +2116,12 @@ class DeckService:
         kind = row.get("kind", "edit")
         risk, why = modes.risk_of(kind, row.get("rows"), max_rows=self.settings.auto_apply_max_rows)
         mode = self.mode_of(sub)
-        may_apply = self.settings.writes_enabled and modes.assistant_may_apply(mode, risk)
+        # "May apply now": the member's mode allows it for this risk AND the proposal is still
+        # pending (risk, approval_mode and risk_reason keep the policy side either way).
+        may_apply = (
+            state == "pending" and self.settings.writes_enabled and modes.assistant_may_apply(mode, risk)
+        )
+        closed_by, closed_by_app = self._closer(row) if state == "rejected" else (None, None)
         return {
             "proposal_id": row["id"],
             "kind": kind,
@@ -2066,6 +2148,12 @@ class DeckService:
             "created_at": row["created_at"],
             "expires_at": row["expires_at"],
             "applied_at": row["applied_at"],
+            # When and by whom a closed proposal was closed (closed_by: assistant, card,
+            # review_page, browser, api or disconnected; recorded since 0.7.22).
+            **({"closed_at": row["applied_at"]} if state in ("rejected", "failed") else {}),
+            **({"closed_at": row["expires_at"]} if state == "expired" else {}),
+            **({"closed_by": closed_by} if closed_by else {}),
+            **({"closed_by_app": closed_by_app} if closed_by_app else {}),
             # while an apply runs in the background: how far it got (see APPLY_WAIT_SECONDS)
             **(
                 {"progress": _progress_view(self._progress[row["id"]])}
@@ -2101,8 +2189,35 @@ class DeckService:
                 in_chat=self.settings.apply_in_chat,
                 partial=bool((row["result"] or {}).get("sent_entries")),
                 kind=kind,
+                closed_by=closed_by,
+                closed_by_app=closed_by_app,
             ),
         }
+
+    def _closer(self, row: dict[str, Any]) -> tuple[str | None, str | None]:
+        """Who rejected a proposal, as reject() recorded it in the result: the kind of closer and
+        the connected app's name (None for proposals rejected before this was recorded)."""
+        result = row.get("result") if isinstance(row.get("result"), dict) else {}
+        by = result.get("rejected_by")
+        if by not in REJECTED_BY:
+            return None, None
+        client = result.get("client")
+        app = client and client not in (BROWSER_CLIENT, ADMIN_CLIENT)
+        name = clean_text(self.db.client_name(client) or "")[:60] if app else ""
+        return by, name or None
+
+    def _not_pending(self, sub: str, proposal_id: str, doing: str) -> DeckError:
+        """The refusal for an apply or reject of a proposal that is no longer pending, carrying its
+        state now (and when and by whom it was closed), so a card can show it and drop its buttons."""
+        p = self.describe(sub, proposal_id)
+        extra = {k: p[k] for k in ("state", "closed_at", "closed_by", "closed_by_app") if p.get(k)}
+        return DeckError(
+            "not_pending",
+            f"This proposal is already {p['state']}, so it cannot be {doing}. Nothing was sent to "
+            "Archidekt; ask for a new proposal if the change is still wanted.",
+            review_url=p["review_url"],
+            **extra,
+        )
 
     def _creator_label(self, client_id: str | None) -> str:
         if not client_id:
@@ -2236,7 +2351,11 @@ class DeckService:
         if row is None:
             raise DeckError("not_found", "No such proposal for your account.")
         if row["state"] == "applied":
-            raise DeckError("already_applied", "This proposal was already applied; nothing was sent again.")
+            raise DeckError(
+                "already_applied",
+                "This proposal was already applied; nothing was sent again.",
+                state="applied",
+            )
         # R-142, structural: only the review page's own form passes REVIEW_PAGE, and an account
         # action (kind "action") is refused for every other caller, whichever route it came by.
         review_page = via == REVIEW_PAGE
@@ -2346,7 +2465,7 @@ class DeckService:
         self, sub: str, proposal_id: str, row: dict[str, Any], *, via: str
     ) -> dict[str, Any]:
         if not self.db.claim_proposal(proposal_id, sub):
-            raise DeckError("not_pending", f"This proposal is {row['state']} and cannot be applied.")
+            raise self._not_pending(sub, proposal_id, "applied")
         lock = self._deck_locks.setdefault(f"{sub}:{row['deck_id']}", asyncio.Lock())
         # What the apply got done so far (snapshot, backup, entries sent of how many, the verify
         # result), kept in the proposal's result whichever way the apply ends, and shown by
@@ -2975,8 +3094,8 @@ class DeckService:
     def reject(self, sub: str, proposal_id: str, *, via: str | None = None) -> dict[str, Any]:
         """Close a pending proposal without applying it (owner only). From the member's browser
         (the review page, or the API with the session cookie) any of their proposals; from a
-        connected app (``via`` "mcp" or "api", or any non-browser client) only the proposals that
-        app made itself, the same rule as apply."""
+        connected app (``via`` "mcp", "app" for its card, "api", or any non-browser client) only
+        the proposals that app made itself, the same rule as apply."""
         row = self.db.get_proposal(proposal_id, sub)
         if row is None:
             raise DeckError("not_found", "No such proposal for your account.")
@@ -2990,10 +3109,16 @@ class DeckService:
                 "cannot be rejected from here. The user can reject it on the review page.",
                 review_url=f"{self.settings.public_url}/proposals/{proposal_id}",
             )
-        if not self.db.reject_proposal(proposal_id, sub):
+        # Who closed it, kept in its result so describe() can say so: the member's own pages, the
+        # card's Reject (via "app"), the assistant's reject_proposal (via "mcp") or the API.
+        if from_browser:
+            by = "review_page" if via is None else "browser"
+        else:
+            by = {"app": "card", "mcp": "assistant"}.get(via or "", "api")
+        closed = {"rejected_by": by, **({"client": actor} if actor and not from_browser else {})}
+        if not self.db.reject_proposal(proposal_id, sub, closed):
             # Lost a race with an apply, or the proposal has expired: report the state as it is now.
-            now_state = self.describe(sub, proposal_id)["state"]
-            raise DeckError("not_pending", f"This proposal is {now_state}, so it cannot be rejected.")
+            raise self._not_pending(sub, proposal_id, "rejected")
         self._audit(
             "proposal_rejected", sub=sub, detail={"proposal_id": proposal_id, "deck_id": row["deck_id"]}
         )
@@ -3925,6 +4050,8 @@ def _next_step(
     in_chat: bool = False,
     partial: bool = False,
     kind: str = "edit",
+    closed_by: str | None = None,
+    closed_by_app: str | None = None,
 ) -> str:
     what = "these details" if kind == "details" else "this copy" if kind == "clone" else "this diff"
     # With the in-chat card (approve.py) the person decides on the card where the app shows one.
@@ -3983,14 +4110,25 @@ def _next_step(
     if state == "failed":
         return "Nothing further was changed. Create a new proposal if you still want these edits."
     if state == "rejected":
-        return "Rejected by the user. Nothing was changed; create a new proposal for different edits."
+        app = closed_by_app or "a connected app"
+        who = {
+            "assistant": (
+                f"Rejected through {app} (the assistant's reject_proposal), not by the user's own press."
+            ),
+            "card": "Rejected by the user on the proposal card.",
+            "review_page": "Rejected by the user on the review page.",
+            "browser": "Rejected by the user in the gateway's web pages.",
+            "api": f"Rejected through {app} (the gateway's API).",
+            "disconnected": "Rejected when the user disconnected the app that made it.",
+        }.get(closed_by or "", "Rejected.")
+        return f"{who} Nothing was changed; create a new proposal for different edits."
     return "This proposal is no longer actionable."
 
 
 def cards_from_json(text: str) -> list[dict[str, Any]]:
     """Rows from the gateway's own deck JSON (what get_deck returns and the Export page's .json
     download holds): an object with ``cards`` (or a bare list), each ``{name, quantity, categories,
-    set, collector_number, finish}``. Only those six fields are read; the rest of a deck read
+    set, collector_number, finish, in_deck}``. Only those fields are read; the rest of a deck read
     (stats, prices, text) is ignored. Raises DeckError when the text is not that shape."""
     if len(text) > 4_000_000:
         raise DeckError("invalid", "deck JSON larger than 4 MB")
@@ -4034,9 +4172,14 @@ def cards_from_json(text: str) -> list[dict[str, Any]]:
                 "finish": finish if finish in ("Foil", "Etched") else "",
                 "set_code": set_code,
                 "collector_number": number,
+                # get_deck's rows say in_deck: false for a maybeboard or sideboard row
+                **({"in_deck": False} if row.get("in_deck") is False else {}),
             }
         )
     return out
+
+
+SIDE_CATEGORIES = ("Maybeboard", "Sideboard")
 
 
 def normalise_cards(
@@ -4048,7 +4191,9 @@ def normalise_cards(
 ) -> list[dict[str, Any]]:
     """Turn any of the accepted inputs into [{name, quantity, categories, foil, finish, ...}].
     Sideboard and maybeboard rows are kept under their category (Archidekt stores them as
-    categories outside the deck), so a pasted list, CSV or the gateway's JSON round-trips whole."""
+    categories outside the deck), so a pasted list, CSV or the gateway's JSON round-trips whole.
+    Such a row also gets ``in_deck: False`` (and ``no_price: True`` for Archidekt's {noPrice}),
+    so the proposal counts it apart from the deck proper."""
     for label, value in (("decklist_text", decklist_text), ("csv_text", csv_text), ("json_text", json_text)):
         if value is not None and not isinstance(value, str):
             raise DeckError("invalid", f"{label} must be a string")
@@ -4074,6 +4219,8 @@ def normalise_cards(
                         "finish": c.finish if c.finish in ("Foil", "Etched") else "",
                         "set_code": c.set_code,
                         "collector_number": c.collector_number,
+                        # the same rule as parse_deck_export: these two categories sit outside the deck
+                        **({"in_deck": False} if c.category in ("Maybeboard", "Sideboard") else {}),
                     }
                 )
         except CsvError as exc:
@@ -4092,6 +4239,8 @@ def normalise_cards(
                         "finish": c.finish,
                         "set_code": c.set_code,
                         "collector_number": c.collector_number,
+                        **({"in_deck": False} if c.zone == "side" else {}),
+                        **({"no_price": True} if c.no_price else {}),
                     }
                 )
         except DecklistError as exc:

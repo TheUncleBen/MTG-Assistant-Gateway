@@ -93,8 +93,12 @@ Other ways to use the same gateway (for the user's other apps):
   `https://<gateway>/mcp` once as a custom connector under Customize,
   Connectors (web or desktop); phones pick it up. The skill ZIP is at
   `https://<gateway>/skill` after signing in.
-- **ChatGPT (web only):** Developer mode, add an app with the same URL;
-  project instructions text is on the same `/skill` page.
+- **ChatGPT (web only):** Developer mode, add an app with the same URL.
+  Upload the icon `https://<gateway>/static/gateway-icon-connector.png`
+  while creating it (ChatGPT takes a PNG of 10 KB at most, and reportedly
+  sets the icon only at creation); `https://<gateway>/install?for=chatgpt`
+  has every step, with the name and description to copy. Project
+  instructions text is on the same `/skill` page.
 - **Scanning physical cards:** `https://<gateway>/scan` on a phone.
 
 The gateway's `https://<gateway>/install` page has the current steps for

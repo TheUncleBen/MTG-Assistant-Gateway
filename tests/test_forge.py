@@ -187,10 +187,9 @@ async def test_one_unfinished_forge_run_per_member(tmp_path: Path, monkeypatch: 
     db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
     fake = FakeForge()
     reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+    reports.forge_interval = 0.05
     first = await reports.run("alice", "42", games=300, options={"seed": 1})
-    second = await reports.run("alice", "42", games=300, options={"seed": 2})
-    assert first["forge"]["state"] == "running" and second["forge"]["state"] == "skipped"
-    assert len(fake.started) == 1
+    assert first["forge"]["state"] == "running" and len(fake.started) == 1
     fake.finish(first["forge"]["job_id"], [1])
     assert reports._forge_task is not None
     await asyncio.wait_for(reports._forge_task, timeout=20)
@@ -209,7 +208,82 @@ async def test_one_unfinished_forge_run_per_member(tmp_path: Path, monkeypatch: 
         # two different decks: the same deck's concurrent runs already share one report
         *(reports.run("alice", ref, games=300, options={"seed": 4}) for ref in ("42", "43"))
     )
-    assert sorted(r["forge"]["state"] for r in together) == ["running", "skipped"]  # no race past the limit
+    # no race past the limit: one plays, the other waits for it
+    assert sorted(r["forge"]["state"] for r in together) == ["queued", "running"]
+    assert len(fake.started) == 3
+
+
+async def test_a_second_report_queues_behind_the_running_forge_run(tmp_path: Path) -> None:
+    """Owner's checklist T-152 (F39): a report made while the member's Forge run is still playing
+    used to get no Forge games ("skipped"). It now waits in the member's queue, says where it is
+    and what it waits for, starts by itself when the run ahead ends (also after a restart), and
+    only a third waiting report is refused."""
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    fake = FakeForge()
+    reports = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+    reports.forge_interval = 0.05
+    first = await reports.run("alice", "42", games=300, options={"seed": 1})
+    second = await reports.run("alice", "42", games=300, options={"seed": 2})
+    third = await reports.run("alice", "42", games=300, options={"seed": 3})
+    fourth = await reports.run("alice", "42", games=300, options={"seed": 4})
+    assert first["forge"]["state"] == "running" and len(fake.started) == 1
+    assert second["forge"]["state"] == "queued" and second["forge"]["position"] == 1
+    assert second["forge"]["waiting_for"] == {
+        "report_id": first["report_id"],
+        "deck_name": first["deck_name"],
+        "job_id": first["forge"]["job_id"],
+    }
+    assert "start" not in second["forge"]  # what starting it takes stays inside
+    assert (
+        third["forge"]["position"] == 2 and third["forge"]["waiting_for"]["report_id"] == second["report_id"]
+    )
+    assert fourth["forge"]["state"] == "skipped" and "2 reports waiting" in fourth["forge"]["error"]
+    status = reports.forge_only("alice", second["report_id"])["forge_status"]
+    assert status == {
+        "state": "queued",
+        "games_done": 0,
+        "games_requested": 4,
+        "position": 1,
+        "waiting_for": second["forge"]["waiting_for"],
+    }
+    # the first run ends: the refresher starts the next one, with its own seed
+    fake.finish(first["forge"]["job_id"], [1, 2, 1, 1])
+    for _ in range(200):
+        if len(fake.started) == 2:
+            break
+        await asyncio.sleep(0.02)
+    assert len(fake.started) == 2 and fake.started[1]["seed"] == 2
+    now = reports.get("alice", second["report_id"])
+    assert now["forge"]["state"] == "running" and now["forge_status"]["job_id"] == now["forge"]["job_id"]
+    # the measured game time (60 s a game in the fake) gives the expected time
+    assert now["forge"]["expected_seconds"] == 4 * 60
+    assert reports.get("alice", third["report_id"])["forge"]["expected_seconds"] == 8 * 60
+    # a gateway restart: a new service on the same database carries on with the queue
+    reports._forge_task.cancel()
+    again = ReportService(db, _Decks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+    again.forge_interval = 0.05
+    again.resume_forge_runs()
+    fake.finish(now["forge"]["job_id"], [1])
+    for _ in range(200):
+        if len(fake.started) == 3:
+            break
+        await asyncio.sleep(0.02)
+    assert len(fake.started) == 3 and fake.started[2]["seed"] == 3
+    assert again.get("alice", third["report_id"])["forge"]["state"] == "running"
+    fake.finish(again.get("alice", third["report_id"])["forge"]["job_id"], [1])
+    await asyncio.wait_for(again._forge_task, timeout=20)
+
+
+async def test_forge_runs_are_always_seeded() -> None:
+    """F40: without options.seed Forge picked its own seed and the report said null. The gateway
+    now picks one, sends it and records it (seed_source says whose it was)."""
+    fake = FakeForge()
+    section = await start_run(fake.client(), DECK_TEXT, "Liesa", games=1)
+    assert isinstance(section["seed"], int) and 0 <= section["seed"] < 2**63
+    assert fake.started[0]["seed"] == section["seed"] and section["seed_source"] == "gateway"
+    given = await start_run(fake.client(), DECK_TEXT, "Liesa", games=1, seed=9)
+    assert given["seed"] == 9 and given["seed_source"] == "request"
 
 
 def test_report_page_and_markdown_show_forge_results() -> None:
@@ -310,3 +384,54 @@ async def test_pruning_old_reports_cancels_their_unfinished_forge_runs(
     await reports.run("alice", "42", games=300, options={"seed": 2})  # prunes the first report
     await asyncio.gather(*reports._forge_cancels)
     assert fake.cancelled == [first["forge"]["job_id"]]
+
+
+def test_report_page_shows_a_queued_run_and_its_place() -> None:
+    from mtg_gateway.report_view import forge_html, report_markdown
+
+    queued = {
+        "state": "queued",
+        "waiting": True,
+        "games_requested": 10,
+        "position": 1,
+        "waiting_for": {"report_id": "rep_ahead", "deck_name": "Liesa", "job_id": "00ab"},
+        "expected_seconds": 4712,
+        "average_game_seconds_measured": 235.6,
+    }
+    live = forge_html(queued, live=True)
+    assert "queued" in live and "data-forge-live" in live
+    assert "Waiting for your earlier Forge run to finish." in live
+    assert "Number 1 in your queue, behind your report of Liesa (rep_ahead)" in live
+    assert "Expected to finish in about 79 minutes (at the measured 235.6 seconds a game)." in live
+    assert "href='/history/reports/rep_ahead'" in live
+    assert "href=" not in forge_html(queued)  # an export links nowhere
+    md = report_markdown({"deck_name": "Aesi", "deck_id": "42", "stats": {}, "forge": queued})
+    assert "Number 1 in your queue" in md
+    seeded = forge_html({"state": "done", "seed": 12, "seed_source": "gateway", "result": {"games": 1}})
+    assert "Seed: 12 (chosen by the gateway; pass it as options.seed to replay these games)." in seeded
+
+
+async def test_report_keeps_a_text_result_once(tmp_path: Path) -> None:
+    """B7: a research tool that answers in text also sends it as {"result": text}; the report kept
+    both (about 35 KB for one report). Now the text is kept once, and old reports read back without
+    the copy."""
+    import mcp_types as types
+
+    text = "# Goldfish run\nCommander: Aesi\n\n## Metrics\n" + "x" * 5000
+
+    class _Mf:
+        async def call(self, tool: str, arguments: Any, **kwargs: Any) -> Any:
+            return types.CallToolResult(
+                content=[types.TextContent(type="text", text=text)], structured_content={"result": text}
+            )
+
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    reports = ReportService(db, _Decks(), _Mf())  # type: ignore[arg-type]
+    out = await reports.run("alice", "42", games=300, options={"seed": 1})
+    assert out["goldfish"]["ok"] and out["goldfish"]["text"] == text and "data" not in out["goldfish"]
+    assert "data" not in out["validation"]
+    old = {"tool": "goldfish_run", "ok": True, "text": text, "data": {"result": text}}
+    with db.tx() as c:
+        c.execute("UPDATE reports SET goldfish_json = ? WHERE id = ?", (json.dumps(old), out["report_id"]))
+    assert "data" not in reports.get("alice", out["report_id"])["goldfish"]

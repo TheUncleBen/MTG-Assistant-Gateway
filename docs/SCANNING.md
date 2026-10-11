@@ -28,6 +28,15 @@ Scryfall and tells the assistant how sure it is:
 | `ambiguous` | more than one card fits, or the closest one isn't a convincing match; `suggestions` lists the candidates |
 | `not_found` | nothing matched; `suggestions` may still help |
 | `deferred` | not looked up yet because Scryfall asked the gateway to wait; `retry_in` says how many seconds, and `complete` is false |
+| `conflict` | the set and number are a different card from the name; `card` is what the name matched, `requested` the printing asked for. Left out of the decklist and the changes until you say which card you mean, and `complete` is false |
+
+With no set given, a card gets its newest printing that is already out
+(released today or earlier, UTC) and sold on paper, in foil when foil was
+asked for. Scryfall's own default is its newest printing, which can be a
+preview that isn't out yet; any newer printings passed over are listed in
+`newer_printings`. When foil was asked for and the printing has no foil,
+the card comes back non-foil with `finish_unavailable` and a note naming
+the finishes it does come in, and it is listed in `needs_review`.
 
 The answer also includes a ready-made decklist for `propose_new_deck` and a
 list of `add` changes for `propose_deck_changes`, so the assistant can go
@@ -144,8 +153,9 @@ number point at a printing with a different name, the title is checked on
 its own:
 
 - same card: you get that printing (`printing`, "title read as ...");
-- a different card matched exactly or confidently: the title wins over the
-  number (a misread digit is the more likely mistake) and the note says so;
+- a different card matched exactly or confidently: `conflict`. The card the
+  title matched is shown (a misread digit is the more likely mistake) next to
+  the printing asked for, but it isn't used until you pick one;
 - anything less: `ambiguous`, with both cards as suggestions.
 
 A long title cut short still counts as agreeing when the fragment completes

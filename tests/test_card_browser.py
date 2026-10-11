@@ -1,6 +1,7 @@
 """The proposal card (static/proposal-card.html) in a real browser, driven by a fake host that
 speaks the MCP Apps postMessage protocol: it draws the proposal, its buttons call
-confirm_proposal with the one-time code, and nothing is called before the person presses."""
+confirm_proposal with the one-time code, and nothing but a read-only get_proposal (to catch a
+proposal closed since it was made) is called before the person presses."""
 
 from __future__ import annotations
 
@@ -43,6 +44,9 @@ HOST = """<!DOCTYPE html><html><body>
 <script>
 window.log = [];
 window.confirmReply = null;  // set by the test: the structuredContent confirm_proposal answers with
+// get_proposal's structuredContent; null: the host refuses the call (as a host may refuse a card's
+// tools/call), so the card keeps what it drew
+window.getReply = null;
 var frame = document.getElementById("f");
 window.addEventListener("message", (ev) => {
   const m = ev.data; if (!m || m.jsonrpc !== "2.0") return;
@@ -57,6 +61,11 @@ window.addEventListener("message", (ev) => {
                     safeAreaInsets: {top: 0, right: 0, bottom: 0, left: 0}}}});
   } else if (m.method === "ui/notifications/initialized") {
     send({jsonrpc: "2.0", method: "ui/notifications/tool-result", params: window.toolResult});
+  } else if (m.method === "tools/call" && m.params.name === "get_proposal") {
+    const sc = window.getReply;
+    if (sc === null) send({jsonrpc: "2.0", id: m.id, error: {code: -32000, message: "blocked"}});
+    else send({jsonrpc: "2.0", id: m.id,
+               result: {content: [{type: "text", text: JSON.stringify(sc)}], structuredContent: sc}});
   } else if (m.method === "tools/call") {
     const sc = window.confirmReply;
     const text = JSON.stringify(sc);
@@ -74,10 +83,11 @@ window.teardown = () => { frame.contentWindow.postMessage(
 </script></body></html>"""
 
 
-def _open(page, result: dict, confirm_reply: dict | None = None):
+def _open(page, result: dict, confirm_reply: dict | None = None, get_reply: dict | None = None):
     page.set_content(HOST)
     page.evaluate("(r) => { window.toolResult = r; }", result)
     page.evaluate("(r) => { window.confirmReply = r; }", confirm_reply)
+    page.evaluate("(r) => { window.getReply = r; }", get_reply)
     page.evaluate("(html) => { document.getElementById('f').srcdoc = html; }", card_html())
     page.wait_for_function(
         "() => window.log.some(m => m.method === 'ui/notifications/initialized')", timeout=10_000
@@ -87,6 +97,11 @@ def _open(page, result: dict, confirm_reply: dict | None = None):
 
 def _calls(page, method: str) -> list[dict]:
     return [m for m in page.evaluate("() => window.log") if m.get("method") == method]
+
+
+def _confirms(page) -> list[dict]:
+    """The card's confirm_proposal calls (its only writes)."""
+    return [m for m in _calls(page, "tools/call") if m["params"]["name"] == "confirm_proposal"]
 
 
 def test_card_renders_and_approve_calls_confirm_with_the_code() -> None:
@@ -132,12 +147,19 @@ def test_card_renders_and_approve_calls_confirm_with_the_code() -> None:
             # Buttons: Approve and Reject come live once the arming delay has passed.
             card.locator("#approve:enabled").wait_for(timeout=5_000)
             assert approve.is_enabled() and card.locator("#reject").is_enabled()
-            assert _calls(page, "tools/call") == []  # nothing was called by itself
+            assert _confirms(page) == []  # nothing was confirmed by itself
+            reads = _calls(page, "tools/call")  # one read-only look at the proposal's state, at most
+            assert len(reads) <= 1 and all(
+                m["params"] == {"name": "get_proposal", "arguments": {"proposal_id": "p-1"}} for m in reads
+            )
             assert _calls(page, "ui/notifications/size-changed"), "the card reports its size"
             # Press Approve: one confirm_proposal call with the proposal id and the code.
             approve.click()
-            page.wait_for_function("() => window.log.some(m => m.method === 'tools/call')", timeout=5_000)
-            calls = _calls(page, "tools/call")
+            page.wait_for_function(
+                "() => window.log.some(m => m.params && m.params.name === 'confirm_proposal')",
+                timeout=5_000,
+            )
+            calls = _confirms(page)
             assert len(calls) == 1
             assert calls[0]["params"] == {
                 "name": "confirm_proposal",
@@ -225,7 +247,7 @@ def test_card_without_a_code_only_offers_the_review_page() -> None:
             button.click()
             page.wait_for_function("() => window.log.some(m => m.method === 'ui/open-link')", timeout=5_000)
             assert _calls(page, "ui/open-link")[0]["params"] == {"url": "https://mtg.test/proposals/p-1"}
-            assert _calls(page, "tools/call") == []
+            assert _confirms(page) == []
             # Reject goes through the same tool with decision=reject, and a refusal is shown.
             card = _open(
                 page,
@@ -241,12 +263,12 @@ def test_card_without_a_code_only_offers_the_review_page() -> None:
             card.locator("#reject").click()
             # Reject first asks why (optional), so the assistant can do better; nothing is sent yet.
             card.locator("#why:not(.hidden)").wait_for(timeout=5_000)
-            assert _calls(page, "tools/call") == []
+            assert _confirms(page) == []
             card.locator("#reason").fill("keep the Islands")
             card.locator("#reject-go").click()
             card.locator("#status.err").wait_for(timeout=5_000)
             assert "does not belong" in card.locator("#status").inner_text()
-            assert _calls(page, "tools/call")[0]["params"]["arguments"]["decision"] == "reject"
+            assert _confirms(page)[0]["params"]["arguments"]["decision"] == "reject"
             assert card.locator("#reject").is_enabled()  # the person may try the other button or the page
             assert card.locator("#why").get_attribute("class") == "why hidden"
             # An error result (the proposal could not be made) shows the message and no buttons.
@@ -302,5 +324,73 @@ def test_narrow_card_keeps_badges_whole_and_names_readable() -> None:
                 assert all(left >= geo["titleRight"] for left, _ in geo["badges"]), (width, geo)
                 assert geo["nameWidth"] > 80, (width, geo)
                 page.close()
+        finally:
+            browser.close()
+
+
+def test_a_card_drawn_for_a_proposal_closed_since_shows_that_and_no_buttons() -> None:
+    """The QA round's ChatGPT session: the proposal was rejected (by the assistant's own
+    reject_proposal) seconds after it was made, while its card still showed live buttons. The
+    card reads the proposal once when drawn and shows what happened instead."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    rejected = {
+        **PROPOSAL,
+        "state": "rejected",
+        "closed_at": int(time.time()) - 60,
+        "closed_by": "assistant",
+        "closed_by_app": "ChatGPT",
+    }
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            page = browser.new_page()
+            errors: list[str] = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            card = _open(
+                page, {"structuredContent": PROPOSAL, "_meta": {APPROVAL_META_KEY: "c"}}, get_reply=rejected
+            )
+            card.locator("#state.rejected").wait_for(timeout=5_000)
+            status = card.locator("#status").inner_text()
+            assert "Already rejected by the assistant in ChatGPT (its reject_proposal call) at " in status
+            assert "Ask the assistant for a new proposal" in status
+            page.wait_for_timeout(900)  # past the arming delay: still no buttons
+            assert card.locator("#approve").count() == 0 and card.locator("#reject").count() == 0
+            assert _confirms(page) == []
+            assert [m["params"]["name"] for m in _calls(page, "tools/call")] == ["get_proposal"]
+            assert not errors, errors
+        finally:
+            browser.close()
+
+
+def test_a_press_on_a_closed_proposal_shows_its_state_and_drops_the_buttons() -> None:
+    """When the card cannot read the proposal (the host refuses the call), the buttons stay; a press
+    on a proposal closed meanwhile gets not_pending with its state, and the card shows that state
+    instead of re-enabling the buttons."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    refusal = {
+        "ok": False,
+        "error": "not_pending",
+        "message": "This proposal is already rejected, so it cannot be applied.",
+        "state": "rejected",
+        "closed_at": int(time.time()) - 5,
+        "closed_by": "review_page",
+    }
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            page = browser.new_page()
+            card = _open(page, {"structuredContent": PROPOSAL, "_meta": {APPROVAL_META_KEY: "c"}}, refusal)
+            card.locator("#approve:enabled").wait_for(timeout=5_000)  # the read failed: buttons stay
+            card.locator("#approve").click()
+            card.locator("#state.rejected").wait_for(timeout=5_000)
+            assert "Already rejected by you on the review page at " in card.locator("#status").inner_text()
+            assert card.locator("#approve").count() == 0 and card.locator("#reject").count() == 0
+            assert len(_confirms(page)) == 1
+            ctx = _calls(page, "ui/update-model-context")
+            assert ctx and "already rejected" in ctx[0]["params"]["content"][0]["text"]
         finally:
             browser.close()

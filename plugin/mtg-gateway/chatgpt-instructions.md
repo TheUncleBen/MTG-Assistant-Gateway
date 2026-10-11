@@ -7,6 +7,13 @@ settings) and chat inside that project with the MTG Assistant Gateway connector 
 on. You can use your account-wide custom instructions instead, but then they
 apply to every chat.
 
+To add the connector itself, follow the gateway's `/install?for=chatgpt`
+page: it has the name, description and connector URL to copy, and the icon
+to upload, `/static/gateway-icon-connector.png` on the gateway (a PNG under
+ChatGPT's 10 KB limit). Upload the icon while creating the connector:
+ChatGPT reportedly lets you set it only then (a user report, not OpenAI's
+documentation).
+
 The block is under 4,000 characters. OpenAI's help pages say custom
 instructions take up to 5,000 characters on paid plans and 1,500 on Free; no
 limit is published for project instructions (all reported, not tested).

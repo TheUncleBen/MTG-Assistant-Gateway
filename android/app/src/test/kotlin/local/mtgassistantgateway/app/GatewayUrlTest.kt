@@ -31,6 +31,32 @@ class GatewayUrlTest {
         }
     }
 
+    @Test fun shortcutPageMapsOnlyTheThreePages() {
+        assertEquals("/decks", GatewayUrl.shortcutPath("decks"))
+        assertEquals("/scan", GatewayUrl.shortcutPath("scan"))
+        assertEquals("/proposals", GatewayUrl.shortcutPath("proposals"))
+        assertNull(GatewayUrl.shortcutPath(null))
+        assertNull(GatewayUrl.shortcutPath(""))
+        assertNull(GatewayUrl.shortcutPath("/decks"))
+        assertNull(GatewayUrl.shortcutPath("https://evil.example/"))
+    }
+
+    @Test fun staticShortcutsNameEachPageOnce() {
+        // res/xml/shortcuts.xml (Gradle runs unit tests from the app module's folder).
+        val xml = java.io.File("src/main/res/xml/shortcuts.xml").readText()
+        val pages = Regex("<extra android:name=\"${GatewayUrl.SHORTCUT_PAGE}\" android:value=\"([^\"]+)\"").findAll(xml).map { it.groupValues[1] }.toList()
+        assertEquals(GatewayUrl.SHORTCUTS.map { it.first }, pages)
+        assertEquals(pages.size, Regex("android:action=\"${Regex.escape(GatewayUrl.SHORTCUT_ACTION)}\"").findAll(xml).count())
+        // Not the IDs the dynamic shortcuts of earlier versions used: Android would skip those.
+        val ids = Regex("android:shortcutId=\"([^\"]+)\"").findAll(xml).map { it.groupValues[1] }.toList()
+        assertEquals(pages.size, ids.toSet().size)
+        assertTrue(ids.none { it in pages })
+        // The package ID is written out in the XML; it must be the one the build uses.
+        val appId = java.io.File("application-id.txt").readText().trim()
+        val targets = Regex("android:targetPackage=\"([^\"]+)\"").findAll(xml).map { it.groupValues[1] }.toList()
+        assertEquals(List(pages.size) { appId }, targets)
+    }
+
     @Test fun originOfHandlesPorts() {
         assertEquals("https://a.example", GatewayUrl.originOf("https://a.example:443/x"))
         assertEquals("https://a.example:8443", GatewayUrl.originOf("https://a.example:8443/x"))
