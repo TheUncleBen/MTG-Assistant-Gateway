@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import secrets
 import time
 from typing import Any
 
@@ -191,7 +192,9 @@ async def start_run(
 ) -> dict[str, Any]:
     """Start a Forge run of the member's deck against bundled precons and return the report's
     ``forge`` section. Cards Forge lacks are removed from the run and named in ``not_played``;
-    the run is refused only when the commander itself is missing."""
+    the run is refused only when the commander itself is missing. Every run is seeded: without a
+    seed from the request the gateway picks one, so ``seed`` is always the one Forge used
+    (``seed_source`` says whose it was) and the same games can be asked for again."""
     deck = forge_deck(deck_text)
     if not deck["commander"]:
         return {
@@ -215,11 +218,16 @@ async def start_run(
     seats = [deck_name, *chosen]
     # Forge takes seeds from 0 to 2**63 - 1 (it reads "-5" as a flag); the gateway's seeds may be
     # negative, so they are mapped onto that range, the same seed always to the same Forge seed.
-    forge_seed = seed % 2**63 if seed is not None else None
+    # Without one, Forge would pick its own and never say which (its seed option is optional).
+    source = "request" if seed is not None else "gateway"
+    if seed is None:
+        seed = secrets.randbelow(2**63)
+    forge_seed = seed % 2**63
     job = await client.start([deck, *({"precon": p} for p in chosen)], games, seed=forge_seed)
     return {
         "state": job.get("state", "queued"),
         "seed": seed,
+        "seed_source": source,
         **({"forge_seed": forge_seed} if forge_seed != seed else {}),
         "job_id": job["id"],
         "seats": seats,

@@ -1,0 +1,262 @@
+{
+ "object": "list",
+ "comment": "Hand-made printings (not recorded live) for the default-printing and finish rules: a preview printing released after the test date, an Arena-only printing, nonfoil-only and foil printings.",
+ "has_more": false,
+ "total_cards": 7,
+ "data": [
+  {
+   "object": "card",
+   "id": "150430a0-b4c5-5e10-83a3-f05e5f33841c",
+   "oracle_id": "b2c6aa39-2d2a-459c-a555-fb48ba993373",
+   "name": "Island",
+   "lang": "en",
+   "released_at": "2026-11-13",
+   "scryfall_uri": "https://scryfall.com/card/trk/319/island?utm_source=api",
+   "layout": "normal",
+   "image_uris": {
+    "small": "https://cards.scryfall.io/small/front/1/5/150430a0-b4c5-5e10-83a3-f05e5f33841c.jpg",
+    "normal": "https://cards.scryfall.io/normal/front/1/5/150430a0-b4c5-5e10-83a3-f05e5f33841c.jpg",
+    "art_crop": "https://cards.scryfall.io/art_crop/front/1/5/150430a0-b4c5-5e10-83a3-f05e5f33841c.jpg"
+   },
+   "mana_cost": "",
+   "cmc": 0.0,
+   "type_line": "Basic Land — Island",
+   "color_identity": [
+    "U"
+   ],
+   "legalities": {
+    "commander": "legal"
+   },
+   "games": [
+    "paper",
+    "mtgo",
+    "arena"
+   ],
+   "finishes": [
+    "nonfoil",
+    "foil"
+   ],
+   "set": "trk",
+   "set_name": "Star Trek",
+   "collector_number": "319",
+   "rarity": "common",
+   "digital": false
+  },
+  {
+   "object": "card",
+   "id": "49ccd660-7ad5-50cc-a4b7-8383e84fc6d7",
+   "oracle_id": "b2c6aa39-2d2a-459c-a555-fb48ba993373",
+   "name": "Island",
+   "lang": "en",
+   "released_at": "2024-11-15",
+   "scryfall_uri": "https://scryfall.com/card/fdn/279/island?utm_source=api",
+   "layout": "normal",
+   "image_uris": {
+    "small": "https://cards.scryfall.io/small/front/4/9/49ccd660-7ad5-50cc-a4b7-8383e84fc6d7.jpg",
+    "normal": "https://cards.scryfall.io/normal/front/4/9/49ccd660-7ad5-50cc-a4b7-8383e84fc6d7.jpg",
+    "art_crop": "https://cards.scryfall.io/art_crop/front/4/9/49ccd660-7ad5-50cc-a4b7-8383e84fc6d7.jpg"
+   },
+   "mana_cost": "",
+   "cmc": 0.0,
+   "type_line": "Basic Land — Island",
+   "color_identity": [
+    "U"
+   ],
+   "legalities": {
+    "commander": "legal"
+   },
+   "games": [
+    "paper",
+    "mtgo",
+    "arena"
+   ],
+   "finishes": [
+    "nonfoil",
+    "foil"
+   ],
+   "set": "fdn",
+   "set_name": "Foundations",
+   "collector_number": "279",
+   "rarity": "common",
+   "digital": false
+  },
+  {
+   "object": "card",
+   "id": "adafa5b1-42e7-5d09-a5e3-06a73e2b3ea7",
+   "oracle_id": "56719f6a-1a6c-4c0a-8d21-18f7d7350b68",
+   "name": "Swamp",
+   "lang": "en",
+   "released_at": "2027-04-09",
+   "scryfall_uri": "https://scryfall.com/card/mdd/296/swamp?utm_source=api",
+   "layout": "normal",
+   "image_uris": {
+    "small": "https://cards.scryfall.io/small/front/a/d/adafa5b1-42e7-5d09-a5e3-06a73e2b3ea7.jpg",
+    "normal": "https://cards.scryfall.io/normal/front/a/d/adafa5b1-42e7-5d09-a5e3-06a73e2b3ea7.jpg",
+    "art_crop": "https://cards.scryfall.io/art_crop/front/a/d/adafa5b1-42e7-5d09-a5e3-06a73e2b3ea7.jpg"
+   },
+   "mana_cost": "",
+   "cmc": 0.0,
+   "type_line": "Basic Land — Swamp",
+   "color_identity": [
+    "B"
+   ],
+   "legalities": {
+    "commander": "legal"
+   },
+   "games": [],
+   "finishes": [
+    "nonfoil",
+    "foil"
+   ],
+   "set": "mdd",
+   "set_name": "Marvel: Darkhold Destiny",
+   "collector_number": "296",
+   "rarity": "common",
+   "digital": [],
+   "preview": {
+    "previewed_at": "2026-10-09",
+    "source": "Wizards of the Coast"
+   }
+  },
+  {
+   "object": "card",
+   "id": "82ee229f-d7dc-5851-9036-b2084a7292fc",
+   "oracle_id": "56719f6a-1a6c-4c0a-8d21-18f7d7350b68",
+   "name": "Swamp",
+   "lang": "en",
+   "released_at": "2026-08-12",
+   "scryfall_uri": "https://scryfall.com/card/ea1/71/swamp?utm_source=api",
+   "layout": "normal",
+   "image_uris": {
+    "small": "https://cards.scryfall.io/small/front/8/2/82ee229f-d7dc-5851-9036-b2084a7292fc.jpg",
+    "normal": "https://cards.scryfall.io/normal/front/8/2/82ee229f-d7dc-5851-9036-b2084a7292fc.jpg",
+    "art_crop": "https://cards.scryfall.io/art_crop/front/8/2/82ee229f-d7dc-5851-9036-b2084a7292fc.jpg"
+   },
+   "mana_cost": "",
+   "cmc": 0.0,
+   "type_line": "Basic Land — Swamp",
+   "color_identity": [
+    "B"
+   ],
+   "legalities": {
+    "commander": "legal"
+   },
+   "games": [
+    "arena"
+   ],
+   "finishes": [
+    "nonfoil"
+   ],
+   "set": "ea1",
+   "set_name": "Arena Alchemy",
+   "collector_number": "71",
+   "rarity": "common",
+   "digital": true
+  },
+  {
+   "object": "card",
+   "id": "2cec8863-8bbb-5908-b495-37f241bc6769",
+   "oracle_id": "56719f6a-1a6c-4c0a-8d21-18f7d7350b68",
+   "name": "Swamp",
+   "lang": "en",
+   "released_at": "2024-11-15",
+   "scryfall_uri": "https://scryfall.com/card/fdn/281/swamp?utm_source=api",
+   "layout": "normal",
+   "image_uris": {
+    "small": "https://cards.scryfall.io/small/front/2/c/2cec8863-8bbb-5908-b495-37f241bc6769.jpg",
+    "normal": "https://cards.scryfall.io/normal/front/2/c/2cec8863-8bbb-5908-b495-37f241bc6769.jpg",
+    "art_crop": "https://cards.scryfall.io/art_crop/front/2/c/2cec8863-8bbb-5908-b495-37f241bc6769.jpg"
+   },
+   "mana_cost": "",
+   "cmc": 0.0,
+   "type_line": "Basic Land — Swamp",
+   "color_identity": [
+    "B"
+   ],
+   "legalities": {
+    "commander": "legal"
+   },
+   "games": [
+    "paper",
+    "mtgo",
+    "arena"
+   ],
+   "finishes": [
+    "nonfoil",
+    "foil"
+   ],
+   "set": "fdn",
+   "set_name": "Foundations",
+   "collector_number": "281",
+   "rarity": "common",
+   "digital": false
+  },
+  {
+   "object": "card",
+   "id": "197016e4-e08d-509a-9414-abbae4415d20",
+   "oracle_id": "6ad8011d-3471-4369-9d68-b264cc027487",
+   "name": "Sol Ring",
+   "lang": "en",
+   "released_at": "2023-06-23",
+   "scryfall_uri": "https://scryfall.com/card/ltc/284/sol-ring?utm_source=api",
+   "layout": "normal",
+   "image_uris": {
+    "small": "https://cards.scryfall.io/small/front/1/9/197016e4-e08d-509a-9414-abbae4415d20.jpg",
+    "normal": "https://cards.scryfall.io/normal/front/1/9/197016e4-e08d-509a-9414-abbae4415d20.jpg",
+    "art_crop": "https://cards.scryfall.io/art_crop/front/1/9/197016e4-e08d-509a-9414-abbae4415d20.jpg"
+   },
+   "mana_cost": "{1}",
+   "cmc": 1.0,
+   "type_line": "Artifact",
+   "color_identity": [],
+   "legalities": {
+    "commander": "legal"
+   },
+   "games": [
+    "paper"
+   ],
+   "finishes": [
+    "nonfoil"
+   ],
+   "set": "ltc",
+   "set_name": "Tales of Middle-earth Commander",
+   "collector_number": "284",
+   "rarity": "uncommon",
+   "digital": false
+  },
+  {
+   "object": "card",
+   "id": "9bd3ae07-eac3-52a5-a36a-6d434186eaab",
+   "oracle_id": "6ad8011d-3471-4369-9d68-b264cc027487",
+   "name": "Sol Ring",
+   "lang": "en",
+   "released_at": "2021-04-23",
+   "scryfall_uri": "https://scryfall.com/card/c21/263/sol-ring?utm_source=api",
+   "layout": "normal",
+   "image_uris": {
+    "small": "https://cards.scryfall.io/small/front/9/b/9bd3ae07-eac3-52a5-a36a-6d434186eaab.jpg",
+    "normal": "https://cards.scryfall.io/normal/front/9/b/9bd3ae07-eac3-52a5-a36a-6d434186eaab.jpg",
+    "art_crop": "https://cards.scryfall.io/art_crop/front/9/b/9bd3ae07-eac3-52a5-a36a-6d434186eaab.jpg"
+   },
+   "mana_cost": "{1}",
+   "cmc": 1.0,
+   "type_line": "Artifact",
+   "color_identity": [],
+   "legalities": {
+    "commander": "legal"
+   },
+   "games": [
+    "paper"
+   ],
+   "finishes": [
+    "nonfoil",
+    "foil"
+   ],
+   "set": "c21",
+   "set_name": "Commander 2021",
+   "collector_number": "263",
+   "rarity": "uncommon",
+   "digital": false
+  }
+ ]
+}

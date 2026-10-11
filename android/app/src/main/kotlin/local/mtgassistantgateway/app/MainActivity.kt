@@ -2,13 +2,12 @@ package local.mtgassistantgateway.app
 
 import android.Manifest
 import android.content.ActivityNotFoundException
+import android.content.ClipboardManager
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.content.pm.ShortcutInfo
 import android.content.pm.ShortcutManager
-import android.graphics.drawable.Icon
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -55,9 +54,11 @@ import java.io.ByteArrayInputStream
  * - a phone-camera scan panel with torch brightness, zoom and exposure ([CameraPanel]), laid over
  *   the /scan page so the page keeps running and reads each photo through [ScanGlue];
  * - file pickers (photo and CSV import) and downloads (CSV export, skill zip);
- * - a floating menu: scan, reload, open in browser, change gateway, check for app updates;
+ * - a floating menu: scan, reload, open in browser, open a copied link, change gateway, check for
+ *   app updates;
  * - the app's own updates from the project's GitHub releases ([Updater]): a bar offers a newer
- *   version, one tap installs it over this one.
+ *   version, one tap installs it over this one. Checked at each cold launch and just after a
+ *   sign-in (at most once an hour), on returning to the app (at most twice a day) and on request.
  *
  * Navigation policy ([NavPolicy]): pages on the gateway's origin, and on the one identity
  * provider the gateway advertises (`/.well-known/mtg-gateway`; for an older gateway, the one its
@@ -70,8 +71,11 @@ import java.io.ByteArrayInputStream
  * a one-time code ([BrowserSignIn]). An older gateway signs in inside the WebView as before.
  *
  * Links into the app: an https link to the configured gateway (an App Link in the applinks flavor,
- * or a link shared to the app) opens that page. Before setup the address screen is shown without
- * any prefill, so a link can never pick the gateway. Links to any other site are ignored.
+ * a link shared to the app or one copied and opened from the menu) opens that page, and an
+ * archidekt.com deck link opens the gateway's page for that deck ([SharedLink]). The launcher
+ * shortcuts (res/xml/shortcuts.xml) name a page that opens on the saved gateway. Before setup the
+ * address screen is shown without any prefill, so a link can never pick the gateway. Links to any
+ * other site are not opened, and a message says what arrived.
  *
  * Fold posture (Jetpack WindowManager) is tracked here for the whole window and handed to the
  * scan panel, which lays itself out around the hinge.
@@ -127,6 +131,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var updateNow: Button
     private lateinit var updateLater: Button
     private var updateOffer: AppUpdate.Offer? = null
+    /** A browser sign-in was handed to the gateway: the next gateway page means it worked (update check). */
+    private var signInPosted = false
 
     /**
      * uiMode stays in configChanges: recreating at once would reload the page under the person and
@@ -169,11 +175,12 @@ class MainActivity : ComponentActivity() {
         // A saved gateway that never loads (moved, gone, a mistyped port) covers its own menu with
         // this box and hides the floating button: this is the way to another address.
         findViewById<Button>(R.id.error_change).setOnClickListener { changeGateway() }
-        publishShortcuts()
+        dropDynamicShortcuts()
         fab = findViewById(R.id.fab)
         fab.setOnClickListener { showMenu(it) }
         fab.visibility = View.GONE // shown by syncFab over pages that are not the gateway's
         setUpUpdates()
+        if (savedInstanceState == null) updater.checkAtSetPoint() // a cold launch, not a theme switch's recreate
         configureWebView()
         // A link is consumed once: after a restore the saved page wins, not the old intent.
         val signInCode = takeSignInCode(intent)
@@ -279,6 +286,7 @@ class MainActivity : ComponentActivity() {
                 R.id.menu_scan -> startScan()
                 R.id.menu_reload -> web.reload()
                 R.id.menu_browser -> openExternal(Uri.parse(web.url ?: origin))
+                R.id.menu_paste -> pasteLink()
                 R.id.menu_gateway -> changeGateway()
                 R.id.menu_update -> updater.check(manual = true)
             }
@@ -294,29 +302,34 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Launcher shortcuts to the gateway's pages, the same three as its web manifest. Dynamic, not
-     * static, because the gateway address is typed at first launch and the shortcut must carry a
-     * link to that gateway: each is an ACTION_VIEW of the page's https URL aimed at this activity,
-     * which [takeLinkedUrl] opens like any gateway link (in onCreate or, while the app is open,
-     * onNewIntent). Replaced whenever the app starts, so a changed gateway gets its own links.
+     * The launcher shortcuts are static now (res/xml/shortcuts.xml), so they show before the app has
+     * ever run. Versions up to 0.7.21 published the same three as dynamic shortcuts; those are
+     * removed so a long press never lists them twice. A shortcut someone pinned to the home screen
+     * keeps working: it carries a gateway link, which [takeLink] opens like any other.
      */
-    private fun publishShortcuts() {
+    private fun dropDynamicShortcuts() {
         val sm = getSystemService(ShortcutManager::class.java) ?: return
-        val labels = mapOf("decks" to R.string.shortcut_decks, "scan" to R.string.shortcut_scan, "proposals" to R.string.shortcut_proposals)
         try {
-            sm.dynamicShortcuts = GatewayUrl.SHORTCUTS.map { (id, path) ->
-                val open = Intent(Intent.ACTION_VIEW, Uri.parse(GatewayUrl.join(origin, path)), this, MainActivity::class.java)
-                ShortcutInfo.Builder(this, id)
-                    .setShortLabel(getString(labels.getValue(id)))
-                    .setIcon(Icon.createWithResource(this, R.mipmap.ic_launcher))
-                    .setIntent(open)
-                    .build()
-            }
+            if (sm.dynamicShortcuts.isNotEmpty()) sm.removeAllDynamicShortcuts()
         } catch (e: IllegalStateException) {
-            Log.w(TAG, "shortcuts not published: ${e.message}") // rate limited or a locked user: the links are a convenience
-        } catch (e: IllegalArgumentException) {
-            Log.w(TAG, "shortcuts not published: ${e.message}")
+            Log.w(TAG, "old shortcuts not removed: ${e.message}") // a locked user: tried again next launch
         }
+    }
+
+    /** "Open a copied link": the clipboard's link, under the same rules as a share ([SharedLink.resolve]). */
+    private fun pasteLink() {
+        val clip = getSystemService(ClipboardManager::class.java)?.primaryClip
+        val texts = mutableListOf<String?>()
+        if (clip != null) {
+            for (i in 0 until clip.itemCount) {
+                val item = clip.getItemAt(i)
+                texts.add(item.text?.toString())
+                texts.add(item.uri?.toString())
+            }
+        }
+        val url = linkedPage(SharedLink.resolve(origin, texts), copied = true) ?: return
+        if (camera != null) closeCamera()
+        web.loadUrl(url)
     }
 
     /**
@@ -379,6 +392,7 @@ class MainActivity : ComponentActivity() {
         }
         if (camera != null) closeCamera()
         errorBox.visibility = View.GONE
+        signInPosted = true
         web.postUrl(GatewayUrl.join(origin, BrowserSignIn.FINISH_PATH), BrowserSignIn.finishBody(code, verifier))
         return true
     }
@@ -644,10 +658,11 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Where an ACTION_VIEW (App Link) or ACTION_SEND intent leads, or null for any other intent.
-     * A share is searched for its first usable https link: in EXTRA_TEXT, in ClipData (where some
-     * apps put it instead) and in EXTRA_SUBJECT ([SharedLink.resolve]). The intent's action is
-     * cleared so the same link is not followed again on a later recreate.
+     * Where an ACTION_VIEW (App Link), ACTION_SEND or launcher-shortcut intent leads, or null for any
+     * other intent. A share is searched for its first usable https link: in EXTRA_TEXT and
+     * EXTRA_HTML_TEXT, in ClipData (where some apps put it instead), in EXTRA_SUBJECT and EXTRA_TITLE,
+     * and in the EXTRA_STREAM address ([SharedLink.resolve]). The intent's action is cleared so the
+     * same link is not followed again on a later recreate.
      */
     private fun takeLink(intent: Intent?): SharedLink.Target? {
         if (intent == null) return null
@@ -661,16 +676,32 @@ class MainActivity : ComponentActivity() {
                 }
             }
             Intent.ACTION_SEND -> {
-                val texts = mutableListOf<String?>(intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString())
+                val texts = mutableListOf<String?>(
+                    intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString(),
+                    intent.getStringExtra(Intent.EXTRA_HTML_TEXT),
+                )
                 intent.clipData?.let { clip ->
                     for (i in 0 until clip.itemCount) {
                         val item = clip.getItemAt(i)
                         texts.add(item.text?.toString())
+                        texts.add(item.htmlText)
                         texts.add(item.uri?.toString())
                     }
                 }
                 texts.add(intent.getCharSequenceExtra(Intent.EXTRA_SUBJECT)?.toString())
-                SharedLink.resolve(origin, texts)
+                texts.add(intent.getCharSequenceExtra(Intent.EXTRA_TITLE)?.toString())
+                val stream = if (android.os.Build.VERSION.SDK_INT >= 33) {
+                    intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                } else {
+                    @Suppress("DEPRECATION") intent.getParcelableExtra(Intent.EXTRA_STREAM)
+                }
+                texts.add(stream?.toString())
+                SharedLink.resolve(origin, texts, file = stream != null)
+            }
+            GatewayUrl.SHORTCUT_ACTION -> {
+                // A launcher shortcut (res/xml/shortcuts.xml): a page of the saved gateway, else home.
+                val path = GatewayUrl.shortcutPath(intent.getStringExtra(GatewayUrl.SHORTCUT_PAGE)) ?: "/"
+                SharedLink.Target.Open(GatewayUrl.join(origin, path))
             }
             else -> return null
         }
@@ -679,21 +710,29 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * The gateway page a link leads to, or null; says why when a link arrived but leads nowhere in
-     * the app. Only gateway pages load in the WebView (an archidekt.com deck link becomes the
-     * gateway's page for that deck); any other link is left alone rather than opened inside.
+     * The gateway page a link leads to, or null; says why when a link arrived ([copied]: from the
+     * clipboard) but leads nowhere in the app, naming the host it went to. Only gateway pages load in
+     * the WebView (an archidekt.com deck link becomes the gateway's page for that deck); any other
+     * link is left alone rather than opened inside.
      */
-    private fun linkedPage(target: SharedLink.Target?): String? = when (target) {
-        null -> null
-        is SharedLink.Target.Open -> target.url
-        is SharedLink.Target.Other -> {
-            Toast.makeText(this, getString(R.string.link_other_gateway, origin.removePrefix("https://")), Toast.LENGTH_LONG).show()
-            null
+    private fun linkedPage(target: SharedLink.Target?, copied: Boolean = false): String? {
+        val gateway = origin.removePrefix("https://")
+        val message = when (target) {
+            null -> return null
+            is SharedLink.Target.Open -> return target.url
+            is SharedLink.Target.Other -> {
+                val host = SharedLink.hostOf(target.first) ?: target.first
+                when {
+                    copied -> getString(R.string.clip_other, host, gateway)
+                    SharedLink.isDiscord(target.first) -> getString(R.string.link_discord_message, host)
+                    else -> getString(R.string.link_other_gateway, host, gateway)
+                }
+            }
+            SharedLink.Target.File -> getString(R.string.link_file_shared)
+            SharedLink.Target.None -> getString(if (copied) R.string.clip_none else R.string.link_none_shared)
         }
-        SharedLink.Target.None -> {
-            Toast.makeText(this, getString(R.string.link_none_shared), Toast.LENGTH_LONG).show()
-            null
-        }
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+        return null
     }
 
     override fun onPause() {
@@ -790,8 +829,15 @@ class MainActivity : ComponentActivity() {
             val gateway = GatewayUrl.isGateway(origin, url)
             // Once a sign-in ends (or a page was refused), its pages leave the history: Back would
             // otherwise reopen the provider's old login page, or the refused page, every time.
+            // A gateway page after a sign-in (in the app, or handed back by the browser) means it
+            // worked: a set point for the update check.
+            val signedIn = gateway && !GatewayUrl.isSignInPage(origin, url) && (nav.signingIn || signInPosted)
             if (nav.pageFinished(url)) view.clearHistory()
             syncBackCallback()
+            if (signedIn) {
+                signInPosted = false
+                updater.checkAtSetPoint()
+            }
             // A Light/Dark switch while the app was open: redraw the app's own screens now that a new
             // page has just loaded (it holds no unsaved edits yet), never under a page in use.
             if (themePending && fileCallback == null) {
@@ -961,6 +1007,10 @@ class MainActivity : ComponentActivity() {
 
         @JavascriptInterface
         fun checkForUpdates() = onGatewayPage { updater.check(manual = true) }
+
+        /** "Open a copied link" on the gateway's pages: the clipboard's gateway or archidekt.com deck link. */
+        @JavascriptInterface
+        fun openCopiedLink() = onGatewayPage { pasteLink() }
 
         @JavascriptInterface
         fun changeGateway() = onGatewayPage {

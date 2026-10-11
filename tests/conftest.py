@@ -26,6 +26,7 @@ from mtg_gateway.app import create_app
 from mtg_gateway.config import Settings
 from mtg_gateway.db import Database
 from mtg_gateway.oidc import OIDCClient
+from mtg_gateway.scan import scryfall as scan_scryfall
 
 IDP = "https://idp.test/application/o/mtg"
 GATEWAY = "https://mtg.test"
@@ -383,6 +384,16 @@ def sse_json(resp: httpx.Response) -> dict:
 @pytest.fixture
 def idp() -> FakeIdP:
     return FakeIdP()
+
+
+# Card resolution prefers printings already released "today" (scan/scryfall.py). Some fixture
+# printings come out after the fixtures were recorded, so every test runs on one fixed date.
+TODAY = "2026-10-11"
+
+
+@pytest.fixture(autouse=True)
+def _fixed_today(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(scan_scryfall, "today", lambda: TODAY)
 
 
 @contextlib.asynccontextmanager

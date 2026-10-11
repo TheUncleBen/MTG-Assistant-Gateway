@@ -1157,7 +1157,8 @@
   function statusLabel(res) {
     return { exact: 'Exact match', printing: 'Matched by set and number', fuzzy: 'Closest match' + (res.note ? ': ' + res.note : ''),
       ambiguous: 'Several cards match', not_found: 'Not found' + (res.note ? ': ' + res.note : ''),
-      deferred: 'Not looked up yet' + (res.note ? ': ' + res.note : ''), error: 'Error' }[res.status] || res.status;
+      deferred: 'Not looked up yet' + (res.note ? ': ' + res.note : ''), error: 'Error',
+      conflict: 'The set and number are a different card' + (res.note ? ': ' + res.note : '') }[res.status] || res.status;
   }
 
   /* A number field with a big minus and plus button either side (44px targets). */

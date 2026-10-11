@@ -463,10 +463,49 @@ async def test_android_app_gets_the_app_layout(stack: Stack) -> None:
         assert app.status_code == 200
         assert "<footer class='site'>" not in app.text
         assert re.search(r"<body class='[^']*\bapp\b", app.text)
-        for action in ("openCamera", "reload", "openInBrowser", "changeGateway", "checkForUpdates"):
+        for action in (
+            "openCamera",
+            "reload",
+            "openInBrowser",
+            "openCopiedLink",
+            "changeGateway",
+            "checkForUpdates",
+        ):
             assert f"data-native='{action}'" in app.text, action
         assert (
             "href='/app'" not in app.text[app.text.index("<nav class='user'") : app.text.index("</header>")]
         )
+    finally:
+        await b.aclose()
+
+
+async def test_account_page_in_the_app_has_an_app_card(stack: Stack) -> None:
+    """T-123/T-143: inside the app the Account page shows the installed version and the update
+    check, not "Get the Android app"; in a browser it stays as it was."""
+    b = Browser(stack.h)
+    try:
+        await b.login("/account")
+        web = await b.http.get("/account", headers=NAV)
+        assert web.status_code == 200
+        assert "Get the Android app" in web.text and "href='/app'" in web.text
+        assert "<h2>App</h2>" not in web.text and "data-native" not in web.text
+
+        app = await b.http.get("/account", headers={**NAV, **APP_UA})
+        assert app.status_code == 200
+        main = app.text[app.text.index("</header>") :]
+        assert "Get the Android app" not in main and "href='/app'" not in main
+        card = main[main.index("<div class='card' id='app'>") :]
+        card = card[: card.index("</div></div>") + 12]
+        assert "<h2>App</h2>" in card
+        assert "<dt>Installed version</dt><dd>0.6.4</dd>" in card
+        assert "data-native='checkForUpdates'" in card and "data-native='openCopiedLink'" in card
+
+        # A user agent with the mark but no readable version still gets the card, marked unknown,
+        # and nothing from the user agent reaches the page.
+        odd = {"User-Agent": "Mozilla/5.0 MTGAssistant/<b>x</b>"}
+        r = await b.http.get("/account", headers={**NAV, **odd})
+        assert "<dt>Installed version</dt><dd>unknown</dd>" in r.text and "<b>x</b>" not in r.text
+        r = await b.http.get("/account", headers={**NAV, "User-Agent": "MTGAssistant/0.7.22.9"})
+        assert "<dd>unknown</dd>" in r.text
     finally:
         await b.aclose()

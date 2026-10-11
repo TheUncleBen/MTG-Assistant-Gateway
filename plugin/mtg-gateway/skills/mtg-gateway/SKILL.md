@@ -105,10 +105,11 @@ the ingest tool, never a private deck's id.
   changers, tutors, extra turns, mass land denial and `salt_total`. Prices,
   salt and those flags are Archidekt's figures; say so when you quote them.
 - **Bracket:** `stats.bracket_estimate` is an estimate from Archidekt's card
-  flags (game changers, mass land denial, extra turns, two-card combos),
-  never bracket 5. Always call it an estimate, not the deck's official
-  bracket; `archidekt_bracket` is what the owner set on Archidekt, if
-  anything. Explain the `basis` lines.
+  flags, and a floor: it counts only game changers, mass land denial, extra
+  turns, tutors and two-card combos, never bracket 5. Always call it an
+  estimate, not the deck's official bracket. `archidekt_bracket` is the
+  bracket set on the deck (the owner's setting), if any; call it that.
+  Explain the `basis` lines.
 - **Testing:** `run_deck_report` reads the deck, keeps its statistics and,
   when the research service is up, a `validate_decklist` and a goldfish run
   (`games`, default 300), stored for the user. `list_deck_reports` (per deck

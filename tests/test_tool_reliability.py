@@ -229,6 +229,62 @@ async def test_arguments_that_do_not_fit_get_a_flagged_structured_refusal(stack:
     # a refusal from the tool itself carries the error flag too
     res = await call(stack.h, token, "get_deck", {"deck_ref": "not a deck"})
     assert res.get("isError") is True and structured(res)["ok"] is False
+    assert structured(res)["error_code"] == "INVALID_ARGUMENT" and structured(res)["retryable"] is False
+    assert out["error_code"] == "INVALID_ARGUMENT"
+    # something that does not exist is NOT_FOUND, not a wrong argument
+    raw = await call(stack.h, token, "get_proposal", {"proposal_id": "nope"})
+    res = structured(raw)
+    assert res["error"] == "not_found" and res["error_code"] == "NOT_FOUND" and res["retryable"] is False
+    # clients that read only the text get the same fields
+    assert json.loads(raw["content"][0]["text"]) == res
+
+
+async def test_refusals_carry_an_error_code_by_kind() -> None:
+    """The QA round saw busy, not_found and an unreachable Scryfall all as INVALID_ARGUMENT. Each
+    kind keeps its ``error`` and gets its own error_code; busy and unavailable are retryable."""
+    from types import SimpleNamespace
+
+    from mtg_gateway.app import _tool_error, error_code, schema_error_middleware
+    from mtg_gateway.decks import DeckError
+    from mtg_gateway.mf_proxy import _busy
+
+    mw = schema_error_middleware()
+    ctx = SimpleNamespace(method="tools/call")
+
+    async def run(result):
+        async def call_next(_ctx):
+            return result
+
+        return await mw(ctx, call_next)
+
+    def refusal(kind: str, **extra) -> dict:
+        sc = {"ok": False, "error": kind, "message": "m", **extra}
+        return {"content": [{"type": "text", "text": json.dumps(sc)}], "structuredContent": sc}
+
+    for kind, code, retry in [
+        ("not_found", "NOT_FOUND", False),
+        ("busy", "BUSY", True),
+        ("unavailable", "UNAVAILABLE", True),
+        ("rate_limited", "RATE_LIMITED", True),
+        ("invalid", "INVALID_ARGUMENT", False),
+        ("not_pending", "FAILED_PRECONDITION", False),
+        ("browser_required", "PERMISSION_DENIED", False),
+        ("insufficient_scope", "PERMISSION_DENIED", False),
+    ]:
+        out = (await run(refusal(kind)))["structuredContent"]
+        assert (out["error"], out["error_code"], out["retryable"]) == (kind, code, retry), out
+    out = await run(refusal("rate_limited", retry_after=120))
+    assert out["isError"] is True and out["structuredContent"]["retry_after"] == 120
+    assert _tool_error(DeckError("rate_limited", "wait", retry_after=30))["retry_after"] == 30
+    assert error_code("something_new") == "UNKNOWN"
+    # the research proxy's busy answer is plain text: it gets the same structured refusal
+    out = await run(_busy())
+    sc = out["structuredContent"]
+    assert out["isError"] is True and sc["error"] == "busy" and sc["error_code"] == "BUSY" and sc["retryable"]
+    assert sc["message"].startswith("2 research calls") and "busy: " in out["content"][0]["text"]
+    # a success is left alone
+    ok = {"content": [{"type": "text", "text": "{}"}], "structuredContent": {"ok": True}}
+    assert await run(ok) is ok
 
 
 # -- deck reads ---------------------------------------------------------------------------------
@@ -690,3 +746,43 @@ async def test_a_report_without_a_simulation_is_not_reused_for_one_that_asks(sta
     # the earlier report had no simulation, so this one runs it instead of reporting a failure
     assert second.get("reused") is not True and "goldfish_run" in ran, second
     assert second.get("error") != "simulation_failed", second
+
+
+# -- Commander searches leave out Arena- and MTGO-only cards ------------------------------------
+class SearchInput(BaseModel):
+    query: str = Field(description="Scryfall search query.")
+
+
+def test_paper_search_query_only_for_commander_searches_without_a_game() -> None:
+    from mtg_gateway.mf_proxy import paper_search_query
+
+    for q in ("t:angel id<=wu", "o:flying commander:wu", "t:dragon f:commander", "is:commander t:angel"):
+        assert paper_search_query(q) == q + " game:paper", q
+    for q in (
+        "t:angel",
+        'o:"commander"',
+        "t:angel id<=wu game:arena",
+        "id<=wu -game:mtgo",
+        "t:angel ID<=W Game:paper",
+    ):
+        assert paper_search_query(q) == q, q
+    long = "id<=wu " + "x" * 490
+    assert paper_search_query(long) == long  # adding it would pass the query limit
+
+
+async def test_a_commander_search_through_the_proxy_asks_for_paper_cards() -> None:
+    mf = MCPServer(name="search-shaped")
+
+    @mf.tool(name="scryfall_search", description="Search for cards.")
+    async def scryfall_search(params: SearchInput) -> str:
+        return f"query={params.query}"
+
+    proxy = MysticForgeProxy("http://mf.test/mcp", client_factory=lambda: Client(mf))
+    listed = {t["name"]: t for t in await proxy.tools()}
+    assert "adds game:paper" in listed["scryfall_search"]["description"]
+    out = await proxy.call("scryfall_search", {"query": "t:angel id<=w"})
+    assert out.content[0].text == "query=t:angel id<=w game:paper"
+    out = await proxy.call("scryfall_search", {"params": {"query": "t:angel id<=w game:arena"}})
+    assert out.content[0].text == "query=t:angel id<=w game:arena"
+    out = await proxy.call("scryfall_search", {"query": "t:angel"})
+    assert out.content[0].text == "query=t:angel"

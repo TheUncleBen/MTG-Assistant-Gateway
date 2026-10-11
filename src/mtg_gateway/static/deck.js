@@ -22,6 +22,18 @@
     if (text !== undefined) e.textContent = text;
     return e;
   }
+  // While something is dragged: how far to scroll the page this frame when the pointer or finger
+  // rests near the window's top or bottom edge (faster the closer it is), so a far stack is reachable;
+  // never past the ends of `box` (the cards), where there is nothing left to drop on.
+  function edgeStep(y, box) {
+    var zone = Math.min(96, window.innerHeight * 0.15), h = window.innerHeight;
+    var d = y < zone ? -(zone - y) : y > h - zone ? y - (h - zone) : 0;
+    if (d && box) {
+      var r = box.getBoundingClientRect();
+      if ((d < 0 && r.top >= zone) || (d > 0 && r.bottom <= h - zone)) return 0;
+    }
+    return Math.round(Math.max(-1, Math.min(1, d / zone)) * 22);
+  }
 
   // -- forms that apply on change ----------------------------------------------------------
   $$("#viewform, #listform, #searchform").forEach(function (form) {
@@ -760,6 +772,9 @@
     if (!card || !cards.contains(card)) return;
     e.preventDefault();  // never the browser's image menu over a card
     if (picking || (menu && menuCard === card)) return;  // a touch hold already opened it
+    // a finger still holding the card: Android's own long press must not open the menu under it,
+    // or the slide that follows scrolls the page in place of moving the card (letting go opens it)
+    if (armed === card || touchCard) return;
     openMenu(card, e.clientX, e.clientY);
   });
   cards.addEventListener("keydown", function (e) {
@@ -1226,7 +1241,10 @@
 
   // touch: press and hold a card for 350 ms. Let go without moving and the card's menu opens;
   // slide it (on the category grouping of your own deck) and it moves onto another category.
+  // The copy under the finger moves by transform and the stack under it is looked up once a frame,
+  // not on every touchmove; near the window's top or bottom edge the page scrolls on by itself.
   var hold = null, armed = null, touchCard = null, ghost = null, lastTarget = null, startX = 0, startY = 0;
+  var touchX = 0, touchY = 0, ghostW = 0, touchFrame = 0;
   function armTouch(card) {
     armed = card;
     card.classList.add("held");
@@ -1236,10 +1254,38 @@
     touchCard = armed;
     dragged = touchCard;
     touchCard.classList.add("dragging");
-    ghost = touchCard.cloneNode(true);
-    ghost.classList.remove("dragging", "held");
-    ghost.style.cssText = "position:fixed;z-index:70;width:" + touchCard.offsetWidth + "px;pointer-events:none;opacity:.9;left:" + (t.clientX - touchCard.offsetWidth / 2) + "px;top:" + (t.clientY - 40) + "px;margin:0";
+    ghostW = touchCard.offsetWidth;
+    // the copy sits in a .deckview of its own (and a text row in its list) to keep the card's look
+    var copy = touchCard.cloneNode(true);
+    copy.classList.remove("dragging", "held");
+    ghost = el("div", "deckview dragghost");
+    ghost.setAttribute("aria-hidden", "true");
+    ghost.style.width = ghostW + "px";
+    if (copy.classList.contains("row")) {
+      var list = el("ul", "plain rows");
+      list.appendChild(copy);
+      copy = list;
+    }
+    ghost.appendChild(copy);
     document.body.appendChild(ghost);
+    touchX = t.clientX; touchY = t.clientY;
+    touchTick();
+  }
+  function touchTick() {
+    touchFrame = 0;
+    if (!touchCard) return;
+    var dy = edgeStep(touchY, cards);
+    if (dy) window.scrollBy(0, dy);
+    ghost.style.transform = "translate3d(" + Math.round(touchX - ghostW / 2) + "px," + Math.round(touchY - 40) + "px,0)";
+    var under = document.elementFromPoint(touchX, touchY);
+    var st = under ? under.closest(".stack") : null;
+    if (st && !cards.contains(st)) st = null;
+    if (st !== lastTarget) {
+      if (lastTarget) lastTarget.classList.remove("dropping");
+      if (st) st.classList.add("dropping");
+      lastTarget = st;
+    }
+    if (dy) touchFrame = requestAnimationFrame(touchTick);  // a resting finger keeps the page scrolling
   }
   cards.addEventListener("touchstart", function (e) {
     var card = e.target.closest(".c, .row");
@@ -1259,19 +1305,20 @@
       startTouchDrag(t);
     }
     e.preventDefault();
-    ghost.style.left = (t.clientX - touchCard.offsetWidth / 2) + "px";
-    ghost.style.top = (t.clientY - 40) + "px";
-    var under = document.elementFromPoint(t.clientX, t.clientY);
-    var st = under ? under.closest(".stack") : null;
-    if (lastTarget && lastTarget !== st) lastTarget.classList.remove("dropping");
-    if (st) st.classList.add("dropping");
-    lastTarget = st;
+    touchX = t.clientX; touchY = t.clientY;
+    if (!touchFrame) touchFrame = requestAnimationFrame(touchTick);
   }, { passive: false });
   function endTouch(e) {
     clearTimeout(hold);
     var wasArmed = armed;
     if (wasArmed) wasArmed.classList.remove("held");
     armed = null;
+    if (touchFrame) {
+      // the last slide was not drawn yet: find the stack under the finger before dropping
+      cancelAnimationFrame(touchFrame);
+      touchFrame = 0;
+      if (touchCard) { touchTick(); cancelAnimationFrame(touchFrame); touchFrame = 0; }
+    }
     if (touchCard) {
       if (lastTarget) { lastTarget.classList.remove("dropping"); if (moveCardFn) moveCardFn(touchCard, lastTarget); }
       touchCard.classList.remove("dragging", "held");
@@ -1363,34 +1410,119 @@
         announce(nameOf(st) + ": position " + (stacksNow().indexOf(st) + 1) + " of " + list.length);
       });
       grip.addEventListener("pointerdown", function (e) {
-        if (e.button !== 0) return;
+        if (e.button !== 0 || drag) return;
         e.preventDefault();
-        grip.setPointerCapture(e.pointerId);
-        st.classList.add("moving");
-        var moved = false;
-        function over(ev) {
-          var under = document.elementFromPoint(ev.clientX, ev.clientY);
-          var target = under && under.closest ? under.closest(".stack") : null;
-          if (!target || target === st || target.parentNode !== cards) return;
-          var r = target.getBoundingClientRect();
-          // before the target when the pointer is in its first half (top half, or left half in a row)
-          var horizontal = getComputedStyle(cards).display === "grid" && r.width < cards.clientWidth * 0.9;
-          var first = horizontal ? ev.clientX < r.left + r.width / 2 : ev.clientY < r.top + r.height / 2;
-          cards.insertBefore(st, first ? target : target.nextSibling);
-          moved = true;
-        }
-        function end() {
-          grip.removeEventListener("pointermove", over);
-          grip.removeEventListener("pointerup", end);
-          grip.removeEventListener("pointercancel", end);
-          st.classList.remove("moving");
-          if (moved) { save(); announce(nameOf(st) + " moved."); }
-        }
-        grip.addEventListener("pointermove", over);
-        grip.addEventListener("pointerup", end);
-        grip.addEventListener("pointercancel", end);
+        try { grip.setPointerCapture(e.pointerId); } catch (err) { /* the pointer is gone already */ }
+        drag = { st: st, grip: grip, id: e.pointerId, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, on: false, spot: null,
+          finger: e.pointerType !== "mouse" };
+        grip.addEventListener("pointermove", dragMove);
+        grip.addEventListener("pointerup", dragUp);
+        grip.addEventListener("pointercancel", dragCancel);
+        grip.addEventListener("lostpointercapture", dragCancel);
       });
     }
+    // A pointer drag leaves every stack where it is until it is let go: a bar shows where the
+    // stack will land and a label with its name follows the pointer. Nothing reflows under the
+    // pointer meanwhile (the text and Brewer views' columns would reshuffle on every step), the
+    // landing spot is looked up once a frame, and near the window's top or bottom edge the page
+    // scrolls on by itself. Escape puts the stack back where it was.
+    var drag = null, dropBar = null, dragTag = null, dragFrame = 0;
+    function dragMove(ev) {
+      if (!drag || ev.pointerId !== drag.id) return;
+      drag.x = ev.clientX; drag.y = ev.clientY;
+      if (!drag.on) {
+        if (Math.abs(drag.x - drag.x0) + Math.abs(drag.y - drag.y0) < 6) return;  // a click, not a drag yet
+        drag.on = true;
+        var r = drag.st.getBoundingClientRect();
+        drag.horizontal = getComputedStyle(cards).display === "grid" && r.width < cards.clientWidth * 0.9;
+        drag.st.classList.add("moving");
+        cards.classList.add("sorting");
+        dropBar = el("div", "stackdrop");
+        dropBar.setAttribute("aria-hidden", "true");
+        dragTag = el("div", "stacktag", nameOf(drag.st));
+        dragTag.setAttribute("aria-hidden", "true");
+        document.body.appendChild(dropBar);
+        document.body.appendChild(dragTag);
+        drag.tagW = dragTag.offsetWidth;
+      }
+      if (!dragFrame) dragFrame = requestAnimationFrame(dragTick);
+    }
+    function dragTick() {
+      dragFrame = 0;
+      if (!drag || !drag.on) return;
+      var dy = edgeStep(drag.y, cards);
+      if (dy) window.scrollBy(0, dy);
+      // the name sits beside a mouse pointer, and above a finger, where the hand does not cover it
+      var tx = Math.max(8, Math.min(drag.x + 16, window.innerWidth - drag.tagW - 8));
+      dragTag.style.transform = "translate3d(" + Math.round(tx) + "px," + Math.round(drag.y + (drag.finger ? -56 : 12)) + "px,0)";
+      findSpot();
+      drawBar();
+      if (dy) dragFrame = requestAnimationFrame(dragTick);  // a resting pointer keeps the page scrolling
+    }
+    function findSpot() {
+      // the stack under the pointer, or the nearest one when it is in a gap, in the page margin or
+      // over a bar fixed to the window (the phone's bottom bar): measured, so nothing covers it
+      var target = null, r = null, best = Infinity;
+      stacksNow().forEach(function (s) {
+        var b = s.getBoundingClientRect();
+        var dx = Math.max(b.left - drag.x, 0, drag.x - b.right), dy = Math.max(b.top - drag.y, 0, drag.y - b.bottom);
+        if (dx * dx + dy * dy < best) { best = dx * dx + dy * dy; target = s; r = b; }
+      });
+      if (!target) return;
+      // before the target in its left half (a row of stacks), or above its header line (a tall
+      // stack's middle may be far off screen; its header is where the eye is)
+      var first = drag.horizontal ? drag.x < r.left + r.width / 2 : drag.y < r.top + Math.min(r.height / 2, 60);
+      var ref = first ? target : target.nextElementSibling;
+      drag.spot = target === drag.st || ref === drag.st || ref === drag.st.nextElementSibling
+        ? null : { target: target, ref: ref, first: first };
+    }
+    function drawBar() {
+      // a 1 px box placed and stretched by transform alone: drawing it never lays the page out
+      var s = dropBar.style;
+      if (!drag.spot) { s.opacity = "0"; return; }
+      var r = drag.spot.target.getBoundingClientRect(), x, y, w, h;
+      if (drag.horizontal) {
+        x = (drag.spot.first ? r.left - 10 : r.right + 6); y = r.top; w = 4; h = r.height;
+      } else {
+        x = r.left; y = (drag.spot.first ? r.top - 8 : r.bottom + 4); w = r.width; h = 4;
+      }
+      s.opacity = "1";
+      s.transform = "translate3d(" + Math.round(x) + "px," + Math.round(y) + "px,0) scale(" + Math.round(w) + "," + Math.round(h) + ")";
+    }
+    function dragEnd(commit) {
+      var d = drag;
+      if (!d) return;
+      drag = null;
+      if (dragFrame) { cancelAnimationFrame(dragFrame); dragFrame = 0; }
+      d.grip.removeEventListener("pointermove", dragMove);
+      d.grip.removeEventListener("pointerup", dragUp);
+      d.grip.removeEventListener("pointercancel", dragCancel);
+      d.grip.removeEventListener("lostpointercapture", dragCancel);
+      try { d.grip.releasePointerCapture(d.id); } catch (err) { /* released already */ }
+      if (!d.on) return;
+      d.st.classList.remove("moving");
+      cards.classList.remove("sorting");
+      if (dropBar) dropBar.remove();
+      if (dragTag) dragTag.remove();
+      dropBar = dragTag = null;
+      if (commit && d.spot) {
+        cards.insertBefore(d.st, d.spot.ref);
+        save();
+        var list = stacksNow();
+        announce(nameOf(d.st) + ": position " + (list.indexOf(d.st) + 1) + " of " + list.length);
+      } else if (!commit) {
+        announce(nameOf(d.st) + " stays where it was.");
+      }
+    }
+    function dragUp(ev) {
+      if (!drag || ev.pointerId !== drag.id) return;
+      if (drag.on) { drag.x = ev.clientX; drag.y = ev.clientY; findSpot(); }  // where it was let go
+      dragEnd(true);
+    }
+    function dragCancel(ev) { if (drag && ev.pointerId === drag.id) dragEnd(false); }
+    document.addEventListener("keydown", function (e) {
+      if (drag && drag.on && e.key === "Escape") { e.preventDefault(); dragEnd(false); }
+    });
     original.forEach(addHandle);
     // a stack the page adds later (a card moved into a new category) gets a handle too
     new MutationObserver(function () { stacksNow().forEach(addHandle); }).observe(cards, { childList: true });

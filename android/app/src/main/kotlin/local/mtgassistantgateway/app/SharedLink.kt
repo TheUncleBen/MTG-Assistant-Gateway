@@ -10,7 +10,8 @@ import java.net.URISyntaxException
  * discord.com link to the message), a browser may add the page title, and some apps put the text
  * in ClipData rather than EXTRA_TEXT. So every https URL in every shared text is looked at, and the
  * first one the app can open wins: a page on the gateway, or an archidekt.com deck link, which
- * opens the gateway's own page for that deck. Nothing else ever loads inside the app.
+ * opens the gateway's own page for that deck. Nothing else ever loads inside the app. The same rules
+ * apply to a link copied to the clipboard ("Open a copied link").
  *
  * Pure functions, no Android types, so the unit tests run on a plain JVM.
  */
@@ -20,6 +21,8 @@ object SharedLink {
         data class Open(val url: String) : Target()
         /** Only links the app does not open ([first] is the first of them). */
         data class Other(val first: String) : Target()
+        /** No https link, but a file (EXTRA_STREAM) was shared. */
+        object File : Target()
         /** No https link in what was shared. */
         object None : Target()
     }
@@ -58,14 +61,32 @@ object SharedLink {
         return if (id.length in 1..12 && id.all { it in '0'..'9' }) id else null
     }
 
+    /** The host of [url] in lower case (`discord.com`), for telling the person what arrived; null if none. */
+    fun hostOf(url: String): String? = try {
+        URI(url).host?.lowercase()?.takeIf { it.isNotEmpty() }
+    } catch (e: URISyntaxException) {
+        null
+    }
+
+    /**
+     * A link to Discord itself (a message link from Discord's own Share), not the link in a message.
+     * Discord's Share on a message hands over such a link; the deck link has to be shared or copied
+     * on its own.
+     */
+    fun isDiscord(url: String): Boolean {
+        val host = hostOf(url) ?: return false
+        return listOf("discord.com", "discordapp.com", "discord.gg").any { host == it || host.endsWith(".$it") }
+    }
+
     /**
      * Where the shared [texts] (EXTRA_TEXT, then each ClipData item, ...) lead for a gateway at
      * [origin]: the first gateway link, else the first archidekt.com deck link as the gateway's deck
-     * page, else [Target.Other] or [Target.None].
+     * page, else [Target.Other], or [Target.File] when there was no link but [file] was shared, or
+     * [Target.None].
      */
-    fun resolve(origin: String, texts: List<String?>): Target {
+    fun resolve(origin: String, texts: List<String?>, file: Boolean = false): Target {
         val urls = texts.flatMap { urlsIn(it) }.distinct()
-        if (urls.isEmpty()) return Target.None
+        if (urls.isEmpty()) return if (file) Target.File else Target.None
         urls.firstOrNull { GatewayUrl.isGateway(origin, it) }?.let { return Target.Open(it) }
         for (u in urls) {
             val id = archidektDeckId(u) ?: continue

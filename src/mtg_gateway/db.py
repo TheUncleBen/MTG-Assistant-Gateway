@@ -1392,9 +1392,10 @@ class Database:
             ]
             for pid in ids:
                 c.execute(
-                    "UPDATE proposals SET state = 'rejected', applied_at = ? "
+                    "UPDATE proposals SET state = 'rejected', applied_at = ?, "
+                    "result_json = json_patch(COALESCE(result_json, '{}'), ?) "
                     "WHERE id = ? AND state = 'pending'",
-                    (int(time.time()), pid),
+                    (int(time.time()), json.dumps({"rejected_by": "disconnected"}), pid),
                 )
         return ids
 
@@ -1483,13 +1484,18 @@ class Database:
             out[str(r["deck_id"])] = str(r["deck_name"] or out.get(str(r["deck_id"])) or "")
         return out
 
-    def reject_proposal(self, proposal_id: str, owner_sub: str) -> bool:
-        """Move pending -> rejected for the owner; False if it was not pending."""
+    def reject_proposal(
+        self, proposal_id: str, owner_sub: str, closed_by: dict[str, Any] | None = None
+    ) -> bool:
+        """Move pending -> rejected for the owner; False if it was not pending. ``closed_by``
+        (who rejected it: ``{"rejected_by": ..., "client": ...}``) is merged into its result."""
+        patch = json.dumps(closed_by) if closed_by else None
         with self.tx() as c:
             cur = c.execute(
-                "UPDATE proposals SET state = 'rejected', applied_at = ? WHERE id = ? AND owner_sub = ? "
-                "AND state = 'pending' AND expires_at >= ?",
-                (int(time.time()), proposal_id, owner_sub, int(time.time())),
+                "UPDATE proposals SET state = 'rejected', applied_at = ?, result_json = CASE WHEN ? IS NULL "
+                "THEN result_json ELSE json_patch(COALESCE(result_json, '{}'), ?) END "
+                "WHERE id = ? AND owner_sub = ? AND state = 'pending' AND expires_at >= ?",
+                (int(time.time()), patch, patch, proposal_id, owner_sub, int(time.time())),
             )
             return cur.rowcount == 1
 

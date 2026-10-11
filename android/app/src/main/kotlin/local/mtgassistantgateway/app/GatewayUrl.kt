@@ -87,10 +87,18 @@ object GatewayUrl {
 
     /**
      * The launcher shortcuts, the same three as the gateway's web manifest (`/app.webmanifest`):
-     * id to gateway path. They are set once the gateway address is known (dynamic shortcuts), so
-     * each opens a page of the configured gateway.
+     * id to gateway path. They are static (res/xml/shortcuts.xml), so they show on a long press of
+     * the icon even before the app has run; each names its page in [SHORTCUT_PAGE] and the app
+     * opens that path on the saved gateway ([shortcutPath]).
      */
     val SHORTCUTS: List<Pair<String, String>> = listOf("decks" to "/decks", "scan" to "/scan", "proposals" to "/proposals")
+
+    /** The action and extra of a launcher shortcut's intent (res/xml/shortcuts.xml). */
+    const val SHORTCUT_ACTION = "local.mtgassistantgateway.app.OPEN_PAGE"
+    const val SHORTCUT_PAGE = "page"
+
+    /** The gateway path a shortcut's [SHORTCUT_PAGE] names, or null for anything that is not one of [SHORTCUTS]. */
+    fun shortcutPath(page: String?): String? = SHORTCUTS.firstOrNull { it.first == page }?.second
 
     /**
      * The gateway page whose redirect goes straight to the identity provider: /login. Only its

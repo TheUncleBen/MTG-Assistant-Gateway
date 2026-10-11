@@ -255,7 +255,52 @@ async def test_card_cannot_apply_what_the_browser_already_rejected(stack: Stack)
         await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": code})
     )
     assert got["ok"] is False and got["error"] == "not_pending"
+    # The refusal says what the proposal is now, so the card shows it and drops its buttons.
+    assert got["state"] == "rejected" and got["closed_at"] and got["error_code"] == "FAILED_PRECONDITION"
+    assert got["retryable"] is False and "already rejected" in got["message"]
     assert _writes(stack.ark) == 0
+
+
+async def test_a_reject_names_who_closed_the_proposal(stack: Stack) -> None:
+    """The assistant's reject_proposal is not the user's press: next_step and closed_by say which
+    it was, and a card press on that proposal afterwards gets its state back."""
+    h = stack.h
+    token = await linked_user(stack)
+    res = await _propose(h, token)
+    p, code = structured(res), res["_meta"][APPROVAL_META_KEY]
+    got = structured(await call(h, token, "reject_proposal", {"proposal_id": p["proposal_id"]}))
+    assert got["ok"] is True and got["state"] == "rejected"
+    assert got["closed_by"] == "assistant" and got["closed_by_app"] == "t" and got["closed_at"]
+    assert "Rejected through t (the assistant's reject_proposal)" in got["next_step"]
+    assert "Rejected by the user" not in got["next_step"]
+    late = structured(
+        await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": code})
+    )
+    assert late["ok"] is False and late["error"] == "not_pending" and late["state"] == "rejected"
+    assert late["closed_by"] == "assistant" and late["closed_by_app"] == "t"
+    again = structured(await call(h, token, "reject_proposal", {"proposal_id": p["proposal_id"]}))
+    assert again["error"] == "not_pending" and again["state"] == "rejected"
+    # The card's Reject is the user's own press.
+    res = await _propose(h, token)
+    q, code = structured(res), res["_meta"][APPROVAL_META_KEY]
+    got = structured(
+        await call(
+            h,
+            token,
+            "confirm_proposal",
+            {"proposal_id": q["proposal_id"], "approval": code, "decision": "reject"},
+        )
+    )
+    assert got["closed_by"] == "card" and "Rejected by the user on the proposal card" in got["next_step"]
+    assert _writes(stack.ark) == 0
+    # The review page says it too, in its own words, without a raw result box for it.
+    b = Browser(h)
+    await b.login()
+    page = (await b.http.get(f"/proposals/{p['proposal_id']}")).text
+    assert "rejected by your assistant (its reject_proposal call)" in page and "rejected_by" not in page
+    page = (await b.http.get(f"/proposals/{q['proposal_id']}")).text
+    assert "rejected on the proposal card in your chat" in page
+    await b.aclose()
 
 
 async def test_read_only_token_cannot_confirm(stack: Stack) -> None:

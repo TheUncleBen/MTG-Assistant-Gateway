@@ -243,6 +243,13 @@ class DeckCard:
     artist: str = ""
     flavor: str = ""
     keywords: list[str] = field(default_factory=list)  # Archidekt's oracle ``keywords`` (Flying, Equip...)
+    # What archidekt.com's legality check reads besides the above: whether the card may lead a
+    # Pauper EDH deck (None when not sent), its Canadian Highlander points, and the oracle ids of
+    # the cards it forms a two-card infinite combo with (``atomicCombos``), matched by oracle id.
+    is_pdh_commander: bool | None = None
+    canlander_points: int | None = None
+    atomic_combos: list[str] = field(default_factory=list)
+    oracle_id: str = ""
 
     @property
     def type_line(self) -> str:
@@ -343,7 +350,10 @@ class Deck:
         the deck's data on 2026-10-08; the "any included category" rule gave 63)."""
         if not categories:
             return True
-        return categories[0] not in self.excluded_categories()
+        # Archidekt keeps a row whose primary category is "Sideboard" out of the deck's size even
+        # though that category is "included in deck" by default: it is the sideboard (its
+        # legality check, read from archidekt.com's code on 2026-10-11).
+        return categories[0] != "Sideboard" and categories[0] not in self.excluded_categories()
 
     @property
     def main_cards(self) -> list[DeckCard]:
@@ -1639,6 +1649,8 @@ def parse_deck(body: Any) -> Deck:
         legalities = oracle.get("legalities") if isinstance(oracle.get("legalities"), dict) else {}
         rank = oracle.get("edhrecRank")
         combos = oracle.get("twoCardComboIds") if isinstance(oracle.get("twoCardComboIds"), list) else []
+        atomic = oracle.get("atomicCombos") if isinstance(oracle.get("atomicCombos"), list) else []
+        pdh = oracle.get("isPDHCommander")
         cards.append(
             DeckCard(
                 relation_id=entry.get("id") if isinstance(entry.get("id"), int) else None,
@@ -1685,6 +1697,10 @@ def parse_deck(body: Any) -> Deck:
                 flavor=str(card.get("flavor") or ""),
                 keywords=_str_list(oracle.get("keywords")),
                 owned=_int(card.get("owned")),
+                is_pdh_commander=pdh if isinstance(pdh, bool) else None,
+                canlander_points=_int(oracle.get("canlanderPoints")) or None,
+                atomic_combos=[str(i) for i in atomic if isinstance(i, (int, str))],
+                oracle_id=str(oracle.get("id") or ""),
             )
         )
     owner = body.get("owner") if isinstance(body.get("owner"), dict) else {}

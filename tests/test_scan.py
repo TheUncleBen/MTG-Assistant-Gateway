@@ -118,10 +118,13 @@ async def test_resolve_requires_input_and_handles_scryfall_outage(stack: Stack) 
         "ok": False,
         "error": "invalid",
         "message": "give `cards` or `text` with at least one card",
+        "error_code": "INVALID_ARGUMENT",
+        "retryable": False,
     }
     stack.sf.fail_with = 503
     out = (await call(h, token, "resolve_cards", {"text": "Sol Ring"}))["structuredContent"]
     assert out["ok"] is False and out["error"] == "unavailable"
+    assert out["error_code"] == "UNAVAILABLE" and out["retryable"] is True  # not INVALID_ARGUMENT
 
 
 async def test_scryfall_client_caches_and_paces() -> None:
@@ -455,7 +458,13 @@ async def test_resolve_caps_names_per_call(stack: Stack) -> None:
     token = await mcp_token(stack.h)
     names = [{"name": "Sol Ring"}] * (MAX_RESOLVE_CARDS + 1)
     out = (await call(stack.h, token, "resolve_cards", {"cards": names}))["structuredContent"]
-    assert out == {"ok": False, "error": "invalid", "message": f"at most {MAX_RESOLVE_CARDS} cards per call"}
+    assert out == {
+        "ok": False,
+        "error": "invalid",
+        "message": f"at most {MAX_RESOLVE_CARDS} cards per call",
+        "error_code": "INVALID_ARGUMENT",
+        "retryable": False,
+    }
     assert not any(m == "POST" for m, _ in stack.sf.requests)  # rejected before any Scryfall traffic
 
 
@@ -710,7 +719,8 @@ async def test_info_line_resolves_the_printing_and_distrusts_a_conflicting_read(
     cards = out["cards"]
     assert cards[0]["status"] == "printing" and cards[0]["card"]["collector_number"] == "365"
     assert cards[0]["foil"] is True and cards[0]["input"]["collector_number"] == "365"
-    assert cards[1]["status"] == "exact" and cards[1]["card"]["name"] == "Sol Ring"
+    # A printing that is another card is a conflict: kept for review, never ready to use.
+    assert cards[1]["status"] == "conflict" and cards[1]["card"]["name"] == "Sol Ring"
     assert "does not match 'Sol Ring'; matched by name instead" in cards[1]["note"]
     assert cards[1]["input"]["lang"] == "en"
     # The single finish wins over the pasted marker, and the note says so.
@@ -748,13 +758,13 @@ async def test_printing_needs_the_title_to_agree(stack: Stack) -> None:
         )
     )["structuredContent"]
     cards = out["cards"]
-    assert cards[0]["status"] == "exact" and cards[0]["card"]["name"] == "Sol Ring"
+    assert cards[0]["status"] == "conflict" and cards[0]["card"]["name"] == "Sol Ring"
     assert (
         "MH2 236 is Sol Talisman, which does not match 'Sol Ring'; matched by name instead"
         in (cards[0]["note"])
     )
     assert cards[0]["input"] == {"name": "Sol Ring", "set": "mh2", "collector_number": "236", "quantity": 1}
-    assert cards[1]["status"] == "exact" and cards[1]["card"]["name"] == "Command Tower"
+    assert cards[1]["status"] == "conflict" and cards[1]["card"]["name"] == "Command Tower"
     assert "TDC 352 is Command Beacon" in cards[1]["note"]
     assert cards[2]["status"] == "printing" and cards[2]["card"]["collector_number"] == "365"
     assert cards[2]["note"] == "title read as 'Aesi, Tyrant'"
@@ -763,9 +773,9 @@ async def test_printing_needs_the_title_to_agree(stack: Stack) -> None:
     assert cards[4]["status"] == "ambiguous" and cards[4]["card"] is None
     assert cards[4]["suggestions"][0] == "Aesi, Tyrant of Gyre Strait"
     assert "CMR 365 is Aesi, Tyrant of Gyre Strait but the title read 'Xq Zzyx'" in cards[4]["note"]
-    assert cards[5]["status"] == "exact" and cards[5]["card"]["name"] == "Mountain"
+    assert cards[5]["status"] == "conflict" and cards[5]["card"]["name"] == "Mountain"
     assert "6ED 195 is Mountain Goat, which does not match 'Mountain'" in cards[5]["note"]
-    assert cards[6]["status"] == "exact" and cards[6]["card"]["name"] == "Apocalypse"
+    assert cards[6]["status"] == "conflict" and cards[6]["card"]["name"] == "Apocalypse"
     assert "BBD 217 is Apocalypse Hydra" in cards[6]["note"]
 
 
@@ -1071,3 +1081,121 @@ async def test_call_budget_counts_the_batched_pass(stack: Stack) -> None:
     assert [c["status"] for c in out["cards"]] == ["deferred", "deferred"]
     assert out["retry_in"] == 0 and "lookup time is used up" in out["cards"][0]["note"]
     assert all(m == "POST" for m, _ in sf.requests)
+
+
+# -- default printing, conflicts and finishes ------------------------------------
+async def test_default_printing_is_the_newest_released_paper_one(stack: Stack) -> None:
+    """Scryfall's default is its newest printing, which can be a preview or Arena-only; without a
+    set, the newest printing that is out on paper is used, in foil when foil is asked for."""
+    token = await mcp_token(stack.h)
+    out = (
+        await call(
+            stack.h,
+            token,
+            "resolve_cards",
+            {
+                "cards": [
+                    "Swamp",
+                    "Island",
+                    "Sol Ring",
+                    {"name": "Sol Ring", "foil": True},
+                    {"name": "Mountain Goat", "foil": True},
+                ]
+            },
+        )
+    )["structuredContent"]
+    swamp, island, sol, sol_foil, goat = out["cards"]
+    assert (swamp["card"]["set"], swamp["card"]["collector_number"]) == ("fdn", "281")
+    assert swamp["newer_printings"] == [
+        {
+            "set": "mdd",
+            "collector_number": "296",
+            "released_at": "2027-04-09",
+            "unreleased": True,
+            "paper": False,
+        },
+        {"set": "ea1", "collector_number": "71", "released_at": "2026-08-12", "paper": False},
+    ]
+    assert "MDD #296 is not out until 2027-04-09; using FDN #281" in swamp["note"]
+    assert swamp["status"] == "exact" and "unreleased" not in swamp["card"]
+    assert (island["card"]["set"], island["card"]["collector_number"]) == ("fdn", "279")
+    assert (sol["card"]["set"], sol["card"]["collector_number"]) == (
+        "frc",
+        "21",
+    ) and "newer_printings" not in sol
+    assert (sol_foil["card"]["set"], sol_foil["card"]["collector_number"]) == ("c21", "263")
+    assert sol_foil["foil"] is True and "finish_unavailable" not in sol_foil
+    # No printing comes in foil: the finish is not claimed, and the row needs a look.
+    assert goat["card"]["set"] == "6ed" and goat["foil"] is False and goat["finish_unavailable"] is True
+    assert "no printing of Mountain Goat comes in foil (finishes: nonfoil)" in goat["note"]
+    assert out["needs_review"] == [4]
+    lines = out["decklist_text"].splitlines()
+    assert "1 Swamp (fdn) 281" in lines and "1 Island (fdn) 279" in lines
+    assert "1 Sol Ring (c21) 263 *F*" in lines and "1 Mountain Goat (6ed) 195" in lines
+    assert not any("mdd" in line or "trk" in line for line in lines)
+
+
+async def test_default_printing_follows_the_date(stack: Stack, monkeypatch: pytest.MonkeyPatch) -> None:
+    from mtg_gateway.scan import scryfall
+
+    monkeypatch.setattr(scryfall, "today", lambda: "2027-04-09")  # the preview is out that day
+    token = await mcp_token(stack.h)
+    out = (await call(stack.h, token, "resolve_cards", {"cards": ["Swamp"]}))["structuredContent"]
+    # Out, but not on paper in this fixture (no games yet): the next paper printing is used.
+    assert out["cards"][0]["card"]["set"] == "fdn"
+    preview = stack.sf.by_print("mdd", "296")
+    assert preview is not None
+    preview["games"] = ["paper"]
+    client = stack.h.app.state.gateway.scan.scryfall
+    client.prints_cache = scryfall._Cache(ttl=60, max_items=5)
+    out = (await call(stack.h, token, "resolve_cards", {"cards": ["Swamp"]}))["structuredContent"]
+    assert out["cards"][0]["card"]["set"] == "mdd" and "newer_printings" not in out["cards"][0]
+
+
+async def test_a_printing_that_is_another_card_is_a_conflict_not_a_change(stack: Stack) -> None:
+    token = await mcp_token(stack.h)
+    ask = {"cards": [{"name": "Island", "set": "ltc", "collector_number": "284"}, "Sol Ring"]}
+    out = (await call(stack.h, token, "resolve_cards", ask))["structuredContent"]
+    row = out["cards"][0]
+    assert row["status"] == "conflict" and row["conflict"] is True
+    assert row["requested"] == {"set": "ltc", "collector_number": "284", "name": "Sol Ring"}
+    assert row["card"]["name"] == "Island" and row["card"]["set"] == "fdn"  # released, not the TRK preview
+    assert out["complete"] is False and out["needs_review"] == [0] and out["conflicts"] == 1
+    assert out["status_counts"] == {"conflict": 1, "exact": 1}
+    assert [c["name"] for c in out["changes"]] == ["Sol Ring"]
+    assert "Island" not in out["decklist_text"] and out["card_count"] == 1
+    # Saved by the assistant, the conflict has no card: unresolved, and out of the changes.
+    saved = (await call(stack.h, token, "save_scan_session", {"name": "Conflict", **ask}))[
+        "structuredContent"
+    ]
+    assert saved["unresolved"] == 1 and saved["items"][0]["status"] == "conflict"
+    assert saved["items"][0]["card"] is None and [c["name"] for c in saved["changes"]] == ["Sol Ring"]
+
+
+async def test_foil_on_a_nonfoil_only_printing_is_named_and_not_claimed(stack: Stack) -> None:
+    token = await mcp_token(stack.h)
+    out = (await call(stack.h, token, "resolve_cards", {"text": "1 Sol Ring (LTC) 284 *F*"}))[
+        "structuredContent"
+    ]
+    row = out["cards"][0]
+    assert row["status"] == "printing" and row["card"]["collector_number"] == "284"
+    assert row["foil"] is False and row["finish_unavailable"] is True and out["needs_review"] == [0]
+    assert "this printing only exists non-foil" in row["note"]
+    assert out["decklist_text"] == "1 Sol Ring (ltc) 284\n"
+
+
+async def test_card_printings_lists_released_paper_first_and_clear_counts(stack: Stack) -> None:
+    token = await mcp_token(stack.h)
+    out = (await call(stack.h, token, "card_printings", {"name": "Swamp", "limit": 2}))["structuredContent"]
+    assert [(c["set"], c.get("unreleased"), c.get("paper")) for c in out["cards"]] == [
+        ("fdn", None, None),
+        ("mdd", True, False),
+    ]
+    assert out["matching_total"] == out["matching"] == 3 and out["returned_count"] == 2
+    assert out["truncated"] is True and out["has_more"] is False and out["total_cards"] == 3
+    assert {s["set"] for s in out["sets"]} == {"fdn", "mdd", "ea1"} and "not narrowed" in out["sets_scope"]
+    one = (await call(stack.h, token, "card_printings", {"name": "Swamp", "set_code": "ea1"}))[
+        "structuredContent"
+    ]
+    assert one["matching_total"] == 1 and one["returned_count"] == 1 and one["truncated"] is False
+    assert len(one["sets"]) == 3  # every set of the card, whatever the filter

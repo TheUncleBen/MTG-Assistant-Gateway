@@ -59,6 +59,9 @@ async def test_full_login_and_whoami(gw: Harness, idp: FakeIdP):
         info["description"] and info["websiteUrl"] == "https://github.com/TheUncleBen/MTG-Assistant-Gateway"
     )
     assert {i["mimeType"] for i in info["icons"]} == {"image/png", "image/svg+xml"}
+    # The small PNG ChatGPT's upload accepts (10 KB at most) comes first; the others are kept.
+    assert info["icons"][0]["src"] == gw.settings.public_url + "/static/gateway-icon-connector.png"
+    assert len(info["icons"]) == 6
     for icon in info["icons"]:
         assert icon["src"].startswith(gw.settings.public_url + "/static/gateway-icon")
         path = icon["src"][len(gw.settings.public_url) :]

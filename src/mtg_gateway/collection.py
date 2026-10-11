@@ -1350,7 +1350,10 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
         return token.subject
 
     def _err(exc: CollectionError) -> dict[str, Any]:
-        return {"ok": False, "error": exc.kind, "message": str(exc)}
+        out: dict[str, Any] = {"ok": False, "error": exc.kind, "message": str(exc)}
+        if exc.retry_after:
+            out["retry_after"] = exc.retry_after
+        return out
 
     @server.tool(
         name="list_collection",

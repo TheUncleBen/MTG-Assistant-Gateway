@@ -14,11 +14,11 @@ Every apply still snapshots the deck first, so an auto-applied change can be und
 History page. The risk tiers are decided from the proposal's stored review rows, so a
 proposal is low risk only if what the review page would show is small and safe:
 
-* **low**: an edit to an existing deck with at most ``max_rows`` rows (default 5), where every
-  row adds, removes, changes the quantity, moves the category or changes the finish, printing
-  or colour tag of a card, no row moves more than ``MAX_COPIES_PER_ROW`` copies (a playset) and none
-  touches the commander; or a clone, which creates a private copy and changes nothing that
-  exists.
+* **low**: an edit to an existing deck or to the collection with at most ``max_rows`` rows
+  (default 5), where every row adds, removes, changes the quantity, moves the category or
+  changes the finish, printing or colour tag of a card, no row moves more than
+  ``MAX_COPIES_PER_ROW`` copies (a playset) and none touches the commander; or a clone, which
+  creates a private copy and changes nothing that exists.
 * **high**: everything else: more rows than that, any commander change, a new deck, restoring
   a snapshot, deck details (name, format, description, visibility).
 * **consent** (R-142): the Archidekt account actions of actions.py: likes, votes, bookmarks,
@@ -54,10 +54,12 @@ MODE_HELP = {
         "The safest choice, and the default."
     ),
     "semi": (
-        "Your assistant applies small edits itself (a few cards added, removed, moved or changed, "
-        "never the commander). New decks, restores, deck details, commander changes, bigger edits, "
-        "and anything on your Archidekt account (likes, votes, bookmarks, follows, comments, new "
-        "folders, deleting a deck) still wait for your press."
+        "Your assistant applies low-risk changes itself: a small edit to a deck or your collection "
+        "(at most {rows} card rows added, removed, moved or changed, no more than "
+        f"{MAX_COPIES_PER_ROW} copies each, never the commander) and a private copy of a deck (a "
+        "clone, which changes nothing that exists). A new deck built from a list, restores, deck "
+        "details, commander changes, bigger edits, and anything on your Archidekt account (likes, "
+        "votes, bookmarks, follows, comments, new folders, deleting a deck) still wait for your press."
     ),
     "auto": (
         "Your assistant applies the deck and collection changes it proposes, without asking you. "
@@ -65,6 +67,13 @@ MODE_HELP = {
         "your own press, every time, in every mode."
     ),
 }
+
+
+def mode_help(mode: str, *, max_rows: int = DEFAULT_MAX_ROWS) -> str:
+    """MODE_HELP for ``mode`` with this gateway's row limit for a low-risk edit filled in."""
+    return MODE_HELP[mode].replace("{rows}", str(max_rows))
+
+
 # Shown next to the semi and auto choices, because turning them on has a real cost.
 AUTO_WARNING = (
     "An assistant can be tricked by text it reads (a web page, a deck description, a pasted "

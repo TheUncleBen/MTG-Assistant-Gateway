@@ -10,14 +10,16 @@ quirks the reader must survive rather than assume away:
 * missing prices are ``----``;
 * multi-value fields (colours, hybrid costs) are comma-joined inside quotes.
 
-The reader positions columns by the header names it recognises, splits the
-joined header, and keeps unknown columns in ``extra``.
+The reader positions columns by the header names it recognises (plus a few
+common other spellings, ``ALIASES``), splits the joined header, and keeps
+unknown columns in ``extra``.
 """
 
 from __future__ import annotations
 
 import csv
 import io
+import json
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -41,6 +43,16 @@ KNOWN = {
     "price": "price",
     "card text": "card_text",
     "mana cost": "mana_cost",
+}
+# Other spellings of a column that other tools and hand-made CSVs use. Only unambiguous ones:
+# "Edition" is left out, as it is the set's code in some exports and its name in others.
+ALIASES = {
+    "count": "quantity",
+    "qty": "quantity",
+    "card name": "name",
+    "set": "set_code",
+    "set code": "set_code",
+    "categories": "categories",  # one cell with every category: "Ramp, Draw" or ["Ramp","Draw"]
 }
 
 
@@ -104,8 +116,10 @@ def _num(value: str) -> float | None:
         return None
 
 
-def parse_export(text: str) -> list[ExportCard]:
-    """Parse an Archidekt CSV export into cards. Raises CsvError when the text is not one."""
+def parse_export(text: str, unknown: list[str] | None = None) -> list[ExportCard]:
+    """Parse an Archidekt CSV export into cards. Raises CsvError when the text is not one.
+    Pass a list as ``unknown`` to collect the header names that were not read (an unrecognised
+    column, or a second column for something already read), so the caller can say so."""
     text = text.lstrip("﻿")
     # Rows are read one at a time and the caps checked as they come, so an oversized paste is
     # refused once it passes a cap rather than after every row has been built in memory.
@@ -130,16 +144,21 @@ def parse_export(text: str) -> list[ExportCard]:
         # Work per row grows with the header width; a real export has a few dozen columns.
         raise CsvError(f"the header has more than {MAX_COLUMNS} columns")
     lowered = [h.lower() for h in header]
-    if "quantity" not in lowered or "name" not in lowered:
-        raise CsvError("the header must contain Quantity and Name columns")
     seen_collector = 0
     keys: list[str] = []
-    for h in lowered:
+    for original, h in zip(header, lowered, strict=True):
         if h == "collector number":
             seen_collector += 1
             keys.append("collector_number" if seen_collector == 1 else "owned")
-        else:
-            keys.append(KNOWN.get(h, f"extra:{h}"))
+            continue
+        key = KNOWN.get(h) or ALIASES.get(h)
+        if key is None or key in keys or (key == "categories" and "category" in keys):
+            key = f"extra:{h}"
+            if unknown is not None and original.strip() and original.strip() not in unknown:
+                unknown.append(original.strip())
+        keys.append(key)
+    if "quantity" not in keys or "name" not in keys:
+        raise CsvError("the header must contain Quantity and Name columns")
     cards: list[ExportCard] = []
     for lineno, row in enumerate(rows[1:], start=2):
         data = {k: (row[i] if i < len(row) else "") for i, k in enumerate(keys)}
@@ -156,14 +175,19 @@ def parse_export(text: str) -> list[ExportCard]:
         text_cell, glued = _split_text_and_cost(data.get("card_text", ""))
         mana_cost = ",".join(p for p in [glued, data.get("mana_cost", "").strip(), *trailing] if p)
         owned_raw = str(data.get("owned", "")).strip().lower()
+        category = _unquote(str(data.get("category", "")))
+        secondary = _list(data.get("secondary_categories", ""))
+        if not category and "categories" in data:
+            category, *more = _categories(str(data["categories"])) or [""]
+            secondary = more + secondary
         cards.append(
             ExportCard(
                 quantity=qty,
                 name=name,
                 set_code=str(data.get("set_code", "")).strip(),
                 collector_number=str(data.get("collector_number", "")).strip(),
-                category=_unquote(str(data.get("category", ""))),
-                secondary_categories=_list(data.get("secondary_categories", "")),
+                category=category,
+                secondary_categories=secondary,
                 finish=str(data.get("finish", "")).strip(),
                 colors=_list(data.get("colors", "")),
                 mana_value=_num(str(data.get("mana_value", ""))),
@@ -182,6 +206,19 @@ def parse_export(text: str) -> list[ExportCard]:
 
 def _list(value: Any) -> list[str]:
     return [_unquote(p) for p in _unquote(str(value)).split(",") if _unquote(p)]
+
+
+def _categories(value: str) -> list[str]:
+    """A Categories cell: a JSON list of names, or names separated by commas."""
+    s = value.strip()
+    if s.startswith("["):
+        try:
+            data = json.loads(s)
+        except ValueError:
+            data = None
+        if isinstance(data, list):
+            return [x for x in (_unquote(str(v)) for v in data) if x]
+    return _list(s)
 
 
 def _unquote(value: str) -> str:

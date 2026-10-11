@@ -20,6 +20,8 @@ from mcp import Client
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.context import CallNext, ServerRequestContext
 
+from . import deck_stats
+from .decks import DeckError
 from .schemas import compact_schema, flatten_params
 
 logger = logging.getLogger(__name__)
@@ -81,6 +83,9 @@ OWNER_NOTES: dict[str, str] = {
     "summary and an optional paired goldfish A/B",
 }
 
+# What a simulation's "Full report: goldfish_report(...)" line becomes (see TEXT_REWRITES).
+FULL_REPORT = "This is the full report."
+
 # Mystic Forge text names its own tools; where one is hidden here, the gateway tool that owns the
 # job is named instead (in tool descriptions and in tool results), so an assistant is never sent to
 # a tool it cannot call. Whole sentences first, then the bare names.
@@ -97,10 +102,8 @@ TEXT_REWRITES: tuple[tuple[re.Pattern[str], str], ...] = (
         re.compile(r"pass them to\s+goldfish_run as `annotations`"),
         "pass them to run_deck_report, or compare_decks with simulate=true, as options.annotations",
     ),
-    (
-        re.compile(r"Full report: goldfish_report\([^)]*\)\.?"),
-        "This is the full report; the stored copy is under History (get_deck_report).",
-    ),
+    # Where the stored copy is, the gateway says itself, and only when it stored one (reports.py).
+    (re.compile(r"Full report: goldfish_report\([^)]*\)\.?"), FULL_REPORT),
     (re.compile(r"\bgoldfish_run/goldfish_ab\b"), "run_deck_report / compare_decks"),
     (re.compile(r"\bgoldfish_ab\b"), "compare_decks (simulate=true)"),
     (re.compile(r"\bgoldfish_run\b"), "run_deck_report"),
@@ -112,11 +115,44 @@ TEXT_REWRITES: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 
 
+# A scryfall_search in a Commander context (a colour identity or a commander term, or Commander
+# legality) is about paper decks, so it leaves out cards that exist only on Arena or MTGO: the
+# gateway adds game:paper unless the query already names a game. Said in the tool's description.
+_COMMANDER_QUERY = re.compile(
+    r"(?<![\w-])-?(?:id|identity|ci|commander)(?:<=|>=|<|>|=|:)|\b(?:f|format|legal|is):commander\b",
+    re.IGNORECASE,
+)
+_GAME_TERM = re.compile(r"(?<![\w])-?game[:=]", re.IGNORECASE)
+SEARCH_QUERY_MAX = 500  # Mystic Forge's own limit on scryfall_search's query
+PAPER_SEARCH_NOTE = (
+    " In a Commander search (a colour identity such as id<=wu, commander:, f:commander or "
+    "is:commander in the query) the gateway adds game:paper, so cards that exist only on Arena or "
+    "MTGO are left out; put a game: term in the query (e.g. game:arena) to choose otherwise."
+)
+
+
+def paper_search_query(query: str) -> str:
+    """``query`` with game:paper added when it is a Commander search that names no game."""
+    if not _COMMANDER_QUERY.search(query) or _GAME_TERM.search(query):
+        return query
+    paper = f"{query.rstrip()} game:paper"
+    return paper if len(paper) <= SEARCH_QUERY_MAX else query
+
+
 def rewrite_text(text: str) -> str:
     """``text`` with every hidden Mystic Forge tool replaced by the gateway tool that owns its job."""
     for pattern, replacement in TEXT_REWRITES:
         text = pattern.sub(replacement, text)
     return text
+
+
+# Added to a listed tool's description: what its own description leaves out.
+DESCRIPTION_NOTES: dict[str, str] = {
+    "edhrec_top_cards": "limit is per section (Top Cards, Creatures, Instants, ...). With color, period "
+    "is ignored: EDHREC's colour pages count all decks, with no time period.",
+    "goldfish_annotate": "A deck id or link is read with the member's own Archidekt access (their "
+    "private decks too), like get_deck.",
+}
 
 
 # Mystic Forge answers a failed upstream request (Scryfall, EDHREC, Archidekt, Commander
@@ -156,6 +192,35 @@ def _rewrite_result(result: types.CallToolResult) -> types.CallToolResult:
         update["structured_content"] = _rewrite_strings(result.structured_content)
     if upstream_failed(result):
         update["is_error"] = True  # so the assistant sees a failure, not an answer
+    return result.model_copy(update=update)
+
+
+def _validation_checks(result: types.CallToolResult, arguments: Any) -> types.CallToolResult:
+    """validate_decklist checks names, size and color identity only, so a list with two Sol Rings
+    "PASSED". The gateway adds its own singleton check as a "Gateway checks" section, and a
+    failure there turns the headline to ISSUES FOUND (the same check deck_stats makes)."""
+    params = arguments.get("params") if isinstance(arguments, dict) and "params" in arguments else arguments
+    decklist = params.get("decklist") if isinstance(params, dict) else None
+    if result.is_error or not isinstance(decklist, str):
+        return result
+    checked = deck_stats.validation_gateway_checks(decklist)
+    if checked is None:
+        return result
+    dupes, section = checked
+
+    def amend(text: str) -> str:
+        if dupes:
+            text = text.replace("Validation: PASSED", "Validation: ISSUES FOUND", 1)
+        return text.rstrip() + "\n\n" + section
+
+    content = [
+        c.model_copy(update={"text": amend(c.text)}) if isinstance(c, types.TextContent) else c
+        for c in result.content
+    ]
+    update: dict[str, Any] = {"content": content}
+    structured = result.structured_content
+    if isinstance(structured, dict) and isinstance(structured.get("result"), str):
+        update["structured_content"] = {**structured, "result": amend(structured["result"])}
     return result.model_copy(update=update)
 
 
@@ -239,6 +304,17 @@ def _refusal(text: str) -> types.CallToolResult:
     return types.CallToolResult(content=[types.TextContent(type="text", text=text)], isError=True)
 
 
+def _deck_refusal(exc: DeckError) -> types.CallToolResult:
+    """A failed deck read as the gateway's own tools report it: the message as text, and the kind
+    (and retry_after for a used-up Archidekt budget) as structured content for its error_code."""
+    out: dict[str, Any] = {"ok": False, "error": exc.kind, "message": str(exc)}
+    if exc.retry_after is not None:
+        out["retry_after"] = exc.retry_after
+    return types.CallToolResult(
+        content=[types.TextContent(type="text", text=str(exc))], structured_content=out, isError=True
+    )
+
+
 def argument_problem(name: str, arguments: dict[str, Any] | None) -> str | None:
     """Why ``arguments`` are out of bounds for proxied tool ``name`` (see GOLDFISH_LIMITS), or None."""
     try:
@@ -285,12 +361,16 @@ def reads_archidekt(name: str, arguments: dict[str, Any] | None) -> bool:
     given = arguments or {}
     if isinstance(given.get("params"), dict):  # the gateway's own calls wrap the tool's model
         given = {**given["params"], **{k: v for k, v in given.items() if k != "params"}}
-    for key in DECK_ARGUMENTS:
-        value = given.get(key)
-        if isinstance(value, int) and not isinstance(value, bool):
-            return True
-        if isinstance(value, str) and (value.strip().isdigit() or "archidekt.com" in value.lower()):
-            return True
+    return any(names_deck(given.get(key)) for key in DECK_ARGUMENTS)
+
+
+def names_deck(value: Any) -> bool:
+    """Whether a deck argument names an Archidekt deck (an id or a link) rather than holding a list."""
+    if isinstance(value, int) and not isinstance(value, bool):
+        return True
+    if isinstance(value, str):
+        value = value.strip()
+        return value.isdigit() or ("archidekt.com" in value.lower() and "\n" not in value)
     return False
 
 
@@ -344,6 +424,10 @@ class MysticForgeProxy:
         # Set by the app: spends one unit of a member's Archidekt budget, returning the refusal
         # text when it is used up (None to go ahead).
         self.archidekt_budget: Any = None
+        # Set by the app: reads an Archidekt deck as the member sees it (their private decks
+        # too) and returns its decklist text, commander first; raises DeckError. Mystic Forge
+        # itself reads Archidekt anonymously, so a member's private deck was "not found" there.
+        self.deck_reader: Any = None
         self._health: tuple[float, bool] = (0.0, False)
         self._health_lock = anyio.Lock()  # one probe at a time, however many /healthz calls wait
 
@@ -392,6 +476,10 @@ class MysticForgeProxy:
                 d["inputSchema"] = compact_schema(flat if flat is not None else d.get("inputSchema") or {})
                 if isinstance(d.get("description"), str):
                     d["description"] = rewrite_text(d["description"])
+                    if t.name == "scryfall_search":
+                        d["description"] = d["description"].rstrip() + PAPER_SEARCH_NOTE
+                    if t.name in DESCRIPTION_NOTES:
+                        d["description"] = d["description"].rstrip() + "\n\n" + DESCRIPTION_NOTES[t.name]
                 # Advertise as read-only research tools; none of them writes to Archidekt.
                 d.setdefault("annotations", {}).update({"readOnlyHint": True, "openWorldHint": True})
                 tools.append(d)
@@ -436,9 +524,24 @@ class MysticForgeProxy:
             and isinstance(arguments["params"], dict)
         ):
             arguments = arguments["params"]
+        if (
+            name == "scryfall_search"
+            and isinstance(arguments, dict)
+            and isinstance(arguments.get("query"), str)
+        ):
+            arguments = {**arguments, "query": paper_search_query(arguments["query"])}
         problem = argument_problem(name, arguments)
         if problem:
             return _refusal(f"{name} refused: {problem}; nothing was sent to the research service")
+        if owner is not None and self.deck_reader is not None and not internal:
+            for key in DECK_ARGUMENTS:
+                ref = arguments.get(key) if isinstance(arguments, dict) else None
+                if names_deck(ref):
+                    try:
+                        text = await self.deck_reader(owner, str(ref).strip())
+                    except DeckError as exc:
+                        return _deck_refusal(exc)
+                    arguments = {**arguments, key: text}  # read here: nothing for the budget below
         if owner is not None and self.archidekt_budget is not None and reads_archidekt(name, arguments):
             refused = self.archidekt_budget(owner)
             if refused:
@@ -453,7 +556,10 @@ class MysticForgeProxy:
                     await self.tools()  # learn which tools take a params object
                 if name in self._wrapped:
                     arguments = {"params": arguments}
-            return _rewrite_result(await self._forward(name, arguments))
+            result = _rewrite_result(await self._forward(name, arguments))
+            if name == "validate_decklist":
+                result = _validation_checks(result, arguments)
+            return result
         finally:
             if owner is not None:
                 left = self._in_flight.get(owner, 1) - 1

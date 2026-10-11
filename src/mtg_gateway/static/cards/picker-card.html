@@ -35,7 +35,8 @@
 
   var STATUS = {
     exact: ["ok", "exact"], printing: ["ok", "printing"], fuzzy: ["warn", "corrected"],
-    ambiguous: ["warn", "which one?"], not_found: ["bad", "not found"], deferred: ["bad", "not looked up"]
+    ambiguous: ["warn", "which one?"], not_found: ["bad", "not found"], deferred: ["bad", "not looked up"],
+    conflict: ["bad", "set and number are another card"]
   };
   function label(c) {
     if (!c) return "";
@@ -134,7 +135,8 @@
         card: r.card || null, note: r.note || "", suggestions: r.suggestions || [], foil: !!r.foil
       };
     });
-    rows.forEach(function (r, i) { keep[i] = !!r.card; });
+    // a conflict (set and number name a different card) starts unticked: the user decides
+    rows.forEach(function (r, i) { keep[i] = !!r.card && r.status !== "conflict"; });
     $("summary").textContent = rows.length ? "Untick what you don't want, pick among the suggestions, then press Use these cards." : "Nothing was recognized.";
     draw();
   }

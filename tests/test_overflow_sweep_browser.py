@@ -152,6 +152,11 @@ def _pages(server: Server, pending: str) -> list[str]:
         "/admin/metrics",
         "/logout",
         "/install",
+        # the guided setup's steps, with their copy boxes (T-145)
+        "/install?for=claude",
+        "/install?for=claude-code",
+        "/install?for=chatgpt",
+        "/install?for=codex",
     ]
 
 

@@ -24,8 +24,10 @@ import java.security.MessageDigest
  * The app updates itself from the project's GitHub releases, so nobody has to uninstall and
  * reinstall to move to a new version ([AppUpdate] holds the rules).
  *
- * 1. Check: on launch, at most every [AppUpdate.INTERVAL_MS], or when asked from the menu, one
- *    anonymous request to GitHub's "latest release" API for [BuildConfig.UPDATE_REPO]. A newer
+ * 1. Check: at each cold launch and just after a sign-in (at most every [AppUpdate.MIN_GAP_MS]),
+ *    on returning to the app (at most every [AppUpdate.INTERVAL_MS]), or when asked from the menu
+ *    or the Account page: one anonymous request to GitHub's "latest release" API for
+ *    [BuildConfig.UPDATE_REPO]. A newer
  *    release is offered only when its published signing certificate is one this app is signed with.
  * 2. Download, when the person taps Update: the release's APK into the app's cache, then checked
  *    before anything is installed: same package, the offered version, signed by this app's own
@@ -55,6 +57,14 @@ class Updater(private val activity: Activity, private val ui: Ui) {
     /** The automatic check: only when one is due, and silent unless there is something to install. */
     fun checkIfDue() {
         if (enabled && AppUpdate.due(prefs.lastUpdateCheck, System.currentTimeMillis())) check(manual = false)
+    }
+
+    /**
+     * The check at a set point (cold launch, just after a sign-in): like [checkIfDue], but due after
+     * [AppUpdate.MIN_GAP_MS] instead of the twice-a-day interval.
+     */
+    fun checkAtSetPoint() {
+        if (enabled && AppUpdate.due(prefs.lastUpdateCheck, System.currentTimeMillis(), AppUpdate.MIN_GAP_MS)) check(manual = false)
     }
 
     /** Looks now; [manual] also says when there is nothing new or the check failed. */

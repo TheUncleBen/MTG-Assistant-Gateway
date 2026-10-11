@@ -151,22 +151,25 @@ def test_format_names_reverse_format_ids() -> None:
 
 def test_compute_blink_deck() -> None:
     s = compute(live("blink_sample"))
-    assert s["card_count"] == 103 and s["distinct"] == 95
-    assert s["land_count"] == 34 and s["nonland_count"] == 69
-    assert s["average_mana_value"] == 2.57
-    assert s["mana_curve"] == {"0": 3, "1": 13, "2": 15, "3": 24, "4": 10, "5": 3, "6": 0, "7+": 1}
-    assert s["colour_pips"] == {"U": 53.5, "W": 25.5}  # Turn to Mist's {W/U} counts half each
+    # The three rows filed under Sideboard are the sideboard, not the deck (as archidekt.com counts
+    # them: its Sideboard category is "included in deck" but kept out of the deck's size).
+    assert s["card_count"] == 100 and s["distinct"] == 92
+    assert s["land_count"] == 34 and s["nonland_count"] == 66
+    assert s["average_mana_value"] == 2.58
+    assert s["mana_curve"] == {"0": 3, "1": 12, "2": 15, "3": 22, "4": 10, "5": 3, "6": 0, "7+": 1}
+    assert s["colour_pips"] == {"U": 53.5, "W": 22.5}  # Turn to Mist's {W/U} counts half each
     assert s["mana_sources"]["W"] == 24 and s["mana_sources"]["U"] == 25 and s["mana_sources"]["C"] == 19
     assert s["type_counts"]["Land"] == 34 and s["type_counts"]["Creature"] == 19
-    assert s["rarity_counts"] == {"rare": 49, "common": 26, "uncommon": 21, "mythic": 7}
-    assert s["price_total"] == 1798.22 and s["priced_cards"] == 94
+    assert s["rarity_counts"] == {"rare": 47, "common": 26, "uncommon": 20, "mythic": 7}
+    assert s["price_total"] == 1758.89 and s["priced_cards"] == 91
+    assert s["checks"]["deck_size"] == {"actual": 100, "expected": 100, "ok": True}
     assert s["format"] == "commander"
     assert {p["name"] for p in s["legality_problems"]} == {"Mana Crypt", "Jeweled Lotus", "Hullbreacher"}
     assert all(p["status"] == "banned" for p in s["legality_problems"])
     assert s["legality_unknown"] == 0
     assert len(s["game_changers"]) == 12 and "Rhystic Study" in s["game_changers"]
     assert s["tutors"] == 11 and s["extra_turns"] == 1 and s["mass_land_denial"] == 0
-    assert s["salt_total"] == 67.93
+    assert s["salt_total"] == 66.02
     assert s["commanders"] == ["Brago, King Eternal"] and s["colour_identity"] == ["W", "U"]
     est = s["bracket_estimate"]
     assert est["bracket"] == 4 and est["kind"] == "estimate"
@@ -558,13 +561,15 @@ def test_format_specific_command_zones() -> None:
     # Canadian Highlander: 100 singleton, no command zone at all
     can = deck([card("Island", 100, types=["Land"], supertypes=["Basic"])], format_id=25)
     assert compute(can)["checks"]["ok"] is True
-    can_cmd = deck([_cmdr("Aesi"), card("Island", 99, types=["Land"], supertypes=["Basic"])],
-                   format_id=25, categories=cat)  # fmt: skip
-    assert any("no command zone" in p for p in compute(can_cmd)["checks"]["problems"])
-    # Tiny Leaders: 50 cards, commander at mana value 3 or less
-    tiny = deck([_cmdr("Aesi", cmc=6.0), card("Island", 49, types=["Land"], supertypes=["Basic"])],
+    # ... at least 100 (archidekt.com sets a minimum, not an exact size)
+    big = deck([card("Island", 101, types=["Land"], supertypes=["Basic"])], format_id=25)
+    assert compute(big)["checks"]["ok"] is True
+    # Tiny Leaders Reborn: 50 cards, a sideboard of at most 10 (archidekt.com sets no mana value
+    # cap on the commander; the cards' own tlr legality covers it)
+    tiny = deck([_cmdr("Aesi", cmc=6.0), card("Island", 49, types=["Land"], supertypes=["Basic"]),
+                 card("Opt", 11, categories=["Sideboard"])],
                 format_id=27, categories=cat)  # fmt: skip
-    assert any("Tiny Leaders" in p for p in compute(tiny)["checks"]["problems"])
+    assert compute(tiny)["checks"]["problems"] == ["sideboard has 11 cards; at most 10"]
     # Pauper Commander: a creature ever printed at uncommon may lead, whichever printing the deck
     # uses (a mythic or rare printing of such a card is fine). The deck's data names only the
     # chosen printing's rarity, so a non-uncommon printing is reported as unverified, never as a
@@ -627,8 +632,9 @@ def test_the_first_category_decides_whether_a_row_is_in_the_deck() -> None:
 def test_companion_and_bracket_mismatch_checks() -> None:
     cat = [{"name": "Commander", "isPremier": True, "includedInDeck": True}]
     islands = card("Island", 99, types=["Land"], supertypes=["Basic"])
-    ok = deck([_cmdr("Aesi"), islands, card("Lurrus", 1, companion=True, oracle_text="Companion — Each...")],
-              categories=cat)  # fmt: skip
+    lurrus = card("Lurrus of the Dream-Den", 1, companion=True, oracle_text="Companion — Each...",
+                  categories=["Sideboard"])  # fmt: skip
+    ok = deck([_cmdr("Aesi"), islands, lurrus], categories=cat)
     assert compute(ok)["checks"]["companion"] == {"count": 1, "ok": True}
     bad = deck([_cmdr("Aesi"), islands, card("Opt", 1, companion=True, oracle_text="Scry 1. Draw a card.")],
                categories=cat)  # fmt: skip
@@ -638,9 +644,15 @@ def test_companion_and_bracket_mismatch_checks() -> None:
                 card("Time Warp", 1, extra_turns=True), card("Temporal Mastery", 1, extra_turns=True)],
                categories=cat)  # fmt: skip
     low.edh_bracket = 2
+    # archidekt.com's bracket 2 allows extra-turn cards (its estimate of 4 aside); bracket 1 does not
     checks = compute(low)["checks"]
-    assert checks["bracket"] == {"set": 2, "estimate": 4, "ok": False} and checks["ok"] is False
-    assert any("bracket set to 2" in p for p in checks["problems"])
+    assert checks["bracket"] == {"set": 2, "estimate": 4, "ok": True} and checks["ok"] is True
+    low.edh_bracket = 1
+    checks = compute(low)["checks"]
+    assert checks["bracket"]["ok"] is False and checks["ok"] is False and checks["legal"] is True
+    assert checks["problems"] == [
+        "bracket set to 1 but the deck has extra-turn cards (Temporal Mastery, Time Warp)"
+    ]
 
 
 # -- Archidekt's extra stats: curve by type or category, lands-only sources, out-of-identity pips,
@@ -734,3 +746,183 @@ def test_stats_panel_draws_the_controls_and_focus_targets() -> None:
     assert "data-focus='[&quot;bolt&quot;, &quot;fire // ice&quot;]'" in html
     assert "Quantity by subtype" in html and "Quantity by keyword" in html
     assert ">Evoke</button></td><td>1</td>" in html
+
+
+# -- archidekt.com's legality rules (its deck page's checker, read 2026-10-11) -------------------
+
+_CAT = [{"name": "Commander", "isPremier": True, "includedInDeck": True}]
+
+
+def _basics(n: int) -> DeckCard:
+    return card("Island", n, types=["Land"], supertypes=["Basic"])
+
+
+def test_copies_are_counted_by_name_across_rows_and_the_sideboard() -> None:
+    """Two rows of Sol Ring (two printings) break the singleton rule like one row of two; a
+    sideboard copy counts too. The sideboard is not part of the deck's size."""
+    d = deck([_cmdr("Aesi"), card("Sol Ring", 1), card("Sol Ring", 1, set_code="c21"), _basics(97),
+              card("Sol Ring", 1, categories=["Sideboard"])], categories=_CAT)  # fmt: skip
+    checks = compute(d)["checks"]
+    assert checks["deck_size"]["actual"] == 100 and checks["deck_size"]["ok"] is True
+    assert checks["singleton_violations"] == [{"name": "Sol Ring", "quantity": 3}]
+    assert checks["legal"] is False
+    assert checks["legal_problems"] == ["more than one copy in a singleton format: Sol Ring ×3"]
+
+
+def test_cards_allowed_in_any_number_or_up_to_a_count() -> None:
+    d = deck([_cmdr("Aesi"), card("Seven Dwarves", 7), card("Persistent Petitioners", 20), _basics(72)],
+             categories=_CAT)  # fmt: skip
+    assert compute(d)["checks"]["singleton_violations"] == []
+    d = deck([_cmdr("Aesi"), card("Seven Dwarves", 8), _basics(91)], categories=_CAT)
+    assert compute(d)["checks"]["singleton_violations"] == [{"name": "Seven Dwarves", "quantity": 8}]
+
+
+def test_commander_must_be_legendary_and_able_to_lead() -> None:
+    plain = _cmdr("Grizzly Bears", supertypes=[])
+    checks = compute(deck([plain, _basics(99)], categories=_CAT))["checks"]
+    assert checks["problems"] == ["a commander must be legendary: Grizzly Bears"]
+    # a legendary Vehicle with power and toughness may lead; Grist may
+    vehicle = _cmdr("Parhelion II", types=["Artifact"], subtypes=["Vehicle"], power="5", toughness="5")
+    assert compute(deck([vehicle, _basics(99)], categories=_CAT))["checks"]["legal"] is True
+    grist = _cmdr("Grist, the Hunger Tide", types=["Planeswalker"])
+    assert compute(deck([grist, _basics(99)], categories=_CAT))["checks"]["legal"] is True
+    # Standard Brawl lets a planeswalker lead; Commander does not
+    walker = _cmdr("Saheeli", types=["Planeswalker"])
+    assert compute(deck([walker, _basics(59)], format_id=13, categories=_CAT))["checks"]["legal"] is True
+    zone = compute(deck([walker, _basics(99)], categories=_CAT))["checks"]["commander_zone"]
+    assert zone["cannot_command"] == ["Saheeli"]
+
+
+def test_partner_kinds_must_match() -> None:
+    a = _cmdr("Rick", "Partner—Survivors (You can have two commanders if both have this ability.)")
+    b = _cmdr("Daryl", "Partner—Survivors")
+    assert compute(deck([a, b, _basics(98)], categories=_CAT))["checks"]["legal"] is True
+    c = _cmdr("Tymna", "Partner")
+    checks = compute(deck([a, c, _basics(98)], categories=_CAT))["checks"]
+    assert checks["commander_zone"]["pairing"] == "invalid" and checks["legal"] is False
+
+
+def test_pauper_edh_uses_archidekts_leader_flag() -> None:
+    legal = {"paupercommander": "legal"}
+    commons = card("Island", 99, types=["Land"], supertypes=["Basic"], legalities=legal)
+    no = _cmdr("Big Rare", rarity="rare", supertypes=[], is_pdh_commander=False)
+    checks = compute(deck([no, commons], format_id=17, categories=_CAT))["checks"]
+    assert checks["legal"] is False and "not a valid Pauper EDH commander" in checks["problems"][0]
+    yes = _cmdr("Rare Print", rarity="rare", supertypes=[], is_pdh_commander=True)
+    checks = compute(deck([yes, commons], format_id=17, categories=_CAT))["checks"]
+    assert checks["legal"] is True and "unverified" not in checks["commander_zone"]
+
+
+def test_duel_commander_banned_as_commander_and_canlander_points() -> None:
+    leader = _cmdr("Ezuri", legalities={"duel": "restricted"})
+    checks = compute(deck([leader, _basics(99)], format_id=12, categories=_CAT))["checks"]
+    assert checks["problems"] == ["banned as a commander in Duel Commander: Ezuri"]
+    can = deck([card("Sol Ring", 1, canlander_points=4), card("Mana Crypt", 1, canlander_points=7),
+                _basics(98)], format_id=25)  # fmt: skip
+    checks = compute(can)["checks"]
+    assert checks["canlander_points"] == {"total": 11, "maximum": 10, "ok": False}
+    assert checks["problems"] == ["11 Canadian Highlander points; at most 10"]
+
+
+def test_companion_conditions() -> None:
+    gyruda = card("Gyruda, Doom of Depths", 1, companion=True, categories=["Sideboard"])
+    d = deck([_cmdr("Aesi", cmc=6.0), card("Opt", 1, cmc=1.0), _basics(98), gyruda], categories=_CAT)
+    checks = compute(d)["checks"]
+    assert checks["companion"]["ok"] is False
+    assert checks["problems"] == ["companion Gyruda, Doom of Depths: its condition is not met: Opt"]
+    yorion = card("Yorion, Sky Nomad", 1, companion=True, categories=["Sideboard"])
+    checks = compute(deck([_cmdr("Aesi"), _basics(99), yorion], categories=_CAT))["checks"]
+    assert "exact deck size" in checks["problems"][0]
+
+
+def test_bracket_set_on_the_deck_against_its_cards() -> None:
+    gcs = [card(f"GC{i}", 1, game_changer=True) for i in range(4)]
+    d = deck([_cmdr("Aesi"), *gcs, _basics(95)], categories=_CAT)
+    d.edh_bracket = 3
+    mismatches = compute(d)["checks"]["bracket"]["mismatches"]
+    assert mismatches == ["more than three game changers (GC0, GC1, GC2, GC3)"]
+    d = deck([_cmdr("Aesi"), card("A", 1, oracle_id="1", atomic_combos=["2"]),
+              card("B", 1, oracle_id="2", atomic_combos=["1"]), _basics(97)], categories=_CAT)  # fmt: skip
+    d.edh_bracket = 2
+    assert compute(d)["checks"]["bracket"]["mismatches"] == ["two-card infinite combos (A, B)"]
+    d.edh_bracket = 4
+    assert compute(d)["checks"]["bracket"]["ok"] is True
+    # a clean deck set to bracket 1 is not a mismatch (the estimate's floor of 2 aside)
+    d = deck([_cmdr("Aesi"), _basics(99)], categories=_CAT)
+    d.edh_bracket = 1
+    assert compute(d)["checks"]["ok"] is True
+
+
+def test_live_payload_carries_the_legality_fields() -> None:
+    d = live("blink_sample")
+    teferi = next(c for c in d.cards if c.name == "Teferi's Protection")
+    assert teferi.atomic_combos == ["120"] and teferi.oracle_id == "16663"
+    assert next(c for c in d.cards if c.name == "Mana Drain").canlander_points == 1
+    assert next(c for c in d.cards if c.name == "Wall of Omens").is_pdh_commander is True
+
+
+def test_mana_sources_stay_inside_the_commanders_colors() -> None:
+    """A source of any color (Command Tower, an any-color land) counts for the commanders' colors
+    only in the commander formats (backlog 13, F28); colorless stays."""
+    s = compute(live("blink_sample"))  # Brago: white and blue
+    assert set(s["mana_sources"]) == {"W", "U", "C"} and set(s["mana_sources_lands"]) <= {"W", "U", "C"}
+    field = card("Lotus Field", 1, types=["Land"], mana_production={"W": 3, "U": 3, "B": 3, "R": 3, "G": 3})
+    mono = deck([_cmdr("Aesi", color_identity=["Blue"]), field, _basics(98)], categories=_CAT)
+    assert compute(mono)["mana_sources"] == {"U": 3}
+    # a constructed deck keeps every color the card can make
+    sixty = deck([field, _basics(59)], format_id=2)
+    assert set(compute(sixty)["mana_sources"]) == {"W", "U", "B", "R", "G"}
+
+
+def test_card_rows_say_where_an_uncategorised_card_is_shown() -> None:
+    """B3 / F27: get_deck's rows had categories [] for uncategorised cards while deck_stats counted
+    them under Archidekt's auto category; the row now names it (shown_under)."""
+    from mtg_gateway.views import deck_out
+
+    d = deck(
+        [
+            _cmdr("Aesi"),
+            card("Cultivate", 1, types=["Sorcery"], default_category="Ramp"),
+            card("Opt", 1, types=["Instant"]),
+            card("Sol Ring", 1, categories=["Mana"], types=["Artifact"], default_category="Ramp"),
+        ],
+        categories=_CAT,
+    )
+    rows = {r["name"]: r for r in deck_out(d, view="cards")["cards"]}
+    assert rows["Cultivate"]["categories"] == [] and rows["Cultivate"]["shown_under"] == "Ramp"
+    assert rows["Opt"]["shown_under"] == "Instant"  # no auto category: its type
+    assert "shown_under" not in rows["Sol Ring"] and "shown_under" not in rows["Aesi"]
+
+
+def test_legality_chip_and_panel_list_every_failing_rule() -> None:
+    """T-040: the deck page shows every rule the deck fails, with its reason and cards, not the
+    first five (the chip) or the cards' own statuses only (the panel)."""
+    from mtg_gateway.deckpage import legality_chip_html, legality_panel_html
+
+    d = deck(
+        [
+            _cmdr("Aesi", color_identity=["U"], legalities={"commander": "legal"}),
+            card("Sol Ring", 2, legalities={"commander": "legal"}),
+            card("Mana Crypt", 1, legalities={"commander": "banned"}),
+            card("Bolt", 1, color_identity=["R"], legalities={"commander": "legal"}),
+            card("Rule Breaker", 1, legalities={"commander": "not_legal"}),
+            card("Opt", 3, legalities={"commander": "legal"}),
+            card("Island", 50, types=["Land"], supertypes=["Basic"], legalities={"commander": "legal"}),
+        ],
+        categories=_CAT,
+    )
+    stats = compute(d)
+    problems = stats["checks"]["legal_problems"]
+    assert problems == [
+        "deck has 59 cards; commander wants 100",
+        "outside the commander's color identity: Bolt (R)",
+        "more than one copy in a singleton format: Sol Ring ×2, Opt ×3",
+        "banned: Mana Crypt",
+        "not legal in commander: Rule Breaker",
+    ]
+    chip = legality_chip_html(d, stats)
+    assert "class='legal bad'" in chip and "5 problems" in chip
+    panel = legality_panel_html(d, stats)
+    assert "Not legal in Commander:" in panel
+    for p in problems:
+        assert f"<li>{p}</li>" in panel.replace("&#x27;", "'"), p

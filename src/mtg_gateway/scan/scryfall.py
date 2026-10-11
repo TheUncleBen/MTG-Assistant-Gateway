@@ -31,6 +31,7 @@ import logging
 import math
 import re
 import time
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -47,6 +48,39 @@ class ScryfallError(Exception):
     def __init__(self, kind: str, message: str):
         super().__init__(message)
         self.kind = kind
+
+
+def today() -> str:
+    """Today in UTC, written as Scryfall writes ``released_at`` (YYYY-MM-DD). Tests replace it."""
+    return datetime.now(UTC).date().isoformat()
+
+
+def is_released(card: dict[str, Any]) -> bool:
+    """Out already: released today or earlier (a card with no date counts as released)."""
+    released = card.get("released_at")
+    return not isinstance(released, str) or not released or released <= today()
+
+
+def on_paper(card: dict[str, Any]) -> bool:
+    """Sold as a paper card. A preview has ``games: []`` until it is out; an Arena or MTGO
+    printing has no ``paper``. Reads a raw card's ``games`` or a summary's ``paper`` flag."""
+    games = card.get("games")
+    if isinstance(games, list):
+        return "paper" in games
+    return card.get("paper") is not False
+
+
+def good_default(card: dict[str, Any], finish: str | None = None) -> bool:
+    """A printing that may stand in when no set was given: released, on paper, and in ``finish``
+    when one was asked for."""
+    return is_released(card) and on_paper(card) and (not finish or finish in (card.get("finishes") or []))
+
+
+def default_printing(cards: list[dict[str, Any]], finish: str | None = None) -> dict[str, Any] | None:
+    """The printing to use when no set was given: the newest released paper printing (in
+    ``finish`` when given) of ``cards``, which are one card's printings newest first. Scryfall's
+    own default is its newest printing, which can be a preview that is not out yet."""
+    return next((c for c in cards if good_default(c, finish)), None)
 
 
 def summarize(card: dict[str, Any]) -> dict[str, Any]:
@@ -81,6 +115,11 @@ def summarize(card: dict[str, Any]) -> dict[str, Any]:
     legal = card.get("legalities") or {}
     if legal:
         out["legal_commander"] = legal.get("commander")
+    # Flags only when they apply, so most summaries stay as they were.
+    if not is_released(card):
+        out["unreleased"] = True
+    if not on_paper(card):
+        out["paper"] = False
     return out
 
 
@@ -102,6 +141,7 @@ _CARD_KEYS = (
     "released_at",
     "scryfall_uri",
     "finishes",
+    "games",
 )
 _FACE_KEYS = ("name", "mana_cost", "oracle_id")
 _IMAGE_KEYS = ("small", "normal", "art_crop")

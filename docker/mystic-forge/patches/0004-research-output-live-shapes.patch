@@ -1,0 +1,681 @@
+Subject: Research and goldfish output that misread live data or misled
+
+Found in the gateway's live run of 2026-10-11 (Mystic Forge 1.3.2-mag2):
+
+- edhrec_precon_upgrade printed "?%" for every card to add. EDHREC's precon
+  pages now send num_decks with potential_decks (Tatyova, Benthic Druid: 969
+  of 1612 for Reap the Tides) and no "inclusion". It also headed EDHREC's
+  precon_commander_counts "Commanders in this precon", but that list holds
+  every commander people built the precon around (Koma, Cosmos Serpent and
+  twenty more); the precon's own commander is in the page's deck.commander.
+- edhrec_salt printed "Stasis — " with nothing after the dash: the salt page
+  now sends a numeric "salt" (3.06) and no "label".
+- edhrec_top_cards printed each section's list without its heading, so the
+  numbering restarted eight times with nothing to say why. With a colour the
+  page is pages/top/<colour>.json, which has no time period (its counts are
+  over all decks), so period was silently not used; the output now says so.
+- edhrec_recommendations listed EDHREC's outRecs as "Consider Cutting",
+  including cards that were never given (Wastes, Forest, Island for a list of
+  one Sol Ring). Only cards from the given list are shown as cuts now.
+- spellbook_card_combos printed "None total" when Commander Spellbook sends
+  "count": null.
+- precon_decklist and precon_export printed one line per MTGJSON printing
+  ("8 Forest" and "7 Forest"); lines for the same card are added together.
+- goldfish_annotate (and every goldfish tool) skipped double-faced cards
+  given by their full name ("Enduring Angel // Angelic Enforcer", "Elbrus,
+  the Binding Blade // Withengar Unbound"): Scryfall's collection lookup does
+  not find the full name, only the front face. Lookups now use the front
+  face; the card found keeps its full name. The pre-flight also says how many
+  copies of an unrecognized name were skipped.
+- The honesty report filed lands and mana rocks that were played (Island,
+  Sol Ring, Arcane Signet) under "Modeled, low-impact ... only this group
+  supports 'the sim agrees this card underperforms'", because they fire no
+  trigger. Mana sources that were played are listed apart now
+  (honesty.modeled_mana_sources), never as low-impact.
+- on_curve.avg_lands_by_turn is the land drops made in each turn (the
+  per-turn counter resets every turn), not lands in play; the report's chart
+  called it "Average lands in play by turn". The chart is renamed and
+  on_curve.avg_land_drops_by_turn carries the same numbers under a clear
+  name (avg_lands_by_turn stays for existing readers).
+
+Tests: tests/test_research_output_fixes.py; tests/goldfish/test_metrics.py
+and tests/goldfish/test_report.py follow the new honesty key and chart title.
+
+Upstream: Kautiontape/mystic-forge at dd82cd1 (main, 2026-10-04) has none of
+these fixes. Drop each part when upstream carries it.
+
+diff --git a/server.py b/server.py
+--- a/server.py
++++ b/server.py
+@@ -1294,9 +1294,22 @@
+ 
+     parts: list[str] = []
+     parts.append(f"# {data.get('header', f'Top Cards — {params.period.value}')}")
++    if params.color:
++        # A colour page (pages/top/<colour>.json) has no time period: its counts
++        # are over all of EDHREC's decks, so period cannot apply.
++        parts.append(f"Period ignored: EDHREC's {params.color.value} page counts "
++                     f"all decks, with no time period.")
++    parts.append(f"Up to {params.limit} cards per section.")
+     parts.append("")
+ 
+     for cl in data.get("container", {}).get("json_dict", {}).get("cardlists", []):
++        # Each list is one section ("Top Cards", "Creatures", "Instants", ...);
++        # without its heading the numbering restarts with nothing to say why.
++        header = cl.get("header")
++        if header and cl.get("cardviews"):
++            if parts[-1] != "":
++                parts.append("")
++            parts.append(f"## {header}")
+         for i, cv in enumerate(cl.get("cardviews", [])[:params.limit], 1):
+             name = cv.get("name", "?")
+             label = cv.get("label", "")
+@@ -1309,6 +1322,12 @@
+             parts.append(line)
+ 
+     return "\n".join(parts)
++
++
++def _recs_key(name: str) -> str:
++    """A card name compared case-blind and by its front face, so "Fire // Ice"
++    given matches "Fire // Ice" or "Fire" sent back."""
++    return name.split(" // ", 1)[0].strip().casefold()
+ 
+ 
+ @mcp.tool(name="edhrec_recommendations")
+@@ -1346,12 +1365,16 @@
+                 line += f" salt:{salt:.1f}"
+             parts.append(line)
+ 
+-    out_recs = data.get("outRecs", [])
+-    if out_recs:
++    # EDHREC's outRecs also name cards that were not given (basic lands, for
++    # one), so a cut is shown only for a card that is in the list given.
++    given = {_recs_key(c) for c in params.cards}
++    cuts = [rec.get("name", "?") for rec in data.get("outRecs", [])
++            if _recs_key(rec.get("name", "")) in given]
++    if cuts:
+         parts.append("")
+-        parts.append("## Consider Cutting")
+-        for rec in out_recs:
+-            parts.append(f"- {rec.get('name', '?')}")
++        parts.append("## Consider Cutting (from the cards given)")
++        for name in cuts:
++            parts.append(f"- {name}")
+ 
+     return "\n".join(parts)
+ 
+@@ -1370,7 +1393,12 @@
+ 
+     for cl in data.get("container", {}).get("json_dict", {}).get("cardlists", []):
+         for i, cv in enumerate(cl.get("cardviews", [])[:params.limit], 1):
+-            parts.append(f"{i}. **{cv.get('name', '?')}** — {cv.get('label', '')}")
++            # The salt page now sends a numeric "salt" score (Stasis 3.06 on
++            # 2026-10-11) and no "label".
++            salt = cv.get("salt")
++            score = (f"salt {salt:.2f}" if isinstance(salt, (int, float))
++                     else cv.get("label") or "no score given")
++            parts.append(f"{i}. **{cv.get('name', '?')}** — {score}")
+ 
+     return "\n".join(parts)
+ 
+@@ -1539,10 +1567,20 @@
+     # 4. Render.
+     parts: list[str] = []
+     parts.append(f"# {selected.get('header', 'Precon Upgrade')}")
++    # The page's own decklist names the precon's commander; precon_commander_counts
++    # lists every commander EDHREC users built this precon around, most of
++    # them cards that are not in the precon at all.
++    deck = page.get("deck")
++    own = [c for c in (deck.get("commander") or []) if isinstance(c, str)] \
++        if isinstance(deck, dict) else []
++    if own:
++        parts.append("")
++        parts.append(f"**Precon commander:** {' + '.join(own)}")
+     if commander_counts:
+         parts.append("")
+         if len(commander_counts) > 1:
+-            parts.append("**Commanders in this precon:**")
++            parts.append("**Commanders used by upgraded builds of this precon "
++                         "(EDHREC decks; not all are in the precon):**")
+             for c in commander_counts:
+                 mark = "  ← shown below" if c.get("href") == active_href else ""
+                 parts.append(f"- {c.get('value', '?')} "
+@@ -1561,7 +1599,12 @@
+         if cl and cl.get("cardviews"):
+             parts.append(f"## {title}")
+             for cv in cl["cardviews"][:params.limit]:
+-                inc, pot = cv.get("inclusion"), cv.get("potential_decks")
++                # EDHREC's precon pages now send the count as num_decks (Tatyova:
++                # 969 of 1612 on 2026-10-11) and no "inclusion".
++                inc = cv.get("inclusion")
++                if inc is None:
++                    inc = cv.get("num_decks")
++                pot = cv.get("potential_decks")
+                 pct = _pct(inc, pot) if inc is not None and pot else "?%"
+                 line = f"- **{cv.get('name', '?')}** — {pct}"
+                 if inc is not None and pot:
+@@ -2913,8 +2956,13 @@
+         return f"No combos found for {params.card}."
+ 
+     parts: list[str] = []
+-    count = data.get("count", len(results))
+-    parts.append(f"# Combos with {params.card} ({count} total, showing {len(results)})")
++    # Commander Spellbook can send "count": null; then only the number shown is known.
++    count = data.get("count")
++    if isinstance(count, int):
++        parts.append(f"# Combos with {params.card} ({count} total, showing {len(results)})")
++    else:
++        parts.append(f"# Combos with {params.card} (showing {len(results)}; "
++                     f"total not given)")
+     parts.append("")
+ 
+     for i, variant in enumerate(results, 1):
+@@ -3469,6 +3517,21 @@
+     return "\n".join(parts)
+ 
+ 
++def _precon_merge(cards: list[dict]) -> list[dict]:
++    """One entry per card name, counts added up. MTGJSON lists each printing
++    of a card separately, so a precon with two Forest arts printed "8 Forest"
++    and "7 Forest" as two lines. First-seen order is kept."""
++    merged: dict[str, dict] = {}
++    for card in cards:
++        name = card.get("name", "?")
++        if name in merged:
++            merged[name]["count"] = (merged[name].get("count", 1)
++                                     + card.get("count", 1))
++        else:
++            merged[name] = {**card, "count": card.get("count", 1)}
++    return list(merged.values())
++
++
+ @mcp.tool(name="precon_decklist")
+ async def precon_decklist(params: PreconDeckInput) -> str:
+     """Get the full official decklist for a preconstructed deck. Use this INSTEAD
+@@ -3495,14 +3558,14 @@
+             parts.append(f"{card.get('count', 1)} {card.get('name', '?')}")
+         parts.append("")
+ 
+-    main = deck.get("mainBoard", [])
++    main = _precon_merge(deck.get("mainBoard", []))
+     if main:
+         parts.append(f"## Main Deck ({sum(c.get('count', 1) for c in main)} cards)")
+         for card in sorted(main, key=lambda c: c.get("name", "")):
+             parts.append(f"{card.get('count', 1)} {card.get('name', '?')}")
+         parts.append("")
+ 
+-    side = deck.get("sideBoard", [])
++    side = _precon_merge(deck.get("sideBoard", []))
+     if side:
+         parts.append(f"## Sideboard ({sum(c.get('count', 1) for c in side)} cards)")
+         for card in sorted(side, key=lambda c: c.get("name", "")):
+@@ -3534,11 +3597,11 @@
+     for card in commander:
+         lines.append(f"{card.get('count', 1)}x {card.get('name', '?')} [Commander{{top}}]")
+ 
+-    main = deck.get("mainBoard", [])
++    main = _precon_merge(deck.get("mainBoard", []))
+     for card in sorted(main, key=lambda c: c.get("name", "")):
+         lines.append(f"{card.get('count', 1)}x {card.get('name', '?')}")
+ 
+-    side = deck.get("sideBoard", [])
++    side = _precon_merge(deck.get("sideBoard", []))
+     for card in side:
+         lines.append(f"{card.get('count', 1)}x {card.get('name', '?')} [Sideboard]")
+ 
+@@ -3732,6 +3795,11 @@
+                             ' "pips": "{R}{W}"}]}')
+ 
+ 
++def _goldfish_front_face(name: str) -> str:
++    """The name a Scryfall collection lookup finds: the front face of "A // B"."""
++    return name.split(" // ", 1)[0].strip() or name
++
++
+ async def _goldfish_fetch_cards(names: list[str]) -> tuple[list[dict], list[str]]:
+     """Fetch raw Scryfall card JSON for the given names (deduplicated, order
+     preserved) via batched POST /cards/collection, 75 identifiers per request.
+@@ -3744,16 +3812,23 @@
+     to_fetch = [n for n in unique if n not in _GOLDFISH_CARD_CACHE]
+     for i in range(0, len(to_fetch), 75):
+         batch = to_fetch[i:i + 75]
++        # The collection lookup does not find a double-faced or split card by
++        # its full name ("Enduring Angel // Angelic Enforcer"), only by its
++        # front face; the card it returns carries the full name.
++        lookups = list(dict.fromkeys(_goldfish_front_face(n) for n in batch))
+         data = await _scryfall_post(
+             "/cards/collection",
+-            {"identifiers": [{"name": n} for n in batch]},
++            {"identifiers": [{"name": n} for n in lookups]},
+         )
+         missing = {item.get("name", "") if isinstance(item, dict) else str(item)
+                    for item in data.get("not_found", [])}
+-        found = [n for n in batch if n not in missing]
++        found = [n for n in lookups if n not in missing]
+         # /cards/collection returns data in identifier order, skipping misses.
+-        for req_name, card in zip(found, data.get("data", [])):
+-            _GOLDFISH_CARD_CACHE[req_name] = card
++        by_lookup = dict(zip(found, data.get("data", [])))
++        for req_name in batch:
++            card = by_lookup.get(_goldfish_front_face(req_name))
++            if card is not None:
++                _GOLDFISH_CARD_CACHE[req_name] = card
+     cards = [_GOLDFISH_CARD_CACHE[n] for n in unique if n in _GOLDFISH_CARD_CACHE]
+     not_found = [n for n in unique if n not in _GOLDFISH_CARD_CACHE]
+     return cards, not_found
+@@ -4008,9 +4083,14 @@
+         parts.append(f"Warning: {_goldfish_n_cards(total)} including commander "
+                      f"— EDH decks are 100. Simulating anyway if that's intended.")
+     if not_found:
++        skipped = Counter(n for n in names if n in set(not_found))
++        n_skipped = sum(skipped.values())
+         parts.append("")
+-        parts.append("Not recognized by Scryfall: " + ", ".join(not_found))
+-        parts.append("These names were skipped — fix any typos and rerun.")
++        parts.append(f"Not recognized by Scryfall, {_goldfish_n_cards(n_skipped)} "
++                     f"skipped: " + ", ".join(f"{skipped[n]} {n}" for n in not_found
++                                              if skipped[n]))
++        parts.append(f"These {_goldfish_n_cards(n_skipped)} are left out of every "
++                     f"section below — fix any typos and rerun.")
+ 
+     parts.append("")
+     parts.append(f"## Auto-derived ({_goldfish_n_cards(len(auto_lines))})")
+@@ -4381,6 +4461,12 @@
+     lines.append("Modeled, low-impact — drawn but never fired (only this "
+                  "group supports 'the sim agrees this card underperforms'):")
+     lines.append("- " + ", ".join(low) if low else "- (none)")
++    mana = honesty.get("modeled_mana_sources") or []
++    if mana:
++        lines.append("Modeled mana sources — played and adding mana (valued "
++                     "by land drops and mana available, not by trigger fires; "
++                     "not low-impact):")
++        lines.append("- " + ", ".join(mana))
+     by_kind: dict[str, set[str]] = {}
+     for name, notes in approx_by_card.items():
+         for note in notes:
+diff --git a/mystic_forge/goldfish/metrics.py b/mystic_forge/goldfish/metrics.py
+--- a/mystic_forge/goldfish/metrics.py
++++ b/mystic_forge/goldfish/metrics.py
+@@ -164,6 +164,9 @@
+     combo_assembled_turn: list[int | None] = field(default_factory=list)
+     combo_castable_turn: list[int | None] = field(default_factory=list)
+     drawn_names: set[str] = field(default_factory=set)
++    # Lands played and mana producers in play at a turn's end: cards whose
++    # value is the mana they add, which no trigger-fire count shows.
++    mana_sources_used: set[str] = field(default_factory=set)
+ 
+ 
+ # --------------------------------------------------------------------------
+@@ -220,7 +223,8 @@
+ 
+     ``card_scopes`` maps card name -> D9 scope class, ``"unrecognized"``, or
+     ``None`` for modeled cards. Modeled-low-impact = modeled cards drawn in
+-    at least one game whose trigger fires sum to zero across all records.
++    at least one game whose trigger fires sum to zero across all records,
++    except the mana sources that were played (``modeled_mana_sources``).
+     """
+ 
+     def drawn_entry(name: str) -> dict[str, Any]:
+@@ -245,15 +249,25 @@
+         if count > 0
+     }
+     drawn_any = {name for r in records for name in r.drawn_names}
++    # A land or mana rock that was played adds mana, which no trigger fire
++    # shows: listed apart, never as low-impact.
++    mana_used = {name for r in records for name in r.mana_sources_used}
++    modeled_mana_sources = sorted(
++        name
++        for name, cls in card_scopes.items()
++        if cls is None and name not in fired and name in mana_used
++    )
+     modeled_low_impact = sorted(
+         name
+         for name, cls in card_scopes.items()
+         if cls is None and name not in fired and name in drawn_any
++        and name not in mana_used
+     )
+     return {
+         "out_of_scope": {k: out_of_scope[k] for k in sorted(out_of_scope)},
+         "unrecognized": unrecognized,
+         "modeled_low_impact": modeled_low_impact,
++        "modeled_mana_sources": modeled_mana_sources,
+     }
+ 
+ 
+@@ -470,11 +484,17 @@
+         for r in records
+         if all(v >= 1 for v in r.lands_played_by_turn[:horizon])
+     )
++    # Land drops made IN each turn (0, 1, more with extra drops), not lands
++    # in play: the per-turn counter resets each turn. avg_lands_by_turn is
++    # the original key, kept for readers of it; avg_land_drops_by_turn says
++    # what it is.
++    land_drops = _avg_by_turn(
++        [r.lands_played_by_turn for r in records], until_turn
++    )
+     metrics["on_curve"] = {
+         "pct_all_drops_through_t5": _prop(on_curve, n),
+-        "avg_lands_by_turn": _avg_by_turn(
+-            [r.lands_played_by_turn for r in records], until_turn
+-        ),
++        "avg_lands_by_turn": land_drops,
++        "avg_land_drops_by_turn": list(land_drops),
+         "avg_mana_by_turn": _avg_by_turn(
+             [r.mana_available_by_turn for r in records], until_turn
+         ),
+diff --git a/mystic_forge/goldfish/runner.py b/mystic_forge/goldfish/runner.py
+--- a/mystic_forge/goldfish/runner.py
++++ b/mystic_forge/goldfish/runner.py
+@@ -66,6 +66,7 @@
+     for "total attacking power" in the table-lethal check."""
+     width = power = mana = equipment = tokens = 0
+     cmdr = None
++    mana_sources: list[str] = []
+     for p in g.battlefield:
+         card = g.card(p.name)
+         if _is_creature_perm(g, p):
+@@ -73,6 +74,8 @@
+             power += effective_power(g, p)
+         if card.data.produces:
+             mana += max(card.data.produces.values())
++            if not p.is_token:
++                mana_sources.append(p.name)
+         if card.is_equipment:
+             equipment += 1
+         if p.is_token:
+@@ -86,6 +89,7 @@
+         "equipment": equipment,
+         "tokens_total": tokens,
+         "lands_played": g._land_drops_used,
++        "mana_sources": mana_sources,
+         "commander_on_bf": cmdr is not None,
+         "commander_equipped": bool(cmdr.attached) if cmdr is not None else False,
+         "opp_life": list(g.opponents),
+@@ -257,6 +261,23 @@
+     return counts
+ 
+ 
++def _lands_played(log: list, horizon: int) -> set[str]:
++    """Names of the lands played through turn ``horizon``, from the pinned
++    log format ``"T{n}: played X"``. A fetch land sacrificed the turn it was
++    played is never on the battlefield at a turn's end, but it was used."""
++    out: set[str] = set()
++    for line in log:
++        head, sep, rest = line.partition(": ")
++        if sep and rest.startswith("played ") and head.startswith("T"):
++            try:
++                t = int(head[1:])
++            except ValueError:
++                continue
++            if 1 <= t <= horizon:
++                out.add(rest[len("played "):])
++    return out
++
++
+ def _tokens_by_source(trigger_fires: dict) -> dict[str, int]:
+     """Token attribution (pinned approximation): the log's "created N
+     token(s)" lines carry no source, so this sums TRIGGER FIRES whose verb
+@@ -316,6 +337,10 @@
+         combo_assembled_turn=list(g.combo_assembled_turn),
+         combo_castable_turn=list(g.combo_castable_turn),
+         drawn_names=set(timeline.drawn),
++        mana_sources_used=(
++            {name for e in turns for name in e["mana_sources"]}
++            | _lands_played(g.log, horizon)
++        ),
+     )
+ 
+ 
+diff --git a/mystic_forge/goldfish/report.py b/mystic_forge/goldfish/report.py
+--- a/mystic_forge/goldfish/report.py
++++ b/mystic_forge/goldfish/report.py
+@@ -341,6 +341,13 @@
+                      "'the sim agrees this card underperforms'.</p>")
+         parts.append("<p>" + ", ".join(_esc(x) for x in low) + "</p>"
+                      if low else "<p>(none)</p>")
++        mana = honesty.get("modeled_mana_sources") or []
++        if mana:
++            parts.append("<h3>Modeled mana sources</h3>"
++                         "<p class=\"note\">Played and adding mana: valued by "
++                         "land drops and mana available, not by trigger "
++                         "fires; not low-impact.</p>")
++            parts.append("<p>" + ", ".join(_esc(x) for x in mana) + "</p>")
+     by_kind: dict[str, set[str]] = {}
+     for name, notes in approx.items():
+         for note in notes:
+@@ -505,8 +512,8 @@
+             "bars",
+             list(range(1, len(m["on_curve"]["avg_lands_by_turn"]) + 1)),
+             m["on_curve"]["avg_lands_by_turn"],
+-            "Average lands in play by turn",
+-            "Turn", "Avg lands", value_fmt="{:.2f}") + "</figure>",
++            "Average land drops made each turn",
++            "Turn", "Avg land drops", value_fmt="{:.2f}") + "</figure>",
+         "<figure>" + _svg_hist(
+             m["casts"]["distribution"],
+             "Casts in a turn — distribution over all simulated turns",
+diff --git a/tests/goldfish/test_metrics.py b/tests/goldfish/test_metrics.py
+--- a/tests/goldfish/test_metrics.py
++++ b/tests/goldfish/test_metrics.py
+@@ -305,7 +305,8 @@
+     }
+     m = aggregate(synthetic_records(), until_turn=6, card_scopes=scopes)
+     h = m["honesty"]
+-    assert set(h) == {"out_of_scope", "unrecognized", "modeled_low_impact"}
++    assert set(h) == {"out_of_scope", "unrecognized", "modeled_low_impact",
++                      "modeled_mana_sources"}
+ 
+     oos = h["out_of_scope"]
+     assert list(oos) == ["interaction_removal"]
+diff --git a/tests/goldfish/test_report.py b/tests/goldfish/test_report.py
+--- a/tests/goldfish/test_report.py
++++ b/tests/goldfish/test_report.py
+@@ -186,7 +186,7 @@
+     assert html.count('class="hist"') == 2     # cast-turn + casts distribution
+     assert html.count('class="curve"') == 2    # commander-cast + kill reached
+     assert html.count('class="bars"') == 1     # on-curve avg lands by turn
+-    assert "Average lands in play by turn" in html
++    assert "Average land drops made each turn" in html
+     assert html.count('class="tile"') >= 5     # stat tiles with CI ranges
+     assert "95% CI" in html
+     # Trigger table: top 15 of 17, with the remainder counted.
+diff --git a/tests/test_research_output_fixes.py b/tests/test_research_output_fixes.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_research_output_fixes.py
+@@ -0,0 +1,194 @@
++"""Research tool output found wrong in the 2026-10-11 live run.
++
++EDHREC shapes below are trimmed from live json.edhrec.com responses on
++2026-10-11 (pages/top/salt.json, pages/top/colorless.json,
++pages/precon/reap-the-tides.json). The double-faced names are the two the
++annotation pre-flight skipped live: Scryfall's collection lookup answers
++"not_found" for the full "Front // Back" name and finds the front face."""
++
++import server
++from mystic_forge.goldfish.metrics import aggregate
++from mystic_forge.goldfish.runner import play_one_game
++from tests.goldfish.helpers import MINI_SCRYFALL, mini_cards, small_deck
++
++SALT = {
++    "header": "Top 100 Saltiest Cards",
++    "container": {"json_dict": {"cardlists": [{"header": "", "tag": "", "cardviews": [
++        {"name": "Stasis", "num_decks": 18144, "potential_decks": 0, "salt": 3.0572033898305087},
++        {"name": "Winter Orb", "num_decks": 20012, "potential_decks": 0, "salt": 2.96},
++    ]}]}},
++}
++
++TOP_COLORLESS = {
++    "header": "Top Colorless Cards",
++    "container": {"json_dict": {"cardlists": [
++        {"header": "Top Cards", "tag": "topcards", "cardviews": [
++            {"name": "Sol Ring", "num_decks": 8535808, "potential_decks": 10248283},
++            {"name": "Arcane Signet", "num_decks": 7353019, "potential_decks": 10248283},
++        ]},
++        {"header": "Creatures", "tag": "creatures", "cardviews": [
++            {"name": "Solemn Simulacrum", "num_decks": 1159819, "potential_decks": 10248283},
++        ]},
++        {"header": "Mana Artifacts", "tag": "manaartifacts", "cardviews": [
++            {"name": "Sol Ring", "num_decks": 8535808, "potential_decks": 10248283},
++        ]},
++    ]}},
++}
++
++PRECON = {
++    "header": "Reap the Tides Precon - Commander Legends",
++    "deck": {"commander": ["Aesi, Tyrant of Gyre Strait"], "cards": {}},
++    "precon_commander_counts": [
++        {"value": "Aesi, Tyrant of Gyre Strait", "count": 1612, "href": "/precon/reap-the-tides"},
++        {"value": "Koma, Cosmos Serpent", "count": 31,
++         "href": "/precon/reap-the-tides/koma-cosmos-serpent"},
++    ],
++    "container": {"json_dict": {"cardlists": [
++        {"header": "Cards to Add", "tag": "cardstoadd", "cardviews": [
++            {"name": "Tatyova, Benthic Druid", "synergy": 0.31343370424386274,
++             "num_decks": 969, "potential_decks": 1612},
++        ]},
++        {"header": "Lands to Add", "tag": "landstoadd", "cardviews": [
++            {"name": "Myriad Landscape", "synergy": 0.003133485433225225,
++             "num_decks": 314, "potential_decks": 1612},
++        ]},
++        {"header": "Cards to Cut", "tag": "cardstocut", "cardviews": [
++            {"name": "Meteor Golem", "num_decks": 0, "potential_decks": 0,
++             "unpopularity": 0.7363523573200993},
++        ]},
++    ]}},
++}
++
++
++def _edhrec(monkeypatch, body):
++    async def fake_get(path):
++        return body
++    monkeypatch.setattr(server, "_edhrec_get", fake_get)
++
++
++async def test_salt_prints_the_numeric_score(monkeypatch):
++    _edhrec(monkeypatch, SALT)
++    out = await server.edhrec_salt(server.SaltInput(limit=3))
++    assert "1. **Stasis** — salt 3.06" in out
++    assert "2. **Winter Orb** — salt 2.96" in out
++
++
++async def test_top_cards_keeps_each_section_heading(monkeypatch):
++    _edhrec(monkeypatch, TOP_COLORLESS)
++    out = await server.edhrec_top_cards(server.TopCardsInput(period="month", color="colorless", limit=3))
++    assert "## Top Cards\n1. **Sol Ring**" in out
++    assert "## Creatures\n1. **Solemn Simulacrum**" in out
++    assert "## Mana Artifacts\n1. **Sol Ring**" in out
++    assert "Period ignored" in out and "Up to 3 cards per section." in out
++
++
++async def test_top_cards_by_period_does_not_claim_the_period_was_ignored(monkeypatch):
++    _edhrec(monkeypatch, {"header": "Top Cards (Past Week)", "container": {"json_dict": {"cardlists": [
++        {"header": "Past Week", "tag": "pastweek", "cardviews": [
++            {"name": "Sol Ring", "num_decks": 266071, "potential_decks": 324897}]}]}}})
++    out = await server.edhrec_top_cards(server.TopCardsInput(period="week"))
++    assert "Period ignored" not in out and "## Past Week" in out
++
++
++async def test_precon_upgrade_reads_num_decks_and_labels_commanders(monkeypatch):
++    _edhrec(monkeypatch, PRECON)
++    out = await server.edhrec_precon_upgrade(server.PreconUpgradeInput(precon="reap-the-tides", limit=3))
++    assert "?%" not in out
++    assert "**Tatyova, Benthic Druid** — 60% (969 of 1612 decks) | synergy +31%" in out
++    assert "**Myriad Landscape** — 19% (314 of 1612 decks)" in out
++    assert "**Precon commander:** Aesi, Tyrant of Gyre Strait" in out
++    assert "Commanders in this precon" not in out
++    assert "Commanders used by upgraded builds of this precon" in out
++
++
++async def test_recommendations_cut_only_cards_that_were_given(monkeypatch):
++    async def fake_post(path, body):
++        return {"inRecs": [{"name": "Command Tower", "score": 100, "primary_type": "Land"}],
++                "outRecs": [{"name": "Wastes"}, {"name": "Sol Ring"}, {"name": "Forest"}]}
++    monkeypatch.setattr(server, "_edhrec_post", fake_post)
++    out = await server.edhrec_recommendations(server.RecsInput(
++        commanders=["Aesi, Tyrant of Gyre Strait"], cards=["sol ring"]))
++    cutting = out.split("## Consider Cutting", 1)[1]
++    assert "- Sol Ring" in cutting and "Wastes" not in cutting and "Forest" not in cutting
++    out = await server.edhrec_recommendations(server.RecsInput(commanders=["Aesi, Tyrant of Gyre Strait"]))
++    assert "Consider Cutting" not in out
++
++
++async def test_spellbook_card_combos_without_a_total(monkeypatch):
++    variant = {"uses": [{"card": {"name": "Basalt Monolith"}}], "produces": [], "description": ""}
++
++    async def fake_get(path, params=None):
++        return {"count": None, "results": [variant, variant, variant]}
++    monkeypatch.setattr(server, "_spellbook_get", fake_get)
++    out = await server.spellbook_card_combos(server.SpellbookCardInput(card="Basalt Monolith", limit=3))
++    assert "None total" not in out
++    assert "(showing 3; total not given)" in out
++
++
++async def test_precon_lists_merge_split_printings(monkeypatch):
++    async def fake_get(path):
++        return {"data": {"name": "Reap the Tides", "code": "CMR", "type": "Commander Deck",
++                         "commander": [{"name": "Aesi, Tyrant of Gyre Strait", "count": 1}],
++                         "mainBoard": [{"name": "Forest", "count": 8}, {"name": "Cultivate", "count": 1},
++                                       {"name": "Forest", "count": 7}]}}
++    monkeypatch.setattr(server, "_mtgjson_get", fake_get)
++    listing = await server.precon_decklist(server.PreconDeckInput(file_name="ReapTheTides_CMR"))
++    assert "15 Forest" in listing and "8 Forest" not in listing and "7 Forest" not in listing
++    assert "## Main Deck (16 cards)" in listing and "**Total: 17 cards**" in listing
++    export = await server.precon_export(server.PreconDeckInput(file_name="ReapTheTides_CMR"))
++    assert export.splitlines().count("15x Forest") == 1 and "8x Forest" not in export
++
++
++ENDURING = {"name": "Enduring Angel // Angelic Enforcer", "type_line": "Creature — Angel // Creature — Angel",
++            "mana_cost": "{2}{W}{W}{W}", "power": "3", "toughness": "3", "keywords": ["Flying"],
++            "card_faces": [{"name": "Enduring Angel", "oracle_text": "Flying, double strike"},
++                           {"name": "Angelic Enforcer", "oracle_text": "Flying"}]}
++
++
++async def test_annotate_finds_double_faced_cards_by_full_name(monkeypatch):
++    by_front = {c["name"].split(" // ")[0]: c for c in [*MINI_SCRYFALL, ENDURING]}
++    sent: list[str] = []
++
++    async def fake_post(path, body):
++        data, not_found = [], []
++        for ident in body["identifiers"]:
++            sent.append(ident["name"])
++            # as live: the full "Front // Back" name is not found, the front face is
++            card = by_front.get(ident["name"])
++            (data.append(card) if card else not_found.append(ident))
++        return {"data": data, "not_found": not_found}
++
++    monkeypatch.setattr(server, "_scryfall_post", fake_post)
++    monkeypatch.setattr(server, "_GOLDFISH_CARD_CACHE", {})
++    deck = ("1 Boss\n1 Enduring Angel // Angelic Enforcer (mid) 17 [Creature]\n"
++            "2 Bera\n30 Plains\n30 Mountain\n36 Bear")
++    out = await server.goldfish_annotate(server.GoldfishAnnotateInput(deck=deck))
++    assert "Enduring Angel // Angelic Enforcer" not in out.split("## Auto-derived")[0]
++    assert "Enduring Angel // Angelic Enforcer" in out
++    assert "Enduring Angel // Angelic Enforcer" not in sent and "Enduring Angel" in sent
++    # the typo is still skipped, with how many copies
++    assert "Not recognized by Scryfall, 2 cards skipped: 2 Bera" in out
++
++
++def test_mana_sources_that_were_played_are_not_low_impact():
++    # seed 1234 plays only Mountains in its first turns (tests/goldfish/test_golden.py)
++    rec, _log = play_one_game(mini_cards(), small_deck(), "Boss", game_seed=1234, until_turn=6)
++    assert "Mountain" in rec.mana_sources_used
++    scopes = {"Mountain": None, "Bear": None}
++    m = aggregate([rec], until_turn=6, card_scopes=scopes)
++    h = m["honesty"]
++    assert "Mountain" not in h["modeled_low_impact"]
++    assert h["modeled_mana_sources"] == ["Mountain"]
++    text = "\n".join(server._goldfish_honesty_lines(h, {}))
++    low = text.split("Modeled, low-impact", 1)[1].split("\n")[1]
++    assert "Mountain" not in low
++    assert "Modeled mana sources" in text and "not low-impact" in text
++
++
++def test_land_drops_by_turn_are_drops_not_lands_in_play():
++    rec, _log = play_one_game(mini_cards(), small_deck(), "Boss", game_seed=1234, until_turn=6)
++    m = aggregate([rec], until_turn=6, card_scopes={})
++    drops = m["on_curve"]["avg_land_drops_by_turn"]
++    assert drops == m["on_curve"]["avg_lands_by_turn"]  # the old key stays
++    # one land drop a turn at most in this deck: a per-turn count, not a running total
++    assert all(v is None or v <= 1 for v in drops) and sum(v or 0 for v in drops) > 1

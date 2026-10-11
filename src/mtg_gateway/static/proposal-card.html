@@ -154,7 +154,7 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
       return;
     }
     switch (m.method) {
-      case "ui/notifications/tool-result": render(m.params || {}); break;
+      case "ui/notifications/tool-result": render(m.params || {}); refresh(); break;
       case "ui/notifications/host-context-changed": applyContext(m.params || {}); break;
       case "ui/notifications/tool-input": case "ui/notifications/tool-input-partial":
       case "ui/notifications/tool-cancelled": case "ui/notifications/request-teardown": break;
@@ -345,8 +345,62 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
     $("foot").textContent = foot.join(" · ");
     renderActions();
     if (sc.state === "applying") { setStatus(progressText(sc), ""); pollApplying(sc.proposal_id); }
-    else setStatus("", "");
+    else setStatus(closedText(sc), "");
   }
+
+  // What happened to a proposal that is no longer pending, and who closed it, in one plain line.
+  function when(t) {
+    if (!t) return "";
+    var d = new Date(Number(t) * 1000);
+    if (isNaN(d.getTime())) return "";
+    var today = d.toDateString() === new Date().toDateString();
+    return " at " + (today ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      : d.toLocaleString([], { dateStyle: "medium", timeStyle: "short" }));
+  }
+  function closedText(p) {
+    var again = " Nothing was sent to Archidekt. Ask the assistant for a new proposal if you still want this change.";
+    var at = when(p.closed_at || p.applied_at);
+    if (p.state === "rejected") {
+      var app = p.closed_by_app ? String(p.closed_by_app) : "the chat app";
+      var by = {
+        assistant: " by the assistant in " + app + " (its reject_proposal call)",
+        card: " by you on the proposal card",
+        review_page: " by you on the review page",
+        browser: " by you in the gateway's web pages",
+        api: " through " + app + " (the gateway's API)",
+        disconnected: " when you disconnected the app that made it"
+      }[p.closed_by] || "";
+      return "Already rejected" + by + at + "." + again;
+    }
+    if (p.state === "expired") return "This proposal expired" + when(p.closed_at || p.expires_at) + " without a decision." + again;
+    if (p.state === "failed") return "Applying this failed" + at + ". The review page shows what happened. Ask the assistant for a new proposal if you still want this change.";
+    if (p.state === "applied") return "Already applied" + at + ". The deck on Archidekt matches this proposal.";
+    return "";
+  }
+
+  // The card may be drawn (or shown again by the host) long after the proposal was made, and the
+  // proposal may have been rejected, applied or expired since. While it shows Approve and Reject,
+  // it reads the proposal once more with get_proposal (read-only) and redraws it if it closed.
+  // If that read fails, the buttons stay: the gateway refuses a press on a closed proposal.
+  var refreshing = false;
+  function refresh() {
+    var p = proposal;
+    if (!p || p.state !== "pending" || !p.proposal_id || refreshing || busy) return;
+    refreshing = true;
+    request("tools/call", { name: "get_proposal", arguments: { proposal_id: p.proposal_id } })
+      .then(function (res) {
+        refreshing = false;
+        var sc = (res && res.structuredContent) || {};
+        if (sc.ok === false || (res && res.isError) || !sc.state) return;
+        if (busy || proposal !== p || sc.proposal_id !== p.proposal_id || sc.state === "pending") return;
+        approval = null;
+        render({ structuredContent: sc, _meta: {} });
+      })
+      .catch(function () { refreshing = false; });
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible") refresh();
+  });
 
   // A large apply keeps running on the gateway after the Approve press answers; the card reads
   // its progress with get_proposal (read-only) until it ends.
@@ -487,9 +541,15 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
         if (sc.ok === false || (res && res.isError)) {
           var msg = sc.message || (res && res.content && res.content[0] && res.content[0].text) || "The gateway refused.";
           busy = false;
-          if (sc.state && sc.state !== "pending") { proposal.state = sc.state; proposal.result = sc.result || proposal.result; approval = null; render({ structuredContent: proposal, _meta: {} }); }
+          // No longer pending (rejected or applied elsewhere, expired): show that and drop the buttons.
+          var closed = sc.state && sc.state !== "pending" ? Object.assign({}, proposal, {
+            state: sc.state, result: sc.result || proposal.result,
+            closed_at: sc.closed_at, closed_by: sc.closed_by, closed_by_app: sc.closed_by_app
+          }) : null;
+          if (closed) { approval = null; render({ structuredContent: closed, _meta: {} }); }
           else { if (ok) ok.disabled = false; if (no) no.disabled = false; }
-          setStatus(String(msg), "err");
+          if (!closed) setStatus(String(msg), "err");
+          else if (closed.state !== "applying") setStatus(closedText(closed) || String(msg), "");
           tellModel("The user pressed " + decision + " on the proposal card for " + pid + ", but the gateway answered: " + msg);
           return;
         }

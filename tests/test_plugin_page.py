@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import io
 import json
 import zipfile
@@ -217,6 +218,56 @@ async def test_install_steps_narrow_to_one_client(harness: Harness) -> None:
         await b.aclose()
     assert "<script>" not in (await harness.http.get("/install?for=<script>")).text
     assert "codex mcp add" in (await harness.http.get("/install.md?for=nope")).text
+
+
+def test_connector_icon_fits_chatgpts_upload_limit() -> None:
+    """ChatGPT's custom connector form takes a PNG of at most 10 KB (T-145, backlog item 3)."""
+    from PIL import Image
+
+    path = REPO / "src" / "mtg_gateway" / "static" / plugin_page.CONNECTOR_ICON_PATH.rsplit("/", 1)[1]
+    data = path.read_bytes()
+    assert len(data) <= plugin_page.CONNECTOR_ICON_MAX_BYTES == 10 * 1024
+    assert data.startswith(b"\x89PNG\r\n\x1a\n")
+    with Image.open(io.BytesIO(data)) as im:
+        im.verify()
+        assert im.format == "PNG"
+        assert im.size == (plugin_page.CONNECTOR_ICON_PX, plugin_page.CONNECTOR_ICON_PX)
+
+
+async def test_chatgpt_steps_offer_the_name_description_url_and_icon_to_copy(
+    tmp_path: Path, idp: FakeIdP, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-145: the ChatGPT steps hand over what its form asks for, the name taken from
+    MTG_SERVER_NAME, and the icon downloads without signing in (on a phone too)."""
+    monkeypatch.setenv("MTG_PLUGIN_DIR", str(REPO_PLUGIN))
+    async with running(Harness(make_settings(tmp_path, server_name="Deck Helper"), idp)) as h:
+        icon = await h.http.get(plugin_page.CONNECTOR_ICON_PATH)  # no session cookie
+        assert icon.status_code == 200 and icon.headers["content-type"] == "image/png"
+        assert len(icon.content) <= plugin_page.CONNECTOR_ICON_MAX_BYTES
+
+        md = (await h.http.get("/install.md?for=chatgpt")).text
+        assert "Name: `Deck Helper`" in md
+        assert f"Description: `{plugin_page.SERVER_DESCRIPTION}`" in md
+        assert f"Connector URL: `{GATEWAY}/mcp`" in md
+        assert f"{GATEWAY}{plugin_page.CONNECTOR_ICON_PATH}" in md
+
+        b = Browser(h)
+        try:
+            await b.login("/install")
+            page = await b.http.get("/install?for=chatgpt")
+        finally:
+            await b.aclose()
+        text = page.text
+        assert "<input id='gpt-name' type='text' readonly value='Deck Helper'>" in text
+        desc = html.escape(plugin_page.SERVER_DESCRIPTION)
+        assert f"<textarea id='gpt-desc' rows='3' readonly>{desc}</textarea>" in text
+        assert f"<input id='gpt-url' type='text' readonly value='{GATEWAY}/mcp'>" in text
+        for key in ("gpt-name", "gpt-desc", "gpt-url"):
+            assert f"data-copy='{key}'" in text
+        assert "<script src='/static/export.js' defer></script>" in text  # what runs the Copy buttons
+        assert f"href='{plugin_page.CONNECTOR_ICON_PATH}' download='deck-helper-icon.png'" in text
+        # Numbered steps, the same in the page and the plain-text version.
+        assert text.count("<li>") >= 12 and "12. Sign in with the account the owner gave you." in md
 
 
 async def test_missing_plugin_folder_gives_503(

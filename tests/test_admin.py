@@ -159,22 +159,28 @@ async def test_the_overview_shows_whether_the_removed_member_clean_up_works(gw: 
     b = await admin_browser(gw)
     try:
         r = await b.http.get("/admin", headers=NAVIGATE)
-        assert "Removed-member clean-up" in r.text and "off: no Authentik API token" in r.text
+        assert "Removed-member clean-up" in r.text
+        # Each state says what to do next, in plain words (T-120).
+        assert "Off. It is optional; to turn it on, follow docs/IDP-AUTHENTIK.md section 12." in r.text
         o = (await b.http.get("/api/v1/admin/overview")).json()
         assert o["system"]["member_cleanup"]["state"] == "off"
 
         sweep._token, sweep.api = "tok-marker-xyz", "https://auth.example.com"  # as if configured
         r = await b.http.get("/admin", headers=NAVIGATE)
-        assert "on, not run yet (the first round is 2 minutes after start)" in r.text
+        assert "On. The first check runs 2 minutes after start; reload this page then." in r.text
         sweep.last.update(ok=True, at=1_800_000_000, removed=1, allowed=4, error=None)
         r = await b.http.get("/admin", headers=NAVIGATE)
-        assert "last run OK at <time datetime='2027-01-15T08:00:00Z'>2027-01-15 08:00 UTC</time>: " in r.text
-        assert "4 allowed members, 1 stored Archidekt session removed" in r.text
+        assert (
+            "Working. Last check at <time datetime='2027-01-15T08:00:00Z'>2027-01-15 08:00 UTC</time>: "
+            in r.text
+        )
+        assert "4 allowed members, 1 stored Archidekt session removed. Nothing to do." in r.text
         assert "&lt;time" not in r.text  # times are markup, never escaped into the text
         err = "group 'mtg-users' found 0 times (is the name right, and may the token view that group?)"
         sweep.last.update(ok=False, at=1_800_003_600, error=err)
         r = await b.http.get("/admin", headers=NAVIGATE)
-        assert "2027-01-15 09:00 UTC</time>, nothing deleted: " + html.escape(err) in r.text
+        assert "2027-01-15 09:00 UTC</time> FAILED, nothing deleted: " + html.escape(err) in r.text
+        assert "Next: Check that MTG_REQUIRED_GROUP and MTG_ADMIN_GROUP match the Authentik group" in r.text
         assert "&lt;time" not in r.text
         o = (await b.http.get("/api/v1/admin/overview")).json()
         assert o["system"]["member_cleanup"] == {"state": "failed", "at": 1_800_003_600, "error": err}

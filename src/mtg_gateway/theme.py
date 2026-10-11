@@ -17,6 +17,7 @@ globalToolbar, floatingToolbar, footer and panel rules). The theme is chosen wit
 from __future__ import annotations
 
 import html
+import re
 import time
 from collections.abc import Iterable
 from contextvars import ContextVar
@@ -66,6 +67,9 @@ _path: ContextVar[str] = ContextVar("mtg_path", default="/")
 # pages then use the phone layout at every width and drop the website footer.
 _app: ContextVar[bool] = ContextVar("mtg_app", default=False)
 APP_UA_MARK = "MTGAssistant/"
+# The app's version follows the mark ("MTGAssistant/0.7.22"); the Account page shows it.
+_APP_VERSION_RE = re.compile(r"MTGAssistant/(\d{1,3}\.\d{1,3}\.\d{1,3})(?![\w.])")
+_app_version: ContextVar[str] = ContextVar("mtg_app_version", default="")
 
 # Archidekt's light set (body custom properties). Emitted twice: under prefers-color-scheme for
 # "system" and under [data-theme=light] for an explicit choice.
@@ -1033,6 +1037,11 @@ def in_app() -> bool:
     return _app.get()
 
 
+def app_version() -> str:
+    """The Android app's version from its user agent (MAJOR.MINOR.PATCH), or "" if not shown."""
+    return _app_version.get()
+
+
 def theme_from_cookie(value: str | None) -> str:
     return value if value in THEMES else "system"
 
@@ -1183,6 +1192,8 @@ def render(
                 "</button>"
                 f"<button type='button' data-native='reload'>{icon('refresh')}Reload</button>"
                 f"<button type='button' data-native='openInBrowser'>{icon('link')}Open in browser</button>"
+                f"<button type='button' data-native='openCopiedLink'>{icon('link')}Open a copied link"
+                "</button>"
                 f"<button type='button' data-native='changeGateway'>{icon('settings')}Change gateway</button>"
                 f"<button type='button' data-native='checkForUpdates'>{icon('download')}Check for app updates"
                 "</button>"
@@ -1363,6 +1374,7 @@ class ThemeMiddleware:
         value = None
         layout = None
         app = False
+        app_ver = ""
         for k, v in scope.get("headers", []):
             if k == b"cookie":
                 for part in v.decode("latin-1").split(";"):
@@ -1373,11 +1385,14 @@ class ThemeMiddleware:
                         layout = val.strip()
             elif k == b"user-agent" and APP_UA_MARK in v.decode("latin-1", "replace"):
                 app = True
+                m = _APP_VERSION_RE.search(v.decode("latin-1", "replace"))
+                app_ver = m.group(1) if m else ""
         token = _theme.set(theme_from_cookie(value))
         ltoken = _layout.set(layout_from_cookie(layout))
         path = scope.get("path") or "/"
         ptoken = _path.set(path)
         atoken = _app.set(app)
+        vtoken = _app_version.set(app_ver)
         try:
             await self.app(scope, receive, send)
         finally:
@@ -1385,6 +1400,7 @@ class ThemeMiddleware:
             _layout.reset(ltoken)
             _path.reset(ptoken)
             _app.reset(atoken)
+            _app_version.reset(vtoken)
 
 
 # One year, the value browsers' preload lists expect. No includeSubDomains: the gateway is usually

@@ -20,7 +20,7 @@ from urllib.parse import parse_qs, quote
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import update_check
+from . import idp_sweep, update_check
 from .decks import ADMIN_CLIENT, actor_label, current_client
 from .pages import BROWSER_CLIENT_ID, _csrf, _when, browser_session, login_redirect, read_limited
 from .theme import display_name, plural, render
@@ -476,20 +476,38 @@ def _archidekt_stats(a: dict[str, Any] | None) -> str:
 
 
 def _cleanup_text(c: dict[str, Any]) -> str:
-    """The removed-member clean-up's state in one line (idp_sweep.AuthentikSweep.status)."""
+    """The removed-member clean-up's state in one line that ends with what to do next
+    (idp_sweep.AuthentikSweep.status). docs/IDP-AUTHENTIK.md section 12 explains each one."""
     st = c.get("state")
+    setup = idp_sweep.SETUP
     if st == "off":
-        return f"off: {c['reason'].removeprefix('removed-member clean-up is off: ')}"
+        cause = c.get("cause")
+        if cause == "token-unreadable":
+            why = c["reason"].removeprefix("removed-member clean-up is off: ").split("; it is optional")[0]
+            return (
+                f"Off: {why}. Check the mtg_authentik_api_token Docker secret and "
+                f"MTG_AUTHENTIK_API_TOKEN_FILE, then redeploy ({setup}, steps 6 and 7)."
+            )
+        if cause == "no-group":
+            return "Off: it needs MTG_REQUIRED_GROUP. Set it in the stack and redeploy."
+        return f"Off. It is optional; to turn it on, follow {setup}."
     if st == "waiting":
-        return f"on, not run yet (the first round is {c['first_after_seconds'] // 60} minutes after start)"
+        return (
+            f"On. The first check runs {c['first_after_seconds'] // 60} minutes after start; "
+            "reload this page then."
+        )
     if st == "ok":
         return _Html(
-            f"last run OK at {_when(c['at'])}: {plural(int(c['allowed']), 'allowed member')}, "
-            f"{plural(int(c['removed']), 'stored Archidekt session')} removed"
+            f"Working. Last check at {_when(c['at'])}: {plural(int(c['allowed']), 'allowed member')}, "
+            f"{plural(int(c['removed']), 'stored Archidekt session')} removed. Nothing to do."
         )
     if st == "failed":
-        return _Html(f"last run FAILED at {_when(c['at'])}, nothing deleted: {html.escape(str(c['error']))}")
-    return "not started yet"
+        err = str(c["error"])
+        return _Html(
+            f"Last check at {_when(c['at'])} FAILED, nothing deleted: {html.escape(err)}. "
+            f"Next: {html.escape(idp_sweep.next_step(err))}"
+        )
+    return "Not started yet. Reload this page in a minute."
 
 
 def users_data(state: Any) -> list[dict[str, Any]]:
