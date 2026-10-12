@@ -714,7 +714,8 @@ def test_every_proposal_tool_is_a_write_tool() -> None:
 
     from mtg_gateway.app import WRITE_TOOLS
 
-    src = (Path(__file__).resolve().parents[1] / "src" / "mtg_gateway" / "app.py").read_text(encoding="utf-8")
+    pkg = Path(__file__).resolve().parents[1] / "src" / "mtg_gateway"
+    src = "".join(p.read_text(encoding="utf-8") for p in pkg.rglob("*.py"))
     names = set(re.findall(r'name="(propose_\w+)"', src))
     assert len(names) >= 10, names
     assert names <= WRITE_TOOLS, names - WRITE_TOOLS
@@ -915,3 +916,43 @@ async def test_hand_delete_and_new_folder_obey_the_writes_switch(stack: Stack) -
     decks.settings = dataclasses.replace(decks.settings, writes_enabled=True)
     folder = await decks.create_folder(SUB, "Brews")
     assert folder["name"] == "Brews"
+
+
+async def test_cover_tags_move_and_folder_rename_obey_the_writes_switch(stack: Stack) -> None:
+    """0.7.26 (Ben's yes to Q1, 02:43Z 10-12): with MTG_WRITES_ENABLED false the cover, tags, deck
+    move and folder rename are refused like the other deck settings and Folders page writes, and
+    nothing is sent."""
+    import dataclasses
+
+    h, ark = stack.h, stack.ark
+    await linked_user(stack)
+    decks = h.app.state.gateway.decks
+    folder = await decks.create_folder(SUB, "Brews")  # while writes are still on
+    decks.settings = dataclasses.replace(decks.settings, writes_enabled=False)
+    b = Browser(h)
+    try:
+        await b.login()
+        csrf = await b.csrf()
+        calls = len(ark.calls)
+        for path, data in (
+            ("/decks/42/cover", {"card": ""}),
+            ("/decks/42/tags", {"action": "add", "name": "budget"}),
+            ("/decks/42/tags", {"action": "remove", "relation_id": "1"}),
+            ("/decks/42/move", {"folder_id": str(folder["id"])}),
+            ("/folders", {"action": "rename", "folder_id": str(folder["id"]), "name": "Old brews"}),
+        ):
+            r = await b.http.post(path, data={"csrf": csrf, **data})
+            assert r.status_code == 400 and "switched off" in r.text, (path, r.status_code, r.text[:300])
+        assert all(m == "GET" for m, _p in ark.calls[calls:]), ark.calls[calls:]
+    finally:
+        await b.aclose()
+    for pending in (
+        decks.set_cover(SUB, "42", None),
+        decks.add_tag(SUB, "42", "budget"),
+        decks.remove_tag(SUB, "42", 1),
+        decks.move_deck(SUB, "42", None),
+        decks.rename_folder(SUB, int(folder["id"]), "Old brews"),
+    ):
+        with pytest.raises(DeckError) as exc:
+            await pending
+        assert exc.value.kind == "writes_disabled"

@@ -236,7 +236,6 @@ class ArtIndex:
         self._build_lock = asyncio.Lock()
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self.paused_until = 0.0  # builds hold while this is in the future: a 429, or the budget spent
-        self.images_fetched = 0
         self._fetch_times: list[float] = []  # monotonic times of the last hour's image fetches
         self._owner_fetches: dict[str, list[float]] = {}  # the same, per member
         self._owner_builds: dict[str, list[float]] = {}  # galleries each member started, last hour
@@ -619,7 +618,6 @@ class ArtIndex:
                 ) from exc
             finally:
                 self._last_image = time.monotonic()
-                self.images_fetched += 1
         if resp.status_code == 429:
             raise ScryfallError("rate_limited", "image host asked us to slow down")
         if resp.status_code != 200 or len(resp.content) > MAX_IMAGE_BYTES:

@@ -157,7 +157,6 @@ ANONYMOUS_AUDIT_TRIM_EVERY = 100
 MAX_ANONYMOUS_AUDIT_DETAIL = 1024
 # Closed proposals (expired, rejected, failed) are deleted this long after they were made.
 CLOSED_PROPOSAL_RETENTION_SECONDS = 30 * 86400
-CLOSED_PROPOSAL_STATES = ("expired", "rejected", "failed")
 # Applied proposals are the record of what was changed and are kept longer, for as long as the
 # audit log: they are deleted a year after they were applied.
 APPLIED_PROPOSAL_RETENTION_SECONDS = 365 * 86400
@@ -1849,11 +1848,6 @@ class Database:
                 target.close()
         finally:
             mem.close()
-
-    def integrity_ok(self) -> bool:
-        """PRAGMA quick_check on the live database (read-only, cheap on a small file)."""
-        with self._lock:
-            return self._conn.execute("PRAGMA quick_check").fetchone()[0] == "ok"
 
     def size_bytes(self) -> int | None:
         if str(self.path) == ":memory:":

@@ -7,6 +7,38 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.26] - 2026-10-12
+
+Clean-up release before the next deployment: old, unused and half-removed code is gone, the two
+largest functions are split into modules, and the image is smaller. A few small visible fixes ride
+along. No new images besides the gateway's; the database stays at schema 12.
+
+### Changed
+- With `MTG_WRITES_ENABLED` false, setting a deck's cover, adding or removing its tags, moving it
+  to a folder and renaming a folder by hand are refused, so every change on the deck settings page
+  and the Folders page obeys the switch (deck delete and new folder already did); nothing is sent.
+  Likes, bookmarks, follows, comments and collection edits made by hand are unchanged.
+- The in-app Guide covers Play on EDHPlay, out-of-date proposals, the Goldfish, Folders and
+  Watchlist pages, and names every assistant tool.
+- The gateway's links to the assistant skill and the Android app open their `/install` sections
+  directly; `/skill` and `/app` still redirect there.
+- Copy on the Export and report pages copies inside the press first, so it also works where the
+  Android app's WebView refuses the async clipboard (tested in Chromium, not in the real app).
+- The gateway image is about 75 MB smaller: dependency wheels are installed from a build mount
+  instead of staying in a layer, and a code change no longer rebuilds them or downloads the scan
+  assets again. The scan page's scripts and styles ship pre-compressed.
+- The Forge refresher finds unfinished runs through an index instead of reading every stored
+  report (created on start-up; no schema change).
+- The deck pages, the History page and the MCP tools are split out of two very large functions
+  into their own modules, moved unchanged; the routes and the tool list are the same.
+- Shared page helpers (HTML escaping, form-token checks, the no-store header) have one copy.
+- The public docs are brought in line with 0.7.25: the API list, Playtest, watchlists, EDHPlay
+  export and the `MTG_FORGE_URL` / `MTG_FORGE_GAMES` settings.
+
+### Removed
+- Dead code, unused parameters and unused styles found by the 0.7.26 audit, and the unused
+  `/static/gateway-icon-32.png`.
+
 ## [0.7.25] - 2026-10-11
 
 Deck sync and online play. Archidekt is the master copy of every deck: the gateway now checks it on
@@ -422,7 +454,7 @@ first ship in this version's image.
 - Moxfield import by URL: Moxfield's deck API could not be reached or checked from here, so it
   is not built. A Moxfield export pasted as text already imports.
 
-## [0.7.17] - 2026-10-10
+## 0.7.17 - 2026-10-10
 
 Assistant tools for actions on your Archidekt account. Each one is only a proposal: you apply it
 yourself, every time, in every approval mode (R-142).
@@ -1536,7 +1568,7 @@ one owner per capability among the assistant's tools.
   slowly the browser delivers its click. The guard used to rely on the click arriving within the
   settle time, which a busy device could miss, so a single tap could approve.
 
-## [0.7.0] - 2026-10-07
+## 0.7.0 - 2026-10-07
 
 Archidekt parity for the pages: browse and search public decks, a home page
 with the full navigation, your Archidekt Collection shown and edited on the
@@ -2274,4 +2306,35 @@ First release, before this repository existed.
 - A one-link install page and assistant plugin, and the MTG skill.
 - Docker Swarm / Portainer stack, nightly database backups, audit log.
 
+[0.7.26]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.7.26
+[0.7.25]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.7.25
+[0.7.24]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.7.24
+[0.7.23]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.7.23
+[0.7.22]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.7.22
+[0.7.21]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.7.21
+[0.7.20]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.7.20
+[0.7.19]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.7.19
+[0.7.18]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.7.18
+[0.7.16]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.7.16
+[0.7.15]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.7.15
+[0.7.14]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.7.14
+[0.7.13]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.7.13
+[0.7.12]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.7.12
+[0.7.11]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.7.11
+[0.7.10]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.7.10
+[0.7.9]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.7.9
+[0.7.8]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.7.8
+[0.7.7]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.7.7
+[0.7.6]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.7.6
+[0.7.5]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.7.5
+[0.7.4]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.7.4
+[0.7.3]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.7.3
+[0.7.2]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.7.2
+[0.7.1]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.7.1
+[0.6.6]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.6.6
+[0.6.5]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.6.5
+[0.6.4]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.6.4
+[0.6.2]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.6.2
+[0.6.1]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.6.1
+[0.6.0]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.6.0
 [0.5.0]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.5.0

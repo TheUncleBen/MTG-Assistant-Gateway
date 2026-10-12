@@ -59,7 +59,6 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         status: int = 200,
         sub: str | None = None,
         sid: str | None = None,
-        scripts: bool = False,
         head_extra: str = "",
         current: str | None = None,
     ) -> Response:
@@ -71,7 +70,6 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             signed_in=sub is not None,
             csrf=_csrf(s, sid),
             admin=_is_admin(sub),
-            scripts=scripts,
             head_extra=head_extra,
             current=current,
             user=display_name(state.db.get_user(sub)) if sub else None,
@@ -94,9 +92,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         return {k: v[0] for k, v in parse_qs(raw.decode("utf-8", "replace"), keep_blank_values=True).items()}
 
     def check_csrf(sid: str | None, data: dict[str, str]) -> bool:
-        expected = _csrf(s, sid)
-        given = data.get("csrf", "").encode()
-        return bool(sid and expected and hmac.compare_digest(given, expected.encode()))
+        return csrf_form_ok(s, sid, data)
 
     def to_login(next_path: str) -> Response:
         return RedirectResponse(f"/login?next={_safe_next(next_path)}", status_code=302)
@@ -126,7 +122,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             if in_app() and q.get("inapp") != "1":
                 # The fresh cookie stays until a sign-in completes (start_session), so backing out
                 # of the browser and coming back here still asks for credentials again.
-                resp = page("Sign in", app_signin.handoff_body(nxt, fresh), scripts=True)
+                resp = page("Sign in", app_signin.handoff_body(nxt, fresh))
                 resp.headers["Cache-Control"] = "no-store"
                 return resp
         try:
@@ -469,7 +465,6 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             sub=sub,
             sid=sid,
             current="/proposals",
-            scripts=True,  # the click guard on Apply (clickguard.py)
             # While a long apply runs in the background the page reloads itself to show progress.
             # It reloads the plain page, so the "Applying" notice of ?ok=applying goes once it ends.
             head_extra=(
@@ -591,10 +586,27 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
 
 
 # -- helpers -----------------------------------------------------------------
+# Headers for a private answer no cache may keep (JSON for the page scripts).
+NO_STORE = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
+
+
 def _csrf(s: Any, sid: str | None) -> str | None:
     if not sid:
         return None
     return hmac.new(s.session_secret.encode(), f"csrf:{sid}".encode(), hashlib.sha256).hexdigest()
+
+
+def csrf_form_ok(s: Any, sid: str | None, data: dict[str, str]) -> bool:
+    """Whether a posted form's ``csrf`` field is this browser session's token."""
+    expected = _csrf(s, sid)
+    return bool(expected) and hmac.compare_digest(data.get("csrf", "").encode(), expected.encode())
+
+
+def csrf_header_ok(s: Any, sid: str | None, request: Request) -> bool:
+    """Whether a script's ``X-CSRF-Token`` header is this browser session's token."""
+    expected = _csrf(s, sid)
+    given = request.headers.get("x-csrf-token", "")
+    return bool(expected) and hmac.compare_digest(given.encode(), expected.encode())
 
 
 def browser_session(state: Any, request: Request) -> tuple[str | None, str | None]:
@@ -619,11 +631,6 @@ def browser_session(state: Any, request: Request) -> tuple[str | None, str | Non
     if sync is not None:
         sync.opened(sub)  # opening the app checks the member's decks on Archidekt (sync.py)
     return sub, sid
-
-
-def browser_user(state: Any, request: Request) -> str | None:
-    """The signed-in person's subject, or None (see browser_session)."""
-    return browser_session(state, request)[0]
 
 
 def login_redirect(next_path: str) -> Response:
@@ -792,9 +799,9 @@ def _account_body(state: Any, sub: str, csrf: str | None, *, disclosure_read: bo
         "operator. While they are off, proposals can be reviewed but not applied.</p>"
         f"{_identity_details(user)}"
         "<div class='form-actions'>"
-        "<a class='btn' href='/skill'>Get the assistant skill for Claude or ChatGPT</a>"
+        "<a class='btn' href='/install?for=skill'>Get the assistant skill for Claude or ChatGPT</a>"
         # Inside the app the App card below takes its place: the app is already installed.
-        + ("" if in_app() else "<a class='btn' href='/app'>Get the Android app</a>")
+        + ("" if in_app() else "<a class='btn' href='/install?for=android'>Get the Android app</a>")
         + f"<form method='post' action='/logout'>{csrf_in}"
         "<button class='inline' data-busy-text='Signing out…'>Sign out</button>"
         "<button class='inline' name='everywhere' value='1' data-busy-text='Signing out…'>"

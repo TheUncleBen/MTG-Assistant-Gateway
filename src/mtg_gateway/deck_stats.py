@@ -531,7 +531,7 @@ def _names(rows: list[Any], limit: int = 10) -> str:
     return ", ".join(shown) + more
 
 
-def _companion_misses(name: str, pool: list[DeckCard], fmt: str, size: dict[str, Any]) -> list[str]:
+def _companion_misses(name: str, pool: list[DeckCard], size: dict[str, Any]) -> list[str]:
     """The cards (or the reason) that break a companion's deck condition, as archidekt.com checks
     it over the deck and its commanders."""
     nonland = [c for c in pool if "Land" not in c.types]
@@ -880,7 +880,7 @@ def deck_checks(deck: Deck, cards: list[DeckCard], commanders: list[DeckCard], q
                     why.append("more than one copy")
                 if c.name == "Lutri, the Spellchaser":
                     why.append("banned as a companion")
-            misses = _companion_misses(c.name, [*rest, *zone_cards], fmt, size)
+            misses = _companion_misses(c.name, [*rest, *zone_cards], size)
             if misses:
                 why.append("its condition is not met: " + _names(sorted(set(misses))))
             if why:

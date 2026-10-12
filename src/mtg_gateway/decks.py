@@ -44,6 +44,7 @@ from .archidekt import (
     ArchidektError,
     Deck,
     art_url,
+    backup_name,
     finish_modifier,
     front_face,
     jwt_exp,
@@ -1541,6 +1542,7 @@ class DeckService:
         # Set by app.py when the deck sync (sync.py) runs: proposal id -> when the sync saw that
         # the proposal's deck no longer matches it (None while it has not), shown with the proposal.
         self.out_of_date: Callable[[str], int | None] | None = None
+        self.social: Any = None  # social.SocialService, set by add_social_routes; actions.py uses it
 
     def _on_archidekt_write(self, path: str) -> None:
         """A write is about to go to Archidekt with some member's session: whatever the gateway
@@ -2612,7 +2614,7 @@ class DeckService:
                 )
                 raise DeckError(
                     "browser_required",
-                    _needs_user_message(mode, risk, why),
+                    _needs_user_message(mode, why),
                     review_url=f"{self.settings.public_url}/proposals/{proposal_id}",
                     state=row["state"],
                     approval_mode=mode,
@@ -3020,8 +3022,7 @@ class DeckService:
     async def _backup_copy(self, sub: str, deck: Deck, snapshot_id: str, *, reason: str) -> dict[str, Any]:
         """Copy ``deck`` into the backup folder and record the copy on the snapshot. Raises the
         Archidekt error as a DeckError; callers decide what that means for their write."""
-        when = time.gmtime()
-        name = f"{deck.name} (backup {time.strftime('%Y-%m-%d %H:%M UTC', when)})"[:200]
+        name = backup_name(deck.name, time.time())[:200]
         description = (
             f"Automatic backup made by the MTG Assistant Gateway {reason}. Gateway snapshot "
             f"{snapshot_id}. To undo the change, ask the assistant to restore snapshot {snapshot_id}, or "
@@ -3603,9 +3604,10 @@ class DeckService:
         return snapshot_id
 
     def _writes_switch(self) -> None:
-        """Refuse a hand write when MTG_WRITES_ENABLED is false. Deck delete and new folder obey
-        the switch like every proposal does (Ben's decision for 0.7.25), on every route: the deck
-        settings page, the Folders page and an approved proposal alike."""
+        """Refuse a hand write when MTG_WRITES_ENABLED is false, as every proposal is refused. The
+        deck settings page and the Folders page call it: deck delete and new folder (0.7.25), and the
+        cover, tags, deck move and folder rename (0.7.26). Hand likes, bookmarks, follows, comments
+        and collection edits do not."""
         if not self.settings.writes_enabled:
             raise DeckError(
                 "writes_disabled",
@@ -3658,11 +3660,15 @@ class DeckService:
     async def set_cover(self, sub: str, deck_id: str, scryfall_uid: str | None) -> dict[str, Any]:
         """Set the deck's cover image to the art of one of its cards (any zone), or back to
         Archidekt's automatic pick with ``None``. Verified by re-reading the deck."""
+        self._writes_switch()
         deck = await self.get_own_deck(sub, deck_id)
         uid = str(scryfall_uid or "").strip().lower()
+        card_name = ""
         if uid:
-            if not any(c.scryfall_uid.lower() == uid for c in deck.cards):
+            card = next((c for c in deck.cards if c.scryfall_uid.lower() == uid), None)
+            if card is None:
                 raise DeckError("invalid", "Pick a card that is in this deck for its cover.")
+            card_name = card.name
             try:
                 url = art_url(uid)
             except ArchidektError as exc:
@@ -3672,7 +3678,7 @@ class DeckService:
             url = ""
             fields = {"customFeatured": ""}
         if (deck.raw.get("featured") or "") == url and not (deck.raw.get("customFeatured") or ""):
-            return {"deck_id": deck.id, "featured": deck.featured, "changed": False}
+            return {"deck_id": deck.id, "featured": deck.featured, "changed": False, "card_name": card_name}
         snapshot_id = self._hand_snapshot(sub, deck)
         await self._call(sub, self.client.update_deck, deck.id, fields)
         verified = await self.get_deck(sub, deck.id)
@@ -3697,6 +3703,7 @@ class DeckService:
             "featured": verified.featured,
             "changed": True,
             "snapshot_id": snapshot_id,
+            "card_name": card_name,
         }
 
     # Folders -----------------------------------------------------------------------------------
@@ -3769,6 +3776,7 @@ class DeckService:
         return folder
 
     async def rename_folder(self, sub: str, folder_id: int, name: str) -> dict[str, Any]:
+        self._writes_switch()
         name = self._folder_name(name)
         info, folder = await self._folder_in(sub, int(folder_id))
         if folder["depth"] == 0:
@@ -3794,6 +3802,7 @@ class DeckService:
     async def move_deck(self, sub: str, deck_id: str, folder_id: int | None) -> dict[str, Any]:
         """Move one of the member's decks into a folder (``None`` = the top-level folder); verified
         by re-reading the deck's ``parentFolder``."""
+        self._writes_switch()
         deck = await self.get_own_deck(sub, deck_id)
         info = await self.folders(sub)
         root = int(info["root_id"])
@@ -3839,6 +3848,7 @@ class DeckService:
     async def add_tag(self, sub: str, deck_id: str, name: str) -> dict[str, Any]:
         """Tag one of the member's decks: an existing Archidekt tag of that exact name is reused,
         else one is created. Verified by re-reading the deck's tags."""
+        self._writes_switch()
         name = self._tag_name(name)
         deck = await self.get_own_deck(sub, deck_id)
         if any(str(r.get("name") or "").casefold() == name.casefold() for r in deck.tag_relations):
@@ -3873,6 +3883,7 @@ class DeckService:
         return {"deck_id": deck.id, "tags": verified.tag_relations, "snapshot_id": snapshot_id}
 
     async def remove_tag(self, sub: str, deck_id: str, relation_id: int) -> dict[str, Any]:
+        self._writes_switch()
         deck = await self.get_own_deck(sub, deck_id)
         rel = next((r for r in deck.tag_relations if r.get("id") == int(relation_id)), None)
         if rel is None:
@@ -4255,7 +4266,7 @@ def _clean_deck_id(deck_id: Any) -> str:
     return raw
 
 
-def _needs_user_message(mode: str, risk: str, why: str) -> str:
+def _needs_user_message(mode: str, why: str) -> str:
     if mode == "semi":
         return (
             f"This proposal is high risk (it {why}), so in the user's semi-automatic approval mode it "

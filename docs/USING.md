@@ -87,12 +87,12 @@ One deck:
   **Reset stack order** puts the deck's own order back.
 - **Quick add** types a card name and takes you to the editor with it
   filled in.
-- **Playtest** shows the deck in Archidekt's own playtester (draw an
-  opening hand, mulligan, play turns by hand) on a gateway page, in the
-  app as on the web. The gateway does not copy that tool: the page frames
-  archidekt.com's playtester, so a game plays the same as on the site. A
-  private deck shows only when that browser is signed in to Archidekt; the
-  page keeps an **Open on Archidekt** button for that case.
+- **Playtest** opens the deck in Archidekt's own playtester (draw an
+  opening hand, mulligan, play turns by hand) in a new tab, or in your
+  phone's browser from the app. A private deck shows there only when that
+  browser is signed in to Archidekt, so sign in on archidekt.com once in
+  the browser you use. To play the deck by hand on the gateway itself, use
+  **Goldfish**.
 - **Play on EDHPlay** takes the deck to [EDHPlay](https://edhplay.com/), the
   free online table for Commander: it copies the deck in EDHPlay's import
   format and opens EDHPlay in a new tab (in the app, your phone's browser).

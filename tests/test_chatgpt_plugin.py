@@ -84,8 +84,14 @@ def test_archive_layout_and_fields() -> None:
     assert "\nname: mtg-gateway\n" in head and "\ndescription: " in head
     assert skill == (REPO_PLUGIN / "mtg-gateway/skills/mtg-gateway/SKILL.md").read_text()
 
+    # The only hosts the ZIP names are this gateway's own and the public project pages: no other
+    # deployment's address can leak into a member's download.
+    gateway_host = GATEWAY.split("://", 1)[1].encode()
     for n in names:
-        assert b"tryhardgamers" not in zf.read(n), n
+        if n.endswith(".png"):
+            continue
+        hosts = set(re.findall(rb"https?://([A-Za-z0-9.-]+)", zf.read(n)))
+        assert hosts <= {gateway_host, b"github.com", b"agent-plugins.org"}, (n, hosts)
     # Same bytes every time.
     assert chatgpt_plugin.build_zip(REPO_PLUGIN, f"{GATEWAY}/mcp", GATEWAY) == data
 

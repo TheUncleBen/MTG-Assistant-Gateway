@@ -5,7 +5,11 @@ docs
 deploy
 venv
 .venv
-__pycache__
-*.pyc
+**/__pycache__
+**/*.pyc
+**/*.egg-info
+android
+# fetched fresh by the build (scripts/fetch_ocr_assets.py), never taken from a local checkout
+src/mtg_gateway/scan/static/vendor
 .pytest_cache
 *.sqlite*

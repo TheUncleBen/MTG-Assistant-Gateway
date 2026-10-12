@@ -10,7 +10,6 @@ same proposal flow: nothing here talks to Archidekt directly.
 from __future__ import annotations
 
 import asyncio
-import hmac
 import json
 import logging
 from collections.abc import Awaitable, Callable
@@ -22,7 +21,7 @@ from starlette.responses import JSONResponse, Response
 
 from . import deck_stats, modes
 from .decks import DeckError, current_client, edit_mismatches, parse_changes, scopes_allow_writes
-from .pages import BROWSER_CLIENT_ID, _csrf, browser_session, read_limited
+from .pages import BROWSER_CLIENT_ID, browser_session, csrf_header_ok, read_limited
 from .views import deck_brief, deck_out
 
 if TYPE_CHECKING:
@@ -95,9 +94,7 @@ async def caller_for(state: AppState, request: Request, *, write: bool) -> Calle
     if not sub or not sid:
         return _unauth()
     if write:
-        expected = _csrf(state.settings, sid) or ""
-        given = request.headers.get("X-CSRF-Token", "")
-        if not expected or not hmac.compare_digest(given.encode(), expected.encode()):
+        if not csrf_header_ok(state.settings, sid, request):
             return JSONResponse({"ok": False, "error": "csrf", "message": "Reload the page and retry."}, 403)
     return Caller(sub, BROWSER_CLIENT_ID, "browser")
 

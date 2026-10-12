@@ -112,3 +112,32 @@ def test_hand_play_names_the_goldfish_page_too() -> None:
     page = _page()
     assert "one place to draw and play" not in page
     assert "two places to draw and play a deck by hand: the gateway's own <strong>Goldfish</strong>" in page
+
+
+def test_every_assistant_tool_and_the_new_pages_are_in_the_guide(tmp_path, monkeypatch) -> None:
+    """0.7.26: the reference names every gateway tool (the watch tools only when watchlists are on),
+    and the 0.7.23 to 0.7.25 pages and features: Goldfish, Folders, Play on EDHPlay, out of date."""
+    from mtg_gateway import app as app_mod
+
+    from .conftest import make_settings
+
+    servers = []
+    build = app_mod.build_mcp_server
+    monkeypatch.setattr(
+        app_mod, "build_mcp_server", lambda state: servers.append(build(state)) or servers[-1]
+    )
+    app_mod.create_app(make_settings(tmp_path, watchlists_enabled=True))
+    tools = [t.name for t in servers[-1]._tool_manager.list_tools()]
+    assert "watch_card" in tools and len(tools) > 30
+    on, off = _page(watchlists=True), _page()
+    missing = [t for t in tools if f"<code>{t}</code>" not in on]
+    assert not missing, missing
+    assert "<code>watch_card</code>" not in off and "<code>/watchlist</code>" not in off
+    assert "<code>/watchlist</code>" in on
+    for fact in (
+        "<code>/decks/&lt;id&gt;/goldfish</code>",
+        "<code>/folders</code>",
+        "Play on EDHPlay",
+        "out of date",
+    ):
+        assert fact in off, fact

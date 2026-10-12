@@ -114,6 +114,11 @@ class ForgeClient:
         self._health: tuple[float, bool] = (0.0, False)  # (checked at, answering), for the admin page
         self._health_lock = asyncio.Lock()
 
+    @property
+    def last_health(self) -> tuple[float, bool]:
+        """(when last checked, whether it answered), for the admin page."""
+        return self._health
+
     async def _call(self, method: str, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
         try:
             r = await self._client.request(method, path, json=body)

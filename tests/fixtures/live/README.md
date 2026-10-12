@@ -21,15 +21,7 @@ pinned in `docker/mystic-forge/Dockerfile`).
 | --- | --- | --- |
 | `archidekt_deck_sample.json` | `https://archidekt.com/api/decks/<id>/` | 200 |
 | `archidekt_deck_blink_sample.json` | `https://archidekt.com/api/decks/<id>/` | 200 |
-| `scryfall_named_aesi.json` | `/cards/named?exact=Aesi, Tyrant of Gyre Strait` | 200 |
-| `scryfall_named_fuzzy_aesi.json` | `/cards/named?fuzzy=aesi tyrant` | 200 |
-| `scryfall_card_aesi_cmr_365.json` | `/cards/d607b003-6b48-429c-a7fd-45b8dd1bb4f9` | 200 |
-| `scryfall_search_aesi_prints.json` | `/cards/search?q=!"Aesi, Tyrant of Gyre Strait"&unique=prints` | 200 |
-| `scryfall_rulings_aesi.json` | `/cards/d607b003-6b48-429c-a7fd-45b8dd1bb4f9/rulings` | 200 |
-| `scryfall_named_murkfiend_liege.json` | `/cards/named?exact=Murkfiend Liege` (hybrid mana cost) | 200 |
-| `scryfall_named_meloku.json` | `/cards/named?exact=Meloku the Clouded Mirror` | 200 |
 | `scryfall_named_sol_ring.json` | `/cards/named?exact=Sol Ring` | 200 |
-| `scryfall_named_not_found.json` | `/cards/named?exact=Definitely Not A Real Card Name` | 404 |
 
 Scryfall paths are relative to `https://api.scryfall.com` and were sent URL-encoded.
 
