@@ -3604,9 +3604,9 @@ class DeckService:
         return snapshot_id
 
     def _writes_switch(self) -> None:
-        """Refuse a hand write when MTG_WRITES_ENABLED is false. Deck delete and new folder obey
-        the switch like every proposal does (Ben's decision for 0.7.25), on every route: the deck
-        settings page, the Folders page and an approved proposal alike."""
+        """Refuse a hand write when MTG_WRITES_ENABLED is false. Every hand write obeys the switch
+        like every proposal does, on every route: deck delete and new folder (0.7.25), and the cover,
+        tags, deck move and folder rename (0.7.26)."""
         if not self.settings.writes_enabled:
             raise DeckError(
                 "writes_disabled",
@@ -3659,6 +3659,7 @@ class DeckService:
     async def set_cover(self, sub: str, deck_id: str, scryfall_uid: str | None) -> dict[str, Any]:
         """Set the deck's cover image to the art of one of its cards (any zone), or back to
         Archidekt's automatic pick with ``None``. Verified by re-reading the deck."""
+        self._writes_switch()
         deck = await self.get_own_deck(sub, deck_id)
         uid = str(scryfall_uid or "").strip().lower()
         card_name = ""
@@ -3774,6 +3775,7 @@ class DeckService:
         return folder
 
     async def rename_folder(self, sub: str, folder_id: int, name: str) -> dict[str, Any]:
+        self._writes_switch()
         name = self._folder_name(name)
         info, folder = await self._folder_in(sub, int(folder_id))
         if folder["depth"] == 0:
@@ -3799,6 +3801,7 @@ class DeckService:
     async def move_deck(self, sub: str, deck_id: str, folder_id: int | None) -> dict[str, Any]:
         """Move one of the member's decks into a folder (``None`` = the top-level folder); verified
         by re-reading the deck's ``parentFolder``."""
+        self._writes_switch()
         deck = await self.get_own_deck(sub, deck_id)
         info = await self.folders(sub)
         root = int(info["root_id"])
@@ -3844,6 +3847,7 @@ class DeckService:
     async def add_tag(self, sub: str, deck_id: str, name: str) -> dict[str, Any]:
         """Tag one of the member's decks: an existing Archidekt tag of that exact name is reused,
         else one is created. Verified by re-reading the deck's tags."""
+        self._writes_switch()
         name = self._tag_name(name)
         deck = await self.get_own_deck(sub, deck_id)
         if any(str(r.get("name") or "").casefold() == name.casefold() for r in deck.tag_relations):
@@ -3878,6 +3882,7 @@ class DeckService:
         return {"deck_id": deck.id, "tags": verified.tag_relations, "snapshot_id": snapshot_id}
 
     async def remove_tag(self, sub: str, deck_id: str, relation_id: int) -> dict[str, Any]:
+        self._writes_switch()
         deck = await self.get_own_deck(sub, deck_id)
         rel = next((r for r in deck.tag_relations if r.get("id") == int(relation_id)), None)
         if rel is None:

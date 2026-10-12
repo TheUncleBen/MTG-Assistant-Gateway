@@ -537,9 +537,10 @@ can be applied. The code default is off; the example env files
   variables in Portainer and update the stack. Any other value, or leaving it
   unset, keeps writes off.
 - **To turn writes off:** set it to `false` (or remove it) and update the
-  stack. It kicks in when the service restarts. Since 0.7.25 it also covers
-  deleting a deck and creating a folder by hand (the deck settings page and
-  the Folders page).
+  stack. It kicks in when the service restarts. It also covers every change
+  made by hand on the deck settings page and the Folders page: deleting a
+  deck and creating a folder (since 0.7.25), and the cover image, tags,
+  moving a deck to a folder and renaming a folder (since 0.7.26).
 
 With writes off, people can still sign in, link Archidekt, use research
 tools, and make and review proposals. Applying returns "Deck writes are
