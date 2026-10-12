@@ -13,7 +13,6 @@ Routes and bodies are the ones archidekt.com's own pages send (read from its bun
 
 from __future__ import annotations
 
-import hmac
 import json
 import re
 import time
@@ -25,7 +24,7 @@ from starlette.responses import JSONResponse, Response
 from .archidekt import VOTE_DOWN, VOTE_NONE, VOTE_UP, ArchidektError, Deck
 from .decklist import clean_text
 from .decks import DeckError, _clean_deck_id
-from .pages import _csrf, browser_session, read_limited
+from .pages import NO_STORE, browser_session, csrf_header_ok, read_limited
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -37,7 +36,6 @@ MAX_THREAD_DEPTH = 6
 FOLLOWING_PAGES = 5  # how far into the member's following list the follow state is looked for
 FOLLOWING_TTL = 120.0  # seconds the following list is remembered after a read
 FRESH_GAP = 15.0  # seconds between forced re-reads of the following list (a collaborator lookup)
-NO_STORE = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
 _STATUS = {
     "csrf": 403,
     "invalid": 400,
@@ -397,7 +395,7 @@ class SocialService:
 def add_social_routes(server: MCPServer, state: AppState) -> SocialService:
     s = state.settings
     service = SocialService(state)
-    state.social = service  # type: ignore[attr-defined]
+    state.social = service
     state.decks.social = service  # actions.py proposes and applies through it
 
     def who(request: Request, *, write: bool) -> str | Response:
@@ -407,9 +405,7 @@ def add_social_routes(server: MCPServer, state: AppState) -> SocialService:
                 {"ok": False, "error": "unauthenticated", "login": "/login"}, 401, headers=NO_STORE
             )
         if write:
-            expected = _csrf(s, sid) or ""
-            given = request.headers.get("x-csrf-token", "")
-            if not expected or not hmac.compare_digest(given.encode(), expected.encode()):
+            if not csrf_header_ok(s, sid, request):
                 return _fail("csrf", "Reload the page and retry.")
         return sub
 

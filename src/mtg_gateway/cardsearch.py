@@ -15,7 +15,6 @@ The top bar's search box (theme.py, static/suggest.js in its site mode) brings p
 from __future__ import annotations
 
 import asyncio
-import html
 import logging
 import re
 import time
@@ -27,8 +26,9 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from .deckpage import mana_html
-from .pages import _csrf, browser_session, login_redirect
+from .pages import NO_STORE, _csrf, browser_session, login_redirect
 from .scan.service import ScanError
+from .theme import esc as _esc
 from .theme import icon, render, stylesheet_link
 
 if TYPE_CHECKING:
@@ -106,11 +106,6 @@ CARDS_CSS = """
 
 TEXT_TTL = 6 * 3600  # seconds a card's text is kept
 TEXT_MAX = 500  # cards kept at most (each a few hundred bytes)
-NO_STORE = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
-
-
-def _esc(v: Any) -> str:
-    return html.escape("" if v is None else str(v), quote=True)
 
 
 def _face(f: dict[str, Any]) -> dict[str, str]:

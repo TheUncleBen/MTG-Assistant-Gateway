@@ -12,12 +12,12 @@ the Markdown and the self-contained HTML exports.
 
 from __future__ import annotations
 
-import html
 import json
 import re
 from typing import Any
 
 from .theme import ICON_DATA_URL, time_html, time_text
+from .theme import esc as _esc
 
 # The simulator's honesty classes, in plain words.
 HONESTY_CLASSES = {
@@ -48,10 +48,6 @@ MILESTONES = (
     ("cmdr21", "21 commander damage"),
 )
 MAX_RAW = 60_000
-
-
-def _esc(value: Any) -> str:
-    return html.escape(str(value if value is not None else ""))
 
 
 def front_face(name: Any) -> str:

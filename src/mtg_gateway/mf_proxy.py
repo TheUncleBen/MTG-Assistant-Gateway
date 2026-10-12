@@ -484,6 +484,11 @@ class MysticForgeProxy:
         self._health: tuple[float, bool] = (0.0, False)
         self._health_lock = anyio.Lock()  # one probe at a time, however many /healthz calls wait
 
+    @property
+    def last_health(self) -> tuple[float, bool]:
+        """(when last checked, whether it answered), for the admin page."""
+        return self._health
+
     async def healthy(self) -> bool:
         """Whether Mystic Forge answers a tool listing now (within a few seconds), for the health
         check. Probed at most every HEALTH_CACHE_SECONDS; a failure is logged once per probe."""

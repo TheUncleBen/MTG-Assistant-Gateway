@@ -14,7 +14,6 @@ the card's Scryfall id, as the deck pages do.
 from __future__ import annotations
 
 import csv
-import html
 import io
 import json
 import re
@@ -30,9 +29,19 @@ from .archidekt import COLLECTION_PAGE_SIZE, ArchidektError, _faces, _oracle_tex
 from .busy import busy_response
 from .deckpage import image_url, mana_html
 from .decks import DeckError, current_client
-from .pages import _csrf, _safe_next, browser_session, login_redirect, read_limited
+from .pages import (
+    NO_STORE,
+    _csrf,
+    _safe_next,
+    browser_session,
+    csrf_form_ok,
+    csrf_header_ok,
+    login_redirect,
+    read_limited,
+)
 from .schemas import CollectionAdd, CollectionRemove, card_aliases, dumped
 from .theme import display_name, icon, remember_view, render, stylesheet_link, view_choice
+from .theme import esc as _esc
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -613,7 +622,6 @@ def _price(value: Any) -> float | None:
 
 
 # -- browser page and JSON -----------------------------------------------------------------------------
-NO_STORE = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
 _STATUS = {
     "invalid": 400,
     "not_found": 404,
@@ -623,10 +631,6 @@ _STATUS = {
     "rate_limited": 503,
     "busy": 429,
 }
-
-
-def _esc(v: Any) -> str:
-    return html.escape("" if v is None else str(v), quote=True)
 
 
 def _fail(exc: CollectionError) -> JSONResponse:
@@ -926,12 +930,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         return {k: v[0] for k, v in parse_qs(raw.decode("utf-8", "replace"), keep_blank_values=True).items()}
 
     def check_csrf(sid: str | None, data: dict[str, str]) -> bool:
-        import hmac
-
-        expected = _csrf(s, sid)
-        return bool(
-            sid and expected and hmac.compare_digest(data.get("csrf", "").encode(), expected.encode())
-        )
+        return csrf_form_ok(s, sid, data)
 
     def api_user(request: Request, *, write: bool) -> tuple[str, str] | Response:
         sub, sid = browser_session(state, request)
@@ -942,11 +941,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 headers=NO_STORE,
             )
         if write:
-            import hmac
-
-            expected = _csrf(s, sid) or ""
-            given = request.headers.get("x-csrf-token", "")
-            if not expected or not hmac.compare_digest(given.encode(), expected.encode()):
+            if not csrf_header_ok(s, sid, request):
                 return JSONResponse(
                     {"ok": False, "error": "csrf", "message": "Reload the page and retry."},
                     403,

@@ -37,7 +37,7 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, RedirectResponse, Response
 
-from ..pages import _csrf, _safe_next, browser_session, read_limited
+from ..pages import NO_STORE, _csrf, _safe_next, browser_session, csrf_header_ok, read_limited
 from ..theme import display_name, render
 from .service import ScanError, ScanService, parse_cards
 
@@ -60,7 +60,6 @@ mimetypes.add_type("application/octet-stream", ".traineddata")
 
 
 # Per-user JSON is never stored by a browser or proxy; nosniff on every API reply.
-NO_STORE = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
 
 
 def _asset_version(static_dir: Path = STATIC_DIR) -> str:
@@ -93,9 +92,7 @@ def add_scan_routes(server: MCPServer, state: AppState, service: ScanService) ->
                 {"ok": False, "error": "unauthenticated", "login": "/login?next=/scan"}, 401, headers=NO_STORE
             )
         if write:
-            expected = _csrf(s, sid) or ""
-            given = request.headers.get("x-csrf-token", "")
-            if not expected or not _eq(given, expected):
+            if not csrf_header_ok(s, sid, request):
                 return JSONResponse(
                     {"ok": False, "error": "csrf", "message": "Reload the page and retry."},
                     403,
@@ -373,10 +370,6 @@ def add_scan_routes(server: MCPServer, state: AppState, service: ScanService) ->
 
 def _draft_key(s: Any, sub: str) -> str:
     return hmac.new(s.session_secret.encode(), f"draft:{sub}".encode(), hashlib.sha256).hexdigest()[:16]
-
-
-def _eq(a: str, b: str) -> bool:
-    return hmac.compare_digest(a.encode(), b.encode())
 
 
 def _json_for_html(data: dict[str, Any]) -> str:

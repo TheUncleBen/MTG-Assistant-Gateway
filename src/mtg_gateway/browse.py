@@ -13,7 +13,6 @@ names in its ``featured`` URL; no Archidekt image is loaded.
 
 from __future__ import annotations
 
-import html
 import logging
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 from urllib.parse import urlencode
@@ -28,6 +27,7 @@ from .deckpage import avatar_html, covers_for, deck_list_html
 from .decks import DeckError
 from .pages import _csrf, browser_session, login_redirect
 from .theme import display_name, icon, render, stylesheet_link
+from .theme import esc as _esc
 
 SearchOrder = Literal["-viewCount", "-updatedAt", "-createdAt", "-size", "edhBracket"]  # SEARCH_ORDERS
 
@@ -140,10 +140,6 @@ BROWSE_CSS = """
 .listbar .controls .field{margin:0}
 .listbar .controls .grow{flex:1 1 min(100%,16rem);min-width:0}
 """
-
-
-def _esc(v: Any) -> str:
-    return html.escape("" if v is None else str(v), quote=True)
 
 
 def read_query(qp: Any) -> dict[str, Any]:

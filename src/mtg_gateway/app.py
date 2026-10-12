@@ -158,6 +158,7 @@ class AppState:
     membership: MembershipChecker | None = None
     sweep: AuthentikSweep | None = None  # removed-member clean-up (idp_sweep.py)
     notifier: Notifier | None = None  # ntfy notifications (notify.py)
+    social: Any = None  # likes, comments, follows (social.py), set by add_social_routes
     prices: PriceService | None = None  # watchlists and price history (prices.py)
     summaries: Summaries | None = None  # members' plain summaries (summary.py)
     app_signins: AppSignins = field(default_factory=AppSignins)  # the Android app's browser sign-in
@@ -1646,7 +1647,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
 
     # -- Archidekt account actions (actions.py): each a proposal the member approves --------------
     def _social_service() -> Any:
-        social = getattr(state, "social", None)
+        social = state.social
         if social is None:
             raise DeckError("unavailable", "Archidekt's social actions are not loaded on this gateway.")
         return social

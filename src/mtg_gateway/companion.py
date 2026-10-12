@@ -65,6 +65,7 @@ from .pages import (
     _when,
     actor_html,
     browser_session,
+    csrf_form_ok,
     login_redirect,
     read_limited,
 )
@@ -87,6 +88,9 @@ from .theme import (
     stylesheet_link,
     time_text,
     view_choice,
+)
+from .theme import (
+    esc as _esc,
 )
 from .views import auto_category, cards_by_category
 
@@ -122,8 +126,12 @@ def _json_for_html(data: Any) -> str:
     return json.dumps(data).replace("<", "\\u003c")
 
 
-def _esc(value: Any) -> str:
-    return html.escape(str(value if value is not None else ""))
+TEXT_PLAIN = "text/plain; charset=utf-8"
+
+
+def _filename(name: str) -> str:
+    """A download's file name: the deck's name in safe characters, at most 60."""
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", name)[:60]
 
 
 def _num(value: Any, digits: int = 1) -> str:
@@ -324,11 +332,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         return {k: v[0] for k, v in parse_qs(raw.decode("utf-8", "replace"), keep_blank_values=True).items()}
 
     def check_csrf(sid: str | None, data: dict[str, str]) -> bool:
-        import hmac
-
-        expected = _csrf(s, sid)
-        given = data.get("csrf", "").encode()
-        return bool(sid and expected and hmac.compare_digest(given, expected.encode()))
+        return csrf_form_ok(s, sid, data)
 
     async def my_decks(
         sub: str, *, wait: float | None = None
@@ -953,7 +957,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         )
 
     async def collaborators_or_none(sub: str, deck_id: str) -> list[dict[str, Any]] | None:
-        social = getattr(state, "social", None)
+        social = state.social
         if social is None:
             return None
         try:
@@ -1111,11 +1115,9 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
 
         async def run(sub: str, data: dict[str, str], _sid: str | None) -> str:
             uid = (data.get("card") or "").strip() or None
-            await decks.set_cover(sub, deck_id, uid)
+            done = await decks.set_cover(sub, deck_id, uid)
             if uid:
-                deck = await decks.get_deck(sub, deck_id)
-                card = next((c for c in deck.cards if c.scryfall_uid.lower() == uid.lower()), None)
-                state.db.save_deck_cover(deck.id, uid.lower(), card.name if card else "", owner_sub=sub)
+                state.db.save_deck_cover(done["deck_id"], uid.lower(), done["card_name"], owner_sub=sub)
             return "cover" if uid else "cover_auto"
 
         return await hand_action(request, deck_id, run, ok="cover", anchor="cover")
@@ -1662,49 +1664,22 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         flags, labels, sideboard rows), for Archidekt's Import dialog or the gateway's New deck."""
         from .decks import deck_to_archidekt_text
 
-        sub, _sid = browser_session(state, request)
-        if not sub:
-            return login_redirect("/decks")
-        try:
-            deck = await decks.get_any_deck(sub, request.path_params["deck_id"])
-        except DeckError as exc:
-            return busy_text_response(exc) or Response(str(exc), 404)
-        name = re.sub(r"[^A-Za-z0-9._-]+", "_", deck.name or deck.id)[:60]
-        return Response(
-            deck_to_archidekt_text(deck) + "\n",
-            media_type="text/plain; charset=utf-8",
-            headers={
-                "Content-Disposition": f'attachment; filename="{name}.archidekt.txt"',
-                "Cache-Control": "no-store",
-                "X-Content-Type-Options": "nosniff",
-            },
+        return await _download(
+            request, ".archidekt.txt", lambda deck: deck_to_archidekt_text(deck) + "\n", TEXT_PLAIN
         )
 
     @server.custom_route("/decks/{deck_id}/export.txt", methods=["GET"], include_in_schema=False)
     async def export_txt(request: Request) -> Response:
         from .decks import deck_to_text
 
-        sub, _sid = browser_session(state, request)
-        if not sub:
-            return login_redirect("/decks")
-        try:
-            deck = await decks.get_any_deck(sub, request.path_params["deck_id"])
-        except DeckError as exc:
-            return busy_text_response(exc) or Response(str(exc), 404)
-        text = deck_to_text(deck)
-        side = deck_to_text(deck, zone="side")
-        if side:
-            text += "\n\n// Sideboard\n" + side
-        name = re.sub(r"[^A-Za-z0-9._-]+", "_", deck.name or deck.id)[:60]
-        return Response(
-            text + "\n",
-            media_type="text/plain; charset=utf-8",
-            headers={
-                "Content-Disposition": f'attachment; filename="{name}.txt"',
-                "Cache-Control": "no-store",
-                "X-Content-Type-Options": "nosniff",
-            },
-        )
+        def make(deck: Deck) -> str:
+            text = deck_to_text(deck)
+            side = deck_to_text(deck, zone="side")
+            if side:
+                text += "\n\n// Sideboard\n" + side
+            return text + "\n"
+
+        return await _download(request, ".txt", make, TEXT_PLAIN)
 
     async def _download(request: Request, ext: str, make: Any, media_type: str) -> Response:
         """One export-only file for a deck the member may read: ``make(deck)`` gives the body."""
@@ -1715,7 +1690,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             deck = await decks.get_any_deck(sub, request.path_params["deck_id"])
         except DeckError as exc:
             return busy_text_response(exc) or Response(str(exc), 404)
-        name = re.sub(r"[^A-Za-z0-9._-]+", "_", deck.name or deck.id)[:60]
+        name = _filename(deck.name or deck.id)
         body = make(deck)
         return Response(
             body,
@@ -1732,7 +1707,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         """Arena import text (export only: Arena imports it; the gateway does not read it back)."""
         from .export_formats import to_arena
 
-        return await _download(request, ".arena.txt", to_arena, "text/plain; charset=utf-8")
+        return await _download(request, ".arena.txt", to_arena, TEXT_PLAIN)
 
     @server.custom_route("/decks/{deck_id}/export.dek", methods=["GET"], include_in_schema=False)
     async def export_dek(request: Request) -> Response:
@@ -1761,7 +1736,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             return busy_json_response(exc) or JSONResponse(
                 {"ok": False, "error": exc.kind, "message": str(exc)}, 404
             )
-        name = re.sub(r"[^A-Za-z0-9._-]+", "_", deck.name or deck.id)[:60]
+        name = _filename(deck.name or deck.id)
         return JSONResponse(
             deck_out(deck),
             headers={
@@ -1778,69 +1753,55 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         import csv
         import io
 
-        sub, _sid = browser_session(state, request)
-        if not sub:
-            return login_redirect("/decks")
-        try:
-            deck = await decks.get_any_deck(sub, request.path_params["deck_id"])
-        except DeckError as exc:
-            return busy_text_response(exc) or Response(str(exc), 404)
+        def make(deck: Deck) -> str:
+            def cell(value: Any) -> str:
+                # A cell starting like a formula is quoted the way spreadsheets expect, so a deck
+                # owner's category or label cannot run as one when another member opens the export.
+                s = str(value)
+                return "'" + s if s[:1] in ("=", "+", "-", "@", "\t", "\r") else s
 
-        def cell(value: Any) -> str:
-            # A cell starting like a formula is quoted the way spreadsheets expect, so a deck
-            # owner's category or label cannot run as one when another member opens the export.
-            s = str(value)
-            return "'" + s if s[:1] in ("=", "+", "-", "@", "\t", "\r") else s
-
-        buf = io.StringIO()
-        w = csv.writer(buf, lineterminator="\r\n")
-        w.writerow(
-            [
-                "Quantity",
-                "Name",
-                "Finish",
-                "Edition Code",
-                "Collector Number",
-                "Category",
-                "Secondary Categories",
-                "Label",
-                "Mana Value",
-                "Mana Cost",
-                "Types",
-                "Rarity",
-                "Price",
-                "Scryfall ID",
-            ]
-        )
-        for c in deck.cards:
+            buf = io.StringIO()
+            w = csv.writer(buf, lineterminator="\r\n")
             w.writerow(
                 [
-                    c.quantity,
-                    cell(c.name),
-                    c.modifier or "Normal",
-                    c.set_code,
-                    c.collector_number,
-                    cell(c.categories[0]) if c.categories else "",
-                    cell(",".join(cell(x) for x in c.categories[1:])),
-                    cell(c.label),
-                    "" if c.cmc is None else (int(c.cmc) if float(c.cmc).is_integer() else c.cmc),
-                    cell(c.mana_cost),
-                    cell(" ".join(c.supertypes + c.types)),
-                    c.rarity,
-                    "" if c.price is None else f"{c.price:.2f}",
-                    c.scryfall_uid,
+                    "Quantity",
+                    "Name",
+                    "Finish",
+                    "Edition Code",
+                    "Collector Number",
+                    "Category",
+                    "Secondary Categories",
+                    "Label",
+                    "Mana Value",
+                    "Mana Cost",
+                    "Types",
+                    "Rarity",
+                    "Price",
+                    "Scryfall ID",
                 ]
             )
-        name = re.sub(r"[^A-Za-z0-9._-]+", "_", deck.name or deck.id)[:60]
-        return Response(
-            buf.getvalue(),
-            media_type="text/csv; charset=utf-8",
-            headers={
-                "Content-Disposition": f'attachment; filename="{name}.csv"',
-                "Cache-Control": "no-store",
-                "X-Content-Type-Options": "nosniff",
-            },
-        )
+            for c in deck.cards:
+                w.writerow(
+                    [
+                        c.quantity,
+                        cell(c.name),
+                        c.modifier or "Normal",
+                        c.set_code,
+                        c.collector_number,
+                        cell(c.categories[0]) if c.categories else "",
+                        cell(",".join(cell(x) for x in c.categories[1:])),
+                        cell(c.label),
+                        "" if c.cmc is None else (int(c.cmc) if float(c.cmc).is_integer() else c.cmc),
+                        cell(c.mana_cost),
+                        cell(" ".join(c.supertypes + c.types)),
+                        c.rarity,
+                        "" if c.price is None else f"{c.price:.2f}",
+                        c.scryfall_uid,
+                    ]
+                )
+            return buf.getvalue()
+
+        return await _download(request, ".csv", make, "text/csv; charset=utf-8")
 
     @server.custom_route("/decks/{deck_id}/report", methods=["POST"], include_in_schema=False)
     async def run_report(request: Request) -> Response:
@@ -2167,7 +2128,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         )
 
     def _report_file(r: dict[str, Any], ext: str, body: str, media_type: str) -> Response:
-        name = re.sub(r"[^A-Za-z0-9._-]+", "_", r.get("deck_name") or r["deck_id"])[:60]
+        name = _filename(r.get("deck_name") or r["deck_id"])
         day = time_text(r.get("taken_at"))[:10]
         return Response(
             body,

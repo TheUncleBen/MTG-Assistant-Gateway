@@ -14,7 +14,6 @@ view (text rows, stacks of images, or a grid), deck stats, description.
 from __future__ import annotations
 
 import calendar
-import html
 import json
 import math
 import re
@@ -41,7 +40,7 @@ from .deck_stats import (
 from .decks import mana_value_text, split_label
 from .export_formats import EDHPLAY_URL, to_edhplay
 from .mana import mana_html as _mana_html
-from .theme import icon, plural
+from .theme import esc, icon, plural
 from .views import cards_by_category
 
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
@@ -76,10 +75,6 @@ SORTS = {
 COLOUR_NAMES = {"W": "White", "U": "Blue", "B": "Black", "R": "Red", "G": "Green", "C": "Colorless"}
 TYPE_ORDER = list(PRIMARY_TYPES)  # deck_stats owns the order (and primary_type, auto_category)
 RARITY_ORDER = {"mythic": 0, "rare": 1, "uncommon": 2, "common": 3, "special": 4}
-
-
-def esc(value: Any) -> str:
-    return html.escape("" if value is None else str(value), quote=True)
 
 
 def image_url(uid: str | None, size: str = "normal") -> str | None:

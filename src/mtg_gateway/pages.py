@@ -92,9 +92,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         return {k: v[0] for k, v in parse_qs(raw.decode("utf-8", "replace"), keep_blank_values=True).items()}
 
     def check_csrf(sid: str | None, data: dict[str, str]) -> bool:
-        expected = _csrf(s, sid)
-        given = data.get("csrf", "").encode()
-        return bool(sid and expected and hmac.compare_digest(given, expected.encode()))
+        return csrf_form_ok(s, sid, data)
 
     def to_login(next_path: str) -> Response:
         return RedirectResponse(f"/login?next={_safe_next(next_path)}", status_code=302)
@@ -588,10 +586,27 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
 
 
 # -- helpers -----------------------------------------------------------------
+# Headers for a private answer no cache may keep (JSON for the page scripts).
+NO_STORE = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
+
+
 def _csrf(s: Any, sid: str | None) -> str | None:
     if not sid:
         return None
     return hmac.new(s.session_secret.encode(), f"csrf:{sid}".encode(), hashlib.sha256).hexdigest()
+
+
+def csrf_form_ok(s: Any, sid: str | None, data: dict[str, str]) -> bool:
+    """Whether a posted form's ``csrf`` field is this browser session's token."""
+    expected = _csrf(s, sid)
+    return bool(expected) and hmac.compare_digest(data.get("csrf", "").encode(), expected.encode())
+
+
+def csrf_header_ok(s: Any, sid: str | None, request: Request) -> bool:
+    """Whether a script's ``X-CSRF-Token`` header is this browser session's token."""
+    expected = _csrf(s, sid)
+    given = request.headers.get("x-csrf-token", "")
+    return bool(expected) and hmac.compare_digest(given.encode(), expected.encode())
 
 
 def browser_session(state: Any, request: Request) -> tuple[str | None, str | None]:

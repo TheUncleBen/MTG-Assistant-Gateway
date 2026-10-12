@@ -986,6 +986,11 @@ ICONS = {
 }
 
 
+def esc(value: Any) -> str:
+    """HTML-escape a value for page text or a quoted attribute; None is empty."""
+    return html.escape("" if value is None else str(value), quote=True)
+
+
 def display_name(user: dict | None) -> str:
     """The name the account menu shows for a member: their username, else their name or email."""
     u = user or {}

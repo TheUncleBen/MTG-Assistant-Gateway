@@ -1542,6 +1542,7 @@ class DeckService:
         # Set by app.py when the deck sync (sync.py) runs: proposal id -> when the sync saw that
         # the proposal's deck no longer matches it (None while it has not), shown with the proposal.
         self.out_of_date: Callable[[str], int | None] | None = None
+        self.social: Any = None  # social.SocialService, set by add_social_routes; actions.py uses it
 
     def _on_archidekt_write(self, path: str) -> None:
         """A write is about to go to Archidekt with some member's session: whatever the gateway
@@ -3660,9 +3661,12 @@ class DeckService:
         Archidekt's automatic pick with ``None``. Verified by re-reading the deck."""
         deck = await self.get_own_deck(sub, deck_id)
         uid = str(scryfall_uid or "").strip().lower()
+        card_name = ""
         if uid:
-            if not any(c.scryfall_uid.lower() == uid for c in deck.cards):
+            card = next((c for c in deck.cards if c.scryfall_uid.lower() == uid), None)
+            if card is None:
                 raise DeckError("invalid", "Pick a card that is in this deck for its cover.")
+            card_name = card.name
             try:
                 url = art_url(uid)
             except ArchidektError as exc:
@@ -3672,7 +3676,7 @@ class DeckService:
             url = ""
             fields = {"customFeatured": ""}
         if (deck.raw.get("featured") or "") == url and not (deck.raw.get("customFeatured") or ""):
-            return {"deck_id": deck.id, "featured": deck.featured, "changed": False}
+            return {"deck_id": deck.id, "featured": deck.featured, "changed": False, "card_name": card_name}
         snapshot_id = self._hand_snapshot(sub, deck)
         await self._call(sub, self.client.update_deck, deck.id, fields)
         verified = await self.get_deck(sub, deck.id)
@@ -3697,6 +3701,7 @@ class DeckService:
             "featured": verified.featured,
             "changed": True,
             "snapshot_id": snapshot_id,
+            "card_name": card_name,
         }
 
     # Folders -----------------------------------------------------------------------------------
