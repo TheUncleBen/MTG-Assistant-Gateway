@@ -7,6 +7,27 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.26] - 2026-10-12
+
+Clean-up release before the next deployment. Nothing a member or operator sees works differently:
+old, unused and half-removed code is gone, the two largest functions are split into modules, and
+the image is smaller. No new images besides the gateway's; the database stays at schema 12.
+
+### Changed
+- The gateway image is about 75 MB smaller: dependency wheels are installed from a build mount
+  instead of staying in a layer, and a code change no longer rebuilds them or downloads the scan
+  assets again. The scan page's scripts and styles ship pre-compressed.
+- The Forge refresher finds unfinished runs through an index instead of reading every stored
+  report (created on start-up; no schema change).
+- The deck pages, the History page and the MCP tools are split out of two very large functions
+  into their own modules, moved unchanged; the routes and the tool list are the same.
+- Shared page helpers (HTML escaping, form-token checks, the no-store header) have one copy.
+- The public docs are brought in line with 0.7.25: the API list, Playtest, watchlists, EDHPlay
+  export and the `MTG_FORGE_URL` / `MTG_FORGE_GAMES` settings.
+
+### Removed
+- Dead code, unused parameters and unused styles found by the 0.7.26 audit.
+
 ## [0.7.25] - 2026-10-11
 
 Deck sync and online play. Archidekt is the master copy of every deck: the gateway now checks it on
@@ -2274,6 +2295,7 @@ First release, before this repository existed.
 - A one-link install page and assistant plugin, and the MTG skill.
 - Docker Swarm / Portainer stack, nightly database backups, audit log.
 
+[0.7.26]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.7.26
 [0.7.25]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.7.25
 [0.7.24]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.7.24
 [0.7.23]: https://github.com/TheUncleBen/MTG-Assistant-Gateway/releases/tag/v0.7.23
