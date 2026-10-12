@@ -469,7 +469,6 @@ class MysticForgeProxy:
         self._client_factory = client_factory or (lambda: Client(url))
         self._tools: list[dict[str, Any]] = []
         self._tools_at = 0.0
-        self._known: set[str] = set()
         # Mystic Forge tools whose one argument is a ``params`` object: the assistant is shown the
         # object's fields as the tool's own (flattened) and the call is wrapped back on the way out.
         self._wrapped: set[str] = set()
@@ -545,7 +544,6 @@ class MysticForgeProxy:
                 sorted(skipped - BLOCKED_TOOLS),
             )
         self._tools, self._tools_at = tools, time.time()
-        self._known = {t["name"] for t in tools}
         return tools
 
     def is_proxied(self, name: str) -> bool:

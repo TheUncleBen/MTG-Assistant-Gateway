@@ -279,9 +279,6 @@ class CollectionService:
         if not path or path.startswith("/collection"):
             self._first_pages.pop(sub, None)
 
-    def forget(self, sub: str) -> None:
-        self._first_pages.pop(sub, None)
-
     def _user_id(self, sub: str) -> str:
         link = self.decks.db.get_link(sub)
         if link is None:
@@ -907,7 +904,6 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             wide=True,
             body_class="collection",
             current="/collection",
-            scripts=scripts,
             head_extra=f"{stylesheet_link('deck.css')}<style>{COLLECTION_CSS}</style>"
             + (
                 "<script src='/static/cardview.js' defer></script>"
@@ -994,7 +990,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         cls = "ok" if code in ("added", "removed", "updated", "imported") else "error"
         return f"<p class='notice {cls}'>{_esc(msgs[code])}</p>"
 
-    def problem(exc: CollectionError, *, link_hint: bool) -> str:
+    def problem(exc: CollectionError) -> str:
         if exc.kind in ("not_linked", "auth"):
             return (
                 "<section class='panel coll-empty'><h2>Your collection lives on Archidekt</h2>"
@@ -1039,7 +1035,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             status = 200 if exc.kind in ("not_linked", "auth") else _STATUS.get(exc.kind, 400)
             return page(
                 "My collection",
-                notice(qp.get("err")) + problem(exc, link_hint=True),
+                notice(qp.get("err")) + problem(exc),
                 sub=sub,
                 sid=sid,
                 status=status,

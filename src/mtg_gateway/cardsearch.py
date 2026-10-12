@@ -431,7 +431,6 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
             admin=admin,
             wide=True,
             current="/search",
-            scripts=True,
             head_extra=(
                 # deck.css carries the card viewer's own styles (the dialog, its bottom sheet on phones)
                 f"{stylesheet_link('deck.css')}<style>{CARDS_CSS}</style>"

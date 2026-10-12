@@ -229,7 +229,6 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             admin=admin,
             user=display_name(user),
             wide=True,
-            scripts=True,
             current="/",
             heading=False,
             body_class="home",

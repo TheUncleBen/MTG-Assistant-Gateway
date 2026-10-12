@@ -338,17 +338,6 @@ class ScryfallClient:
             if isinstance(r, dict) and r.get("comment")
         ]
 
-    async def by_set_number(self, set_code: str, collector_number: str) -> dict[str, Any]:
-        key = f"print:{set_code.lower()}:{collector_number.lower()}"
-        if (hit := self.cards.get(key)) is not None:
-            return hit
-        resp = await self._request(
-            "GET", f"/cards/{set_code.lower()}/{collector_number}", interval=self.lookup_interval
-        )
-        card = slim(self._card_or_error(resp, f"{set_code} {collector_number}"))
-        self.cards.put(key, card)
-        return card
-
     async def autocomplete(self, query: str) -> list[str]:
         q = query.strip()
         if len(q) < 2:

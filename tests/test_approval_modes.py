@@ -444,7 +444,6 @@ def test_the_account_actions_wording_names_every_account_action() -> None:
         assert modes.risk_of("action", [{"action": action}])[0] in modes.MEMBER_ONLY
     for mode in modes.MODES:
         assert "Archidekt account" in modes.mode_help(mode) and "deleting a deck" in modes.mode_help(mode)
-    assert modes.MODE_HELP["semi"] == modes.mode_help("semi")
 
 
 async def test_the_account_page_and_guide_use_the_one_wording(stack: Stack) -> None:

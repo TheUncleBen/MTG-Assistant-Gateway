@@ -59,7 +59,6 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         status: int = 200,
         sub: str | None = None,
         sid: str | None = None,
-        scripts: bool = False,
         head_extra: str = "",
         current: str | None = None,
     ) -> Response:
@@ -71,7 +70,6 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             signed_in=sub is not None,
             csrf=_csrf(s, sid),
             admin=_is_admin(sub),
-            scripts=scripts,
             head_extra=head_extra,
             current=current,
             user=display_name(state.db.get_user(sub)) if sub else None,
@@ -126,7 +124,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             if in_app() and q.get("inapp") != "1":
                 # The fresh cookie stays until a sign-in completes (start_session), so backing out
                 # of the browser and coming back here still asks for credentials again.
-                resp = page("Sign in", app_signin.handoff_body(nxt, fresh), scripts=True)
+                resp = page("Sign in", app_signin.handoff_body(nxt, fresh))
                 resp.headers["Cache-Control"] = "no-store"
                 return resp
         try:
@@ -469,7 +467,6 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             sub=sub,
             sid=sid,
             current="/proposals",
-            scripts=True,  # the click guard on Apply (clickguard.py)
             # While a long apply runs in the background the page reloads itself to show progress.
             # It reloads the plain page, so the "Applying" notice of ?ok=applying goes once it ends.
             head_extra=(
@@ -619,11 +616,6 @@ def browser_session(state: Any, request: Request) -> tuple[str | None, str | Non
     if sync is not None:
         sync.opened(sub)  # opening the app checks the member's decks on Archidekt (sync.py)
     return sub, sid
-
-
-def browser_user(state: Any, request: Request) -> str | None:
-    """The signed-in person's subject, or None (see browser_session)."""
-    return browser_session(state, request)[0]
 
 
 def login_redirect(next_path: str) -> Response:

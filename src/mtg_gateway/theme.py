@@ -109,7 +109,6 @@ VIZ_CSS = """
   display:flex;flex-direction:column;gap:.1rem;min-width:0}
 .tile b{font-size:1.25rem;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 .tile span{color:var(--text-muted);font-size:.8rem;overflow-wrap:anywhere}
-.tile .spark{color:var(--orange);width:100%;height:36px}
 .tiles.wide{grid-template-columns:repeat(auto-fit,minmax(min(100%,10rem),1fr));gap:.75rem}
 .tiles.wide .tile{padding:.7rem .8rem;gap:.2rem} .tiles.wide .tile b{font-size:1.5rem}
 /* a confidence interval under a tile's number: a track with the interval filled in */
@@ -132,7 +131,7 @@ VIZ_CSS = """
 .chart{min-width:0} .chart h3{margin:0 0 .4rem}
 .chart svg{display:block;width:100%;height:auto;color:var(--text-muted);font-size:11px;overflow:visible}
 .chart text{fill:currentColor} .chart .grid{stroke:var(--border-soft);stroke-width:1}
-.chart .axis{stroke:var(--border)} .chart .col{fill:var(--orange)} .chart .col.c2{fill:var(--blue)}
+.chart .axis{stroke:var(--border)} .chart .col{fill:var(--orange)}
 .chart .s1{stroke:var(--orange)} .chart .s2{stroke:var(--blue)} .chart .s3{stroke:var(--green)}
 .chart .s4{stroke:var(--purple)} .chart polyline{fill:none;stroke-width:2.5;stroke-linejoin:round;
   stroke-linecap:round} .chart circle.s1{fill:var(--orange)} .chart circle.s2{fill:var(--blue)}
@@ -314,7 +313,7 @@ ul.plain{list-style:none;margin:0;padding:0}
 .card > :first-child,.panel > :first-child{margin-top:0}
 .card > :last-child,.panel > :last-child{margin-bottom:0}
 .panel h2,.card h2{font-size:1.5rem}
-code,pre,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace}
+code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace}
 code{font-size:.92em;background:var(--surface-2);padding:.1rem .4rem;border-radius:3px;overflow-wrap:anywhere}
 pre{font-size:.86rem;line-height:1.5;background:var(--bg);border:1px solid var(--border-soft);
   border-radius:var(--radius);padding:.75rem .9rem;margin:.5rem 0;overflow:auto;white-space:pre-wrap;
@@ -445,10 +444,8 @@ button[aria-busy=true]::after,.btn[aria-busy=true]::after{content:'';width:.9em;
 .btn-primary:hover,button.primary:hover{background:var(--orange);color:var(--on-orange);filter:brightness(1.1)}
 button.danger,.btn-danger{background:var(--danger-fill);border-color:var(--danger-fill);color:#fff}
 button.danger:hover,.btn-danger:hover{background:var(--danger-fill);color:#fff;filter:brightness(1.1)}
-button.success,.btn-success{background:var(--green);border-color:var(--green);color:var(--on-green)}
 button.secondary,.btn-ghost{background:transparent;border-color:transparent}
 button.secondary:hover,.btn-ghost:hover{background:var(--surface-2)}
-.btn-block{width:100%}
 .btn-lg,button.btn-lg{height:48px;padding:0 1.4rem;font-size:1.1rem}
 button.mini{width:2.25rem;min-width:2.25rem;height:2.25rem;padding:0;font-size:1.1rem;line-height:1}
 button.icon-only{width:var(--ctl);padding:0}
@@ -630,18 +627,9 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
 .consent .who .host{color:var(--text-muted);font-size:.93rem;overflow-wrap:anywhere}
 .consent .meta{font-size:1rem} .consent .meta code{font-size:1em}
 
-/* companion layout: wide pages, two panes from 600px */
+/* companion layout: wide pages */
 .wide .wrap{max-width:2300px}
 .wide main.wrap{padding-left:1rem;padding-right:1rem}
-@media (min-width:600px){
-  .wide main.wrap.panes{display:grid;grid-template-columns:minmax(14rem,20rem) minmax(0,1fr);gap:1rem;
-    align-items:start}
-  .wide main.wrap.panes > h1{grid-column:1 / -1;margin-bottom:.25rem}
-  .pane.list{position:sticky;top:60px;max-height:calc(100vh - 80px);overflow:auto}
-  .pane.detail.empty{display:flex;align-items:center;justify-content:center;min-height:12rem;
-    border:1px dashed var(--border);border-radius:var(--radius-panel)}
-}
-@media (max-width:599px){ .pane.aside,.pane.detail.empty{display:none} }
 
 @media (max-width:900px){ .topbar nav.site a{padding:0 .45rem;font-size:.93rem} .brand{margin-right:.25rem} }
 /* The proposal review's three choices sit at one height (gate D8), and the deck banner's
@@ -1198,8 +1186,6 @@ def render(
     form_action: tuple[str, ...] = (),
     admin: bool = False,
     wide: bool = False,
-    scripts: bool = False,
-    panes: bool = False,
     current: str | None = None,
     heading: bool = True,
     head_extra: str = "",
@@ -1208,9 +1194,8 @@ def render(
 ) -> HTMLResponse:
     """Render a page. ``form_action`` adds exact origins a form on this page may submit or be
     redirected to (browsers apply form-action to the redirect that follows a POST too).
-    ``scripts`` allows the page to load scripts from the gateway's own origin (``script-src
-    'self'``; inline script stays forbidden), used by the click guard of clickguard.py and the
-    deck pages. ``current`` names the nav link to mark as the current page (its path);
+    Scripts load only from the gateway's own origin (``script-src 'self'``; inline script stays
+    forbidden). ``current`` names the nav link to mark as the current page (its path);
     ``heading=False`` leaves the <h1> to the body (deck banner). ``user`` is the signed-in
     member's name for the account menu's "Signed in as" line."""
     theme = current_theme()
@@ -1355,7 +1340,6 @@ def render(
         if c
     )
     viewport = "width=1100" if desktop else "width=device-width, initial-scale=1, viewport-fit=cover"
-    main_cls = "wrap panes" if panes else "wrap"
     # a page with its own web app (the scanner) names its own manifest; a second one would win
     manifest = "" if "rel='manifest'" in head_extra else "<link rel='manifest' href='/app.webmanifest'>"
     # The browser's own chrome follows the top bar: the light bar is #313131, the dark one #111111.
@@ -1394,7 +1378,7 @@ def render(
         f"<span class='mark'>{icon('brand')}</span>"
         f"<span class='word'>{html.escape(site)}</span></a>{nav}</div>"
         f"<div class='right'>{right}</div></div></header>"
-        f"<main class='{main_cls}' id='main' tabindex='-1'>{h1}{body}</main>"
+        f"<main class='wrap' id='main' tabindex='-1'>{h1}{body}</main>"
         + (
             # The website footer; the Android app has no footer (its pages end at the tab bar).
             "<footer class='site'><div class='links'>"

@@ -815,7 +815,6 @@ def add_setup_routes(server: MCPServer, state: AppState) -> None:
             admin=admin,
             user=display_name(user),
             current="/install",
-            scripts=True,  # export.js: the Copy buttons
             head_extra=f"<style>{INSTALL_CSS}</style><script src='/static/export.js' defer></script>",
         )
         resp.headers["Cache-Control"] = "no-store"

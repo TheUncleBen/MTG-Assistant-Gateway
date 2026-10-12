@@ -307,10 +307,6 @@ class Settings:
         return self.required_group in held or bool(self.admin_group and self.admin_group in held)
 
     @property
-    def public_host(self) -> str:
-        return urlparse(self.public_url).netloc
-
-    @property
     def mcp_url(self) -> str:
         return f"{self.public_url}/mcp"
 

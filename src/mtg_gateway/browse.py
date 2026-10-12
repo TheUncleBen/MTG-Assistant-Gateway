@@ -281,7 +281,6 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             user=display_name(user),
             wide=True,
             current=current,
-            scripts=True,
             head_extra=f"{stylesheet_link('deck.css')}<style>{BROWSE_CSS}</style>"
             "<script src='/static/deck.js' defer></script>",
         )

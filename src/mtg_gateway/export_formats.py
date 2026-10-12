@@ -70,8 +70,6 @@ class EdhplayList:
     text: str
     commanders: list[str]
     left_out: list[tuple[int, str]]  # (copies, name) that did not fit EDHPlay's 15-card sideboard
-    maybeboard: int  # maybeboard cards, never sent (Ben, 23:21Z 2026-10-11)
-    tokens: int  # token cards left out (EDHPlay's import drops them)
 
 
 def _edh_line(c: DeckCard, *, commander: bool = False, quantity: int | None = None) -> str:
@@ -111,13 +109,12 @@ def to_edhplay(deck: Deck) -> EdhplayList:
     the deck) is never sent (Ben's choice, 23:21Z 2026-10-11), and neither are tokens; the note
     says so. Printings keep their set and number when EDHPlay's parser can read them. A deck with
     no commander starts with a line of several copies when it has one, because EDHPlay's parser
-    takes a first line of quantity 1 as the commander. Unknown: whether the 15 counts copies or
-    lines; copies is the safe reading."""
+    takes a first line of quantity 1 as the commander. The 15 counts copies, not lines (verified
+    live 2026-10-11)."""
     commanders: list[str] = []
     head: list[str] = []
     main: list[str] = []
     first: list[DeckCard] = []  # the sideboard and the companion
-    maybeboard = tokens = 0
     for c in sorted(deck.cards, key=lambda c: (c.name.casefold(), c.set_code, c.collector_number)):
         if not c.name.strip() or c.quantity <= 0:
             continue
@@ -128,11 +125,10 @@ def to_edhplay(deck: Deck) -> EdhplayList:
         elif deck.in_deck(c):
             main.append(_edh_line(c))
         elif any(cat.strip().casefold() in _EDH_TOKEN_CATEGORIES for cat in c.categories):
-            tokens += c.quantity
+            continue  # tokens: EDHPlay's import drops them
         elif c.companion or (c.categories and c.categories[0].casefold() in ("sideboard", "companion")):
             first.append(c)
-        else:  # the maybeboard, or another category kept outside the deck
-            maybeboard += c.quantity
+        # anything else (the maybeboard, another category kept outside the deck) is never sent
     side: list[str] = []
     left_out: list[tuple[int, str]] = []
     room = EDHPLAY_SIDEBOARD_MAX
@@ -154,7 +150,7 @@ def to_edhplay(deck: Deck) -> EdhplayList:
     text = "\n".join(head + main) + "\n"
     if side:
         text += "\nSideboard\n" + "\n".join(side) + "\n"
-    return EdhplayList(text, commanders, left_out, maybeboard, tokens)
+    return EdhplayList(text, commanders, left_out)
 
 
 def to_mtgo_dek(deck: Deck) -> str:

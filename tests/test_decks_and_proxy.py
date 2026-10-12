@@ -1136,7 +1136,7 @@ async def test_apply_resolves_common_and_double_faced_cards(stack: Stack) -> Non
     assert p2["ok"] and p2["diff"].splitlines() == ["-1 Delver of Secrets // Insectile Aberration"]
 
 
-async def test_resolve_card_id_prefers_named_printing() -> None:
+async def test_resolve_card_prefers_named_printing() -> None:
     from mtg_gateway.archidekt import ArchidektClient, Pacer
 
     seen: list[dict[str, str]] = []
@@ -1166,12 +1166,12 @@ async def test_resolve_card_id_prefers_named_printing() -> None:
         Pacer(0.0),
         http=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
     )
-    assert await client.resolve_card_id("t", "Sol Ring") == 1
-    assert await client.resolve_card_id("t", "sol ring", set_code="CMR") == 2
-    assert await client.resolve_card_id("t", "Sol Ring", set_code="xxx", collector_number="490") == 2
+    assert (await client.resolve_card("t", "Sol Ring"))["id"] == 1
+    assert (await client.resolve_card("t", "sol ring", set_code="CMR"))["id"] == 2
+    assert (await client.resolve_card("t", "Sol Ring", set_code="xxx", collector_number="490"))["id"] == 2
     assert seen[0]["exact"] == "true" and seen[0]["name"] == "Sol Ring"
     with pytest.raises(Exception, match="no Archidekt printing"):
-        await client.resolve_card_id("t", "Nonexistent Card")
+        (await client.resolve_card("t", "Nonexistent Card"))["id"]
     assert seen[-1].get("exact") is None  # the fallback substring search was tried
 
 

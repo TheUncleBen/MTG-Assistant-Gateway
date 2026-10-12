@@ -44,6 +44,7 @@ from .archidekt import (
     ArchidektError,
     Deck,
     art_url,
+    backup_name,
     finish_modifier,
     front_face,
     jwt_exp,
@@ -2612,7 +2613,7 @@ class DeckService:
                 )
                 raise DeckError(
                     "browser_required",
-                    _needs_user_message(mode, risk, why),
+                    _needs_user_message(mode, why),
                     review_url=f"{self.settings.public_url}/proposals/{proposal_id}",
                     state=row["state"],
                     approval_mode=mode,
@@ -3020,8 +3021,7 @@ class DeckService:
     async def _backup_copy(self, sub: str, deck: Deck, snapshot_id: str, *, reason: str) -> dict[str, Any]:
         """Copy ``deck`` into the backup folder and record the copy on the snapshot. Raises the
         Archidekt error as a DeckError; callers decide what that means for their write."""
-        when = time.gmtime()
-        name = f"{deck.name} (backup {time.strftime('%Y-%m-%d %H:%M UTC', when)})"[:200]
+        name = backup_name(deck.name, time.time())[:200]
         description = (
             f"Automatic backup made by the MTG Assistant Gateway {reason}. Gateway snapshot "
             f"{snapshot_id}. To undo the change, ask the assistant to restore snapshot {snapshot_id}, or "
@@ -4255,7 +4255,7 @@ def _clean_deck_id(deck_id: Any) -> str:
     return raw
 
 
-def _needs_user_message(mode: str, risk: str, why: str) -> str:
+def _needs_user_message(mode: str, why: str) -> str:
     if mode == "semi":
         return (
             f"This proposal is high risk (it {why}), so in the user's semi-automatic approval mode it "

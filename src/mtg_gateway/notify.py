@@ -154,9 +154,6 @@ class Notifier:
     def enabled(self) -> bool:
         return bool(self.url)
 
-    def subscribe_url(self, topic: str) -> str:
-        return f"{self.url}/{topic}"
-
     async def publish(self, topic: str, title: str, message: str, path: str = "/", tags: str = "") -> bool:
         """One message to ``topic``; True when the server took it. Never raises."""
         if not self.enabled or not topic:

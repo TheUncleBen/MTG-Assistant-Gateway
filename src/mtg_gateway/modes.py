@@ -122,9 +122,6 @@ def mode_help(mode: str, *, max_rows: int = DEFAULT_MAX_ROWS) -> str:
     )
 
 
-MODE_HELP = {mode: mode_help(mode) for mode in MODES}
-
-
 # Shown next to the semi and auto choices, because turning them on has a real cost.
 AUTO_WARNING = (
     "An assistant can be tricked by text it reads (a web page, a deck description, a pasted "

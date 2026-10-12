@@ -3,8 +3,7 @@
 These are the pages the Android app wraps and the browser shows on a phone. They render on
 the server from the same services the MCP tools and the JSON API use; the small amount of
 JavaScript (the deck editor) lives in ``static/companion.js`` and talks to ``/api/v1``.
-Layout rules asked for by the Android thread: two panes (list and detail) from 600 px up, one
-column below; internal links never open a new tab; external sites (Archidekt, Scryfall) may.
+Internal links never open a new tab; external sites (Archidekt, Scryfall) may.
 """
 
 from __future__ import annotations
@@ -27,7 +26,7 @@ from starlette.responses import FileResponse, JSONResponse, RedirectResponse, Re
 
 from . import deck_stats
 from .actions import COLLABORATOR_NOTE, collaborator_by_hand, collaborator_target
-from .archidekt import FORMAT_NAMES, ArchidektError, Deck, featured_scryfall_id, format_label, parse_deck
+from .archidekt import FORMAT_NAMES, ArchidektError, Deck, featured_scryfall_id, format_label
 from .busy import busy_json_response, busy_response, busy_text_response
 from .decklist import DecklistError, parse_decklist
 from .deckpage import (
@@ -125,11 +124,6 @@ def _json_for_html(data: Any) -> str:
 
 def _esc(value: Any) -> str:
     return html.escape(str(value if value is not None else ""))
-
-
-def _ext(url: str, text: str) -> str:
-    """A link to an external site (Archidekt, Scryfall) may open a new tab."""
-    return f"<a href='{_esc(url)}' target='_blank' rel='noopener noreferrer'>{_esc(text)}</a>"
 
 
 def _num(value: Any, digits: int = 1) -> str:
@@ -303,7 +297,6 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             admin=admin,
             user=display_name(user),
             wide=two_pane,
-            scripts=scripts or bool(extra_scripts),
             current=current,
             heading=heading,
             head_extra=(stylesheet_link("deck.css") if deck_css else "")
@@ -2535,10 +2528,6 @@ def event_detail_html(detail: dict[str, Any]) -> str:
         else:
             bits.append(f"{label} {_esc(v)}")
     return " · ".join(bits)
-
-
-def snapshot_deck(state: AppState, sub: str, snapshot_id: str) -> Deck:
-    return parse_deck(state.decks.snapshot(sub, snapshot_id)["deck"])
 
 
 __all__ = ["add_companion_routes", "stats_strip"]

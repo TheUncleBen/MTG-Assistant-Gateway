@@ -293,7 +293,6 @@ class Deck:
     user_vote: int = 0
     bookmarked: bool = False
     comment_root: int | None = None
-    view_count: int = 0
 
     def _rows(self) -> list[tuple[Any, ...]]:
         return sorted(
@@ -1135,21 +1134,6 @@ class ArchidektClient:
         return {"id": str(new_id), "url": f"https://archidekt.com/decks/{new_id}", "name": name}
 
     # -- writes -------------------------------------------------------------
-    async def resolve_card_id(
-        self,
-        token: str,
-        name: str,
-        *,
-        set_code: str | None = None,
-        collector_number: str | None = None,
-        scryfall_id: str | None = None,
-    ) -> int:
-        """Archidekt printing id for a card; see resolve_card."""
-        card = await self.resolve_card(
-            token, name, set_code=set_code, collector_number=collector_number, scryfall_id=scryfall_id
-        )
-        return card["id"]
-
     async def resolve_card(
         self,
         token: str,
@@ -1509,17 +1493,6 @@ class ArchidektClient:
         the folder page's move (patch ``parentFolder``) and rename (patch ``name``) (reported)."""
         return await self._request("PATCH", "/massUpdate/", token=token, json_body={"items": items})
 
-    async def deck_tags(self, token: str | None, deck_id: str) -> list[dict[str, Any]]:
-        """GET /decks/{id}/tagRelations/: ``results`` of {id (the relation), tag, deck, name,
-        position} (reported; the public precon listing carries the same shape under ``tags``)."""
-        if not DECK_ID_RE.fullmatch(str(deck_id)):
-            raise ArchidektError("contract", "deck id is not a number")
-        body = await self._request("GET", f"/decks/{deck_id}/tagRelations/", token=token)
-        results = body.get("results") if isinstance(body, dict) else body
-        if not isinstance(results, list):
-            raise ArchidektError("contract", "unexpected tag relation listing shape")
-        return [r for r in results if isinstance(r, dict)]
-
     async def search_tags(self, token: str, query: str) -> list[dict[str, Any]]:
         """GET /decks/tags/v2/?q=: the site's tag picker lookup ({id, name} rows; reported)."""
         body = await self._request("GET", "/decks/tags/v2/", token=token, params={"q": query[:60]})
@@ -1771,5 +1744,4 @@ def parse_deck(body: Any) -> Deck:
         user_vote=_int(body.get("userInput")) if _int(body.get("userInput")) in (0, 1, 2) else 0,
         bookmarked=body.get("bookmarked") is True,
         comment_root=_int(body.get("commentRoot")) or None,
-        view_count=_int(body.get("viewCount")),
     )

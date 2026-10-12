@@ -89,7 +89,15 @@ from .companion import add_companion_routes
 from .config import Settings
 from .db import Database
 from .decklist import DecklistError, ListCard, clean_text, parse_decklist, to_text
-from .decks import DeckError, DeckService, _clean_deck_id, current_client, deck_to_text, scopes_allow_writes
+from .decks import (
+    FULL_SCOPE,
+    DeckError,
+    DeckService,
+    _clean_deck_id,
+    current_client,
+    deck_to_text,
+    scopes_allow_writes,
+)
 from .forge import ForgeClient
 from .guide import add_guide_routes
 from .home import add_home_routes
@@ -688,7 +696,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
         issuer_url=s.public_url,  # type: ignore[arg-type]  # AuthSettings keeps the empty path (no trailing slash)
         resource_server_url=s.mcp_url,  # type: ignore[arg-type]
         validate_token_resource=True,
-        client_registration_options=ClientRegistrationOptions(enabled=True, default_scopes=["mtg"]),
+        client_registration_options=ClientRegistrationOptions(enabled=True, default_scopes=[FULL_SCOPE]),
         revocation_options=RevocationOptions(enabled=True),
         required_scopes=None,
     )
@@ -2008,9 +2016,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
             "connected unless you approve here and sign in there. Deny leaves the application "
             "unconnected.</p></div>"
         )
-        return render(
-            "Connect an application", body, site=s.server_name, form_action=info["form_action"], scripts=True
-        )
+        return render("Connect an application", body, site=s.server_name, form_action=info["form_action"])
 
     @server.custom_route(CONSENT_PATH, methods=["POST"], include_in_schema=False)
     async def consent_continue(request: Request) -> Response:
@@ -2357,7 +2363,7 @@ def _advertise_cimd(app: Starlette, server: MCPServer) -> None:
     metadata = build_metadata(
         server.settings.auth.issuer_url,  # the SDK's own value, so the issuer string matches exactly
         None,
-        ClientRegistrationOptions(enabled=True, default_scopes=["mtg"]),
+        ClientRegistrationOptions(enabled=True, default_scopes=[FULL_SCOPE]),
         RevocationOptions(enabled=True),
     )
     metadata.client_id_metadata_document_supported = True

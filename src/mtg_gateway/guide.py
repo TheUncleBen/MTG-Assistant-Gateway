@@ -1100,7 +1100,6 @@ def add_guide_routes(server: MCPServer, state: AppState) -> None:
             admin=admin,
             user=display_name(user),
             wide=True,
-            scripts=True,
             current="/guide",
             head_extra=f"<style>{GUIDE_CSS}</style><script src='/static/guide.js' defer></script>",
         )
