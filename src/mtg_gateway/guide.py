@@ -267,7 +267,8 @@ def guide_body(
         "<ol class='steps'>"
         "<li><span>On <a href='/'>Home</a>, open <strong>Connect an AI assistant</strong> and follow the "
         "steps for your assistant; it ends with a sign-in to this site in your browser.</span></li>"
-        "<li><span>Install the <a href='/skill'>assistant skill</a> once per assistant. It teaches your "
+        "<li><span>Install the <a href='/install?for=skill'>assistant skill</a> once per assistant. "
+        "It teaches your "
         "assistant the house rules: look things up instead of guessing, show the diff before changing "
         "anything, never ask for a password.</span></li>"
         "<li><span>Ask it something that only reads: “Show me my decks”, “open my Krenko deck and tell me "
@@ -533,7 +534,8 @@ def guide_body(
         "scanning included.</li></ul>"
     )
     how_app = (
-        "<p>The <a href='/app'>Android app</a> shows these same pages as a native-feeling app with the phone "
+        "<p>The <a href='/install?for=android'>Android app</a> shows these same pages as a "
+        "native-feeling app with the phone "
         "camera built in. Sign in once, then it opens on your home page. The app's own actions (scan with "
         "the phone camera, reload, open in browser, change gateway) sit in the account menu at the top "
         "right. Links to Archidekt or Scryfall open in your browser; gateway links shared from other apps "
@@ -787,8 +789,12 @@ def guide_body(
             "link or unlink Archidekt, approval mode, Connected apps, theme, sign out (two buttons), "
             "Delete my data",
         ),
-        ("Assistant skill", "<code>/skill</code>", "the house rules to install in your assistant"),
-        ("Android app", "<code>/app</code>", "download and set-up"),
+        (
+            "Assistant skill",
+            "<code>/install?for=skill</code>",
+            "the house rules to install in your assistant",
+        ),
+        ("Android app", "<code>/install?for=android</code>", "download and set-up"),
         ("Guide", "<code>/guide</code>", "this page"),
         ("Admin (admin group only)", "<code>/admin</code>", "members, activity, metrics, the System card"),
     ]
@@ -971,7 +977,8 @@ def guide_body(
         "creating or renaming folders, likes, comments and follows, linking Archidekt and choosing your "
         "approval mode have no assistant tool at all. <a href='#ref-assistant'>What the assistant can "
         "do, by tool</a> is the full map.</p>"
-        "<p class='tip'>The <a href='/skill'>assistant skill</a> teaches your assistant the house rules: "
+        "<p class='tip'>The <a href='/install?for=skill'>assistant skill</a> teaches your assistant "
+        "the house rules: "
         "look things up instead of guessing, show the diff before changing anything, never ask for a "
         "password. Install it once per assistant.</p>"
     )

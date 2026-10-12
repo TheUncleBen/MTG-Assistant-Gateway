@@ -799,9 +799,9 @@ def _account_body(state: Any, sub: str, csrf: str | None, *, disclosure_read: bo
         "operator. While they are off, proposals can be reviewed but not applied.</p>"
         f"{_identity_details(user)}"
         "<div class='form-actions'>"
-        "<a class='btn' href='/skill'>Get the assistant skill for Claude or ChatGPT</a>"
+        "<a class='btn' href='/install?for=skill'>Get the assistant skill for Claude or ChatGPT</a>"
         # Inside the app the App card below takes its place: the app is already installed.
-        + ("" if in_app() else "<a class='btn' href='/app'>Get the Android app</a>")
+        + ("" if in_app() else "<a class='btn' href='/install?for=android'>Get the Android app</a>")
         + f"<form method='post' action='/logout'>{csrf_in}"
         "<button class='inline' data-busy-text='Signing out…'>Sign out</button>"
         "<button class='inline' name='everywhere' value='1' data-busy-text='Signing out…'>"

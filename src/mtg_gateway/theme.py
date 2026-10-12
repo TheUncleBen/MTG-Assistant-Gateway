@@ -1245,8 +1245,8 @@ def render(
             + (f"<a href='/watchlist'>{icon('stats')}Watchlist</a>" if WATCHLISTS else "")
             + f"<a href='/activity'>{icon('activity')}My activity</a>"
             f"<a href='/guide'>{icon('guide')}Guide</a>"
-            f"<a href='/skill'>{icon('report')}Assistant skill</a>"
-            + (f"<a href='/app'>{icon('download')}Android app</a>" if not app else "")
+            f"<a href='/install?for=skill'>{icon('report')}Assistant skill</a>"
+            + (f"<a href='/install?for=android'>{icon('download')}Android app</a>" if not app else "")
             + (
                 # The Android app's own actions (its floating button offers them over other pages);
                 # feedback.js calls window.MtgNative for each data-native button. Open a copied link
@@ -1393,7 +1393,8 @@ def render(
                 if signed_in
                 else ""
             )
-            + "<a href='/guide'>Guide</a><a href='/skill'>Assistant</a><a href='/app'>Apps</a>"
+            + "<a href='/guide'>Guide</a><a href='/install?for=skill'>Assistant</a>"
+            + "<a href='/install?for=android'>Apps</a>"
             + ("<a href='/account'>Account</a>" if signed_in else "<a href='/login'>Sign in</a>")
             + "</div>"
             "<div class='legal'>Private deck gateway. Nothing on these pages is indexed or shared. "

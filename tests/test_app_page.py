@@ -74,7 +74,7 @@ async def test_signed_in_user_gets_page_and_apk(harness: Harness) -> None:
         assert r.content == FAKE_APK
 
         account = await b.http.get("/account")
-        assert "href='/app'" in account.text
+        assert "href='/install?for=android'" in account.text
     finally:
         await b.aclose()
 
