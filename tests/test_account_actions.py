@@ -920,7 +920,8 @@ async def test_hand_delete_and_new_folder_obey_the_writes_switch(stack: Stack) -
 
 async def test_cover_tags_move_and_folder_rename_obey_the_writes_switch(stack: Stack) -> None:
     """0.7.26 (Ben's yes to Q1, 02:43Z 10-12): with MTG_WRITES_ENABLED false the cover, tags, deck
-    move and folder rename are refused like every other Archidekt write, and nothing is sent."""
+    move and folder rename are refused like the other deck settings and Folders page writes, and
+    nothing is sent."""
     import dataclasses
 
     h, ark = stack.h, stack.ark

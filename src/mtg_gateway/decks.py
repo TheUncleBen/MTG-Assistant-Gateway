@@ -3604,9 +3604,10 @@ class DeckService:
         return snapshot_id
 
     def _writes_switch(self) -> None:
-        """Refuse a hand write when MTG_WRITES_ENABLED is false. Every hand write obeys the switch
-        like every proposal does, on every route: deck delete and new folder (0.7.25), and the cover,
-        tags, deck move and folder rename (0.7.26)."""
+        """Refuse a hand write when MTG_WRITES_ENABLED is false, as every proposal is refused. The
+        deck settings page and the Folders page call it: deck delete and new folder (0.7.25), and the
+        cover, tags, deck move and folder rename (0.7.26). Hand likes, bookmarks, follows, comments
+        and collection edits do not."""
         if not self.settings.writes_enabled:
             raise DeckError(
                 "writes_disabled",

@@ -59,9 +59,6 @@ mimetypes.add_type("application/manifest+json", ".webmanifest")
 mimetypes.add_type("application/octet-stream", ".traineddata")
 
 
-# Per-user JSON is never stored by a browser or proxy; nosniff on every API reply.
-
-
 def _asset_version(static_dir: Path = STATIC_DIR) -> str:
     """Short digest of every file under static/ (the vendored OCR engine included), used to
     bust the browser and service-worker caches after a deploy changes any of them."""

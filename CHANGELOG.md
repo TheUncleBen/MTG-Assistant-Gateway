@@ -15,8 +15,9 @@ along. No new images besides the gateway's; the database stays at schema 12.
 
 ### Changed
 - With `MTG_WRITES_ENABLED` false, setting a deck's cover, adding or removing its tags, moving it
-  to a folder and renaming a folder by hand are refused like every other Archidekt write (deck
-  delete and new folder already were); nothing is sent.
+  to a folder and renaming a folder by hand are refused, so every change on the deck settings page
+  and the Folders page obeys the switch (deck delete and new folder already did); nothing is sent.
+  Likes, bookmarks, follows, comments and collection edits made by hand are unchanged.
 - The in-app Guide covers Play on EDHPlay, out-of-date proposals, the Goldfish, Folders and
   Watchlist pages, and names every assistant tool.
 - The gateway's links to the assistant skill and the Android app open their `/install` sections
