@@ -63,7 +63,7 @@ def risk_of(rows: list[dict[str, Any]] | None) -> tuple[str, str]:
 
 
 def _social(decks: DeckService) -> Any:
-    social = getattr(decks, "social", None)
+    social = decks.social
     if social is None:
         raise DeckError("unavailable", "Archidekt's social actions are not loaded on this gateway.")
     return social

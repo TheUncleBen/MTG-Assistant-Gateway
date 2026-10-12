@@ -26,6 +26,7 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
 
 from mtg_gateway import scan as scan_pkg
+from mtg_gateway import theme
 from mtg_gateway.app import create_app
 from mtg_gateway.config import Settings
 from mtg_gateway.db import Database
@@ -400,6 +401,14 @@ TODAY = "2026-10-11"
 @pytest.fixture(autouse=True)
 def _fixed_today(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(scan_scryfall, "today", lambda: TODAY)
+
+
+@pytest.fixture(autouse=True)
+def _reset_theme_globals(monkeypatch: pytest.MonkeyPatch) -> None:
+    """create_app sets these page-wide globals; put them back after each test so one test's
+    settings (watchlists on, a public URL) never leak into the next."""
+    monkeypatch.setattr(theme, "PUBLIC_URL", theme.PUBLIC_URL)
+    monkeypatch.setattr(theme, "WATCHLISTS", theme.WATCHLISTS)
 
 
 # Tests stay offline. A gateway built without a Scryfall client of its own (create_app makes one)

@@ -200,6 +200,7 @@ def guide_body(
     max_rows: int = modes.DEFAULT_MAX_ROWS,
     archidekt_backups: bool = True,
     backup_folder: str = "MTG Gateway backups",
+    watchlists: bool = False,
 ) -> str:
     folder = _esc(backup_folder)
     writes = (
@@ -267,7 +268,8 @@ def guide_body(
         "<ol class='steps'>"
         "<li><span>On <a href='/'>Home</a>, open <strong>Connect an AI assistant</strong> and follow the "
         "steps for your assistant; it ends with a sign-in to this site in your browser.</span></li>"
-        "<li><span>Install the <a href='/skill'>assistant skill</a> once per assistant. It teaches your "
+        "<li><span>Install the <a href='/install?for=skill'>assistant skill</a> once per assistant. "
+        "It teaches your "
         "assistant the house rules: look things up instead of guessing, show the diff before changing "
         "anything, never ask for a password.</span></li>"
         "<li><span>Ask it something that only reads: “Show me my decks”, “open my Krenko deck and tell me "
@@ -409,6 +411,13 @@ def guide_body(
         "on your Archidekt account, then reads the deck back to confirm.</span></li>"
         "<li><span>Your own saves appear under Proposals too, already applied, so every change has a "
         "record.</span></li></ol>"
+        "<p><strong>Out of date:</strong> Archidekt is the master copy of your decks. When you open the "
+        "app, and regularly while proposals are waiting (every 30 minutes unless this gateway is set "
+        "otherwise), the gateway checks your decks on Archidekt; it only reads. If a deck changed after "
+        "a proposal for it was made, on archidekt.com, in another app or by another change applied "
+        "here, the proposal is marked <strong>out of date</strong> at once: Apply would be refused and "
+        "nothing sent, so reject it and ask for a new one. The check never changes a deck, a proposal, "
+        "a snapshot or your undo history.</p>"
         "<p>On your Account page you can pick an approval mode: Manual (every change asks you), Semi-auto "
         "(the assistant applies small, low-risk edits itself and asks about the rest) or Full auto. "
         "Every change keeps a snapshot either way; <a href='#ref-approval'>Approval modes and risk "
@@ -508,8 +517,8 @@ def guide_body(
         "<a href='#how-export'>Export and import</a>.</li></ul>"
         "<p class='tip'>Your assistant can read the collection too, for questions like “which cards in "
         "this deck do I not own yet?”, and propose additions or removals that you approve like a deck "
-        "edit. It cannot like, follow or comment for you: those buttons only work when you press them "
-        "yourself.</p>"
+        "edit. It can also propose a like, follow or comment, but each one waits for your own press on "
+        "its review page, whatever your approval mode.</p>"
     )
     how_playtest = (
         "<p><strong>Playtest</strong> in a deck's banner opens the deck in Archidekt's own playtester "
@@ -520,6 +529,15 @@ def guide_body(
         "<p><strong>Goldfish</strong>, next to it, plays the deck by hand here on the gateway: seven cards "
         "with London mulligans, then draw, play, tap and next turn, all in your browser. A Commander deck "
         "starts with its commander in the command zone.</p>"
+        "<p><strong>Play on EDHPlay</strong> takes the deck to EDHPlay, the free online table for "
+        "Commander: it copies the deck in EDHPlay's import format and opens EDHPlay in a new tab (in the "
+        "app, your phone's browser). The list has the commander first, then the rest of the deck with "
+        "each card's printing, then a Sideboard section with your companion and sideboard. EDHPlay's "
+        "sideboard holds 15 cards, so anything past that is left out and a note names it; your "
+        "maybeboard is not sent, and EDHPlay does not take tokens from a list, so add those there by "
+        "hand. On EDHPlay choose <strong>Create Deck</strong>, then <strong>Import</strong>: paste the "
+        "list and press <strong>Import &amp; Replace</strong>. EDHPlay cannot receive a deck by link, "
+        "so after a change on Archidekt press the button again.</p>"
     )
     how_layout = (
         "<ul>"
@@ -533,7 +551,8 @@ def guide_body(
         "scanning included.</li></ul>"
     )
     how_app = (
-        "<p>The <a href='/app'>Android app</a> shows these same pages as a native-feeling app with the phone "
+        "<p>The <a href='/install?for=android'>Android app</a> shows these same pages as a "
+        "native-feeling app with the phone "
         "camera built in. Sign in once, then it opens on your home page. The app's own actions (scan with "
         "the phone camera, reload, open in browser, change gateway) sit in the account menu at the top "
         "right. Links to Archidekt or Scryfall open in your browser; gateway links shared from other apps "
@@ -678,13 +697,45 @@ def guide_body(
             "in-chat card like a deck proposal; read back after applying",
         ),
         (
+            "Read a deck's comments, and the collaborators of your own deck",
+            "<code>get_deck_comments</code>, <code>get_deck_collaborators</code>",
+            "no",
+            "",
+        ),
+        (
+            "Act on your Archidekt account: like, vote, bookmark, follow the owner; post, edit, delete or "
+            "vote on comments; a new folder; add or remove a collaborator; delete a deck",
+            "<code>propose_deck_social</code>, <code>propose_comment</code>, "
+            "<code>propose_create_folder</code>, <code>propose_collaborator</code>, "
+            "<code>propose_delete_deck</code>",
+            "proposal (your press)",
+            "only you apply these, on the review page, in every approval mode",
+        ),
+        (
+            "A plain summary of the last day or week",
+            "<code>get_summary</code>",
+            "no",
+            "fixed sentences from the gateway's own data, with or without notifications",
+        ),
+        (
             "Proposals: list, read, approve with the card's code, reject (with a reason on the card), apply",
             "<code>list_my_proposals</code>, <code>get_proposal</code>, <code>confirm_proposal</code>, "
             "<code>reject_proposal</code>, <code>apply_proposal</code>",
             "apply writes",
-            "<code>apply_proposal</code> succeeds only when the mode allows",
+            "<code>apply_proposal</code> succeeds only when the mode allows; an out-of-date proposal is "
+            "refused",
         ),
     ]
+    if watchlists:
+        cap_rows.append(
+            (
+                "Watch card prices and deck values",
+                "<code>watch_card</code>, <code>watch_deck</code>, <code>unwatch</code>, "
+                "<code>list_watchlist</code>, <code>card_price_history</code>",
+                "the gateway's own data",
+                "changes nothing on Archidekt, so no proposal; the Watchlist page is the hand path",
+            )
+        )
     ref_assistant = (
         "<p>The assistant acts as the signed-in member. Reads need nothing more than the connection; "
         "<strong>every write is a proposal</strong>, and who applies it is decided by your approval mode "
@@ -728,7 +779,8 @@ def guide_body(
             "<code>/decks/&lt;id&gt;</code>",
             "views, grouping, sorting, filter, the whole card on tap, the card menu, drag to move, Undo and "
             "Redo, "
-            "Quick add, Playtest, Goldfish, Run simulation, statistics with Probability of draw and Deck "
+            "Quick add, Playtest, Goldfish, Play on EDHPlay, Run simulation, statistics with Probability "
+            "of draw and Deck "
             "checks, "
             "description, comments, like, bookmark, follow; More: Settings, Compare, Export, History, "
             "Open on Archidekt, Delete deck",
@@ -750,6 +802,12 @@ def guide_body(
             "a precon, any deck or a pasted list against this deck",
         ),
         ("Export", "<code>/decks/&lt;id&gt;/export</code>", "import text, plain list, sideboard, downloads"),
+        (
+            "Goldfish",
+            "<code>/decks/&lt;id&gt;/goldfish</code>",
+            "play the deck by hand in your browser: opening hand, mulligans, draw, play, next turn",
+        ),
+        ("Folders", "<code>/folders</code>", "your Archidekt folders: a new folder, rename one"),
         ("Search", "<code>/search</code>", "public decks by name, commander, format, colors, owner"),
         ("Cards", "<code>/cards</code>", "cards by name, with picture, cost and type; add one to a deck"),
         (
@@ -772,7 +830,7 @@ def guide_body(
         (
             "Proposals",
             "<code>/proposals</code>",
-            "what is waiting; the review page with Approve, Apply, Reject",
+            "what is waiting, out-of-date ones marked; the review page with Approve, Apply, Reject",
         ),
         (
             "History",
@@ -781,14 +839,24 @@ def guide_body(
             "<code>/history/reports/&lt;id&gt;</code> with its Markdown and HTML exports",
         ),
         ("My activity", "<code>/activity</code>", "what your account and its connected apps did"),
+    ]
+    if watchlists:
+        page_rows.append(
+            ("Watchlist", "<code>/watchlist</code>", "the card prices and deck values you watch, once a day")
+        )
+    page_rows += [
         (
             "Account",
             "<code>/account</code>",
             "link or unlink Archidekt, approval mode, Connected apps, theme, sign out (two buttons), "
             "Delete my data",
         ),
-        ("Assistant skill", "<code>/skill</code>", "the house rules to install in your assistant"),
-        ("Android app", "<code>/app</code>", "download and set-up"),
+        (
+            "Assistant skill",
+            "<code>/install?for=skill</code>",
+            "the house rules to install in your assistant",
+        ),
+        ("Android app", "<code>/install?for=android</code>", "download and set-up"),
         ("Guide", "<code>/guide</code>", "this page"),
         ("Admin (admin group only)", "<code>/admin</code>", "members, activity, metrics, the System card"),
     ]
@@ -971,7 +1039,8 @@ def guide_body(
         "creating or renaming folders, likes, comments and follows, linking Archidekt and choosing your "
         "approval mode have no assistant tool at all. <a href='#ref-assistant'>What the assistant can "
         "do, by tool</a> is the full map.</p>"
-        "<p class='tip'>The <a href='/skill'>assistant skill</a> teaches your assistant the house rules: "
+        "<p class='tip'>The <a href='/install?for=skill'>assistant skill</a> teaches your assistant "
+        "the house rules: "
         "look things up instead of guessing, show the diff before changing anything, never ask for a "
         "password. Install it once per assistant.</p>"
     )
@@ -1093,6 +1162,7 @@ def add_guide_routes(server: MCPServer, state: AppState) -> None:
                 max_rows=int(getattr(s, "auto_apply_max_rows", modes.DEFAULT_MAX_ROWS)),
                 archidekt_backups=bool(getattr(s, "archidekt_backups", True)),
                 backup_folder=s.archidekt_backup_folder,
+                watchlists=bool(s.watchlists_enabled),
             ),
             site=s.server_name,
             signed_in=True,
@@ -1100,7 +1170,6 @@ def add_guide_routes(server: MCPServer, state: AppState) -> None:
             admin=admin,
             user=display_name(user),
             wide=True,
-            scripts=True,
             current="/guide",
             head_extra=f"<style>{GUIDE_CSS}</style><script src='/static/guide.js' defer></script>",
         )

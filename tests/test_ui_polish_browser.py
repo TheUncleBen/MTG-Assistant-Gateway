@@ -155,6 +155,18 @@ def test_skip_link_times_images_and_copy_button(server: Server) -> None:
         )
         page.wait_for_timeout(1600)
         assert btn.locator("svg").count() == 1 and btn.locator(".label").inner_text() == "Copy"
+        # 0.7.26: with the async clipboard refused (as the app's WebView may), Copy still copies the
+        # list through execCommand inside the press
+        page.evaluate(
+            "() => { navigator.clipboard.writeText = () => Promise.reject(new Error('refused'));"
+            " window.copied = null; document.addEventListener('copy', () => {"
+            " window.copied = document.activeElement.value; }); }"
+        )
+        btn.click()
+        page.wait_for_timeout(200)
+        assert btn.locator(".label").inner_text() == "Copied"
+        area_id = btn.get_attribute("data-copy")
+        assert page.evaluate("() => window.copied") == page.locator(f"#{area_id}").input_value()
         # server times are shown in the viewer's zone, with the UTC time kept in the tooltip
         page.goto(f"{server.base}/proposals", wait_until="networkidle")
         page.goto(f"{server.base}/history", wait_until="networkidle")

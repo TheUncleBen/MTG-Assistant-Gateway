@@ -217,8 +217,8 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             "propose edits you approve here.</p>"
             f"<pre>{_esc(s.mcp_url)}</pre>"
             f"<div class='actions'><a class='btn btn-primary' href='/install'>{icon('download')} Guided setup"
-            f"</a><a class='btn' href='/skill'>{icon('report')} Assistant skill</a>"
-            f"<a class='btn' href='/app'>{icon('download')} Android app</a></div></details>"
+            f"</a><a class='btn' href='/install?for=skill'>{icon('report')} Assistant skill</a>"
+            f"<a class='btn' href='/install?for=android'>{icon('download')} Android app</a></div></details>"
         )
         resp = render(
             "Home",
@@ -229,7 +229,6 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             admin=admin,
             user=display_name(user),
             wide=True,
-            scripts=True,
             current="/",
             heading=False,
             body_class="home",

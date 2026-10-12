@@ -42,15 +42,16 @@ still the owner's test to report.
 ## 1. Getting the app
 
 Open your gateway in the phone's browser, sign in, go to **Account**, then
-**Get the Android app** (the `/app` page). It shows the version, the SHA-256
+**Get the Android app** (the Android section of the setup page,
+`/install?for=android`; `/app` leads there). It shows the version, the SHA-256
 of the file, the SHA-256 fingerprint of the app's signing certificate, and one
 download button. Then:
 
-1. Compare the signing certificate SHA-256 on `/app` with the one published in
+1. Compare the signing certificate SHA-256 on that page with the one published in
    the project's GitHub release for that version (in the release notes and in
    the release's `mtg-assistant-gateway.json`), or with one the gateway's owner gave you some
    other way. If they differ, don't install the app; tell the owner. Both values
-   on `/app` come from the gateway, the same place as the file, so the file's
+   on that page come from the gateway, the same place as the file, so the file's
    SHA-256 only shows the download arrived intact, not who made it. For a
    stronger check, run `apksigner verify --print-certs mtg-assistant-gateway.apk` on a computer
    and compare the `certificate SHA-256 digest` line with the published value.
@@ -59,7 +60,7 @@ download button. Then:
 3. Play Protect may warn that the developer is unknown or unverified, because
    the app is signed by whoever runs your gateway, not by an app store; the
    exact wording varies by phone and Android version. Only continue if you got
-   the file from your gateway's `/app` page and the certificate fingerprint
+   the file from your gateway's setup page and the certificate fingerprint
    matched in step 1. If Play Protect says the app is harmful, or you are
    unsure, don't install it and ask the gateway's owner.
 4. On first launch the app asks for your **gateway address**: type the hostname

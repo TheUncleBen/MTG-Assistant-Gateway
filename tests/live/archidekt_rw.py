@@ -22,8 +22,8 @@ Safety rules enforced in code:
   aborts the run before a proposal is made, and so does any deck listed in
   ARCHIDEKT_TEST_NEVER_TOUCH (comma-separated ids), whatever its name.
 * Applies go through the browser review page, the gateway's default path.
-* The script cannot delete decks (the gateway has no delete call); it prints
-  the ids of the decks it created so a person can delete them on Archidekt.
+* The script never deletes decks; it prints the ids of the decks it created
+  so a person can delete them on Archidekt.
 
 Output: one line per step and a JSON summary (--out). Token values never
 appear in it; for the login response only field names and the access token's

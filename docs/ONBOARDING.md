@@ -245,9 +245,10 @@ Good to know:
 - Predict multiplayer win rates. Goldfish simulation plays your deck alone.
   A good report gives the seed, number of games, mulligan settings, what it
   couldn't simulate, and the confidence intervals.
-- Keep price watchlists, price history or step-by-step practice games. The
-  research engine has them, but they're switched off on this gateway for now.
-  (Deck reports, including goldfish results, are saved by the gateway itself.)
+- Keep price watchlists or price history unless whoever runs the gateway has
+  turned watchlists on, or run step-by-step practice games through the
+  assistant (the deck page's **Goldfish** lets you play a deck by hand).
+  Deck reports, including goldfish results, are saved by the gateway itself.
 
 ## 8. Privacy
 

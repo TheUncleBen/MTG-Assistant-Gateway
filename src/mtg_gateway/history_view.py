@@ -10,13 +10,13 @@ string a row shows is escaped here; nothing in it runs script (the site's CSP fo
 from __future__ import annotations
 
 import calendar
-import html
 import re
 import time
 from typing import Any
 from urllib.parse import urlencode
 
 from .decks import actor_label
+from .theme import esc as _esc
 from .theme import icon, time_html
 
 PAGE = 25
@@ -57,10 +57,6 @@ KIND_ICONS = {
     "snapshot": "bookmark",
     "report": "stats",
 }
-
-
-def _esc(value: Any) -> str:
-    return html.escape(str(value if value is not None else ""))
 
 
 def read_query(params: Any) -> dict[str, Any]:

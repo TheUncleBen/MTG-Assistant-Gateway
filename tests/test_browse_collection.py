@@ -470,7 +470,8 @@ async def test_android_app_gets_the_app_layout(stack: Stack) -> None:
         for action in ("openCopiedLink", "checkForUpdates"):
             assert f"data-native='{action}'" not in app.text, action
         assert (
-            "href='/app'" not in app.text[app.text.index("<nav class='user'") : app.text.index("</header>")]
+            "href='/install?for=android'"
+            not in app.text[app.text.index("<nav class='user'") : app.text.index("</header>")]
         )
     finally:
         await b.aclose()
@@ -484,13 +485,13 @@ async def test_account_page_in_the_app_has_an_app_card(stack: Stack) -> None:
         await b.login("/account")
         web = await b.http.get("/account", headers=NAV)
         assert web.status_code == 200
-        assert "Get the Android app" in web.text and "href='/app'" in web.text
+        assert "Get the Android app" in web.text and "href='/install?for=android'" in web.text
         assert "<h2>App</h2>" not in web.text and "data-native" not in web.text
 
         app = await b.http.get("/account", headers={**NAV, **APP_UA})
         assert app.status_code == 200
         main = app.text[app.text.index("</header>") :]
-        assert "Get the Android app" not in main and "href='/app'" not in main
+        assert "Get the Android app" not in main and "href='/install?for=android'" not in main
         card = main[main.index("<div class='card' id='app'>") :]
         card = card[: card.index("</div></div>") + 12]
         assert "<h2>App</h2>" in card

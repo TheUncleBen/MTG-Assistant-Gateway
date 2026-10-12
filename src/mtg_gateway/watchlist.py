@@ -11,8 +11,6 @@ Notifications card (with the summary) is notify.py's, and ``get_summary`` is sum
 
 from __future__ import annotations
 
-import hmac
-import html
 import json
 import logging
 from typing import TYPE_CHECKING, Annotated, Any, Literal
@@ -24,9 +22,10 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from .decks import DeckError
 from .history_view import _trend_svg
-from .pages import _csrf, browser_session, login_redirect, read_limited
+from .pages import _csrf, browser_session, csrf_form_ok, csrf_header_ok, login_redirect, read_limited
 from .prices import money
 from .theme import display_name, render
+from .theme import esc as _esc
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -69,10 +68,6 @@ OK_NOTES = {
     "deck_added": "Deck added to your watchlist.",
     "deck_removed": "Deck removed from your watchlist.",
 }
-
-
-def _esc(v: Any) -> str:
-    return html.escape(str(v if v is not None else ""), quote=True)
 
 
 def _pct(v: float | None) -> str:
@@ -260,7 +255,7 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
         raw = await read_limited(request, MAX_FORM)
         data = {k: v[0] for k, v in parse_qs((raw or b"").decode("utf-8", "replace")).items()}
         csrf = _csrf(s, sid) or ""
-        if raw is None or not csrf or not hmac.compare_digest(data.get("csrf", "").encode(), csrf.encode()):
+        if raw is None or not csrf_form_ok(s, sid, data):
             return page(
                 watchlist_body(state, sub, csrf, err="This form expired. Reload the page and try again."),
                 sub=sub,
@@ -321,9 +316,7 @@ def add_watchlist_routes(server: MCPServer, state: AppState) -> None:
         sub, sid = browser_session(state, request)
         if not sub:
             return JSONResponse({"ok": False, "error": "unauthenticated"}, 401, headers=NO_STORE)
-        expected = _csrf(s, sid) or ""
-        given = request.headers.get("X-CSRF-Token", "")
-        if not expected or not hmac.compare_digest(given.encode(), expected.encode()):
+        if not csrf_header_ok(s, sid, request):
             return JSONResponse(
                 {"ok": False, "error": "csrf", "message": "Reload the page and retry."}, 403, headers=NO_STORE
             )

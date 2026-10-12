@@ -20,7 +20,6 @@ which is offered only when a notification server is set up, since ntfy is how it
 from __future__ import annotations
 
 import asyncio
-import html
 import logging
 import re
 import secrets
@@ -30,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from .db import Database
+from .theme import esc as _esc
 
 if TYPE_CHECKING:
     from .app import AppState
@@ -154,9 +154,6 @@ class Notifier:
     def enabled(self) -> bool:
         return bool(self.url)
 
-    def subscribe_url(self, topic: str) -> str:
-        return f"{self.url}/{topic}"
-
     async def publish(self, topic: str, title: str, message: str, path: str = "/", tags: str = "") -> bool:
         """One message to ``topic``; True when the server took it. Never raises."""
         if not self.enabled or not topic:
@@ -222,10 +219,6 @@ SUMMARY_CSS = (
     "<style>#summary pre{white-space:pre-wrap;font-family:inherit;margin:.5rem 0 0;padding:.6rem .8rem;"
     "background:var(--surface-2);border-radius:3px;overflow-wrap:anywhere}</style>"
 )
-
-
-def _esc(v: Any) -> str:
-    return html.escape(str(v if v is not None else ""), quote=True)
 
 
 def _summary_html(state: AppState, sub: str, p: dict[str, Any], csrf_in: str) -> str:

@@ -58,7 +58,7 @@ def test_the_whole_deck_is_copied_commander_first_and_marked() -> None:
     assert [line.split(" (")[0] for line in parts["sideboard"]] == ["1 Sol Ring"]
     assert "\n\nSideboard\n" in text and "Maybeboard" not in text and "3 Cultivate" not in text
     assert any(line.startswith("1 Cultivate") for line in main)  # the deck's own copy stays main
-    assert edh.maybeboard == 3 and edh.left_out == [] and edh.tokens == 0
+    assert edh.left_out == []
 
 
 def test_the_sideboard_stops_at_fifteen_copies_and_names_the_rest() -> None:
@@ -92,13 +92,14 @@ def test_double_faced_cards_keep_both_faces() -> None:
     assert "\n1 Delver of Secrets // Insectile Aberration\n" in to_edhplay(deck).text
 
 
-def test_tokens_are_left_out_and_counted() -> None:
+def test_tokens_are_left_out() -> None:
     """EDHPlay parses a Tokens section and then drops it (verified live), so nothing is sent and
     the note says to add tokens by hand."""
     ark = FakeArchidekt()
+    before = to_edhplay(parse_deck(ark.decks[42])).text
     ark.add_side_row(42, "Forest", quantity=2, category="Tokens")
     edh = to_edhplay(parse_deck(ark.decks[42]))
-    assert "Tokens" not in edh.text and edh.tokens == 2 and "sideboard" not in _sections(edh.text)
+    assert edh.text == before and "Tokens" not in edh.text and "sideboard" not in _sections(edh.text)
 
 
 def test_a_deck_without_commander_starts_with_a_line_of_several_copies() -> None:

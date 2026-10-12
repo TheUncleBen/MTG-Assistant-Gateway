@@ -165,6 +165,11 @@ cookie, set by `POST /theme`); internal links never open a new tab.
 | `/users/{username}` | One Archidekt user's public decks |
 | `/collection?q=&sort=added|edition&view=grid|list&page=` | My collection: the member's Archidekt Collection, filtered by name, grid or list, plus and minus, remove, add by name, a details menu per row (finish, condition, language, price paid; `action=details`); `/collection/export.csv` downloads it |
 | `/guide` | The in-app guide (end-user documentation) |
+| `/cards?q=` | Card search by name (picture, mana cost, type), each card in the card viewer, and an add to one of the member's decks; `/cards/api/text` and `/cards/api/rulings` feed the viewer |
+| `/watchlist` (GET, POST) | The member's card watchlist and price history; only when `MTG_WATCHLISTS_ENABLED=true` |
+| `/install`, `/install.md` | The setup hub: connecting Claude and ChatGPT, the skill, the plugins and the Android app (`?for=` opens one section) |
+| `/skill`, `/skill/mtg-gateway.zip` | `/skill` redirects to `/install?for=skill`; the ZIP is the end-user skill |
+| `/plugin/marketplace.json`, `/plugin/{name}.zip`, `/plugin/{name}-chatgpt.zip` | The Claude plugin marketplace and plugin, and the ChatGPT plugin ZIP ([PLUGIN.md](PLUGIN.md)) |
 | `/decks?q=&folder=&view=grid|list&order=` | My decks: filter by name or Archidekt folder, grid or list, order by updated / created / name / format, "New deck", "Folders" |
 | `/folders` (GET, POST `action=create|rename`) | The member's Archidekt folders: create one (`name`, `parent_id`) or rename one (`folder_id`, `name`); verified by re-reading the folder tree |
 | `/precons?q=` | Archidekt's preconstructed decks grouped by set (cached an hour), filtered by set or deck name |
@@ -179,17 +184,22 @@ cookie, set by `POST /theme`); internal links never open a new tab.
 | `/decks/{id}/delete` (GET, POST `name`) | Delete the deck after its exact name is typed; a gateway snapshot and, with backups on, an Archidekt backup copy are made first, and the deletion is verified by reading the deck back. Owners only; never a tool |
 | `/decks/{id}/clone` (POST) | A `clone` proposal for the deck |
 | `/decks/{id}/report` (POST) | Run a deck report and open it |
-| `/decks/{id}/export`, `.txt`, `.json`, `.csv` | Export as text, JSON or an Archidekt-style CSV |
+| `/decks/{id}/export`, `export.archidekt.txt`, `export.txt`, `export.csv`, `export.json`, `export.arena.txt`, `export.dek`, `export.pdf` | The Export page and its downloads: Archidekt import text, plain text, an Archidekt-style CSV, JSON, and the one-way Arena, MTGO and PDF files ([EXPORT-IMPORT.md](EXPORT-IMPORT.md)) |
+| `/decks/{id}/goldfish` | Goldfish: play the deck by hand in the browser; nothing is sent or kept |
+| `/decks/{id}/compare` | Compare the deck with a precon, another deck or a pasted list |
+| `/decks/{id}/collaborators` (POST) | Add or remove a deck collaborator by hand, after a confirmation page |
+| `/decks/{id}/playtest` | Redirects to Archidekt's own playtester (kept for old links) |
 | `/history?deck_id=` | Proposals, snapshots and reports over time, with restore; `type=`, `state=`, `q=`, `when=` (today, 7d, 30d, 90d, year: UTC days) and `group=` (day or deck) narrow and arrange the page, `offset=` pages it |
+| `POST /history/restore` | Browser session (CSRF): makes a restore proposal for `snapshot_id` and opens its review page |
 | `/history/reports/{rid}` | One report, designed: headline tiles, trends, the research service's text; `/history/reports/{rid}/export.md` and `.html` download it, and Copy puts the Markdown on the clipboard |
 | `POST /layout` | Browser session (CSRF): the "Desktop layout" / "Fit the screen" switch, remembered per device in a cookie |
 | `/activity` | My activity |
 | `/proposals`, `/proposals/{pid}` | Review and Apply, Reject |
 | `/scan` | The card scanner (see SCANNING.md) |
-| `/account`, `/login`, `/logout`, `/signed-out` | Account, Archidekt link, sign-in and sign-out |
+| `/account`, `/login`, `/logout`, `/signed-out`, `/data-deleted` | Account, Archidekt link, sign-in and sign-out, and the page shown after a member deletes their data |
 | `POST /login/app` | The Android app finishing a sign-in made in the phone's browser: a one-time code and the app's secret ([ANDROID.md](ANDROID.md#13-privacy-and-security-notes)) |
 | `/account/avatar` | The signed-in member's picture (the provider's, else Gravatar, else initials) for the account menu |
-| `/app`, `/app/mtg-assistant-gateway.apk` | The Android app page and download ([ANDROID.md](ANDROID.md)) |
+| `/app`, `/app/mtg-assistant-gateway.apk`, `/app/latest.json` | `/app` redirects to `/install?for=android`; the APK download and the version file the app checks for updates ([ANDROID.md](ANDROID.md)) |
 | `/admin`, `/admin/users`, `/admin/activity`, `/admin/metrics` | Admin page (members of `MTG_ADMIN_GROUP`) |
 | `/app.webmanifest`, `/sw.js`, `/static/{file}` | App shell |
 | `/.well-known/assetlinks.json` | Android App Links statement from `MTG_ANDROID_ASSETLINKS` (empty list when unset) |

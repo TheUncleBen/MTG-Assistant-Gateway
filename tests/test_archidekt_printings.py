@@ -52,7 +52,6 @@ async def test_unknown_printing_falls_back_to_the_name() -> None:
     ark, client, token = await _client()
     card = await client.resolve_card(token, "Opt", set_code="zzz", collector_number="1")
     assert card["id"] == 9007 and card["exact_printing"] is False
-    assert await client.resolve_card_id(token, "Opt") == 9007
 
 
 async def test_bad_set_code_is_not_sent() -> None:

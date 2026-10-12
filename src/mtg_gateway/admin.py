@@ -11,7 +11,6 @@ never create a user or change a group. Every action writes an ``admin_<action>``
 from __future__ import annotations
 
 import datetime as _dt
-import hmac
 import html
 import json
 from typing import TYPE_CHECKING, Any
@@ -22,7 +21,17 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from . import idp_sweep, update_check
 from .decks import ADMIN_CLIENT, actor_label, current_client
-from .pages import BROWSER_CLIENT_ID, _csrf, _when, browser_session, login_redirect, read_limited
+from .pages import (
+    BROWSER_CLIENT_ID,
+    _csrf,
+    _err,
+    _when,
+    browser_session,
+    csrf_form_ok,
+    csrf_header_ok,
+    login_redirect,
+    read_limited,
+)
 from .theme import display_name, plural, render
 
 if TYPE_CHECKING:
@@ -119,9 +128,7 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
         if not is_admin(state, sub):
             return not_found(api)
         if write and api:
-            expected = _csrf(s, sid) or ""
-            given = request.headers.get("x-csrf-token", "")
-            if not expected or not hmac.compare_digest(given.encode(), expected.encode()):
+            if not csrf_header_ok(s, sid, request):
                 return JSONResponse(
                     {"ok": False, "error": "csrf", "message": "Reload the page and retry."}, 403
                 )
@@ -217,8 +224,7 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
             return who
         admin_sub, sid = who
         data = await form(request)
-        expected = _csrf(s, sid) or ""
-        if not expected or not hmac.compare_digest(data.get("csrf", "").encode(), expected.encode()):
+        if not csrf_form_ok(s, sid, data):
             return page(
                 "Users", _err("This form expired. Reload the page and try again."), status=403, sid=sid
             )
@@ -383,7 +389,7 @@ def system_data(state: Any) -> dict[str, Any]:
     if proxy is None:
         out["mystic_forge"] = "not configured"
     else:
-        at, ok = getattr(proxy, "_health", (0.0, False))
+        at, ok = proxy.last_health
         out["mystic_forge"] = ("answering" if ok else "NOT answering") if at else "not checked yet"
     # The Forge engine likewise (optional, off unless MTG_FORGE_URL is set).
     reports = getattr(state, "reports", None)
@@ -391,7 +397,7 @@ def system_data(state: Any) -> dict[str, Any]:
     if forge is None:
         out["forge"] = "not configured"
     else:
-        at, ok = getattr(forge, "_health", (0.0, False))
+        at, ok = forge.last_health
         out["forge"] = ("answering" if ok else "NOT answering") if at else "not checked yet"
     copy_dir = getattr(settings, "backup_copy_dir", None)
     out["backup_copies_enabled"] = copy_dir is not None
@@ -529,10 +535,6 @@ def _nav(active: str) -> str:
         )
         + "</div>"
     )
-
-
-def _err(msg: str) -> str:
-    return f"<div class='notice error'>{html.escape(msg)}</div>"
 
 
 def _notice(ok: str | None, err: str | None) -> str:

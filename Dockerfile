@@ -3,15 +3,29 @@
 # same digests) because anonymous pulls from Docker Hub are rate-limited per address, and shared CI
 # runners hit that limit (0.7.10). CI also signs in to Docker Hub when the owner set DOCKERHUB_USERNAME
 # and DOCKERHUB_TOKEN (docs/DEPLOY.md).
+# The gateway's dependencies as a requirements list, so the step that builds their wheels below is
+# cached until the dependencies themselves change (pyproject.toml also changes with every version).
+FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS requirements
+COPY pyproject.toml /
+RUN python3 -c "import tomllib; print('\n'.join(tomllib.load(open('/pyproject.toml', 'rb'))['project']['dependencies']))" \
+  > /requirements.txt
+
 FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS build
 WORKDIR /build
-COPY pyproject.toml README.md LICENSE constraints.txt ./
-COPY src ./src
+# The steps that change least come first, so a release that only changes the gateway's own code
+# reuses the cached OCR download and dependency wheels.
 COPY scripts/fetch_ocr_assets.py ./scripts/
 # Self-hosted OCR engine for /scan (pinned, checksummed; see the script). Needs network at build time.
 RUN python3 scripts/fetch_ocr_assets.py
+COPY constraints.txt ./
+COPY --from=requirements /requirements.txt ./
 RUN pip install --no-cache-dir --upgrade pip wheel \
- && pip wheel --no-cache-dir --wheel-dir /wheels -c constraints.txt .
+ && pip wheel --no-cache-dir --wheel-dir /wheels -c constraints.txt -r requirements.txt
+COPY pyproject.toml README.md LICENSE ./
+COPY src ./src
+# The scanner's own scripts and stylesheet are served gzipped when a .gz sits beside them (scan/routes.py).
+RUN find src/mtg_gateway/scan/static -maxdepth 1 \( -name '*.js' -o -name '*.css' \) -exec gzip -9 -k -n {} + \
+ && pip wheel --no-cache-dir --no-deps --wheel-dir /wheels -c constraints.txt .
 
 FROM mirror.gcr.io/library/python:3.12-slim-bookworm
 LABEL org.opencontainers.image.source="https://github.com/TheUncleBen/MTG-Assistant-Gateway" \
@@ -23,8 +37,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends util-linux ca-c
  && rm -rf /var/lib/apt/lists/* \
  && groupadd -g 1000 mtg && useradd -u 1000 -g 1000 -M -d /data -s /usr/sbin/nologin mtg \
  && mkdir -p /data /backups && chown mtg:mtg /data /backups
-COPY --from=build /wheels /wheels
-RUN pip install --no-cache-dir /wheels/*.whl && rm -rf /wheels
+# The wheels are mounted for the install rather than copied, so they never become an image layer.
+RUN --mount=type=bind,from=build,source=/wheels,target=/wheels pip install --no-cache-dir /wheels/*.whl
 COPY plugin /usr/share/mtg-gateway/plugin
 # The Android app, when the release build produced one (docker/app-dist is empty otherwise; see docs/ANDROID.md).
 COPY docker/app-dist /usr/share/mtg-gateway/app

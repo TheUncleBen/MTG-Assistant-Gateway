@@ -14,7 +14,6 @@ view (text rows, stacks of images, or a grid), deck stats, description.
 from __future__ import annotations
 
 import calendar
-import html
 import json
 import math
 import re
@@ -41,7 +40,7 @@ from .deck_stats import (
 from .decks import mana_value_text, split_label
 from .export_formats import EDHPLAY_URL, to_edhplay
 from .mana import mana_html as _mana_html
-from .theme import icon, plural
+from .theme import esc, icon, plural
 from .views import cards_by_category
 
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
@@ -76,10 +75,6 @@ SORTS = {
 COLOUR_NAMES = {"W": "White", "U": "Blue", "B": "Black", "R": "Red", "G": "Green", "C": "Colorless"}
 TYPE_ORDER = list(PRIMARY_TYPES)  # deck_stats owns the order (and primary_type, auto_category)
 RARITY_ORDER = {"mythic": 0, "rare": 1, "uncommon": 2, "common": 3, "special": 4}
-
-
-def esc(value: Any) -> str:
-    return html.escape("" if value is None else str(value), quote=True)
 
 
 def image_url(uid: str | None, size: str = "normal") -> str | None:
@@ -390,7 +385,7 @@ def banner_html(
         )
     more_items = []
     if csrf and forge_on:
-        # D17: the same run without the Forge games, for a quick result (forge=0, companion.py).
+        # D17: the same run without the Forge games, for a quick result (forge=0, companion_tools.py).
         more_items.append(
             f"<form method='post' action='/decks/{did}/report'>{csrf_in}"
             "<input type='hidden' name='forge' value='0'>"
@@ -838,7 +833,7 @@ def _odds_groups(cards: list[DeckCard]) -> dict[str, dict[str, int]]:
     return {k: dict(sorted(v.items(), key=lambda kv: (-kv[1], kv[0]))) for k, v in groups.items() if v}
 
 
-def _odds_html(deck: Deck, cards: list[DeckCard]) -> str:
+def _odds_html(cards: list[DeckCard]) -> str:
     """The "Probability of draw" calculator: a form plus the counts as a JSON data block the page
     script reads (a data block is not executed, so the page's script policy allows it)."""
     size = sum(c.quantity for c in cards)
@@ -1332,7 +1327,7 @@ def stats_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
     kw_rows = _qty_rows(keywords, cards, "keywords")
     rarity_rows = "".join(f"<tr><td>{esc(k.capitalize())}</td><td>{v}</td></tr>" for k, v in rarities.items())
     problems_html = legality_panel_html(deck, stats)
-    odds_html = _odds_html(deck, cards)
+    odds_html = _odds_html(cards)
     checks_html = checks_panel_html(deck, stats)
     bracket = stats.get("bracket_estimate") or {}
     basis = bracket.get("basis") or []
@@ -1899,7 +1894,7 @@ DECK_CSS = """
 .compareform input,.compareform textarea{width:100%}
 .compareform button{justify-self:start}
 .comparecols{display:grid;grid-template-columns:repeat(auto-fit,minmax(18rem,1fr));gap:1rem;margin-top:1rem}
-.comparehead,.comparetiles{margin-bottom:1rem}
+.comparehead{margin-bottom:1rem}
 .comparecols .panel{margin:0}
 .comparelist{list-style:none;margin:0;padding:0}
 .comparelist li{display:flex;gap:.6rem;align-items:baseline;padding:.3rem 0;
@@ -2453,8 +2448,6 @@ ul.decklist.list .tags{border-top:0;max-width:30%}
   ul.decklist.list .tags{max-width:none;flex-basis:100%;border-top:1px solid var(--border-soft)}
   ul.decklist.list .tags:empty{display:none} }
 ul.decklist.list .deck{margin-bottom:.5rem}
-.pane.list ul.decklist.grid{grid-template-columns:minmax(0,1fr);gap:.75rem}
-.pane.list ul.decklist .thumb{height:90px}
 
 /* editor (own-deck edits that become one proposal) */
 .editor .edithead .row{display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap}
@@ -2633,9 +2626,8 @@ ul.erows{list-style:none;margin:.5rem 0 0;padding:0}
   .editbar .review{flex:1}
   .addbox form.addcard{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
   .addbox form.addcard .grow{grid-column:1 / -1;grid-row:1}
-  .addbox form.addcard .qtyf{grid-column:2;grid-row:2}
   .addbox form.addcard .go{grid-column:1;grid-row:2} .addbox form.addcard .go button{width:100%}
-  .addbox form.addcard .field:not(.grow):not(.qtyf):not(.go){grid-row:auto;grid-column:auto}
+  .addbox form.addcard .field:not(.grow):not(.go){grid-row:auto;grid-column:auto}
   .erow{grid-template-columns:40px minmax(0,1fr) auto;grid-template-rows:auto auto}
   .erow .sel{grid-column:2;grid-row:2}
   .erow details.dd,.erow button.remove{grid-column:3;grid-row:2;justify-self:end}

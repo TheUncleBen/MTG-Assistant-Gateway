@@ -411,7 +411,7 @@
       var r = rows[key];
       if (zone === "side") {
         if (rowEls[key]) return;  // the same side card listed twice: one row
-        var sideLi = el("li", { class: "erow side", "data-row": key }, [
+        var sideLi = el("li", { class: "erow side" }, [
           thumb(r, c.name),
           el("span", { class: "main" }, [
             el("span", { class: "name", text: c.name }),
@@ -443,7 +443,7 @@
       ]);
       var nameEl = el("span", { class: "name", text: c.name, title: c.name });
       if (r.mana && window.MtgMana) nameEl.appendChild(window.MtgMana.mana(r.mana));
-      var li = el("li", { class: "erow" + (c.in_deck ? "" : " side"), "data-row": key, id: "card-" + c.name }, [
+      var li = el("li", { class: "erow" + (c.in_deck ? "" : " side"), id: "card-" + c.name }, [
         thumb(r, c.name),
         el("span", { class: "main" }, [
           nameEl,

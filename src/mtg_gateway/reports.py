@@ -143,6 +143,12 @@ class ReportService:
             if "forge_json" not in {r["name"] for r in c.execute("PRAGMA table_info(reports)")}:
                 c.execute("ALTER TABLE reports ADD COLUMN forge_json TEXT")
                 c.execute("ALTER TABLE reports ADD COLUMN forge_state TEXT")
+            # The Forge refresher polls for unfinished runs. forge_state is the last column, behind
+            # each report's large JSON, so without this index every poll read every whole report.
+            c.execute(
+                "CREATE INDEX IF NOT EXISTS reports_forge ON reports(forge_state) "
+                "WHERE forge_state IS NOT NULL"
+            )
 
     # -- running --------------------------------------------------------------
     async def run(

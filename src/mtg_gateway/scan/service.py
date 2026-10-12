@@ -28,7 +28,6 @@ MAX_TEXT = 200_000
 MAX_LINE = 300  # a card line never needs more; longer lines are skipped before any regex runs
 MAX_LINES = 2000
 MAX_SUGGESTIONS = 8
-FUZZY_MIN_SIMILARITY = 0.65  # default; see ScanThresholds
 # Recovery for names Scryfall cannot place at all (fuzzy 404, empty autocomplete):
 # retry with common OCR confusions swapped, then autocomplete on shorter prefixes.
 MAX_VARIANT_LOOKUPS = 4
@@ -38,7 +37,6 @@ MAX_LOOKUPS_PER_USER = 4  # concurrent name searches and printing lists per acco
 MAX_SESSION_BYTES = 600_000  # one saved scan session as stored JSON (500 full cards take about 470 KB)
 MAX_CALL_SECONDS = 40.0  # wall-clock budget per resolve call, under proxy and client timeouts
 MIN_PREFIX = 4
-AMBIGUITY_MARGIN = 0.05  # default; see ScanThresholds
 STATUSES = ("exact", "printing", "fuzzy", "ambiguous", "not_found", "deferred", "error", "conflict")
 MAX_NEWER = 3  # newer printings passed over for the default (previews, digital only) named on a result
 

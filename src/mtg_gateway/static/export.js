@@ -20,7 +20,23 @@
     if (!area) return;
     var done = function () { flash(btn, "Copied"); };
     var fail = function () { area.focus(); area.select(); flash(btn, "Select and copy"); };
-    if (navigator.clipboard && navigator.clipboard.writeText) {
+    // execCommand first, inside the press: it works in the app's WebView, where the async
+    // clipboard may be refused (the same order as Play on EDHPlay in deck.js); the async API is
+    // the fallback for browsers that dropped execCommand.
+    var temp = document.createElement("textarea");
+    temp.value = area.value;
+    temp.setAttribute("readonly", "");
+    temp.style.position = "fixed";
+    temp.style.top = "-1000px";
+    document.body.appendChild(temp);
+    temp.select();
+    var ok = false;
+    try { ok = document.execCommand("copy"); } catch (err) { ok = false; }
+    temp.remove();
+    btn.focus();
+    if (ok) {
+      done();
+    } else if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(area.value).then(done, fail);
     } else {
       fail();
