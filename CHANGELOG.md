@@ -9,11 +9,20 @@ with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 
 ## [0.7.26] - 2026-10-12
 
-Clean-up release before the next deployment. Nothing a member or operator sees works differently:
-old, unused and half-removed code is gone, the two largest functions are split into modules, and
-the image is smaller. No new images besides the gateway's; the database stays at schema 12.
+Clean-up release before the next deployment: old, unused and half-removed code is gone, the two
+largest functions are split into modules, and the image is smaller. A few small visible fixes ride
+along. No new images besides the gateway's; the database stays at schema 12.
 
 ### Changed
+- With `MTG_WRITES_ENABLED` false, setting a deck's cover, adding or removing its tags, moving it
+  to a folder and renaming a folder by hand are refused like every other Archidekt write (deck
+  delete and new folder already were); nothing is sent.
+- The in-app Guide covers Play on EDHPlay, out-of-date proposals, the Goldfish, Folders and
+  Watchlist pages, and names every assistant tool.
+- The gateway's links to the assistant skill and the Android app open their `/install` sections
+  directly; `/skill` and `/app` still redirect there.
+- Copy on the Export and report pages copies inside the press first, so it also works where the
+  Android app's WebView refuses the async clipboard (tested in Chromium, not in the real app).
 - The gateway image is about 75 MB smaller: dependency wheels are installed from a build mount
   instead of staying in a layer, and a code change no longer rebuilds them or downloads the scan
   assets again. The scan page's scripts and styles ship pre-compressed.
@@ -26,7 +35,8 @@ the image is smaller. No new images besides the gateway's; the database stays at
   export and the `MTG_FORGE_URL` / `MTG_FORGE_GAMES` settings.
 
 ### Removed
-- Dead code, unused parameters and unused styles found by the 0.7.26 audit.
+- Dead code, unused parameters and unused styles found by the 0.7.26 audit, and the unused
+  `/static/gateway-icon-32.png`.
 
 ## [0.7.25] - 2026-10-11
 
