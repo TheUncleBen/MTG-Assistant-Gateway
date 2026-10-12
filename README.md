@@ -44,7 +44,7 @@ person has said yes to the exact change.
   plus any MCP client that does OAuth.
   What works where, and the limits, are in [docs/CONNECT.md](docs/CONNECT.md).
 - **On a phone:** the pages work in any browser. There is also an Android app
-  that each gateway can hand out itself (on its `/app` page, once the app file
+  that each gateway can hand out itself (on its setup page, `/install?for=android`, once the app file
   is in the image or added by the operator), adding a camera scan screen with torch
   brightness that lays itself out around a foldable's hinge
   ([docs/ANDROID.md](docs/ANDROID.md)).
@@ -132,7 +132,8 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
   - Mystic Forge features that keep per-user state (watchlists, its own
     saved reports, interactive games) stay hidden until the gateway can
     track who owns them. Saved reports are covered by the gateway's own
-    deck reports below.
+    deck reports below, and the gateway has its own watchlists, off unless
+    the operator sets `MTG_WATCHLISTS_ENABLED=true`.
 - **Deck import.** Three ways to read a deck. Counts leave out the
   maybeboard and sideboard.
   - `get_deck` reads any public or unlisted Archidekt deck from a link
@@ -298,7 +299,8 @@ between releases ([docs/VERSIONS.md](docs/VERSIONS.md)).
 | Deck statistics, stored deck reports and history, compare, companion pages, admin page, JSON API | Built and covered by the test suite against fakes. The companion pages and admin page were also checked by the owner on his own deployment on 2026-10-10 and 2026-10-11 (speed, backup copies, the redesigned pages, edit and restore) |
 | Deck deletion, cover image, folders, tags, comment editing, collection details (0.7.2); comment votes, colour tags and the assistant's account-action proposals (likes, bookmarks, follows, comments, folders, deck deletion; 0.7.16 to 0.7.19); custom mana value and deck collaborators (0.7.20) | Built against Archidekt routes read from its own site code and covered by tests against a fake; not yet exercised live (taking a colour tag off a card is also unverified). Each one reads the result back and reports a mismatch rather than trusting Archidekt's answer |
 | Forge games in deck reports (0.7.14, optional, off by default) | Built. The Forge image is built and smoke-tested on arm64 in CI, with a card-coverage gate (99.69% of the cards legal in at least one format; the cards Forge lacks are named in every report). Not yet measured on a Raspberry Pi. Opponents are Commander precons of the deck's bracket (0.7.23; the bracket set on Archidekt, else the gateway's estimate; a precon's bracket counts only its game changers; the nearest bracket fills in, and the report says which and why). Commander decks only: there are no 60-card opponent decks |
-| Watchlists, price history; other features not built yet | Not yet; the full list is in [docs/CAPABILITIES.md](docs/CAPABILITIES.md#d-parked) (Mystic Forge's own saved goldfish reports stay hidden too; the gateway's stored deck reports replace them) |
+| Watchlists and price history (0.7.23) | Built and covered by tests against fakes; off unless the operator sets `MTG_WATCHLISTS_ENABLED=true` |
+| Features not built yet | The full list is in [docs/CAPABILITIES.md](docs/CAPABILITIES.md#d-parked) (Mystic Forge's own saved goldfish reports stay hidden too; the gateway's stored deck reports replace them) |
 
 ## How it works
 

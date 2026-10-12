@@ -743,8 +743,9 @@ Archidekt busy for everyone:
 
 - at most three Archidekt actions running or waiting at once;
 - at most `MTG_ARCHIDEKT_CALLS_PER_10_MIN` (120 by default) started per 10
-  minutes, refilled evenly. Deck reads, proposals, applies, links and the
-  research tools' `archidekt_*` calls all count. Past it the member gets
+  minutes, refilled evenly. Deck reads, proposals, applies, links and
+  research tools (goldfish, precon) given an Archidekt deck id or link all
+  count. Past it the member gets
   `rate_limited` and waits a few minutes;
 - at most five failed Archidekt link attempts (wrong username or password)
   in 15 minutes, so the Account page can't be used to guess Archidekt
