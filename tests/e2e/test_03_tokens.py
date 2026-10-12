@@ -197,10 +197,6 @@ def test_callback_refuses_a_replayed_or_foreign_browser(http: httpx.Client):
 def test_registration_requires_redirect_uris(http: httpx.Client):
     r = http.post("/register", json={"client_name": "no redirects"})
     assert r.status_code == 400, r.text
-    # Finding (reported to the gateway owner): the SDK's registration handler accepts any URL
-    # scheme, so a javascript: redirect URI registers. Browsers ignore javascript: in a
-    # Location header, so this is low risk, but https or loopback http should be required.
+    # Only https, or http on loopback, may register (test_auth_flow.py checks the full list).
     r = http.post("/register", json={"client_name": "x", "redirect_uris": ["javascript:alert(1)"]})
-    if r.status_code == 201:
-        pytest.xfail("gateway accepts a javascript: redirect_uri at registration (reported)")
     assert r.status_code == 400, r.text

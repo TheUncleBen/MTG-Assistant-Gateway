@@ -6,6 +6,7 @@ capability among the assistant's tools."""
 # ruff: noqa: F811 - the stack fixture is imported and then named as a parameter
 from __future__ import annotations
 
+import copy
 import json
 import re
 
@@ -525,3 +526,23 @@ async def test_owner_tools_carry_what_the_hidden_duplicates_had(stack: Stack) ->
         assert "added" in out
     finally:
         gw.reports.mf = real
+
+
+async def test_cover_tags_and_move_refuse_a_bad_form_and_someone_elses_deck(stack: Stack) -> None:
+    b = await linked(stack)
+    stack.ark.private.discard(43)  # Amy's deck, readable but not this member's
+    forms = {
+        "cover": {"card": ""},
+        "tags": {"action": "add", "name": "budget"},
+        "move": {"folder_id": "1"},
+    }
+    try:
+        updates, tags = len(stack.ark.updates), copy.deepcopy(stack.ark.deck_tags)
+        for what, data in forms.items():
+            r = await b.http.post(f"/decks/42/{what}", data={"csrf": "not-the-token", **data})
+            assert r.status_code == 403, (what, r.status_code)
+            r = await _form(b, f"/decks/43/{what}", data)
+            assert r.status_code == 403, (what, r.status_code, r.text[:300])
+        assert len(stack.ark.updates) == updates and stack.ark.deck_tags == tags
+    finally:
+        await b.aclose()
