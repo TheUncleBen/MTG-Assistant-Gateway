@@ -7,7 +7,9 @@ sell, so a paper-only card is simply not found on import there. Nothing here con
 
 from __future__ import annotations
 
+import re
 import zlib
+from dataclasses import dataclass
 from xml.sax.saxutils import quoteattr
 
 from .archidekt import Deck, DeckCard
@@ -45,6 +47,114 @@ def to_arena(deck: Deck) -> str:
         if rows:
             blocks.append(title + "\n" + "\n".join(_arena_line(c) for c in _sorted(rows)))
     return "\n\n".join(blocks) + "\n"
+
+
+EDHPLAY_URL = "https://edhplay.com/"
+
+
+# EDHPlay's Bulk Import reads "(SET) NUMBER" only when both match these (its parser, below).
+_EDH_SET = re.compile(r"[A-Za-z0-9]+")
+_EDH_NUMBER = re.compile(r"[A-Za-z0-9-]+")
+# Archidekt categories EDHPlay's import cannot take: it reads a Tokens section but drops it
+# (verified live 2026-10-11: the import request carries no token rows), so tokens are left out.
+_EDH_TOKEN_CATEGORIES = {"token", "tokens"}
+# The most cards EDHPlay's Sideboard holds. An import that would put more there is refused whole
+# ("Sideboard would have 17 cards, max is 15", verified live 2026-10-11) and nothing is imported.
+EDHPLAY_SIDEBOARD_MAX = 15
+
+
+@dataclass
+class EdhplayList:
+    """What "Play on EDHPlay" copies, and what it had to leave out (for the note)."""
+
+    text: str
+    commanders: list[str]
+    left_out: list[tuple[int, str]]  # (copies, name) that did not fit EDHPlay's 15-card sideboard
+    maybeboard: int  # maybeboard cards, never sent (Ben, 23:21Z 2026-10-11)
+    tokens: int  # token cards left out (EDHPlay's import drops them)
+
+
+def _edh_line(c: DeckCard, *, commander: bool = False, quantity: int | None = None) -> str:
+    """``1 Name (SET) 123``, with ``[Commander{top}]`` on a commander: the marker EDHPlay's parser
+    looks for (it takes Archidekt's own export syntax for the commander)."""
+    name = " ".join(c.name.replace("[", "(").replace("]", ")").split())
+    line = f"{c.quantity if quantity is None else quantity} {name}"
+    if c.set_code and c.collector_number and _EDH_SET.fullmatch(c.set_code):
+        if _EDH_NUMBER.fullmatch(c.collector_number):
+            line += f" ({c.set_code.upper()}) {c.collector_number}"
+    return line + (" [Commander{top}]" if commander else "")
+
+
+def to_edhplay(deck: Deck) -> EdhplayList:
+    """The whole deck as EDHPlay's Bulk Import reads it, the commander names and what was left out.
+
+    Verified 2026-10-11 against EDHPlay itself: its help page ('Click "Create Deck", choose your
+    format and commander. Add cards by searching or use "Bulk Import" to paste your decklist (e.g.,
+    "1 Sol Ring", "1 Command Tower")'), the import dialog's own text ("1 Sol Ring (C18) 222": "Use
+    set code and collector number to specify exact printing"), the parser the dialog runs in the
+    browser (edhplay.com/assets/DeckEditorSkeleton-*.js, functions ``tc``/``Vs``/``bn``) and live
+    imports with a test account, read back through EDHPlay's own Export:
+
+    - each line is ``N Name``, an optional ``x`` after N, then optional ``(SET) NUMBER``;
+    - a line carrying ``[...Commander{top}...]`` is the commander, a second one the partner, and
+      it wins over a commander already picked under Create Deck (with Import & Replace);
+    - lines before the first ``Sideboard``, ``Tokens``, ``Attractions`` or ``Stickers`` heading are
+      the main deck; each heading's section runs to the next blank line;
+    - double-faced cards are found by their full ``A // B`` name;
+    - EDHPlay has no maybeboard (a ``Maybeboard`` heading is skipped and its cards would count as
+      main deck), its import never sets a companion, it drops a Tokens section, and its Sideboard
+      holds at most 15 cards: more and the whole import is refused.
+
+    So: commander(s) first, marked; then the main deck; then, after a blank line, ``Sideboard``
+    with the deck's companion and sideboard, up to 15 copies (the companion first); anything past
+    that is left out and named in the note. The maybeboard (and any other category kept outside
+    the deck) is never sent (Ben's choice, 23:21Z 2026-10-11), and neither are tokens; the note
+    says so. Printings keep their set and number when EDHPlay's parser can read them. A deck with
+    no commander starts with a line of several copies when it has one, because EDHPlay's parser
+    takes a first line of quantity 1 as the commander. Unknown: whether the 15 counts copies or
+    lines; copies is the safe reading."""
+    commanders: list[str] = []
+    head: list[str] = []
+    main: list[str] = []
+    first: list[DeckCard] = []  # the sideboard and the companion
+    maybeboard = tokens = 0
+    for c in sorted(deck.cards, key=lambda c: (c.name.casefold(), c.set_code, c.collector_number)):
+        if not c.name.strip() or c.quantity <= 0:
+            continue
+        if deck.in_deck(c) and deck.is_commander(c):
+            head.append(_edh_line(c, commander=True))
+            if c.name not in commanders:
+                commanders.append(c.name)
+        elif deck.in_deck(c):
+            main.append(_edh_line(c))
+        elif any(cat.strip().casefold() in _EDH_TOKEN_CATEGORIES for cat in c.categories):
+            tokens += c.quantity
+        elif c.companion or (c.categories and c.categories[0].casefold() in ("sideboard", "companion")):
+            first.append(c)
+        else:  # the maybeboard, or another category kept outside the deck
+            maybeboard += c.quantity
+    side: list[str] = []
+    left_out: list[tuple[int, str]] = []
+    room = EDHPLAY_SIDEBOARD_MAX
+    # the companion first, so a cut never drops it
+    first.sort(key=lambda c: not (c.companion or c.categories[0].casefold() == "companion"))
+    for c in first:
+        fits = min(c.quantity, room)
+        if fits:
+            side.append(_edh_line(c, quantity=fits))
+            room -= fits
+        if fits < c.quantity:
+            left_out.append((c.quantity - fits, c.name))
+    if not head:
+        # With no marked commander EDHPlay's parser takes a first line of quantity 1 as the
+        # commander; a line of several copies first (a basic land, usually) keeps it from that.
+        several = next((i for i, line in enumerate(main) if not line.startswith("1 ")), None)
+        if several:
+            main.insert(0, main.pop(several))
+    text = "\n".join(head + main) + "\n"
+    if side:
+        text += "\nSideboard\n" + "\n".join(side) + "\n"
+    return EdhplayList(text, commanders, left_out, maybeboard, tokens)
 
 
 def to_mtgo_dek(deck: Deck) -> str:

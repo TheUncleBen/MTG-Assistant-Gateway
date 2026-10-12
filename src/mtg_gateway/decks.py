@@ -47,6 +47,7 @@ from .archidekt import (
     finish_modifier,
     front_face,
     jwt_exp,
+    no_retry,
     parse_deck,
 )
 from .archidekt_csv import CsvError, parse_export
@@ -164,6 +165,11 @@ DECK_LIST_COLD_WAIT = 1.5
 PAGE_DECK_SECONDS = 20.0
 PAGE_DECKS_MAX = 200  # reads kept at most, the oldest go first
 TOUCH_LINK_INTERVAL = 60.0  # the link's last_used_at is written at most this often per member
+# Said first in a pending proposal's next_step once the deck sync (sync.py) has seen its deck change.
+OUT_OF_DATE_STEP = (
+    "Out of date: the deck changed after this proposal was made, so applying it will be refused "
+    "and nothing will be sent. Reject it and propose again from the current deck. "
+)
 # Archidekt work one member may start per ARCHIDEKT_BUDGET_WINDOW seconds (each deck read,
 # proposal, apply or proxied archidekt_* research call counts once), on top of the concurrency
 # cap above: a looping assistant cannot keep a steady stream of requests going on the member's
@@ -253,6 +259,14 @@ class MemberCache:
     def clear(self) -> None:
         for sub in list(self._entries):
             self.drop(sub)
+
+    async def refreshed(self, sub: str, fetch: Callable[[], Awaitable[Any]], *, wait: float) -> Any | None:
+        """A value fetched now (sharing a fetch already in flight), for the deck sync: unlike
+        ``get`` it never answers a failed fetch with an older value, so the error reaches the
+        caller. None when the fetch takes longer than ``wait`` (it carries on and fills the cache)."""
+        task = self._refresh(sub, fetch)
+        done, _pending = await asyncio.wait({task}, timeout=wait)
+        return task.result() if done else None
 
     def refreshing(self, sub: str) -> bool:
         return sub in self._refreshing
@@ -1524,6 +1538,9 @@ class DeckService:
         if listeners is not None:
             listeners.append(self._on_archidekt_write)
         self._touched: dict[str, float] = {}  # sub -> when last_used_at was last written
+        # Set by app.py when the deck sync (sync.py) runs: proposal id -> when the sync saw that
+        # the proposal's deck no longer matches it (None while it has not), shown with the proposal.
+        self.out_of_date: Callable[[str], int | None] | None = None
 
     def _on_archidekt_write(self, path: str) -> None:
         """A write is about to go to Archidekt with some member's session: whatever the gateway
@@ -1775,12 +1792,17 @@ class DeckService:
         async with self.archidekt_slot(sub):
             return await self._call_unslotted(sub, fn, *args)
 
-    async def _call_unslotted(self, sub: str, fn: Any, *args: Any) -> Any:
+    async def _call_unslotted(self, sub: str, fn: Any, *args: Any, background: bool = False) -> Any:
         """Run ``fn(token, *args)`` with the user's Archidekt session. The access token is
         refreshed ahead of time when its ``exp`` is unreadable or within five minutes, and once
         more if Archidekt still answers 401. The new pair is stored under the same link (same
         Fernet, same username and user id). The link is revoked only when no refresh token is
-        stored, the refresh itself is rejected, or a freshly refreshed token is rejected too."""
+        stored, the refresh itself is rejected, or a freshly refreshed token is rejected too.
+
+        ``background`` (the deck sync, sync.py): nobody is using the link, so it is never revoked
+        (a rejected session ends the check as ``not_linked`` and the member's next own request
+        decides), it is not marked as used, a refresh is audited as the sync's, and every GET is
+        sent once with no retry."""
         token, row = self._token(sub)
         refresh = (row.get("_secret") or {}).get("refresh")
         # The stored session this call works with. Every write below is conditional on the link
@@ -1789,6 +1811,8 @@ class DeckService:
         stored = {"secret_enc": row["secret_enc"]}
 
         def expire(reason: str) -> DeckError:
+            if background:
+                return DeckError("not_linked", "Archidekt did not accept the stored session.")
             if self.db.revoke_link(sub, only_secret=stored["secret_enc"]):
                 self._audit("archidekt_link_expired", sub=sub, detail={"reason": reason})
             return DeckError(
@@ -1824,13 +1848,15 @@ class DeckService:
                     f" (the link is managed at {self.settings.public_url}/account).",
                 )
             stored["secret_enc"] = new_enc
-            self._audit("archidekt_session_refreshed", sub=sub, detail={"reason": reason})
+            detail = {"reason": reason, **({"by": "deck sync"} if background else {})}
+            self._audit("archidekt_session_refreshed", sub=sub, detail=detail)
             return access
 
         exp = jwt_exp(token)
         if exp is None or exp - time.time() < 300:
             token = await refreshed("expiring")
         acting = _acting_sub.set(sub)
+        quiet = no_retry.set(background)
         try:
             try:
                 result = await fn(token, *args)
@@ -1844,8 +1870,10 @@ class DeckService:
                 raise expire("rejected after refresh") from exc
             raise DeckError(exc.kind, str(exc)) from exc
         finally:
+            no_retry.reset(quiet)
             _acting_sub.reset(acting)
-        self._touch(sub)
+        if not background:  # the deck sync's background reads are not the member using their link
+            self._touch(sub)
         return result
 
     def _touch(self, sub: str) -> None:
@@ -2011,6 +2039,53 @@ class DeckService:
                 return await self.client.get_deck(None, deck_id)
             except ArchidektError as exc:
                 raise DeckError(exc.kind, str(exc)) from exc
+
+    # -- the deck sync's reads (sync.py) ----------------------------------------
+    def archidekt_busy(self) -> bool:
+        """Whether any member's Archidekt work is running or waiting, or an apply is under way:
+        the deck sync waits for that to finish, so it never holds up a member or an assistant."""
+        return bool(self._archidekt_in_flight) or bool(self._running) or self.client.pacer.busy()
+
+    def deck_busy(self, sub: str, deck_id: str) -> bool:
+        """Whether an apply (or restore) on this deck is running: the sync leaves the deck alone
+        until it ends, so the gateway's own write is never read halfway."""
+        lock = self._deck_locks.get(f"{sub}:{deck_id}")
+        return (lock is not None and lock.locked()) or self.db.deck_applying(sub, deck_id)
+
+    async def sync_deck_list(self, sub: str, *, wait: float = 120.0) -> list[dict[str, Any]] | None:
+        """The member's deck list for the deck sync: the cached one while it is fresh, else one
+        listing request (shared with a page's read already under way). Read-only, outside the
+        member's own Archidekt slot and budget, and not counted as the member using their link.
+        None when the read takes longer than ``wait`` (it carries on and fills the cache)."""
+        value, state = self.deck_lists.peek(sub)
+        if state == "fresh":
+            return [dict(d) for d in value]
+        _token, row = self._token(sub)
+        folder = self.settings.archidekt_backup_folder if self.settings.archidekt_backups else None
+
+        async def fetch() -> list[dict[str, Any]]:
+            return await self._call_unslotted(
+                sub,
+                lambda token, *_: self.client.list_decks(
+                    token, row["archidekt_username"], row.get("archidekt_user_id"), backup_folder=folder
+                ),
+                background=True,
+            )
+
+        # A page arriving meanwhile shares this read, and with it the sync's terms (no retry, no
+        # unlink); its next load reads again.
+        rows = await self.deck_lists.refreshed(sub, fetch, wait=wait)
+        return None if rows is None else [dict(d) for d in rows]
+
+    async def sync_read_deck(self, sub: str, deck_id: str) -> Deck:
+        """One live read of the member's deck for the deck sync (never cached, like every read
+        with the member's session); outside their slot and budget, like sync_deck_list."""
+        deck_id = _clean_deck_id(deck_id)
+        deck: Deck = await self._call_unslotted(sub, self.client.get_deck, deck_id, background=True)
+        return deck
+
+    def _out_of_date_since(self, proposal_id: str) -> int | None:
+        return self.out_of_date(proposal_id) if self.out_of_date is not None else None
 
     def _forget_page_decks(self) -> None:
         self._page_decks.clear()
@@ -2217,6 +2292,8 @@ class DeckService:
             state == "pending" and self.settings.writes_enabled and modes.assistant_may_apply(mode, risk)
         )
         closed_by, closed_by_app = self._closer(row) if state == "rejected" else (None, None)
+        # The deck sync (sync.py) saw the deck change after this proposal was made (R-153).
+        out_of_date = self._out_of_date_since(row["id"]) if state == "pending" else None
         return {
             "proposal_id": row["id"],
             "kind": kind,
@@ -2267,7 +2344,9 @@ class DeckService:
             "risk": risk,
             "risk_reason": why,
             "assistant_may_apply": may_apply,
-            "next_step": (
+            **({"out_of_date": True, "out_of_date_since": out_of_date} if out_of_date else {}),
+            "next_step": (OUT_OF_DATE_STEP if out_of_date else "")
+            + (
                 # an apply that stopped at the backup (possibly after its caller had its answer)
                 "The last attempt to apply this stopped before anything changed: the backup copy "
                 "could not be made on Archidekt. "
@@ -2396,6 +2475,11 @@ class DeckService:
                     "state": state,
                     "created_by": self._creator_label(r.get("created_by_client")),
                     "review_url": f"{self.settings.public_url}/proposals/{r['id']}",
+                    **(
+                        {"out_of_date": True}
+                        if state == "pending" and self._out_of_date_since(r["id"])
+                        else {}
+                    ),
                 }
             )
         return out
@@ -3518,10 +3602,22 @@ class DeckService:
             raise DeckError("unavailable", "The snapshot could not be stored; nothing was sent to Archidekt.")
         return snapshot_id
 
+    def _writes_switch(self) -> None:
+        """Refuse a hand write when MTG_WRITES_ENABLED is false. Deck delete and new folder obey
+        the switch like every proposal does (Ben's decision for 0.7.25), on every route: the deck
+        settings page, the Folders page and an approved proposal alike."""
+        if not self.settings.writes_enabled:
+            raise DeckError(
+                "writes_disabled",
+                "Archidekt writes are switched off on this gateway (MTG_WRITES_ENABLED is false); "
+                "nothing was sent to Archidekt.",
+            )
+
     async def delete_deck(self, sub: str, deck_id: str, typed_name: str) -> dict[str, Any]:
         """Delete one of the member's own decks after they typed its exact name. A snapshot is kept
         in the gateway and, when backups are on, a copy in the backup folder on Archidekt; the
         deletion is verified by reading the deck back (it must be gone)."""
+        self._writes_switch()
         deck = await self.get_own_deck(sub, deck_id)
         if clean_text(typed_name).casefold() != clean_text(deck.name).casefold():
             raise DeckError(
@@ -3653,6 +3749,7 @@ class DeckService:
     ) -> tuple[str, dict[str, Any]]:
         """(clean name, parent folder) for a new folder, refused as create_folder would refuse it;
         nothing is created. The Folders page's confirmation asks about what this returns."""
+        self._writes_switch()
         name = self._folder_name(name)
         info = await self.folders(sub)
         parent = int(parent_id) if parent_id is not None else int(info["root_id"])

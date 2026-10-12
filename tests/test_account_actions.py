@@ -874,3 +874,44 @@ async def test_settings_page_collaborators_respect_the_writes_switch(stack: Stac
         assert len(ark.editors[42]) == 1
     finally:
         await b.aclose()
+
+
+async def test_hand_delete_and_new_folder_obey_the_writes_switch(stack: Stack) -> None:
+    """0.7.25 (Ben's decision 22:20Z 10-11): with MTG_WRITES_ENABLED false, deck delete (the deck
+    settings page) and new folder (the Folders page, both its first press and its confirmation)
+    are refused like every other Archidekt write, and nothing is sent."""
+    import dataclasses
+
+    h, ark = stack.h, stack.ark
+    await linked_user(stack)
+    decks = h.app.state.gateway.decks
+    decks.settings = dataclasses.replace(decks.settings, writes_enabled=False)
+    before = [dict(f) for f in ark.folders.get("alice", [])]
+    b = Browser(h)
+    try:
+        await b.login()
+        csrf = await b.csrf()
+        calls = len(ark.calls)
+        r = await b.http.post("/decks/42/delete", data={"csrf": csrf, "name": "Sample Commander Deck"})
+        assert r.status_code == 400 and "switched off" in r.text, r.text
+        assert ark.deleted == [] and 42 in ark.decks
+        for confirmed in ("", "1"):
+            r = await b.http.post(
+                "/folders",
+                data={"csrf": csrf, "action": "create", "name": "Brews", "confirmed": confirmed},
+            )
+            assert r.status_code == 400 and "switched off" in r.text, r.text
+        assert ark.folders.get("alice", []) == before
+        assert all(m == "GET" for m, _p in ark.calls[calls:]), ark.calls[calls:]
+    finally:
+        await b.aclose()
+    with pytest.raises(DeckError) as exc:
+        await decks.delete_deck(SUB, "42", "Sample Commander Deck")
+    assert exc.value.kind == "writes_disabled"
+    with pytest.raises(DeckError) as exc:
+        await decks.create_folder(SUB, "Brews")
+    assert exc.value.kind == "writes_disabled"
+    # switched back on, both work again
+    decks.settings = dataclasses.replace(decks.settings, writes_enabled=True)
+    folder = await decks.create_folder(SUB, "Brews")
+    assert folder["name"] == "Brews"
