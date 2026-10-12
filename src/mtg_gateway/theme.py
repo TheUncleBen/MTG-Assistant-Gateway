@@ -1142,7 +1142,7 @@ def _deck_css() -> str:
     return DECK_CSS
 
 
-# Stylesheets the pages share, served from memory at /static/<name> (companion.py's static route)
+# Stylesheets the pages share, served from memory at /static/<name> (companion_shell.py's static route)
 # instead of inline in every page: the browser keeps them, so a page brings only its own markup.
 STYLESHEETS: dict[str, Callable[[], str]] = {"site.css": lambda: CSS, "deck.css": _deck_css}
 

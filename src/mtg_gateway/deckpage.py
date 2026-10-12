@@ -385,7 +385,7 @@ def banner_html(
         )
     more_items = []
     if csrf and forge_on:
-        # D17: the same run without the Forge games, for a quick result (forge=0, companion.py).
+        # D17: the same run without the Forge games, for a quick result (forge=0, companion_tools.py).
         more_items.append(
             f"<form method='post' action='/decks/{did}/report'>{csrf_in}"
             "<input type='hidden' name='forge' value='0'>"

@@ -714,7 +714,8 @@ def test_every_proposal_tool_is_a_write_tool() -> None:
 
     from mtg_gateway.app import WRITE_TOOLS
 
-    src = (Path(__file__).resolve().parents[1] / "src" / "mtg_gateway" / "app.py").read_text(encoding="utf-8")
+    pkg = Path(__file__).resolve().parents[1] / "src" / "mtg_gateway"
+    src = "".join(p.read_text(encoding="utf-8") for p in pkg.rglob("*.py"))
     names = set(re.findall(r'name="(propose_\w+)"', src))
     assert len(names) >= 10, names
     assert names <= WRITE_TOOLS, names - WRITE_TOOLS
