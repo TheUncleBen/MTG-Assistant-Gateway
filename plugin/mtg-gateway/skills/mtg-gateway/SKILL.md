@@ -386,7 +386,7 @@ flagged as an error too: say the lookup failed. Act on the code:
 | `invalid_approval` / `in_chat_disabled` | Answers of `confirm_proposal`, the card's own tool. Never call it; the card does. |
 | `writes_disabled` | The owner has switched applying off. The proposal is kept. Give the user the review link and stop; do not retry. |
 | `not_linked` | No Archidekt link, or Archidekt no longer accepts it. Send the user to the account page to link or relink. |
-| `stale` | The deck changed on Archidekt after the proposal was made. Nothing was sent. Load the deck again, explain what changed, and propose again if the user still wants it. |
+| `stale` | The deck changed on Archidekt after the proposal was made. Nothing was sent. Load the deck again, explain what changed, and propose again if the user still wants it. A pending proposal can say so before anyone applies it: `out_of_date: true` in `get_proposal` / `list_my_proposals` (the gateway's background deck sync saw the deck change). Don't apply it; tell the user and propose again from the current deck if they still want it. |
 | `already_applied` | It was applied before. Nothing was sent again. Report that and stop. |
 | `other_client` | Another connected app (or the browser) made this proposal, so it can't be applied or rejected from here. Nothing was sent. Give the user the `review_url` and stop. |
 | `not_pending` | The proposal failed, expired or was rejected by the user earlier. Propose again if wanted. |

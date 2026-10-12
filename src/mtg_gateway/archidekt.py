@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextvars
 import copy
 import hashlib
 import http.cookiejar
@@ -548,6 +549,17 @@ class Pacer:
         self._next_allowed = time.monotonic() + self.min_interval
         self._lock.release()
 
+    def busy(self) -> bool:
+        """Whether a call is being sent or waiting its turn right now (the deck sync, sync.py,
+        steps aside while one is)."""
+        return self._lock.locked()
+
+    def paused(self) -> bool:
+        """Whether calls are being refused right now (the breaker is open or a Retry-After is
+        running): the deck sync sends nothing then, so it never adds to a pause."""
+        now = time.monotonic()
+        return now < self._open_until or now < self._retry_until
+
     def record(self, ok: bool, retry_after: float | None = None) -> None:
         if ok:
             self._failures = 0
@@ -569,6 +581,9 @@ class Pacer:
 CARD_PATH = "/cards/v2/"
 CACHE_MAX_ENTRIES = 500
 BACKOFF_CAP = 10.0  # seconds; the longest single wait between retries
+# Set by the deck sync (sync.py) around its background reads: each GET is sent once and never
+# retried, so a failing Archidekt costs the shared breaker at most one failure per check.
+no_retry: contextvars.ContextVar[bool] = contextvars.ContextVar("archidekt_no_retry", default=False)
 MAX_LIST_PAGES = 4  # deck-list pages of 50 followed for one member (200 decks)
 
 
@@ -692,7 +707,7 @@ class ArchidektClient:
             self.forget_deck_reads()
             for listener in self.write_listeners:
                 listener(path)
-        attempts = 1 + (self.retries if method == "GET" else 0)
+        attempts = 1 + (self.retries if method == "GET" and not no_retry.get() else 0)
         for attempt in range(attempts):
             try:
                 value = await self._send(

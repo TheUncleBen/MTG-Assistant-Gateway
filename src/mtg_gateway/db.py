@@ -1592,6 +1592,31 @@ class Database:
             )
             return cur.rowcount == 1
 
+    def pending_baselines(self, owner_sub: str | None = None) -> list[dict[str, Any]]:
+        """Live pending proposals that recorded the deck as it was when they were made (a
+        non-empty ``baseline_fingerprint``: edits, details, restores, clones, deck deletes), oldest
+        first, for the deck sync (sync.py); all members' when ``owner_sub`` is None."""
+        sql = (
+            "SELECT id, owner_sub, deck_id, baseline_fingerprint FROM proposals "
+            "WHERE state = 'pending' AND expires_at >= ? AND baseline_fingerprint != ''"
+        )
+        args: tuple[Any, ...] = (int(time.time()),)
+        if owner_sub is not None:
+            sql += " AND owner_sub = ?"
+            args += (owner_sub,)
+        with self._lock:
+            rows = self._conn.execute(sql + " ORDER BY created_at", args).fetchall()
+        return [dict(r) for r in rows]
+
+    def deck_applying(self, owner_sub: str, deck_id: str) -> bool:
+        """Whether one of the member's proposals for this deck is being applied right now."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT 1 FROM proposals WHERE owner_sub = ? AND deck_id = ? AND state = 'applying' LIMIT 1",
+                (owner_sub, deck_id),
+            ).fetchone()
+        return row is not None
+
     def claim_proposal(self, proposal_id: str, owner_sub: str) -> bool:
         """Move pending -> applying atomically; False if it was not pending (duplicate apply)."""
         with self.tx() as c:

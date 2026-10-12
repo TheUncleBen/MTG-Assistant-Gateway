@@ -207,6 +207,9 @@ class Settings:
     cimd_enabled: bool = True
     cimd_allowed_hosts: list[str] = field(default_factory=list)
     writes_enabled: bool = False
+    # Automatic Archidekt -> gateway deck sync (sync.py): minutes between the timed checks of
+    # members with waiting proposals; a signed-in page also starts one. 0 turns the sync off.
+    deck_sync_minutes: int = 30
     # The Approve/Reject card an AI app shows in the chat (MCP Apps) may apply a proposal with
     # its one-time code; false leaves only the review page.
     apply_in_chat: bool = True
@@ -445,6 +448,7 @@ def load_settings() -> Settings:
         auto_apply_max_rows=_int_env("MTG_AUTO_APPLY_MAX_ROWS", 5, lo=1, hi=100),
         browser_session_ttl=_int_env("MTG_BROWSER_SESSION_TTL", 2 * 3600, lo=300, hi=86400),
         writes_enabled=_bool_env("MTG_WRITES_ENABLED", False),
+        deck_sync_minutes=_int_env("MTG_DECK_SYNC_MINUTES", 30, lo=0, hi=24 * 60),
         archidekt_base=(_env("MTG_ARCHIDEKT_BASE", "https://archidekt.com/api") or "").rstrip("/"),
         archidekt_backups=_bool_env("MTG_ARCHIDEKT_BACKUPS", True),
         archidekt_calls_per_10_min=_int_env("MTG_ARCHIDEKT_CALLS_PER_10_MIN", 120, lo=10, hi=100_000),
