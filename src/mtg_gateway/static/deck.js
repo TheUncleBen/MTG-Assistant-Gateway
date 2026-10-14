@@ -122,7 +122,8 @@
   var deckId = cards.getAttribute("data-deck");
   var own = cards.hasAttribute("data-own");
   var canDrag = cards.hasAttribute("data-drop");
-  var byCategory = cards.getAttribute("data-grouping") === "category";
+  var grouping = cards.getAttribute("data-grouping");
+  var byCategory = grouping === "category";
   var touch = window.matchMedia("(hover: none)").matches;
   var phone = function () {
     return window.matchMedia("(max-width: 599.98px)").matches ||
@@ -245,32 +246,133 @@
     toast((err && err.message) || "No connection; nothing was changed.", { error: true });
   }
 
+  // -- saves in the background (T-159): the card's edits from its menu, viewer and drags --------
+  // The edit is drawn on the page at once and Archidekt saves it behind, one save at a time in
+  // the order they were made: a Saving note until it answers, then Saved with Undo (applyAnswer).
+  // A save that does not go through puts the card back as it was and says why in a red note. A
+  // card with an edit still waiting its turn keeps what it shows when an earlier answer is drawn
+  // (drawRows), so nothing jumps back and forth.
+  var bgQueue = Promise.resolve(), bgCount = 0, bgCards = [];
+  var qtySteps = [];  // a card's quantity steps not yet saved (stepQty): {card, shown, saved, timer, queued, gone}
+  function bgBusy() { return bgCount > 0 || qtySteps.length > 0; }
+  function waits(card) {
+    return bgCards.indexOf(card) >= 0 || qtySteps.some(function (s) { return s.card === card && s.timer; });
+  }
+  function idle() {
+    // a save made elsewhere on the page (selected cards, Undo, Redo) finishes first
+    return new Promise(function (resolve) {
+      (function check() { if (saving || histBusy) setTimeout(check, 100); else resolve(); })();
+    });
+  }
+  // the Saving note; one that already says this stays as it is (no flicker, no second
+  // announcement). later: a save whose turn came, which leaves an error or a question up.
+  function savingNote(text, later) {
+    if (toastEl && $(".msg", toastEl).textContent === text && !toastEl.classList.contains("error")) return;
+    if (later && toastEl && (toastEl.classList.contains("error") || toastEl.getAttribute("role") === "alertdialog")) return;
+    toast(text, { sticky: true });
+  }
+  /* job.card: the card drawn changed; job.start(): {changes, inverse, saying} when its turn comes
+     (null when nothing is left to send); job.saved(): after Archidekt took it; job.undo(): puts the
+     card back and returns the note's end ("Cultivate is back in Ramp."); job.what: "Move" and so on. */
+  function background(job) {
+    bgCount++;
+    bgCards.push(job.card);
+    syncHist();
+    var done = function () { bgCount--; syncHist(); };
+    bgQueue = bgQueue.then(idle).then(function () {
+      bgCards.splice(bgCards.indexOf(job.card), 1);
+      var plan = job.start();
+      if (!plan) return null;
+      savingNote(plan.saying, true);
+      return saveEdit(plan.changes, plan.inverse).then(function () { if (job.saved) job.saved(); }, function (err) {
+        var back = job.undo();
+        if (err && err.cancelled) { dismissToast(); return; }
+        var why = ((err && err.message) || "no connection").replace(/\.$/, "");
+        toast(job.what + " not saved: " + why + ". " + back, { error: true });
+      });
+    }).then(done, done);
+  }
+  // Where a card sits and how it is filed, to put it back there when its save does not go through
+  // (its stack too, when the card was the last one in it and the stack went with it).
+  var SPOT_ATTRS = ["data-cat", "data-allcats", "data-zone"];
+  function spotOf(card) {
+    var st = card.closest(".stack");
+    return {
+      list: card.parentNode, next: card.nextSibling, stack: st, stackNext: st && st.nextSibling,
+      attrs: SPOT_ATTRS.map(function (a) { return card.getAttribute(a); }), side: card.classList.contains("side")
+    };
+  }
+  function putBack(card, spot) {
+    var st = spot.stack, list = spot.list;
+    if (st && !st.isConnected) {
+      var same = stackByName(st.getAttribute("data-group"));
+      if (same) st = same;
+      else cards.insertBefore(st, spot.stackNext && spot.stackNext.parentNode === cards ? spot.stackNext : null);
+    }
+    if (st) list = $(".cards, .rows", st);
+    var focused = document.activeElement === card;
+    if (list) list.insertBefore(card, spot.next && spot.next.parentNode === list ? spot.next : null);
+    if (focused) card.focus();
+    SPOT_ATTRS.forEach(function (a, i) { if (spot.attrs[i] === null) card.removeAttribute(a); else card.setAttribute(a, spot.attrs[i]); });
+    card.classList.toggle("side", spot.side);
+    refreshStacks();
+  }
+  // the keyboard stays on the page when the focused card leaves it: the next card of its stack
+  function focusNear(stack) {
+    var next = (stack && stack.isConnected && $(".c, .row", stack)) || $(".c, .row", cards);
+    if (next) next.focus();
+  }
+
   // -- drawing the answer in place: the touched cards, the stack totals, the chip and the panels --
-  var removedCards = {}; // front face -> [elements taken off the page], put back by an Undo
+  // front face -> [{card, home}]: elements taken off the page and the stack they were in, put
+  // back there by an Undo (a card filed under no category has no category of its own to go by)
+  var removedCards = {};
+  function keepRemoved(card, home) {
+    var face = frontFace(card.getAttribute("data-card"));
+    (removedCards[face] = removedCards[face] || []).push({ card: card, home: home });
+  }
   function stackByName(name) {
     return $$(".stack", cards).filter(function (st) { return st.getAttribute("data-group") === name; })[0] || null;
+  }
+  // a stack made on the page, drawn as the server draws one (deckpage.cards_html)
+  function makeStack(name) {
+    var st = el("section", "stack");
+    st.setAttribute("data-group", name);
+    var head = el("div", "stackhead");
+    var h2 = el("h2");
+    var title = el("span", "title", name);
+    title.title = name;
+    h2.appendChild(title);
+    head.appendChild(h2);
+    head.appendChild(el("div", "meta", "Qty: 0"));
+    st.appendChild(head);
+    var rows = cards.classList.contains("text") || cards.classList.contains("table") || cards.classList.contains("brewer");
+    var list = rows ? el("ul", "plain rows") : el("div", "cards");
+    var th = $(".rows > .th", cards);  // the Table view's column heads
+    if (th) list.appendChild(th.cloneNode(true));
+    st.appendChild(list);
+    return st;
   }
   function ensureStack(name) {
     var st = stackByName(name);
     if (st || !byCategory) return st;
-    st = el("section", "stack");
-    st.setAttribute("data-group", name);
-    var head = el("div", "stackhead");
-    var h4 = el("h4");
-    h4.appendChild(el("span", "title", name));
-    head.appendChild(h4);
-    head.appendChild(el("div", "meta", "Qty: 0"));
-    st.appendChild(head);
-    st.appendChild(cards.classList.contains("text") || cards.classList.contains("table") ? el("ul", "plain rows") : el("div", "cards"));
+    st = makeStack(name);
     // the maybeboard sits last, as on Archidekt; a new category goes before it
     var side = excluded.map(stackByName).filter(Boolean)[0];
     if (side && excluded.indexOf(name) < 0) cards.insertBefore(st, side); else cards.appendChild(st);
     return st;
   }
+  // the count shown for a card in the open menu or viewer, kept in step with the card's own
+  var qtyLabels = [];  // {el, card, show}
   function setQty(card, qty) {
     card.setAttribute("data-qty", String(qty));
     var q = $(".qty, .q", card);
     if (q) q.textContent = String(qty);
+    qtyLabels = qtyLabels.filter(function (l) {
+      if (!l.el.isConnected) return false;
+      if (l.card === card) l.show();
+      return true;
+    });
   }
   // the finish badge Archidekt shows beside the name (F, E); none for a normal card
   function setFinish(card, finish) {
@@ -310,10 +412,37 @@
     dot.textContent = "";
     dot.appendChild(el("span", "sr-only", "tag " + t.name));
   }
-  // Archidekt's custom mana value: the deck's own override of a card's mana value (data-mv)
+  // Archidekt's custom mana value: the deck's own override of a card's mana value (data-mv). The
+  // Table view's MV column shows it, and grouped by Mana value the card moves to its stack.
   function setManaValue(card, mv) {
     if (mv === null || mv === undefined || mv === "") card.removeAttribute("data-mv");
     else card.setAttribute("data-mv", String(mv));
+    var custom = card.getAttribute("data-mv"), printed = card.getAttribute("data-cmc");
+    var now = custom !== null ? custom : printed;  // as the deck counts it (deck_stats.mana_value)
+    var cell = $(".mv", card);
+    if (cell) {
+      cell.textContent = now === null ? "" : String(Number(now));
+      if (custom !== null && printed !== null) cell.title = "Custom mana value; printed " + Number(printed);
+      else cell.removeAttribute("title");
+    }
+    var from = stackOf(card);
+    if (grouping !== "mv" || !from || from === "Land") return;  // a land is grouped as one whatever its value
+    var to = now === null ? "No mana value" : Number(now) + " mana value";  // deckpage.mv_group
+    if (to === from) return;
+    var focused = document.activeElement === card;
+    $(".cards, .rows", mvStack(to)).appendChild(card);
+    if (focused) card.focus();
+    refreshStacks();
+  }
+  // the Mana value grouping's stack, made in its place in the order when there is none
+  function mvStack(name) {
+    var st = stackByName(name);
+    if (st) return st;
+    var rank = function (n) { return n === "Land" ? 1e6 : n === "No mana value" ? 2e6 : parseFloat(n); };
+    st = makeStack(name);
+    var after = $$(".stack", cards).filter(function (o) { return rank(o.getAttribute("data-group")) > rank(name); })[0];
+    cards.insertBefore(st, after || null);
+    return st;
   }
   // The card menu's "Mana value…" form: a whole number from 0 to 20, or Clear to use the card's own
   function manaValueForm(card, m) {
@@ -339,20 +468,22 @@
     input.addEventListener("input", function () { msg.className = "status"; msg.textContent = ""; });
     form.appendChild(lab); form.appendChild(input); form.appendChild(hint); form.appendChild(acts); form.appendChild(msg);
     m.appendChild(form);
-    // The form closes at once and the card shows the new value while Archidekt saves it (as a
-    // drag shows the card in its new stack); applyAnswer then says Saved with Undo. A save that
-    // does not go through puts the old value back and says why.
+    // The form closes at once and the card shows the new value while Archidekt saves it (a save
+    // in the background, as the menu's other edits are)
     var send = function (value) {
       var ch = { action: "set_mana_value", card_name: name, mana_value: value, zone: card.getAttribute("data-zone") || "main" };
       var inv = { action: "set_mana_value", card_name: name, mana_value: cur === null ? null : Number(cur), zone: ch.zone };
+      var saying = "Saving the mana value of " + name + "…";
       setManaValue(card, value);
       closeMenu();
-      toast("Saving the mana value of " + name + "…", { sticky: true });
-      saveEdit([ch], [inv]).catch(function (err) {
-        setManaValue(card, cur);
-        if (err && err.cancelled) { dismissToast(); return; }
-        var why = ((err && err.message) || "no connection").replace(/\.$/, "");
-        toast("Mana value not saved: " + why + ". " + name + " is back to " + (cur === null ? "its own mana value" : cur) + ".", { error: true });
+      savingNote(saying);
+      background({
+        card: card, what: "Mana value",
+        start: function () { return { changes: [ch], inverse: [inv], saying: saying }; },
+        undo: function () {
+          setManaValue(card, cur);
+          return name + " is back to " + (cur === null ? "its own mana value" : cur) + ".";
+        }
       });
     };
     form.addEventListener("submit", function (e) {
@@ -447,17 +578,19 @@
     names.forEach(function (name) {
       $$(".c, .row", cards).filter(function (c) { return frontFace(c.getAttribute("data-card")) === name; }).forEach(function (card) {
         var r = take(card);
+        if (waits(card)) return;  // an edit of it still to be saved: it shows that, and its answer follows
         if (r) { place(card, r); return; }
-        (removedCards[name] = removedCards[name] || []).push(card);
+        keepRemoved(card, stackOf(card));
         card.remove();
       });
     });
     // rows with no card on the page: a card an Undo put back (its element was kept)
     left.forEach(function (r) {
       var kept = removedCards[frontFace(r.name)];
-      var card = kept && kept.shift();
-      if (!card) return;
-      var st = ensureStack((r.categories && r.categories[0]) || stackOf(card)) || stackByName(stackOf(card)) || $(".stack", cards);
+      var was = kept && kept.shift();
+      if (!was) return;
+      var card = was.card, home = (r.categories && r.categories[0]) || was.home;
+      var st = (home && (ensureStack(home) || stackByName(home))) || stackByName(was.home) || $(".stack", cards);
       if (!st) return;
       $(".cards, .rows", st).appendChild(card);
       place(card, r);
@@ -490,8 +623,9 @@
   var past = [], future = [], histBusy = false;
   var undoBtnEl = null, redoBtnEl = null;
   function syncHist() {
-    if (undoBtnEl) undoBtnEl.disabled = histBusy || !past.length;
-    if (redoBtnEl) redoBtnEl.disabled = histBusy || !future.length;
+    // an edit still saving in the background goes first; Undo and Redo wait for it
+    if (undoBtnEl) undoBtnEl.disabled = histBusy || bgBusy() || !past.length;
+    if (redoBtnEl) redoBtnEl.disabled = histBusy || bgBusy() || !future.length;
   }
   function record(changes, inverse) {
     future = [];
@@ -509,11 +643,11 @@
   function histButton(label, fn) {
     var b = el("button", "btn", label);
     b.type = "button";
-    b.addEventListener("click", function () { b.disabled = true; fn(); });
+    b.addEventListener("click", function () { if (histBusy || saving || bgBusy()) return; b.disabled = true; fn(); });
     return b;
   }
   function undoLast() {
-    if (histBusy || saving || !past.length) return;
+    if (histBusy || saving || bgBusy() || !past.length) return;
     var entry = past.pop(), done = 0;
     histBusy = true;
     syncHist();
@@ -533,7 +667,7 @@
     });
   }
   function redoLast() {
-    if (histBusy || saving || !future.length) return;
+    if (histBusy || saving || bgBusy() || !future.length) return;
     var entry = future.pop();
     histBusy = true;
     syncHist();
@@ -568,7 +702,7 @@
     var names = namesOf(changes);
     drawRows(d.rows, names);
     drawStats(d);
-    if (menu) closeMenu();
+    if (menu && !menuCard.isConnected) closeMenu();  // a menu open on a card the answer took off
     if (replay) {
       // an Undo or Redo step: the history says what was done; a stale read is read once more
       if (d.stale) setTimeout(function () {
@@ -651,16 +785,6 @@
     if (zone === "side") inv.zone = "side";
     return inv;
   }
-  function edit(card, action, value) {
-    var ch = changeFor(card, action, value);
-    var inv = inverseFor(card, ch);
-    var go = function () { return saveEdit([ch], inv ? [].concat(inv) : null); };
-    if (action !== "remove") return go();
-    return confirmNotes([card]).then(function (yes) {
-      if (!yes) { var c = new Error("Nothing was changed."); c.cancelled = true; throw c; }
-      return go();
-    });
-  }
   // Before a card with notes is removed: Archidekt keeps a card's notes on its row, and the
   // gateway has no way to write them, so neither an Undo nor anything else here brings them back.
   function confirmNotes(list) {
@@ -686,10 +810,117 @@
       no.focus();
     });
   }
+  // Quantity steps (the menu's and the viewer's − and +): the count changes at once and a burst
+  // of steps is one save of the count it ends on, sent once the presses pause (or the menu
+  // closes); a step made while that save is out follows it in a save of its own. The last copy's
+  // − removes the card.
+  function copies(n) { return n === 1 ? "1 copy" : n + " copies"; }
+  function stepOf(card) { return qtySteps.filter(function (s) { return s.card === card; })[0] || null; }
   function stepQty(card, delta) {
-    var q = qtyOf(card) + delta;
-    if (q <= 0) return edit(card, "remove");
-    return edit(card, "set_quantity", q);
+    var s = stepOf(card);
+    var q = (s ? s.shown : qtyOf(card)) + delta;
+    if (q <= 0) { removeCard(card); return; }
+    if (!s) { s = { card: card, shown: q, saved: qtyOf(card), timer: 0, queued: false }; qtySteps.push(s); }
+    s.shown = q;
+    setQty(card, q);
+    refreshStacks();
+    savingNote("Saving " + card.getAttribute("data-card") + ": " + copies(q) + "…");
+    syncHist();
+    if (!s.queued) { clearTimeout(s.timer); s.timer = setTimeout(function () { sendSteps(s); }, 400); }
+  }
+  function flushSteps() { qtySteps.forEach(function (s) { if (s.timer) sendSteps(s); }); }
+  function settleSteps(s) {
+    if (s.timer || s.queued) return;
+    var i = qtySteps.indexOf(s);
+    if (i >= 0) qtySteps.splice(i, 1);
+    syncHist();
+  }
+  function sendSteps(s) {
+    clearTimeout(s.timer);
+    s.timer = 0;
+    s.queued = true;
+    var card = s.card, name = card.getAttribute("data-card"), sent = 0;
+    background({
+      card: card, what: "Quantity",
+      start: function () {
+        s.queued = false;
+        if (s.gone || s.shown === s.saved) { settleSteps(s); return null; }
+        sent = s.shown;
+        var ch = changeFor(card, "set_quantity", sent);
+        var inv = { action: "set_quantity", card_name: name, quantity: s.saved };
+        if (ch.zone) inv.zone = ch.zone;
+        return { changes: [ch], inverse: [inv], saying: "Saving " + name + ": " + copies(sent) + "…" };
+      },
+      saved: function () {
+        s.saved = sent;
+        if (!s.gone) { setQty(card, s.shown); refreshStacks(); }
+        settleSteps(s);
+      },
+      undo: function () {
+        s.shown = s.saved;
+        if (!s.gone) { setQty(card, s.saved); refreshStacks(); }
+        settleSteps(s);
+        return name + " is back to " + copies(s.saved) + ".";
+      }
+    });
+  }
+  // Remove from deck: the card leaves the page at once (after the question a card note asks) and
+  // comes back in its place when the save does not go through.
+  function removeCard(card) {
+    var name = card.getAttribute("data-card");
+    confirmNotes([card]).then(function (yes) {
+      if (!yes) return;
+      var s = stepOf(card);
+      if (s) { clearTimeout(s.timer); s.timer = 0; s.gone = true; }
+      var spot = spotOf(card), side = zoneOf(card) === "side";
+      var ch = changeFor(card, "remove");
+      var saying = "Removing " + name + "…";
+      card.remove();
+      refreshStacks();
+      closeMenu();
+      closeViewer();
+      if (!document.activeElement || document.activeElement === document.body) focusNear(spot.stack);
+      savingNote(saying);
+      background({
+        card: card, what: "Removal",
+        start: function () {
+          // the count to put back with an Undo is the one Archidekt has by now
+          if (s) { setQty(card, s.saved); settleSteps(s); }
+          var inv = inverseFor(card, ch);
+          return { changes: [ch], inverse: inv ? [].concat(inv) : null, saying: saying };
+        },
+        // kept for an Undo, which puts this element back (drawRows)
+        saved: function () { keepRemoved(card, spot.stack ? spot.stack.getAttribute("data-group") : ""); },
+        undo: function () { putBack(card, spot); return name + " is back in " + (side ? "the " + sideCat : "the deck") + "."; }
+      });
+    });
+  }
+  // Move to (and a drop on another stack): the card is filed under its new category at once, in
+  // that stack when the page is grouped by category, and goes back when the save does not go through.
+  function moveTo(card, to, target) {
+    var name = card.getAttribute("data-card");
+    var from = byCategory ? stackOf(card) : catOf(card);
+    var ch = changeFor(card, "set_category", to);
+    var inv = inverseFor(card, ch);  // from where the card is now, before it moves
+    var spot = spotOf(card);
+    var saying = "Moving " + name + " to " + to + "…";
+    // filed as Archidekt files it: a category left out of the deck is the maybeboard (drawRows)
+    var zone = excluded.indexOf(to) >= 0 ? "side" : "main";
+    card.setAttribute("data-cat", to);
+    card.removeAttribute("data-allcats");
+    card.setAttribute("data-zone", zone);
+    card.classList.toggle("side", zone === "side" && card.classList.contains("row"));
+    target = target || (byCategory ? ensureStack(to) : null);
+    var focused = document.activeElement === card;
+    if (target) $(".cards, .rows", target).appendChild(card);
+    if (focused) card.focus();  // moving the element took the focus off it
+    refreshStacks();
+    savingNote(saying);
+    background({
+      card: card, what: "Move",
+      start: function () { return { changes: [ch], inverse: inv ? [inv] : null, saying: saying }; },
+      undo: function () { putBack(card, spot); return name + " is back in " + (from || "its category") + "."; }
+    });
   }
   function categoryChoices(card) {
     var cur = byCategory ? stackOf(card) : catOf(card);
@@ -723,25 +954,14 @@
         plus.setAttribute("aria-label", "One more: " + (q + 1));
       };
       relabel();
-      var busy = function (on) { minus.disabled = plus.disabled = on; ctl.classList.toggle("busy", on); };
-      var step = function (delta) {
-        busy(true);
-        stepQty(card, delta).then(function () {
-          busy(false);
-          if (!card.isConnected) { closeViewer(); return; }
-          relabel();
-        }).catch(function (err) { busy(false); showError(err); });
-      };
-      minus.addEventListener("click", function () { step(-1); });
-      plus.addEventListener("click", function () { step(1); });
+      qtyLabels.push({ el: n, card: card, show: relabel });
+      minus.addEventListener("click", function () { stepQty(card, -1); });
+      plus.addEventListener("click", function () { stepQty(card, 1); });
       ctl.appendChild(minus); ctl.appendChild(n); ctl.appendChild(plus);
       acts.push(ctl);
       var rm = el("button", "btn btn-danger", "Remove from deck");
       rm.type = "button";
-      rm.addEventListener("click", function () {
-        rm.disabled = true;
-        edit(card, "remove").then(function () { closeViewer(); }).catch(function (err) { rm.disabled = false; showError(err); });
-      });
+      rm.addEventListener("click", function () { removeCard(card); });
       acts.push(rm);
       var move = el("button", "btn", "Move to…");
       move.type = "button";
@@ -795,11 +1015,10 @@
       try { history.back(); } catch (e) { ignorePop = false; }
     }
     menuPushed = false;
+    flushSteps();  // quantity steps made in it go to Archidekt now
     if (!back) return;
     if (card && card.isConnected) { card.focus(); return; }
-    // the card was removed: the next card of its stack, else any card, keeps the keyboard on the page
-    var next = (stack && stack.isConnected && $(".c, .row", stack)) || $(".c, .row", cards);
-    if (next) next.focus();
+    focusNear(stack);  // the card was removed
   }
   function menuItem(text, ic, onClick, cls) {
     var b = el("button", cls || "", "");
@@ -844,16 +1063,10 @@
         plus.setAttribute("aria-label", "One more " + name + ": " + (q + 1));
       };
       relabel();
-      var stepping = function (delta) {
-        minus.disabled = plus.disabled = true;
-        m.classList.add("busy");
-        stepQty(card, delta).then(function () { /* applyAnswer closed the menu */ }).catch(function (err) {
-          if (menu === m) { minus.disabled = plus.disabled = false; m.classList.remove("busy"); relabel(); }
-          showError(err);
-        });
-      };
-      minus.addEventListener("click", function (e) { stop(e); stepping(-1); });
-      plus.addEventListener("click", function (e) { stop(e); stepping(1); });
+      // the menu stays open for more steps; each shows at once and saves in the background
+      qtyLabels.push({ el: n, card: card, show: relabel });
+      minus.addEventListener("click", function (e) { stop(e); stepQty(card, -1); });
+      plus.addEventListener("click", function (e) { stop(e); stepQty(card, 1); });
       row.appendChild(minus); row.appendChild(n); row.appendChild(plus);
       m.appendChild(row);
       var moveBtn = menuItem("Move to", "swap", null, "more");
@@ -865,10 +1078,7 @@
       sub.setAttribute("aria-label", "Categories");
       sub.hidden = true;
       categoryChoices(card).forEach(function (c) {
-        var b = menuItem(c.name, c.side ? "eye-off" : "tag", function () {
-          m.classList.add("busy");
-          edit(card, "set_category", c.name).catch(function (err) { if (menu === m) m.classList.remove("busy"); showError(err); });
-        }, c.current ? "on" : "");
+        var b = menuItem(c.name, c.side ? "eye-off" : "tag", function () { closeMenu(); moveTo(card, c.name); }, c.current ? "on" : "");
         if (c.side) b.title = "Not counted in the deck";
         if (c.current) { b.disabled = true; b.setAttribute("aria-current", "true"); }
         sub.appendChild(b);
@@ -885,10 +1095,7 @@
       m.appendChild(sub);
       if (window.MtgDeckTag) m.appendChild(menuItem("Color tag…", "tag", function () { closeMenu(); window.MtgDeckTag(card); }));
       m.appendChild(menuItem("Mana value…", "edit", function () { manaValueForm(card, m); }));
-      m.appendChild(menuItem("Remove from deck", "x", function () {
-        m.classList.add("busy");
-        edit(card, "remove").catch(function (err) { if (menu === m) m.classList.remove("busy"); showError(err); });
-      }, "danger"));
+      m.appendChild(menuItem("Remove from deck", "x", function () { removeCard(card); }, "danger"));
       m.appendChild(el("div", "sep"));
       var editLink = el("a", "", "");
       editLink.setAttribute("role", "menuitem");
@@ -1309,19 +1516,7 @@
   function moveCard(card, target) {
     var from = card.closest(".stack");
     if (!target || !from || target === from) return;
-    var to = target.getAttribute("data-group");
-    var ch = changeFor(card, "set_category", to);
-    var inv = inverseFor(card, ch);  // from where the card is now, before it moves
-    var next = card.nextSibling;
-    $(".cards, .rows", target).appendChild(card);  // shown where it was dropped while it saves
-    saveEdit([ch], inv ? [inv] : null).catch(function (err) {
-      // nothing was saved: the card goes back where it was
-      var back = from.isConnected ? from : ensureStack(from.getAttribute("data-group"));
-      var list = back && $(".cards, .rows", back);
-      if (list) list.insertBefore(card, next && next.parentNode === list ? next : null);
-      refreshStacks();
-      showError(err);
-    });
+    moveTo(card, target.getAttribute("data-group"), target);  // shown where it was dropped while it saves
   }
 
   // mouse drag (native drag and drop)
@@ -1516,7 +1711,7 @@
       showReset();
     }
     function addHandle(st) {
-      var head = $(".stackhead h2, .stackhead h4", st);
+      var head = $(".stackhead h2", st);
       if (!head || $(".stackgrip", head)) return;
       var grip = el("button", "stackgrip icon-only btn-ghost", "⠿");
       grip.type = "button";
