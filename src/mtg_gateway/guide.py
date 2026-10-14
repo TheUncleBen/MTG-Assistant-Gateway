@@ -546,8 +546,9 @@ def guide_body(
         "each card's printing, then a Sideboard section with your companion and sideboard. EDHPlay's "
         "sideboard holds 15 cards, so anything past that is left out and a note names it; your "
         "maybeboard is not sent, and EDHPlay does not take tokens from a list, so add those there by "
-        "hand. On EDHPlay choose <strong>Create Deck</strong>, then <strong>Import</strong>: paste the "
-        "list and press <strong>Import &amp; Replace</strong>. EDHPlay cannot receive a deck by link, "
+        "hand. On EDHPlay go to <strong>My Decks</strong>, choose <strong>Add Deck</strong> and open the "
+        "new deck, then press <strong>Import</strong>: paste the list and press <strong>Import &amp; "
+        "Replace</strong>. EDHPlay cannot receive a deck by link, "
         "so after a change on Archidekt press the button again.</p>"
     )
     how_layout = (

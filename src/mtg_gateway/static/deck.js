@@ -2203,14 +2203,20 @@
 })();
 
 /* Play on EDHPlay (R-154, T-161): every press opens a small confirmation box; its "Copy and Open
-   EDHPlay.com" copies the whole deck in EDHPlay's import format (the data-list text, made by
-   export_formats.to_edhplay) and opens edhplay.com (in the Android app, the phone's browser). The
-   two import steps show open until the member has launched once on this device, then sit folded
-   in the same box (Ben, 01:36Z 10-14). The copy is made inside that press, the way the app's
-   WebView allows it. Sideboard cards left out to fit EDHPlay's 15-card limit are named in the box
-   and in the note that follows. Without script the button is a plain link to EDHPlay. */
+   EDHPlay.com" copies the whole deck in EDHPlay's import format and opens edhplay.com (in the
+   Android app, the phone's browser). The box asks the gateway for the list as it opens (the
+   button's data-src, made by export_formats.to_edhplay) and the button turns on once it is here,
+   so the copy can still be made inside that press, the way the app's WebView allows it; a list
+   that can't be had shows why, with Try again. The two import steps show open until the member
+   has launched once on this device, then sit folded in the same box (Ben, 01:36Z 10-14). The box
+   closes with ×, Escape or a press outside it (Ben, 02:08Z 10-14: no Cancel). Sideboard cards left
+   out to fit EDHPlay's 15-card limit are named in the box and in the note that follows. Without
+   script the button is a plain link to EDHPlay. */
 (function () {
   "use strict";
+  var STEPS = ["On EDHPlay, go to My Decks, choose Add Deck, then open the new deck.",
+    "Press Import, paste, then press Import & Replace."];
+  var COPIED = "Deck list copied. On EDHPlay: My Decks, Add Deck, open the deck, Import, paste, then Import & Replace.";
   function copyNow(text) {
     // execCommand first: it works inside the press in the app's WebView, where the async
     // clipboard API may be refused; the async API is the fallback for browsers that dropped it.
@@ -2263,6 +2269,18 @@
     document.body.appendChild(t);
     if (!kind) setTimeout(function () { t.remove(); }, 8000);
   }
+  // the list for the deck: {list, left_out, left_count}, or an Error whose message is shown
+  function fetchList(src) {
+    return fetch(src, { credentials: "same-origin", headers: { Accept: "application/json" } }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (d) {
+        if (r.ok && d && d.ok && typeof d.list === "string") return d;
+        if (r.status === 401) throw new Error("You're signed out. Reload the page to sign in.");
+        throw new Error((d && d.message) || "The deck list couldn't be loaded.");
+      });
+    }, function () {
+      throw new Error("The deck list couldn't be loaded: no connection.");
+    });
+  }
   var dialog = null, back = null;
   function close() {
     if (!dialog) return;
@@ -2286,10 +2304,9 @@
   function open(link) {
     close();
     back = link;
-    var list = link.getAttribute("data-list") || "";
-    var leftOut = link.getAttribute("data-left-out") || "";
-    var cut = parseInt(link.getAttribute("data-left-count") || "0", 10) || 0;
+    var data = null;  // the list, once the gateway has sent it
     dialog = make("div", "picker edhplay-dialog");
+    var mine = dialog;
     dialog.setAttribute("role", "dialog");
     dialog.setAttribute("aria-modal", "true");
     dialog.setAttribute("aria-labelledby", "edhplay-title");
@@ -2309,40 +2326,72 @@
     how.open = !stepsSeen();
     how.appendChild(make("summary", "", "How to import"));
     var steps = make("ol", "steps");
-    ["On EDHPlay, choose Create Deck, then Import.", "Paste, then press Import & Replace."]
-      .forEach(function (s) { steps.appendChild(make("li", "", s)); });
+    STEPS.forEach(function (s) { steps.appendChild(make("li", "", s)); });
     how.appendChild(steps);
     box.appendChild(how);
-    if (cut) box.appendChild(make("p", "notice warn", cutLine(cut, leftOut)));
+    var spot = make("div", "edhplay-state");  // the cut line, or why the list isn't here
+    spot.hidden = true;
+    box.appendChild(spot);
     box.appendChild(make("p", "muted small", "The maybeboard and tokens aren't sent."));
     var acts = make("div", "acts");
     var go = make("a", "btn btn-primary", "Copy and Open EDHPlay.com");
     go.href = link.href;
     go.target = "_blank";
     go.rel = "noreferrer noopener";
-    var cancel = make("button", "btn", "Cancel");
-    cancel.type = "button";
-    cancel.addEventListener("click", close);
-    acts.appendChild(go); acts.appendChild(cancel);
+    acts.appendChild(go);
     box.appendChild(acts);
     dialog.appendChild(box);
     document.body.appendChild(dialog);
     document.addEventListener("keydown", onKey, true);
-    go.addEventListener("click", function () {
+    function waiting(on) {
+      if (on) { go.setAttribute("aria-disabled", "true"); go.setAttribute("aria-busy", "true"); }
+      else go.removeAttribute("aria-busy");
+    }
+    function load() {
+      spot.textContent = "";
+      spot.hidden = true;
+      waiting(true);
+      fetchList(link.getAttribute("data-src")).then(function (d) {
+        if (dialog !== mine) return;  // closed, or opened again, meanwhile
+        data = d;
+        waiting(false);
+        go.removeAttribute("aria-disabled");
+        if (d.left_count) {
+          spot.appendChild(make("p", "notice warn", cutLine(d.left_count, d.left_out)));
+          spot.hidden = false;
+        }
+      }, function (err) {
+        if (dialog !== mine) return;
+        waiting(false);
+        var p = make("p", "notice error");
+        p.setAttribute("role", "alert");
+        p.appendChild(make("span", "", err.message));
+        var again = make("button", "btn small", "Try again");
+        again.type = "button";
+        again.addEventListener("click", function () { load(); go.focus(); });
+        p.appendChild(again);
+        spot.appendChild(p);
+        spot.hidden = false;
+      });
+    }
+    go.addEventListener("click", function (e) {
+      if (!data) { e.preventDefault(); return; }  // the list is on its way, or couldn't be had
       // the copy happens inside this press; the link itself opens EDHPlay (nothing is prevented)
-      var copied = copyNow(list);
-      try { localStorage.setItem(STEPS_SEEN, "1"); } catch (e) { /* private window */ }
+      var copied = copyNow(data.list);
+      var cut = data.left_count || 0, leftOut = data.left_out || "";
+      try { localStorage.setItem(STEPS_SEEN, "1"); } catch (err) { /* private window */ }
       close();
       copied.then(function (ok) {
         if (!ok) {
           note(["The deck list couldn't be copied here. Use More, then Export deck, to copy it."], "error");
           return;
         }
-        var lines = ["Deck list copied. On EDHPlay: Create Deck, Import, paste, then Import & Replace."];
+        var lines = [COPIED];
         if (cut) lines.push(cutLine(cut, leftOut));
         note(lines, cut ? "warn" : "");
       });
     });
+    load();
     go.focus();
   }
   document.addEventListener("click", function (e) {

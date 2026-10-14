@@ -83,6 +83,26 @@ def _edh_line(c: DeckCard, *, commander: bool = False, quantity: int | None = No
     return line + (" [Commander{top}]" if commander else "")
 
 
+def _edh_lead(c: DeckCard) -> int:
+    """How safely a card can lead a list with no commander marked, lowest first. EDHPlay's import
+    sends a first single copy as the commander and EDHPlay makes it the commander when the card
+    can be one (verified live 2026-10-14: a legendary creature first became the commander, in a
+    Commander deck and in a Modern deck; a land first, or a non-legendary creature first, stayed in
+    the main deck). Several copies are never taken; a land can lead no deck; nor can another
+    non-creature, non-planeswalker card; a non-legendary creature can lead a Pauper EDH deck (its
+    rules; not tried on EDHPlay)."""
+    if c.quantity > 1:
+        return 0
+    legendary = "Legendary" in c.supertypes or "can be your commander" in c.oracle_text.casefold()
+    if legendary or not c.types:
+        return 4  # could be a commander, or its type isn't known
+    if "Land" in c.types and "Creature" not in c.types:
+        return 1
+    if "Creature" not in c.types and "Planeswalker" not in c.types:
+        return 2
+    return 3
+
+
 def to_edhplay(deck: Deck) -> EdhplayList:
     """The whole deck as EDHPlay's Bulk Import reads it, the commander names and what was left out.
 
@@ -95,7 +115,8 @@ def to_edhplay(deck: Deck) -> EdhplayList:
 
     - each line is ``N Name``, an optional ``x`` after N, then optional ``(SET) NUMBER``;
     - a line carrying ``[...Commander{top}...]`` is the commander, a second one the partner, and
-      it wins over a commander already picked under Create Deck (with Import & Replace);
+      it wins over a commander already picked in EDHPlay's editor (with Import & Replace, which
+      clears that commander even when the list marks none: verified live 2026-10-14);
     - lines before the first ``Sideboard``, ``Tokens``, ``Attractions`` or ``Stickers`` heading are
       the main deck; each heading's section runs to the next blank line;
     - double-faced cards are found by their full ``A // B`` name;
@@ -108,12 +129,13 @@ def to_edhplay(deck: Deck) -> EdhplayList:
     that is left out and named in the note. The maybeboard (and any other category kept outside
     the deck) is never sent (Ben's choice, 23:21Z 2026-10-11), and neither are tokens; the note
     says so. Printings keep their set and number when EDHPlay's parser can read them. A deck with
-    no commander starts with a line of several copies when it has one, because EDHPlay's parser
-    takes a first line of quantity 1 as the commander. The 15 counts copies, not lines (verified
-    live 2026-10-11)."""
+    no commander starts with a card EDHPlay can't take as one (``_edh_lead``): a line of several
+    copies when it has one, else a land, because EDHPlay's parser takes a first line of quantity 1
+    as the commander. Only a real commander (Archidekt's commander zone) is ever marked. The 15
+    counts copies, not lines (verified live 2026-10-11)."""
     commanders: list[str] = []
     head: list[str] = []
-    main: list[str] = []
+    main: list[tuple[DeckCard, str]] = []
     first: list[DeckCard] = []  # the sideboard and the companion
     for c in sorted(deck.cards, key=lambda c: (c.name.casefold(), c.set_code, c.collector_number)):
         if not c.name.strip() or c.quantity <= 0:
@@ -123,7 +145,7 @@ def to_edhplay(deck: Deck) -> EdhplayList:
             if c.name not in commanders:
                 commanders.append(c.name)
         elif deck.in_deck(c):
-            main.append(_edh_line(c))
+            main.append((c, _edh_line(c)))
         elif any(cat.strip().casefold() in _EDH_TOKEN_CATEGORIES for cat in c.categories):
             continue  # tokens: EDHPlay's import drops them
         elif c.companion or (c.categories and c.categories[0].casefold() in ("sideboard", "companion")):
@@ -141,13 +163,13 @@ def to_edhplay(deck: Deck) -> EdhplayList:
             room -= fits
         if fits < c.quantity:
             left_out.append((c.quantity - fits, c.name))
-    if not head:
+    if not head and main:
         # With no marked commander EDHPlay's parser takes a first line of quantity 1 as the
-        # commander; a line of several copies first (a basic land, usually) keeps it from that.
-        several = next((i for i, line in enumerate(main) if not line.startswith("1 ")), None)
-        if several:
-            main.insert(0, main.pop(several))
-    text = "\n".join(head + main) + "\n"
+        # commander: the card least able to be one leads (the first of them, so the rest keeps
+        # its order); a deck of only possible commanders keeps its order.
+        lead = min(range(len(main)), key=lambda i: _edh_lead(main[i][0]))
+        main.insert(0, main.pop(lead))
+    text = "\n".join(head + [line for _c, line in main]) + "\n"
     if side:
         text += "\nSideboard\n" + "\n".join(side) + "\n"
     return EdhplayList(text, commanders, left_out)
