@@ -255,6 +255,27 @@ async def test_collection_writes_send_numbers() -> None:
     await client.aclose()
 
 
+async def test_a_collection_edit_never_fails_on_a_stored_value_it_does_not_know() -> None:
+    """M9: only the values being changed are converted (and refused when unknown). A stored
+    number goes back as it came, a stored code as its number, and a stored string with no number
+    ("" or an old "JAPANESE") is left out instead of failing a plain quantity change."""
+    ark = FakeArchidekt()
+    client = _client(ark)
+    token = ark.issue_access("alice")
+    card_id = next(iter(ark._deck_printings()))["id"]
+    made = await client.collection_add(token, card_id, 2, condition="LP", language="JA")
+    row = ark.collections["alice"][made["id"]]
+    row.update(condition="", language="JAPANESE")
+    out = await client.collection_set(token, dict(row), quantity=3)
+    assert out["quantity"] == 3  # nothing raised; the unknown stored values were not sent back
+    row.update(condition=3, language="fr")
+    out = await client.collection_set(token, dict(row), quantity=4)
+    assert (out["quantity"], out["condition"], out["language"]) == (4, 3, 4)
+    with pytest.raises(ArchidektError):  # a value being changed must still be one Archidekt has
+        await client.collection_set(token, dict(row), language="JAPANESE")
+    await client.aclose()
+
+
 async def test_collection_page_shows_codes_for_archidekts_numbers(stack: Stack) -> None:
     b = await linked(stack)
     try:

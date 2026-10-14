@@ -1592,19 +1592,29 @@ class ArchidektClient:
             "card": card_id,
             "modifier": record.get("modifier") or "Normal",
         }
-        for key in ("language", "condition", "tags", "purchasePrice"):
+        for key in ("tags", "purchasePrice"):
             if record.get(key) is not None:
                 body[key] = record[key]
+        # Archidekt keeps condition and language as numbers (see CONDITION_IDS). A value copied
+        # from the record goes back as it came when it is a number, as its number when it is a
+        # known code, and is left out when it is neither (an edit never fails on a stored value
+        # the gateway does not know); only the values in ``changes`` must be known codes.
+        for key, to_id in (("language", _language_id), ("condition", _condition_id)):
+            stored = record.get(key)
+            if stored is None:
+                continue
+            try:
+                body[key] = to_id(stored)
+            except ArchidektError:
+                logger.info("collection record %s: unknown stored %s left out", rid, key)
         # None clears purchasePrice and condition (the site sends null for "no price" and "no
         # condition"); for the other fields None means "leave as is".
-        body.update(
-            {k: v for k, v in changes.items() if v is not None or k in ("purchasePrice", "condition")}
-        )
-        # Archidekt keeps both as numbers (see CONDITION_IDS); a code is sent as its number
-        if "condition" in body:
-            body["condition"] = _condition_id(body["condition"])
-        if "language" in body:
-            body["language"] = _language_id(body["language"])
+        changed = {k: v for k, v in changes.items() if v is not None or k in ("purchasePrice", "condition")}
+        if "condition" in changed:
+            changed["condition"] = _condition_id(changed["condition"])
+        if "language" in changed:
+            changed["language"] = _language_id(changed["language"])
+        body.update(changed)
         resp = await self._request("PATCH", f"/collection/v2/{rid}/", token=token, json_body=body)
         if not isinstance(resp, dict):
             raise ArchidektError("contract", "unexpected collection update response shape")
