@@ -674,7 +674,14 @@ The gateway is built to be light on Archidekt. For everyone together:
   minute. A request past that waits its turn, so a long apply slows down
   instead of stopping halfway;
 - if Archidekt says "slow down" (HTTP 429), every request stops for the time
-  it asks (at most 2 minutes), and nothing is retried meanwhile;
+  it asks (at most 2 minutes), and nothing is retried meanwhile. A member's
+  apply is the one exception: it waits Archidekt's pause out (the full time
+  Archidekt asks, even past 2 minutes) and sends the refused request again,
+  up to 6 waits and 5 minutes of waiting in all for the whole apply. If
+  Archidekt asks for a longer wait than is left, the apply stops at once
+  with a plain message that says what had changed, and an unused backup copy
+  is deleted again when nothing had. An apply's 429s don't count towards the
+  five failures below, so they never pause the gateway for everyone;
 - a read that times out or gets a server error is retried at most
   `MTG_ARCHIDEKT_RETRIES` (2) times, after a random wait that doubles each
   time (`MTG_ARCHIDEKT_BACKOFF_BASE`, 1 second, capped at 10). Writes are

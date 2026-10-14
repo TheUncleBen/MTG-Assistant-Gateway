@@ -40,10 +40,12 @@ from .approve import approval_code, approval_matches
 from .archidekt import (
     FORMAT_IDS,
     MAX_LIST_PAGES,
+    PATIENCE_SPENT,
     ArchidektClient,
     ArchidektError,
     Deck,
     DeckList,
+    Patience,
     art_url,
     backup_name,
     finish_modifier,
@@ -495,13 +497,23 @@ class DeckError(Exception):
     """A user-facing failure: the message is safe to show as is. ``extra`` holds structured
     fields the tool reply carries alongside ``error`` and ``message``. ``retry_after`` (seconds)
     is set when the refusal knows how long to wait (a used-up Archidekt budget); the browser
-    pages put it in their Retry-After header."""
+    pages put it in their Retry-After header. ``sent`` is False when the Archidekt request never
+    left the gateway (the pacer refused it), so nothing can have been written whatever the kind."""
 
-    def __init__(self, kind: str, message: str, *, retry_after: int | None = None, **extra: Any):
+    def __init__(
+        self,
+        kind: str,
+        message: str,
+        *,
+        retry_after: int | None = None,
+        sent: bool = True,
+        **extra: Any,
+    ):
         super().__init__(message)
         self.kind = kind
         self.extra = extra
         self.retry_after = retry_after
+        self.sent = sent
 
 
 @dataclass(frozen=True)
@@ -1855,7 +1867,8 @@ class DeckService:
             except ArchidektError as exc:
                 if exc.kind == "auth":
                     raise expire(f"{reason}, refresh rejected") from exc
-                raise DeckError(exc.kind, str(exc)) from exc
+                # the session could not be refreshed, so the call it was for was never sent
+                raise DeckError(exc.kind, str(exc), sent=False) from exc
             new_enc = self._seal(sub, access, refresh)
             if not self.db.update_link_secret(sub, new_enc, only_secret=stored["secret_enc"]):
                 # Unlinked, revoked or relinked while the refresh was in flight: never resurrect
@@ -1894,7 +1907,7 @@ class DeckService:
         except ArchidektError as exc:
             if exc.kind == "auth":
                 raise expire("rejected after refresh") from exc
-            raise DeckError(exc.kind, str(exc)) from exc
+            raise DeckError(exc.kind, str(exc), sent=exc.sent) from exc
         finally:
             no_retry.reset(quiet)
             _acting_sub.reset(acting)
@@ -2384,6 +2397,11 @@ class DeckService:
                 if state == "pending" and (row["result"] or {}).get("error") == "backup_failed"
                 else ""
             )
+            + (
+                PATIENCE_SPENT + " "
+                if state == "failed" and (row["result"] or {}).get("error") == "rate_limited"
+                else ""
+            )
             + _next_step(
                 state,
                 self.settings.writes_enabled,
@@ -2394,6 +2412,7 @@ class DeckService:
                 in_chat=self.settings.apply_in_chat,
                 partial=bool((row["result"] or {}).get("sent_entries")),
                 kind=kind,
+                rate_limited=(row["result"] or {}).get("error") == "rate_limited",
                 closed_by=closed_by,
                 closed_by_app=closed_by_app,
             ),
@@ -2707,8 +2726,9 @@ class DeckService:
         # describe() while it runs.
         progress: dict[str, Any] = {}
         self._progress[proposal_id] = progress
-        # This task's own context: a rate limit is waited out instead of failing the apply halfway
-        patient.set(True)
+        # This task's own context: a rate limit is waited out instead of failing the apply halfway,
+        # within one allowance for the whole apply (Q66)
+        patient.set(Patience())
         wait_note.set(progress)
         try:
             await lock.acquire()  # another apply on this deck may hold it
@@ -2721,15 +2741,20 @@ class DeckService:
             except DeckError as exc:
                 if exc.kind == "backup_failed":  # nothing was sent; the proposal is pending again
                     raise
-                await self._drop_unused_backup(sub, proposal_id, progress)
+                await self._drop_unused_backup(sub, proposal_id, progress, source_deck_id=row["deck_id"])
+                # One plain message for an apply that ran out of patience with Archidekt's 429s
+                # (Q41, Q66): what stopped it, how far it got, and to try again later.
+                detail = f"{exc} {_rate_limited_note(progress)}" if exc.kind == "rate_limited" else str(exc)
                 self.db.finish_proposal(
-                    proposal_id, state="failed", result={**progress, "error": exc.kind, "detail": str(exc)}
+                    proposal_id, state="failed", result={**progress, "error": exc.kind, "detail": detail}
                 )
                 self._audit(
                     "proposal_failed",
                     sub=sub,
                     detail={"proposal_id": proposal_id, "error": exc.kind, **_sent(progress)},
                 )
+                if exc.kind == "rate_limited":
+                    raise DeckError(exc.kind, detail, **{**exc.extra, **_sent(progress)}) from exc
                 if (
                     progress.get("sent_entries") or progress.get("deck_id")
                 ) and exc.kind != "verify_mismatch":
@@ -3021,13 +3046,29 @@ class DeckService:
         self.db.finish_proposal(row["id"], state="applying", snapshot_id=snapshot_id)
         return snapshot_id
 
-    async def _drop_unused_backup(self, sub: str, proposal_id: str, progress: dict[str, Any]) -> None:
+    async def _drop_unused_backup(
+        self, sub: str, proposal_id: str, progress: dict[str, Any], *, source_deck_id: str
+    ) -> None:
         """An apply that failed before it changed the deck deletes the backup copy it made a moment
         earlier on Archidekt: the deck is as it was, so the copy would only pile up in the backup
         folder. When the deck may have changed the copy is kept, as the readable way back. The
-        gateway's own snapshot is always kept. Only the copy this apply made is ever deleted."""
+        gateway's own snapshot is always kept. Only the copy this apply made is ever deleted: never
+        the deck the apply was for, and only the copy its snapshot records (review L7)."""
         backup_id = progress.get("backup_deck_id")
         if not backup_id or progress.get("deck_written"):
+            return
+        snap = self.db.get_snapshot(str(progress.get("snapshot_id") or ""), sub)
+        if (
+            not str(backup_id).isdigit()
+            or str(backup_id) == str(source_deck_id)
+            or snap is None
+            or str(snap.get("backup_deck_id") or "") != str(backup_id)
+        ):
+            self._audit(
+                "backup_delete_skipped",
+                sub=sub,
+                detail={"proposal_id": proposal_id, "backup_deck_id": str(backup_id)},
+            )
             return
         try:
             await self._call(sub, self.client.delete_deck, str(backup_id))
@@ -3586,23 +3627,24 @@ class DeckService:
         self, sub: str, deck_id: str, plan: dict[str, Any], progress: dict[str, Any]
     ) -> list[str]:
         """Carry out a details proposal's organisation plan with the same verified calls as the
-        deck page's own buttons; each re-reads the deck. Returns the fields done. Marks
-        ``deck_written`` once a step may have changed the deck: a step refused before it wrote
-        anything (an unknown tag, Archidekt's 403 or 429) leaves the deck as it was."""
+        deck page's own buttons; each re-reads the deck. Returns the fields done. Each step marks
+        ``deck_written`` as soon as its write call returns or fails in a way that may still have
+        landed (review M5), not after its re-read: a step refused before it wrote anything (an
+        unknown tag, Archidekt's 403 or 429) leaves the deck as it was, and a re-read that fails
+        after the write never makes the change look unwritten."""
         done: list[str] = []
-
-        async def step(label: str, work: Awaitable[Any]) -> None:
-            await _writing(progress, work)
-            done.append(label)
-
         if "folder_id" in plan:
-            await step("folder", self.move_deck(sub, deck_id, int(plan["folder_id"])))
+            await self.move_deck(sub, deck_id, int(plan["folder_id"]), progress=progress)
+            done.append("folder")
         for name in plan.get("add_tags") or []:
-            await step(f"tag +{name}", self.add_tag(sub, deck_id, name))
+            await self.add_tag(sub, deck_id, name, progress=progress)
+            done.append(f"tag +{name}")
         for rel in plan.get("remove_tags") or []:
-            await step(f"tag -{rel['name']}", self.remove_tag(sub, deck_id, int(rel["id"])))
+            await self.remove_tag(sub, deck_id, int(rel["id"]), progress=progress)
+            done.append(f"tag -{rel['name']}")
         if "cover_uid" in plan:
-            await step("cover", self.set_cover(sub, deck_id, plan["cover_uid"]))
+            await self.set_cover(sub, deck_id, plan["cover_uid"], progress=progress)
+            done.append("cover")
         return done
 
     async def _apply_details(self, sub: str, row: dict[str, Any], progress: dict[str, Any]) -> dict[str, Any]:
@@ -3741,9 +3783,12 @@ class DeckService:
             )
         return {"deck_id": deck.id, "name": deck.name, "snapshot_id": snapshot_id, **backup}
 
-    async def set_cover(self, sub: str, deck_id: str, scryfall_uid: str | None) -> dict[str, Any]:
+    async def set_cover(
+        self, sub: str, deck_id: str, scryfall_uid: str | None, *, progress: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """Set the deck's cover image to the art of one of its cards (any zone), or back to
-        Archidekt's automatic pick with ``None``. Verified by re-reading the deck."""
+        Archidekt's automatic pick with ``None``. Verified by re-reading the deck. ``progress``:
+        a details apply's, marked written as the write returns (see ``_apply_organise``)."""
         self._writes_switch()
         deck = await self.get_own_deck(sub, deck_id)
         uid = str(scryfall_uid or "").strip().lower()
@@ -3764,7 +3809,7 @@ class DeckService:
         if _cover_is(deck, uid):
             return {"deck_id": deck.id, "featured": deck.featured, "changed": False, "card_name": card_name}
         snapshot_id = self._hand_snapshot(sub, deck)
-        await self._call(sub, self.client.update_deck, deck.id, {"customFeatured": url})
+        await _writing(progress, self._call(sub, self.client.update_deck, deck.id, {"customFeatured": url}))
         verified = await self.get_deck(sub, deck.id)
         ok = _cover_is(verified, uid)
         self._audit(
@@ -3879,9 +3924,11 @@ class DeckService:
             )
         return now
 
-    async def move_deck(self, sub: str, deck_id: str, folder_id: int | None) -> dict[str, Any]:
+    async def move_deck(
+        self, sub: str, deck_id: str, folder_id: int | None, *, progress: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """Move one of the member's decks into a folder (``None`` = the top-level folder); verified
-        by re-reading the deck's ``parentFolder``."""
+        by re-reading the deck's ``parentFolder``. ``progress`` as for ``set_cover``."""
         self._writes_switch()
         deck = await self.get_own_deck(sub, deck_id)
         info = await self.folders(sub)
@@ -3893,10 +3940,13 @@ class DeckService:
         if current == target:
             return {"deck_id": deck.id, "folder_id": target, "changed": False}
         # the item archidekt.com's folder page sends for its "Move" (its bundle, read 2026-10-14)
-        await self._call(
-            sub,
-            lambda token, *_: self.client.mass_update(
-                token, [{"type": "deck", "id": int(deck.id), "patch": {"parentFolder": target}}]
+        await _writing(
+            progress,
+            self._call(
+                sub,
+                lambda token, *_: self.client.mass_update(
+                    token, [{"type": "deck", "id": int(deck.id), "patch": {"parentFolder": target}}]
+                ),
             ),
         )
         verified = await self.get_deck(sub, deck.id)
@@ -3959,9 +4009,11 @@ class DeckService:
             self._tag_lookups.pop(next(iter(self._tag_lookups)))
         return list(names)
 
-    async def add_tag(self, sub: str, deck_id: str, name: str) -> dict[str, Any]:
+    async def add_tag(
+        self, sub: str, deck_id: str, name: str, *, progress: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """Tag one of the member's decks with one of Archidekt's tags (see ``_archidekt_tag``).
-        Verified by re-reading the deck's tags."""
+        Verified by re-reading the deck's tags. ``progress`` as for ``set_cover``."""
         self._writes_switch()
         name = self._tag_name(name)
         deck = await self.get_own_deck(sub, deck_id)
@@ -3972,7 +4024,10 @@ class DeckService:
         tag_id, name = await self._archidekt_tag(sub, name)
         snapshot_id = self._hand_snapshot(sub, deck)
         position = next_tag_position([r.get("position") for r in deck.tag_relations])
-        await self._call(sub, lambda token, *_: self.client.add_deck_tag(token, deck.id, tag_id, position))
+        await _writing(
+            progress,
+            self._call(sub, lambda token, *_: self.client.add_deck_tag(token, deck.id, tag_id, position)),
+        )
         verified = await self.get_deck(sub, deck.id)
         ok = any(str(r.get("name") or "").casefold() == name.casefold() for r in verified.tag_relations)
         self._audit(
@@ -3986,14 +4041,20 @@ class DeckService:
             )
         return {"deck_id": deck.id, "tags": verified.tag_relations, "snapshot_id": snapshot_id}
 
-    async def remove_tag(self, sub: str, deck_id: str, relation_id: int) -> dict[str, Any]:
+    async def remove_tag(
+        self, sub: str, deck_id: str, relation_id: int, *, progress: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """Take a tag off one of the member's decks; verified by re-reading the deck's tags.
+        ``progress`` as for ``set_cover``."""
         self._writes_switch()
         deck = await self.get_own_deck(sub, deck_id)
         rel = next((r for r in deck.tag_relations if r.get("id") == int(relation_id)), None)
         if rel is None:
             raise DeckError("not_found", "That tag is not on this deck.")
         snapshot_id = self._hand_snapshot(sub, deck)
-        await self._call(sub, lambda token, *_: self.client.remove_deck_tag(token, int(relation_id)))
+        await _writing(
+            progress, self._call(sub, lambda token, *_: self.client.remove_deck_tag(token, int(relation_id)))
+        )
         verified = await self.get_deck(sub, deck.id)
         ok = all(r.get("id") != int(relation_id) for r in verified.tag_relations)
         self._audit(
@@ -4306,17 +4367,35 @@ NOTHING_WRITTEN = frozenset(
 )
 
 
-async def _writing(progress: dict[str, Any], work: Awaitable[Any]) -> Any:
+async def _writing(progress: dict[str, Any] | None, work: Awaitable[Any]) -> Any:
     """Await one write of an apply; ``progress["deck_written"]`` is set once the deck may have
-    changed (the write succeeded, or failed in a way that may still have landed)."""
+    changed (the write succeeded, or failed in a way that may still have landed). A failure whose
+    request never left the gateway (``sent`` False: the pacer's breaker or a running Retry-After
+    pause refused it, review M1) changed nothing, whatever its kind. ``progress`` None (a hand
+    action outside an apply) only awaits the write."""
+    if progress is None:
+        return await work
     try:
         out = await work
     except DeckError as exc:
-        if exc.kind not in NOTHING_WRITTEN:
+        if exc.kind not in NOTHING_WRITTEN and exc.sent:
             progress["deck_written"] = True
         raise
     progress["deck_written"] = True
     return out
+
+
+def _rate_limited_note(progress: dict[str, Any]) -> str:
+    """What an apply that ran out of patience with Archidekt's 429s had changed, and what to do
+    (Q41, Q66): added to PATIENCE_SPENT in the message the member sees."""
+    if progress.get("sent_entries") or progress.get("deck_id"):
+        return f"{_partial_note(progress)} Try the rest again in a few minutes with a new proposal."
+    if progress.get("deck_written"):
+        return (
+            "Part of this change had already reached Archidekt, so check the deck. Try the rest again "
+            "in a few minutes with a new proposal."
+        )
+    return "Nothing was changed on Archidekt. Try again in a few minutes with a new proposal."
 
 
 def next_tag_position(positions: list[Any]) -> str:
@@ -4485,6 +4564,7 @@ def _next_step(
     kind: str = "edit",
     closed_by: str | None = None,
     closed_by_app: str | None = None,
+    rate_limited: bool = False,
 ) -> str:
     what = "these details" if kind == "details" else "this copy" if kind == "clone" else "this diff"
     # With the in-chat card (approve.py) the person decides on the card where the app shows one.
@@ -4540,6 +4620,8 @@ def _next_step(
             "Part of this change reached Archidekt before it failed (see result.sent_entries). Check "
             "the deck; result.snapshot_id can be restored with propose_restore_snapshot."
         )
+    if state == "failed" and rate_limited:
+        return "Nothing was changed on Archidekt. Try again in a few minutes with a new proposal."
     if state == "failed":
         return "Nothing further was changed. Create a new proposal if you still want these edits."
     if state == "rejected":

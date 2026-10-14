@@ -289,11 +289,25 @@ class ArchidektError(Exception):
     ``kind`` is one of auth, not_found, rate_limited, unavailable, contract, forbidden.
     """
 
-    def __init__(self, kind: str, message: str, *, retryable: bool = False):
+    def __init__(
+        self,
+        kind: str,
+        message: str,
+        *,
+        retryable: bool = False,
+        sent: bool = True,
+        retry_after: float | None = None,
+    ):
         super().__init__(message)
         self.kind = kind
         # a GET that failed this way (timeout, network error, 5xx) may be retried after a backoff
         self.retryable = retryable
+        # False when the request never left the gateway (the pacer refused it): nothing can have
+        # been written, whatever the kind
+        self.sent = sent
+        # a 429's Retry-After in seconds as Archidekt sent it, before Pacer.MAX_RETRY_AFTER caps
+        # the shared pause (an apply stops rather than wait less than Archidekt asked, Q66)
+        self.retry_after = retry_after
 
 
 BACKUP_FOLDER_NAME = "MTG Gateway backups"
@@ -677,12 +691,15 @@ class Pacer:
             now = time.monotonic()
             if now < self._open_until:
                 raise ArchidektError(
-                    "unavailable", "Archidekt requests are paused after repeated failures; try later"
+                    "unavailable",
+                    "Archidekt requests are paused after repeated failures; try later",
+                    sent=False,
                 )
             if now < self._retry_until:
                 raise ArchidektError(
                     "rate_limited",
                     f"Archidekt asked us to slow down; try again in {int(self._retry_until - now) + 1} s",
+                    sent=False,
                 )
             if now < self._next_allowed:
                 await asyncio.sleep(self._next_allowed - now)
@@ -720,11 +737,15 @@ class Pacer:
         now = time.monotonic()
         return now < self._open_until or now < self._retry_until
 
-    def record(self, ok: bool, retry_after: float | None = None) -> None:
+    def record(self, ok: bool, retry_after: float | None = None, *, breaker: bool = True) -> None:
+        """Note a call's outcome. ``breaker=False`` (a 429 met during a member's apply, Q62) sets
+        the Retry-After pause like any 429 but does not count towards the breaker, so an apply
+        that waits out Archidekt's 429s never pauses the gateway for everyone."""
         if ok:
             self._failures = 0
             return
-        self._failures += 1
+        if breaker:
+            self._failures += 1
         if retry_after:
             wait = min(retry_after, self.MAX_RETRY_AFTER)
             self._retry_until = max(self._retry_until, time.monotonic() + wait)
@@ -744,18 +765,39 @@ BACKOFF_CAP = 10.0  # seconds; the longest single wait between retries
 # Set by the deck sync (sync.py) around its background reads: each GET is sent once and never
 # retried, so a failing Archidekt costs the shared breaker at most one failure per check.
 no_retry: contextvars.ContextVar[bool] = contextvars.ContextVar("archidekt_no_retry", default=False)
-# Set around a member's apply (decks.py): a 429, or a call refused while a 429's Retry-After pause
-# runs, is waited out and the same request sent again, so a long apply (a 100-card new deck is a few
-# hundred paced requests) slows down instead of failing halfway. A 429 means Archidekt did not act
-# on the request, so sending a write again after one cannot apply it twice. Bounded: at most
-# RATE_LIMIT_WAITS waits and RATE_LIMIT_WAIT_TOTAL seconds for one request, then it fails as before.
-patient: contextvars.ContextVar[bool] = contextvars.ContextVar("archidekt_patient", default=False)
+RATE_LIMIT_WAITS = 6
+RATE_LIMIT_WAIT_TOTAL = 300.0
+# What an apply that stopped this way says (the apply adds whether anything had changed).
+PATIENCE_SPENT = (
+    "Archidekt is busy and asked the gateway to wait longer than an apply may wait, so the apply stopped."
+)
+
+
+class Patience:
+    """One member's apply's allowance for Archidekt's 429s (Q41, Q66): at most RATE_LIMIT_WAITS
+    waits and RATE_LIMIT_WAIT_TOTAL seconds of waiting in all, across every request of the apply
+    (not per request)."""
+
+    def __init__(self) -> None:
+        self.waits = 0
+        self.waited = 0.0
+
+    def left(self) -> float:
+        return max(0.0, RATE_LIMIT_WAIT_TOTAL - self.waited)
+
+
+# Set around a member's apply (decks.py), to that apply's own Patience: a 429, or a call refused
+# while a 429's Retry-After pause runs, is waited out and the same request sent again, so a long
+# apply (a 100-card new deck is a few hundred paced requests) slows down instead of failing halfway.
+# A 429 means Archidekt did not act on the request, so sending a write again after one cannot apply
+# it twice. The apply's 429s do not count towards the Pacer's breaker (Q62). Once the allowance is
+# used up, or Archidekt asks for a single wait longer than what is left of it (Q66), the request
+# fails at once as rate_limited with PATIENCE_SPENT; Archidekt's Retry-After is never cut short.
+patient: contextvars.ContextVar[Patience | None] = contextvars.ContextVar("archidekt_patient", default=None)
 # The apply's progress dict (decks.py), so the review page can say the apply is waiting.
 wait_note: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
     "archidekt_wait_note", default=None
 )
-RATE_LIMIT_WAITS = 6
-RATE_LIMIT_WAIT_TOTAL = 300.0
 MAX_LIST_PAGES = 4  # deck-list pages of 50 followed for one member (200 decks)
 
 
@@ -904,7 +946,7 @@ class ArchidektClient:
             for listener in self.write_listeners:
                 listener(path)
         attempts = 1 + (self.retries if method == "GET" and not no_retry.get() else 0)
-        attempt, waits, waited = 0, 0, 0.0
+        attempt = 0
         while True:
             try:
                 value = await self._send(
@@ -913,12 +955,22 @@ class ArchidektClient:
             except ArchidektError as exc:
                 if exc.kind == "rate_limited":
                     self.stats["rate_limited"] += 1
-                    if patient.get() and waits < RATE_LIMIT_WAITS and waited < RATE_LIMIT_WAIT_TOTAL:
+                    allowance = patient.get()
+                    if allowance is not None:
+                        # Archidekt's own Retry-After, uncapped (the shared pause is capped at
+                        # MAX_RETRY_AFTER), or the shared pause still running
+                        asked = max(exc.retry_after or 0.0, self.pacer.retry_wait(), 1.0)
+                        left = allowance.left()
+                        if allowance.waits >= RATE_LIMIT_WAITS or asked > left:
+                            self.stats["failures"] += 1
+                            raise ArchidektError(
+                                "rate_limited", PATIENCE_SPENT, sent=exc.sent, retry_after=exc.retry_after
+                            ) from exc
                         # the jitter keeps many waiters from all coming back at once; added before
-                        # the cap, so one request's waits never add up past RATE_LIMIT_WAIT_TOTAL
-                        wait = max(self.pacer.retry_wait(), 1.0) + random.uniform(0, 1.0)
-                        wait = min(wait, RATE_LIMIT_WAIT_TOTAL - waited)
-                        waits, waited = waits + 1, waited + wait
+                        # the cap, so the apply's waits never add up past RATE_LIMIT_WAIT_TOTAL
+                        wait = min(asked + random.uniform(0, 1.0), left)
+                        allowance.waits += 1
+                        allowance.waited += wait
                         self.stats["rate_limit_waits"] += 1
                         await self._wait_out(wait)
                         continue
@@ -990,8 +1042,14 @@ class ArchidektClient:
                     "unavailable", f"Archidekt request failed: {type(exc).__name__}", retryable=True
                 ) from exc
             if resp.status_code == 429:
-                self.pacer.record(False, retry_after_seconds(resp.headers.get("Retry-After")))
-                raise ArchidektError("rate_limited", "Archidekt asked us to slow down; try again in a minute")
+                asked = retry_after_seconds(resp.headers.get("Retry-After"))
+                # Q62: during a member's apply a 429 is waited out, not counted towards the breaker
+                self.pacer.record(False, asked, breaker=patient.get() is None)
+                raise ArchidektError(
+                    "rate_limited",
+                    "Archidekt asked us to slow down; try again in a minute",
+                    retry_after=asked,
+                )
             if resp.status_code == 401:
                 self.pacer.record(True)
                 raise ArchidektError("auth", "Archidekt rejected the stored session; relink your account")
