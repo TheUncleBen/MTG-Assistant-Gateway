@@ -284,13 +284,13 @@
   // edits of that kind wait or save. A refused save puts the card back to that state, not to the
   // unsaved one the edit was made over, and drops the card's later edits of that kind still
   // waiting their turn (made over a state Archidekt never took).
-  var confirmed = [];  // {card, what, state, gen, open}
+  var confirmed = [];  // {card, what, state, gen, open, queued}
   function confirmedOf(card, what) {
     return confirmed.filter(function (o) { return o.card === card && o.what === what; })[0] || null;
   }
   function holdConfirmed(card, what, current) {
     var c = confirmedOf(card, what);
-    if (!c) { c = { card: card, what: what, state: current(), gen: 0, open: 0 }; confirmed.push(c); }
+    if (!c) { c = { card: card, what: what, state: current(), gen: 0, open: 0, queued: 0 }; confirmed.push(c); }
     c.open++;
     return c;
   }
@@ -298,6 +298,13 @@
     if (--c.open > 0) return;
     var i = confirmed.indexOf(c);
     if (i >= 0) confirmed.splice(i, 1);
+  }
+  // N5 (review question 1, provisional): a refused edit's note says when later edits of the same
+  // kind were dropped with it. c.queued counts this kind's own edits still to finish (a Removal
+  // holds the card's Move state too, but is always sent); the refused one is among them here.
+  function droppedNote(c, one, many) {
+    var later = c.queued - 1;
+    return later > 1 ? " " + many : later === 1 ? " " + one : "";
   }
   /* job.card: the card drawn changed; job.start(): {changes, inverse, saying} when its turn comes
      (null when nothing is left to send); job.saved(): after Archidekt took it; job.undo(): puts the
@@ -509,6 +516,7 @@
       var inv = { action: "set_mana_value", card_name: name, mana_value: cur === null ? null : Number(cur), zone: ch.zone };
       var saying = "Saving the mana value of " + name + "…";
       var held = holdConfirmed(card, "Mana value", function () { return cur; }), gen = held.gen;
+      held.queued++;
       setManaValue(card, value);
       closeMenu();
       savingNote(saying, false, card, "Mana value");
@@ -521,9 +529,10 @@
           held.gen++;
           var back = held.state;
           setManaValue(card, back);
-          return name + " is back to " + (back === null ? "its own mana value" : back) + ".";
+          return name + " is back to " + (back === null ? "its own mana value" : back) + "." +
+            droppedNote(held, "Your later mana value for it was not sent.", "Your later mana values for it were not sent.");
         },
-        done: function () { releaseConfirmed(held); }
+        done: function () { held.queued--; releaseConfirmed(held); }
       });
     };
     form.addEventListener("submit", function (e) {
@@ -950,6 +959,7 @@
     var ch = changeFor(card, "set_category", to);
     var inv = inverseFor(card, ch);  // from where the card is now, before it moves
     var held = holdConfirmed(card, "Move", function () { return { spot: spotOf(card), cat: from }; }), gen = held.gen;
+    held.queued++;
     var saying = "Moving " + name + " to " + to + "…";
     // filed as Archidekt files it: a category left out of the deck is the maybeboard (drawRows)
     var zone = excluded.indexOf(to) >= 0 ? "side" : "main";
@@ -975,9 +985,10 @@
         // taken off the page meanwhile (a Remove waits its turn): only filed back; the removal's
         // own answer decides whether it shows again
         putBack(card, back.spot, !card.isConnected);
-        return name + " is back in " + (back.cat || "its category") + ".";
+        return name + " is back in " + (back.cat || "its category") + "." +
+          droppedNote(held, "Your later move of it was not sent.", "Your later moves of it were not sent.");
       },
-      done: function () { releaseConfirmed(held); }
+      done: function () { held.queued--; releaseConfirmed(held); }
     });
   }
   function categoryChoices(card) {

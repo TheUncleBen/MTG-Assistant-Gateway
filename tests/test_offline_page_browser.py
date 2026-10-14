@@ -28,12 +28,15 @@ pytest.importorskip("playwright")
 
 class Relay:
     """A TCP relay in front of the gateway. ``cut()`` resets every open connection and each new
-    one (the browser sees the network fail); ``restore()`` relays again."""
+    one (the browser sees the network fail); ``restore()`` relays again. ``refuse`` set to a
+    request line's start (b"GET /history ") resets the connection of each such request only, so
+    that one page keeps failing at the network level while the rest of the gateway answers."""
 
     def __init__(self, target: int) -> None:
         self.target = target
         self.port = _free_port()
         self.up = True
+        self.refuse: bytes | None = None
         self.live: set[socket.socket] = set()
         self._stop = False
         self._sock = socket.socket()
@@ -82,6 +85,9 @@ class Relay:
         def pump(a: socket.socket, b: socket.socket) -> None:
             try:
                 while data := a.recv(65536):
+                    if a is c and self.refuse and self.refuse in data:
+                        a.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, b"\x01\x00\x00\x00\x00\x00\x00\x00")
+                        break  # closed with a reset below, as a dropped connection would be
                     b.sendall(data)
             except OSError:
                 pass
@@ -298,5 +304,57 @@ def test_the_worker_keeps_trying_a_failed_load_for_about_five_seconds(served) ->
         assert _offline(page)
         assert 4.0 <= took <= 12.0, took
         relay.restore()
+
+    _drive(served, run)
+
+
+def test_a_browser_that_knows_it_is_offline_gets_the_offline_page_at_once(served) -> None:
+    """Review N7 (question 2, provisional): when the browser already says it is offline, the worker
+    shows the offline page at once instead of trying for about 5 s; it still reloads by itself
+    once the browser is back online. With the browser online, a failed load is still tried for
+    about 5 s (the test above)."""
+
+    def run(page, ctx, base: str, relay: Relay, steps: Steps) -> None:
+        steps.now = "the browser offline"
+        ctx.set_offline(True)
+        started = time.monotonic()
+        page.goto(f"{base}/history")
+        took = time.monotonic() - started
+        assert _offline(page)
+        assert took < 2.5, took  # it used to take about 5 s of tries
+        steps.now = "back online: the page loads by itself"
+        ctx.set_offline(False)
+        _wait_for_title(page, "History", int((CHECK_EVERY - 1) * 1000))
+
+    _drive(served, run)
+
+
+def test_a_page_that_keeps_failing_is_reloaded_three_times_at_most(served) -> None:
+    """Review N11: a page that keeps failing at the network level while the gateway's /healthz
+    answers is loaded again by itself 3 times at most, then the offline page stays, with its Try
+    again link, which still works and starts the tries afresh."""
+
+    def run(page, ctx, base: str, relay: Relay, steps: Steps) -> None:
+        loads: list[float] = []
+        page.on("load", lambda: loads.append(time.monotonic()))
+        steps.now = "a page that keeps failing while /healthz answers"
+        relay.refuse = b"GET /history "
+        page.goto(f"{base}/history")
+        assert _offline(page)
+        # each try: about 5 s of the worker's tries, then the next check 5 s later finds the
+        # gateway up and loads the page again; 3 tries take about 30 s
+        deadline = time.monotonic() + 4 * 2 * (CHECK_EVERY + 1) + 10
+        while len(loads) < 4 and time.monotonic() < deadline:
+            page.wait_for_timeout(500)
+        assert len(loads) == 4, len(loads)  # the first offline page and 3 reloads
+        page.wait_for_function("() => document.readyState === 'complete'")
+        page.wait_for_timeout(2 * (CHECK_EVERY + 1) * 1000 + 2000)  # long enough for another try
+        assert len(loads) == 4, len(loads)
+        assert _offline(page), page.title()
+        steps.now = "Try again once the page loads"
+        relay.refuse = None
+        with page.expect_navigation():
+            page.get_by_role("link", name="Try again").click()
+        assert page.title().startswith("History"), page.title()
 
     _drive(served, run)
