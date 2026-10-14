@@ -212,7 +212,9 @@ def test_right_click_menu_and_quantity_plus_redraw_in_place(server: Server, widt
         page.locator(".deck-toast").wait_for(timeout=8000)
         page.wait_for_timeout(200)
         assert page.url == url
-        assert page.locator(".ctxmenu").count() == 0  # the menu closed on the save
+        # the menu stays open for more steps (0.7.27, T-159), showing the saved count
+        assert page.locator(".ctxmenu").count() == 1 and menu.locator(".qtyrow .n").inner_text() == "2"
+        page.keyboard.press("Escape")
         assert "Saved. Snapshot kept under History" in page.locator(".deck-toast .msg").inner_text()
         assert page.locator(".deck-toast button", has_text="Undo").count() == 1
         assert server.quantity("Cultivate") == 2

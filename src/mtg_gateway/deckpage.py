@@ -681,7 +681,8 @@ def _card_data(card: DeckCard, deck: Deck) -> str:
     menu, the viewer's quantity buttons, dragging between stacks): the row's count, zone (main
     or side), first category (empty when Archidekt has none) and relation id, which pick the row
     an edit targets when the same card sits in the deck and on the maybeboard. A row in more than
-    one category lists them all in data-allcats, so an Undo of its removal puts every one back."""
+    one category lists them all in data-allcats, so an Undo of its removal puts every one back.
+    data-cmc is the printed mana value, which a cleared custom one (data-mv) goes back to."""
     zone = "main" if deck.in_deck(card) else "side"
     cat = card.categories[0] if card.categories else ""
     rel = f" data-rel='{card.relation_id}'" if card.relation_id is not None else ""
@@ -695,6 +696,7 @@ def _card_data(card: DeckCard, deck: Deck) -> str:
         + f" data-qty='{card.quantity}' data-zone='{zone}' data-cat='{esc(cat)}'{rel}{allcats}"
         + (f" data-label='{esc(card.label)}'" if split_label(card.label)[0] else "")
         + (f" data-mv='{mana_value_text(card.custom_cmc)}'" if card.custom_cmc is not None else "")
+        + (f" data-cmc='{card.cmc:g}'" if card.cmc is not None else "")
         + (f" data-notes='{esc(card.notes)}'" if card.notes else "")
     )
 
@@ -2237,7 +2239,7 @@ html.cardview-open{overflow:hidden}
 @media (min-width:1400px){
   .cardview .box{width:min(100%,66rem);grid-template-columns:minmax(16rem,27rem) minmax(0,1fr)} }
 /* the card menu (deck.js): the shared .menu panel, fixed where the pointer or finger was */
-.ctxmenu{position:fixed;z-index:65;min-width:220px;max-width:min(20rem,calc(100vw - 1rem));overflow:auto;
+.ctxmenu{position:fixed;z-index:58;min-width:220px;max-width:min(20rem,calc(100vw - 1rem));overflow:auto;
   overscroll-behavior:contain;border:1px solid var(--border)}
 .ctxmenu .head{text-transform:none;letter-spacing:0;font-size:.9rem;color:var(--text);white-space:normal;
   overflow-wrap:anywhere;padding-bottom:.35rem;border-bottom:1px solid var(--border);margin-bottom:.25rem}
@@ -2263,15 +2265,17 @@ html.cardview-open{overflow:hidden}
 .ctxmenu .more[aria-expanded=true] .chev{transform:rotate(90deg)}
 .ctxmenu .sub{display:flex;flex-direction:column;background:var(--surface);border-top:1px solid var(--border);
   border-bottom:1px solid var(--border);max-height:40vh;overflow:auto}
+.ctxmenu .sub[hidden]{display:none}
 .ctxmenu .sub button{padding-left:2.4rem;min-height:34px;font-size:.95rem}
 .ctxmenu .sub .on:disabled{color:var(--toolbar-active);font-weight:700}
-.ctxmenu.busy{opacity:.6;pointer-events:none}
 .deckview .c.held,.deckview .row.held{outline:3px solid var(--orange);outline-offset:2px}
 /* the toast after a save (theme .toast, bottom right): the message, Undo and History */
 .deck-toast{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;padding:.75rem 1rem;z-index:59;
   border-left:4px solid var(--blue);color:var(--text)}
 .deck-toast.error{border-left-color:var(--red)} .deck-toast.warn{border-left-color:var(--orange)}
-.deck-toast[role=alertdialog]{z-index:66}  /* a question ("Save anyway?") sits above the viewer */
+/* the note of a save sits above the card menu, which stays open for more quantity steps; a
+   question ("Save anyway?") and an error sit above the card viewer too */
+.deck-toast[role=alertdialog],.deck-toast.error{z-index:66}
 .deck-toast .msg{flex:1 1 10rem;min-width:0;overflow-wrap:anywhere}
 .deck-toast .acts{display:inline-flex;align-items:center;gap:.5rem;flex-wrap:wrap}
 .deck-toast .acts button,.deck-toast .acts .btn{margin:0;min-height:34px;padding:0 .75rem}
@@ -2297,7 +2301,6 @@ html.cardview-open{overflow:hidden}
 .cardview .acts .qtyctl button{flex:0 0 auto;width:2.6rem;padding:0;font-size:1.2rem;font-weight:700}
 .cardview .acts .qtyctl .n{min-width:2rem;text-align:center;font-size:1.1rem;
   font-variant-numeric:tabular-nums}
-.cardview .acts .qtyctl.busy{opacity:.6}
 /* grid view: cards about 170 to 230 px wide, as many per row as fit (five in a 1366 px window) */
 .deckview.grid .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:1rem}
 @media (max-width:600px){ .deckview.grid .cards{grid-template-columns:repeat(2,minmax(0,1fr))}
