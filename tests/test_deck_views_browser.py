@@ -298,6 +298,18 @@ def _edge_run(log: list, t_in: float, t_out: float, t_next: float) -> dict:
     }
 
 
+# How far ahead of the page's clock it is paused, in seconds. Playwright refuses to pause at a
+# moment already past ("Cannot fast-forward to the past"), and on a busy machine 50 ms had passed
+# by the time the pause arrived (review F1). Nothing the tests hold is pending when it pauses, so
+# the jump ahead fires nothing they measure.
+PAUSE_AHEAD_S = 2
+
+
+def _pause_clock(page) -> None:
+    """Pause the page's clock (installed with page.clock.install) a little ahead of now."""
+    page.clock.pause_at(page.evaluate("Date.now()") / 1000 + PAUSE_AHEAD_S)
+
+
 @pytest.mark.parametrize(
     ("how", "hz"), [("mouse", None), ("finger", None), ("card", None), ("mouse", 120), ("finger", 30)]
 )
@@ -338,7 +350,7 @@ def test_edge_auto_scroll_is_measured(server: Server, how: str, hz: int | None) 
             what.scroll_into_view_if_needed()
             b = what.bounding_box()
             x, y = b["x"] + min(b["width"] / 2, 60), b["y"] + b["height"] / 2
-            page.clock.pause_at(page.evaluate("Date.now()") / 1000 + 0.05)  # (seconds) the test moves it on
+            _pause_clock(page)  # the test moves it on
             if how == "mouse":
                 page.mouse.move(x, y)
                 page.mouse.down()
@@ -677,7 +689,7 @@ def _menu_page(p, server: Server, width: int, height: int, scheme: str, *, clock
 def _hold_timers(page) -> None:
     """Stop the page's clock: no timer fires until the test moves it on (page.clock.run_for) or
     lets it run again (page.clock.resume)."""
-    page.clock.pause_at(page.evaluate("Date.now()") / 1000 + 0.05)  # seconds
+    _pause_clock(page)
 
 
 def _menu_shot(page, what: str, width: int, scheme: str) -> None:

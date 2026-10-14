@@ -598,6 +598,10 @@ def test_a_long_approve_that_ends_back_at_pending_offers_approve_again() -> None
             card.locator("#state.pending").wait_for(timeout=10_000)  # the card reads it every 5 s
             card.locator("#status.err").wait_for(timeout=5_000)
             assert card.locator("#status").inner_text() == STOPPED
+            # Q95 (review F3): the assistant is told the stop's own approved message (section E),
+            # nothing the owner has not approved
+            told = [m["params"]["content"][0]["text"] for m in _calls(page, "ui/update-model-context")]
+            assert len(told) == 2 and told[1] == STOPPED, told
             card.locator("#approve:enabled").wait_for(timeout=5_000)
             card.locator("#approve").click()
             page.wait_for_function(
@@ -606,6 +610,48 @@ def test_a_long_approve_that_ends_back_at_pending_offers_approve_again() -> None
                 timeout=5_000,
             )
             assert [c["params"]["arguments"]["approval"] for c in _confirms(page)] == ["c", "c"]
+            assert not errors, errors
+        finally:
+            browser.close()
+
+
+def test_a_long_approve_that_ends_failed_shows_the_same_failed_text() -> None:
+    """Review F2: the Approve outlasted the gateway's wait ("applying") and the apply then failed.
+    The card shows Failed with the same text as an Approve that failed at once (D1.2, Q85): the
+    reason, "The review page shows what happened." and to ask for a new proposal, never the
+    assistant's next_step."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    applying = {**PROPOSAL, "state": "applying", "progress": {"sent_entries": 0, "of_entries": 3}}
+    failed = {
+        **PROPOSAL,
+        "state": "failed",
+        "closed_at": int(time.time()),
+        "next_step": "Nothing further was changed. Create a new proposal if you still want these edits.",
+        "result": {"error": "upstream", "detail": "Archidekt returned HTTP 503", "snapshot_id": "s1"},
+    }
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            page = browser.new_page()
+            errors: list[str] = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            # get_proposal is refused until the press (the card keeps its buttons), then says failed
+            card = _open(page, {"structuredContent": PROPOSAL, "_meta": {APPROVAL_META_KEY: "c"}}, applying)
+            card.locator("#approve:enabled").wait_for(timeout=5_000)
+            card.locator("#approve").click()
+            card.locator("#state.applying").wait_for(timeout=5_000)
+            page.evaluate("(r) => { window.getReply = r; }", failed)
+            card.locator("#state.failed").wait_for(timeout=10_000)  # the card reads it every 5 s
+            status = card.locator("#status")
+            assert status.inner_text() == (
+                "Archidekt returned HTTP 503. The review page shows what happened. Ask the assistant for a "
+                "new proposal if you still want this change."
+            )
+            assert "err" in (status.get_attribute("class") or "").split()
+            assert card.locator("#approve").count() == 0 and card.locator("#reject").count() == 0
+            assert card.locator(".status").count() == 1
             assert not errors, errors
         finally:
             browser.close()
@@ -665,10 +711,12 @@ def test_locked_buttons_read_at_full_strength(theme: str) -> None:
                 )
                 page.evaluate("(html) => { document.getElementById('f').srcdoc = html; }", card_html())
                 card = page.frame_locator("#f")
-                card.locator("#approve").wait_for()
+                # Locked by the arming delay, or (to measure it at leisure) by a press still out: the
+                # same disabled state either way. The 700 ms arming ends first (waited on the buttons'
+                # state, not on time), so its timer cannot unlock them during the measure (review F4).
+                card.locator("#approve:enabled").wait_for(timeout=5_000)
+                card.locator("#reject:enabled").wait_for(timeout=5_000)
                 frame = page.frames[1]
-                # locked by the arming delay, or (to measure it at leisure) by a press still out:
-                # the same disabled state either way
                 frame.evaluate("() => { approve.disabled = true; reject.disabled = true; }")
                 for b in frame.evaluate(LOCKED):
                     assert b["disabled"] and b["opacity"] == "1", (width, b)
