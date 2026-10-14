@@ -74,6 +74,10 @@ stays at schema 12, so going back to 0.7.26 is a plain image swap. The Android a
   new tag after tags starting with Z still sorts last.
 - Picking a card in the deck editor before its details had loaded no longer leaves the new row
   without its picture, mana cost and type.
+- A card picture that fails to load keeps the deck editor's rows in shape, and a card suggestion
+  no longer shows a gap inside the typed part of its name.
+- The Home page's My decks panel and the assistant's deck list say when the deck list couldn't be
+  read from Archidekt, as My decks does.
 - The deck card in ChatGPT no longer says "No connection to the gateway": the deck now comes with
   the answer, so the card can show it without reaching the gateway (not yet tried in ChatGPT).
 - Proposal cards and review pages are easier to read: the footer names the app that proposed,
