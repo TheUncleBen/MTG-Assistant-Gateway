@@ -373,7 +373,7 @@ async def test_set_category_to_maybeboard_is_shown_as_removal(stack_browser_only
     page = (await b.http.get(url)).text
     summary = re.search(r"<div class='summary'>(.*?)</div>", page).group(1)
     assert f"{len(victims)} removed" in summary and f"Net -{gone} cards" in summary, summary
-    await b.http.post(url, data={"csrf": await b.csrf(url), "action": "apply"})
+    await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
     await b.aclose()
     # verify agrees with the review: the cards left the deck proper, so the apply succeeded
     assert h.db.get_proposal(p["proposal_id"], "user-1")["state"] == "applied"
@@ -452,7 +452,7 @@ async def test_proposals_name_their_app_and_close_on_disconnect(stack_browser_on
     r = await b.http.post("/account", data={"csrf": csrf, "action": "disconnect", "client_id": client_id})
     assert r.status_code == 303
     assert h.db.get_proposal(p["proposal_id"], "user-1")["state"] == "rejected"
-    r = await b.http.post(url, data={"csrf": await b.csrf(url), "action": "apply"})
+    r = await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
     assert "err=not_pending" in r.headers["location"]
     assert any(e["event"] == "proposal_rejected" for e in h.db.audit_for_user("user-1", 50))
     await b.aclose()

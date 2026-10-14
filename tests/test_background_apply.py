@@ -125,7 +125,7 @@ async def test_the_review_page_shows_progress_and_refreshes_while_applying(stack
     b = Browser(h)
     await b.login()
     url = f"/proposals/{p['proposal_id']}"
-    r = await b.http.post(url, data={"csrf": await b.csrf(url), "action": "apply"})
+    r = await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
     assert r.status_code == 303 and r.headers["location"].endswith("?ok=applying"), r.headers
     page = await b.http.get(r.headers["location"])
     assert "Applying. This is a large change" in page.text

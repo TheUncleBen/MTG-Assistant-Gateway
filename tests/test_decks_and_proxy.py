@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from mtg_gateway.archidekt import ArchidektClient, Pacer
 from mtg_gateway.mf_proxy import MysticForgeProxy
 
-from .conftest import GATEWAY, FakeIdP, Harness, make_settings, running, sse_json
+from .conftest import GATEWAY, FakeIdP, Harness, make_settings, proposal_stamp, running, sse_json
 from .fake_archidekt import FakeArchidekt
 
 
@@ -185,6 +185,14 @@ class Browser:
         m = re.search(r"name='csrf' value='([0-9a-f]+)'", r.text)
         assert m, r.text
         return m.group(1)
+
+    async def review_form(self, url: str) -> dict[str, str]:
+        """The hidden fields of the review page ``url`` (``/proposals/<pid>``) as a person sends
+        them: the CSRF token and a render stamp old enough for the click guard."""
+        return {
+            "csrf": await self.csrf(url),
+            "shown": proposal_stamp(self.h, self.http, url.rsplit("/", 1)[1]),
+        }
 
     async def link(self, login: str, password: str, *, csrf: str | None = None) -> httpx.Response:
         csrf = csrf if csrf is not None else await self.csrf()
@@ -480,7 +488,7 @@ async def test_browser_apply_with_csrf(stack: Stack) -> None:
     assert "Apply these changes" in page.text
     r = await b.http.post(url, data={"csrf": "nope", "action": "apply"})
     assert r.status_code == 403 and ark.patches == []
-    r = await b.http.post(url, data={"csrf": await b.csrf(url), "action": "apply"})
+    r = await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
     assert r.status_code == 303 and r.headers["location"].endswith("?ok=applied")
     assert len(ark.patches) == 1  # one card added
     page = await b.http.get(url + "?ok=applied")
@@ -506,7 +514,7 @@ async def test_browser_reject_closes_a_pending_proposal(stack: Stack) -> None:
     assert "Reject this proposal" in page.text
     r = await b.http.post(url, data={"csrf": "nope", "action": "reject"})
     assert r.status_code == 403
-    r = await b.http.post(url, data={"csrf": await b.csrf(url), "action": "reject"})
+    r = await b.http.post(url, data={**await b.review_form(url), "action": "reject"})
     assert r.status_code == 303 and r.headers["location"].endswith("?ok=rejected")
     page = await b.http.get(url + "?ok=rejected")
     assert "Rejected." in page.text and ">rejected<" in page.text and "Reject this proposal" not in page.text
@@ -515,9 +523,9 @@ async def test_browser_reject_closes_a_pending_proposal(stack: Stack) -> None:
     got = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
     assert got["state"] == "rejected" and "Rejected by the user on the review page" in got["next_step"]
     assert got["closed_by"] == "review_page" and "closed_by_app" not in got
-    r = await b.http.post(url, data={"csrf": await b.csrf(url), "action": "apply"})
+    r = await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
     assert r.status_code == 303 and "err=" in r.headers["location"] and ark.patches == []
-    r = await b.http.post(url, data={"csrf": await b.csrf(url), "action": "reject"})
+    r = await b.http.post(url, data={**await b.review_form(url), "action": "reject"})
     assert r.status_code == 303 and "err=" in r.headers["location"]
     await b.aclose()
 
@@ -943,7 +951,7 @@ async def test_apply_over_mcp_is_refused_by_default(stack_browser_only: Stack) -
     b = Browser(h)
     await b.login()
     url = f"/proposals/{p['proposal_id']}"
-    r = await b.http.post(url, data={"csrf": await b.csrf(url), "action": "apply"})
+    r = await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
     assert r.status_code == 303 and len(ark.patches) == 1
     await b.aclose()
 
@@ -1066,7 +1074,7 @@ async def test_manual_mode_needs_the_users_own_press(stack_manual: Stack) -> Non
     b = Browser(h)
     await b.login()
     url = f"/proposals/{p['proposal_id']}"
-    r = await b.http.post(url, data={"csrf": await b.csrf(url), "action": "apply"})
+    r = await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
     assert r.status_code == 303 and len(ark.patches) == 1
     await b.aclose()
 

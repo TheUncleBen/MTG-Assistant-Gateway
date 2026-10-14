@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .conftest import FakeIdP, Harness, gw, idp, make_settings, running  # noqa: F401
+from .conftest import FakeIdP, Harness, gw, idp, make_settings, proposal_stamp, running  # noqa: F401
 from .test_decks_and_proxy import Browser, call, mcp_token, stack, structured  # noqa: F401
 
 AMY = {
@@ -134,7 +134,8 @@ async def test_cross_user_objects(stack) -> None:  # noqa: F811
     # Browser pages
     r = await bb.http.get(f"/proposals/{pid}", headers=NAV)
     assert r.status_code == 404
-    r = await bb.http.post(f"/proposals/{pid}", data={"csrf": csrf_b, "action": "reject"})
+    shown = proposal_stamp(h, bb.http, pid)  # a stamp of Bob's own, so only ownership refuses it
+    r = await bb.http.post(f"/proposals/{pid}", data={"csrf": csrf_b, "action": "reject", "shown": shown})
     assert r.status_code in (303, 404), r.text
     r = await bb.http.get(f"/history/reports/{rid}", headers=NAV)
     assert r.status_code == 404

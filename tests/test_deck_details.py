@@ -194,7 +194,8 @@ async def test_details_proposal_shows_on_the_review_page_and_only_to_its_owner(s
     assert "Apply these changes to Archidekt" in page.text
 
     # Applying from the review page works as for a card edit.
-    r = await b.http.post(f"/proposals/{p['proposal_id']}", data={"csrf": await b.csrf(), "action": "apply"})
+    url = f"/proposals/{p['proposal_id']}"
+    r = await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
     assert r.status_code == 303 and "ok=" in r.headers["location"], r.headers
     assert ark.decks[42]["name"] == "Aesi <Lands>" and ark.decks[42]["unlisted"] is True
     await b.aclose()
@@ -238,7 +239,8 @@ async def test_an_assistant_description_is_written_as_plain_text_only(stack: Sta
     await b.login()
     page = await b.http.get(f"/proposals/{p['proposal_id']}")
     assert "See my primer" in page.text and "evil" not in page.text
-    r = await b.http.post(f"/proposals/{p['proposal_id']}", data={"csrf": await b.csrf(), "action": "apply"})
+    url = f"/proposals/{p['proposal_id']}"
+    r = await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
     assert r.status_code == 303 and "ok=" in r.headers["location"], r.headers
     await b.aclose()
     sent = [u for u in ark.updates if u["deck_id"] == 42]
