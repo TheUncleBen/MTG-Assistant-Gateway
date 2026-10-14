@@ -103,6 +103,17 @@ def _language_id(value: Any) -> int | None:
 # JSON.stringify(getContents())) and reads them with JSON.parse, showing an empty text for anything
 # that is not JSON (its bundle and editor chunk, read 2026-10-14). So plain text from the gateway
 # is wrapped in a document before it is sent, and a document read back is shown as its text.
+#
+# What an assistant or a gateway form writes is plain text only (Q70): the gateway builds the
+# document from the text itself and never sends a document a caller supplied, so a link, any
+# formatting or an embed the review page does not show can never be written. Only a snapshot
+# restore puts a stored document back as it was, by handing it over as a QuillDoc. A later
+# formatted-text feature (Q61) would make its own QuillDoc from checked input; nothing else changes.
+
+
+class QuillDoc(str):
+    """A Quill document (JSON text) that ``rich_doc`` sends unchanged, formatting included. Only a
+    snapshot restore makes one, from the document Archidekt itself stored (Q70)."""
 
 
 def _quill_ops(value: Any) -> list[Any] | None:
@@ -123,7 +134,7 @@ def rich_text(value: Any) -> str:
     ends with. Text that is not a Quill document (older plain text) is returned as it is."""
     ops = _quill_ops(value)
     if ops is None:
-        return value if isinstance(value, str) else ""
+        return str(value) if isinstance(value, str) else ""
     parts: list[str] = []
     for op in ops:
         insert = op.get("insert") if isinstance(op, dict) else None
@@ -135,11 +146,33 @@ def rich_text(value: Any) -> str:
     return text[:-1] if text.endswith("\n") else text
 
 
+def plain_text(value: str) -> str:
+    """Text an assistant or a form supplied, as the plain text that will be written (Q70): a Quill
+    document given as JSON text is reduced to its words (``rich_text``: links, formatting and
+    embeds dropped, a card link kept as its card name); any other text is kept as it is. A
+    document inside a document is reduced too, so the result is never a document and reducing it
+    again changes nothing: a proposal re-checked when it is applied writes what its review showed."""
+    text = str(value)
+    while _quill_ops(text) is not None:
+        text = rich_text(text)  # each pass is shorter than the last, so this ends
+    return text
+
+
+def written_text(value: str) -> str:
+    """The text ``rich_doc(value)`` writes, as a review shows it: a QuillDoc's words, else the
+    plain text itself."""
+    return rich_text(value) if isinstance(value, QuillDoc) else str(value)
+
+
 def rich_doc(value: str) -> str:
-    """The rich-text value to send for ``value``: a Quill document given as JSON text is sent as
-    it is (a snapshot restore keeps its formatting); plain text becomes a one-insert document
-    that ends with a line break, as the site's editor makes it; "" stays "" (no text)."""
-    if not value or _quill_ops(value) is not None:
+    """The rich-text value to send for ``value``. Plain text, whatever it holds (JSON included),
+    becomes a one-insert document that ends with a line break, as the site's editor makes it, so
+    it shows on Archidekt exactly as written (Q70). Only a QuillDoc that holds a document (a
+    snapshot restore) is sent as it is, keeping its formatting. "" stays "" (no text)."""
+    if isinstance(value, QuillDoc) and _quill_ops(value) is not None:
+        return str(value)
+    value = str(value)
+    if not value:
         return value
     text = value if value.endswith("\n") else value + "\n"
     return json.dumps({"ops": [{"insert": text}]}, ensure_ascii=False, separators=(",", ":"))
@@ -1691,8 +1724,9 @@ class ArchidektClient:
         ``unlisted`` (bool), and the cover: ``customFeatured`` (a card-art URL, see ``art_url``; the
         site's "Set Deck Image" sends only that key, its bundle read 2026-10-14) or ``""`` for its
         "Autoselect deck image". ``featured`` is Archidekt's own automatic pick and is never sent.
-        Only the keys given are sent. ``description`` is rich text: plain text is sent as a Quill
-        document (``rich_doc``), as the site's description editor sends it. The route with
+        Only the keys given are sent. ``description`` is rich text: it is sent as a Quill document
+        built from its plain text (``rich_doc``), as the site's description editor sends it; only
+        a QuillDoc (a snapshot restore) goes as it is. The route with
         ``description`` is verified live (backup_deck uses it); the other keys are what Archidekt's
         own site bundle sends on the same route (reported 2026-10-07, not verified). Callers re-read
         the deck afterwards and compare every field rather than trusting the response, which only
