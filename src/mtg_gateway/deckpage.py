@@ -2284,7 +2284,10 @@ html.cardview-open{overflow:hidden}
 .picker.edhplay-dialog{padding:1rem;align-items:center}
 .picker.edhplay-dialog .pickbox{width:min(100%,30rem);max-height:100%;overflow:auto;padding:1rem 1.15rem;
   border-radius:var(--radius-panel);border-bottom:1px solid var(--border)}
-.edhplay-dialog details.disclosure{margin:0;padding-top:.35rem}
+.edhplay-dialog details.disclosure{margin:0;padding-top:.15rem}
+/* finger-sized (44 px): the fold's summary and the box's x (L9) */
+.edhplay-dialog details.disclosure > summary{min-height:44px}
+.picker.edhplay-dialog .pickbox .close{width:44px;min-height:44px;height:44px;margin:-.2rem -.35rem 0 0}
 .edhplay-dialog .steps{margin:.15rem 0 .2rem;padding-left:1.4rem;display:flex;flex-direction:column;gap:.4rem}
 .edhplay-dialog p{margin:0}
 .edhplay-dialog .edhplay-state{display:flex;flex-direction:column;gap:.5rem}
