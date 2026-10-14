@@ -169,7 +169,10 @@ def build_events(
         )
         count = x.get("card_count")
         summary = f"{count} cards as the deck stood" if count is not None else "The whole deck as it stood"
-        summary += " just before a change was applied." if x.get("proposal_id") else "."
+        if x.get("stopped_attempt"):  # Q78: taken for an apply that changed nothing
+            summary += " just before an apply that stopped before it changed anything."
+        else:
+            summary += " just before a change was applied." if x.get("proposal_id") else "."
         if x.get("deck_gone"):
             # A restore rewrites the deck itself; with the deck deleted on Archidekt it cannot work.
             summary += " The deck is no longer on Archidekt."

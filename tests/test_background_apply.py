@@ -343,7 +343,11 @@ async def test_a_copy_whose_post_meets_a_429_is_made_once(stack: Stack) -> None:
 
 
 # -- Archidekt's 429s during an apply (Q41, Q62, Q66) and the backup copy (Q35) ---------------------
-NOTHING_CHANGED = "Nothing was changed on Archidekt. Try again in a few minutes with a new proposal."
+# Q78: a stop that changed nothing leaves the proposal pending
+NOTHING_CHANGED = (
+    "Nothing was changed on Archidekt. The proposal is still pending, so it can be approved again in a "
+    "few minutes."
+)
 
 
 @pytest.fixture
@@ -392,7 +396,8 @@ async def test_an_apply_that_runs_out_of_patience_with_nothing_sent_drops_its_ba
 ) -> None:
     """Review M1 (Q35, Q41, Q62): every card write meets a 429. The apply waits exactly six times,
     sends the write seven times, never opens the gateway-wide breaker, and stops with one plain
-    message; nothing changed, so the backup copy it made is deleted again."""
+    message; nothing changed, so the backup copy it made is deleted again, and the proposal is
+    pending again (Q78)."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": THREE}))
@@ -400,7 +405,7 @@ async def test_an_apply_that_runs_out_of_patience_with_nothing_sent_drops_its_ba
     structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     row = await _finished(h, p["proposal_id"])
     result = row["result"]
-    assert row["state"] == "failed" and result["error"] == "rate_limited", result
+    assert row["state"] == "pending" and result["error"] == "rate_limited", result
     assert result["detail"] == f"{ark_mod.PATIENCE_SPENT} {NOTHING_CHANGED}", result
     assert tries["n"] == 7 and len(quick_waits) == 6 and ark.patches == []
     assert not result.get("deck_written") and result.get("backup_deleted") is True, result
@@ -410,10 +415,10 @@ async def test_an_apply_that_runs_out_of_patience_with_nothing_sent_drops_its_ba
     assert got["next_step"] == f"{ark_mod.PATIENCE_SPENT} {NOTHING_CHANGED}", got["next_step"]
     page = await _review_page(h, p["proposal_id"])
     assert (
-        f"{ark_mod.PATIENCE_SPENT} Nothing was changed on Archidekt. Try again in a few minutes: ask "
-        "your assistant for a new proposal."
+        f"{ark_mod.PATIENCE_SPENT} Nothing was changed on Archidekt. The proposal is still pending, so "
+        "you can apply it again in a few minutes."
     ) in page
-    assert "paused after repeated failures" not in page
+    assert "paused after repeated failures" not in page and "new proposal" not in page
 
 
 async def test_an_apply_that_runs_out_of_patience_partway_keeps_its_backup(
@@ -620,7 +625,7 @@ async def test_a_tags_only_stop_before_anything_was_written_claims_no_other_deta
     await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]})
     row = await _finished(h, p["proposal_id"])
     result = row["result"]
-    assert row["state"] == "failed" and result["error"] == "rate_limited", result
+    assert row["state"] == "pending" and result["error"] == "rate_limited", result  # Q78
     assert not ark.deck_tags.get(42) and not result.get("deck_written"), result
     assert result["detail"] == (
         f"{ark_mod.PATIENCE_SPENT} A snapshot ({result['snapshot_id']}) of the deck before the change "
@@ -653,19 +658,31 @@ async def test_a_details_stop_after_other_details_were_written_still_says_they_w
     assert got["next_step"] == f"{ark_mod.PATIENCE_SPENT} {PARTLY}", got["next_step"]
 
 
-async def test_a_stop_whose_backup_copy_could_not_be_deleted_says_it_stays(
+LATER = (
+    "Nothing was changed on Archidekt. The unused backup copy will be deleted from the backup folder "
+    "by itself once Archidekt allows it. The proposal is still pending, so it can be approved again "
+    "in a few minutes."
+)
+
+
+async def test_a_stop_whose_backup_copy_could_not_be_deleted_queues_its_delete(
     stack: Stack, quick_waits: list[float]
 ) -> None:
-    """Follow-up N4 (B4): Archidekt asks for 30 s, so the clean-up's delete of the unused backup is
-    refused too. The assistant's message and next_step say the copy stays in the backup folder."""
+    """Follow-up N4 (B4), now Q77 and Q78: Archidekt asks for 30 s, so the clean-up's delete of the
+    unused backup would be refused too. It is not sent but queued for later, and the assistant's
+    message, next_step and the review page say the copy will be deleted by itself. Nothing
+    changed, so the proposal is pending again."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": THREE}))
     orig = ark.transport.handler
+    deletes = {"n": 0}
 
     def handler(req: httpx.Request) -> httpx.Response:
         if req.method == "PATCH" and "modifyCards" in req.url.path:
             return httpx.Response(429, json={"detail": "slow down"}, headers={"Retry-After": "30"})
+        if req.method == "DELETE":
+            deletes["n"] += 1
         return orig(req)
 
     ark.transport.handler = handler
@@ -675,14 +692,21 @@ async def test_a_stop_whose_backup_copy_could_not_be_deleted_says_it_stays(
     finally:
         h.app.state.gateway.decks.client.pacer._retry_until = 0
     result = row["result"]
-    assert row["state"] == "failed" and result["error"] == "rate_limited", result
+    assert row["state"] == "pending" and result["error"] == "rate_limited", result
     assert result.get("backup_deck_id") and ark.deleted == [] and ark.patches == [], result
-    kept = (
-        "Nothing was changed on Archidekt. The unused backup copy could not be deleted; it stays in "
-        "the backup folder. Try again in a few minutes with a new proposal."
-    )
-    assert result["detail"] == f"{ark_mod.PATIENCE_SPENT} {kept}", result["detail"]
+    assert deletes["n"] == 0  # the pause was running: the doomed delete was never sent
+    assert result["detail"] == f"{ark_mod.PATIENCE_SPENT} {LATER}", result["detail"]
     if out.get("ok") is False:  # answered before the apply moved to the background
-        assert out["message"] == result["detail"], out
+        assert out["message"] == result["detail"] and out["state"] == "pending", out
     got = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
-    assert got["next_step"] == f"{ark_mod.PATIENCE_SPENT} {kept}", got["next_step"]
+    assert got["next_step"] == f"{ark_mod.PATIENCE_SPENT} {LATER}", got["next_step"]
+    queued = h.db.queued_backup_deletes()
+    assert [(q["snapshot_id"], q["backup_deck_id"], q["attempts"]) for q in queued] == [
+        (result["snapshot_id"], str(result["backup_deck_id"]), 0)
+    ], queued
+    page = await _review_page(h, p["proposal_id"])
+    assert (
+        f"{ark_mod.PATIENCE_SPENT} Nothing was changed on Archidekt. The unused backup copy will be "
+        "deleted from the backup folder by itself once Archidekt allows it. The proposal is still "
+        "pending, so you can apply it again in a few minutes."
+    ) in page

@@ -140,7 +140,7 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
   var COLLAPSE_AT = 8;   // a longer list shows a summary and this many rows until "Show all"
   var ARM_DELAY_MS = 700; // buttons stay disabled this long after the card is drawn
   var host = window.parent;
-  var pending = {}, nextId = 1, hostCaps = null, proposal = null, approval = null, armed = false, busy = false;
+  var pending = {}, nextId = 1, hostCaps = null, proposal = null, approval = null, armed = false, busy = false, heldCode = null;
 
   function post(msg) { host.postMessage(msg, "*"); }
   function request(method, params) {
@@ -462,8 +462,16 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
             setStatus("Still applying, but the card can't read its progress (" + String(sc.message || "the gateway refused") + "). Open the review page to follow it.", "err");
             return;
           }
-          render({ structuredContent: sc, _meta: {} });
-          if (sc.state === "applied") {
+          // Q78: an apply Archidekt's waits stopped before it changed anything leaves the proposal
+          // pending, and this card's code approves it again (the code stays valid while pending).
+          var meta = {};
+          if (sc.state === "pending" && heldCode) meta[APPROVAL_KEY] = heldCode;
+          render({ structuredContent: sc, _meta: meta });
+          if (sc.state === "pending") {
+            var r = sc.result || {};
+            setStatus(String((r.error === "rate_limited" && r.detail) || sc.next_step || ""), "err");
+            tellModel("Proposal " + pid + " stopped applying: it is pending again.");
+          } else if (sc.state === "applied") {
             setStatus("Applied. The deck on Archidekt matches this proposal.", "ok");
             tellModel("Proposal " + pid + " finished applying to Archidekt.");
           } else if (sc.state !== "applying") {
@@ -588,6 +596,7 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
           tellModel("The user pressed " + decision + " on the proposal card for " + pid + ", but the gateway answered: " + msg);
           return;
         }
+        heldCode = sc.state === "applying" ? approval : null;
         approval = null; busy = false;
         render({ structuredContent: Object.assign({}, proposal, sc), _meta: {} });
         if (sc.state === "applying") {
