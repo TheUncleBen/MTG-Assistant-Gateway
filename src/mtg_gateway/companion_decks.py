@@ -188,7 +188,9 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
 
             recent = sorted(rows or [], key=lambda d: d.get("updated_at") or "", reverse=True)
             covers = covers_for(recent, state.db.deck_covers([str(d["id"]) for d in recent]))
-            out["html"] = recent_panel_inner(None if problem else recent, covers)
+            out["html"] = recent_panel_inner(
+                None if problem else recent, covers, unreadable=bool(getattr(rows, "unreadable", 0))
+            )
             out["count"] = len(recent)
         else:
             unreadable = bool(getattr(rows, "unreadable", 0))  # Q64, as on /decks

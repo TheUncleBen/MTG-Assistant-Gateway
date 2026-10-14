@@ -720,6 +720,11 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
 .home .panel-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;
   gap:.5rem 1rem;margin:0 0 .75rem}
 .home .panel-head h2{margin:0}
+/* the deck list couldn't be read (Q64): the /decks notice inside the panel, over any covers read */
+.home .decks-unreadable p{margin:0}
+.home .decks-unreadable .actions{margin-top:.75rem}
+.home .decks-unreadable .actions .btn{min-height:44px}
+.home .decks-unreadable + .recent{margin-top:1rem}
 /* placeholders while a deck list is still being read (decks.js swaps the real list in) */
 .skeleton>*{display:block;background:var(--surface-2);border:1px solid var(--border);
   border-radius:var(--radius);animation:skeleton 1.4s ease-in-out infinite}
