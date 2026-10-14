@@ -96,8 +96,7 @@ def test_add_a_card_with_rich_suggestions(server: Server, width: int) -> None:
         assert page.locator("[role=option] .rich .pip").count() >= 1
         box.press("ArrowDown")
         box.press("Enter")
-        page.wait_for_timeout(300)
-        assert "Added 1 × Sol Ring" in page.locator(".addstatus").inner_text()
+        page.locator(".addstatus", has_text="Added 1 × Sol Ring").wait_for(timeout=3000)
         assert page.locator(".pendingbox .n").inner_text() == "1"
         assert page.evaluate("() => document.activeElement.id") == "addname"
         assert box.input_value() == ""
@@ -124,8 +123,10 @@ def test_add_a_card_with_rich_suggestions(server: Server, width: int) -> None:
         box.press_sequentially("oathsw", delay=30)
         page.locator("[role=option]").first.wait_for(timeout=3000)
         box.press("Enter")
-        page.wait_for_timeout(300)
+        # L18: the row's mana cost may come after the row itself (a pick made before the list's
+        # details arrived is filled in when they do): wait for it, not for a fixed time
         row = page.locator(".erow.new").first
+        row.locator(".name .pip").first.wait_for(timeout=5000)
         assert "Oathsworn Giant" in row.inner_text()
         assert row.locator(".name .pip").count() >= 1
         # the printing picker is a dialog, closed by Escape
@@ -136,8 +137,59 @@ def test_add_a_card_with_rich_suggestions(server: Server, width: int) -> None:
         page.locator(".picker .print").first.wait_for(timeout=5000)
         assert page.evaluate("() => document.activeElement.className").startswith("close")
         page.keyboard.press("Escape")
-        page.wait_for_timeout(200)
+        picker.wait_for(state="hidden", timeout=3000)
         assert page.locator(".picker:visible").count() == 0
         assert page.evaluate("() => document.documentElement.scrollWidth") <= width
+        assert errors == []
+        browser.close()
+
+
+@pytest.mark.parametrize("width", [390, 1366])
+def test_a_card_picked_before_its_details_arrive_gets_them(server: Server, width: int) -> None:
+    """L18's cause: Enter on a name whose picture and mana cost had not come back yet added a row
+    without them, for good (the late answer only reached the closed list). The row now gets them
+    when they arrive. The details are held here until after the pick, so this never races."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = _link(server)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": width, "height": 900 if width > 500 else 800})
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        ctx.route(
+            re.compile(r"https://cards\.scryfall\.io/.*"),
+            lambda route: route.fulfill(status=200, content_type="image/png", body=PNG),
+        )
+        page = ctx.new_page()
+        errors: list[str] = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(f"{server.base}/decks/42/edit", wait_until="networkidle")
+        held: list = []
+        page.route(re.compile(r".*/scan/api/peek\?.*"), lambda route: held.append(route))
+        box = page.locator("#addname")
+        box.click()
+        box.press_sequentially("oathsw", delay=30)
+        page.locator("[role=option]").first.wait_for(timeout=3000)
+        box.press("Enter")
+        row = page.locator(".erow.new").first
+        row.wait_for(timeout=3000)
+        assert "Oathsworn Giant" in row.inner_text() and row.locator(".name .pip").count() == 0
+        page.unroute(re.compile(r".*/scan/api/peek\?.*"))
+        for route in held:
+            try:
+                route.continue_()
+            except Exception:  # the list aborted its own request when it closed
+                pass
+        row.locator(".name .pip").first.wait_for(timeout=5000)
+        assert row.locator("img.thumb").count() == 1
+        assert "Creature" in row.locator(".meta").inner_text()
+        # one change in the list, and Undo takes the add back in one step (the late details are
+        # not a change of their own)
+        assert page.locator(".pendingbox .n").inner_text() == "1"
+        page.locator("button.undo").click()
+        assert page.locator(".erow.new").count() == 0
         assert errors == []
         browser.close()

@@ -266,10 +266,38 @@
   }
   // the Saving note; one that already says this stays as it is (no flicker, no second
   // announcement). later: a save whose turn came, which leaves an error or a question up.
-  function savingNote(text, later) {
-    if (toastEl && $(".msg", toastEl).textContent === text && !toastEl.classList.contains("error")) return;
+  // card, what: whose note it is, so a save that finds nothing to send can take its own note
+  // down (M6) and never another card's, an error or a question.
+  var savingFor = null;  // {el, card, what}
+  function savingNote(text, later, card, what) {
+    if (toastEl && $(".msg", toastEl).textContent === text && !toastEl.classList.contains("error")) {
+      savingFor = { el: toastEl, card: card, what: what };
+      return;
+    }
     if (later && toastEl && (toastEl.classList.contains("error") || toastEl.getAttribute("role") === "alertdialog")) return;
-    toast(text, { sticky: true });
+    savingFor = { el: toast(text, { sticky: true }), card: card, what: what };
+  }
+  function dropSavingNote(card, what) {
+    if (savingFor && toastEl && savingFor.el === toastEl && savingFor.card === card && savingFor.what === what) dismissToast();
+  }
+  // M7: what Archidekt last confirmed for a card, per kind of edit ("Move", "Mana value"), while
+  // edits of that kind wait or save. A refused save puts the card back to that state, not to the
+  // unsaved one the edit was made over, and drops the card's later edits of that kind still
+  // waiting their turn (made over a state Archidekt never took).
+  var confirmed = [];  // {card, what, state, gen, open}
+  function confirmedOf(card, what) {
+    return confirmed.filter(function (o) { return o.card === card && o.what === what; })[0] || null;
+  }
+  function holdConfirmed(card, what, current) {
+    var c = confirmedOf(card, what);
+    if (!c) { c = { card: card, what: what, state: current(), gen: 0, open: 0 }; confirmed.push(c); }
+    c.open++;
+    return c;
+  }
+  function releaseConfirmed(c) {
+    if (--c.open > 0) return;
+    var i = confirmed.indexOf(c);
+    if (i >= 0) confirmed.splice(i, 1);
   }
   /* job.card: the card drawn changed; job.start(): {changes, inverse, saying} when its turn comes
      (null when nothing is left to send); job.saved(): after Archidekt took it; job.undo(): puts the
@@ -278,12 +306,13 @@
     bgCount++;
     bgCards.push(job.card);
     syncHist();
-    var done = function () { bgCount--; syncHist(); };
+    var done = function () { bgCount--; if (job.done) job.done(); syncHist(); };
     bgQueue = bgQueue.then(idle).then(function () {
       bgCards.splice(bgCards.indexOf(job.card), 1);
       var plan = job.start();
-      if (!plan) return null;
-      savingNote(plan.saying, true);
+      // nothing left to send (+ then − before the save went): its Saving note goes too (M6)
+      if (!plan) { dropSavingNote(job.card, job.what); return null; }
+      savingNote(plan.saying, true, job.card, job.what);
       return saveEdit(plan.changes, plan.inverse).then(function () { if (job.saved) job.saved(); }, function (err) {
         var back = job.undo();
         if (err && err.cancelled) { dismissToast(); return; }
@@ -302,7 +331,12 @@
       attrs: SPOT_ATTRS.map(function (a) { return card.getAttribute(a); }), side: card.classList.contains("side")
     };
   }
-  function putBack(card, spot) {
+  function putBack(card, spot, fileOnly) {
+    if (fileOnly) {
+      SPOT_ATTRS.forEach(function (a, i) { if (spot.attrs[i] === null) card.removeAttribute(a); else card.setAttribute(a, spot.attrs[i]); });
+      card.classList.toggle("side", spot.side);
+      return;
+    }
     var st = spot.stack, list = spot.list;
     if (st && !st.isConnected) {
       var same = stackByName(st.getAttribute("data-group"));
@@ -474,16 +508,22 @@
       var ch = { action: "set_mana_value", card_name: name, mana_value: value, zone: card.getAttribute("data-zone") || "main" };
       var inv = { action: "set_mana_value", card_name: name, mana_value: cur === null ? null : Number(cur), zone: ch.zone };
       var saying = "Saving the mana value of " + name + "…";
+      var held = holdConfirmed(card, "Mana value", function () { return cur; }), gen = held.gen;
       setManaValue(card, value);
       closeMenu();
-      savingNote(saying);
+      savingNote(saying, false, card, "Mana value");
       background({
         card: card, what: "Mana value",
-        start: function () { return { changes: [ch], inverse: [inv], saying: saying }; },
+        // an earlier one of these was refused: this one was made over a value Archidekt never had
+        start: function () { return held.gen === gen ? { changes: [ch], inverse: [inv], saying: saying } : null; },
+        saved: function () { held.state = value === null ? null : String(value); },
         undo: function () {
-          setManaValue(card, cur);
-          return name + " is back to " + (cur === null ? "its own mana value" : cur) + ".";
-        }
+          held.gen++;
+          var back = held.state;
+          setManaValue(card, back);
+          return name + " is back to " + (back === null ? "its own mana value" : back) + ".";
+        },
+        done: function () { releaseConfirmed(held); }
       });
     };
     form.addEventListener("submit", function (e) {
@@ -824,7 +864,7 @@
     s.shown = q;
     setQty(card, q);
     refreshStacks();
-    savingNote("Saving " + card.getAttribute("data-card") + ": " + copies(q) + "…");
+    savingNote("Saving " + card.getAttribute("data-card") + ": " + copies(q) + "…", false, card, "Quantity");
     syncHist();
     if (!s.queued) { clearTimeout(s.timer); s.timer = setTimeout(function () { sendSteps(s); }, 400); }
   }
@@ -872,26 +912,33 @@
       if (!yes) return;
       var s = stepOf(card);
       if (s) { clearTimeout(s.timer); s.timer = 0; s.gone = true; }
-      var spot = spotOf(card), side = zoneOf(card) === "side";
-      var ch = changeFor(card, "remove");
+      // where Archidekt has the card filed, kept through any move of it still waiting or saving
+      // (M7): a refused move files it back there, and so does a refused removal
+      var filed = holdConfirmed(card, "Move", function () { return { spot: spotOf(card), cat: byCategory ? stackOf(card) : catOf(card) }; });
+      var near = card.closest(".stack");
       var saying = "Removing " + name + "…";
       card.remove();
       refreshStacks();
       closeMenu();
       closeViewer();
-      if (!document.activeElement || document.activeElement === document.body) focusNear(spot.stack);
-      savingNote(saying);
+      if (!document.activeElement || document.activeElement === document.body) focusNear(near);
+      savingNote(saying, false, card, "Removal");
       background({
         card: card, what: "Removal",
         start: function () {
           // the count to put back with an Undo is the one Archidekt has by now
           if (s) { setQty(card, s.saved); settleSteps(s); }
+          var ch = changeFor(card, "remove");
           var inv = inverseFor(card, ch);
           return { changes: [ch], inverse: inv ? [].concat(inv) : null, saying: saying };
         },
         // kept for an Undo, which puts this element back (drawRows)
-        saved: function () { keepRemoved(card, spot.stack ? spot.stack.getAttribute("data-group") : ""); },
-        undo: function () { putBack(card, spot); return name + " is back in " + (side ? "the " + sideCat : "the deck") + "."; }
+        saved: function () { var st = filed.state.spot.stack; keepRemoved(card, st ? st.getAttribute("data-group") : ""); },
+        undo: function () {
+          putBack(card, filed.state.spot);
+          return name + " is back in " + (zoneOf(card) === "side" ? "the " + sideCat : "the deck") + ".";
+        },
+        done: function () { releaseConfirmed(filed); }
       });
     });
   }
@@ -902,7 +949,7 @@
     var from = byCategory ? stackOf(card) : catOf(card);
     var ch = changeFor(card, "set_category", to);
     var inv = inverseFor(card, ch);  // from where the card is now, before it moves
-    var spot = spotOf(card);
+    var held = holdConfirmed(card, "Move", function () { return { spot: spotOf(card), cat: from }; }), gen = held.gen;
     var saying = "Moving " + name + " to " + to + "…";
     // filed as Archidekt files it: a category left out of the deck is the maybeboard (drawRows)
     var zone = excluded.indexOf(to) >= 0 ? "side" : "main";
@@ -915,11 +962,22 @@
     if (target) $(".cards, .rows", target).appendChild(card);
     if (focused) card.focus();  // moving the element took the focus off it
     refreshStacks();
-    savingNote(saying);
+    var now = { spot: spotOf(card), cat: to };
+    savingNote(saying, false, card, "Move");
     background({
       card: card, what: "Move",
-      start: function () { return { changes: [ch], inverse: inv ? [inv] : null, saying: saying }; },
-      undo: function () { putBack(card, spot); return name + " is back in " + (from || "its category") + "."; }
+      // an earlier move of this card was refused: this one was made from where Archidekt never had it
+      start: function () { return held.gen === gen ? { changes: [ch], inverse: inv ? [inv] : null, saying: saying } : null; },
+      saved: function () { held.state = now; },
+      undo: function () {
+        held.gen++;
+        var back = held.state;
+        // taken off the page meanwhile (a Remove waits its turn): only filed back; the removal's
+        // own answer decides whether it shows again
+        putBack(card, back.spot, !card.isConnected);
+        return name + " is back in " + (back.cat || "its category") + ".";
+      },
+      done: function () { releaseConfirmed(held); }
     });
   }
   function categoryChoices(card) {
@@ -2269,13 +2327,20 @@
     document.body.appendChild(t);
     if (!kind) setTimeout(function () { t.remove(); }, 8000);
   }
-  // the list for the deck: {list, left_out, left_count}, or an Error whose message is shown
+  // the list for the deck: {list, left_out, left_count}, or an Error whose message is shown.
+  // The box shows only the three approved messages (Q53, Q67): the gateway's own reason goes to
+  // the console, never on screen. Signed out, retrying can't help (Q69): err.signedOut.
   function fetchList(src) {
     return fetch(src, { credentials: "same-origin", headers: { Accept: "application/json" } }).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (d) {
         if (r.ok && d && d.ok && typeof d.list === "string") return d;
-        if (r.status === 401) throw new Error("You're signed out. Reload the page to sign in.");
-        throw new Error((d && d.message) || "The deck list couldn't be loaded.");
+        if (r.status === 401) {
+          var out = new Error("You're signed out. Reload the page to sign in.");
+          out.signedOut = true;
+          throw out;
+        }
+        if (window.console) console.warn("Play on EDHPlay: the deck list request failed (HTTP " + r.status + ")" + (d && d.message ? ": " + d.message : ""));
+        throw new Error("The deck list couldn't be loaded.");
       });
     }, function () {
       throw new Error("The deck list couldn't be loaded: no connection.");
@@ -2303,6 +2368,9 @@
   }
   function open(link) {
     close();
+    // a note left from an earlier launch would sit above the box (L10): the box says it all again
+    var old = document.querySelector(".edhplay-toast");
+    if (old) old.remove();
     back = link;
     var data = null;  // the list, once the gateway has sent it
     dialog = make("div", "picker edhplay-dialog");
@@ -2374,10 +2442,12 @@
         var p = make("p", "notice error");
         p.setAttribute("role", "alert");
         p.appendChild(make("span", "", err.message));
-        var again = make("button", "btn small", "Try again");
-        again.type = "button";
-        again.addEventListener("click", function () { load(); go.focus(); });
-        p.appendChild(again);
+        if (!err.signedOut) {
+          var again = make("button", "btn small", "Try again");
+          again.type = "button";
+          again.addEventListener("click", function () { load(); go.focus(); });
+          p.appendChild(again);
+        }
         spot.appendChild(p);
         spot.hidden = false;
       });
