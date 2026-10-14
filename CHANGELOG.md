@@ -18,8 +18,9 @@ stays at schema 12, so going back to 0.7.26 is a plain image swap. The Android a
 - A long apply (a new 100-card deck, a big edit) no longer fails halfway when Archidekt asks the
   gateway to slow down: it waits out the pause Archidekt asks for and carries on by itself, up to
   6 waits and 5 minutes of waiting for the whole apply. If Archidekt asks for a longer wait than is
-  left, the apply stops at once with a plain message saying what had changed. The review page says
-  when it is waiting. An apply's waits no longer pause the gateway for everyone. Outside an apply
+  left, the apply stops at once with a plain message saying what had changed; the assistant and
+  the review page give the same account, and a deck or tag already written is never reported as
+  nothing changed. The review page says when it is waiting. An apply's waits no longer pause the gateway for everyone. Outside an apply
   nothing changed: a 429 still pauses every call and is not retried. A wait Archidekt gives as a
   date is now read as that date instead of a fixed 30 seconds.
 - When Archidekt refuses a request (HTTP 403), the message now says so, with Archidekt's own
@@ -59,7 +60,8 @@ stays at schema 12, so going back to 0.7.26 is a plain image swap. The Android a
 - The deck page's card menu no longer freezes while Archidekt saves. Mana value, Quantity, Move to
   and Remove from deck show the change at once and save in the background; quick Quantity presses
   are sent as one save. If a save fails, the card goes back to what Archidekt has and a note says
-  why, also when several edits to the same card fail.
+  why, also when several edits to the same card fail, and says when a later move or mana value for
+  that card was not sent.
 - Grouped by Mana value, a card whose mana value you change moves to its new stack at once, and the
   Table view's MV column shows the new value. The card menu's Move to list no longer shows all the
   time, and undoing the removal of a card with no category no longer brings it back under a blank
@@ -67,22 +69,32 @@ stays at schema 12, so going back to 0.7.26 is a plain image swap. The Android a
 - Play on EDHPlay no longer makes the first card of a deck with no commander set into the commander
   on EDHPlay. Lands come first among the candidates, a list with only a sideboard no longer starts
   with a blank line, and a companion filed in a main-deck category goes to the sideboard.
-- The "You're offline" page loads the page again by itself once the connection is back, and a
-  page load keeps trying for about 5 seconds before showing it, so a short drop or a gateway
-  restart no longer shows it at all.
+- The "You're offline" page loads the page again by itself once the connection is back. When the
+  browser knows it is offline the page shows at once; otherwise a page load keeps trying for about
+  5 seconds first, so a short drop or a gateway restart no longer shows it at all. A page that
+  keeps failing while the gateway answers is reloaded by itself at most 3 times, then waits for
+  Try again.
 - A tag named twice in one proposal is added once, a deck already liked isn't liked again, and a
   new tag after tags starting with Z still sorts last.
 - Picking a card in the deck editor before its details had loaded no longer leaves the new row
   without its picture, mana cost and type.
-- A card picture that fails to load keeps the deck editor's rows in shape, and a card suggestion
-  no longer shows a gap inside the typed part of its name.
+- A card picture that fails to load keeps the deck editor's rows in shape (and is not read out
+  again where the row already names the card), and a card suggestion no longer shows a gap inside
+  the typed part of its name.
+- Restoring a snapshot of a deck in another format than Commander is no longer refused because of
+  a bracket stored with it.
+- Try again on My decks reads the deck list from Archidekt again instead of showing the same
+  partly read list.
+- After an Approve whose apply failed, the chat card shows Failed with the reason once and no
+  Approve or Reject buttons, and the review page shows the failure once instead of twice.
 - The Home page's My decks panel and the assistant's deck list say when the deck list couldn't be
   read from Archidekt, as My decks does.
 - The deck card in ChatGPT no longer says "No connection to the gateway": the deck now comes with
   the answer, so the card can show it without reaching the gateway (not yet tried in ChatGPT).
 - Proposal cards and review pages are easier to read: the footer names the app that proposed,
   tag changes say which tags are added and removed, a cover change names the cover it replaces,
-  rows without a picture leave no gap, rows are shorter on phones, the locked Apply and Reject
+  rows without a picture leave no gap, rows are shorter on phones (a long change such as a move to
+  another board wraps beside its label instead of over it), the locked Apply and Reject
   buttons are readable in dark mode, and a chat app that cannot show the card gets a plain summary
   instead of raw data.
 - Deck settings forms (cover, tags, folder, collaborators) show their result next to the form you
