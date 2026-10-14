@@ -122,7 +122,14 @@ def add_history_routes(
             {**reports.decks_seen(sub), **state.db.history_decks(sub)},
             live,
             listed=listed["ids"] if listed else None,
-            own=state.db.own_history_deck_ids(sub),
+            own=state.db.own_history_deck_ids(
+                sub,
+                account_id=listed["account_id"],
+                username=listed["username"],
+                linked_at=listed["linked_at"],
+            )
+            if listed
+            else set(),
         )
         # The backup copies the gateway made on Archidekt (D-03): kept out of Home and My decks,
         # listed here on the first, unfiltered page (and on a deck's own history).
