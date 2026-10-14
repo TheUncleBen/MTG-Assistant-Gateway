@@ -128,6 +128,14 @@ async def test_approval_code_travels_only_in_meta(stack: Stack) -> None:
     assert len(code) >= 30
     text = res["content"][0]["text"]
     assert code not in text and code not in json.dumps(res["structuredContent"])
+    # The text is plain, not JSON (a chat app that draws no card shows it), and still names every
+    # field the assistant acts on, under the structured content's names.
+    sc = res["structuredContent"]
+    assert not text.lstrip().startswith("{")
+    assert text.startswith(f"Proposal {sc['proposal_id']} for ")
+    for key in ("proposal_id", "state", "review_url", "next_step", "assistant_may_apply", "approval_mode"):
+        assert f"\n{key}: " in text, key
+    assert "assistant_may_apply: false" in text and "\nChanges:\n  1 -> 2 Sol Ring" in text, text
     assert "approval" not in res["structuredContent"]
     # get_proposal shows the card again with the same code while the proposal is pending.
     again = await call(h, token, "get_proposal", {"proposal_id": structured(res)["proposal_id"]})

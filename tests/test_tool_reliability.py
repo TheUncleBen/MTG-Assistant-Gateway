@@ -281,8 +281,14 @@ async def test_arguments_that_do_not_fit_get_a_flagged_structured_refusal(stack:
     raw = await call(stack.h, token, "get_proposal", {"proposal_id": "nope"})
     res = structured(raw)
     assert res["error"] == "not_found" and res["error_code"] == "NOT_FOUND" and res["retryable"] is False
-    # clients that read only the text get the same fields
-    assert json.loads(raw["content"][0]["text"]) == res
+    # clients that read only the text get the same fields, as plain lines rather than JSON (R-181)
+    text = raw["content"][0]["text"]
+    assert text.startswith("Not done: " + res["message"]), text
+    for key, value in res.items():
+        if key not in ("message", "ok"):
+            shown = str(value).lower() if isinstance(value, bool) else str(value)
+            assert f"\n{key}: {shown}" in text, (key, text)
+    assert "\nok: false" in text
 
 
 async def test_refusals_carry_an_error_code_by_kind() -> None:
@@ -611,8 +617,11 @@ async def test_folder_tags_and_cover_go_through_a_details_proposal(stack: Stack)
     p = structured(await call(stack.h, token, "propose_deck_details", {"deck_id": "42", "details": details}))
     assert p["ok"] and p["kind"] == "details" and p["risk"] == "high", p
     diff = p["diff"]
-    assert "folder: Top level (no folder) -> Cube" in diff and "tags: none -> budget, Spicy" in diff, diff
-    assert f"cover: current -> {cover_name}" in diff
+    assert "folder: Top level (no folder) -> Cube" in diff, diff
+    assert "tags: none -> budget, Spicy (adds budget, Spicy)" in diff, diff
+    assert f"cover: automatic -> {cover_name}" in diff  # Archidekt picks it now: said so
+    tags_row = next(r for r in p["rows"] if r.get("field") == "tags")
+    assert tags_row["added"] == ["budget", "Spicy"] and tags_row["removed"] == []
     assert ark.deck_tags.get(42, []) == [] and 42 not in ark.deck_folder  # nothing sent yet
     a = structured(await call(stack.h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     if a.get("error") == "browser_required":  # the member's mode asks them: apply as they would
@@ -634,6 +643,15 @@ async def test_folder_tags_and_cover_go_through_a_details_proposal(stack: Stack)
     )
     assert new["ok"] is False and "no deck tag called 'gwtest'" in new["message"], new
     assert ark.tag_creates == 0
+    # the next change names the cover it replaces and the tag it takes off
+    other = ark.decks[42]["cards"][1]
+    other["card"]["uid"] = "58b26011-e103-45c4-a253-900f4e6b2eeb"
+    swap = {"cover": other["card"]["oracleCard"]["name"], "remove_tags": ["Spicy"]}
+    q = structured(await call(stack.h, token, "propose_deck_details", {"deck_id": "42", "details": swap}))
+    assert q["ok"], q
+    assert f"cover: {cover_name} -> {swap['cover']}" in q["diff"], q["diff"]
+    assert "tags: budget, Spicy -> budget (removes Spicy)" in q["diff"], q["diff"]
+    await call(stack.h, token, "reject_proposal", {"proposal_id": q["proposal_id"]})
     # taking a tag off names a tag the deck has; anything else is refused before any proposal
     off = structured(
         await call(

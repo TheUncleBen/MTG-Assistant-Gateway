@@ -611,12 +611,21 @@ ul.changes{list-style:none;margin:0 0 .75rem;padding:0;border:1px solid var(--bo
 @media (max-width:420px){
   .changes li{grid-template-columns:4.9rem minmax(0,1fr);gap:.35rem .6rem}
   .changes .qty{grid-column:2;text-align:left}
+  /* an add or remove count (+1, -1) is short: it stays on the card's line, one line a row */
+  .changes li.add,.changes li.del:not(.action){grid-template-columns:4.9rem minmax(0,1fr) auto}
+  .changes li.add .qty,.changes li.del:not(.action) .qty{grid-column:auto;text-align:right}
 }
 details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--text-muted);font-size:.9rem}
 .apply{margin-top:1rem;padding:1rem;border:2px solid var(--orange);border-radius:var(--radius-panel);
   background:var(--orange-tint)}
 .apply h2{margin:0 0 .4rem;font-size:1.25rem;font-weight:900} .apply p{margin:0 0 .25rem}
 .apply .choice{margin-top:.9rem}
+/* Locked (until the click guard unlocks them), Apply and Reject keep labels that read: outlined in
+   their colour, not faded. */
+.apply form.guarded button[data-guard]:disabled{opacity:1;background:transparent;
+  border:1px dashed currentColor}
+.apply form.guarded button.primary:disabled{color:var(--orange-text)}
+.apply form.guarded button.danger:disabled{color:var(--danger-text)}
 
 /* consent page: who is asking, and where you end up */
 .consent .ask{font-size:1.1rem;margin:0 0 .75rem}

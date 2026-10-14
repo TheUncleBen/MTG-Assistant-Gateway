@@ -398,6 +398,18 @@ def row_label(r: dict[str, Any]) -> str:
 DESCRIPTION_EXCERPT = 300  # characters of a new deck description shown on its diff line
 
 
+def tag_change_text(r: dict[str, Any]) -> str:
+    """'adds ramp, landfall; removes budget' for a tags row that names them; '' otherwise."""
+    if r.get("field") != "tags":
+        return ""
+    bits = []
+    if r.get("added"):
+        bits.append("adds " + ", ".join(clean_text(str(n)) for n in r["added"]))
+    if r.get("removed"):
+        bits.append("removes " + ", ".join(clean_text(str(n)) for n in r["removed"]))
+    return "; ".join(bits)
+
+
 def row_line(r: dict[str, Any]) -> str:
     """The plain-text diff line for one review row."""
     kind = r.get("kind")
@@ -448,7 +460,9 @@ def row_line(r: dict[str, Any]) -> str:
             else (f"description: (changed, {after_len} chars)")
         )
     if kind == "detail":
-        return f"{r['field']}: {r['before']} -> {r['after']}"
+        line = f"{r['field']}: {r['before']} -> {r['after']}"
+        said = tag_change_text(r)
+        return f"{line} ({said})" if said else line
     return str(r.get("text", ""))
 
 
@@ -3534,6 +3548,8 @@ class DeckService:
                     field="tags",
                     before=", ".join(before) or "none",
                     after=", ".join(after) or "none",
+                    added=add,
+                    removed=[r["name"] for r in remove],
                 )
             )
         if "cover" in raw:
@@ -3541,9 +3557,16 @@ class DeckService:
             card = next((c for c in deck.cards if c.name.casefold() == pick and c.scryfall_uid), None)
             if card is None:
                 raise DeckError("invalid", f"'{raw['cover']}' is not a card in this deck.")
+            chosen = str(deck.raw.get("customFeatured") or "").lower()
             if not _cover_is(deck, card.scryfall_uid.lower()):
                 plan["cover_uid"] = card.scryfall_uid
-                rows.append(_row("detail", field="cover", before="current", after=card.name))
+                # the card whose art is the chosen cover now, by name: "automatic" when Archidekt
+                # picks it, and "a card not in this deck" for art of a card the deck no longer holds
+                was = next(
+                    (c.name for c in deck.cards if c.scryfall_uid and c.scryfall_uid.lower() in chosen), ""
+                )
+                before = was or ("a card not in this deck" if chosen else "automatic")
+                rows.append(_row("detail", field="cover", before=before, after=card.name))
         return plan, rows
 
     async def _apply_organise(
