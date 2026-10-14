@@ -49,7 +49,9 @@ def to_arena(deck: Deck) -> str:
     return "\n\n".join(blocks) + "\n"
 
 
-EDHPLAY_URL = "https://edhplay.com/"
+# EDHPlay's My Decks, where its import starts (Ben, Q52 10-14); signed out, EDHPlay asks to sign in
+# and then comes back here (checked on the test account, 2026-10-14)
+EDHPLAY_URL = "https://edhplay.com/decks"
 
 
 # EDHPlay's Bulk Import reads "(SET) NUMBER" only when both match these (its parser, below).

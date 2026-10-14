@@ -352,6 +352,7 @@ def test_the_button_opens_a_dialog_then_copies_and_launches(server: Server, widt
             and btn.get_attribute("data-src") == "/decks/42/edhplay.json"
         )
         assert btn.get_attribute("href") == EDHPLAY_URL and btn.get_attribute("target") == "_blank"
+        assert EDHPLAY_URL == "https://edhplay.com/decks"  # straight to My Decks (Q52)
         assert "noopener" in (btn.get_attribute("rel") or "")
 
         dialog = _open_dialog(page)
