@@ -193,3 +193,73 @@ def test_a_card_picked_before_its_details_arrive_gets_them(server: Server, width
         assert page.locator(".erow.new").count() == 0
         assert errors == []
         browser.close()
+
+
+# Overlapping boxes among an element's laid-out children (a child of 0 size, or hidden, is left out).
+_OVERLAPS = """el => {
+  const kids = [...el.children].map(c => [c, c.getBoundingClientRect()])
+    .filter(([c, r]) => r.width > 0 && r.height > 0 && getComputedStyle(c).visibility !== 'hidden');
+  const out = [];
+  for (let i = 0; i < kids.length; i++) for (let j = i + 1; j < kids.length; j++) {
+    const [a, ra] = kids[i], [b, rb] = kids[j];
+    const w = Math.min(ra.right, rb.right) - Math.max(ra.left, rb.left);
+    const h = Math.min(ra.bottom, rb.bottom) - Math.max(ra.top, rb.top);
+    if (w > 1 && h > 1) out.push(a.className + ' / ' + b.className);
+  }
+  return out;
+}"""
+
+
+@pytest.mark.parametrize("width", [344, 1280])
+def test_a_picture_that_fails_keeps_the_editor_rows_layout(server: Server, width: int) -> None:
+    """A card picture that can't load (Scryfall down) in an editor row: the row keeps its layout
+    (the stand-in takes the picture's own place and size, no broken glyph, nothing overlapping
+    the quantity box), the same plain tile a row without a picture shows; the suggestion rows
+    keep theirs too."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = _link(server)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": width, "height": 900 if width > 500 else 800})
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        ctx.route(re.compile(r"https://cards\.scryfall\.io/.*"), lambda route: route.abort())
+        page = ctx.new_page()
+        errors: list[str] = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(f"{server.base}/decks/42/edit", wait_until="networkidle")
+        box = page.locator("#addname")
+        box.click()
+        box.press_sequentially("oathsw", delay=30)
+        page.locator("[role=option] .rich .ty").first.wait_for(timeout=3000)
+        page.wait_for_timeout(300)  # the suggestion pictures fail
+        rich = page.locator("[role=option] .rich").first
+        assert rich.evaluate(_OVERLAPS) == []
+        assert page.locator("[role=option] img.img-broken:visible").count() == 0
+        box.press("Enter")
+        row = page.locator(".erow.new").first
+        row.locator(".name .pip").first.wait_for(timeout=5000)
+        row.locator(".img-fallback").wait_for(timeout=3000)
+        # the stand-in is the row's one picture, in the picture's place and size
+        assert row.locator("img:visible").count() == 0
+        assert row.locator(".img-fallback").count() == 1
+        tile = row.locator(".img-fallback").bounding_box()
+        assert tile is not None and round(tile["width"]) == 40 and round(tile["height"]) == 56, tile
+        assert row.locator(".img-fallback").get_attribute("aria-label") == "Image unavailable"
+        assert row.evaluate(_OVERLAPS) == []
+        # the quantity box is the element at its own centre (nothing drawn over it)
+        assert row.locator("input").first.evaluate(
+            "i => { i.scrollIntoView({block: 'center'}); const r = i.getBoundingClientRect();"
+            " return document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) === i; }"
+        )
+        # the deck's own rows, whose pictures failed too, keep theirs
+        rows = page.locator(".erow:not(.new)")
+        for i in range(min(rows.count(), 4)):
+            assert rows.nth(i).evaluate(_OVERLAPS) == [], i
+        assert page.locator(".erow img:visible").count() == 0
+        assert page.evaluate("() => document.documentElement.scrollWidth") <= width
+        assert errors == []
+        browser.close()

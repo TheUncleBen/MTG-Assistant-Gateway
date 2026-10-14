@@ -116,3 +116,48 @@ def test_a_deck_list_that_cannot_be_read_says_so_with_try_again(server: Server) 
         assert page.locator("#decks-total").inner_text() == "Total decks: 1"
         assert errors == [], errors
         browser.close()
+
+
+def test_home_my_decks_panel_says_the_list_could_not_be_read(server: Server) -> None:
+    """Q64 on a cold home page: the My decks panel's placeholder becomes the /decks notice with
+    Try again (never "No decks yet"), at phone width without sideways scroll, and Try again loads
+    the page again, which reads Archidekt again."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = _link(server)
+    svc, ark = server.app.state.gateway.decks, server.ark
+    real_row = ark._listing_row
+    ark._listing_row = lambda d: {**real_row(d), "owner": None}
+    svc.deck_lists.drop("user-1")
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": 344, "height": 882})
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        ctx.route(
+            re.compile(r"https://cards\.scryfall\.io/.*"),
+            lambda route: route.fulfill(status=200, content_type="image/png", body=PNG),
+        )
+        page = ctx.new_page()
+        page.set_default_timeout(10_000)
+        errors: list[str] = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(f"{server.base}/", wait_until="commit")
+        page.wait_for_selector(".recent.skeleton", state="attached")
+        note = page.wait_for_selector(".home .decks-unreadable[role=alert]")
+        assert note.inner_text().startswith("Your deck list couldn't be read from Archidekt.")
+        assert "No decks yet" not in page.content() and page.locator(".skeleton").count() == 0
+        again = page.get_by_role("link", name="Try again")
+        box = again.bounding_box()
+        assert box is not None and box["height"] >= 44, box
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+        ark._listing_row = real_row  # Archidekt reads normally again
+        with page.expect_navigation():
+            again.click()
+        page.wait_for_selector(".recent a", timeout=10_000)
+        assert page.locator(".decks-unreadable").count() == 0
+        assert "All decks (1)" in page.content()
+        assert errors == [], errors
+        browser.close()
