@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import dataclasses
+import datetime
 import json
 import logging
 import math
@@ -49,8 +50,10 @@ from .archidekt import (
     Patience,
     QuillDoc,
     _owned_by,
+    apply_writes,
     art_url,
     backup_name,
+    backup_writes,
     finish_modifier,
     front_face,
     jwt_exp,
@@ -59,6 +62,7 @@ from .archidekt import (
     patient,
     plain_text,
     rich_text,
+    same_rich_text,
     wait_note,
     written_text,
 )
@@ -143,10 +147,22 @@ BACKUP_LATER = (
     "The unused backup copy will be deleted from the backup folder by itself once Archidekt allows it."
 )
 BACKUP_DELETE_TRANSIENT = frozenset({"rate_limited", "unavailable"})
+# A copy of a deck (clone) that failed or stopped after Archidekt made the copy (review D1): the
+# copy holds the cards, so the new-deck sentence ("no cards were added") would be wrong.
+COPY_MADE = (
+    "The copy {deck_id} was made on Archidekt, but the gateway could not check it. Look at it on "
+    "Archidekt before asking for another copy."
+)
 BACKUP_DELETE_MARGIN = 30
 BACKUP_DELETE_BACKOFF = 600
 BACKUP_DELETE_TRIES = 4
 BACKUP_DELETE_EVERY = 60.0  # seconds between the loop's passes
+# Review D4: before a later delete, the copy is read once and deleted only while it is as the
+# gateway made it: in the backup folder, with the name and description it was given, and with
+# Archidekt's updatedAt no later than this many seconds after the delete was queued (the gateway's
+# last write to the copy came before that; the slack covers the two clocks).
+BACKUP_UNCHANGED_SLACK = 120
+BACKUPS_REMEMBERED = 256  # backup copies made recently whose name and description are kept
 BROWSER_CLIENT = "__browser__"  # the same value as pages.BROWSER_CLIENT_ID
 # An administrator acting on a member's account from the admin pages (unlink): recorded in the
 # member's own activity log as done by an administrator, never as the member's browser.
@@ -1583,6 +1599,9 @@ class DeckService:
         self._progress: dict[str, dict[str, Any]] = {}
         self._archidekt_in_flight: dict[str, int] = {}
         self._link_locks: dict[str, asyncio.Lock] = {}
+        # backup copy id -> the name, description and folder id it was made with, until its
+        # unused delete is queued (review D4); only the newest BACKUPS_REMEMBERED are kept
+        self._backups_made: dict[str, dict[str, str]] = {}
         self.max_archidekt_per_user = MAX_ARCHIDEKT_PER_USER
         self.archidekt_budget = RateBudget(settings.archidekt_calls_per_10_min)
         # sub -> {matched card name (lower case): what the scan read}; set when scanning is on
@@ -1729,6 +1748,7 @@ class DeckService:
         ):
             raise refused
         self._audit("archidekt_linked", sub=sub, detail={"archidekt_username": session["username"]})
+        self._drop_backup_deletes_on_relink(sub)
         self.forget_member(sub)
         return self.status(sub)
 
@@ -2483,7 +2503,10 @@ class DeckService:
                 kind=kind,
                 rate_limited=(
                     _rate_limited_note(
-                        row["result"] or {}, pending=state == "pending", collection=kind == "collection"
+                        row["result"] or {},
+                        pending=state == "pending",
+                        collection=kind == "collection",
+                        clone=kind == "clone",
                     )
                     if stopped
                     else ""
@@ -2801,11 +2824,13 @@ class DeckService:
         # describe() while it runs.
         progress: dict[str, Any] = {}
         coll = row.get("kind") == "collection"  # the messages say "your collection", not "the deck"
+        clone = row.get("kind") == "clone"  # a copy holds the cards: never "no cards were added"
         self._progress[proposal_id] = progress
         # This task's own context: a rate limit is waited out instead of failing the apply halfway,
         # within one allowance for the whole apply (Q66)
         patient.set(Patience())
         wait_note.set(progress)
+        apply_writes.set(progress)  # every write of the apply counts as a change (review D1, D2)
         try:
             await lock.acquire()  # another apply on this deck may hold it
         except BaseException:  # cancelled while waiting (shutdown): never leave it in applying
@@ -2838,9 +2863,18 @@ class DeckService:
                     ) from exc
                 # One plain message for an apply that ran out of patience with Archidekt's 429s
                 # (Q41, Q66): what stopped it, how far it got, and to try again later.
+                # A failure after part of the change landed says how much (_partial_note); the
+                # stored detail is the same message the caller gets, so the chat card after a slow
+                # Approve and the review page say it too.
+                partial = (
+                    bool(progress.get("sent_entries") or progress.get("deck_id"))
+                    and exc.kind != "verify_mismatch"
+                )
                 detail = (
-                    f"{exc} {_rate_limited_note(progress, collection=coll)}"
+                    f"{exc} {_rate_limited_note(progress, collection=coll, clone=clone)}"
                     if exc.kind == "rate_limited"
+                    else f"{exc} {_partial_note(progress, collection=coll, clone=clone)}"
+                    if partial
                     else str(exc)
                 )
                 self.db.finish_proposal(
@@ -2853,18 +2887,16 @@ class DeckService:
                 )
                 if exc.kind == "rate_limited":
                     raise DeckError(exc.kind, detail, **{**exc.extra, **_sent(progress)}) from exc
-                if (
-                    progress.get("sent_entries") or progress.get("deck_id")
-                ) and exc.kind != "verify_mismatch":
-                    raise DeckError(
-                        exc.kind,
-                        f"{exc} {_partial_note(progress, collection=coll)}",
-                        **{**exc.extra, **_sent(progress)},
-                    ) from exc
+                if partial:
+                    raise DeckError(exc.kind, detail, **{**exc.extra, **_sent(progress)}) from exc
                 raise
             except BaseException as exc:  # cancelled or unexpected: never leave a proposal in applying
                 kind = "internal" if isinstance(exc, Exception) else "interrupted"
-                self.db.finish_proposal(proposal_id, state="failed", result={**progress, "error": kind})
+                unexpected = (
+                    f"Applying failed unexpectedly. {_partial_note(progress, collection=coll, clone=clone)}"
+                )
+                stored = {**progress, "error": kind, **({"detail": unexpected} if kind == "internal" else {})}
+                self.db.finish_proposal(proposal_id, state="failed", result=stored)
                 self._audit(
                     "proposal_failed",
                     sub=sub,
@@ -2873,9 +2905,7 @@ class DeckService:
                 if not isinstance(exc, Exception):
                     raise
                 logger.exception("apply failed")
-                raise DeckError(
-                    "internal", f"Applying failed unexpectedly. {_partial_note(progress, collection=coll)}"
-                ) from exc
+                raise DeckError("internal", unexpected) from exc
         finally:
             lock.release()
         self._audit("proposal_applied", sub=sub, detail={"proposal_id": proposal_id, "via": via})
@@ -3184,7 +3214,8 @@ class DeckService:
         spent.waits = RATE_LIMIT_WAITS
         allowance = patient.set(spent)
         try:
-            await self._call(sub, self.client.delete_deck, str(backup_id))
+            with backup_writes():
+                await self._call(sub, self.client.delete_deck, str(backup_id))
         except DeckError as exc:
             if exc.kind in BACKUP_DELETE_TRANSIENT:
                 self._queue_backup_delete(sub, proposal_id, progress, source_deck_id, why=exc.kind)
@@ -3221,6 +3252,7 @@ class DeckService:
             deck_id=str(source_deck_id),
             proposal_id=proposal_id,
             due=due,
+            expect=self._backups_made.pop(backup_id, None),
         )
         progress["backup_note"] = BACKUP_LATER
         self._audit(
@@ -3273,46 +3305,32 @@ class DeckService:
             )
             return {"skipped": sid}
         attempts = int(job["attempts"]) + 1
+        linked_at = (self.db.get_link(sub) or {}).get("created_at")
         gone = False
         try:
+            # Review D4: one read of the copy first; a 404 there means it is already gone.
+            copy = await self._call(sub, self.client.get_deck, backup_id)
+            if not _backup_as_made(copy, job):
+                return self._give_up_backup_delete(job, attempts, "copy_changed")
+            if (self.db.get_link(sub) or {}).get("created_at") != linked_at:
+                return {"relinked": sid}  # relinked meanwhile: the relink dropped this delete (D3)
             await self._call(sub, self.client.delete_deck, backup_id)
         except DeckError as exc:
+            if (self.db.get_link(sub) or {}).get("created_at") != linked_at:
+                return {"relinked": sid}  # an answer for another link proves nothing (D3)
             if exc.kind == "not_found":  # already gone from Archidekt: nothing left to do
                 gone = True
             elif exc.kind in BACKUP_DELETE_TRANSIENT and attempts < BACKUP_DELETE_TRIES:
-                wait = max(
-                    self.client.pacer.pause_left() + BACKUP_DELETE_MARGIN,
-                    BACKUP_DELETE_BACKOFF * 2 ** (attempts - 1),
-                )
-                due = int(time.time() + wait)
-                self.db.reschedule_backup_delete(sid, due=due, attempts=attempts)
-                self._audit(
-                    "backup_delete_failed",
-                    sub=sub,
-                    detail={
-                        "proposal_id": pid,
-                        "backup_deck_id": backup_id,
-                        "error": exc.kind,
-                        "later": True,
-                        "attempts": attempts,
-                        "due": due,
-                    },
-                )
-                return {"retry": sid, "attempts": attempts, "due": due}
+                return self._retry_backup_delete(job, attempts, exc.kind)
             else:
-                self.db.drop_backup_delete(sid)
-                self._reword_backup_note(sub, pid, sid, BACKUP_KEPT)
-                self._audit(
-                    "backup_delete_given_up",
-                    sub=sub,
-                    detail={
-                        "proposal_id": pid,
-                        "backup_deck_id": backup_id,
-                        "error": exc.kind,
-                        "attempts": attempts,
-                    },
-                )
-                return {"given_up": sid, "error": exc.kind}
+                return self._give_up_backup_delete(job, attempts, exc.kind)
+        except Exception:
+            # Review D5: an unexpected error is retried on the same schedule, never left due
+            # (where it would hold up every other queued delete), and counts towards the limit.
+            logger.exception("queued backup delete %s failed unexpectedly", sid)
+            if attempts < BACKUP_DELETE_TRIES:
+                return self._retry_backup_delete(job, attempts, "internal")
+            return self._give_up_backup_delete(job, attempts, "internal")
         self.db.drop_backup_delete(sid)
         self.db.clear_snapshot_backup(sid)
         self._reword_backup_note(sub, pid, sid, None)
@@ -3327,6 +3345,56 @@ class DeckService:
             },
         )
         return {"deleted": sid, **({"already_gone": True} if gone else {})}
+
+    def _retry_backup_delete(self, job: dict[str, Any], attempts: int, error: str) -> dict[str, Any]:
+        """A later delete's try failed for a passing reason: try again after at least the pause left
+        and at least BACKUP_DELETE_BACKOFF seconds, doubling with each failed try (Q77)."""
+        sid = job["snapshot_id"]
+        wait = max(
+            self.client.pacer.pause_left() + BACKUP_DELETE_MARGIN,
+            BACKUP_DELETE_BACKOFF * 2 ** (attempts - 1),
+        )
+        due = int(time.time() + wait)
+        self.db.reschedule_backup_delete(sid, due=due, attempts=attempts)
+        self._audit(
+            "backup_delete_failed",
+            sub=job["sub"],
+            detail={
+                "proposal_id": job["proposal_id"],
+                "backup_deck_id": job["backup_deck_id"],
+                "error": error,
+                "later": True,
+                "attempts": attempts,
+                "due": due,
+            },
+        )
+        return {"retry": sid, "attempts": attempts, "due": due}
+
+    def _give_up_backup_delete(self, job: dict[str, Any], attempts: int, error: str) -> dict[str, Any]:
+        """Stop trying to delete a queued backup copy (Q77): the copy stays in the backup folder,
+        the proposal's message says so again, and the audit says why."""
+        sid, sub, pid = job["snapshot_id"], job["sub"], job["proposal_id"]
+        self.db.drop_backup_delete(sid)
+        self._reword_backup_note(sub, pid, sid, BACKUP_KEPT)
+        self._audit(
+            "backup_delete_given_up",
+            sub=sub,
+            detail={
+                "proposal_id": pid,
+                "backup_deck_id": job["backup_deck_id"],
+                "error": error,
+                "attempts": attempts,
+            },
+        )
+        return {"given_up": sid, "error": error}
+
+    def _drop_backup_deletes_on_relink(self, sub: str) -> None:
+        """Review D3: a queued delete does not record which Archidekt account made the copy (Q84
+        defers that), so after any relink an answer to it could be the other account's. The
+        member's queued deletes are given up; the copies stay in the backup folder."""
+        for job in self.db.queued_backup_deletes():
+            if job.get("sub") == sub:
+                self._give_up_backup_delete(job, int(job.get("attempts") or 0), "relinked")
 
     def _reword_backup_note(self, sub: str, proposal_id: str, snapshot_id: str, note: str | None) -> None:
         """A queued delete ended (Q77): the proposal's stored result, if it is still the one from the
@@ -3398,18 +3466,27 @@ class DeckService:
             f"{snapshot_id}. To undo the change, ask the assistant to restore snapshot {snapshot_id}, or "
             f"copy this deck back by hand. Original deck: https://archidekt.com/decks/{deck.id}"
         )
-        folder = await self._call(
-            sub,
-            lambda token, *_: self.client.ensure_folder(token, name=self.settings.archidekt_backup_folder),
-        )
-        copy = await self._call(
-            sub,
-            lambda token, *_: self.client.backup_deck(
-                token, deck, name=name, folder_id=str(folder["id"]), description=description
-            ),
-        )
+        folder_name = self.settings.archidekt_backup_folder
+        with backup_writes():  # the backup copy is not a change to the deck
+            folder = await self._call(
+                sub,
+                lambda token, *_: self.client.ensure_folder(token, name=folder_name),
+            )
+            copy = await self._call(
+                sub,
+                lambda token, *_: self.client.backup_deck(
+                    token, deck, name=name, folder_id=str(folder["id"]), description=description
+                ),
+            )
         backup = {"backup_deck_id": str(copy["id"]), "backup_url": str(copy.get("url") or "")}
         self.db.set_snapshot_backup(snapshot_id, **backup)
+        self._backups_made[str(copy["id"])] = {
+            "name": name,
+            "description": description,
+            "folder_id": str(folder["id"]),
+        }
+        while len(self._backups_made) > BACKUPS_REMEMBERED:
+            self._backups_made.pop(next(iter(self._backups_made)))
         return backup
 
     COLLECTION_TARGET = "collection"
@@ -3525,6 +3602,9 @@ class DeckService:
             )
         name = clean_text(str((row.get("changes") or {}).get("name") or "")) or f"Copy of - {deck.name}"
         copy = await self._call(sub, lambda token, *_: self.client.copy_deck(token, deck, name=name))
+        # Recorded at once, as _apply_create records its new deck (review D1): a stop from here on
+        # has made the copy, so the proposal stays failed and is never copied a second time.
+        progress["deck_id"] = str(copy["id"])
         verified = await self.get_deck(sub, str(copy["id"]))
         want = deck.counts_by_name()
         mismatches = _mismatches(verified.counts_by_name(), want)
@@ -4671,23 +4751,62 @@ async def _writing(progress: dict[str, Any] | None, work: Awaitable[Any]) -> Any
     return out
 
 
+def _iso_time(value: str) -> float | None:
+    """Seconds since the epoch for an ISO 8601 time as Archidekt writes it ("...Z", with or without
+    fractions; no zone read as UTC), or None when it cannot be read."""
+    try:
+        when = datetime.datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=datetime.UTC)
+    return when.timestamp()
+
+
+def _backup_as_made(copy: Deck, job: dict[str, Any]) -> bool:
+    """Whether a queued backup copy is still as the gateway made it (review D4): in the backup
+    folder it was made in, with the name and description it was given, and with Archidekt's
+    updatedAt no later than BACKUP_UNCHANGED_SLACK seconds after its delete was queued. Anything
+    missing or unreadable counts as changed, so the copy is kept."""
+    expect = job.get("expect")
+    if not isinstance(expect, dict):
+        return False
+    updated = _iso_time(copy.updated_at)
+    queued = job.get("queued_at")
+    return (
+        str(copy.parent_folder) == str(expect.get("folder_id"))
+        and copy.name == expect.get("name")
+        and same_rich_text(copy.description, str(expect.get("description") or ""))
+        and updated is not None
+        and isinstance(queued, int)
+        and updated <= queued + BACKUP_UNCHANGED_SLACK
+    )
+
+
 def _changed_anything(progress: dict[str, Any]) -> bool:
     """Whether an apply may have changed anything on Archidekt, by its progress or by the
     proposal's stored result (which holds it): deck rows (or collection records) sent, a deck
     created, or any write that landed or may have. The one definition of "changed nothing" for
     the apply-stopped messages, the unused backup copy and putting a proposal back to pending
-    (Q78). A backup copy made in the backup folder is not a change to the deck."""
+    (Q78). It fails closed: besides the writes the apply paths mark themselves (``_writing``), the
+    client marks every write sent inside an apply (``archidekt.apply_writes``, review D1, D2). A
+    backup copy made in the backup folder is not a change to the deck."""
     return bool(progress.get("sent_entries") or progress.get("deck_id") or progress.get("deck_written"))
 
 
-def _rate_limited_note(progress: dict[str, Any], *, pending: bool = False, collection: bool = False) -> str:
+def _rate_limited_note(
+    progress: dict[str, Any], *, pending: bool = False, collection: bool = False, clone: bool = False
+) -> str:
     """What an apply that ran out of patience with Archidekt's 429s had changed, and what to do
     (Q41, Q66): added to PATIENCE_SPENT in the message the member sees. ``progress`` is the apply's
     progress, or the proposal's stored result (which holds it): get_proposal's next_step is built
     from the same note, so the two always agree (review N1). A backup copy whose delete was
     refused is said to stay in the backup folder, or to be deleted later (review N4, Q77).
     ``pending``: nothing changed, so the proposal is pending again (Q78). ``collection``: a
-    collection proposal, whose target is "your collection"."""
+    collection proposal, whose target is "your collection". ``clone``: a copy of a deck, which
+    has nothing left to try once the copy is made (review D1)."""
+    if clone and progress.get("deck_id"):
+        return _partial_note(progress, clone=True)
     if progress.get("sent_entries") or progress.get("deck_id"):
         note = _partial_note(progress, collection=collection)
         return f"{note} Try the rest again in a few minutes with a new proposal."
@@ -4753,9 +4872,12 @@ def _progress_view(progress: dict[str, Any]) -> dict[str, Any]:
     return {k: progress[k] for k in keys if k in progress}
 
 
-def _partial_note(progress: dict[str, Any], *, collection: bool = False) -> str:
+def _partial_note(progress: dict[str, Any], *, collection: bool = False, clone: bool = False) -> str:
     """What a failed apply had already changed on Archidekt, for the message the user sees.
-    ``collection``: a collection proposal's apply, which counts collection records."""
+    ``collection``: a collection proposal's apply, which counts collection records. ``clone``: a
+    copy of a deck, made whole by one request, so once it exists it holds the cards (review D1)."""
+    if clone and progress.get("deck_id"):
+        return COPY_MADE.format(deck_id=progress["deck_id"])
     sent = int(progress.get("sent_entries") or 0)
     if not sent and progress.get("deck_id"):
         return f"The new deck {progress['deck_id']} was created on Archidekt, but no cards were added."

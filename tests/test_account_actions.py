@@ -1159,3 +1159,90 @@ async def test_likes_bookmarks_follows_comments_and_collection_edits_obey_the_wr
         assert r.status_code == 403 and r.json()["error"] == "writes_disabled", r.text
     finally:
         await b.aclose()
+
+
+# -- review D2: an action whose write landed, then whose check met Archidekt's long wait ---------------
+async def _own_comment(h, token: str, ark) -> int:
+    """Post a comment of the member's own on deck 43 (through a proposal) and return its id."""
+    res = await call(h, token, "propose_comment", {"deck_id": "43", "action": "post", "text": "Mine."})
+    await _press(h, token, res)
+    return next(c["id"] for c in ark.comments[300043] if c["text"] == rich_doc("Mine."))
+
+
+async def _collaborator_amy(h, token: str, ark, *, added: bool) -> None:
+    ark.follows["alice"] = {78}
+    if added:
+        await _propose_and_apply(
+            h, token, "propose_collaborator", {"deck_id": "42", "action": "add", "username": "amy"}
+        )
+
+
+@pytest.mark.parametrize(
+    "case", ["collaborator_add", "collaborator_remove", "comment_edit", "comment_delete", "create_folder"]
+)
+async def test_an_action_whose_write_landed_is_never_put_back_to_pending(
+    stack: Stack, monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    """Review D2 (Q78): the action's write reached Archidekt, then the re-read that checks it met a
+    429 longer than an apply may wait. Something changed, so the proposal stays failed and never
+    says "Nothing was changed" (every write of an apply counts, fail closed)."""
+    import httpx
+
+    from mtg_gateway import social
+    from mtg_gateway.archidekt import ArchidektClient
+
+    async def no_wait(self, seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(ArchidektClient, "_wait_out", no_wait)
+    monkeypatch.setattr(social, "FRESH_GAP", 0.0)
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    if case == "collaborator_add":
+        await _collaborator_amy(h, token, ark, added=False)
+        tool, args = "propose_collaborator", {"deck_id": "42", "action": "add", "username": "amy"}
+        method, path, landed = "POST", "/editors/", lambda: len(ark.editors.get(42, [])) == 1
+    elif case == "collaborator_remove":
+        await _collaborator_amy(h, token, ark, added=True)
+        tool, args = "propose_collaborator", {"deck_id": "42", "action": "remove", "username": "amy"}
+        method, path, landed = "DELETE", "/decks/editors/", lambda: ark.editors[42] == []
+    elif case in ("comment_edit", "comment_delete"):
+        mine = await _own_comment(h, token, ark)
+        if case == "comment_edit":
+            tool = "propose_comment"
+            args = {"deck_id": "43", "action": "edit", "comment_id": mine, "text": "Changed."}
+            method, path = "PATCH", "/comments/"
+            landed = lambda: any(c["text"] == rich_doc("Changed.") for c in ark.comments[300043])  # noqa: E731
+        else:
+            tool, args = "propose_comment", {"deck_id": "43", "action": "delete", "comment_id": mine}
+            method, path = "DELETE", "/comments/"
+            landed = lambda: all(c["id"] != mine for c in ark.comments[300043])  # noqa: E731
+    else:
+        tool, args = "propose_create_folder", {"name": "Brews"}
+        method, path = "POST", "/decks/folders/"
+        landed = lambda: any(f["name"] == "Brews" for f in ark.folders["alice"])  # noqa: E731
+    p = structured(await call(h, token, tool, args))
+    assert p["ok"] and p["state"] == "pending", p
+    orig = ark.transport.handler
+    wrote = {"x": False}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == method and path in req.url.path:
+            wrote["x"] = True
+            return orig(req)
+        if wrote["x"] and req.method == "GET":
+            return httpx.Response(429, json={"detail": "slow"}, headers={"Retry-After": "3600"})
+        return orig(req)
+
+    ark.transport.handler = handler
+    try:
+        out = await _browser_apply(h, p["proposal_id"])
+    finally:
+        ark.transport.handler = orig
+        h.app.state.gateway.decks.client.pacer._retry_until = 0
+    assert wrote["x"] and landed(), case
+    row = h.db.get_proposal(p["proposal_id"], SUB)
+    assert out["ok"] is False and row["state"] == "failed", (case, out, row["result"])
+    assert row["result"]["error"] == "rate_limited", row["result"]
+    assert "Nothing was changed" not in row["result"]["detail"], row["result"]["detail"]
+    assert "Part of this change had already reached Archidekt" in row["result"]["detail"]

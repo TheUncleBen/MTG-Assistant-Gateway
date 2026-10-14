@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import contextvars
 import copy
 import datetime
@@ -24,7 +25,7 @@ import random
 import re
 import time
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -880,6 +881,42 @@ patient: contextvars.ContextVar[Patience | None] = contextvars.ContextVar("archi
 wait_note: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
     "archidekt_wait_note", default=None
 )
+# Set around a member's apply (decks.py), to the apply's progress dict: every write ``_request``
+# sends inside the apply marks ``progress["deck_written"]`` once it succeeds or fails in a way that
+# may still have landed, so "the apply changed nothing" fails closed (review D1, D2, Q78): a write
+# path that forgets to say it wrote can never send a proposal back to pending. Only the backup
+# copy's own writes (``backup_writes``) are not a change.
+apply_writes: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+    "archidekt_apply_writes", default=None
+)
+_backup_write: contextvars.ContextVar[bool] = contextvars.ContextVar("archidekt_backup_write", default=False)
+# Answers after which Archidekt did not act on a write: a 429, a 403, a 404, a 401.
+NOT_ACTED_ON = frozenset({"rate_limited", "forbidden", "not_found", "auth"})
+
+
+@contextlib.contextmanager
+def backup_writes() -> Iterator[None]:
+    """The writes inside are the gateway's backup copy (its folder, the copy, its description, the
+    delete of an unused copy): they are not a change to what the apply changes, so they do not
+    mark the apply as having written."""
+    token = _backup_write.set(True)
+    try:
+        yield
+    finally:
+        _backup_write.reset(token)
+
+
+def _note_write(exc: ArchidektError | None) -> None:
+    """A write inside an apply succeeded (``exc`` None) or failed with ``exc``: mark the apply's
+    progress as written unless the request never left the gateway or Archidekt did not act on it."""
+    progress = apply_writes.get()
+    if progress is None or _backup_write.get():
+        return
+    if exc is not None and (not exc.sent or exc.kind in NOT_ACTED_ON):
+        return
+    progress["deck_written"] = True
+
+
 MAX_LIST_PAGES = 4  # deck-list pages of 50 followed for one member (200 decks)
 
 
@@ -1022,7 +1059,8 @@ class ArchidektClient:
                 self.stats["cache_hits"] += 1
                 logger.debug("archidekt cache hit %s", path)
                 return copy.deepcopy(value)
-        if method != "GET" and not path.startswith("/rest-auth/"):
+        is_write = method != "GET" and not path.startswith("/rest-auth/")
+        if is_write:
             # cleared before the write is sent: a write that fails halfway may still have landed
             self.forget_deck_reads()
             for listener in self.write_listeners:
@@ -1059,14 +1097,22 @@ class ArchidektClient:
                 retryable = exc.kind == "unavailable" and exc.retryable
                 if not retryable or attempt + 1 >= attempts:
                     self.stats["failures"] += 1
+                    if is_write:
+                        _note_write(exc)
                     raise
                 self.stats["retries"] += 1
                 await asyncio.sleep(self._backoff(attempt))
                 attempt += 1
                 continue
+            except BaseException:
+                if is_write:  # cancelled or unexpected while the write was under way
+                    _note_write(None)
+                raise
+            if is_write:
+                _note_write(None)
             if key is not None:
                 self._cache_put(key, copy.deepcopy(value))
-            elif method != "GET" and not path.startswith("/rest-auth/"):
+            elif is_write:
                 # and again once the write has landed: a list fetched while it was under way could
                 # otherwise be kept as fresh with the old rows
                 for listener in self.write_listeners:

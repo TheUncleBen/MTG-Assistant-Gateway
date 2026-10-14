@@ -495,3 +495,125 @@ async def test_the_delete_at_once_never_waits_inside_the_apply(
     assert row["result"]["backup_note"] == decks_mod.BACKUP_LATER, row["result"]
     assert len(h.db.queued_backup_deletes()) == 1
     assert h.app.state.gateway.decks.client.pacer._failures == 0
+
+
+def _kept(h, pid: str, snap_id: str, copy: int, ark: FakeArchidekt, error: str) -> None:
+    """The queued delete was given up: the copy stays on Archidekt, the snapshot still records
+    it, the proposal's message is back to the copy staying in the backup folder, and the audit
+    says why."""
+    assert h.db.queued_backup_deletes() == []
+    assert copy in ark.decks and ark.deleted == []
+    assert h.db.get_snapshot(snap_id, SUB)["backup_deck_id"] == str(copy)
+    row = h.db.get_proposal(pid, SUB)
+    assert row["result"]["backup_note"] == decks_mod.BACKUP_KEPT, row["result"]
+    assert decks_mod.BACKUP_KEPT in row["result"]["detail"]
+    assert decks_mod.BACKUP_LATER not in row["result"]["detail"]
+    [gave] = _events(h, "backup_delete_given_up")
+    assert gave["detail"]["error"] == error and gave["detail"]["backup_deck_id"] == str(copy), gave
+
+
+@pytest.mark.usefixtures("quick_waits")
+@pytest.mark.parametrize("who", ["amy", "alice"])
+async def test_a_relink_drops_the_members_queued_deletes_and_keeps_the_copies(stack: Stack, who: str) -> None:
+    """Review D3: a queued delete does not record which Archidekt account made the copy, so after a
+    relink (to another account, or the same one: any relink, the conservative choice) a 404 could
+    no longer be read as "already gone". The relink drops the member's queued deletes; the copies
+    stay in the backup folder, with the old sentence and an audit row."""
+    h, ark = stack.h, stack.ark
+    svc = h.app.state.gateway.decks
+    token = await linked_user(stack)
+    pid, result, seen = await _stop(h, ark, token)
+    copy, snap_id = int(result["backup_deck_id"]), result["snapshot_id"]
+    _calm(h, ark, seen)
+    from .test_decks_and_proxy import Browser
+
+    b = Browser(h)
+    try:
+        await b.login()
+        r = await b.link(who, f"pw-{who}")
+        assert r.status_code == 303, r.text
+    finally:
+        await b.aclose()
+    assert svc.status(SUB)["archidekt_username"] == who
+    _kept(h, pid, snap_id, copy, ark, "relinked")
+    _due_now(h)
+    assert await svc.delete_one_queued_backup() is None
+    assert copy in ark.decks and ark.deleted == []
+
+
+@pytest.mark.usefixtures("quick_waits")
+@pytest.mark.parametrize("change", ["renamed", "described", "moved", "edited"])
+async def test_a_copy_changed_since_it_was_made_is_kept(stack: Stack, change: str) -> None:
+    """Review D4: the later delete reads the copy once first and deletes it only while it is still
+    in the backup folder with the name and description the gateway gave it, and Archidekt's
+    updated time is no later than shortly after its delete was queued. Otherwise it gives up and
+    keeps the copy."""
+    h, ark = stack.h, stack.ark
+    svc = h.app.state.gateway.decks
+    token = await linked_user(stack)
+    pid, result, seen = await _stop(h, ark, token)
+    copy, snap_id = int(result["backup_deck_id"]), result["snapshot_id"]
+    _calm(h, ark, seen)
+    if change == "renamed":
+        ark.decks[copy]["name"] = "My own brew now"
+    elif change == "described":
+        ark.decks[copy]["description"] = "Kept on purpose."
+    elif change == "moved":
+        ark.deck_folder[copy] = 1000 + 77  # the account's root folder
+    else:
+        later = time.gmtime(time.time() + decks_mod.BACKUP_UNCHANGED_SLACK + 600)
+        ark.decks[copy]["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S.000000Z", later)
+    _due_now(h)
+    assert await svc.delete_one_queued_backup() == {"given_up": snap_id, "error": "copy_changed"}
+    _kept(h, pid, snap_id, copy, ark, "copy_changed")
+
+
+@pytest.mark.usefixtures("quick_waits")
+async def test_an_unchanged_copy_is_read_once_then_deleted(stack: Stack) -> None:
+    """Review D4: one read of the copy (an ordinary call), then the delete."""
+    h, ark = stack.h, stack.ark
+    svc = h.app.state.gateway.decks
+    token = await linked_user(stack)
+    _pid, result, seen = await _stop(h, ark, token)
+    copy, snap_id = int(result["backup_deck_id"]), result["snapshot_id"]
+    _calm(h, ark, seen)
+    orig = ark.transport.handler
+    sent: list[tuple[str, str]] = []
+
+    def count(req: httpx.Request) -> httpx.Response:
+        sent.append((req.method, req.url.path))
+        return orig(req)
+
+    ark.transport.handler = count
+    _due_now(h)
+    assert await svc.delete_one_queued_backup() == {"deleted": snap_id}
+    assert sent == [("GET", f"/api/decks/{copy}/"), ("DELETE", f"/api/decks/{copy}/")], sent
+
+
+@pytest.mark.usefixtures("quick_waits")
+async def test_an_unexpected_error_is_retried_on_the_backoff_then_given_up(stack: Stack, monkeypatch) -> None:
+    """Review D5: a queued delete whose try raises something unexpected is not left due (where it
+    would hold up every other queued delete, one try a minute): it waits 10, 20, then 40 minutes
+    like any failed try, and the fourth failure gives up and keeps the copy."""
+    h, ark = stack.h, stack.ark
+    svc = h.app.state.gateway.decks
+    token = await linked_user(stack)
+    pid, result, seen = await _stop(h, ark, token)
+    copy, snap_id = int(result["backup_deck_id"]), result["snapshot_id"]
+    _calm(h, ark, seen)
+
+    async def broken(token: str, deck_id: str) -> None:
+        raise RuntimeError("unexpected")
+
+    monkeypatch.setattr(svc.client, "delete_deck", broken)
+    for attempt, minutes in ((1, 10), (2, 20), (3, 40)):
+        _due_now(h)
+        now = int(time.time())
+        out = await svc.delete_one_queued_backup()
+        assert out is not None and out["retry"] == snap_id and out["attempts"] == attempt, out
+        [job] = h.db.queued_backup_deletes()
+        assert job["attempts"] == attempt and now + minutes * 60 - 1 <= job["due"] <= now + minutes * 60 + 2
+        assert await svc.delete_one_queued_backup() is None  # not due again: nothing is held up
+    _due_now(h)
+    assert await svc.delete_one_queued_backup() == {"given_up": snap_id, "error": "internal"}
+    _kept(h, pid, snap_id, copy, ark, "internal")
