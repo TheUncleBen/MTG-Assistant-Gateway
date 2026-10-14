@@ -10,6 +10,7 @@ import copy
 import json
 import re
 
+from mtg_gateway.archidekt import rich_doc
 from mtg_gateway.mf_proxy import ALLOWED_TOOLS, BLOCKED_TOOLS, OWNED_ELSEWHERE
 
 from .test_browse_collection import NAV, Stack, api, linked, stack  # noqa: F401
@@ -50,7 +51,7 @@ async def test_cover_tags_and_folder_from_the_settings_page(stack: Stack) -> Non
         assert r.status_code == 200 and "Cover image saved" in r.text, r.text[:500]
         sent = stack.ark.updates[-1]
         assert sent == {"deck_id": 42, "customFeatured": sent["customFeatured"]}  # as archidekt.com sends it
-        assert sent["customFeatured"].endswith(f"/{uid}.webp")
+        assert sent["customFeatured"].endswith(f"/{uid}.webp?11")  # its image version: "11" when none
         assert len(db.list_snapshots("user-1")) == before + 1
         assert db.deck_covers(["42"])["42"]["scryfall_uid"] == uid
         page = await b.http.get("/decks/42", headers=NAV)
@@ -291,7 +292,7 @@ async def test_own_comments_can_be_edited_and_deleted_others_not(stack: Stack) -
             csrf=await alice.csrf("/decks"),
         )
         assert r.status_code == 200 and r.json()["comment"]["text"] == "second thoughts", r.text
-        assert stack.ark.comments[300042][0]["text"] == "second thoughts"
+        assert stack.ark.comments[300042][0]["text"] == rich_doc("second thoughts")  # a Quill document
         # another member, linked to another Archidekt account, cannot touch alice's comment
         stack.h.idp.user = {
             **stack.h.idp.user,
@@ -312,7 +313,7 @@ async def test_own_comments_can_be_edited_and_deleted_others_not(stack: Stack) -
         r = await api(
             bob, "DELETE", f"/social/api/decks/42/comments/{cid}", {}, csrf=await bob.csrf("/decks")
         )
-        assert r.status_code == 403 and stack.ark.comments[300042][0]["text"] == "second thoughts"
+        assert r.status_code == 403 and stack.ark.comments[300042][0]["text"] == rich_doc("second thoughts")
         r = await api(
             alice, "DELETE", f"/social/api/decks/42/comments/{cid}", {}, csrf=await alice.csrf("/decks")
         )
@@ -352,8 +353,8 @@ async def test_collection_row_details_save_condition_language_and_price(stack: S
         rec = stack.ark.collections["alice"][rid]
         assert (rec["modifier"], rec["condition"], rec["language"], rec["purchasePrice"]) == (
             "Foil",
-            "LP",
-            "DE",
+            2,  # Archidekt keeps the condition as a number: LP = 2
+            3,  # and the language: DE = 3
             1.5,
         )
         page = await b.http.get(r.headers["location"], headers=NAV)
@@ -361,7 +362,7 @@ async def test_collection_row_details_save_condition_language_and_price(stack: S
         # the JSON API takes the same fields; an empty price clears it, a bad language is refused
         r = await api(b, "POST", f"/collection/api/rows/{rid}", {"purchase_price": "", "condition": "NM"})
         assert r.status_code == 200, r.text
-        assert rec["purchasePrice"] is None and rec["condition"] == "NM"
+        assert rec["purchasePrice"] is None and rec["condition"] == 1  # NM
         r = await api(b, "POST", f"/collection/api/rows/{rid}", {"language": "1"})
         assert r.status_code == 400
         r = await api(b, "POST", f"/collection/api/rows/{rid}", {"purchase_price": "lots"})
