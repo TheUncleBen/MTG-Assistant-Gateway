@@ -2524,9 +2524,13 @@ ul.decklist.list .deck{margin-bottom:.5rem}
   color:var(--text-muted)}
 .editor .edithead h1.deckname{margin:0;font-size:24px}
 .editor .edithead .btn{margin:0}
-.editbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;
+/* the save bar sticks just under the site's top bar (theme.py: sticky, 50px tall, plus the safe
+   area in the app), never over it */
+.editbar{position:sticky;top:50px;z-index:20;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;
   background:var(--toolbar-bg);color:var(--toolbar-text);padding:.5rem 1rem;margin:0 -1rem 1rem;
   box-shadow:0 2px 6px rgba(0,0,0,.35)}
+@media (min-width:600px){ body.app .editbar{top:calc(50px + env(safe-area-inset-top))}
+  html:has(.editbar){scroll-padding-top:120px} }
 .editbar button{margin:0}
 .editbar .count{color:inherit;opacity:.85}
 .editbar .backup{display:inline-flex;align-items:center;gap:.35rem;margin:0;font-size:.9rem;
