@@ -35,10 +35,11 @@ async def stack(tmp_path, idp: FakeIdP, monkeypatch):
 
 
 @pytest.fixture
-def whole_apply(monkeypatch) -> None:
+def whole_apply(stack: Stack, monkeypatch) -> None:
     """For a test that checks the apply's own final reply: wait for the whole apply (on the fake it
     takes well under a second) instead of answering "applying" after 0.2 s, which a busy machine
-    could reach first (review N9: wait on state, not time)."""
+    could reach first (review N9: wait on state, not time). It asks for ``stack`` so it is set after
+    the stack's own 0.2 s, also when a test names it in ``usefixtures`` (set up before arguments)."""
     monkeypatch.setattr(decks_mod, "APPLY_WAIT_SECONDS", 30)
 
 
