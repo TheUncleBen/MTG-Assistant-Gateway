@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import secrets
 from typing import TYPE_CHECKING, Any
+from urllib.parse import quote
 
 from .archidekt import VOTE_DOWN, VOTE_NONE, VOTE_UP
 from .decklist import clean_text
@@ -102,6 +103,12 @@ async def _thread_comment(decks: DeckService, sub: str, deck_id: str, comment_id
     return {**found, "_me": thread.get("me")}
 
 
+def profile_url(username: str) -> str:
+    """The person's profile on archidekt.com (/u/<username>, as the site links it), where the
+    Follow button is."""
+    return "https://archidekt.com/u/" + quote(username, safe="")
+
+
 async def collaborator_target(
     decks: DeckService, sub: str, deck: Any, action: str, username: Any
 ) -> tuple[int, str]:
@@ -124,7 +131,10 @@ async def collaborator_target(
                 "not_found",
                 f"{want} is not among the people you follow on Archidekt (the gateway reads the "
                 f"first {FOLLOWING_PAGES} pages of that list). Collaborators are added from the "
-                "people you follow, as on Archidekt's own settings page.",
+                "people you follow, as on Archidekt's own settings page: follow them on Archidekt "
+                f"first ({profile_url(want)}), then add them.",
+                follow_username=want,
+                follow_url=profile_url(want),
             )
         user_id, name = hits[0], people[hits[0]]
         if any(c["user_id"] == user_id for c in current):
