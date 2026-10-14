@@ -1597,6 +1597,10 @@
     closeMenu();
     dragged = card;
     card.classList.add("dragging");
+    // The stack under the pointer fans out below its stack's box, over the top of the stack
+    // directly below, and a native drag keeps it open: a drop there would land on the card's own
+    // stack. The fan stays closed while a card is dragged (deckpage.py, .carddrag).
+    cards.classList.add("carddrag");
     try { e.dataTransfer.setData("text/plain", card.getAttribute("data-card")); e.dataTransfer.effectAllowed = "move"; } catch (err) { /* older browsers */ }
   });
   cards.addEventListener("dragover", function (e) {
@@ -1619,6 +1623,7 @@
   });
   cards.addEventListener("dragend", function () {
     if (dragged) dragged.classList.remove("dragging");
+    cards.classList.remove("carddrag");
     $$(".stack.dropping", cards).forEach(function (s) { s.classList.remove("dropping"); });
     setTimeout(function () { dragged = null; }, 0);  // swallow the click that follows a drop
   });
