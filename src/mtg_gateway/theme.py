@@ -201,10 +201,13 @@ a.skip{position:absolute;left:.5rem;top:-100px;z-index:50;padding:.6rem 1rem;bor
 a.skip:focus-visible{top:.5rem;outline-color:var(--on-orange)}
 main:focus{outline:none}
 /* an image that failed to load (feedback.js marks it): hide it, show the name in its place */
-img.img-broken{display:none}
+/* (!important: a row's own img rule, such as .erow .thumb's inline-flex, must not show it again) */
+img.img-broken{display:none !important}
 .img-fallback{display:flex;align-items:center;justify-content:center;width:100%;height:100%;min-height:2rem;
   padding:.5rem;text-align:center;font-size:.8rem;font-weight:700;color:var(--text-muted);
   background:linear-gradient(160deg,var(--surface-3),var(--surface-2));overflow-wrap:anywhere}
+/* too small for the name (a row's thumbnail): the plain tile a row without a picture shows */
+.img-fallback.img-fallback-mini{font-size:0;padding:0;min-height:0;overflow:hidden}
 svg.i{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;
   stroke-linejoin:round;vertical-align:-.15em;flex:none}
 @media (prefers-reduced-motion: reduce){ *{transition:none !important;animation:none !important} }
