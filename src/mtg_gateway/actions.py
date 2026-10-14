@@ -364,7 +364,12 @@ async def apply(
                 "Ask for a new proposal if you still want it gone.",
             )
         try:
-            result = {**(await decks.delete_deck(sub, deck_id, deck.name)), "verified": True}
+            # progress: the snapshot and the backup copy are recorded as every apply's are (review
+            # L1), so a stop that changed nothing deletes the copy or queues its delete (Q77)
+            result = {
+                **(await decks.delete_deck(sub, deck_id, deck.name, progress=progress)),
+                "verified": True,
+            }
         except DeckError as exc:
             if exc.kind == "backup_failed":  # nothing was deleted: the member can try again or reject
                 decks.db.finish_proposal(

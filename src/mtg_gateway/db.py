@@ -1922,6 +1922,13 @@ class Database:
                 (int(due), int(attempts), BACKUP_DELETE_JOB + snapshot_id),
             )
 
+    def backup_delete_queued(self, snapshot_id: str) -> bool:
+        """Whether the backup delete of ``snapshot_id`` is still queued (a relink or "Delete my
+        data" drops it)."""
+        return (
+            self._one("SELECT 1 FROM job_runs WHERE name = ?", (BACKUP_DELETE_JOB + snapshot_id,)) is not None
+        )
+
     def drop_backup_delete(self, snapshot_id: str) -> None:
         with self.tx() as c:
             c.execute("DELETE FROM job_runs WHERE name = ?", (BACKUP_DELETE_JOB + snapshot_id,))
