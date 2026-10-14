@@ -358,7 +358,7 @@ def banner_html(
         f"turns by hand, here on the gateway'>{icon('layers')} Goldfish</a>"
     )
     # Play on EDHPlay (R-154, T-161): EDHPlay is the online table; it has no import by link, so the
-    # button opens a short dialog whose Copy and launch copies the whole deck in its import format
+    # button opens a short box whose Copy and open edhplay.com copies the whole deck in its import format
     # (export_formats.to_edhplay) and opens the site (deck.js). Without script the link still
     # opens EDHPlay, and Export deck has the list.
     edh = to_edhplay(deck)
@@ -2281,12 +2281,13 @@ html.cardview-open{overflow:hidden}
 .deck-toast .close:hover{color:var(--text)}
 /* Play on EDHPlay's note: one line per point (deck.js) */
 .edhplay-toast .msg span{display:block} .edhplay-toast .msg span+span{margin-top:.3rem}
-/* its dialog: the editor's printing picker (.picker below), narrow and in the middle of the
-   window on a phone too (the picker is a bottom sheet there), with three numbered steps */
+/* its box: the editor's printing picker (.picker below), narrow and in the middle of the
+   window on a phone too (the picker is a bottom sheet there), with the import steps folded in */
 .picker.edhplay-dialog{padding:1rem;align-items:center}
 .picker.edhplay-dialog .pickbox{width:min(100%,30rem);max-height:100%;overflow:auto;padding:1rem 1.15rem;
   border-radius:var(--radius-panel);border-bottom:1px solid var(--border)}
-.edhplay-dialog .steps{margin:0;padding-left:1.4rem;display:flex;flex-direction:column;gap:.4rem}
+.edhplay-dialog details.disclosure{margin:0;padding-top:.35rem}
+.edhplay-dialog .steps{margin:.15rem 0 .2rem;padding-left:1.4rem;display:flex;flex-direction:column;gap:.4rem}
 .edhplay-dialog p{margin:0}
 .edhplay-dialog .acts{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.25rem}
 .edhplay-dialog .acts .btn{margin:0;justify-content:center}

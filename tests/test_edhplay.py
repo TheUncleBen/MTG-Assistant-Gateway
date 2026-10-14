@@ -156,11 +156,9 @@ CONTRAST = """() => {
   return worst;
 }"""
 
-STEPS = [
-    "Press Copy and launch EDHPlay below. It copies your deck and opens EDHPlay in a new tab.",
-    "On EDHPlay, choose Create Deck, then Import.",
-    "Paste, then press Import & Replace (it sets your commander).",
-]
+STEPS = ["On EDHPlay, choose Create Deck, then Import.", "Paste, then press Import & Replace."]
+GO = "Copy and open edhplay.com"
+COPIED = "Deck list copied. On EDHPlay: Create Deck, Import, paste, then Import & Replace."
 
 
 def _open_dialog(page):
@@ -172,7 +170,7 @@ def _open_dialog(page):
 
 def _launch(page) -> str:
     with page.context.expect_page() as popup:
-        page.locator(".edhplay-dialog a", has_text="Copy and launch EDHPlay").click()
+        page.locator(".edhplay-dialog a", has_text=GO).click()
     popup.value.wait_for_load_state()
     note = page.locator(".edhplay-toast")
     note.wait_for()
@@ -181,9 +179,10 @@ def _launch(page) -> str:
 
 @pytest.mark.parametrize(("width", "scheme"), [(390, "dark"), (673, "light"), (1366, "light")])
 def test_the_button_opens_a_dialog_then_copies_and_launches(server: Server, width: int, scheme: str) -> None:
-    """0.7.27 (T-161): the press opens a small dialog with three numbered steps and opens nothing
-    yet; Escape, the backdrop and Cancel close it and give focus back to the button, Tab stays
-    inside it; its Copy and launch EDHPlay copies the list and opens EDHPlay. The 0.7.25
+    """0.7.27 (T-161): every press opens a small box and opens nothing yet; Escape, the backdrop and
+    Cancel close it and give focus back to the button, Tab stays inside it; its Copy and open
+    edhplay.com copies the list and opens EDHPlay. The two import steps show open until the first
+    launch on this device, then folded under How to import (Ben, 01:36Z 10-14). The 0.7.25
     first-time tip is gone, and so is the mark it kept in this browser."""
     from playwright.sync_api import sync_playwright
 
@@ -210,12 +209,15 @@ def test_the_button_opens_a_dialog_then_copies_and_launches(server: Server, widt
         dialog = _open_dialog(page)
         assert opened == [] and len(page.context.pages) == 1  # nothing opens before the second press
         assert dialog.get_attribute("role") == "dialog" and dialog.get_attribute("aria-modal") == "true"
-        assert dialog.locator("h2").inner_text() == "Copy and launch EDHPlay"
+        assert dialog.locator("h2").inner_text() == "Play on EDHPlay"
+        how = dialog.locator("details.edhplay-steps")
+        assert how.get_attribute("open") is not None  # not launched from here yet: the steps show
+        assert how.locator("summary").inner_text() == "How to import"
         assert dialog.locator("ol li").all_inner_texts() == STEPS
         assert dialog.locator(".notice.warn").count() == 0  # nothing cut from this deck
-        go = dialog.locator("a", has_text="Copy and launch EDHPlay")
+        go = dialog.locator("a", has_text=GO)
         assert go.get_attribute("href") == EDHPLAY_URL and go.get_attribute("target") == "_blank"
-        assert page.evaluate("() => document.activeElement.textContent") == "Copy and launch EDHPlay"
+        assert page.evaluate("() => document.activeElement.textContent") == GO
         # the box sits in the middle of the window, inside it
         box = dialog.locator(".pickbox").bounding_box()
         vw = page.viewport_size["width"]
@@ -226,11 +228,14 @@ def test_the_button_opens_a_dialog_then_copies_and_launches(server: Server, widt
         assert page.evaluate(CONTRAST) >= 4.5
         assert _overflow(page) <= 0
         _shot(page, f"edhplay-dialog-{width}-{scheme}")
-        # Tab goes round inside the dialog: Cancel, the close button, Copy and launch
+        # Tab goes round inside the dialog: Cancel, the close button, How to import, Copy and open
         page.keyboard.press("Tab")
         assert page.evaluate("() => document.activeElement.textContent") == "Cancel"
         page.keyboard.press("Tab")
         assert page.evaluate("() => document.activeElement.getAttribute('aria-label')") == "Close"
+        page.keyboard.press("Tab")
+        assert page.evaluate("() => document.activeElement.textContent") == "How to import"
+        page.keyboard.press("Shift+Tab")
         page.keyboard.press("Shift+Tab")
         assert page.evaluate("() => document.activeElement.textContent") == "Cancel"
         # Escape, a press on the backdrop and Cancel each close it; focus goes back to the button
@@ -243,6 +248,9 @@ def test_the_button_opens_a_dialog_then_copies_and_launches(server: Server, widt
         _open_dialog(page).locator("button", has_text="Cancel").click()
         assert page.locator(".edhplay-dialog").count() == 0
         assert opened == [] and page.locator(".edhplay-toast").count() == 0
+        # closing without launching keeps the steps open for next time
+        assert _open_dialog(page).locator("details.edhplay-steps").get_attribute("open") is not None
+        page.keyboard.press("Escape")
 
         _open_dialog(page)
         _launch(page)
@@ -250,14 +258,21 @@ def test_the_button_opens_a_dialog_then_copies_and_launches(server: Server, widt
         assert opened and opened[0].startswith(EDHPLAY_URL)
         edh = to_edhplay(parse_deck(server.ark.decks[42]))
         assert edh.left_out == []
-        assert page.locator(".edhplay-toast .msg span").all_inner_texts() == [
-            "Deck list copied. On EDHPlay: Create Deck, then Import, paste and Import & Replace."
-        ]
+        assert page.locator(".edhplay-toast .msg span").all_inner_texts() == [COPIED]
         assert "warn" not in (page.locator(".edhplay-toast").get_attribute("class") or "")
         copied = page.evaluate("() => navigator.clipboard.readText()")
         assert copied.replace("\r\n", "\n") == edh.text
         assert page.evaluate(CONTRAST) >= 4.5
         assert page.evaluate("() => localStorage.getItem('mtg.edhplay.tip')") is None
+        # after a launch the box still opens on every press, with the steps folded away
+        page.reload(wait_until="networkidle")
+        dialog = _open_dialog(page)
+        how = dialog.locator("details.edhplay-steps")
+        assert how.get_attribute("open") is None and not dialog.locator("ol").is_visible()
+        assert page.evaluate(CONTRAST) >= 4.5 and _overflow(page) <= 0
+        _shot(page, f"edhplay-dialog-folded-{width}-{scheme}")
+        how.locator("summary").click()
+        assert dialog.locator("ol li").all_inner_texts() == STEPS
         assert errors == []
         browser.close()
 
@@ -289,7 +304,7 @@ def test_a_cut_sideboard_is_named_in_one_line(server: Server, width: int, scheme
         _shot(page, f"edhplay-cut-dialog-{width}-{scheme}")
         _launch(page)
         assert page.locator(".edhplay-toast .msg span").all_inner_texts() == [
-            "Deck list copied. On EDHPlay: Create Deck, then Import, paste and Import & Replace.",
+            COPIED,
             cut,
         ]
         assert "warn" in (page.locator(".edhplay-toast").get_attribute("class") or "")

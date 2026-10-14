@@ -2007,12 +2007,13 @@
   }
 })();
 
-/* Play on EDHPlay (R-154, T-161): the press opens a small dialog with the three steps of an
-   import on EDHPlay; its "Copy and launch EDHPlay" link copies the whole deck in EDHPlay's import
-   format (the data-list text, made by export_formats.to_edhplay) and opens edhplay.com in a new
-   tab (in the Android app, the phone's browser). The copy is made inside that press, the way the
-   app's WebView allows it. Sideboard cards left out to fit EDHPlay's 15-card limit are named in
-   the dialog and in the note that follows. Without script the button is a plain link to EDHPlay. */
+/* Play on EDHPlay (R-154, T-161): every press opens a small confirmation box; its "Copy and open
+   edhplay.com" copies the whole deck in EDHPlay's import format (the data-list text, made by
+   export_formats.to_edhplay) and opens edhplay.com (in the Android app, the phone's browser). The
+   two import steps show open until the member has launched once on this device, then sit folded
+   in the same box (Ben, 01:36Z 10-14). The copy is made inside that press, the way the app's
+   WebView allows it. Sideboard cards left out to fit EDHPlay's 15-card limit are named in the box
+   and in the note that follows. Without script the button is a plain link to EDHPlay. */
 (function () {
   "use strict";
   function copyNow(text) {
@@ -2034,8 +2035,12 @@
     }
     return Promise.resolve(false);
   }
-  // 0.7.25 and 0.7.26 kept a first-time tip's "seen" mark here; the dialog says it all now
+  // 0.7.25 and 0.7.26 kept a first-time tip's "seen" mark here; the box replaced that tip
   try { localStorage.removeItem("mtg.edhplay.tip"); } catch (e) { /* private window */ }
+  var STEPS_SEEN = "mtg.edhplay.steps";  // set once the member has launched from the box here
+  function stepsSeen() {
+    try { return localStorage.getItem(STEPS_SEEN) === "1"; } catch (e) { return false; }
+  }
   function make(tag, cls, text) {
     var e = document.createElement(tag);
     if (cls) e.className = cls;
@@ -2063,7 +2068,6 @@
     document.body.appendChild(t);
     if (!kind) setTimeout(function () { t.remove(); }, 8000);
   }
-  var inApp = / MTGAssistant\//.test(navigator.userAgent || "");
   var dialog = null, back = null;
   function close() {
     if (!dialog) return;
@@ -2077,7 +2081,7 @@
     if (!dialog) return;
     if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); return; }
     if (e.key === "Tab") {  // focus stays inside the dialog
-      var f = dialog.querySelectorAll("a[href],button:not([disabled])");
+      var f = dialog.querySelectorAll("a[href],button:not([disabled]),summary");
       var first = f[0], last = f[f.length - 1];
       if (!dialog.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
       else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
@@ -2097,7 +2101,7 @@
     dialog.addEventListener("click", function (e) { if (e.target === dialog) close(); });
     var box = make("div", "pickbox");
     var head = make("div", "head");
-    var h = make("h2", "", "Copy and launch EDHPlay");
+    var h = make("h2", "", "Play on EDHPlay");
     h.id = "edhplay-title";
     var x = make("button", "close icon-only", "×");
     x.type = "button";
@@ -2106,17 +2110,18 @@
     x.addEventListener("click", close);
     head.appendChild(h); head.appendChild(x);
     box.appendChild(head);
+    var how = make("details", "disclosure edhplay-steps");
+    how.open = !stepsSeen();
+    how.appendChild(make("summary", "", "How to import"));
     var steps = make("ol", "steps");
-    [
-      "Press Copy and launch EDHPlay below. It copies your deck and opens EDHPlay " + (inApp ? "in your phone's browser." : "in a new tab."),
-      "On EDHPlay, choose Create Deck, then Import.",
-      "Paste, then press Import & Replace (it sets your commander)."
-    ].forEach(function (s) { steps.appendChild(make("li", "", s)); });
-    box.appendChild(steps);
+    ["On EDHPlay, choose Create Deck, then Import.", "Paste, then press Import & Replace."]
+      .forEach(function (s) { steps.appendChild(make("li", "", s)); });
+    how.appendChild(steps);
+    box.appendChild(how);
     if (cut) box.appendChild(make("p", "notice warn", cutLine(cut, leftOut)));
     box.appendChild(make("p", "muted small", "The maybeboard and tokens aren't sent."));
     var acts = make("div", "acts");
-    var go = make("a", "btn btn-primary", "Copy and launch EDHPlay");
+    var go = make("a", "btn btn-primary", "Copy and open edhplay.com");
     go.href = link.href;
     go.target = "_blank";
     go.rel = "noreferrer noopener";
@@ -2131,13 +2136,14 @@
     go.addEventListener("click", function () {
       // the copy happens inside this press; the link itself opens EDHPlay (nothing is prevented)
       var copied = copyNow(list);
+      try { localStorage.setItem(STEPS_SEEN, "1"); } catch (e) { /* private window */ }
       close();
       copied.then(function (ok) {
         if (!ok) {
           note(["The deck list couldn't be copied here. Use More, then Export deck, to copy it."], "error");
           return;
         }
-        var lines = ["Deck list copied. On EDHPlay: Create Deck, then Import, paste and Import & Replace."];
+        var lines = ["Deck list copied. On EDHPlay: Create Deck, Import, paste, then Import & Replace."];
         if (cut) lines.push(cutLine(cut, leftOut));
         note(lines, cut ? "warn" : "");
       });
