@@ -331,19 +331,23 @@ class McpClient:
             await callback.stop()
 
     async def call(self, session: ClientSession, name: str, arguments: dict | None = None) -> dict:
-        """Call a tool and return its JSON result (tool errors come back as {"ok": False, ...})."""
+        """Call a tool and return its JSON result (tool errors come back as {"ok": False, ...}).
+        A proposal tool's text is plain lines for people (approve.proposal_text), so its result is
+        read from the structured content; every other tool's text is its JSON."""
         result = await session.call_tool(name, arguments or {})
         text = result.content[0].text if result.content else ""
+        try:
+            data = json.loads(text)
+        except ValueError:
+            data = result.structured_content if isinstance(result.structured_content, dict) else None
         if result.is_error:
             # a refusal is the tool's own JSON ({"ok": false, "error": ...}), marked isError
-            try:
-                data = json.loads(text)
-            except ValueError:
-                data = None
             if isinstance(data, dict) and data.get("ok") is False:
                 return data
             return {"ok": False, "error": "tool_error", "message": text}
-        return json.loads(text)
+        if data is None:
+            raise ValueError(f"{name} returned neither JSON nor structured content: {text[:200]!r}")
+        return data
 
     async def whoami(self) -> dict:
         """Full client flow: discovery, registration, browser login, token, initialize, tools/list, whoami."""
