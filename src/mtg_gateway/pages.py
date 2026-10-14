@@ -454,15 +454,19 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 sid=sid,
                 current="/proposals",
             )
-        notice = _notice(request.query_params.get("ok"), request.query_params.get("err"))
+        err = request.query_params.get("err")
+        on_top = _failure_on_top(p, err)
+        # the stored proposal's own words only, never the URL's, so a crafted link adds nothing
+        notice = _err(_page_step(p)) if on_top else _notice(request.query_params.get("ok"), err)
         title = (
             f"New deck: {p['deck_name']}"
             if p.get("kind") == "create_deck"
             else f"Proposal for {p['deck_name'] or p['deck_id']}"
         )
+        stamp = form_stamp(s.session_secret, f"proposal:{sub}:{pid}")
         return page(
             title,
-            notice + _proposal_body(p, _csrf(s, sid), form_stamp(s.session_secret, f"proposal:{sub}:{pid}")),
+            notice + _proposal_body(p, _csrf(s, sid), stamp, step=not on_top),
             sub=sub,
             sid=sid,
             current="/proposals",
@@ -1168,6 +1172,18 @@ OUT_OF_DATE_PAGE = (
 )
 
 
+FAILED_PLAIN_STEP = (
+    "Nothing else was changed. Ask your assistant for a new proposal if you still want these edits."
+)
+
+
+def _failure_on_top(p: dict[str, Any], err: str | None) -> bool:
+    """Review B6: right after a failed Apply (?err=failed), a failure the page explains on its own
+    (Archidekt's waits ran out, part of it reached Archidekt) is that one message, in the error
+    box, instead of the general "could not be applied" box above the same message lower down."""
+    return err == "failed" and p.get("state") == "failed" and _page_step(p) != FAILED_PLAIN_STEP
+
+
 def _page_step(p: dict[str, Any]) -> str:
     """What happens next, said to the person reading the review page. next_step speaks to the
     assistant (call this tool, do not call that one), so the page words it on its own."""
@@ -1212,9 +1228,7 @@ def _page_step(p: dict[str, Any]) -> str:
         )
         return f"Part of this change reached Archidekt before it stopped. Check {where}{undo}"
     if state == "failed":
-        return (
-            "Nothing else was changed. Ask your assistant for a new proposal if you still want these edits."
-        )
+        return FAILED_PLAIN_STEP
     if state == "rejected":
         by = {
             "assistant": " by your assistant (its reject_proposal call)",
@@ -1280,7 +1294,8 @@ def _risk_badge(risk: str) -> str:
     return "danger" if risk == "destructive" else "warn" if risk in ("high", "consent") else ""
 
 
-def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str = "") -> str:
+def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str = "", *, step: bool = True) -> str:
+    """``step=False``: what happens next is already in the error box above (_failure_on_top)."""
     if p.get("kind") == "details":
         rows, total = _detail_rows(p.get("rows"), p["diff"])
         summary = [f"<span>{total} deck detail{'s' if total != 1 else ''} changed; no cards change</span>"]
@@ -1350,7 +1365,8 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str = "") -> str:
         f"<div class='summary'>{''.join(summary)}</div>"
         f"<ul class='changes' aria-label='{aria}'>{rows}</ul>"
         f"<details class='raw'><summary>Plain-text diff</summary>{raw}</details>"
-        f"<p class='muted'>{html.escape(_page_step(p))}</p>" + _progress_html(p)
+        + (f"<p class='muted'>{html.escape(_page_step(p))}</p>" if step else "")
+        + _progress_html(p)
     )
     if p["state"] == "pending" and p["writes_enabled"]:
         destroy = p.get("risk") == "destructive"

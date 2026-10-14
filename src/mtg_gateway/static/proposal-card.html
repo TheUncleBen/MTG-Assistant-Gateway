@@ -405,6 +405,16 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
     return "";
   }
 
+  // Review B6: this press's apply failed (the gateway's answer says the proposal is failed now):
+  // its reason once, then where to see what happened, and to ask again unless the reason says so.
+  function failedText(msg) {
+    var text = msg.trim();
+    if (text && !/[.!?]$/.test(text)) text += ".";
+    text += (text ? " " : "") + "The review page shows what happened.";
+    if (!/new proposal/i.test(msg)) text += " Ask the assistant for a new proposal if you still want this change.";
+    return text;
+  }
+
   // The card may be drawn (or shown again by the host) long after the proposal was made, and the
   // proposal may have been rejected, applied or expired since. While it shows Approve and Reject,
   // it reads the proposal once more with get_proposal (read-only) and redraws it if it closed.
@@ -571,6 +581,7 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
           if (closed) { approval = null; render({ structuredContent: closed, _meta: {} }); }
           else { if (ok) ok.disabled = false; if (no) no.disabled = false; }
           if (!closed) setStatus(String(msg), "err");
+          else if (closed.state === "failed") setStatus(failedText(String(msg)), "err");
           else if (closed.state !== "applying") setStatus(closedText(closed) || String(msg), "");
           tellModel("The user pressed " + decision + " on the proposal card for " + pid + ", but the gateway answered: " + msg);
           return;
