@@ -489,7 +489,7 @@ def test_colour_tag_from_the_card_menu_and_undo(server: Server, width: int, sche
         with page.expect_response(EDIT_URL):
             page.locator(".bulkbar button", has_text="Take tag off").click()
         page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
-        assert not _rows(server, "Cultivate")[0].get("label")
+        assert _rows(server, "Cultivate")[0].get("label") == ",#656565"  # the site's empty tag (Q58)
         assert page.locator(".deckview .row[data-card='Cultivate'] .tagdot").count() == 0
         # Undo puts the tag back
         with page.expect_response(EDIT_URL) as r2:
