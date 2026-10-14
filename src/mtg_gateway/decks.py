@@ -3650,9 +3650,9 @@ class DeckService:
 
     def _writes_switch(self) -> None:
         """Refuse a hand write when MTG_WRITES_ENABLED is false, as every proposal is refused. The
-        deck settings page and the Folders page call it: deck delete and new folder (0.7.25), and the
-        cover, tags, deck move and folder rename (0.7.26). Hand likes, bookmarks, follows, comments
-        and collection edits do not."""
+        deck settings page and the Folders page call it: deck delete and new folder (0.7.25), the
+        cover, tags, deck move and folder rename (0.7.26); likes, bookmarks, follows, comments and
+        collaborators (social.py) and collection edits (collection.py) too."""
         if not self.settings.writes_enabled:
             raise DeckError(
                 "writes_disabled",

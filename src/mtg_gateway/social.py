@@ -139,6 +139,7 @@ class SocialService:
         return await self.decks.get_any_deck(sub, deck_id)
 
     async def vote(self, sub: str, deck_id: str, want: int) -> dict[str, Any]:
+        self.decks._writes_switch()
         self._me(sub)
         deck = await self.deck(sub, deck_id)
         if deck.comment_root is None:
@@ -161,6 +162,7 @@ class SocialService:
         {up, remove}, the body archidekt.com's own comment vote sends (its bundle, read 2026-10-10).
         The new score is worked out the way the site does, from the thread's points and the
         member's earlier vote."""
+        self.decks._writes_switch()
         uid, _name = self._me(sub)
         thread = await self.comments(sub, deck_id)
         found = _find(thread["comments"], comment_id)
@@ -187,6 +189,7 @@ class SocialService:
         return {"comment": comment_id, "vote": want, "points": points}
 
     async def bookmark(self, sub: str, deck_id: str, on: bool) -> dict[str, Any]:
+        self.decks._writes_switch()
         self._me(sub)
         await self.decks._call(sub, lambda t: self.client.bookmark_deck(t, deck_id, on=on))
         self.state.db.audit("deck_bookmarked", sub=sub, detail={"deck_id": deck_id, "on": on})
@@ -248,6 +251,7 @@ class SocialService:
         return out
 
     async def add_collaborator(self, sub: str, deck_id: str, user_id: int) -> dict[str, Any]:
+        self.decks._writes_switch()
         uid, _name = self._me(sub)
         if str(user_id) == uid:
             raise DeckError("invalid", "you own this deck already")
@@ -264,6 +268,7 @@ class SocialService:
     async def remove_collaborator(self, sub: str, deck_id: str, user_id: int) -> dict[str, Any]:
         """Remove by the person's user id: the editor row is looked up on this deck first, so
         only a collaborator of this deck can be removed through it."""
+        self.decks._writes_switch()
         row = next((c for c in await self.collaborators(sub, deck_id) if c["user_id"] == user_id), None)
         if row is None:
             return {"removed": False, "already": True, "verified": True}
@@ -280,6 +285,7 @@ class SocialService:
         return {"self": False, "following": user_id in await self.following(sub)}
 
     async def follow(self, sub: str, user_id: int, on: bool) -> dict[str, Any]:
+        self.decks._writes_switch()
         uid, _name = self._me(sub)
         if str(user_id) == uid:
             raise DeckError("invalid", "you cannot follow yourself")
@@ -333,6 +339,7 @@ class SocialService:
     async def edit_comment(self, sub: str, deck_id: str, comment_id: int, text: str) -> dict[str, Any]:
         """Change the text of one of the member's own comments (Archidekt's edit); verified by
         re-reading the thread."""
+        self.decks._writes_switch()
         text = _CONTROL.sub("", text.replace("\r\n", "\n")).strip()
         if not text:
             raise DeckError("invalid", "write something first")
@@ -354,6 +361,7 @@ class SocialService:
 
     async def delete_comment(self, sub: str, deck_id: str, comment_id: int) -> dict[str, Any]:
         """Delete one of the member's own comments; verified by re-reading the thread."""
+        self.decks._writes_switch()
         thread = await self.comments(sub, deck_id)
         self._own_comment(sub, thread, comment_id)
         await self.decks._call(sub, lambda t: self.client.comment_delete(t, comment_id))
@@ -371,6 +379,7 @@ class SocialService:
         return {"deleted": comment_id, "count": after["count"]}
 
     async def comment(self, sub: str, deck_id: str, text: str, parent: int | None) -> dict[str, Any]:
+        self.decks._writes_switch()
         _uid, name = self._me(sub)
         text = _CONTROL.sub("", text.replace("\r\n", "\n")).strip()
         if not text:
