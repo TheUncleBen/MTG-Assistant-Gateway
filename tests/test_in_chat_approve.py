@@ -299,7 +299,11 @@ async def test_the_review_page_right_after_a_failed_apply_says_it_once(stack: St
     """Review B6: right after a failed Apply (the page's ?err=failed), a failure the page explains
     on its own (here Archidekt's waits ran out) shows that one message in the error box, not the
     general "could not be applied" box above the same message further down. A failure with no
-    message of its own keeps the general box, once."""
+    message of its own keeps the general box, once.
+
+    Q78, Q79: the stop on Archidekt's waits changed nothing, so the proposal is pending again: the
+    card's reply says pending with the assistant's message (no "new proposal"), the page shows its
+    one box and the Apply button, and the card's code approves it again once Archidekt allows."""
     from mtg_gateway import archidekt as ark_mod
 
     h = stack.h
@@ -311,14 +315,29 @@ async def test_the_review_page_right_after_a_failed_apply_says_it_once(stack: St
     got = structured(
         await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": code})
     )
-    assert got["ok"] is False and got["error"] == "rate_limited" and got["state"] == "failed", got
+    assert got["ok"] is False and got["error"] == "rate_limited" and got["state"] == "pending", got
+    assert got["message"] == (
+        f"{ark_mod.PATIENCE_SPENT} Nothing was changed on Archidekt. The proposal is still pending, so it "
+        "can be approved again in a few minutes."
+    ), got["message"]
     b = Browser(h)
     await b.login()
     page = (await b.http.get(f"/proposals/{p['proposal_id']}?err=failed")).text
-    assert "could not be applied" not in page
+    assert "could not be applied" not in page and "new proposal" not in page
     # once as a message (the raw result further down quotes it too)
     assert page.count(f">{ark_mod.PATIENCE_SPENT}") == 1
-    assert f"<div class='notice error'>{ark_mod.PATIENCE_SPENT} Nothing was changed on Archidekt." in page
+    assert (
+        f"<div class='notice error'>{ark_mod.PATIENCE_SPENT} Nothing was changed on Archidekt. The "
+        "proposal is still pending, so you can apply it again in a few minutes.</div>"
+    ) in page
+    assert page.count("class='notice") == 1
+    assert "<span class='badge warn'>pending</span>" in page
+    assert "Apply these changes to Archidekt" in page
+    stack.ark.transport.handler = orig  # Archidekt allows it again: the same code approves it
+    again = structured(
+        await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": code})
+    )
+    assert again["ok"] is True and again["state"] == "applied", again
 
     stack.ark.transport.handler = orig  # the 429s are over
     stack.ark.fail_card_writes = True

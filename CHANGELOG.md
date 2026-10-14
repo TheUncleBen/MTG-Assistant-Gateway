@@ -87,6 +87,8 @@ stays at schema 12, so going back to 0.7.26 is a plain image swap. The Android a
   partly read list.
 - After an Approve whose apply failed, the chat card shows Failed with the reason once and no
   Approve or Reject buttons, and the review page shows the failure once instead of twice.
+- A Collection change that stopped partway now says how many of its changes reached Archidekt,
+  instead of saying nothing was changed.
 - The Home page's My decks panel and the assistant's deck list say when the deck list couldn't be
   read from Archidekt, as My decks does.
 - The deck card in ChatGPT no longer says "No connection to the gateway": the deck now comes with
@@ -108,6 +110,19 @@ stays at schema 12, so going back to 0.7.26 is a plain image swap. The Android a
   numbers are readable in light and dark.
 
 ### Changed
+- When Archidekt's waits stop an apply before anything changed on Archidekt, the proposal stays
+  pending instead of failing, so you can approve it again in a few minutes without asking for a new
+  proposal. It is checked against the deck again when applied, with a new snapshot and backup.
+  Nothing applies it again by itself. The chat card keeps Pending with working buttons, the review
+  page shows the one message with its Apply button, and History marks the snapshot of the stopped
+  try as taken before an apply that changed nothing. If any part of the change had reached
+  Archidekt, the proposal still fails as before.
+- When the backup copy an apply made can't be deleted right away because Archidekt asked the
+  gateway to wait (or answered with a server or network error), the gateway deletes it later by
+  itself: one copy at a time, never while Archidekt's pause runs, first once the pause is over,
+  then waiting 10, 20 and 40 minutes between tries, and giving up after 4 failed tries (the copy
+  then stays in the backup folder, as before). The messages say so until it is done. Waiting
+  deletes are kept in the database, so a restart doesn't lose them.
 - Only a Commander deck has a bracket, as on archidekt.com: moving a deck to another format clears
   its bracket, and a bracket for another format is refused.
 - A hand-set mana value is a whole number from 0 to 15, the range archidekt.com offers.

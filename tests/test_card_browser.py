@@ -526,6 +526,91 @@ def test_a_failed_approve_shows_failed_with_one_message_and_no_buttons(message: 
             browser.close()
 
 
+STOPPED = (
+    "Archidekt is busy and asked the gateway to wait longer than an apply may wait, so the apply "
+    "stopped. Nothing was changed on Archidekt. The proposal is still pending, so it can be approved "
+    "again in a few minutes."
+)
+
+
+def test_an_approve_stopped_back_to_pending_keeps_pending_and_working_buttons() -> None:
+    """Q78, Q79: an Approve whose apply Archidekt's waits stopped before anything changed answers
+    with state pending. The card keeps Pending, shows the assistant's message once (no "review
+    page" or "new proposal" sentence), and its Approve works again with the same code."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    refusal = {"ok": False, "error": "rate_limited", "message": STOPPED, "state": "pending"}
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            page = browser.new_page()
+            errors: list[str] = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            card = _open(page, {"structuredContent": PROPOSAL, "_meta": {APPROVAL_META_KEY: "c"}}, refusal)
+            card.locator("#approve:enabled").wait_for(timeout=5_000)
+            card.locator("#approve").click()
+            card.locator("#status.err").wait_for(timeout=5_000)
+            status = card.locator("#status")
+            assert status.inner_text() == STOPPED
+            assert card.locator("#state").inner_text().lower() == "pending"
+            assert card.locator(".status").count() == 1
+            card.locator("#approve:enabled").wait_for(timeout=5_000)
+            assert card.locator("#reject").is_enabled()
+            card.locator("#approve").click()
+            page.wait_for_function(
+                "() => window.log.filter(m => m.method === 'tools/call' && "
+                "m.params.name === 'confirm_proposal').length === 2",
+                timeout=5_000,
+            )
+            assert [c["params"]["arguments"]["approval"] for c in _confirms(page)] == ["c", "c"]
+            assert not errors, errors
+        finally:
+            browser.close()
+
+
+def test_a_long_approve_that_ends_back_at_pending_offers_approve_again() -> None:
+    """Q78, Q79: the Approve outlasted the gateway's wait ("applying"); the card follows it with
+    get_proposal and finds it pending again after a stop on Archidekt's waits. It shows Pending,
+    the stop's own message (not the assistant's next_step), and Approve with the card's code."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    applying = {**PROPOSAL, "state": "applying", "progress": {"sent_entries": 0, "of_entries": 3}}
+    back = {
+        **PROPOSAL,
+        "state": "pending",
+        "next_step": "for the assistant",
+        "result": {"error": "rate_limited", "detail": STOPPED, "snapshot_id": "s1"},
+    }
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            page = browser.new_page()
+            errors: list[str] = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            card = _open(
+                page, {"structuredContent": PROPOSAL, "_meta": {APPROVAL_META_KEY: "c"}}, applying, back
+            )
+            card.locator("#approve:enabled").wait_for(timeout=5_000)
+            card.locator("#approve").click()
+            card.locator("#state.applying").wait_for(timeout=5_000)
+            card.locator("#state.pending").wait_for(timeout=10_000)  # the card reads it every 5 s
+            card.locator("#status.err").wait_for(timeout=5_000)
+            assert card.locator("#status").inner_text() == STOPPED
+            card.locator("#approve:enabled").wait_for(timeout=5_000)
+            card.locator("#approve").click()
+            page.wait_for_function(
+                "() => window.log.filter(m => m.method === 'tools/call' && "
+                "m.params.name === 'confirm_proposal').length === 2",
+                timeout=5_000,
+            )
+            assert [c["params"]["arguments"]["approval"] for c in _confirms(page)] == ["c", "c"]
+            assert not errors, errors
+        finally:
+            browser.close()
+
+
 # WCAG contrast of each locked button's text against the card behind it (the button is see-through)
 LOCKED = """() => {
   function rgb(s) { const m = s.match(/[\\d.]+/g); return m ? m.map(Number) : [0, 0, 0, 0]; }

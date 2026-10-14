@@ -1180,8 +1180,19 @@ FAILED_PLAIN_STEP = (
 def _failure_on_top(p: dict[str, Any], err: str | None) -> bool:
     """Review B6: right after a failed Apply (?err=failed), a failure the page explains on its own
     (Archidekt's waits ran out, part of it reached Archidekt) is that one message, in the error
-    box, instead of the general "could not be applied" box above the same message lower down."""
-    return err == "failed" and p.get("state") == "failed" and _page_step(p) != FAILED_PLAIN_STEP
+    box, instead of the general "could not be applied" box above the same message lower down.
+    The same for an apply that Archidekt's waits stopped before it changed anything, which left
+    the proposal pending (Q78, Q79): its one message, with the Apply button below."""
+    if err != "failed":
+        return False
+    if p.get("state") == "pending":
+        result = p.get("result") if isinstance(p.get("result"), dict) else {}
+        return (
+            result.get("error") == "rate_limited"
+            and bool(p.get("writes_enabled"))
+            and not p.get("out_of_date")
+        )
+    return p.get("state") == "failed" and _page_step(p) != FAILED_PLAIN_STEP
 
 
 def _page_step(p: dict[str, Any]) -> str:
@@ -1193,6 +1204,13 @@ def _page_step(p: dict[str, Any]) -> str:
         return "Review only: deck writes are turned off on this gateway, so this can't be applied yet."
     if state == "pending" and p.get("out_of_date"):
         return OUT_OF_DATE_PAGE
+    if state == "pending" and result.get("error") == "rate_limited":
+        # Q78: Archidekt's waits stopped the last apply before it changed anything there
+        kept = f" {result['backup_note']}" if result.get("backup_note") else ""
+        return (
+            f"{PATIENCE_SPENT} Nothing was changed on Archidekt.{kept} The proposal is still pending, "
+            "so you can apply it again in a few minutes."
+        )
     if state == "pending":
         retry = (
             "The last try stopped before anything changed, because Archidekt's backup copy couldn't be made. "
