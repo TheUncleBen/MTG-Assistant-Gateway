@@ -28,6 +28,7 @@ from starlette.routing import Route
 from mtg_gateway import scan as scan_pkg
 from mtg_gateway import theme
 from mtg_gateway.app import create_app
+from mtg_gateway.clickguard import MIN_FORM_AGE, form_stamp
 from mtg_gateway.config import Settings
 from mtg_gateway.db import Database
 from mtg_gateway.oidc import OIDCClient
@@ -231,6 +232,26 @@ class FakeIdP:
         self.directory[sub]["groups"] = list(groups)
 
 
+def aged_stamp(settings: Settings, scope: str) -> str:
+    """A click-guard render stamp (``shown``) for ``scope``, old enough to be accepted: what a
+    guarded form carries once a person has had it on screen for a moment."""
+    return form_stamp(settings.session_secret, scope, now=time.time() - 2 * MIN_FORM_AGE)
+
+
+def consent_stamp(settings: Settings, login_id: str) -> str:
+    """The accepted ``shown`` stamp for the consent page of ``login_id``."""
+    return aged_stamp(settings, f"consent:{login_id}")
+
+
+def proposal_stamp(h: Harness, http: httpx.AsyncClient, pid: str) -> str:
+    """The accepted ``shown`` stamp for proposal ``pid``'s review page, for the member signed in
+    on ``http`` (the stamp is bound to that member)."""
+    sid = next(c.value for c in http.cookies.jar if c.name.endswith("mtg_session") and c.value)
+    sub = h.db.get_browser_session(sid)
+    assert sub, "not signed in"
+    return aged_stamp(h.settings, f"proposal:{sub}:{pid}")
+
+
 def make_settings(tmp_path: Path, **over: object) -> Settings:
     from cryptography.fernet import Fernet
 
@@ -311,7 +332,13 @@ class Harness:
         assert page.status_code == 200, page.text
         csrf = re.search(r"name='csrf' value='([0-9a-f]+)'", page.text).group(1)  # type: ignore[union-attr]
         go = await self.http.post(
-            "/authorize/confirm", data={"state": login_id, "csrf": csrf, "action": "approve"}
+            "/authorize/confirm",
+            data={
+                "state": login_id,
+                "csrf": csrf,
+                "action": "approve",
+                "shown": consent_stamp(self.settings, login_id),
+            },
         )
         assert go.status_code == 303, go.text
         return go

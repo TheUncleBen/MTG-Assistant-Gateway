@@ -35,8 +35,8 @@ async def _browser_apply(h, pid: str) -> dict:
     b = Browser(h)
     try:
         await b.login()
-        csrf = await b.csrf()
-        r = await b.http.post(f"/proposals/{pid}", data={"csrf": csrf, "action": "apply"})
+        url = f"/proposals/{pid}"
+        r = await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
         assert r.status_code == 303, r.text
         err = r.headers["location"].partition("?err=")[2]
         if err:  # the review page shows the refusal by its code

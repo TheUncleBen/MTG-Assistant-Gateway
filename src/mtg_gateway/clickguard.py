@@ -22,9 +22,11 @@ Two layers, both small:
    shows the page again. With JavaScript on that never triggers, because the script waits
    longer than that before enabling anything.
 
-A POST without a ``shown`` field is accepted: it cannot come from the gateway's own page (which
-always carries one), and a forged request would already need the page's CSRF token, which only
-the page itself holds. Scripts and tests that post the form directly keep working that way.
+Every guarded form needs its stamp: a POST without a ``shown`` field is refused the same way as
+one with a stamp that is too young or not ours (the page is shown again and nothing is granted).
+The gateway's own page always carries one, so only a hand-made request lacks it. Scripts and
+tests that post the form directly send a stamp made with ``form_stamp`` (aged past
+``MIN_FORM_AGE``), or the one from the page after waiting that long.
 """
 
 from __future__ import annotations
@@ -53,10 +55,9 @@ def form_stamp(secret: str, scope: str, now: float | None = None) -> str:
 
 def submitted_too_soon(secret: str, scope: str, value: str | None, now: float | None = None) -> bool:
     """True when a guarded form's submit must be refused and the page shown again: its
-    ``shown`` stamp is malformed, not ours, or younger than MIN_FORM_AGE. No stamp at all is
-    accepted (see the module docstring)."""
-    if value is None:
-        return False
+    ``shown`` stamp is missing, malformed, not ours, or younger than MIN_FORM_AGE."""
+    if not value:
+        return True
     ms_text, _, sig = value.partition(".")
     if not ms_text.isdigit() or len(ms_text) > 15:
         return True

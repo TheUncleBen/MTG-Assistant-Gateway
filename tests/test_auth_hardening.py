@@ -328,10 +328,26 @@ async def test_consent_submit_faster_than_a_person_is_shown_again(gw: Harness):
     assert r.status_code == 303 and r.headers["location"].startswith("https://idp.test/")
 
 
+@pytest.mark.parametrize("action", ["approve", "deny"])
+async def test_consent_submit_without_a_stamp_is_shown_again(gw: Harness, action: str):
+    """A post with no render stamp grants nothing: the consent page is shown again and the
+    login is still pending (the IdP was never visited)."""
+    login_id, csrf, _page = await _consent(gw)
+    r = await gw.http.post("/authorize/confirm", data={"state": login_id, "csrf": csrf, "action": action})
+    assert r.status_code == 303 and r.headers["location"] == f"/authorize/confirm?state={login_id}"
+    assert (await gw.http.get("/authorize/confirm", params={"state": login_id})).status_code == 200
+    aged = form_stamp(gw.settings.session_secret, f"consent:{login_id}", now=time.time() - 2 * MIN_FORM_AGE)
+    r = await gw.http.post(
+        "/authorize/confirm", data={"state": login_id, "csrf": csrf, "action": "approve", "shown": aged}
+    )
+    assert r.status_code == 303 and r.headers["location"].startswith("https://idp.test/")
+
+
 def test_form_stamp_rules():
     secret = "s" * 48
     now = time.time()
-    assert not submitted_too_soon(secret, "x", None)
+    assert submitted_too_soon(secret, "x", None, now)  # a guarded form always needs its stamp
+    assert submitted_too_soon(secret, "x", "", now)
     assert submitted_too_soon(secret, "x", form_stamp(secret, "x", now), now)
     assert not submitted_too_soon(secret, "x", form_stamp(secret, "x", now - 1), now)
     assert submitted_too_soon(secret, "y", form_stamp(secret, "x", now - 1), now)  # other scope
@@ -381,6 +397,56 @@ async def test_review_page_apply_is_guarded(stack: Stack):
     assert r.status_code == 303 and r.headers["location"].endswith("?ok=applied")
     assert len(ark.patches) == 1
     await b.aclose()
+
+
+@pytest.mark.parametrize("action", ["apply", "reject"])
+async def test_review_page_submit_without_a_stamp_changes_nothing(stack: Stack, action: str):
+    """Apply and Reject posted with no render stamp: the review page is shown again and the
+    proposal stays pending; nothing reaches Archidekt."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    p = structured(
+        await call(
+            h,
+            token,
+            "propose_deck_changes",
+            {"deck_id": "42", "changes": [{"action": "add", "card_name": "Arcane Signet"}]},
+        )
+    )
+    pid = p["proposal_id"]
+    b = Browser(h)
+    await b.login()
+    url = f"/proposals/{pid}"
+    r = await b.http.post(url, data={"csrf": await b.csrf(url), "action": action})
+    assert r.status_code == 303 and r.headers["location"] == url
+    assert ark.patches == [] and h.app.state.gateway.decks.describe("user-1", pid)["state"] == "pending"
+    r = await b.http.post(url, data={**await b.review_form(url), "action": action})
+    assert r.status_code == 303 and r.headers["location"].endswith(
+        "?ok=applied" if action == "apply" else "?ok=rejected"
+    )
+    await b.aclose()
+
+
+async def test_review_page_reject_without_writes_carries_a_stamp(tmp_path: Path, idp: FakeIdP):
+    """With writes off the page offers only a plain Reject form; it carries the stamp too."""
+    ark = FakeArchidekt()
+    settings = make_settings(tmp_path, writes_enabled=False, archidekt_base="https://ark.test/api")
+    async with running(Harness(settings, idp, archidekt=_client(settings, ark))) as h:
+        token = await linked_user(Stack(h, ark))
+        p = structured(
+            await call(
+                h,
+                token,
+                "propose_deck_changes",
+                {"deck_id": "42", "changes": [{"action": "add", "card_name": "Arcane Signet"}]},
+            )
+        )
+        b = Browser(h)
+        await b.login()
+        page = await b.http.get(f"/proposals/{p['proposal_id']}")
+        form = re.search(r"<form method='post' class='reject'>(.*?)</form>", page.text)
+        assert form and re.search(r"name='shown' value='\d+\.[0-9a-f]{32}'", form.group(1)), page.text
+        await b.aclose()
 
 
 def test_guard_script_ships_in_the_wheel():

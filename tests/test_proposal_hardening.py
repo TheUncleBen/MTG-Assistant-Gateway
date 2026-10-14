@@ -110,7 +110,7 @@ async def test_another_client_cannot_apply_a_pending_proposal(stack: Stack) -> N
     b = Browser(h)
     await b.login()
     url = f"/proposals/{p2['proposal_id']}"
-    r = await b.http.post(url, data={"csrf": await b.csrf(url), "action": "apply"})
+    r = await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
     await b.aclose()
     assert r.status_code == 303 and h.db.get_proposal(p2["proposal_id"], "user-1")["state"] == "applied"
 
