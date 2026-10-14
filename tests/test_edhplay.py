@@ -157,7 +157,7 @@ CONTRAST = """() => {
 }"""
 
 STEPS = [
-    "Copy and launch copies your deck and opens EDHPlay in a new tab.",
+    "Press Copy and launch EDHPlay below. It copies your deck and opens EDHPlay in a new tab.",
     "On EDHPlay, choose Create Deck, then Import.",
     "Paste, then press Import & Replace (it sets your commander).",
 ]
