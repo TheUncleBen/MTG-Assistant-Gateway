@@ -172,7 +172,12 @@
       text.className = "txt";
       var nm = document.createElement("span");
       nm.className = "nm";
-      while (li.firstChild) nm.appendChild(li.firstChild);
+      // the name's pieces (text and its highlight) stay one flex item, so the row's gap only
+      // separates the name from its mana cost, never "Oathsw" from "orn Giant"
+      var label = document.createElement("span");
+      label.className = "label";
+      while (li.firstChild) label.appendChild(li.firstChild);
+      nm.appendChild(label);
       if (c.mana_cost && window.MtgMana) nm.appendChild(window.MtgMana.mana(c.mana_cost));
       text.appendChild(nm);
       if (c.type_line) {

@@ -94,6 +94,13 @@ def test_add_a_card_with_rich_suggestions(server: Server, width: int) -> None:
         page.locator("[role=option] .rich .ty").first.wait_for(timeout=3000)
         assert page.locator("[role=option] .rich .ty").first.inner_text() == "Artifact"
         assert page.locator("[role=option] .rich .pip").count() >= 1
+        # the highlighted part and the rest of the name sit together, with no gap between them
+        gap = first.evaluate(
+            """li => { const m = li.querySelector('.rich .nm mark'), r = document.createRange();
+                       r.selectNodeContents(m.nextSibling);
+                       return r.getBoundingClientRect().left - m.getBoundingClientRect().right; }"""
+        )
+        assert abs(gap) < 1, gap
         box.press("ArrowDown")
         box.press("Enter")
         page.locator(".addstatus", has_text="Added 1 × Sol Ring").wait_for(timeout=3000)
