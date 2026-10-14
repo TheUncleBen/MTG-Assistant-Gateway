@@ -341,8 +341,8 @@ def section(key: str, ctx: Context) -> Section:
                     notes=(
                         "If sign-in fails with the published identity, remove the connector, add it again "
                         "choosing **Register automatically**, and tell the owner. Claude shows a plain "
-                        "tile for custom connectors, not their own icon (reported by developers, not in "
-                        "Anthropic's documentation), so there is no icon to set.",
+                        "tile for custom connectors rather than their own icon, so there is no icon to "
+                        "set.",
                     ),
                 ),
             ),
@@ -354,14 +354,16 @@ def section(key: str, ctx: Context) -> Section:
             (
                 Block(
                     paras=(
-                        "**Works on:** chatgpt.com in a computer's web browser, on Plus, Pro, Business, "
-                        "Enterprise or Edu, with Developer mode on (OpenAI's pages). Checked with this "
-                        "gateway on the Pro plan on 2026-10-10: ChatGPT used every tool, deck proposals "
-                        "included. Write tools may be blocked on Plus (reported).",
-                        '**Does not work on:** the ChatGPT iPhone and Android apps ("web only"), or the '
-                        f"Free plan (no Developer mode). Use [Claude]({pub}/install?for=claude) there "
-                        "instead, whose phone apps work. ChatGPT in a phone's browser or the desktop app is "
-                        "not documented: set it up on chatgpt.com on a computer.",
+                        "**You need:** a ChatGPT Plus, Pro, Business, Enterprise or Edu plan, and a "
+                        "computer. Set it up on chatgpt.com in the computer's web browser, not in a "
+                        "phone's browser or the ChatGPT desktop app.",
+                        "**Works on:** chatgpt.com in a computer's web browser, with Developer mode on "
+                        "(step 3 below). All tools work there, deck proposals included, though on some "
+                        "plans, Plus especially, ChatGPT may block the tools that change things: see "
+                        "**If ChatGPT blocks write tools** below.",
+                        "**Does not work on:** the ChatGPT iPhone and Android apps, or the Free plan, "
+                        f"which has no Developer mode. Use [Claude]({pub}/install?for=claude) there "
+                        "instead: its phone apps work.",
                     ),
                     agent=(
                         "If the person is in a ChatGPT phone app or on the Free plan, do not attempt the "
@@ -398,9 +400,8 @@ def section(key: str, ctx: Context) -> Section:
                         ),
                         Step("Paste the MCP server URL.", Copy("gpt-url", "Connector URL", mcp)),
                         Step(
-                            "Icon: choose the file from step 2. Do it now: ChatGPT reportedly lets you set "
-                            "the icon only while creating the connector (a user report, not OpenAI's "
-                            "documentation)."
+                            "Icon: choose the file from step 2. Do it now: you may not be able to add the "
+                            "icon after the connector is created."
                         ),
                         Step("Authentication: choose **OAuth**. Leave client ID and client secret empty."),
                         Step("Accept the risk notice and create the connector."),
@@ -431,10 +432,9 @@ def section(key: str, ctx: Context) -> Section:
                     "ChatGPT plugin file (Business/Enterprise admins only)",
                     paras=(
                         "The connector and the MTG skill in one file, for ChatGPT Business and Enterprise "
-                        "workspace owners and admins only: OpenAI's help pages say they upload it under "
-                        "Plugins in the admin console (reported, not yet tested with this gateway). Plus "
-                        "and Pro accounts have no plugin upload (checked on a Pro account, 2026-10-11): "
-                        "they use the connector, as above.",
+                        "workspace owners and admins only: upload it under **Plugins** in the admin "
+                        "console. If the upload does not work, add the connector as above instead. Plus "
+                        "and Pro accounts have no plugin upload: use the connector, as above.",
                     ),
                     link=Link(
                         "Download the ChatGPT plugin (ZIP)",
@@ -446,7 +446,7 @@ def section(key: str, ctx: Context) -> Section:
                 Block(
                     "If ChatGPT blocks write tools",
                     paras=(
-                        "OpenAI's pages report this may happen on Plus and Pro. Research, simulation, "
+                        "This can happen on Plus and Pro. Research, simulation, "
                         "reading decks, scanning and deck proposals still work. To apply a proposal, open "
                         "its review "
                         f"link or your [proposals]({pub}/proposals) and press Apply. To save scans, use "
@@ -461,7 +461,6 @@ def section(key: str, ctx: Context) -> Section:
             CLIENTS[key],
             (
                 Block(
-                    paras=("As documented by OpenAI (not yet tested with this gateway).",),
                     steps=(
                         Step(
                             "In a terminal, run this command.",
@@ -791,7 +790,7 @@ def add_setup_routes(server: MCPServer, state: AppState) -> None:
                 f"<div class='actions'>{picker}</div>"
                 "<p class='muted small'>On a phone? Claude's iPhone and Android apps work once the "
                 "connector is added on claude.ai or in the desktop app. ChatGPT's phone apps do not "
-                "support custom connectors, according to OpenAI.</p>"
+                "support custom connectors: set ChatGPT up on chatgpt.com on a computer.</p>"
                 + copy_field("mcp-url", "Connector URL", s.mcp_url)
                 + "</div>"
             )
