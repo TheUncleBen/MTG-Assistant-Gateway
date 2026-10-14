@@ -225,9 +225,16 @@
     var ph = document.createElement("span");
     ph.className = (own ? own + " " : "") + "ph img-fallback";
     var name = img.getAttribute("alt") || img.getAttribute("title") || "";
+    // a decorative picture (alt="": the card's name is already in its row) stays silent for
+    // screen readers when it fails too; one with a real alt keeps that name (review N8)
+    var decorative = img.hasAttribute("alt") && !img.getAttribute("alt").trim();
     ph.textContent = name || "Image unavailable";
-    ph.setAttribute("role", "img");
-    ph.setAttribute("aria-label", name ? name + " (image unavailable)" : "Image unavailable");
+    if (decorative) {
+      ph.setAttribute("aria-hidden", "true");
+    } else {
+      ph.setAttribute("role", "img");
+      ph.setAttribute("aria-label", name ? name + " (image unavailable)" : "Image unavailable");
+    }
     if (!img.parentNode) return;
     img.parentNode.insertBefore(ph, img.nextSibling);
     // a thumbnail's slot (28-56 px wide in the app's rows) is too narrow for a name; a tile
@@ -235,7 +242,7 @@
     if (ph.getBoundingClientRect().width > 0 && ph.getBoundingClientRect().width < 72) {
       ph.classList.add("img-fallback-mini");
       if (ph.getBoundingClientRect().height < 16) ph.classList.remove("img-fallback-mini");
-      else ph.setAttribute("title", ph.getAttribute("aria-label"));
+      else ph.setAttribute("title", ph.getAttribute("aria-label") || ph.textContent);
     }
   }, true);
 
