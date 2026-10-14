@@ -20,7 +20,7 @@ import re
 import time
 from collections import Counter
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from .archidekt import VOTE_UP, Deck, DeckCard, featured_scryfall_id, format_label, rich_text
 from .deck_stats import (
@@ -1817,7 +1817,8 @@ def deck_list_html(
 
 # Q64: Archidekt's deck list came back with entries whose owner couldn't be read, so they were
 # left out. Shown like the gateway's other "couldn't load" answers (busy.busy_body): the reason in
-# a panel and a Try again button that loads the page again (the list is read again, not cached).
+# a panel and a Try again button that loads the page again with reread=1, which reads the list
+# again (a list like this is otherwise kept for a minute: decks.DECK_LIST_PARTIAL, review N10).
 DECKS_UNREADABLE = "Your deck list couldn't be read from Archidekt. Try again in a moment."
 DECKS_PARTLY_UNREADABLE = (
     "Part of your deck list couldn't be read from Archidekt, so some decks may be missing here. "
@@ -1830,13 +1831,25 @@ def decks_unreadable_text(*, some_shown: bool) -> str:
     return DECKS_PARTLY_UNREADABLE if some_shown else DECKS_UNREADABLE
 
 
-def decks_unreadable_html(*, some_shown: bool, panel: bool = True) -> str:
+REREAD_KEEPS = ("q", "order", "view", "folder")  # the deck list's own query, kept by Try again
+
+
+def reread_href(path: str, query: Any = ()) -> str:
+    """Where Try again on the Q64 notice goes: ``path`` with the list's own query (REREAD_KEEPS,
+    from ``query``) and ``reread=1``. The page reads the list again and sends the browser back to
+    the address without ``reread``."""
+    kept = [(k, v) for k, v in dict(query).items() if k in REREAD_KEEPS and v]
+    return f"{path}?{urlencode([*kept, ('reread', '1')])}"
+
+
+def decks_unreadable_html(*, some_shown: bool, panel: bool = True, again: str = "") -> str:
     """The notice over (or instead of) the deck list when entries couldn't be read (Q64);
-    ``panel=False`` for a notice inside a panel already (the home page's My decks)."""
+    ``panel=False`` for a notice inside a panel already (the home page's My decks). ``again``:
+    the Try again link (``reread_href``); empty loads the same address again."""
     text = decks_unreadable_text(some_shown=some_shown)
     return (
         f"<div class='{'panel ' if panel else ''}decks-unreadable' role='alert'><p>{esc(text)}</p>"
-        "<div class='actions'><a class='btn btn-primary' href=''>Try again</a></div></div>"
+        f"<div class='actions'><a class='btn btn-primary' href='{esc(again)}'>Try again</a></div></div>"
     )
 
 

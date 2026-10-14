@@ -15,10 +15,10 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import RedirectResponse, Response
 
 from .companion import DECK_CSP
-from .deckpage import covers_for, decks_unreadable_html, image_url
+from .deckpage import covers_for, decks_unreadable_html, image_url, reread_href
 from .decks import DeckError
 from .pages import _csrf, browser_session, login_redirect
 from .theme import display_name, icon, render
@@ -70,7 +70,11 @@ def recent_panel_inner(
     /api/decks/mine?shape=recent answers with the same markup for the placeholder to swap in.
     ``unreadable``: Archidekt left entries of the list unreadable, so the panel says so with the
     /decks notice and Try again (Q64), over the covers it did read, never "No decks yet"."""
-    note = decks_unreadable_html(some_shown=bool(decks), panel=False) if unreadable else ""
+    note = (
+        decks_unreadable_html(some_shown=bool(decks), panel=False, again=reread_href("/"))
+        if unreadable
+        else ""
+    )
     if decks:
         return (
             "<div class='panel-head'><h2>My decks</h2>"
@@ -120,6 +124,9 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
         sub, sid = browser_session(state, request)
         if sub is None:
             return login_redirect("/")
+        if request.query_params.get("reread"):  # Try again on the Q64 notice: read the list again
+            state.decks.reread_deck_list(sub)
+            return RedirectResponse("/", 303)
         user = state.db.get_user(sub) or {}
         admin = bool(s.admin_group and s.admin_group in (user.get("groups") or []))
         who = user.get("preferred_username") or user.get("email") or "there"

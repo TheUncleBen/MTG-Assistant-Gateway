@@ -167,6 +167,9 @@ _acting_sub: ContextVar[str | None] = ContextVar("_acting_sub", default=None)
 # served for up to DECK_LIST_STALE seconds more while one refresh runs in the background.
 DECK_LIST_FRESH = 90.0
 DECK_LIST_STALE = 15 * 60.0
+# A list with entries Archidekt left unreadable (Q64) is kept only this long, and never served
+# stale: My decks and Home say so with Try again, which reads it again at once (review N10).
+DECK_LIST_PARTIAL = 60.0
 # How long a page waits for a cold deck list before it renders with a placeholder the browser
 # fills from /api/decks/mine (the fetch carries on and lands in the cache either way).
 DECK_LIST_COLD_WAIT = 1.5
@@ -239,10 +242,13 @@ class MemberCache:
     one fetch in flight. ``drop`` forgets a member's value and makes a fetch that was already in
     flight store nothing, so a write racing a read never leaves the old list behind."""
 
-    def __init__(self, fresh: float, stale: float):
+    def __init__(self, fresh: float, stale: float, *, keep_for: Callable[[Any], float | None] | None = None):
         self.fresh = fresh
         self.stale = stale
+        # ``keep_for(value)``: a shorter life for some values, in seconds, never served stale
+        self.keep_for = keep_for
         self._entries: dict[str, tuple[float, float, Any]] = {}  # sub -> (monotonic, wall, value)
+        self._limits: dict[str, float] = {}  # sub -> that shorter life, for the value kept now
         self._refreshing: dict[str, tuple[asyncio.Task[Any], float]] = {}  # task, when it started
         self._dropped: dict[str, float] = {}
 
@@ -252,6 +258,13 @@ class MemberCache:
         if hit is None:
             return None, "miss"
         age = time.monotonic() - hit[0]
+        limit = self._limits.get(sub)
+        if limit is not None:  # a value kept briefly: fresh, then gone (never served stale)
+            if age < limit:
+                return hit[2], "fresh"
+            self._entries.pop(sub, None)
+            self._limits.pop(sub, None)
+            return None, "miss"
         if age < self.fresh:
             return hit[2], "fresh"
         if age < self.stale:
@@ -265,6 +278,7 @@ class MemberCache:
 
     def drop(self, sub: str) -> None:
         self._entries.pop(sub, None)
+        self._limits.pop(sub, None)
         self._dropped[sub] = time.monotonic()
 
     def clear(self) -> None:
@@ -294,6 +308,11 @@ class MemberCache:
             value = await fetch()
             if self._dropped.get(sub, 0.0) <= started:  # not invalidated while it was fetched
                 self._entries[sub] = (time.monotonic(), time.time(), value)
+                limit = self.keep_for(value) if self.keep_for else None
+                if limit is None:
+                    self._limits.pop(sub, None)
+                else:
+                    self._limits[sub] = limit
             return value
 
         def done(t: asyncio.Task[Any]) -> None:
@@ -309,6 +328,7 @@ class MemberCache:
         self._refreshing[sub] = (task, started)
         if len(self._entries) > 10_000:
             self._entries.clear()
+            self._limits.clear()
             self._dropped.clear()
         return task
 
@@ -1564,7 +1584,11 @@ class DeckService:
         self._tag_lookups: dict[str, tuple[float, list[str]]] = {}
         # The member's deck list (list_decks), served from memory between Archidekt reads and
         # dropped by every write the gateway sends for that member.
-        self.deck_lists = MemberCache(DECK_LIST_FRESH, DECK_LIST_STALE)
+        self.deck_lists = MemberCache(
+            DECK_LIST_FRESH,
+            DECK_LIST_STALE,
+            keep_for=lambda rows: DECK_LIST_PARTIAL if getattr(rows, "unreadable", 0) else None,
+        )
         self.deck_list_wait = DECK_LIST_COLD_WAIT
         # (member, deck id) -> (when read, the deck): what a deck page showed, for the next view of
         # it (page_deck). Every write the gateway sends empties it; the counter tells a read that
@@ -1964,8 +1988,9 @@ class DeckService:
         backup copies marked ``backup: True``: those in the backup folder, those named like one,
         and those a snapshot here records as its copy (``db.backup_copies``). The list keeps the
         listing's ``complete`` and ``unreadable`` (see archidekt.DeckList); a list of unknown origin
-        is incomplete. A list with entries whose owner could not be read is not kept: My decks says
-        so with Try again (Q64), and trying again must read Archidekt again, not this answer."""
+        is incomplete. A list with entries whose owner could not be read is kept only briefly
+        (DECK_LIST_PARTIAL): My decks says so with Try again (Q64), which reads Archidekt again
+        through ``reread_deck_list``."""
         _token, row = self._token(sub)  # not linked: raise before touching the cache
         folder = self.settings.archidekt_backup_folder if self.settings.archidekt_backups else None
 
@@ -1981,8 +2006,6 @@ class DeckService:
         if rows is None:
             return None
         unreadable = getattr(rows, "unreadable", 0)
-        if unreadable:
-            self.deck_lists.drop(sub)
         known = self.db.backup_copies(sub)
         out = []
         for d in rows:
@@ -2062,6 +2085,14 @@ class DeckService:
     def decks_fetched_at(self, sub: str) -> float | None:
         """When the cached deck list was read from Archidekt (epoch seconds), None when none is."""
         return self.deck_lists.fetched_at(sub)
+
+    def reread_deck_list(self, sub: str) -> None:
+        """Try again on the Q64 notice: forget the member's list when the one kept has entries
+        Archidekt left unreadable, so the next page reads Archidekt again (review N10). A list
+        that read fine is kept, so an old Try again link costs Archidekt nothing."""
+        rows, _state = self.deck_lists.peek(sub)
+        if getattr(rows, "unreadable", 0):
+            self.deck_lists.drop(sub)
 
     async def get_deck(self, sub: str, deck_id: str) -> Deck:
         deck_id = _clean_deck_id(deck_id)
@@ -2433,7 +2464,11 @@ class DeckService:
                 in_chat=self.settings.apply_in_chat,
                 partial=bool((row["result"] or {}).get("sent_entries")),
                 kind=kind,
-                rate_limited=(row["result"] or {}).get("error") == "rate_limited",
+                rate_limited=(
+                    _rate_limited_note(row["result"] or {})
+                    if (row["result"] or {}).get("error") == "rate_limited"
+                    else ""
+                ),
                 closed_by=closed_by,
                 closed_by_app=closed_by_app,
             ),
@@ -3711,10 +3746,12 @@ class DeckService:
                 organised = await self._apply_organise(sub, deck.id, organise, progress)
             except DeckError as exc:
                 progress.update({"snapshot_id": snapshot_id, **backup, "fields": sorted(changes)})
+                # Only a proposal with other details had them written (review N3): a tags-only
+                # one wrote nothing before this step.
+                applied = " The deck's other details were applied." if changes else ""
                 raise DeckError(
                     exc.kind,
-                    f"{exc} The deck's other details were applied. A snapshot ({snapshot_id}) of the "
-                    "deck before the change was kept.",
+                    f"{exc}{applied} A snapshot ({snapshot_id}) of the deck before the change was kept.",
                 ) from exc
         result = {
             "snapshot_id": snapshot_id,
@@ -4268,14 +4305,18 @@ def details_rows(deck: Deck, wanted: dict[str, Any]) -> tuple[dict[str, Any], li
 def snapshot_details(snapshot: Deck) -> dict[str, Any]:
     """The deck details a snapshot recorded, in the shape ``details_rows`` compares: name,
     description, format (as its FORMAT_IDS key, when known), bracket, private and unlisted. The
-    description is Archidekt's own stored document, so it goes back with its formatting (Q70)."""
+    description is Archidekt's own stored document, so it goes back with its formatting (Q70).
+    The bracket is left out when the snapshot's deck was not a Commander deck: an older release
+    could set one on any format, and restoring such a deck must not meet the Q56 refusal (review
+    N2); moving the deck off Commander still clears a bracket it has now (``details_rows``)."""
     out: dict[str, Any] = {
         "name": snapshot.name,
         "description": QuillDoc(snapshot.description or ""),
-        "edh_bracket": snapshot.edh_bracket,
         "private": bool(snapshot.private),
         "unlisted": bool(snapshot.unlisted),
     }
+    if snapshot.format_id == FORMAT_IDS["commander"]:
+        out["edh_bracket"] = snapshot.edh_bracket
     if snapshot.format in FORMAT_IDS:
         out["deck_format"] = snapshot.format
     return out
@@ -4421,7 +4462,10 @@ async def _writing(progress: dict[str, Any] | None, work: Awaitable[Any]) -> Any
 
 def _rate_limited_note(progress: dict[str, Any]) -> str:
     """What an apply that ran out of patience with Archidekt's 429s had changed, and what to do
-    (Q41, Q66): added to PATIENCE_SPENT in the message the member sees."""
+    (Q41, Q66): added to PATIENCE_SPENT in the message the member sees. ``progress`` is the apply's
+    progress, or the failed proposal's stored result (which holds it): get_proposal's next_step
+    is built from the same note, so the two always agree (review N1). A backup copy whose delete
+    was refused is said to stay in the backup folder, as the review page shows (review N4)."""
     if progress.get("sent_entries") or progress.get("deck_id"):
         return f"{_partial_note(progress)} Try the rest again in a few minutes with a new proposal."
     if progress.get("deck_written"):
@@ -4429,7 +4473,8 @@ def _rate_limited_note(progress: dict[str, Any]) -> str:
             "Part of this change had already reached Archidekt, so check the deck. Try the rest again "
             "in a few minutes with a new proposal."
         )
-    return "Nothing was changed on Archidekt. Try again in a few minutes with a new proposal."
+    kept = f" {progress['backup_note']}" if progress.get("backup_note") else ""
+    return f"Nothing was changed on Archidekt.{kept} Try again in a few minutes with a new proposal."
 
 
 def next_tag_position(positions: list[Any]) -> str:
@@ -4603,8 +4648,11 @@ def _next_step(
     kind: str = "edit",
     closed_by: str | None = None,
     closed_by_app: str | None = None,
-    rate_limited: bool = False,
+    rate_limited: str = "",
 ) -> str:
+    """What the assistant should do next with a proposal in ``state``. ``rate_limited``: for an
+    apply that stopped on Archidekt's waits, the same note its stored message ends with
+    (``_rate_limited_note``), so the two never disagree (review N1)."""
     what = "these details" if kind == "details" else "this copy" if kind == "clone" else "this diff"
     # With the in-chat card (approve.py) the person decides on the card where the app shows one.
     card = (
@@ -4654,13 +4702,13 @@ def _next_step(
         return "Done. The copy exists on Archidekt (see result.deck_url) and matches the source deck."
     if state == "applied":
         return "Done. The deck on Archidekt matches this proposal."
+    if state == "failed" and rate_limited:
+        return rate_limited
     if state == "failed" and partial:
         return (
             "Part of this change reached Archidekt before it failed (see result.sent_entries). Check "
             "the deck; result.snapshot_id can be restored with propose_restore_snapshot."
         )
-    if state == "failed" and rate_limited:
-        return "Nothing was changed on Archidekt. Try again in a few minutes with a new proposal."
     if state == "failed":
         return "Nothing further was changed. Create a new proposal if you still want these edits."
     if state == "rejected":
