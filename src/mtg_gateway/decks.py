@@ -2847,7 +2847,7 @@ class DeckService:
                     # Q78: Archidekt's waits stopped it before anything changed there, so the
                     # proposal is pending again, to be approved again later (re-checked against the
                     # live deck then, with a new snapshot and backup). Its snapshot stays.
-                    detail = f"{exc} {_rate_limited_note(progress, pending=True, collection=coll)}"
+                    detail = f"{_sentence(exc)} {_rate_limited_note(progress, pending=True, collection=coll)}"
                     self.db.finish_proposal(
                         proposal_id,
                         state="pending",
@@ -2871,9 +2871,9 @@ class DeckService:
                     and exc.kind != "verify_mismatch"
                 )
                 detail = (
-                    f"{exc} {_rate_limited_note(progress, collection=coll, clone=clone)}"
+                    f"{_sentence(exc)} {_rate_limited_note(progress, collection=coll, clone=clone)}"
                     if exc.kind == "rate_limited"
-                    else f"{exc} {_partial_note(progress, collection=coll, clone=clone)}"
+                    else f"{_sentence(exc)} {_partial_note(progress, collection=coll, clone=clone)}"
                     if partial
                     else str(exc)
                 )
@@ -4792,6 +4792,13 @@ def _changed_anything(progress: dict[str, Any]) -> bool:
     client marks every write sent inside an apply (``archidekt.apply_writes``, review D1, D2). A
     backup copy made in the backup folder is not a change to the deck."""
     return bool(progress.get("sent_entries") or progress.get("deck_id") or progress.get("deck_written"))
+
+
+def _sentence(exc: Exception) -> str:
+    """An error's message as a whole sentence, so the note after it starts a new one
+    ("Archidekt returned HTTP 503. 1 of 3 ...", never "HTTP 503 1 of 3")."""
+    text = str(exc).rstrip()
+    return text if not text or text[-1] in ".!?" else text + "."
 
 
 def _rate_limited_note(
