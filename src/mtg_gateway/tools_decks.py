@@ -448,7 +448,15 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
                 return _card_result({"ok": True, **state.decks.reject(sub, proposal_id, via="app")}, None)
             return _card_result({"ok": True, **(await state.decks.apply(sub, proposal_id, via="app"))}, None)
         except DeckError as exc:
-            return _card_result(_tool_error(exc), None)
+            out = _tool_error(exc)
+            if "state" not in out:
+                # Review B6: the card shows the proposal as it now is (failed after an apply that
+                # failed, pending after a refusal that left it so), never a stale Pending.
+                try:
+                    out["state"] = state.decks.describe(_sub(), proposal_id)["state"]
+                except DeckError:
+                    pass
+            return _card_result(out, None)
 
     def _scan_session(sub: str, ref: str) -> dict[str, Any]:
         if state.scan is None:
