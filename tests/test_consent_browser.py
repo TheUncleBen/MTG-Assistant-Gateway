@@ -154,7 +154,17 @@ def _chromium_or_skip() -> str | None:
 
 
 def _launch(p, exe: str | None):
-    return p.chromium.launch(executable_path=exe, args=["--no-sandbox"]) if exe else p.chromium.launch()
+    # The cards run in a sandboxed iframe, which Chromium puts in a process of its own
+    # (IsolateSandboxedIframes). Playwright's request routing reaches such a frame a moment after
+    # it starts, so under load a card's first fetch could leave before the test's routes were on
+    # it and go to the real network (net::ERR_NAME_NOT_RESOLVED for mtg.test): the 0.7.27 review's
+    # flaky test_deck_card_groups_by_category_and_shows_rules_text_on_tap (7 card loads in 200 went
+    # out unrouted on a busy machine). Kept in the page's process, the frame is routed from its
+    # first request (0 in 200).
+    args = ["--disable-features=IsolateSandboxedIframes"]
+    if exe:
+        return p.chromium.launch(executable_path=exe, args=["--no-sandbox", *args])
+    return p.chromium.launch(args=args)
 
 
 @pytest.fixture
