@@ -620,9 +620,12 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
   background:var(--orange-tint)}
 .apply h2{margin:0 0 .4rem;font-size:1.25rem;font-weight:900} .apply p{margin:0 0 .25rem}
 .apply .choice{margin-top:.9rem}
-/* Locked (until the click guard unlocks it), Reject keeps a label that reads: outlined, not faded. */
-.apply form.guarded button.danger:disabled{opacity:1;background:transparent;color:var(--danger-text);
+/* Locked (until the click guard unlocks them), Apply and Reject keep labels that read: outlined in
+   their colour, not faded. */
+.apply form.guarded button[data-guard]:disabled{opacity:1;background:transparent;
   border:1px dashed currentColor}
+.apply form.guarded button.primary:disabled{color:var(--orange-text)}
+.apply form.guarded button.danger:disabled{color:var(--danger-text)}
 
 /* consent page: who is asking, and where you end up */
 .consent .ask{font-size:1.1rem;margin:0 0 .75rem}

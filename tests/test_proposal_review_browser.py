@@ -1,5 +1,5 @@
 """The proposal review page (/proposals/<id>) in headless Chromium, light and dark, desktop and
-phone (R-181): the locked Reject label reads at 4.5:1, a tag change says what it adds and takes
+phone (R-181): the locked Apply and Reject labels read at 4.5:1, a tag change says what it adds and takes
 off, a cover change names the cover it replaces, and an add or remove row is one line on a
 phone. Skipped without a Chromium build."""
 
@@ -103,7 +103,7 @@ def test_review_page_reads_in_both_themes_on_desktop_and_phone(server: Server) -
         browser = p.chromium.launch(executable_path=exe) if exe else p.chromium.launch()
         try:
             for theme in ("light", "dark"):
-                for vw, vh, phone in ((1280, 800, False), (390, 844, True)):
+                for vw, vh, phone in ((1280, 800, False), (673, 841, True), (390, 844, True)):
                     ctx = browser.new_context(
                         viewport={"width": vw, "height": vh},
                         color_scheme=theme,
@@ -113,10 +113,10 @@ def test_review_page_reads_in_both_themes_on_desktop_and_phone(server: Server) -
                     ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
                     page = ctx.new_page()
                     page.goto(f"{server.base}/proposals/{details}", wait_until="networkidle")
-                    reject = page.locator("form.guarded button[value=reject]")
-                    got = reject.evaluate(CONTRAST)
-                    assert got["disabled"], got  # locked until the click guard sees the page in use
-                    assert got["opacity"] == 1 and got["ratio"] >= 4.5, (theme, vw, got)
+                    for value in ("apply", "reject"):
+                        got = page.locator(f"form.guarded button[value={value}]").evaluate(CONTRAST)
+                        assert got["disabled"], got  # locked until the click guard sees the page in use
+                        assert got["opacity"] == 1 and got["ratio"] >= 4.5, (theme, vw, value, got)
                     rows = page.locator("ul.changes li")
                     tags = rows.filter(has_text="Adds ramp, landfall; removes budget")
                     assert tags.count() == 1 and "budget" in tags.locator(".was").inner_text()

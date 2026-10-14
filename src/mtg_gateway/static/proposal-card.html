@@ -67,6 +67,7 @@ ul.changes li.nopic{grid-template-columns:minmax(0,1fr) auto}
 .act{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);display:block}
 li.add .act{color:var(--green)} li.remove .act{color:var(--red)}
 .name{display:block;overflow-wrap:anywhere}
+.name .sub{display:block;font-size:12px;color:var(--muted);margin-top:1px}
 .qty{font-variant-numeric:tabular-nums;font-weight:600;white-space:nowrap;font-size:13px;color:var(--muted)}
 /* A change's text (Main → Maybeboard) may wrap, so on a narrow card it never squeezes the card name to a letter a line. */
 ul.changes li .qty{white-space:normal;text-align:right;overflow-wrap:anywhere;max-width:min(20em,32vw)}
@@ -224,15 +225,14 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
     if (!t) return "changed, " + len + " chars";
     return "“" + (t.length > 300 ? t.slice(0, 299) + "…" : t) + "”";
   }
-  // Tags say which are added and which taken off, then the whole list as it will be.
-  function detailText(r) {
-    if (r.field === "tags" && (Array.isArray(r.added) || Array.isArray(r.removed))) {
-      var bits = [];
-      if (r.added && r.added.length) bits.push("add " + r.added.join(", "));
-      if (r.removed && r.removed.length) bits.push("remove " + r.removed.join(", "));
-      return bits.join("; ") + " (then: " + String(r.after) + ")";
-    }
-    return arrow(r.before, r.after);
+  // Under a tags row, which tags are added and which taken off (as the review page says it).
+  function tagNote(r) {
+    if (r.field !== "tags") return "";
+    var bits = [];
+    if (Array.isArray(r.added) && r.added.length) bits.push("adds " + r.added.join(", "));
+    if (Array.isArray(r.removed) && r.removed.length) bits.push("removes " + r.removed.join(", "));
+    var s = bits.join("; ");
+    return s ? s.charAt(0).toUpperCase() + s.slice(1) : "";
   }
   // Which app made the proposal, by its name; never its internal client id.
   function creator(label) {
@@ -256,7 +256,7 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
       case "new_deck": return ["New deck", r.name + " (" + r.format + ", " + r.cards + " cards, " + (r.private ? "private" : "public") + ")", ""];
       case "restore": return ["Restore", "snapshot " + r.snapshot_id + " taken " + r.taken + " (" + r.rows + " rows)", ""];
       case "description": return ["Description", r.after_len ? excerpt(r.after_text, r.after_len) : "cleared", ""];
-      case "detail": return [String(r.field || "Setting"), detailText(r), ""];
+      case "detail": return [String(r.field || "Setting"), arrow(r.before, r.after), "", tagNote(r)];
       case "action": return [String(r.label || "Action"), String(r.text || "") + (r.after_text ? ": " + excerpt(r.after_text, String(r.after_text).length) : ""), r.cannot_undo ? "Can't be undone" : ""];
       default: return ["Change", r.text || "", ""];
     }
@@ -478,7 +478,8 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
       var li = el("li", String(r.kind || "change"));
       if (CARD_KINDS[r.kind] && r.name && images < MAX_IMAGES) { li.appendChild(cardImage(String(r.name))); images++; }
       else li.classList.add("nopic");
-      var n = el("span", "txt"); n.appendChild(el("span", "act", d[0])); n.appendChild(el("span", "name", d[1]));
+      var n = el("span", "txt"); n.appendChild(el("span", "act", d[0]));
+      var nm = el("span", "name", d[1]); if (d[3]) nm.appendChild(el("span", "sub", d[3])); n.appendChild(nm);
       li.appendChild(n); li.appendChild(el("span", "qty", d[2])); list.appendChild(li);
       shown++;
     }
