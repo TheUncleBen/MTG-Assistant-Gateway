@@ -133,3 +133,13 @@ async def test_the_save_bar_tick_box_decides_the_extra_copy_on_archidekt(stack: 
         assert snap and snap.get("backup_deck_id") and len(stack.ark.decks) == before + 1
     finally:
         await b.aclose()
+
+
+def test_the_editor_backup_tick_box_is_off_by_default() -> None:
+    """The extra Archidekt copy is the member's choice per save, unticked until they tick it."""
+    import re
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parent.parent / "src/mtg_gateway/companion_tools.py").read_text()
+    box = re.search(r"<input type='checkbox' name='archidekt_backup'[^>]*>", src)
+    assert box is not None and "checked" not in box.group(0)
