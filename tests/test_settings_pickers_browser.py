@@ -7,6 +7,7 @@ dark, text contrast at least 4.5:1. Skipped without a Chromium build."""
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -314,5 +315,52 @@ def test_tag_box_stays_a_plain_box_when_the_lookup_fails(server: Server) -> None
         with page.expect_navigation():
             page.keyboard.press("Enter")
         assert "Tag added on Archidekt." in page.locator("#tags").inner_text()
+        assert errors == []
+        browser.close()
+
+
+# The placeholder's width against the room the box gives it (inside its padding and border)
+PLACEHOLDER_ROOM = """() => {
+  const i = document.getElementById('collabname'), cs = getComputedStyle(i);
+  const c = document.createElement('canvas').getContext('2d');
+  c.font = cs.fontWeight + ' ' + cs.fontSize + ' ' + cs.fontFamily;
+  const room = i.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  return [c.measureText(i.placeholder).width, room];
+}"""
+
+
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+@pytest.mark.parametrize("width", [344, 390, 673, 1280])
+def test_collaborator_picker_fits_names_its_list_and_has_finger_sized_rows(
+    server: Server, width: int, scheme: str
+) -> None:
+    """L11: at 344 px (Fold cover) the placeholder "Pick someone you follow" shows whole, the box
+    and Add still on one row. L12: the list has an accessible name, its heading's words. L9: each
+    person in it is at least 44 px tall."""
+    from playwright.sync_api import sync_playwright
+
+    sid = _link(server)
+    exe = _exe()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, exe, server, sid, width, scheme)
+        page.goto(f"{server.base}/decks/42/settings#collaborators", wait_until="networkidle")
+        section = page.locator("#collaborators")
+        box = page.locator("#collabname")
+        text, room = page.evaluate(PLACEHOLDER_ROOM)
+        assert text <= room, (text, room)
+        b, a = box.bounding_box(), section.locator("form.addtag > button").bounding_box()
+        assert abs(b["y"] - a["y"]) < 2 and a["x"] > b["x"] + b["width"], (b, a)
+        assert section.locator("form.addtag > button").inner_text().strip() == "Add"
+        box.click()
+        listbox = page.locator("#collabname-list[role=listbox]")
+        listbox.wait_for(state="visible", timeout=3000)
+        assert listbox.get_attribute("aria-label") == "People you follow"
+        heights = [r["height"] for r in (o.bounding_box() for o in listbox.locator("[role=option]").all())]
+        assert heights and min(heights) >= 44, heights
+        assert page.evaluate("() => document.documentElement.scrollWidth") <= width
+        _contrast_ok(page, "#collabname-list li, #collaborators label, #collaborators .who span")
+        section.scroll_into_view_if_needed()
+        if os.environ.get("MTG_SHOTS"):
+            page.screenshot(path=str(Path(os.environ["MTG_SHOTS"]) / f"l9-l11-collab-{width}-{scheme}.png"))
         assert errors == []
         browser.close()

@@ -147,6 +147,24 @@
     });
     input.addEventListener("search", apply); // the box's own clear button
   }
+  // In the list of matches (L13): Down and Up move through it (Up from the first goes back to the
+  // box), Home and End go to its ends, Escape goes back to the box with the search kept.
+  if (input && results) {
+    results.addEventListener("keydown", function (e) {
+      var all = Array.prototype.slice.call(results.querySelectorAll("a"));
+      var at = all.indexOf(document.activeElement);
+      if (at === -1) return;
+      var to = null;
+      if (e.key === "ArrowDown") to = all[Math.min(at + 1, all.length - 1)];
+      else if (e.key === "ArrowUp") to = at === 0 ? input : all[at - 1];
+      else if (e.key === "Home") to = all[0];
+      else if (e.key === "End") to = all[all.length - 1];
+      else if (e.key === "Escape") to = input;
+      if (!to) return;
+      e.preventDefault();  // the keys move the focus, not the page
+      to.focus();
+    });
+  }
 
   // -- current entry in the rail ----------------------------------------------------------------
   var current = null;
