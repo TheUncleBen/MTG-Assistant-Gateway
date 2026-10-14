@@ -2559,9 +2559,10 @@ ul.plain.taglist{display:flex;flex-wrap:wrap;gap:.5rem;margin:0 0 1rem}
   align-items:center;justify-content:center;border-radius:50%}
 .taglist button.mini svg{width:14px;height:14px}
 /* a box (or list) and its button on one row, the button at the box's height: on a phone the box
-   narrows rather than the button dropping to a row of its own */
-.addtag,.moveform{display:flex;gap:.6rem;align-items:flex-end}
-.addtag .field,.moveform .field{margin:0;flex:0 1 24rem}
+   narrows rather than the button dropping to a row of its own; only with large text, where the
+   two can't share a row, does the button wrap below */
+.addtag,.moveform{display:flex;flex-wrap:wrap;gap:.6rem;align-items:flex-end}
+.addtag .field,.moveform .field{margin:0;flex:1 1 10rem;max-width:24rem;min-width:0}
 /* (main form > button is full width on a phone; here the button keeps its own width) */
 main .panel form.addtag > button,main .panel form.moveform > button{flex:none;width:auto}
 .tagbox .notice,.collabbox .notice,.folderbox .notice,.coverbox .notice{margin:.75rem 0 0}

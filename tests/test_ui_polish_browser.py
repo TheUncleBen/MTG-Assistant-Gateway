@@ -85,6 +85,8 @@ def test_editor_new_category_is_inline_and_controls_name_the_card(server: Server
         box = page.locator(".editbar input[type=checkbox]")
         if box.count():
             assert box.evaluate("e => getComputedStyle(e).appearance") == "none"
+            assert not box.is_checked()  # unticked until the member ticks it (0.7.27)
+            box.check()
             assert "check.svg" in box.evaluate("e => getComputedStyle(e).backgroundImage")
         foil = page.locator("input[name=foil]")
         assert foil.evaluate("e => getComputedStyle(e).appearance") == "none"

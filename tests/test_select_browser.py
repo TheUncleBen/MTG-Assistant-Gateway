@@ -21,7 +21,7 @@ pytest.importorskip("playwright")
 
 @pytest.fixture
 def server(tmp_path: Path):
-    s = Server(tmp_path)
+    s = Server(tmp_path, writes_enabled=True)  # one test adds to the collection by hand
     s.ark.add_side_row(42, "Sol Ring")
     s.start()
     try:
