@@ -661,11 +661,14 @@ class DeckList(list):  # type: ignore[type-arg]
     cut off at MAX_LIST_PAGES, when its count moved while the pages were read, when a deck came
     back on two pages (the list shifted, so another may have been skipped), or when fewer decks
     came back than Archidekt's count. Only a complete list may say a deck is gone
-    (DeckService.on_archidekt)."""
+    (DeckService.on_archidekt). ``unreadable`` counts the entries left out because their owner
+    field could not be read at all: My decks then says the list couldn't be read (Q64) instead of
+    showing it as whole."""
 
-    def __init__(self, rows: Any = (), *, complete: bool = False) -> None:
+    def __init__(self, rows: Any = (), *, complete: bool = False, unreadable: int = 0) -> None:
         super().__init__(rows)
         self.complete = complete
+        self.unreadable = unreadable
 
 
 def _owned_by(owner: Any, username: str, user_id: str | None) -> bool:
@@ -1231,7 +1234,7 @@ class ArchidektClient:
         # fewer decks than the count Archidekt gave: some were never seen
         short = any(len(seen) < n for n in counts)
         complete = not dropped and not cut_off and not repeated and not short and len(counts) <= 1
-        return DeckList(decks, complete=complete)
+        return DeckList(decks, complete=complete, unreadable=unreadable)
 
     async def search_decks(
         self,

@@ -8,6 +8,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ShortcutManager
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -77,6 +80,11 @@ import java.io.ByteArrayInputStream
  * address screen is shown without any prefill, so a link can never pick the gateway. Links to any
  * other site are not opened, and a message says what arrived.
  *
+ * Network coming back (Q63): while the activity is started it watches the phone's default network
+ * (ConnectivityManager), and when the network becomes usable again while the error box is showing
+ * over a page that failed to load (the gateway's offline page, a connection error), it reloads
+ * that page once by itself. [Reconnect] decides; a working page is never reloaded.
+ *
  * Fold posture (Jetpack WindowManager) is tracked here for the whole window and handed to the
  * scan panel, which lays itself out around the hinge.
  */
@@ -133,6 +141,9 @@ class MainActivity : ComponentActivity() {
     private var updateOffer: AppUpdate.Offer? = null
     /** A browser sign-in was handed to the gateway: the next gateway page means it worked (update check). */
     private var signInPosted = false
+    /** Reload over the error box when the network comes back (Q63); registered from onStart to onStop. */
+    private val reconnect = Reconnect()
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
     /**
      * uiMode stays in configChanges: recreating at once would reload the page under the person and
@@ -210,11 +221,56 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         windowInfo.addWindowLayoutInfoListener(this, mainExecutor, foldListener)
+        watchNetwork()
     }
 
     override fun onStop() {
+        unwatchNetwork()
         windowInfo.removeWindowLayoutInfoListener(foldListener)
         super.onStop()
+    }
+
+    /** The phone's default network, reported on the UI thread to [networkChanged]. */
+    private fun watchNetwork() {
+        if (networkCallback != null || !this::web.isInitialized) return // not set up: no page to reload
+        val cm = getSystemService(ConnectivityManager::class.java) ?: return
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+                networkChanged(
+                    caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                        caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
+                )
+            }
+
+            override fun onLost(network: Network) = networkChanged(false)
+        }
+        try {
+            cm.registerDefaultNetworkCallback(callback, Handler(mainLooper))
+            networkCallback = callback
+        } catch (e: RuntimeException) { // a SecurityException, or the system's callback limit
+            Log.w(TAG, "network callback not registered", e)
+        }
+    }
+
+    private fun unwatchNetwork() {
+        val callback = networkCallback ?: return
+        networkCallback = null
+        reconnect.reset()
+        try {
+            getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(callback)
+        } catch (e: IllegalArgumentException) {
+            Log.w(TAG, "network callback already gone", e)
+        }
+    }
+
+    /** The error box's Retry, pressed for the person, once, when the network has just come back. */
+    private fun networkChanged(usable: Boolean) {
+        if (networkCallback == null || isFinishing || isDestroyed) return
+        val errorShowing = errorBox.visibility == View.VISIBLE && !retryHome // not a refused page
+        if (reconnect.onNetwork(usable, errorShowing, SystemClock.elapsedRealtime())) {
+            errorBox.visibility = View.GONE
+            web.reload()
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

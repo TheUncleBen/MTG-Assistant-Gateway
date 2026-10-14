@@ -30,6 +30,7 @@ from .deckpage import (
     deck_list_controls_html,
     deck_list_html,
     deck_page_html,
+    decks_unreadable_html,
     featured,
 )
 from .decks import DeckError, current_client, owns_deck
@@ -83,13 +84,15 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         if failure is not None and (busy := busy_response(failure, request, page, sub=sub, sid=sid)):
             return busy
         pending = rows is None  # cold start: the shell goes out now, decks.js fills the list
+        unreadable = bool(getattr(rows, "unreadable", 0))  # entries Archidekt left unreadable (Q64)
         hidden = 0  # the gateway's backup copies, kept out of this list (D-03); the list is warm now
-        if not pending and not problem:
+        if not pending and not problem and not unreadable:  # unreadable: the list is not kept (Q64)
             try:
                 hidden = len(await decks.backup_copies(sub, wait=0.0) or [])
             except DeckError:
                 hidden = 0
         rows, folders, total = arrange_decks(rows or [], q=q, order=order, folder=folder)
+        unread_html = decks_unreadable_html(some_shown=total > 0) if unreadable else ""
         open_form = (
             "<form method='get' action='/decks/open' class='openform'>"
             "<label for='ref'>Open any Archidekt deck</label>"
@@ -111,13 +114,19 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             listing = f"<div data-decks-src='{_esc(src)}' aria-busy='true'>{deck_list_skeleton(view)}</div>"
         else:
             covers = covers_for(rows, state.db.deck_covers([str(d["id"]) for d in rows]))
-            listing = (f"<p class='notice error'>{_esc(problem)}</p>" if problem else "") + deck_list_html(
-                rows, covers=covers, q=q, view=view, folder=folder
-            )
+            listing = (f"<p class='notice error'>{_esc(problem)}</p>" if problem else "") + unread_html
+            if not (unreadable and not total):  # nothing read: the notice instead of "No decks yet"
+                listing += deck_list_html(rows, covers=covers, q=q, view=view, folder=folder)
         body = (
             notice
             + deck_list_controls_html(
-                q=q, order=order, view=view, folders=folders, folder=folder, total=total, pending=pending
+                q=q,
+                order=order,
+                view=view,
+                folders=folders,
+                folder=folder,
+                total=None if unreadable and not total else total,
+                pending=pending,
             )
             + listing
             + (
@@ -182,12 +191,16 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             out["html"] = recent_panel_inner(None if problem else recent, covers)
             out["count"] = len(recent)
         else:
+            unreadable = bool(getattr(rows, "unreadable", 0))  # Q64, as on /decks
             shown, folders, total = arrange_decks(rows or [], q=q, order=order, folder=folder)
             covers = covers_for(shown, state.db.deck_covers([str(d["id"]) for d in shown]))
-            out["html"] = (
-                f"<p class='notice error'>{_esc(problem[1])}</p>" if problem else ""
-            ) + deck_list_html(shown, covers=covers, q=q, view=view, folder=folder)
-            out["count"], out["total"], out["folders"] = len(shown), total, folders
+            out["html"] = (f"<p class='notice error'>{_esc(problem[1])}</p>" if problem else "") + (
+                decks_unreadable_html(some_shown=total > 0) if unreadable else ""
+            )
+            if not (unreadable and not total):
+                out["html"] += deck_list_html(shown, covers=covers, q=q, view=view, folder=folder)
+            out["count"], out["folders"] = len(shown), folders
+            out["total"] = None if unreadable and not total else total  # no count it doesn't know
         for d in rows or []:
             d.setdefault("url", f"https://archidekt.com/decks/{d['id']}")
         out["decks"] = rows or []

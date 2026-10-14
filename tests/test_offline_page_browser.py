@@ -1,8 +1,11 @@
 """The service worker's "You're offline" page in headless Chromium (T-125): it answers a page load
 that cannot reach the gateway (the browser offline, or the gateway's connections reset), and once
 the connection is back one reload, or its Try again link, loads the page again, also when the
-browser stopped the idle worker meanwhile. The gateway is reached through a small relay the test
-can cut, as a dropped network or a restarting gateway would. Skipped without a Chromium build."""
+browser stopped the idle worker meanwhile. Q63: the worker keeps trying a failed load for about
+5 s before it shows that page, and the page loads the address again by itself when the browser
+is back online or the gateway answers its check every few seconds. The gateway is reached through
+a small relay the test can cut, as a dropped network or a restarting gateway would. Skipped
+without a Chromium build."""
 
 from __future__ import annotations
 
@@ -10,7 +13,10 @@ import os
 import signal
 import socket
 import threading
+import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -127,7 +133,17 @@ def _kill_children() -> None:
                 pass
 
 
-def test_one_reload_after_the_connection_returns_loads_the_page(served) -> None:
+class Steps:
+    """The step a test is on, for the watchdog's message."""
+
+    def __init__(self) -> None:
+        self.now = "starting Chromium"
+
+
+def _drive(served, run: Callable[[Any, Any, str, Relay, Steps], None]) -> None:
+    """Start Chromium with a signed-in context whose page is controlled by the service worker, then
+    ``run(page, ctx, base, relay, steps)``. A watchdog kills the browser after STUCK_AFTER seconds,
+    so a call that never returns fails the test, naming its step, instead of hanging the run."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium_path()
@@ -135,7 +151,7 @@ def test_one_reload_after_the_connection_returns_loads_the_page(served) -> None:
         pytest.skip("no Chromium available for Playwright")
     server, relay, base = served
     sid = server.sign_in()
-    step = "starting Chromium"
+    steps = Steps()
     stuck = threading.Event()
 
     def give_up() -> None:
@@ -152,7 +168,7 @@ def test_one_reload_after_the_connection_returns_loads_the_page(served) -> None:
             ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": base}])
             page = ctx.new_page()
             page.set_default_timeout(15_000)
-            step = "first load and the service worker getting ready"
+            steps.now = "first load and the service worker getting ready"
             page.goto(f"{base}/decks")
             # bounded: a worker that never gets ready fails the test instead of hanging it
             ready = (
@@ -162,50 +178,125 @@ def test_one_reload_after_the_connection_returns_loads_the_page(served) -> None:
             assert page.evaluate(ready), "the service worker never became ready"
             page.goto(f"{base}/decks")  # this load goes through the worker
             assert page.evaluate("!!navigator.serviceWorker.controller")
-
-            step = "the browser offline, then online again"
-            ctx.set_offline(True)
-            page.goto(f"{base}/history")
-            assert _offline(page)
-            ctx.set_offline(False)
-            page.reload()
-            assert page.title().startswith("History"), page.title()
-
-            step = "the gateway cut off, then back"
-            relay.cut()
-            page.goto(f"{base}/history")
-            assert _offline(page)
-            relay.restore()
-            page.reload()
-            assert page.title().startswith("History"), page.title()
-
-            step = "the Try again link"
-            relay.cut()
-            page.goto(f"{base}/history")
-            assert _offline(page)
-            relay.restore()
-            with page.expect_navigation():
-                page.get_by_role("link", name="Try again").click()
-            assert page.title().startswith("History"), page.title()
-
-            # The gateway is cut off here rather than the browser set offline: on newer Chromium,
-            # Playwright's set_offline never returns once the worker has been stopped.
-            step = "the browser stopping the idle worker while offline"
-            cdp = ctx.new_cdp_session(page)
-            cdp.send("ServiceWorker.enable")
-            relay.cut()
-            page.goto(f"{base}/decks")
-            assert _offline(page)
-            cdp.send("ServiceWorker.stopAllWorkers")
-            relay.restore()
-            page.reload()
-            assert page.title().startswith("My decks"), page.title()
-            step = "closing Chromium"
+            run(page, ctx, base, relay, steps)
+            steps.now = "closing Chromium"
             browser.close()
     except Exception:
         if stuck.is_set():
-            pytest.fail(f"stuck for {STUCK_AFTER} s during: {step}")
+            pytest.fail(f"stuck for {STUCK_AFTER} s during: {steps.now}")
         raise
     finally:
         watchdog.cancel()
-    assert not stuck.is_set(), f"stuck for {STUCK_AFTER} s during: {step}"
+    assert not stuck.is_set(), f"stuck for {STUCK_AFTER} s during: {steps.now}"
+
+
+def _wait_for_title(page, start: str, timeout_ms: int) -> None:
+    """Wait (bounded) until a page with this title has loaded; survives the page's own reloads."""
+    page.wait_for_function(
+        "t => document.readyState !== 'loading' && document.title.startsWith(t)",
+        arg=start,
+        timeout=timeout_ms,
+    )
+
+
+def test_one_reload_after_the_connection_returns_loads_the_page(served) -> None:
+    def run(page, ctx, base: str, relay: Relay, steps: Steps) -> None:
+        # The offline page loads the address again by itself once the connection is back (Q63),
+        # so each reload here follows the cut at once, well before its first check.
+        steps.now = "the gateway cut off, then back"
+        relay.cut()
+        page.goto(f"{base}/history")
+        assert _offline(page)
+        relay.restore()
+        page.reload()
+        assert page.title().startswith("History"), page.title()
+
+        steps.now = "the Try again link"
+        relay.cut()
+        page.goto(f"{base}/history")
+        assert _offline(page)
+        relay.restore()
+        with page.expect_navigation():
+            page.get_by_role("link", name="Try again").click()
+        assert page.title().startswith("History"), page.title()
+
+        # The gateway is cut off here rather than the browser set offline: on newer Chromium,
+        # Playwright's set_offline never returns once the worker has been stopped.
+        steps.now = "the browser stopping the idle worker while offline"
+        cdp = ctx.new_cdp_session(page)
+        cdp.send("ServiceWorker.enable")
+        relay.cut()
+        page.goto(f"{base}/decks")
+        assert _offline(page)
+        cdp.send("ServiceWorker.stopAllWorkers")
+        relay.restore()
+        page.reload()
+        assert page.title().startswith("My decks"), page.title()
+
+    _drive(served, run)
+
+
+CHECK_EVERY = 5.0  # seconds between the offline page's checks (static/offline.js)
+
+
+def test_the_offline_page_reloads_itself_once_the_connection_is_back(served) -> None:
+    """Q63 (a): back online, the page loads again at once (the browser's online event, well before
+    the first check); with the gateway cut off, it asks /healthz every few seconds, never in a
+    tight loop, and loads the page again once the gateway answers."""
+
+    def run(page, ctx, base: str, relay: Relay, steps: Steps) -> None:
+        steps.now = "the browser offline, then online again"
+        ctx.set_offline(True)
+        page.goto(f"{base}/history")
+        assert _offline(page)
+        ctx.set_offline(False)
+        _wait_for_title(page, "History", int((CHECK_EVERY - 1) * 1000))
+
+        steps.now = "the gateway checked every few seconds while cut off"
+        checks: list[float] = []
+        page.on("request", lambda r: checks.append(time.monotonic()) if r.url.endswith("/healthz") else None)
+        relay.cut()
+        page.goto(f"{base}/history")
+        assert _offline(page)
+        shown = time.monotonic()
+        page.wait_for_timeout(2 * CHECK_EVERY * 1000 + 1500)
+        assert _offline(page), page.title()  # nothing answered: still the offline page
+        assert 2 <= len(checks) <= 3, [round(t - shown, 1) for t in checks]
+        assert all(b - a >= CHECK_EVERY - 1 for a, b in zip(checks, checks[1:], strict=False)), checks
+
+        steps.now = "the gateway back: the page loads by itself"
+        relay.restore()
+        _wait_for_title(page, "History", int((CHECK_EVERY + 6) * 1000))
+        after = len(checks)
+        page.wait_for_timeout(CHECK_EVERY * 1000 + 1000)
+        assert len(checks) == after, "the checks went on after the page had loaded"
+
+    _drive(served, run)
+
+
+def test_the_worker_keeps_trying_a_failed_load_for_about_five_seconds(served) -> None:
+    """Q63 (b): a gateway restart or a short drop (here 2.5 s) never shows the offline page; a
+    longer one shows it after about 5 s of tries."""
+
+    def run(page, ctx, base: str, relay: Relay, steps: Steps) -> None:
+        steps.now = "a 2.5 s drop during a page load"
+        relay.cut()
+        back = threading.Timer(2.5, relay.restore)
+        back.start()
+        try:
+            page.goto(f"{base}/history")
+        finally:
+            back.cancel()
+            relay.restore()
+        assert page.title().startswith("History"), page.title()
+
+        steps.now = "a longer cut shows the offline page after the tries"
+        relay.cut()
+        started = time.monotonic()
+        page.goto(f"{base}/history")
+        took = time.monotonic() - started
+        assert _offline(page)
+        assert 4.0 <= took <= 12.0, took
+        relay.restore()
+
+    _drive(served, run)
