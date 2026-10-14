@@ -356,14 +356,21 @@ COLLECTION_LABEL = "Your Archidekt collection"
 
 
 def deck_filter_groups(
-    seen: dict[str, str], live: list[dict[str, Any]] | None, *, complete: bool
+    seen: dict[str, str],
+    live: list[dict[str, Any]] | None,
+    *,
+    listed: set[str] | None,
+    own: set[str],
 ) -> tuple[dict[str, str], dict[str, str]]:
     """The History deck filter's two groups from the decks that have history here (``seen``: id ->
-    the name recorded then) and the member's live Archidekt deck list (``live``, backup copies
-    already left out; None when it can't be read): current decks under their live names, and the
-    decks no longer on Archidekt. A deck missing from the list counts as gone only when the list
-    is ``complete``; otherwise it stays with the current decks under its recorded name. The
-    placeholder of a new-deck proposal never applied ("new") is not a deck and is left out."""
+    the name recorded then): current decks, under their live names from the member's Archidekt
+    deck list (``live``, backup copies left out; None when it can't be read), and the decks no
+    longer on Archidekt. A deck is gone only when all of these hold: ``listed`` (the ids of a
+    complete deck list, ``DeckService.on_archidekt``) is known and lacks it, and the member's
+    history shows it as their own (``own``, ``db.own_history_deck_ids``: a report or a copy may be
+    of anyone's deck, which is never in the member's list). Anything else is unknown, and an
+    unknown deck stays with the current decks under its recorded name. The placeholder of a
+    new-deck proposal never applied ("new") is not a deck and is left out."""
     names = {str(d["id"]): str(d.get("name") or "") for d in live or []}
     current: dict[str, str] = {}
     gone: dict[str, str] = {}
@@ -374,7 +381,7 @@ def deck_filter_groups(
             current[did] = COLLECTION_LABEL
         elif did in names:
             current[did] = names[did] or recorded
-        elif live is not None and complete:
+        elif listed is not None and did not in listed and did in own:
             gone[did] = recorded
         else:
             current[did] = recorded
