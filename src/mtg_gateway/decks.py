@@ -46,6 +46,8 @@ from .archidekt import (
     Deck,
     DeckList,
     Patience,
+    QuillDoc,
+    _owned_by,
     art_url,
     backup_name,
     finish_modifier,
@@ -54,9 +56,10 @@ from .archidekt import (
     no_retry,
     parse_deck,
     patient,
+    plain_text,
     rich_text,
-    same_rich_text,
     wait_note,
+    written_text,
 )
 from .archidekt_csv import CsvError, parse_export
 from .config import Settings
@@ -2023,7 +2026,8 @@ class DeckService:
 
     async def on_archidekt(self, sub: str, *, wait: float | None = None) -> dict[str, Any] | None:
         """What the member's deck list (the cached one, no extra request) says is on Archidekt:
-        ``{"ids", "read_at"}``, every deck and backup copy id and when the list was read. None
+        ``{"ids", "read_at", "account_id", "username", "linked_at"}``: every deck and backup copy
+        id, when the list was read, and the Archidekt account it is of and when it was linked. None
         when the list cannot tell that something is gone: still cold, read by username (which may
         leave private decks out), or not ``complete`` (archidekt.DeckList: cut off at
         MAX_LIST_PAGES pages, an entry whose owner could not be read or was someone else, or a
@@ -2036,7 +2040,14 @@ class DeckService:
             return None
         if not rows.complete or len(rows) >= MAX_LIST_PAGES * 50:
             return None
-        return {"ids": {str(d["id"]) for d in rows}, "read_at": read_at}
+        return {
+            "ids": {str(d["id"]) for d in rows},
+            "read_at": read_at,
+            # the list is this account's alone: history of an account linked before is not judged
+            "account_id": str(link["archidekt_user_id"]),
+            "username": str(link.get("archidekt_username") or ""),
+            "linked_at": int(link.get("created_at") or 0),
+        }
 
     def decks_fetched_at(self, sub: str) -> float | None:
         """When the cached deck list was read from Archidekt (epoch seconds), None when none is."""
@@ -3577,9 +3588,18 @@ class DeckService:
                 before = by_id.get(current, {}).get("name", "unknown")
                 rows.append(_row("detail", field="folder", before=before, after=target["name"]))
         on_deck = {str(r.get("name") or "").casefold(): r for r in deck.tag_relations}
-        add = [self._tag_name(n) for n in _names(raw.get("add_tags"), "add_tags")]
-        add = [n for n in dict.fromkeys(add) if n.casefold() not in on_deck]
-        add = [(await self._archidekt_tag(sub, n))[1] for n in add]  # refused now, not at apply
+        add: list[str] = []
+        looked_up: set[str] = set()
+        for given in _names(raw.get("add_tags"), "add_tags"):
+            n = self._tag_name(given)
+            if n.casefold() in on_deck or n.casefold() in looked_up:
+                continue
+            looked_up.add(n.casefold())
+            found = (await self._archidekt_tag(sub, n))[1]  # refused now, not at apply
+            # Archidekt's own name, once: two names of one tag ("Ramp", "ramp") would make the
+            # second add fail halfway through an apply
+            if found.casefold() not in on_deck and found.casefold() not in {a.casefold() for a in add}:
+                add.append(found)
         remove = []
         for name in _names(raw.get("remove_tags"), "remove_tags"):
             rel = on_deck.get(self._tag_name(name).casefold())
@@ -4117,7 +4137,8 @@ def parse_details(raw: Any) -> dict[str, Any]:
                 raise DeckError(
                     "invalid", f"description must be a string of up to {MAX_DESCRIPTION} characters"
                 )
-            out[key] = value
+            # plain text only (Q70): a Quill document an assistant sends is kept as its words alone
+            out[key] = plain_text(value)
         elif key == "deck_format":
             fmt = str(value or "").strip().lower()
             if fmt not in FORMAT_IDS:
@@ -4193,14 +4214,15 @@ def details_rows(deck: Deck, wanted: dict[str, Any]) -> tuple[dict[str, Any], li
     for key, value in wanted.items():
         new = FORMAT_IDS[value] if key == "deck_format" else value
         if key == "description":
-            # Archidekt keeps a Quill document (see rich_doc): the texts are compared and shown
-            if same_rich_text(new, deck.description):
+            # Archidekt keeps a Quill document (see rich_doc): the texts are compared, and the row
+            # shows the very text the write sends (written_text), never a reading of it
+            current, after = rich_text(deck.description), written_text(value)
+            if after.strip() == current.strip():
                 continue
         elif new == _current_detail(deck, key):
             continue
         changes[key] = value
         if key == "description":
-            current, after = rich_text(deck.description), rich_text(value)
             lines.append(
                 _row(
                     "description",
@@ -4235,10 +4257,11 @@ def details_rows(deck: Deck, wanted: dict[str, Any]) -> tuple[dict[str, Any], li
 
 def snapshot_details(snapshot: Deck) -> dict[str, Any]:
     """The deck details a snapshot recorded, in the shape ``details_rows`` compares: name,
-    description, format (as its FORMAT_IDS key, when known), bracket, private and unlisted."""
+    description, format (as its FORMAT_IDS key, when known), bracket, private and unlisted. The
+    description is Archidekt's own stored document, so it goes back with its formatting (Q70)."""
     out: dict[str, Any] = {
         "name": snapshot.name,
-        "description": snapshot.description or "",
+        "description": QuillDoc(snapshot.description or ""),
         "edh_bracket": snapshot.edh_bracket,
         "private": bool(snapshot.private),
         "unlisted": bool(snapshot.unlisted),
@@ -4342,18 +4365,19 @@ def _same_account(a: dict[str, Any], b: dict[str, Any]) -> bool:
 
 
 def owns_deck(deck: Deck, link: dict[str, Any]) -> bool | None:
-    """Whether the linked account owns ``deck``: True when the deck's owner id or username names
-    it (the same rule as the deck list's), False when the owner can be read and is someone else,
-    None when Archidekt's answer does not say who owns the deck. None is never "someone else's":
-    a page shows the deck as it would any deck it cannot edit, and an edit is refused as unknown."""
-    user_id = str(link.get("archidekt_user_id") or "")
-    if user_id and deck.owner_id and str(deck.owner_id) == user_id:
-        return True
-    if deck.owner and deck.owner.casefold() == str(link.get("archidekt_username") or "").casefold():
-        return True
-    if deck.owner or deck.owner_id:
-        return False
-    return None
+    """Whether the linked account owns ``deck``: True when the deck's owner names it (the same
+    rule as the deck list's, archidekt._owned_by: by id when both ids are known, as a username
+    can change hands; by username only when an id is missing, and an empty username never
+    matches), False when the owner can be read and is someone else, None when Archidekt's answer
+    does not say who owns the deck. None is never "someone else's": a page shows the deck as it
+    would any deck it cannot edit, and an edit is refused as unknown."""
+    if not deck.owner and not deck.owner_id:
+        return None
+    return _owned_by(
+        {"id": deck.owner_id, "username": deck.owner},
+        str(link.get("archidekt_username") or ""),
+        str(link.get("archidekt_user_id") or "") or None,
+    )
 
 
 def _sent(progress: dict[str, Any]) -> dict[str, Any]:
@@ -4402,7 +4426,10 @@ def next_tag_position(positions: list[Any]) -> str:
     """The ``position`` for a tag added after the deck's others, worked out as archidekt.com's deck
     settings does it (its bundle, read 2026-10-14): "M-500000" for a deck's first tag, otherwise
     the last tag's "<letter>-<number>" with 10000 added, moving on to the next letter at 0 once
-    the number would pass 999999. The last tag is the one with the highest position."""
+    the number would pass 999999. The last tag is the one with the highest position. After "Z"
+    there is no next letter (the site's code read does not say what it does there), so a tag
+    after "Z-990000" or later goes halfway to "Z-999999": it still sorts after every other tag,
+    and never wraps to "Z-0", which would sort first."""
     parsed: list[tuple[str, int]] = []
     for p in positions:
         m = re.fullmatch(r"([0-9A-Za-z])-(\d{1,7})", str(p or ""))
@@ -4415,7 +4442,9 @@ def next_tag_position(positions: list[Any]) -> str:
         return f"{letter}-{number + 10000}"
     if letter == "9":
         return "A-0"
-    return f"{letter if letter == 'Z' else chr(ord(letter) + 1)}-0"
+    if letter == "Z":
+        return f"Z-{min(999999, (number + 1000000) // 2)}"
+    return f"{chr(ord(letter) + 1)}-0"
 
 
 def _cover_is(deck: Deck, uid: str) -> bool:
@@ -4813,13 +4842,18 @@ def mark_gone(snapshots: list[dict[str, Any]], listed: dict[str, Any] | None) ->
     a snapshot taken before the list was read whose deck is not in it gets ``deck_gone`` (Restore
     cannot work: it rewrites that deck), one whose Archidekt backup copy is not in it gets
     ``backup_gone`` (deleted on Archidekt; Restore still works, it uses the snapshot kept here).
-    Without a list that can tell, nothing is marked."""
+    Without a list that can tell, nothing is marked. The list is of the account linked now, so a
+    snapshot of another account's deck (one linked before) is never marked: its deck and copy
+    are not in this list whether they still exist or not."""
     if not listed:
         return snapshots
     ids, read_at = listed["ids"], float(listed["read_at"])
+    account = listed.get("account_id")
     for x in snapshots:
         if float(x.get("taken_at") or 0) >= read_at:
             continue  # newer than the list: it cannot know
+        if account is not None and x.get("account_id") != account:
+            continue  # another account's deck (or one whose owner was not recorded)
         if str(x.get("deck_id") or "") not in ids:
             x["deck_gone"] = True
         if x.get("backup_deck_id") and str(x["backup_deck_id"]) not in ids:

@@ -15,9 +15,11 @@ from mtg_gateway.archidekt import (
     ArchidektClient,
     ArchidektError,
     Pacer,
+    QuillDoc,
     art_url,
     condition_code,
     language_code,
+    plain_text,
     rich_doc,
     rich_text,
     same_rich_text,
@@ -70,7 +72,11 @@ def test_rich_text_round_trip_matches_the_site_editor() -> None:
             ]
         }
     )
-    assert rich_doc(formatted) == formatted  # a document (a snapshot restore) keeps its formatting
+    # only a snapshot restore's document (a QuillDoc) keeps its formatting (Q70); any other text,
+    # a document included, is written as the plain text it is
+    assert rich_doc(QuillDoc(formatted)) == formatted
+    assert json.loads(rich_doc(formatted)) == {"ops": [{"insert": formatted + "\n"}]}
+    assert rich_doc(QuillDoc("older plain text")) == rich_doc("older plain text")
     assert rich_text(formatted) == "Play Sol Ring early"
     assert rich_text("older plain text") == "older plain text" and rich_text(None) == ""
     assert same_rich_text(formatted, "Play Sol Ring early\n") and not same_rich_text(formatted, "x")
@@ -138,6 +144,52 @@ async def test_comments_read_as_text_and_post_as_documents(stack: Stack) -> None
         await b.aclose()
 
 
+# A Quill document with a hidden phishing link and an embed, as an assistant steered by text in
+# another deck might send it (review M4).
+PHISH = json.dumps(
+    {
+        "ops": [
+            {"insert": "See my primer", "attributes": {"link": "https://evil.example/login"}},
+            {"insert": {"image": "https://evil.example/pixel.png"}},
+            {"insert": "\n"},
+        ]
+    }
+)
+
+
+def test_plain_text_keeps_only_the_words_of_a_document() -> None:
+    """Q70: what an assistant or a form supplies is reduced to its words, never sent as a document;
+    reducing it again changes nothing (a nested document is reduced all the way)."""
+    assert plain_text(PHISH) == "See my primer"
+    nested = json.dumps({"ops": [{"insert": PHISH + "\n"}]})
+    assert plain_text(nested) == "See my primer" == plain_text(plain_text(nested))
+    assert plain_text("Ramp {first}") == "Ramp {first}"
+    assert "evil" not in rich_doc(plain_text(PHISH))
+
+
+async def test_a_comment_typed_as_a_document_is_posted_as_plain_text(stack: Stack) -> None:
+    """M4: a comment or comment edit sent as a Quill document with a hidden link (the comment form,
+    or any caller of its API) is posted and edited as its words only."""
+    stack.ark.private.discard(43)
+    stack.ark.comments[300043] = []
+    b = await linked(stack)
+    try:
+        r = await post(b, "/social/api/decks/43/comments", {"text": PHISH})
+        assert r.status_code == 201, r.text
+        assert r.json()["comment"]["text"] == "See my primer"
+        made = stack.ark.comments[300043][-1]
+        assert made["text"] == rich_doc("See my primer") and "evil" not in made["text"]
+        r = await b.http.patch(
+            f"/social/api/decks/43/comments/{made['id']}",
+            content=json.dumps({"text": PHISH.replace("See my", "Read my")}),
+            headers={"Content-Type": "application/json", "X-CSRF-Token": await b.csrf("/decks")},
+        )
+        assert r.status_code == 200, r.text
+        assert stack.ark.comments[300043][-1]["text"] == rich_doc("Read my primer")
+    finally:
+        await b.aclose()
+
+
 # -- likes and votes ----------------------------------------------------------------------------------
 async def test_deck_like_goes_to_the_deck_vote_route(stack: Stack) -> None:
     stack.ark.private.discard(43)
@@ -153,6 +205,27 @@ async def test_deck_like_goes_to_the_deck_vote_route(stack: Stack) -> None:
         assert r.json()["points"] == 0 and stack.ark.votes == {}
         assert stack.ark.vote_calls[-1] == {"path": "/api/decks/43/vote/", "up": False, "remove": True}
         assert all(c["path"].startswith("/api/decks/") for c in stack.ark.vote_calls)
+    finally:
+        await b.aclose()
+
+
+async def test_a_deck_like_already_so_sends_nothing(stack: Stack) -> None:
+    """L6: as for comment votes, liking a deck the member already likes (or taking back a vote
+    they have not given) sends nothing, since Archidekt might toggle the vote off instead."""
+    stack.ark.private.discard(43)
+    b = await linked(stack)
+    try:
+        r = await post(b, "/social/api/decks/43/vote", {"vote": "up"})
+        assert r.status_code == 200 and r.json()["points"] == 1
+        sent = len(stack.ark.vote_calls)
+        r = await post(b, "/social/api/decks/43/vote", {"vote": "up"})
+        assert r.status_code == 200 and r.json() == {"ok": True, "vote": 1, "points": 1}, r.json()
+        assert len(stack.ark.vote_calls) == sent and stack.ark.votes == {("alice", 300043): 1}
+        r = await post(b, "/social/api/decks/43/vote", {"vote": "none"})
+        assert r.json()["points"] == 0 and stack.ark.votes == {}
+        sent = len(stack.ark.vote_calls)
+        r = await post(b, "/social/api/decks/43/vote", {"vote": "none"})
+        assert r.status_code == 200 and len(stack.ark.vote_calls) == sent
     finally:
         await b.aclose()
 
@@ -203,6 +276,27 @@ async def test_collection_writes_send_numbers() -> None:
     await client.aclose()
 
 
+async def test_a_collection_edit_never_fails_on_a_stored_value_it_does_not_know() -> None:
+    """M9: only the values being changed are converted (and refused when unknown). A stored
+    number goes back as it came, a stored code as its number, and a stored string with no number
+    ("" or an old "JAPANESE") is left out instead of failing a plain quantity change."""
+    ark = FakeArchidekt()
+    client = _client(ark)
+    token = ark.issue_access("alice")
+    card_id = next(iter(ark._deck_printings()))["id"]
+    made = await client.collection_add(token, card_id, 2, condition="LP", language="JA")
+    row = ark.collections["alice"][made["id"]]
+    row.update(condition="", language="JAPANESE")
+    out = await client.collection_set(token, dict(row), quantity=3)
+    assert out["quantity"] == 3  # nothing raised; the unknown stored values were not sent back
+    row.update(condition=3, language="fr")
+    out = await client.collection_set(token, dict(row), quantity=4)
+    assert (out["quantity"], out["condition"], out["language"]) == (4, 3, 4)
+    with pytest.raises(ArchidektError):  # a value being changed must still be one Archidekt has
+        await client.collection_set(token, dict(row), language="JAPANESE")
+    await client.aclose()
+
+
 async def test_collection_page_shows_codes_for_archidekts_numbers(stack: Stack) -> None:
     b = await linked(stack)
     try:
@@ -231,8 +325,16 @@ def test_tag_position_follows_the_last_tag_like_the_site() -> None:
     assert next_tag_position(["M-500000"]) == "M-510000"
     assert next_tag_position(["M-530000", "M-505000"]) == "M-540000"  # after the highest one
     assert next_tag_position(["M-995000"]) == "N-0"
-    assert next_tag_position(["Z-995000"]) == "Z-0"
     assert next_tag_position(["9-995000"]) == "A-0"
+
+
+def test_a_tag_after_the_last_letter_still_sorts_last() -> None:
+    """L5: past "Z" there is no next letter; the new tag must not wrap to "Z-0" (which sorts first)."""
+    for last in ("Z-990000", "Z-995000", "Z-999998", "Z-999999"):
+        after = next_tag_position(["M-500000", last])
+        assert after.startswith("Z-") and int(after[2:]) >= int(last[2:]), (last, after)
+    assert next_tag_position(["Z-995000"]) == "Z-997500"
+    assert next_tag_position(["Z-980000"]) == "Z-990000"  # room left: the usual step
 
 
 async def test_added_tag_goes_after_a_reordered_tag(stack: Stack) -> None:

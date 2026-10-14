@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from .archidekt import VOTE_DOWN, VOTE_NONE, VOTE_UP, ArchidektError, Deck, rich_text
+from .archidekt import VOTE_DOWN, VOTE_NONE, VOTE_UP, ArchidektError, Deck, plain_text, rich_text
 from .decklist import clean_text
 from .decks import DeckError, _clean_deck_id
 from .pages import NO_STORE, browser_session, csrf_header_ok, read_limited
@@ -50,6 +50,18 @@ _STATUS = {
     "writes_disabled": 403,
 }
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def comment_text(text: str) -> str:
+    """A comment as it will be written: plain text only (Q70; a Quill document is kept as its words
+    alone, see ``plain_text``), without control characters or surrounding white space. Cleaning
+    the result again changes nothing, so an approved comment is posted as its review showed it."""
+    text = str(text)
+    while True:
+        clean = _CONTROL.sub("", plain_text(text).replace("\r\n", "\n")).strip()
+        if clean == text:
+            return clean
+        text = clean
 
 
 def _fail(kind: str, message: str) -> JSONResponse:
@@ -142,6 +154,8 @@ class SocialService:
         self.decks._writes_switch()
         self._me(sub)
         deck = await self.deck(sub, deck_id)
+        if deck.user_vote == want:  # already so: nothing is sent (Archidekt might toggle it)
+            return {"vote": want, "points": deck.points}
         if want == VOTE_NONE:
             # taking a vote back names the vote taken back, as archidekt.com's like button does
             await self.decks._call(
@@ -339,7 +353,7 @@ class SocialService:
         """Change the text of one of the member's own comments (Archidekt's edit); verified by
         re-reading the thread."""
         self.decks._writes_switch()
-        text = _CONTROL.sub("", text.replace("\r\n", "\n")).strip()
+        text = comment_text(text)
         if not text:
             raise DeckError("invalid", "write something first")
         if len(text) > MAX_COMMENT:
@@ -380,7 +394,7 @@ class SocialService:
     async def comment(self, sub: str, deck_id: str, text: str, parent: int | None) -> dict[str, Any]:
         self.decks._writes_switch()
         _uid, name = self._me(sub)
-        text = _CONTROL.sub("", text.replace("\r\n", "\n")).strip()
+        text = comment_text(text)
         if not text:
             raise DeckError("invalid", "write something first")
         if len(text) > MAX_COMMENT:

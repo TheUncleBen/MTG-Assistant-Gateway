@@ -71,9 +71,9 @@ def _social(decks: DeckService) -> Any:
 
 
 def _comment_text(text: Any) -> str:
-    from .social import _CONTROL, MAX_COMMENT
+    from .social import MAX_COMMENT, comment_text
 
-    clean = _CONTROL.sub("", str(text or "").replace("\r\n", "\n")).strip()
+    clean = comment_text(str(text or ""))
     if not clean:
         raise DeckError("invalid", "text is required: write the comment first")
     if len(clean) > MAX_COMMENT:
@@ -205,6 +205,8 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             VOTE_DOWN: f"Vote down the deck {where} on Archidekt",
             VOTE_NONE: f"Take back your vote on the deck {where}",
         }[vote]
+        if deck is not None and deck.user_vote == vote:
+            row["text"] += " (already the case; applying changes nothing)"
     elif action == "deck_bookmark":
         on = params.get("on") is not False
         changes["on"] = on
