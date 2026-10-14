@@ -149,6 +149,17 @@ def test_inline_refs_writes_definitions_out_and_stops_at_cycles() -> None:
     assert out["properties"]["next"] == {"$ref": "#/$defs/N"} and "N" in out["$defs"]  # finite
 
 
+def test_the_mana_value_schema_allows_0_to_15_as_the_tool_does() -> None:
+    """Follow-up N6 (Q57): the schema assistants see bounds a custom mana value to 0-15, the same
+    range the tool enforces, so 16 to 20 are refused at the schema too."""
+    prop = DeckChange.model_json_schema()["properties"]["mana_value"]
+    bounds = [b for b in prop.get("anyOf", [prop]) if b.get("type") == "integer"]
+    assert bounds and bounds[0]["minimum"] == 0 and bounds[0]["maximum"] == 15, prop
+    DeckChange(action="set_mana_value", name="Sol Ring", mana_value=15)
+    with pytest.raises(ValueError):
+        DeckChange(action="set_mana_value", name="Sol Ring", mana_value=16)
+
+
 def test_compact_schema_drops_titles_and_null_branches_but_keeps_meaningful_null() -> None:
     schema = compact_schema(DeckDetails.model_json_schema())
     text = json.dumps(schema)
