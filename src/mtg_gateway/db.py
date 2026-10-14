@@ -1871,7 +1871,11 @@ class Database:
         deck_id: str,
         proposal_id: str,
         due: int,
+        expect: dict[str, Any] | None = None,
     ) -> None:
+        """``expect``: the copy as the gateway made it (name, description, folder id), which the
+        later delete checks before it deletes (review D4); kept in the row's detail, so no schema
+        change."""
         detail = {
             "sub": sub,
             "snapshot_id": snapshot_id,
@@ -1880,6 +1884,7 @@ class Database:
             "proposal_id": proposal_id,
             "attempts": 0,
             "queued_at": int(time.time()),
+            **({"expect": expect} if expect else {}),
         }
         with self.tx() as c:
             c.execute(

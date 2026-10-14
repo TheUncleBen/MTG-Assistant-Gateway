@@ -119,13 +119,18 @@ stays at schema 12, so going back to 0.7.26 is a plain image swap. The Android a
   Nothing applies it again by itself. The chat card keeps Pending with working buttons, the review
   page shows the one message with its Apply button, and History marks the snapshot of the stopped
   try as taken before an apply that changed nothing. If any part of the change had reached
-  Archidekt, the proposal still fails as before.
+  Archidekt, the proposal still fails as before. That includes a copy of a deck already made (the
+  message gives the copy's number, so it is never copied twice) and a collaborator, comment or
+  folder change already sent.
 - When the backup copy an apply made can't be deleted right away because Archidekt asked the
   gateway to wait (or answered with a server or network error), the gateway deletes it later by
   itself: one copy at a time, never while Archidekt's pause runs, first once the pause is over,
   then waiting 10, 20 and 40 minutes between tries, and giving up after 4 failed tries (the copy
   then stays in the backup folder, as before). The messages say so until it is done. Waiting
-  deletes are kept in the database, so a restart doesn't lose them.
+  deletes are kept in the database, so a restart doesn't lose them. Before it deletes a copy, the
+  gateway reads it once and keeps it if it was moved out of the backup folder, renamed, given
+  another description or changed since. Linking an Archidekt account again cancels your waiting
+  deletes, and those copies stay.
 - Only a Commander deck has a bracket, as on archidekt.com: moving a deck to another format clears
   its bracket, and a bracket for another format is refused.
 - A hand-set mana value is a whole number from 0 to 15, the range archidekt.com offers.
