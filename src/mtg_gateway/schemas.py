@@ -206,7 +206,7 @@ class DeckChange(_Card):
     mana_value: StrictInt | None = Field(
         default=None,
         ge=0,
-        le=20,
+        le=15,  # Q57: the range the tool enforces
         description="For set_mana_value: the card's custom mana value, 0 to 15; null takes it off.",
     )
 
