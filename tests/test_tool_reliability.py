@@ -625,7 +625,15 @@ async def test_folder_tags_and_cover_go_through_a_details_proposal(stack: Stack)
     assert a.get("state") == "applied", a
     assert ark.deck_folder[42] == 501
     assert [x["name"] for x in ark.deck_tags[42]] == ["budget", "Spicy"]
-    assert ark.updates[-1]["featured"].endswith(f"/{uid}.webp")
+    assert ark.updates[-1]["customFeatured"].endswith(f"/{uid}.webp") and "featured" not in ark.updates[-1]
+    # a tag Archidekt doesn't have is refused when the proposal is made, not when it is applied
+    new = structured(
+        await call(
+            stack.h, token, "propose_deck_details", {"deck_id": "42", "details": {"add_tags": ["gwtest"]}}
+        )
+    )
+    assert new["ok"] is False and "no deck tag called 'gwtest'" in new["message"], new
+    assert ark.tag_creates == 0
     # taking a tag off names a tag the deck has; anything else is refused before any proposal
     off = structured(
         await call(

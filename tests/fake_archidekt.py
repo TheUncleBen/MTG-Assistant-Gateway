@@ -144,9 +144,9 @@ class FakeArchidekt:
         self.next_comment_id = 800000
         # Hand actions added 2026-10-07: global deck tags (id -> name), each deck's tag relations
         # (deck id -> [{id, tag, name, position}]), deleted deck ids and massUpdate bodies.
-        self.tags: dict[int, str] = {1: "budget", 2: "tribal"}
+        self.tags: dict[int, str] = {1: "budget", 2: "tribal", 3: "Spicy"}
+        self.tag_creates = 0
         self.deck_tags: dict[int, list[dict[str, Any]]] = {}
-        self.next_tag_id = 10
         self.next_tag_rel_id = 90000
         self.deleted: list[int] = []
         self.mass_updates: list[dict[str, Any]] = []
@@ -419,13 +419,10 @@ class FakeArchidekt:
             hits = [{"id": i, "name": n} for i, n in self.tags.items() if q in n.lower()]
             return httpx.Response(200, json={"count": len(hits), "results": hits})
         if path == "/api/decks/tags/" and request.method == "POST":
-            body = json.loads(request.content)
-            name = str(body.get("name") or "").strip()
-            if not name:
-                return httpx.Response(400, json={"name": ["This field may not be blank."]})
-            self.next_tag_id += 1
-            self.tags[self.next_tag_id] = name
-            return httpx.Response(201, json={"id": self.next_tag_id, "name": name})
+            # Inferred: Archidekt's tag list is its own; its deck page never creates a tag, and a
+            # member creating one is refused like this (the 403 a member saw on adding a new tag).
+            self.tag_creates += 1
+            return httpx.Response(403, json={"detail": "You do not have permission to perform this action."})
         if path == "/api/decks/tagRelations/" and request.method == "POST":
             body = json.loads(request.content)
             deck = self.decks.get(body.get("deck"))
@@ -838,14 +835,12 @@ class FakeArchidekt:
                 for key in ("name", "description", "deckFormat", "edhBracket", "private", "unlisted"):
                     if key in body:
                         deck[key] = body[key]
-                if "customFeatured" in body or "featured" in body:
-                    # the site's "deck image": a card art URL, or an empty customFeatured for automatic
+                if "featured" in body:
+                    # Inferred: featured is Archidekt's own automatic pick, not the member's to set
+                    return httpx.Response(403, json={"detail": "You do not have permission."})
+                if "customFeatured" in body:
+                    # the site's "Set Deck Image": a card art URL, or "" for its automatic pick
                     deck["customFeatured"] = body.get("customFeatured") or ""
-                    deck["featured"] = body.get("featured") or (
-                        ""
-                        if "customFeatured" in body and "featured" not in body
-                        else deck.get("featured", "")
-                    )
                 if "private" in body:
                     (self.private.add if body["private"] else self.private.discard)(deck["id"])
                 deck["updatedAt"] = "2026-10-03T00:00:00Z"

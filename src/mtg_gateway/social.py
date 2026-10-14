@@ -62,7 +62,7 @@ def _err(exc: Exception) -> JSONResponse:
     if isinstance(exc, (DeckError, ArchidektError)):
         kind = exc.kind
         msg = str(exc)
-        if kind in ("auth", "forbidden"):
+        if kind == "auth":
             msg = "Archidekt did not accept your linked session; relink it on the Account page."
         if kind == "contract":
             msg = "Archidekt answered in an unexpected way; try again."

@@ -391,3 +391,27 @@ def test_deploy_doc_documents_every_limit() -> None:
 def test_entrypoint_chowns_only_a_real_copy_folder() -> None:
     text = (ROOT / "docker/entrypoint.sh").read_text()
     assert '"${MTG_BACKUP_COPY_DIR:-}"' in text and '[ -d "$d" ] && chown' in text
+
+
+async def test_a_403_says_archidekt_refused_and_never_asks_to_relink() -> None:
+    """T-151: a 403 is Archidekt refusing one request, with its own reason; only a 401 means the
+    stored session is bad."""
+    ark = FakeArchidekt()
+    client = _client(ark)
+    ark.inject = [(403, None)]
+    with pytest.raises(ArchidektError) as err:
+        await client.search_decks(name="Sample")
+    assert err.value.kind == "forbidden"
+    assert str(err.value) == "Archidekt refused this request: injected"
+    assert "relink" not in str(err.value)
+    ark.inject = [(401, None)]
+    with pytest.raises(ArchidektError) as auth:
+        await client.search_decks(name="Sample")
+    assert auth.value.kind == "auth" and "relink" in str(auth.value)
+
+
+def test_the_review_page_no_longer_blames_another_account_for_a_refusal() -> None:
+    from mtg_gateway.pages import ERR_MESSAGES
+
+    assert "another Archidekt account" not in ERR_MESSAGES["forbidden"]
+    assert "no need to relink" in ERR_MESSAGES["forbidden"]

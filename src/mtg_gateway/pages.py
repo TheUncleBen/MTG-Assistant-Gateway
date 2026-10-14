@@ -687,7 +687,8 @@ ERR_MESSAGES = {
     "changed. The proposal is still pending; try again once Archidekt answers.",
     "not_linked": "Your Archidekt account is not linked, or Archidekt no longer accepts the stored "
     "session. Relink it on the Account page.",
-    "forbidden": "This deck belongs to another Archidekt account than the one you linked.",
+    "forbidden": "Archidekt did not allow this change, so nothing more was changed. The reason is in "
+    "the result below. Your Archidekt link is fine; there is no need to relink.",
     "other_account": "This new deck was proposed for another Archidekt account than the one linked now, "
     "so nothing was created. Ask for a new proposal.",
     "verify_mismatch": "Archidekt accepted the change but the deck does not fully match the proposal. "
