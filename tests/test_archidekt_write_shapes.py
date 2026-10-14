@@ -1,0 +1,272 @@
+"""Release 0.7.27: the Archidekt write calls checked against archidekt.com's own site code (its
+public script files, read 2026-10-14). Each test pins one call to the shape the site sends: the
+deck like's route, the vote taken back, rich text (descriptions and comments are Quill documents),
+the collection's numeric condition and language, the tag position, the folder move item and the
+cover URL's image version."""
+
+# ruff: noqa: F811 - the stack fixture is imported and then named as a parameter
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from mtg_gateway.archidekt import (
+    ArchidektClient,
+    ArchidektError,
+    Pacer,
+    art_url,
+    condition_code,
+    language_code,
+    rich_doc,
+    rich_text,
+    same_rich_text,
+)
+from mtg_gateway.decks import next_tag_position
+
+from .fake_archidekt import FakeArchidekt
+from .test_browse_collection import NAV, Stack, api, linked, stack  # noqa: F401
+from .test_social_layout import post
+
+UID = "be68e315-ffef-40a8-8a46-1c042b148c03"
+
+
+def _client(ark: FakeArchidekt) -> ArchidektClient:
+    return ArchidektClient("https://ark.test/api", "test", Pacer(0.0), http=ark.client())
+
+
+def _amy_comment(cid: int, text: str, root: int = 300043) -> dict:
+    return {
+        "id": cid,
+        "text": text,
+        "owner": {"id": 78, "username": "amy", "avatar": None, "frame": None},
+        "parent": root,
+        "originalPost": root,
+        "createdAt": "2026-10-10T12:00:00Z",
+        "editedAt": None,
+        "points": 0,
+        "userInput": 0,
+        "childrenCount": 0,
+        "children": {"count": 0, "results": []},
+        "archived": False,
+        "locked": False,
+        "type": 4,
+    }
+
+
+# -- rich text ------------------------------------------------------------------------------------
+def test_rich_text_round_trip_matches_the_site_editor() -> None:
+    doc = rich_doc("Ramp first.\nThen draw.")
+    assert json.loads(doc) == {"ops": [{"insert": "Ramp first.\nThen draw.\n"}]}
+    assert rich_text(doc) == "Ramp first.\nThen draw."
+    assert rich_doc("") == ""  # no text stays no text
+    formatted = json.dumps(
+        {
+            "ops": [
+                {"insert": "Play "},
+                {"insert": {"card-link": "Sol Ring"}},
+                {"insert": " early", "attributes": {"bold": True}},
+                {"attributes": {"list": "ordered"}, "insert": "\n"},
+            ]
+        }
+    )
+    assert rich_doc(formatted) == formatted  # a document (a snapshot restore) keeps its formatting
+    assert rich_text(formatted) == "Play Sol Ring early"
+    assert rich_text("older plain text") == "older plain text" and rich_text(None) == ""
+    assert same_rich_text(formatted, "Play Sol Ring early\n") and not same_rich_text(formatted, "x")
+
+
+async def test_description_and_comments_are_sent_as_quill_documents() -> None:
+    ark = FakeArchidekt()
+    client = _client(ark)
+    token = ark.issue_access("alice")
+    await client.update_deck(token, "42", {"description": "Lands matter."})
+    assert ark.updates[-1] == {"deck_id": 42, "description": '{"ops":[{"insert":"Lands matter.\\n"}]}'}
+    ark.comments[300043] = []
+    ark.private.discard(43)
+    made = await client.comment_create(token, 300043, "Nice ramp!")
+    assert ark.comments[300043][0]["text"] == rich_doc("Nice ramp!")
+    await client.comment_update(token, made["id"], "Edited.")
+    assert ark.comments[300043][0]["text"] == rich_doc("Edited.")
+    await client.aclose()
+
+
+async def test_quill_description_shows_as_text_and_an_unchanged_text_is_no_change(stack: Stack) -> None:
+    quill = json.dumps(
+        {"ops": [{"insert": "Blink "}, {"insert": "value", "attributes": {"bold": True}}, {"insert": "\n"}]}
+    )
+    stack.ark.decks[42]["description"] = quill
+    b = await linked(stack)
+    try:
+        page = await b.http.get("/decks/42", headers=NAV)
+        assert "Blink value" in page.text and "{&quot;ops" not in page.text and '{"ops' not in page.text
+        settings = await b.http.get("/decks/42/settings", headers=NAV)
+        assert ">Blink value</textarea>" in settings.text
+        # saving the settings with the text untouched leaves Archidekt's formatted document alone
+        before = len(stack.ark.updates)
+        csrf = await b.csrf("/decks")
+        r = await b.http.post(
+            "/decks/42/settings",
+            data={
+                "csrf": csrf,
+                "name": stack.ark.decks[42]["name"],
+                "description": "Blink value",
+                "deck_format": "commander",
+                "edh_bracket": str(stack.ark.decks[42].get("edhBracket") or ""),
+                **({"private": "1"} if 42 in stack.ark.private else {}),
+            },
+        )
+        assert r.status_code in (200, 303, 400), r.text[:300]
+        mine = [u for u in stack.ark.updates[before:] if u["deck_id"] == 42]  # not the backup copy's
+        assert all("description" not in u for u in mine), mine
+        assert stack.ark.decks[42]["description"] == quill
+    finally:
+        await b.aclose()
+
+
+async def test_comments_read_as_text_and_post_as_documents(stack: Stack) -> None:
+    stack.ark.private.discard(43)
+    stack.ark.comments[300043] = [_amy_comment(555001, rich_doc("Try Cultivate."))]
+    b = await linked(stack)
+    try:
+        r = await b.http.get("/social/api/decks/43/comments")
+        assert r.json()["comments"][0]["text"] == "Try Cultivate."
+        r = await post(b, "/social/api/decks/43/comments", {"text": "Thanks!", "parent": 555001})
+        assert r.status_code == 201 and r.json()["comment"]["text"] == "Thanks!"
+        assert stack.ark.comments[300043][-1]["text"] == rich_doc("Thanks!")
+    finally:
+        await b.aclose()
+
+
+# -- likes and votes ----------------------------------------------------------------------------------
+async def test_deck_like_goes_to_the_deck_vote_route(stack: Stack) -> None:
+    stack.ark.private.discard(43)
+    b = await linked(stack)
+    try:
+        r = await post(b, "/social/api/decks/43/vote", {"vote": "up"})
+        assert r.status_code == 200 and r.json()["points"] == 1
+        assert stack.ark.vote_calls[-1] == {"path": "/api/decks/43/vote/", "up": True, "remove": False}
+        r = await post(b, "/social/api/decks/43/vote", {"vote": "down"})
+        assert stack.ark.vote_calls[-1] == {"path": "/api/decks/43/vote/", "up": False, "remove": False}
+        # taking a down vote back names the down vote, as the site's buttons do
+        r = await post(b, "/social/api/decks/43/vote", {"vote": "none"})
+        assert r.json()["points"] == 0 and stack.ark.votes == {}
+        assert stack.ark.vote_calls[-1] == {"path": "/api/decks/43/vote/", "up": False, "remove": True}
+        assert all(c["path"].startswith("/api/decks/") for c in stack.ark.vote_calls)
+    finally:
+        await b.aclose()
+
+
+async def test_comment_vote_taken_back_names_the_vote(stack: Stack) -> None:
+    stack.ark.private.discard(43)
+    stack.ark.comments[300043] = [_amy_comment(555001, rich_doc("Try Cultivate."))]
+    b = await linked(stack)
+    try:
+        path = "/social/api/decks/43/comments/555001/vote"
+        r = await post(b, path, {"vote": "down"})
+        assert r.status_code == 200, r.text
+        assert stack.ark.vote_calls[-1] == {
+            "path": "/api/comments/vote/555001/",
+            "up": False,
+            "remove": False,
+        }
+        r = await post(b, path, {"vote": "none"})
+        assert r.status_code == 200, r.text
+        assert stack.ark.vote_calls[-1] == {"path": "/api/comments/vote/555001/", "up": False, "remove": True}
+    finally:
+        await b.aclose()
+
+
+# -- collection ---------------------------------------------------------------------------------------
+def test_condition_and_language_numbers_are_archidekts_tables() -> None:
+    assert [condition_code(i) for i in range(1, 6)] == ["NM", "LP", "MP", "HP", "DMG"]
+    assert [language_code(i) for i in range(1, 12)] == [
+        "EN", "ZHT", "DE", "FR", "IT", "JA", "KO", "PT", "RU", "ZHS", "ES",
+    ]  # fmt: skip
+    assert condition_code(None) == "" and language_code("en") == "EN"
+
+
+async def test_collection_writes_send_numbers() -> None:
+    ark = FakeArchidekt()
+    client = _client(ark)
+    token = ark.issue_access("alice")
+    card_id = next(iter(ark._deck_printings()))["id"] if ark._deck_printings() else None
+    assert card_id is not None
+    made = await client.collection_add(token, card_id, 2, condition="LP", language="JA")
+    assert (made["condition"], made["language"]) == (2, 6)
+    out = await client.collection_set(token, made, condition="DMG", language="ES")
+    assert (out["condition"], out["language"]) == (5, 11)
+    out = await client.collection_set(token, out, condition=None)  # "not set" clears it
+    assert out["condition"] is None and out["language"] == 11
+    with pytest.raises(ArchidektError):
+        await client.collection_add(token, card_id, 1, language="PH")  # Archidekt has no Phyrexian
+    await client.aclose()
+
+
+async def test_collection_page_shows_codes_for_archidekts_numbers(stack: Stack) -> None:
+    b = await linked(stack)
+    try:
+        csrf = await b.csrf("/collection")
+        r = await b.http.post(
+            "/collection", data={"csrf": csrf, "action": "add", "name": "Sol Ring", "quantity": "1"}
+        )
+        assert r.status_code == 303
+        rid = next(iter(stack.ark.collections["alice"]))
+        stack.ark.collections["alice"][rid].update(condition=3, language=4)
+        page = await b.http.get("/collection", headers=NAV)
+        assert "class='pill cond'>MP<" in page.text
+        assert "<option value='FR' selected>" in page.text and "value='PH'" not in page.text
+        r = await api(b, "POST", f"/collection/api/rows/{rid}", {"language": "PH"})
+        assert r.status_code == 400
+    finally:
+        await b.aclose()
+
+
+# -- tags, folders, cover -----------------------------------------------------------------------------
+def test_tag_position_follows_the_last_tag_like_the_site() -> None:
+    assert next_tag_position([]) == "M-500000"
+    assert next_tag_position(["M-500000"]) == "M-510000"
+    assert next_tag_position(["M-530000", "M-505000"]) == "M-540000"  # after the highest one
+    assert next_tag_position(["M-995000"]) == "N-0"
+    assert next_tag_position(["Z-995000"]) == "Z-0"
+    assert next_tag_position(["9-995000"]) == "A-0"
+
+
+async def test_added_tag_goes_after_a_reordered_tag(stack: Stack) -> None:
+    stack.ark.deck_tags[42] = [{"id": 9001, "tag": 2, "deck": 42, "name": "tribal", "position": "M-720000"}]
+    b = await linked(stack)
+    try:
+        csrf = await b.csrf("/decks")
+        r = await b.http.post("/decks/42/tags", data={"csrf": csrf, "action": "add", "name": "budget"})
+        assert r.status_code == 303, r.text[:300]
+        assert stack.ark.deck_tags[42][-1]["position"] == "M-730000"
+    finally:
+        await b.aclose()
+
+
+async def test_move_sends_the_site_move_item(stack: Stack) -> None:
+    b = await linked(stack)
+    try:
+        csrf = await b.csrf("/decks")
+        root = 1000 + 77
+        folder = await b.http.post(
+            "/folders", data={"csrf": csrf, "action": "create", "name": "Cube", "confirmed": "1"}
+        )
+        assert folder.status_code == 303
+        fid = stack.ark.folders["alice"][-1]["id"]
+        r = await b.http.post("/decks/42/move", data={"csrf": csrf, "folder_id": str(fid)})
+        assert r.status_code == 303 and stack.ark.deck_folder[42] == fid
+        assert stack.ark.mass_updates[-1] == {
+            "items": [{"type": "deck", "id": 42, "patch": {"parentFolder": fid}}]
+        }
+        r = await b.http.post("/decks/42/move", data={"csrf": csrf, "folder_id": str(root)})
+        assert stack.ark.deck_folder[42] == root
+    finally:
+        await b.aclose()
+
+
+def test_cover_url_carries_the_image_version() -> None:
+    base = f"https://card-images.archidekt.com/art/front/b/e/{UID}.webp"
+    assert art_url(UID, "1783928704") == base + "?1783928704"
+    assert art_url(UID) == base + "?11"  # the site's own default
+    assert art_url(UID, "../x") == base + "?11"

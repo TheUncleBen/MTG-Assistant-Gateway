@@ -143,6 +143,7 @@ class FakeArchidekt:
         self.editors: dict[int, list[dict[str, Any]]] = {}  # deck id -> collaborator rows
         self.next_editor_id = 900
         self.votes: dict[tuple[str, int], int] = {}
+        self.vote_calls: list[dict[str, Any]] = []  # path and body of each vote PUT
         self.comments: dict[int, list[dict[str, Any]]] = {}  # thread root -> flat list of comments
         self.next_comment_id = 800000
         # Hand actions added 2026-10-07: global deck tags (id -> name), each deck's tag relations
@@ -227,13 +228,26 @@ class FakeArchidekt:
             "quantity": int(body["quantity"]),
             "card": card,
             "modifier": body.get("modifier") or "Normal",
-            "language": body.get("language") or "EN",
-            "condition": body.get("condition") or "NM",
+            # numbers, as archidekt.com's site sends and reads them (EN = 1, NM = 1)
+            "language": body.get("language") or 1,
+            "condition": body.get("condition") or 1,
             "tags": body.get("tags") or [],
             "purchasePrice": body.get("purchasePrice"),
             "createdAt": now,
             "modifiedAt": now,
         }
+
+    @staticmethod
+    def _bad_collection_enum(body: dict[str, Any]) -> bool:
+        """A record's condition and language are numbers on Archidekt (its site's tables: condition
+        1-5, language 1-11). Inferred, not seen live: text such as "NM" is refused like this."""
+        for key, top in (("condition", 5), ("language", 11)):
+            value = body.get(key)
+            if value is None:
+                continue
+            if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= top:
+                return True
+        return False
 
     def _comment(self, cid: int, who: str) -> dict[str, Any]:
         for comments in self.comments.values():
@@ -637,6 +651,8 @@ class FakeArchidekt:
             body = json.loads(request.content)
             if not isinstance(body.get("card"), int) or not isinstance(body.get("quantity"), int):
                 return httpx.Response(400, json={"card": ["This field is required."]})
+            if self._bad_collection_enum(body):
+                return httpx.Response(400, json={"condition": ["A valid integer is required."]})
             try:
                 card = self.printing(body["card"])
             except AssertionError:
@@ -651,6 +667,8 @@ class FakeArchidekt:
             if row is None or request.method not in ("PUT", "PATCH"):
                 return httpx.Response(404, json={"detail": "Not found."})
             body = json.loads(request.content)
+            if self._bad_collection_enum(body):
+                return httpx.Response(400, json={"condition": ["A valid integer is required."]})
             for key in ("quantity", "modifier", "language", "condition", "tags", "purchasePrice"):
                 if key in body:
                     row[key] = body[key]
@@ -689,6 +707,7 @@ class FakeArchidekt:
             and request.method == "PUT"
         ):
             body = json.loads(request.content)
+            self.vote_calls.append({"path": path, **body})
             root = int(parts[3])
             if body.get("remove"):
                 self.votes.pop((who, root), None)
@@ -799,6 +818,17 @@ class FakeArchidekt:
             if parts[3:] == ["tagRelations"] and request.method == "GET":
                 rels = self.deck_tags.get(deck["id"], [])
                 return httpx.Response(200, json={"count": len(rels), "results": [dict(r) for r in rels]})
+            if parts[3:] == ["vote"] and request.method == "PUT":
+                # the deck page's like: PUT /api/decks/{id}/vote/ {up, remove}; the deck's points
+                # and the reader's vote live on its thread root, as the deck JSON reports them
+                body = json.loads(request.content)
+                self.vote_calls.append({"path": path, **body})
+                root = 300000 + deck["id"]
+                if body.get("remove"):
+                    self.votes.pop((who, root), None)
+                else:
+                    self.votes[(who, root)] = 1 if body.get("up") else 2
+                return httpx.Response(200, json={"ok": True})
             if parts[3:] == ["bookmarks"] and request.method in ("POST", "DELETE"):
                 marks = self.bookmarks.setdefault(who, set())
                 (marks.add if request.method == "POST" else marks.discard)(deck["id"])

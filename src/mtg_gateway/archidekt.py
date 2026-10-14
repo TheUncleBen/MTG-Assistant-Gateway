@@ -38,6 +38,116 @@ TOKEN_FIELDS = ("access_token", "access", "token", "jwt")
 VOTE_NONE, VOTE_UP, VOTE_DOWN = 0, 1, 2
 # Collection "modifier" values are the deck ones: Normal, Foil, Etched.
 COLLECTION_PAGE_SIZE = 100
+# A collection record's condition and language are numbers on Archidekt: its site sends and reads
+# them through these tables (its bundle, read 2026-10-14: {NM:1, LP:2, MP:3, HP:4, D:5} and
+# {EN:1, CT:2, DE:3, FR:4, IT:5, JP:6, KR:7, PT:8, RU:9, CS:10, SP:11}), keyed here by the codes
+# the gateway shows (DMG for its D, ZHT/ZHS for CT/CS, JA/KO/ES for JP/KR/SP).
+CONDITION_IDS = {"NM": 1, "LP": 2, "MP": 3, "HP": 4, "DMG": 5}
+LANGUAGE_IDS = {
+    "EN": 1,
+    "ZHT": 2,
+    "DE": 3,
+    "FR": 4,
+    "IT": 5,
+    "JA": 6,
+    "KO": 7,
+    "PT": 8,
+    "RU": 9,
+    "ZHS": 10,
+    "ES": 11,
+}
+_CONDITION_CODES = {v: k for k, v in CONDITION_IDS.items()}
+_LANGUAGE_CODES = {v: k for k, v in LANGUAGE_IDS.items()}
+
+
+def condition_code(value: Any) -> str:
+    """A record's condition as the gateway's code (NM ... DMG), from Archidekt's number; "" when
+    it has none. A code given as text is passed through, upper-cased."""
+    if isinstance(value, int) and not isinstance(value, bool):
+        return _CONDITION_CODES.get(value, "")
+    return str(value or "").strip().upper()
+
+
+def language_code(value: Any) -> str:
+    """A record's language as the gateway's code (EN, JA, ...), from Archidekt's number; "" when
+    it has none. A code given as text is passed through, upper-cased."""
+    if isinstance(value, int) and not isinstance(value, bool):
+        return _LANGUAGE_CODES.get(value, "")
+    return str(value or "").strip().upper()
+
+
+def _condition_id(value: Any) -> int | None:
+    if value is None or (isinstance(value, int) and not isinstance(value, bool)):
+        return value
+    code = str(value).strip().upper()
+    if code == "D":
+        code = "DMG"
+    if code not in CONDITION_IDS:
+        raise ArchidektError("invalid", f"Archidekt has no card condition {code!r}")
+    return CONDITION_IDS[code]
+
+
+def _language_id(value: Any) -> int | None:
+    if value is None or (isinstance(value, int) and not isinstance(value, bool)):
+        return value
+    code = str(value).strip().upper()
+    if code not in LANGUAGE_IDS:
+        raise ArchidektError("invalid", f"Archidekt has no card language {code!r}")
+    return LANGUAGE_IDS[code]
+
+
+# Deck descriptions and comments are rich text on Archidekt: a Quill document stored as JSON text,
+# '{"ops":[{"insert":"..."}]}'. Its site writes them that way (its editor sends
+# JSON.stringify(getContents())) and reads them with JSON.parse, showing an empty text for anything
+# that is not JSON (its bundle and editor chunk, read 2026-10-14). So plain text from the gateway
+# is wrapped in a document before it is sent, and a document read back is shown as its text.
+
+
+def _quill_ops(value: Any) -> list[Any] | None:
+    """The ops of a Quill document given as JSON text, None for anything else."""
+    if not isinstance(value, str) or not value.lstrip().startswith("{"):
+        return None
+    try:
+        doc = json.loads(value)
+    except ValueError:
+        return None
+    ops = doc.get("ops") if isinstance(doc, dict) else None
+    return ops if isinstance(ops, list) else None
+
+
+def rich_text(value: Any) -> str:
+    """The plain text of an Archidekt rich-text field: a Quill document's text (a card link as its
+    card name, as the site's own text preview does), without the final line break every document
+    ends with. Text that is not a Quill document (older plain text) is returned as it is."""
+    ops = _quill_ops(value)
+    if ops is None:
+        return value if isinstance(value, str) else ""
+    parts: list[str] = []
+    for op in ops:
+        insert = op.get("insert") if isinstance(op, dict) else None
+        if isinstance(insert, str):
+            parts.append(insert)
+        elif isinstance(insert, dict) and isinstance(insert.get("card-link"), str):
+            parts.append(insert["card-link"])
+    text = "".join(parts)
+    return text[:-1] if text.endswith("\n") else text
+
+
+def rich_doc(value: str) -> str:
+    """The rich-text value to send for ``value``: a Quill document given as JSON text is sent as
+    it is (a snapshot restore keeps its formatting); plain text becomes a one-insert document
+    that ends with a line break, as the site's editor makes it; "" stays "" (no text)."""
+    if not value or _quill_ops(value) is not None:
+        return value
+    text = value if value.endswith("\n") else value + "\n"
+    return json.dumps({"ops": [{"insert": text}]}, ensure_ascii=False, separators=(",", ":"))
+
+
+def same_rich_text(a: Any, b: Any) -> bool:
+    """Whether two rich-text values hold the same text (either may be a Quill document or plain
+    text), compared without surrounding white space."""
+    return rich_text(a).strip() == rich_text(b).strip()
+
 
 # Archidekt's numeric deck formats as observed by the nccurry/mtg-mcp reference (reported, not verified).
 # Archidekt's deckFormat ids, read from the site's own client code on 2026-10-08 (its format
@@ -113,14 +223,19 @@ SEARCH_ORDERS = {
 _ART_UUID = re.compile(r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
 
 
-def art_url(scryfall_uid: str) -> str:
+def art_url(scryfall_uid: str, image_hash: str = "") -> str:
     """The card-art URL Archidekt stores as a deck's ``featured`` cover: its art images live at
     card-images.archidekt.com/art/front/<u[0]>/<u[1]>/<uid>.webp (the pattern of every ``featured``
-    in the live precon listing, 2026-10-07; a path with other characters is refused)."""
+    in the live precon listing, 2026-10-07; a path with other characters is refused). The site's
+    "Set Deck Image" adds the card's ``scryfallImageHash`` as the query, "11" when it has none
+    (its image URL helper, bundle read 2026-10-14), so the same is sent here."""
     uid = str(scryfall_uid or "").lower()
     if not re.fullmatch(r"[0-9a-f-]{36}", uid):
         raise ArchidektError("invalid", "not a Scryfall card id")
-    return f"https://card-images.archidekt.com/art/front/{uid[0]}/{uid[1]}/{uid}.webp"
+    version = str(image_hash or "")
+    if not re.fullmatch(r"[0-9A-Za-z]{1,32}", version):
+        version = "11"
+    return f"https://card-images.archidekt.com/art/front/{uid[0]}/{uid[1]}/{uid}.webp?{version}"
 
 
 def featured_scryfall_id(url: Any) -> str | None:
@@ -1052,7 +1167,7 @@ class ArchidektClient:
             token=token,
             json_body={
                 "name": name,
-                "description": description,
+                "description": rich_doc(description),
                 "deckFormat": format_id,
                 "edhBracket": None,
                 "parentFolder": None,
@@ -1133,7 +1248,7 @@ class ArchidektClient:
                 "name": name,
                 "deckFormat": deck.raw.get("deckFormat") or 3,
                 "edhBracket": None,
-                "description": description,
+                "description": rich_doc(description),
                 "featured": "",
                 "playmat": "",
                 "copyId": int(deck.id),
@@ -1152,7 +1267,10 @@ class ArchidektClient:
         if description:
             try:
                 await self._request(
-                    "PATCH", f"/decks/{new_id}/update/", token=token, json_body={"description": description}
+                    "PATCH",
+                    f"/decks/{new_id}/update/",
+                    token=token,
+                    json_body={"description": rich_doc(description)},
                 )
             except ArchidektError as exc:
                 logger.info("backup %s: description not set (%s)", new_id, exc.kind)
@@ -1312,6 +1430,7 @@ class ArchidektClient:
     # answer OPTIONS with the field list: game, quantity, card, modifier, language, condition,
     # purchasePrice); DELETE /collection/bulk/ {"ids": [...]} removes records. The write calls
     # are taken from the bundle and the OPTIONS schemas; this session could not exercise them.
+    # language and condition are numbers there (CONDITION_IDS, LANGUAGE_IDS; re-read 2026-10-14).
 
     async def collection_page(
         self,
@@ -1349,7 +1468,9 @@ class ArchidektClient:
         condition: str | None = None,
         language: str | None = None,
     ) -> dict[str, Any]:
-        """POST /collection/v2/: one new record for ``card_id`` (an Archidekt printing id)."""
+        """POST /collection/v2/: one new record for ``card_id`` (an Archidekt printing id).
+        ``condition`` and ``language`` are the gateway's codes (NM, EN, ...), sent as Archidekt's
+        numbers (CONDITION_IDS, LANGUAGE_IDS)."""
         body: dict[str, Any] = {
             "game": 1,
             "quantity": int(quantity),
@@ -1357,9 +1478,9 @@ class ArchidektClient:
             "modifier": modifier,
         }
         if condition:
-            body["condition"] = condition
+            body["condition"] = _condition_id(condition)
         if language:
-            body["language"] = language
+            body["language"] = _language_id(language)
         resp = await self._request("POST", "/collection/v2/", token=token, json_body=body)
         if not isinstance(resp, dict):
             raise ArchidektError("contract", "unexpected collection create response shape")
@@ -1390,6 +1511,11 @@ class ArchidektClient:
         body.update(
             {k: v for k, v in changes.items() if v is not None or k in ("purchasePrice", "condition")}
         )
+        # Archidekt keeps both as numbers (see CONDITION_IDS); a code is sent as its number
+        if "condition" in body:
+            body["condition"] = _condition_id(body["condition"])
+        if "language" in body:
+            body["language"] = _language_id(body["language"])
         resp = await self._request("PATCH", f"/collection/v2/{rid}/", token=token, json_body=body)
         if not isinstance(resp, dict):
             raise ArchidektError("contract", "unexpected collection update response shape")
@@ -1404,15 +1530,27 @@ class ArchidektClient:
 
     # -- social actions (a person's own clicks; no assistant tool calls these) -----------------
     # Routes from archidekt.com's deck page bundle (2026-10-07): bookmarks are POST/DELETE
-    # /decks/{id}/bookmarks/ (OPTIONS answers "Bookmark" with POST); a deck's like is a vote on
-    # its comment root, PUT /comments/vote/{root}/ {"up": bool, "remove": bool}; follow is POST
+    # /decks/{id}/bookmarks/ (OPTIONS answers "Bookmark" with POST); a deck's like is PUT
+    # /decks/{id}/vote/ and a comment's vote PUT /comments/vote/{id}/, both {"up": bool, "remove":
+    # bool} (re-read from the bundle 2026-10-14; the like had been sent to the comment route before
+    # 0.7.27); follow is POST
     # /users/follow/ {"followId", "unfollow"}; the thread is GET /comments/{root}/?page=&orderBy=
     # (checked live) and POST /comments/createComment/ {"parent", "text"} (OPTIONS lists text and
     # parent). Writes are reported from the bundle, not exercised by this session.
 
-    async def vote_deck(self, token: str, comment_root: int, *, up: bool, remove: bool = False) -> Any:
+    async def vote_deck(self, token: str, deck_id: str, *, up: bool, remove: bool = False) -> Any:
+        """PUT /decks/{id}/vote/ {up, remove}: the deck page's like button. Taking a vote back
+        sends ``remove`` with ``up`` naming the vote taken back, as the site does."""
+        if not DECK_ID_RE.fullmatch(str(deck_id)):
+            raise ArchidektError("contract", "deck id is not a number")
         return await self._request(
-            "PUT", f"/comments/vote/{int(comment_root)}/", token=token, json_body={"up": up, "remove": remove}
+            "PUT", f"/decks/{deck_id}/vote/", token=token, json_body={"up": up, "remove": remove}
+        )
+
+    async def vote_comment(self, token: str, comment_id: int, *, up: bool, remove: bool = False) -> Any:
+        """PUT /comments/vote/{id}/ {up, remove}: a comment's vote buttons."""
+        return await self._request(
+            "PUT", f"/comments/vote/{int(comment_id)}/", token=token, json_body={"up": up, "remove": remove}
         )
 
     async def bookmark_deck(self, token: str, deck_id: str, *, on: bool) -> Any:
@@ -1482,7 +1620,10 @@ class ArchidektClient:
 
     async def comment_create(self, token: str, parent: int, text: str) -> dict[str, Any]:
         resp = await self._request(
-            "POST", "/comments/createComment/", token=token, json_body={"parent": int(parent), "text": text}
+            "POST",
+            "/comments/createComment/",
+            token=token,
+            json_body={"parent": int(parent), "text": rich_doc(text)},
         )
         if not isinstance(resp, dict):
             raise ArchidektError("contract", "unexpected comment create response shape")
@@ -1494,7 +1635,8 @@ class ArchidektClient:
         ``unlisted`` (bool), and the cover: ``customFeatured`` (a card-art URL, see ``art_url``; the
         site's "Set Deck Image" sends only that key, its bundle read 2026-10-14) or ``""`` for its
         "Autoselect deck image". ``featured`` is Archidekt's own automatic pick and is never sent.
-        Only the keys given are sent. The route with
+        Only the keys given are sent. ``description`` is rich text: plain text is sent as a Quill
+        document (``rich_doc``), as the site's description editor sends it. The route with
         ``description`` is verified live (backup_deck uses it); the other keys are what Archidekt's
         own site bundle sends on the same route (reported 2026-10-07, not verified). Callers re-read
         the deck afterwards and compare every field rather than trusting the response, which only
@@ -1513,6 +1655,8 @@ class ArchidektClient:
         body = {k: fields[k] for k in allowed if k in fields}
         if not body:
             raise ArchidektError("contract", "no deck details to update")
+        if isinstance(body.get("description"), str):
+            body["description"] = rich_doc(body["description"])
         resp = await self._request("PATCH", f"/decks/{deck_id}/update/", token=token, json_body=body)
         if not isinstance(resp, dict):
             raise ArchidektError("contract", "unexpected deck update response shape")
@@ -1553,7 +1697,7 @@ class ArchidektClient:
         return made
 
     async def mass_update(self, token: str, items: list[dict[str, Any]]) -> Any:
-        """PATCH /massUpdate/ {"items": [{id, type: "deck" | "folder", patch: {...}, parentFolderId?}]}:
+        """PATCH /massUpdate/ {"items": [{id, type: "deck" | "folder", patch: {...}}]}:
         the folder page's move (patch ``parentFolder``) and rename (patch ``name``) (reported)."""
         return await self._request("PATCH", "/massUpdate/", token=token, json_body={"items": items})
 
@@ -1585,9 +1729,10 @@ class ArchidektClient:
 
     async def comment_update(self, token: str, comment_id: int, text: str) -> dict[str, Any]:
         """PATCH /comments/{id}/ {text}: edit one's own comment (the site sends text, archived and
-        locked; only the text is sent here; reported)."""
+        locked as it read them; only the text is sent here). The text goes as a Quill document
+        (``rich_doc``), as the site's comment editor sends it."""
         resp = await self._request(
-            "PATCH", f"/comments/{int(comment_id)}/", token=token, json_body={"text": text}
+            "PATCH", f"/comments/{int(comment_id)}/", token=token, json_body={"text": rich_doc(text)}
         )
         if not isinstance(resp, dict):
             raise ArchidektError("contract", "unexpected comment update response shape")

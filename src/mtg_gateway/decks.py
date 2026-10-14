@@ -51,6 +51,8 @@ from .archidekt import (
     no_retry,
     parse_deck,
     patient,
+    rich_text,
+    same_rich_text,
     wait_note,
 )
 from .archidekt_csv import CsvError, parse_export
@@ -3744,7 +3746,7 @@ class DeckService:
                 raise DeckError("invalid", "Pick a card that is in this deck for its cover.")
             card_name = card.name
             try:
-                url = art_url(uid)
+                url = art_url(uid, card.image_hash)
             except ArchidektError as exc:
                 raise DeckError("invalid", "That card has no usable art id.") from exc
         else:
@@ -3882,18 +3884,11 @@ class DeckService:
         current = deck.parent_folder if deck.parent_folder is not None else root
         if current == target:
             return {"deck_id": deck.id, "folder_id": target, "changed": False}
+        # the item archidekt.com's folder page sends for its "Move" (its bundle, read 2026-10-14)
         await self._call(
             sub,
             lambda token, *_: self.client.mass_update(
-                token,
-                [
-                    {
-                        "id": int(deck.id),
-                        "type": "deck",
-                        "patch": {"parentFolder": target},
-                        "parentFolderId": current,
-                    }
-                ],
+                token, [{"type": "deck", "id": int(deck.id), "patch": {"parentFolder": target}}]
             ),
         )
         verified = await self.get_deck(sub, deck.id)
@@ -3968,7 +3963,7 @@ class DeckService:
             raise DeckError("invalid", f"A deck has at most {self.MAX_TAGS} tags here.")
         tag_id, name = await self._archidekt_tag(sub, name)
         snapshot_id = self._hand_snapshot(sub, deck)
-        position = f"M-{500000 + 10000 * len(deck.tag_relations)}"
+        position = next_tag_position([r.get("position") for r in deck.tag_relations])
         await self._call(sub, lambda token, *_: self.client.add_deck_tag(token, deck.id, tag_id, position))
         verified = await self.get_deck(sub, deck.id)
         ok = any(str(r.get("name") or "").casefold() == name.casefold() for r in verified.tag_relations)
@@ -4114,18 +4109,22 @@ def details_rows(deck: Deck, wanted: dict[str, Any]) -> tuple[dict[str, Any], li
     lines: list[dict[str, Any]] = []
     for key, value in wanted.items():
         new = FORMAT_IDS[value] if key == "deck_format" else value
-        if new == _current_detail(deck, key):
+        if key == "description":
+            # Archidekt keeps a Quill document (see rich_doc): the texts are compared and shown
+            if same_rich_text(new, deck.description):
+                continue
+        elif new == _current_detail(deck, key):
             continue
         changes[key] = value
         if key == "description":
-            current = str(deck.description or "")
+            current, after = rich_text(deck.description), rich_text(value)
             lines.append(
                 _row(
                     "description",
                     before_len=len(current),
-                    after_len=len(value or ""),
+                    after_len=len(after),
                     before_text=current,
-                    after_text=str(value or ""),
+                    after_text=after,
                 )
             )
         elif key == "deck_format":
@@ -4281,6 +4280,26 @@ async def _writing(progress: dict[str, Any], work: Awaitable[Any]) -> Any:
         raise
     progress["deck_written"] = True
     return out
+
+
+def next_tag_position(positions: list[Any]) -> str:
+    """The ``position`` for a tag added after the deck's others, worked out as archidekt.com's deck
+    settings does it (its bundle, read 2026-10-14): "M-500000" for a deck's first tag, otherwise
+    the last tag's "<letter>-<number>" with 10000 added, moving on to the next letter at 0 once
+    the number would pass 999999. The last tag is the one with the highest position."""
+    parsed: list[tuple[str, int]] = []
+    for p in positions:
+        m = re.fullmatch(r"([0-9A-Za-z])-(\d{1,7})", str(p or ""))
+        if m:
+            parsed.append((m.group(1).upper(), int(m.group(2))))
+    if not parsed:
+        return "M-500000" if not positions else f"M-{500000 + 10000 * len(positions)}"
+    letter, number = max(parsed)
+    if number + 10000 < 1000000:
+        return f"{letter}-{number + 10000}"
+    if letter == "9":
+        return "A-0"
+    return f"{letter if letter == 'Z' else chr(ord(letter) + 1)}-0"
 
 
 def _cover_is(deck: Deck, uid: str) -> bool:

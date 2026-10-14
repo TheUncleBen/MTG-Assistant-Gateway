@@ -37,6 +37,7 @@ class Server:
             public_url=self.base,
             allowed_hosts=["127.0.0.1", f"127.0.0.1:{self.port}"],
             archidekt_base="https://ark.test/api",
+            writes_enabled=True,  # the likes and follows here are writes (the writes switch, 0.7.27)
         )
         self.db = Database(settings.db_path)
         oidc = OIDCClient(IDP, CLIENT_ID, CLIENT_SECRET, settings.callback_url, settings.oidc_scopes)

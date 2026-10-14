@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from mtg_gateway.archidekt import DeckCard
+from mtg_gateway.archidekt import DeckCard, rich_doc
 from mtg_gateway.decks import Change, DeckError, parse_changes, parse_details
 
 from .conftest import GATEWAY, FakeIdP, Harness, make_settings, running
@@ -89,7 +89,7 @@ async def test_propose_details_then_apply_changes_and_verifies(stack: Stack) -> 
     }
     a2 = structured(await call(h, token, "apply_proposal", {"proposal_id": p2["proposal_id"]}))
     assert a2["ok"] and a2["result"]["verified"] is True, a2
-    assert ark.decks[42]["edhBracket"] is None and ark.decks[42]["description"] == "x" * 120
+    assert ark.decks[42]["edhBracket"] is None and ark.decks[42]["description"] == rich_doc("x" * 120)
     assert 42 not in ark.private
 
 
