@@ -1229,6 +1229,11 @@ def _progress_html(p: dict[str, Any]) -> str:
     if g.get("of_entries"):
         bits.append(f"sent {int(g.get('sent_entries') or 0)} of {int(g['of_entries'])} changes")
     text = "Applying to Archidekt" + (": " + ", ".join(bits) if bits else "") + "."
+    if g.get("waiting_for_archidekt"):
+        text += (
+            " Archidekt asked us to slow down, so the gateway is waiting about "
+            f"{int(g['waiting_for_archidekt'])} seconds before carrying on by itself."
+        )
     return f"<p class='notice warn' role='status'>{html.escape(text)}</p>"
 
 

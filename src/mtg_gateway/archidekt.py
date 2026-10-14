@@ -548,6 +548,10 @@ class Pacer:
         self._next_allowed = time.monotonic() + self.min_interval
         self._lock.release()
 
+    def retry_wait(self) -> float:
+        """Seconds left of the pause a 429's Retry-After set (0 when none is running)."""
+        return max(0.0, self._retry_until - time.monotonic())
+
     def busy(self) -> bool:
         """Whether a call is being sent or waiting its turn right now (the deck sync, sync.py,
         steps aside while one is)."""
@@ -583,6 +587,18 @@ BACKOFF_CAP = 10.0  # seconds; the longest single wait between retries
 # Set by the deck sync (sync.py) around its background reads: each GET is sent once and never
 # retried, so a failing Archidekt costs the shared breaker at most one failure per check.
 no_retry: contextvars.ContextVar[bool] = contextvars.ContextVar("archidekt_no_retry", default=False)
+# Set around a member's apply (decks.py): a 429, or a call refused while a 429's Retry-After pause
+# runs, is waited out and the same request sent again, so a long apply (a 100-card new deck is a few
+# hundred paced requests) slows down instead of failing halfway. A 429 means Archidekt did not act
+# on the request, so sending a write again after one cannot apply it twice. Bounded: at most
+# RATE_LIMIT_WAITS waits and RATE_LIMIT_WAIT_TOTAL seconds for one request, then it fails as before.
+patient: contextvars.ContextVar[bool] = contextvars.ContextVar("archidekt_patient", default=False)
+# The apply's progress dict (decks.py), so the review page can say the apply is waiting.
+wait_note: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+    "archidekt_wait_note", default=None
+)
+RATE_LIMIT_WAITS = 6
+RATE_LIMIT_WAIT_TOTAL = 300.0
 MAX_LIST_PAGES = 4  # deck-list pages of 50 followed for one member (200 decks)
 
 
@@ -590,8 +606,9 @@ class ArchidektClient:
     """Every Archidekt request goes through ``_request``: paced by the shared Pacer, sent with the
     gateway's own honest User-Agent (no disguise), read caches as described above, and bounded
     retries with jittered exponential backoff for GETs that failed on a timeout, a network error
-    or a 5xx. A 429 is never retried: its Retry-After pauses every call. Writes are never
-    retried, so a slow answer can never apply a change twice."""
+    or a 5xx. A 429's Retry-After pauses every call; only a member's apply (``patient``) waits
+    the pause out and sends the request again. Writes are never retried after a timeout or a 5xx,
+    so a slow answer can never apply a change twice."""
 
     def __init__(
         self,
@@ -613,7 +630,14 @@ class ArchidektClient:
         self.cache_seconds = max(0.0, float(cache_seconds))
         self.card_cache_seconds = max(0.0, float(card_cache_seconds))
         self._cache: dict[str, tuple[float, Any]] = {}
-        self.stats = {"requests": 0, "cache_hits": 0, "retries": 0, "rate_limited": 0, "failures": 0}
+        self.stats = {
+            "requests": 0,
+            "cache_hits": 0,
+            "retries": 0,
+            "rate_limited": 0,
+            "rate_limit_waits": 0,
+            "failures": 0,
+        }
         # Called with the path of every write about to be sent (decks.py drops the member caches
         # that write makes stale: the deck list, the collection's first page).
         self.write_listeners: list[Callable[[str], None]] = []
@@ -707,7 +731,8 @@ class ArchidektClient:
             for listener in self.write_listeners:
                 listener(path)
         attempts = 1 + (self.retries if method == "GET" and not no_retry.get() else 0)
-        for attempt in range(attempts):
+        attempt, waits, waited = 0, 0, 0.0
+        while True:
             try:
                 value = await self._send(
                     method, path, token=token, scheme=scheme, json_body=json_body, params=params
@@ -715,12 +740,20 @@ class ArchidektClient:
             except ArchidektError as exc:
                 if exc.kind == "rate_limited":
                     self.stats["rate_limited"] += 1
+                    if patient.get() and waits < RATE_LIMIT_WAITS and waited < RATE_LIMIT_WAIT_TOTAL:
+                        wait = min(max(self.pacer.retry_wait(), 1.0), RATE_LIMIT_WAIT_TOTAL - waited)
+                        wait += random.uniform(0, 1.0)  # many waiters must not all come back at once
+                        waits, waited = waits + 1, waited + wait
+                        self.stats["rate_limit_waits"] += 1
+                        await self._wait_out(wait)
+                        continue
                 retryable = exc.kind == "unavailable" and exc.retryable
                 if not retryable or attempt + 1 >= attempts:
                     self.stats["failures"] += 1
                     raise
                 self.stats["retries"] += 1
                 await asyncio.sleep(self._backoff(attempt))
+                attempt += 1
                 continue
             if key is not None:
                 self._cache_put(key, copy.deepcopy(value))
@@ -730,7 +763,17 @@ class ArchidektClient:
                 for listener in self.write_listeners:
                     listener(path)
             return value
-        raise AssertionError("unreachable")  # pragma: no cover
+
+    async def _wait_out(self, seconds: float) -> None:
+        """Sleep through a rate-limit pause, marking the running apply's progress meanwhile."""
+        note = wait_note.get()
+        if note is not None:
+            note["waiting_for_archidekt"] = int(seconds) + 1
+        try:
+            await asyncio.sleep(seconds)
+        finally:
+            if note is not None:
+                note.pop("waiting_for_archidekt", None)
 
     async def _send(
         self,

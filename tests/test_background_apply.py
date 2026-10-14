@@ -222,3 +222,26 @@ async def test_a_backup_that_fails_after_the_answer_is_explained(stack: Stack, m
     assert got["result"]["error"] == "backup_failed", got
     assert got["next_step"].startswith("The last attempt to apply this stopped before anything changed")
     assert stack.ark.patches == []
+
+
+async def test_an_apply_waits_out_archidekts_429_and_finishes(stack: Stack) -> None:
+    """T-032: a 429 halfway through an apply pauses it (the review page says so) instead of
+    failing it with the deck partly changed; the refused request is sent again after the pause."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": THREE}))
+    orig = ark.transport.handler
+    refused = {"n": 0}
+
+    def once_429(req: httpx.Request) -> httpx.Response:
+        if req.method == "PATCH" and len(ark.patches) == 1 and not refused["n"]:
+            refused["n"] += 1
+            return httpx.Response(429, json={"detail": "slow down"}, headers={"Retry-After": "1"})
+        return orig(req)
+
+    ark.transport.handler = once_429
+    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert out["state"] == "applying", out
+    assert out["progress"].get("waiting_for_archidekt"), out
+    await _until(lambda: h.db.get_proposal(p["proposal_id"], "user-1")["state"] == "applied")
+    assert refused["n"] == 1 and len(ark.patches) == 3
