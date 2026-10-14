@@ -944,6 +944,13 @@ STACK_OF_JS = (
 )
 
 
+# every error note the page shows, in order (a later note replaces an earlier one on screen)
+ERRORS_SEEN_JS = """() => { window.__errs = [];
+  new MutationObserver(() => { const m = document.querySelector('.deck-toast.error .msg');
+    if (m && window.__errs[window.__errs.length - 1] !== m.textContent) window.__errs.push(m.textContent); })
+  .observe(document.body, {childList: true, subtree: true, characterData: true}); }"""
+
+
 def _settle(page, ms: int = 1200) -> None:
     """Wait for the Saving note to give way to an answer, then make sure the end state holds: a
     later save of the same card (the old bug) would change it within this time."""
@@ -1010,14 +1017,18 @@ def test_two_refused_moves_put_the_card_back_where_archidekt_has_it(
             held.set()
         _settle(page)
         text = _error(page)
-        assert text.startswith("Move not saved:") and text.endswith("Cultivate is back in Ramp."), text
+        # N5 (provisional, review question 1): the note says the later move was not sent
+        assert text.startswith("Move not saved:"), text
+        assert text.endswith("Cultivate is back in Ramp. Your later move of it was not sent."), text
         assert page.evaluate(STACK_OF_JS, "Cultivate") == "Ramp"
         assert page.evaluate(ORDER_JS) == before
         assert _cats(server, "Cultivate") == ["Ramp"]
         row.scroll_into_view_if_needed()
         _menu_shot(page, "m7-move-twice-error", width, scheme)
 
-        # a move, then Remove from deck while it is held: both refused, back in Ramp
+        # a move, then Remove from deck while it is held: both refused, back in Ramp; the removal
+        # is still sent, so the move's note says nothing about a later edit not sent
+        page.evaluate(ERRORS_SEEN_JS)
         held.clear()
         try:
             move("Lands")
@@ -1029,6 +1040,11 @@ def test_two_refused_moves_put_the_card_back_where_archidekt_has_it(
         _settle(page)
         text = _error(page)
         assert text.startswith("Removal not saved:") and text.endswith("Cultivate is back in the deck."), text
+        seen = page.evaluate("() => window.__errs")
+        move_note = seen[-2]
+        assert move_note.startswith("Move not saved:") and move_note.endswith("Cultivate is back in Ramp."), (
+            seen
+        )
         assert page.evaluate(STACK_OF_JS, "Cultivate") == "Ramp"
         assert page.evaluate(ORDER_JS) == before
         assert page.locator(".deckview .row[data-card='Cultivate']").get_attribute("data-cat") == "Ramp"
@@ -1069,9 +1085,29 @@ def test_two_refused_mana_values_put_back_the_value_archidekt_has(
         _settle(page)
         text = _error(page)
         assert text.startswith("Mana value not saved:"), text
-        assert text.endswith("Cultivate is back to its own mana value."), text
+        # N5 (provisional, review question 1): the note says the later value was not sent
+        assert text.endswith(
+            "Cultivate is back to its own mana value. Your later mana value for it was not sent."
+        ), text
         assert row.get_attribute("data-mv") is None
         assert _rows(server, "Cultivate")[0].get("customCmc") is None
         _shot(page, f"m7-mv-twice-error-{scheme}-{'phone' if width < 500 else 'desktop'}")
+
+        # three in a row, the first refused: both later ones were dropped, and the note says so
+        page.locator(".deck-toast .close").click()
+        page.locator(".deck-toast").wait_for(state="detached", timeout=3000)
+        held.clear()
+        try:
+            save("5")
+            save("6")
+            save("7")
+        finally:
+            held.set()
+        _settle(page)
+        text = _error(page)
+        assert text.endswith(
+            "Cultivate is back to its own mana value. Your later mana values for it were not sent."
+        ), text
+        assert row.get_attribute("data-mv") is None
         assert errors == []
         browser.close()
