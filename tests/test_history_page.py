@@ -194,8 +194,14 @@ async def test_history_page_filters_groups_and_pages(stack: Stack) -> None:
         assert "2 most recent stored reports" in body and "<svg class='tspark'" in body
         # the filter bar: themed selects in one form, the deck list from the member's history
         assert "class='card filterbar'" in body and body.count("<select") == 5
-        assert "<option value='42' selected>Immortal Reckoning</option>" in body
-        assert "<option value='43'>Reap the Tides</option>" in body
+        # Q11: current decks by their live Archidekt names (the history recorded "Immortal
+        # Reckoning"); a deck no longer in the member's list sits in its own group below
+        assert "<option value='42' selected>Sample Commander Deck</option>" in body
+        assert "Immortal Reckoning</option>" not in body
+        assert (
+            "<optgroup label='No longer on Archidekt'><option value='43'>Reap the Tides</option></optgroup>"
+            in body
+        )
         assert (
             "<label for='h-when'>When (UTC days)</label>" in body
             and "<select id='h-when' name='when'>" in body
@@ -593,3 +599,18 @@ async def test_trends_never_mix_simulations_run_differently(stack: Stack) -> Non
         assert "no rules engine" in table
     finally:
         await b.aclose()
+
+
+def test_deck_filter_groups_use_live_names_and_set_gone_decks_apart() -> None:
+    from mtg_gateway.history_view import deck_filter_groups
+
+    seen = {"42": "Old name", "43": "Deleted deck", "new": "Brand new", "collection": "x", "44": "Kept"}
+    live = [{"id": "42", "name": "New name"}, {"id": "44", "name": ""}]
+    current, gone = deck_filter_groups(seen, live, complete=True)
+    assert current == {"42": "New name", "collection": "Your Archidekt collection", "44": "Kept"}
+    assert gone == {"43": "Deleted deck"}
+    # an incomplete or unreadable list can't tell a deck is gone: it stays with the current ones
+    current, gone = deck_filter_groups(seen, live, complete=False)
+    assert gone == {} and current["43"] == "Deleted deck"
+    current, gone = deck_filter_groups(seen, None, complete=False)
+    assert gone == {} and current["42"] == "Old name"
