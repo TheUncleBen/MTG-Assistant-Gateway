@@ -935,3 +935,143 @@ def test_mana_value_grouping_restacks_at_once(server: Server, width: int, height
         assert _overflow(page) == 0
         assert errors == []
         browser.close()
+
+
+# 0.7.27 review M6 and M7: the card menu's background saves never leave a stale note, and a card
+# whose edits Archidekt refused goes back to what Archidekt really has.
+STACK_OF_JS = (
+    "n => document.querySelector(`.deckview .row[data-card=\"${n}\"]`)?.closest('.stack')?.dataset.group"
+)
+
+
+def _settle(page, ms: int = 1200) -> None:
+    """Wait for the Saving note to give way to an answer, then make sure the end state holds: a
+    later save of the same card (the old bug) would change it within this time."""
+    page.wait_for_function(
+        "() => !document.querySelector('.deck-toast .msg')?.textContent.startsWith('Saving')", timeout=8000
+    )
+    page.wait_for_timeout(ms)
+
+
+@pytest.mark.parametrize(("width", "height", "scheme"), MENU_SIZES[:2])
+def test_plus_then_minus_leaves_no_saving_note(server: Server, width: int, height: int, scheme: str) -> None:
+    """M6: + then - inside the 400 ms window sends nothing, and the Saving note goes away (it used
+    to stay on screen for good, saying a save was running)."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    with sync_playwright() as p:
+        browser, page, errors = _menu_page(p, server, width, height, scheme)
+        sent = _edits(page)
+        row = page.locator(".deckview .row[data-card='Cultivate']").first
+        menu = _open_menu(page, row)
+        menu.locator(".qtyrow .step").nth(1).click()
+        menu.locator(".qtyrow .step").nth(0).click()
+        assert page.locator(".deck-toast .msg", has_text="Saving Cultivate: 1 copy").count() == 1
+        page.locator(".deck-toast").wait_for(state="detached", timeout=3000)
+        page.wait_for_timeout(600)
+        assert sent == [] and row.get_attribute("data-qty") == "1"
+        assert page.locator(".deck-toast").count() == 0
+        _menu_shot(page, "m6-plus-minus", width, scheme)
+        assert errors == []
+        browser.close()
+
+
+@pytest.mark.parametrize(("width", "height", "scheme"), MENU_SIZES[:2])
+def test_two_refused_moves_put_the_card_back_where_archidekt_has_it(
+    server: Server, width: int, height: int, scheme: str
+) -> None:
+    """M7: Ramp -> Lands -> Draw, both refused: the card is back in Ramp (it used to stay in Lands,
+    an unsaved state, with "back in Lands"). Then a move held while the card is removed, both
+    refused: back in Ramp, not where the unsaved move put it."""
+    from playwright.sync_api import sync_playwright
+
+    _file_under(server, "Rampant Growth", ["Lands"])
+    _file_under(server, "Explore", ["Draw"])
+    _file_under(server, "Cultivate", ["Ramp"])
+    _chromium()
+    with sync_playwright() as p:
+        browser, page, errors = _menu_page(p, server, width, height, scheme)
+        row = page.locator(".deckview .row[data-card='Cultivate']").first
+        before = page.evaluate(ORDER_JS)
+
+        def move(to: str) -> None:
+            menu = _open_menu(page, row)
+            menu.locator(".more").click()
+            menu.locator(".sub button", has_text=to).click()
+
+        held = _held(server)
+        server.ark.fail_card_writes = True
+        try:
+            move("Lands")
+            move("Draw")
+            assert page.evaluate(STACK_OF_JS, "Cultivate") == "Draw"
+        finally:
+            held.set()
+        _settle(page)
+        text = _error(page)
+        assert text.startswith("Move not saved:") and text.endswith("Cultivate is back in Ramp."), text
+        assert page.evaluate(STACK_OF_JS, "Cultivate") == "Ramp"
+        assert page.evaluate(ORDER_JS) == before
+        assert _cats(server, "Cultivate") == ["Ramp"]
+        row.scroll_into_view_if_needed()
+        _menu_shot(page, "m7-move-twice-error", width, scheme)
+
+        # a move, then Remove from deck while it is held: both refused, back in Ramp
+        held.clear()
+        try:
+            move("Lands")
+            menu = _open_menu(page, row)
+            menu.locator("[role=menuitem]", has_text="Remove from deck").click()
+            assert page.locator(".deckview .row[data-card='Cultivate']").count() == 0
+        finally:
+            held.set()
+        _settle(page)
+        text = _error(page)
+        assert text.startswith("Removal not saved:") and text.endswith("Cultivate is back in the deck."), text
+        assert page.evaluate(STACK_OF_JS, "Cultivate") == "Ramp"
+        assert page.evaluate(ORDER_JS) == before
+        assert page.locator(".deckview .row[data-card='Cultivate']").get_attribute("data-cat") == "Ramp"
+        assert errors == []
+        browser.close()
+
+
+@pytest.mark.parametrize(("width", "scheme"), [(390, "dark"), (1280, "light")])
+def test_two_refused_mana_values_put_back_the_value_archidekt_has(
+    server: Server, width: int, scheme: str
+) -> None:
+    """M7: mana value 5 then 7, both refused: the card has its own mana value again and the note
+    says so (it used to show 5, "back to 5", a value Archidekt never had)."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, color_scheme=scheme)
+        page.goto(f"{server.base}/decks/42?view=brewer", wait_until="networkidle")
+        row = page.locator(".deckview.brewer .row.brew[data-card='Cultivate']").first
+        row.scroll_into_view_if_needed()
+
+        def save(value: str) -> None:
+            row.click(button="right")
+            page.locator(".ctxmenu [role=menuitem]", has_text="Mana value").click()
+            page.locator(".ctxmenu .mvform input").fill(value)
+            page.locator(".ctxmenu .mvform button", has_text="Save").click()
+
+        held = _held(server)
+        server.ark.fail_card_writes = True
+        try:
+            save("5")
+            save("7")
+            assert row.get_attribute("data-mv") == "7"
+        finally:
+            held.set()
+        _settle(page)
+        text = _error(page)
+        assert text.startswith("Mana value not saved:"), text
+        assert text.endswith("Cultivate is back to its own mana value."), text
+        assert row.get_attribute("data-mv") is None
+        assert _rows(server, "Cultivate")[0].get("customCmc") is None
+        _shot(page, f"m7-mv-twice-error-{scheme}-{'phone' if width < 500 else 'desktop'}")
+        assert errors == []
+        browser.close()
