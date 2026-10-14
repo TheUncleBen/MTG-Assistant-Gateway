@@ -201,10 +201,13 @@ a.skip{position:absolute;left:.5rem;top:-100px;z-index:50;padding:.6rem 1rem;bor
 a.skip:focus-visible{top:.5rem;outline-color:var(--on-orange)}
 main:focus{outline:none}
 /* an image that failed to load (feedback.js marks it): hide it, show the name in its place */
-img.img-broken{display:none}
+/* (!important: a row's own img rule, such as .erow .thumb's inline-flex, must not show it again) */
+img.img-broken{display:none !important}
 .img-fallback{display:flex;align-items:center;justify-content:center;width:100%;height:100%;min-height:2rem;
   padding:.5rem;text-align:center;font-size:.8rem;font-weight:700;color:var(--text-muted);
   background:linear-gradient(160deg,var(--surface-3),var(--surface-2));overflow-wrap:anywhere}
+/* too small for the name (a row's thumbnail): the plain tile a row without a picture shows */
+.img-fallback.img-fallback-mini{font-size:0;padding:0;min-height:0;overflow:hidden}
 svg.i{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;
   stroke-linejoin:round;vertical-align:-.15em;flex:none}
 @media (prefers-reduced-motion: reduce){ *{transition:none !important;animation:none !important} }
@@ -720,6 +723,11 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
 .home .panel-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;
   gap:.5rem 1rem;margin:0 0 .75rem}
 .home .panel-head h2{margin:0}
+/* the deck list couldn't be read (Q64): the /decks notice inside the panel, over any covers read */
+.home .decks-unreadable p{margin:0}
+.home .decks-unreadable .actions{margin-top:.75rem}
+.home .decks-unreadable .actions .btn{min-height:44px}
+.home .decks-unreadable + .recent{margin-top:1rem}
 /* placeholders while a deck list is still being read (decks.js swaps the real list in) */
 .skeleton>*{display:block;background:var(--surface-2);border:1px solid var(--border);
   border-radius:var(--radius);animation:skeleton 1.4s ease-in-out infinite}

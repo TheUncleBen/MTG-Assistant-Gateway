@@ -23,6 +23,7 @@ from .cards import (
     with_card,
 )
 from .decklist import DecklistError, parse_decklist, to_text
+from .deckpage import decks_unreadable_text
 from .decks import (
     DeckError,
 )
@@ -72,7 +73,9 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "List the decks owned by the linked Archidekt account (most recently updated first). Optional "
             "filters: name_contains, deck_format (commander, modern...), folder. This is the one tool for "
             "the member's deck list; search_decks with owner lists another user's public decks. The "
-            "gateway's own backup copies are left out (each snapshot in list_snapshots links its copy)."
+            "gateway's own backup copies are left out (each snapshot in list_snapshots links its copy). "
+            "unreadable counts decks Archidekt listed without a readable owner, which are left out; when "
+            "it is above 0, note says so in words to pass on to the member."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
         meta=deck_list_card_meta,
@@ -84,6 +87,10 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             rows = await state.decks.list_decks(_sub())
         except DeckError as exc:
             return _tool_error(exc)
+        # entries Archidekt listed without a readable owner are left out (Q64): say so, in the
+        # words My decks uses, so the assistant doesn't present a partial list as the whole one
+        unreadable = int(getattr(rows, "unreadable", 0) or 0)
+        note = decks_unreadable_text(some_shown=len(rows) > 0) if unreadable else None
         if name_contains:
             rows = [d for d in rows if name_contains.strip().lower() in str(d.get("name", "")).lower()]
         if deck_format:
@@ -93,7 +100,10 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             rows = [d for d in rows if (d.get("folder") or "") == folder]
         for d in rows:
             d.setdefault("url", f"https://archidekt.com/decks/{d['id']}")
-        return {"ok": True, "decks": rows, "count": len(rows)}
+        out: dict[str, object] = {"ok": True, "decks": rows, "count": len(rows), "unreadable": unreadable}
+        if note:
+            out["note"] = note
+        return out
 
     @server.tool(
         name="get_deck",

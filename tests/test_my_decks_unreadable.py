@@ -12,6 +12,7 @@ from mtg_gateway.archidekt import ArchidektClient, Pacer
 
 from .test_backup_copies_hidden import UNREADABLE_OWNER_ROWS
 from .test_browse_collection import NAV, Stack, linked, stack  # noqa: F401 - fixture
+from .test_decks_and_proxy import call, linked_user, structured
 
 NONE_READ = html.escape("Your deck list couldn't be read from Archidekt. Try again in a moment.")
 SOME_READ = html.escape(
@@ -105,3 +106,70 @@ async def test_the_list_counts_entries_whose_owner_cannot_be_read() -> None:
     assert (await One([mine, other]).list_decks("t", "alice", "7")).unreadable == 0  # readable, not hers
     listed = await One([mine, null, {**null, "id": 4}]).list_decks("t", "alice", "7")
     assert listed.unreadable == 2 and [d["id"] for d in listed] == ["1"]
+
+
+async def test_home_my_decks_panel_says_the_list_could_not_be_read(stack: Stack) -> None:  # noqa: F811
+    """The home page's My decks panel tells the same truth as /decks (Q64): the /decks notice and
+    Try again, never "No decks yet", when nothing could be read; the covers it did read plus the
+    "some may be missing" notice when part of it could."""
+    b = await linked(stack)
+    ark, svc = stack.ark, stack.h.app.state.gateway.decks
+    real_row = ark._listing_row
+    try:
+        for shape, change in UNREADABLE.items():
+            ark._listing_row = lambda d, change=change: change(real_row(d))
+            svc.deck_lists.drop(_sub(stack))
+            page = await b.http.get("/", headers=NAV)
+            assert page.status_code == 200, shape
+            assert NONE_READ in page.text and TRY_AGAIN in page.text, shape
+            assert "No decks yet" not in page.text, shape
+            # the cold-start placeholder's JSON brings the same panel
+            data = (await b.http.get("/api/decks/mine?shape=recent")).json()
+            assert NONE_READ in data["html"] and TRY_AGAIN in data["html"], shape
+            assert "No decks yet" not in data["html"], shape
+        # part of the list read: the covers it read, and the notice that some may be missing
+        ark.decks[44] = json.loads(json.dumps({**ark.decks[42], "id": 44, "name": "Unread deck"}))
+        ark._listing_row = lambda d: {**real_row(d), "owner": None} if d["id"] == 44 else real_row(d)
+        svc.deck_lists.drop(_sub(stack))
+        page = await b.http.get("/", headers=NAV)
+        assert SOME_READ in page.text and TRY_AGAIN in page.text
+        assert "Sample Commander Deck" in page.text and "Unread deck" not in page.text
+        data = (await b.http.get("/api/decks/mine?shape=recent")).json()
+        assert SOME_READ in data["html"] and "Sample Commander Deck" in data["html"]
+        # readable again: no notice
+        ark._listing_row = real_row
+        del ark.decks[44]
+        svc.deck_lists.drop(_sub(stack))
+        page = await b.http.get("/", headers=NAV)
+        assert "be read from Archidekt" not in page.text and TRY_AGAIN not in page.text
+        assert "All decks (1)" in page.text
+    finally:
+        ark._listing_row = real_row
+        ark.decks.pop(44, None)
+        await b.aclose()
+
+
+async def test_list_my_decks_tool_says_when_entries_could_not_be_read(stack: Stack) -> None:  # noqa: F811
+    """The assistant's list_my_decks says how many entries were left out because their owner
+    couldn't be read, with a note to relay (Q64); its other fields stay as they were."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)  # type: ignore[arg-type]
+    svc = h.app.state.gateway.decks
+    real_row = ark._listing_row
+    try:
+        out = structured(await call(h, token, "list_my_decks"))
+        assert out["ok"] and out["count"] == 1 and out["unreadable"] == 0 and "note" not in out
+        ark.decks[44] = json.loads(json.dumps({**ark.decks[42], "id": 44, "name": "Unread deck"}))
+        ark._listing_row = lambda d: {**real_row(d), "owner": None} if d["id"] == 44 else real_row(d)
+        svc.deck_lists.drop(_sub(stack))
+        out = structured(await call(h, token, "list_my_decks"))
+        assert out["ok"] and [d["id"] for d in out["decks"]] == ["42"] and out["count"] == 1
+        assert out["unreadable"] == 1 and out["note"] == html.unescape(SOME_READ)
+        ark._listing_row = lambda d: {**real_row(d), "owner": None}
+        svc.deck_lists.drop(_sub(stack))
+        out = structured(await call(h, token, "list_my_decks"))
+        assert out["ok"] and out["decks"] == [] and out["count"] == 0
+        assert out["unreadable"] == 2 and out["note"] == html.unescape(NONE_READ)
+    finally:
+        ark._listing_row = real_row
+        ark.decks.pop(44, None)

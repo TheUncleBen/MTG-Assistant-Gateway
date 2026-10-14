@@ -1825,11 +1825,17 @@ DECKS_PARTLY_UNREADABLE = (
 )
 
 
-def decks_unreadable_html(*, some_shown: bool) -> str:
-    """The notice over (or instead of) the deck list when entries couldn't be read (Q64)."""
-    text = DECKS_PARTLY_UNREADABLE if some_shown else DECKS_UNREADABLE
+def decks_unreadable_text(*, some_shown: bool) -> str:
+    """The Q64 notice's words: none of the list read, or only part of it."""
+    return DECKS_PARTLY_UNREADABLE if some_shown else DECKS_UNREADABLE
+
+
+def decks_unreadable_html(*, some_shown: bool, panel: bool = True) -> str:
+    """The notice over (or instead of) the deck list when entries couldn't be read (Q64);
+    ``panel=False`` for a notice inside a panel already (the home page's My decks)."""
+    text = decks_unreadable_text(some_shown=some_shown)
     return (
-        f"<div class='panel decks-unreadable' role='alert'><p>{esc(text)}</p>"
+        f"<div class='{'panel ' if panel else ''}decks-unreadable' role='alert'><p>{esc(text)}</p>"
         "<div class='actions'><a class='btn btn-primary' href=''>Try again</a></div></div>"
     )
 
