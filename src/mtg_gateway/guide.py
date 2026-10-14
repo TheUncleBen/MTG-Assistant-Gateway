@@ -235,10 +235,11 @@ def guide_body(
         "<li><span>Optional: <a href='#tut-connect'><strong>connect an assistant</strong></a> from the home "
         "page and ask it to research, simulate or edit for you. An assistant's edit comes back to you as a "
         "proposal.</span></li></ol>"
-        "<p class='tip'>On a phone the tabs at the bottom are Decks, Scan, Collection, Proposals and More; "
-        "the magnifier at the top opens the search box for cards and decks. More opens Home, History, Guide "
-        "and Account (and Admin). "
-        "Unfolded or on a tablet the tabs move to a rail down the left edge, with Search among them. "
+        "<p class='tip'>On a phone the tabs at the bottom are Home, Decks, Scan, Collection and More; "
+        "the magnifier at the top opens the search box for cards and decks. More opens Proposals, History, "
+        "Guide and Account (and Admin). "
+        "Unfolded or on a tablet the tabs move to a rail down the left edge with every page on it, Search "
+        "among them, and no More. "
         "Your account menu is your picture at the top right, and a tap anywhere else closes it.</p>"
     )
     tut_link = (
@@ -866,9 +867,10 @@ def guide_body(
         "<tbody>"
         + "".join(f"<tr><td>{_esc(p)}</td><td>{a}</td><td>{w}</td></tr>" for p, a, w in page_rows)
         + "</tbody></table></div>"
-        "<p>On a phone the tabs at the bottom are Decks, Scan, Collection, Proposals and More (Home, "
+        "<p>On a phone the tabs at the bottom are Home, Decks, Scan, Collection and More (Proposals, "
         "History, Guide, Account and Admin); Search is the magnifier at the top. From 600 px on a touch "
-        "screen the tabs are a rail down the left edge; a wider browser has the links in the top bar.</p>"
+        "screen every page is a tab on a rail down the left edge, with no More; a wider browser has the "
+        "links in the top bar, Home first.</p>"
     )
     on_review_page = "<td>you press Apply on its review page</td>"  # R-142, in every mode
     ref_approval = (

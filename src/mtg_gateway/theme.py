@@ -631,7 +631,7 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
 .wide .wrap{max-width:2300px}
 .wide main.wrap{padding-left:1rem;padding-right:1rem}
 
-@media (max-width:900px){ .topbar nav.site a{padding:0 .45rem;font-size:.93rem} .brand{margin-right:.25rem} }
+@media (max-width:900px){ .topbar nav.site a{padding:0 .4rem;font-size:.93rem} .brand{margin-right:.25rem} }
 /* The proposal review's three choices sit at one height (gate D8), and the deck banner's
    Comments link matches its Like and Bookmark buttons (gate D9). */
 .choice button,.choice .btn{min-height:48px}
@@ -807,7 +807,8 @@ _MOBILE_RULES = """
 """
 # The medium layout: the same tabs as a navigation rail (80px wide, icon in a pill with the label
 # under it, as Material's rail draws it) fixed to the left edge; the top bar keeps the brand and
-# the account menu and loses its text links. The body is padded by the rail's width so every page
+# the account menu and loses its text links. The rail lists every page (More's too) and drops
+# More; on a short screen it scrolls. The body is padded by the rail's width so every page
 # re-centres in the remaining space.
 _RAIL_RULES = """
   body{b} .topbar nav.site a:not(.keep){display:none}
@@ -828,18 +829,7 @@ _RAIL_RULES = """
   body{b} .tabbar > a:focus-visible::before{background:rgba(127,127,127,.18)}
   body{b} .tabbar > a[aria-current=page]{color:var(--toolbar-active)}
   body{b} .tabbar > a[aria-current=page]::before{background:rgba(255,111,0,.22)}
-  body{b} .tabbar details.more summary{position:relative;display:flex;flex-direction:column;
-    align-items:center;justify-content:center;gap:.3rem;height:64px;flex:none;color:var(--toolbar-text);
-    font-weight:700;
-    font-size:11px;-webkit-tap-highlight-color:transparent}
-  body{b} .tabbar details.more summary svg{width:24px;height:24px;position:relative;z-index:1}
-  body{b} .tabbar details.more summary::before{content:'';position:absolute;top:7px;left:50%;width:56px;
-    height:32px;margin-left:-28px;border-radius:16px;background:transparent}
-  body{b} .tabbar details.more summary.on,
-  body{b} .tabbar details.more[open] summary{color:var(--toolbar-active)}
-  body{b} .tabbar details.more[open] summary::before{background:rgba(255,111,0,.22)}
-  body{b} .tabbar details.more .menu.sheet{left:calc(84px + env(safe-area-inset-left));transform:none;
-    bottom:auto;top:calc(7rem + env(safe-area-inset-top) + 4 * 64px)}
+  body{b} .tabbar details.more{display:none}
   body{b} details.dd .menu{min-width:min(14rem,calc(100vw - 16px))}
 """
 CSS = CSS.replace(
@@ -1096,10 +1086,11 @@ def current_layout() -> str:
     return _layout.get()
 
 
-# The site navigation, in Archidekt's order of sections as far as the gateway has them: decks,
-# deck search, cards you own, scanning, then the gateway's own review pages. The same list feeds
-# the top bar on wide screens and the bottom tab bar on phones.
+# The site navigation, in Archidekt's order of sections as far as the gateway has them: Home, then
+# decks, deck search, cards you own, scanning, then the gateway's own review pages. The same list
+# feeds the top bar on wide screens and the bottom tab bar on phones.
 NAV_LINKS = [
+    ("/", "Home", "home"),
     ("/decks", "Decks", "decks"),
     ("/search", "Search", "search"),
     ("/collection", "Collection", "collection"),
@@ -1107,19 +1098,20 @@ NAV_LINKS = [
     ("/proposals", "Proposals", "proposals"),
     ("/history", "History", "history"),
 ]
-# The tabs, as Material's navigation bar (3 to 5 destinations) and rail (up to 7) have them: on a
-# compact screen Decks, Scan, Collection, Proposals and More, with Search as the icon in the top
-# bar; the rail has room for Search as a sixth tab. More opens a sheet with the remaining pages
-# (Home, History, Watchlist, Guide, Admin, Account) so nothing is more than two taps away.
+# The tabs, as Material's navigation bar (3 to 5 destinations) has them: on a compact screen Home,
+# Decks, Scan, Collection and More, with Search as the icon in the top bar. More opens a sheet with
+# the remaining pages (Proposals, History, Watchlist, Guide, Account, Admin) so nothing is more than
+# two taps away; Home is never under More. The rail (an unfolded Fold, a tablet, the app from
+# 600px) is tall enough for every page, so it lists them all as tabs and has no More.
 TAB_LINKS = [
+    ("/", "Home", "home", ""),
     ("/decks", "Decks", "decks", ""),
     ("/search", "Search", "search", "railonly"),
     ("/scan", "Scan", "scan", ""),
     ("/collection", "Collection", "collection", ""),
-    ("/proposals", "Proposals", "proposals", ""),
 ]
 MORE_LINKS = [
-    ("/", "Home", "home"),
+    ("/proposals", "Proposals", "proposals"),
     ("/history", "History", "history"),
     ("/watchlist", "Watchlist", "stats"),
     ("/guide", "Guide", "guide"),
@@ -1301,13 +1293,15 @@ def render(
         more_links = [m for m in MORE_LINKS if WATCHLISTS or m[0] != "/watchlist"] + (
             [("/admin", "Admin", "settings")] if admin else []
         )
-        more_open = cur in {href for href, _l, _i in more_links} and cur != "/"
+        more_open = cur in {href for href, _l, _i in more_links}
+        # The More pages are tabs on the rail too (railonly: hidden on the phone bar, which has More)
+        rail_more = [(href, label, ic, "railonly") for href, label, ic in more_links]
         tabbar = (
             "<nav class='tabbar' aria-label='Sections'>"
             + "".join(
                 f"<a href='{href}' class='{cls}'{' aria-current=page' if cur == href else ''}>"
                 f"{icon(ic)}{label}</a>"
-                for href, label, ic, cls in TAB_LINKS
+                for href, label, ic, cls in TAB_LINKS + rail_more
             )
             + "<details class='dd more'><summary"
             + (" class='on'" if more_open else "")
