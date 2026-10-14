@@ -131,6 +131,21 @@ APPLY_WAIT_SECONDS = 20.0
 # wait for requests (GRACEFUL_SHUTDOWN_SECONDS in __main__), and the two together stay under the
 # stack's stop_grace_period, after which Docker kills the container with nothing recorded.
 SHUTDOWN_GRACE_SECONDS = 90.0
+# The unused backup copy of a failed apply that changed nothing (Q77). When Archidekt refuses its
+# delete for a while (a pause is running, a 429, a 5xx, a network error, the breaker), the delete
+# is queued and tried again later by backup_delete_loop, one at a time across all members, never
+# while the client is paused: first when the pause ends plus BACKUP_DELETE_MARGIN, then after each
+# failure at least the pause left and at least BACKUP_DELETE_BACKOFF seconds, doubling, until
+# BACKUP_DELETE_TRIES later attempts have failed. Any other refusal keeps the copy at once.
+BACKUP_KEPT = "The unused backup copy could not be deleted; it stays in the backup folder."
+BACKUP_LATER = (
+    "The unused backup copy will be deleted from the backup folder by itself once Archidekt allows it."
+)
+BACKUP_DELETE_TRANSIENT = frozenset({"rate_limited", "unavailable"})
+BACKUP_DELETE_MARGIN = 30
+BACKUP_DELETE_BACKOFF = 600
+BACKUP_DELETE_TRIES = 4
+BACKUP_DELETE_EVERY = 60.0  # seconds between the loop's passes
 BROWSER_CLIENT = "__browser__"  # the same value as pages.BROWSER_CLIENT_ID
 # An administrator acting on a member's account from the admin pages (unlink): recorded in the
 # member's own activity log as done by an administrator, never as the member's browser.
@@ -2390,6 +2405,11 @@ class DeckService:
         closed_by, closed_by_app = self._closer(row) if state == "rejected" else (None, None)
         # The deck sync (sync.py) saw the deck change after this proposal was made (R-153).
         out_of_date = self._out_of_date_since(row["id"]) if state == "pending" else None
+        # Archidekt's waits stopped the last apply: it failed, or it changed nothing and the
+        # proposal is pending again (Q78; an out-of-date one is told only that it is out of date)
+        stopped = (row["result"] or {}).get("error") == "rate_limited" and (
+            state == "failed" or (state == "pending" and self.settings.writes_enabled and not out_of_date)
+        )
         return {
             "proposal_id": row["id"],
             "kind": kind,
@@ -2449,11 +2469,7 @@ class DeckService:
                 if state == "pending" and (row["result"] or {}).get("error") == "backup_failed"
                 else ""
             )
-            + (
-                PATIENCE_SPENT + " "
-                if state == "failed" and (row["result"] or {}).get("error") == "rate_limited"
-                else ""
-            )
+            + (PATIENCE_SPENT + " " if stopped else "")
             + _next_step(
                 state,
                 self.settings.writes_enabled,
@@ -2465,8 +2481,10 @@ class DeckService:
                 partial=bool((row["result"] or {}).get("sent_entries")),
                 kind=kind,
                 rate_limited=(
-                    _rate_limited_note(row["result"] or {})
-                    if (row["result"] or {}).get("error") == "rate_limited"
+                    _rate_limited_note(
+                        row["result"] or {}, pending=state == "pending", collection=kind == "collection"
+                    )
+                    if stopped
                     else ""
                 ),
                 closed_by=closed_by,
@@ -2781,6 +2799,7 @@ class DeckService:
         # result), kept in the proposal's result whichever way the apply ends, and shown by
         # describe() while it runs.
         progress: dict[str, Any] = {}
+        coll = row.get("kind") == "collection"  # the messages say "your collection", not "the deck"
         self._progress[proposal_id] = progress
         # This task's own context: a rate limit is waited out instead of failing the apply halfway,
         # within one allowance for the whole apply (Q66)
@@ -2798,9 +2817,31 @@ class DeckService:
                 if exc.kind == "backup_failed":  # nothing was sent; the proposal is pending again
                     raise
                 await self._drop_unused_backup(sub, proposal_id, progress, source_deck_id=row["deck_id"])
+                if exc.kind == "rate_limited" and not _changed_anything(progress):
+                    # Q78: Archidekt's waits stopped it before anything changed there, so the
+                    # proposal is pending again, to be approved again later (re-checked against the
+                    # live deck then, with a new snapshot and backup). Its snapshot stays.
+                    detail = f"{exc} {_rate_limited_note(progress, pending=True, collection=coll)}"
+                    self.db.finish_proposal(
+                        proposal_id,
+                        state="pending",
+                        result={**progress, "error": exc.kind, "detail": detail},
+                    )
+                    self._audit(
+                        "proposal_apply_stopped",
+                        sub=sub,
+                        detail={"proposal_id": proposal_id, "error": exc.kind, "state": "pending"},
+                    )
+                    raise DeckError(
+                        exc.kind, detail, **{**exc.extra, **_sent(progress), "state": "pending"}
+                    ) from exc
                 # One plain message for an apply that ran out of patience with Archidekt's 429s
                 # (Q41, Q66): what stopped it, how far it got, and to try again later.
-                detail = f"{exc} {_rate_limited_note(progress)}" if exc.kind == "rate_limited" else str(exc)
+                detail = (
+                    f"{exc} {_rate_limited_note(progress, collection=coll)}"
+                    if exc.kind == "rate_limited"
+                    else str(exc)
+                )
                 self.db.finish_proposal(
                     proposal_id, state="failed", result={**progress, "error": exc.kind, "detail": detail}
                 )
@@ -2815,7 +2856,9 @@ class DeckService:
                     progress.get("sent_entries") or progress.get("deck_id")
                 ) and exc.kind != "verify_mismatch":
                     raise DeckError(
-                        exc.kind, f"{exc} {_partial_note(progress)}", **{**exc.extra, **_sent(progress)}
+                        exc.kind,
+                        f"{exc} {_partial_note(progress, collection=coll)}",
+                        **{**exc.extra, **_sent(progress)},
                     ) from exc
                 raise
             except BaseException as exc:  # cancelled or unexpected: never leave a proposal in applying
@@ -2830,7 +2873,7 @@ class DeckService:
                     raise
                 logger.exception("apply failed")
                 raise DeckError(
-                    "internal", f"Applying failed unexpectedly. {_partial_note(progress)}"
+                    "internal", f"Applying failed unexpectedly. {_partial_note(progress, collection=coll)}"
                 ) from exc
         finally:
             lock.release()
@@ -3109,9 +3152,13 @@ class DeckService:
         earlier on Archidekt: the deck is as it was, so the copy would only pile up in the backup
         folder. When the deck may have changed the copy is kept, as the readable way back. The
         gateway's own snapshot is always kept. Only the copy this apply made is ever deleted: never
-        the deck the apply was for, and only the copy its snapshot records (review L7)."""
+        the deck the apply was for, and only the copy its snapshot records (review L7).
+
+        Q77: while Archidekt refuses calls for a while (a pause running now, or the delete meets a
+        429, a 5xx, a network error or the breaker) the delete is queued for backup_delete_loop
+        instead, with no extra waiting here; any other refusal keeps the copy."""
         backup_id = progress.get("backup_deck_id")
-        if not backup_id or progress.get("deck_written"):
+        if not backup_id or _changed_anything(progress):
             return
         snap = self.db.get_snapshot(str(progress.get("snapshot_id") or ""), sub)
         if (
@@ -3126,12 +3173,16 @@ class DeckService:
                 detail={"proposal_id": proposal_id, "backup_deck_id": str(backup_id)},
             )
             return
+        if self.client.pacer.paused():  # the call would only be refused: queue it straight away
+            self._queue_backup_delete(sub, proposal_id, progress, source_deck_id, why="paused")
+            return
         try:
             await self._call(sub, self.client.delete_deck, str(backup_id))
         except DeckError as exc:
-            progress["backup_note"] = (
-                "The unused backup copy could not be deleted; it stays in the backup folder."
-            )
+            if exc.kind in BACKUP_DELETE_TRANSIENT:
+                self._queue_backup_delete(sub, proposal_id, progress, source_deck_id, why=exc.kind)
+                return
+            progress["backup_note"] = BACKUP_KEPT
             self._audit(
                 "backup_delete_failed",
                 sub=sub,
@@ -3146,6 +3197,157 @@ class DeckService:
         self._audit(
             "backup_deleted", sub=sub, detail={"proposal_id": proposal_id, "backup_deck_id": backup_id}
         )
+
+    def _queue_backup_delete(
+        self, sub: str, proposal_id: str, progress: dict[str, Any], source_deck_id: str, *, why: str
+    ) -> None:
+        """Keep the delete of an unused backup copy for later (Q77), in the database so it outlives
+        a restart and a re-apply of the proposal (which rewrites its result)."""
+        due = int(time.time() + self.client.pacer.pause_left()) + BACKUP_DELETE_MARGIN
+        backup_id = str(progress["backup_deck_id"])
+        self.db.queue_backup_delete(
+            str(progress["snapshot_id"]),
+            sub=sub,
+            backup_deck_id=backup_id,
+            deck_id=str(source_deck_id),
+            proposal_id=proposal_id,
+            due=due,
+        )
+        progress["backup_note"] = BACKUP_LATER
+        self._audit(
+            "backup_delete_queued",
+            sub=sub,
+            detail={"proposal_id": proposal_id, "backup_deck_id": backup_id, "error": why, "due": due},
+        )
+
+    async def backup_delete_loop(self) -> None:
+        """Every BACKUP_DELETE_EVERY seconds, try at most one queued backup delete (Q77)."""
+        while True:
+            await asyncio.sleep(BACKUP_DELETE_EVERY)
+            try:
+                await self.delete_one_queued_backup()
+            except Exception:  # never let one bad pass end the loop
+                logger.exception("queued backup delete failed")
+
+    async def delete_one_queued_backup(self) -> dict[str, Any] | None:
+        """One pass of the later deletes (Q77): the one queued delete due first, across all
+        members, never while the client is paused or writes are off. It runs the same checks as
+        _drop_unused_backup, through the member's own link as a normal call (outside an apply its
+        429 counts towards the breaker, Q62). Returns what it did, for the log and the tests."""
+        if not self.settings.writes_enabled or self.client.pacer.paused():
+            return None
+        job = self.db.next_backup_delete(int(time.time()))
+        if job is None:
+            return None
+        sub, sid = job["sub"], job["snapshot_id"]
+        backup_id, deck_id, pid = job["backup_deck_id"], job["deck_id"], job["proposal_id"]
+        snap = self.db.get_snapshot(sid, sub)
+        proposal = self.db.get_proposal(pid, sub) if pid else None
+        changed = (
+            proposal is not None
+            and proposal.get("snapshot_id") == sid
+            and _changed_anything(proposal.get("result") or {})
+        )
+        if (
+            not backup_id.isdigit()
+            or backup_id == deck_id
+            or snap is None
+            or str(snap.get("backup_deck_id") or "") != backup_id
+            or str(snap.get("deck_id") or "") != deck_id
+            or changed
+        ):
+            self.db.drop_backup_delete(sid)
+            self._audit(
+                "backup_delete_skipped",
+                sub=sub,
+                detail={"proposal_id": pid, "backup_deck_id": backup_id, "later": True},
+            )
+            return {"skipped": sid}
+        attempts = int(job["attempts"]) + 1
+        gone = False
+        try:
+            await self._call(sub, self.client.delete_deck, backup_id)
+        except DeckError as exc:
+            if exc.kind == "not_found":  # already gone from Archidekt: nothing left to do
+                gone = True
+            elif exc.kind in BACKUP_DELETE_TRANSIENT and attempts < BACKUP_DELETE_TRIES:
+                wait = max(
+                    self.client.pacer.pause_left() + BACKUP_DELETE_MARGIN,
+                    BACKUP_DELETE_BACKOFF * 2 ** (attempts - 1),
+                )
+                due = int(time.time() + wait)
+                self.db.reschedule_backup_delete(sid, due=due, attempts=attempts)
+                self._audit(
+                    "backup_delete_failed",
+                    sub=sub,
+                    detail={
+                        "proposal_id": pid,
+                        "backup_deck_id": backup_id,
+                        "error": exc.kind,
+                        "later": True,
+                        "attempts": attempts,
+                        "due": due,
+                    },
+                )
+                return {"retry": sid, "attempts": attempts, "due": due}
+            else:
+                self.db.drop_backup_delete(sid)
+                self._reword_backup_note(sub, pid, sid, BACKUP_KEPT)
+                self._audit(
+                    "backup_delete_given_up",
+                    sub=sub,
+                    detail={
+                        "proposal_id": pid,
+                        "backup_deck_id": backup_id,
+                        "error": exc.kind,
+                        "attempts": attempts,
+                    },
+                )
+                return {"given_up": sid, "error": exc.kind}
+        self.db.drop_backup_delete(sid)
+        self.db.clear_snapshot_backup(sid)
+        self._reword_backup_note(sub, pid, sid, None)
+        self._audit(
+            "backup_deleted",
+            sub=sub,
+            detail={
+                "proposal_id": pid,
+                "backup_deck_id": backup_id,
+                "later": True,
+                **({"already_gone": True} if gone else {}),
+            },
+        )
+        return {"deleted": sid, **({"already_gone": True} if gone else {})}
+
+    def _reword_backup_note(self, sub: str, proposal_id: str, snapshot_id: str, note: str | None) -> None:
+        """A queued delete ended (Q77): the proposal's stored result, if it is still the one from the
+        apply that queued it, no longer says the copy will be deleted by itself. ``note`` None: the
+        copy is gone, so the sentence goes; otherwise the sentence becomes ``note``."""
+
+        def reword(result: Any) -> dict[str, Any] | None:
+            if (
+                not isinstance(result, dict)
+                or str(result.get("snapshot_id") or "") != snapshot_id
+                or result.get("backup_note") != BACKUP_LATER
+            ):
+                return None
+            out = dict(result)
+            if note is None:
+                for key in ("backup_note", "backup_deck_id", "backup_url"):
+                    out.pop(key, None)
+                out["backup_deleted"] = True
+            else:
+                out["backup_note"] = note
+            if isinstance(out.get("detail"), str):
+                out["detail"] = (
+                    out["detail"].replace(f" {BACKUP_LATER}", "").replace(BACKUP_LATER, "")
+                    if note is None
+                    else out["detail"].replace(BACKUP_LATER, note)
+                )
+            return out
+
+        if proposal_id:
+            self.db.edit_proposal_result(proposal_id, sub, reword)
 
     async def _backup_on_archidekt(
         self, sub: str, row: dict[str, Any], deck: Deck, snapshot_id: str
@@ -4460,20 +4662,38 @@ async def _writing(progress: dict[str, Any] | None, work: Awaitable[Any]) -> Any
     return out
 
 
-def _rate_limited_note(progress: dict[str, Any]) -> str:
+def _changed_anything(progress: dict[str, Any]) -> bool:
+    """Whether an apply may have changed anything on Archidekt, by its progress or by the
+    proposal's stored result (which holds it): deck rows (or collection records) sent, a deck
+    created, or any write that landed or may have. The one definition of "changed nothing" for
+    the apply-stopped messages, the unused backup copy and putting a proposal back to pending
+    (Q78). A backup copy made in the backup folder is not a change to the deck."""
+    return bool(progress.get("sent_entries") or progress.get("deck_id") or progress.get("deck_written"))
+
+
+def _rate_limited_note(progress: dict[str, Any], *, pending: bool = False, collection: bool = False) -> str:
     """What an apply that ran out of patience with Archidekt's 429s had changed, and what to do
     (Q41, Q66): added to PATIENCE_SPENT in the message the member sees. ``progress`` is the apply's
-    progress, or the failed proposal's stored result (which holds it): get_proposal's next_step
-    is built from the same note, so the two always agree (review N1). A backup copy whose delete
-    was refused is said to stay in the backup folder, as the review page shows (review N4)."""
+    progress, or the proposal's stored result (which holds it): get_proposal's next_step is built
+    from the same note, so the two always agree (review N1). A backup copy whose delete was
+    refused is said to stay in the backup folder, or to be deleted later (review N4, Q77).
+    ``pending``: nothing changed, so the proposal is pending again (Q78). ``collection``: a
+    collection proposal, whose target is "your collection"."""
     if progress.get("sent_entries") or progress.get("deck_id"):
-        return f"{_partial_note(progress)} Try the rest again in a few minutes with a new proposal."
+        note = _partial_note(progress, collection=collection)
+        return f"{note} Try the rest again in a few minutes with a new proposal."
     if progress.get("deck_written"):
+        where = "your collection" if collection else "the deck"
         return (
-            "Part of this change had already reached Archidekt, so check the deck. Try the rest again "
+            f"Part of this change had already reached Archidekt, so check {where}. Try the rest again "
             "in a few minutes with a new proposal."
         )
     kept = f" {progress['backup_note']}" if progress.get("backup_note") else ""
+    if pending:
+        return (
+            f"Nothing was changed on Archidekt.{kept} The proposal is still pending, so it can be "
+            "approved again in a few minutes."
+        )
     return f"Nothing was changed on Archidekt.{kept} Try again in a few minutes with a new proposal."
 
 
@@ -4524,11 +4744,19 @@ def _progress_view(progress: dict[str, Any]) -> dict[str, Any]:
     return {k: progress[k] for k in keys if k in progress}
 
 
-def _partial_note(progress: dict[str, Any]) -> str:
-    """What a failed apply had already changed on Archidekt, for the message the user sees."""
+def _partial_note(progress: dict[str, Any], *, collection: bool = False) -> str:
+    """What a failed apply had already changed on Archidekt, for the message the user sees.
+    ``collection``: a collection proposal's apply, which counts collection records."""
     sent = int(progress.get("sent_entries") or 0)
     if not sent and progress.get("deck_id"):
         return f"The new deck {progress['deck_id']} was created on Archidekt, but no cards were added."
+    if collection:
+        if not sent:
+            return "No collection records were changed."
+        return (
+            f"{sent} of {progress.get('of_entries', '?')} collection changes had already been sent, "
+            "so your collection is partly changed."
+        )
     if not sent:
         return "No deck rows were changed."
     note = (
@@ -4663,6 +4891,10 @@ def _next_step(
     )
     if state == "pending" and not writes_enabled:
         return "Review only: deck writes are disabled on this gateway, so this cannot be applied yet."
+    if state == "pending" and rate_limited:
+        # Q78: the last apply stopped on Archidekt's waits before it changed anything. No "call
+        # apply_proposal now", even when the member's mode lets the assistant apply: not yet.
+        return rate_limited
     if state == "pending" and may_apply:
         chose = (
             "to apply deck and collection changes without asking"
