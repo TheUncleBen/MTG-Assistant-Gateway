@@ -68,7 +68,6 @@ def proposal_tool_result(data: dict[str, Any], *, decks: Any, sub: str, in_chat:
     """A propose_* tool's result: the JSON as text and structured content, plus, for a pending
     proposal the member decides on, the in-chat card's one-time approval code in ``_meta`` (kept
     out of the text and structured content, so not in the model's context)."""
-    import pydantic_core
     from mcp_types import CallToolResult, TextContent
 
     approval = None
@@ -86,10 +85,55 @@ def proposal_tool_result(data: dict[str, Any], *, decks: Any, sub: str, in_chat:
             approval = decks.approval_for(sub, row)
     meta = {APPROVAL_META_KEY: approval} if approval else None
     return CallToolResult(
-        content=[TextContent(type="text", text=pydantic_core.to_json(data, fallback=str, indent=2).decode())],
+        content=[TextContent(type="text", text=proposal_text(data))],
         structured_content=data,
         _meta=meta,
     )
+
+
+# Left out of the text: the review rows and the stored edit, which the diff lines already say.
+_TEXT_SKIP = ("rows", "changes", "diff")
+
+
+def proposal_text(data: dict[str, Any]) -> str:
+    """A proposal result as plain text, not JSON: what a chat app shows when it does not draw the
+    card, and what an MCP Apps host gives the model (the structured content is for the card). A
+    few sentences, the diff lines, then every other field as ``name: value`` on its own line,
+    under the same names as the structured content, so the assistant reads all it did before."""
+    import pydantic_core
+
+    def one_line(v: Any) -> str:
+        if isinstance(v, bool):
+            return "true" if v else "false"
+        if isinstance(v, (dict, list)):
+            return pydantic_core.to_json(v, fallback=str).decode()
+        return " ".join(str(v).split())
+
+    lines: list[str] = []
+    skip = set(_TEXT_SKIP)
+    if data.get("ok") is False:
+        lines.append(
+            "Not done: " + one_line(data.get("message") or data.get("error") or "the gateway refused.")
+        )
+        skip.add("message")
+    elif data.get("proposal_id"):
+        deck = one_line(data.get("deck_name") or data.get("deck_id"))
+        head = f"Proposal {one_line(data['proposal_id'])} for {deck}: {one_line(data.get('state'))}"
+        if data.get("risk"):
+            head += f", {one_line(data['risk'])} risk"
+            if data.get("risk_reason"):
+                head += f" ({one_line(data['risk_reason'])})"
+        lines.append(head + ".")
+        if data.get("review_url"):
+            lines.append("review_url: " + one_line(data["review_url"]))
+            skip.add("review_url")
+    diff = [ln for ln in str(data.get("diff") or "").splitlines() if ln.strip()]
+    if diff:
+        lines += ["", "Changes:", *("  " + ln for ln in diff)]
+    rest = [f"{k}: {one_line(v)}" for k, v in data.items() if k not in skip and v not in (None, "", [], {})]
+    if rest:
+        lines += ["", "Details:", *rest]
+    return "\n".join(lines)
 
 
 def approval_code(secret: str, *, proposal_id: str, sub: str, client_id: str, created_at: int) -> str:

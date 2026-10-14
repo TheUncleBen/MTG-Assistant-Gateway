@@ -12,6 +12,7 @@ import pytest
 
 from mtg_gateway.approve import APPROVAL_META_KEY, card_html
 
+from .test_cards_browser import HOST as SIZED_HOST
 from .test_cards_browser import PNG
 from .test_consent_browser import _chromium_or_skip, _launch
 
@@ -327,6 +328,72 @@ def test_narrow_card_keeps_badges_whole_and_names_readable() -> None:
                 assert all(left >= geo["titleRight"] for left, _ in geo["badges"]), (width, geo)
                 assert geo["nameWidth"] > 80, (width, geo)
                 page.close()
+        finally:
+            browser.close()
+
+
+def test_rows_read_on_a_phone_with_no_empty_column_and_the_footer_names_the_app() -> None:
+    """R-181: at 380 px a row is two lines (the action with its count or change, then the card), a
+    row with no picture (a setting, or a picture that did not load) leaves no empty column, tag
+    changes say what is added and taken off, and the footer names the app, never its client id."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    details = {
+        **PROPOSAL,
+        "created_by": "app: ChatGPT (cid-0123456789abcdef)",
+        "rows": [
+            {"kind": "add", "name": "Arcane Signet", "qty": 1},
+            {"kind": "change", "name": "Forest", "before": 15, "after": 13},
+            {
+                "kind": "detail",
+                "field": "tags",
+                "before": "budget",
+                "after": "ramp, landfall",
+                "added": ["ramp", "landfall"],
+                "removed": ["budget"],
+            },
+            {"kind": "detail", "field": "cover", "before": "Sol Ring", "after": "Cultivate"},
+        ],
+    }
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            page = browser.new_page(viewport={"width": 400, "height": 900})
+            errors: list[str] = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.route("https://api.scryfall.com/**", lambda r: r.abort())  # no picture loads
+            page.set_content(SIZED_HOST % ("#ffffff", 380, "light"))  # a host that sizes the frame
+            page.evaluate(
+                "(r) => { window.toolResult = r; }",
+                {"structuredContent": details, "_meta": {APPROVAL_META_KEY: "c"}},
+            )
+            page.evaluate("(html) => { document.getElementById('f').srcdoc = html; }", card_html())
+            card = page.frame_locator("#f")
+            card.locator("#approve").wait_for()
+            page.frames[1].wait_for_function("() => document.querySelectorAll('li.nopic').length === 4")
+            geo = page.frames[1].evaluate(
+                """() => [...document.querySelectorAll('ul.changes li:not(.group)')].map(li => {
+  const r = li.getBoundingClientRect(), box = s => li.querySelector(s).getBoundingClientRect();
+  return {cls: li.className, h: r.height, left: r.left, act: box('.act'), name: box('.name'),
+          qty: box('.qty'), pics: li.querySelectorAll('.pic').length};
+})"""
+            )
+            for row in geo:
+                assert row["pics"] == 0 and row["act"]["left"] - row["left"] < 30, row  # no 34 px empty slot
+                assert row["name"]["top"] >= row["act"]["bottom"] - 1, row  # the card under the action
+                if row["qty"]["width"]:
+                    assert abs(row["qty"]["top"] - row["act"]["top"]) < 6, row  # count on the action's line
+                assert "detail" in row["cls"] or row["h"] < 60, row  # a card row: two lines, not three
+            rows = card.locator("ul.changes li:not(.group)")
+            assert (
+                rows.nth(2).locator(".name").inner_text()
+                == "add ramp, landfall; remove budget (then: ramp, landfall)"
+            )
+            assert rows.nth(3).locator(".name").inner_text() == "Sol Ring → Cultivate"
+            foot = card.locator("#foot").inner_text()
+            assert foot.startswith("Proposed by ChatGPT · expires") and "cid-" not in foot, foot
+            assert not errors, errors
         finally:
             browser.close()
 
