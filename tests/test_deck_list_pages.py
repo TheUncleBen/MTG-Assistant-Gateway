@@ -130,3 +130,31 @@ async def test_a_listing_without_a_count_is_judged_by_its_rows() -> None:
 
     client._request = no_count  # type: ignore[method-assign]
     assert (await client.list_decks("tok", "alice", "7")).complete is True
+
+
+async def test_a_deck_seen_on_two_pages_makes_the_list_incomplete() -> None:
+    """L3: the listing shifted between pages (a deck came back again), so another deck may have
+    been skipped, even when the count did not move."""
+    pages = [[_row(i) for i in range(50)], [_row(49), _row(50)]]
+    client = _Paged(pages)
+    real = client._request
+
+    async def steady(method: str, path: str, **kw: Any) -> Any:
+        return {**(await real(method, path, **kw)), "count": 51}
+
+    client._request = steady  # type: ignore[method-assign]
+    decks = await client.list_decks("tok", "alice", "7")
+    assert len(decks) == 51 and decks.complete is False
+
+
+async def test_fewer_decks_than_archidekts_count_make_the_list_incomplete() -> None:
+    """L3: Archidekt's count says more decks exist than came back."""
+    client = _Paged([[_row(i) for i in range(3)]])
+    real = client._request
+
+    async def more(method: str, path: str, **kw: Any) -> Any:
+        return {**(await real(method, path, **kw)), "count": 4}
+
+    client._request = more  # type: ignore[method-assign]
+    decks = await client.list_decks("tok", "alice", "7")
+    assert len(decks) == 3 and decks.complete is False

@@ -103,6 +103,17 @@ def _language_id(value: Any) -> int | None:
 # JSON.stringify(getContents())) and reads them with JSON.parse, showing an empty text for anything
 # that is not JSON (its bundle and editor chunk, read 2026-10-14). So plain text from the gateway
 # is wrapped in a document before it is sent, and a document read back is shown as its text.
+#
+# What an assistant or a gateway form writes is plain text only (Q70): the gateway builds the
+# document from the text itself and never sends a document a caller supplied, so a link, any
+# formatting or an embed the review page does not show can never be written. Only a snapshot
+# restore puts a stored document back as it was, by handing it over as a QuillDoc. A later
+# formatted-text feature (Q61) would make its own QuillDoc from checked input; nothing else changes.
+
+
+class QuillDoc(str):
+    """A Quill document (JSON text) that ``rich_doc`` sends unchanged, formatting included. Only a
+    snapshot restore makes one, from the document Archidekt itself stored (Q70)."""
 
 
 def _quill_ops(value: Any) -> list[Any] | None:
@@ -123,7 +134,7 @@ def rich_text(value: Any) -> str:
     ends with. Text that is not a Quill document (older plain text) is returned as it is."""
     ops = _quill_ops(value)
     if ops is None:
-        return value if isinstance(value, str) else ""
+        return str(value) if isinstance(value, str) else ""
     parts: list[str] = []
     for op in ops:
         insert = op.get("insert") if isinstance(op, dict) else None
@@ -135,11 +146,33 @@ def rich_text(value: Any) -> str:
     return text[:-1] if text.endswith("\n") else text
 
 
+def plain_text(value: str) -> str:
+    """Text an assistant or a form supplied, as the plain text that will be written (Q70): a Quill
+    document given as JSON text is reduced to its words (``rich_text``: links, formatting and
+    embeds dropped, a card link kept as its card name); any other text is kept as it is. A
+    document inside a document is reduced too, so the result is never a document and reducing it
+    again changes nothing: a proposal re-checked when it is applied writes what its review showed."""
+    text = str(value)
+    while _quill_ops(text) is not None:
+        text = rich_text(text)  # each pass is shorter than the last, so this ends
+    return text
+
+
+def written_text(value: str) -> str:
+    """The text ``rich_doc(value)`` writes, as a review shows it: a QuillDoc's words, else the
+    plain text itself."""
+    return rich_text(value) if isinstance(value, QuillDoc) else str(value)
+
+
 def rich_doc(value: str) -> str:
-    """The rich-text value to send for ``value``: a Quill document given as JSON text is sent as
-    it is (a snapshot restore keeps its formatting); plain text becomes a one-insert document
-    that ends with a line break, as the site's editor makes it; "" stays "" (no text)."""
-    if not value or _quill_ops(value) is not None:
+    """The rich-text value to send for ``value``. Plain text, whatever it holds (JSON included),
+    becomes a one-insert document that ends with a line break, as the site's editor makes it, so
+    it shows on Archidekt exactly as written (Q70). Only a QuillDoc that holds a document (a
+    snapshot restore) is sent as it is, keeping its formatting. "" stays "" (no text)."""
+    if isinstance(value, QuillDoc) and _quill_ops(value) is not None:
+        return str(value)
+    value = str(value)
+    if not value:
         return value
     text = value if value.endswith("\n") else value + "\n"
     return json.dumps({"ops": [{"insert": text}]}, ensure_ascii=False, separators=(",", ":"))
@@ -625,8 +658,10 @@ class DeckList(list):  # type: ignore[type-arg]
     """``list_decks``' answer: the member's deck rows, plus ``complete``, whether they can be taken
     as every deck of the account. False when any entry was dropped (its owner field could not be
     read, or it named someone else, so the owner filter was not honoured), when the listing was
-    cut off at MAX_LIST_PAGES, or when its count moved while the pages were read. Only a complete
-    list may say a deck is gone (DeckService.on_archidekt)."""
+    cut off at MAX_LIST_PAGES, when its count moved while the pages were read, when a deck came
+    back on two pages (the list shifted, so another may have been skipped), or when fewer decks
+    came back than Archidekt's count. Only a complete list may say a deck is gone
+    (DeckService.on_archidekt)."""
 
     def __init__(self, rows: Any = (), *, complete: bool = False) -> None:
         super().__init__(rows)
@@ -634,13 +669,17 @@ class DeckList(list):  # type: ignore[type-arg]
 
 
 def _owned_by(owner: Any, username: str, user_id: str | None) -> bool:
-    """True only when a deck entry's owner field names the linked account."""
+    """True only when a deck entry's owner field names the linked account. When both the owner's
+    id and the linked account's id are known, the ids decide alone: a username can be given up
+    and taken by someone else, an id cannot. The username decides only when an id is missing,
+    and an empty username never matches."""
     if isinstance(owner, dict):
-        if user_id and owner.get("id") is not None and str(owner["id"]) == str(user_id):
-            return True
-        return str(owner.get("username") or "").casefold() == username.casefold()
+        owner_id = owner.get("id")
+        if user_id and owner_id is not None and str(owner_id) != "":
+            return str(owner_id) == str(user_id)
+        owner = owner.get("username")
     if isinstance(owner, str):
-        return owner.casefold() == username.casefold()
+        return bool(owner) and bool(username) and owner.casefold() == username.casefold()
     return False
 
 
@@ -1149,7 +1188,7 @@ class ArchidektClient:
         seen: set[str] = set()
         dropped = unreadable = 0
         counts: set[int] = set()
-        cut_off = False
+        cut_off = repeated = False
         for page in range(1, MAX_LIST_PAGES + 1):
             params = {**flt, "orderBy": "-updatedAt", "pageSize": 50}
             if page > 1:
@@ -1170,6 +1209,7 @@ class ArchidektClient:
                     continue
                 deck_id = str(d["id"])
                 if deck_id in seen:
+                    repeated = True  # the list shifted between pages: another deck may have been skipped
                     continue
                 seen.add(deck_id)
                 row = list_row(d)
@@ -1188,7 +1228,10 @@ class ArchidektClient:
                 unreadable,
             )
         decks.sort(key=lambda d: d["updated_at"], reverse=True)
-        return DeckList(decks, complete=not dropped and not cut_off and len(counts) <= 1)
+        # fewer decks than the count Archidekt gave: some were never seen
+        short = any(len(seen) < n for n in counts)
+        complete = not dropped and not cut_off and not repeated and not short and len(counts) <= 1
+        return DeckList(decks, complete=complete)
 
     async def search_decks(
         self,
@@ -1617,19 +1660,29 @@ class ArchidektClient:
             "card": card_id,
             "modifier": record.get("modifier") or "Normal",
         }
-        for key in ("language", "condition", "tags", "purchasePrice"):
+        for key in ("tags", "purchasePrice"):
             if record.get(key) is not None:
                 body[key] = record[key]
+        # Archidekt keeps condition and language as numbers (see CONDITION_IDS). A value copied
+        # from the record goes back as it came when it is a number, as its number when it is a
+        # known code, and is left out when it is neither (an edit never fails on a stored value
+        # the gateway does not know); only the values in ``changes`` must be known codes.
+        for key, to_id in (("language", _language_id), ("condition", _condition_id)):
+            stored = record.get(key)
+            if stored is None:
+                continue
+            try:
+                body[key] = to_id(stored)
+            except ArchidektError:
+                logger.info("collection record %s: unknown stored %s left out", rid, key)
         # None clears purchasePrice and condition (the site sends null for "no price" and "no
         # condition"); for the other fields None means "leave as is".
-        body.update(
-            {k: v for k, v in changes.items() if v is not None or k in ("purchasePrice", "condition")}
-        )
-        # Archidekt keeps both as numbers (see CONDITION_IDS); a code is sent as its number
-        if "condition" in body:
-            body["condition"] = _condition_id(body["condition"])
-        if "language" in body:
-            body["language"] = _language_id(body["language"])
+        changed = {k: v for k, v in changes.items() if v is not None or k in ("purchasePrice", "condition")}
+        if "condition" in changed:
+            changed["condition"] = _condition_id(changed["condition"])
+        if "language" in changed:
+            changed["language"] = _language_id(changed["language"])
+        body.update(changed)
         resp = await self._request("PATCH", f"/collection/v2/{rid}/", token=token, json_body=body)
         if not isinstance(resp, dict):
             raise ArchidektError("contract", "unexpected collection update response shape")
@@ -1749,8 +1802,9 @@ class ArchidektClient:
         ``unlisted`` (bool), and the cover: ``customFeatured`` (a card-art URL, see ``art_url``; the
         site's "Set Deck Image" sends only that key, its bundle read 2026-10-14) or ``""`` for its
         "Autoselect deck image". ``featured`` is Archidekt's own automatic pick and is never sent.
-        Only the keys given are sent. ``description`` is rich text: plain text is sent as a Quill
-        document (``rich_doc``), as the site's description editor sends it. The route with
+        Only the keys given are sent. ``description`` is rich text: it is sent as a Quill document
+        built from its plain text (``rich_doc``), as the site's description editor sends it; only
+        a QuillDoc (a snapshot restore) goes as it is. The route with
         ``description`` is verified live (backup_deck uses it); the other keys are what Archidekt's
         own site bundle sends on the same route (reported 2026-10-07, not verified). Callers re-read
         the deck afterwards and compare every field rather than trusting the response, which only

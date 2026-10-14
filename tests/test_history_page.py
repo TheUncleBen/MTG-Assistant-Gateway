@@ -26,7 +26,11 @@ DAY = 86400
 
 def seed_history(db: Database, sub: str, *, now: int) -> None:
     """30 proposals for deck 42 and 30 for deck 43, alternating and spread over 20 days, one
-    snapshot per applied proposal, so the user-wide newest 20 hold only part of deck 42's."""
+    snapshot per applied proposal, so the user-wide newest 20 hold only part of deck 42's. A
+    snapshot's deck names its owner, the linked account, as a deck read from Archidekt does."""
+    link = db.get_link(sub)
+    uid = (link or {}).get("archidekt_user_id")
+    owner = {"owner": {"id": int(uid), "username": link["archidekt_username"]}} if link and uid else {}
     for i in range(60):
         deck = "42" if i % 2 == 0 else "43"
         pid = f"p{i:02d}"
@@ -60,6 +64,7 @@ def seed_history(db: Database, sub: str, *, now: int) -> None:
                     "id": deck,
                     "name": "Immortal Reckoning" if deck == "42" else "Reap the Tides",
                     "cards": [],
+                    **owner,
                 },
             )
             with db.tx() as c:
@@ -599,6 +604,126 @@ async def test_trends_never_mix_simulations_run_differently(stack: Stack) -> Non
         assert "no rules engine" in table
     finally:
         await b.aclose()
+
+
+async def test_a_relinked_member_keeps_the_old_accounts_history(stack: Stack) -> None:
+    """L1: after relinking to another Archidekt account, the decks of the account linked before are
+    not in the new account's list, but they are not gone: they stay with the current decks and
+    their snapshots keep Restore. A deck of the account linked now that left its list still is."""
+    b = await linked_browser(stack)
+    try:
+        gw = stack.h.app.state.gateway
+        sub = gw.db._one("SELECT sub FROM users", ())["sub"]
+        link = gw.db.get_link(sub)
+        me = {"id": int(link["archidekt_user_id"]), "username": link["archidekt_username"]}
+        before = {"id": 999999, "username": "my-old-account"}
+        now = int(time.time())
+
+        def snapshot(sid: str, deck: str, name: str, owner: dict) -> None:
+            gw.db.save_snapshot(
+                sid,
+                owner_sub=sub,
+                deck_id=deck,
+                proposal_id=None,
+                fingerprint="f",
+                deck={"id": deck, "name": name, "cards": [], "owner": owner},
+            )
+            with gw.db.tx() as c:
+                c.execute("UPDATE snapshots SET taken_at = ? WHERE id = ?", (now - DAY, sid))
+
+        snapshot("s_old_account", "7001", "Old Account Deck", before)
+        snapshot("s_mine_gone", "7002", "Mine Deleted", me)
+        gw.db.save_proposal(  # a change to the old account's deck, made before the relink
+            {
+                "id": "p_old_account",
+                "owner_sub": sub,
+                "kind": "edit",
+                "deck_id": "7003",
+                "deck_name": "Old Account Other",
+                "baseline_fingerprint": "f",
+                "changes": [],
+                "diff_text": "+1 Sol Ring",
+                "expires_at": now + 3600,
+            }
+        )
+        # the old account was linked 60 days ago (the audit log names each account linked)
+        gw.db.audit("archidekt_linked", sub=sub, detail={"archidekt_username": before["username"]})
+        with gw.db.tx() as c:
+            c.execute("UPDATE proposals SET created_at = ? WHERE id = 'p_old_account'", (now - 30 * DAY,))
+            c.execute("UPDATE archidekt_links SET created_at = ? WHERE sub = ?", (now - 2 * DAY, sub))
+            c.execute(
+                "UPDATE audit_log SET at = ? WHERE sub = ? AND event = 'archidekt_linked' "
+                "AND detail_json LIKE '%my-old-account%'",
+                (now - 60 * DAY, sub),
+            )
+        page = await b.http.get("/history", headers=NAV)
+        body = page.text.split("<main")[1]
+        gone = body.split("<optgroup label='No longer on Archidekt'>")[1].split("</optgroup>")[0]
+        assert "Mine Deleted" in gone
+        assert "Old Account Deck" not in gone and "Old Account Other" not in gone
+        assert "<option value='7001'>Old Account Deck</option>" in body
+        assert "<option value='7003'>Old Account Other</option>" in body
+        snaps = re.findall(r"<li class='hrow k-snapshot.*?</li>", body, re.S)
+        (old_row,) = [r for r in snaps if "Old Account Deck" in r]
+        (mine_row,) = [r for r in snaps if "Mine Deleted" in r]
+        assert "action='/history/restore'" in old_row and "no longer on Archidekt" not in old_row
+        assert "action='/history/restore'" not in mine_row and "no longer on Archidekt" in mine_row
+    finally:
+        await b.aclose()
+
+
+def test_own_decks_are_the_linked_accounts_only(tmp_path: Path) -> None:
+    """L1: which decks of the history count as the linked account's own (the only ones that can
+    be called gone). A snapshot names its deck's owner; a proposal counts by the account linked
+    when it was made, and every doubt leaves a deck out."""
+    db = Database(tmp_path / "g.db")
+    now = int(time.time())
+
+    def at(sql: str, when: int, key: str) -> None:
+        with db.tx() as c:
+            c.execute(sql, (when, key))
+
+    def proposal(pid: str, deck: str, when: int) -> None:
+        db.save_proposal(
+            {
+                "id": pid,
+                "owner_sub": "u",
+                "kind": "edit",
+                "deck_id": deck,
+                "deck_name": deck,
+                "baseline_fingerprint": "f",
+                "changes": [],
+                "diff_text": "x",
+                "expires_at": now + 3600,
+            }
+        )
+        at("UPDATE proposals SET created_at = ? WHERE id = ?", when, pid)
+
+    def linked(name: str, when: int) -> None:
+        db.audit("archidekt_linked", sub="u", detail={"archidekt_username": name})
+        at("UPDATE audit_log SET at = ? WHERE id = (SELECT MAX(id) FROM audit_log WHERE ? != '')", when, "x")
+
+    def own(**kw) -> set[str]:
+        return db.own_history_deck_ids("u", **{"account_id": "7", "username": "Me", "linked_at": now, **kw})
+
+    for sid, deck, owner in (("s1", "1", {"id": 7}), ("s2", "2", {"id": 8}), ("s3", "3", None)):
+        db.save_snapshot(
+            sid, owner_sub="u", deck_id=deck, proposal_id=None, fingerprint="f", deck={"owner": owner}
+        )
+        at("UPDATE snapshots SET taken_at = ? WHERE id = ?", now - 50 * DAY, sid)
+    proposal("p_now", "10", now + 1)
+    proposal("p_before", "11", now - 40 * DAY)
+    # no link recorded at all: one account only, as before this release
+    assert own() == {"1", "3", "10", "11"}
+    # the same account linked (and relinked): still the member's own
+    linked("me", now - 60 * DAY)
+    linked("Me", now)
+    assert own() == {"1", "3", "10", "11"}
+    # another account was linked when "11" was changed (after "3" was snapshotted): not this one's
+    linked("someone-else", now - 45 * DAY)
+    assert own() == {"1", "3", "10"}
+    # an empty username never matches
+    assert own(username="") == {"1", "10"}
 
 
 def test_deck_filter_groups_use_live_names_and_set_gone_decks_apart() -> None:

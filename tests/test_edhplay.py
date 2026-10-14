@@ -239,6 +239,53 @@ def test_an_all_single_copy_deck_without_a_land_starts_with_a_non_creature() -> 
     assert _edhplay_commander(text) == card.name  # what EDHPlay sends, and refuses as a commander
 
 
+def test_a_legendary_land_ranks_with_the_lands_not_the_commanders() -> None:
+    """L15: a single legendary land is a land: it leads a deck of single copies with no
+    commander, ahead of a legendary creature that sorts before it."""
+    deck = _deck()
+    aesi = next(c for c in deck.cards if deck.is_commander(c))
+    aesi.categories, aesi.supertypes = ["Creature"], ["Legendary"]  # a possible commander, unmarked
+    lands = [c for c in deck.cards if "Land" in c.types and "Creature" not in c.types]
+    keep = lands[0]
+    keep.name, keep.supertypes, keep.quantity = "Zzz Legendary Land", ["Legendary"], 1
+    deck.cards = [c for c in deck.cards if c is keep or "Land" not in c.types]
+    deck.cards = [c for c in deck.cards if "Creature" in c.types or c is keep]  # no other lead
+    for c in deck.cards:
+        c.quantity = 1
+    text = to_edhplay(deck).text
+    assert text.splitlines()[0].startswith("1 Zzz Legendary Land"), text.splitlines()[:3]
+    assert _edhplay_commander(text) == "Zzz Legendary Land"  # sent, and refused: a land
+
+
+def test_a_list_with_only_a_sideboard_starts_at_its_heading() -> None:
+    """L16: no blank first line when there is no main deck to end."""
+    ark = FakeArchidekt()
+    ark.add_side_row(42, "Sol Ring", quantity=1, category="Sideboard")
+    deck = parse_deck(ark.decks[42])
+    deck.cards = [c for c in deck.cards if not deck.in_deck(c)]
+    text = to_edhplay(deck).text
+    assert text.startswith("Sideboard\n1 Sol Ring"), text
+    assert _sections(text)["main"] == []
+    # with a main deck, the blank line before the heading stays
+    assert "\n\nSideboard\n" in to_edhplay(parse_deck(ark.decks[42])).text
+
+
+def test_a_companion_in_a_main_deck_category_moves_to_the_sideboard() -> None:
+    """L17: a row flagged as the companion but filed in a main-deck category goes to the
+    Sideboard (first) with the box's companion note, as a companion does in the Arena export."""
+    ark = FakeArchidekt()
+    deck_json = ark.decks[42]
+    row = next(c for c in deck_json["cards"] if c["card"]["oracleCard"]["name"] == "Acidic Slime")
+    row["companion"] = True
+    deck = parse_deck(deck_json)
+    slime = next(c for c in deck.cards if c.name == "Acidic Slime")
+    assert deck.in_deck(slime) and slime.companion
+    edh = to_edhplay(deck)
+    parts = _sections(edh.text)
+    assert parts["sideboard"][0].startswith("1 Acidic Slime") and edh.companion
+    assert not any(line.startswith("1 Acidic Slime") for line in parts["main"])
+
+
 def to_edhplay_lines(deck) -> list[str]:
     from mtg_gateway.export_formats import _edh_line
 

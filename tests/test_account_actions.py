@@ -6,9 +6,11 @@ card cannot apply one either: it gets no approval code and only opens the review
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
-from mtg_gateway import modes
+from mtg_gateway import actions, modes
 from mtg_gateway.approve import APPROVAL_META_KEY, approval_code
 from mtg_gateway.archidekt import rich_doc
 from mtg_gateway.decks import DeckError
@@ -102,6 +104,19 @@ async def test_like_bookmark_and_follow_through_proposals(stack: Stack) -> None:
     assert p["ok"] is False and p["error"] == "invalid"
 
 
+async def test_a_like_already_given_says_so_and_sends_nothing(stack: Stack) -> None:
+    """L6: a like proposal for a deck the member already likes says applying changes nothing,
+    and applying it sends no vote (Archidekt might toggle it off)."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _propose_and_apply(h, token, "propose_deck_social", {"deck_id": "43", "action": "like"})
+    sent = len(ark.vote_calls)
+    res = await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "like"})
+    assert structured(res)["rows"][0]["text"].endswith("(already the case; applying changes nothing)")
+    await _press(h, token, res)
+    assert len(ark.vote_calls) == sent and ark.votes == {("alice", 300043): 1}
+
+
 async def test_comments_post_edit_vote_delete(stack: Stack) -> None:
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
@@ -165,6 +180,30 @@ async def test_comments_post_edit_vote_delete(stack: Stack) -> None:
     assert p["rows"][0]["cannot_undo"] is True and p["rows"][0]["before_text"] == "Edited."
     await _press(h, token, res)
     assert all(c["id"] != mine["id"] for c in ark.comments[300043])
+
+
+async def test_an_assistant_comment_is_posted_as_plain_text_only(stack: Stack) -> None:
+    """M4/Q70: a comment proposed as a Quill document with a hidden link shows its words on the
+    review row, and exactly those words are posted (and edited) when the member applies it. (The
+    MCP tool itself turns a JSON text argument into an object and refuses it, so the proposal is
+    made here the way the tool makes it, with the text as a string.)"""
+    h, ark = stack.h, stack.ark
+    await linked_user(stack)
+    decks = h.app.state.gateway.decks
+    ark.comments[300043] = []
+    phish = json.dumps(
+        {"ops": [{"insert": "See my primer", "attributes": {"link": "https://evil.example/login"}}]}
+    )
+    p = await actions.propose(decks, SUB, "comment_post", {"deck_id": "43", "text": phish, "reply_to": None})
+    assert p["rows"][0]["after_text"] == "See my primer" and "evil" not in json.dumps(p), p
+    assert (await _browser_apply(h, p["proposal_id"]))["state"] == "applied"
+    (made,) = ark.comments[300043]
+    assert made["text"] == rich_doc("See my primer")
+    edit = {"deck_id": "43", "comment_id": made["id"], "text": phish.replace("See", "Read")}
+    p = await actions.propose(decks, SUB, "comment_edit", edit)
+    assert p["rows"][0]["after_text"] == "Read my primer" and "evil" not in json.dumps(p), p
+    assert (await _browser_apply(h, p["proposal_id"]))["state"] == "applied"
+    assert ark.comments[300043][0]["text"] == rich_doc("Read my primer")
 
 
 async def test_delete_deck_waits_for_the_members_press_even_in_auto(stack: Stack) -> None:
