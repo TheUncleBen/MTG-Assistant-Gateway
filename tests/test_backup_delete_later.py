@@ -465,3 +465,33 @@ def test_the_wording_is_the_approved_text() -> None:
         "The unused backup copy will be deleted from the backup folder by itself once Archidekt allows it."
     )
     assert LATER.startswith("Nothing was changed on Archidekt. " + decks_mod.BACKUP_LATER)
+
+
+async def test_the_delete_at_once_never_waits_inside_the_apply(
+    stack: Stack, quick_waits: list[float]
+) -> None:
+    """Q77 ("no extra waiting in the apply"): when the delete just after a failed apply meets a
+    429, the apply does not wait it out; the delete is queued for later at once. As an apply's
+    429 it still does not count towards the gateway-wide breaker (Q62)."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    orig = ark.transport.handler
+    deletes = {"n": 0}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "PATCH" and "modifyCards" in req.url.path:
+            return httpx.Response(403, json={"detail": "You do not have permission."})
+        if req.method == "DELETE":
+            deletes["n"] += 1
+            return httpx.Response(429, json={"detail": "slow down"}, headers={"Retry-After": "5"})
+        return orig(req)
+
+    ark.transport.handler = handler
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": THREE}))
+    await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]})
+    row = await _finished(h, p["proposal_id"])
+    assert row["state"] == "failed" and row["result"]["error"] == "forbidden", row
+    assert quick_waits == [] and deletes["n"] == 1, (quick_waits, deletes)
+    assert row["result"]["backup_note"] == decks_mod.BACKUP_LATER, row["result"]
+    assert len(h.db.queued_backup_deletes()) == 1
+    assert h.app.state.gateway.decks.client.pacer._failures == 0
