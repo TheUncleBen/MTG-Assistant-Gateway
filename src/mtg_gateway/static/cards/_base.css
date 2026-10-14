@@ -112,7 +112,8 @@ textarea{min-height:72px;resize:vertical}
 .stat{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted);margin:0 0 10px}
 .stat b{color:var(--text);font-weight:600}
 .curve{display:flex;align-items:flex-end;gap:3px;height:36px;flex:1 1 140px;max-width:220px}
-.curve span{flex:1;background:var(--blue);border-radius:2px 2px 0 0;min-height:2px;position:relative}
+.curve span{flex:1;align-self:stretch;display:flex;align-items:flex-end;position:relative}
+.curve span b{display:block;width:100%;background:var(--blue);border-radius:2px 2px 0 0;min-height:2px}
 .curve span i{position:absolute;bottom:-14px;left:0;right:0;text-align:center;font-style:normal;font-size:9px;color:var(--muted)}
 .pips{display:inline-flex;gap:3px;vertical-align:middle}
 .pips span{width:14px;height:14px;border-radius:50%;border:1px solid var(--border);display:inline-block}
