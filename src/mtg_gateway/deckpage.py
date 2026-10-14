@@ -358,7 +358,7 @@ def banner_html(
         f"turns by hand, here on the gateway'>{icon('layers')} Goldfish</a>"
     )
     # Play on EDHPlay (R-154, T-161): EDHPlay is the online table; it has no import by link, so the
-    # button opens a short box whose Copy and open edhplay.com copies the whole deck in its import format
+    # button opens a short box whose Copy and Open EDHPlay.com copies the whole deck in its import format
     # (export_formats.to_edhplay) and opens the site (deck.js). Without script the link still
     # opens EDHPlay, and Export deck has the list.
     edh = to_edhplay(deck)
