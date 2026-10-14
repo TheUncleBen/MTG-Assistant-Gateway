@@ -107,6 +107,9 @@ class FakeArchidekt:
         self.inject: list[tuple[int | Exception, str | None]] = []
         self.patches: list[dict[str, Any]] = []
         self.fail_patch_silently = False
+        self.fail_card_writes = False  # PATCH modifyCards answers 503
+        # set to an unset threading.Event: PATCH modifyCards waits for it (a slow save, held open)
+        self.hold_card_writes: Any = None
         # Faults a verify must catch: added rows stored without their finish, or with another
         # printing of the same card (card id -> card id to store instead).
         self.add_rows_lose_finish = False
@@ -846,6 +849,10 @@ class FakeArchidekt:
                 deck["updatedAt"] = "2026-10-03T00:00:00Z"
                 return httpx.Response(200, json={"id": deck["id"], "name": deck["name"]})
             if parts[3:] == ["modifyCards", "v2"] and request.method == "PATCH":
+                if self.hold_card_writes is not None:
+                    self.hold_card_writes.wait(15)
+                if self.fail_card_writes:
+                    return httpx.Response(503, json={"detail": "Service unavailable."})
                 body = json.loads(request.content)
                 self.patches.append(body)
                 if not self.fail_patch_silently:

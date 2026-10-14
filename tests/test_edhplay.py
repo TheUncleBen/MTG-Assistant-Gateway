@@ -122,7 +122,7 @@ def server(tmp_path: Path):
         s.stop()
 
 
-# Text in the note against the background it is drawn on (WCAG contrast, at least 4.5:1).
+# Text in the dialog and the note against the background it is drawn on (WCAG contrast, 4.5:1).
 CONTRAST = """() => {
   function rgb(s) { var m = s.match(/[\\d.]+/g); return m ? m.map(Number) : [0, 0, 0, 0]; }
   function lum(c) {
@@ -132,25 +132,47 @@ CONTRAST = """() => {
     });
     return 0.2126 * a[0] + 0.7152 * a[1] + 0.0722 * a[2];
   }
-  function bg(e) {
+  function bg(e) {  // a see-through background (a notice's tint) is laid over what is under it
+    var layers = [];
     for (; e; e = e.parentElement) {
       var c = rgb(getComputedStyle(e).backgroundColor);
-      if (c.length < 4 || c[3] > 0) return c;
+      if (c.length < 4 || c[3] >= 1) { layers.push(c); break; }
+      if (c[3] > 0) layers.push(c);
     }
-    return [255, 255, 255];
+    var out = layers.length && (layers[layers.length - 1].length < 4 || layers[layers.length - 1][3] >= 1)
+      ? layers.pop().slice(0, 3) : [255, 255, 255];
+    while (layers.length) {
+      var l = layers.pop();
+      out = out.map(function (v, i) { return l[i] * l[3] + v * (1 - l[3]); });
+    }
+    return out;
   }
   var worst = 99;
-  document.querySelectorAll(".edhplay-toast .msg span, .edhplay-toast .acts button").forEach(function (e) {
+  document.querySelectorAll(".edhplay-toast .msg span, .edhplay-dialog h2, .edhplay-dialog li,"
+    + " .edhplay-dialog p, .edhplay-dialog .acts .btn").forEach(function (e) {
     var a = lum(rgb(getComputedStyle(e).color)), b = lum(bg(e));
     worst = Math.min(worst, (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05));
   });
   return worst;
 }"""
 
+STEPS = [
+    "Copy and launch copies your deck and opens EDHPlay in a new tab.",
+    "On EDHPlay, choose Create Deck, then Import.",
+    "Paste, then press Import & Replace (it sets your commander).",
+]
 
-def _press(page) -> str:
+
+def _open_dialog(page):
+    page.locator(".banner a[data-edhplay]").click()
+    dialog = page.locator(".edhplay-dialog")
+    dialog.wait_for()
+    return dialog
+
+
+def _launch(page) -> str:
     with page.context.expect_page() as popup:
-        page.locator(".banner a[data-edhplay]").click()
+        page.locator(".edhplay-dialog a", has_text="Copy and launch EDHPlay").click()
     popup.value.wait_for_load_state()
     note = page.locator(".edhplay-toast")
     note.wait_for()
@@ -158,9 +180,11 @@ def _press(page) -> str:
 
 
 @pytest.mark.parametrize(("width", "scheme"), [(390, "dark"), (673, "light"), (1366, "light")])
-def test_the_button_copies_the_list_and_shows_the_tip_once(server: Server, width: int, scheme: str) -> None:
-    """The first press on a device adds a short tip on EDHPlay's import limits, kept until it is
-    closed; after that a deck that fits shows only the one line."""
+def test_the_button_opens_a_dialog_then_copies_and_launches(server: Server, width: int, scheme: str) -> None:
+    """0.7.27 (T-161): the press opens a small dialog with three numbered steps and opens nothing
+    yet; Escape, the backdrop and Cancel close it and give focus back to the button, Tab stays
+    inside it; its Copy and launch EDHPlay copies the list and opens EDHPlay. The 0.7.25
+    first-time tip is gone, and so is the mark it kept in this browser."""
     from playwright.sync_api import sync_playwright
 
     _chromium()
@@ -175,39 +199,73 @@ def test_the_button_copies_the_list_and_shows_the_tip_once(server: Server, width
             lambda route: (opened.append(route.request.url), route.fulfill(status=200, body="edhplay"))[1],
         )
         page.goto(f"{server.base}/decks/42", wait_until="networkidle")
+        page.evaluate("() => localStorage.setItem('mtg.edhplay.tip', '1')")  # left by 0.7.25 or 0.7.26
+        page.reload(wait_until="networkidle")
+        assert page.evaluate("() => localStorage.getItem('mtg.edhplay.tip')") is None
         btn = page.locator(".banner a[data-edhplay]")
         assert btn.count() == 1 and btn.inner_text().strip() == "Play on EDHPlay"
         assert btn.get_attribute("href") == EDHPLAY_URL and btn.get_attribute("target") == "_blank"
         assert "noopener" in (btn.get_attribute("rel") or "")
-        text = _press(page)
+
+        dialog = _open_dialog(page)
+        assert opened == [] and len(page.context.pages) == 1  # nothing opens before the second press
+        assert dialog.get_attribute("role") == "dialog" and dialog.get_attribute("aria-modal") == "true"
+        assert dialog.locator("h2").inner_text() == "Copy and launch EDHPlay"
+        assert dialog.locator("ol li").all_inner_texts() == STEPS
+        assert dialog.locator(".notice.warn").count() == 0  # nothing cut from this deck
+        go = dialog.locator("a", has_text="Copy and launch EDHPlay")
+        assert go.get_attribute("href") == EDHPLAY_URL and go.get_attribute("target") == "_blank"
+        assert page.evaluate("() => document.activeElement.textContent") == "Copy and launch EDHPlay"
+        # the box sits in the middle of the window, inside it
+        box = dialog.locator(".pickbox").bounding_box()
+        vw = page.viewport_size["width"]
+        assert box["x"] >= 0 and box["x"] + box["width"] <= vw
+        assert abs((box["x"] + box["width"] / 2) - vw / 2) <= 2
+        assert abs((box["y"] + box["height"] / 2) - page.viewport_size["height"] / 2) <= 2
+        assert box["width"] <= 30 * 16 + 1  # a small box, not the editor's wide picker
+        assert page.evaluate(CONTRAST) >= 4.5
+        assert _overflow(page) <= 0
+        _shot(page, f"edhplay-dialog-{width}-{scheme}")
+        # Tab goes round inside the dialog: Cancel, the close button, Copy and launch
+        page.keyboard.press("Tab")
+        assert page.evaluate("() => document.activeElement.textContent") == "Cancel"
+        page.keyboard.press("Tab")
+        assert page.evaluate("() => document.activeElement.getAttribute('aria-label')") == "Close"
+        page.keyboard.press("Shift+Tab")
+        assert page.evaluate("() => document.activeElement.textContent") == "Cancel"
+        # Escape, a press on the backdrop and Cancel each close it; focus goes back to the button
+        page.keyboard.press("Escape")
+        assert page.locator(".edhplay-dialog").count() == 0
+        assert page.evaluate("() => document.activeElement.hasAttribute('data-edhplay')")
+        _open_dialog(page)
+        page.mouse.click(3, 3)
+        assert page.locator(".edhplay-dialog").count() == 0
+        _open_dialog(page).locator("button", has_text="Cancel").click()
+        assert page.locator(".edhplay-dialog").count() == 0
+        assert opened == [] and page.locator(".edhplay-toast").count() == 0
+
+        _open_dialog(page)
+        _launch(page)
+        assert page.locator(".edhplay-dialog").count() == 0
         assert opened and opened[0].startswith(EDHPLAY_URL)
         edh = to_edhplay(parse_deck(server.ark.decks[42]))
         assert edh.left_out == []
         assert page.locator(".edhplay-toast .msg span").all_inner_texts() == [
-            "Deck list copied. On EDHPlay: Create Deck, then Import, paste and Import & Replace.",
-            "Good to know: EDHPlay's sideboard holds 15 cards, the maybeboard isn't sent, and tokens are "
-            "added on EDHPlay by hand.",
-        ], text
+            "Deck list copied. On EDHPlay: Create Deck, then Import, paste and Import & Replace."
+        ]
+        assert "warn" not in (page.locator(".edhplay-toast").get_attribute("class") or "")
         copied = page.evaluate("() => navigator.clipboard.readText()")
         assert copied.replace("\r\n", "\n") == edh.text
         assert page.evaluate(CONTRAST) >= 4.5
-        assert _overflow(page) <= 0
-        _shot(page, f"edhplay-first-tip-{width}-{scheme}")
-        page.locator(".edhplay-toast .acts button", has_text="Got it").click()
-        assert page.locator(".edhplay-toast").count() == 0
-        # the next press, after a reload: only the one line, and it goes by itself
-        page.reload(wait_until="networkidle")
-        _press(page)
-        assert page.locator(".edhplay-toast .msg span").count() == 1
-        assert "warn" not in (page.locator(".edhplay-toast").get_attribute("class") or "")
+        assert page.evaluate("() => localStorage.getItem('mtg.edhplay.tip')") is None
         assert errors == []
         browser.close()
 
 
 @pytest.mark.parametrize(("width", "scheme"), [(390, "dark"), (673, "dark"), (1366, "light")])
 def test_a_cut_sideboard_is_named_in_one_line(server: Server, width: int, scheme: str) -> None:
-    """A sideboard past 15 copies: the cards left out are named in one line that stays up; the
-    maybeboard and tokens are not sent and add nothing once the tip has been seen."""
+    """A sideboard past 15 copies: the dialog names the cards left out before anything is copied,
+    and so does the note after, which stays up; the maybeboard and tokens are not sent."""
     from playwright.sync_api import sync_playwright
 
     _chromium()
@@ -216,17 +274,23 @@ def test_a_cut_sideboard_is_named_in_one_line(server: Server, width: int, scheme
     ark.add_side_row(42, "Island", quantity=2)  # maybeboard
     ark.add_side_row(42, "Forest", quantity=1, category="Tokens")
     sid = server.sign_in_and_link()
+    cut = "1 sideboard card is left out to fit EDHPlay's 15-card limit: Cultivate."
     with sync_playwright() as p:
         browser, page, errors = _page(
             p, server, sid, width, color_scheme=scheme, permissions=["clipboard-read", "clipboard-write"]
         )
         page.context.route(re.compile(r"https://edhplay\.com/.*"), lambda route: route.fulfill(status=200))
         page.goto(f"{server.base}/decks/42", wait_until="networkidle")
-        page.evaluate("() => localStorage.setItem('mtg.edhplay.tip', '1')")  # the tip was seen before
-        _press(page)
+        dialog = _open_dialog(page)
+        assert dialog.locator(".notice.warn").inner_text() == cut
+        assert "maybeboard and tokens" in dialog.locator("p.muted").inner_text()
+        assert page.evaluate(CONTRAST) >= 4.5
+        assert _overflow(page) <= 0
+        _shot(page, f"edhplay-cut-dialog-{width}-{scheme}")
+        _launch(page)
         assert page.locator(".edhplay-toast .msg span").all_inner_texts() == [
             "Deck list copied. On EDHPlay: Create Deck, then Import, paste and Import & Replace.",
-            "1 sideboard card didn't fit EDHPlay's 15-card limit: Cultivate.",
+            cut,
         ]
         assert "warn" in (page.locator(".edhplay-toast").get_attribute("class") or "")
         copied = page.evaluate("() => navigator.clipboard.readText()").replace("\r\n", "\n")
