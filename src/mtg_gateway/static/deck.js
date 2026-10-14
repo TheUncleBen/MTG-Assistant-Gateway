@@ -2108,7 +2108,7 @@
     box.appendChild(head);
     var steps = make("ol", "steps");
     [
-      "Copy and launch copies your deck and opens EDHPlay " + (inApp ? "in your phone's browser." : "in a new tab."),
+      "Press Copy and launch EDHPlay below. It copies your deck and opens EDHPlay " + (inApp ? "in your phone's browser." : "in a new tab."),
       "On EDHPlay, choose Create Deck, then Import.",
       "Paste, then press Import & Replace (it sets your commander)."
     ].forEach(function (s) { steps.appendChild(make("li", "", s)); });
