@@ -32,7 +32,7 @@ from .deckpage import (
     deck_page_html,
     featured,
 )
-from .decks import DeckError, current_client
+from .decks import DeckError, current_client, owns_deck
 from .pages import (
     BROWSER_CLIENT_ID,
     _csrf,
@@ -334,7 +334,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
                 status=404 if exc.kind == "not_found" else 400,
             )
         link = state.db.get_link(sub)
-        own = bool(link and deck.owner and deck.owner.lower() == str(link["archidekt_username"]).lower())
+        own = bool(link) and owns_deck(deck, link) is True
         stats = deck_stats.compute(deck)
         art = featured(deck)
         if own and art is not None:  # the deck list shows covers for the member's own decks

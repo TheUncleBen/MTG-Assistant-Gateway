@@ -198,6 +198,188 @@ async def test_retries_count_towards_the_breaker(sleeps: list[float]) -> None:
     assert "paused" in str(err.value) and len(ark.calls) == 5  # breaker open: nothing sent
 
 
+# -- reading a 429's Retry-After -------------------------------------------------------------------
+@pytest.mark.parametrize(
+    ("value", "seconds"),
+    [
+        ("120", 120.0),
+        (" 7 ", 7.0),
+        ("0", 0.0),
+        ("9" * 5000, float("inf")),  # absurd but digits: Pacer.record caps it
+        (None, ark_mod.DEFAULT_RETRY_AFTER),
+        ("", ark_mod.DEFAULT_RETRY_AFTER),
+        ("soon", ark_mod.DEFAULT_RETRY_AFTER),
+        ("-5", ark_mod.DEFAULT_RETRY_AFTER),
+        ("1.5", ark_mod.DEFAULT_RETRY_AFTER),  # delay-seconds is whole digits only (RFC 9110)
+        ("Wed, 99 Foo 2026 25:61:00 GMT", ark_mod.DEFAULT_RETRY_AFTER),
+    ],
+)
+def test_retry_after_seconds_reads_delay_seconds_and_falls_back_on_garbage(value, seconds) -> None:
+    assert ark_mod.retry_after_seconds(value, now=1_000_000.0) == seconds
+
+
+def test_retry_after_seconds_reads_an_http_date() -> None:
+    now = 1_791_000_000.0  # Sat, 03 Oct 2026 04:00:00 GMT
+    ahead = "Sat, 03 Oct 2026 04:01:30 GMT"
+    assert ark_mod.retry_after_seconds(ahead, now=now) == 90.0
+    assert ark_mod.retry_after_seconds("Sat, 03 Oct 2026 03:59:00 GMT", now=now) == 0.0  # already past
+    assert ark_mod.retry_after_seconds("Saturday, 03-Oct-26 04:01:30 GMT", now=now) == 90.0  # RFC 850 form
+
+
+def test_pacer_record_caps_the_pause_and_keeps_the_longest(clock: list[float]) -> None:
+    pacer = Pacer(0.0)
+    assert pacer.retry_wait() == 0.0 and not pacer.paused()
+    pacer.record(False, 10_000.0)
+    assert pacer.retry_wait() == Pacer.MAX_RETRY_AFTER and pacer.paused()
+    pacer.record(False, 5.0)  # a shorter pause never cuts a running one short
+    assert pacer.retry_wait() == Pacer.MAX_RETRY_AFTER
+    pacer.record(True)
+    assert pacer.retry_wait() == Pacer.MAX_RETRY_AFTER  # a success does not end Archidekt's pause
+
+
+def test_pacer_without_a_retry_after_sets_no_pause(clock: list[float]) -> None:
+    pacer = Pacer(0.0)
+    pacer.record(False, None)
+    pacer.record(False, 0.0)
+    assert pacer.retry_wait() == 0.0 and not pacer.paused()
+
+
+async def test_retry_wait_counts_down_and_never_goes_below_zero(clock: list[float]) -> None:
+    pacer = Pacer(0.0)
+    pacer.record(False, 30.0)
+    await ark_mod.asyncio.sleep(10.0)  # the fixture's sleep moves the clock
+    assert pacer.retry_wait() == 20.0
+    await ark_mod.asyncio.sleep(25.0)
+    assert pacer.retry_wait() == 0.0 and not pacer.paused()
+
+
+@pytest.mark.parametrize(
+    ("header", "paused_for"),
+    [
+        ("45", 45.0),
+        (None, ark_mod.DEFAULT_RETRY_AFTER),
+        ("later", ark_mod.DEFAULT_RETRY_AFTER),
+        ("100000", Pacer.MAX_RETRY_AFTER),
+    ],
+)
+async def test_a_429_pauses_for_what_retry_after_says(clock: list[float], header, paused_for) -> None:
+    ark = FakeArchidekt()
+    ark.inject = [(429, header)]
+    client = _client(ark)
+    with pytest.raises(ArchidektError):
+        await client.search_decks(name="Sample")
+    assert client.pacer.retry_wait() == paused_for
+
+
+async def test_a_429_with_an_http_date_pauses_until_that_date(clock: list[float]) -> None:
+    """Bug (found in this release's checks): an HTTP-date Retry-After, which RFC 9110 allows, was
+    read as garbage and paused for 30 s whatever the date said."""
+    from email.utils import formatdate
+
+    ark = FakeArchidekt()
+    ark.inject = [(429, formatdate(time.time() + 90, usegmt=True))]
+    client = _client(ark)
+    with pytest.raises(ArchidektError):
+        await client.search_decks(name="Sample")
+    assert 88.0 <= client.pacer.retry_wait() <= 90.0
+
+
+async def test_an_apply_shows_the_wait_while_it_runs(monkeypatch: pytest.MonkeyPatch) -> None:
+    now = [1000.0]
+    during: list[dict] = []
+    note: dict = {"sent_entries": 3}
+
+    async def fake_sleep(seconds: float) -> None:
+        during.append(dict(note))
+        now[0] += seconds
+
+    monkeypatch.setattr(ark_mod.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(ark_mod.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(ark_mod.random, "uniform", lambda lo, hi: 0.4)
+    ark = FakeArchidekt()
+    ark.inject = [(429, "12")]
+    client = _client(ark)
+    token, noted = ark_mod.patient.set(True), ark_mod.wait_note.set(note)
+    try:
+        await client.search_decks(name="Sample")
+    finally:
+        ark_mod.patient.reset(token)
+        ark_mod.wait_note.reset(noted)
+    assert during == [{"sent_entries": 3, "waiting_for_archidekt": 13}]  # 12 s + jitter, rounded up
+    assert note == {"sent_entries": 3}  # the apply's own progress is left as it was
+
+
+async def test_an_apply_waits_out_a_pause_that_was_already_running(clock: list[float]) -> None:
+    """A call refused by the pacer (nothing sent) during another request's Retry-After pause is
+    waited out like a 429 and then sent once."""
+    ark = FakeArchidekt()
+    client = _client(ark)
+    client.pacer.record(False, 20.0)
+    token = ark_mod.patient.set(True)
+    try:
+        await client.search_decks(name="Sample")
+    finally:
+        ark_mod.patient.reset(token)
+    assert clock == [20.0] and _reads(ark, "/api/decks/v3/") == 1
+    assert client.stats["rate_limited"] == 1 and client.stats["rate_limit_waits"] == 1
+
+
+async def test_outside_an_apply_a_running_pause_refuses_at_once(clock: list[float]) -> None:
+    ark = FakeArchidekt()
+    client = _client(ark)
+    client.pacer.record(False, 20.0)
+    ark_mod.wait_note.set({"x": 1})  # a note alone does not make a request wait
+    with pytest.raises(ArchidektError) as err:
+        await client.search_decks(name="Sample")
+    assert err.value.kind == "rate_limited" and "try again in 21 s" in str(err.value)
+    assert clock == [] and ark.calls == []
+
+
+async def test_an_apply_s_waits_never_add_up_past_the_total(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bug (found in this release's checks): the jitter was added after the total was capped, so
+    the waits for one request could run up to a second past RATE_LIMIT_WAIT_TOTAL each time."""
+    now = [1000.0]
+    waits: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        waits.append(seconds)
+        now[0] += seconds
+
+    monkeypatch.setattr(ark_mod.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(ark_mod.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(ark_mod.random, "uniform", lambda lo, hi: hi)  # the largest jitter
+    ark = FakeArchidekt()
+    ark.inject = [(429, "120")] * 3
+    client = _client(ark)
+    token = ark_mod.patient.set(True)
+    try:
+        with pytest.raises(ArchidektError) as err:
+            await client.search_decks(name="Sample")
+    finally:
+        ark_mod.patient.reset(token)
+    assert err.value.kind == "rate_limited"
+    assert len(waits) == 3 and sum(waits) <= ark_mod.RATE_LIMIT_WAIT_TOTAL, waits
+    # the third pause was cut short at the total, so the next try is refused here, unsent
+    assert _reads(ark, "/api/decks/v3/") == 3
+
+
+async def test_an_apply_meets_the_breaker_after_five_429s_in_a_row(clock: list[float]) -> None:
+    """What happens today when Archidekt answers 429 to every try: each 429 also counts towards
+    the breaker, so the fifth opens it (for every member, a minute) and the apply stops there as
+    "unavailable", after five waits rather than RATE_LIMIT_WAITS (6)."""
+    ark = FakeArchidekt()
+    ark.inject = [(429, "1")] * 10
+    client = _client(ark)
+    token = ark_mod.patient.set(True)
+    try:
+        with pytest.raises(ArchidektError) as err:
+            await client.search_decks(name="Sample")
+    finally:
+        ark_mod.patient.reset(token)
+    assert err.value.kind == "unavailable" and "paused after repeated failures" in str(err.value)
+    assert _reads(ark, "/api/decks/v3/") == 5 and len(clock) == 5
+
+
 # -- the read cache --------------------------------------------------------------------------------
 async def test_a_repeat_search_is_a_cache_hit_with_no_upstream_call() -> None:
     ark = FakeArchidekt()

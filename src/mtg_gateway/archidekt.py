@@ -14,6 +14,8 @@ import asyncio
 import base64
 import contextvars
 import copy
+import datetime
+import email.utils
 import hashlib
 import http.cookiejar
 import json
@@ -598,15 +600,55 @@ def _prefer_printing(
     return max(hits, key=score)  # stable: the first hit wins ties
 
 
+def _owner_readable(owner: Any) -> bool:
+    """Whether a deck entry's owner field says who owns it (an id or a username)."""
+    if isinstance(owner, dict):
+        return owner.get("id") is not None or bool(owner.get("username"))
+    return isinstance(owner, str) and bool(owner)
+
+
+class DeckList(list):  # type: ignore[type-arg]
+    """``list_decks``' answer: the member's deck rows, plus ``complete``, whether they can be taken
+    as every deck of the account. False when any entry was dropped (its owner field could not be
+    read, or it named someone else, so the owner filter was not honoured), when the listing was
+    cut off at MAX_LIST_PAGES, or when its count moved while the pages were read. Only a complete
+    list may say a deck is gone (DeckService.on_archidekt)."""
+
+    def __init__(self, rows: Any = (), *, complete: bool = False) -> None:
+        super().__init__(rows)
+        self.complete = complete
+
+
 def _owned_by(owner: Any, username: str, user_id: str | None) -> bool:
     """True only when a deck entry's owner field names the linked account."""
     if isinstance(owner, dict):
         if user_id and owner.get("id") is not None and str(owner["id"]) == str(user_id):
             return True
-        return str(owner.get("username", "")).casefold() == username.casefold()
+        return str(owner.get("username") or "").casefold() == username.casefold()
     if isinstance(owner, str):
         return owner.casefold() == username.casefold()
     return False
+
+
+DEFAULT_RETRY_AFTER = 30.0  # seconds paused after a 429 whose Retry-After is missing or unreadable
+
+
+def retry_after_seconds(value: str | None, *, now: float | None = None) -> float:
+    """Seconds a 429's Retry-After asks for, in either form RFC 9110 allows: delay-seconds
+    ("120") or an HTTP-date (0 once that date has passed). A missing or unreadable value gives
+    DEFAULT_RETRY_AFTER; Pacer.record caps whatever comes out at MAX_RETRY_AFTER."""
+    text = (value or "").strip()
+    if not text:
+        return DEFAULT_RETRY_AFTER
+    if text.isascii() and text.isdigit():
+        return float(text)
+    try:
+        when = email.utils.parsedate_to_datetime(text)
+    except (TypeError, ValueError, IndexError):
+        return DEFAULT_RETRY_AFTER
+    if when.tzinfo is None:  # "-0000": UTC, as HTTP dates always are
+        when = when.replace(tzinfo=datetime.UTC)
+    return max(0.0, when.timestamp() - (time.time() if now is None else now))
 
 
 class Pacer:
@@ -872,8 +914,10 @@ class ArchidektClient:
                 if exc.kind == "rate_limited":
                     self.stats["rate_limited"] += 1
                     if patient.get() and waits < RATE_LIMIT_WAITS and waited < RATE_LIMIT_WAIT_TOTAL:
-                        wait = min(max(self.pacer.retry_wait(), 1.0), RATE_LIMIT_WAIT_TOTAL - waited)
-                        wait += random.uniform(0, 1.0)  # many waiters must not all come back at once
+                        # the jitter keeps many waiters from all coming back at once; added before
+                        # the cap, so one request's waits never add up past RATE_LIMIT_WAIT_TOTAL
+                        wait = max(self.pacer.retry_wait(), 1.0) + random.uniform(0, 1.0)
+                        wait = min(wait, RATE_LIMIT_WAIT_TOTAL - waited)
                         waits, waited = waits + 1, waited + wait
                         self.stats["rate_limit_waits"] += 1
                         await self._wait_out(wait)
@@ -946,8 +990,7 @@ class ArchidektClient:
                     "unavailable", f"Archidekt request failed: {type(exc).__name__}", retryable=True
                 ) from exc
             if resp.status_code == 429:
-                ra = resp.headers.get("Retry-After")
-                self.pacer.record(False, float(ra) if ra and ra.isdigit() else 30.0)
+                self.pacer.record(False, retry_after_seconds(resp.headers.get("Retry-After")))
                 raise ArchidektError("rate_limited", "Archidekt asked us to slow down; try again in a minute")
             if resp.status_code == 401:
                 self.pacer.record(True)
@@ -1029,7 +1072,7 @@ class ArchidektClient:
         user_id: str | None = None,
         *,
         backup_folder: str | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> DeckList:
         """The linked user's decks. Archidekt honours ``ownerId`` and ``ownerUsername`` (verified
         live 2026-10-04 and 2026-10-05: each returned exactly the account's decks, private ones
         included, when sent with the usual ``JWT`` scheme; ``Bearer`` is treated as signed out and
@@ -1041,11 +1084,14 @@ class ArchidektClient:
         an entry whose owner cannot be read is dropped rather than shown as the user's. Entries in
         the folder named ``backup_folder``, or named like the gateway's backup copies, come back
         with ``backup: True``: the deck pages keep them out of the member's lists and show them
-        under History instead."""
+        under History instead. Whether the rows can be taken as every deck of the account comes
+        back as the list's ``complete`` (see DeckList)."""
         flt: dict[str, Any] = {"ownerId": user_id} if user_id else {"ownerUsername": username}
         decks: list[dict[str, Any]] = []
         seen: set[str] = set()
-        dropped = 0
+        dropped = unreadable = 0
+        counts: set[int] = set()
+        cut_off = False
         for page in range(1, MAX_LIST_PAGES + 1):
             params = {**flt, "orderBy": "-updatedAt", "pageSize": 50}
             if page > 1:
@@ -1054,11 +1100,15 @@ class ArchidektClient:
             results = body.get("results") if isinstance(body, dict) else None
             if not isinstance(results, list):
                 raise ArchidektError("contract", "unexpected deck list shape")
+            count = body.get("count")
+            if isinstance(count, int) and not isinstance(count, bool):
+                counts.add(count)
             for d in results:
                 if not isinstance(d, dict) or "id" not in d:
                     raise ArchidektError("contract", "unexpected deck entry shape")
                 if not _owned_by(d.get("owner"), username, user_id):
                     dropped += 1
+                    unreadable += not _owner_readable(d.get("owner"))
                     continue
                 deck_id = str(d["id"])
                 if deck_id in seen:
@@ -1071,10 +1121,16 @@ class ArchidektClient:
                 decks.append(row)
             if not body.get("next") or len(results) < 50:
                 break
+        else:
+            cut_off = True  # MAX_LIST_PAGES full pages and Archidekt still offers another
         if dropped:
-            logger.info("deck list: dropped %d entries not owned by the linked account", dropped)
+            logger.info(
+                "deck list: dropped %d entries not owned by the linked account (%d with no readable owner)",
+                dropped,
+                unreadable,
+            )
         decks.sort(key=lambda d: d["updated_at"], reverse=True)
-        return decks
+        return DeckList(decks, complete=not dropped and not cut_off and len(counts) <= 1)
 
     async def search_decks(
         self,
@@ -1924,7 +1980,7 @@ def parse_deck(body: Any) -> Deck:
     return Deck(
         id=str(body["id"]),
         name=str(body.get("name", "")),
-        owner=str(owner.get("username", "")),
+        owner=str(owner.get("username") or ""),  # a null username is no owner, never "None"
         updated_at=str(body.get("updatedAt", "")),
         cards=cards,
         categories=[c for c in (body.get("categories") or []) if isinstance(c, dict)],

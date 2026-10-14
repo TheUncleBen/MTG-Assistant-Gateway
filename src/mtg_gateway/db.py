@@ -1576,6 +1576,18 @@ class Database:
             out[str(r["deck_id"])] = str(r["deck_name"] or out.get(str(r["deck_id"])) or "")
         return out
 
+    def own_history_deck_ids(self, owner_sub: str) -> set[str]:
+        """The decks the member's history shows as their own: snapshots, and proposals that change
+        or make one of their decks (edit, details, restore, new deck). A clone's source, an
+        account action's deck or a report's deck may be anyone's, so they are not in it."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT deck_id FROM snapshots WHERE owner_sub = ? UNION SELECT deck_id FROM proposals "
+                "WHERE owner_sub = ? AND kind IN ('edit', 'details', 'restore', 'create_deck')",
+                (owner_sub, owner_sub),
+            ).fetchall()
+        return {str(r["deck_id"]) for r in rows}
+
     def reject_proposal(
         self, proposal_id: str, owner_sub: str, closed_by: dict[str, Any] | None = None
     ) -> bool:
