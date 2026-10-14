@@ -644,8 +644,10 @@ class DeckList(list):  # type: ignore[type-arg]
     """``list_decks``' answer: the member's deck rows, plus ``complete``, whether they can be taken
     as every deck of the account. False when any entry was dropped (its owner field could not be
     read, or it named someone else, so the owner filter was not honoured), when the listing was
-    cut off at MAX_LIST_PAGES, or when its count moved while the pages were read. Only a complete
-    list may say a deck is gone (DeckService.on_archidekt)."""
+    cut off at MAX_LIST_PAGES, when its count moved while the pages were read, when a deck came
+    back on two pages (the list shifted, so another may have been skipped), or when fewer decks
+    came back than Archidekt's count. Only a complete list may say a deck is gone
+    (DeckService.on_archidekt)."""
 
     def __init__(self, rows: Any = (), *, complete: bool = False) -> None:
         super().__init__(rows)
@@ -1128,7 +1130,7 @@ class ArchidektClient:
         seen: set[str] = set()
         dropped = unreadable = 0
         counts: set[int] = set()
-        cut_off = False
+        cut_off = repeated = False
         for page in range(1, MAX_LIST_PAGES + 1):
             params = {**flt, "orderBy": "-updatedAt", "pageSize": 50}
             if page > 1:
@@ -1149,6 +1151,7 @@ class ArchidektClient:
                     continue
                 deck_id = str(d["id"])
                 if deck_id in seen:
+                    repeated = True  # the list shifted between pages: another deck may have been skipped
                     continue
                 seen.add(deck_id)
                 row = list_row(d)
@@ -1167,7 +1170,10 @@ class ArchidektClient:
                 unreadable,
             )
         decks.sort(key=lambda d: d["updated_at"], reverse=True)
-        return DeckList(decks, complete=not dropped and not cut_off and len(counts) <= 1)
+        # fewer decks than the count Archidekt gave: some were never seen
+        short = any(len(seen) < n for n in counts)
+        complete = not dropped and not cut_off and not repeated and not short and len(counts) <= 1
+        return DeckList(decks, complete=complete)
 
     async def search_decks(
         self,
