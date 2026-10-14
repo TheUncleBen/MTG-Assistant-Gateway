@@ -9,7 +9,8 @@ from mcp_types import CallToolResult
 from pydantic import Field
 
 from .app import AppState, _tool_error
-from .archidekt import ArchidektError
+from .approve import with_words_note
+from .archidekt import ArchidektError, drops_formatting, words_only_note
 from .archidekt_csv import CsvError, parse_export
 from .decklist import ListCard, to_text
 from .decks import (
@@ -55,11 +56,13 @@ def add_account_tools(state: AppState, h: SimpleNamespace) -> None:
         details: Annotated[DeckDetails, Field(description="Only the settings to change.")],
     ) -> CallToolResult:
         try:
+            raw = dumped(details, unset=True)
+            # Q90: a description given as a Quill document is saved as its words alone; say so
+            # when links, formatting or embeds were lost, so the assistant does not claim them
+            lost = drops_formatting(raw.get("description")) if isinstance(raw, dict) else False
+            out = await state.decks.propose_deck_details(_sub(), deck_id, raw)
             return _proposal(
-                {
-                    "ok": True,
-                    **(await state.decks.propose_deck_details(_sub(), deck_id, dumped(details, unset=True))),
-                }
+                with_words_note({"ok": True, **out}, words_only_note("description") if lost else None)
             )
         except DeckError as exc:
             return _proposal(_tool_error(exc))

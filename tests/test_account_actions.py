@@ -206,6 +206,87 @@ async def test_an_assistant_comment_is_posted_as_plain_text_only(stack: Stack) -
     assert ark.comments[300043][0]["text"] == rich_doc("Read my primer")
 
 
+COMMENT_NOTE = (
+    "Only the words of this comment are saved: the gateway writes plain text, so the links, "
+    "formatting and embeds in it were removed. Don't tell the user a link or formatting was added."
+)
+
+
+async def test_the_assistant_is_told_when_a_comment_loses_its_link(stack: Stack) -> None:
+    """Q90: a comment post or edit proposed as a Quill document with a link (or a card link) is
+    saved as its words, and the proposal reply says so. (Made as the tool makes it: see
+    test_an_assistant_comment_is_posted_as_plain_text_only.)"""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    decks = h.app.state.gateway.decks
+    ark.comments[300043] = []
+    phish = json.dumps(
+        {"ops": [{"insert": "See my primer", "attributes": {"link": "https://evil.example/login"}}]}
+    )
+    p = await actions.propose(decks, SUB, "comment_post", {"deck_id": "43", "text": phish, "reply_to": None})
+    assert p["note"] == COMMENT_NOTE and p["rows"][0]["after_text"] == "See my primer", p
+    assert p["changes"]["text"] == "See my primer"  # the same text is written as before
+    # the tool reply carries it, in its structured content and its text
+    from mtg_gateway.approve import proposal_tool_result
+
+    res = proposal_tool_result({"ok": True, **p}, decks=decks, sub=SUB, in_chat=True)
+    assert res.structured_content["note"] == COMMENT_NOTE
+    assert "note: " + COMMENT_NOTE in res.content[0].text
+    assert (await _browser_apply(h, p["proposal_id"]))["state"] == "applied"
+    (made,) = ark.comments[300043]
+    card = json.dumps({"ops": [{"insert": "Read "}, {"insert": {"card-link": "Sol Ring"}}, {"insert": "\n"}]})
+    p = await actions.propose(
+        decks, SUB, "comment_edit", {"deck_id": "43", "comment_id": made["id"], "text": card}
+    )
+    assert p["note"] == COMMENT_NOTE and p["rows"][0]["after_text"] == "Read Sol Ring", p
+    # a later get_proposal of it (stored as plain text) adds none
+    got = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
+    assert got["ok"] and "note" not in got, got
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Nice deck!",
+        "**Nice** deck: [see](https://example.com/x)",
+        json.dumps({"ops": [{"insert": "Nice deck!\n"}]}),
+    ],
+)
+async def test_a_comment_that_loses_nothing_gets_no_note(stack: Stack, text: str) -> None:
+    """Q90: plain text, Markdown and a document of words only lose nothing: no note, through the
+    tool itself as well."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    ark.comments[300043] = []
+    p = await actions.propose(
+        h.app.state.gateway.decks, SUB, "comment_post", {"deck_id": "43", "text": text, "reply_to": None}
+    )
+    assert "note" not in p, p
+    if not text.startswith("{"):  # the MCP layer turns JSON text into an object and refuses it
+        res = await call(h, token, "propose_comment", {"deck_id": "43", "action": "post", "text": text})
+        assert structured(res)["ok"] and "note" not in structured(res), structured(res)
+
+
+async def test_a_comment_stored_by_0726_tells_the_assistant_in_get_proposal(stack: Stack) -> None:
+    """Q90: a comment proposal stored by 0.7.26 with a formatted document is posted as its words
+    when the member applies it; get_proposal tells the assistant so."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    ark.comments[300043] = []
+    res = await call(h, token, "propose_comment", {"deck_id": "43", "action": "post", "text": "x"})
+    pid = structured(res)["proposal_id"]
+    row = h.db.get_proposal(pid, SUB)
+    phish = json.dumps({"ops": [{"insert": "Hi", "attributes": {"bold": True}}, {"insert": "\n"}]})
+    changes = {**row["changes"], "text": phish}
+    h.db._conn.execute("UPDATE proposals SET changes_json = ? WHERE id = ?", (json.dumps(changes), pid))
+    got = structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
+    assert got["note"] == COMMENT_NOTE, got
+    assert (await _browser_apply(h, pid))["state"] == "applied"
+    assert ark.comments[300043][0]["text"] == rich_doc("Hi")
+    got = structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
+    assert got["state"] == "applied" and got["note"] == COMMENT_NOTE, got
+
+
 async def test_delete_deck_waits_for_the_members_press_even_in_auto(stack: Stack) -> None:
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)

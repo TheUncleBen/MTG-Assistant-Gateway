@@ -293,6 +293,101 @@ async def test_a_restore_puts_the_formatted_description_back(stack: Stack) -> No
     assert ark.decks[42]["description"] == formatted
 
 
+# Q90: the note an assistant's reply carries when its description lost links, formatting or embeds
+DESCRIPTION_NOTE = (
+    "Only the words of this description are saved: the gateway writes plain text, so the links, "
+    "formatting and embeds in it were removed. Don't tell the user a link or formatting was added."
+)
+# Texts that lose nothing visible: plain text, Markdown (written as typed) and a words-only document
+NO_LOSS = (
+    "Ramp first, then draw.",
+    "**Primer**: [my guide](https://example.com/guide)",
+    json.dumps({"ops": [{"insert": "Ramp first.\nThen draw.\n"}]}),
+)
+
+
+async def test_the_assistant_is_told_when_a_description_loses_its_link(stack: Stack) -> None:
+    """Q90: a description proposed as a Quill document with a link is saved as its words, and the
+    proposal reply says so (structured content and the text the model reads), so the assistant
+    does not claim the link was added."""
+    h = stack.h
+    token = await linked_user(stack)
+    res = await call(h, token, "propose_deck_details", {"deck_id": "42", "details": {"description": PHISH}})
+    p = structured(res)
+    assert p["ok"] and p["note"] == DESCRIPTION_NOTE, p
+    assert "note: " + DESCRIPTION_NOTE in res["content"][0]["text"]
+    assert p["changes"] == {"description": "See my primer"}  # the same text is written as before
+    # a later get_proposal and apply of this proposal (stored as plain text) add none
+    got = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
+    assert got["ok"] and "note" not in got, got
+    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert a["ok"] and a["state"] == "applied" and "note" not in a, a
+
+
+@pytest.mark.parametrize("text", NO_LOSS)
+async def test_a_description_that_loses_nothing_gets_no_note(stack: Stack, text: str) -> None:
+    """Q90: plain text, Markdown and a document of words only lose nothing: no note."""
+    token = await linked_user(stack)
+    res = await call(
+        stack.h, token, "propose_deck_details", {"deck_id": "42", "details": {"description": text}}
+    )
+    p = structured(res)
+    assert p["ok"] and "note" not in p, p
+    assert "note:" not in res["content"][0]["text"]
+
+
+def _as_stored_by_0726(h: Harness, pid: str, changes: dict) -> None:
+    """Make a pending proposal hold its text as 0.7.26 stored it: as given, a document included."""
+    h.db._conn.execute("UPDATE proposals SET changes_json = ? WHERE id = ?", (json.dumps(changes), pid))
+
+
+async def _stored_0726(stack: Stack, token: str, text: str) -> str:
+    p = structured(
+        await call(stack.h, token, "propose_deck_details", {"deck_id": "42", "details": {"description": "x"}})
+    )
+    _as_stored_by_0726(stack.h, p["proposal_id"], {"description": text})
+    return p["proposal_id"]
+
+
+async def test_a_description_stored_by_0726_is_applied_as_words_and_the_reply_says_so(stack: Stack) -> None:
+    """Q90: a details proposal stored by 0.7.26 with a formatted document is converted when it is
+    applied; get_proposal and the apply reply tell the assistant so."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    pid = await _stored_0726(stack, token, PHISH)
+    got = structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
+    assert got["note"] == DESCRIPTION_NOTE, got
+    a = structured(await call(h, token, "apply_proposal", {"proposal_id": pid}))
+    assert a["ok"] and a["state"] == "applied" and a["note"] == DESCRIPTION_NOTE, a
+    assert ark.decks[42]["description"] == rich_doc("See my primer")
+
+
+async def test_the_cards_apply_of_a_0726_description_says_so_too(stack: Stack) -> None:
+    """Q90: the in-chat card's apply (confirm_proposal) of such a proposal carries the note."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    pid = await _stored_0726(stack, token, PHISH)
+    code = h.app.state.gateway.decks.approval_for("user-1", h.db.get_proposal(pid, "user-1"))
+    done = structured(await call(h, token, "confirm_proposal", {"proposal_id": pid, "approval": code}))
+    assert done["ok"] and done["state"] == "applied" and done["note"] == DESCRIPTION_NOTE, done
+    assert ark.decks[42]["description"] == rich_doc("See my primer")
+
+
+async def test_a_0726_description_that_loses_nothing_or_was_rejected_gets_no_note(stack: Stack) -> None:
+    """Q90: a stored words-only document or Markdown loses nothing; a rejected proposal saves nothing."""
+    h = stack.h
+    token = await linked_user(stack)
+    for text in NO_LOSS[1:]:
+        pid = await _stored_0726(stack, token, text)
+        got = structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
+        assert got["ok"] and "note" not in got, got
+        await call(h, token, "reject_proposal", {"proposal_id": pid})
+    pid = await _stored_0726(stack, token, PHISH)
+    await call(h, token, "reject_proposal", {"proposal_id": pid})
+    got = structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
+    assert got["state"] == "rejected" and "note" not in got, got
+
+
 def test_parse_details_normalises_the_format() -> None:
     assert parse_details({"deck_format": " EDH "}) == {"deck_format": "edh"}
     with pytest.raises(DeckError):

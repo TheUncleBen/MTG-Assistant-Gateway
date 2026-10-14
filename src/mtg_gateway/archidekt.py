@@ -158,6 +158,40 @@ def plain_text(value: str) -> str:
     return text
 
 
+def _plain_insert(op: Any) -> bool:
+    """A Quill op that ``rich_text`` keeps whole: a text insert with no formatting."""
+    return (
+        isinstance(op, dict)
+        and isinstance(op.get("insert"), str)
+        and set(op) <= {"insert", "attributes"}
+        and not op.get("attributes")
+    )
+
+
+def drops_formatting(value: Any) -> bool:
+    """Whether ``plain_text(value)`` drops more than the words keep: ``value`` is a Quill document
+    (at any depth ``plain_text`` reduces) with an op other than a plain text insert, i.e. a link
+    or other formatting, an embed (an image; a card link kept only as its name) or any other op.
+    A document of plain inserts only, and any text that is not a document (Markdown included),
+    loses nothing."""
+    text = str(value) if isinstance(value, str) else ""
+    while (ops := _quill_ops(text)) is not None:
+        if not all(_plain_insert(op) for op in ops):
+            return True
+        text = rich_text(text)
+    return False
+
+
+def words_only_note(noun: str) -> str:
+    """The note an assistant's tool reply carries when its description or comment was a Quill
+    document that lost more than its words (``drops_formatting``), so the assistant does not
+    tell the user a link or formatting was added (Q90)."""
+    return (
+        f"Only the words of this {noun} are saved: the gateway writes plain text, so the links, "
+        "formatting and embeds in it were removed. Don't tell the user a link or formatting was added."
+    )
+
+
 def written_text(value: str) -> str:
     """The text ``rich_doc(value)`` writes, as a review shows it: a QuillDoc's words, else the
     plain text itself."""

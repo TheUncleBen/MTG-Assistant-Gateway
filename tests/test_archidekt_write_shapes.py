@@ -167,6 +167,30 @@ def test_plain_text_keeps_only_the_words_of_a_document() -> None:
     assert "evil" not in rich_doc(plain_text(PHISH))
 
 
+def test_drops_formatting_only_when_a_document_loses_more_than_its_words() -> None:
+    """Q90's rule: a Quill document (at any depth plain_text reduces) with an op other than a
+    plain text insert loses something; plain text, Markdown and a words-only document do not."""
+    from mtg_gateway.archidekt import drops_formatting, words_only_note
+
+    def doc(*ops: dict) -> str:
+        return json.dumps({"ops": list(ops)})
+
+    assert drops_formatting(PHISH)  # a link and an image
+    assert drops_formatting(doc({"insert": "Ramp", "attributes": {"bold": True}}, {"insert": "\n"}))
+    assert drops_formatting(doc({"insert": "Primer"}, {"insert": "\n", "attributes": {"header": 2}}))
+    assert drops_formatting(doc({"insert": "Key card: "}, {"insert": {"card-link": "Sol Ring"}}))
+    assert drops_formatting(json.dumps({"ops": [{"insert": PHISH + "\n"}]}))  # nested
+    assert not drops_formatting(doc({"insert": "Ramp first.\n"}, {"insert": "Then draw.\n"}))
+    assert not drops_formatting(doc({"insert": "Ramp\n", "attributes": {}}))
+    assert not drops_formatting("Ramp {first}")
+    assert not drops_formatting("**Primer**: [guide](https://example.com/guide)")
+    assert not drops_formatting('{"not": "a document"}') and not drops_formatting(None)
+    assert words_only_note("comment") == (
+        "Only the words of this comment are saved: the gateway writes plain text, so the links, "
+        "formatting and embeds in it were removed. Don't tell the user a link or formatting was added."
+    )
+
+
 async def test_a_comment_typed_as_a_document_is_posted_as_plain_text(stack: Stack) -> None:
     """M4: a comment or comment edit sent as a Quill document with a hidden link (the comment form,
     or any caller of its API) is posted and edited as its words only."""

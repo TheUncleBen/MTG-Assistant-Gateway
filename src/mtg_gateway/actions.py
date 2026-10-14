@@ -14,7 +14,7 @@ import secrets
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
-from .archidekt import VOTE_DOWN, VOTE_NONE, VOTE_UP
+from .archidekt import VOTE_DOWN, VOTE_NONE, VOTE_UP, drops_formatting, words_only_note
 from .decklist import clean_text
 from .decks import DeckError, _clean_deck_id, _row
 from .social import FOLLOWING_PAGES
@@ -321,7 +321,12 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         [_row("action", **row)],
     )
     decks._audit("proposal_created", sub=sub, detail={"proposal_id": pid, "kind": "action", "action": action})
-    return decks.describe(sub, pid)
+    out = decks.describe(sub, pid)
+    # Q90: a comment given as a Quill document is posted as its words alone; the assistant (the
+    # only caller) is told when links, formatting or embeds were lost, so it does not claim them
+    if action in ("comment_post", "comment_edit") and drops_formatting(params.get("text")):
+        out["note"] = words_only_note("comment")
+    return out
 
 
 async def apply(

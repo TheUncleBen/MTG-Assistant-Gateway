@@ -39,6 +39,9 @@ stays at schema 12, so going back to 0.7.26 is a plain image swap. The Android a
   Archidekt's formatting. Descriptions and comments written on Archidekt show as readable
   text in the gateway instead of raw code, and saving the settings without touching the
   description no longer replaces Archidekt's formatting.
+- When an assistant sends a description or comment in Archidekt's rich-text format and its links,
+  formatting or embeds are removed, the gateway now tells the assistant so in its reply, so it
+  doesn't tell you a link was added. This includes applying a proposal made before this release.
 - Collection condition and language are saved as Archidekt expects and shown as codes (for
   example "MP" instead of "3"). Phyrexian, which Archidekt does not have, is no longer offered. A
   new record is English and Near Mint when nothing is picked, as on archidekt.com, and editing a
