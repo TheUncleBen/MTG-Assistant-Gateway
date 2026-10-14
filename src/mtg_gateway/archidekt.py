@@ -653,13 +653,17 @@ class DeckList(list):  # type: ignore[type-arg]
 
 
 def _owned_by(owner: Any, username: str, user_id: str | None) -> bool:
-    """True only when a deck entry's owner field names the linked account."""
+    """True only when a deck entry's owner field names the linked account. When both the owner's
+    id and the linked account's id are known, the ids decide alone: a username can be given up
+    and taken by someone else, an id cannot. The username decides only when an id is missing,
+    and an empty username never matches."""
     if isinstance(owner, dict):
-        if user_id and owner.get("id") is not None and str(owner["id"]) == str(user_id):
-            return True
-        return str(owner.get("username") or "").casefold() == username.casefold()
+        owner_id = owner.get("id")
+        if user_id and owner_id is not None and str(owner_id) != "":
+            return str(owner_id) == str(user_id)
+        owner = owner.get("username")
     if isinstance(owner, str):
-        return owner.casefold() == username.casefold()
+        return bool(owner) and bool(username) and owner.casefold() == username.casefold()
     return False
 
 
