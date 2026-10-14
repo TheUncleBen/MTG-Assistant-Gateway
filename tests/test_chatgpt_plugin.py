@@ -150,7 +150,7 @@ async def test_route_serves_this_gateways_plugin_without_sign_in(
         assert link in md
         # D8: labelled for Business/Enterprise admins, with Plus and Pro sent to the connector
         assert "**ChatGPT plugin file (Business/Enterprise admins only)**" in md
-        assert "Plus and Pro accounts have no plugin upload" in md and "they use the connector" in md
+        assert "Plus and Pro accounts likely have no plugin upload" in md and "use the connector" in md
         assert md.index("12. Sign in") < md.index(link)  # not one of the numbered connector steps
         b = Browser(h)
         try:
