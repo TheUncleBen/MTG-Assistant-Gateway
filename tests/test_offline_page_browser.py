@@ -121,7 +121,12 @@ def test_one_reload_after_the_connection_returns_loads_the_page(served) -> None:
         page = ctx.new_page()
         page.set_default_timeout(15_000)
         page.goto(f"{base}/decks")
-        page.evaluate("navigator.serviceWorker.ready.then(() => true)")
+        # bounded: a worker that never gets ready fails the test instead of hanging it
+        ready = (
+            "Promise.race([navigator.serviceWorker.ready.then(() => true),"
+            " new Promise(r => setTimeout(() => r(false), 15000))])"
+        )
+        assert page.evaluate(ready), "the service worker never became ready"
         page.goto(f"{base}/decks")  # this load goes through the worker
         assert page.evaluate("!!navigator.serviceWorker.controller")
 
