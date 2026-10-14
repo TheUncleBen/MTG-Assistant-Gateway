@@ -690,7 +690,7 @@ def guide_body(
             "remove tags, set its cover",
             "<code>propose_deck_details</code>",
             "proposal (high)",
-            "applied with the same verified calls as the deck settings page",
+            "applied the same way as on the deck settings page",
         ),
         (
             "Undo: snapshots and restore (cards and the deck's name, description, format, bracket, privacy)",
