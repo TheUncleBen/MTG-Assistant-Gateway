@@ -130,6 +130,11 @@ class FakeScryfall:
             "creature-types": ["Goblin", "Time Lord", "Elemental"],
         }
 
+    def names_catalog(self) -> list[str]:
+        """An offline card-name catalog (``/catalog/card-names``): the recorded cards' names, then
+        filler names enough to pass the gateway's size check (a real catalog holds 1,000 or more)."""
+        return sorted({c["name"] for c in self.cards}) + [f"Filler Card {i}" for i in range(1200)]
+
     def client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(transport=httpx.MockTransport(self.handle), base_url="https://scryfall.test")
 

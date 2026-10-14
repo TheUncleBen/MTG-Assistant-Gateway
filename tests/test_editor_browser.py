@@ -25,7 +25,7 @@ PNG = base64.b64decode(
 def server(tmp_path: Path):
     s = Server(tmp_path)
     # the fixture cards' names are suggestable, with their summaries behind /scan/api/peek
-    s.sf.catalog = sorted({c["name"] for c in s.sf.cards}) + [f"Filler Card {i}" for i in range(1200)]
+    s.sf.catalog = s.sf.names_catalog()
     s.app.state.gateway.scan.names.set_names(s.sf.catalog)
     s.start()
     try:

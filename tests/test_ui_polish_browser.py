@@ -20,7 +20,7 @@ pytest.importorskip("playwright")
 @pytest.fixture
 def server(tmp_path: Path):
     s = Server(tmp_path)
-    s.sf.catalog = sorted({c["name"] for c in s.sf.cards}) + [f"Filler Card {i}" for i in range(1200)]
+    s.sf.catalog = s.sf.names_catalog()
     s.app.state.gateway.scan.names.set_names(s.sf.catalog)
     s.start()
     try:

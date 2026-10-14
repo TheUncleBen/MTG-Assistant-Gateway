@@ -451,7 +451,10 @@ def _reset_theme_globals(monkeypatch: pytest.MonkeyPatch) -> None:
 # gets one that answers from the recorded fixtures, so its start-up download of the card-name
 # catalog never reaches api.scryfall.com; and any request that still heads for a host other than
 # this machine is refused and fails the test that made it (SCAN_LIVE=1 lets the opt-in live
-# check in test_scan.py through). The end-to-end suite (tests/e2e/run.sh test, which sets
+# check in test_scan.py through). The guard sits at every way out: httpx's transports, a socket's
+# connect, and the name lookup before it (so not even a DNS query leaves). A refusal from a server
+# thread or a background task after its test has ended fails the next test's set-up, or the run's
+# last test, so none goes unnoticed. The end-to-end suite (tests/e2e/run.sh test, which sets
 # E2E_PUBLIC_URL) talks to its deployed stack by name, so the guard stands aside for it.
 OUTBOUND: list[str] = []
 E2E = bool(os.environ.get("E2E_PUBLIC_URL"))
@@ -485,6 +488,7 @@ def _refuse(where: str, host: str | None = None) -> None:
 _real_async_send = httpx.AsyncHTTPTransport.handle_async_request
 _real_send = httpx.HTTPTransport.handle_request
 _real_connect = socket.socket.connect
+_real_getaddrinfo = socket.getaddrinfo
 
 
 async def _offline_async_send(self: httpx.AsyncHTTPTransport, request: httpx.Request) -> httpx.Response:
@@ -506,9 +510,19 @@ def _offline_connect(self: socket.socket, address: object) -> None:
     return _real_connect(self, address)  # type: ignore[arg-type]
 
 
+def _offline_getaddrinfo(host: str | bytes | None, *args: object, **kwargs: object) -> list:
+    name = host.decode() if isinstance(host, bytes) else str(host)
+    if not _this_machine(host) and name != socket.gethostname():
+        if not _reserved(name):
+            OUTBOUND.append(f"name lookup: {name}")
+        raise socket.gaierror(socket.EAI_NONAME, f"tests stay offline, refused: {name}")
+    return _real_getaddrinfo(host, *args, **kwargs)  # type: ignore[arg-type]
+
+
 httpx.AsyncHTTPTransport.handle_async_request = _offline_async_send  # type: ignore[method-assign]
 httpx.HTTPTransport.handle_request = _offline_send  # type: ignore[method-assign]
 socket.socket.connect = _offline_connect  # type: ignore[method-assign]
+socket.getaddrinfo = _offline_getaddrinfo  # type: ignore[assignment]
 
 try:
     from playwright.sync_api import BrowserType
@@ -542,10 +556,30 @@ def _offline(monkeypatch: pytest.MonkeyPatch):
             args = args[1:]
         return real(*args, **kwargs)
 
+    early = _unreported()
+    assert early == [], f"something reached the network after an earlier test ended: {early}"
     monkeypatch.setattr(scan_pkg, "ScryfallClient", recorded)
-    before = len(OUTBOUND)
     yield
-    assert OUTBOUND[before:] == [], "a test reached the network"
+    reached = _unreported()
+    assert reached == [], f"a test reached the network: {reached}"
+
+
+_REPORTED = [0]
+
+
+def _unreported() -> list[str]:
+    """The refusals not yet reported by a test (OUTBOUND only grows)."""
+    new = OUTBOUND[_REPORTED[0] :]
+    _REPORTED[0] = len(OUTBOUND)
+    return new
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _offline_to_the_end():
+    """A refusal after the last test of the run (a server thread still finishing) fails it too."""
+    yield
+    late = _unreported()
+    assert late == [], f"something reached the network after the last test ended: {late}"
 
 
 @contextlib.asynccontextmanager
