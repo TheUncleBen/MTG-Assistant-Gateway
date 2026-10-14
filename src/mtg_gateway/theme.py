@@ -518,6 +518,11 @@ button.thumbbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px
   text-overflow:ellipsis}
 .suggest-list mark{background:none;color:inherit;font-weight:700;text-decoration:underline;
   text-decoration-color:var(--orange);text-underline-offset:.15em}
+/* the picker over a short list (static/suggest.js, data-suggest="list") reads as one: the select
+   chevron in the box, finger-sized rows on a touch screen */
+.suggest > input[data-suggest=list]{padding-right:2.25rem;background-image:url(/static/chevron.svg);
+  background-repeat:no-repeat;background-position:right .9rem center;background-size:10px 6px}
+@media (pointer:coarse){ .suggest-list.picklist li:not(.head){padding-top:.75rem;padding-bottom:.75rem} }
 
 /* badges, pills and notices */
 .badge{display:inline-block;vertical-align:middle;padding:.125rem .5rem;border-radius:5px;font-size:.86rem;
