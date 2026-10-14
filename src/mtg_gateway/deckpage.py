@@ -38,7 +38,7 @@ from .deck_stats import (
     primary_type,
 )
 from .decks import mana_value_text, split_label
-from .export_formats import EDHPLAY_URL, to_edhplay
+from .export_formats import EDHPLAY_URL
 from .mana import mana_html as _mana_html
 from .theme import esc, icon, plural
 from .views import cards_by_category
@@ -358,19 +358,13 @@ def banner_html(
         f"turns by hand, here on the gateway'>{icon('layers')} Goldfish</a>"
     )
     # Play on EDHPlay (R-154, T-161): EDHPlay is the online table; it has no import by link, so the
-    # button opens a short box whose Copy and Open EDHPlay.com copies the whole deck in its import format
-    # (export_formats.to_edhplay) and opens the site (deck.js). Without script the link still
-    # opens EDHPlay, and Export deck has the list.
-    edh = to_edhplay(deck)
-    edh_list = esc(edh.text).replace("\n", "&#10;")  # one line per card, kept through the attribute
-    # what did not fit EDHPlay's 15-card sideboard: the dialog and the note name it (deck.js). The
-    # maybeboard (never sent) and tokens (EDHPlay drops them) get one line in the dialog.
-    edh_left = esc(", ".join(name if n == 1 else f"{n} {name}" for n, name in edh.left_out))
-    edh_left_count = sum(n for n, _name in edh.left_out)
+    # button opens a short box whose Copy and Open EDHPlay.com copies the whole deck in its import
+    # format and opens the site (deck.js). The box asks /decks/{id}/edhplay.json for the list when it
+    # opens (companion_tools.py), so the page itself doesn't carry the whole list. Without script the
+    # link still opens EDHPlay, and Export deck has the list.
     primary += (
         f"<a class='btn' href='{EDHPLAY_URL}' target='_blank' rel='noreferrer noopener' data-edhplay "
-        f"data-list='{edh_list}' "
-        f"data-left-out='{edh_left}' data-left-count='{edh_left_count}' "
+        f"data-src='/decks/{did}/edhplay.json' "
         "title='Copy this deck list and open EDHPlay to play it online'>"
         f"{icon('play')} Play on EDHPlay</a>"
     )
@@ -2293,8 +2287,12 @@ html.cardview-open{overflow:hidden}
 .edhplay-dialog details.disclosure{margin:0;padding-top:.35rem}
 .edhplay-dialog .steps{margin:.15rem 0 .2rem;padding-left:1.4rem;display:flex;flex-direction:column;gap:.4rem}
 .edhplay-dialog p{margin:0}
-.edhplay-dialog .acts{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.25rem}
-.edhplay-dialog .acts .btn{margin:0;justify-content:center}
+.edhplay-dialog .acts{display:flex;margin-top:.25rem}
+.edhplay-dialog .acts .btn{margin:0;flex:1;justify-content:center}
+/* the list could not be had: the reason, and Try again beside it (a wrapped line on a phone) */
+.edhplay-dialog .notice.error{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem .75rem;margin:0}
+.edhplay-dialog .notice.error span{flex:1 1 12rem}
+.edhplay-dialog .notice.error .btn{margin:0}
 @media (max-width:600px){ .deck-toast{right:.5rem;left:.5rem;bottom:.5rem;width:auto;max-width:none} }
 @media (max-width:900px){ .has-tabbar .deck-toast{bottom:calc(64px + env(safe-area-inset-bottom))} }
 /* the viewer's own copies control: one fewer, the count, one more */

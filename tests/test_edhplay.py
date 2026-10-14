@@ -76,6 +76,24 @@ def test_the_sideboard_stops_at_fifteen_copies_and_names_the_rest() -> None:
     assert edh.left_out == [(3, "Island")]
 
 
+def test_a_companion_set_by_archidekts_flag_leads_the_sideboard() -> None:
+    """A companion marked with Archidekt's companion flag on a Sideboard row (no Companion
+    category) goes first in the Sideboard section, so a cut never drops it. EDHPlay took such a
+    list and put the card in its sideboard (verified live 2026-10-14); its import never sets a
+    companion, so the member picks it there."""
+    ark = FakeArchidekt()
+    ark.add_side_row(42, "Cultivate", quantity=2, category="Sideboard")
+    ark.add_side_row(42, "Sol Ring", quantity=14, category="Sideboard")
+    ark.add_side_row(42, "Yavimaya Elder", quantity=1, category="Sideboard")
+    ark.decks[42]["cards"][-1]["companion"] = True
+    deck = parse_deck(ark.decks[42])
+    assert next(c for c in deck.side_cards if c.name == "Yavimaya Elder").companion
+    edh = to_edhplay(deck)
+    side = _sections(edh.text)["sideboard"]
+    assert side[0].startswith("1 Yavimaya Elder") and side[1].startswith("2 Cultivate")
+    assert side[2].startswith("12 Sol Ring") and edh.left_out == [(2, "Sol Ring")]
+
+
 def test_printings_keep_set_and_number_when_edhplay_can_read_them() -> None:
     deck = _deck()
     card = next(c for c in deck.main_cards if not deck.is_commander(c))
@@ -102,6 +120,70 @@ def test_tokens_are_left_out() -> None:
     assert edh.text == before and "Tokens" not in edh.text and "sideboard" not in _sections(edh.text)
 
 
+def _edhplay_commander(text: str) -> str | None:
+    """The commander EDHPlay's import dialog picks from a pasted list (its parser ``tc`` in
+    DeckEditorSkeleton-*.js, read 2026-10-14): a line marked ``[...Commander{top}...]``; else, with
+    a Sideboard heading, a lone single line after a blank line in that section; else, with no
+    Sideboard, a last single line set off by a blank line; else the first main-deck card when its
+    copies (summed over lines of the same printing) are 1. The import then sends that card as the
+    commander, and EDHPlay makes it the commander when the card can be one (verified live
+    2026-10-14: a legendary creature first became the commander, in a Commander deck and in a
+    Modern deck; a land or a non-legendary creature first stayed in the main deck)."""
+    lines = [line.strip() for line in text.split("\n")]
+    heads = {"sideboard", "tokens", "attractions", "stickers"}
+
+    def parse(line: str) -> tuple[str, int, bool] | None:
+        if not line or line.lower().rstrip(":") in {*heads, "deck", "maybeboard", "companion", "about"}:
+            return None
+        m = re.match(r"^(\d+)\s*x?\s+", line)
+        qty, rest = (int(m.group(1)), line[m.end() :]) if m else (1, line)
+        marked = re.search(r"\[[^\]]*Commander\{top\}[^\]]*\]", rest, re.I) is not None
+        rest = re.sub(r"\[[^\]]*Commander\{top\}[^\]]*\]", "", rest, flags=re.I).strip()
+        return rest, qty, marked
+
+    side = next((i for i, line in enumerate(lines) if line.lower() == "sideboard"), -1)
+    end = min([i for i, line in enumerate(lines) if line.lower() in heads] or [len(lines)])
+    main: dict[str, list] = {}
+    for line in lines[:end]:
+        got = parse(line)
+        if got:
+            if got[0] in main:
+                main[got[0]][0] += got[1]
+                main[got[0]][1] |= got[2]
+            else:
+                main[got[0]] = [got[1], got[2]]
+
+    def name(key: str) -> str:  # the card name, without "(SET) NUMBER"
+        return re.sub(r"\s*\([A-Z0-9]+\)\s+[A-Z0-9-]+", "", key, count=1, flags=re.I).strip()
+
+    marked = [key for key, (_q, m) in main.items() if m]
+    if marked:
+        return name(marked[0])
+    if side != -1:
+        rest = lines[side:]
+        if "" in rest:
+            after = [line for line in rest[rest.index("") :] if line]
+            if len(after) == 1 and (got := parse(after[0])) and got[1] == 1:
+                return name(got[0])
+    keys = list(main)
+    if keys and side == -1:
+        main_lines = [line for line in lines[:end] if line]
+        last = lines[:end].index(main_lines[-1]) if main_lines else -1
+        if main[keys[-1]][0] == 1 and last > 0 and lines[last - 1] == "":
+            return name(keys[-1])
+    if keys and main[keys[0]][0] == 1:
+        return name(keys[0])
+    return None
+
+
+def test_the_reading_of_edhplays_parser_matches_its_known_answers() -> None:
+    assert _edhplay_commander("1 Sol Ring\n1 Opt\n") == "Sol Ring"
+    assert _edhplay_commander("2 Island\n1 Sol Ring\n") is None
+    assert _edhplay_commander("1 Opt\n1 Aesi (CMR) 365 [Commander{top}]\n") == "Aesi"
+    assert _edhplay_commander("1 Sol Ring (C18) 222\n") == "Sol Ring"
+    assert _edhplay_commander("2 Island\n\nSideboard\n1 Opt\n") is None
+
+
 def test_a_deck_without_commander_starts_with_a_line_of_several_copies() -> None:
     deck = _deck()
     deck.cards = [c for c in deck.cards if not deck.is_commander(c)]
@@ -110,6 +192,55 @@ def test_a_deck_without_commander_starts_with_a_line_of_several_copies() -> None
     assert commanders == [] and "Commander{top}" not in text
     first = text.splitlines()[0]
     assert int(first.split(" ", 1)[0]) > 1, first  # EDHPlay would take a first single copy as commander
+    assert _edhplay_commander(text) is None
+
+
+@pytest.mark.parametrize("fmt", [3, 1, None])  # Commander, Standard, no format set
+def test_only_a_real_commander_is_marked_in_an_all_single_copy_deck(fmt: int | None) -> None:
+    """A deck with no commander set and one copy of every card (a Commander deck before its
+    commander is chosen, a highlander deck, a cube): EDHPlay's import takes the first single copy
+    as the commander, and a legendary creature first became the commander on EDHPlay (verified
+    live 2026-10-14). The list starts with a card that can't be one, a land first."""
+    deck = _deck()
+    deck.format_id = fmt
+    aesi = next(c for c in deck.cards if deck.is_commander(c))
+    aesi.categories = ["Creature"]  # in the deck, but not in the commander zone
+    aesi.supertypes = ["Legendary"]
+    deck.cards = [c for c in deck.cards if c.name != "Acidic Slime"]  # Aesi sorts first
+    for c in deck.cards:
+        c.quantity = 1
+    assert not any(deck.is_commander(c) for c in deck.cards)
+    edh = to_edhplay(deck)
+    assert edh.commanders == [] and "Commander{top}" not in edh.text
+    assert _edhplay_commander(edh.text) != aesi.name
+    first = edh.text.splitlines()[0]
+    card = next(c for c in deck.cards if first.startswith(f"1 {c.name} ") or first == f"1 {c.name}")
+    assert "Land" in card.types and "Creature" not in card.types and "Legendary" not in card.supertypes
+    # nothing else moved: the rest of the deck keeps its order, every card once
+    main = _sections(edh.text)["main"]
+    assert sorted(main) == sorted(to_edhplay_lines(deck)) and main[1:] == sorted(main[1:], key=str.casefold)
+
+
+def test_an_all_single_copy_deck_without_a_land_starts_with_a_non_creature() -> None:
+    deck = _deck()
+    deck.cards = [c for c in deck.cards if "Land" not in c.types]
+    aesi = next(c for c in deck.cards if deck.is_commander(c))
+    aesi.categories = ["Creature"]
+    aesi.supertypes = ["Legendary"]
+    for c in deck.cards:
+        c.quantity = 1
+    text = to_edhplay(deck).text
+    first = text.splitlines()[0]
+    card = next(c for c in deck.cards if first.startswith(f"1 {c.name} "))
+    assert "Creature" not in card.types and "Planeswalker" not in card.types
+    assert "Legendary" not in card.supertypes
+    assert _edhplay_commander(text) == card.name  # what EDHPlay sends, and refuses as a commander
+
+
+def to_edhplay_lines(deck) -> list[str]:
+    from mtg_gateway.export_formats import _edh_line
+
+    return [_edh_line(c) for c in deck.main_cards]
 
 
 @pytest.fixture
@@ -156,15 +287,27 @@ CONTRAST = """() => {
   return worst;
 }"""
 
-STEPS = ["On EDHPlay, choose Create Deck, then Import.", "Paste, then press Import & Replace."]
+# What EDHPlay shows, checked on its site at 390 px on 2026-10-14: My Decks, Add Deck (a Create a
+# Deck box: name, format), the new deck in the list, its Import, then Import & Add or Import & Replace.
+STEPS = [
+    "On EDHPlay, go to My Decks, choose Add Deck, then open the new deck.",
+    "Press Import, paste, then press Import & Replace.",
+]
 GO = "Copy and Open EDHPlay.com"
-COPIED = "Deck list copied. On EDHPlay: Create Deck, Import, paste, then Import & Replace."
+COPIED = (
+    "Deck list copied. On EDHPlay: My Decks, Add Deck, open the deck, Import, paste, then Import & Replace."
+)
 
 
-def _open_dialog(page):
+def _open_dialog(page, *, ready: bool = True):
     page.locator(".banner a[data-edhplay]").click()
     dialog = page.locator(".edhplay-dialog")
     dialog.wait_for()
+    if ready:  # the list has come: the button is on
+        page.wait_for_function(
+            "() => { var a = document.querySelector('.edhplay-dialog .acts a');"
+            " return a && !a.hasAttribute('aria-disabled') && !a.hasAttribute('aria-busy'); }"
+        )
     return dialog
 
 
@@ -177,13 +320,14 @@ def _launch(page) -> str:
     return note.inner_text()
 
 
-@pytest.mark.parametrize(("width", "scheme"), [(390, "dark"), (673, "light"), (1366, "light")])
+@pytest.mark.parametrize(("width", "scheme"), [(390, "dark"), (673, "light"), (1280, "light")])
 def test_the_button_opens_a_dialog_then_copies_and_launches(server: Server, width: int, scheme: str) -> None:
     """0.7.27 (T-161): every press opens a small box and opens nothing yet; Escape, the backdrop and
-    Cancel close it and give focus back to the button, Tab stays inside it; its Copy and Open
-    EDHPlay.com copies the list and opens EDHPlay. The two import steps show open until the first
-    launch on this device, then folded under How to import (Ben, 01:36Z 10-14). The 0.7.25
-    first-time tip is gone, and so is the mark it kept in this browser."""
+    × close it and give focus back to the button (no Cancel: Ben, 02:08Z 10-14), Tab stays inside
+    it; its Copy and Open EDHPlay.com copies the list and opens EDHPlay. The page doesn't carry the
+    list: the box asks for it as it opens. The two import steps show open until the first launch on
+    this device, then folded under How to import (Ben, 01:36Z 10-14). The 0.7.25 first-time tip is
+    gone, and so is the mark it kept in this browser."""
     from playwright.sync_api import sync_playwright
 
     _chromium()
@@ -203,6 +347,10 @@ def test_the_button_opens_a_dialog_then_copies_and_launches(server: Server, widt
         assert page.evaluate("() => localStorage.getItem('mtg.edhplay.tip')") is None
         btn = page.locator(".banner a[data-edhplay]")
         assert btn.count() == 1 and btn.inner_text().strip() == "Play on EDHPlay"
+        assert (
+            btn.get_attribute("data-list") is None
+            and btn.get_attribute("data-src") == "/decks/42/edhplay.json"
+        )
         assert btn.get_attribute("href") == EDHPLAY_URL and btn.get_attribute("target") == "_blank"
         assert "noopener" in (btn.get_attribute("rel") or "")
 
@@ -215,8 +363,14 @@ def test_the_button_opens_a_dialog_then_copies_and_launches(server: Server, widt
         assert how.locator("summary").inner_text() == "How to import"
         assert dialog.locator("ol li").all_inner_texts() == STEPS
         assert dialog.locator(".notice.warn").count() == 0  # nothing cut from this deck
+        assert (
+            dialog.locator("button", has_text="Cancel").count() == 0 and "Cancel" not in dialog.inner_text()
+        )
         go = dialog.locator("a", has_text=GO)
         assert go.get_attribute("href") == EDHPLAY_URL and go.get_attribute("target") == "_blank"
+        # the one action fills the row
+        row = dialog.locator(".acts").bounding_box()
+        assert abs(go.bounding_box()["width"] - row["width"]) <= 1
         assert page.evaluate("() => document.activeElement.textContent") == GO
         # the box sits in the middle of the window, inside it
         box = dialog.locator(".pickbox").bounding_box()
@@ -228,24 +382,27 @@ def test_the_button_opens_a_dialog_then_copies_and_launches(server: Server, widt
         assert page.evaluate(CONTRAST) >= 4.5
         assert _overflow(page) <= 0
         _shot(page, f"edhplay-dialog-{width}-{scheme}")
-        # Tab goes round inside the dialog: Cancel, the close button, How to import, Copy and Open
-        page.keyboard.press("Tab")
-        assert page.evaluate("() => document.activeElement.textContent") == "Cancel"
-        page.keyboard.press("Tab")
-        assert page.evaluate("() => document.activeElement.getAttribute('aria-label')") == "Close"
-        page.keyboard.press("Tab")
-        assert page.evaluate("() => document.activeElement.textContent") == "How to import"
+        # Tab goes round inside the dialog: from Copy and Open to ×, How to import, back to Copy and Open
+        focus = (
+            "() => document.activeElement.getAttribute('aria-label') || document.activeElement.textContent"
+        )
+        cycle = []
+        for _ in range(4):
+            page.keyboard.press("Tab")
+            cycle.append(page.evaluate(focus))
+        assert cycle == ["Close", "How to import", GO, "Close"]
         page.keyboard.press("Shift+Tab")
+        assert page.evaluate(focus) == GO
         page.keyboard.press("Shift+Tab")
-        assert page.evaluate("() => document.activeElement.textContent") == "Cancel"
-        # Escape, a press on the backdrop and Cancel each close it; focus goes back to the button
+        assert page.evaluate(focus) == "How to import"
+        # Escape, a press on the backdrop and × each close it; focus goes back to the button
         page.keyboard.press("Escape")
         assert page.locator(".edhplay-dialog").count() == 0
         assert page.evaluate("() => document.activeElement.hasAttribute('data-edhplay')")
         _open_dialog(page)
         page.mouse.click(3, 3)
         assert page.locator(".edhplay-dialog").count() == 0
-        _open_dialog(page).locator("button", has_text="Cancel").click()
+        _open_dialog(page).locator("button[aria-label='Close']").click()
         assert page.locator(".edhplay-dialog").count() == 0
         assert opened == [] and page.locator(".edhplay-toast").count() == 0
         # closing without launching keeps the steps open for next time
@@ -277,7 +434,7 @@ def test_the_button_opens_a_dialog_then_copies_and_launches(server: Server, widt
         browser.close()
 
 
-@pytest.mark.parametrize(("width", "scheme"), [(390, "dark"), (673, "dark"), (1366, "light")])
+@pytest.mark.parametrize(("width", "scheme"), [(390, "dark"), (673, "dark"), (1280, "light")])
 def test_a_cut_sideboard_is_named_in_one_line(server: Server, width: int, scheme: str) -> None:
     """A sideboard past 15 copies: the dialog names the cards left out before anything is copied,
     and so does the note after, which stays up; the maybeboard and tokens are not sent."""
@@ -316,4 +473,118 @@ def test_a_cut_sideboard_is_named_in_one_line(server: Server, width: int, scheme
         _shot(page, f"edhplay-cut-{width}-{scheme}")
         page.wait_for_timeout(9000)
         assert page.locator(".edhplay-toast").count() == 1  # a cut list stays until it is closed
+        browser.close()
+
+
+def _deck_reads(server: Server) -> int:
+    return sum(1 for method, path in server.ark.calls if method == "GET" and "/decks/42/" in path)
+
+
+def test_the_list_comes_from_its_own_address_with_the_deck_pages_access(server: Server) -> None:
+    """GET /decks/{id}/edhplay.json: signed in, the deck as the deck page reads it (the read the
+    page just made, so no new Archidekt request), never stored by the browser; signed out, 401;
+    a deck the member can't read, the deck page's refusal."""
+    import httpx
+
+    sid = server.sign_in_and_link()
+    h = httpx.Client(base_url=server.base, cookies={"mtg_session": sid})
+    page = h.get("/decks/42")
+    assert page.status_code == 200 and "data-list=" not in page.text
+    assert "data-src='/decks/42/edhplay.json'" in page.text
+    reads = _deck_reads(server)
+    r = h.get("/decks/42/edhplay.json")
+    assert r.status_code == 200 and r.headers["cache-control"] == "no-store"
+    assert r.headers["content-type"].startswith("application/json")
+    edh = to_edhplay(parse_deck(server.ark.decks[42]))
+    assert r.json() == {"ok": True, "list": edh.text, "left_out": "", "left_count": 0}
+    assert _deck_reads(server) == reads  # the page's own read, kept a short while
+    server.ark.add_side_row(42, "Cultivate", quantity=17, category="Sideboard")
+    h.get("/decks/42", headers={"Cache-Control": "max-age=0"})  # the browser's Reload reads again
+    d = h.get("/decks/42/edhplay.json").json()
+    assert d["left_count"] == 2 and d["left_out"] == "2 Cultivate" and "15 Cultivate" in d["list"]
+
+    out = httpx.get(f"{server.base}/decks/42/edhplay.json", follow_redirects=False)
+    assert out.status_code == 401 and out.json() == {"ok": False, "error": "unauthenticated"}
+    assert h.get("/decks/43").status_code == 404  # amy's private deck: the page refuses it
+    other = h.get("/decks/43/edhplay.json")
+    assert other.status_code == 404 and other.json()["ok"] is False and other.json()["message"]
+
+
+@pytest.mark.parametrize(("width", "scheme"), [(390, "dark"), (1280, "light")])
+def test_the_box_waits_for_the_list_and_says_when_it_cannot_have_it(
+    server: Server, width: int, scheme: str
+) -> None:
+    """While the list is on its way the button shows it is busy and a press opens nothing; when it
+    can't be had the box says why, with Try again, and the button stays off; Try again fetches it."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(
+            p, server, sid, width, color_scheme=scheme, permissions=["clipboard-read", "clipboard-write"]
+        )
+        opened: list[str] = []
+        page.context.route(
+            re.compile(r"https://edhplay\.com/.*"),
+            lambda route: (opened.append(route.request.url), route.fulfill(status=200, body="edhplay"))[1],
+        )
+        page.goto(f"{server.base}/decks/42", wait_until="networkidle")
+        held: list = []  # the list's request, held until let go
+        page.route("**/edhplay.json", lambda route: held.append(route))
+        dialog = _open_dialog(page, ready=False)
+        go = dialog.locator(".acts a")
+        assert go.get_attribute("aria-busy") == "true" and go.get_attribute("aria-disabled") == "true"
+        assert page.evaluate("() => document.activeElement.textContent") == GO
+        _shot(page, f"edhplay-loading-{width}-{scheme}")
+        go.click(force=True)  # not ready: nothing opens, nothing is copied, the box stays
+        page.wait_for_timeout(300)
+        assert opened == [] and len(page.context.pages) == 1 and page.locator(".edhplay-dialog").count() == 1
+        held.pop().continue_()
+        page.wait_for_function("() => !document.querySelector('.edhplay-dialog .acts a[aria-disabled]')")
+        assert go.get_attribute("aria-busy") is None
+        page.keyboard.press("Escape")
+        page.unroute("**/edhplay.json")
+
+        # no connection: the reason and Try again, inside the focus loop; the button stays off
+        page.route("**/edhplay.json", lambda route: route.abort())
+        dialog = _open_dialog(page, ready=False)
+        err = dialog.locator(".notice.error")
+        err.wait_for()
+        assert err.get_attribute("role") == "alert"
+        assert err.locator("span").inner_text() == "The deck list couldn't be loaded: no connection."
+        assert go.get_attribute("aria-disabled") == "true" and go.get_attribute("aria-busy") is None
+        assert page.evaluate(CONTRAST) >= 4.5 and _overflow(page) <= 0
+        box = dialog.locator(".pickbox").bounding_box()
+        assert box["x"] >= 0 and box["x"] + box["width"] <= page.viewport_size["width"]
+        _shot(page, f"edhplay-error-{width}-{scheme}")
+        focus = (
+            "() => document.activeElement.getAttribute('aria-label') || document.activeElement.textContent"
+        )
+        cycle = []
+        for _ in range(4):
+            page.keyboard.press("Tab")
+            cycle.append(page.evaluate(focus))
+        assert cycle == ["Close", "How to import", "Try again", GO]
+        go.click(force=True)
+        assert opened == []
+        # the gateway answers again: Try again fetches the list and the button turns on
+        page.unroute("**/edhplay.json")
+        err.locator("button", has_text="Try again").click()
+        page.wait_for_function("() => !document.querySelector('.edhplay-dialog .acts a[aria-disabled]')")
+        assert dialog.locator(".notice.error").count() == 0
+        assert page.evaluate("() => document.activeElement.textContent") == GO
+        _launch(page)
+        copied = page.evaluate("() => navigator.clipboard.readText()").replace("\r\n", "\n")
+        assert copied == to_edhplay(parse_deck(server.ark.decks[42])).text and opened
+
+        # signed out meanwhile: the box says so
+        page.context.clear_cookies()
+        dialog = _open_dialog(page, ready=False)
+        dialog.locator(".notice.error").wait_for()
+        assert (
+            dialog.locator(".notice.error span").inner_text()
+            == "You're signed out. Reload the page to sign in."
+        )
+        assert errors == []
         browser.close()
