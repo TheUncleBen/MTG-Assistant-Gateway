@@ -38,6 +38,8 @@ from typing import Any
 
 from mcp.server.apps import Apps, ResourceCsp
 
+from .archidekt import drops_formatting, words_only_note
+
 CARD_URI = "ui://mtg-assistant-gateway/proposal-card"
 CARD_PATH = Path(__file__).parent / "static" / "proposal-card.html"
 APPROVAL_META_KEY = "mtg/approval"  # tool-result _meta key the card reads the code from
@@ -84,11 +86,45 @@ def proposal_tool_result(data: dict[str, Any], *, decks: Any, sub: str, in_chat:
         if row is not None and row.get("kind") != "action":
             approval = decks.approval_for(sub, row)
     meta = {APPROVAL_META_KEY: approval} if approval else None
+    data = with_words_note(data)
     return CallToolResult(
         content=[TextContent(type="text", text=proposal_text(data))],
         structured_content=data,
         _meta=meta,
     )
+
+
+# The comment actions whose text is written (actions.py).
+_COMMENT_WRITES = ("comment_post", "comment_edit")
+
+
+def stored_words_note(p: dict[str, Any]) -> str | None:
+    """``words_only_note`` for a proposal whose STORED description or comment is a Quill document
+    that its apply reduces to its words with formatting lost (Q90). Only a proposal stored before
+    0.7.27 holds one (0.7.26 kept the text as given): since then the plain text is stored. None
+    for a proposal that was rejected or expired, since nothing of it is saved."""
+    if p.get("state") in ("rejected", "expired"):
+        return None
+    changes = p.get("changes") if isinstance(p.get("changes"), dict) else {}
+    if p.get("kind") == "details" and drops_formatting(changes.get("description")):
+        return words_only_note("description")
+    if (
+        p.get("kind") == "action"
+        and changes.get("action") in _COMMENT_WRITES
+        and drops_formatting(changes.get("text"))
+    ):
+        return words_only_note("comment")
+    return None
+
+
+def with_words_note(data: dict[str, Any], note: str | None = None) -> dict[str, Any]:
+    """An assistant's proposal reply with ``note`` set (Q90) when its description or comment lost
+    links, formatting or embeds: ``note`` when the caller knows (the text it was given), else what
+    the stored proposal shows (``stored_words_note``). A refusal (ok false) gets none."""
+    note = note or stored_words_note(data)
+    if note and data.get("ok") is not False:
+        return {**data, "note": note}
+    return data
 
 
 # Left out of the text: the review rows and the stored edit, which the diff lines already say.

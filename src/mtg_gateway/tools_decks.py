@@ -17,6 +17,7 @@ from .approve import (
     APPROVE_DECISIONS,
     CONFIRM_TOOL_META,
     apply_on_review_page,
+    with_words_note,
 )
 from .archidekt import parse_deck
 from .cards import (
@@ -403,9 +404,10 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
                     # and the gateway waits a little for the member's Apply there.
                     done = await apply_on_review_page(ctx, lambda: state.decks.describe(sub, proposal_id))
                     if done is not None:
-                        return done
+                        return with_words_note(done)
             # The service re-checks the mode and the risk itself, so there is no way around it.
-            return {"ok": True, **(await state.decks.apply(sub, proposal_id, via="mcp"))}
+            # Q90: a proposal stored with a formatted document (0.7.26) is applied as its words
+            return with_words_note({"ok": True, **(await state.decks.apply(sub, proposal_id, via="mcp"))})
         except DeckError as exc:
             return _tool_error(exc)
 
@@ -446,7 +448,9 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             state.decks.check_approval(sub, proposal_id, approval)
             if decision == "reject":
                 return _card_result({"ok": True, **state.decks.reject(sub, proposal_id, via="app")}, None)
-            return _card_result({"ok": True, **(await state.decks.apply(sub, proposal_id, via="app"))}, None)
+            return _card_result(
+                with_words_note({"ok": True, **(await state.decks.apply(sub, proposal_id, via="app"))}), None
+            )
         except DeckError as exc:
             out = _tool_error(exc)
             if "state" not in out:
