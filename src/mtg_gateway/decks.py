@@ -2012,7 +2012,8 @@ class DeckService:
 
     async def on_archidekt(self, sub: str, *, wait: float | None = None) -> dict[str, Any] | None:
         """What the member's deck list (the cached one, no extra request) says is on Archidekt:
-        ``{"ids", "read_at"}``, every deck and backup copy id and when the list was read. None
+        ``{"ids", "read_at", "account_id", "username", "linked_at"}``: every deck and backup copy
+        id, when the list was read, and the Archidekt account it is of and when it was linked. None
         when the list cannot tell that something is gone: still cold, read by username (which may
         leave private decks out), or not ``complete`` (archidekt.DeckList: cut off at
         MAX_LIST_PAGES pages, an entry whose owner could not be read or was someone else, or a
@@ -2025,7 +2026,14 @@ class DeckService:
             return None
         if not rows.complete or len(rows) >= MAX_LIST_PAGES * 50:
             return None
-        return {"ids": {str(d["id"]) for d in rows}, "read_at": read_at}
+        return {
+            "ids": {str(d["id"]) for d in rows},
+            "read_at": read_at,
+            # the list is this account's alone: history of an account linked before is not judged
+            "account_id": str(link["archidekt_user_id"]),
+            "username": str(link.get("archidekt_username") or ""),
+            "linked_at": int(link.get("created_at") or 0),
+        }
 
     def decks_fetched_at(self, sub: str) -> float | None:
         """When the cached deck list was read from Archidekt (epoch seconds), None when none is."""
@@ -4736,13 +4744,18 @@ def mark_gone(snapshots: list[dict[str, Any]], listed: dict[str, Any] | None) ->
     a snapshot taken before the list was read whose deck is not in it gets ``deck_gone`` (Restore
     cannot work: it rewrites that deck), one whose Archidekt backup copy is not in it gets
     ``backup_gone`` (deleted on Archidekt; Restore still works, it uses the snapshot kept here).
-    Without a list that can tell, nothing is marked."""
+    Without a list that can tell, nothing is marked. The list is of the account linked now, so a
+    snapshot of another account's deck (one linked before) is never marked: its deck and copy
+    are not in this list whether they still exist or not."""
     if not listed:
         return snapshots
     ids, read_at = listed["ids"], float(listed["read_at"])
+    account = listed.get("account_id")
     for x in snapshots:
         if float(x.get("taken_at") or 0) >= read_at:
             continue  # newer than the list: it cannot know
+        if account is not None and x.get("account_id") != account:
+            continue  # another account's deck (or one whose owner was not recorded)
         if str(x.get("deck_id") or "") not in ids:
             x["deck_gone"] = True
         if x.get("backup_deck_id") and str(x["backup_deck_id"]) not in ids:

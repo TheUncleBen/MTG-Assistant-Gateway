@@ -1576,17 +1576,61 @@ class Database:
             out[str(r["deck_id"])] = str(r["deck_name"] or out.get(str(r["deck_id"])) or "")
         return out
 
-    def own_history_deck_ids(self, owner_sub: str) -> set[str]:
-        """The decks the member's history shows as their own: snapshots, and proposals that change
-        or make one of their decks (edit, details, restore, new deck). A clone's source, an
-        account action's deck or a report's deck may be anyone's, so they are not in it."""
+    def own_history_deck_ids(
+        self, owner_sub: str, *, account_id: str, username: str, linked_at: int
+    ) -> set[str]:
+        """The decks the member's history shows as decks of the Archidekt account linked now
+        (``account_id`` and ``username``, linked at ``linked_at``), the only ones its deck list
+        can call gone: snapshots of a deck that account owned (a stored deck names its owner),
+        and proposals that change or make one of that account's decks (edit, details, restore,
+        new deck). A clone's source, an account action's deck or a report's deck may be anyone's,
+        so they are never in it, and neither is a deck of an account linked before: its history
+        stays usable (its snapshots keep Restore) and it is never called gone.
+
+        A proposal (or a snapshot whose deck names no owner) does not record the account, so it
+        counts when it was made under the link of now (at or after ``linked_at``), or under an
+        earlier link of the same account (the member's "archidekt_linked" audit entries name each
+        account linked). One made before any recorded link counts only while no other account was
+        ever linked. Every doubt leaves a deck out, so a deck is never called gone wrongly."""
         with self._lock:
-            rows = self._conn.execute(
-                "SELECT deck_id FROM snapshots WHERE owner_sub = ? UNION SELECT deck_id FROM proposals "
-                "WHERE owner_sub = ? AND kind IN ('edit', 'details', 'restore', 'create_deck')",
+            snaps = self._conn.execute(
+                "SELECT deck_id FROM snapshots WHERE owner_sub = ? "
+                "AND CAST(json_extract(deck_json, '$.owner.id') AS TEXT) = ?",
+                (owner_sub, str(account_id)),
+            ).fetchall()
+            props = self._conn.execute(
+                "SELECT deck_id, created_at FROM proposals WHERE owner_sub = ? "
+                "AND kind IN ('edit', 'details', 'restore', 'create_deck') "
+                "UNION ALL SELECT deck_id, taken_at FROM snapshots WHERE owner_sub = ? "
+                "AND json_extract(deck_json, '$.owner.id') IS NULL",
                 (owner_sub, owner_sub),
             ).fetchall()
-        return {str(r["deck_id"]) for r in rows}
+            links = self._conn.execute(
+                "SELECT at, detail_json FROM audit_log WHERE sub = ? AND event = 'archidekt_linked' "
+                "ORDER BY at, id",
+                (owner_sub,),
+            ).fetchall()
+        me = str(username or "").casefold()
+
+        def named(detail: Any) -> str:
+            try:
+                d = json.loads(detail or "{}")
+            except ValueError:
+                return ""
+            return str(d.get("archidekt_username") or "").casefold() if isinstance(d, dict) else ""
+
+        linked = [(int(r["at"]), named(r["detail_json"])) for r in links]
+        only_me = bool(me) and all(name == me for _at, name in linked)
+        out = {str(r["deck_id"]) for r in snaps}
+        for r in props:
+            at = int(r["created_at"])
+            if at >= int(linked_at):
+                out.add(str(r["deck_id"]))
+                continue
+            earlier = [name for when, name in linked if when <= at]
+            if (earlier[-1] == me and bool(me)) if earlier else only_me:
+                out.add(str(r["deck_id"]))
+        return out
 
     def reject_proposal(
         self, proposal_id: str, owner_sub: str, closed_by: dict[str, Any] | None = None
@@ -1741,6 +1785,8 @@ class Database:
         for r in rows:
             deck = json.loads(r["deck_json"])
             cards = deck.get("cards") if isinstance(deck, dict) else None
+            owner = deck.get("owner") if isinstance(deck, dict) else None
+            owner_id = owner.get("id") if isinstance(owner, dict) else None
             out.append(
                 {
                     "snapshot_id": r["id"],
@@ -1750,6 +1796,8 @@ class Database:
                     "taken_at": r["taken_at"],
                     "backup_deck_id": r["backup_deck_id"],
                     "backup_url": r["backup_url"],
+                    # the Archidekt account that owned the deck then (None when not recorded)
+                    "account_id": str(owner_id) if owner_id is not None else None,
                     "card_count": sum(int(c.get("quantity", 0)) for c in cards if isinstance(c, dict))
                     if isinstance(cards, list)
                     else None,
