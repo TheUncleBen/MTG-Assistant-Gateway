@@ -1525,6 +1525,9 @@ class DeckService:
         # decks). None while the collection pages are not loaded.
         self.collection_apply: Any = None
         self._precon_cache: tuple[float, dict[str, list[dict[str, Any]]]] | None = None
+        # Archidekt's tag list as the settings page's tag box looked it up: typed text (folded) ->
+        # (until when, tag names), shared by members (it is one list), oldest dropped past the size
+        self._tag_lookups: dict[str, tuple[float, list[str]]] = {}
         # The member's deck list (list_decks), served from memory between Archidekt reads and
         # dropped by every write the gateway sends for that member.
         self.deck_lists = MemberCache(DECK_LIST_FRESH, DECK_LIST_STALE)
@@ -3634,6 +3637,9 @@ class DeckService:
 
     MAX_TAGS = 20
     MAX_FOLDERS = 200
+    TAG_LOOKUP_SECONDS = 300.0
+    TAG_LOOKUP_ENTRIES = 512
+    TAG_LOOKUP_NAMES = 20
 
     def _hand_snapshot(self, sub: str, deck: Deck) -> str:
         snapshot_id = secrets.token_urlsafe(12)
@@ -3900,6 +3906,32 @@ class DeckService:
             f"Archidekt has no deck tag called '{name}'. Tags are picked from Archidekt's own list"
             + (f"; close ones: {', '.join(close)}." if close else "; try a shorter or different word."),
         )
+
+    async def tag_suggestions(self, sub: str, text: Any) -> list[str]:
+        """Archidekt's tags for what the member is typing in the settings page's tag box (its own
+        site's tag picker lookup, ``search_tags``): one paced request per new text of at least two
+        characters, then remembered for TAG_LOOKUP_SECONDS, since the box asks as the member types
+        and Archidekt's terms ask for gentle use."""
+        q = clean_text(str(text or "")).strip("#").strip()[:40]
+        if len(q) < 2:
+            return []
+        key = q.casefold()
+        now = time.monotonic()
+        hit = self._tag_lookups.get(key)
+        if hit and hit[0] > now:
+            return list(hit[1])
+        found = await self._call(sub, lambda token, *_: self.client.search_tags(token, q))
+        names: list[str] = []
+        for t in found:
+            name = str(t.get("name") or "").strip()
+            if name and name.casefold() not in {n.casefold() for n in names}:
+                names.append(name)
+        names = names[: self.TAG_LOOKUP_NAMES]
+        self._tag_lookups.pop(key, None)
+        self._tag_lookups[key] = (now + self.TAG_LOOKUP_SECONDS, names)
+        while len(self._tag_lookups) > self.TAG_LOOKUP_ENTRIES:
+            self._tag_lookups.pop(next(iter(self._tag_lookups)))
+        return list(names)
 
     async def add_tag(self, sub: str, deck_id: str, name: str) -> dict[str, Any]:
         """Tag one of the member's decks with one of Archidekt's tags (see ``_archidekt_tag``).

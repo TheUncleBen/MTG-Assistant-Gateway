@@ -2550,15 +2550,30 @@ ul.erows{list-style:none;margin:.5rem 0 0;padding:0}
 .coverart{width:100%;max-width:22rem;aspect-ratio:16/9;object-fit:cover;border-radius:var(--radius-panel);
   background:var(--surface-2);display:flex;align-items:center;justify-content:center;flex:1 1 14rem}
 .coverform .field{flex:1 1 14rem;margin:0}
-.taglist{display:flex;flex-wrap:wrap;gap:.5rem;margin:0 0 1rem}
+ul.plain.taglist{display:flex;flex-wrap:wrap;gap:.5rem;margin:0 0 1rem}
 .taglist li{display:flex;align-items:center;gap:.25rem}
 .taglist .pill{font-size:.95rem;padding:.3rem .6rem}
 .taglist form.inline{display:inline;margin:0}
 .taglist button.mini{width:1.9rem;height:1.9rem;min-height:0;padding:0;margin:0;display:inline-flex;
   align-items:center;justify-content:center;border-radius:50%}
 .taglist button.mini svg{width:14px;height:14px}
-.addtag,.moveform{display:flex;flex-wrap:wrap;gap:.75rem;align-items:flex-end}
-.addtag .field,.moveform .field{margin:0}
+/* a box (or list) and its button on one row, the button at the box's height: on a phone the box
+   narrows rather than the button dropping to a row of its own */
+.addtag,.moveform{display:flex;gap:.6rem;align-items:flex-end}
+.addtag .field,.moveform .field{margin:0;flex:0 1 24rem}
+/* (main form > button is full width on a phone; here the button keeps its own width) */
+main .panel form.addtag > button,main .panel form.moveform > button{flex:none;width:auto}
+.tagbox .notice,.collabbox .notice,.folderbox .notice,.coverbox .notice{margin:.75rem 0 0}
+/* collaborators: one row each, like the page's other lists, the remove button at the end */
+ul.plain.collablist{margin:0 0 .75rem;border-bottom:1px solid var(--surface-2)}
+.collablist li{flex-wrap:nowrap}
+.collablist .who{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:.1rem}
+.collablist .name{flex:none}
+.collablist li.none{min-height:0;padding:.25rem 0 .75rem}
+.follownote{display:flex;flex-direction:column;align-items:flex-start;gap:.5rem}
+.follownote p{margin:0;font-weight:400}
+.follownote p.lead{font-weight:700}
+.follownote .btn{color:var(--text)}
 .foldertree li{padding-left:calc(var(--depth,0) * 1.25rem)}
 .foldertree li .name{display:flex;align-items:center;gap:.5rem}
 .foldertree li .btn{margin-left:auto}
