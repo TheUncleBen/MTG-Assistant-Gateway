@@ -108,6 +108,91 @@ async def test_cover_tags_and_folder_from_the_settings_page(stack: Stack) -> Non
         await b.aclose()
 
 
+async def test_section_forms_answer_next_to_their_own_form(stack: Stack) -> None:
+    """Each section form of the settings page names its section, and its notice (done or refused)
+    is shown inside that section, where the browser lands, not at the top of the page."""
+    b = await linked(stack)
+    try:
+        page = (await b.http.get("/decks/42/settings", headers=NAV)).text
+        for action in ("/decks/42/cover#cover", "/decks/42/tags#tags", "/decks/42/move#folder"):
+            assert f"action='{action}'" in page, action
+        r = await _form(b, "/decks/42/tags", {"action": "add", "name": "budget"})
+        assert r.status_code == 303 and r.headers["location"].endswith("ok=tag_added#tags")
+        shown = (await b.http.get(r.headers["location"], headers=NAV)).text
+        tags = shown.index("id='tags'")
+        assert tags < shown.index("Tag added on Archidekt.") < shown.index("id='folder'")
+        r = await _form(b, "/decks/42/tags", {"action": "add", "name": "sea monsters"})
+        assert r.status_code == 400
+        at = r.text.index("<p class='notice error' id='tags-msg' role='alert'>Archidekt has no deck tag")
+        assert r.text.index("id='tags'") < at < r.text.index("id='folder'")
+        assert "aria-describedby='tags-help tags-msg' aria-invalid='true'" in r.text
+        assert "value='sea monsters'" in r.text  # the box keeps what was typed
+    finally:
+        await b.aclose()
+
+
+async def test_tag_box_suggests_archidekts_tags_gently(stack: Stack) -> None:
+    """The settings page's tag box asks /decks/api/tags as the member types: Archidekt's own tag
+    lookup through the member's session, two characters at least, each text read once and then
+    remembered for a few minutes (a bounded memory); a failure answers with an error status, which
+    the box takes as "no list". The page leaves out the deck's own tags."""
+    unlinked = Browser(stack.h)
+    try:
+        assert (await unlinked.http.get("/decks/api/tags", params={"q": "bu"})).status_code == 401
+        await unlinked.login("/account")
+        r = await unlinked.http.get("/decks/api/tags", params={"q": "bu"})
+        assert r.status_code == 409 and r.json()["ok"] is False
+    finally:
+        await unlinked.aclose()
+    b = await linked(stack)
+    decks = stack.h.app.state.gateway.decks
+    ark = stack.ark
+
+    def lookups() -> int:
+        return sum(1 for m, p in ark.calls if m == "GET" and p == "/api/decks/tags/v2/")
+
+    try:
+        page = (await b.http.get("/decks/42/settings", headers=NAV)).text
+        assert "data-suggest='tags' data-suggest-src='/decks/api/tags?q='" in page
+        assert "data-suggest-exclude='[]'" in page
+        r = await b.http.get("/decks/api/tags", params={"q": "bu"})
+        assert r.status_code == 200 and r.json() == {"ok": True, "names": ["budget"], "complete": False}
+        assert r.headers["cache-control"] == "no-store"
+        assert lookups() == 1
+        # the same text again, in any case: remembered, Archidekt is not asked again
+        for q in ("bu", "BU", " bu "):
+            assert (await b.http.get("/decks/api/tags", params={"q": q})).json()["names"] == ["budget"]
+        assert lookups() == 1
+        # one character, or nothing: no lookup at all
+        for q in ("b", "", "#"):
+            assert (await b.http.get("/decks/api/tags", params={"q": q})).json()["names"] == []
+        assert lookups() == 1
+        assert (await b.http.get("/decks/api/tags", params={"q": "sp"})).json()["names"] == ["Spicy"]
+        assert lookups() == 2
+        # the memory is bounded: past its size the oldest text is dropped
+        decks.TAG_LOOKUP_ENTRIES = 2
+        await b.http.get("/decks/api/tags", params={"q": "tri"})  # bu, sp, tri -> sp, tri kept
+        assert lookups() == 3
+        await b.http.get("/decks/api/tags", params={"q": "sp"})
+        assert lookups() == 3
+        await b.http.get("/decks/api/tags", params={"q": "bu"})
+        assert lookups() == 4
+        # the deck's own tags are named on the page, for the box to leave out
+        await _form(b, "/decks/42/tags", {"action": "add", "name": "budget"})
+        page = (await b.http.get("/decks/42/settings", headers=NAV)).text
+        assert "data-suggest-exclude='[&quot;budget&quot;]'" in page
+        # Archidekt busy: an error status and nothing remembered; while Archidekt asks to wait,
+        # the gateway does not ask it again
+        before = lookups()
+        ark.inject.append((429, "30"))
+        for _ in range(2):
+            r = await b.http.get("/decks/api/tags", params={"q": "ic"})
+            assert r.status_code in (429, 503) and r.json()["ok"] is False and "names" not in r.json()
+        assert lookups() == before + 1 and "ic" not in decks._tag_lookups
+    finally:
+        await b.aclose()
+
+
 async def test_delete_needs_the_typed_name_and_keeps_a_snapshot_and_backup(stack: Stack) -> None:
     b = await linked(stack)
     db = stack.h.app.state.gateway.db

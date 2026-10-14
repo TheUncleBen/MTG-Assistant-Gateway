@@ -500,11 +500,17 @@ async def test_settings_page_collaborators_take_one_press_and_a_confirmation(sta
     try:
         await b.login()
         page = (await b.http.get("/decks/42/settings")).text
-        assert "id='collaborators'" in page and "<b>amy</b>" in page and "added by alice" in page
+        assert "id='collaborators'" in page and "<span class='name'>amy</span>" in page
+        assert "added by alice" in page and "aria-label='Remove amy'" in page
         assert "press Apply there" not in page
-        # Q6b: one line on the rule; the people followed are offered, less current collaborators
+        # Q6b: one line on the rule; the people followed are offered (the site's own combobox, no
+        # datalist), less current collaborators: amy, the only one followed, is one already
         assert "Only people you follow on Archidekt can be added" in page
-        assert "<datalist" not in page  # amy, the only one followed, is a collaborator already
+        assert "<datalist" not in page and "data-suggest='list'" not in page
+        assert "Everyone you follow on Archidekt is a collaborator already." in page
+        # each form names its section, so the answer (a refusal, or the page after the confirmation)
+        # opens there
+        assert "action='/decks/42/collaborators#collaborators'" in page
         csrf = await b.csrf()
         # the first press only asks: nothing is sent and no proposal is stored
         r = await b.http.post(
@@ -522,8 +528,11 @@ async def test_settings_page_collaborators_take_one_press_and_a_confirmation(sta
         assert ark.editors[42] == [] and h.db.list_proposals(SUB) == []
         shown = (await b.http.get(r.headers["location"])).text
         assert "Collaborator removed on Archidekt." in shown
-        assert "<datalist id='collab-follows'><option value='amy'></option></datalist>" in shown
-        assert "list='collab-follows'" in shown
+        # the notice sits in the section, next to the form, not at the top of the page
+        assert shown.index("Collaborator removed on Archidekt.") > shown.index("id='collaborators'")
+        assert "No collaborators yet." in shown
+        assert "data-suggest='list' data-options='[&quot;amy&quot;]'" in shown
+        assert "data-suggest-head='People you follow'" in shown and "<datalist" not in shown
         # adding: the same two steps, someone the member follows
         r = await b.http.post(
             "/decks/42/collaborators", data={"csrf": csrf, "action": "add", "username": "amy"}
@@ -539,9 +548,23 @@ async def test_settings_page_collaborators_take_one_press_and_a_confirmation(sta
         bad = await b.http.post(
             "/decks/42/collaborators", data={"csrf": csrf, "action": "add", "username": "nobody"}
         )
-        assert bad.status_code == 400 and "not among the people you follow" in bad.text
-        # Q6b: the refusal links the person's Archidekt profile, to follow them there
-        assert "href='https://archidekt.com/u/nobody'" in bad.text and "press Follow" in bad.text
+        assert bad.status_code == 400 and "nobody isn't someone you follow on Archidekt." in bad.text
+        # Q6b: one message, under the box, with the person's Archidekt profile to follow them there;
+        # not repeated at the top of the page
+        assert bad.text.count("someone you follow on Archidekt") == 1
+        assert "not among the people you follow" not in bad.text
+        assert "<p class='notice error'>" not in bad.text
+        msg = bad.text.index("id='collaborators-msg'")
+        assert bad.text.index("id='collabname'") < msg < bad.text.index("id='collab-help'")
+        assert (
+            "<a class='btn' href='https://archidekt.com/u/nobody' target='_blank' "
+            "rel='noreferrer noopener'>" in bad.text
+        )
+        assert "Open nobody on Archidekt</a>" in bad.text
+        # the box keeps the name, is marked invalid and is described by the message
+        assert (
+            "value='nobody' aria-describedby='collab-help collaborators-msg' aria-invalid='true'" in bad.text
+        )
         bad = await b.http.post(
             "/decks/42/collaborators",
             data={"csrf": csrf, "action": "add", "username": "nobody", "confirmed": "1"},
