@@ -57,7 +57,7 @@ async def test_quantity_remove_and_category_edits_answer_with_fresh_rows_and_che
                 "categories": d["rows"][0]["categories"],
                 "relation_id": d["rows"][0]["relation_id"],
                 "finish": "Normal",
-                "label": "",
+                "label": ",#656565",  # archidekt.com's empty tag, sent with every modify (Q58)
                 "mana_value": None,
                 "notes": "",
             }
@@ -105,7 +105,7 @@ async def test_quantity_remove_and_category_edits_answer_with_fresh_rows_and_che
                 "categories": ["Removal"],
                 "relation_id": d["rows"][0]["relation_id"],
                 "finish": "Normal",
-                "label": "",
+                "label": ",#656565",
                 "mana_value": None,
                 "notes": "",
             }

@@ -564,7 +564,7 @@ def test_brewer_view_and_custom_mana_value(server: Server, width: int, scheme: s
         assert page.locator(".ctxmenu .mvform button", has_text="Clear").count() == 0  # nothing to clear
         page.locator(".ctxmenu .mvform input").fill("25")
         page.locator(".ctxmenu .mvform button", has_text="Save").click()
-        assert "0 to 20" in page.locator(".ctxmenu .mvform .status").inner_text()
+        assert "0 to 15" in page.locator(".ctxmenu .mvform .status").inner_text()
         page.locator(".ctxmenu .mvform input").fill("2")
         assert page.locator(".ctxmenu .mvform .status").inner_text() == ""  # typing clears the error
         _shot(page, f"deck-mv-form-{width}-{scheme}")

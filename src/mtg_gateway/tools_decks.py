@@ -259,7 +259,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "and set_printing change copies already in the deck. set_label puts Archidekt's color tag "
             "(label up to 40 characters, color #rrggbb) on every row of a card, in zone main or side; "
             "an empty label takes it off. set_mana_value sets Archidekt's custom mana value (mana_value "
-            "0 to 20, null takes it off) on every row of a card in that zone. set_category and "
+            "0 to 15, null takes it off) on every row of a card in that zone. set_category and "
             "set_commander move every copy of a card (set_category creates the category if the deck "
             "has none of that name). "
             "One card takes one kind of change per proposal; a pending proposal is replaced by rejecting "

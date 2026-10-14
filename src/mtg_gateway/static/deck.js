@@ -444,7 +444,7 @@
     cards.insertBefore(st, after || null);
     return st;
   }
-  // The card menu's "Mana value…" form: a whole number from 0 to 20, or Clear to use the card's own
+  // The card menu's "Mana value…" form: a whole number from 0 to 15, or Clear to use the card's own
   function manaValueForm(card, m) {
     var name = card.getAttribute("data-card") || "";
     var cur = card.getAttribute("data-mv");
@@ -454,7 +454,7 @@
     form.noValidate = true;  // our own message, in the menu, rather than the browser bubble
     var lab = el("label", "", "Custom mana value");
     var input = el("input", "");
-    input.type = "number"; input.min = "0"; input.max = "20"; input.step = "1"; input.inputMode = "numeric";
+    input.type = "number"; input.min = "0"; input.max = "15"; input.step = "1"; input.inputMode = "numeric";
     input.id = "mv-input"; lab.htmlFor = "mv-input";
     input.value = cur === null ? "" : cur;
     var hint = el("p", "hint", "Archidekt's mana value override for this card, in this deck only.");
@@ -489,7 +489,7 @@
     form.addEventListener("submit", function (e) {
       stop(e);
       var v = input.value.trim();
-      if (!/^\d{1,2}$/.test(v) || Number(v) > 20) { msg.className = "status err"; msg.textContent = "Enter a whole number from 0 to 20."; input.focus(); return; }
+      if (!/^\d{1,2}$/.test(v) || Number(v) > 15) { msg.className = "status err"; msg.textContent = "Enter a whole number from 0 to 15."; input.focus(); return; }
       if (cur !== null && Number(cur) === Number(v)) { closeMenu(); return; }
       send(Number(v));
     });

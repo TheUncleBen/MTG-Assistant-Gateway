@@ -11,7 +11,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from .actions import COLLABORATOR_NOTE, collaborator_by_hand, collaborator_target, profile_url
-from .archidekt import ArchidektError, Deck, featured_scryfall_id, format_label, rich_text
+from .archidekt import FORMAT_IDS, ArchidektError, Deck, featured_scryfall_id, format_label, rich_text
 from .busy import busy_response
 from .companion import DECK_CSP, FORMAT_CHOICES, INDENT, LIST_OK_MESSAGES, SETTINGS_OK_MESSAGES
 from .deckpage import (
@@ -151,8 +151,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             f"{fmt_opts}</select></div>"
             "<div class='field'><label for='edh_bracket'>Commander bracket</label>"
             f"<select id='edh_bracket' name='edh_bracket'>{bracket_opts}</select>"
-            "<p class='muted small'>Your own bracket. It does not influence the estimated bracket on "
-            "the deck page."
+            "<p class='muted small'>Your own bracket, for Commander decks only: changing the format "
+            "clears it. It does not influence the estimated bracket on the deck page."
             "</p></div>"
             "<label for='description'>Description</label>"
             f"<textarea id='description' name='description' rows='10'>{_esc(description)}"
@@ -828,6 +828,11 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             details["deck_format"] = data["deck_format"]
         bracket = data.get("edh_bracket", "")
         details["edh_bracket"] = int(bracket) if re.fullmatch(r"[1-5]", bracket) else None
+        # only a Commander deck has a bracket: archidekt.com's own settings form sends none for
+        # another format (Q56), so a bracket left picked when the format moves off Commander goes
+        fmt = details.get("deck_format") or deck.format
+        if FORMAT_IDS.get(str(fmt or "")) != FORMAT_IDS["commander"]:
+            details["edh_bracket"] = None
         current_client.set(BROWSER_CLIENT_ID)
         try:
             p = await decks.propose_deck_details(sub, deck.id, details)

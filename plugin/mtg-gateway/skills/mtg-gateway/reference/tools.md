@@ -100,7 +100,7 @@ A list of 1 to 40 objects:
 | `finish` | no | For `add`: `nonfoil`, `foil` or `etched` (`normal` and `foil: true` also work). A finish the printing does not come in falls back to what Archidekt offers. For `set_finish` (required) and `set_printing` (optional): the finish every copy already in the deck gets. |
 | `zone` | no | `main` (default: the deck proper) or `side` (the maybeboard and sideboard rows, which do not count toward the deck). With `side`, `add`, `remove`, `set_quantity` and `set_category` work on those rows; `set_commander`, `set_finish`, `set_printing` and a pinned printing are for the deck proper only. A side add is filed under the deck's Maybeboard (or its first uncounted category). Diff lines for side rows end in "(maybeboard/sideboard)". `set_label` and `set_mana_value` work in either zone. |
 | `label`, `color` | for `set_label` | The colour tag's name (up to 40 characters, no commas; an empty string takes the tag off) and its colour as `#rrggbb` (grey `#656565` when left out). |
-| `mana_value` | for `set_mana_value` | Archidekt's custom mana value for the card, a whole number from 0 to 20; `null` takes it off so the card's own mana value counts again. |
+| `mana_value` | for `set_mana_value` | Archidekt's custom mana value for the card, a whole number from 0 to 15; `null` takes it off so the card's own mana value counts again. |
 
 `set_category` and `set_commander` take only `name` (plus `category` for
 `set_category`): no quantity or printing. The card must already be in the deck.

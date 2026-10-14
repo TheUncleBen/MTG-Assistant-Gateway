@@ -36,13 +36,13 @@ def _rows(ark, deck_id: int) -> dict[str, dict]:
 async def test_propose_details_then_apply_changes_and_verifies(stack: Stack) -> None:
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
-    details = {"name": "Aesi Lands", "deck_format": "modern", "edh_bracket": 3, "private": True}
+    details = {"name": "Aesi Lands", "deck_format": "commander", "edh_bracket": 3, "private": True}
     p = structured(await call(h, token, "propose_deck_details", {"deck_id": "42", "details": details}))
     assert p["ok"] and p["state"] == "pending" and p["kind"] == "details", p
     assert p["deck_id"] == "42" and p["deck_name"] == "Sample Commander Deck"
     assert set(p["diff"].splitlines()) == {
         'name: "Sample Commander Deck" -> "Aesi Lands"',
-        "format: unknown -> modern",
+        "format: unknown -> commander",
         "bracket: none -> 3",
         "private: no -> yes",
     }, p["diff"]
@@ -58,13 +58,13 @@ async def test_propose_details_then_apply_changes_and_verifies(stack: Stack) -> 
     assert ark.patches == []  # no card rows were touched
     # One update for the deck itself; the other PATCH names the backup copy made first.
     assert [u for u in ark.updates if u["deck_id"] == 42] == [
-        {"deck_id": 42, "name": "Aesi Lands", "deckFormat": 2, "edhBracket": 3, "private": True}
+        {"deck_id": 42, "name": "Aesi Lands", "deckFormat": 3, "edhBracket": 3, "private": True}
     ]
     backup_id = int(a["result"]["backup_deck_id"])
     assert ark.decks[backup_id]["name"].startswith("Sample Commander Deck (backup ")
     assert [u["deck_id"] for u in ark.updates] == [backup_id, 42]  # backup before the change
     deck = ark.decks[42]
-    assert deck["name"] == "Aesi Lands" and deck["deckFormat"] == 2 and deck["edhBracket"] == 3
+    assert deck["name"] == "Aesi Lands" and deck["deckFormat"] == 3 and deck["edhBracket"] == 3
     assert deck["private"] is True and 42 in ark.private
     snap = h.db.get_snapshot(a["snapshot_id"], "user-1")
     assert snap and snap["deck"]["name"] == "Sample Commander Deck"  # pre-change state kept
@@ -455,12 +455,15 @@ async def test_restoring_a_snapshot_puts_the_deck_details_back(stack: Stack) -> 
     # The fixture deck has no format; give it one first so the restore has a format to go back to.
     p0 = structured(
         await call(
-            h, token, "propose_deck_details", {"deck_id": "42", "details": {"deck_format": "commander"}}
+            h,
+            token,
+            "propose_deck_details",
+            {"deck_id": "42", "details": {"deck_format": "commander", "edh_bracket": 3}},
         )
     )
     assert structured(await call(h, token, "apply_proposal", {"proposal_id": p0["proposal_id"]}))["ok"]
-    details = {"name": "Aesi Lands", "description": "new text", "deck_format": "modern", "edh_bracket": 3}
-    details["private"] = True
+    # moving the deck to Modern also clears its bracket, as on archidekt.com (Q56)
+    details = {"name": "Aesi Lands", "description": "new text", "deck_format": "modern", "private": True}
     p = structured(await call(h, token, "propose_deck_details", {"deck_id": "42", "details": details}))
     a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     assert a["ok"] and a["result"]["verified"] is True, a
@@ -474,14 +477,14 @@ async def test_restoring_a_snapshot_puts_the_deck_details_back(stack: Stack) -> 
         'name: "Aesi Lands" -> "Sample Commander Deck"',
         "description: (cleared)",
         "format: modern -> commander",
-        "bracket: 3 -> none",
+        "bracket: none -> 3",
         "private: yes -> no",
     }, lines
     assert r["changes"]["details"] == {
         "name": "Sample Commander Deck",
         "description": "",
         "deck_format": "commander",
-        "edh_bracket": None,
+        "edh_bracket": 3,
         "private": False,
     }
     before = len(ark.updates)
@@ -502,12 +505,12 @@ async def test_restoring_a_snapshot_puts_the_deck_details_back(stack: Stack) -> 
             "name": "Sample Commander Deck",
             "description": "",
             "deckFormat": 3,
-            "edhBracket": None,
+            "edhBracket": 3,
             "private": False,
         }
     ], sent
     deck = ark.decks[42]
-    assert deck["name"] == "Sample Commander Deck" and deck["edhBracket"] is None
+    assert deck["name"] == "Sample Commander Deck" and deck["edhBracket"] == 3
     assert (
         deck["deckFormat"] == 3
         and deck["private"] is False
