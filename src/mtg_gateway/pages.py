@@ -23,7 +23,7 @@ from . import app_signin, link_disclosure, modes, notify
 from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
 from .avatars import initials_svg
 from .clickguard import form_stamp, guarded_form, submitted_too_soon
-from .decks import REVIEW_PAGE, DeckError, current_client, row_label, row_line
+from .decks import REVIEW_PAGE, DeckError, current_client, row_label, row_line, tag_change_text
 from .theme import (
     LAYOUT_COOKIE,
     THEME_COOKIE,
@@ -1142,11 +1142,17 @@ def _detail_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, int
             )
             items.append(_li("chg", "description", html.escape(summary) + full))
         elif r.get("kind") == "detail":
+            said = tag_change_text(r)  # tags: which are added and which taken off, not only the lists
             items.append(
                 _li(
                     "chg",
                     str(r.get("field", "")).replace("_", " "),
-                    _was_now(r.get("before", ""), r.get("after", "")),
+                    _was_now(r.get("before", ""), r.get("after", ""))
+                    + (
+                        f"<br><span class='small'>{html.escape(said[0].upper() + said[1:])}</span>"
+                        if said
+                        else ""
+                    ),
                 )
             )
         else:
