@@ -67,7 +67,7 @@ def _proposals(server: Server) -> tuple[str, str, str]:
     by_name = {c["card"]["oracleCard"]["name"]: c for c in deck["cards"]}
     by_name["Sol Ring"]["card"]["uid"] = SOL
     by_name["Cultivate"]["card"]["uid"] = CULTIVATE
-    deck["featured"] = art_url(SOL)
+    deck["customFeatured"] = art_url(SOL)
     server.ark.deck_tags[42] = [{"id": 501, "tag": 1, "name": "budget", "position": 0}]
     decks = server.app.state.gateway.decks
 
@@ -84,7 +84,7 @@ def _proposals(server: Server) -> tuple[str, str, str]:
         details = await decks.propose_deck_details(
             "user-1",
             "42",
-            {"add_tags": ["ramp", "landfall"], "remove_tags": ["budget"], "cover": "Cultivate"},
+            {"add_tags": ["tribal", "Spicy"], "remove_tags": ["budget"], "cover": "Cultivate"},
         )
         return edit["proposal_id"], details["proposal_id"]
 
@@ -118,7 +118,7 @@ def test_review_page_reads_in_both_themes_on_desktop_and_phone(server: Server) -
                         assert got["disabled"], got  # locked until the click guard sees the page in use
                         assert got["opacity"] == 1 and got["ratio"] >= 4.5, (theme, vw, value, got)
                     rows = page.locator("ul.changes li")
-                    tags = rows.filter(has_text="Adds ramp, landfall; removes budget")
+                    tags = rows.filter(has_text="Adds tribal, Spicy; removes budget")
                     assert tags.count() == 1 and "budget" in tags.locator(".was").inner_text()
                     assert rows.filter(has_text="Sol Ring").locator(".was").inner_text() == "Sol Ring"
                     assert "current" not in page.locator("ul.changes").inner_text()
