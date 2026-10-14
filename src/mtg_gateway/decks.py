@@ -3547,9 +3547,18 @@ class DeckService:
                 before = by_id.get(current, {}).get("name", "unknown")
                 rows.append(_row("detail", field="folder", before=before, after=target["name"]))
         on_deck = {str(r.get("name") or "").casefold(): r for r in deck.tag_relations}
-        add = [self._tag_name(n) for n in _names(raw.get("add_tags"), "add_tags")]
-        add = [n for n in dict.fromkeys(add) if n.casefold() not in on_deck]
-        add = [(await self._archidekt_tag(sub, n))[1] for n in add]  # refused now, not at apply
+        add: list[str] = []
+        looked_up: set[str] = set()
+        for given in _names(raw.get("add_tags"), "add_tags"):
+            n = self._tag_name(given)
+            if n.casefold() in on_deck or n.casefold() in looked_up:
+                continue
+            looked_up.add(n.casefold())
+            found = (await self._archidekt_tag(sub, n))[1]  # refused now, not at apply
+            # Archidekt's own name, once: two names of one tag ("Ramp", "ramp") would make the
+            # second add fail halfway through an apply
+            if found.casefold() not in on_deck and found.casefold() not in {a.casefold() for a in add}:
+                add.append(found)
         remove = []
         for name in _names(raw.get("remove_tags"), "remove_tags"):
             rel = on_deck.get(self._tag_name(name).casefold())
@@ -4338,7 +4347,10 @@ def next_tag_position(positions: list[Any]) -> str:
     """The ``position`` for a tag added after the deck's others, worked out as archidekt.com's deck
     settings does it (its bundle, read 2026-10-14): "M-500000" for a deck's first tag, otherwise
     the last tag's "<letter>-<number>" with 10000 added, moving on to the next letter at 0 once
-    the number would pass 999999. The last tag is the one with the highest position."""
+    the number would pass 999999. The last tag is the one with the highest position. After "Z"
+    there is no next letter (the site's code read does not say what it does there), so a tag
+    after "Z-990000" or later goes halfway to "Z-999999": it still sorts after every other tag,
+    and never wraps to "Z-0", which would sort first."""
     parsed: list[tuple[str, int]] = []
     for p in positions:
         m = re.fullmatch(r"([0-9A-Za-z])-(\d{1,7})", str(p or ""))
@@ -4351,7 +4363,9 @@ def next_tag_position(positions: list[Any]) -> str:
         return f"{letter}-{number + 10000}"
     if letter == "9":
         return "A-0"
-    return f"{letter if letter == 'Z' else chr(ord(letter) + 1)}-0"
+    if letter == "Z":
+        return f"Z-{min(999999, (number + 1000000) // 2)}"
+    return f"{chr(ord(letter) + 1)}-0"
 
 
 def _cover_is(deck: Deck, uid: str) -> bool:
