@@ -50,6 +50,8 @@ from .archidekt import (
     jwt_exp,
     no_retry,
     parse_deck,
+    patient,
+    wait_note,
 )
 from .archidekt_csv import CsvError, parse_export
 from .config import Settings
@@ -2678,6 +2680,9 @@ class DeckService:
         # describe() while it runs.
         progress: dict[str, Any] = {}
         self._progress[proposal_id] = progress
+        # This task's own context: a rate limit is waited out instead of failing the apply halfway
+        patient.set(True)
+        wait_note.set(progress)
         try:
             await lock.acquire()  # another apply on this deck may hold it
         except BaseException:  # cancelled while waiting (shutdown): never leave it in applying
@@ -4164,7 +4169,16 @@ def _sent(progress: dict[str, Any]) -> dict[str, Any]:
 
 def _progress_view(progress: dict[str, Any]) -> dict[str, Any]:
     """What a running apply has done so far, for get_proposal and the review page."""
-    keys = ("resolved_cards", "of_cards", "sent_entries", "of_entries", "snapshot_id", "deck_id", "deck_url")
+    keys = (
+        "resolved_cards",
+        "of_cards",
+        "sent_entries",
+        "of_entries",
+        "snapshot_id",
+        "deck_id",
+        "deck_url",
+        "waiting_for_archidekt",
+    )
     return {k: progress[k] for k in keys if k in progress}
 
 

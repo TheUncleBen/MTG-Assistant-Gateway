@@ -1,8 +1,8 @@
 """Gentle on Archidekt: the shared per-minute cap, bounded retries with jittered backoff for reads
-only, 429s honoured and never retried, the read cache (a hit sends nothing upstream; any write
-clears deck and search reads; signed-in reads are never cached), the honest User-Agent, and the
-settings, stack files and admin page that carry the limits. The answers come from the recording-
-based FakeArchidekt, with failures injected in front of it."""
+only, 429s honoured (waited out only inside an apply), the read cache (a hit sends nothing
+upstream; any write clears deck and search reads; signed-in reads are never cached), the honest
+User-Agent, and the settings, stack files and admin page that carry the limits. The answers come
+from the recording-based FakeArchidekt, with failures injected in front of it."""
 
 from __future__ import annotations
 
@@ -118,6 +118,72 @@ async def test_a_429_is_not_retried_and_pauses_every_call(sleeps: list[float]) -
         await client.get_deck(None, "42")  # a different request: still refused, nothing sent
     assert again.value.kind == "rate_limited" and len(ark.calls) == 1
     assert client.stats["rate_limited"] == 2
+
+
+@pytest.fixture
+def clock(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """A fake clock that the patched sleep moves forward, so a Retry-After pause can run out."""
+    now = [1000.0]
+    waits: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        waits.append(seconds)
+        now[0] += seconds
+
+    monkeypatch.setattr(ark_mod.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(ark_mod.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(ark_mod.random, "uniform", lambda lo, hi: 0.0)
+    return waits
+
+
+async def test_an_apply_waits_out_a_429_and_sends_the_read_again(clock: list[float]) -> None:
+    ark = FakeArchidekt()
+    ark.inject = [(429, "30")]
+    client = _client(ark)
+    note: dict = {}
+    token = ark_mod.patient.set(True)
+    noted = ark_mod.wait_note.set(note)
+    try:
+        out = await client.search_decks(name="Sample")
+    finally:
+        ark_mod.patient.reset(token)
+        ark_mod.wait_note.reset(noted)
+    assert out["decks"]
+    assert _reads(ark, "/api/decks/v3/") == 2  # the 429, then the same read once the pause ran out
+    assert clock == [30.0]
+    assert client.stats["rate_limit_waits"] == 1 and client.stats["failures"] == 0
+    assert "waiting_for_archidekt" not in note  # cleared once the wait is over
+
+
+async def test_an_apply_waits_out_a_429_on_a_write_too(clock: list[float]) -> None:
+    ark = FakeArchidekt()
+    client = _client(ark)
+    login = (await client.login("alice", "pw-alice"))["access"]
+    ark.calls.clear()
+    ark.inject = [(429, "5")]
+    token = ark_mod.patient.set(True)
+    try:
+        await client.update_deck(login, "42", {"name": "Renamed"})
+    finally:
+        ark_mod.patient.reset(token)
+    assert [m for m, _p in ark.calls] == ["PATCH", "PATCH"]  # refused once, not acted on; sent again
+    assert clock == [5.0]
+
+
+async def test_an_apply_gives_up_after_a_bounded_number_of_waits(clock: list[float]) -> None:
+    ark = FakeArchidekt()
+    ark.inject = [(429, "1")] * (ark_mod.RATE_LIMIT_WAITS + 1)
+    client = _client(ark)
+    token = ark_mod.patient.set(True)
+    try:
+        with pytest.raises(ArchidektError) as err:
+            await client.search_decks(name="Sample")
+    finally:
+        ark_mod.patient.reset(token)
+    # five 429s in a row open the breaker, which ends the waiting as "unavailable" even sooner
+    assert err.value.kind in ("rate_limited", "unavailable")
+    assert len(clock) <= ark_mod.RATE_LIMIT_WAITS
+    assert sum(clock) <= ark_mod.RATE_LIMIT_WAIT_TOTAL
 
 
 async def test_retries_count_towards_the_breaker(sleeps: list[float]) -> None:
