@@ -154,6 +154,8 @@ class SocialService:
         self.decks._writes_switch()
         self._me(sub)
         deck = await self.deck(sub, deck_id)
+        if deck.user_vote == want:  # already so: nothing is sent (Archidekt might toggle it)
+            return {"vote": want, "points": deck.points}
         if want == VOTE_NONE:
             # taking a vote back names the vote taken back, as archidekt.com's like button does
             await self.decks._call(

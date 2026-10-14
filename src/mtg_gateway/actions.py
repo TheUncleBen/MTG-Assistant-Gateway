@@ -205,6 +205,8 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             VOTE_DOWN: f"Vote down the deck {where} on Archidekt",
             VOTE_NONE: f"Take back your vote on the deck {where}",
         }[vote]
+        if deck is not None and deck.user_vote == vote:
+            row["text"] += " (already the case; applying changes nothing)"
     elif action == "deck_bookmark":
         on = params.get("on") is not False
         changes["on"] = on
