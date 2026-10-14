@@ -463,3 +463,73 @@ def test_a_press_on_a_closed_proposal_shows_its_state_and_drops_the_buttons() ->
             assert ctx and "already rejected" in ctx[0]["params"]["content"][0]["text"]
         finally:
             browser.close()
+
+
+# WCAG contrast of each locked button's text against the card behind it (the button is see-through)
+LOCKED = """() => {
+  function rgb(s) { const m = s.match(/[\\d.]+/g); return m ? m.map(Number) : [0, 0, 0, 0]; }
+  function lum(c) {
+    const a = c.slice(0, 3).map(v => {
+      v /= 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * a[0] + 0.7152 * a[1] + 0.0722 * a[2];
+  }
+  function bg(e) {
+    for (; e; e = e.parentElement) {
+      const c = rgb(getComputedStyle(e).backgroundColor);
+      if (c.length < 4 || c[3] >= 1) return c;
+    }
+    return [255, 255, 255];
+  }
+  return ["approve", "reject"].map(id => {
+    const b = document.getElementById(id), s = getComputedStyle(b);
+    const a = lum(rgb(s.color)), z = lum(bg(b));
+    return {id, disabled: b.disabled, opacity: s.opacity, border: s.borderTopStyle,
+            borderColour: s.borderTopColor, colour: s.color,
+            ratio: (Math.max(a, z) + 0.05) / (Math.min(a, z) + 0.05)};
+  });
+}"""
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_locked_buttons_read_at_full_strength(theme: str) -> None:
+    """L8 (as R-181 did for the review page): while Approve and Reject are locked (the 700 ms after
+    drawing, and while a press is out) they are not faded: full-strength text with a dashed outline
+    in each button's own colour, at least 4.5:1 against the card, at 344, 390, 673 and 1280 px."""
+    from playwright.sync_api import sync_playwright
+
+    from .test_cards_browser import _shot
+
+    exe = _chromium_or_skip()
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            for width in (344, 390, 673, 1280):
+                page = browser.new_page(viewport={"width": width, "height": 900})
+                page.route(
+                    "https://api.scryfall.com/**", lambda r: r.fulfill(content_type="image/png", body=PNG)
+                )
+                page.set_content(
+                    SIZED_HOST % ("#262624" if theme == "dark" else "#ffffff", width - 24, theme)
+                )
+                page.evaluate(
+                    "(r) => { window.toolResult = r; }",
+                    {"structuredContent": PROPOSAL, "_meta": {APPROVAL_META_KEY: "c"}},
+                )
+                page.evaluate("(html) => { document.getElementById('f').srcdoc = html; }", card_html())
+                card = page.frame_locator("#f")
+                card.locator("#approve").wait_for()
+                frame = page.frames[1]
+                # locked by the arming delay, or (to measure it at leisure) by a press still out:
+                # the same disabled state either way
+                frame.evaluate("() => { approve.disabled = true; reject.disabled = true; }")
+                for b in frame.evaluate(LOCKED):
+                    assert b["disabled"] and b["opacity"] == "1", (width, b)
+                    assert b["border"] == "dashed" and b["borderColour"] == b["colour"], (width, b)
+                    assert b["ratio"] >= 4.5, (width, b)
+                page.wait_for_timeout(100)  # the frame takes the card's height (size-changed)
+                _shot(page, f"l8-chatcard-locked-{width}-{theme}")
+                page.close()
+        finally:
+            browser.close()
