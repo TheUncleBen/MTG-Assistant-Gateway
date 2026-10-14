@@ -289,8 +289,8 @@ def test_card_without_a_code_only_offers_the_review_page() -> None:
 
 def test_narrow_card_keeps_badges_whole_and_names_readable() -> None:
     """At phone widths the state and risk badges stay one line each and clear of the title, and a
-    long change ("Main → Maybeboard (leaves the deck, −1)") wraps under the card name instead of
-    squeezing it to a letter a line."""
+    long change ("Main → Maybeboard (leaves the deck, −1)") wraps beside its action label, never over
+    it, instead of squeezing the card name to a letter a line."""
     from playwright.sync_api import sync_playwright
 
     exe = _chromium_or_skip()
@@ -303,7 +303,7 @@ def test_narrow_card_keeps_badges_whole_and_names_readable() -> None:
     with sync_playwright() as p:
         browser = _launch(p, exe)
         try:
-            for width in (320, 360, 420):
+            for width in (320, 344, 360, 390, 420):
                 page = browser.new_page(viewport={"width": width + 20, "height": 900})
                 page.set_content(HOST.replace("width:600px", f"width:{width}px"))
                 page.evaluate(
@@ -321,9 +321,19 @@ def test_narrow_card_keeps_badges_whole_and_names_readable() -> None:
   const h = document.getElementById('title').getBoundingClientRect();
   const b = [...document.querySelectorAll('.badges .badge')].map(e => e.getBoundingClientRect());
   const n = document.querySelector('ul.changes li.category .name').getBoundingClientRect();
-  return {titleRight: h.right, badges: b.map(r => [r.left, r.height]), nameWidth: n.width};
+  // measure the text itself: a squeezed grid cell can be narrower than the words it overflows with
+  const ink = (sel) => { const r = document.createRange();
+    r.selectNodeContents(document.querySelector(sel)); return r.getBoundingClientRect(); };
+  const a = ink('ul.changes li.category .act');
+  const q = ink('ul.changes li.category .qty');
+  const apart = a.right <= q.left || q.right <= a.left || a.bottom <= q.top || q.bottom <= a.top;
+  return {titleRight: h.right, badges: b.map(r => [r.left, r.height]), nameWidth: n.width,
+          actQtyApart: apart, act: [a.left, a.right, a.top, a.bottom],
+          qty: [q.left, q.right, q.top, q.bottom]};
 }"""
                 )
+                # the action label and the change beside it never overlap (seen at 390 px)
+                assert geo["actQtyApart"], (width, geo)
                 assert all(h <= 26 for _, h in geo["badges"]), (width, geo)
                 assert all(left >= geo["titleRight"] for left, _ in geo["badges"]), (width, geo)
                 assert geo["nameWidth"] > 80, (width, geo)
