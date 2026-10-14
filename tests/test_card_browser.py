@@ -386,10 +386,9 @@ def test_rows_read_on_a_phone_with_no_empty_column_and_the_footer_names_the_app(
                     assert abs(row["qty"]["top"] - row["act"]["top"]) < 6, row  # count on the action's line
                 assert "detail" in row["cls"] or row["h"] < 60, row  # a card row: two lines, not three
             rows = card.locator("ul.changes li:not(.group)")
-            assert (
-                rows.nth(2).locator(".name").inner_text()
-                == "add ramp, landfall; remove budget (then: ramp, landfall)"
-            )
+            tags = rows.nth(2).locator(".name")
+            assert tags.inner_text() == "budget → ramp, landfall\nAdds ramp, landfall; removes budget"
+            assert tags.locator(".sub").count() == 1  # the note is its own smaller line
             assert rows.nth(3).locator(".name").inner_text() == "Sol Ring → Cultivate"
             foot = card.locator("#foot").inner_text()
             assert foot.startswith("Proposed by ChatGPT · expires") and "cid-" not in foot, foot
