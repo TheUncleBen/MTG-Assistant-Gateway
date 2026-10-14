@@ -72,6 +72,9 @@ class EdhplayList:
     text: str
     commanders: list[str]
     left_out: list[tuple[int, str]]  # (copies, name) that did not fit EDHPlay's 15-card sideboard
+    # a companion goes in the Sideboard section: EDHPlay's import never sets one, so the box asks
+    # the member to set it there (Ben, Q54 10-14)
+    companion: bool = False
 
 
 def _edh_line(c: DeckCard, *, commander: bool = False, quantity: int | None = None) -> str:
@@ -174,7 +177,8 @@ def to_edhplay(deck: Deck) -> EdhplayList:
     text = "\n".join(head + [line for _c, line in main]) + "\n"
     if side:
         text += "\nSideboard\n" + "\n".join(side) + "\n"
-    return EdhplayList(text, commanders, left_out)
+    companion = any(c.companion or c.categories[0].casefold() == "companion" for c in first)
+    return EdhplayList(text, commanders, left_out, companion)
 
 
 def to_mtgo_dek(deck: Deck) -> str:

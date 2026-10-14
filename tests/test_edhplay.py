@@ -92,6 +92,8 @@ def test_a_companion_set_by_archidekts_flag_leads_the_sideboard() -> None:
     side = _sections(edh.text)["sideboard"]
     assert side[0].startswith("1 Yavimaya Elder") and side[1].startswith("2 Cultivate")
     assert side[2].startswith("12 Sol Ring") and edh.left_out == [(2, "Sol Ring")]
+    assert edh.companion and edh.commanders == ["Aesi, Tyrant of Gyre Strait"]
+    assert not to_edhplay(parse_deck(FakeArchidekt().decks[42])).companion
 
 
 def test_printings_keep_set_and_number_when_edhplay_can_read_them() -> None:
@@ -497,12 +499,20 @@ def test_the_list_comes_from_its_own_address_with_the_deck_pages_access(server: 
     assert r.status_code == 200 and r.headers["cache-control"] == "no-store"
     assert r.headers["content-type"].startswith("application/json")
     edh = to_edhplay(parse_deck(server.ark.decks[42]))
-    assert r.json() == {"ok": True, "list": edh.text, "left_out": "", "left_count": 0}
+    assert r.json() == {
+        "ok": True,
+        "list": edh.text,
+        "left_out": "",
+        "left_count": 0,
+        "companion": False,
+        "no_commander": False,
+    }
     assert _deck_reads(server) == reads  # the page's own read, kept a short while
     server.ark.add_side_row(42, "Cultivate", quantity=17, category="Sideboard")
     h.get("/decks/42", headers={"Cache-Control": "max-age=0"})  # the browser's Reload reads again
     d = h.get("/decks/42/edhplay.json").json()
     assert d["left_count"] == 2 and d["left_out"] == "2 Cultivate" and "15 Cultivate" in d["list"]
+    assert d["companion"] is False and d["no_commander"] is False
 
     out = httpx.get(f"{server.base}/decks/42/edhplay.json", follow_redirects=False)
     assert out.status_code == 401 and out.json() == {"ok": False, "error": "unauthenticated"}
@@ -588,4 +598,41 @@ def test_the_box_waits_for_the_list_and_says_when_it_cannot_have_it(
             == "You're signed out. Reload the page to sign in."
         )
         assert errors == []
+        browser.close()
+
+
+@pytest.mark.parametrize(("width", "scheme"), [(390, "dark"), (1280, "light")])
+def test_the_box_says_what_to_set_on_edhplay(server: Server, width: int, scheme: str) -> None:
+    """EDHPlay's import never sets a companion, and with no commander marked it sets none: the
+    box says so for such decks only (Ben, Q54 and Q55 10-14); deck 42 has a commander and no
+    companion, so it says neither."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    lines = ".edhplay-state .notice:not(.warn):not(.error)"
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, color_scheme=scheme)
+        page.goto(f"{server.base}/decks/42", wait_until="networkidle")
+        dialog = _open_dialog(page)
+        page.wait_for_function("() => !document.querySelector('.edhplay-dialog .acts a[aria-busy]')")
+        assert dialog.locator(lines).count() == 0
+        page.keyboard.press("Escape")
+        # the commander leaves the command zone and a flagged companion joins the sideboard
+        for row in server.ark.decks[42]["cards"]:
+            cats = [c for c in (row.get("categories") or []) if c != "Commander"]
+            row["categories"] = cats or ["Uncategorized"]
+        server.ark.add_side_row(42, "Yavimaya Elder", quantity=1, category="Sideboard")
+        server.ark.decks[42]["cards"][-1]["companion"] = True
+        page.goto(f"{server.base}/decks/42", wait_until="networkidle")
+        page.reload(wait_until="networkidle")
+        dialog = _open_dialog(page)
+        page.wait_for_function("() => !document.querySelector('.edhplay-dialog .acts a[aria-busy]')")
+        assert dialog.locator(lines).all_inner_texts() == [
+            "Choose your commander on EDHPlay.",
+            "Set your companion on EDHPlay.",
+        ]
+        assert page.evaluate(CONTRAST) >= 4.5  # the notice lines are among the dialog's p
+        assert _overflow(page) <= 0 and errors == []
+        _shot(page, f"edhplay-set-on-edhplay-{width}-{scheme}")
         browser.close()

@@ -2329,7 +2329,7 @@
     STEPS.forEach(function (s) { steps.appendChild(make("li", "", s)); });
     how.appendChild(steps);
     box.appendChild(how);
-    var spot = make("div", "edhplay-state");  // the cut line, or why the list isn't here
+    var spot = make("div", "edhplay-state");  // the cut line, what to set on EDHPlay, or why the list isn't here
     spot.hidden = true;
     box.appendChild(spot);
     box.appendChild(make("p", "muted small", "The maybeboard and tokens aren't sent."));
@@ -2358,6 +2358,14 @@
         go.removeAttribute("aria-disabled");
         if (d.left_count) {
           spot.appendChild(make("p", "notice warn", cutLine(d.left_count, d.left_out)));
+          spot.hidden = false;
+        }
+        if (d.no_commander) {  // nothing is marked, so EDHPlay sets no commander (Ben, Q55)
+          spot.appendChild(make("p", "notice", "Choose your commander on EDHPlay."));
+          spot.hidden = false;
+        }
+        if (d.companion) {  // EDHPlay's import never sets a companion (Ben, Q54)
+          spot.appendChild(make("p", "notice", "Set your companion on EDHPlay."));
           spot.hidden = false;
         }
       }, function (err) {
