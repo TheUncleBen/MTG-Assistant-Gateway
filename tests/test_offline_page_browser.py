@@ -6,6 +6,8 @@ can cut, as a dropped network or a restarting gateway would. Skipped without a C
 
 from __future__ import annotations
 
+import os
+import signal
 import socket
 import threading
 from pathlib import Path
@@ -106,6 +108,25 @@ def _offline(page) -> bool:
     return page.title().startswith("You're offline")
 
 
+STUCK_AFTER = 180  # seconds; the whole test takes a few seconds when it works
+
+
+def _kill_children() -> None:
+    """Kill this process's child processes (the Playwright driver and its browser), so a call
+    that never returns raises instead of hanging the test run."""
+    me = str(os.getpid())
+    for d in Path("/proc").glob("[0-9]*"):
+        try:
+            ppid = (d / "stat").read_text().rsplit(")", 1)[1].split()[1]
+        except (OSError, IndexError):
+            continue
+        if ppid == me:
+            try:
+                os.kill(int(d.name), signal.SIGKILL)
+            except OSError:
+                pass
+
+
 def test_one_reload_after_the_connection_returns_loads_the_page(served) -> None:
     from playwright.sync_api import sync_playwright
 
@@ -114,55 +135,75 @@ def test_one_reload_after_the_connection_returns_loads_the_page(served) -> None:
         pytest.skip("no Chromium available for Playwright")
     server, relay, base = served
     sid = server.sign_in()
-    with sync_playwright() as p:
-        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
-        ctx = browser.new_context()
-        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": base}])
-        page = ctx.new_page()
-        page.set_default_timeout(15_000)
-        page.goto(f"{base}/decks")
-        # bounded: a worker that never gets ready fails the test instead of hanging it
-        ready = (
-            "Promise.race([navigator.serviceWorker.ready.then(() => true),"
-            " new Promise(r => setTimeout(() => r(false), 15000))])"
-        )
-        assert page.evaluate(ready), "the service worker never became ready"
-        page.goto(f"{base}/decks")  # this load goes through the worker
-        assert page.evaluate("!!navigator.serviceWorker.controller")
+    step = "starting Chromium"
+    stuck = threading.Event()
 
-        # the browser is offline, then online again
-        ctx.set_offline(True)
-        page.goto(f"{base}/history")
-        assert _offline(page)
-        ctx.set_offline(False)
-        page.reload()
-        assert page.title().startswith("History"), page.title()
+    def give_up() -> None:
+        stuck.set()
+        _kill_children()
 
-        # the gateway cannot be reached (connections reset), then can again
-        relay.cut()
-        page.goto(f"{base}/history")
-        assert _offline(page)
-        relay.restore()
-        page.reload()
-        assert page.title().startswith("History"), page.title()
+    watchdog = threading.Timer(STUCK_AFTER, give_up)
+    watchdog.daemon = True
+    watchdog.start()
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+            ctx = browser.new_context()
+            ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": base}])
+            page = ctx.new_page()
+            page.set_default_timeout(15_000)
+            step = "first load and the service worker getting ready"
+            page.goto(f"{base}/decks")
+            # bounded: a worker that never gets ready fails the test instead of hanging it
+            ready = (
+                "Promise.race([navigator.serviceWorker.ready.then(() => true),"
+                " new Promise(r => setTimeout(() => r(false), 15000))])"
+            )
+            assert page.evaluate(ready), "the service worker never became ready"
+            page.goto(f"{base}/decks")  # this load goes through the worker
+            assert page.evaluate("!!navigator.serviceWorker.controller")
 
-        # the page's own Try again link does the same
-        relay.cut()
-        page.goto(f"{base}/history")
-        assert _offline(page)
-        relay.restore()
-        with page.expect_navigation():
-            page.get_by_role("link", name="Try again").click()
-        assert page.title().startswith("History"), page.title()
+            step = "the browser offline, then online again"
+            ctx.set_offline(True)
+            page.goto(f"{base}/history")
+            assert _offline(page)
+            ctx.set_offline(False)
+            page.reload()
+            assert page.title().startswith("History"), page.title()
 
-        # the browser stopped the idle worker while the page was offline
-        cdp = ctx.new_cdp_session(page)
-        cdp.send("ServiceWorker.enable")
-        ctx.set_offline(True)
-        page.goto(f"{base}/decks")
-        assert _offline(page)
-        cdp.send("ServiceWorker.stopAllWorkers")
-        ctx.set_offline(False)
-        page.reload()
-        assert page.title().startswith("My decks"), page.title()
-        browser.close()
+            step = "the gateway cut off, then back"
+            relay.cut()
+            page.goto(f"{base}/history")
+            assert _offline(page)
+            relay.restore()
+            page.reload()
+            assert page.title().startswith("History"), page.title()
+
+            step = "the Try again link"
+            relay.cut()
+            page.goto(f"{base}/history")
+            assert _offline(page)
+            relay.restore()
+            with page.expect_navigation():
+                page.get_by_role("link", name="Try again").click()
+            assert page.title().startswith("History"), page.title()
+
+            step = "the browser stopping the idle worker while offline"
+            cdp = ctx.new_cdp_session(page)
+            cdp.send("ServiceWorker.enable")
+            ctx.set_offline(True)
+            page.goto(f"{base}/decks")
+            assert _offline(page)
+            cdp.send("ServiceWorker.stopAllWorkers")
+            ctx.set_offline(False)
+            page.reload()
+            assert page.title().startswith("My decks"), page.title()
+            step = "closing Chromium"
+            browser.close()
+    except Exception:
+        if stuck.is_set():
+            pytest.fail(f"stuck for {STUCK_AFTER} s during: {step}")
+        raise
+    finally:
+        watchdog.cancel()
+    assert not stuck.is_set(), f"stuck for {STUCK_AFTER} s during: {step}"
