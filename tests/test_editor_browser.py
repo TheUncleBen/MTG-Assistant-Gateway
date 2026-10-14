@@ -255,7 +255,11 @@ def test_a_picture_that_fails_keeps_the_editor_rows_layout(server: Server, width
         assert row.locator(".img-fallback").count() == 1
         tile = row.locator(".img-fallback").bounding_box()
         assert tile is not None and round(tile["width"]) == 40 and round(tile["height"]) == 56, tile
-        assert row.locator(".img-fallback").get_attribute("aria-label") == "Image unavailable"
+        # the row's picture was decorative (alt="", the name is in the row), so its stand-in is
+        # hidden from screen readers rather than read out as "Image unavailable" (review N8)
+        fallback = row.locator(".img-fallback")
+        assert fallback.get_attribute("aria-hidden") == "true"
+        assert fallback.get_attribute("role") is None and fallback.get_attribute("aria-label") is None
         assert row.evaluate(_OVERLAPS) == []
         # the quantity box is the element at its own centre (nothing drawn over it)
         assert row.locator("input").first.evaluate(
