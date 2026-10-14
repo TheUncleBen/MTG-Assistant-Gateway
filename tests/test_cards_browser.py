@@ -508,6 +508,56 @@ def test_deck_card_groups_by_category_and_shows_rules_text_on_tap() -> None:
             browser.close()
 
 
+def test_deck_card_draws_the_deck_from_the_result_with_no_connection_to_the_gateway() -> None:
+    """A host whose sandbox lets the card reach no server but the picture hosts (ChatGPT, as seen):
+    the deck rides in the result's _meta, so the card draws it and never calls the gateway."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            page = browser.new_page()
+            errors: list[str] = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            _route(page)
+            gateway_calls: list[str] = []
+            page.unroute("https://mtg.test/cards/data/*")
+
+            def blocked(route):
+                gateway_calls.append(route.request.url)
+                route.abort()
+
+            page.route("https://mtg.test/**", blocked)
+            card = _open(
+                page,
+                "deck-card",
+                {
+                    "structuredContent": {"ok": True, "name": "Sample <b>Deck</b>"},
+                    "_meta": {"mtg/card": {"link": LINK, "name": "Sample <b>Deck</b>", "deck": DECK}},
+                },
+            )
+            card.locator(".row.cardrow").nth(3).wait_for(timeout=5_000)
+            assert card.locator("#count").inner_text().lower() == "4 cards + 1 aside"
+            assert card.locator(".row.group").count() == 3 and card.locator(".row.cardrow").count() == 4
+            assert "Commander:" in card.locator("#stat").inner_text()
+            assert card.locator("#status").get_attribute("class") == "status hidden"
+            assert gateway_calls == []
+            # Without the deck in the result the card still falls back to the link, and says so
+            # when that cannot be reached.
+            card = _open(
+                page,
+                "deck-card",
+                {"structuredContent": {"ok": True, "name": "X"}, "_meta": {"mtg/card": {"link": LINK}}},
+            )
+            card.locator("#status.err").wait_for()
+            assert "no connection to the gateway" in card.locator("#status").inner_text()
+            assert gateway_calls and gateway_calls[0].startswith(LINK)
+            assert not errors, errors
+        finally:
+            browser.close()
+
+
 def test_account_card_points_at_what_is_missing() -> None:
     from playwright.sync_api import sync_playwright
 

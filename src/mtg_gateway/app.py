@@ -52,7 +52,7 @@ from .approve import (
     apps_extension,
     proposal_tool_result,
 )
-from .archidekt import ArchidektClient, Pacer
+from .archidekt import ArchidektClient, Deck, Pacer
 from .auth_provider import (
     BROWSER_COOKIE,
     BROWSER_KEY,
@@ -71,6 +71,7 @@ from .cards import (
     STATS_CARD_URI,
     CardLinks,
     add_card_routes,
+    deck_card_payload,
     tool_meta,
     with_card,
 )
@@ -761,8 +762,9 @@ def build_mcp_server(state: AppState) -> MCPServer:
     # a pending proposal's result carries the card's one-time code. Off with MTG_APPLY_IN_CHAT.
     card_meta = dict(CARD_TOOL_META) if s.apply_in_chat else None
     # The other in-chat cards (cards.py) ride on the same switch: a deck read, a card's printings
-    # and the account status carry their card, and the deck card fetches the deck through a
-    # signed link the result carries in _meta.
+    # and the account status carry their card. The deck card draws the deck from the result's
+    # _meta (out of the model's context); a signed link stays there as the fallback for a deck too
+    # large to carry.
     state.cards = CardLinks(s.fernet_key, s.public_url) if s.apply_in_chat else None
     deck_card_meta = tool_meta(DECK_CARD_URI) if s.apply_in_chat else None
     account_card_meta = tool_meta(ACCOUNT_CARD_URI) if s.apply_in_chat else None
@@ -771,11 +773,18 @@ def build_mcp_server(state: AppState) -> MCPServer:
     stats_card_meta = tool_meta(STATS_CARD_URI) if s.apply_in_chat else None
     compare_card_meta = tool_meta(COMPARE_CARD_URI) if s.apply_in_chat else None
 
-    def _deck_card(data: dict[str, object], kind: str, ref: str) -> CallToolResult:
-        """A deck read as the assistant gets it, plus the deck card's signed link in _meta."""
+    def _deck_card(
+        data: dict[str, object], kind: str, ref: str, deck: Deck, snapshot: dict[str, Any] | None = None
+    ) -> CallToolResult:
+        """A deck read as the assistant gets it, plus what the deck card draws in _meta."""
         card = None
         if state.cards is not None and data.get("ok"):
-            card = {"link": state.cards.issue(_sub(), kind, ref), "name": data.get("name")}
+            card = deck_card_payload(
+                deck,
+                link=state.cards.issue(_sub(), kind, ref),
+                public_url=s.public_url,
+                snapshot=snapshot,
+            )
         return with_card(data, card)
 
     def _closed_at(p: dict[str, Any]) -> dict[str, Any]:

@@ -132,7 +132,9 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             deck = await state.decks.get_any_deck(_sub(), deck_ref)
         except DeckError as exc:
             return with_card(_tool_error(exc), None)
-        return _deck_card(deck_out(deck, include_text=bool(include_text), view=view), "deck", str(deck.id))
+        return _deck_card(
+            deck_out(deck, include_text=bool(include_text), view=view), "deck", str(deck.id), deck
+        )
 
     @server.tool(
         name="parse_decklist",
@@ -482,11 +484,14 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             snap = state.decks.snapshot(_sub(), snapshot_id)
         except DeckError as exc:
             return with_card(_tool_error(exc), None)
+        deck = parse_deck(snap["deck"])
         data = {
-            **deck_out(parse_deck(snap["deck"]), view=view),
+            **deck_out(deck, view=view),
             "snapshot_id": snap["id"],
             "proposal_id": snap.get("proposal_id"),
             "taken_at": snap["taken_at"],
             "backup_url": snap.get("backup_url"),
         }
-        return _deck_card(data, "snapshot", str(snap["id"]))
+        return _deck_card(
+            data, "snapshot", str(snap["id"]), deck, snapshot={"id": snap["id"], "taken_at": snap["taken_at"]}
+        )
