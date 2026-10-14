@@ -496,22 +496,31 @@ def _cleanup_text(c: dict[str, Any]) -> str:
             )
         if cause == "no-group":
             return "Off: it needs MTG_REQUIRED_GROUP. Set it in the stack and redeploy."
-        return f"Off. It is optional; to turn it on, follow {setup}."
+        return (
+            "Off. This optional hourly check deletes the saved Archidekt sign-in of people who no "
+            f"longer have access. To turn it on, follow {setup}."
+        )
     if st == "waiting":
         return (
-            f"On. The first check runs {c['first_after_seconds'] // 60} minutes after start; "
-            "reload this page then."
+            f"On. The first check runs {c['first_after_seconds'] // 60} minutes after the gateway "
+            "starts; reload this page then."
         )
     if st == "ok":
+        removed = int(c["removed"])
+        what = (
+            f"deleted the saved Archidekt sign-in of {plural(removed, 'person', 'people')} who lost access"
+            if removed
+            else "no one lost access"
+        )
         return _Html(
-            f"Working. Last check at {_when(c['at'])}: {plural(int(c['allowed']), 'allowed member')}, "
-            f"{plural(int(c['removed']), 'stored Archidekt session')} removed. Nothing to do."
+            f"Working. Last check at {_when(c['at'])}: {plural(int(c['allowed']), 'member')} with "
+            f"access; {what}. Nothing for you to do."
         )
     if st == "failed":
         err = str(c["error"])
         return _Html(
-            f"Last check at {_when(c['at'])} FAILED, nothing deleted: {html.escape(err)}. "
-            f"Next: {html.escape(idp_sweep.next_step(err))}"
+            f"Not working. The last check at {_when(c['at'])} failed and deleted nothing: "
+            f"{html.escape(err)}. To fix: {html.escape(idp_sweep.next_step(err))}"
         )
     return "Not started yet. Reload this page in a minute."
 
