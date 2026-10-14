@@ -351,25 +351,72 @@ def _by_deck_html(events: list[dict[str, Any]], query: dict[str, Any]) -> str:
     return "".join(out)
 
 
-def filter_bar_html(query: dict[str, Any], decks: dict[str, str], *, shown: int, total_hint: str = "") -> str:
+COLLECTION_ID = "collection"  # decks.Decks.COLLECTION_TARGET: collection proposals file under it
+COLLECTION_LABEL = "Your Archidekt collection"
+
+
+def deck_filter_groups(
+    seen: dict[str, str], live: list[dict[str, Any]] | None, *, complete: bool
+) -> tuple[dict[str, str], dict[str, str]]:
+    """The History deck filter's two groups from the decks that have history here (``seen``: id ->
+    the name recorded then) and the member's live Archidekt deck list (``live``, backup copies
+    already left out; None when it can't be read): current decks under their live names, and the
+    decks no longer on Archidekt. A deck missing from the list counts as gone only when the list
+    is ``complete``; otherwise it stays with the current decks under its recorded name. The
+    placeholder of a new-deck proposal never applied ("new") is not a deck and is left out."""
+    names = {str(d["id"]): str(d.get("name") or "") for d in live or []}
+    current: dict[str, str] = {}
+    gone: dict[str, str] = {}
+    for did, recorded in seen.items():
+        if did == "new":
+            continue
+        if did == COLLECTION_ID:
+            current[did] = COLLECTION_LABEL
+        elif did in names:
+            current[did] = names[did] or recorded
+        elif live is not None and complete:
+            gone[did] = recorded
+        else:
+            current[did] = recorded
+    return current, gone
+
+
+def filter_bar_html(
+    query: dict[str, Any],
+    decks: dict[str, str],
+    *,
+    shown: int,
+    total_hint: str = "",
+    gone: dict[str, str] | None = None,
+) -> str:
     def options(items: list[tuple[str, str]], chosen: str) -> str:
         return "".join(
             f"<option value='{_esc(v)}'{' selected' if v == chosen else ''}>{_esc(label)}</option>"
             for v, label in items
         )
 
-    deck_items = [("", "All decks")] + [
-        (did, f"{name or did}")
-        for did, name in sorted(decks.items(), key=lambda kv: (kv[1] or kv[0]).lower())
-    ]
-    if query["deck_id"] and query["deck_id"] not in decks:
+    def by_name(group: dict[str, str]) -> list[tuple[str, str]]:
+        return [
+            (did, name or did) for did, name in sorted(group.items(), key=lambda kv: (kv[1] or kv[0]).lower())
+        ]
+
+    gone = gone or {}
+    deck_items = [("", "All decks"), *by_name(decks)]
+    if query["deck_id"] and query["deck_id"] not in decks and query["deck_id"] not in gone:
         deck_items.append((query["deck_id"], query["deck_id"]))
+    deck_options = options(deck_items, query["deck_id"])
+    if gone:
+        deck_options += (
+            "<optgroup label='No longer on Archidekt'>"
+            + options(by_name(gone), query["deck_id"])
+            + "</optgroup>"
+        )
     status = f"{shown} shown" + (f" · {total_hint}" if total_hint else "")
     return (
         "<form method='get' action='/history' class='card filterbar' role='search'>"
         "<div class='controls'>"
         f"<div class='field'><label for='h-deck'>Deck</label><span class='sel'>{icon('decks')}"
-        f"<select id='h-deck' name='deck_id'>{options(deck_items, query['deck_id'])}</select></span></div>"
+        f"<select id='h-deck' name='deck_id'>{deck_options}</select></span></div>"
         f"<div class='field'><label for='h-type'>Type</label><span class='sel'>{icon('filter')}"
         f"<select id='h-type' name='type'>{options(list(TYPES), query['type'])}</select></span></div>"
         f"<div class='field'><label for='h-state'>State</label><span class='sel'>{icon('proposals')}"
@@ -651,6 +698,7 @@ __all__ = [
     "backup_copies_html",
     "build_events",
     "events_html",
+    "deck_filter_groups",
     "filter_bar_html",
     "is_filtered",
     "pager_html",

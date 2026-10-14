@@ -16,6 +16,7 @@ from .history_view import (
     PAGE,
     backup_copies_html,
     build_events,
+    deck_filter_groups,
     events_html,
     filter_bar_html,
     is_filtered,
@@ -101,22 +102,25 @@ def add_history_routes(
             reps = reports.list(sub, deck_id, limit=fetch, search=query["q"] or None, since=since)
         client_ids = {r.get("created_by_client") for r in reps if r.get("created_by_client")}
         names = {cid: state.db.client_name(cid) for cid in client_ids if not cid.startswith("__")}
+        # The member's Archidekt deck list, the one the backup copies panel reads too (cached; no
+        # request per snapshot or deck): a deck or a backup copy deleted on Archidekt is marked, a
+        # deleted deck's snapshots offer no Restore, and the deck filter shows live names.
+        try:
+            listed = await asyncio.wait_for(
+                decks.on_archidekt(sub, wait=decks.deck_list_wait), DECKS_JSON_TIMEOUT
+            )
+            live = await asyncio.wait_for(decks.list_decks_quick(sub, wait=0), DECKS_JSON_TIMEOUT)
+        except (DeckError, TimeoutError):
+            listed, live = None, None  # not linked, or Archidekt unavailable: shown as recorded
         if snapshots:
-            # Reconciled with the member's Archidekt deck list, the one the backup copies panel
-            # reads too (cached; no request per snapshot): a deck or a backup copy deleted on
-            # Archidekt is marked, and a deleted deck's snapshots offer no Restore.
-            try:
-                listed = await asyncio.wait_for(
-                    decks.on_archidekt(sub, wait=decks.deck_list_wait), DECKS_JSON_TIMEOUT
-                )
-            except (DeckError, TimeoutError):
-                listed = None  # not linked, or Archidekt unavailable: shown as recorded
             mark_gone(snapshots, listed)
         csrf_in = f"<input type='hidden' name='csrf' value='{_esc(_csrf(s, sid))}'>"
         events = build_events(proposals, snapshots, reps, csrf_input=csrf_in, client_names=names)
         has_more = len(events) > query["offset"] + PAGE
         shown = events[query["offset"] : query["offset"] + PAGE]
-        seen = {**state.db.history_decks(sub), **reports.decks_seen(sub)}
+        current, gone = deck_filter_groups(
+            {**reports.decks_seen(sub), **state.db.history_decks(sub)}, live, complete=listed is not None
+        )
         # The backup copies the gateway made on Archidekt (D-03): kept out of Home and My decks,
         # listed here on the first, unfiltered page (and on a deck's own history).
         copies_panel = ""
@@ -153,7 +157,7 @@ def add_history_routes(
                 "<div class='card'><p>Nothing yet. Changes you or the assistant propose, the snapshots taken "
                 "before a change is applied and deck reports appear here.</p></div>"
             )
-        bar = filter_bar_html(query, seen, shown=len(shown), total_hint=hint)
+        bar = filter_bar_html(query, current, shown=len(shown), total_hint=hint, gone=gone)
         body = head + trend + bar + listing + copies_panel
         return page(
             "History" if not deck_id else "Deck history",
