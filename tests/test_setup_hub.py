@@ -80,6 +80,35 @@ async def test_the_hub_has_every_section_with_steps_copy_buttons_and_icon(harnes
         await b.aclose()
 
 
+# Research notes, not instructions: where a fact came from, when it was tested, how sure we are.
+RESEARCH_WORDING = re.compile(
+    r"\(reported|reportedly|\breported by\b|not documented|documented by|undocumented|"
+    r"OpenAI's (pages|help|documentation)|Anthropic's|according to (OpenAI|Anthropic)|"
+    r"checked (with this gateway|on a|on the)|tested with this gateway|user report|\binferred\b|"
+    r"unknown to us|\bverified\b|\b20\d\d-\d\d-\d\d\b",
+    re.IGNORECASE,
+)
+
+
+async def test_no_section_reads_like_research_notes(harness: Harness) -> None:
+    """The setup steps are plain instructions: no sources cited, no test dates, no hedges such
+    as "(reported)" or "not documented", on the page or in the Markdown, for every section."""
+    b = Browser(harness)
+    try:
+        await b.login("/install")
+        for key in ("", *setup_hub.SECTIONS):
+            query = f"?for={key}" if key else ""
+            page = (await b.http.get(f"/install{query}")).text
+            # the ChatGPT instructions box is text for the assistant (it names a `verified` field)
+            page = re.sub(r"<textarea[^>]*>.*?</textarea>", "", page, flags=re.DOTALL)
+            md = (await harness.http.get(f"/install.md{query}")).text
+            for where, text in (("page", page), ("md", md)):
+                found = [m.group(0) for m in RESEARCH_WORDING.finditer(text)]
+                assert not found, (key or "hub", where, found)
+    finally:
+        await b.aclose()
+
+
 async def test_old_addresses_keep_working(harness: Harness) -> None:
     # signed out: the same sign-in as before
     for path, back in (("/skill", "/skill"), ("/app", "/app"), ("/skill/mtg-gateway.zip", "/skill")):
