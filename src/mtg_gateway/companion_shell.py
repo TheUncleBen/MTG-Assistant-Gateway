@@ -99,10 +99,11 @@ def add_shell_routes(server: MCPServer, h: SimpleNamespace) -> None:
         # that fails at the network level is tried four more times, 0.5, 1, 1.5 and 2 s apart
         # (about 5 s in all, Q63), before the plain offline page built here answers instead of the
         # browser's own error screen, so a dropped connection or a gateway restart on the way in
-        # doesn't show "offline". GET navigations only. The offline page's one script
-        # (static/offline.js: it loads the page again once the connection is back) is answered from
-        # here too, so it loads with the gateway unreachable. The page
-        # follows the member's chosen theme (the mtg_theme cookie, read through the Cookie Store
+        # doesn't show "offline". When the browser already says it is offline (navigator.onLine
+        # false), the offline page answers at once instead (review N7). GET navigations only. The
+        # offline page's one script (static/offline.js: it loads the page again once the
+        # connection is back) is answered from here too, so it loads with the gateway unreachable.
+        # The page follows the member's chosen theme (the mtg_theme cookie, read through the Cookie Store
         # where the browser has it). The X-MTG-Offline header tells the Android app this is the
         # gateway's own offline answer. Navigation preload: the browser asks for the page while the
         # worker is still starting (a browser stops an idle worker after a short while, and starting
@@ -115,7 +116,8 @@ def add_shell_routes(server: MCPServer, h: SimpleNamespace) -> None:
             "const RETRY=[500,1000,1500,2000];"
             "const wait=ms=>new Promise(r=>setTimeout(r,ms));"
             "const tryFetch=(req,i)=>fetch(req).catch(err=>"
-            "i<RETRY.length?wait(RETRY[i]).then(()=>tryFetch(req,i+1)):Promise.reject(err));"
+            "i<RETRY.length&&self.navigator.onLine!==false?wait(RETRY[i]).then(()=>tryFetch(req,i+1))"
+            ":Promise.reject(err));"
             "const PAGE=" + json.dumps(OFFLINE_PAGE) + ";"
             "const theme=()=>(self.cookieStore?self.cookieStore.get('mtg_theme'):Promise.resolve(null))"
             ".then(c=>c&&(c.value==='light'||c.value==='dark')?c.value:'').catch(()=>'');"

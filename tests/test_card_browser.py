@@ -465,6 +465,57 @@ def test_a_press_on_a_closed_proposal_shows_its_state_and_drops_the_buttons() ->
             browser.close()
 
 
+@pytest.mark.parametrize(
+    ("message", "shown"),
+    [
+        (
+            "Archidekt returned HTTP 503",
+            "Archidekt returned HTTP 503. The review page shows what happened. Ask the assistant for a "
+            "new proposal if you still want this change.",
+        ),
+        (
+            "Archidekt is busy and asked the gateway to wait longer than an apply may wait, so the apply "
+            "stopped. Nothing was changed on Archidekt. Try again in a few minutes with a new proposal.",
+            "Archidekt is busy and asked the gateway to wait longer than an apply may wait, so the apply "
+            "stopped. Nothing was changed on Archidekt. Try again in a few minutes with a new proposal. "
+            "The review page shows what happened.",
+        ),
+    ],
+)
+def test_a_failed_approve_shows_failed_with_one_message_and_no_buttons(message: str, shown: str) -> None:
+    """Review B6: an Approve whose apply fails answers with the proposal's state (failed). The card
+    shows Failed, the reason once as an error with what to do next, and no Approve or Reject (it
+    used to keep Pending and live buttons that would only be refused)."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    refusal = {"ok": False, "error": "upstream", "message": message, "state": "failed"}
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            page = browser.new_page()
+            errors: list[str] = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            card = _open(page, {"structuredContent": PROPOSAL, "_meta": {APPROVAL_META_KEY: "c"}}, refusal)
+            card.locator("#approve:enabled").wait_for(timeout=5_000)
+            card.locator("#approve").click()
+            card.locator("#state.failed").wait_for(timeout=5_000)
+            assert card.locator("#state").inner_text().lower() == "failed"
+            status = card.locator("#status")
+            assert status.inner_text() == shown
+            assert "err" in (status.get_attribute("class") or "").split()
+            assert card.locator("#approve").count() == 0 and card.locator("#reject").count() == 0
+            assert card.locator(".status").count() == 1
+            page.wait_for_timeout(900)  # nothing comes back after the arming delay
+            assert card.locator("#approve").count() == 0
+            assert len(_confirms(page)) == 1
+            ctx = _calls(page, "ui/update-model-context")
+            assert ctx and message in ctx[0]["params"]["content"][0]["text"]
+            assert not errors, errors
+        finally:
+            browser.close()
+
+
 # WCAG contrast of each locked button's text against the card behind it (the button is see-through)
 LOCKED = """() => {
   function rgb(s) { const m = s.match(/[\\d.]+/g); return m ? m.map(Number) : [0, 0, 0, 0]; }

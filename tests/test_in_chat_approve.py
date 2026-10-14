@@ -22,6 +22,7 @@ from mtg_gateway.approve import (
 
 from .conftest import FakeIdP, Harness, make_settings, running, sse_json
 from .fake_archidekt import FakeArchidekt
+from .test_background_apply import _every_patch_429, quick_waits  # noqa: F401 (a fixture)
 from .test_decks_and_proxy import Browser, Stack, _client, call, linked_user, mcp_token, structured
 
 CARD_TOOLS = (
@@ -267,6 +268,70 @@ async def test_card_cannot_apply_what_the_browser_already_rejected(stack: Stack)
     assert got["state"] == "rejected" and got["closed_at"] and got["error_code"] == "FAILED_PRECONDITION"
     assert got["retryable"] is False and "already rejected" in got["message"]
     assert _writes(stack.ark) == 0
+
+
+async def test_a_failed_approve_says_the_proposal_is_now_failed(stack: Stack) -> None:
+    """Review B6: an Approve whose apply fails answers with the proposal's state (failed), so the
+    card shows that and drops its buttons instead of showing Pending with buttons that would only
+    be refused. A refusal that leaves the proposal pending says pending."""
+    h = stack.h
+    token = await linked_user(stack)
+    res = await _propose(h, token)
+    p, code = structured(res), res["_meta"][APPROVAL_META_KEY]
+    wrong = structured(
+        await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": "x"})
+    )
+    assert wrong["ok"] is False and wrong["error"] == "invalid_approval" and wrong["state"] == "pending"
+    stack.ark.fail_card_writes = True
+    got = structured(
+        await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": code})
+    )
+    assert got["ok"] is False and got["state"] == "failed", got
+    print("B6 failed-apply message:", got["message"])
+    assert (
+        structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))["state"]
+        == "failed"
+    )
+
+
+@pytest.mark.usefixtures("quick_waits")
+async def test_the_review_page_right_after_a_failed_apply_says_it_once(stack: Stack) -> None:
+    """Review B6: right after a failed Apply (the page's ?err=failed), a failure the page explains
+    on its own (here Archidekt's waits ran out) shows that one message in the error box, not the
+    general "could not be applied" box above the same message further down. A failure with no
+    message of its own keeps the general box, once."""
+    from mtg_gateway import archidekt as ark_mod
+
+    h = stack.h
+    token = await linked_user(stack)
+    res = await _propose(h, token)
+    p, code = structured(res), res["_meta"][APPROVAL_META_KEY]
+    orig = stack.ark.transport.handler
+    _every_patch_429(stack.ark)
+    got = structured(
+        await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": code})
+    )
+    assert got["ok"] is False and got["error"] == "rate_limited" and got["state"] == "failed", got
+    b = Browser(h)
+    await b.login()
+    page = (await b.http.get(f"/proposals/{p['proposal_id']}?err=failed")).text
+    assert "could not be applied" not in page
+    # once as a message (the raw result further down quotes it too)
+    assert page.count(f">{ark_mod.PATIENCE_SPENT}") == 1
+    assert f"<div class='notice error'>{ark_mod.PATIENCE_SPENT} Nothing was changed on Archidekt." in page
+
+    stack.ark.transport.handler = orig  # the 429s are over
+    stack.ark.fail_card_writes = True
+    res = await _propose(h, token)
+    p, code = structured(res), res["_meta"][APPROVAL_META_KEY]
+    got = structured(
+        await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": code})
+    )
+    assert got["ok"] is False and got["state"] == "failed", got
+    page = (await b.http.get(f"/proposals/{p['proposal_id']}?err=failed")).text
+    assert page.count("This proposal could not be applied. Details are in the result below, if any.") == 1
+    assert page.count("Nothing else was changed. Ask your assistant for a new proposal") == 1
+    await b.aclose()
 
 
 async def test_a_reject_names_who_closed_the_proposal(stack: Stack) -> None:
