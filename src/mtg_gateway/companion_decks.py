@@ -32,6 +32,7 @@ from .deckpage import (
     deck_page_html,
     decks_unreadable_html,
     featured,
+    reread_href,
 )
 from .decks import DeckError, current_client, owns_deck
 from .pages import (
@@ -78,6 +79,10 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
         if not sub:
             return login_redirect("/decks")
         qp = request.query_params
+        if qp.get("reread"):  # Try again on the Q64 notice: read the list again, then show it
+            decks.reread_deck_list(sub)
+            rest = urlencode([(k, v) for k, v in qp.multi_items() if k != "reread"])
+            return RedirectResponse("/decks" + (f"?{rest}" if rest else ""), 303)
         chosen, remember = view_choice(request, "decks", LIST_VIEWS, "grid")
         q, order, view, folder = list_query(qp, chosen)
         rows, problem, failure = await my_decks(sub, wait=decks.deck_list_wait)
@@ -92,7 +97,9 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             except DeckError:
                 hidden = 0
         rows, folders, total = arrange_decks(rows or [], q=q, order=order, folder=folder)
-        unread_html = decks_unreadable_html(some_shown=total > 0) if unreadable else ""
+        unread_html = (
+            decks_unreadable_html(some_shown=total > 0, again=reread_href("/decks", qp)) if unreadable else ""
+        )
         open_form = (
             "<form method='get' action='/decks/open' class='openform'>"
             "<label for='ref'>Open any Archidekt deck</label>"
@@ -197,7 +204,9 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             shown, folders, total = arrange_decks(rows or [], q=q, order=order, folder=folder)
             covers = covers_for(shown, state.db.deck_covers([str(d["id"]) for d in shown]))
             out["html"] = (f"<p class='notice error'>{_esc(problem[1])}</p>" if problem else "") + (
-                decks_unreadable_html(some_shown=total > 0) if unreadable else ""
+                decks_unreadable_html(some_shown=total > 0, again=reread_href("/decks", qp))
+                if unreadable
+                else ""
             )
             if not (unreadable and not total):
                 out["html"] += deck_list_html(shown, covers=covers, q=q, view=view, folder=folder)

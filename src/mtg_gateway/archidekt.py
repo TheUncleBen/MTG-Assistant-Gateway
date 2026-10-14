@@ -835,6 +835,7 @@ class Patience:
 # it twice. The apply's 429s do not count towards the Pacer's breaker (Q62). Once the allowance is
 # used up, or Archidekt asks for a single wait longer than what is left of it (Q66), the request
 # fails at once as rate_limited with PATIENCE_SPENT; Archidekt's Retry-After is never cut short.
+# A task created inside an apply (asyncio.create_task copies the context) inherits this allowance.
 patient: contextvars.ContextVar[Patience | None] = contextvars.ContextVar("archidekt_patient", default=None)
 # The apply's progress dict (decks.py), so the review page can say the apply is waiting.
 wait_note: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(

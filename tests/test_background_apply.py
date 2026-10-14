@@ -521,3 +521,168 @@ async def test_dropping_an_unused_backup_never_deletes_the_deck_itself(stack: St
     assert ark.deleted == [] and 42 in ark.decks
     result = h.db.get_proposal(p["proposal_id"], "user-1")["result"]
     assert not result.get("backup_deleted"), result
+
+
+def _tag_post_then_deck_read_429(ark: FakeArchidekt) -> None:
+    """The tag is added on Archidekt, then every read of deck 42 after it meets a 429."""
+    orig = ark.transport.handler
+    tagged = {"x": False}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "POST" and req.url.path == "/api/decks/tagRelations/":
+            tagged["x"] = True
+        elif tagged["x"] and req.method == "GET" and req.url.path == "/api/decks/42/":
+            return httpx.Response(429, json={"detail": "slow down"}, headers={"Retry-After": "0"})
+        return orig(req)
+
+    ark.transport.handler = handler
+
+
+def _every_tag_post_429(ark: FakeArchidekt) -> None:
+    orig = ark.transport.handler
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "POST" and req.url.path == "/api/decks/tagRelations/":
+            return httpx.Response(429, json={"detail": "slow down"}, headers={"Retry-After": "0"})
+        return orig(req)
+
+    ark.transport.handler = handler
+
+
+PARTLY = (
+    "Part of this change had already reached Archidekt, so check the deck. Try the rest again in a "
+    "few minutes with a new proposal."
+)
+
+
+async def test_a_stop_after_a_tag_was_added_never_tells_the_assistant_nothing_changed(
+    stack: Stack, quick_waits: list[float]
+) -> None:
+    """Follow-up N1, N3: the tag reached Archidekt, then the re-read kept meeting 429s. The stored
+    message, get_proposal's next_step and the review page all say part of it reached Archidekt;
+    none says "Nothing was changed", and a tags-only proposal never claims other details."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    p = structured(
+        await call(h, token, "propose_deck_details", {"deck_id": "42", "details": {"add_tags": ["budget"]}})
+    )
+    _tag_post_then_deck_read_429(ark)
+    await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]})
+    row = await _finished(h, p["proposal_id"])
+    result = row["result"]
+    assert row["state"] == "failed" and result["error"] == "rate_limited", result
+    assert [t["name"] for t in ark.deck_tags[42]] == ["budget"] and result.get("deck_written") is True
+    assert result["detail"] == (
+        f"{ark_mod.PATIENCE_SPENT} A snapshot ({result['snapshot_id']}) of the deck before the change "
+        f"was kept. {PARTLY}"
+    ), result["detail"]
+    got = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
+    assert got["next_step"] == f"{ark_mod.PATIENCE_SPENT} {PARTLY}", got["next_step"]
+    page = await _review_page(h, p["proposal_id"])
+    assert f"{ark_mod.PATIENCE_SPENT} Part of this change reached Archidekt first. Check the deck." in page
+
+
+async def test_a_stop_after_the_new_deck_was_made_says_so_to_the_assistant(
+    stack: Stack, quick_waits: list[float]
+) -> None:
+    """Follow-up N1: the new deck was created, then every card write met a 429. get_proposal's
+    next_step says the deck was made, as the stored message does."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    cards = [{"name": "Forest", "quantity": 3}, {"name": "Island", "quantity": 2}]
+    p = structured(await call(h, token, "propose_new_deck", {"name": "New", "cards": cards}))
+    assert p["ok"], p
+    _every_patch_429(ark)
+    await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]})
+    row = await _finished(h, p["proposal_id"])
+    result = row["result"]
+    assert row["state"] == "failed" and result["error"] == "rate_limited" and result["deck_id"], result
+    made = (
+        f"The new deck {result['deck_id']} was created on Archidekt, but no cards were added. Try the "
+        "rest again in a few minutes with a new proposal."
+    )
+    assert result["detail"] == f"{ark_mod.PATIENCE_SPENT} {made}", result["detail"]
+    got = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
+    assert got["next_step"] == f"{ark_mod.PATIENCE_SPENT} {made}", got["next_step"]
+
+
+async def test_a_tags_only_stop_before_anything_was_written_claims_no_other_details(
+    stack: Stack, quick_waits: list[float]
+) -> None:
+    """Follow-up N3: a tags-only proposal whose tag write keeps meeting 429s wrote nothing. The
+    message says nothing changed and never that "the deck's other details were applied"."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    p = structured(
+        await call(h, token, "propose_deck_details", {"deck_id": "42", "details": {"add_tags": ["budget"]}})
+    )
+    _every_tag_post_429(ark)
+    await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]})
+    row = await _finished(h, p["proposal_id"])
+    result = row["result"]
+    assert row["state"] == "failed" and result["error"] == "rate_limited", result
+    assert not ark.deck_tags.get(42) and not result.get("deck_written"), result
+    assert result["detail"] == (
+        f"{ark_mod.PATIENCE_SPENT} A snapshot ({result['snapshot_id']}) of the deck before the change "
+        f"was kept. {NOTHING_CHANGED}"
+    ), result["detail"]
+    got = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
+    assert got["next_step"] == f"{ark_mod.PATIENCE_SPENT} {NOTHING_CHANGED}", got["next_step"]
+
+
+async def test_a_details_stop_after_other_details_were_written_still_says_they_were(
+    stack: Stack, quick_waits: list[float]
+) -> None:
+    """Follow-up N3, the other side: the new name was written, then the tag kept meeting 429s.
+    "The deck's other details were applied" is true here and stays, with what reached Archidekt."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    details = {"name": "Renamed", "add_tags": ["budget"]}
+    p = structured(await call(h, token, "propose_deck_details", {"deck_id": "42", "details": details}))
+    assert p["ok"], p
+    _every_tag_post_429(ark)
+    await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]})
+    row = await _finished(h, p["proposal_id"])
+    result = row["result"]
+    assert ark.decks[42]["name"] == "Renamed" and result.get("deck_written") is True, result
+    assert result["detail"] == (
+        f"{ark_mod.PATIENCE_SPENT} The deck's other details were applied. A snapshot "
+        f"({result['snapshot_id']}) of the deck before the change was kept. {PARTLY}"
+    ), result["detail"]
+    got = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
+    assert got["next_step"] == f"{ark_mod.PATIENCE_SPENT} {PARTLY}", got["next_step"]
+
+
+async def test_a_stop_whose_backup_copy_could_not_be_deleted_says_it_stays(
+    stack: Stack, quick_waits: list[float]
+) -> None:
+    """Follow-up N4 (B4): Archidekt asks for 30 s, so the clean-up's delete of the unused backup is
+    refused too. The assistant's message and next_step say the copy stays in the backup folder."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": THREE}))
+    orig = ark.transport.handler
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "PATCH" and "modifyCards" in req.url.path:
+            return httpx.Response(429, json={"detail": "slow down"}, headers={"Retry-After": "30"})
+        return orig(req)
+
+    ark.transport.handler = handler
+    try:
+        out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+        row = await _finished(h, p["proposal_id"])
+    finally:
+        h.app.state.gateway.decks.client.pacer._retry_until = 0
+    result = row["result"]
+    assert row["state"] == "failed" and result["error"] == "rate_limited", result
+    assert result.get("backup_deck_id") and ark.deleted == [] and ark.patches == [], result
+    kept = (
+        "Nothing was changed on Archidekt. The unused backup copy could not be deleted; it stays in "
+        "the backup folder. Try again in a few minutes with a new proposal."
+    )
+    assert result["detail"] == f"{ark_mod.PATIENCE_SPENT} {kept}", result["detail"]
+    if out.get("ok") is False:  # answered before the apply moved to the background
+        assert out["message"] == result["detail"], out
+    got = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
+    assert got["next_step"] == f"{ark_mod.PATIENCE_SPENT} {kept}", got["next_step"]

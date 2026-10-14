@@ -780,3 +780,27 @@ async def test_only_a_commander_deck_has_a_bracket(stack: Stack) -> None:
         assert ark.decks[42]["deckFormat"] == 3 and ark.decks[42]["edhBracket"] == 3
     finally:
         await b.aclose()
+
+
+async def test_a_snapshot_of_a_non_commander_deck_with_a_bracket_restores(stack: Stack) -> None:
+    """Follow-up N2: an older release could leave a bracket on a deck of another format. Restoring a
+    snapshot of such a deck is not refused by the Q56 check: the snapshot's bracket is left out,
+    the other details go back, and the restore's format, as any details change naming a format
+    that isn't Commander, clears the bracket (Q56), shown on the review first."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    ark.decks[42]["deckFormat"] = 2  # Modern
+    ark.decks[42]["edhBracket"] = 2  # left from before Q56
+    rename = {"deck_id": "42", "details": {"name": "New"}}
+    p = structured(await call(h, token, "propose_deck_details", rename))
+    assert p["ok"], p
+    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert a["ok"] and a["snapshot_id"], a
+    r = structured(await call(h, token, "propose_restore_snapshot", {"snapshot_id": a["snapshot_id"]}))
+    assert r["ok"], r
+    assert 'name: "New" -> "Sample Commander Deck"' in r["diff"], r["diff"]
+    assert "bracket: 2 -> none" in r["diff"], r["diff"]
+    done = structured(await call(h, token, "apply_proposal", {"proposal_id": r["proposal_id"]}))
+    assert done["ok"] and done["result"]["verified"] is True, done
+    assert ark.decks[42]["name"] == "Sample Commander Deck" and ark.decks[42]["deckFormat"] == 2
+    assert ark.decks[42]["edhBracket"] is None
