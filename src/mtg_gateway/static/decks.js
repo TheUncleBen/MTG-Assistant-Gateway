@@ -24,6 +24,7 @@
   function fillToolbar(data) {
     var total = document.getElementById("decks-total");
     if (total && typeof data.total === "number") total.textContent = "Total decks: " + data.total;
+    if (total && data.total === null) total.hidden = true; // the list couldn't be read (Q64): no count
     var field = document.getElementById("folder-field");
     var sel = document.getElementById("f-folder");
     if (sel && Array.isArray(data.folders)) {

@@ -1815,11 +1815,38 @@ def deck_list_html(
     return f"<ul class='plain decklist {esc(view)}'>{items}</ul>"
 
 
+# Q64: Archidekt's deck list came back with entries whose owner couldn't be read, so they were
+# left out. Shown like the gateway's other "couldn't load" answers (busy.busy_body): the reason in
+# a panel and a Try again button that loads the page again (the list is read again, not cached).
+DECKS_UNREADABLE = "Your deck list couldn't be read from Archidekt. Try again in a moment."
+DECKS_PARTLY_UNREADABLE = (
+    "Part of your deck list couldn't be read from Archidekt, so some decks may be missing here. "
+    "Try again in a moment."
+)
+
+
+def decks_unreadable_html(*, some_shown: bool) -> str:
+    """The notice over (or instead of) the deck list when entries couldn't be read (Q64)."""
+    text = DECKS_PARTLY_UNREADABLE if some_shown else DECKS_UNREADABLE
+    return (
+        f"<div class='panel decks-unreadable' role='alert'><p>{esc(text)}</p>"
+        "<div class='actions'><a class='btn btn-primary' href=''>Try again</a></div></div>"
+    )
+
+
 def deck_list_controls_html(
-    *, q: str, order: str, view: str, folders: list[str], folder: str, total: int, pending: bool = False
+    *,
+    q: str,
+    order: str,
+    view: str,
+    folders: list[str],
+    folder: str,
+    total: int | None,
+    pending: bool = False,
 ) -> str:
     """The toolbar over the deck list. ``pending``: the list is still being read (the folder picker
-    is rendered hidden and the total left blank; decks.js fills both)."""
+    is rendered hidden and the total left blank; decks.js fills both). ``total`` None: the list
+    couldn't be read (Q64), so no count is shown."""
     folder_opts = "".join(
         f"<option value='{esc(f)}'{' selected' if f == folder else ''}>{esc(f)}</option>" for f in folders
     )
@@ -1839,8 +1866,9 @@ def deck_list_controls_html(
             if folders or pending
             else ""
         )
-        + f"<div class='field'><span class='lbl' id='decks-total'>Total decks: {'…' if pending else total}"
-        "</span>"
+        + "<div class='field'><span class='lbl' id='decks-total'"
+        + (" hidden" if total is None and not pending else "")
+        + f">Total decks: {'…' if pending or total is None else total}</span>"
         f"<a class='btn' href='/folders'>{icon('folder')} Folders</a>"
         f"<a class='btn btn-primary' href='/decks/new'>{icon('plus')} New deck</a></div>"
         "<noscript><button type='submit' class='apply'>Apply</button></noscript>"
@@ -2416,6 +2444,9 @@ table.qty td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-
     align-items:center}
   .listbar .field:last-of-type .lbl{margin-right:auto} .listbar .field.grow{min-width:0} }
 @media (max-width:600px){ .listbar .controls{grid-template-columns:minmax(0,1fr)} }
+/* the list couldn't be read (Q64): the reason and Try again, a full-size touch target */
+.decks-unreadable p{margin:0}
+.decks-unreadable .actions .btn{min-height:44px}
 /* minmax(0,1fr), never 1fr: a long deck name (the "Copy of - …" names the app itself makes) must shrink
    and ellipsise inside its tile, not widen the track and scroll the page sideways. */
 ul.decklist.grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:25px;margin-bottom:1.25rem}

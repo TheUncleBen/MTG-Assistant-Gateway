@@ -1947,7 +1947,9 @@ class DeckService:
         """Every deck of the linked account from the member cache (or Archidekt), the gateway's
         backup copies marked ``backup: True``: those in the backup folder, those named like one,
         and those a snapshot here records as its copy (``db.backup_copies``). The list keeps the
-        listing's ``complete`` (see archidekt.DeckList); a list of unknown origin is incomplete."""
+        listing's ``complete`` and ``unreadable`` (see archidekt.DeckList); a list of unknown origin
+        is incomplete. A list with entries whose owner could not be read is not kept: My decks says
+        so with Try again (Q64), and trying again must read Archidekt again, not this answer."""
         _token, row = self._token(sub)  # not linked: raise before touching the cache
         folder = self.settings.archidekt_backup_folder if self.settings.archidekt_backups else None
 
@@ -1962,6 +1964,9 @@ class DeckService:
         rows = await self.deck_lists.get(sub, fetch, wait=wait, prefer_fresh=prefer_fresh)
         if rows is None:
             return None
+        unreadable = getattr(rows, "unreadable", 0)
+        if unreadable:
+            self.deck_lists.drop(sub)
         known = self.db.backup_copies(sub)
         out = []
         for d in rows:
@@ -1971,15 +1976,20 @@ class DeckService:
                 d["backup_of"] = known[d["id"]]["deck_id"]
                 d["snapshot_id"] = known[d["id"]]["snapshot_id"]
             out.append(d)
-        return DeckList(out, complete=getattr(rows, "complete", False) is True)
+        return DeckList(out, complete=getattr(rows, "complete", False) is True, unreadable=unreadable)
 
     async def list_decks_quick(self, sub: str, *, wait: float | None = None) -> list[dict[str, Any]] | None:
         """``list_decks`` that gives up waiting for a cold read after ``wait`` seconds and answers
         None; the read carries on and lands in the cache for /api/decks/mine. ``wait=None``
         waits for it. The list comes back as fresh dicts, so a caller may sort or add to it. The
-        gateway's backup copies are left out (``backup_copies`` lists them, History shows them)."""
+        gateway's backup copies are left out (``backup_copies`` lists them, History shows them).
+        It keeps the listing's ``complete`` and ``unreadable`` (archidekt.DeckList)."""
         rows = await self._deck_rows(sub, wait=wait)
-        return None if rows is None else [d for d in rows if not d.get("backup")]
+        if rows is None:
+            return None
+        return DeckList(
+            [d for d in rows if not d.get("backup")], complete=rows.complete, unreadable=rows.unreadable
+        )
 
     async def backup_copies(
         self,
