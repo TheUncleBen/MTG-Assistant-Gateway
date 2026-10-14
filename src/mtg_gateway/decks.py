@@ -45,6 +45,7 @@ from .archidekt import (
     Deck,
     DeckList,
     QuillDoc,
+    _owned_by,
     art_url,
     backup_name,
     finish_modifier,
@@ -4294,18 +4295,19 @@ def _same_account(a: dict[str, Any], b: dict[str, Any]) -> bool:
 
 
 def owns_deck(deck: Deck, link: dict[str, Any]) -> bool | None:
-    """Whether the linked account owns ``deck``: True when the deck's owner id or username names
-    it (the same rule as the deck list's), False when the owner can be read and is someone else,
-    None when Archidekt's answer does not say who owns the deck. None is never "someone else's":
-    a page shows the deck as it would any deck it cannot edit, and an edit is refused as unknown."""
-    user_id = str(link.get("archidekt_user_id") or "")
-    if user_id and deck.owner_id and str(deck.owner_id) == user_id:
-        return True
-    if deck.owner and deck.owner.casefold() == str(link.get("archidekt_username") or "").casefold():
-        return True
-    if deck.owner or deck.owner_id:
-        return False
-    return None
+    """Whether the linked account owns ``deck``: True when the deck's owner names it (the same
+    rule as the deck list's, archidekt._owned_by: by id when both ids are known, as a username
+    can change hands; by username only when an id is missing, and an empty username never
+    matches), False when the owner can be read and is someone else, None when Archidekt's answer
+    does not say who owns the deck. None is never "someone else's": a page shows the deck as it
+    would any deck it cannot edit, and an edit is refused as unknown."""
+    if not deck.owner and not deck.owner_id:
+        return None
+    return _owned_by(
+        {"id": deck.owner_id, "username": deck.owner},
+        str(link.get("archidekt_username") or ""),
+        str(link.get("archidekt_user_id") or "") or None,
+    )
 
 
 def _sent(progress: dict[str, Any]) -> dict[str, Any]:
