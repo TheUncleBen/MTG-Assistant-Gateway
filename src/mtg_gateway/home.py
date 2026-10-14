@@ -18,7 +18,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from .companion import DECK_CSP
-from .deckpage import covers_for, image_url
+from .deckpage import covers_for, decks_unreadable_html, image_url
 from .decks import DeckError
 from .pages import _csrf, browser_session, login_redirect
 from .theme import display_name, icon, render
@@ -63,14 +63,23 @@ async def recent_decks(state: AppState, sub: str, *, wait: float | None) -> list
     return rows
 
 
-def recent_panel_inner(decks: list[dict[str, Any]] | None, covers: dict[str, dict[str, Any]]) -> str:
+def recent_panel_inner(
+    decks: list[dict[str, Any]] | None, covers: dict[str, dict[str, Any]], *, unreadable: bool = False
+) -> str:
     """The inside of the home page's My decks panel: the newest covers, or why there are none.
-    /api/decks/mine?shape=recent answers with the same markup for the placeholder to swap in."""
+    /api/decks/mine?shape=recent answers with the same markup for the placeholder to swap in.
+    ``unreadable``: Archidekt left entries of the list unreadable, so the panel says so with the
+    /decks notice and Try again (Q64), over the covers it did read, never "No decks yet"."""
+    note = decks_unreadable_html(some_shown=bool(decks), panel=False) if unreadable else ""
     if decks:
         return (
             "<div class='panel-head'><h2>My decks</h2>"
-            f"<a class='btn' href='/decks'>All decks ({len(decks)})</a></div>" + recent_html(decks, covers)
+            f"<a class='btn' href='/decks'>All decks ({len(decks)})</a></div>"
+            + note
+            + recent_html(decks, covers)
         )
+    if note:  # nothing read: the notice, never "No decks yet"
+        return "<div class='panel-head'><h2>My decks</h2></div>" + note
     if decks is None:
         return (
             "<h2>My decks</h2><p class='muted'>Archidekt did not answer in time. "
@@ -152,7 +161,12 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             )
         elif link["linked"]:
             assert not isinstance(decks, str)
-            recent = "<section class='panel'>" + recent_panel_inner(decks, covers) + "</section>"
+            unreadable = bool(getattr(decks, "unreadable", 0))  # Q64, as on /decks
+            recent = (
+                "<section class='panel'>"
+                + recent_panel_inner(decks, covers, unreadable=unreadable)
+                + "</section>"
+            )
         else:
             recent = ""
         search = (
