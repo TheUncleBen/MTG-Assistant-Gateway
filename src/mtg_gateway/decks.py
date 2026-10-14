@@ -43,6 +43,7 @@ from .archidekt import (
     ArchidektClient,
     ArchidektError,
     Deck,
+    DeckList,
     art_url,
     backup_name,
     finish_modifier,
@@ -1940,10 +1941,11 @@ class DeckService:
 
     async def _deck_rows(
         self, sub: str, *, wait: float | None, prefer_fresh: bool = False
-    ) -> list[dict[str, Any]] | None:
+    ) -> DeckList | None:
         """Every deck of the linked account from the member cache (or Archidekt), the gateway's
         backup copies marked ``backup: True``: those in the backup folder, those named like one,
-        and those a snapshot here records as its copy (``db.backup_copies``)."""
+        and those a snapshot here records as its copy (``db.backup_copies``). The list keeps the
+        listing's ``complete`` (see archidekt.DeckList); a list of unknown origin is incomplete."""
         _token, row = self._token(sub)  # not linked: raise before touching the cache
         folder = self.settings.archidekt_backup_folder if self.settings.archidekt_backups else None
 
@@ -1967,7 +1969,7 @@ class DeckService:
                 d["backup_of"] = known[d["id"]]["deck_id"]
                 d["snapshot_id"] = known[d["id"]]["snapshot_id"]
             out.append(d)
-        return out
+        return DeckList(out, complete=getattr(rows, "complete", False) is True)
 
     async def list_decks_quick(self, sub: str, *, wait: float | None = None) -> list[dict[str, Any]] | None:
         """``list_decks`` that gives up waiting for a cold read after ``wait`` seconds and answers
@@ -2008,14 +2010,16 @@ class DeckService:
         """What the member's deck list (the cached one, no extra request) says is on Archidekt:
         ``{"ids", "read_at"}``, every deck and backup copy id and when the list was read. None
         when the list cannot tell that something is gone: still cold, read by username (which may
-        leave private decks out), or cut off at MAX_LIST_PAGES pages. A list older than
-        DECK_LIST_FRESH is refreshed first, waiting up to ``wait`` for it (prefer_fresh)."""
+        leave private decks out), or not ``complete`` (archidekt.DeckList: cut off at
+        MAX_LIST_PAGES pages, an entry whose owner could not be read or was someone else, or a
+        count that moved between pages). None means "unknown": nothing is marked gone. A list
+        older than DECK_LIST_FRESH is refreshed first, waiting up to ``wait`` for it."""
         rows = await self._deck_rows(sub, wait=wait, prefer_fresh=True)
         _token, link = self._token(sub)
         read_at = self.deck_lists.fetched_at(sub)
         if rows is None or read_at is None or not link.get("archidekt_user_id"):
             return None
-        if len(rows) >= MAX_LIST_PAGES * 50:
+        if not rows.complete or len(rows) >= MAX_LIST_PAGES * 50:
             return None
         return {"ids": {str(d["id"]) for d in rows}, "read_at": read_at}
 
@@ -2032,12 +2036,14 @@ class DeckService:
         """Fetch with the user's session and insist the linked account owns the deck."""
         deck = await self.get_deck(sub, deck_id)
         _token, link = self._token(sub)
-        if not deck.owner:
+        owned = owns_deck(deck, link)
+        if owned is None:
             raise DeckError("contract", "Archidekt did not say who owns this deck, so it cannot be edited.")
-        if deck.owner.lower() != str(link["archidekt_username"]).lower():
+        if not owned:
             raise DeckError(
                 "forbidden",
-                f"Deck {deck.id} belongs to {deck.owner}, not to your linked account. "
+                f"Deck {deck.id} belongs to {deck.owner or 'another Archidekt account'}, not to your "
+                "linked account. "
                 "Use get_deck to read it.",
             )
         return deck
@@ -4256,6 +4262,21 @@ def _same_account(a: dict[str, Any], b: dict[str, Any]) -> bool:
     if a.get("archidekt_user_id") and b.get("archidekt_user_id"):
         return str(a["archidekt_user_id"]) == str(b["archidekt_user_id"])
     return str(a.get("archidekt_username") or "").lower() == str(b.get("archidekt_username") or "").lower()
+
+
+def owns_deck(deck: Deck, link: dict[str, Any]) -> bool | None:
+    """Whether the linked account owns ``deck``: True when the deck's owner id or username names
+    it (the same rule as the deck list's), False when the owner can be read and is someone else,
+    None when Archidekt's answer does not say who owns the deck. None is never "someone else's":
+    a page shows the deck as it would any deck it cannot edit, and an edit is refused as unknown."""
+    user_id = str(link.get("archidekt_user_id") or "")
+    if user_id and deck.owner_id and str(deck.owner_id) == user_id:
+        return True
+    if deck.owner and deck.owner.casefold() == str(link.get("archidekt_username") or "").casefold():
+        return True
+    if deck.owner or deck.owner_id:
+        return False
+    return None
 
 
 def _sent(progress: dict[str, Any]) -> dict[str, Any]:

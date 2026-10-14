@@ -606,11 +606,35 @@ def test_deck_filter_groups_use_live_names_and_set_gone_decks_apart() -> None:
 
     seen = {"42": "Old name", "43": "Deleted deck", "new": "Brand new", "collection": "x", "44": "Kept"}
     live = [{"id": "42", "name": "New name"}, {"id": "44", "name": ""}]
-    current, gone = deck_filter_groups(seen, live, complete=True)
+    own = {"42", "43", "44"}
+    current, gone = deck_filter_groups(seen, live, listed={"42", "44"}, own=own)
     assert current == {"42": "New name", "collection": "Your Archidekt collection", "44": "Kept"}
     assert gone == {"43": "Deleted deck"}
     # an incomplete or unreadable list can't tell a deck is gone: it stays with the current ones
-    current, gone = deck_filter_groups(seen, live, complete=False)
+    current, gone = deck_filter_groups(seen, live, listed=None, own=own)
     assert gone == {} and current["43"] == "Deleted deck"
-    current, gone = deck_filter_groups(seen, None, complete=False)
+    current, gone = deck_filter_groups(seen, None, listed=None, own=own)
     assert gone == {} and current["42"] == "Old name"
+
+
+def test_only_a_deck_known_as_the_members_can_be_no_longer_on_archidekt() -> None:
+    """Bug (found in this release's checks): a report on someone else's public deck (or a copy
+    made of it) put that deck under "No longer on Archidekt", since it is never in the member's
+    own deck list. Only decks the member's history shows as theirs (a change, restore, snapshot
+    or new deck) can be judged gone; any other missing deck stays with the current ones."""
+    from mtg_gateway.history_view import deck_filter_groups
+
+    seen = {"42": "Mine", "43": "Mine, deleted", "900": "Someone else's"}
+    live = [{"id": "42", "name": "Mine"}]
+    current, gone = deck_filter_groups(seen, live, listed={"42"}, own={"42", "43"})
+    assert gone == {"43": "Mine, deleted"}
+    assert current == {"42": "Mine", "900": "Someone else's"}
+
+
+def test_the_gone_group_follows_the_complete_list_not_a_later_read() -> None:
+    # The names come from one read of the list and the judgement from another (on_archidekt):
+    # a deck the judging list holds is never called gone because the names list lacks it.
+    from mtg_gateway.history_view import deck_filter_groups
+
+    current, gone = deck_filter_groups({"42": "Mine"}, [], listed={"42"}, own={"42"})
+    assert gone == {} and current == {"42": "Mine"}

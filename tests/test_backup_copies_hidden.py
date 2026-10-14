@@ -4,6 +4,8 @@ Archidekt and to the deck it copied)."""
 
 from __future__ import annotations
 
+import httpx
+
 from mtg_gateway.archidekt import is_backup_name
 from mtg_gateway.archidekt_csv import parse_export, to_deck_json
 from mtg_gateway.decks import mark_gone
@@ -144,5 +146,83 @@ async def test_history_reconciles_with_what_is_still_on_archidekt(stack: Stack) 
         r = await b.http.post("/history/restore", data={"csrf": csrf, "snapshot_id": snap_id})
         assert r.status_code == 400
         assert "Deck 42 is no longer on your Archidekt account" in r.text and "Nothing was changed" in r.text
+    finally:
+        await b.aclose()
+
+
+GONE_GROUP = "<optgroup label='No longer on Archidekt'>"
+UNREADABLE_OWNER_ROWS = {
+    "owner missing": lambda row: {k: v for k, v in row.items() if k != "owner"},
+    "owner renamed": lambda row: {**{k: v for k, v in row.items() if k != "owner"}, "creator": row["owner"]},
+    "owner null": lambda row: {**row, "owner": None},
+    "owner fields null": lambda row: {**row, "owner": {"id": None, "username": None}},
+    "owner fields renamed": lambda row: {**row, "owner": {"userId": 7, "name": "alice"}},
+    "owner filter ignored": lambda row: {**row, "owner": {"id": 999, "username": "someone"}},
+}
+
+
+async def test_history_marks_nothing_gone_when_the_deck_list_cannot_be_trusted(stack: Stack) -> None:  # noqa: F811
+    """If Archidekt's deck list stops naming each deck's owner the way the gateway reads it (the
+    field missing, renamed or null), or lists decks that are not the member's, or cannot be read
+    at all, no deck or backup copy is called gone: the deck stays in the normal filter group and
+    its snapshots keep Restore."""
+    b = await linked(stack)
+    ark, svc = stack.ark, stack.h.app.state.gateway.decks
+    try:
+        r = await api(
+            b,
+            "POST",
+            "/api/v1/proposals",
+            {
+                "kind": "edit",
+                "deck_id": "42",
+                "changes": [{"action": "add", "card_name": "Cultivate", "quantity": 1}],
+                "apply": True,
+            },
+        )
+        assert r.status_code == 201, r.text
+        snap_id = (await b.http.get("/api/v1/decks/42/history")).json()["snapshots"][0]["snapshot_id"]
+        restore_form = f"name='snapshot_id' value='{snap_id}'"
+        real_row = ark._listing_row
+        svc.deck_lists.fresh = 0  # every History load reads the list again
+        for shape, change in UNREADABLE_OWNER_ROWS.items():
+            ark._listing_row = lambda d, change=change: change(real_row(d))
+            hist = await b.http.get("/history", headers=NAV)
+            assert hist.status_code == 200, shape
+            assert "The deck is no longer on Archidekt." not in hist.text, shape
+            assert "no longer on Archidekt (deleted there)" not in hist.text, shape
+            assert GONE_GROUP not in hist.text, shape
+            assert restore_form in hist.text, shape
+            assert "<option value='42'>" in hist.text, shape  # in the normal group
+        # the list cannot be read at all
+        ark._listing_row = real_row
+        orig = ark.transport.handler
+        ark.transport.handler = lambda req: (
+            httpx.Response(503, json={"detail": "down"}) if req.url.path == "/api/decks/v3/" else orig(req)
+        )
+        svc.deck_lists.drop(stack.h.app.state.gateway.db._one("SELECT sub FROM users", ())["sub"])
+        hist = await b.http.get("/history", headers=NAV)
+        assert hist.status_code == 200
+        assert "The deck is no longer on Archidekt." not in hist.text and GONE_GROUP not in hist.text
+        assert restore_form in hist.text
+    finally:
+        await b.aclose()
+
+
+async def test_a_report_on_someone_elses_deck_is_not_called_gone(stack: Stack) -> None:  # noqa: F811
+    """Bug (found in this release's checks): a stored report of another member's public deck is in
+    History, and that deck is never in the member's own list, so the deck filter put it under "No
+    longer on Archidekt". Only decks the member's history shows as theirs can be judged gone."""
+    from .test_history_page import store_report
+
+    b = await linked(stack)
+    gw = stack.h.app.state.gateway
+    try:
+        sub = gw.db._one("SELECT sub FROM users", ())["sub"]
+        store_report(gw.db, sub, "rep_other", deck_id="43", deck_name="Amy's deck")
+        hist = await b.http.get("/history", headers=NAV)
+        assert hist.status_code == 200
+        assert GONE_GROUP not in hist.text
+        assert "<option value='43'>Amy&#x27;s deck</option>" in hist.text
     finally:
         await b.aclose()
