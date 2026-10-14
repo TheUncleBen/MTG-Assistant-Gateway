@@ -82,7 +82,7 @@ def test_a_narrow_window_with_a_mouse_keeps_the_links_clear_of_the_account_butto
     exe = _chromium_path()
     if exe == "missing":
         pytest.skip("no Chromium available for Playwright")
-    sid = _admin(server)  # seven links: the six sections and Admin
+    sid = _admin(server)  # eight links: Home, the six sections and Admin
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
         ctx = browser.new_context(viewport={"width": 1000, "height": 700})
@@ -99,7 +99,77 @@ def test_a_narrow_window_with_a_mouse_keeps_the_links_clear_of_the_account_butto
         phone = page.evaluate(GEOMETRY)
         browser.close()
     for width, g in seen.items():
-        assert g["links"] == 7, (width, g)
+        assert g["links"] == 8, (width, g)
         assert g["doc"] == g["win"] == width, (width, g)  # no sideways scroll
         assert g["last"] + 8 <= g["avatar"], (width, g)  # the last link ends before the account button
     assert phone["links"] == 0, phone  # the phone layout: links move to the tab bar
+
+
+HOME_PLACE = """() => {
+  const shown = e => !!e && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden';
+  const box = e => { const b = e.getBoundingClientRect(); return {x: b.left, y: b.top, bottom: b.bottom}; };
+  const pick = sel => [...document.querySelectorAll(sel)].find(shown);
+  const home = pick(".topbar nav.site a[href='/'], .tabbar > a[href='/']");
+  const decks = pick(".topbar nav.site a[href='/decks'], .tabbar > a[href='/decks']");
+  const more = document.querySelector('.tabbar details.more summary');
+  const tabs = [...document.querySelectorAll('.tabbar > a')].filter(shown);
+  return {home: home ? box(home) : null, decks: decks ? box(decks) : null,
+    homeInMore: !!document.querySelector(".tabbar details.more a[href='/']"),
+    moreShown: shown(more),
+    moreItems: [...document.querySelectorAll('.tabbar details.more .menu a')]
+      .map(a => a.getAttribute('href')),
+    tabs: tabs.map(a => a.getAttribute('href')),
+    tabsBottom: Math.max(0, ...tabs.map(a => a.getBoundingClientRect().bottom)), height: innerHeight,
+    doc: document.documentElement.scrollWidth, win: innerWidth};
+}"""
+
+
+@pytest.mark.parametrize(
+    "where",
+    ["desktop", "phone", "phone-app", "fold-unfolded", "fold-unfolded-app", "fold-landscape-app"],
+)
+def test_home_is_never_under_more(server: Server, where: str) -> None:
+    """Home sits left of Decks in the top bar and the phone tab bar and above Decks in the rail,
+    never under More; the rail (an unfolded Fold, the app from 600 px) shows every page as a tab
+    and has no More."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    width, height, touch, app = {
+        "desktop": (1280, 800, False, False),
+        "phone": (390, 844, True, False),
+        "phone-app": (390, 844, True, True),
+        "fold-unfolded": (884, 1104, True, False),
+        "fold-unfolded-app": (884, 1104, True, True),
+        "fold-landscape-app": (1104, 820, True, True),
+    }[where]
+    sid = server.sign_in()
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        extra = {"user_agent": "Mozilla/5.0 (Linux; Android 14) MTGAssistant/0.7.27"} if app else {}
+        ctx = browser.new_context(
+            viewport={"width": width, "height": height}, has_touch=touch, is_mobile=touch, **extra
+        )
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        page.goto(f"{server.base}/decks", wait_until="networkidle")
+        got = page.evaluate(HOME_PLACE)
+        browser.close()
+    assert got["home"] and got["decks"], got
+    assert not got["homeInMore"], got
+    assert got["doc"] == got["win"], got  # no sideways scroll
+    if where.startswith("fold"):  # the rail: Home above Decks, every page a tab, no More
+        assert got["home"]["bottom"] <= got["decks"]["y"] + 1, got
+        assert abs(got["home"]["x"] - got["decks"]["x"]) < 1, got
+        assert not got["moreShown"], got
+        for href in ("/", "/decks", "/search", "/scan", "/collection", "/proposals", "/history", "/guide"):
+            assert href in got["tabs"], (href, got)
+        assert got["tabsBottom"] <= got["height"], got  # every tab on screen without scrolling the rail
+    else:  # a row: Home left of Decks
+        assert got["home"]["x"] < got["decks"]["x"], got
+        assert abs(got["home"]["y"] - got["decks"]["y"]) < 1, got
+    if where.startswith("phone"):  # the bar: Home, Decks, Scan, Collection and More
+        assert got["tabs"] == ["/", "/decks", "/scan", "/collection"], got
+        assert got["moreShown"] and "/proposals" in got["moreItems"], got

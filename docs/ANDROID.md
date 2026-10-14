@@ -187,7 +187,7 @@ else your gateway serves. A few things are native:
   website footer. Navigation follows Android's window size classes: under
   600 px wide (a phone, a folded foldable) the bottom tab bar; from 600 px (an
   unfolded foldable, a tablet, a wide split-screen pane) a navigation rail
-  down the left edge with the same five sections. The rules track the live
+  down the left edge with every page on it (Home first) and no More menu. The rules track the live
   window, so folding, rotating, split screen and pop-up windows re-flow at
   once without a reload.
 - **Back** goes back a page; on the first page it leaves the app.
