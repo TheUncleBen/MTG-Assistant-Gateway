@@ -306,7 +306,9 @@ def test_edge_auto_scroll_is_measured(server: Server, how: str, hz: int | None) 
     by finger in every view, a held card by finger, and on a 120 Hz and a 30 Hz screen. Resting
     near the bottom edge, the page starts on the next frame, scrolls at a steady speed (about
     1,200 px/s at the very edge, half that halfway into the zone) whatever the frame rate, and
-    stops as soon as the pointer leaves the zone or is let go."""
+    stops as soon as the pointer leaves the zone or is let go. Review N9: the page's clock is
+    Playwright's, paused while measuring and moved on by the test, so the frames come on time
+    however busy the machine running the test is (a busy machine used to fail it)."""
     from playwright.sync_api import sync_playwright
 
     _chromium()
@@ -317,6 +319,7 @@ def test_edge_auto_scroll_is_measured(server: Server, how: str, hz: int | None) 
         browser, page, errors = _page(p, server, sid, 390, **touch)
         if hz:
             page.context.add_init_script(FRAME_RATE % hz)
+        page.clock.install()  # runs as usual until paused for a measurement
         cdp = page.context.new_cdp_session(page)
 
         def move(x: float, y: float) -> float:
@@ -327,6 +330,7 @@ def test_edge_auto_scroll_is_measured(server: Server, how: str, hz: int | None) 
             return t
 
         for view in views:
+            page.clock.resume()
             page.goto(f"{server.base}/decks/42?view={view}", wait_until="networkidle")
             h = page.evaluate("innerHeight")
             zone = min(96, h * 0.15)
@@ -334,25 +338,26 @@ def test_edge_auto_scroll_is_measured(server: Server, how: str, hz: int | None) 
             what.scroll_into_view_if_needed()
             b = what.bounding_box()
             x, y = b["x"] + min(b["width"] / 2, 60), b["y"] + b["height"] / 2
+            page.clock.pause_at(page.evaluate("Date.now()") / 1000 + 0.05)  # (seconds) the test moves it on
             if how == "mouse":
                 page.mouse.move(x, y)
                 page.mouse.down()
             else:
                 _touch(cdp, "touchStart", x, y)
                 if how == "card":
-                    page.wait_for_timeout(450)  # held: the card is picked up
+                    page.clock.run_for(450)  # held: the card is picked up
             move(x + 4, y + 10)
             move(x + 8, h / 2)
-            page.wait_for_timeout(150)
+            page.clock.run_for(150)
             page.evaluate(SCROLL_LOG)
             # at the very edge, out of the zone, halfway into it, out, and let go at the edge
             times = []
             for at, wait in [(h - 8, 600), (h / 2, 250), (h - zone / 2, 600), (h / 2, 250), (h - 8, 250)]:
                 times.append(move(x + 8, at))
-                page.wait_for_timeout(wait)
+                page.clock.run_for(wait)
             t_up = page.evaluate("performance.now()")
             page.mouse.up() if how == "mouse" else _touch(cdp, "touchEnd")
-            page.wait_for_timeout(400)
+            page.clock.run_for(400)
             log, events = page.evaluate("__s"), page.evaluate("__ev")
             times = [next(e for e in events if e >= t) for t in times]
             edge = _edge_run(log, times[0], times[1], times[2])
@@ -656,12 +661,23 @@ MENU_SIZES = [(390, 844, "dark"), (1280, 800, "light"), (673, 841, "light")]
 ORDER_JS = "() => [...document.querySelectorAll('.deckview .row')].map(r => r.dataset.card)"
 
 
-def _menu_page(p, server: Server, width: int, height: int, scheme: str):
+def _menu_page(p, server: Server, width: int, height: int, scheme: str, *, clock: bool = False):
+    """``clock``: the page runs on Playwright's clock, so a test can hold the page's timers (the
+    400 ms that gathers quantity steps into one save) while it clicks, however slow the clicks
+    are on a busy machine (review N9)."""
     sid = server.sign_in_and_link()
     browser, page, errors = _page(p, server, sid, width, color_scheme=scheme)
+    if clock:
+        page.clock.install()  # runs as usual until _hold_timers
     page.set_viewport_size({"width": width, "height": height})
     page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
     return browser, page, errors
+
+
+def _hold_timers(page) -> None:
+    """Stop the page's clock: no timer fires until the test moves it on (page.clock.run_for) or
+    lets it run again (page.clock.resume)."""
+    page.clock.pause_at(page.evaluate("Date.now()") / 1000 + 0.05)  # seconds
 
 
 def _menu_shot(page, what: str, width: int, scheme: str) -> None:
@@ -701,7 +717,7 @@ def test_quantity_steps_save_in_the_background(server: Server, width: int, heigh
 
     _chromium()
     with sync_playwright() as p:
-        browser, page, errors = _menu_page(p, server, width, height, scheme)
+        browser, page, errors = _menu_page(p, server, width, height, scheme, clock=True)
         sent = _edits(page)
         row = page.locator(".deckview .row[data-card='Cultivate']").first
         held = _held(server)
@@ -710,6 +726,9 @@ def test_quantity_steps_save_in_the_background(server: Server, width: int, heigh
             # Move to's list stays folded until it is asked for (it used to show at all times)
             assert menu.locator(".sub").is_hidden()
             plus = menu.locator(".qtyrow .step").nth(1)
+            # a quick burst: the page's 400 ms does not run out between these presses, however
+            # long the presses take here (review N9: a busy run sent [2] and then 4)
+            _hold_timers(page)
             plus.click()
             # on the page at once; the menu stays open, not faded, for more steps
             assert menu.locator(".qtyrow .n").inner_text() == "2"
@@ -719,7 +738,10 @@ def test_quantity_steps_save_in_the_background(server: Server, width: int, heigh
             plus.click()
             assert menu.locator(".qtyrow .n").inner_text() == "4" and row.get_attribute("data-qty") == "4"
             page.locator(".deck-toast .msg", has_text="Saving Cultivate: 4 copies").wait_for(timeout=3000)
-            page.wait_for_timeout(800)  # the save is out by now, held by Archidekt
+            assert sent == []  # nothing until the presses pause
+            with page.expect_request(EDIT_URL):
+                page.clock.run_for(400)  # the presses paused: one save goes out (held by Archidekt)
+            page.clock.resume()
             assert [ch[0]["quantity"] for ch in sent] == [4]
             _menu_shot(page, "quantity-saving", width, scheme)
             # a step while that save is out waits for it; the count stays where the person put it
@@ -968,13 +990,15 @@ def test_plus_then_minus_leaves_no_saving_note(server: Server, width: int, heigh
 
     _chromium()
     with sync_playwright() as p:
-        browser, page, errors = _menu_page(p, server, width, height, scheme)
+        browser, page, errors = _menu_page(p, server, width, height, scheme, clock=True)
         sent = _edits(page)
         row = page.locator(".deckview .row[data-card='Cultivate']").first
         menu = _open_menu(page, row)
+        _hold_timers(page)  # both presses inside the 400 ms, however slow they are here (N9)
         menu.locator(".qtyrow .step").nth(1).click()
         menu.locator(".qtyrow .step").nth(0).click()
         assert page.locator(".deck-toast .msg", has_text="Saving Cultivate: 1 copy").count() == 1
+        page.clock.resume()
         page.locator(".deck-toast").wait_for(state="detached", timeout=3000)
         page.wait_for_timeout(600)
         assert sent == [] and row.get_attribute("data-qty") == "1"

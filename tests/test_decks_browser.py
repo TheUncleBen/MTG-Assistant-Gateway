@@ -144,8 +144,19 @@ def test_home_my_decks_panel_says_the_list_could_not_be_read(server: Server) -> 
         page.set_default_timeout(10_000)
         errors: list[str] = []
         page.on("pageerror", lambda e: errors.append(str(e)))
+        # the panel's own read is held until the placeholder has been seen, so a fast answer can
+        # never swap it out first (review N9: a busy run missed it)
+        held: list = []
+        page.route(re.compile(r".*/api/decks/mine\?shape=recent$"), lambda route: held.append(route))
         page.goto(f"{server.base}/", wait_until="commit")
         page.wait_for_selector(".recent.skeleton", state="attached")
+        for _ in range(200):
+            if held:
+                break
+            page.wait_for_timeout(50)
+        assert held, "the panel never asked for the deck list"
+        held.pop().continue_()
+        page.unroute(re.compile(r".*/api/decks/mine\?shape=recent$"))
         note = page.wait_for_selector(".home .decks-unreadable[role=alert]")
         assert note.inner_text().startswith("Your deck list couldn't be read from Archidekt.")
         assert "No decks yet" not in page.content() and page.locator(".skeleton").count() == 0
