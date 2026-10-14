@@ -41,6 +41,7 @@ from .archidekt import (
     FORMAT_IDS,
     MAX_LIST_PAGES,
     PATIENCE_SPENT,
+    RATE_LIMIT_WAITS,
     ArchidektClient,
     ArchidektError,
     Deck,
@@ -3176,6 +3177,12 @@ class DeckService:
         if self.client.pacer.paused():  # the call would only be refused: queue it straight away
             self._queue_backup_delete(sub, proposal_id, progress, source_deck_id, why="paused")
             return
+        # No waiting in the apply for this delete (Q77): an allowance already used up makes a 429
+        # fail at once, and the delete is queued. It is still the apply's 429, so it does not count
+        # towards the breaker (Q62).
+        spent = Patience()
+        spent.waits = RATE_LIMIT_WAITS
+        allowance = patient.set(spent)
         try:
             await self._call(sub, self.client.delete_deck, str(backup_id))
         except DeckError as exc:
@@ -3189,6 +3196,8 @@ class DeckService:
                 detail={"proposal_id": proposal_id, "backup_deck_id": backup_id, "error": exc.kind},
             )
             return
+        finally:
+            patient.reset(allowance)
         if progress.get("snapshot_id"):
             self.db.clear_snapshot_backup(progress["snapshot_id"])
         progress.pop("backup_deck_id", None)
