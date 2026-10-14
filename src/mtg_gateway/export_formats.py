@@ -95,17 +95,22 @@ def _edh_lead(c: DeckCard) -> int:
     Commander deck and in a Modern deck; a land first, or a non-legendary creature first, stayed in
     the main deck). Several copies are never taken; a land can lead no deck; nor can another
     non-creature, non-planeswalker card; a non-legendary creature can lead a Pauper EDH deck (its
-    rules; not tried on EDHPlay)."""
+    rules; not tried on EDHPlay). A legendary land is a land: it ranks with the lands."""
     if c.quantity > 1:
         return 0
-    legendary = "Legendary" in c.supertypes or "can be your commander" in c.oracle_text.casefold()
-    if legendary or not c.types:
+    can_be = "can be your commander" in c.oracle_text.casefold()
+    if "Land" in c.types and "Creature" not in c.types and not can_be:
+        return 1  # a land, legendary or not, is never a commander
+    if "Legendary" in c.supertypes or can_be or not c.types:
         return 4  # could be a commander, or its type isn't known
-    if "Land" in c.types and "Creature" not in c.types:
-        return 1
     if "Creature" not in c.types and "Planeswalker" not in c.types:
         return 2
     return 3
+
+
+def _edh_companion(c: DeckCard) -> bool:
+    """Whether a row is the deck's companion: Archidekt's companion flag, or a Companion category."""
+    return c.companion or any(cat.strip().casefold() == "companion" for cat in c.categories)
 
 
 def to_edhplay(deck: Deck) -> EdhplayList:
@@ -149,18 +154,22 @@ def to_edhplay(deck: Deck) -> EdhplayList:
             head.append(_edh_line(c, commander=True))
             if c.name not in commanders:
                 commanders.append(c.name)
+        elif _edh_companion(c):
+            # a companion goes to the Sideboard, with the box's companion note, wherever its row
+            # is filed (a main-deck category included), as the Arena export puts it in Companion
+            first.append(c)
         elif deck.in_deck(c):
             main.append((c, _edh_line(c)))
         elif any(cat.strip().casefold() in _EDH_TOKEN_CATEGORIES for cat in c.categories):
             continue  # tokens: EDHPlay's import drops them
-        elif c.companion or (c.categories and c.categories[0].casefold() in ("sideboard", "companion")):
+        elif c.categories and c.categories[0].casefold() == "sideboard":
             first.append(c)
         # anything else (the maybeboard, another category kept outside the deck) is never sent
     side: list[str] = []
     left_out: list[tuple[int, str]] = []
     room = EDHPLAY_SIDEBOARD_MAX
     # the companion first, so a cut never drops it
-    first.sort(key=lambda c: not (c.companion or c.categories[0].casefold() == "companion"))
+    first.sort(key=lambda c: not _edh_companion(c))
     for c in first:
         fits = min(c.quantity, room)
         if fits:
@@ -174,10 +183,12 @@ def to_edhplay(deck: Deck) -> EdhplayList:
         # its order); a deck of only possible commanders keeps its order.
         lead = min(range(len(main)), key=lambda i: _edh_lead(main[i][0]))
         main.insert(0, main.pop(lead))
-    text = "\n".join(head + [line for _c, line in main]) + "\n"
+    deck_lines = head + [line for _c, line in main]
+    text = "\n".join(deck_lines) + "\n" if deck_lines or not side else ""
     if side:
-        text += "\nSideboard\n" + "\n".join(side) + "\n"
-    companion = any(c.companion or c.categories[0].casefold() == "companion" for c in first)
+        # a blank line ends the main deck; a list with only a sideboard starts at its heading
+        text += ("\n" if deck_lines else "") + "Sideboard\n" + "\n".join(side) + "\n"
+    companion = any(_edh_companion(c) for c in first)
     return EdhplayList(text, commanders, left_out, companion)
 
 
