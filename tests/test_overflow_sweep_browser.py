@@ -60,7 +60,8 @@ LONG_CATS = [
 
 @pytest.fixture
 def server(tmp_path: Path):
-    s = Server(tmp_path, watchlists_enabled=True)  # the sweep covers the Watchlist page too
+    # the sweep covers the Watchlist page too; writes on, so the seed can add to the collection
+    s = Server(tmp_path, watchlists_enabled=True, writes_enabled=True)
     long_cards = ((9801, CARDS[-2]), (9802, CARDS[-1]))
     for cid, name in long_cards:
         FA.CARD_DB.setdefault(name.lower(), {"id": cid, "oracleCard": {"name": name}})
