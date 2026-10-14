@@ -209,6 +209,27 @@ async def test_deck_like_goes_to_the_deck_vote_route(stack: Stack) -> None:
         await b.aclose()
 
 
+async def test_a_deck_like_already_so_sends_nothing(stack: Stack) -> None:
+    """L6: as for comment votes, liking a deck the member already likes (or taking back a vote
+    they have not given) sends nothing, since Archidekt might toggle the vote off instead."""
+    stack.ark.private.discard(43)
+    b = await linked(stack)
+    try:
+        r = await post(b, "/social/api/decks/43/vote", {"vote": "up"})
+        assert r.status_code == 200 and r.json()["points"] == 1
+        sent = len(stack.ark.vote_calls)
+        r = await post(b, "/social/api/decks/43/vote", {"vote": "up"})
+        assert r.status_code == 200 and r.json() == {"ok": True, "vote": 1, "points": 1}, r.json()
+        assert len(stack.ark.vote_calls) == sent and stack.ark.votes == {("alice", 300043): 1}
+        r = await post(b, "/social/api/decks/43/vote", {"vote": "none"})
+        assert r.json()["points"] == 0 and stack.ark.votes == {}
+        sent = len(stack.ark.vote_calls)
+        r = await post(b, "/social/api/decks/43/vote", {"vote": "none"})
+        assert r.status_code == 200 and len(stack.ark.vote_calls) == sent
+    finally:
+        await b.aclose()
+
+
 async def test_comment_vote_taken_back_names_the_vote(stack: Stack) -> None:
     stack.ark.private.discard(43)
     stack.ark.comments[300043] = [_amy_comment(555001, rich_doc("Try Cultivate."))]

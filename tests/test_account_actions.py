@@ -104,6 +104,19 @@ async def test_like_bookmark_and_follow_through_proposals(stack: Stack) -> None:
     assert p["ok"] is False and p["error"] == "invalid"
 
 
+async def test_a_like_already_given_says_so_and_sends_nothing(stack: Stack) -> None:
+    """L6: a like proposal for a deck the member already likes says applying changes nothing,
+    and applying it sends no vote (Archidekt might toggle it off)."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _propose_and_apply(h, token, "propose_deck_social", {"deck_id": "43", "action": "like"})
+    sent = len(ark.vote_calls)
+    res = await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "like"})
+    assert structured(res)["rows"][0]["text"].endswith("(already the case; applying changes nothing)")
+    await _press(h, token, res)
+    assert len(ark.vote_calls) == sent and ark.votes == {("alice", 300043): 1}
+
+
 async def test_comments_post_edit_vote_delete(stack: Stack) -> None:
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
