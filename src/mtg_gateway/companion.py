@@ -419,7 +419,9 @@ def short_name(name: str, limit: int = 12) -> str:
 
 def offline_page(site: str) -> str:
     """The service worker's offline page: the site's name and icon, the chosen theme (the
-    worker sets data-theme from the mtg_theme cookie; otherwise the system's), one button."""
+    worker sets data-theme from the mtg_theme cookie; otherwise the system's), one button.
+    static/offline.js (answered by the worker itself) loads the page again once the connection
+    is back (Q63)."""
     title = html.escape(f"You're offline · {site}")
     return (
         "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
@@ -441,11 +443,13 @@ def offline_page(site: str) -> str:
         f"<img src='{ICON_DATA_URL}' alt=''><p class='site'>{html.escape(site)}</p>"
         "<h1>You're offline</h1><p>The gateway can't be reached right now. If you just pressed a button, "
         "nothing was sent. Check your connection, then try again.</p>"
-        "<a href=''>Try again</a></main></body></html>"
+        "<a href=''>Try again</a></main><script src='/static/offline.js'></script></body></html>"
     )
 
 
 OFFLINE_PAGE = offline_page("MTG Assistant Gateway")
+# The offline page's script, which the service worker answers itself (companion_shell, /sw.js).
+OFFLINE_SCRIPT = (STATIC_DIR / "offline.js").read_text(encoding="utf-8")
 
 
 # Audit event names as sentences for the member's activity page (anything unlisted is shown
