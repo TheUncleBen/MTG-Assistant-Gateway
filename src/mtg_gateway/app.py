@@ -50,6 +50,7 @@ from .approve import (
     APPROVAL_META_KEY,
     CARD_TOOL_META,
     apps_extension,
+    proposal_text,
     proposal_tool_result,
 )
 from .archidekt import ArchidektClient, Deck, Pacer
@@ -318,6 +319,8 @@ def schema_error_middleware():
                 if same:  # the text is the same JSON, so clients that read only the text get the code too
                     text = pydantic_core.to_json(coded, fallback=str, indent=2).decode()
                     content[0] = {**content[0], "text": text}
+                elif content[0]["text"] == proposal_text(structured):  # a proposal tool's plain text
+                    content[0] = {**content[0], "text": proposal_text(coded)}
             return {**data, "content": content, "structuredContent": coded, "isError": True}
         if not data.get("isError") or structured:
             return result
