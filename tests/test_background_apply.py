@@ -34,6 +34,14 @@ async def stack(tmp_path, idp: FakeIdP, monkeypatch):
         yield Stack(h, ark)
 
 
+@pytest.fixture
+def whole_apply(monkeypatch) -> None:
+    """For a test that checks the apply's own final reply: wait for the whole apply (on the fake it
+    takes well under a second) instead of answering "applying" after 0.2 s, which a busy machine
+    could reach first (review N9: wait on state, not time)."""
+    monkeypatch.setattr(decks_mod, "APPLY_WAIT_SECONDS", 30)
+
+
 def _hold(ark: FakeArchidekt, when) -> asyncio.Event:
     """Hold Archidekt's answer to the first request ``when`` matches until the returned event is
     set (a slow Archidekt), so the apply outlasts APPLY_WAIT_SECONDS."""
@@ -249,7 +257,9 @@ async def test_an_apply_waits_out_archidekts_429_and_finishes(stack: Stack) -> N
     assert refused["n"] == 1 and len(ark.patches) == 3
 
 
-async def test_a_failed_apply_that_changed_nothing_deletes_its_backup_copy(stack: Stack) -> None:
+async def test_a_failed_apply_that_changed_nothing_deletes_its_backup_copy(
+    stack: Stack, whole_apply: None
+) -> None:
     """Q14: Archidekt refuses the first write, so the deck is as it was; the backup copy the apply
     made a moment before is deleted again. The gateway's own snapshot stays."""
     h, ark = stack.h, stack.ark
@@ -274,7 +284,9 @@ async def test_a_failed_apply_that_changed_nothing_deletes_its_backup_copy(stack
     assert snap is not None and snap["backup_deck_id"] is None
 
 
-async def test_a_failed_apply_that_changed_the_deck_keeps_its_backup_copy(stack: Stack) -> None:
+async def test_a_failed_apply_that_changed_the_deck_keeps_its_backup_copy(
+    stack: Stack, whole_apply: None
+) -> None:
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": THREE}))
@@ -441,7 +453,9 @@ async def test_an_apply_that_runs_out_of_patience_partway_keeps_its_backup(
     assert "1 of 3 changes reached Archidekt first, so the deck is partly changed. Check the deck." in page
 
 
-async def test_a_breaker_refusal_on_the_first_write_counts_as_nothing_written(stack: Stack) -> None:
+async def test_a_breaker_refusal_on_the_first_write_counts_as_nothing_written(
+    stack: Stack, whole_apply: None
+) -> None:
     """Review M1: the gateway-wide breaker (opened by other failures) refuses the apply's first
     card write before it is sent. Nothing changed, so the backup copy is deleted again."""
     h, ark = stack.h, stack.ark
@@ -465,7 +479,9 @@ async def test_a_breaker_refusal_on_the_first_write_counts_as_nothing_written(st
     assert result.get("backup_deleted") is True and len(ark.deleted) == 1 and ark.deleted[0] != 42
 
 
-async def test_a_details_step_whose_re_read_fails_after_the_write_keeps_the_backup(stack: Stack) -> None:
+async def test_a_details_step_whose_re_read_fails_after_the_write_keeps_the_backup(
+    stack: Stack, whole_apply: None
+) -> None:
     """Review M5: the tag is added on Archidekt, then the re-read just after is refused (403). The
     deck changed, so the backup copy must be kept, not deleted as if nothing was written."""
     h, ark = stack.h, stack.ark
@@ -500,7 +516,9 @@ async def test_a_details_step_whose_re_read_fails_after_the_write_keeps_the_back
     assert result.get("backup_deck_id") and not result.get("backup_deleted") and ark.deleted == []
 
 
-async def test_dropping_an_unused_backup_never_deletes_the_deck_itself(stack: Stack, monkeypatch) -> None:
+async def test_dropping_an_unused_backup_never_deletes_the_deck_itself(
+    stack: Stack, monkeypatch, whole_apply: None
+) -> None:
     """Review L7: if the copy's id were ever the source deck's own, the clean-up after a failed
     apply must not delete the real deck."""
     h, ark = stack.h, stack.ark
