@@ -2327,13 +2327,20 @@
     document.body.appendChild(t);
     if (!kind) setTimeout(function () { t.remove(); }, 8000);
   }
-  // the list for the deck: {list, left_out, left_count}, or an Error whose message is shown
+  // the list for the deck: {list, left_out, left_count}, or an Error whose message is shown.
+  // The box shows only the three approved messages (Q53, Q67): the gateway's own reason goes to
+  // the console, never on screen. Signed out, retrying can't help (Q69): err.signedOut.
   function fetchList(src) {
     return fetch(src, { credentials: "same-origin", headers: { Accept: "application/json" } }).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (d) {
         if (r.ok && d && d.ok && typeof d.list === "string") return d;
-        if (r.status === 401) throw new Error("You're signed out. Reload the page to sign in.");
-        throw new Error((d && d.message) || "The deck list couldn't be loaded.");
+        if (r.status === 401) {
+          var out = new Error("You're signed out. Reload the page to sign in.");
+          out.signedOut = true;
+          throw out;
+        }
+        if (window.console) console.warn("Play on EDHPlay: the deck list request failed (HTTP " + r.status + ")" + (d && d.message ? ": " + d.message : ""));
+        throw new Error("The deck list couldn't be loaded.");
       });
     }, function () {
       throw new Error("The deck list couldn't be loaded: no connection.");
@@ -2361,6 +2368,9 @@
   }
   function open(link) {
     close();
+    // a note left from an earlier launch would sit above the box (L10): the box says it all again
+    var old = document.querySelector(".edhplay-toast");
+    if (old) old.remove();
     back = link;
     var data = null;  // the list, once the gateway has sent it
     dialog = make("div", "picker edhplay-dialog");
@@ -2432,10 +2442,12 @@
         var p = make("p", "notice error");
         p.setAttribute("role", "alert");
         p.appendChild(make("span", "", err.message));
-        var again = make("button", "btn small", "Try again");
-        again.type = "button";
-        again.addEventListener("click", function () { load(); go.focus(); });
-        p.appendChild(again);
+        if (!err.signedOut) {
+          var again = make("button", "btn small", "Try again");
+          again.type = "button";
+          again.addEventListener("click", function () { load(); go.focus(); });
+          p.appendChild(again);
+        }
         spot.appendChild(p);
         spot.hidden = false;
       });
