@@ -211,8 +211,8 @@ def guide_body(
         "are kept as proposals and applied once the person running it turns writes on."
     )
     backup_box = (
-        "The save bar has a tick box, <strong>Also keep a backup copy on Archidekt</strong>, on by "
-        "default: unticking it skips only that extra copy for that one save."
+        "The save bar has a tick box, <strong>Also keep a backup copy on Archidekt</strong>, off by "
+        "default: tick it to also keep that extra copy for that one save."
         if archidekt_backups
         else "The backup copy on Archidekt is switched off on this gateway, so no tick box is offered."
     )
