@@ -102,6 +102,7 @@ class FakeArchidekt:
             ),
         }
         self.calls: list[tuple[str, str]] = []
+        self.collection_posts: list[dict[str, Any]] = []  # the bodies of collection creates, as sent
         # Answers given before the normal handling, one per request, in order: an int status (with
         # an optional Retry-After) or an exception to raise, e.g. httpx.ReadTimeout.
         self.inject: list[tuple[int | Exception, str | None]] = []
@@ -649,6 +650,7 @@ class FakeArchidekt:
             )
         if path == "/api/collection/v2/" and request.method == "POST":
             body = json.loads(request.content)
+            self.collection_posts.append(body)
             if not isinstance(body.get("card"), int) or not isinstance(body.get("quantity"), int):
                 return httpx.Response(400, json={"card": ["This field is required."]})
             if self._bad_collection_enum(body):
@@ -919,8 +921,9 @@ class FakeArchidekt:
         raise AssertionError(f"unknown printing id {card_id}")
 
     def ignore_empty_label_or_set(self, entry: dict[str, Any]) -> bool:
-        """A fault a verify must catch: a modify with an empty label leaves the old tag."""
-        return self.empty_label_ignored and not entry["modifications"]["label"]
+        """A fault a verify must catch: a modify with an empty label (no name, as the site's own
+        ",#656565") leaves the old tag."""
+        return self.empty_label_ignored and not entry["modifications"]["label"].split(",")[0].strip()
 
     def apply_patch(self, deck: dict[str, Any], entries: list[dict[str, Any]]) -> None:
         """Apply entries in the reference shape: action add|modify|remove, cardid, deckRelationId,

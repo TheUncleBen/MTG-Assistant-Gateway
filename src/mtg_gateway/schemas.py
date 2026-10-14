@@ -207,7 +207,7 @@ class DeckChange(_Card):
         default=None,
         ge=0,
         le=20,
-        description="For set_mana_value: the card's custom mana value, 0 to 20; null takes it off.",
+        description="For set_mana_value: the card's custom mana value, 0 to 15; null takes it off.",
     )
 
 

@@ -91,7 +91,7 @@ CATEGORY_ACTIONS = ("set_category", "set_commander")
 PRINTING_ACTIONS = ("set_finish", "set_printing", "set_label", "set_mana_value")
 # Row-by-row changes that also work on the maybeboard and sideboard rows (zone "side").
 ROW_TAG_ACTIONS = ("set_label", "set_mana_value")
-MAX_MANA_VALUE = 20
+MAX_MANA_VALUE = 15  # the range of archidekt.com's own Mana value menu (Q57)
 LABEL_COLOUR = re.compile(r"#[0-9a-fA-F]{6}")
 MAX_LABEL = 40
 COMMANDER = "Commander"
@@ -518,7 +518,7 @@ class Change:
     finish: str | None = None
     # set_label: the colour tag as Archidekt stores it ("Have,#37d67a"); "" takes the tag off
     label: str | None = None
-    # set_mana_value: the custom mana value (0 to 20); None takes the override off
+    # set_mana_value: the custom mana value (0 to 15); None takes the override off
     mana_value: int | None = None
     # "main" (the deck proper) or "side": the maybeboard and sideboard rows, which count
     # separately. A count or category change names the zone its rows are in.
@@ -770,11 +770,13 @@ def _parse_label_change(i: int, name: str, item: dict[str, Any]) -> Change:
 
 
 DEFAULT_LABEL_COLOUR = "#656565"
+# The tag archidekt.com sends for a row with none: no name, the default grey (its site code).
+NO_LABEL = "," + DEFAULT_LABEL_COLOUR
 
 
 def _parse_mana_value_change(i: int, name: str, item: dict[str, Any]) -> Change:
     """``set_mana_value`` ({action, card_name, mana_value, zone?}) sets Archidekt's custom mana
-    value on every row of the card in that zone, a whole number from 0 to 20 as Archidekt's own
+    value on every row of the card in that zone, a whole number from 0 to 15 as Archidekt's own
     editor takes it; ``mana_value`` null takes the override off, so the card's own counts again."""
     for key in ("quantity", "category", "set_code", "set", "collector_number", "finish", "label", "color"):
         if item.get(key) not in (None, "", False):
@@ -1400,15 +1402,15 @@ def _add_entry(cardid: int, qty: int, categories: list[str] | None, modifier: st
 def _entry(action: str, card: Any, qty: int, categories: list[str] | None = None) -> dict[str, Any]:
     """One modifyCards entry for an existing row; ``categories`` replaces the row's own when given.
     A row's colour tag and custom mana value go along when it has them, as Archidekt's own editor
-    sends them with every change (its site code, read 2026-10-10), so an edit does not drop them."""
+    sends them with every change (its site code, read 2026-10-10), so an edit does not drop them.
+    A row with no tag sends Archidekt's empty one, ``NO_LABEL``, as its editor does (Q58)."""
     mods: dict[str, Any] = {
         "quantity": qty,
         "companion": False,
         "flippedDefault": False,
         "modifier": card.modifier or "Normal",
+        "label": getattr(card, "label", "") or NO_LABEL,
     }
-    if getattr(card, "label", ""):
-        mods["label"] = card.label
     if getattr(card, "custom_cmc", None) is not None:
         mods["customCmc"] = card.custom_cmc
     return {
@@ -2911,11 +2913,11 @@ class DeckService:
                 continue
             if "label" in spec:
                 # Archidekt's own editor sends the tag in modifications.label, "Name,#rrggbb"
-                # (its site code, read 2026-10-10); taking a tag off sends an empty one (not
-                # verified live: the re-read after the write checks it)
+                # (its site code, read 2026-10-10); taking a tag off sends its empty one, NO_LABEL
+                # (not verified live: the re-read after the write checks it)
                 for rid in spec["relation_ids"]:
                     entry = _entry("modify", rows[rid], rows[rid].quantity)
-                    entry["modifications"]["label"] = spec["label"]
+                    entry["modifications"]["label"] = spec["label"] or NO_LABEL
                     entry["modifications"]["companion"] = bool(rows[rid].companion)  # kept as it is
                     out.append(entry)
                 continue
@@ -4110,7 +4112,21 @@ def details_diff(deck: Deck, wanted: dict[str, Any]) -> tuple[dict[str, Any], li
 
 def details_rows(deck: Deck, wanted: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """``details_diff`` with review rows. A description row holds the current and the proposed
-    text in full, so the review page shows exactly what an apply will write."""
+    text in full, so the review page shows exactly what an apply will write.
+
+    Only a Commander deck has a bracket, as on archidekt.com (Q56): a bracket for a deck of
+    another format is refused, and moving a deck off Commander clears the bracket it had."""
+    commander = FORMAT_IDS["commander"]
+    fmt_after = FORMAT_IDS[wanted["deck_format"]] if "deck_format" in wanted else deck.format_id
+    if fmt_after != commander:
+        if wanted.get("edh_bracket") is not None:
+            raise DeckError(
+                "invalid",
+                "only a Commander deck has a bracket (as on archidekt.com); set the format to "
+                "commander, or leave edh_bracket out",
+            )
+        if "deck_format" in wanted and deck.edh_bracket is not None:
+            wanted = {**wanted, "edh_bracket": None}
     changes: dict[str, Any] = {}
     lines: list[dict[str, Any]] = []
     for key, value in wanted.items():

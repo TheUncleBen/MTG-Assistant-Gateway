@@ -445,7 +445,10 @@ class CollectionService:
                         printing["id"],
                         opts["quantity"],
                         modifier=MODIFIERS[finish],
-                        condition=opts["condition"] or None,
+                        # with none picked, English and Near Mint, as archidekt.com's own new
+                        # record (its site code; Q60)
+                        condition=opts["condition"] or "NM",
+                        language="EN",
                     ),
                 )
                 rec = {**out, "modifier": MODIFIERS[finish], "card": self._card_stub(printing, spec, out)}
@@ -1102,7 +1105,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             "value='etched'>Etched</option></select></span></div>"
             "<div class='field'><label for='addcond'>Condition</label><span "
             "class='sel'><select id='addcond' name='condition'>"
-            "<option value=''>Any</option><option>NM</option><option>LP</option><option>MP</option>"
+            "<option selected>NM</option><option>LP</option><option>MP</option>"
             "<option>HP</option><option>DMG</option>"
             "</select></span></div>"
             f"<button class='btn-primary'>{icon('plus')} Add</button></form>"

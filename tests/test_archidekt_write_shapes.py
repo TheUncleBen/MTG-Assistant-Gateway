@@ -212,6 +212,9 @@ async def test_collection_page_shows_codes_for_archidekts_numbers(stack: Stack) 
         )
         assert r.status_code == 303
         rid = next(iter(stack.ark.collections["alice"]))
+        # nothing picked: English and Near Mint, as archidekt.com's own new record (Q60)
+        sent = stack.ark.collection_posts[-1]
+        assert (sent.get("condition"), sent.get("language")) == (1, 1), sent
         stack.ark.collections["alice"][rid].update(condition=3, language=4)
         page = await b.http.get("/collection", headers=NAV)
         assert "class='pill cond'>MP<" in page.text

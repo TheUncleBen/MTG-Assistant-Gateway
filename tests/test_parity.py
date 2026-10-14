@@ -542,10 +542,32 @@ async def test_set_label_puts_and_takes_off_a_colour_tag(stack: Stack) -> None:
     # an empty label takes the tag off
     off = await propose({"action": "set_label", "name": "Sol Ring", "label": ""})
     assert off["ok"] and "Have (#37d67a) -> no tag" in off["diff"], off
+    before = len(ark.patches)
     a = structured(await call(h, token, "apply_proposal", {"proposal_id": off["proposal_id"]}))
     assert a["ok"] and a["result"]["verified"] is True, a
+    # sent as archidekt.com's own empty tag, no name and the default grey (Q58)
+    sent = [e for patch in ark.patches[before:] for e in patch.get("cards", [patch])]
+    assert [e["modifications"]["label"] for e in sent] == [",#656565"], sent
+    row = next(c for c in ark.decks[42]["cards"] if c["card"]["oracleCard"]["name"] == "Sol Ring")
+    assert row["label"] == ",#656565"
+
+
+async def test_every_modify_sends_the_colour_tag_as_the_site_does(stack: Stack) -> None:
+    """Q58: archidekt.com sends a row's colour tag with every modify, ",#656565" for a row with no
+    tag; the gateway does the same, so a quantity change on an untagged row carries it too."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
     row = next(c for c in ark.decks[42]["cards"] if c["card"]["oracleCard"]["name"] == "Sol Ring")
     assert not row.get("label")
+    args = {"deck_id": "42", "changes": [{"action": "set_quantity", "name": "Sol Ring", "quantity": 2}]}
+    p = structured(await call(h, token, "propose_deck_changes", args))
+    assert p["ok"], p
+    before = len(ark.patches)
+    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert a["ok"] and a["result"]["verified"] is True, a
+    sent = [e for patch in ark.patches[before:] for e in patch.get("cards", [patch])]
+    modifies = [e for e in sent if e["action"] == "modify"]
+    assert modifies and all(e["modifications"]["label"] == ",#656565" for e in modifies), sent
 
 
 @pytest.mark.parametrize(
@@ -663,11 +685,11 @@ async def test_set_mana_value_sets_and_clears_the_custom_mana_value(stack: Stack
 @pytest.mark.parametrize(
     ("change", "message"),
     [
-        ({"mana_value": -1}, "0 to 20"),
-        ({"mana_value": 21}, "0 to 20"),
-        ({"mana_value": 2.5}, "0 to 20"),
-        ({"mana_value": "x"}, "0 to 20"),
-        ({"mana_value": True}, "0 to 20"),
+        ({"mana_value": -1}, "0 to 15"),
+        ({"mana_value": 16}, "0 to 15"),
+        ({"mana_value": 2.5}, "0 to 15"),
+        ({"mana_value": "x"}, "0 to 15"),
+        ({"mana_value": True}, "0 to 15"),
         ({}, "needs mana_value"),
         ({"mana_value": 2, "quantity": 2}, "takes only"),
     ],
@@ -710,5 +732,51 @@ async def test_card_notes_and_custom_mana_value_are_shown_read_only(stack: Stack
         assert page.status_code == 200
         assert "data-notes='Swap for &lt;Mana Vault&gt; later'" in page.text
         assert "data-mv='0'" in page.text
+    finally:
+        await b.aclose()
+
+
+async def test_only_a_commander_deck_has_a_bracket(stack: Stack) -> None:
+    """Q56: as on archidekt.com, moving a deck off Commander clears its bracket, a bracket for a
+    deck of another format is refused, and the settings form sends none for another format."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    ark.decks[42]["edhBracket"] = 3
+
+    async def propose(details: dict) -> dict:
+        return structured(await call(h, token, "propose_deck_details", {"deck_id": "42", "details": details}))
+
+    bad = await propose({"deck_format": "modern", "edh_bracket": 2})
+    assert not bad["ok"] and "only a Commander deck has a bracket" in bad["message"], bad
+    p = await propose({"deck_format": "modern"})
+    assert p["ok"], p
+    assert "bracket: 3 -> none" in p["diff"], p["diff"]
+    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert a["ok"] and a["result"]["verified"] is True, a
+    assert ark.decks[42]["deckFormat"] == 2 and ark.decks[42]["edhBracket"] is None
+    bad = await propose({"edh_bracket": 4})  # the deck is Modern now
+    assert not bad["ok"] and "only a Commander deck has a bracket" in bad["message"], bad
+
+    # the settings form: a bracket left picked is dropped for another format, kept for Commander
+    b = await _linked_browser(stack)
+    try:
+        csrf = await b.csrf()
+        page = await b.http.get("/decks/42/settings", headers=NAV)
+        assert "for Commander decks only: changing the format clears it" in page.text
+        form = {
+            "csrf": csrf,
+            "name": "Sample Commander Deck",
+            "deck_format": "modern",
+            "edh_bracket": "3",
+            "description": "",
+            "private": "",
+            "unlisted": "",
+        }
+        r = await b.http.post("/decks/42/settings", data={**form, "description": "Modern now."})
+        assert r.status_code == 303, r.status_code
+        assert ark.decks[42]["edhBracket"] is None
+        r = await b.http.post("/decks/42/settings", data={**form, "deck_format": "commander"})
+        assert r.status_code == 303, r.status_code
+        assert ark.decks[42]["deckFormat"] == 3 and ark.decks[42]["edhBracket"] == 3
     finally:
         await b.aclose()
