@@ -1,7 +1,8 @@
 """The Guide page in headless Chromium (static/guide.js): the contents rail marks the section in
-view as the reader scrolls, the search box filters the sections and the rail and announces the
-count, Escape clears it, the drawer folds on a phone, "Back to top" appears after scrolling, and
-nothing is wider than the window at 360 and 1366 px. Skipped without a Chromium build."""
+view as the reader scrolls, the search box filters the sections and the rail, announces the
+count and lists links to the matching sections (Enter goes to the first), Escape clears it, the
+drawer folds on a phone, "Back to top" appears after scrolling, and nothing is wider than the
+window at 360 and 1366 px. Skipped without a Chromium build."""
 
 from __future__ import annotations
 
@@ -147,17 +148,48 @@ def test_rail_follows_the_reader_search_filters_and_escape_clears(server: Server
         assert page.locator(".gnav a[href='#tutorials']").is_hidden()
         assert page.locator(".gnav a[href='#ref-keys']").is_visible()
         assert page.locator("#guide-status").get_attribute("role") == "status"
+        # under the box, a link to each matching section with its title and the words around the
+        # first match, in the guide's order
+        results = page.locator("#guide-results")
+        assert results.is_visible()
+        # typing did not scroll the matches away to follow the rail's current entry
+        first_top = results.locator("a").first.evaluate("el => el.getBoundingClientRect().top")
+        assert 0 < first_top < 500, first_top
+        hrefs = results.locator("a").evaluate_all("els => els.map(a => a.getAttribute('href'))")
+        shown = page.locator(".gsec:visible").evaluate_all("els => els.map(s => '#' + s.id)")
+        assert hrefs == shown and "#ref-keys" in hrefs and "#how-add-cards" in hrefs, hrefs
+        keys = results.locator("a[href='#ref-keys']")
+        assert keys.locator(".t").inner_text() == "Keyboard shortcuts"
+        assert keys.locator("mark").first.inner_text() == "F10"
         assert _overflow(page) == 0
+        # Down moves into the list; Enter in the box goes to the first match
+        box.press("ArrowDown")
+        assert page.evaluate("() => document.activeElement.getAttribute('href')") == hrefs[0]
+        box.focus()
+        box.press("Enter")
+        page.wait_for_function(f"() => location.hash === '{hrefs[0]}'")
+        _wait_current(page, hrefs[0])
+        # a click on another match lands on that section
+        page.evaluate("() => window.scrollTo(0, 0)")
+        keys.click()
+        page.wait_for_function("() => location.hash === '#ref-keys'")
+        _wait_current(page, "#ref-keys")
+        # (with only a few sections left the page may end before the heading reaches the top)
+        top = page.locator("#ref-keys").evaluate("el => el.getBoundingClientRect().top")
+        assert 0 <= top < 450, top
         # nothing matches: the status says so and the empty-state line shows
         box.fill("zzqxv")
         page.wait_for_function("() => document.getElementById('guide-status').textContent.startsWith('No')")
         assert page.locator(".nomatch").is_visible()
         assert page.locator(".gsec:visible").count() == 0
+        assert page.locator("#guide-results").is_hidden()
+        assert page.locator("#guide-results li").count() == 0
         # Escape clears: every section and rail entry is back, the status is empty
         box.press("Escape")
         page.wait_for_function("() => document.getElementById('guide-q').value === ''")
         assert page.locator("#guide-status").inner_text() == ""
         assert page.locator(".nomatch").is_hidden()
+        assert page.locator("#guide-results").is_hidden()
         assert page.locator("#exp-playtest").is_visible()
         assert page.locator(".gnav a[href='#tutorials']").is_visible()
         total = page.locator(".gsec").count()
@@ -195,9 +227,77 @@ def test_phone_drawer_folds_and_nothing_overflows_at_360(server: Server) -> None
         page.locator("#ref-assistant").evaluate("el => el.scrollIntoView({block: 'start'})")
         page.wait_for_timeout(100)
         assert _overflow(page) == 0
+        page.evaluate("() => window.scrollTo(0, 0)")
         page.locator("#guide-q").fill("snapshot")
         page.wait_for_function("() => document.getElementById('guide-status').textContent.includes('match')")
         assert page.locator("#exp-approvals").is_visible() and page.locator("#how-layout").is_hidden()
+        assert _overflow(page) == 0
+        # with the contents drawer folded, the matches are still listed right under the box as
+        # links, each with a marked snippet; a tap goes to that section and leaves the drawer shut
+        assert drawer.get_attribute("open") is None
+        hit = page.locator("#guide-results a[href='#exp-approvals']")
+        assert hit.is_visible()
+        assert hit.locator("mark").first.inner_text().lower() == "snapshot"
+        assert _overflow(page) == 0
+        hit.click()
+        page.wait_for_function("() => location.hash === '#exp-approvals'")
+        _wait_current(page, "#exp-approvals")
+        top = page.locator("#exp-approvals").evaluate("el => el.getBoundingClientRect().top")
+        assert 0 <= top < 200, top
+        assert drawer.get_attribute("open") is None
+        # with the drawer open, a tap on a match folds it again
+        page.evaluate("() => window.scrollTo(0, 0)")
+        summary.click()
+        assert drawer.get_attribute("open") is not None
+        page.locator("#guide-results a").first.click()
+        page.wait_for_function("() => !document.querySelector('details.gnav').open")
+        assert errors == []
+        browser.close()
+
+
+@pytest.mark.parametrize("width", [390, 1366])
+def test_search_results_are_walked_with_the_arrow_keys(server: Server, width: int) -> None:
+    """L13: Down from the box reaches the first match, Down and Up go on through the list (Up from
+    the first one goes back to the box), Home and End jump to its ends, and Escape goes back to the
+    box with the search kept. Enter on a match opens it, as a click does."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width)
+        if width < 900:
+            page.locator("details.gnav > summary").click()  # the phone drawer holds the search
+        box = page.locator("#guide-q")
+        box.fill("deck")
+        page.wait_for_function("() => document.querySelectorAll('#guide-results a').length >= 4")
+        hrefs = page.locator("#guide-results a").evaluate_all("els => els.map(a => a.getAttribute('href'))")
+        focus = "() => document.activeElement.getAttribute('href') || document.activeElement.id"
+        box.press("ArrowDown")
+        assert page.evaluate(focus) == hrefs[0]
+        page.keyboard.press("ArrowDown")
+        assert page.evaluate(focus) == hrefs[1]
+        page.keyboard.press("ArrowDown")
+        assert page.evaluate(focus) == hrefs[2]
+        page.keyboard.press("ArrowUp")
+        assert page.evaluate(focus) == hrefs[1]
+        page.keyboard.press("End")
+        assert page.evaluate(focus) == hrefs[-1]
+        page.keyboard.press("ArrowDown")  # the last one stays put
+        assert page.evaluate(focus) == hrefs[-1]
+        page.keyboard.press("Home")
+        assert page.evaluate(focus) == hrefs[0]
+        page.keyboard.press("ArrowUp")  # from the first, back to the box
+        assert page.evaluate(focus) == "guide-q"
+        box.press("ArrowDown")
+        page.keyboard.press("ArrowDown")
+        page.keyboard.press("Escape")
+        assert page.evaluate(focus) == "guide-q" and box.input_value() == "deck"
+        assert page.evaluate("() => window.scrollY") >= 0  # the arrows moved focus, not the page
+        box.press("ArrowDown")
+        page.keyboard.press("ArrowDown")
+        page.keyboard.press("Enter")
+        page.wait_for_function(f"() => location.hash === '{hrefs[1]}'")
         assert _overflow(page) == 0
         assert errors == []
         browser.close()

@@ -201,10 +201,13 @@ a.skip{position:absolute;left:.5rem;top:-100px;z-index:50;padding:.6rem 1rem;bor
 a.skip:focus-visible{top:.5rem;outline-color:var(--on-orange)}
 main:focus{outline:none}
 /* an image that failed to load (feedback.js marks it): hide it, show the name in its place */
-img.img-broken{display:none}
+/* (!important: a row's own img rule, such as .erow .thumb's inline-flex, must not show it again) */
+img.img-broken{display:none !important}
 .img-fallback{display:flex;align-items:center;justify-content:center;width:100%;height:100%;min-height:2rem;
   padding:.5rem;text-align:center;font-size:.8rem;font-weight:700;color:var(--text-muted);
   background:linear-gradient(160deg,var(--surface-3),var(--surface-2));overflow-wrap:anywhere}
+/* too small for the name (a row's thumbnail): the plain tile a row without a picture shows */
+.img-fallback.img-fallback-mini{font-size:0;padding:0;min-height:0;overflow:hidden}
 svg.i{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;
   stroke-linejoin:round;vertical-align:-.15em;flex:none}
 @media (prefers-reduced-motion: reduce){ *{transition:none !important;animation:none !important} }
@@ -518,6 +521,13 @@ button.thumbbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px
   text-overflow:ellipsis}
 .suggest-list mark{background:none;color:inherit;font-weight:700;text-decoration:underline;
   text-decoration-color:var(--orange);text-underline-offset:.15em}
+/* the picker over a short list (static/suggest.js, data-suggest="list") reads as one: the select
+   chevron in the box, finger-sized rows (44 px, L9; roomier on a touch screen) */
+.suggest > input[data-suggest=list]{padding-right:2.25rem;background-image:url(/static/chevron.svg);
+  background-repeat:no-repeat;background-position:right .9rem center;background-size:10px 6px}
+.suggest-list.picklist li:not(.head){min-height:44px;padding-top:max(.55rem,calc((44px - 1.3em) / 2));
+  padding-bottom:max(.55rem,calc((44px - 1.3em) / 2))}
+@media (pointer:coarse){ .suggest-list.picklist li:not(.head){padding-top:.75rem;padding-bottom:.75rem} }
 
 /* badges, pills and notices */
 .badge{display:inline-block;vertical-align:middle;padding:.125rem .5rem;border-radius:5px;font-size:.86rem;
@@ -611,12 +621,21 @@ ul.changes{list-style:none;margin:0 0 .75rem;padding:0;border:1px solid var(--bo
 @media (max-width:420px){
   .changes li{grid-template-columns:4.9rem minmax(0,1fr);gap:.35rem .6rem}
   .changes .qty{grid-column:2;text-align:left}
+  /* an add or remove count (+1, -1) is short: it stays on the card's line, one line a row */
+  .changes li.add,.changes li.del:not(.action){grid-template-columns:4.9rem minmax(0,1fr) auto}
+  .changes li.add .qty,.changes li.del:not(.action) .qty{grid-column:auto;text-align:right}
 }
 details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--text-muted);font-size:.9rem}
 .apply{margin-top:1rem;padding:1rem;border:2px solid var(--orange);border-radius:var(--radius-panel);
   background:var(--orange-tint)}
 .apply h2{margin:0 0 .4rem;font-size:1.25rem;font-weight:900} .apply p{margin:0 0 .25rem}
 .apply .choice{margin-top:.9rem}
+/* Locked (until the click guard unlocks them), Apply and Reject keep labels that read: outlined in
+   their colour, not faded. */
+.apply form.guarded button[data-guard]:disabled{opacity:1;background:transparent;
+  border:1px dashed currentColor}
+.apply form.guarded button.primary:disabled{color:var(--orange-text)}
+.apply form.guarded button.danger:disabled{color:var(--danger-text)}
 
 /* consent page: who is asking, and where you end up */
 .consent .ask{font-size:1.1rem;margin:0 0 .75rem}
@@ -631,7 +650,7 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
 .wide .wrap{max-width:2300px}
 .wide main.wrap{padding-left:1rem;padding-right:1rem}
 
-@media (max-width:900px){ .topbar nav.site a{padding:0 .45rem;font-size:.93rem} .brand{margin-right:.25rem} }
+@media (max-width:900px){ .topbar nav.site a{padding:0 .4rem;font-size:.93rem} .brand{margin-right:.25rem} }
 /* The proposal review's three choices sit at one height (gate D8), and the deck banner's
    Comments link matches its Like and Bookmark buttons (gate D9). */
 .choice button,.choice .btn{min-height:48px}
@@ -704,6 +723,11 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
 .home .panel-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;
   gap:.5rem 1rem;margin:0 0 .75rem}
 .home .panel-head h2{margin:0}
+/* the deck list couldn't be read (Q64): the /decks notice inside the panel, over any covers read */
+.home .decks-unreadable p{margin:0}
+.home .decks-unreadable .actions{margin-top:.75rem}
+.home .decks-unreadable .actions .btn{min-height:44px}
+.home .decks-unreadable + .recent{margin-top:1rem}
 /* placeholders while a deck list is still being read (decks.js swaps the real list in) */
 .skeleton>*{display:block;background:var(--surface-2);border:1px solid var(--border);
   border-radius:var(--radius);animation:skeleton 1.4s ease-in-out infinite}
@@ -807,7 +831,8 @@ _MOBILE_RULES = """
 """
 # The medium layout: the same tabs as a navigation rail (80px wide, icon in a pill with the label
 # under it, as Material's rail draws it) fixed to the left edge; the top bar keeps the brand and
-# the account menu and loses its text links. The body is padded by the rail's width so every page
+# the account menu and loses its text links. The rail lists every page (More's too) and drops
+# More; on a short screen it scrolls. The body is padded by the rail's width so every page
 # re-centres in the remaining space.
 _RAIL_RULES = """
   body{b} .topbar nav.site a:not(.keep){display:none}
@@ -828,18 +853,7 @@ _RAIL_RULES = """
   body{b} .tabbar > a:focus-visible::before{background:rgba(127,127,127,.18)}
   body{b} .tabbar > a[aria-current=page]{color:var(--toolbar-active)}
   body{b} .tabbar > a[aria-current=page]::before{background:rgba(255,111,0,.22)}
-  body{b} .tabbar details.more summary{position:relative;display:flex;flex-direction:column;
-    align-items:center;justify-content:center;gap:.3rem;height:64px;flex:none;color:var(--toolbar-text);
-    font-weight:700;
-    font-size:11px;-webkit-tap-highlight-color:transparent}
-  body{b} .tabbar details.more summary svg{width:24px;height:24px;position:relative;z-index:1}
-  body{b} .tabbar details.more summary::before{content:'';position:absolute;top:7px;left:50%;width:56px;
-    height:32px;margin-left:-28px;border-radius:16px;background:transparent}
-  body{b} .tabbar details.more summary.on,
-  body{b} .tabbar details.more[open] summary{color:var(--toolbar-active)}
-  body{b} .tabbar details.more[open] summary::before{background:rgba(255,111,0,.22)}
-  body{b} .tabbar details.more .menu.sheet{left:calc(84px + env(safe-area-inset-left));transform:none;
-    bottom:auto;top:calc(7rem + env(safe-area-inset-top) + 4 * 64px)}
+  body{b} .tabbar details.more{display:none}
   body{b} details.dd .menu{min-width:min(14rem,calc(100vw - 16px))}
 """
 CSS = CSS.replace(
@@ -1096,10 +1110,11 @@ def current_layout() -> str:
     return _layout.get()
 
 
-# The site navigation, in Archidekt's order of sections as far as the gateway has them: decks,
-# deck search, cards you own, scanning, then the gateway's own review pages. The same list feeds
-# the top bar on wide screens and the bottom tab bar on phones.
+# The site navigation, in Archidekt's order of sections as far as the gateway has them: Home, then
+# decks, deck search, cards you own, scanning, then the gateway's own review pages. The same list
+# feeds the top bar on wide screens and the bottom tab bar on phones.
 NAV_LINKS = [
+    ("/", "Home", "home"),
     ("/decks", "Decks", "decks"),
     ("/search", "Search", "search"),
     ("/collection", "Collection", "collection"),
@@ -1107,19 +1122,20 @@ NAV_LINKS = [
     ("/proposals", "Proposals", "proposals"),
     ("/history", "History", "history"),
 ]
-# The tabs, as Material's navigation bar (3 to 5 destinations) and rail (up to 7) have them: on a
-# compact screen Decks, Scan, Collection, Proposals and More, with Search as the icon in the top
-# bar; the rail has room for Search as a sixth tab. More opens a sheet with the remaining pages
-# (Home, History, Watchlist, Guide, Admin, Account) so nothing is more than two taps away.
+# The tabs, as Material's navigation bar (3 to 5 destinations) has them: on a compact screen Home,
+# Decks, Scan, Collection and More, with Search as the icon in the top bar. More opens a sheet with
+# the remaining pages (Proposals, History, Watchlist, Guide, Account, Admin) so nothing is more than
+# two taps away; Home is never under More. The rail (an unfolded Fold, a tablet, the app from
+# 600px) is tall enough for every page, so it lists them all as tabs and has no More.
 TAB_LINKS = [
+    ("/", "Home", "home", ""),
     ("/decks", "Decks", "decks", ""),
     ("/search", "Search", "search", "railonly"),
     ("/scan", "Scan", "scan", ""),
     ("/collection", "Collection", "collection", ""),
-    ("/proposals", "Proposals", "proposals", ""),
 ]
 MORE_LINKS = [
-    ("/", "Home", "home"),
+    ("/proposals", "Proposals", "proposals"),
     ("/history", "History", "history"),
     ("/watchlist", "Watchlist", "stats"),
     ("/guide", "Guide", "guide"),
@@ -1301,13 +1317,15 @@ def render(
         more_links = [m for m in MORE_LINKS if WATCHLISTS or m[0] != "/watchlist"] + (
             [("/admin", "Admin", "settings")] if admin else []
         )
-        more_open = cur in {href for href, _l, _i in more_links} and cur != "/"
+        more_open = cur in {href for href, _l, _i in more_links}
+        # The More pages are tabs on the rail too (railonly: hidden on the phone bar, which has More)
+        rail_more = [(href, label, ic, "railonly") for href, label, ic in more_links]
         tabbar = (
             "<nav class='tabbar' aria-label='Sections'>"
             + "".join(
                 f"<a href='{href}' class='{cls}'{' aria-current=page' if cur == href else ''}>"
                 f"{icon(ic)}{label}</a>"
-                for href, label, ic, cls in TAB_LINKS
+                for href, label, ic, cls in TAB_LINKS + rail_more
             )
             + "<details class='dd more'><summary"
             + (" class='on'" if more_open else "")

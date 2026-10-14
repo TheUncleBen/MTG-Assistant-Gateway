@@ -38,6 +38,8 @@ from typing import Any
 
 from mcp.server.apps import Apps, ResourceCsp
 
+from .archidekt import drops_formatting, words_only_note
+
 CARD_URI = "ui://mtg-assistant-gateway/proposal-card"
 CARD_PATH = Path(__file__).parent / "static" / "proposal-card.html"
 APPROVAL_META_KEY = "mtg/approval"  # tool-result _meta key the card reads the code from
@@ -68,7 +70,6 @@ def proposal_tool_result(data: dict[str, Any], *, decks: Any, sub: str, in_chat:
     """A propose_* tool's result: the JSON as text and structured content, plus, for a pending
     proposal the member decides on, the in-chat card's one-time approval code in ``_meta`` (kept
     out of the text and structured content, so not in the model's context)."""
-    import pydantic_core
     from mcp_types import CallToolResult, TextContent
 
     approval = None
@@ -85,11 +86,90 @@ def proposal_tool_result(data: dict[str, Any], *, decks: Any, sub: str, in_chat:
         if row is not None and row.get("kind") != "action":
             approval = decks.approval_for(sub, row)
     meta = {APPROVAL_META_KEY: approval} if approval else None
+    data = with_words_note(data)
     return CallToolResult(
-        content=[TextContent(type="text", text=pydantic_core.to_json(data, fallback=str, indent=2).decode())],
+        content=[TextContent(type="text", text=proposal_text(data))],
         structured_content=data,
         _meta=meta,
     )
+
+
+# The comment actions whose text is written (actions.py).
+_COMMENT_WRITES = ("comment_post", "comment_edit")
+
+
+def stored_words_note(p: dict[str, Any]) -> str | None:
+    """``words_only_note`` for a proposal whose STORED description or comment is a Quill document
+    that its apply reduces to its words with formatting lost (Q90). Only a proposal stored before
+    0.7.27 holds one (0.7.26 kept the text as given): since then the plain text is stored. None
+    for a proposal that was rejected or expired, since nothing of it is saved."""
+    if p.get("state") in ("rejected", "expired"):
+        return None
+    changes = p.get("changes") if isinstance(p.get("changes"), dict) else {}
+    if p.get("kind") == "details" and drops_formatting(changes.get("description")):
+        return words_only_note("description")
+    if (
+        p.get("kind") == "action"
+        and changes.get("action") in _COMMENT_WRITES
+        and drops_formatting(changes.get("text"))
+    ):
+        return words_only_note("comment")
+    return None
+
+
+def with_words_note(data: dict[str, Any], note: str | None = None) -> dict[str, Any]:
+    """An assistant's proposal reply with ``note`` set (Q90) when its description or comment lost
+    links, formatting or embeds: ``note`` when the caller knows (the text it was given), else what
+    the stored proposal shows (``stored_words_note``). A refusal (ok false) gets none."""
+    note = note or stored_words_note(data)
+    if note and data.get("ok") is not False:
+        return {**data, "note": note}
+    return data
+
+
+# Left out of the text: the review rows and the stored edit, which the diff lines already say.
+_TEXT_SKIP = ("rows", "changes", "diff")
+
+
+def proposal_text(data: dict[str, Any]) -> str:
+    """A proposal result as plain text, not JSON: what a chat app shows when it does not draw the
+    card, and what an MCP Apps host gives the model (the structured content is for the card). A
+    few sentences, the diff lines, then every other field as ``name: value`` on its own line,
+    under the same names as the structured content, so the assistant reads all it did before."""
+    import pydantic_core
+
+    def one_line(v: Any) -> str:
+        if isinstance(v, bool):
+            return "true" if v else "false"
+        if isinstance(v, (dict, list)):
+            return pydantic_core.to_json(v, fallback=str).decode()
+        return " ".join(str(v).split())
+
+    lines: list[str] = []
+    skip = set(_TEXT_SKIP)
+    if data.get("ok") is False:
+        lines.append(
+            "Not done: " + one_line(data.get("message") or data.get("error") or "the gateway refused.")
+        )
+        skip.add("message")
+    elif data.get("proposal_id"):
+        deck = one_line(data.get("deck_name") or data.get("deck_id"))
+        head = f"Proposal {one_line(data['proposal_id'])} for {deck}: {one_line(data.get('state'))}"
+        if data.get("risk"):
+            head += f", {one_line(data['risk'])} risk"
+            if data.get("risk_reason"):
+                head += f" ({one_line(data['risk_reason'])})"
+        lines.append(head + ".")
+        if data.get("review_url"):
+            lines.append("review_url: " + one_line(data["review_url"]))
+            skip.add("review_url")
+    diff = [ln for ln in str(data.get("diff") or "").splitlines() if ln.strip()]
+    if diff:
+        lines += ["", "Changes:", *("  " + ln for ln in diff)]
+    rest = [f"{k}: {one_line(v)}" for k, v in data.items() if k not in skip and v not in (None, "", [], {})]
+    if rest:
+        lines += ["", "Details:", *rest]
+    return "\n".join(lines)
 
 
 def approval_code(secret: str, *, proposal_id: str, sub: str, client_id: str, created_at: int) -> str:

@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import re
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 from starlette.requests import Request
-from starlette.responses import RedirectResponse, Response
+from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from .actions import COLLABORATOR_NOTE, collaborator_by_hand, collaborator_target
-from .archidekt import ArchidektError, Deck, featured_scryfall_id, format_label
+from .actions import COLLABORATOR_NOTE, collaborator_by_hand, collaborator_target, profile_url
+from .archidekt import FORMAT_IDS, ArchidektError, Deck, featured_scryfall_id, format_label, rich_text
 from .busy import busy_response
 from .companion import DECK_CSP, FORMAT_CHOICES, INDENT, LIST_OK_MESSAGES, SETTINGS_OK_MESSAGES
 from .deckpage import (
@@ -31,10 +32,24 @@ from .theme import (
     plural,
 )
 
+NO_STORE = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
+
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
 
     from .app import AppState
+
+# The section of the settings page each ?ok= notice belongs to: the forms there send the member back
+# to their own section (#cover, #tags ...), so the notice shows next to the form that was used.
+OK_SECTIONS = {
+    "cover": "cover",
+    "cover_auto": "cover",
+    "tag_added": "tags",
+    "tag_removed": "tags",
+    "moved": "folder",
+    "collaborator_added": "collaborators",
+    "collaborator_removed": "collaborators",
+}
 
 
 def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> None:
@@ -56,13 +71,28 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         values: dict[str, str] | None = None,
         error: str = "",
         *,
+        error_in: str = "",
         folders: dict[str, Any] | None = None,
         collaborators: list[dict[str, Any]] | None = None,
+        following: list[str] | None = None,
+        follow_hint: str = "",
+        typed_tag: str = "",
         ok: str = "",
     ) -> str:
+        """The settings page. ``error`` shows at the top (the main settings form's own refusal) or,
+        with ``error_in``, inside that section next to its form, as the ?ok= notices of the section
+        forms do (OK_SECTIONS): those forms land on their own section, below the top of the page."""
         v = values or {}
+
+        def note(section: str) -> str:
+            if error and error_in == section:
+                return f"<p class='notice error' id='{section}-msg' role='alert'>{_esc(error)}</p>"
+            if not error and ok in SETTINGS_OK_MESSAGES and OK_SECTIONS.get(ok) == section:
+                return f"<p class='notice ok' role='status'>{_esc(SETTINGS_OK_MESSAGES[ok])}</p>"
+            return ""
+
         fmt_current = v.get("deck_format", deck.format or "")
-        description = v.get("description", deck.description or "")
+        description = v.get("description", rich_text(deck.description))  # its text (Quill on Archidekt)
 
         def sel(flag: bool) -> str:
             return " selected" if flag else ""
@@ -104,10 +134,10 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             if isinstance(c.get("name"), str)
         )
         return (
-            (f"<p class='notice error'>{_esc(error)}</p>" if error else "")
+            (f"<p class='notice error'>{_esc(error)}</p>" if error and not error_in else "")
             + (
                 f"<p class='notice ok'>{_esc(SETTINGS_OK_MESSAGES[ok])}</p>"
-                if ok in SETTINGS_OK_MESSAGES
+                if ok in SETTINGS_OK_MESSAGES and ok not in OK_SECTIONS
                 else ""
             )
             + f"<form method='post' action='/decks/{did}/settings' class='panel settings'>"
@@ -121,8 +151,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             f"{fmt_opts}</select></div>"
             "<div class='field'><label for='edh_bracket'>Commander bracket</label>"
             f"<select id='edh_bracket' name='edh_bracket'>{bracket_opts}</select>"
-            "<p class='muted small'>Your own bracket. It does not influence the estimated bracket on "
-            "the deck page."
+            "<p class='muted small'>Your own bracket, for Commander decks only: changing the format "
+            "clears it. It does not influence the estimated bracket on the deck page."
             "</p></div>"
             "<label for='description'>Description</label>"
             f"<textarea id='description' name='description' rows='10'>{_esc(description)}"
@@ -147,10 +177,17 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             "is created "
             "by typing its name there. Renaming, deleting and the premier / in-deck / in-price flags are not "
             "available through the gateway yet.</p></section>"
-            + cover_section(deck, csrf)
-            + tags_section(deck, csrf)
-            + folder_section(deck, csrf, folders)
-            + collaborator_section(deck, csrf, collaborators)
+            + cover_section(deck, csrf, note("cover"))
+            + tags_section(deck, csrf, note("tags"), typed_tag if error_in == "tags" else "")
+            + folder_section(deck, csrf, folders, note("folder"))
+            + collaborator_section(
+                deck,
+                csrf,
+                collaborators,
+                following,
+                follow_hint if error_in == "collaborators" else "",
+                note("collaborators"),
+            )
             + "<section class='panel danger' id='delete'><h2>Delete this deck</h2>"
             "<p class='muted small'>Deletes the deck on Archidekt after you type its name. A snapshot is "
             "kept under History"
@@ -159,7 +196,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             f"<a class='btn btn-danger' href='/decks/{did}/delete'>{icon('trash')} Delete deck…</a></section>"
         )
 
-    def cover_section(deck: Deck, csrf: str | None) -> str:
+    def cover_section(deck: Deck, csrf: str | None, note: str = "") -> str:
         """Pick the deck's cover image from its cards (Archidekt's "deck image"), or let Archidekt pick."""
         did = _esc(deck.id)
         chosen = (featured_scryfall_id(deck.featured) or "").lower()
@@ -178,7 +215,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             )
         return (
             "<section class='panel coverbox' id='cover'><h2>Cover image</h2>"
-            f"<form method='post' action='/decks/{did}/cover' class='coverform'>"
+            f"<form method='post' action='/decks/{did}/cover#cover' class='coverform'>"
             f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
             + (
                 f"<img class='coverart' src='{_esc(preview)}' alt='Current cover: {_esc(current.name)}'>"
@@ -192,16 +229,17 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             + "".join(options)
             + "</select></span></div>"
             f"<button class='primary'>{icon('image')} Set cover</button></form>"
-            "<p class='muted small'>Shown on the deck page, in your deck lists and on Archidekt.</p>"
+            + note
+            + "<p class='muted small'>Shown on the deck page, in your deck lists and on Archidekt.</p>"
             "</section>"
         )
 
-    def tags_section(deck: Deck, csrf: str | None) -> str:
+    def tags_section(deck: Deck, csrf: str | None, note: str = "", typed: str = "") -> str:
         did = _esc(deck.id)
         csrf_in = f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
         items = "".join(
             f"<li><span class='pill'>{_esc(r.get('name'))}</span>"
-            f"<form method='post' action='/decks/{did}/tags' class='inline'>{csrf_in}"
+            f"<form method='post' action='/decks/{did}/tags#tags' class='inline'>{csrf_in}"
             "<input type='hidden' name='action' value='remove'>"
             f"<input type='hidden' name='relation_id' value='{int(r['id'])}'>"
             f"<button class='mini' aria-label='Remove tag {_esc(r.get('name'))}' title='Remove tag'>"
@@ -210,25 +248,36 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             for r in deck.tag_relations
             if isinstance(r.get("id"), int) and r.get("name")
         )
+        # The box suggests Archidekt's tags as the member types (static/suggest.js over
+        # /decks/api/tags), less the deck's own; without scripts, or when the lookup fails, it is a
+        # plain box and a name Archidekt lacks is refused with its closest tags.
+        taken = [str(r["name"]) for r in deck.tag_relations if r.get("name")]
+        bad = "id='tags-msg'" in note
         return (
             f"<section class='panel tagbox' id='tags'><h2>Deck tags</h2>"
             f"<ul class='plain taglist'>{items or '<li class=muted>No deck tags yet.</li>'}</ul>"
-            f"<form method='post' action='/decks/{did}/tags' class='addtag'>{csrf_in}"
+            f"<form method='post' action='/decks/{did}/tags#tags' class='addtag'>{csrf_in}"
             "<input type='hidden' name='action' value='add'>"
             "<div class='field grow'><label for='tagname'>Add a tag</label>"
-            "<input id='tagname' type='text' name='name' maxlength='40' placeholder='Example: budget' "
-            "required>"
+            "<input id='tagname' type='text' name='name' maxlength='40' autocomplete='off' "
+            "data-suggest='tags' data-suggest-src='/decks/api/tags?q=' data-suggest-delay='250' "
+            f"data-suggest-exclude='{_esc(json.dumps(taken, ensure_ascii=False))}' "
+            "data-suggest-none='No Archidekt tag by that name' placeholder='Type to find a tag' "
+            f"value='{_esc(typed)}' "
+            "aria-describedby='tags-help" + (" tags-msg' aria-invalid='true'" if bad else "'") + " required>"
             f"</div><button>{icon('tag')} Add tag</button></form>"
-            "<p class='muted small'>Tags are Archidekt's public deck tags: an existing tag of that name is "
-            "reused, otherwise it is created.</p></section>"
+            + note
+            + "<p class='muted small' id='tags-help'>Tags come from Archidekt's own tag list: type a few "
+            "letters and pick one of its tags.</p></section>"
         )
 
-    def folder_section(deck: Deck, csrf: str | None, folders: dict[str, Any] | None) -> str:
+    def folder_section(deck: Deck, csrf: str | None, folders: dict[str, Any] | None, note: str = "") -> str:
         did = _esc(deck.id)
         if not folders:
             return (
-                "<section class='panel' id='folder'><h2>Folder</h2><p class='muted'>Your folders could not "
-                "be read from Archidekt right now.</p></section>"
+                "<section class='panel folderbox' id='folder'><h2>Folder</h2>"
+                + note
+                + "<p class='muted'>Your folders could not be read from Archidekt right now.</p></section>"
             )
         current = deck.parent_folder if deck.parent_folder is not None else folders["root_id"]
         opts = "".join(
@@ -238,52 +287,101 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         )
         return (
             f"<section class='panel folderbox' id='folder'><h2>Folder</h2>"
-            f"<form method='post' action='/decks/{did}/move' class='moveform'>"
+            f"<form method='post' action='/decks/{did}/move#folder' class='moveform'>"
             f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
             "<div class='field grow'><label for='folder_id'>This deck sits in</label>"
             f"<span class='sel'><select id='folder_id' name='folder_id'>{opts}</select></span></div>"
             f"<button>{icon('folder')} Move</button></form>"
-            "<p class='muted small'>Folders are created and renamed from <a href='/folders'>My decks "
+            + note
+            + "<p class='muted small'>Folders are created and renamed from <a href='/folders'>My decks "
             "› Folders</a>.</p></section>"
         )
 
-    def collaborator_section(deck: Deck, csrf: str | None, rows: list[dict[str, Any]] | None) -> str:
+    def collaborator_section(
+        deck: Deck,
+        csrf: str | None,
+        rows: list[dict[str, Any]] | None,
+        following: list[str] | None = None,
+        follow_hint: str = "",
+        note: str = "",
+    ) -> str:
         """Archidekt's deck collaborators. Adding or removing one changes who can edit the deck, so
         each form asks once more (a confirmation page) before it is sent to Archidekt. These are the
-        member's own presses; an assistant's proposal for the same thing waits on its review page."""
+        member's own presses; an assistant's proposal for the same thing waits on its review page.
+        The add box is the site's own combobox (static/suggest.js, data-suggest="list") over the
+        people the member follows (``following``, the only people Archidekt accepts) less the
+        current collaborators: focusing it shows them all, typing narrows them; without scripts it is
+        a plain box. ``follow_hint`` is a name just refused for not being followed: the refusal under
+        the box offers that person's Archidekt profile, where the Follow button is. ``note`` is this
+        section's other notice (a refusal or the ?ok= notice)."""
         did = _esc(deck.id)
         csrf_in = f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
         if rows is None:
             listing = "<p class='muted'>The collaborators could not be read from Archidekt right now.</p>"
         else:
             items = "".join(
-                f"<li><span><b>{_esc(r['username'])}</b>"
-                + (
-                    f" <span class='muted small'>added by {_esc(r['added_by'])}</span>"
-                    if r["added_by"]
-                    else ""
-                )
+                f"<li><span class='who'><span class='name'>{_esc(r['username'])}</span>"
+                + (f"<span class='when'>added by {_esc(r['added_by'])}</span>" if r["added_by"] else "")
                 + "</span>"
-                f"<form method='post' action='/decks/{did}/collaborators' class='inline'>{csrf_in}"
+                f"<form method='post' action='/decks/{did}/collaborators#collaborators'>{csrf_in}"
                 "<input type='hidden' name='action' value='remove'>"
                 f"<input type='hidden' name='username' value='{_esc(r['username'])}'>"
-                f"<button class='mini' aria-label='Remove {_esc(r['username'])}' title='Remove'>"
-                f"{icon('x')}</button></form></li>"
+                f"<button aria-label='Remove {_esc(r['username'])}'>{icon('x')} Remove</button>"
+                "</form></li>"
                 for r in rows
             )
-            empty = "<li class=muted>No collaborators.</li>"
-            listing = f"<ul class='plain taglist collablist'>{items or empty}</ul>"
+            empty = "<li class='none muted'>No collaborators yet. Only you can edit this deck.</li>"
+            listing = f"<ul class='plain plist collablist'>{items or empty}</ul>"
+        taken = {str(r["username"]).casefold() for r in rows or []}
+        people = sorted((n for n in following or [] if n.casefold() not in taken), key=str.casefold)
+        if follow_hint:
+            name = _esc(follow_hint)
+            note = (
+                "<div class='notice error follownote' id='collaborators-msg' role='alert'>"
+                f"<p class='lead'>{name} isn't someone you follow on Archidekt.</p>"
+                "<p>Follow them on their Archidekt profile, then add them here.</p>"
+                f"<a class='btn' href='{_esc(profile_url(follow_hint))}' target='_blank' "
+                f"rel='noreferrer noopener'>{icon('external')} Open {name} on Archidekt</a></div>"
+            )
+        if following is not None and not following:
+            hint = (
+                "<p class='muted small'>You don't follow anyone on Archidekt yet. To find people, "
+                "<a href='/search'>search decks</a>, open a deck, then its owner's name, and press "
+                "Follow.</p>"
+            )
+        elif following and not people:
+            hint = "<p class='muted small'>Everyone you follow on Archidekt is a collaborator already.</p>"
+        else:
+            hint = ""
+        described = "collab-help" + (" collaborators-msg" if "id='collaborators-msg'" in note else "")
+        picker = (
+            "data-suggest='list' "
+            f"data-options='{_esc(json.dumps(people, ensure_ascii=False))}' "
+            "data-suggest-head='People you follow' "
+            "data-suggest-none='Not among the people you follow' "
+            "placeholder='Pick someone you follow' "
+            if people
+            else "placeholder='Archidekt username' "
+        )
         return (
-            "<section class='panel tagbox' id='collaborators'><h2>Collaborators</h2>"
+            "<section class='panel collabbox' id='collaborators'><h2>Collaborators</h2>"
             + listing
-            + f"<form method='post' action='/decks/{did}/collaborators' class='addtag'>{csrf_in}"
-            "<input type='hidden' name='action' value='add'>"
-            "<div class='field grow'><label for='collabname'>Add someone you follow on Archidekt</label>"
+            + f"<form method='post' action='/decks/{did}/collaborators#collaborators' class='addtag'>"
+            f"{csrf_in}<input type='hidden' name='action' value='add'>"
+            "<div class='field grow'><label for='collabname'>Add someone you follow</label>"
             "<input id='collabname' type='text' name='username' maxlength='60' autocomplete='off' "
-            "placeholder='Archidekt username' required>"
-            f"</div><button>{icon('plus')} Add</button></form>"
-            "<p class='muted small'>A collaborator can make any change to this deck that you can, except "
-            "its main settings. You confirm each change once before it is sent to Archidekt.</p></section>"
+            "autocapitalize='none' spellcheck='false' "
+            + picker
+            + f"value='{_esc(follow_hint)}' aria-describedby='{described}'"
+            + (" aria-invalid='true'" if "id='collaborators-msg'" in note else "")
+            + " required>"
+            + f"</div><button>{icon('plus')} Add</button></form>"
+            + note
+            + hint
+            + "<p class='muted small' id='collab-help'>Only people you follow on Archidekt can be added; "
+            "that is Archidekt's own rule. A collaborator can make any change to this deck that you can, "
+            "except its main settings. You confirm each change once before it is sent to Archidekt.</p>"
+            "</section>"
         )
 
     async def collaborators_or_none(sub: str, deck_id: str) -> list[dict[str, Any]] | None:
@@ -292,6 +390,16 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             return None
         try:
             return await social.collaborators(sub, deck_id, owned=True)  # the page just read it as own
+        except (DeckError, ArchidektError):
+            return None
+
+    async def following_or_none(sub: str) -> list[str] | None:
+        """The usernames the member follows on Archidekt (cached briefly), None when unreadable."""
+        social = state.social
+        if social is None:
+            return None
+        try:
+            return list((await social.following_names(sub)).values())
         except (DeckError, ArchidektError):
             return None
 
@@ -333,6 +441,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 _csrf(s, sid),
                 folders=await folders_or_none(sub),
                 collaborators=await collaborators_or_none(sub, deck.id),
+                following=await following_or_none(sub),
                 ok=ok,
             ),
             sub=sub,
@@ -345,8 +454,10 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
     async def hand_action(request: Request, deck_id: str, run: Any, *, ok: str, anchor: str) -> Response:
         """One of the settings page's own forms (cover, tags, folder, collaborators): the member's
         click is the approval. On success the settings page reopens with a notice; a refusal
-        re-renders it with the message next to the form. ``run`` may answer with a page of its own
-        instead (the collaborator form's confirmation)."""
+        re-renders it with the message next to the form (``anchor``, its section, which the form's
+        own address names too, so the browser shows that section) and the typed tag still in its
+        box. ``run`` may answer with a page of its own instead (the collaborator form's
+        confirmation)."""
         sub, sid = browser_session(state, request)
         if not sub:
             return login_redirect(f"/decks/{deck_id}/settings")
@@ -367,8 +478,12 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                     deck,
                     _csrf(s, sid),
                     error=str(exc),
+                    error_in=anchor,
                     folders=await folders_or_none(sub),
                     collaborators=await collaborators_or_none(sub, deck.id),
+                    following=await following_or_none(sub),
+                    follow_hint=str(exc.extra.get("follow_username") or ""),
+                    typed_tag=(data.get("name") or "")[:40] if data.get("action") == "add" else "",
                 ),
                 sub=sub,
                 sid=sid,
@@ -425,7 +540,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             _uid, name = await collaborator_target(decks, sub, deck, kind, data.get("username") or "")
             adding = kind == "collaborator_add"
             body = confirm_form(
-                f"/decks/{deck.id}/collaborators",
+                f"/decks/{deck.id}/collaborators#collaborators",
                 _csrf(s, sid),
                 {"action": data.get("action") or "", "username": name},
                 f"Let {name} edit “{deck.name}” on Archidekt?"
@@ -467,6 +582,24 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             return "tag_added"
 
         return await hand_action(request, deck_id, run, ok="tag_added", anchor="tags")
+
+    @server.custom_route("/decks/api/tags", methods=["GET"], include_in_schema=False)
+    async def tag_lookup(request: Request) -> Response:
+        """The tag box's suggestions (static/suggest.js, data-suggest-src): Archidekt's tags for the
+        typed text, ``{"ok": true, "names": [...]}``, for the signed-in member with a linked
+        account; nothing is changed, so like the card-name lookup it is a plain GET (no CSRF). Any
+        refusal (signed out, not linked, Archidekt busy) answers with an error status: the box then
+        simply shows no list, and the form's own refusal still names close tags."""
+        sub, _sid = browser_session(state, request)
+        if not sub:
+            return JSONResponse({"ok": False, "error": "unauthenticated"}, 401, headers=NO_STORE)
+        try:
+            names = await decks.tag_suggestions(sub, request.query_params.get("q", ""))
+        except (DeckError, ArchidektError) as exc:
+            status = {"not_linked": 409, "auth": 409, "rate_limited": 429}.get(exc.kind, 503)
+            return JSONResponse({"ok": False, "error": exc.kind}, status, headers=NO_STORE)
+        # Archidekt's own lookup may stop short of every match: never narrowed in the browser
+        return JSONResponse({"ok": True, "names": names, "complete": False}, headers=NO_STORE)
 
     @server.custom_route("/decks/{deck_id}/move", methods=["POST"], include_in_schema=False)
     async def move_post(request: Request) -> Response:
@@ -695,6 +828,11 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             details["deck_format"] = data["deck_format"]
         bracket = data.get("edh_bracket", "")
         details["edh_bracket"] = int(bracket) if re.fullmatch(r"[1-5]", bracket) else None
+        # only a Commander deck has a bracket: archidekt.com's own settings form sends none for
+        # another format (Q56), so a bracket left picked when the format moves off Commander goes
+        fmt = details.get("deck_format") or deck.format
+        if FORMAT_IDS.get(str(fmt or "")) != FORMAT_IDS["commander"]:
+            details["edh_bracket"] = None
         current_client.set(BROWSER_CLIENT_ID)
         try:
             p = await decks.propose_deck_details(sub, deck.id, details)

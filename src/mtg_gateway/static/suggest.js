@@ -10,15 +10,22 @@
    search: the names become a Cards group whose rows open that page for the card, and a Decks
    group offers the deck search for the typed text and, once the card details are known, "Decks
    with commander …" for a legendary creature among the matches; Enter on plain text submits the
-   form (deck search). Loaded on every page; does nothing without inputs. */
+   form (deck search). data-suggest="list" is a short list that comes with the page (data-options,
+   as "static"): people pick from it more than they type, so focusing or clicking the box shows
+   the whole list at once (under an optional data-suggest-head heading), typing narrows it with no
+   minimum and no limit, and data-suggest-none words the empty answer. data-suggest-src names
+   another lookup in place of the card names (the settings page's tag box asks Archidekt's tag
+   list through the gateway), each with its own memory; an answer with "complete": false is never
+   narrowed locally, data-suggest-delay waits longer between keys, and data-suggest-exclude (a JSON
+   list) leaves out names already taken. Loaded on every page; does nothing without inputs. */
 (function () {
   "use strict";
   var LIMIT = 20;
   var MIN = 2;
   var DELAY = 90;
-  var memory = {};      // query -> names (this page's lifetime)
+  var memories = {};    // lookup address -> {query -> names} (this page's lifetime)
   var cards = {};       // folded name -> card summary (rich lists: mana, type, picture)
-  var complete = {};    // query -> true when the answer had fewer than LIMIT names
+  var completes = {};   // lookup address -> {query -> true when the answer had every match}
   var counter = 0;
 
   function fold(s) {
@@ -38,15 +45,16 @@
     }
     return 1;
   }
-  function narrow(names, q) {
+  function narrow(names, q, limit) {
     var starts = [], words = [], inside = [];
     names.forEach(function (n) {
       var where = rank(fold(n), q);
       if (where === 0) starts.push(n); else if (where === 1) words.push(n); else if (where === 2) inside.push(n);
     });
-    return starts.concat(words, inside).slice(0, LIMIT);
+    return starts.concat(words, inside).slice(0, limit || LIMIT);
   }
   function highlight(li, name, q) {
+    if (!q) { li.textContent = name; return; }
     // fold without collapsing spaces, so the offsets line up with the name character for character
     var f = name.toLowerCase();
     try { f = f.normalize("NFKD").replace(/[\u0300-\u036f]/g, ""); } catch (e) { /* old engine */ }
@@ -72,6 +80,12 @@
     list.className = "suggest-list";
     list.id = id;
     list.setAttribute("role", "listbox");
+    // the list's accessible name (L12): its heading's words, else the box's own label
+    var named = input.getAttribute("data-suggest-head");
+    var lab = input.labels && input.labels[0];
+    if (named) list.setAttribute("aria-label", named);
+    else if (lab) { if (!lab.id) lab.id = id + "-label"; list.setAttribute("aria-labelledby", lab.id); }
+    else if (input.getAttribute("aria-label")) list.setAttribute("aria-label", input.getAttribute("aria-label"));
     list.hidden = true;
     wrap.appendChild(list);
     var status = document.createElement("span");
@@ -86,6 +100,14 @@
     input.autocomplete = "off";
     input.removeAttribute("list");
 
+    var src = input.getAttribute("data-suggest-src") || "/scan/api/search?q=";
+    var memory = memories[src] || (memories[src] = {});
+    var complete = completes[src] || (completes[src] = {});
+    var delay = parseInt(input.getAttribute("data-suggest-delay"), 10) || DELAY;
+    var taken = {};
+    try {
+      (JSON.parse(input.getAttribute("data-suggest-exclude") || "[]") || []).forEach(function (n) { taken[fold(String(n))] = true; });
+    } catch (e) { /* no list: nothing left out */ }
     var items = [], active = -1, timer = null, inflight = null, seq = 0, shownFor = "";
     var rich = input.hasAttribute("data-suggest-rich"), peeking = null;
     var site = input.getAttribute("data-suggest-site");  // the top bar: card rows open this page, plus a Decks group
@@ -109,7 +131,9 @@
     // data-suggest="static": the choices come with the page (data-options: a JSON list of
     // labels, or of {l: label, v: value}); picking fills the label, the form reads it by name.
     var fixed = null;
-    if (input.getAttribute("data-suggest") === "static") {
+    var whole = input.getAttribute("data-suggest") === "list";  // the whole list on focus, no minimum
+    if (whole) list.className += " picklist";
+    if (input.getAttribute("data-suggest") === "static" || whole) {
       try { fixed = JSON.parse(input.getAttribute("data-options") || "[]").map(function (o) { return typeof o === "string" ? o : o.l; }); }
       catch (e) { fixed = []; }
     }
@@ -148,7 +172,12 @@
       text.className = "txt";
       var nm = document.createElement("span");
       nm.className = "nm";
-      while (li.firstChild) nm.appendChild(li.firstChild);
+      // the name's pieces (text and its highlight) stay one flex item, so the row's gap only
+      // separates the name from its mana cost, never "Oathsw" from "orn Giant"
+      var label = document.createElement("span");
+      label.className = "label";
+      while (li.firstChild) label.appendChild(li.firstChild);
+      nm.appendChild(label);
       if (c.mana_cost && window.MtgMana) nm.appendChild(window.MtgMana.mana(c.mana_cost));
       text.appendChild(nm);
       if (c.type_line) {
@@ -188,6 +217,7 @@
       li.className = "head";
       li.setAttribute("role", "presentation");
       li.textContent = label;
+      li.addEventListener("mousedown", function (e) { e.preventDefault(); });  // keep the box's focus
       return li;
     }
     function goRow(label, href, ic) {
@@ -249,13 +279,15 @@
     }
     function show(names, q) {
       if (document.activeElement !== input) return;
+      names = names.filter(function (n) { return !taken[fold(n)]; });
       list.textContent = "";
       items = [];
       active = -1;
       if (!names.length) {
         var none = document.createElement("li");
         none.className = "none";
-        var noneText = input.getAttribute("data-suggest") === "static" ? "No match" : "No card with that name";
+        var noneText = input.getAttribute("data-suggest-none")
+          || (fixed ? "No match" : "No card with that name");
         none.textContent = noneText;
         list.appendChild(none);
         status.textContent = noneText;
@@ -275,15 +307,31 @@
         status.textContent = names.length + " suggestion" + (names.length === 1 ? "" : "s");
       }
       if (site) siteRows(names);
+      var heading = whole && names.length && input.getAttribute("data-suggest-head");
+      if (heading) list.insertBefore(head(heading), list.firstChild);
       list.hidden = false;
       input.setAttribute("aria-expanded", "true");
       shownFor = q;
+      if (whole) reveal();
       if (rich && names.length) peek(names);
       announce();
       if (pendingEnter) { pendingEnter = false; if (names.length) pick(0); }
     }
+    /* A list under a box low on a phone's screen would open under the keyboard: once it shows,
+       bring the box to the top of what can be seen (scroll-padding keeps it below the top bar). */
+    function reveal() {
+      var vv = window.visualViewport, seen = vv ? vv.height : window.innerHeight;
+      if (list.getBoundingClientRect().bottom <= seen) return;
+      var calm = window.matchMedia && window.matchMedia("(prefers-reduced-motion:reduce)").matches;
+      wrap.scrollIntoView({ block: "start", behavior: calm ? "auto" : "smooth" });
+    }
+    if (whole && window.visualViewport) {
+      // the keyboard opens after the focus: look again when it has taken its room
+      window.visualViewport.addEventListener("resize", function () { if (!list.hidden) reveal(); });
+    }
     function lookup() {
       var raw = text(), q = fold(raw);
+      if (whole) { show(q ? narrow(fixed, q, fixed.length) : fixed.slice(), q); return; }
       if (q.length < MIN) { close(); if (inflight) inflight.abort(); return; }
       if (fixed) { show(narrow(fixed, q), q); return; }
       if (memory[q]) { show(memory[q], q); return; }
@@ -301,7 +349,7 @@
       var ctrl = typeof AbortController === "function" ? new AbortController() : null;
       inflight = ctrl;
       var mine = ++seq;
-      fetch("/scan/api/search?q=" + encodeURIComponent(raw.trim()), { credentials: "same-origin", signal: ctrl ? ctrl.signal : undefined })
+      fetch(src + encodeURIComponent(raw.trim()), { credentials: "same-origin", signal: ctrl ? ctrl.signal : undefined })
         .then(function (r) {
           // signed out, busy or Scryfall down is not "no such card": close and remember nothing
           if (!r.ok) { if (mine === seq) close(); return null; }
@@ -311,7 +359,7 @@
           if (!d || mine !== seq) return;      // failed, or a newer request is out
           var names = (d.names || []).slice(0, LIMIT);
           memory[q] = names;
-          if (names.length < LIMIT) complete[q] = true;
+          if (names.length < LIMIT && d.complete !== false) complete[q] = true;
           if (fold(text()) === q) show(names, q);
         })
         .catch(function () { /* aborted or offline: keep what is shown */ });
@@ -321,13 +369,15 @@
       pendingEnter = false;
       var q = fold(text());
       if (fixed || memory[q]) { lookup(); return; }   // known text: no wait at all
-      timer = setTimeout(lookup, DELAY);
+      timer = setTimeout(lookup, delay);
     });
-    input.addEventListener("focus", function () { if (fold(text()).length >= MIN && !items.length) lookup(); });
+    input.addEventListener("focus", function () { if ((whole || fold(text()).length >= MIN) && !items.length) lookup(); });
+    // a click in a box that already has the focus (after Escape or a pick) opens the list again
+    if (whole) input.addEventListener("click", function () { if (list.hidden) lookup(); });
     input.addEventListener("blur", function () { setTimeout(close, 0); });
     input.addEventListener("keydown", function (e) {
       if (list.hidden) {
-        if (e.key === "ArrowDown" && fold(text()).length >= MIN) { e.preventDefault(); lookup(); }
+        if (e.key === "ArrowDown" && (whole || fold(text()).length >= MIN)) { e.preventDefault(); lookup(); }
         return;
       }
       if (e.key === "ArrowDown") { e.preventDefault(); if (items.length) setActive((active + 1) % items.length); }

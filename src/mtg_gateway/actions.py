@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import secrets
 from typing import TYPE_CHECKING, Any
+from urllib.parse import quote
 
-from .archidekt import VOTE_DOWN, VOTE_NONE, VOTE_UP
+from .archidekt import VOTE_DOWN, VOTE_NONE, VOTE_UP, drops_formatting, words_only_note
 from .decklist import clean_text
 from .decks import DeckError, _clean_deck_id, _row
 from .social import FOLLOWING_PAGES
@@ -70,9 +71,9 @@ def _social(decks: DeckService) -> Any:
 
 
 def _comment_text(text: Any) -> str:
-    from .social import _CONTROL, MAX_COMMENT
+    from .social import MAX_COMMENT, comment_text
 
-    clean = _CONTROL.sub("", str(text or "").replace("\r\n", "\n")).strip()
+    clean = comment_text(str(text or ""))
     if not clean:
         raise DeckError("invalid", "text is required: write the comment first")
     if len(clean) > MAX_COMMENT:
@@ -102,6 +103,12 @@ async def _thread_comment(decks: DeckService, sub: str, deck_id: str, comment_id
     return {**found, "_me": thread.get("me")}
 
 
+def profile_url(username: str) -> str:
+    """The person's profile on archidekt.com (/u/<username>, as the site links it), where the
+    Follow button is."""
+    return "https://archidekt.com/u/" + quote(username, safe="")
+
+
 async def collaborator_target(
     decks: DeckService, sub: str, deck: Any, action: str, username: Any
 ) -> tuple[int, str]:
@@ -124,7 +131,10 @@ async def collaborator_target(
                 "not_found",
                 f"{want} is not among the people you follow on Archidekt (the gateway reads the "
                 f"first {FOLLOWING_PAGES} pages of that list). Collaborators are added from the "
-                "people you follow, as on Archidekt's own settings page.",
+                "people you follow, as on Archidekt's own settings page: follow them on Archidekt "
+                f"first ({profile_url(want)}), then add them.",
+                follow_username=want,
+                follow_url=profile_url(want),
             )
         user_id, name = hits[0], people[hits[0]]
         if any(c["user_id"] == user_id for c in current):
@@ -195,6 +205,8 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             VOTE_DOWN: f"Vote down the deck {where} on Archidekt",
             VOTE_NONE: f"Take back your vote on the deck {where}",
         }[vote]
+        if deck is not None and deck.user_vote == vote:
+            row["text"] += " (already the case; applying changes nothing)"
     elif action == "deck_bookmark":
         on = params.get("on") is not False
         changes["on"] = on
@@ -309,7 +321,12 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         [_row("action", **row)],
     )
     decks._audit("proposal_created", sub=sub, detail={"proposal_id": pid, "kind": "action", "action": action})
-    return decks.describe(sub, pid)
+    out = decks.describe(sub, pid)
+    # Q90: a comment given as a Quill document is posted as its words alone; the assistant (the
+    # only caller) is told when links, formatting or embeds were lost, so it does not claim them
+    if action in ("comment_post", "comment_edit") and drops_formatting(params.get("text")):
+        out["note"] = words_only_note("comment")
+    return out
 
 
 async def apply(
@@ -347,7 +364,12 @@ async def apply(
                 "Ask for a new proposal if you still want it gone.",
             )
         try:
-            result = {**(await decks.delete_deck(sub, deck_id, deck.name)), "verified": True}
+            # progress: the snapshot and the backup copy are recorded as every apply's are (review
+            # L1), so a stop that changed nothing deletes the copy or queues its delete (Q77)
+            result = {
+                **(await decks.delete_deck(sub, deck_id, deck.name, progress=progress)),
+                "verified": True,
+            }
         except DeckError as exc:
             if exc.kind == "backup_failed":  # nothing was deleted: the member can try again or reject
                 decks.db.finish_proposal(

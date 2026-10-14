@@ -1,4 +1,4 @@
-"""Archidekt's social actions for the signed-in person: like a deck (a vote on its comment thread),
+"""Archidekt's social actions for the signed-in person: like a deck (a vote on the deck),
 bookmark it, follow its owner, read and post comments.
 
 These routes are a person's own clicks: every write needs the browser session and the page's
@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from .archidekt import VOTE_DOWN, VOTE_NONE, VOTE_UP, ArchidektError, Deck
+from .archidekt import VOTE_DOWN, VOTE_NONE, VOTE_UP, ArchidektError, Deck, plain_text, rich_text
 from .decklist import clean_text
 from .decks import DeckError, _clean_deck_id
 from .pages import NO_STORE, browser_session, csrf_header_ok, read_limited
@@ -52,6 +52,18 @@ _STATUS = {
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
+def comment_text(text: str) -> str:
+    """A comment as it will be written: plain text only (Q70; a Quill document is kept as its words
+    alone, see ``plain_text``), without control characters or surrounding white space. Cleaning
+    the result again changes nothing, so an approved comment is posted as its review showed it."""
+    text = str(text)
+    while True:
+        clean = _CONTROL.sub("", plain_text(text).replace("\r\n", "\n")).strip()
+        if clean == text:
+            return clean
+        text = clean
+
+
 def _fail(kind: str, message: str) -> JSONResponse:
     return JSONResponse(
         {"ok": False, "error": kind, "message": message}, _STATUS.get(kind, 400), headers=NO_STORE
@@ -62,7 +74,7 @@ def _err(exc: Exception) -> JSONResponse:
     if isinstance(exc, (DeckError, ArchidektError)):
         kind = exc.kind
         msg = str(exc)
-        if kind in ("auth", "forbidden"):
+        if kind == "auth":
             msg = "Archidekt did not accept your linked session; relink it on the Account page."
         if kind == "contract":
             msg = "Archidekt answered in an unexpected way; try again."
@@ -81,7 +93,7 @@ def comment_out(c: dict[str, Any], depth: int = 0) -> dict[str, Any]:
     results = kids.get("results") if isinstance(kids, dict) else kids if isinstance(kids, list) else []
     return {
         "id": _int(c.get("id")),
-        "text": str(c.get("text") or ""),
+        "text": rich_text(c.get("text")),  # Archidekt keeps a Quill document; shown as its text
         "owner": {
             "id": _int(owner.get("id")),
             "username": str(owner.get("username") or ""),
@@ -139,18 +151,19 @@ class SocialService:
         return await self.decks.get_any_deck(sub, deck_id)
 
     async def vote(self, sub: str, deck_id: str, want: int) -> dict[str, Any]:
+        self.decks._writes_switch()
         self._me(sub)
         deck = await self.deck(sub, deck_id)
-        if deck.comment_root is None:
-            raise DeckError("unavailable", "Archidekt reports no thread for this deck, so it cannot be liked")
+        if deck.user_vote == want:  # already so: nothing is sent (Archidekt might toggle it)
+            return {"vote": want, "points": deck.points}
         if want == VOTE_NONE:
+            # taking a vote back names the vote taken back, as archidekt.com's like button does
             await self.decks._call(
-                sub, lambda t: self.client.vote_deck(t, deck.comment_root, up=True, remove=True)
+                sub,
+                lambda t: self.client.vote_deck(t, deck.id, up=deck.user_vote != VOTE_DOWN, remove=True),
             )
         else:
-            await self.decks._call(
-                sub, lambda t: self.client.vote_deck(t, deck.comment_root, up=want == VOTE_UP)
-            )
+            await self.decks._call(sub, lambda t: self.client.vote_deck(t, deck.id, up=want == VOTE_UP))
         weight = {VOTE_UP: 1, VOTE_DOWN: -1, VOTE_NONE: 0}
         points = deck.points - weight[deck.user_vote] + weight[want]
         self.state.db.audit("deck_voted", sub=sub, detail={"deck_id": deck.id, "vote": want})
@@ -161,6 +174,7 @@ class SocialService:
         {up, remove}, the body archidekt.com's own comment vote sends (its bundle, read 2026-10-10).
         The new score is worked out the way the site does, from the thread's points and the
         member's earlier vote."""
+        self.decks._writes_switch()
         uid, _name = self._me(sub)
         thread = await self.comments(sub, deck_id)
         found = _find(thread["comments"], comment_id)
@@ -175,9 +189,10 @@ class SocialService:
         if found["user_vote"] == want:  # already so: nothing is sent (Archidekt might toggle it)
             return {"comment": comment_id, "vote": want, "points": found["points"]}
         if want == VOTE_NONE:
-            await self.decks._call(sub, lambda t: self.client.vote_deck(t, comment_id, up=True, remove=True))
+            up = found["user_vote"] != VOTE_DOWN  # the vote taken back, as the site sends it
+            await self.decks._call(sub, lambda t: self.client.vote_comment(t, comment_id, up=up, remove=True))
         else:
-            await self.decks._call(sub, lambda t: self.client.vote_deck(t, comment_id, up=want == VOTE_UP))
+            await self.decks._call(sub, lambda t: self.client.vote_comment(t, comment_id, up=want == VOTE_UP))
         weight = {VOTE_UP: 1, VOTE_DOWN: -1, VOTE_NONE: 0}
         before = found["user_vote"] if found["user_vote"] in weight else VOTE_NONE
         points = found["points"] - weight[before] + weight[want]
@@ -187,6 +202,7 @@ class SocialService:
         return {"comment": comment_id, "vote": want, "points": points}
 
     async def bookmark(self, sub: str, deck_id: str, on: bool) -> dict[str, Any]:
+        self.decks._writes_switch()
         self._me(sub)
         await self.decks._call(sub, lambda t: self.client.bookmark_deck(t, deck_id, on=on))
         self.state.db.audit("deck_bookmarked", sub=sub, detail={"deck_id": deck_id, "on": on})
@@ -248,6 +264,7 @@ class SocialService:
         return out
 
     async def add_collaborator(self, sub: str, deck_id: str, user_id: int) -> dict[str, Any]:
+        self.decks._writes_switch()
         uid, _name = self._me(sub)
         if str(user_id) == uid:
             raise DeckError("invalid", "you own this deck already")
@@ -264,6 +281,7 @@ class SocialService:
     async def remove_collaborator(self, sub: str, deck_id: str, user_id: int) -> dict[str, Any]:
         """Remove by the person's user id: the editor row is looked up on this deck first, so
         only a collaborator of this deck can be removed through it."""
+        self.decks._writes_switch()
         row = next((c for c in await self.collaborators(sub, deck_id) if c["user_id"] == user_id), None)
         if row is None:
             return {"removed": False, "already": True, "verified": True}
@@ -280,6 +298,7 @@ class SocialService:
         return {"self": False, "following": user_id in await self.following(sub)}
 
     async def follow(self, sub: str, user_id: int, on: bool) -> dict[str, Any]:
+        self.decks._writes_switch()
         uid, _name = self._me(sub)
         if str(user_id) == uid:
             raise DeckError("invalid", "you cannot follow yourself")
@@ -333,7 +352,8 @@ class SocialService:
     async def edit_comment(self, sub: str, deck_id: str, comment_id: int, text: str) -> dict[str, Any]:
         """Change the text of one of the member's own comments (Archidekt's edit); verified by
         re-reading the thread."""
-        text = _CONTROL.sub("", text.replace("\r\n", "\n")).strip()
+        self.decks._writes_switch()
+        text = comment_text(text)
         if not text:
             raise DeckError("invalid", "write something first")
         if len(text) > MAX_COMMENT:
@@ -354,6 +374,7 @@ class SocialService:
 
     async def delete_comment(self, sub: str, deck_id: str, comment_id: int) -> dict[str, Any]:
         """Delete one of the member's own comments; verified by re-reading the thread."""
+        self.decks._writes_switch()
         thread = await self.comments(sub, deck_id)
         self._own_comment(sub, thread, comment_id)
         await self.decks._call(sub, lambda t: self.client.comment_delete(t, comment_id))
@@ -371,8 +392,9 @@ class SocialService:
         return {"deleted": comment_id, "count": after["count"]}
 
     async def comment(self, sub: str, deck_id: str, text: str, parent: int | None) -> dict[str, Any]:
+        self.decks._writes_switch()
         _uid, name = self._me(sub)
-        text = _CONTROL.sub("", text.replace("\r\n", "\n")).strip()
+        text = comment_text(text)
         if not text:
             raise DeckError("invalid", "write something first")
         if len(text) > MAX_COMMENT:

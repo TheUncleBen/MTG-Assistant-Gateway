@@ -17,12 +17,14 @@ from .approve import (
     APPROVE_DECISIONS,
     CONFIRM_TOOL_META,
     apply_on_review_page,
+    with_words_note,
 )
 from .archidekt import parse_deck
 from .cards import (
     with_card,
 )
 from .decklist import DecklistError, parse_decklist, to_text
+from .deckpage import decks_unreadable_text
 from .decks import (
     DeckError,
 )
@@ -72,7 +74,9 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "List the decks owned by the linked Archidekt account (most recently updated first). Optional "
             "filters: name_contains, deck_format (commander, modern...), folder. This is the one tool for "
             "the member's deck list; search_decks with owner lists another user's public decks. The "
-            "gateway's own backup copies are left out (each snapshot in list_snapshots links its copy)."
+            "gateway's own backup copies are left out (each snapshot in list_snapshots links its copy). "
+            "unreadable counts decks Archidekt listed without a readable owner, which are left out; when "
+            "it is above 0, note says so in words to pass on to the member."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
         meta=deck_list_card_meta,
@@ -84,6 +88,10 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             rows = await state.decks.list_decks(_sub())
         except DeckError as exc:
             return _tool_error(exc)
+        # entries Archidekt listed without a readable owner are left out (Q64): say so, in the
+        # words My decks uses, so the assistant doesn't present a partial list as the whole one
+        unreadable = int(getattr(rows, "unreadable", 0) or 0)
+        note = decks_unreadable_text(some_shown=len(rows) > 0) if unreadable else None
         if name_contains:
             rows = [d for d in rows if name_contains.strip().lower() in str(d.get("name", "")).lower()]
         if deck_format:
@@ -93,7 +101,10 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             rows = [d for d in rows if (d.get("folder") or "") == folder]
         for d in rows:
             d.setdefault("url", f"https://archidekt.com/decks/{d['id']}")
-        return {"ok": True, "decks": rows, "count": len(rows)}
+        out: dict[str, object] = {"ok": True, "decks": rows, "count": len(rows), "unreadable": unreadable}
+        if note:
+            out["note"] = note
+        return out
 
     @server.tool(
         name="get_deck",
@@ -132,7 +143,9 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             deck = await state.decks.get_any_deck(_sub(), deck_ref)
         except DeckError as exc:
             return with_card(_tool_error(exc), None)
-        return _deck_card(deck_out(deck, include_text=bool(include_text), view=view), "deck", str(deck.id))
+        return _deck_card(
+            deck_out(deck, include_text=bool(include_text), view=view), "deck", str(deck.id), deck
+        )
 
     @server.tool(
         name="parse_decklist",
@@ -257,7 +270,7 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "and set_printing change copies already in the deck. set_label puts Archidekt's color tag "
             "(label up to 40 characters, color #rrggbb) on every row of a card, in zone main or side; "
             "an empty label takes it off. set_mana_value sets Archidekt's custom mana value (mana_value "
-            "0 to 20, null takes it off) on every row of a card in that zone. set_category and "
+            "0 to 15, null takes it off) on every row of a card in that zone. set_category and "
             "set_commander move every copy of a card (set_category creates the category if the deck "
             "has none of that name). "
             "One card takes one kind of change per proposal; a pending proposal is replaced by rejecting "
@@ -391,9 +404,10 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
                     # and the gateway waits a little for the member's Apply there.
                     done = await apply_on_review_page(ctx, lambda: state.decks.describe(sub, proposal_id))
                     if done is not None:
-                        return done
+                        return with_words_note(done)
             # The service re-checks the mode and the risk itself, so there is no way around it.
-            return {"ok": True, **(await state.decks.apply(sub, proposal_id, via="mcp"))}
+            # Q90: a proposal stored with a formatted document (0.7.26) is applied as its words
+            return with_words_note({"ok": True, **(await state.decks.apply(sub, proposal_id, via="mcp"))})
         except DeckError as exc:
             return _tool_error(exc)
 
@@ -434,9 +448,19 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             state.decks.check_approval(sub, proposal_id, approval)
             if decision == "reject":
                 return _card_result({"ok": True, **state.decks.reject(sub, proposal_id, via="app")}, None)
-            return _card_result({"ok": True, **(await state.decks.apply(sub, proposal_id, via="app"))}, None)
+            return _card_result(
+                with_words_note({"ok": True, **(await state.decks.apply(sub, proposal_id, via="app"))}), None
+            )
         except DeckError as exc:
-            return _card_result(_tool_error(exc), None)
+            out = _tool_error(exc)
+            if "state" not in out:
+                # Review B6: the card shows the proposal as it now is (failed after an apply that
+                # failed, pending after a refusal that left it so), never a stale Pending.
+                try:
+                    out["state"] = state.decks.describe(_sub(), proposal_id)["state"]
+                except DeckError:
+                    pass
+            return _card_result(out, None)
 
     def _scan_session(sub: str, ref: str) -> dict[str, Any]:
         if state.scan is None:
@@ -482,11 +506,14 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             snap = state.decks.snapshot(_sub(), snapshot_id)
         except DeckError as exc:
             return with_card(_tool_error(exc), None)
+        deck = parse_deck(snap["deck"])
         data = {
-            **deck_out(parse_deck(snap["deck"]), view=view),
+            **deck_out(deck, view=view),
             "snapshot_id": snap["id"],
             "proposal_id": snap.get("proposal_id"),
             "taken_at": snap["taken_at"],
             "backup_url": snap.get("backup_url"),
         }
-        return _deck_card(data, "snapshot", str(snap["id"]))
+        return _deck_card(
+            data, "snapshot", str(snap["id"]), deck, snapshot={"id": snap["id"], "taken_at": snap["taken_at"]}
+        )

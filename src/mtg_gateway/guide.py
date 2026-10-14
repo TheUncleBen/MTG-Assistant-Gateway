@@ -40,6 +40,14 @@ GUIDE_CSS = """
 .gsearch label{display:block;font-weight:700;margin-bottom:.25rem}
 .gsearch input[type=search]{width:100%}
 .gsearch .status{min-height:1.2em;margin:.35rem 0 0}
+.guide .gresults{list-style:none;margin:.35rem 0 0;padding:0}
+.guide .gresults li{margin:0 0 .25rem}
+.gresults a{display:block;padding:.4rem .6rem;border-radius:var(--radius);color:var(--text);
+  text-decoration:none;border:1px solid var(--border-soft)}
+.gresults a:hover,.gresults a:focus-visible{background:var(--surface-2);color:var(--text)}
+.gresults .t{display:block;font-weight:700;overflow-wrap:anywhere}
+.gresults .snip{display:block;color:var(--text-muted);font-size:.86rem;overflow-wrap:anywhere}
+.gresults mark{background:var(--orange-tint);color:var(--text);border-radius:2px;padding:0 .1rem}
 details.gnav{margin:0 0 .5rem}
 details.gnav > summary{list-style:none;cursor:pointer;user-select:none;width:100%}
 details.gnav > summary::-webkit-details-marker{display:none}
@@ -211,8 +219,8 @@ def guide_body(
         "are kept as proposals and applied once the person running it turns writes on."
     )
     backup_box = (
-        "The save bar has a tick box, <strong>Also keep a backup copy on Archidekt</strong>, on by "
-        "default: unticking it skips only that extra copy for that one save."
+        "The save bar has a tick box, <strong>Also keep a backup copy on Archidekt</strong>, off by "
+        "default: tick it to also keep that extra copy for that one save."
         if archidekt_backups
         else "The backup copy on Archidekt is switched off on this gateway, so no tick box is offered."
     )
@@ -235,10 +243,11 @@ def guide_body(
         "<li><span>Optional: <a href='#tut-connect'><strong>connect an assistant</strong></a> from the home "
         "page and ask it to research, simulate or edit for you. An assistant's edit comes back to you as a "
         "proposal.</span></li></ol>"
-        "<p class='tip'>On a phone the tabs at the bottom are Decks, Scan, Collection, Proposals and More; "
-        "the magnifier at the top opens the search box for cards and decks. More opens Home, History, Guide "
-        "and Account (and Admin). "
-        "Unfolded or on a tablet the tabs move to a rail down the left edge, with Search among them. "
+        "<p class='tip'>On a phone the tabs at the bottom are Home, Decks, Scan, Collection and More; "
+        "the magnifier at the top opens the search box for cards and decks. More opens Proposals, History, "
+        "Guide and Account (and Admin). "
+        "Unfolded or on a tablet the tabs move to a rail down the left edge with every page on it, Search "
+        "among them, and no More. "
         "Your account menu is your picture at the top right, and a tap anywhere else closes it.</p>"
     )
     tut_link = (
@@ -530,13 +539,16 @@ def guide_body(
         "with London mulligans, then draw, play, tap and next turn, all in your browser. A Commander deck "
         "starts with its commander in the command zone.</p>"
         "<p><strong>Play on EDHPlay</strong> takes the deck to EDHPlay, the free online table for "
-        "Commander: it copies the deck in EDHPlay's import format and opens EDHPlay in a new tab (in the "
-        "app, your phone's browser). The list has the commander first, then the rest of the deck with "
+        "Commander. A short box asks first; its <strong>Copy and Open EDHPlay.com</strong> copies the "
+        "deck in EDHPlay's import format and opens EDHPlay. The import steps show in that box the "
+        "first time and stay folded under <strong>How to import</strong> after that. The list has "
+        "the commander first, then the rest of the deck with "
         "each card's printing, then a Sideboard section with your companion and sideboard. EDHPlay's "
         "sideboard holds 15 cards, so anything past that is left out and a note names it; your "
         "maybeboard is not sent, and EDHPlay does not take tokens from a list, so add those there by "
-        "hand. On EDHPlay choose <strong>Create Deck</strong>, then <strong>Import</strong>: paste the "
-        "list and press <strong>Import &amp; Replace</strong>. EDHPlay cannot receive a deck by link, "
+        "hand. On EDHPlay go to <strong>My Decks</strong>, choose <strong>Add Deck</strong> and open the "
+        "new deck, then press <strong>Import</strong>: paste the list and press <strong>Import &amp; "
+        "Replace</strong>. EDHPlay cannot receive a deck by link, "
         "so after a change on Archidekt press the button again.</p>"
     )
     how_layout = (
@@ -682,7 +694,7 @@ def guide_body(
             "remove tags, set its cover",
             "<code>propose_deck_details</code>",
             "proposal (high)",
-            "applied with the same verified calls as the deck settings page",
+            "applied the same way as on the deck settings page",
         ),
         (
             "Undo: snapshots and restore (cards and the deck's name, description, format, bracket, privacy)",
@@ -866,9 +878,10 @@ def guide_body(
         "<tbody>"
         + "".join(f"<tr><td>{_esc(p)}</td><td>{a}</td><td>{w}</td></tr>" for p, a, w in page_rows)
         + "</tbody></table></div>"
-        "<p>On a phone the tabs at the bottom are Decks, Scan, Collection, Proposals and More (Home, "
+        "<p>On a phone the tabs at the bottom are Home, Decks, Scan, Collection and More (Proposals, "
         "History, Guide, Account and Admin); Search is the magnifier at the top. From 600 px on a touch "
-        "screen the tabs are a rail down the left edge; a wider browser has the links in the top bar.</p>"
+        "screen every page is a tab on a rail down the left edge, with no More; a wider browser has the "
+        "links in the top bar, Home first.</p>"
     )
     on_review_page = "<td>you press Apply on its review page</td>"  # R-142, in every mode
     ref_approval = (
@@ -1132,7 +1145,8 @@ def guide_body(
         "<div class='gsearch' hidden><label for='guide-q'>Search the guide</label>"
         "<input id='guide-q' type='search' placeholder='A word or two, such as “snapshot” or “F10”' "
         "autocomplete='off' spellcheck='false' aria-describedby='guide-status'>"
-        "<p id='guide-status' class='status muted small' role='status' aria-live='polite'></p></div>"
+        "<p id='guide-status' class='status muted small' role='status' aria-live='polite'></p>"
+        "<ul id='guide-results' class='gresults' aria-label='Matching sections' hidden></ul></div>"
     )
     return (
         f"<div class='guide' id='top'><div class='gside'>{search}{_nav(parts)}</div>"

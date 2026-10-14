@@ -151,6 +151,11 @@ async def test_tools_carry_their_cards_and_the_cards_declare_only_what_they_load
     for uri in (DECK_LIST_CARD_URI, SCAN_CARD_URI):
         assert set(csp[uri]["resourceDomains"]) == {"https://api.scryfall.com", "https://cards.scryfall.io"}
     assert "frameDomains" not in json.dumps(csp)
+    # The same origins under ChatGPT's own key, in its snake_case spelling.
+    for uri in set(CARDED.values()):
+        widget = res[uri]["_meta"]["openai/widgetCSP"]
+        assert widget["connect_domains"] == (csp[uri].get("connectDomains") or []), uri
+        assert widget["resource_domains"] == (csp[uri].get("resourceDomains") or []), uri
 
 
 async def test_switching_the_card_off_removes_every_card(no_card: Stack) -> None:
@@ -226,9 +231,61 @@ async def test_deck_reads_keep_their_text_and_carry_a_signed_link_only_in_meta(s
         card = result["_meta"][CARD_META_KEY]
         assert card["name"] == sc["name"] and card["link"].startswith("https://mtg.test" + LINK_PATH)
         assert LINK_PATH not in result["content"][0]["text"] and LINK_PATH not in json.dumps(sc)
+        # The deck itself rides along for the card (out of the model's context), the same rows the
+        # link serves, so the card needs no connection to the gateway.
+        served = (await stack.h.http.get(card["link"][len("https://mtg.test") :])).json()
+        assert card["deck"] == {k: v for k, v in served.items() if k != "ok"}
+        assert card["deck"]["categories"] and "gateway_url" not in json.dumps(sc)
     # An error carries no link.
     err = await call(stack.h, token, "get_deck", {"deck_ref": "999999"})
     assert err["structuredContent"]["ok"] is False and not (err.get("_meta") or {}).get(CARD_META_KEY)
+
+
+def _big_deck(n: int):
+    from mtg_gateway.archidekt import Deck, DeckCard
+
+    cats = ["Commander", "Ramp", "Card Draw", "Removal", "Board Wipes", "Creatures", "Synergy", "Lands"]
+    rows = [
+        DeckCard(
+            relation_id=i,
+            card_id=i,
+            name=f"Some Rather Long Legendary Card Name Number {i}",
+            quantity=1,
+            categories=[cats[i % len(cats)]],
+            modifier="Foil" if i % 7 == 0 else "Normal",
+            set_code="cmm",
+            collector_number=str(400 + i),
+            cmc=float(i % 8),
+            mana_cost="{3}{G}{G}{U}",
+            color_identity=["G", "U"],
+            types=["Legendary", "Creature"],
+            price=12.34,
+            scryfall_uid=f"0000aaaa-bbbb-cccc-dddd-{i:012d}",
+            oracle_text="x" * 400,  # rules text never travels to the card
+        )
+        for i in range(n)
+    ]
+    return Deck(
+        id="42",
+        name="Big",
+        owner="alice",
+        updated_at="",
+        cards=rows,
+        categories=[{"name": c, "includedInDeck": True} for c in cats],
+        raw={},
+        format="commander",
+    )
+
+
+def test_a_commander_deck_rides_in_the_result_and_a_huge_one_falls_back_to_the_link() -> None:
+    link = "https://mtg.test" + LINK_PATH + "tok"
+    meta = cards.deck_card_payload(_big_deck(100), link=link, public_url="https://mtg.test")
+    size = len(json.dumps(meta["deck"], separators=(",", ":")))
+    assert len(meta["deck"]["categories"]) == 8 and meta["deck"]["card_count"] == 100
+    assert size < 40_000, size  # a 100-card deck of long names is well under the inline limit
+    assert "oracle_text" not in json.dumps(meta) and meta["link"] == link
+    huge = cards.deck_card_payload(_big_deck(2000), link=link, public_url="https://mtg.test")
+    assert "deck" not in huge and huge["link"] == link and huge["name"] == "Big"
 
 
 async def test_the_deck_link_serves_the_deck_grouped_for_the_card_without_any_cookie(stack: Stack) -> None:
@@ -442,6 +499,7 @@ async def test_snapshot_reads_carry_the_deck_card_with_the_snapshot_named(stack:
     result = await call(h, token, "get_snapshot", {"snapshot_id": a["snapshot_id"]})
     assert result["structuredContent"]["snapshot_id"] == a["snapshot_id"]
     link = result["_meta"][CARD_META_KEY]["link"]
+    assert result["_meta"][CARD_META_KEY]["deck"]["snapshot"]["id"] == a["snapshot_id"]
     r = await h.http.get(link[len("https://mtg.test") :])
     assert r.status_code == 200 and r.json()["snapshot"]["id"] == a["snapshot_id"]
     # Another member's link to the same snapshot id answers not found.

@@ -14,7 +14,7 @@ import json
 import sqlite3
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -419,6 +419,15 @@ def _like(search: str) -> str:
     text = str(search).strip()[:200]
     text = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     return f"%{text}%"
+
+
+def _like_prefix(prefix: str) -> str:
+    """A LIKE pattern matching what starts with ``prefix``, its wildcards escaped (ESCAPE '\\')."""
+    return prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+
+# job_runs rows of the queued backup deletes (Q77): this prefix and the snapshot id
+BACKUP_DELETE_JOB = "backup_delete:"
 
 
 class Database:
@@ -1241,6 +1250,12 @@ class Database:
             for table, column in self.MEMBER_TABLES:
                 if table in present:
                     out[table] = c.execute(f"DELETE FROM {table} WHERE {column} = ?", (sub,)).rowcount
+            if "job_runs" in present:  # their queued backup deletes (Q77) go with their snapshots
+                out["backup_deletes"] = c.execute(
+                    "DELETE FROM job_runs WHERE name LIKE ? ESCAPE '\\' "
+                    "AND json_extract(detail_json, '$.sub') = ?",
+                    (_like_prefix(BACKUP_DELETE_JOB), sub),
+                ).rowcount
             c.execute(
                 "INSERT INTO audit_log (at, sub, client_id, event, detail_json) VALUES (?, ?, NULL, ?, ?)",
                 (int(time.time()), sub, "member_data_deleted", json.dumps(out)),
@@ -1576,6 +1591,62 @@ class Database:
             out[str(r["deck_id"])] = str(r["deck_name"] or out.get(str(r["deck_id"])) or "")
         return out
 
+    def own_history_deck_ids(
+        self, owner_sub: str, *, account_id: str, username: str, linked_at: int
+    ) -> set[str]:
+        """The decks the member's history shows as decks of the Archidekt account linked now
+        (``account_id`` and ``username``, linked at ``linked_at``), the only ones its deck list
+        can call gone: snapshots of a deck that account owned (a stored deck names its owner),
+        and proposals that change or make one of that account's decks (edit, details, restore,
+        new deck). A clone's source, an account action's deck or a report's deck may be anyone's,
+        so they are never in it, and neither is a deck of an account linked before: its history
+        stays usable (its snapshots keep Restore) and it is never called gone.
+
+        A proposal (or a snapshot whose deck names no owner) does not record the account, so it
+        counts when it was made under the link of now (at or after ``linked_at``), or under an
+        earlier link of the same account (the member's "archidekt_linked" audit entries name each
+        account linked). One made before any recorded link counts only while no other account was
+        ever linked. Every doubt leaves a deck out, so a deck is never called gone wrongly."""
+        with self._lock:
+            snaps = self._conn.execute(
+                "SELECT deck_id FROM snapshots WHERE owner_sub = ? "
+                "AND CAST(json_extract(deck_json, '$.owner.id') AS TEXT) = ?",
+                (owner_sub, str(account_id)),
+            ).fetchall()
+            props = self._conn.execute(
+                "SELECT deck_id, created_at FROM proposals WHERE owner_sub = ? "
+                "AND kind IN ('edit', 'details', 'restore', 'create_deck') "
+                "UNION ALL SELECT deck_id, taken_at FROM snapshots WHERE owner_sub = ? "
+                "AND json_extract(deck_json, '$.owner.id') IS NULL",
+                (owner_sub, owner_sub),
+            ).fetchall()
+            links = self._conn.execute(
+                "SELECT at, detail_json FROM audit_log WHERE sub = ? AND event = 'archidekt_linked' "
+                "ORDER BY at, id",
+                (owner_sub,),
+            ).fetchall()
+        me = str(username or "").casefold()
+
+        def named(detail: Any) -> str:
+            try:
+                d = json.loads(detail or "{}")
+            except ValueError:
+                return ""
+            return str(d.get("archidekt_username") or "").casefold() if isinstance(d, dict) else ""
+
+        linked = [(int(r["at"]), named(r["detail_json"])) for r in links]
+        only_me = bool(me) and all(name == me for _at, name in linked)
+        out = {str(r["deck_id"]) for r in snaps}
+        for r in props:
+            at = int(r["created_at"])
+            if at >= int(linked_at):
+                out.add(str(r["deck_id"]))
+                continue
+            earlier = [name for when, name in linked if when <= at]
+            if (earlier[-1] == me and bool(me)) if earlier else only_me:
+                out.add(str(r["deck_id"]))
+        return out
+
     def reject_proposal(
         self, proposal_id: str, owner_sub: str, closed_by: dict[str, Any] | None = None
     ) -> bool:
@@ -1705,7 +1776,13 @@ class Database:
         ``search`` (on the stored deck's name) and a time window (``since`` inclusive, ``until``
         exclusive, epoch seconds) narrow the list in SQL."""
         sql = (
-            "SELECT id, deck_id, proposal_id, taken_at, deck_json, backup_deck_id, backup_url "
+            "SELECT id, deck_id, proposal_id, taken_at, deck_json, backup_deck_id, backup_url, "
+            # Taken for an apply that stopped before it changed anything (Q78): its proposal is
+            # open again or was closed without being applied (only a pending one is rejected or
+            # expires), or a later apply of it took another snapshot.
+            "(SELECT 1 FROM proposals p WHERE p.id = snapshots.proposal_id "
+            "AND p.owner_sub = snapshots.owner_sub AND (p.state IN ('pending', 'expired', 'rejected') "
+            "OR (p.snapshot_id IS NOT NULL AND p.snapshot_id != snapshots.id))) AS stopped_attempt "
             "FROM snapshots WHERE owner_sub = ?"
         )
         args: list[Any] = [owner_sub]
@@ -1729,6 +1806,8 @@ class Database:
         for r in rows:
             deck = json.loads(r["deck_json"])
             cards = deck.get("cards") if isinstance(deck, dict) else None
+            owner = deck.get("owner") if isinstance(deck, dict) else None
+            owner_id = owner.get("id") if isinstance(owner, dict) else None
             out.append(
                 {
                     "snapshot_id": r["id"],
@@ -1738,9 +1817,12 @@ class Database:
                     "taken_at": r["taken_at"],
                     "backup_deck_id": r["backup_deck_id"],
                     "backup_url": r["backup_url"],
+                    # the Archidekt account that owned the deck then (None when not recorded)
+                    "account_id": str(owner_id) if owner_id is not None else None,
                     "card_count": sum(int(c.get("quantity", 0)) for c in cards if isinstance(c, dict))
                     if isinstance(cards, list)
                     else None,
+                    **({"stopped_attempt": True} if r["stopped_attempt"] else {}),
                 }
             )
         return out
@@ -1769,6 +1851,105 @@ class Database:
                 "UPDATE snapshots SET backup_deck_id = ?, backup_url = ? WHERE id = ?",
                 (backup_deck_id, backup_url, snapshot_id),
             )
+
+    def clear_snapshot_backup(self, snapshot_id: str) -> None:
+        """The snapshot's Archidekt backup copy was deleted (an apply that failed before it wrote)."""
+        with self.tx() as c:
+            c.execute(
+                "UPDATE snapshots SET backup_deck_id = NULL, backup_url = NULL WHERE id = ?", (snapshot_id,)
+            )
+
+    # Later deletes of unused backup copies (Q77). Kept in job_runs, one row per snapshot whose copy
+    # waits to be deleted (name BACKUP_DELETE_JOB + snapshot id, ``at`` the time it is due), so the
+    # queue outlives a restart and a re-apply of the proposal without a schema change.
+    def queue_backup_delete(
+        self,
+        snapshot_id: str,
+        *,
+        sub: str,
+        backup_deck_id: str,
+        deck_id: str,
+        proposal_id: str,
+        due: int,
+        expect: dict[str, Any] | None = None,
+    ) -> None:
+        """``expect``: the copy as the gateway made it (name, description, folder id), which the
+        later delete checks before it deletes (review D4); kept in the row's detail, so no schema
+        change."""
+        detail = {
+            "sub": sub,
+            "snapshot_id": snapshot_id,
+            "backup_deck_id": backup_deck_id,
+            "deck_id": deck_id,
+            "proposal_id": proposal_id,
+            "attempts": 0,
+            "queued_at": int(time.time()),
+            **({"expect": expect} if expect else {}),
+        }
+        with self.tx() as c:
+            c.execute(
+                "INSERT OR REPLACE INTO job_runs (name, day, at, detail_json) VALUES (?, ?, ?, ?)",
+                (
+                    BACKUP_DELETE_JOB + snapshot_id,
+                    _dt.datetime.now(_dt.UTC).date().isoformat(),
+                    int(due),
+                    json.dumps(detail),
+                ),
+            )
+
+    def next_backup_delete(self, now: int) -> dict[str, Any] | None:
+        """The queued backup delete due first (at or before ``now``), or None."""
+        row = self._one(
+            "SELECT at, detail_json FROM job_runs WHERE name LIKE ? ESCAPE '\\' AND at <= ? "
+            "ORDER BY at, name LIMIT 1",
+            (_like_prefix(BACKUP_DELETE_JOB), int(now)),
+        )
+        return {**json.loads(row["detail_json"]), "due": row["at"]} if row else None
+
+    def queued_backup_deletes(self) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT at, detail_json FROM job_runs WHERE name LIKE ? ESCAPE '\\' ORDER BY at, name",
+                (_like_prefix(BACKUP_DELETE_JOB),),
+            ).fetchall()
+        return [{**json.loads(r["detail_json"]), "due": r["at"]} for r in rows]
+
+    def reschedule_backup_delete(self, snapshot_id: str, *, due: int, attempts: int) -> None:
+        with self.tx() as c:
+            c.execute(
+                "UPDATE job_runs SET at = ?, detail_json = json_set(detail_json, '$.attempts', ?) "
+                "WHERE name = ?",
+                (int(due), int(attempts), BACKUP_DELETE_JOB + snapshot_id),
+            )
+
+    def backup_delete_queued(self, snapshot_id: str) -> bool:
+        """Whether the backup delete of ``snapshot_id`` is still queued (a relink or "Delete my
+        data" drops it)."""
+        return (
+            self._one("SELECT 1 FROM job_runs WHERE name = ?", (BACKUP_DELETE_JOB + snapshot_id,)) is not None
+        )
+
+    def drop_backup_delete(self, snapshot_id: str) -> None:
+        with self.tx() as c:
+            c.execute("DELETE FROM job_runs WHERE name = ?", (BACKUP_DELETE_JOB + snapshot_id,))
+
+    def edit_proposal_result(
+        self, proposal_id: str, owner_sub: str, edit: Callable[[Any], dict[str, Any] | None]
+    ) -> bool:
+        """Replace a proposal's stored result with ``edit(result)``, read and written in one
+        transaction (an apply may be rewriting it); ``edit`` returns None to leave it. The state
+        is never changed. True when it was replaced."""
+        with self.tx() as c:
+            row = c.execute(
+                "SELECT result_json FROM proposals WHERE id = ? AND owner_sub = ?", (proposal_id, owner_sub)
+            ).fetchone()
+            if row is None:
+                return False
+            new = edit(json.loads(row["result_json"]) if row["result_json"] else None)
+            if new is None:
+                return False
+            c.execute("UPDATE proposals SET result_json = ? WHERE id = ?", (json.dumps(new), proposal_id))
+            return True
 
     def get_snapshot(self, snapshot_id: str, owner_sub: str) -> dict[str, Any] | None:
         row = self._one("SELECT * FROM snapshots WHERE id = ? AND owner_sub = ?", (snapshot_id, owner_sub))

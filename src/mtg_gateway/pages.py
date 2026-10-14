@@ -20,10 +20,11 @@ from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
 from . import app_signin, link_disclosure, modes, notify
+from .archidekt import PATIENCE_SPENT
 from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
 from .avatars import initials_svg
 from .clickguard import form_stamp, guarded_form, submitted_too_soon
-from .decks import REVIEW_PAGE, DeckError, current_client, row_label, row_line
+from .decks import REVIEW_PAGE, DeckError, current_client, row_label, row_line, tag_change_text
 from .theme import (
     LAYOUT_COOKIE,
     THEME_COOKIE,
@@ -453,15 +454,19 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 sid=sid,
                 current="/proposals",
             )
-        notice = _notice(request.query_params.get("ok"), request.query_params.get("err"))
+        err = request.query_params.get("err")
+        on_top = _failure_on_top(p, err)
+        # the stored proposal's own words only, never the URL's, so a crafted link adds nothing
+        notice = _err(_page_step(p)) if on_top else _notice(request.query_params.get("ok"), err)
         title = (
             f"New deck: {p['deck_name']}"
             if p.get("kind") == "create_deck"
             else f"Proposal for {p['deck_name'] or p['deck_id']}"
         )
+        stamp = form_stamp(s.session_secret, f"proposal:{sub}:{pid}")
         return page(
             title,
-            notice + _proposal_body(p, _csrf(s, sid), form_stamp(s.session_secret, f"proposal:{sub}:{pid}")),
+            notice + _proposal_body(p, _csrf(s, sid), stamp, step=not on_top),
             sub=sub,
             sid=sid,
             current="/proposals",
@@ -687,7 +692,8 @@ ERR_MESSAGES = {
     "changed. The proposal is still pending; try again once Archidekt answers.",
     "not_linked": "Your Archidekt account is not linked, or Archidekt no longer accepts the stored "
     "session. Relink it on the Account page.",
-    "forbidden": "This deck belongs to another Archidekt account than the one you linked.",
+    "forbidden": "Archidekt did not allow this change, so nothing more was changed. The reason is in "
+    "the result below. Your Archidekt link is fine; there is no need to relink.",
     "other_account": "This new deck was proposed for another Archidekt account than the one linked now, "
     "so nothing was created. Ask for a new proposal.",
     "verify_mismatch": "Archidekt accepted the change but the deck does not fully match the proposal. "
@@ -1141,11 +1147,17 @@ def _detail_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, int
             )
             items.append(_li("chg", "description", html.escape(summary) + full))
         elif r.get("kind") == "detail":
+            said = tag_change_text(r)  # tags: which are added and which taken off, not only the lists
             items.append(
                 _li(
                     "chg",
                     str(r.get("field", "")).replace("_", " "),
-                    _was_now(r.get("before", ""), r.get("after", "")),
+                    _was_now(r.get("before", ""), r.get("after", ""))
+                    + (
+                        f"<br><span class='small'>{html.escape(said[0].upper() + said[1:])}</span>"
+                        if said
+                        else ""
+                    ),
                 )
             )
         else:
@@ -1160,6 +1172,29 @@ OUT_OF_DATE_PAGE = (
 )
 
 
+FAILED_PLAIN_STEP = (
+    "Nothing else was changed. Ask your assistant for a new proposal if you still want these edits."
+)
+
+
+def _failure_on_top(p: dict[str, Any], err: str | None) -> bool:
+    """Review B6: right after a failed Apply (?err=failed), a failure the page explains on its own
+    (Archidekt's waits ran out, part of it reached Archidekt) is that one message, in the error
+    box, instead of the general "could not be applied" box above the same message lower down.
+    The same for an apply that Archidekt's waits stopped before it changed anything, which left
+    the proposal pending (Q78, Q79): its one message, with the Apply button below."""
+    if err != "failed":
+        return False
+    if p.get("state") == "pending":
+        result = p.get("result") if isinstance(p.get("result"), dict) else {}
+        return (
+            result.get("error") == "rate_limited"
+            and bool(p.get("writes_enabled"))
+            and not p.get("out_of_date")
+        )
+    return p.get("state") == "failed" and _page_step(p) != FAILED_PLAIN_STEP
+
+
 def _page_step(p: dict[str, Any]) -> str:
     """What happens next, said to the person reading the review page. next_step speaks to the
     assistant (call this tool, do not call that one), so the page words it on its own."""
@@ -1169,6 +1204,13 @@ def _page_step(p: dict[str, Any]) -> str:
         return "Review only: deck writes are turned off on this gateway, so this can't be applied yet."
     if state == "pending" and p.get("out_of_date"):
         return OUT_OF_DATE_PAGE
+    if state == "pending" and result.get("error") == "rate_limited":
+        # Q78: Archidekt's waits stopped the last apply before it changed anything there
+        kept = f" {result['backup_note']}" if result.get("backup_note") else ""
+        return (
+            f"{PATIENCE_SPENT} Nothing was changed on Archidekt.{kept} The proposal is still pending, "
+            "so you can apply it again in a few minutes."
+        )
     if state == "pending":
         retry = (
             "The last try stopped before anything changed, because Archidekt's backup copy couldn't be made. "
@@ -1188,6 +1230,8 @@ def _page_step(p: dict[str, Any]) -> str:
         )
     if state == "applied":
         return "Done. Archidekt matches this proposal."
+    if state == "failed" and result.get("error") == "rate_limited":
+        return _rate_limited_step(p, result)
     if state == "failed" and p.get("kind") in ("create_deck", "clone") and result.get("deck_id"):
         return (
             "A new deck was made on Archidekt before this stopped, so it may not match the proposal. "
@@ -1202,9 +1246,7 @@ def _page_step(p: dict[str, Any]) -> str:
         )
         return f"Part of this change reached Archidekt before it stopped. Check {where}{undo}"
     if state == "failed":
-        return (
-            "Nothing else was changed. Ask your assistant for a new proposal if you still want these edits."
-        )
+        return FAILED_PLAIN_STEP
     if state == "rejected":
         by = {
             "assistant": " by your assistant (its reject_proposal call)",
@@ -1218,6 +1260,35 @@ def _page_step(p: dict[str, Any]) -> str:
     return "This proposal can no longer be applied."
 
 
+def _rate_limited_step(p: dict[str, Any], result: dict[str, Any]) -> str:
+    """The review page's one message for an apply that stopped because Archidekt asked the gateway
+    to wait longer than an apply may (Q41, Q66): why, how far it got, and to try again later."""
+    again = "Try again in a few minutes: ask your assistant for a new proposal."
+    where = "your collection" if p.get("kind") == "collection" else "the deck"
+    undo = (
+        " The snapshot taken just before it can be restored from History."
+        if result.get("snapshot_id") and p.get("kind") != "collection"
+        else ""
+    )
+    if p.get("kind") in ("create_deck", "clone") and result.get("deck_id"):
+        got = (
+            "A new deck was made on Archidekt before this stopped, so it may not match the proposal. "
+            "Check it, and delete it from its deck page if you don't want it."
+        )
+    elif result.get("sent_entries"):
+        sent, of = int(result["sent_entries"]), result.get("of_entries")
+        got = (
+            f"{sent} of {int(of)} changes reached Archidekt first, so {where} is partly changed."
+            if isinstance(of, int)
+            else f"Part of this change reached Archidekt first, so {where} is partly changed."
+        ) + f" Check {where}.{undo}"
+    elif result.get("deck_written"):
+        got = f"Part of this change reached Archidekt first. Check {where}.{undo}"
+    else:
+        got = "Nothing was changed on Archidekt."
+    return f"{PATIENCE_SPENT} {got} {again}"
+
+
 def _progress_html(p: dict[str, Any]) -> str:
     """How far a large apply running in the background got (the page refreshes itself)."""
     if p.get("state") != "applying":
@@ -1229,6 +1300,11 @@ def _progress_html(p: dict[str, Any]) -> str:
     if g.get("of_entries"):
         bits.append(f"sent {int(g.get('sent_entries') or 0)} of {int(g['of_entries'])} changes")
     text = "Applying to Archidekt" + (": " + ", ".join(bits) if bits else "") + "."
+    if g.get("waiting_for_archidekt"):
+        text += (
+            " Archidekt asked us to slow down, so the gateway is waiting about "
+            f"{int(g['waiting_for_archidekt'])} seconds before carrying on by itself."
+        )
     return f"<p class='notice warn' role='status'>{html.escape(text)}</p>"
 
 
@@ -1236,7 +1312,8 @@ def _risk_badge(risk: str) -> str:
     return "danger" if risk == "destructive" else "warn" if risk in ("high", "consent") else ""
 
 
-def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str = "") -> str:
+def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str = "", *, step: bool = True) -> str:
+    """``step=False``: what happens next is already in the error box above (_failure_on_top)."""
     if p.get("kind") == "details":
         rows, total = _detail_rows(p.get("rows"), p["diff"])
         summary = [f"<span>{total} deck detail{'s' if total != 1 else ''} changed; no cards change</span>"]
@@ -1306,7 +1383,8 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str = "") -> str:
         f"<div class='summary'>{''.join(summary)}</div>"
         f"<ul class='changes' aria-label='{aria}'>{rows}</ul>"
         f"<details class='raw'><summary>Plain-text diff</summary>{raw}</details>"
-        f"<p class='muted'>{html.escape(_page_step(p))}</p>" + _progress_html(p)
+        + (f"<p class='muted'>{html.escape(_page_step(p))}</p>" if step else "")
+        + _progress_html(p)
     )
     if p["state"] == "pending" and p["writes_enabled"]:
         destroy = p.get("risk") == "destructive"

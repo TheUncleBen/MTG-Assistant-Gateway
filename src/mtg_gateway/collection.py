@@ -25,10 +25,18 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from .approve import CARD_TOOL_META, proposal_tool_result
-from .archidekt import COLLECTION_PAGE_SIZE, ArchidektError, _faces, _oracle_text, _pt
+from .archidekt import (
+    COLLECTION_PAGE_SIZE,
+    ArchidektError,
+    _faces,
+    _oracle_text,
+    _pt,
+    condition_code,
+    language_code,
+)
 from .busy import busy_response
 from .deckpage import image_url, mana_html
-from .decks import DeckError, current_client
+from .decks import DeckError, _writing, current_client
 from .pages import (
     NO_STORE,
     _csrf,
@@ -71,7 +79,8 @@ _ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
 
 class CollectionError(Exception):
     """User-facing failure. ``kind``: invalid, not_found, not_linked, unavailable, rate_limited,
-    busy, auth. ``retry_after`` copies DeckError's (seconds to wait, when known)."""
+    busy, auth, forbidden, writes_disabled. ``retry_after`` copies DeckError's (seconds to wait,
+    when known)."""
 
     def __init__(self, kind: str, message: str, *, retry_after: int | None = None):
         super().__init__(message)
@@ -90,7 +99,7 @@ def _wrap(exc: Exception) -> CollectionError:
         kind = exc.kind
         if kind == "not_found":
             return CollectionError("not_found", "Archidekt has no such collection record")
-        if kind in ("auth", "forbidden"):
+        if kind == "auth":
             return CollectionError("auth", str(exc))
         if kind == "contract":
             return CollectionError("unavailable", "Archidekt answered in an unexpected way; try again")
@@ -245,8 +254,8 @@ def row_out(rec: dict[str, Any]) -> dict[str, Any]:
         "name": str(oracle.get("name") or card.get("displayName") or ""),
         "quantity": qty if isinstance(qty, int) and not isinstance(qty, bool) else 0,
         "finish": _finish_of(rec.get("modifier")),
-        "condition": str(rec.get("condition") or ""),
-        "lang": str(rec.get("language") or ""),
+        "condition": condition_code(rec.get("condition")),  # Archidekt sends a number (CONDITION_IDS)
+        "lang": language_code(rec.get("language")),  # and a number here too (LANGUAGE_IDS)
         "set": str(edition.get("editioncode") or "").lower(),
         "set_name": str(edition.get("editionname") or ""),
         "collector_number": str(card.get("collectorNumber") or ""),
@@ -299,11 +308,24 @@ class CollectionService:
             raise CollectionError("not_linked", "The linked Archidekt account has no user id; relink it.")
         return str(uid)
 
-    async def _run(self, sub: str, fn: Any) -> Any:
+    def _writes_on(self) -> None:
+        """Collection edits obey MTG_WRITES_ENABLED like every other Archidekt write."""
         try:
-            return await self.decks._call(sub, fn)
+            self.decks._writes_switch()
+        except DeckError as exc:
+            raise CollectionError(exc.kind, str(exc)) from exc
+
+    async def _run(self, sub: str, fn: Any, *, progress: dict[str, Any] | None = None) -> Any:
+        """``progress``: a write of a collection proposal's apply, recorded there (one record
+        changed, or a write that may have landed) so a stop says what had changed and a proposal
+        that changed something never goes back to pending (Q78)."""
+        try:
+            out = await _writing(progress, self.decks._call(sub, fn))
         except (DeckError, ArchidektError) as exc:
             raise _wrap(exc) from exc
+        if progress is not None:
+            progress["sent_entries"] = int(progress.get("sent_entries") or 0) + 1
+        return out
 
     # -- reads -----------------------------------------------------------------------------------
     async def page(
@@ -374,12 +396,16 @@ class CollectionService:
         return [r for r in out["rows"] if r["name"].casefold() == want]
 
     # -- writes ----------------------------------------------------------------------------------
-    async def add(self, sub: str, items: Any, *, source: str) -> dict[str, Any]:
+    async def add(
+        self, sub: str, items: Any, *, source: str, progress: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """Add cards to the member's Archidekt Collection. Each item names a printing by
         ``scryfall_id`` (a scan result) or by ``name`` with optional ``set`` and
         ``collector_number``; ``quantity``, ``finish`` (or ``foil: true``) and ``condition`` are
         optional. A printing already in the collection in that finish gets its copies added to the
-        existing record (as the site's own add does); otherwise a record is created."""
+        existing record (as the site's own add does); otherwise a record is created. ``progress``:
+        a collection proposal's apply, which counts each record written (``_run``)."""
+        self._writes_on()
         wanted = [
             (it, {k: it[k] for k in ("quantity", "finish", "condition")}) for it in normalise_items(items)
         ]
@@ -418,6 +444,7 @@ class CollectionService:
                 out = await self._run(
                     sub,
                     lambda token, have=have, qty=qty: self.client.collection_set(token, have, quantity=qty),
+                    progress=progress,
                 )
                 rec = {**have, **out, "card": have.get("card")}
             else:
@@ -428,8 +455,12 @@ class CollectionService:
                         printing["id"],
                         opts["quantity"],
                         modifier=MODIFIERS[finish],
-                        condition=opts["condition"] or None,
+                        # with none picked, English and Near Mint, as archidekt.com's own new
+                        # record (its site code; Q60)
+                        condition=opts["condition"] or "NM",
+                        language="EN",
                     ),
+                    progress=progress,
                 )
                 rec = {**out, "modifier": MODIFIERS[finish], "card": self._card_stub(printing, spec, out)}
             existing[key] = rec
@@ -478,6 +509,7 @@ class CollectionService:
         raise CollectionError("not_found", "no such card in your collection")
 
     async def set_quantity(self, sub: str, rid: int, quantity: int) -> dict[str, Any]:
+        self._writes_on()
         rec = await self._record(sub, rid)
         if quantity <= 0:
             await self._run(sub, lambda token: self.client.collection_delete(token, [rid]))
@@ -489,6 +521,7 @@ class CollectionService:
     async def update(self, sub: str, rid: int, data: dict[str, Any]) -> dict[str, Any]:
         """Change a record's details: finish, condition, language and price paid (the fields
         Archidekt's own row editor offers; tags are read-only here)."""
+        self._writes_on()
         rec = await self._record(sub, rid)
         opts = _item_options({k: v for k, v in data.items() if k in ("finish", "foil", "condition")}, 0)
         changes: dict[str, Any] = {}
@@ -504,11 +537,12 @@ class CollectionService:
             raise CollectionError("invalid", "nothing to change: give finish, condition, language or price")
         out = await self._run(sub, lambda token: self.client.collection_set(token, rec, **changes))
         row = row_out({**rec, **out, "card": rec.get("card")})
-        wrong = [
-            k
-            for k, want in changes.items()
-            if (out.get(k) if k != "purchasePrice" else _price(out.get(k))) != want
-        ]
+        read = {  # what Archidekt answered, in the gateway's terms (it keeps numbers for two)
+            "purchasePrice": _price(out.get("purchasePrice")),
+            "condition": condition_code(out.get("condition")) or None,
+            "language": language_code(out.get("language")),
+        }
+        wrong = [k for k, want in changes.items() if read.get(k, out.get(k)) != want]
         self.decks.db.audit(
             "collection_updated",
             sub=sub,
@@ -521,15 +555,20 @@ class CollectionService:
             )
         return {"row": row}
 
-    async def remove(self, sub: str, rid: int, quantity: int | None = None) -> dict[str, Any]:
+    async def remove(
+        self, sub: str, rid: int, quantity: int | None = None, *, progress: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        self._writes_on()
         rec = await self._record(sub, rid)
         have = int(rec.get("quantity") or 0)
         if quantity is None or quantity >= have:
-            await self._run(sub, lambda token: self.client.collection_delete(token, [rid]))
+            await self._run(sub, lambda token: self.client.collection_delete(token, [rid]), progress=progress)
             left = None
         else:
             out = await self._run(
-                sub, lambda token: self.client.collection_set(token, rec, quantity=have - max(1, quantity))
+                sub,
+                lambda token: self.client.collection_set(token, rec, quantity=have - max(1, quantity)),
+                progress=progress,
             )
             left = row_out({**rec, **out, "card": rec.get("card")})
         self.decks.db.audit("collection_removed", sub=sub, detail={"id": rid, "quantity": quantity})
@@ -594,16 +633,16 @@ def _item_options(raw: dict[str, Any], i: int) -> dict[str, Any]:
     return {"quantity": qty, "finish": finish, "condition": condition}
 
 
-# Language codes as Archidekt's collection shows them (reported from its row editor, not verified
-# against a list it publishes); the gateway accepts any two- or three-letter code.
-LANGUAGES = ("EN", "ES", "FR", "DE", "IT", "PT", "JA", "KO", "RU", "ZHS", "ZHT", "PH")
+# The languages Archidekt's collection takes (its site's own list of eleven, read 2026-10-14; see
+# LANGUAGE_IDS), in the order the details menu offers them. Archidekt has no Phyrexian.
+LANGUAGES = ("EN", "ES", "FR", "DE", "IT", "PT", "JA", "KO", "RU", "ZHS", "ZHT")
 MAX_PRICE = 99999.0
 
 
 def _language(value: Any) -> str:
     code = _clean(value, 3).upper()
-    if not code or len(code) < 2 or not code.isalpha():
-        raise CollectionError("invalid", "language must be a two- or three-letter code such as EN")
+    if code not in LANGUAGES:
+        raise CollectionError("invalid", "language must be one of " + ", ".join(LANGUAGES))
     return code
 
 
@@ -627,6 +666,8 @@ _STATUS = {
     "not_found": 404,
     "not_linked": 409,
     "auth": 409,
+    "forbidden": 403,
+    "writes_disabled": 403,
     "unavailable": 503,
     "rate_limited": 503,
     "busy": 429,
@@ -979,6 +1020,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             "invalid": "That was not a valid request.",
             "lookup": "Archidekt is not answering right now. Try again in a moment.",
             "link": "Link your Archidekt account on the Account page first.",
+            "writes": "Archidekt writes are switched off on this gateway, so nothing was changed.",
         }
         if not code or code not in msgs:
             return ""
@@ -1078,7 +1120,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             "value='etched'>Etched</option></select></span></div>"
             "<div class='field'><label for='addcond'>Condition</label><span "
             "class='sel'><select id='addcond' name='condition'>"
-            "<option value=''>Any</option><option>NM</option><option>LP</option><option>MP</option>"
+            "<option selected>NM</option><option>LP</option><option>MP</option>"
             "<option>HP</option><option>DMG</option>"
             "</select></span></div>"
             f"<button class='btn-primary'>{icon('plus')} Add</button></form>"
@@ -1241,6 +1283,8 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 code = "err=link"
             elif exc.kind in ("unavailable", "rate_limited", "busy"):
                 code = "err=lookup"
+            elif exc.kind == "writes_disabled":
+                code = "err=writes"
             else:
                 code = "err=invalid"
         sep = "&" if "?" in back else "?"
@@ -1427,22 +1471,22 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
         adds = changes.get("add") or []
         result: dict[str, Any] = {"added": [], "skipped": [], "removed": []}
         expected: dict[Any, int | None] = {}  # record id -> copies it should now hold (None: gone)
+        # each record written counts one (CollectionService._run), of every add and removal
+        progress["of_entries"] = len(adds) + len(changes.get("remove") or [])
         try:
             if adds:
                 source = str(changes.get("source") or "assistant")
-                out = await service.add(sub, adds, source=source)
+                out = await service.add(sub, adds, source=source, progress=progress)
                 result["added"], result["skipped"] = out["added"], out["skipped"]
                 for row in out["added"]:
                     expected[row["id"]] = int(row["quantity"])
-                progress["sent_entries"] = len(out["added"])
                 session_id = changes.get("scan_session_id")
                 if session_id and service.scan is not None and not out["skipped"]:
                     service.scan.store.delete(str(session_id), sub)
             for r in changes.get("remove") or []:
-                gone = await service.remove(sub, _rid(r["id"]), int(r["quantity"]))
+                gone = await service.remove(sub, _rid(r["id"]), int(r["quantity"]), progress=progress)
                 result["removed"].append(gone["removed"])
                 expected[_rid(r["id"])] = int(gone["row"]["quantity"]) if gone.get("row") else None
-                progress["sent_entries"] = int(progress.get("sent_entries") or 0) + 1
         except CollectionError as exc:
             raise DeckError(exc.kind, str(exc)) from exc
         result["verified"], result["mismatches"] = await _read_back(sub, expected)

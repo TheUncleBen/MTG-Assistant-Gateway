@@ -7,6 +7,7 @@ Shapes follow the handoff's endpoint map and the project's real CSV export
 from __future__ import annotations
 
 import base64
+import datetime
 import json
 import time
 from pathlib import Path
@@ -15,6 +16,12 @@ from typing import Any
 import httpx
 
 from mtg_gateway.archidekt_csv import parse_export, to_deck_json
+
+
+def _now_iso() -> str:
+    """The time now as Archidekt writes it: UTC, with microseconds and a "Z"."""
+    return datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample_deck.csv"
 
@@ -102,11 +109,15 @@ class FakeArchidekt:
             ),
         }
         self.calls: list[tuple[str, str]] = []
+        self.collection_posts: list[dict[str, Any]] = []  # the bodies of collection creates, as sent
         # Answers given before the normal handling, one per request, in order: an int status (with
         # an optional Retry-After) or an exception to raise, e.g. httpx.ReadTimeout.
         self.inject: list[tuple[int | Exception, str | None]] = []
         self.patches: list[dict[str, Any]] = []
         self.fail_patch_silently = False
+        self.fail_card_writes = False  # PATCH modifyCards answers 503
+        # set to an unset threading.Event: PATCH modifyCards waits for it (a slow save, held open)
+        self.hold_card_writes: Any = None
         # Faults a verify must catch: added rows stored without their finish, or with another
         # printing of the same card (card id -> card id to store instead).
         self.add_rows_lose_finish = False
@@ -123,6 +134,10 @@ class FakeArchidekt:
         self.fail_deck_update = False
         self.updates: list[dict[str, Any]] = []  # bodies of PATCH /decks/{id}/update/, with deck_id
         self.fail_backup = False  # POST /decks/copy/ answers 503
+        # Copies made here (POST /decks/copy/) carry createdAt and updatedAt as the time they were
+        # made, in Archidekt's "...Z" form with fractions, and an update moves their updatedAt to
+        # its own time (inferred, not seen live). Every other deck keeps its fixed times.
+        self.timed: set[int] = set()
         # Like the real site: the old owner= filter is ignored and every deck comes back.
         self.ignore_owner_username = False
         # Suspected live behaviour (unverified): the ownerUsername listing leaves the owner's
@@ -140,13 +155,14 @@ class FakeArchidekt:
         self.editors: dict[int, list[dict[str, Any]]] = {}  # deck id -> collaborator rows
         self.next_editor_id = 900
         self.votes: dict[tuple[str, int], int] = {}
+        self.vote_calls: list[dict[str, Any]] = []  # path and body of each vote PUT
         self.comments: dict[int, list[dict[str, Any]]] = {}  # thread root -> flat list of comments
         self.next_comment_id = 800000
         # Hand actions added 2026-10-07: global deck tags (id -> name), each deck's tag relations
         # (deck id -> [{id, tag, name, position}]), deleted deck ids and massUpdate bodies.
-        self.tags: dict[int, str] = {1: "budget", 2: "tribal"}
+        self.tags: dict[int, str] = {1: "budget", 2: "tribal", 3: "Spicy"}
+        self.tag_creates = 0
         self.deck_tags: dict[int, list[dict[str, Any]]] = {}
-        self.next_tag_id = 10
         self.next_tag_rel_id = 90000
         self.deleted: list[int] = []
         self.mass_updates: list[dict[str, Any]] = []
@@ -224,13 +240,26 @@ class FakeArchidekt:
             "quantity": int(body["quantity"]),
             "card": card,
             "modifier": body.get("modifier") or "Normal",
-            "language": body.get("language") or "EN",
-            "condition": body.get("condition") or "NM",
+            # numbers, as archidekt.com's site sends and reads them (EN = 1, NM = 1)
+            "language": body.get("language") or 1,
+            "condition": body.get("condition") or 1,
             "tags": body.get("tags") or [],
             "purchasePrice": body.get("purchasePrice"),
             "createdAt": now,
             "modifiedAt": now,
         }
+
+    @staticmethod
+    def _bad_collection_enum(body: dict[str, Any]) -> bool:
+        """A record's condition and language are numbers on Archidekt (its site's tables: condition
+        1-5, language 1-11). Inferred, not seen live: text such as "NM" is refused like this."""
+        for key, top in (("condition", 5), ("language", 11)):
+            value = body.get(key)
+            if value is None:
+                continue
+            if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= top:
+                return True
+        return False
 
     def _comment(self, cid: int, who: str) -> dict[str, Any]:
         for comments in self.comments.values():
@@ -419,13 +448,10 @@ class FakeArchidekt:
             hits = [{"id": i, "name": n} for i, n in self.tags.items() if q in n.lower()]
             return httpx.Response(200, json={"count": len(hits), "results": hits})
         if path == "/api/decks/tags/" and request.method == "POST":
-            body = json.loads(request.content)
-            name = str(body.get("name") or "").strip()
-            if not name:
-                return httpx.Response(400, json={"name": ["This field may not be blank."]})
-            self.next_tag_id += 1
-            self.tags[self.next_tag_id] = name
-            return httpx.Response(201, json={"id": self.next_tag_id, "name": name})
+            # Inferred: Archidekt's tag list is its own; its deck page never creates a tag, and a
+            # member creating one is refused like this (the 403 a member saw on adding a new tag).
+            self.tag_creates += 1
+            return httpx.Response(403, json={"detail": "You do not have permission to perform this action."})
         if path == "/api/decks/tagRelations/" and request.method == "POST":
             body = json.loads(request.content)
             deck = self.decks.get(body.get("deck"))
@@ -496,7 +522,10 @@ class FakeArchidekt:
                 owner={"username": who},
                 description="",
                 private=body["private"],
+                createdAt=_now_iso(),
             )
+            copy["updatedAt"] = copy["createdAt"]
+            self.timed.add(self.next_deck_id)
             self.decks[self.next_deck_id] = copy
             self.private.add(self.next_deck_id)
             self.deck_folder[self.next_deck_id] = body["parent_folder"]
@@ -635,8 +664,11 @@ class FakeArchidekt:
             )
         if path == "/api/collection/v2/" and request.method == "POST":
             body = json.loads(request.content)
+            self.collection_posts.append(body)
             if not isinstance(body.get("card"), int) or not isinstance(body.get("quantity"), int):
                 return httpx.Response(400, json={"card": ["This field is required."]})
+            if self._bad_collection_enum(body):
+                return httpx.Response(400, json={"condition": ["A valid integer is required."]})
             try:
                 card = self.printing(body["card"])
             except AssertionError:
@@ -651,6 +683,8 @@ class FakeArchidekt:
             if row is None or request.method not in ("PUT", "PATCH"):
                 return httpx.Response(404, json={"detail": "Not found."})
             body = json.loads(request.content)
+            if self._bad_collection_enum(body):
+                return httpx.Response(400, json={"condition": ["A valid integer is required."]})
             for key in ("quantity", "modifier", "language", "condition", "tags", "purchasePrice"):
                 if key in body:
                     row[key] = body[key]
@@ -689,6 +723,7 @@ class FakeArchidekt:
             and request.method == "PUT"
         ):
             body = json.loads(request.content)
+            self.vote_calls.append({"path": path, **body})
             root = int(parts[3])
             if body.get("remove"):
                 self.votes.pop((who, root), None)
@@ -799,6 +834,17 @@ class FakeArchidekt:
             if parts[3:] == ["tagRelations"] and request.method == "GET":
                 rels = self.deck_tags.get(deck["id"], [])
                 return httpx.Response(200, json={"count": len(rels), "results": [dict(r) for r in rels]})
+            if parts[3:] == ["vote"] and request.method == "PUT":
+                # the deck page's like: PUT /api/decks/{id}/vote/ {up, remove}; the deck's points
+                # and the reader's vote live on its thread root, as the deck JSON reports them
+                body = json.loads(request.content)
+                self.vote_calls.append({"path": path, **body})
+                root = 300000 + deck["id"]
+                if body.get("remove"):
+                    self.votes.pop((who, root), None)
+                else:
+                    self.votes[(who, root)] = 1 if body.get("up") else 2
+                return httpx.Response(200, json={"ok": True})
             if parts[3:] == ["bookmarks"] and request.method in ("POST", "DELETE"):
                 marks = self.bookmarks.setdefault(who, set())
                 (marks.add if request.method == "POST" else marks.discard)(deck["id"])
@@ -838,19 +884,21 @@ class FakeArchidekt:
                 for key in ("name", "description", "deckFormat", "edhBracket", "private", "unlisted"):
                     if key in body:
                         deck[key] = body[key]
-                if "customFeatured" in body or "featured" in body:
-                    # the site's "deck image": a card art URL, or an empty customFeatured for automatic
+                if "featured" in body:
+                    # Inferred: featured is Archidekt's own automatic pick, not the member's to set
+                    return httpx.Response(403, json={"detail": "You do not have permission."})
+                if "customFeatured" in body:
+                    # the site's "Set Deck Image": a card art URL, or "" for its automatic pick
                     deck["customFeatured"] = body.get("customFeatured") or ""
-                    deck["featured"] = body.get("featured") or (
-                        ""
-                        if "customFeatured" in body and "featured" not in body
-                        else deck.get("featured", "")
-                    )
                 if "private" in body:
                     (self.private.add if body["private"] else self.private.discard)(deck["id"])
-                deck["updatedAt"] = "2026-10-03T00:00:00Z"
+                deck["updatedAt"] = _now_iso() if deck["id"] in self.timed else "2026-10-03T00:00:00Z"
                 return httpx.Response(200, json={"id": deck["id"], "name": deck["name"]})
             if parts[3:] == ["modifyCards", "v2"] and request.method == "PATCH":
+                if self.hold_card_writes is not None:
+                    self.hold_card_writes.wait(15)
+                if self.fail_card_writes:
+                    return httpx.Response(503, json={"detail": "Service unavailable."})
                 body = json.loads(request.content)
                 self.patches.append(body)
                 if not self.fail_patch_silently:
@@ -887,8 +935,9 @@ class FakeArchidekt:
         raise AssertionError(f"unknown printing id {card_id}")
 
     def ignore_empty_label_or_set(self, entry: dict[str, Any]) -> bool:
-        """A fault a verify must catch: a modify with an empty label leaves the old tag."""
-        return self.empty_label_ignored and not entry["modifications"]["label"]
+        """A fault a verify must catch: a modify with an empty label (no name, as the site's own
+        ",#656565") leaves the old tag."""
+        return self.empty_label_ignored and not entry["modifications"]["label"].split(",")[0].strip()
 
     def apply_patch(self, deck: dict[str, Any], entries: list[dict[str, Any]]) -> None:
         """Apply entries in the reference shape: action add|modify|remove, cardid, deckRelationId,

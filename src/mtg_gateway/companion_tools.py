@@ -183,8 +183,8 @@ def add_deck_tool_routes(
             "<span class='count muted'>No changes yet</span>"
             + (
                 # D-02: the extra copy on Archidekt is the member's choice per save; the gateway's own
-                # snapshot (Restore under History) is always kept.
-                "<label class='backup'><input type='checkbox' name='archidekt_backup' checked>"
+                # snapshot (Restore under History) is always kept. Unticked until the member ticks it.
+                "<label class='backup'><input type='checkbox' name='archidekt_backup'>"
                 "Also keep a backup copy on Archidekt</label>"
                 if s.archidekt_backups
                 else ""
@@ -380,6 +380,41 @@ def add_deck_tool_routes(
         from .export_formats import to_arena
 
         return await _download(request, ".arena.txt", to_arena, TEXT_PLAIN)
+
+    @server.custom_route("/decks/{deck_id}/edhplay.json", methods=["GET"], include_in_schema=False)
+    async def export_edhplay(request: Request) -> Response:
+        """The deck in EDHPlay's import format, for the deck page's Play on EDHPlay box (deck.js),
+        which asks for it when the box opens. The deck as the deck page read it (page_deck: the same
+        read, kept a short while, so no new Archidekt request while it is fresh), for anyone who may
+        open that page. ``left_out`` names the sideboard copies past EDHPlay's 15; ``companion`` says
+        the deck sends one, which EDHPlay's import leaves for the member to set, and
+        ``no_commander`` that no commander is marked, so the member chooses one there."""
+        from .export_formats import to_edhplay
+
+        headers = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
+        sub, _sid = browser_session(state, request)
+        if not sub:
+            return JSONResponse({"ok": False, "error": "unauthenticated"}, 401, headers=headers)
+        try:
+            deck = await decks.page_deck(sub, request.path_params["deck_id"])
+        except DeckError as exc:
+            return busy_json_response(exc) or JSONResponse(
+                {"ok": False, "error": exc.kind, "message": str(exc)},
+                404 if exc.kind == "not_found" else 400,
+                headers=headers,
+            )
+        edh = to_edhplay(deck)
+        return JSONResponse(
+            {
+                "ok": True,
+                "list": edh.text,
+                "left_out": ", ".join(name if n == 1 else f"{n} {name}" for n, name in edh.left_out),
+                "left_count": sum(n for n, _name in edh.left_out),
+                "companion": edh.companion,
+                "no_commander": not edh.commanders,
+            },
+            headers=headers,
+        )
 
     @server.custom_route("/decks/{deck_id}/export.dek", methods=["GET"], include_in_schema=False)
     async def export_dek(request: Request) -> Response:

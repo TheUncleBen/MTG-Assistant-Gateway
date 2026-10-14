@@ -10,6 +10,7 @@ import copy
 import json
 import re
 
+from mtg_gateway.archidekt import rich_doc
 from mtg_gateway.mf_proxy import ALLOWED_TOOLS, BLOCKED_TOOLS, OWNED_ELSEWHERE
 
 from .test_browse_collection import NAV, Stack, api, linked, stack  # noqa: F401
@@ -49,7 +50,8 @@ async def test_cover_tags_and_folder_from_the_settings_page(stack: Stack) -> Non
         r = await _form(b, "/decks/42/cover", {"card": uid}, follow=True)
         assert r.status_code == 200 and "Cover image saved" in r.text, r.text[:500]
         sent = stack.ark.updates[-1]
-        assert sent["featured"].endswith(f"/{uid}.webp") and sent["customFeatured"] == ""
+        assert sent == {"deck_id": 42, "customFeatured": sent["customFeatured"]}  # as archidekt.com sends it
+        assert sent["customFeatured"].endswith(f"/{uid}.webp?11")  # its image version: "11" when none
         assert len(db.list_snapshots("user-1")) == before + 1
         assert db.deck_covers(["42"])["42"]["scryfall_uid"] == uid
         page = await b.http.get("/decks/42", headers=NAV)
@@ -60,20 +62,21 @@ async def test_cover_tags_and_folder_from_the_settings_page(stack: Stack) -> Non
         r = await _form(b, "/decks/42/cover", {"card": ""}, follow=True)
         assert "picks the cover image again" in r.text
         assert stack.ark.updates[-1] == {"deck_id": 42, "customFeatured": ""}
-        # tags: an existing Archidekt tag is reused, a new one created, duplicates refused
+        # tags: Archidekt's own tags only; a name it doesn't have is refused and never created
         r = await _form(b, "/decks/42/tags", {"action": "add", "name": "Budget"}, follow=True)
         assert "Tag added" in r.text and "Budget" not in r.text.split("Deck tags")[0]
         rels = stack.ark.deck_tags[42]
         assert [(x["tag"], x["name"]) for x in rels] == [(1, "budget")]
         r = await _form(b, "/decks/42/tags", {"action": "add", "name": "sea monsters"}, follow=True)
-        assert [x["name"] for x in stack.ark.deck_tags[42]] == ["budget", "sea monsters"]
-        assert "sea monsters" in stack.ark.tags.values()
+        assert "Archidekt has no deck tag called" in r.text, r.text[:800]
+        assert [x["name"] for x in stack.ark.deck_tags[42]] == ["budget"]
+        assert stack.ark.tag_creates == 0
         r = await _form(b, "/decks/42/tags", {"action": "add", "name": "budget"})
         assert r.status_code == 400 and "already has the tag" in r.text
         r = await _form(
             b, "/decks/42/tags", {"action": "remove", "relation_id": str(rels[0]["id"])}, follow=True
         )
-        assert "Tag removed" in r.text and [x["name"] for x in stack.ark.deck_tags[42]] == ["sea monsters"]
+        assert "Tag removed" in r.text and [x["name"] for x in stack.ark.deck_tags[42]] == []
         # a relation of someone else's deck cannot be removed through this deck
         stack.ark.deck_tags[43] = [{"id": 777, "tag": 2, "deck": 43, "name": "tribal", "position": "M-1"}]
         r = await _form(b, "/decks/42/tags", {"action": "remove", "relation_id": "777"})
@@ -102,6 +105,91 @@ async def test_cover_tags_and_folder_from_the_settings_page(stack: Stack) -> Non
         assert stack.ark.deck_folder[42] == root
         r = await _form(b, "/decks/42/move", {"folder_id": "999999"})
         assert r.status_code == 400 and "not in your Archidekt account" in r.text
+    finally:
+        await b.aclose()
+
+
+async def test_section_forms_answer_next_to_their_own_form(stack: Stack) -> None:
+    """Each section form of the settings page names its section, and its notice (done or refused)
+    is shown inside that section, where the browser lands, not at the top of the page."""
+    b = await linked(stack)
+    try:
+        page = (await b.http.get("/decks/42/settings", headers=NAV)).text
+        for action in ("/decks/42/cover#cover", "/decks/42/tags#tags", "/decks/42/move#folder"):
+            assert f"action='{action}'" in page, action
+        r = await _form(b, "/decks/42/tags", {"action": "add", "name": "budget"})
+        assert r.status_code == 303 and r.headers["location"].endswith("ok=tag_added#tags")
+        shown = (await b.http.get(r.headers["location"], headers=NAV)).text
+        tags = shown.index("id='tags'")
+        assert tags < shown.index("Tag added on Archidekt.") < shown.index("id='folder'")
+        r = await _form(b, "/decks/42/tags", {"action": "add", "name": "sea monsters"})
+        assert r.status_code == 400
+        at = r.text.index("<p class='notice error' id='tags-msg' role='alert'>Archidekt has no deck tag")
+        assert r.text.index("id='tags'") < at < r.text.index("id='folder'")
+        assert "aria-describedby='tags-help tags-msg' aria-invalid='true'" in r.text
+        assert "value='sea monsters'" in r.text  # the box keeps what was typed
+    finally:
+        await b.aclose()
+
+
+async def test_tag_box_suggests_archidekts_tags_gently(stack: Stack) -> None:
+    """The settings page's tag box asks /decks/api/tags as the member types: Archidekt's own tag
+    lookup through the member's session, two characters at least, each text read once and then
+    remembered for a few minutes (a bounded memory); a failure answers with an error status, which
+    the box takes as "no list". The page leaves out the deck's own tags."""
+    unlinked = Browser(stack.h)
+    try:
+        assert (await unlinked.http.get("/decks/api/tags", params={"q": "bu"})).status_code == 401
+        await unlinked.login("/account")
+        r = await unlinked.http.get("/decks/api/tags", params={"q": "bu"})
+        assert r.status_code == 409 and r.json()["ok"] is False
+    finally:
+        await unlinked.aclose()
+    b = await linked(stack)
+    decks = stack.h.app.state.gateway.decks
+    ark = stack.ark
+
+    def lookups() -> int:
+        return sum(1 for m, p in ark.calls if m == "GET" and p == "/api/decks/tags/v2/")
+
+    try:
+        page = (await b.http.get("/decks/42/settings", headers=NAV)).text
+        assert "data-suggest='tags' data-suggest-src='/decks/api/tags?q='" in page
+        assert "data-suggest-exclude='[]'" in page
+        r = await b.http.get("/decks/api/tags", params={"q": "bu"})
+        assert r.status_code == 200 and r.json() == {"ok": True, "names": ["budget"], "complete": False}
+        assert r.headers["cache-control"] == "no-store"
+        assert lookups() == 1
+        # the same text again, in any case: remembered, Archidekt is not asked again
+        for q in ("bu", "BU", " bu "):
+            assert (await b.http.get("/decks/api/tags", params={"q": q})).json()["names"] == ["budget"]
+        assert lookups() == 1
+        # one character, or nothing: no lookup at all
+        for q in ("b", "", "#"):
+            assert (await b.http.get("/decks/api/tags", params={"q": q})).json()["names"] == []
+        assert lookups() == 1
+        assert (await b.http.get("/decks/api/tags", params={"q": "sp"})).json()["names"] == ["Spicy"]
+        assert lookups() == 2
+        # the memory is bounded: past its size the oldest text is dropped
+        decks.TAG_LOOKUP_ENTRIES = 2
+        await b.http.get("/decks/api/tags", params={"q": "tri"})  # bu, sp, tri -> sp, tri kept
+        assert lookups() == 3
+        await b.http.get("/decks/api/tags", params={"q": "sp"})
+        assert lookups() == 3
+        await b.http.get("/decks/api/tags", params={"q": "bu"})
+        assert lookups() == 4
+        # the deck's own tags are named on the page, for the box to leave out
+        await _form(b, "/decks/42/tags", {"action": "add", "name": "budget"})
+        page = (await b.http.get("/decks/42/settings", headers=NAV)).text
+        assert "data-suggest-exclude='[&quot;budget&quot;]'" in page
+        # Archidekt busy: an error status and nothing remembered; while Archidekt asks to wait,
+        # the gateway does not ask it again
+        before = lookups()
+        ark.inject.append((429, "30"))
+        for _ in range(2):
+            r = await b.http.get("/decks/api/tags", params={"q": "ic"})
+            assert r.status_code in (429, 503) and r.json()["ok"] is False and "names" not in r.json()
+        assert lookups() == before + 1 and "ic" not in decks._tag_lookups
     finally:
         await b.aclose()
 
@@ -204,7 +292,7 @@ async def test_own_comments_can_be_edited_and_deleted_others_not(stack: Stack) -
             csrf=await alice.csrf("/decks"),
         )
         assert r.status_code == 200 and r.json()["comment"]["text"] == "second thoughts", r.text
-        assert stack.ark.comments[300042][0]["text"] == "second thoughts"
+        assert stack.ark.comments[300042][0]["text"] == rich_doc("second thoughts")  # a Quill document
         # another member, linked to another Archidekt account, cannot touch alice's comment
         stack.h.idp.user = {
             **stack.h.idp.user,
@@ -225,7 +313,7 @@ async def test_own_comments_can_be_edited_and_deleted_others_not(stack: Stack) -
         r = await api(
             bob, "DELETE", f"/social/api/decks/42/comments/{cid}", {}, csrf=await bob.csrf("/decks")
         )
-        assert r.status_code == 403 and stack.ark.comments[300042][0]["text"] == "second thoughts"
+        assert r.status_code == 403 and stack.ark.comments[300042][0]["text"] == rich_doc("second thoughts")
         r = await api(
             alice, "DELETE", f"/social/api/decks/42/comments/{cid}", {}, csrf=await alice.csrf("/decks")
         )
@@ -265,8 +353,8 @@ async def test_collection_row_details_save_condition_language_and_price(stack: S
         rec = stack.ark.collections["alice"][rid]
         assert (rec["modifier"], rec["condition"], rec["language"], rec["purchasePrice"]) == (
             "Foil",
-            "LP",
-            "DE",
+            2,  # Archidekt keeps the condition as a number: LP = 2
+            3,  # and the language: DE = 3
             1.5,
         )
         page = await b.http.get(r.headers["location"], headers=NAV)
@@ -274,7 +362,7 @@ async def test_collection_row_details_save_condition_language_and_price(stack: S
         # the JSON API takes the same fields; an empty price clears it, a bad language is refused
         r = await api(b, "POST", f"/collection/api/rows/{rid}", {"purchase_price": "", "condition": "NM"})
         assert r.status_code == 200, r.text
-        assert rec["purchasePrice"] is None and rec["condition"] == "NM"
+        assert rec["purchasePrice"] is None and rec["condition"] == 1  # NM
         r = await api(b, "POST", f"/collection/api/rows/{rid}", {"language": "1"})
         assert r.status_code == 400
         r = await api(b, "POST", f"/collection/api/rows/{rid}", {"purchase_price": "lots"})

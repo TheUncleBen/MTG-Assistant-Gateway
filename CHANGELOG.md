@@ -7,6 +7,158 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.27] - 2026-10-14
+
+Bug fixes and small fixes from the owner's checks of 0.7.26, a check of every Archidekt write
+call against archidekt.com's own site code, and the fixes from an independent review. The database
+stays at schema 12, so going back to 0.7.26 is a plain image swap. The Android app changes too
+(it reloads by itself when the phone is back online), so it is rebuilt with this release.
+
+### Fixed
+- A long apply (a new 100-card deck, a big edit) no longer fails halfway when Archidekt asks the
+  gateway to slow down: it waits out the pause Archidekt asks for and carries on by itself, up to
+  6 waits and 5 minutes of waiting for the whole apply. If Archidekt asks for a longer wait than is
+  left, the apply stops at once with a plain message saying what had changed; the assistant and
+  the review page give the same account, and a deck or tag already written is never reported as
+  nothing changed. The review page says when it is waiting. An apply's waits no longer pause the gateway for everyone. Outside an apply
+  nothing changed: a 429 still pauses every call and is not retried. A wait Archidekt gives as a
+  date is now read as that date instead of a fixed 30 seconds.
+- When Archidekt refuses a request (HTTP 403), the message now says so, with Archidekt's own
+  reason, instead of "relink your account" or "this deck belongs to another Archidekt account".
+  Likes, bookmarks, follows and Collection edits no longer report a refusal as a sign-in problem.
+- Deck tags come from Archidekt's own tag list: archidekt.com never creates a new tag, so the
+  gateway no longer tries to. A name Archidekt doesn't have is refused when the proposal is made,
+  with close matches.
+- Write requests now match what archidekt.com itself sends (checked against its site code, not yet
+  tried live): liking a deck uses the deck's own vote, taking back a down vote is sent as a down
+  vote, the cover uses Archidekt's own image address, a new tag goes after the deck's other tags,
+  and moving a deck to a folder sends the same request as Archidekt's folder page.
+- Deck descriptions and comments written in the gateway are sent in Archidekt's rich-text format,
+  so they show on archidekt.com. Text from an assistant or a gateway form is always sent as plain
+  text, so a hidden link or formatting can never go out unseen; restoring a snapshot keeps
+  Archidekt's formatting. Descriptions and comments written on Archidekt show as readable
+  text in the gateway instead of raw code, and saving the settings without touching the
+  description no longer replaces Archidekt's formatting.
+- When an assistant sends a description or comment in Archidekt's rich-text format and its links,
+  formatting or embeds are removed, the gateway now tells the assistant so in its reply, so it
+  doesn't tell you a link was added. This includes applying a proposal made before this release.
+- Collection condition and language are saved as Archidekt expects and shown as codes (for
+  example "MP" instead of "3"). Phyrexian, which Archidekt does not have, is no longer offered. A
+  new record is English and Near Mint when nothing is picked, as on archidekt.com, and editing a
+  record never fails on a stored value the gateway doesn't know.
+- When an apply fails before it changed the deck, the backup copy it had just made on Archidekt is
+  deleted again. When part of the change landed (a tag, cover or folder change included), the copy
+  is kept as the way back. Only that apply's own copy is ever deleted. The gateway's own snapshot
+  is always kept.
+- History's deck filter lists your decks by their current Archidekt names. Decks that are no
+  longer on Archidekt are listed under "No longer on Archidekt", below the others. Nothing is put
+  there when Archidekt's deck list can't be fully trusted (owner details missing, a list cut short,
+  changing while it was read, a deck seen twice or fewer decks than Archidekt counts), and a report
+  on someone else's deck, or a deck of an Archidekt account you were linked to before, is never put
+  there.
+- A deck whose owner Archidekt doesn't name is no longer said to belong to "None". Ownership is
+  decided by Archidekt account id whenever both ids are known.
+- My decks says when your deck list couldn't be read from Archidekt, with Try again, instead of
+  showing an empty list.
+- The deck page's card menu no longer freezes while Archidekt saves. Mana value, Quantity, Move to
+  and Remove from deck show the change at once and save in the background; quick Quantity presses
+  are sent as one save. If a save fails, the card goes back to what Archidekt has and a note says
+  why, also when several edits to the same card fail, and says when a later move or mana value for
+  that card was not sent.
+- Grouped by Mana value, a card whose mana value you change moves to its new stack at once, and the
+  Table view's MV column shows the new value. The card menu's Move to list no longer shows all the
+  time, and undoing the removal of a card with no category no longer brings it back under a blank
+  heading.
+- Play on EDHPlay no longer makes the first card of a deck with no commander set into the commander
+  on EDHPlay. Lands come first among the candidates, a list with only a sideboard no longer starts
+  with a blank line, and a companion filed in a main-deck category goes to the sideboard.
+- The "You're offline" page loads the page again by itself once the connection is back. When the
+  browser knows it is offline the page shows at once; otherwise a page load keeps trying for about
+  5 seconds first, so a short drop or a gateway restart no longer shows it at all. A page that
+  keeps failing while the gateway answers is reloaded by itself at most 3 times, then waits for
+  Try again.
+- A tag named twice in one proposal is added once, a deck already liked isn't liked again, and a
+  new tag after tags starting with Z still sorts last.
+- Picking a card in the deck editor before its details had loaded no longer leaves the new row
+  without its picture, mana cost and type.
+- A card picture that fails to load keeps the deck editor's rows in shape (and is not read out
+  again where the row already names the card), and a card suggestion no longer shows a gap inside
+  the typed part of its name.
+- Restoring a snapshot of a deck in another format than Commander is no longer refused because of
+  a bracket stored with it.
+- Try again on My decks reads the deck list from Archidekt again instead of showing the same
+  partly read list.
+- After an Approve whose apply failed, the chat card shows Failed with the reason once and no
+  Approve or Reject buttons, and the review page shows the failure once instead of twice.
+- A Collection change that stopped partway now says how many of its changes reached Archidekt,
+  instead of saying nothing was changed.
+- The Home page's My decks panel and the assistant's deck list say when the deck list couldn't be
+  read from Archidekt, as My decks does.
+- The deck card in ChatGPT no longer says "No connection to the gateway": the deck now comes with
+  the answer, so the card can show it without reaching the gateway (not yet tried in ChatGPT).
+- Proposal cards and review pages are easier to read: the footer names the app that proposed,
+  tag changes say which tags are added and removed, a cover change names the cover it replaces,
+  rows without a picture leave no gap, rows are shorter on phones (a long change such as a move to
+  another board wraps beside its label instead of over it), the locked Apply and Reject
+  buttons are readable in dark mode, and a chat app that cannot show the card gets a plain summary
+  instead of raw data.
+- Deck settings forms (cover, tags, folder, collaborators) show their result next to the form you
+  used, and on phones each box keeps its button on the same row.
+- The Guide's search lists the matching sections right under the box, with a short snippet and a
+  link to each. Enter goes to the first match, and on phones the contents drawer folds away.
+- Easier to use by touch and keyboard: the EDHPlay box's close button and "How to import", and the
+  collaborator list's rows, are finger-sized; the collaborator list has a name for screen readers
+  and its box shows its whole hint on a Fold's cover screen; the Guide's search results can be
+  walked with the arrow keys; the chat cards' locked buttons and the deck card's mana curve
+  numbers are readable in light and dark.
+
+### Changed
+- When Archidekt's waits stop an apply before anything changed on Archidekt, the proposal stays
+  pending instead of failing, so you can approve it again in a few minutes without asking for a new
+  proposal. It is checked against the deck again when applied, with a new snapshot and backup.
+  Nothing applies it again by itself. The chat card keeps Pending with working buttons, the review
+  page shows the one message with its Apply button, and History marks the snapshot of the stopped
+  try as taken before an apply that changed nothing. If any part of the change had reached
+  Archidekt, the proposal still fails as before. That includes a copy of a deck already made (the
+  message gives the copy's number, so it is never copied twice) and a collaborator, comment or
+  folder change already sent.
+- When the backup copy an apply made can't be deleted right away because Archidekt asked the
+  gateway to wait (or answered with a server or network error), the gateway deletes it later by
+  itself: one copy at a time, never while Archidekt's pause runs, first once the pause is over,
+  then waiting 10, 20 and 40 minutes between tries, and giving up after 4 failed tries (the copy
+  then stays in the backup folder, as before). The messages say so until it is done. Waiting
+  deletes are kept in the database, so a restart doesn't lose them. Before it deletes a copy, the
+  gateway reads it once and keeps it if it was moved out of the backup folder, renamed, given
+  another description or changed since it was made, or if it isn't owned by the Archidekt account
+  you're linked to. Linking an Archidekt account again cancels your waiting
+  deletes, and those copies stay.
+- Only a Commander deck has a bracket, as on archidekt.com: moving a deck to another format clears
+  its bracket, and a bracket for another format is refused.
+- A hand-set mana value is a whole number from 0 to 15, the range archidekt.com offers.
+- Every card change sends the card's colour tag, as archidekt.com does.
+- The Android app reloads a page that failed to load as soon as the phone's connection comes back.
+  For this it now asks for the network state (`ACCESS_NETWORK_STATE`), granted at install without
+  a prompt.
+- Home is always in the navigation: left of Decks in the top bar and the phone's tab bar, and first
+  in the side rail on an unfolded foldable, a tablet and the Android app from 600 px wide. The rail
+  lists every page and has no More menu. On phones, Proposals moves into More.
+- Play on EDHPlay opens a short box on every press. Its "Copy and Open EDHPlay.com" copies the deck
+  and opens EDHPlay's My Decks. The import steps (My Decks, Add Deck, open the deck, Import, paste,
+  Import & Replace) show the first time on a device and stay folded under "How to import" after
+  that. The box says when to choose the commander or set the companion on EDHPlay, and gets the
+  deck list when it opens instead of with every deck page. A failed load shows only "The deck list
+  couldn't be loaded." with Try again; when you're signed out it says to reload the page, without
+  Try again. The first-use tip is gone.
+- The deck editor's "Also keep a backup copy on Archidekt" box is unticked by default.
+- With `MTG_WRITES_ENABLED` false, likes, bookmarks, follows, comments, collaborators and
+  Collection edits made by hand are refused too, and nothing is sent to Archidekt.
+- Adding a collaborator opens a list of the people you follow on Archidekt, which narrows as you
+  type. Someone you don't follow gets one message under the box with a button to open their
+  Archidekt profile.
+- The "Add a tag" box suggests Archidekt's own tags as you type.
+- The setup page (`/install`) and the Guide give plain instructions without research notes or test
+  dates, and say where a detail is untested or may vary by plan.
+
 ## [0.7.26] - 2026-10-12
 
 Clean-up release before the next deployment: old, unused and half-removed code is gone, the two

@@ -6,10 +6,13 @@ card cannot apply one either: it gets no approval code and only opens the review
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
-from mtg_gateway import modes
+from mtg_gateway import actions, modes
 from mtg_gateway.approve import APPROVAL_META_KEY, approval_code
+from mtg_gateway.archidekt import rich_doc
 from mtg_gateway.decks import DeckError
 
 from .conftest import FakeIdP, running
@@ -101,6 +104,19 @@ async def test_like_bookmark_and_follow_through_proposals(stack: Stack) -> None:
     assert p["ok"] is False and p["error"] == "invalid"
 
 
+async def test_a_like_already_given_says_so_and_sends_nothing(stack: Stack) -> None:
+    """L6: a like proposal for a deck the member already likes says applying changes nothing,
+    and applying it sends no vote (Archidekt might toggle it off)."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _propose_and_apply(h, token, "propose_deck_social", {"deck_id": "43", "action": "like"})
+    sent = len(ark.vote_calls)
+    res = await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "like"})
+    assert structured(res)["rows"][0]["text"].endswith("(already the case; applying changes nothing)")
+    await _press(h, token, res)
+    assert len(ark.vote_calls) == sent and ark.votes == {("alice", 300043): 1}
+
+
 async def test_comments_post_edit_vote_delete(stack: Stack) -> None:
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
@@ -136,7 +152,7 @@ async def test_comments_post_edit_vote_delete(stack: Stack) -> None:
         "propose_comment",
         {"deck_id": "43", "action": "edit", "comment_id": mine["id"], "text": "Edited."},
     )
-    assert any(c["text"] == "Edited." for c in ark.comments[300043])
+    assert any(c["text"] == rich_doc("Edited.") for c in ark.comments[300043])  # as a Quill document
     await _propose_and_apply(
         h, token, "propose_comment", {"deck_id": "43", "action": "vote_up", "comment_id": 555001}
     )
@@ -164,6 +180,111 @@ async def test_comments_post_edit_vote_delete(stack: Stack) -> None:
     assert p["rows"][0]["cannot_undo"] is True and p["rows"][0]["before_text"] == "Edited."
     await _press(h, token, res)
     assert all(c["id"] != mine["id"] for c in ark.comments[300043])
+
+
+async def test_an_assistant_comment_is_posted_as_plain_text_only(stack: Stack) -> None:
+    """M4/Q70: a comment proposed as a Quill document with a hidden link shows its words on the
+    review row, and exactly those words are posted (and edited) when the member applies it. (The
+    MCP tool itself turns a JSON text argument into an object and refuses it, so the proposal is
+    made here the way the tool makes it, with the text as a string.)"""
+    h, ark = stack.h, stack.ark
+    await linked_user(stack)
+    decks = h.app.state.gateway.decks
+    ark.comments[300043] = []
+    phish = json.dumps(
+        {"ops": [{"insert": "See my primer", "attributes": {"link": "https://evil.example/login"}}]}
+    )
+    p = await actions.propose(decks, SUB, "comment_post", {"deck_id": "43", "text": phish, "reply_to": None})
+    assert p["rows"][0]["after_text"] == "See my primer" and "evil" not in json.dumps(p), p
+    assert (await _browser_apply(h, p["proposal_id"]))["state"] == "applied"
+    (made,) = ark.comments[300043]
+    assert made["text"] == rich_doc("See my primer")
+    edit = {"deck_id": "43", "comment_id": made["id"], "text": phish.replace("See", "Read")}
+    p = await actions.propose(decks, SUB, "comment_edit", edit)
+    assert p["rows"][0]["after_text"] == "Read my primer" and "evil" not in json.dumps(p), p
+    assert (await _browser_apply(h, p["proposal_id"]))["state"] == "applied"
+    assert ark.comments[300043][0]["text"] == rich_doc("Read my primer")
+
+
+COMMENT_NOTE = (
+    "Only the words of this comment are saved: the gateway writes plain text, so the links, "
+    "formatting and embeds in it were removed. Don't tell the user a link or formatting was added."
+)
+
+
+async def test_the_assistant_is_told_when_a_comment_loses_its_link(stack: Stack) -> None:
+    """Q90: a comment post or edit proposed as a Quill document with a link (or a card link) is
+    saved as its words, and the proposal reply says so. (Made as the tool makes it: see
+    test_an_assistant_comment_is_posted_as_plain_text_only.)"""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    decks = h.app.state.gateway.decks
+    ark.comments[300043] = []
+    phish = json.dumps(
+        {"ops": [{"insert": "See my primer", "attributes": {"link": "https://evil.example/login"}}]}
+    )
+    p = await actions.propose(decks, SUB, "comment_post", {"deck_id": "43", "text": phish, "reply_to": None})
+    assert p["note"] == COMMENT_NOTE and p["rows"][0]["after_text"] == "See my primer", p
+    assert p["changes"]["text"] == "See my primer"  # the same text is written as before
+    # the tool reply carries it, in its structured content and its text
+    from mtg_gateway.approve import proposal_tool_result
+
+    res = proposal_tool_result({"ok": True, **p}, decks=decks, sub=SUB, in_chat=True)
+    assert res.structured_content["note"] == COMMENT_NOTE
+    assert "note: " + COMMENT_NOTE in res.content[0].text
+    assert (await _browser_apply(h, p["proposal_id"]))["state"] == "applied"
+    (made,) = ark.comments[300043]
+    card = json.dumps({"ops": [{"insert": "Read "}, {"insert": {"card-link": "Sol Ring"}}, {"insert": "\n"}]})
+    p = await actions.propose(
+        decks, SUB, "comment_edit", {"deck_id": "43", "comment_id": made["id"], "text": card}
+    )
+    assert p["note"] == COMMENT_NOTE and p["rows"][0]["after_text"] == "Read Sol Ring", p
+    # a later get_proposal of it (stored as plain text) adds none
+    got = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
+    assert got["ok"] and "note" not in got, got
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Nice deck!",
+        "**Nice** deck: [see](https://example.com/x)",
+        json.dumps({"ops": [{"insert": "Nice deck!\n"}]}),
+    ],
+)
+async def test_a_comment_that_loses_nothing_gets_no_note(stack: Stack, text: str) -> None:
+    """Q90: plain text, Markdown and a document of words only lose nothing: no note, through the
+    tool itself as well."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    ark.comments[300043] = []
+    p = await actions.propose(
+        h.app.state.gateway.decks, SUB, "comment_post", {"deck_id": "43", "text": text, "reply_to": None}
+    )
+    assert "note" not in p, p
+    if not text.startswith("{"):  # the MCP layer turns JSON text into an object and refuses it
+        res = await call(h, token, "propose_comment", {"deck_id": "43", "action": "post", "text": text})
+        assert structured(res)["ok"] and "note" not in structured(res), structured(res)
+
+
+async def test_a_comment_stored_by_0726_tells_the_assistant_in_get_proposal(stack: Stack) -> None:
+    """Q90: a comment proposal stored by 0.7.26 with a formatted document is posted as its words
+    when the member applies it; get_proposal tells the assistant so."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    ark.comments[300043] = []
+    res = await call(h, token, "propose_comment", {"deck_id": "43", "action": "post", "text": "x"})
+    pid = structured(res)["proposal_id"]
+    row = h.db.get_proposal(pid, SUB)
+    phish = json.dumps({"ops": [{"insert": "Hi", "attributes": {"bold": True}}, {"insert": "\n"}]})
+    changes = {**row["changes"], "text": phish}
+    h.db._conn.execute("UPDATE proposals SET changes_json = ? WHERE id = ?", (json.dumps(changes), pid))
+    got = structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
+    assert got["note"] == COMMENT_NOTE, got
+    assert (await _browser_apply(h, pid))["state"] == "applied"
+    assert ark.comments[300043][0]["text"] == rich_doc("Hi")
+    got = structured(await call(h, token, "get_proposal", {"proposal_id": pid}))
+    assert got["state"] == "applied" and got["note"] == COMMENT_NOTE, got
 
 
 async def test_delete_deck_waits_for_the_members_press_even_in_auto(stack: Stack) -> None:
@@ -500,8 +621,17 @@ async def test_settings_page_collaborators_take_one_press_and_a_confirmation(sta
     try:
         await b.login()
         page = (await b.http.get("/decks/42/settings")).text
-        assert "id='collaborators'" in page and "<b>amy</b>" in page and "added by alice" in page
+        assert "id='collaborators'" in page and "<span class='name'>amy</span>" in page
+        assert "added by alice" in page and "aria-label='Remove amy'" in page
         assert "press Apply there" not in page
+        # Q6b: one line on the rule; the people followed are offered (the site's own combobox, no
+        # datalist), less current collaborators: amy, the only one followed, is one already
+        assert "Only people you follow on Archidekt can be added" in page
+        assert "<datalist" not in page and "data-suggest='list'" not in page
+        assert "Everyone you follow on Archidekt is a collaborator already." in page
+        # each form names its section, so the answer (a refusal, or the page after the confirmation)
+        # opens there
+        assert "action='/decks/42/collaborators#collaborators'" in page
         csrf = await b.csrf()
         # the first press only asks: nothing is sent and no proposal is stored
         r = await b.http.post(
@@ -519,6 +649,11 @@ async def test_settings_page_collaborators_take_one_press_and_a_confirmation(sta
         assert ark.editors[42] == [] and h.db.list_proposals(SUB) == []
         shown = (await b.http.get(r.headers["location"])).text
         assert "Collaborator removed on Archidekt." in shown
+        # the notice sits in the section, next to the form, not at the top of the page
+        assert shown.index("Collaborator removed on Archidekt.") > shown.index("id='collaborators'")
+        assert "No collaborators yet." in shown
+        assert "data-suggest='list' data-options='[&quot;amy&quot;]'" in shown
+        assert "data-suggest-head='People you follow'" in shown and "<datalist" not in shown
         # adding: the same two steps, someone the member follows
         r = await b.http.post(
             "/decks/42/collaborators", data={"csrf": csrf, "action": "add", "username": "amy"}
@@ -534,7 +669,23 @@ async def test_settings_page_collaborators_take_one_press_and_a_confirmation(sta
         bad = await b.http.post(
             "/decks/42/collaborators", data={"csrf": csrf, "action": "add", "username": "nobody"}
         )
-        assert bad.status_code == 400 and "not among the people you follow" in bad.text
+        assert bad.status_code == 400 and "nobody isn't someone you follow on Archidekt." in bad.text
+        # Q6b: one message, under the box, with the person's Archidekt profile to follow them there;
+        # not repeated at the top of the page
+        assert bad.text.count("someone you follow on Archidekt") == 1
+        assert "not among the people you follow" not in bad.text
+        assert "<p class='notice error'>" not in bad.text
+        msg = bad.text.index("id='collaborators-msg'")
+        assert bad.text.index("id='collabname'") < msg < bad.text.index("id='collab-help'")
+        assert (
+            "<a class='btn' href='https://archidekt.com/u/nobody' target='_blank' "
+            "rel='noreferrer noopener'>" in bad.text
+        )
+        assert "Open nobody on Archidekt</a>" in bad.text
+        # the box keeps the name, is marked invalid and is described by the message
+        assert (
+            "value='nobody' aria-describedby='collab-help collaborators-msg' aria-invalid='true'" in bad.text
+        )
         bad = await b.http.post(
             "/decks/42/collaborators",
             data={"csrf": csrf, "action": "add", "username": "nobody", "confirmed": "1"},
@@ -956,3 +1107,142 @@ async def test_cover_tags_move_and_folder_rename_obey_the_writes_switch(stack: S
         with pytest.raises(DeckError) as exc:
             await pending
         assert exc.value.kind == "writes_disabled"
+
+
+async def test_likes_bookmarks_follows_comments_and_collection_edits_obey_the_writes_switch(
+    stack: Stack,
+) -> None:
+    """R-160: with MTG_WRITES_ENABLED false the member's own likes, bookmarks, follows, comments,
+    collaborators and collection edits are refused too, and nothing is sent to Archidekt."""
+    import dataclasses
+
+    from mtg_gateway.collection import CollectionError
+
+    h, ark = stack.h, stack.ark
+    await linked_user(stack)
+    decks = h.app.state.gateway.decks
+    social = decks.social
+    collection = h.app.state.gateway.collection
+    decks.settings = dataclasses.replace(decks.settings, writes_enabled=False)
+    calls = len(ark.calls)
+    for pending in (
+        social.vote(SUB, "42", 1),
+        social.vote_comment(SUB, "42", 1, 1),
+        social.bookmark(SUB, "42", True),
+        social.follow(SUB, 7, True),
+        social.comment(SUB, "42", "hello", None),
+        social.edit_comment(SUB, "42", 1, "edited"),
+        social.delete_comment(SUB, "42", 1),
+        social.add_collaborator(SUB, "42", 7),
+        social.remove_collaborator(SUB, "42", 7),
+    ):
+        with pytest.raises(DeckError) as exc:
+            await pending
+        assert exc.value.kind == "writes_disabled"
+    for pending in (
+        collection.add(SUB, [{"name": "Sol Ring"}], source="test"),
+        collection.set_quantity(SUB, 1, 2),
+        collection.update(SUB, 1, {"condition": "NM"}),
+        collection.remove(SUB, 1),
+    ):
+        with pytest.raises(CollectionError) as cexc:
+            await pending
+        assert cexc.value.kind == "writes_disabled"
+    assert ark.calls[calls:] == []  # refused before anything, reads included, was sent
+    b = Browser(h)
+    try:
+        await b.login()
+        csrf = await b.csrf()
+        r = await b.http.post(
+            "/social/api/decks/42/bookmark", json={"on": True}, headers={"X-CSRF-Token": csrf}
+        )
+        assert r.status_code == 403 and r.json()["error"] == "writes_disabled", r.text
+    finally:
+        await b.aclose()
+
+
+# -- review D2: an action whose write landed, then whose check met Archidekt's long wait ---------------
+async def _own_comment(h, token: str, ark) -> int:
+    """Post a comment of the member's own on deck 43 (through a proposal) and return its id."""
+    res = await call(h, token, "propose_comment", {"deck_id": "43", "action": "post", "text": "Mine."})
+    await _press(h, token, res)
+    return next(c["id"] for c in ark.comments[300043] if c["text"] == rich_doc("Mine."))
+
+
+async def _collaborator_amy(h, token: str, ark, *, added: bool) -> None:
+    ark.follows["alice"] = {78}
+    if added:
+        await _propose_and_apply(
+            h, token, "propose_collaborator", {"deck_id": "42", "action": "add", "username": "amy"}
+        )
+
+
+@pytest.mark.parametrize(
+    "case", ["collaborator_add", "collaborator_remove", "comment_edit", "comment_delete", "create_folder"]
+)
+async def test_an_action_whose_write_landed_is_never_put_back_to_pending(
+    stack: Stack, monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    """Review D2 (Q78): the action's write reached Archidekt, then the re-read that checks it met a
+    429 longer than an apply may wait. Something changed, so the proposal stays failed and never
+    says "Nothing was changed" (every write of an apply counts, fail closed)."""
+    import httpx
+
+    from mtg_gateway import social
+    from mtg_gateway.archidekt import ArchidektClient
+
+    async def no_wait(self, seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(ArchidektClient, "_wait_out", no_wait)
+    monkeypatch.setattr(social, "FRESH_GAP", 0.0)
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    if case == "collaborator_add":
+        await _collaborator_amy(h, token, ark, added=False)
+        tool, args = "propose_collaborator", {"deck_id": "42", "action": "add", "username": "amy"}
+        method, path, landed = "POST", "/editors/", lambda: len(ark.editors.get(42, [])) == 1
+    elif case == "collaborator_remove":
+        await _collaborator_amy(h, token, ark, added=True)
+        tool, args = "propose_collaborator", {"deck_id": "42", "action": "remove", "username": "amy"}
+        method, path, landed = "DELETE", "/decks/editors/", lambda: ark.editors[42] == []
+    elif case in ("comment_edit", "comment_delete"):
+        mine = await _own_comment(h, token, ark)
+        if case == "comment_edit":
+            tool = "propose_comment"
+            args = {"deck_id": "43", "action": "edit", "comment_id": mine, "text": "Changed."}
+            method, path = "PATCH", "/comments/"
+            landed = lambda: any(c["text"] == rich_doc("Changed.") for c in ark.comments[300043])  # noqa: E731
+        else:
+            tool, args = "propose_comment", {"deck_id": "43", "action": "delete", "comment_id": mine}
+            method, path = "DELETE", "/comments/"
+            landed = lambda: all(c["id"] != mine for c in ark.comments[300043])  # noqa: E731
+    else:
+        tool, args = "propose_create_folder", {"name": "Brews"}
+        method, path = "POST", "/decks/folders/"
+        landed = lambda: any(f["name"] == "Brews" for f in ark.folders["alice"])  # noqa: E731
+    p = structured(await call(h, token, tool, args))
+    assert p["ok"] and p["state"] == "pending", p
+    orig = ark.transport.handler
+    wrote = {"x": False}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == method and path in req.url.path:
+            wrote["x"] = True
+            return orig(req)
+        if wrote["x"] and req.method == "GET":
+            return httpx.Response(429, json={"detail": "slow"}, headers={"Retry-After": "3600"})
+        return orig(req)
+
+    ark.transport.handler = handler
+    try:
+        out = await _browser_apply(h, p["proposal_id"])
+    finally:
+        ark.transport.handler = orig
+        h.app.state.gateway.decks.client.pacer._retry_until = 0
+    assert wrote["x"] and landed(), case
+    row = h.db.get_proposal(p["proposal_id"], SUB)
+    assert out["ok"] is False and row["state"] == "failed", (case, out, row["result"])
+    assert row["result"]["error"] == "rate_limited", row["result"]
+    assert "Nothing was changed" not in row["result"]["detail"], row["result"]["detail"]
+    assert "Part of this change had already reached Archidekt" in row["result"]["detail"]

@@ -20,9 +20,9 @@ import re
 import time
 from collections import Counter
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
-from .archidekt import VOTE_UP, Deck, DeckCard, featured_scryfall_id, format_label
+from .archidekt import VOTE_UP, Deck, DeckCard, featured_scryfall_id, format_label, rich_text
 from .deck_stats import (
     CURVE_BUCKETS,
     PRIMARY_TYPES,
@@ -38,7 +38,7 @@ from .deck_stats import (
     primary_type,
 )
 from .decks import mana_value_text, split_label
-from .export_formats import EDHPLAY_URL, to_edhplay
+from .export_formats import EDHPLAY_URL
 from .mana import mana_html as _mana_html
 from .theme import esc, icon, plural
 from .views import cards_by_category
@@ -357,19 +357,14 @@ def banner_html(
         f"<a class='btn' href='/decks/{did}/goldfish' title='Shuffle, draw an opening hand and play "
         f"turns by hand, here on the gateway'>{icon('layers')} Goldfish</a>"
     )
-    # Play on EDHPlay (R-154): EDHPlay is the online table; it has no import by link, so the button
-    # copies the whole deck in its import format (export_formats.to_edhplay) and opens the site
-    # (deck.js). Without script the link still opens EDHPlay, and Export deck has the list.
-    edh = to_edhplay(deck)
-    edh_list = esc(edh.text).replace("\n", "&#10;")  # one line per card, kept through the attribute
-    # what did not fit EDHPlay's 15-card sideboard: the note names it (deck.js). The maybeboard
-    # (never sent) and tokens (EDHPlay drops them) are in the first-time tip.
-    edh_left = esc(", ".join(name if n == 1 else f"{n} {name}" for n, name in edh.left_out))
-    edh_left_count = sum(n for n, _name in edh.left_out)
+    # Play on EDHPlay (R-154, T-161): EDHPlay is the online table; it has no import by link, so the
+    # button opens a short box whose Copy and Open EDHPlay.com copies the whole deck in its import
+    # format and opens the site (deck.js). The box asks /decks/{id}/edhplay.json for the list when it
+    # opens (companion_tools.py), so the page itself doesn't carry the whole list. Without script the
+    # link still opens EDHPlay, and Export deck has the list.
     primary += (
         f"<a class='btn' href='{EDHPLAY_URL}' target='_blank' rel='noreferrer noopener' data-edhplay "
-        f"data-list='{edh_list}' "
-        f"data-left-out='{edh_left}' data-left-count='{edh_left_count}' "
+        f"data-src='/decks/{did}/edhplay.json' "
         "title='Copy this deck list and open EDHPlay to play it online'>"
         f"{icon('play')} Play on EDHPlay</a>"
     )
@@ -680,7 +675,8 @@ def _card_data(card: DeckCard, deck: Deck) -> str:
     menu, the viewer's quantity buttons, dragging between stacks): the row's count, zone (main
     or side), first category (empty when Archidekt has none) and relation id, which pick the row
     an edit targets when the same card sits in the deck and on the maybeboard. A row in more than
-    one category lists them all in data-allcats, so an Undo of its removal puts every one back."""
+    one category lists them all in data-allcats, so an Undo of its removal puts every one back.
+    data-cmc is the printed mana value, which a cleared custom one (data-mv) goes back to."""
     zone = "main" if deck.in_deck(card) else "side"
     cat = card.categories[0] if card.categories else ""
     rel = f" data-rel='{card.relation_id}'" if card.relation_id is not None else ""
@@ -694,6 +690,7 @@ def _card_data(card: DeckCard, deck: Deck) -> str:
         + f" data-qty='{card.quantity}' data-zone='{zone}' data-cat='{esc(cat)}'{rel}{allcats}"
         + (f" data-label='{esc(card.label)}'" if split_label(card.label)[0] else "")
         + (f" data-mv='{mana_value_text(card.custom_cmc)}'" if card.custom_cmc is not None else "")
+        + (f" data-cmc='{card.cmc:g}'" if card.cmc is not None else "")
         + (f" data-notes='{esc(card.notes)}'" if card.notes else "")
     )
 
@@ -1382,7 +1379,7 @@ def stats_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
 
 
 def description_html(deck: Deck) -> str:
-    text = (getattr(deck, "description", "") or "").strip()
+    text = rich_text(getattr(deck, "description", "")).strip()  # Archidekt keeps a Quill document
     if not text:
         body = "<p class='muted empty'><i>This deck has no description</i></p>"
     else:
@@ -1818,11 +1815,57 @@ def deck_list_html(
     return f"<ul class='plain decklist {esc(view)}'>{items}</ul>"
 
 
+# Q64: Archidekt's deck list came back with entries whose owner couldn't be read, so they were
+# left out. Shown like the gateway's other "couldn't load" answers (busy.busy_body): the reason in
+# a panel and a Try again button that loads the page again with reread=1, which reads the list
+# again (a list like this is otherwise kept for a minute: decks.DECK_LIST_PARTIAL, review N10).
+DECKS_UNREADABLE = "Your deck list couldn't be read from Archidekt. Try again in a moment."
+DECKS_PARTLY_UNREADABLE = (
+    "Part of your deck list couldn't be read from Archidekt, so some decks may be missing here. "
+    "Try again in a moment."
+)
+
+
+def decks_unreadable_text(*, some_shown: bool) -> str:
+    """The Q64 notice's words: none of the list read, or only part of it."""
+    return DECKS_PARTLY_UNREADABLE if some_shown else DECKS_UNREADABLE
+
+
+REREAD_KEEPS = ("q", "order", "view", "folder")  # the deck list's own query, kept by Try again
+
+
+def reread_href(path: str, query: Any = ()) -> str:
+    """Where Try again on the Q64 notice goes: ``path`` with the list's own query (REREAD_KEEPS,
+    from ``query``) and ``reread=1``. The page reads the list again and sends the browser back to
+    the address without ``reread``."""
+    kept = [(k, v) for k, v in dict(query).items() if k in REREAD_KEEPS and v]
+    return f"{path}?{urlencode([*kept, ('reread', '1')])}"
+
+
+def decks_unreadable_html(*, some_shown: bool, panel: bool = True, again: str = "") -> str:
+    """The notice over (or instead of) the deck list when entries couldn't be read (Q64);
+    ``panel=False`` for a notice inside a panel already (the home page's My decks). ``again``:
+    the Try again link (``reread_href``); empty loads the same address again."""
+    text = decks_unreadable_text(some_shown=some_shown)
+    return (
+        f"<div class='{'panel ' if panel else ''}decks-unreadable' role='alert'><p>{esc(text)}</p>"
+        f"<div class='actions'><a class='btn btn-primary' href='{esc(again)}'>Try again</a></div></div>"
+    )
+
+
 def deck_list_controls_html(
-    *, q: str, order: str, view: str, folders: list[str], folder: str, total: int, pending: bool = False
+    *,
+    q: str,
+    order: str,
+    view: str,
+    folders: list[str],
+    folder: str,
+    total: int | None,
+    pending: bool = False,
 ) -> str:
     """The toolbar over the deck list. ``pending``: the list is still being read (the folder picker
-    is rendered hidden and the total left blank; decks.js fills both)."""
+    is rendered hidden and the total left blank; decks.js fills both). ``total`` None: the list
+    couldn't be read (Q64), so no count is shown."""
     folder_opts = "".join(
         f"<option value='{esc(f)}'{' selected' if f == folder else ''}>{esc(f)}</option>" for f in folders
     )
@@ -1842,8 +1885,9 @@ def deck_list_controls_html(
             if folders or pending
             else ""
         )
-        + f"<div class='field'><span class='lbl' id='decks-total'>Total decks: {'…' if pending else total}"
-        "</span>"
+        + "<div class='field'><span class='lbl' id='decks-total'"
+        + (" hidden" if total is None and not pending else "")
+        + f">Total decks: {'…' if pending or total is None else total}</span>"
         f"<a class='btn' href='/folders'>{icon('folder')} Folders</a>"
         f"<a class='btn btn-primary' href='/decks/new'>{icon('plus')} New deck</a></div>"
         "<noscript><button type='submit' class='apply'>Apply</button></noscript>"
@@ -2236,7 +2280,7 @@ html.cardview-open{overflow:hidden}
 @media (min-width:1400px){
   .cardview .box{width:min(100%,66rem);grid-template-columns:minmax(16rem,27rem) minmax(0,1fr)} }
 /* the card menu (deck.js): the shared .menu panel, fixed where the pointer or finger was */
-.ctxmenu{position:fixed;z-index:65;min-width:220px;max-width:min(20rem,calc(100vw - 1rem));overflow:auto;
+.ctxmenu{position:fixed;z-index:58;min-width:220px;max-width:min(20rem,calc(100vw - 1rem));overflow:auto;
   overscroll-behavior:contain;border:1px solid var(--border)}
 .ctxmenu .head{text-transform:none;letter-spacing:0;font-size:.9rem;color:var(--text);white-space:normal;
   overflow-wrap:anywhere;padding-bottom:.35rem;border-bottom:1px solid var(--border);margin-bottom:.25rem}
@@ -2262,15 +2306,17 @@ html.cardview-open{overflow:hidden}
 .ctxmenu .more[aria-expanded=true] .chev{transform:rotate(90deg)}
 .ctxmenu .sub{display:flex;flex-direction:column;background:var(--surface);border-top:1px solid var(--border);
   border-bottom:1px solid var(--border);max-height:40vh;overflow:auto}
+.ctxmenu .sub[hidden]{display:none}
 .ctxmenu .sub button{padding-left:2.4rem;min-height:34px;font-size:.95rem}
 .ctxmenu .sub .on:disabled{color:var(--toolbar-active);font-weight:700}
-.ctxmenu.busy{opacity:.6;pointer-events:none}
 .deckview .c.held,.deckview .row.held{outline:3px solid var(--orange);outline-offset:2px}
 /* the toast after a save (theme .toast, bottom right): the message, Undo and History */
 .deck-toast{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;padding:.75rem 1rem;z-index:59;
   border-left:4px solid var(--blue);color:var(--text)}
 .deck-toast.error{border-left-color:var(--red)} .deck-toast.warn{border-left-color:var(--orange)}
-.deck-toast[role=alertdialog]{z-index:66}  /* a question ("Save anyway?") sits above the viewer */
+/* the note of a save sits above the card menu, which stays open for more quantity steps; a
+   question ("Save anyway?") and an error sit above the card viewer too */
+.deck-toast[role=alertdialog],.deck-toast.error{z-index:66}
 .deck-toast .msg{flex:1 1 10rem;min-width:0;overflow-wrap:anywhere}
 .deck-toast .acts{display:inline-flex;align-items:center;gap:.5rem;flex-wrap:wrap}
 .deck-toast .acts button,.deck-toast .acts .btn{margin:0;min-height:34px;padding:0 .75rem}
@@ -2280,6 +2326,24 @@ html.cardview-open{overflow:hidden}
 .deck-toast .close:hover{color:var(--text)}
 /* Play on EDHPlay's note: one line per point (deck.js) */
 .edhplay-toast .msg span{display:block} .edhplay-toast .msg span+span{margin-top:.3rem}
+/* its box: the editor's printing picker (.picker below), narrow and in the middle of the
+   window on a phone too (the picker is a bottom sheet there), with the import steps folded in */
+.picker.edhplay-dialog{padding:1rem;align-items:center}
+.picker.edhplay-dialog .pickbox{width:min(100%,30rem);max-height:100%;overflow:auto;padding:1rem 1.15rem;
+  border-radius:var(--radius-panel);border-bottom:1px solid var(--border)}
+.edhplay-dialog details.disclosure{margin:0;padding-top:.15rem}
+/* finger-sized (44 px): the fold's summary and the box's x (L9) */
+.edhplay-dialog details.disclosure > summary{min-height:44px}
+.picker.edhplay-dialog .pickbox .close{width:44px;min-height:44px;height:44px;margin:-.2rem -.35rem 0 0}
+.edhplay-dialog .steps{margin:.15rem 0 .2rem;padding-left:1.4rem;display:flex;flex-direction:column;gap:.4rem}
+.edhplay-dialog p{margin:0}
+.edhplay-dialog .edhplay-state{display:flex;flex-direction:column;gap:.5rem}
+.edhplay-dialog .acts{display:flex;margin-top:.25rem}
+.edhplay-dialog .acts .btn{margin:0;flex:1;justify-content:center}
+/* the list could not be had: the reason, and Try again beside it (a wrapped line on a phone) */
+.edhplay-dialog .notice.error{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem .75rem;margin:0}
+.edhplay-dialog .notice.error span{flex:1 1 12rem}
+.edhplay-dialog .notice.error .btn{margin:0}
 @media (max-width:600px){ .deck-toast{right:.5rem;left:.5rem;bottom:.5rem;width:auto;max-width:none} }
 @media (max-width:900px){ .has-tabbar .deck-toast{bottom:calc(64px + env(safe-area-inset-bottom))} }
 /* the viewer's own copies control: one fewer, the count, one more */
@@ -2287,7 +2351,6 @@ html.cardview-open{overflow:hidden}
 .cardview .acts .qtyctl button{flex:0 0 auto;width:2.6rem;padding:0;font-size:1.2rem;font-weight:700}
 .cardview .acts .qtyctl .n{min-width:2rem;text-align:center;font-size:1.1rem;
   font-variant-numeric:tabular-nums}
-.cardview .acts .qtyctl.busy{opacity:.6}
 /* grid view: cards about 170 to 230 px wide, as many per row as fit (five in a 1366 px window) */
 .deckview.grid .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:1rem}
 @media (max-width:600px){ .deckview.grid .cards{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -2403,6 +2466,9 @@ table.qty td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-
     align-items:center}
   .listbar .field:last-of-type .lbl{margin-right:auto} .listbar .field.grow{min-width:0} }
 @media (max-width:600px){ .listbar .controls{grid-template-columns:minmax(0,1fr)} }
+/* the list couldn't be read (Q64): the reason and Try again, a full-size touch target */
+.decks-unreadable p{margin:0}
+.decks-unreadable .actions .btn{min-height:44px}
 /* minmax(0,1fr), never 1fr: a long deck name (the "Copy of - …" names the app itself makes) must shrink
    and ellipsise inside its tile, not widen the track and scroll the page sideways. */
 ul.decklist.grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:25px;margin-bottom:1.25rem}
@@ -2540,15 +2606,35 @@ ul.erows{list-style:none;margin:.5rem 0 0;padding:0}
 .coverart{width:100%;max-width:22rem;aspect-ratio:16/9;object-fit:cover;border-radius:var(--radius-panel);
   background:var(--surface-2);display:flex;align-items:center;justify-content:center;flex:1 1 14rem}
 .coverform .field{flex:1 1 14rem;margin:0}
-.taglist{display:flex;flex-wrap:wrap;gap:.5rem;margin:0 0 1rem}
+ul.plain.taglist{display:flex;flex-wrap:wrap;gap:.5rem;margin:0 0 1rem}
 .taglist li{display:flex;align-items:center;gap:.25rem}
 .taglist .pill{font-size:.95rem;padding:.3rem .6rem}
 .taglist form.inline{display:inline;margin:0}
 .taglist button.mini{width:1.9rem;height:1.9rem;min-height:0;padding:0;margin:0;display:inline-flex;
   align-items:center;justify-content:center;border-radius:50%}
 .taglist button.mini svg{width:14px;height:14px}
-.addtag,.moveform{display:flex;flex-wrap:wrap;gap:.75rem;align-items:flex-end}
-.addtag .field,.moveform .field{margin:0}
+/* a box (or list) and its button on one row, the button at the box's height: on a phone the box
+   narrows rather than the button dropping to a row of its own; only with large text, where the
+   two can't share a row, does the button wrap below */
+.addtag,.moveform{display:flex;flex-wrap:wrap;gap:.6rem;align-items:flex-end}
+.addtag .field,.moveform .field{margin:0;flex:1 1 10rem;max-width:24rem;min-width:0}
+/* (main form > button is full width on a phone; here the button keeps its own width) */
+main .panel form.addtag > button,main .panel form.moveform > button{flex:none;width:auto}
+/* the Fold's cover screen (under 360px): the buttons drop their icon, so the box keeps room for its
+   whole placeholder ("Pick someone you follow", L11) and the two still share a row */
+@media (max-width:359.98px){ main .panel form.addtag > button svg,
+  main .panel form.moveform > button svg{display:none} }
+.tagbox .notice,.collabbox .notice,.folderbox .notice,.coverbox .notice{margin:.75rem 0 0}
+/* collaborators: one row each, like the page's other lists, the remove button at the end */
+ul.plain.collablist{margin:0 0 .75rem;border-bottom:1px solid var(--surface-2)}
+.collablist li{flex-wrap:nowrap}
+.collablist .who{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:.1rem}
+.collablist .name{flex:none}
+.collablist li.none{min-height:0;padding:.25rem 0 .75rem}
+.follownote{display:flex;flex-direction:column;align-items:flex-start;gap:.5rem}
+.follownote p{margin:0;font-weight:400}
+.follownote p.lead{font-weight:700}
+.follownote .btn{color:var(--text)}
 .foldertree li{padding-left:calc(var(--depth,0) * 1.25rem)}
 .foldertree li .name{display:flex;align-items:center;gap:.5rem}
 .foldertree li .btn{margin-left:auto}

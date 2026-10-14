@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import html
 import json
 import logging
@@ -50,9 +51,10 @@ from .approve import (
     APPROVAL_META_KEY,
     CARD_TOOL_META,
     apps_extension,
+    proposal_text,
     proposal_tool_result,
 )
-from .archidekt import ArchidektClient, Pacer
+from .archidekt import ArchidektClient, Deck, Pacer
 from .auth_provider import (
     BROWSER_COOKIE,
     BROWSER_KEY,
@@ -71,6 +73,7 @@ from .cards import (
     STATS_CARD_URI,
     CardLinks,
     add_card_routes,
+    deck_card_payload,
     tool_meta,
     with_card,
 )
@@ -317,6 +320,8 @@ def schema_error_middleware():
                 if same:  # the text is the same JSON, so clients that read only the text get the code too
                     text = pydantic_core.to_json(coded, fallback=str, indent=2).decode()
                     content[0] = {**content[0], "text": text}
+                elif content[0]["text"] == proposal_text(structured):  # a proposal tool's plain text
+                    content[0] = {**content[0], "text": proposal_text(coded)}
             return {**data, "content": content, "structuredContent": coded, "isError": True}
         if not data.get("isError") or structured:
             return result
@@ -642,6 +647,9 @@ def build_mcp_server(state: AppState) -> MCPServer:
             )
         if state.sync is not None and state.sync.enabled:
             tasks.append(asyncio.create_task(state.sync.loop()))
+        # unused backup copies whose delete Archidekt refused for a while (Q77), one at a time,
+        # in a context of its own (never inside a member's apply or slot)
+        tasks.append(asyncio.create_task(state.decks.backup_delete_loop(), context=contextvars.Context()))
         updates = UpdateChecker(s.update_check)
         if updates.enabled:
             tasks.append(asyncio.create_task(updates.loop()))
@@ -761,8 +769,9 @@ def build_mcp_server(state: AppState) -> MCPServer:
     # a pending proposal's result carries the card's one-time code. Off with MTG_APPLY_IN_CHAT.
     card_meta = dict(CARD_TOOL_META) if s.apply_in_chat else None
     # The other in-chat cards (cards.py) ride on the same switch: a deck read, a card's printings
-    # and the account status carry their card, and the deck card fetches the deck through a
-    # signed link the result carries in _meta.
+    # and the account status carry their card. The deck card draws the deck from the result's
+    # _meta (out of the model's context); a signed link stays there as the fallback for a deck too
+    # large to carry.
     state.cards = CardLinks(s.fernet_key, s.public_url) if s.apply_in_chat else None
     deck_card_meta = tool_meta(DECK_CARD_URI) if s.apply_in_chat else None
     account_card_meta = tool_meta(ACCOUNT_CARD_URI) if s.apply_in_chat else None
@@ -771,11 +780,18 @@ def build_mcp_server(state: AppState) -> MCPServer:
     stats_card_meta = tool_meta(STATS_CARD_URI) if s.apply_in_chat else None
     compare_card_meta = tool_meta(COMPARE_CARD_URI) if s.apply_in_chat else None
 
-    def _deck_card(data: dict[str, object], kind: str, ref: str) -> CallToolResult:
-        """A deck read as the assistant gets it, plus the deck card's signed link in _meta."""
+    def _deck_card(
+        data: dict[str, object], kind: str, ref: str, deck: Deck, snapshot: dict[str, Any] | None = None
+    ) -> CallToolResult:
+        """A deck read as the assistant gets it, plus what the deck card draws in _meta."""
         card = None
         if state.cards is not None and data.get("ok"):
-            card = {"link": state.cards.issue(_sub(), kind, ref), "name": data.get("name")}
+            card = deck_card_payload(
+                deck,
+                link=state.cards.issue(_sub(), kind, ref),
+                public_url=s.public_url,
+                snapshot=snapshot,
+            )
         return with_card(data, card)
 
     def _closed_at(p: dict[str, Any]) -> dict[str, Any]:

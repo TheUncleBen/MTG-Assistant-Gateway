@@ -508,6 +508,56 @@ def test_deck_card_groups_by_category_and_shows_rules_text_on_tap() -> None:
             browser.close()
 
 
+def test_deck_card_draws_the_deck_from_the_result_with_no_connection_to_the_gateway() -> None:
+    """A host whose sandbox lets the card reach no server but the picture hosts (ChatGPT, as seen):
+    the deck rides in the result's _meta, so the card draws it and never calls the gateway."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            page = browser.new_page()
+            errors: list[str] = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            _route(page)
+            gateway_calls: list[str] = []
+            page.unroute("https://mtg.test/cards/data/*")
+
+            def blocked(route):
+                gateway_calls.append(route.request.url)
+                route.abort()
+
+            page.route("https://mtg.test/**", blocked)
+            card = _open(
+                page,
+                "deck-card",
+                {
+                    "structuredContent": {"ok": True, "name": "Sample <b>Deck</b>"},
+                    "_meta": {"mtg/card": {"link": LINK, "name": "Sample <b>Deck</b>", "deck": DECK}},
+                },
+            )
+            card.locator(".row.cardrow").nth(3).wait_for(timeout=5_000)
+            assert card.locator("#count").inner_text().lower() == "4 cards + 1 aside"
+            assert card.locator(".row.group").count() == 3 and card.locator(".row.cardrow").count() == 4
+            assert "Commander:" in card.locator("#stat").inner_text()
+            assert card.locator("#status").get_attribute("class") == "status hidden"
+            assert gateway_calls == []
+            # Without the deck in the result the card still falls back to the link, and says so
+            # when that cannot be reached.
+            card = _open(
+                page,
+                "deck-card",
+                {"structuredContent": {"ok": True, "name": "X"}, "_meta": {"mtg/card": {"link": LINK}}},
+            )
+            card.locator("#status.err").wait_for()
+            assert "no connection to the gateway" in card.locator("#status").inner_text()
+            assert gateway_calls and gateway_calls[0].startswith(LINK)
+            assert not errors, errors
+        finally:
+            browser.close()
+
+
 def test_account_card_points_at_what_is_missing() -> None:
     from playwright.sync_api import sync_playwright
 
@@ -936,3 +986,63 @@ def test_scan_card_flags_unrecognised_items_and_links_the_scan_page_at_320px() -
         assert _keyboard_open(page, card, "Open the Scan page") == "https://mtg.test/scan"
 
     _display_card("scan-card", {"structuredContent": SCAN}, "#list .row", check)
+
+
+# WCAG contrast of each mana-curve label against what is drawn behind it (the nearest painted box)
+CURVE_LABELS = """() => {
+  function rgb(s) { const m = s.match(/[\\d.]+/g); return m ? m.map(Number) : [0, 0, 0, 0]; }
+  function lum(c) {
+    const a = c.slice(0, 3).map(v => {
+      v /= 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * a[0] + 0.7152 * a[1] + 0.0722 * a[2];
+  }
+  function bg(e) {
+    for (; e; e = e.parentElement) {
+      const c = rgb(getComputedStyle(e).backgroundColor);
+      if (c.length < 4 || c[3] > 0) return c;
+    }
+    return [255, 255, 255];
+  }
+  return [...document.querySelectorAll(".curve i")].map(i => {
+    const a = lum(rgb(getComputedStyle(i).color)), z = lum(bg(i));
+    return [i.textContent, (Math.max(a, z) + 0.05) / (Math.min(a, z) + 0.05)];
+  });
+}"""
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_deck_card_curve_labels_read_against_their_background(theme: str) -> None:
+    """L14: the mana curve's labels (0 to 7+) sit on the card, not inside their bars: each one
+    reaches 4.5:1 against what is behind it (a "0" under an empty bar measured 1.1:1 against the
+    bar it belonged to). The bars keep their heights, one per mana value."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            for width in (344, 390, 673, 1280):
+                page = browser.new_page(viewport={"width": width, "height": 900})
+                _route(page, deck=DECK)
+                card = _open(
+                    page,
+                    "deck-card",
+                    {"structuredContent": {"ok": True}, "_meta": {"mtg/card": {"deck": DECK}}},
+                    width=width - 24,
+                    theme=theme,
+                )
+                card.locator(".curve i").nth(7).wait_for()
+                labels = page.frames[1].evaluate(CURVE_LABELS)
+                assert [t for t, _ in labels] == ["0", "1", "2", "3", "4", "5", "6", "7+"]
+                assert all(r >= 4.5 for _, r in labels), (width, labels)
+                heights = page.frames[1].evaluate(
+                    "() => [...document.querySelectorAll('.curve b')].map(b => b.offsetHeight)"
+                )
+                assert heights == [2, 28, 2, 28, 2, 2, 28, 2], heights  # curve 1, 3 and 6: one card each
+                page.wait_for_timeout(100)  # the frame takes the card's height (size-changed)
+                _shot(page, f"l14-deckcard-curve-{width}-{theme}")
+                page.close()
+        finally:
+            browser.close()

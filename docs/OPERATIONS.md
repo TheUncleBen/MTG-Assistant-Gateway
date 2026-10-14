@@ -539,8 +539,10 @@ can be applied. The code default is off; the example env files
 - **To turn writes off:** set it to `false` (or remove it) and update the
   stack. It kicks in when the service restarts. It also covers every change
   made by hand on the deck settings page and the Folders page: deleting a
-  deck and creating a folder (since 0.7.25), and the cover image, tags,
-  moving a deck to a folder and renaming a folder (since 0.7.26).
+  deck and creating a folder (since 0.7.25), the cover image, tags,
+  moving a deck to a folder and renaming a folder (since 0.7.26), and likes,
+  bookmarks, follows, comments, collaborators and Collection edits (since
+  0.7.27). Nothing is sent to Archidekt for any of them.
 
 With writes off, people can still sign in, link Archidekt, use research
 tools, and make and review proposals. Applying returns "Deck writes are
@@ -672,7 +674,22 @@ The gateway is built to be light on Archidekt. For everyone together:
   minute. A request past that waits its turn, so a long apply slows down
   instead of stopping halfway;
 - if Archidekt says "slow down" (HTTP 429), every request stops for the time
-  it asks (at most 2 minutes), and nothing is retried meanwhile;
+  it asks (at most 2 minutes), and nothing is retried meanwhile. A member's
+  apply is the one exception: it waits Archidekt's pause out (the full time
+  Archidekt asks, even past 2 minutes) and sends the refused request again,
+  up to 6 waits and 5 minutes of waiting in all for the whole apply. If
+  Archidekt asks for a longer wait than is left, the apply stops at once
+  with a plain message that says what had changed. When nothing had, the
+  proposal stays pending (it can be approved again later) and its unused
+  backup copy is deleted again. An apply's 429s don't count towards the
+  five failures below, so they never pause the gateway for everyone;
+- an unused backup copy whose delete Archidekt refuses for a while (a pause
+  running, a 429, a server or network error) is deleted later by the
+  gateway itself: one copy per minute at most, for everyone together, never
+  while requests are paused, first once the pause is over (plus 30 seconds),
+  then at least 10, 20 and 40 minutes apart, and given up after 4 failed
+  tries (the copy then stays in the backup folder). These deletes are normal
+  requests: their 429s count towards the five failures below;
 - a read that times out or gets a server error is retried at most
   `MTG_ARCHIDEKT_RETRIES` (2) times, after a random wait that doubles each
   time (`MTG_ARCHIDEKT_BACKOFF_BASE`, 1 second, capped at 10). Writes are

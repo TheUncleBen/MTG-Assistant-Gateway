@@ -62,14 +62,26 @@ ul.changes li.add{border-left-color:var(--green)} ul.changes li.remove{border-le
 ul.changes li.change,ul.changes li.category,ul.changes li.finish,ul.changes li.printing,ul.changes li.commander,
 ul.changes li.detail,ul.changes li.description{border-left-color:var(--blue)}
 .pic{width:34px;height:48px;border-radius:3px;background:var(--bg2);object-fit:cover;display:block;flex:none}
-.pic.none{visibility:hidden}
+/* A row with no picture (a setting, or a picture that did not load) leaves no empty column. */
+ul.changes li.nopic{grid-template-columns:minmax(0,1fr) auto}
 .act{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);display:block}
 li.add .act{color:var(--green)} li.remove .act{color:var(--red)}
 .name{display:block;overflow-wrap:anywhere}
+.name .sub{display:block;font-size:12px;color:var(--muted);margin-top:1px}
 .qty{font-variant-numeric:tabular-nums;font-weight:600;white-space:nowrap;font-size:13px;color:var(--muted)}
 /* A change's text (Main → Maybeboard) may wrap, so on a narrow card it never squeezes the card name to a letter a line. */
 ul.changes li .qty{white-space:normal;text-align:right;overflow-wrap:anywhere;max-width:min(20em,32vw)}
-@media (max-width:420px){ul.changes li:not(.add):not(.remove) .qty:not(:empty){grid-column:2;text-align:left;max-width:none}}
+/* On a narrow card the count or change sits on the action's line, so a row takes two lines, not three. */
+@media (max-width:420px){
+  /* the action label keeps its own width and a long change (Main → Maybeboard …) wraps beside
+     it, so the two never overlap */
+  ul.changes li:not(.group):not(.more-row){grid-template-columns:auto max-content minmax(0,1fr);
+    grid-template-areas:"pic act qty" "pic name name";row-gap:2px;column-gap:10px}
+  ul.changes li.nopic{grid-template-columns:max-content minmax(0,1fr);grid-template-areas:"act qty" "name name"}
+  ul.changes li .txt{display:contents}
+  ul.changes li .pic{grid-area:pic} ul.changes li .act{grid-area:act;align-self:end}
+  ul.changes li .name{grid-area:name} ul.changes li .qty{grid-area:qty;align-self:end;max-width:none;justify-self:end}
+}
 li.add .qty{color:var(--green)} li.remove .qty{color:var(--red)}
 ul.changes li.group{display:block;padding:5px 10px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
   color:var(--muted);background:var(--bg2);border-left-color:var(--border)}
@@ -87,7 +99,11 @@ button{font:inherit;font-weight:600;min-height:44px;padding:0 16px;border-radius
   border:1px solid var(--border);background:var(--bg2);color:var(--text)}
 button.primary{background:var(--btn-bg);color:var(--btn-text);border-color:var(--btn-bg)}
 button.danger{color:var(--red)}
-button:disabled{opacity:.55;cursor:default}
+/* Locked (the 700 ms after drawing, and while a press is out), a button keeps a label that reads:
+   full-strength text with a dashed outline in its own colour, not faded (as the review page's
+   Apply and Reject, R-181) */
+button:disabled{opacity:1;cursor:default;background:transparent;border:1px dashed currentColor;color:var(--text)}
+button.danger:disabled{color:var(--red)}
 a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer;min-height:44px;display:inline-flex;align-items:center}
 .status{margin-top:10px;padding:9px 11px;border-radius:var(--radius);font-size:13px;background:var(--bg2);overflow-wrap:anywhere}
 .status.ok{background:var(--green-bg);color:var(--green)} .status.err{background:var(--red-bg);color:var(--red)}
@@ -124,7 +140,7 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
   var COLLAPSE_AT = 8;   // a longer list shows a summary and this many rows until "Show all"
   var ARM_DELAY_MS = 700; // buttons stay disabled this long after the card is drawn
   var host = window.parent;
-  var pending = {}, nextId = 1, hostCaps = null, proposal = null, approval = null, armed = false, busy = false;
+  var pending = {}, nextId = 1, hostCaps = null, proposal = null, approval = null, armed = false, busy = false, heldCode = null;
 
   function post(msg) { host.postMessage(msg, "*"); }
   function request(method, params) {
@@ -215,6 +231,22 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
     if (!t) return "changed, " + len + " chars";
     return "“" + (t.length > 300 ? t.slice(0, 299) + "…" : t) + "”";
   }
+  // Under a tags row, which tags are added and which taken off (as the review page says it).
+  function tagNote(r) {
+    if (r.field !== "tags") return "";
+    var bits = [];
+    if (Array.isArray(r.added) && r.added.length) bits.push("adds " + r.added.join(", "));
+    if (Array.isArray(r.removed) && r.removed.length) bits.push("removes " + r.removed.join(", "));
+    var s = bits.join("; ");
+    return s ? s.charAt(0).toUpperCase() + s.slice(1) : "";
+  }
+  // Which app made the proposal, by its name; never its internal client id.
+  function creator(label) {
+    var s = String(label || ""), m = /^app: (.+) \((.+)\)$/.exec(s);
+    if (m) return m[1];
+    if (s.indexOf("app: ") === 0) return "an assistant";
+    return s === "browser" ? "you, in your browser" : s;
+  }
   function describeRow(r) {
     switch (r.kind) {
       case "add": return ["Add", label(r), "+" + r.qty];
@@ -230,7 +262,7 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
       case "new_deck": return ["New deck", r.name + " (" + r.format + ", " + r.cards + " cards, " + (r.private ? "private" : "public") + ")", ""];
       case "restore": return ["Restore", "snapshot " + r.snapshot_id + " taken " + r.taken + " (" + r.rows + " rows)", ""];
       case "description": return ["Description", r.after_len ? excerpt(r.after_text, r.after_len) : "cleared", ""];
-      case "detail": return [String(r.field || "Setting"), arrow(r.before, r.after), ""];
+      case "detail": return [String(r.field || "Setting"), arrow(r.before, r.after), "", tagNote(r)];
       case "action": return [String(r.label || "Action"), String(r.text || "") + (r.after_text ? ": " + excerpt(r.after_text, String(r.after_text).length) : ""), r.cannot_undo ? "Can't be undone" : ""];
       default: return ["Change", r.text || "", ""];
     }
@@ -240,7 +272,8 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
     var img = el("img", "pic");
     img.alt = ""; img.loading = "lazy"; img.decoding = "async"; img.referrerPolicy = "no-referrer";
     img.src = "https://api.scryfall.com/cards/named?exact=" + encodeURIComponent(name) + "&format=image&version=small";
-    img.onerror = function () { img.classList.add("none"); img.onerror = null; };
+    // A picture that does not load leaves no empty slot: the row closes up like a setting's.
+    img.onerror = function () { var li = img.parentNode; img.onerror = null; if (li) { li.removeChild(img); li.classList.add("nopic"); } };
     return img;
   }
   function titleFor(p) {
@@ -320,8 +353,8 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
     if (!rows.length && sc.diff) {
       String(sc.diff).split("\n").forEach(function (line) {
         if (!line.trim()) return;
-        var li = el("li", "change"); li.appendChild(el("span", "pic none"));
-        var n = el("span"); n.appendChild(el("span", "act", "Change")); n.appendChild(el("span", "name", line));
+        var li = el("li", "change nopic");
+        var n = el("span", "txt"); n.appendChild(el("span", "act", "Change")); n.appendChild(el("span", "name", line));
         li.appendChild(n); li.appendChild(el("span", "qty", "")); list.appendChild(li);
       });
     }
@@ -333,7 +366,7 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
     $("note").textContent = note; $("note").className = "note" + (note ? "" : " hidden");
     renderRows(list, rows, rows.length > COLLAPSE_AT ? COLLAPSE_AT : rows.length);
     var foot = [];
-    if (sc.created_by) foot.push("Proposed by " + sc.created_by);
+    if (sc.created_by) foot.push("Proposed by " + creator(sc.created_by));
     if (sc.state === "pending" && sc.expires_at) {
       var mins = Math.max(0, Math.round((Number(sc.expires_at) * 1000 - Date.now()) / 60000));
       foot.push("expires in " + (mins >= 120 ? Math.round(mins / 60) + " h" : mins + " min"));
@@ -372,6 +405,16 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
     if (p.state === "failed") return "Applying this failed" + at + ". The review page shows what happened. Ask the assistant for a new proposal if you still want this change.";
     if (p.state === "applied") return "Already applied" + at + ". The deck on Archidekt matches this proposal.";
     return "";
+  }
+
+  // Review B6: this press's apply failed (the gateway's answer says the proposal is failed now):
+  // its reason once, then where to see what happened, and to ask again unless the reason says so.
+  function failedText(msg) {
+    var text = msg.trim();
+    if (text && !/[.!?]$/.test(text)) text += ".";
+    text += (text ? " " : "") + "The review page shows what happened.";
+    if (!/new proposal/i.test(msg)) text += " Ask the assistant for a new proposal if you still want this change.";
+    return text;
   }
 
   // The card may be drawn (or shown again by the host) long after the proposal was made, and the
@@ -419,12 +462,26 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
             setStatus("Still applying, but the card can't read its progress (" + String(sc.message || "the gateway refused") + "). Open the review page to follow it.", "err");
             return;
           }
-          render({ structuredContent: sc, _meta: {} });
-          if (sc.state === "applied") {
+          // Q78: an apply Archidekt's waits stopped before it changed anything leaves the proposal
+          // pending, and this card's code approves it again (the code stays valid while pending).
+          var meta = {};
+          if (sc.state === "pending" && heldCode) meta[APPROVAL_KEY] = heldCode;
+          render({ structuredContent: sc, _meta: meta });
+          var r = sc.result || {};
+          if (sc.state === "pending") {
+            // the stop's own message, shown here and told to the assistant as it is (Q95: the
+            // approved stop message, no other line)
+            var stop = String((r.error === "rate_limited" && r.detail) || sc.next_step || "");
+            setStatus(stop, "err");
+            if (stop) tellModel(stop);
+          } else if (sc.state === "applied") {
             setStatus("Applied. The deck on Archidekt matches this proposal.", "ok");
             tellModel("Proposal " + pid + " finished applying to Archidekt.");
           } else if (sc.state !== "applying") {
-            setStatus(String(sc.next_step || ("Now " + sc.state)), "err");
+            // failed: the same text as an Approve that failed at once (review F2, D1.2), from the
+            // reason the proposal stored, never the assistant's next_step
+            setStatus(sc.state === "failed" ? failedText(String(r.detail || ""))
+              : String(sc.next_step || ("Now " + sc.state)), "err");
             tellModel("Proposal " + pid + " stopped applying: it is now " + sc.state + ".");
           }
         })
@@ -450,8 +507,9 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
       var d = describeRow(r);
       var li = el("li", String(r.kind || "change"));
       if (CARD_KINDS[r.kind] && r.name && images < MAX_IMAGES) { li.appendChild(cardImage(String(r.name))); images++; }
-      else li.appendChild(el("span", "pic none"));
-      var n = el("span"); n.appendChild(el("span", "act", d[0])); n.appendChild(el("span", "name", d[1]));
+      else li.classList.add("nopic");
+      var n = el("span", "txt"); n.appendChild(el("span", "act", d[0]));
+      var nm = el("span", "name", d[1]); if (d[3]) nm.appendChild(el("span", "sub", d[3])); n.appendChild(nm);
       li.appendChild(n); li.appendChild(el("span", "qty", d[2])); list.appendChild(li);
       shown++;
     }
@@ -539,10 +597,12 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
           if (closed) { approval = null; render({ structuredContent: closed, _meta: {} }); }
           else { if (ok) ok.disabled = false; if (no) no.disabled = false; }
           if (!closed) setStatus(String(msg), "err");
+          else if (closed.state === "failed") setStatus(failedText(String(msg)), "err");
           else if (closed.state !== "applying") setStatus(closedText(closed) || String(msg), "");
           tellModel("The user pressed " + decision + " on the proposal card for " + pid + ", but the gateway answered: " + msg);
           return;
         }
+        heldCode = sc.state === "applying" ? approval : null;
         approval = null; busy = false;
         render({ structuredContent: Object.assign({}, proposal, sc), _meta: {} });
         if (sc.state === "applying") {

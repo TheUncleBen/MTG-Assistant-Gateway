@@ -137,7 +137,8 @@ def test_offline_page_names_the_site_and_follows_the_theme() -> None:
         ":root[data-theme=light]{" in page
         and "@media (prefers-color-scheme: light){:root:not([data-theme=dark])" in page
     )
-    assert "<script" not in page
+    # no inline script (its CSP allows none): only the one file the worker answers (Q63)
+    assert page.count("<script") == 1 and "<script src='/static/offline.js'></script>" in page
 
 
 # -- the shell over HTTP ---------------------------------------------------------------------

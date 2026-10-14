@@ -187,7 +187,7 @@ else your gateway serves. A few things are native:
   website footer. Navigation follows Android's window size classes: under
   600 px wide (a phone, a folded foldable) the bottom tab bar; from 600 px (an
   unfolded foldable, a tablet, a wide split-screen pane) a navigation rail
-  down the left edge with the same five sections. The rules track the live
+  down the left edge with every page on it (Home first) and no More menu. The rules track the live
   window, so folding, rotating, split screen and pop-up windows re-flow at
   once without a reload.
 - **Back** goes back a page; on the first page it leaves the app.
@@ -255,6 +255,10 @@ else your gateway serves. A few things are native:
   screen offers **Change gateway** next to **Retry**, so another address can
   be typed without clearing the app's data. **Back** on the address screen
   returns to the page when a gateway was already set.
+- **Back online.** When a page could not load because the phone was offline
+  (or the gateway could not be reached), the app loads it again by itself as
+  soon as the phone's connection comes back, once; **Retry** still works at any
+  time. A page that loaded is never reloaded for this.
 
 ## 3. Scanning with the phone camera
 
@@ -626,9 +630,10 @@ screen is shown without a prefill, so a link can't pick your gateway for you.
   address and when it last looked for an update. It asks for internet and
   camera, and for the two permissions that let it install its own updates
   (`REQUEST_INSTALL_PACKAGES`, which Android grants only after you allow
-  installs from this app, and `UPDATE_PACKAGES_WITHOUT_USER_ACTION`); the
-  network-state permission one of its libraries declares is removed from the
-  manifest. The update check talks to the app's own gateway only ([Updates](#updates)). Sign-in cookies live in the system WebView's cookie store
+  installs from this app, and `UPDATE_PACKAGES_WITHOUT_USER_ACTION`), and for
+  the network state (`ACCESS_NETWORK_STATE`, granted at install without asking),
+  only to notice the connection coming back while a page has failed to load.
+  The update check talks to the app's own gateway only ([Updates](#updates)). Sign-in cookies live in the system WebView's cookie store
   for this app only. None of it is backed up or copied to a new phone: backup
   is off, and from Android 12 the data-extraction rules also exclude everything
   from cloud backup and device-to-device transfer, so a new phone signs in

@@ -212,17 +212,38 @@
   // 5. A card image that cannot be loaded (Scryfall down, an old link) shows the card's name on a
   //    plain tile instead of the browser's broken-image glyph. Inline onerror handlers are not
   //    allowed by the pages' script policy, so the error is caught here, on its way up.
+  //    The tile takes the picture's own classes, so it lands in the picture's place and size in
+  //    a row or grid (an editor row's 40 px thumbnail stays a 40 px cell, never an extra one);
+  //    a tile too small for words is the plain tile a row without a picture shows, its name
+  //    kept for screen readers and as a tooltip.
   document.addEventListener("error", function (e) {
     var img = e.target;
     if (!(img instanceof HTMLImageElement) || img.classList.contains("img-broken")) return;
     if (img.closest(".topbar") || img.classList.contains("av")) return;
+    var own = img.className;
     img.classList.add("img-broken");
     var ph = document.createElement("span");
-    ph.className = "ph img-fallback";
-    ph.textContent = img.getAttribute("alt") || img.getAttribute("title") || "Image unavailable";
-    ph.setAttribute("role", "img");
-    ph.setAttribute("aria-label", ph.textContent + " (image unavailable)");
-    if (img.parentNode) img.parentNode.insertBefore(ph, img.nextSibling);
+    ph.className = (own ? own + " " : "") + "ph img-fallback";
+    var name = img.getAttribute("alt") || img.getAttribute("title") || "";
+    // a decorative picture (alt="": the card's name is already in its row) stays silent for
+    // screen readers when it fails too; one with a real alt keeps that name (review N8)
+    var decorative = img.hasAttribute("alt") && !img.getAttribute("alt").trim();
+    ph.textContent = name || "Image unavailable";
+    if (decorative) {
+      ph.setAttribute("aria-hidden", "true");
+    } else {
+      ph.setAttribute("role", "img");
+      ph.setAttribute("aria-label", name ? name + " (image unavailable)" : "Image unavailable");
+    }
+    if (!img.parentNode) return;
+    img.parentNode.insertBefore(ph, img.nextSibling);
+    // a thumbnail's slot (28-56 px wide in the app's rows) is too narrow for a name; a tile
+    // whose size came from its words alone keeps them (it would fold to nothing without)
+    if (ph.getBoundingClientRect().width > 0 && ph.getBoundingClientRect().width < 72) {
+      ph.classList.add("img-fallback-mini");
+      if (ph.getBoundingClientRect().height < 16) ph.classList.remove("img-fallback-mini");
+      else ph.setAttribute("title", ph.getAttribute("aria-label") || ph.textContent);
+    }
   }, true);
 
   // 6. A deep link to an element whose id carries a member's text (#cat-Ramp, #card-Sol%20Ring):

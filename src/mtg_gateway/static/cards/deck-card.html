@@ -56,7 +56,8 @@
     var curve = d.curve || {}, keys = ["0", "1", "2", "3", "4", "5", "6", "7+"], max = 1;
     keys.forEach(function (k) { max = Math.max(max, Number(curve[k]) || 0); });
     var cv = el("span", "curve"); cv.setAttribute("aria-label", "Mana curve");
-    keys.forEach(function (k) { var bar = el("span"); bar.style.height = Math.max(2, Math.round(28 * (Number(curve[k]) || 0) / max)) + "px"; bar.title = k + ": " + (curve[k] || 0); bar.appendChild(el("i", "", k)); cv.appendChild(bar); });
+    // a column per mana value: its bar, and under it the label, on the card rather than in the bar (L14)
+    keys.forEach(function (k) { var col = el("span"), bar = el("b"); bar.style.height = Math.max(2, Math.round(28 * (Number(curve[k]) || 0) / max)) + "px"; col.title = k + ": " + (curve[k] || 0); col.appendChild(bar); col.appendChild(el("i", "", k)); cv.appendChild(col); });
     s.appendChild(cv);
   }
   function rowMatches(r, q) { return !q || String(r.name).toLowerCase().indexOf(q) >= 0 || String(r.type || "").toLowerCase().indexOf(q) >= 0; }
@@ -148,6 +149,9 @@
       B.setStatus(String(sc.message || (result.content && result.content[0] && result.content[0].text) || "The deck could not be read."), "err");
       return;
     }
+    // The deck itself comes in the result (no connection needed); only a deck too large to carry
+    // is fetched through the signed link.
+    if (meta.deck && typeof meta.deck === "object" && Array.isArray(meta.deck.categories)) { show(meta.deck); return; }
     var link = typeof meta.link === "string" ? meta.link : "";
     if (!link) { $("summary").textContent = "The deck is in the assistant's message."; return; }
     fetch(link, { credentials: "omit", headers: { Accept: "application/json" } })
@@ -155,15 +159,18 @@
       .then(function (pair) {
         var j = pair[1] || {};
         if (pair[0] !== 200 || j.ok === false) { B.setStatus(String(j.message || "The deck could not be loaded; ask again."), "err"); return; }
-        deck = j;
-        $("title").textContent = j.name || "Deck";
-        $("count").textContent = (j.card_count || 0) + " cards" + (j.side_count ? " + " + j.side_count + " aside" : "");
-        $("summary").textContent = (j.owner ? "by " + j.owner + " · " : "") + "tap a card for its picture and rules text." + (j.snapshot ? " Snapshot taken " + j.snapshot.taken_at + "." : "");
-        drawStats(j);
-        renderActions(j);
-        draw();
+        show(j);
       })
       .catch(function () { B.setStatus("The deck could not be loaded (no connection to the gateway). The list is in the assistant's message.", "err"); });
+  }
+  function show(j) {
+    deck = j;
+    $("title").textContent = j.name || "Deck";
+    $("count").textContent = (j.card_count || 0) + " cards" + (j.side_count ? " + " + j.side_count + " aside" : "");
+    $("summary").textContent = (j.owner ? "by " + j.owner + " · " : "") + "tap a card for its picture and rules text." + (j.snapshot ? " Snapshot taken " + j.snapshot.taken_at + "." : "");
+    drawStats(j);
+    renderActions(j);
+    draw();
   }
   $("filter").addEventListener("input", draw);
   $("viewbtn").onclick = function () { pictures = !pictures; draw(); };

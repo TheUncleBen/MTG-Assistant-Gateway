@@ -74,6 +74,7 @@ def test_search_box_status_line_and_no_inline_script() -> None:
     assert "class='btn gtop hide' href='#top'" in page and "id='top'" in page
     # without script the search box is hidden and every section is simply on the page
     assert "<div class='gsearch' hidden>" in page
+    assert "<ul id='guide-results' class='gresults' aria-label='Matching sections' hidden></ul>" in page
     assert "hidden" not in re.search(r"<section class='panel gsec'[^>]*>", page).group(0)
 
 

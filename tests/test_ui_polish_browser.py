@@ -85,6 +85,8 @@ def test_editor_new_category_is_inline_and_controls_name_the_card(server: Server
         box = page.locator(".editbar input[type=checkbox]")
         if box.count():
             assert box.evaluate("e => getComputedStyle(e).appearance") == "none"
+            assert not box.is_checked()  # unticked until the member ticks it (0.7.27)
+            box.check()
             assert "check.svg" in box.evaluate("e => getComputedStyle(e).backgroundImage")
         foil = page.locator("input[name=foil]")
         assert foil.evaluate("e => getComputedStyle(e).appearance") == "none"
@@ -133,6 +135,10 @@ def test_skip_link_times_images_and_copy_button(server: Server) -> None:
         )
         page.locator(".img-fallback").wait_for(timeout=3000)
         assert page.locator(".img-fallback").inner_text() == "Sol Ring"
+        # a picture with a real alt keeps its name for screen readers (review N8)
+        assert page.locator(".img-fallback").get_attribute("role") == "img"
+        assert page.locator(".img-fallback").get_attribute("aria-label") == "Sol Ring (image unavailable)"
+        assert page.locator(".img-fallback").get_attribute("aria-hidden") is None
         assert page.locator("img.img-broken").evaluate("e => getComputedStyle(e).display") == "none"
         # the odds form words follow the number: "1 card", "2 cards"
         k = page.locator(".oddsform input[name=k]")
