@@ -40,6 +40,14 @@ GUIDE_CSS = """
 .gsearch label{display:block;font-weight:700;margin-bottom:.25rem}
 .gsearch input[type=search]{width:100%}
 .gsearch .status{min-height:1.2em;margin:.35rem 0 0}
+.guide .gresults{list-style:none;margin:.35rem 0 0;padding:0}
+.guide .gresults li{margin:0 0 .25rem}
+.gresults a{display:block;padding:.4rem .6rem;border-radius:var(--radius);color:var(--text);
+  text-decoration:none;border:1px solid var(--border-soft)}
+.gresults a:hover,.gresults a:focus-visible{background:var(--surface-2);color:var(--text)}
+.gresults .t{display:block;font-weight:700;overflow-wrap:anywhere}
+.gresults .snip{display:block;color:var(--text-muted);font-size:.86rem;overflow-wrap:anywhere}
+.gresults mark{background:var(--orange-tint);color:var(--text);border-radius:2px;padding:0 .1rem}
 details.gnav{margin:0 0 .5rem}
 details.gnav > summary{list-style:none;cursor:pointer;user-select:none;width:100%}
 details.gnav > summary::-webkit-details-marker{display:none}
@@ -683,7 +691,7 @@ def guide_body(
             "remove tags, set its cover",
             "<code>propose_deck_details</code>",
             "proposal (high)",
-            "applied with the same verified calls as the deck settings page",
+            "applied the same way as on the deck settings page",
         ),
         (
             "Undo: snapshots and restore (cards and the deck's name, description, format, bracket, privacy)",
@@ -1134,7 +1142,8 @@ def guide_body(
         "<div class='gsearch' hidden><label for='guide-q'>Search the guide</label>"
         "<input id='guide-q' type='search' placeholder='A word or two, such as “snapshot” or “F10”' "
         "autocomplete='off' spellcheck='false' aria-describedby='guide-status'>"
-        "<p id='guide-status' class='status muted small' role='status' aria-live='polite'></p></div>"
+        "<p id='guide-status' class='status muted small' role='status' aria-live='polite'></p>"
+        "<ul id='guide-results' class='gresults' aria-label='Matching sections' hidden></ul></div>"
     )
     return (
         f"<div class='guide' id='top'><div class='gside'>{search}{_nav(parts)}</div>"
