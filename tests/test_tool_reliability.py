@@ -634,7 +634,7 @@ async def test_folder_tags_and_cover_go_through_a_details_proposal(stack: Stack)
     assert a.get("state") == "applied", a
     assert ark.deck_folder[42] == 501
     assert [x["name"] for x in ark.deck_tags[42]] == ["budget", "Spicy"]
-    assert ark.updates[-1]["customFeatured"].endswith(f"/{uid}.webp") and "featured" not in ark.updates[-1]
+    assert ark.updates[-1]["customFeatured"].endswith(f"/{uid}.webp?11") and "featured" not in ark.updates[-1]
     # a tag Archidekt doesn't have is refused when the proposal is made, not when it is applied
     new = structured(
         await call(

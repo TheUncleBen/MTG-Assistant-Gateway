@@ -9,6 +9,7 @@ import io
 import pytest
 
 from mtg_gateway import modes
+from mtg_gateway.archidekt import rich_text
 from mtg_gateway.decks import DeckError, parse_changes, split_label
 from mtg_gateway.scan.scryfall import ScryfallClient
 
@@ -506,7 +507,7 @@ async def test_settings_for_a_deck_without_a_format_keep_it_unset(stack: Stack) 
         )
         assert r.status_code == 303 and r.headers["location"] == "/decks/42?ok=saved", r.text
         assert ark.decks[42]["deckFormat"] is None
-        assert ark.decks[42]["description"] == "Only the description changes."
+        assert rich_text(ark.decks[42]["description"]) == "Only the description changes."
     finally:
         await b.aclose()
 

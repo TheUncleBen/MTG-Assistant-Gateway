@@ -11,7 +11,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from .actions import COLLABORATOR_NOTE, collaborator_by_hand, collaborator_target, profile_url
-from .archidekt import ArchidektError, Deck, featured_scryfall_id, format_label
+from .archidekt import ArchidektError, Deck, featured_scryfall_id, format_label, rich_text
 from .busy import busy_response
 from .companion import DECK_CSP, FORMAT_CHOICES, INDENT, LIST_OK_MESSAGES, SETTINGS_OK_MESSAGES
 from .deckpage import (
@@ -92,7 +92,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             return ""
 
         fmt_current = v.get("deck_format", deck.format or "")
-        description = v.get("description", deck.description or "")
+        description = v.get("description", rich_text(deck.description))  # its text (Quill on Archidekt)
 
         def sel(flag: bool) -> str:
             return " selected" if flag else ""

@@ -1,4 +1,4 @@
-"""Archidekt's social actions for the signed-in person: like a deck (a vote on its comment thread),
+"""Archidekt's social actions for the signed-in person: like a deck (a vote on the deck),
 bookmark it, follow its owner, read and post comments.
 
 These routes are a person's own clicks: every write needs the browser session and the page's
@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from .archidekt import VOTE_DOWN, VOTE_NONE, VOTE_UP, ArchidektError, Deck
+from .archidekt import VOTE_DOWN, VOTE_NONE, VOTE_UP, ArchidektError, Deck, rich_text
 from .decklist import clean_text
 from .decks import DeckError, _clean_deck_id
 from .pages import NO_STORE, browser_session, csrf_header_ok, read_limited
@@ -81,7 +81,7 @@ def comment_out(c: dict[str, Any], depth: int = 0) -> dict[str, Any]:
     results = kids.get("results") if isinstance(kids, dict) else kids if isinstance(kids, list) else []
     return {
         "id": _int(c.get("id")),
-        "text": str(c.get("text") or ""),
+        "text": rich_text(c.get("text")),  # Archidekt keeps a Quill document; shown as its text
         "owner": {
             "id": _int(owner.get("id")),
             "username": str(owner.get("username") or ""),
@@ -142,16 +142,14 @@ class SocialService:
         self.decks._writes_switch()
         self._me(sub)
         deck = await self.deck(sub, deck_id)
-        if deck.comment_root is None:
-            raise DeckError("unavailable", "Archidekt reports no thread for this deck, so it cannot be liked")
         if want == VOTE_NONE:
+            # taking a vote back names the vote taken back, as archidekt.com's like button does
             await self.decks._call(
-                sub, lambda t: self.client.vote_deck(t, deck.comment_root, up=True, remove=True)
+                sub,
+                lambda t: self.client.vote_deck(t, deck.id, up=deck.user_vote != VOTE_DOWN, remove=True),
             )
         else:
-            await self.decks._call(
-                sub, lambda t: self.client.vote_deck(t, deck.comment_root, up=want == VOTE_UP)
-            )
+            await self.decks._call(sub, lambda t: self.client.vote_deck(t, deck.id, up=want == VOTE_UP))
         weight = {VOTE_UP: 1, VOTE_DOWN: -1, VOTE_NONE: 0}
         points = deck.points - weight[deck.user_vote] + weight[want]
         self.state.db.audit("deck_voted", sub=sub, detail={"deck_id": deck.id, "vote": want})
@@ -177,9 +175,10 @@ class SocialService:
         if found["user_vote"] == want:  # already so: nothing is sent (Archidekt might toggle it)
             return {"comment": comment_id, "vote": want, "points": found["points"]}
         if want == VOTE_NONE:
-            await self.decks._call(sub, lambda t: self.client.vote_deck(t, comment_id, up=True, remove=True))
+            up = found["user_vote"] != VOTE_DOWN  # the vote taken back, as the site sends it
+            await self.decks._call(sub, lambda t: self.client.vote_comment(t, comment_id, up=up, remove=True))
         else:
-            await self.decks._call(sub, lambda t: self.client.vote_deck(t, comment_id, up=want == VOTE_UP))
+            await self.decks._call(sub, lambda t: self.client.vote_comment(t, comment_id, up=want == VOTE_UP))
         weight = {VOTE_UP: 1, VOTE_DOWN: -1, VOTE_NONE: 0}
         before = found["user_vote"] if found["user_vote"] in weight else VOTE_NONE
         points = found["points"] - weight[before] + weight[want]

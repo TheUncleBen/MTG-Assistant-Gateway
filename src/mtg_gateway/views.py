@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from . import deck_stats
-from .archidekt import Deck, DeckCard
+from .archidekt import Deck, DeckCard, rich_text
 from .decks import deck_to_archidekt_text, deck_to_text
 
 
@@ -87,7 +87,7 @@ def deck_out(
         "updated_at": deck.updated_at,
         "url": f"https://archidekt.com/decks/{deck.id}",
         "format": getattr(deck, "format", None),
-        "description": getattr(deck, "description", None) or "",
+        "description": rich_text(getattr(deck, "description", None)),  # its text, not the Quill JSON
         "edh_bracket": getattr(deck, "edh_bracket", None),
         "private": getattr(deck, "private", None),
         "tags": getattr(deck, "tags", None) or [],

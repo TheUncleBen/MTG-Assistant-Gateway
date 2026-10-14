@@ -22,7 +22,7 @@ from collections import Counter
 from typing import Any
 from urllib.parse import quote
 
-from .archidekt import VOTE_UP, Deck, DeckCard, featured_scryfall_id, format_label
+from .archidekt import VOTE_UP, Deck, DeckCard, featured_scryfall_id, format_label, rich_text
 from .deck_stats import (
     CURVE_BUCKETS,
     PRIMARY_TYPES,
@@ -1379,7 +1379,7 @@ def stats_panel_html(deck: Deck, stats: dict[str, Any] | None) -> str:
 
 
 def description_html(deck: Deck) -> str:
-    text = (getattr(deck, "description", "") or "").strip()
+    text = rich_text(getattr(deck, "description", "")).strip()  # Archidekt keeps a Quill document
     if not text:
         body = "<p class='muted empty'><i>This deck has no description</i></p>"
     else:

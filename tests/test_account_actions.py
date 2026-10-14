@@ -10,6 +10,7 @@ import pytest
 
 from mtg_gateway import modes
 from mtg_gateway.approve import APPROVAL_META_KEY, approval_code
+from mtg_gateway.archidekt import rich_doc
 from mtg_gateway.decks import DeckError
 
 from .conftest import FakeIdP, running
@@ -136,7 +137,7 @@ async def test_comments_post_edit_vote_delete(stack: Stack) -> None:
         "propose_comment",
         {"deck_id": "43", "action": "edit", "comment_id": mine["id"], "text": "Edited."},
     )
-    assert any(c["text"] == "Edited." for c in ark.comments[300043])
+    assert any(c["text"] == rich_doc("Edited.") for c in ark.comments[300043])  # as a Quill document
     await _propose_and_apply(
         h, token, "propose_comment", {"deck_id": "43", "action": "vote_up", "comment_id": 555001}
     )
