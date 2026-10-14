@@ -71,9 +71,9 @@ def _social(decks: DeckService) -> Any:
 
 
 def _comment_text(text: Any) -> str:
-    from .social import _CONTROL, MAX_COMMENT
+    from .social import MAX_COMMENT, comment_text
 
-    clean = _CONTROL.sub("", str(text or "").replace("\r\n", "\n")).strip()
+    clean = comment_text(str(text or ""))
     if not clean:
         raise DeckError("invalid", "text is required: write the comment first")
     if len(clean) > MAX_COMMENT:

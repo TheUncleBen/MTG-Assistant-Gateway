@@ -44,6 +44,7 @@ from .archidekt import (
     ArchidektError,
     Deck,
     DeckList,
+    QuillDoc,
     art_url,
     backup_name,
     finish_modifier,
@@ -52,9 +53,10 @@ from .archidekt import (
     no_retry,
     parse_deck,
     patient,
+    plain_text,
     rich_text,
-    same_rich_text,
     wait_note,
+    written_text,
 )
 from .archidekt_csv import CsvError, parse_export
 from .config import Settings
@@ -4056,7 +4058,8 @@ def parse_details(raw: Any) -> dict[str, Any]:
                 raise DeckError(
                     "invalid", f"description must be a string of up to {MAX_DESCRIPTION} characters"
                 )
-            out[key] = value
+            # plain text only (Q70): a Quill document an assistant sends is kept as its words alone
+            out[key] = plain_text(value)
         elif key == "deck_format":
             fmt = str(value or "").strip().lower()
             if fmt not in FORMAT_IDS:
@@ -4132,14 +4135,15 @@ def details_rows(deck: Deck, wanted: dict[str, Any]) -> tuple[dict[str, Any], li
     for key, value in wanted.items():
         new = FORMAT_IDS[value] if key == "deck_format" else value
         if key == "description":
-            # Archidekt keeps a Quill document (see rich_doc): the texts are compared and shown
-            if same_rich_text(new, deck.description):
+            # Archidekt keeps a Quill document (see rich_doc): the texts are compared, and the row
+            # shows the very text the write sends (written_text), never a reading of it
+            current, after = rich_text(deck.description), written_text(value)
+            if after.strip() == current.strip():
                 continue
         elif new == _current_detail(deck, key):
             continue
         changes[key] = value
         if key == "description":
-            current, after = rich_text(deck.description), rich_text(value)
             lines.append(
                 _row(
                     "description",
@@ -4174,10 +4178,11 @@ def details_rows(deck: Deck, wanted: dict[str, Any]) -> tuple[dict[str, Any], li
 
 def snapshot_details(snapshot: Deck) -> dict[str, Any]:
     """The deck details a snapshot recorded, in the shape ``details_rows`` compares: name,
-    description, format (as its FORMAT_IDS key, when known), bracket, private and unlisted."""
+    description, format (as its FORMAT_IDS key, when known), bracket, private and unlisted. The
+    description is Archidekt's own stored document, so it goes back with its formatting (Q70)."""
     out: dict[str, Any] = {
         "name": snapshot.name,
-        "description": snapshot.description or "",
+        "description": QuillDoc(snapshot.description or ""),
         "edh_bracket": snapshot.edh_bracket,
         "private": bool(snapshot.private),
         "unlisted": bool(snapshot.unlisted),

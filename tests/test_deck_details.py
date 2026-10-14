@@ -3,6 +3,7 @@ set_commander change actions, through the MCP tools and the browser review page.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -207,6 +208,89 @@ async def test_details_proposal_shows_on_the_review_page_and_only_to_its_owner(s
     await b2.login()
     assert (await b2.http.get(f"/proposals/{p['proposal_id']}")).status_code == 404
     await b2.aclose()
+
+
+PHISH = json.dumps(
+    {
+        "ops": [
+            {"insert": "See my primer", "attributes": {"link": "https://evil.example/login"}},
+            {"insert": "\n"},
+        ]
+    }
+)
+
+
+async def test_an_assistant_description_is_written_as_plain_text_only(stack: Stack) -> None:
+    """M4/Q70, the reviewer's scenario: an assistant proposes a description as a Quill document
+    with a hidden link. The review page, the chat card's rows and the proposal text show "See my
+    primer", and that plain text is exactly what is written: the link never reaches Archidekt."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    res = await call(h, token, "propose_deck_details", {"deck_id": "42", "details": {"description": PHISH}})
+    p = structured(res)
+    assert p["ok"], p
+    assert p["changes"] == {"description": "See my primer"}
+    (row,) = [r for r in p["rows"] if r["kind"] == "description"]
+    assert row["after_text"] == "See my primer"
+    assert all("evil" not in str(c.get("text", "")) for c in res["content"])  # the proposal text
+    assert "See my primer" in res["content"][0]["text"]
+    b = Browser(h)
+    await b.login()
+    page = await b.http.get(f"/proposals/{p['proposal_id']}")
+    assert "See my primer" in page.text and "evil" not in page.text
+    r = await b.http.post(f"/proposals/{p['proposal_id']}", data={"csrf": await b.csrf(), "action": "apply"})
+    assert r.status_code == 303 and "ok=" in r.headers["location"], r.headers
+    await b.aclose()
+    sent = [u for u in ark.updates if u["deck_id"] == 42]
+    assert sent == [{"deck_id": 42, "description": rich_doc("See my primer")}], sent
+    assert "evil" not in ark.decks[42]["description"]
+
+
+async def test_the_settings_form_writes_a_typed_document_as_plain_text(stack: Stack) -> None:
+    """Q70: text typed (or pasted) in the gateway's deck settings form is plain text too."""
+    h, ark = stack.h, stack.ark
+    await linked_user(stack)
+    b = Browser(h)
+    await b.login()
+    r = await b.http.post(
+        "/decks/42/settings",
+        data={"csrf": await b.csrf("/decks"), "name": ark.decks[42]["name"], "description": PHISH},
+    )
+    assert r.status_code == 303, r.text[:300]
+    page = await b.http.get(r.headers["location"])
+    assert "See my primer" in page.text and "evil" not in page.text, page.text[:500]
+    await b.aclose()  # the form applies the change at once (the member's own press)
+    assert ark.decks[42]["description"] == rich_doc("See my primer")
+
+
+async def test_a_restore_puts_the_formatted_description_back(stack: Stack) -> None:
+    """Q70: only a snapshot restore writes a Quill document as it is: the deck's own formatted
+    description (a link the member made on Archidekt included) comes back unchanged."""
+    h, ark = stack.h, stack.ark
+    formatted = json.dumps(
+        {
+            "ops": [
+                {"insert": "Primer", "attributes": {"link": "https://example.com/primer"}},
+                {"insert": " and "},
+                {"insert": "notes", "attributes": {"bold": True}},
+                {"insert": "\n"},
+            ]
+        }
+    )
+    ark.decks[42]["description"] = formatted
+    token = await linked_user(stack)
+    p = structured(
+        await call(h, token, "propose_deck_details", {"deck_id": "42", "details": {"description": "new"}})
+    )
+    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert a["ok"] and ark.decks[42]["description"] == rich_doc("new"), a
+    r = structured(await call(h, token, "propose_restore_snapshot", {"snapshot_id": a["snapshot_id"]}))
+    assert r["ok"], r
+    (row,) = [x for x in r["rows"] if x["kind"] == "description"]
+    assert row["after_text"] == "Primer and notes"
+    done = structured(await call(h, token, "apply_proposal", {"proposal_id": r["proposal_id"]}))
+    assert done["ok"] and done["result"]["verified"] is True, done
+    assert ark.decks[42]["description"] == formatted
 
 
 def test_parse_details_normalises_the_format() -> None:

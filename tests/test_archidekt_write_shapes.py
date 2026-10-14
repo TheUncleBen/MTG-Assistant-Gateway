@@ -15,9 +15,11 @@ from mtg_gateway.archidekt import (
     ArchidektClient,
     ArchidektError,
     Pacer,
+    QuillDoc,
     art_url,
     condition_code,
     language_code,
+    plain_text,
     rich_doc,
     rich_text,
     same_rich_text,
@@ -70,7 +72,11 @@ def test_rich_text_round_trip_matches_the_site_editor() -> None:
             ]
         }
     )
-    assert rich_doc(formatted) == formatted  # a document (a snapshot restore) keeps its formatting
+    # only a snapshot restore's document (a QuillDoc) keeps its formatting (Q70); any other text,
+    # a document included, is written as the plain text it is
+    assert rich_doc(QuillDoc(formatted)) == formatted
+    assert json.loads(rich_doc(formatted)) == {"ops": [{"insert": formatted + "\n"}]}
+    assert rich_doc(QuillDoc("older plain text")) == rich_doc("older plain text")
     assert rich_text(formatted) == "Play Sol Ring early"
     assert rich_text("older plain text") == "older plain text" and rich_text(None) == ""
     assert same_rich_text(formatted, "Play Sol Ring early\n") and not same_rich_text(formatted, "x")
@@ -134,6 +140,52 @@ async def test_comments_read_as_text_and_post_as_documents(stack: Stack) -> None
         r = await post(b, "/social/api/decks/43/comments", {"text": "Thanks!", "parent": 555001})
         assert r.status_code == 201 and r.json()["comment"]["text"] == "Thanks!"
         assert stack.ark.comments[300043][-1]["text"] == rich_doc("Thanks!")
+    finally:
+        await b.aclose()
+
+
+# A Quill document with a hidden phishing link and an embed, as an assistant steered by text in
+# another deck might send it (review M4).
+PHISH = json.dumps(
+    {
+        "ops": [
+            {"insert": "See my primer", "attributes": {"link": "https://evil.example/login"}},
+            {"insert": {"image": "https://evil.example/pixel.png"}},
+            {"insert": "\n"},
+        ]
+    }
+)
+
+
+def test_plain_text_keeps_only_the_words_of_a_document() -> None:
+    """Q70: what an assistant or a form supplies is reduced to its words, never sent as a document;
+    reducing it again changes nothing (a nested document is reduced all the way)."""
+    assert plain_text(PHISH) == "See my primer"
+    nested = json.dumps({"ops": [{"insert": PHISH + "\n"}]})
+    assert plain_text(nested) == "See my primer" == plain_text(plain_text(nested))
+    assert plain_text("Ramp {first}") == "Ramp {first}"
+    assert "evil" not in rich_doc(plain_text(PHISH))
+
+
+async def test_a_comment_typed_as_a_document_is_posted_as_plain_text(stack: Stack) -> None:
+    """M4: a comment or comment edit sent as a Quill document with a hidden link (the comment form,
+    or any caller of its API) is posted and edited as its words only."""
+    stack.ark.private.discard(43)
+    stack.ark.comments[300043] = []
+    b = await linked(stack)
+    try:
+        r = await post(b, "/social/api/decks/43/comments", {"text": PHISH})
+        assert r.status_code == 201, r.text
+        assert r.json()["comment"]["text"] == "See my primer"
+        made = stack.ark.comments[300043][-1]
+        assert made["text"] == rich_doc("See my primer") and "evil" not in made["text"]
+        r = await b.http.patch(
+            f"/social/api/decks/43/comments/{made['id']}",
+            content=json.dumps({"text": PHISH.replace("See my", "Read my")}),
+            headers={"Content-Type": "application/json", "X-CSRF-Token": await b.csrf("/decks")},
+        )
+        assert r.status_code == 200, r.text
+        assert stack.ark.comments[300043][-1]["text"] == rich_doc("Read my primer")
     finally:
         await b.aclose()
 
