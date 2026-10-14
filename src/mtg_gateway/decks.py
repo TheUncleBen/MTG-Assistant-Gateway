@@ -592,9 +592,9 @@ class Change:
     # "main" (the deck proper) or "side": the maybeboard and sideboard rows, which count
     # separately. A count or category change names the zone its rows are in.
     zone: str = "main"
-    # add: every category the new row goes in, in order (the first is ``category``, the row's
-    # primary one). The deck page's Undo of a removal sends it, so a card filed under several
-    # categories comes back under all of them.
+    # add and set_category: every category the row goes in, in order (the first is ``category``,
+    # the row's primary one). The deck page's Undo of a removal or a move sends it, so a card
+    # filed under several categories comes back under all of them.
     categories: tuple[str, ...] = ()
 
     @property
@@ -795,12 +795,12 @@ def _all_categories(chs: list[Change]) -> list[str]:
 
 
 def _parse_add_categories(i: int, action: str, raw: Any) -> tuple[str, ...]:
-    """An add's ``categories``: the row's categories in order (each one line, as ``category``),
-    duplicates dropped. Only an add takes them."""
+    """An add's or set_category's ``categories``: the row's categories in order (each one line,
+    as ``category``), duplicates dropped. Only those two take them."""
     if raw is None or raw == []:
         return ()
-    if action != "add":
-        raise DeckError("invalid", f"change {i}: categories apply to add only")
+    if action not in ("add", "set_category"):
+        raise DeckError("invalid", f"change {i}: categories apply to add and set_category only")
     if not isinstance(raw, list) or len(raw) > MAX_ADD_CATEGORIES or not all(isinstance(c, str) for c in raw):
         raise DeckError(
             "invalid", f"change {i}: categories must be a list of up to {MAX_ADD_CATEGORIES} names"
@@ -1039,8 +1039,9 @@ def _same_label(have: str, want: str) -> bool:
 
 
 def _parse_category_change(i: int, action: str, name: str, item: dict[str, Any]) -> Change:
-    """``set_category`` ({action, card_name, category}) and ``set_commander`` ({action, card_name});
-    neither takes a quantity or a printing."""
+    """``set_category`` ({action, card_name, category, categories?}) and ``set_commander``
+    ({action, card_name}); neither takes a quantity or a printing. A set_category's
+    ``categories`` files the card under all of them (the deck page's Undo of a move sends it)."""
     for key in ("quantity", "set_code", "set", "collector_number", "finish", "modifier", "foil"):
         if item.get(key) not in (None, "", False):
             raise DeckError(
@@ -1051,13 +1052,18 @@ def _parse_category_change(i: int, action: str, name: str, item: dict[str, Any])
     # One line, like every other name and category in a diff (no newlines, bidi or control
     # characters), so a category can never add rows of its own to the review page.
     cat = clean_text(item.get("category") or "")
+    cats = _parse_add_categories(i, action, item.get("categories"))  # never with set_commander
     if action == "set_commander":
         if cat and cat != COMMANDER:
             raise DeckError("invalid", f"change {i}: set_commander always files the card under Commander")
         return Change(action, name, category=COMMANDER)
+    if cats:
+        if cat and cat != cats[0]:
+            raise DeckError("invalid", f"change {i}: category must be the first of categories")
+        cat = cats[0]
     if not cat or len(cat) > MAX_CATEGORY:
         raise DeckError("invalid", f"change {i}: set_category needs a category (up to {MAX_CATEGORY} chars)")
-    return Change(action, name, category=cat)
+    return Change(action, name, category=cat, categories=cats)
 
 
 def category_plan(deck: Deck, changes: list[Change]) -> tuple[dict[int, list[str]], list[str]]:
@@ -1073,7 +1079,8 @@ def category_plan_rows(
     """Rows whose categories the set_category and set_commander changes rewrite, as
     ``{relation id: new categories}``, plus their review rows.
 
-    ``set_category`` moves every row of the card to exactly that one category. ``set_commander``
+    ``set_category`` moves every row of the card to exactly that one category (or, with
+    ``categories``, exactly those, the first the primary one). ``set_commander``
     files the card under Commander and takes Commander off every other row that has it (keeping
     that row's other categories), so after the change the commanders are exactly the cards named
     by this proposal's set_commander changes (two for partners). Rows that already have the
@@ -1101,10 +1108,10 @@ def category_plan_rows(
         rows = list({r.relation_id: r for r in rows}.values())
         if any(r.relation_id is None for r in rows):
             raise DeckError("contract", f"Archidekt did not number the deck rows of '{ch.card_name}'.")
-        new = [ch.category or COMMANDER]
+        new = list(ch.categories) or [ch.category or COMMANDER]
         if ch.action == "set_commander":
             new_commanders.append(rows[0].name)
-        changed = [r for r in rows if sorted(r.categories) != new]
+        changed = [r for r in rows if sorted(r.categories) != sorted(new)]
         for r in changed:
             want[r.relation_id] = new
         if ch.action == "set_category" and changed:
@@ -1114,7 +1121,7 @@ def category_plan_rows(
                     "category",
                     name=rows[0].name,
                     before=" / ".join(old),
-                    after=new[0],
+                    after=", ".join(new),
                     zone="side" if ch.zone == "side" else None,
                 )
             )

@@ -148,6 +148,49 @@ async def test_an_add_puts_a_card_back_under_every_category(stack: Stack) -> Non
         await b.aclose()
 
 
+async def test_a_move_puts_a_card_back_under_every_category(stack: Stack) -> None:  # noqa: F811
+    """A23: the deck page's Undo of a move of a card filed under several categories is a
+    set_category with every category it had, the primary first; it files the row under all of
+    them. Only set_category and add take categories, and the first is the category."""
+    row = _deck_card(stack, "Cultivate")[0]
+    row.update(categories=["Ramp", "Value"])
+    b = await linked(stack)
+    try:
+        r = await api(b, "POST", "/api/v1/decks/42/edit", {"changes": [{"action": "set_category",
+                      "card_name": "Cultivate", "category": "Lands"}]})  # fmt: skip
+        assert r.status_code == 201 and _deck_card(stack, "Cultivate")[0]["categories"] == ["Lands"], r.text
+        back = {"action": "set_category", "card_name": "Cultivate", "category": "Ramp",
+                "categories": ["Ramp", "Value"]}  # fmt: skip
+        r = await api(b, "POST", "/api/v1/decks/42/edit", {"changes": [back]})
+        assert r.status_code == 201, r.text
+        assert [x["categories"] for x in r.json()["rows"]] == [["Ramp", "Value"]]
+        assert _deck_card(stack, "Cultivate")[0]["categories"] == ["Ramp", "Value"]
+        for bad in (
+            {
+                "action": "set_category",
+                "card_name": "Cultivate",
+                "category": "Value",
+                "categories": ["Ramp", "Value"],
+            },
+            {"action": "set_commander", "card_name": "Cultivate", "categories": ["Commander", "Ramp"]},
+            {"action": "set_category", "card_name": "Cultivate", "categories": "Ramp"},
+        ):
+            r = await api(b, "POST", "/api/v1/decks/42/edit", {"changes": [bad]})
+            assert r.status_code == 400 and r.json()["error"] == "invalid", (bad, r.text)
+    finally:
+        await b.aclose()
+
+
+def test_set_category_categories_round_trip_through_the_stored_proposal() -> None:
+    from mtg_gateway.decks import parse_changes
+
+    ch = parse_changes([{"action": "set_category", "card_name": "Opt", "categories": ["Draw", "Cantrip"]}])[0]
+    assert ch.category == "Draw" and ch.categories == ("Draw", "Cantrip")
+    assert parse_changes([ch.as_dict()]) == [ch]
+    one = parse_changes([{"action": "set_category", "card_name": "Opt", "category": "Draw"}])[0]
+    assert "categories" not in one.as_dict()
+
+
 def test_add_categories_round_trip_through_the_stored_proposal() -> None:
     from mtg_gateway.decks import parse_changes
 

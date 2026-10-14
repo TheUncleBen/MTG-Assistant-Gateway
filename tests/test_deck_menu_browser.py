@@ -658,6 +658,55 @@ def test_undo_of_a_remove_restores_every_category_and_a_note_is_warned_about(ser
         browser.close()
 
 
+def test_undo_of_a_move_files_a_card_back_under_every_category(server: Server) -> None:
+    """A23: Move to of a card filed under several categories has an Undo, as a single-category
+    move does; the Undo's set_category names every category it had, the primary first. Redo
+    moves it again."""
+    from playwright.sync_api import sync_playwright
+
+    _file_under(server, "Cultivate", ["Ramp", "Value"])
+    _file_under(server, "Rampant Growth", ["Lands"])
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1366)
+        page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+        sent = _edits(page)
+        card = page.locator(".deckview .row[data-card='Cultivate']").first
+        assert json.loads(card.get_attribute("data-allcats")) == ["Ramp", "Value"]
+        menu = page.locator(".ctxmenu[role=menu]")
+        card.evaluate("e => e.scrollIntoView({block: 'center'})")  # room below it for the whole menu
+        card.click(button="right")
+        menu.wait_for(timeout=3000)
+        menu.locator(".more").click()
+        menu.locator(".sub button", has_text="Lands").click()
+        page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
+        assert sent == [[{"action": "set_category", "card_name": "Cultivate", "category": "Lands"}]]
+        assert _cats(server, "Cultivate") == ["Lands"]
+        undo = page.locator(".histtools button", has_text="Undo")
+        assert not undo.is_disabled()
+        page.locator(".deck-toast button", has_text="Undo").click()
+        page.locator(".deck-toast .msg", has_text="Undone").wait_for(timeout=8000)
+        assert sent[-1] == [
+            {
+                "action": "set_category",
+                "card_name": "Cultivate",
+                "category": "Ramp",
+                "categories": ["Ramp", "Value"],
+            }
+        ]
+        assert _cats(server, "Cultivate") == ["Ramp", "Value"]
+        back = page.locator(".stack[data-group='Ramp'] .row[data-card='Cultivate']")
+        assert back.count() == 1 and json.loads(back.get_attribute("data-allcats")) == ["Ramp", "Value"]
+        page.locator("h1.deckname").click()
+        page.keyboard.press("Control+Shift+z")
+        page.locator(".deck-toast .msg", has_text="Redone").wait_for(timeout=8000)
+        assert sent[-1] == [{"action": "set_category", "card_name": "Cultivate", "category": "Lands"}]
+        assert _cats(server, "Cultivate") == ["Lands"]
+        assert errors == []
+        browser.close()
+
+
 def test_drag_onto_the_stack_directly_below_in_the_stacks_view(server: Server) -> None:
     """A57: in the stacks view the cards after the one under the pointer fan out downwards, past
     the bottom of their stack and over the top of the stack directly below. A native drag kept
