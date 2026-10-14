@@ -539,7 +539,7 @@ def guide_body(
         "with London mulligans, then draw, play, tap and next turn, all in your browser. A Commander deck "
         "starts with its commander in the command zone.</p>"
         "<p><strong>Play on EDHPlay</strong> takes the deck to EDHPlay, the free online table for "
-        "Commander. A short box asks first; its <strong>Copy and open edhplay.com</strong> copies the "
+        "Commander. A short box asks first; its <strong>Copy and Open EDHPlay.com</strong> copies the "
         "deck in EDHPlay's import format and opens EDHPlay. The import steps show in that box the "
         "first time and stay folded under <strong>How to import</strong> after that. The list has "
         "the commander first, then the rest of the deck with "

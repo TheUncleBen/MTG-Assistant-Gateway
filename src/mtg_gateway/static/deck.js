@@ -2007,8 +2007,8 @@
   }
 })();
 
-/* Play on EDHPlay (R-154, T-161): every press opens a small confirmation box; its "Copy and open
-   edhplay.com" copies the whole deck in EDHPlay's import format (the data-list text, made by
+/* Play on EDHPlay (R-154, T-161): every press opens a small confirmation box; its "Copy and Open
+   EDHPlay.com" copies the whole deck in EDHPlay's import format (the data-list text, made by
    export_formats.to_edhplay) and opens edhplay.com (in the Android app, the phone's browser). The
    two import steps show open until the member has launched once on this device, then sit folded
    in the same box (Ben, 01:36Z 10-14). The copy is made inside that press, the way the app's
@@ -2121,7 +2121,7 @@
     if (cut) box.appendChild(make("p", "notice warn", cutLine(cut, leftOut)));
     box.appendChild(make("p", "muted small", "The maybeboard and tokens aren't sent."));
     var acts = make("div", "acts");
-    var go = make("a", "btn btn-primary", "Copy and open edhplay.com");
+    var go = make("a", "btn btn-primary", "Copy and Open EDHPlay.com");
     go.href = link.href;
     go.target = "_blank";
     go.rel = "noreferrer noopener";

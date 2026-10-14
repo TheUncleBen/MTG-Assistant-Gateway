@@ -157,7 +157,7 @@ CONTRAST = """() => {
 }"""
 
 STEPS = ["On EDHPlay, choose Create Deck, then Import.", "Paste, then press Import & Replace."]
-GO = "Copy and open edhplay.com"
+GO = "Copy and Open EDHPlay.com"
 COPIED = "Deck list copied. On EDHPlay: Create Deck, Import, paste, then Import & Replace."
 
 
@@ -180,8 +180,8 @@ def _launch(page) -> str:
 @pytest.mark.parametrize(("width", "scheme"), [(390, "dark"), (673, "light"), (1366, "light")])
 def test_the_button_opens_a_dialog_then_copies_and_launches(server: Server, width: int, scheme: str) -> None:
     """0.7.27 (T-161): every press opens a small box and opens nothing yet; Escape, the backdrop and
-    Cancel close it and give focus back to the button, Tab stays inside it; its Copy and open
-    edhplay.com copies the list and opens EDHPlay. The two import steps show open until the first
+    Cancel close it and give focus back to the button, Tab stays inside it; its Copy and Open
+    EDHPlay.com copies the list and opens EDHPlay. The two import steps show open until the first
     launch on this device, then folded under How to import (Ben, 01:36Z 10-14). The 0.7.25
     first-time tip is gone, and so is the mark it kept in this browser."""
     from playwright.sync_api import sync_playwright
@@ -228,7 +228,7 @@ def test_the_button_opens_a_dialog_then_copies_and_launches(server: Server, widt
         assert page.evaluate(CONTRAST) >= 4.5
         assert _overflow(page) <= 0
         _shot(page, f"edhplay-dialog-{width}-{scheme}")
-        # Tab goes round inside the dialog: Cancel, the close button, How to import, Copy and open
+        # Tab goes round inside the dialog: Cancel, the close button, How to import, Copy and Open
         page.keyboard.press("Tab")
         assert page.evaluate("() => document.activeElement.textContent") == "Cancel"
         page.keyboard.press("Tab")
