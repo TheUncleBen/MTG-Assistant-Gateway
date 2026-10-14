@@ -357,13 +357,14 @@ def banner_html(
         f"<a class='btn' href='/decks/{did}/goldfish' title='Shuffle, draw an opening hand and play "
         f"turns by hand, here on the gateway'>{icon('layers')} Goldfish</a>"
     )
-    # Play on EDHPlay (R-154): EDHPlay is the online table; it has no import by link, so the button
-    # copies the whole deck in its import format (export_formats.to_edhplay) and opens the site
-    # (deck.js). Without script the link still opens EDHPlay, and Export deck has the list.
+    # Play on EDHPlay (R-154, T-161): EDHPlay is the online table; it has no import by link, so the
+    # button opens a short dialog whose Copy and launch copies the whole deck in its import format
+    # (export_formats.to_edhplay) and opens the site (deck.js). Without script the link still
+    # opens EDHPlay, and Export deck has the list.
     edh = to_edhplay(deck)
     edh_list = esc(edh.text).replace("\n", "&#10;")  # one line per card, kept through the attribute
-    # what did not fit EDHPlay's 15-card sideboard: the note names it (deck.js). The maybeboard
-    # (never sent) and tokens (EDHPlay drops them) are in the first-time tip.
+    # what did not fit EDHPlay's 15-card sideboard: the dialog and the note name it (deck.js). The
+    # maybeboard (never sent) and tokens (EDHPlay drops them) get one line in the dialog.
     edh_left = esc(", ".join(name if n == 1 else f"{n} {name}" for n, name in edh.left_out))
     edh_left_count = sum(n for n, _name in edh.left_out)
     primary += (
@@ -2280,6 +2281,15 @@ html.cardview-open{overflow:hidden}
 .deck-toast .close:hover{color:var(--text)}
 /* Play on EDHPlay's note: one line per point (deck.js) */
 .edhplay-toast .msg span{display:block} .edhplay-toast .msg span+span{margin-top:.3rem}
+/* its dialog: the editor's printing picker (.picker below), narrow and in the middle of the
+   window on a phone too (the picker is a bottom sheet there), with three numbered steps */
+.picker.edhplay-dialog{padding:1rem;align-items:center}
+.picker.edhplay-dialog .pickbox{width:min(100%,30rem);max-height:100%;overflow:auto;padding:1rem 1.15rem;
+  border-radius:var(--radius-panel);border-bottom:1px solid var(--border)}
+.edhplay-dialog .steps{margin:0;padding-left:1.4rem;display:flex;flex-direction:column;gap:.4rem}
+.edhplay-dialog p{margin:0}
+.edhplay-dialog .acts{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.25rem}
+.edhplay-dialog .acts .btn{margin:0;justify-content:center}
 @media (max-width:600px){ .deck-toast{right:.5rem;left:.5rem;bottom:.5rem;width:auto;max-width:none} }
 @media (max-width:900px){ .has-tabbar .deck-toast{bottom:calc(64px + env(safe-area-inset-bottom))} }
 /* the viewer's own copies control: one fewer, the count, one more */

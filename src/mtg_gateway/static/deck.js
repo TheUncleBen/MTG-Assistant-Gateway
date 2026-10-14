@@ -339,12 +339,21 @@
     input.addEventListener("input", function () { msg.className = "status"; msg.textContent = ""; });
     form.appendChild(lab); form.appendChild(input); form.appendChild(hint); form.appendChild(acts); form.appendChild(msg);
     m.appendChild(form);
+    // The form closes at once and the card shows the new value while Archidekt saves it (as a
+    // drag shows the card in its new stack); applyAnswer then says Saved with Undo. A save that
+    // does not go through puts the old value back and says why.
     var send = function (value) {
       var ch = { action: "set_mana_value", card_name: name, mana_value: value, zone: card.getAttribute("data-zone") || "main" };
       var inv = { action: "set_mana_value", card_name: name, mana_value: cur === null ? null : Number(cur), zone: ch.zone };
-      m.classList.add("busy");
-      saveEdit([ch], [inv]).then(function () { closeMenu(); })  // applyAnswer shows Saved with Undo
-        .catch(function (err) { m.classList.remove("busy"); if (!err || !err.cancelled) { msg.className = "status err"; msg.textContent = err.message; } });
+      setManaValue(card, value);
+      closeMenu();
+      toast("Saving the mana value of " + name + "…", { sticky: true });
+      saveEdit([ch], [inv]).catch(function (err) {
+        setManaValue(card, cur);
+        if (err && err.cancelled) { dismissToast(); return; }
+        var why = ((err && err.message) || "no connection").replace(/\.$/, "");
+        toast("Mana value not saved: " + why + ". " + name + " is back to " + (cur === null ? "its own mana value" : cur) + ".", { error: true });
+      });
     };
     form.addEventListener("submit", function (e) {
       stop(e);
@@ -542,12 +551,12 @@
   }
   if (own && deckId) {
     // the editor's keys: Ctrl+Z, Ctrl+Shift+Z or Ctrl+Y (Cmd on a Mac), never while typing in a
-    // field, behind the card menu or viewer, or while a question is up
+    // field, behind the card menu, viewer or EDHPlay dialog, or while a question is up
     document.addEventListener("keydown", function (ev) {
       if (!(ev.ctrlKey || ev.metaKey) || ev.altKey) return;
       var t = ev.target, tag = t && t.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (t && t.isContentEditable)) return;
-      if (menu || document.documentElement.classList.contains("cardview-open") || $(".deck-toast[role=alertdialog]")) return;
+      if (menu || document.documentElement.classList.contains("cardview-open") || $(".deck-toast[role=alertdialog], .edhplay-dialog")) return;
       var k = (ev.key || "").toLowerCase();
       if (k === "z" && !ev.shiftKey) { if (past.length) { ev.preventDefault(); undoLast(); } }
       else if ((k === "z" && ev.shiftKey) || (k === "y" && !ev.metaKey)) { if (future.length) { ev.preventDefault(); redoLast(); } }
@@ -1998,12 +2007,12 @@
   }
 })();
 
-/* Play on EDHPlay (R-154): the press copies the whole deck in EDHPlay's import format (the
-   data-list text, made by export_formats.to_edhplay) and lets the link open edhplay.com in a new
-   tab (in the Android app, the phone's browser). The copy is made inside the press itself, the
-   way the app's WebView allows it; a short note says what to do next on EDHPlay, names any
-   sideboard cards left out to fit EDHPlay's 15-card limit, and on a device's first press adds a
-   tip on EDHPlay's import limits that stays until it is closed. */
+/* Play on EDHPlay (R-154, T-161): the press opens a small dialog with the three steps of an
+   import on EDHPlay; its "Copy and launch EDHPlay" link copies the whole deck in EDHPlay's import
+   format (the data-list text, made by export_formats.to_edhplay) and opens edhplay.com in a new
+   tab (in the Android app, the phone's browser). The copy is made inside that press, the way the
+   app's WebView allows it. Sideboard cards left out to fit EDHPlay's 15-card limit are named in
+   the dialog and in the note that follows. Without script the button is a plain link to EDHPlay. */
 (function () {
   "use strict";
   function copyNow(text) {
@@ -2025,71 +2034,121 @@
     }
     return Promise.resolve(false);
   }
-  var TIP_SEEN = "mtg.edhplay.tip";  // this device has seen (and closed) the first-time tip
-  function tipSeen() { try { return localStorage.getItem(TIP_SEEN) === "1"; } catch (e) { return false; } }
-  function rememberTip() { try { localStorage.setItem(TIP_SEEN, "1"); } catch (e) { /* private window */ } }
-  // lines: the note's text, one per line; kind: "", "warn" or "error"; tip: a first-time tip,
-  // which stays until it is closed and is then not shown again on this device
-  function note(lines, kind, tip) {
+  // 0.7.25 and 0.7.26 kept a first-time tip's "seen" mark here; the dialog says it all now
+  try { localStorage.removeItem("mtg.edhplay.tip"); } catch (e) { /* private window */ }
+  function make(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text) e.textContent = text;
+    return e;
+  }
+  function cutLine(cut, leftOut) {
+    return (cut === 1 ? "1 sideboard card is" : cut + " sideboard cards are")
+      + " left out to fit EDHPlay's 15-card limit: " + leftOut + ".";
+  }
+  // lines: the note's text, one per line; kind: "", "warn" or "error" (those stay until closed)
+  function note(lines, kind) {
     var old = document.querySelector(".edhplay-toast");
     if (old) old.remove();
-    var t = document.createElement("div");
-    t.className = "toast deck-toast edhplay-toast" + (kind ? " " + kind : "");
+    var t = make("div", "toast deck-toast edhplay-toast" + (kind ? " " + kind : ""));
     t.setAttribute("role", kind === "error" ? "alert" : "status");
-    var msg = document.createElement("div");
-    msg.className = "msg";
-    lines.forEach(function (line) {
-      var l = document.createElement("span");
-      l.textContent = line;
-      msg.appendChild(l);
-    });
+    var msg = make("div", "msg");
+    lines.forEach(function (line) { msg.appendChild(make("span", "", line)); });
     t.appendChild(msg);
-    function close() { t.remove(); if (tip) rememberTip(); }
-    if (tip) {
-      var acts = document.createElement("span");
-      acts.className = "acts";
-      var ok = document.createElement("button");
-      ok.type = "button";
-      ok.textContent = "Got it";
-      ok.addEventListener("click", close);
-      acts.appendChild(ok);
-      t.appendChild(acts);
-    }
-    var x = document.createElement("button");
+    var x = make("button", "close icon-only", "×");
     x.type = "button";
-    x.className = "close icon-only";
     x.setAttribute("aria-label", "Dismiss");
-    x.textContent = "×";
-    x.addEventListener("click", close);
+    x.addEventListener("click", function () { t.remove(); });
     t.appendChild(x);
     document.body.appendChild(t);
-    if (!kind && !tip) setTimeout(function () { t.remove(); }, 8000);  // a cut list or a tip stays
+    if (!kind) setTimeout(function () { t.remove(); }, 8000);
+  }
+  var inApp = / MTGAssistant\//.test(navigator.userAgent || "");
+  var dialog = null, back = null;
+  function close() {
+    if (!dialog) return;
+    dialog.remove();
+    dialog = null;
+    document.removeEventListener("keydown", onKey, true);
+    if (back && back.isConnected) back.focus();
+    back = null;
+  }
+  function onKey(e) {
+    if (!dialog) return;
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); return; }
+    if (e.key === "Tab") {  // focus stays inside the dialog
+      var f = dialog.querySelectorAll("a[href],button:not([disabled])");
+      var first = f[0], last = f[f.length - 1];
+      if (!dialog.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+      else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  }
+  function open(link) {
+    close();
+    back = link;
+    var list = link.getAttribute("data-list") || "";
+    var leftOut = link.getAttribute("data-left-out") || "";
+    var cut = parseInt(link.getAttribute("data-left-count") || "0", 10) || 0;
+    dialog = make("div", "picker edhplay-dialog");
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-labelledby", "edhplay-title");
+    dialog.addEventListener("click", function (e) { if (e.target === dialog) close(); });
+    var box = make("div", "pickbox");
+    var head = make("div", "head");
+    var h = make("h2", "", "Copy and launch EDHPlay");
+    h.id = "edhplay-title";
+    var x = make("button", "close icon-only", "×");
+    x.type = "button";
+    x.setAttribute("aria-label", "Close");
+    x.title = "Close";
+    x.addEventListener("click", close);
+    head.appendChild(h); head.appendChild(x);
+    box.appendChild(head);
+    var steps = make("ol", "steps");
+    [
+      "Copy and launch copies your deck and opens EDHPlay " + (inApp ? "in your phone's browser." : "in a new tab."),
+      "On EDHPlay, choose Create Deck, then Import.",
+      "Paste, then press Import & Replace (it sets your commander)."
+    ].forEach(function (s) { steps.appendChild(make("li", "", s)); });
+    box.appendChild(steps);
+    if (cut) box.appendChild(make("p", "notice warn", cutLine(cut, leftOut)));
+    box.appendChild(make("p", "muted small", "The maybeboard and tokens aren't sent."));
+    var acts = make("div", "acts");
+    var go = make("a", "btn btn-primary", "Copy and launch EDHPlay");
+    go.href = link.href;
+    go.target = "_blank";
+    go.rel = "noreferrer noopener";
+    var cancel = make("button", "btn", "Cancel");
+    cancel.type = "button";
+    cancel.addEventListener("click", close);
+    acts.appendChild(go); acts.appendChild(cancel);
+    box.appendChild(acts);
+    dialog.appendChild(box);
+    document.body.appendChild(dialog);
+    document.addEventListener("keydown", onKey, true);
+    go.addEventListener("click", function () {
+      // the copy happens inside this press; the link itself opens EDHPlay (nothing is prevented)
+      var copied = copyNow(list);
+      close();
+      copied.then(function (ok) {
+        if (!ok) {
+          note(["The deck list couldn't be copied here. Use More, then Export deck, to copy it."], "error");
+          return;
+        }
+        var lines = ["Deck list copied. On EDHPlay: Create Deck, then Import, paste and Import & Replace."];
+        if (cut) lines.push(cutLine(cut, leftOut));
+        note(lines, cut ? "warn" : "");
+      });
+    });
+    go.focus();
   }
   document.addEventListener("click", function (e) {
     var link = e.target.closest && e.target.closest("a[data-edhplay]");
-    if (!link) return;
-    var leftOut = link.getAttribute("data-left-out") || "";
-    var cut = parseInt(link.getAttribute("data-left-count") || "0", 10) || 0;
-    var tip = !tipSeen();
-    copyNow(link.getAttribute("data-list") || "").then(function (ok) {
-      if (!ok) {
-        note(["The deck list couldn't be copied here. Use More, then Export deck, to copy it."], "error");
-        return;
-      }
-      var lines = ["Deck list copied. On EDHPlay: Create Deck, then Import, paste and Import & Replace."];
-      // only what this deck runs into (export_formats.to_edhplay): EDHPlay refuses an import whose
-      // sideboard passes 15 cards, so the rest was left out of the list
-      if (cut) {
-        lines.push((cut === 1 ? "1 sideboard card didn't" : cut + " sideboard cards didn't")
-          + " fit EDHPlay's 15-card limit: " + leftOut + ".");
-      }
-      // the first press on this device: EDHPlay's import limits, once
-      if (tip) {
-        lines.push("Good to know: EDHPlay's sideboard holds 15 cards, the maybeboard isn't sent,"
-          + " and tokens are added on EDHPlay by hand.");
-      }
-      note(lines, cut ? "warn" : "", tip);
-    });
-    // the link itself opens EDHPlay (target=_blank): nothing is prevented
+    // a Ctrl, Cmd or Shift press opens EDHPlay straight away, as a plain link
+    if (!link || e.ctrlKey || e.metaKey || e.shiftKey || e.button) return;
+    e.preventDefault();
+    open(link);
   });
 })();
