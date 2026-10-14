@@ -8,7 +8,9 @@ import asyncio
 import httpx
 import pytest
 
+from mtg_gateway import archidekt as ark_mod
 from mtg_gateway import decks as decks_mod
+from mtg_gateway.archidekt import ArchidektClient
 
 from .conftest import FakeIdP, Harness, make_settings, running
 from .fake_archidekt import FakeArchidekt
@@ -338,3 +340,184 @@ async def test_a_copy_whose_post_meets_a_429_is_made_once(stack: Stack) -> None:
     assert row["state"] == "applied", row
     made = [d for d in set(ark.decks) - before if ark.decks[d]["name"] == "Paced copy"]
     assert refused["n"] == 1 and len(made) == 1, made
+
+
+# -- Archidekt's 429s during an apply (Q41, Q62, Q66) and the backup copy (Q35) ---------------------
+NOTHING_CHANGED = "Nothing was changed on Archidekt. Try again in a few minutes with a new proposal."
+
+
+@pytest.fixture
+def quick_waits(monkeypatch) -> list[float]:
+    """The apply's 429 waits, recorded instead of slept (the allowance counts what was asked)."""
+    waits: list[float] = []
+
+    async def wait_out(self, seconds: float) -> None:
+        waits.append(seconds)
+        await asyncio.sleep(0)
+
+    monkeypatch.setattr(ArchidektClient, "_wait_out", wait_out)
+    return waits
+
+
+def _every_patch_429(ark: FakeArchidekt, *, after: int = 0) -> dict[str, int]:
+    """Answer every card PATCH after the first ``after`` with a 429 (Retry-After 0)."""
+    orig = ark.transport.handler
+    tries = {"n": 0}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "PATCH" and "modifyCards" in req.url.path and len(ark.patches) >= after:
+            tries["n"] += 1
+            return httpx.Response(429, json={"detail": "slow down"}, headers={"Retry-After": "0"})
+        return orig(req)
+
+    ark.transport.handler = handler
+    return tries
+
+
+async def _finished(h, pid: str) -> dict:
+    await _until(lambda: h.db.get_proposal(pid, "user-1")["state"] != "applying", timeout=30)
+    return h.db.get_proposal(pid, "user-1")
+
+
+async def _review_page(h, pid: str) -> str:
+    b = Browser(h)
+    await b.login()
+    page = (await b.http.get(f"/proposals/{pid}")).text
+    await b.aclose()
+    return page
+
+
+async def test_an_apply_that_runs_out_of_patience_with_nothing_sent_drops_its_backup(
+    stack: Stack, quick_waits: list[float]
+) -> None:
+    """Review M1 (Q35, Q41, Q62): every card write meets a 429. The apply waits exactly six times,
+    sends the write seven times, never opens the gateway-wide breaker, and stops with one plain
+    message; nothing changed, so the backup copy it made is deleted again."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": THREE}))
+    tries = _every_patch_429(ark)
+    structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    row = await _finished(h, p["proposal_id"])
+    result = row["result"]
+    assert row["state"] == "failed" and result["error"] == "rate_limited", result
+    assert result["detail"] == f"{ark_mod.PATIENCE_SPENT} {NOTHING_CHANGED}", result
+    assert tries["n"] == 7 and len(quick_waits) == 6 and ark.patches == []
+    assert not result.get("deck_written") and result.get("backup_deleted") is True, result
+    assert len(ark.deleted) == 1 and ark.deleted[0] != 42 and 42 in ark.decks
+    assert not h.app.state.gateway.decks.client.pacer.paused()  # Q62: no pause for everyone
+    got = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
+    assert got["next_step"] == f"{ark_mod.PATIENCE_SPENT} {NOTHING_CHANGED}", got["next_step"]
+    page = await _review_page(h, p["proposal_id"])
+    assert (
+        f"{ark_mod.PATIENCE_SPENT} Nothing was changed on Archidekt. Try again in a few minutes: ask "
+        "your assistant for a new proposal."
+    ) in page
+    assert "paused after repeated failures" not in page
+
+
+async def test_an_apply_that_runs_out_of_patience_partway_keeps_its_backup(
+    stack: Stack, quick_waits: list[float]
+) -> None:
+    """Q35: the first card write landed, then Archidekt kept answering 429: the deck is partly
+    changed, so the backup copy is kept and the message says how far it got."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": THREE}))
+    _every_patch_429(ark, after=1)
+    structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    row = await _finished(h, p["proposal_id"])
+    result = row["result"]
+    assert row["state"] == "failed" and result["error"] == "rate_limited", result
+    assert result["detail"].startswith(ark_mod.PATIENCE_SPENT + " 1 of 3 deck row changes had already")
+    assert result["detail"].endswith("Try the rest again in a few minutes with a new proposal.")
+    assert result.get("backup_deck_id") and not result.get("backup_deleted") and ark.deleted == []
+    page = await _review_page(h, p["proposal_id"])
+    assert "1 of 3 changes reached Archidekt first, so the deck is partly changed. Check the deck." in page
+
+
+async def test_a_breaker_refusal_on_the_first_write_counts_as_nothing_written(stack: Stack) -> None:
+    """Review M1: the gateway-wide breaker (opened by other failures) refuses the apply's first
+    card write before it is sent. Nothing changed, so the backup copy is deleted again."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": THREE}))
+    client = h.app.state.gateway.decks.client
+    real = client.modify_card
+
+    async def breaker_opens_first(*args, **kwargs):
+        client.pacer._open_until = ark_mod.time.monotonic() + 60
+        try:
+            return await real(*args, **kwargs)
+        finally:
+            client.pacer._open_until = 0.0  # so the clean-up after the failure may still run
+
+    client.modify_card = breaker_opens_first
+    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert out["ok"] is False and out["error"] == "unavailable", out
+    result = h.db.get_proposal(p["proposal_id"], "user-1")["result"]
+    assert ark.patches == [] and not result.get("deck_written"), result
+    assert result.get("backup_deleted") is True and len(ark.deleted) == 1 and ark.deleted[0] != 42
+
+
+async def test_a_details_step_whose_re_read_fails_after_the_write_keeps_the_backup(stack: Stack) -> None:
+    """Review M5: the tag is added on Archidekt, then the re-read just after is refused (403). The
+    deck changed, so the backup copy must be kept, not deleted as if nothing was written."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    p = structured(
+        await call(h, token, "propose_deck_details", {"deck_id": "42", "details": {"add_tags": ["budget"]}})
+    )
+    assert p["ok"], p
+    orig = ark.transport.handler
+    tagged = {"x": False}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "POST" and req.url.path == "/api/decks/tagRelations/":
+            tagged["x"] = True
+        elif tagged["x"] and req.method == "GET" and req.url.path == "/api/decks/42/":
+            return httpx.Response(403, json={"detail": "You do not have permission."})
+        return orig(req)
+
+    ark.transport.handler = handler
+    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    if out.get("error") == "browser_required":  # the member's mode asks them: apply as they would
+        b = Browser(h)
+        await b.login()
+        csrf = await b.csrf("/proposals")
+        r = await b.http.post(f"/api/v1/proposals/{p['proposal_id']}/apply", headers={"X-CSRF-Token": csrf})
+        out = r.json()
+        await b.aclose()
+    assert out.get("ok") is False and out.get("error") == "forbidden", out
+    assert [t["name"] for t in ark.deck_tags[42]] == ["budget"]  # the write landed
+    result = h.db.get_proposal(p["proposal_id"], "user-1")["result"]
+    assert result.get("deck_written") is True, result
+    assert result.get("backup_deck_id") and not result.get("backup_deleted") and ark.deleted == []
+
+
+async def test_dropping_an_unused_backup_never_deletes_the_deck_itself(stack: Stack, monkeypatch) -> None:
+    """Review L7: if the copy's id were ever the source deck's own, the clean-up after a failed
+    apply must not delete the real deck."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    svc = h.app.state.gateway.decks
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": THREE}))
+
+    async def copy_answers_the_source_id(sub, deck, snapshot_id, *, reason):
+        h.db.set_snapshot_backup(snapshot_id, backup_deck_id=deck.id, backup_url="")
+        return {"backup_deck_id": deck.id, "backup_url": ""}
+
+    monkeypatch.setattr(svc, "_backup_copy", copy_answers_the_source_id)
+    orig = ark.transport.handler
+
+    def refuse(req: httpx.Request) -> httpx.Response:
+        if req.method == "PATCH" and "modifyCards" in req.url.path:
+            return httpx.Response(403, json={"detail": "You do not have permission."})
+        return orig(req)
+
+    ark.transport.handler = refuse
+    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert out["ok"] is False and out["error"] == "forbidden", out
+    assert ark.deleted == [] and 42 in ark.decks
+    result = h.db.get_proposal(p["proposal_id"], "user-1")["result"]
+    assert not result.get("backup_deleted"), result

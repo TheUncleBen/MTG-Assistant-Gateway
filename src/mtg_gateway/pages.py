@@ -20,6 +20,7 @@ from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
 from . import app_signin, link_disclosure, modes, notify
+from .archidekt import PATIENCE_SPENT
 from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
 from .avatars import initials_svg
 from .clickguard import form_stamp, guarded_form, submitted_too_soon
@@ -1195,6 +1196,8 @@ def _page_step(p: dict[str, Any]) -> str:
         )
     if state == "applied":
         return "Done. Archidekt matches this proposal."
+    if state == "failed" and result.get("error") == "rate_limited":
+        return _rate_limited_step(p, result)
     if state == "failed" and p.get("kind") in ("create_deck", "clone") and result.get("deck_id"):
         return (
             "A new deck was made on Archidekt before this stopped, so it may not match the proposal. "
@@ -1223,6 +1226,35 @@ def _page_step(p: dict[str, Any]) -> str:
         }.get(str(p.get("closed_by") or ""), "")
         return f"This proposal was rejected{by}. Nothing was changed."
     return "This proposal can no longer be applied."
+
+
+def _rate_limited_step(p: dict[str, Any], result: dict[str, Any]) -> str:
+    """The review page's one message for an apply that stopped because Archidekt asked the gateway
+    to wait longer than an apply may (Q41, Q66): why, how far it got, and to try again later."""
+    again = "Try again in a few minutes: ask your assistant for a new proposal."
+    where = "your collection" if p.get("kind") == "collection" else "the deck"
+    undo = (
+        " The snapshot taken just before it can be restored from History."
+        if result.get("snapshot_id") and p.get("kind") != "collection"
+        else ""
+    )
+    if p.get("kind") in ("create_deck", "clone") and result.get("deck_id"):
+        got = (
+            "A new deck was made on Archidekt before this stopped, so it may not match the proposal. "
+            "Check it, and delete it from its deck page if you don't want it."
+        )
+    elif result.get("sent_entries"):
+        sent, of = int(result["sent_entries"]), result.get("of_entries")
+        got = (
+            f"{sent} of {int(of)} changes reached Archidekt first, so {where} is partly changed."
+            if isinstance(of, int)
+            else f"Part of this change reached Archidekt first, so {where} is partly changed."
+        ) + f" Check {where}.{undo}"
+    elif result.get("deck_written"):
+        got = f"Part of this change reached Archidekt first. Check {where}.{undo}"
+    else:
+        got = "Nothing was changed on Archidekt."
+    return f"{PATIENCE_SPENT} {got} {again}"
 
 
 def _progress_html(p: dict[str, Any]) -> str:
