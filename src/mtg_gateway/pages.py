@@ -630,7 +630,7 @@ def browser_session(state: Any, request: Request) -> tuple[str | None, str | Non
         return None, None  # a disabled account keeps no browser session either
     if not state.settings.grants_access(user["groups"]):
         return None, None
-    sync = getattr(state, "sync", None)
+    sync = state.sync
     if sync is not None:
         sync.opened(sub)  # opening the app checks the member's decks on Archidekt (sync.py)
     return sub, sid
@@ -815,7 +815,7 @@ def _account_body(state: Any, sub: str, csrf: str | None, *, disclosure_read: bo
         out.append(_app_card())
     out.append(_mode_card(state, sub, csrf_in))
     out.append(_apps_card(state, sub, csrf_in))
-    if getattr(state, "summaries", None) is not None:
+    if state.summaries is not None:
         out.append(notify.account_card_html(state, sub, csrf_in))  # the summary is inside, with ntfy on
     if info["linked"]:
         expires = _when(info.get("link_expires_at"))
@@ -878,7 +878,7 @@ def _identity_details(user: dict[str, Any]) -> str:
 
 def _sweep_on(state: Any) -> bool:
     """Whether this gateway runs the removed-member clean-up (idp_sweep.py)."""
-    sweep = getattr(state, "sweep", None)
+    sweep = state.sweep
     return bool(sweep is not None and sweep.enabled)
 
 
