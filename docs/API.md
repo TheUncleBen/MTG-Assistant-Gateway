@@ -132,7 +132,8 @@ a bearer token. They answer `401` without a browser session, and `404` to signed
   (`categories`: every category the new row goes in, the first one being `category`; the deck page's
   Undo of a removal sends it),
   `{"action": "remove", "card_name"}`, `{"action": "set_quantity", "card_name", "quantity"}`,
-  `{"action": "set_category", "card_name", "category"}`, `{"action": "set_commander", "card_name"}`,
+  `{"action": "set_category", "card_name", "category", "categories"?}` (`categories` as for add: the
+  row goes under exactly those; the deck page's Undo of a move sends it), `{"action": "set_commander", "card_name"}`,
   `{"action": "set_finish", "card_name", "finish"}` (normal, foil or etched, for the copies already in
   the deck) or `{"action": "set_printing", "card_name", "set_code", "collector_number", "finish"?}`
   (swap every copy for that printing, keeping quantity and categories), or

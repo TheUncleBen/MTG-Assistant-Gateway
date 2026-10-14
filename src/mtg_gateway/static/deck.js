@@ -823,10 +823,11 @@
       if (zone === "side") more.forEach(function (m) { m.zone = "side"; });
       return more;
     } else if (ch.action === "set_category") {
-      // a move files the card under that one category; a card filed under several could not
-      // get all of them back by a move, so it has no Undo
-      if (catsOf(card).length > 1) return null;
-      inv = { action: "set_category", card_name: name, category: catOf(card) || stackOf(card) };
+      // a move files the card under that one category; its Undo files it back under every
+      // category it had (in order, the primary first), as the Undo of a removal does
+      var was = catsOf(card);
+      inv = { action: "set_category", card_name: name, category: was[0] || stackOf(card) };
+      if (was.length > 1) inv.categories = was;
       // after the move the row sits in the zone its new category puts it in
       zone = excluded.indexOf(ch.category) >= 0 ? "side" : "main";
       if (twinIn(card, zone)) return null;
