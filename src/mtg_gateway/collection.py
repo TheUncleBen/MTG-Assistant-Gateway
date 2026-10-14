@@ -25,7 +25,15 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from .approve import CARD_TOOL_META, proposal_tool_result
-from .archidekt import COLLECTION_PAGE_SIZE, ArchidektError, _faces, _oracle_text, _pt
+from .archidekt import (
+    COLLECTION_PAGE_SIZE,
+    ArchidektError,
+    _faces,
+    _oracle_text,
+    _pt,
+    condition_code,
+    language_code,
+)
 from .busy import busy_response
 from .deckpage import image_url, mana_html
 from .decks import DeckError, current_client
@@ -246,8 +254,8 @@ def row_out(rec: dict[str, Any]) -> dict[str, Any]:
         "name": str(oracle.get("name") or card.get("displayName") or ""),
         "quantity": qty if isinstance(qty, int) and not isinstance(qty, bool) else 0,
         "finish": _finish_of(rec.get("modifier")),
-        "condition": str(rec.get("condition") or ""),
-        "lang": str(rec.get("language") or ""),
+        "condition": condition_code(rec.get("condition")),  # Archidekt sends a number (CONDITION_IDS)
+        "lang": language_code(rec.get("language")),  # and a number here too (LANGUAGE_IDS)
         "set": str(edition.get("editioncode") or "").lower(),
         "set_name": str(edition.get("editionname") or ""),
         "collector_number": str(card.get("collectorNumber") or ""),
@@ -515,11 +523,12 @@ class CollectionService:
             raise CollectionError("invalid", "nothing to change: give finish, condition, language or price")
         out = await self._run(sub, lambda token: self.client.collection_set(token, rec, **changes))
         row = row_out({**rec, **out, "card": rec.get("card")})
-        wrong = [
-            k
-            for k, want in changes.items()
-            if (out.get(k) if k != "purchasePrice" else _price(out.get(k))) != want
-        ]
+        read = {  # what Archidekt answered, in the gateway's terms (it keeps numbers for two)
+            "purchasePrice": _price(out.get("purchasePrice")),
+            "condition": condition_code(out.get("condition")) or None,
+            "language": language_code(out.get("language")),
+        }
+        wrong = [k for k, want in changes.items() if read.get(k, out.get(k)) != want]
         self.decks.db.audit(
             "collection_updated",
             sub=sub,
@@ -606,16 +615,16 @@ def _item_options(raw: dict[str, Any], i: int) -> dict[str, Any]:
     return {"quantity": qty, "finish": finish, "condition": condition}
 
 
-# Language codes as Archidekt's collection shows them (reported from its row editor, not verified
-# against a list it publishes); the gateway accepts any two- or three-letter code.
-LANGUAGES = ("EN", "ES", "FR", "DE", "IT", "PT", "JA", "KO", "RU", "ZHS", "ZHT", "PH")
+# The languages Archidekt's collection takes (its site's own list of eleven, read 2026-10-14; see
+# LANGUAGE_IDS), in the order the details menu offers them. Archidekt has no Phyrexian.
+LANGUAGES = ("EN", "ES", "FR", "DE", "IT", "PT", "JA", "KO", "RU", "ZHS", "ZHT")
 MAX_PRICE = 99999.0
 
 
 def _language(value: Any) -> str:
     code = _clean(value, 3).upper()
-    if not code or len(code) < 2 or not code.isalpha():
-        raise CollectionError("invalid", "language must be a two- or three-letter code such as EN")
+    if code not in LANGUAGES:
+        raise CollectionError("invalid", "language must be one of " + ", ".join(LANGUAGES))
     return code
 
 
