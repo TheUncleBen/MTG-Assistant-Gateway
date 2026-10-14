@@ -3479,6 +3479,7 @@ class DeckService:
         on_deck = {str(r.get("name") or "").casefold(): r for r in deck.tag_relations}
         add = [self._tag_name(n) for n in _names(raw.get("add_tags"), "add_tags")]
         add = [n for n in dict.fromkeys(add) if n.casefold() not in on_deck]
+        add = [(await self._archidekt_tag(sub, n))[1] for n in add]  # refused now, not at apply
         remove = []
         for name in _names(raw.get("remove_tags"), "remove_tags"):
             rel = on_deck.get(self._tag_name(name).casefold())
@@ -3508,7 +3509,7 @@ class DeckService:
             card = next((c for c in deck.cards if c.name.casefold() == pick and c.scryfall_uid), None)
             if card is None:
                 raise DeckError("invalid", f"'{raw['cover']}' is not a card in this deck.")
-            if card.scryfall_uid.lower() not in str(deck.raw.get("featured") or "").lower():
+            if not _cover_is(deck, card.scryfall_uid.lower()):
                 plan["cover_uid"] = card.scryfall_uid
                 rows.append(_row("detail", field="cover", before="current", after=card.name))
         return plan, rows
@@ -3678,20 +3679,16 @@ class DeckService:
                 url = art_url(uid)
             except ArchidektError as exc:
                 raise DeckError("invalid", "That card has no usable art id.") from exc
-            fields = {"featured": url, "customFeatured": ""}
         else:
             url = ""
-            fields = {"customFeatured": ""}
-        if (deck.raw.get("featured") or "") == url and not (deck.raw.get("customFeatured") or ""):
+        # The chosen cover is customFeatured, as archidekt.com's own "Set Deck Image" sends it;
+        # "" hands the choice back to Archidekt. A URL is compared by the art id inside it.
+        if _cover_is(deck, uid):
             return {"deck_id": deck.id, "featured": deck.featured, "changed": False, "card_name": card_name}
         snapshot_id = self._hand_snapshot(sub, deck)
-        await self._call(sub, self.client.update_deck, deck.id, fields)
+        await self._call(sub, self.client.update_deck, deck.id, {"customFeatured": url})
         verified = await self.get_deck(sub, deck.id)
-        ok = (
-            (verified.raw.get("featured") or "") == url
-            if uid
-            else not (verified.raw.get("customFeatured") or "")
-        )
+        ok = _cover_is(verified, uid)
         self._audit(
             "deck_cover_changed",
             sub=sub,
@@ -3850,9 +3847,24 @@ class DeckService:
             raise DeckError("invalid", "A tag is 1 to 40 characters.")
         return clean
 
+    async def _archidekt_tag(self, sub: str, name: str) -> tuple[int, str]:
+        """The id and exact name of Archidekt's tag called ``name``. Archidekt keeps one list of
+        deck tags and its own site only picks from it, so a name it doesn't have is refused here,
+        with its closest tags, instead of being sent to be created."""
+        found = await self._call(sub, lambda token, *_: self.client.search_tags(token, name))
+        for t in found:
+            if str(t.get("name") or "").casefold() == name.casefold() and isinstance(t.get("id"), int):
+                return t["id"], str(t["name"])
+        close = [str(t.get("name")) for t in found if t.get("name")][:8]
+        raise DeckError(
+            "invalid",
+            f"Archidekt has no deck tag called '{name}'. Tags are picked from Archidekt's own list"
+            + (f"; close ones: {', '.join(close)}." if close else "; try a shorter or different word."),
+        )
+
     async def add_tag(self, sub: str, deck_id: str, name: str) -> dict[str, Any]:
-        """Tag one of the member's decks: an existing Archidekt tag of that exact name is reused,
-        else one is created. Verified by re-reading the deck's tags."""
+        """Tag one of the member's decks with one of Archidekt's tags (see ``_archidekt_tag``).
+        Verified by re-reading the deck's tags."""
         self._writes_switch()
         name = self._tag_name(name)
         deck = await self.get_own_deck(sub, deck_id)
@@ -3860,18 +3872,8 @@ class DeckService:
             raise DeckError("invalid", f"This deck already has the tag '{name}'.")
         if len(deck.tag_relations) >= self.MAX_TAGS:
             raise DeckError("invalid", f"A deck has at most {self.MAX_TAGS} tags here.")
-        found = await self._call(sub, lambda token, *_: self.client.search_tags(token, name))
-        tag_id = next(
-            (
-                t["id"]
-                for t in found
-                if str(t.get("name") or "").casefold() == name.casefold() and isinstance(t.get("id"), int)
-            ),
-            None,
-        )
+        tag_id, name = await self._archidekt_tag(sub, name)
         snapshot_id = self._hand_snapshot(sub, deck)
-        if tag_id is None:
-            tag_id = int((await self._call(sub, lambda token, *_: self.client.create_tag(token, name)))["id"])
         position = f"M-{500000 + 10000 * len(deck.tag_relations)}"
         await self._call(sub, lambda token, *_: self.client.add_deck_tag(token, deck.id, tag_id, position))
         verified = await self.get_deck(sub, deck.id)
@@ -4165,6 +4167,13 @@ def _same_account(a: dict[str, Any], b: dict[str, Any]) -> bool:
 
 def _sent(progress: dict[str, Any]) -> dict[str, Any]:
     return {k: progress[k] for k in ("sent_entries", "of_entries", "snapshot_id", "deck_id") if k in progress}
+
+
+def _cover_is(deck: Deck, uid: str) -> bool:
+    """Whether the deck's chosen cover is the art of the card with Scryfall id ``uid`` ("" = no
+    chosen cover: Archidekt picks it)."""
+    chosen = str(deck.raw.get("customFeatured") or "").lower()
+    return uid in chosen if uid else not chosen
 
 
 def _progress_view(progress: dict[str, Any]) -> dict[str, Any]:

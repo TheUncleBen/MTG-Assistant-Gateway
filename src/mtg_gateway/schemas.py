@@ -262,7 +262,10 @@ class DeckDetails(BaseModel):
         default=None,
         description='Move the deck into this existing folder (its name; "" or "top" for the top level).',
     )
-    add_tags: list[str] | None = Field(default=None, description="Tags to put on the deck (names).")
+    add_tags: list[str] | None = Field(
+        default=None,
+        description="Tags to put on the deck: names from Archidekt's own tag list (it has no custom tags).",
+    )
     remove_tags: list[str] | None = Field(default=None, description="Tags to take off the deck (names).")
     cover: str | None = Field(default=None, description="A card in the deck whose art becomes the cover.")
 

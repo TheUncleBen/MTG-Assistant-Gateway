@@ -219,8 +219,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             "<input id='tagname' type='text' name='name' maxlength='40' placeholder='Example: budget' "
             "required>"
             f"</div><button>{icon('tag')} Add tag</button></form>"
-            "<p class='muted small'>Tags are Archidekt's public deck tags: an existing tag of that name is "
-            "reused, otherwise it is created.</p></section>"
+            "<p class='muted small'>Tags come from Archidekt's own tag list, so type the name of one of "
+            "its tags. If Archidekt has no tag by that name, the closest ones are suggested.</p></section>"
         )
 
     def folder_section(deck: Deck, csrf: str | None, folders: dict[str, Any] | None) -> str:

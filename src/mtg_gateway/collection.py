@@ -71,7 +71,7 @@ _ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
 
 class CollectionError(Exception):
     """User-facing failure. ``kind``: invalid, not_found, not_linked, unavailable, rate_limited,
-    busy, auth. ``retry_after`` copies DeckError's (seconds to wait, when known)."""
+    busy, auth, forbidden. ``retry_after`` copies DeckError's (seconds to wait, when known)."""
 
     def __init__(self, kind: str, message: str, *, retry_after: int | None = None):
         super().__init__(message)
@@ -90,7 +90,7 @@ def _wrap(exc: Exception) -> CollectionError:
         kind = exc.kind
         if kind == "not_found":
             return CollectionError("not_found", "Archidekt has no such collection record")
-        if kind in ("auth", "forbidden"):
+        if kind == "auth":
             return CollectionError("auth", str(exc))
         if kind == "contract":
             return CollectionError("unavailable", "Archidekt answered in an unexpected way; try again")
@@ -627,6 +627,7 @@ _STATUS = {
     "not_found": 404,
     "not_linked": 409,
     "auth": 409,
+    "forbidden": 403,
     "unavailable": 503,
     "rate_limited": 503,
     "busy": 429,

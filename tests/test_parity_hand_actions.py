@@ -49,7 +49,8 @@ async def test_cover_tags_and_folder_from_the_settings_page(stack: Stack) -> Non
         r = await _form(b, "/decks/42/cover", {"card": uid}, follow=True)
         assert r.status_code == 200 and "Cover image saved" in r.text, r.text[:500]
         sent = stack.ark.updates[-1]
-        assert sent["featured"].endswith(f"/{uid}.webp") and sent["customFeatured"] == ""
+        assert sent == {"deck_id": 42, "customFeatured": sent["customFeatured"]}  # as archidekt.com sends it
+        assert sent["customFeatured"].endswith(f"/{uid}.webp")
         assert len(db.list_snapshots("user-1")) == before + 1
         assert db.deck_covers(["42"])["42"]["scryfall_uid"] == uid
         page = await b.http.get("/decks/42", headers=NAV)
@@ -60,20 +61,21 @@ async def test_cover_tags_and_folder_from_the_settings_page(stack: Stack) -> Non
         r = await _form(b, "/decks/42/cover", {"card": ""}, follow=True)
         assert "picks the cover image again" in r.text
         assert stack.ark.updates[-1] == {"deck_id": 42, "customFeatured": ""}
-        # tags: an existing Archidekt tag is reused, a new one created, duplicates refused
+        # tags: Archidekt's own tags only; a name it doesn't have is refused and never created
         r = await _form(b, "/decks/42/tags", {"action": "add", "name": "Budget"}, follow=True)
         assert "Tag added" in r.text and "Budget" not in r.text.split("Deck tags")[0]
         rels = stack.ark.deck_tags[42]
         assert [(x["tag"], x["name"]) for x in rels] == [(1, "budget")]
         r = await _form(b, "/decks/42/tags", {"action": "add", "name": "sea monsters"}, follow=True)
-        assert [x["name"] for x in stack.ark.deck_tags[42]] == ["budget", "sea monsters"]
-        assert "sea monsters" in stack.ark.tags.values()
+        assert "Archidekt has no deck tag called" in r.text, r.text[:800]
+        assert [x["name"] for x in stack.ark.deck_tags[42]] == ["budget"]
+        assert stack.ark.tag_creates == 0
         r = await _form(b, "/decks/42/tags", {"action": "add", "name": "budget"})
         assert r.status_code == 400 and "already has the tag" in r.text
         r = await _form(
             b, "/decks/42/tags", {"action": "remove", "relation_id": str(rels[0]["id"])}, follow=True
         )
-        assert "Tag removed" in r.text and [x["name"] for x in stack.ark.deck_tags[42]] == ["sea monsters"]
+        assert "Tag removed" in r.text and [x["name"] for x in stack.ark.deck_tags[42]] == []
         # a relation of someone else's deck cannot be removed through this deck
         stack.ark.deck_tags[43] = [{"id": 777, "tag": 2, "deck": 43, "name": "tribal", "position": "M-1"}]
         r = await _form(b, "/decks/42/tags", {"action": "remove", "relation_id": "777"})

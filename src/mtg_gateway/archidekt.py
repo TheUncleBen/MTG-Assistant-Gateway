@@ -602,6 +602,22 @@ RATE_LIMIT_WAIT_TOTAL = 300.0
 MAX_LIST_PAGES = 4  # deck-list pages of 50 followed for one member (200 decks)
 
 
+def _refusal_detail(resp: httpx.Response) -> str:
+    """Archidekt's own reason for a refusal (``{"detail": ...}`` and the like), one short line, or
+    "" when the body has none."""
+    try:
+        body = resp.json()
+    except ValueError:
+        return ""
+    if isinstance(body, dict):
+        body = next((body[k] for k in ("detail", "error", "message", "non_field_errors") if k in body), "")
+    if isinstance(body, list):
+        body = body[0] if body and isinstance(body[0], str) else ""
+    if not isinstance(body, str):
+        return ""
+    return " ".join(body.split())[:200]
+
+
 class ArchidektClient:
     """Every Archidekt request goes through ``_request``: paced by the shared Pacer, sent with the
     gateway's own honest User-Agent (no disguise), read caches as described above, and bounded
@@ -818,11 +834,16 @@ class ArchidektClient:
                 ra = resp.headers.get("Retry-After")
                 self.pacer.record(False, float(ra) if ra and ra.isdigit() else 30.0)
                 raise ArchidektError("rate_limited", "Archidekt asked us to slow down; try again in a minute")
-            if resp.status_code in (401, 403):
+            if resp.status_code == 401:
                 self.pacer.record(True)
+                raise ArchidektError("auth", "Archidekt rejected the stored session; relink your account")
+            if resp.status_code == 403:
+                # A 403 is Archidekt refusing this one request; the session itself still works
+                # (that is a 401), so it is never reported as a link to redo.
+                self.pacer.record(True)
+                why = _refusal_detail(resp)
                 raise ArchidektError(
-                    "auth" if resp.status_code == 401 else "forbidden",
-                    "Archidekt rejected the stored session; relink your account",
+                    "forbidden", "Archidekt refused this request" + (f": {why}" if why else " (HTTP 403)")
                 )
             if resp.status_code == 404:
                 self.pacer.record(True)
@@ -1470,9 +1491,10 @@ class ArchidektClient:
     async def update_deck(self, token: str, deck_id: str, fields: dict[str, Any]) -> dict[str, Any]:
         """PATCH /decks/{id}/update/ with the deck's own details: any of ``name``, ``description``,
         ``deckFormat`` (int, see FORMAT_IDS), ``edhBracket`` (int or None), ``private`` and
-        ``unlisted`` (bool), and the cover: ``featured`` (a card-art URL, see ``art_url``) with
-        ``customFeatured`` ``""`` (the site sends both when a member picks a card; ``{"customFeatured":
-        ""}`` alone is its "Autoselect deck image"). Only the keys given are sent. The route with
+        ``unlisted`` (bool), and the cover: ``customFeatured`` (a card-art URL, see ``art_url``; the
+        site's "Set Deck Image" sends only that key, its bundle read 2026-10-14) or ``""`` for its
+        "Autoselect deck image". ``featured`` is Archidekt's own automatic pick and is never sent.
+        Only the keys given are sent. The route with
         ``description`` is verified live (backup_deck uses it); the other keys are what Archidekt's
         own site bundle sends on the same route (reported 2026-10-07, not verified). Callers re-read
         the deck afterwards and compare every field rather than trusting the response, which only
@@ -1486,7 +1508,6 @@ class ArchidektClient:
             "edhBracket",
             "private",
             "unlisted",
-            "featured",
             "customFeatured",
         )
         body = {k: fields[k] for k in allowed if k in fields}
@@ -1537,20 +1558,14 @@ class ArchidektClient:
         return await self._request("PATCH", "/massUpdate/", token=token, json_body={"items": items})
 
     async def search_tags(self, token: str, query: str) -> list[dict[str, Any]]:
-        """GET /decks/tags/v2/?q=: the site's tag picker lookup ({id, name} rows; reported)."""
+        """GET /decks/tags/v2/?q=: the site's tag picker lookup ({id, name} rows; reported). Deck tags
+        are one list Archidekt keeps: its own deck page only ever picks from it and never creates a
+        tag (its bundle, read 2026-10-14), so the gateway does not create tags either."""
         body = await self._request("GET", "/decks/tags/v2/", token=token, params={"q": query[:60]})
         results = body.get("results") if isinstance(body, dict) else body
         if not isinstance(results, list):
             raise ArchidektError("contract", "unexpected tag search shape")
         return [r for r in results if isinstance(r, dict)]
-
-    async def create_tag(self, token: str, name: str) -> dict[str, Any]:
-        """POST /decks/tags/ {name}: a new global deck tag (reported; the body is inferred from the
-        site's picker, which creates a tag by its typed name)."""
-        made = await self._request("POST", "/decks/tags/", token=token, json_body={"name": name})
-        if not isinstance(made, dict) or not isinstance(made.get("id"), int):
-            raise ArchidektError("contract", "unexpected tag create response")
-        return made
 
     async def add_deck_tag(self, token: str, deck_id: str, tag_id: int, position: str) -> dict[str, Any]:
         """POST /decks/tagRelations/ {deck, tag, position} (reported)."""
