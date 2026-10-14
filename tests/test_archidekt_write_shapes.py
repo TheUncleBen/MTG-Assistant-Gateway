@@ -304,8 +304,16 @@ def test_tag_position_follows_the_last_tag_like_the_site() -> None:
     assert next_tag_position(["M-500000"]) == "M-510000"
     assert next_tag_position(["M-530000", "M-505000"]) == "M-540000"  # after the highest one
     assert next_tag_position(["M-995000"]) == "N-0"
-    assert next_tag_position(["Z-995000"]) == "Z-0"
     assert next_tag_position(["9-995000"]) == "A-0"
+
+
+def test_a_tag_after_the_last_letter_still_sorts_last() -> None:
+    """L5: past "Z" there is no next letter; the new tag must not wrap to "Z-0" (which sorts first)."""
+    for last in ("Z-990000", "Z-995000", "Z-999998", "Z-999999"):
+        after = next_tag_position(["M-500000", last])
+        assert after.startswith("Z-") and int(after[2:]) >= int(last[2:]), (last, after)
+    assert next_tag_position(["Z-995000"]) == "Z-997500"
+    assert next_tag_position(["Z-980000"]) == "Z-990000"  # room left: the usual step
 
 
 async def test_added_tag_goes_after_a_reordered_tag(stack: Stack) -> None:

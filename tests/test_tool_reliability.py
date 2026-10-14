@@ -667,6 +667,28 @@ async def test_folder_tags_and_cover_go_through_a_details_proposal(stack: Stack)
     assert bad["ok"] is False and "Cube" in bad["message"]  # the error lists the folders there are
 
 
+async def test_one_tag_named_twice_is_added_once(stack: Stack) -> None:
+    """L4: ["Spicy", "spicy", "SPICY "] are one Archidekt tag: the proposal adds it once, so the
+    apply cannot fail halfway on a second add of a tag the deck by then has."""
+    token = await linked_user(stack)
+    ark = stack.ark
+    details = {"add_tags": ["Spicy", "spicy", "SPICY ", "budget"]}
+    p = structured(await call(stack.h, token, "propose_deck_details", {"deck_id": "42", "details": details}))
+    assert p["ok"], p
+    tags_row = next(r for r in p["rows"] if r.get("field") == "tags")
+    assert tags_row["added"] == ["Spicy", "budget"], tags_row
+    a = structured(await call(stack.h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    if a.get("error") == "browser_required":  # the member's mode asks them: apply as they would
+        b = Browser(stack.h)
+        await b.login()
+        csrf = await b.csrf("/proposals")
+        r = await b.http.post(f"/api/v1/proposals/{p['proposal_id']}/apply", headers={"X-CSRF-Token": csrf})
+        a = r.json()
+        await b.aclose()
+    assert a.get("state") == "applied", a
+    assert [x["name"] for x in ark.deck_tags[42]] == ["Spicy", "budget"]
+
+
 async def test_new_deck_cards_keep_the_etched_and_foil_finish(manual: Stack) -> None:
     token = await linked_user(manual)
     cards = [
