@@ -358,9 +358,9 @@ def section(key: str, ctx: Context) -> Section:
                         "computer. Set it up on chatgpt.com in the computer's web browser, not in a "
                         "phone's browser or the ChatGPT desktop app.",
                         "**Works on:** chatgpt.com in a computer's web browser, with Developer mode on "
-                        "(step 3 below). All tools work there, deck proposals included, though on some "
-                        "plans, Plus especially, ChatGPT may block the tools that change things: see "
-                        "**If ChatGPT blocks write tools** below.",
+                        "(step 3 below). In our testing on Pro every tool worked there, deck proposals "
+                        "included. On some plans, Plus especially, ChatGPT may block the tools that "
+                        "change things: see **If ChatGPT blocks write tools** below.",
                         "**Does not work on:** the ChatGPT iPhone and Android apps, or the Free plan, "
                         f"which has no Developer mode. Use [Claude]({pub}/install?for=claude) there "
                         "instead: its phone apps work.",
@@ -432,9 +432,10 @@ def section(key: str, ctx: Context) -> Section:
                     "ChatGPT plugin file (Business/Enterprise admins only)",
                     paras=(
                         "The connector and the MTG skill in one file, for ChatGPT Business and Enterprise "
-                        "workspace owners and admins only: upload it under **Plugins** in the admin "
+                        "workspace owners and admins only: it should upload under **Plugins** in the admin "
                         "console. If the upload does not work, add the connector as above instead. Plus "
-                        "and Pro accounts have no plugin upload: use the connector, as above.",
+                        "and Pro accounts likely have no plugin upload (Pro had none in our testing): use "
+                        "the connector, as above.",
                     ),
                     link=Link(
                         "Download the ChatGPT plugin (ZIP)",
@@ -446,7 +447,7 @@ def section(key: str, ctx: Context) -> Section:
                 Block(
                     "If ChatGPT blocks write tools",
                     paras=(
-                        "This can happen on Plus and Pro. Research, simulation, "
+                        "This may happen on Plus and Pro. Research, simulation, "
                         "reading decks, scanning and deck proposals still work. To apply a proposal, open "
                         "its review "
                         f"link or your [proposals]({pub}/proposals) and press Apply. To save scans, use "
