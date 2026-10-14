@@ -26,9 +26,12 @@ from mtg_gateway.archidekt import (
 )
 from mtg_gateway.decks import next_tag_position
 
+from .conftest import COLLECTION, Stack, stack_with
 from .fake_archidekt import FakeArchidekt
-from .test_browse_collection import NAV, Stack, api, linked, stack  # noqa: F401
+from .test_browse_collection import NAV, api, linked
 from .test_social_layout import post
+
+stack_options = stack_with(COLLECTION)
 
 UID = "be68e315-ffef-40a8-8a46-1c042b148c03"
 

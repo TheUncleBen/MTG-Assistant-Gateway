@@ -15,25 +15,22 @@ from mtg_gateway import decks as decks_mod
 from mtg_gateway import sync as sync_mod
 from mtg_gateway.sync import DeckSync
 
-from .conftest import FakeIdP, Harness, make_settings, running
+from .conftest import AUTO, FakeIdP, Harness, Stack, StackOptions, make_settings, running
 from .fake_archidekt import FakeArchidekt
-from .test_decks_and_proxy import Browser, Stack, _client, call, linked_user, structured
+from .test_decks_and_proxy import Browser, _client, call, linked_user, structured
 
 SUB = "user-1"
 CHANGE = [{"action": "set_quantity", "card_name": "Forest", "quantity": 3}]
 
 
 @pytest.fixture
-async def stack(tmp_path, idp: FakeIdP, monkeypatch):
+def stack_options(monkeypatch) -> StackOptions:
+    """The shared AUTO stack, with the assistant's apply answering "applying" after 0.2 s. The sync's
+    idle wait is 0.3 s, looked at every 10 ms."""
     monkeypatch.setattr(decks_mod, "APPLY_WAIT_SECONDS", 0.2)
     monkeypatch.setattr(sync_mod, "IDLE_WAIT", 0.3)
     monkeypatch.setattr(sync_mod, "IDLE_POLL", 0.01)
-    ark = FakeArchidekt()
-    settings = make_settings(
-        tmp_path, writes_enabled=True, approval_mode_default="auto", archidekt_base="https://ark.test/api"
-    )
-    async with running(Harness(settings, idp, archidekt=_client(settings, ark))) as h:
-        yield Stack(h, ark)
+    return AUTO
 
 
 def _sync(stack: Stack, *, quiet: bool = True) -> DeckSync:

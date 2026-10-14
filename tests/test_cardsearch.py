@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import pytest
 
-from .test_browse_collection import Stack, linked, stack  # noqa: F401 - fixture
+from .conftest import COLLECTION, Stack, stack_with
+from .test_browse_collection import linked
 from .test_decks_and_proxy import Browser
+
+stack_options = stack_with(COLLECTION)
 
 CATALOG = [
     "Sol Ring",

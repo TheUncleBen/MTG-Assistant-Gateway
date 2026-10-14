@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import dataclasses
 import hashlib
 import ipaddress
 import json
@@ -13,13 +14,17 @@ import re
 import secrets
 import socket
 import time
+from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
 import httpx
 import pytest
 from joserfc import jwt
 from joserfc.jwk import OctKey, RSAKey
+from mcp import Client
+from mcp.server.mcpserver import MCPServer
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
@@ -28,12 +33,16 @@ from starlette.routing import Route
 from mtg_gateway import scan as scan_pkg
 from mtg_gateway import theme
 from mtg_gateway.app import create_app
+from mtg_gateway.archidekt import ArchidektClient, Pacer
 from mtg_gateway.clickguard import MIN_FORM_AGE, form_stamp
 from mtg_gateway.config import Settings
 from mtg_gateway.db import Database
+from mtg_gateway.mf_proxy import MysticForgeProxy
 from mtg_gateway.oidc import OIDCClient
 from mtg_gateway.scan import scryfall as scan_scryfall
 
+from .fake_archidekt import FakeArchidekt
+from .fake_mystic_forge import fake_mystic_forge
 from .fake_scryfall import FakeScryfall
 
 IDP = "https://idp.test/application/o/mtg"
@@ -565,3 +574,121 @@ async def running(h: Harness):
 async def gw(tmp_path: Path, idp: FakeIdP):
     async with running(Harness(make_settings(tmp_path), idp)) as h:
         yield h
+
+
+# -- the ``stack`` fixture: a running gateway with its fakes ---------------------------------------
+# Many modules test against one running gateway with a fake Archidekt behind it. They share the
+# ``stack`` fixture below; what differs between them (settings, a Mystic Forge proxy, a fake
+# Scryfall to inspect, something set up once it runs) is spelled out in a StackOptions the module
+# picks with ``stack_options = stack_with(...)``. A module that picks nothing gets AUTO.
+
+
+class Stack:
+    """A running gateway (``h``) and the fakes behind it: ``ark`` (Archidekt, None without one) and
+    ``sf`` (the Scryfall the scan service asks, when the options swapped one in). A ``started``
+    hook may add more (the watchlist tests' ``ntfy``)."""
+
+    def __init__(
+        self,
+        h: Harness,
+        ark: FakeArchidekt | None = None,
+        sf: FakeScryfall | None = None,
+        options: StackOptions | None = None,
+    ):
+        self.h = h
+        self.ark = ark
+        self.sf = sf
+        self.options = options or AUTO
+
+    @property
+    def gw(self) -> Any:
+        return self.h.app.state.gateway
+
+
+@dataclasses.dataclass(frozen=True)
+class StackOptions:
+    """How a stack is built.
+
+    ``settings``: passed to make_settings as they are (plus ``archidekt_base`` when there is an
+    Archidekt); anything left out keeps the shipped default.
+    ``archidekt``: makes the fake Archidekt the gateway's client talks to; None for no client.
+    ``mystic_forge``: makes the fake Mystic Forge server behind the gateway's proxy; None for none.
+    ``scryfall``: once started, the scan service asks a FakeScryfall of its own (``stack.sf``).
+    ``started``: called with the stack once the gateway runs (and Scryfall is swapped)."""
+
+    settings: Mapping[str, object] = dataclasses.field(
+        default_factory=lambda: {"writes_enabled": True, "approval_mode_default": "auto"}
+    )
+    archidekt: Callable[[], FakeArchidekt] | None = FakeArchidekt
+    mystic_forge: Callable[[], MCPServer] | None = None
+    scryfall: bool = False
+    started: Callable[[Stack], None] | None = None
+
+    def but(self, **changes: Any) -> StackOptions:
+        return dataclasses.replace(self, **changes)
+
+
+ARK_BASE = "https://ark.test/api"
+# Writes on, applies allowed over MCP; no Mystic Forge.
+AUTO = StackOptions()
+# The same with the fake Mystic Forge behind the proxy (test_decks_and_proxy).
+AUTO_PROXY = AUTO.but(mystic_forge=fake_mystic_forge)
+# Writes on with the shipped approval mode, the fake Mystic Forge, and a fake Scryfall to inspect
+# (test_browse_collection).
+COLLECTION = StackOptions(settings={"writes_enabled": True}, mystic_forge=fake_mystic_forge, scryfall=True)
+
+
+def build_stack(tmp_path: Path, idp: FakeIdP, options: StackOptions = AUTO) -> Stack:
+    """The stack's gateway built but not yet running (a test can set up its database first)."""
+    ark = options.archidekt() if options.archidekt else None
+    over = {"archidekt_base": ARK_BASE} if ark is not None else {}
+    settings = make_settings(tmp_path, **over, **options.settings)
+    kw: dict[str, object] = {}
+    if ark is not None:
+        client = ArchidektClient(settings.archidekt_base, "test-agent", Pacer(0.0), http=ark.client())
+        kw["archidekt"] = client
+    if options.mystic_forge is not None:
+        server = options.mystic_forge
+        kw["mf_proxy"] = MysticForgeProxy("http://mf.test/mcp", client_factory=lambda: Client(server()))
+    return Stack(Harness(settings, idp, **kw), ark, options=options)
+
+
+@contextlib.asynccontextmanager
+async def run_stack(st: Stack):
+    """Run a built stack for the length of the block."""
+    async with running(st.h):
+        if st.options.scryfall:
+            st.sf = FakeScryfall()
+            st.gw.scan.scryfall = scan_scryfall.ScryfallClient(
+                "https://scryfall.test", min_interval=0.0, http=st.sf.client()
+            )
+        if st.options.started is not None:
+            st.options.started(st)
+        yield st
+
+
+@contextlib.asynccontextmanager
+async def open_stack(tmp_path: Path, idp: FakeIdP, options: StackOptions = AUTO):
+    async with run_stack(build_stack(tmp_path, idp, options)) as st:
+        yield st
+
+
+def stack_with(options: StackOptions):
+    """A module's ``stack_options`` fixture: ``stack_options = stack_with(COLLECTION)``."""
+
+    @pytest.fixture
+    def stack_options() -> StackOptions:
+        return options
+
+    return stack_options
+
+
+@pytest.fixture
+def stack_options() -> StackOptions:
+    return AUTO
+
+
+@pytest.fixture
+async def stack(tmp_path: Path, idp: FakeIdP, stack_options: StackOptions):
+    async with open_stack(tmp_path, idp, stack_options) as st:
+        yield st

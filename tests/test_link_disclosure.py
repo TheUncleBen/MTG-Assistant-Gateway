@@ -13,26 +13,13 @@ import time
 from pathlib import Path
 
 import pytest
-from mcp import Client
 
 from mtg_gateway import link_disclosure, pages
-from mtg_gateway.mf_proxy import MysticForgeProxy
 
-from .conftest import FakeIdP, Harness, make_settings, running
-from .test_decks_and_proxy import Browser, Stack, _client, call, fake_mystic_forge, linked_user, structured
+from .conftest import AUTO_PROXY, Stack, stack_with
+from .test_decks_and_proxy import Browser, call, linked_user, structured
 
-
-@pytest.fixture
-async def stack(tmp_path: Path, idp: FakeIdP):
-    from .fake_archidekt import FakeArchidekt
-
-    ark = FakeArchidekt()
-    settings = make_settings(
-        tmp_path, writes_enabled=True, approval_mode_default="auto", archidekt_base="https://ark.test/api"
-    )
-    proxy = MysticForgeProxy("http://mf.test/mcp", client_factory=lambda: Client(fake_mystic_forge()))
-    async with running(Harness(settings, idp, archidekt=_client(settings, ark), mf_proxy=proxy)) as h:
-        yield Stack(h, ark)
+stack_options = stack_with(AUTO_PROXY)
 
 
 def _jwt(claims: dict) -> str:

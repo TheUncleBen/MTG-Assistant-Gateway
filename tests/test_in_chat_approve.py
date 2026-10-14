@@ -20,10 +20,17 @@ from mtg_gateway.approve import (
     approval_matches,
 )
 
-from .conftest import FakeIdP, Harness, make_settings, running, sse_json
+from .conftest import (
+    FakeIdP,
+    Stack,
+    StackOptions,
+    open_stack,
+    sse_json,
+    stack_with,
+)
 from .fake_archidekt import FakeArchidekt
 from .test_background_apply import _every_patch_429, quick_waits  # noqa: F401 (a fixture)
-from .test_decks_and_proxy import Browser, Stack, _client, call, linked_user, mcp_token, structured
+from .test_decks_and_proxy import Browser, call, linked_user, mcp_token, structured
 
 CARD_TOOLS = (
     "propose_deck_changes",
@@ -35,32 +42,17 @@ CARD_TOOLS = (
 )
 
 
-def _stack_with(tmp_path, idp: FakeIdP, **over):
-    ark = FakeArchidekt()
-    settings = make_settings(
-        tmp_path,
-        writes_enabled=True,
-        approval_mode_default="manual",
-        archidekt_base="https://ark.test/api",
-        **over,
-    )
-    return Harness(settings, idp, archidekt=_client(settings, ark)), ark
-
-
-@pytest.fixture
-async def stack(tmp_path, idp: FakeIdP):
-    """Writes on, the assistant's own apply off (the shipped default): only the card or the
-    review page applies."""
-    h, ark = _stack_with(tmp_path, idp)
-    async with running(h):
-        yield Stack(h, ark)
+# Writes on, the assistant's own apply off (the shipped default): only the card or the review
+# page applies.
+MANUAL = StackOptions(settings={"writes_enabled": True, "approval_mode_default": "manual"})
+stack_options = stack_with(MANUAL)
 
 
 @pytest.fixture
 async def no_card(tmp_path, idp: FakeIdP):
-    h, ark = _stack_with(tmp_path, idp, apply_in_chat=False)
-    async with running(h):
-        yield Stack(h, ark)
+    settings = {**MANUAL.settings, "apply_in_chat": False}
+    async with open_stack(tmp_path, idp, MANUAL.but(settings=settings)) as st:
+        yield st
 
 
 async def _propose(h, token: str) -> dict:

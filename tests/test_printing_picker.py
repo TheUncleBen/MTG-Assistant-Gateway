@@ -10,14 +10,14 @@ from __future__ import annotations
 from urllib.parse import parse_qs, urlparse
 
 from .fake_printings import SOL_RING_ORACLE, sol_ring_printings
-from .test_browse_collection import Stack, api, linked, stack  # noqa: F401 - fixture
+from .test_browse_collection import Stack, api, linked, stack_options  # noqa: F401 - fixture
 
 
 def _prints_calls(st: Stack) -> list[dict[str, str]]:
     return [q for q in st.sf.print_searches if SOL_RING_ORACLE in q.get("q", "")]
 
 
-async def test_printings_page_past_scryfalls_page_and_are_cached(stack: Stack) -> None:  # noqa: F811
+async def test_printings_page_past_scryfalls_page_and_are_cached(stack: Stack) -> None:
     stack.sf.extra_cards = sol_ring_printings(fillers=7)
     stack.sf.page_size = 6  # Scryfall's is 175; small here so the card has three pages
     b = await linked(stack)
@@ -65,7 +65,7 @@ async def test_printings_page_past_scryfalls_page_and_are_cached(stack: Stack) -
         await b.aclose()
 
 
-async def test_printings_filter_and_sort_on_scryfalls_side(stack: Stack) -> None:  # noqa: F811
+async def test_printings_filter_and_sort_on_scryfalls_side(stack: Stack) -> None:
     stack.sf.extra_cards = sol_ring_printings()
     b = await linked(stack)
     try:
@@ -108,7 +108,7 @@ async def test_printings_filter_and_sort_on_scryfalls_side(stack: Stack) -> None
         await b.aclose()
 
 
-async def test_printings_refuse_values_they_do_not_know(stack: Stack) -> None:  # noqa: F811
+async def test_printings_refuse_values_they_do_not_know(stack: Stack) -> None:
     stack.sf.extra_cards = sol_ring_printings()
     b = await linked(stack)
     try:
@@ -143,7 +143,7 @@ def _adds(st: Stack, since: int) -> list[dict]:
     return [e for p in st.ark.patches[since:] for e in p["cards"] if e["action"] == "add"]
 
 
-async def test_change_printing_saves_at_once_and_undo_puts_it_back(stack: Stack) -> None:  # noqa: F811
+async def test_change_printing_saves_at_once_and_undo_puts_it_back(stack: Stack) -> None:
     """The deck page's menu sends one set_printing change to the edit endpoint (as its Quantity and
     Move do); the answer's row carries the new printing for the page to draw. The toast's Undo
     sends the inverse change: the old set and number, and the old finish when the pick changed it."""
@@ -209,7 +209,7 @@ async def test_change_printing_saves_at_once_and_undo_puts_it_back(stack: Stack)
         await b.aclose()
 
 
-async def test_a_printing_not_made_in_the_finish_moves_the_finish_and_undo_restores_it(stack: Stack) -> None:  # noqa: F811
+async def test_a_printing_not_made_in_the_finish_moves_the_finish_and_undo_restores_it(stack: Stack) -> None:
     """P6: SLD 1074 is etched only. The picker names the finish the printing has (etched), the
     card becomes etched; the Undo names the old finish (normal) with the old printing."""
     b = await linked(stack)

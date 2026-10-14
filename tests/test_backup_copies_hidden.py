@@ -10,8 +10,11 @@ from mtg_gateway.archidekt import is_backup_name
 from mtg_gateway.archidekt_csv import parse_export, to_deck_json
 from mtg_gateway.decks import mark_gone
 
+from .conftest import COLLECTION, Stack, stack_with
 from .fake_archidekt import FIXTURE
-from .test_browse_collection import NAV, Stack, api, linked, stack  # noqa: F401 - fixture
+from .test_browse_collection import NAV, api, linked
+
+stack_options = stack_with(COLLECTION)
 
 
 def test_mark_gone_judges_only_what_the_list_can_know() -> None:

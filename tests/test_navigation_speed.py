@@ -14,9 +14,10 @@ import re
 from mtg_gateway import theme
 from mtg_gateway.deckpage import DECK_CSS
 
-from .test_decks_and_proxy import Browser, Stack, call, linked_user, stack, structured
+from .conftest import AUTO_PROXY, Stack, stack_with
+from .test_decks_and_proxy import Browser, call, linked_user, structured
 
-__all__ = ["stack"]
+stack_options = stack_with(AUTO_PROXY)
 
 NAV = {"Sec-Fetch-Mode": "navigate", "Accept": "text/html"}
 STATIC_REF = re.compile(r"(?:src|href)='(/static/[^']+)'")

@@ -13,9 +13,11 @@ from pathlib import Path
 
 from mtg_gateway.db import Database
 
-from .test_companion import NAV, Stack, linked_browser
-from .test_companion import stack as stack  # noqa: PLC0414  (the fixture)
+from .conftest import Stack, stack_with
+from .test_companion import COMPANION, NAV, linked_browser
 from .test_decks_and_proxy import call, mcp_token, structured
+
+stack_options = stack_with(COMPANION)
 
 FIX = Path(__file__).parent / "fixtures" / "reports"
 GOLDFISH = (FIX / "goldfish_run.md").read_text()

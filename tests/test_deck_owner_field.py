@@ -12,7 +12,10 @@ import pytest
 from mtg_gateway.archidekt import _owned_by, parse_deck
 from mtg_gateway.decks import DeckError, owns_deck
 
-from .test_browse_collection import Stack, linked, stack  # noqa: F401 - fixture
+from .conftest import COLLECTION, Stack, stack_with
+from .test_browse_collection import linked
+
+stack_options = stack_with(COLLECTION)
 
 LINK = {"archidekt_username": "alice", "archidekt_user_id": "7"}
 

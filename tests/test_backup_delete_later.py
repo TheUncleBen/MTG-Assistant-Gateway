@@ -12,36 +12,37 @@ import time
 
 import httpx
 import pytest
-from mcp import Client
 
 from mtg_gateway import archidekt as ark_mod
 from mtg_gateway import decks as decks_mod
-from mtg_gateway.archidekt import ArchidektClient, Pacer
+from mtg_gateway.archidekt import ArchidektClient
 from mtg_gateway.history_view import build_events
-from mtg_gateway.mf_proxy import MysticForgeProxy
-from mtg_gateway.scan.scryfall import ScryfallClient
 from mtg_gateway.sync import DeckSync
 
-from .conftest import FakeIdP, Harness, make_settings, running
+from .conftest import (
+    AUTO,
+    COLLECTION,
+    FakeIdP,
+    Harness,
+    Stack,
+    StackOptions,
+    make_settings,
+    open_stack,
+    running,
+)
 from .fake_archidekt import FakeArchidekt
-from .fake_scryfall import FakeScryfall
 from .test_background_apply import LATER, NOTHING_CHANGED, THREE, _finished
-from .test_browse_collection import Stack as CollectionStack
 from .test_browse_collection import linked
-from .test_decks_and_proxy import Stack, _client, call, fake_mystic_forge, linked_user, mcp_token, structured
+from .test_decks_and_proxy import _client, call, linked_user, mcp_token, structured
 
 SUB = "user-1"
 
 
 @pytest.fixture
-async def stack(tmp_path, idp: FakeIdP, monkeypatch):
+def stack_options(monkeypatch) -> StackOptions:
+    """The shared AUTO stack, with the assistant's apply answering "applying" after 0.2 s."""
     monkeypatch.setattr(decks_mod, "APPLY_WAIT_SECONDS", 0.2)
-    ark = FakeArchidekt()
-    settings = make_settings(
-        tmp_path, writes_enabled=True, approval_mode_default="auto", archidekt_base="https://ark.test/api"
-    )
-    async with running(Harness(settings, idp, archidekt=_client(settings, ark))) as h:
-        yield Stack(h, ark)
+    return AUTO
 
 
 @pytest.fixture
@@ -425,15 +426,8 @@ async def test_a_collection_apply_stopped_after_a_record_was_added_stays_failed(
     """Q78: a collection proposal whose first card went in before Archidekt's waits ran out
     changed something, so it is not pending again (applying it again would add the card twice),
     and the message says your collection is partly changed."""
-    ark, sf = FakeArchidekt(), FakeScryfall()
-    settings = make_settings(tmp_path, writes_enabled=True, archidekt_base="https://ark.test/api")
-    client = ArchidektClient(settings.archidekt_base, "test-agent", Pacer(0.0), http=ark.client())
-    proxy = MysticForgeProxy("http://mf.test/mcp", client_factory=lambda: Client(fake_mystic_forge()))
-    async with running(Harness(settings, idp, archidekt=client, mf_proxy=proxy)) as h:
-        h.app.state.gateway.scan.scryfall = ScryfallClient(
-            "https://scryfall.test", min_interval=0.0, http=sf.client()
-        )
-        cs = CollectionStack(h, ark, sf)
+    async with open_stack(tmp_path, idp, COLLECTION) as cs:
+        h, ark = cs.h, cs.ark
         b = await linked(cs)
         try:
             token = await mcp_token(h)

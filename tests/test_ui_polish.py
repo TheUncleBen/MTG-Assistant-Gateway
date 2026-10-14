@@ -16,7 +16,10 @@ from mtg_gateway.archidekt_csv import parse_export, to_deck_json
 from mtg_gateway.pages import actor_html
 from mtg_gateway.report_view import report_export_html
 
-from .test_companion import NAV, Stack, linked_browser, stack  # noqa: F401  (fixture)
+from .conftest import Stack, stack_with
+from .test_companion import COMPANION, NAV, linked_browser
+
+stack_options = stack_with(COMPANION)
 
 STATIC = Path(companion.__file__).parent / "static"
 SCAN_STATIC = Path(companion.__file__).parent / "scan" / "static"

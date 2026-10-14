@@ -27,13 +27,10 @@ from mtg_gateway.cards import (
     ask_choices,
     card_html,
 )
-from mtg_gateway.scan.scryfall import ScryfallClient
 
-from .conftest import FakeIdP, Harness, make_settings, running, sse_json
-from .fake_archidekt import FakeArchidekt
-from .fake_scryfall import FakeScryfall
+from .conftest import AUTO, FakeIdP, Stack, open_stack, sse_json, stack_with
 from .test_approval_modes import _set_mode
-from .test_decks_and_proxy import _client, call, linked_user, mcp_token, structured
+from .test_decks_and_proxy import call, linked_user, mcp_token, structured
 
 AESI = "6511f317-bd38-46d0-b800-7125a3f420da"
 CARDED = {
@@ -63,45 +60,15 @@ CARD_NAMES = (
 )
 
 
-class Stack:
-    def __init__(self, h: Harness, ark: FakeArchidekt, sf: FakeScryfall):
-        self.h = h
-        self.ark = ark
-        self.sf = sf
-
-
-def _stack_with(tmp_path, idp: FakeIdP, **over):
-    ark = FakeArchidekt()
-    settings = make_settings(
-        tmp_path,
-        writes_enabled=True,
-        approval_mode_default="auto",
-        archidekt_base="https://ark.test/api",
-        **over,
-    )
-    return Harness(settings, idp, archidekt=_client(settings, ark)), ark
-
-
-def _fake_scryfall(h: Harness) -> FakeScryfall:
-    sf = FakeScryfall()
-    h.app.state.gateway.scan.scryfall = ScryfallClient(
-        "https://scryfall.test", min_interval=0.0, http=sf.client()
-    )
-    return sf
-
-
-@pytest.fixture
-async def stack(tmp_path, idp: FakeIdP):
-    h, ark = _stack_with(tmp_path, idp)
-    async with running(h):
-        yield Stack(h, ark, _fake_scryfall(h))
+CARDS = AUTO.but(scryfall=True)
+stack_options = stack_with(CARDS)
 
 
 @pytest.fixture
 async def no_card(tmp_path, idp: FakeIdP):
-    h, ark = _stack_with(tmp_path, idp, apply_in_chat=False)
-    async with running(h):
-        yield Stack(h, ark, _fake_scryfall(h))
+    settings = {**CARDS.settings, "apply_in_chat": False}
+    async with open_stack(tmp_path, idp, CARDS.but(settings=settings)) as st:
+        yield st
 
 
 async def _tools(h, token: str) -> dict[str, dict]:

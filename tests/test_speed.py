@@ -12,9 +12,10 @@ import pytest
 
 from mtg_gateway.decks import MemberCache
 
-from .test_decks_and_proxy import Browser, Stack, call, linked_user, stack, structured
+from .conftest import AUTO_PROXY, Stack, stack_with
+from .test_decks_and_proxy import Browser, call, linked_user, structured
 
-__all__ = ["stack"]
+stack_options = stack_with(AUTO_PROXY)
 
 NAV = {"Sec-Fetch-Mode": "navigate", "Accept": "text/html"}
 TIMING = re.compile(r"^total;dur=\d+(\.\d+)?, archidekt;dur=\d+(\.\d+)?, idp;dur=\d+(\.\d+)?$")

@@ -13,8 +13,11 @@ import re
 from mtg_gateway.archidekt import rich_doc
 from mtg_gateway.mf_proxy import ALLOWED_TOOLS, BLOCKED_TOOLS, OWNED_ELSEWHERE
 
-from .test_browse_collection import NAV, Stack, api, linked, stack  # noqa: F401
+from .conftest import COLLECTION, Stack, stack_with
+from .test_browse_collection import NAV, api, linked
 from .test_decks_and_proxy import Browser, call, mcp_token, structured
+
+stack_options = stack_with(COLLECTION)
 
 HAND_ONLY = (
     "delete_deck",

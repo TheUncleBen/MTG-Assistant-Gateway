@@ -4,29 +4,18 @@ set_commander change actions, through the MCP tools and the browser review page.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
 from mtg_gateway.archidekt import DeckCard, rich_doc
 from mtg_gateway.decks import Change, DeckError, parse_changes, parse_details
 
-from .conftest import GATEWAY, FakeIdP, Harness, make_settings, running
-from .fake_archidekt import FakeArchidekt
-from .test_decks_and_proxy import Browser, Stack, _client, call, linked_user, structured
+from .conftest import GATEWAY, Harness, Stack
+from .test_decks_and_proxy import Browser, call, linked_user, structured
 
 AMY = {"sub": "user-2", "email": "amy@example.test", "name": "Amy", "preferred_username": "amy", "groups": []}
 
-
-@pytest.fixture
-async def stack(tmp_path: Path, idp: FakeIdP):
-    """Writes on, applies allowed over MCP (as test_decks_and_proxy.stack, without the proxy)."""
-    ark = FakeArchidekt()
-    settings = make_settings(
-        tmp_path, writes_enabled=True, approval_mode_default="auto", archidekt_base="https://ark.test/api"
-    )
-    async with running(Harness(settings, idp, archidekt=_client(settings, ark))) as h:
-        yield Stack(h, ark)
+# ``stack`` is the shared AUTO stack (tests/conftest.py): writes on, applies allowed over MCP.
 
 
 def _rows(ark, deck_id: int) -> dict[str, dict]:

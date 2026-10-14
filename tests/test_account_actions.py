@@ -15,19 +15,21 @@ from mtg_gateway.approve import APPROVAL_META_KEY, approval_code
 from mtg_gateway.archidekt import rich_doc
 from mtg_gateway.decks import DeckError
 
-from .conftest import FakeIdP, running
-from .test_approval_modes import _set_mode, _stack_with
-from .test_decks_and_proxy import Browser, Stack, call, linked_user, structured
+from .conftest import Stack, stack_with
+from .fake_archidekt import FakeArchidekt
+from .test_approval_modes import SHIPPED, _set_mode
+from .test_decks_and_proxy import Browser, call, linked_user, structured
 
 SUB = "user-1"  # the signed-in member of linked_user
 
 
-@pytest.fixture
-async def stack(tmp_path, idp: FakeIdP):
-    h, ark = _stack_with(tmp_path, idp)
+def _amy_public() -> FakeArchidekt:
+    ark = FakeArchidekt()
     ark.private.discard(43)  # amy's deck is public: someone else's deck to like and follow
-    async with running(h):
-        yield Stack(h, ark)
+    return ark
+
+
+stack_options = stack_with(SHIPPED.but(archidekt=_amy_public))
 
 
 async def _browser_apply(h, pid: str) -> dict:
