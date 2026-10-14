@@ -656,3 +656,41 @@ def test_undo_of_a_remove_restores_every_category_and_a_note_is_warned_about(ser
         assert server.quantity("Cultivate") == 0
         assert errors == []
         browser.close()
+
+
+def test_drag_onto_the_stack_directly_below_in_the_stacks_view(server: Server) -> None:
+    """A57: in the stacks view the cards after the one under the pointer fan out downwards, past
+    the bottom of their stack and over the top of the stack directly below. A native drag kept
+    that fan open, so a drop on the lower stack's head landed on the dragged card's own stack and
+    did nothing. While a card is dragged the fan stays closed: the drop reaches the lower stack."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        # Fold width: three columns, Creature (the tallest) with Land directly below it
+        browser, page, errors = _page(p, server, sid, 673)
+        page.goto(f"{server.base}/decks/42?view=stacks", wait_until="networkidle")
+        sent = _edits(page)
+        creature = page.locator(".stack[data-group='Creature']")
+        land = page.locator(".stack[data-group='Land']")
+        c, ld = creature.bounding_box(), land.bounding_box()
+        assert abs(c["x"] - ld["x"]) < 2 and c["y"] + c["height"] < ld["y"]  # the same column, below
+        page.evaluate("y => window.scrollBy(0, y)", ld["y"] - 650)
+        # the third card from the end: the two after it fan out over Land's head
+        source = creature.locator(".c").nth(-3)
+        name = source.get_attribute("data-card")
+        s = source.bounding_box()
+        head = land.locator(".stackhead").bounding_box()
+        x0, y0 = s["x"] + s["width"] / 2, s["y"] + 12
+        page.mouse.move(x0, y0)
+        page.wait_for_timeout(300)  # the fan opens under the pointer
+        page.mouse.down()
+        page.mouse.move(x0, y0 + 8, steps=2)  # the drag starts on this card
+        page.mouse.move(head["x"] + head["width"] / 2, head["y"] + head["height"] / 2, steps=8)
+        page.mouse.up()
+        page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
+        assert sent == [[{"action": "set_category", "card_name": name, "category": "Land"}]]
+        assert land.locator(f".c[data-card={json.dumps(name)}]").count() == 1
+        assert errors == []
+        browser.close()

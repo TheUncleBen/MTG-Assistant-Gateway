@@ -2107,9 +2107,12 @@ ul.rows .hover img{width:100%;height:100%;display:block}
 .stack.moving{outline:2px dashed var(--orange);outline-offset:4px;background:var(--surface-2)}
 /* while a stack is dragged a bar shows where it lands and its name follows the pointer; both, and
    a card slid by a finger, move by transform only */
-/* nor does a row's hover picture or a stack's fan open under the pointer meanwhile */
-.deckview.sorting ul.rows .row:hover .hover{display:none}
+/* nor does a row's hover picture or a stack's fan open under the pointer meanwhile, nor while a
+   card is dragged (deck.js): the fan would cover the top of the stack directly below */
+.deckview.sorting ul.rows .row:hover .hover,.deckview.carddrag ul.rows .row:hover .hover{display:none}
 .deckview.sorting.stacks .c:hover ~ .c{transform:none}
+/* at once, not after the fan's 0.3 s slide: a quick drag reaches the lower stack before that */
+.deckview.carddrag.stacks .c:hover ~ .c{transform:none;transition:none}
 .stackdrop,.stacktag,.dragghost{position:fixed;left:0;top:0;pointer-events:none;will-change:transform;margin:0}
 .stackdrop{z-index:70;width:1px;height:1px;opacity:0;transform-origin:0 0;background:var(--orange)}
 .stacktag{z-index:71;max-width:60vw;padding:.3rem .6rem;border-radius:var(--radius);background:var(--surface);
