@@ -584,3 +584,65 @@ def test_brewer_view_and_custom_mana_value(server: Server, width: int, scheme: s
         assert _rows(server, "Cultivate")[0].get("customCmc") is None
         assert errors == []
         browser.close()
+
+
+@pytest.mark.parametrize(("width", "scheme"), [(390, "dark"), (1280, "light")])
+def test_mana_value_saves_in_the_background(server: Server, width: int, scheme: str) -> None:
+    """0.7.27 (T-159): Save closes the Mana value form at once and the new value is on the card
+    while Archidekt is still answering, with a Saving note and then Saved; a save Archidekt refuses
+    puts the old value back and says why."""
+    import threading
+
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    held = threading.Event()
+    server.ark.hold_card_writes = held
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, color_scheme=scheme)
+        page.goto(f"{server.base}/decks/42?view=brewer", wait_until="networkidle")
+        row = page.locator(".deckview.brewer .row.brew[data-card='Cultivate']").first
+        row.scroll_into_view_if_needed()
+
+        def save(value: str) -> None:
+            row.click(button="right")
+            page.locator(".ctxmenu [role=menuitem]", has_text="Mana value").click()
+            page.locator(".ctxmenu .mvform input").fill(value)
+            page.locator(".ctxmenu .mvform button", has_text="Save").click()
+
+        try:
+            save("3")
+            # the form is gone and the card has its new value before Archidekt answers
+            assert page.locator(".ctxmenu").count() == 0
+            assert row.get_attribute("data-mv") == "3"
+            page.locator(".deck-toast .msg", has_text="Saving").wait_for(timeout=2000)
+            _shot(page, f"t159-after-saving-{scheme}-{'phone' if width < 500 else 'desktop'}")
+        finally:
+            held.set()
+        page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
+        assert _rows(server, "Cultivate")[0]["customCmc"] == 3
+        assert row.get_attribute("data-mv") == "3"
+        _shot(page, f"t159-after-saved-{scheme}-{'phone' if width < 500 else 'desktop'}")
+
+        # Archidekt refuses the next one: the value goes back to 3 and the error is shown
+        held.clear()
+        server.ark.fail_card_writes = True
+        try:
+            save("5")
+            assert page.locator(".ctxmenu").count() == 0
+            assert row.get_attribute("data-mv") == "5"
+        finally:
+            held.set()
+        err = page.locator(".deck-toast.error .msg")
+        err.wait_for(timeout=8000)
+        text = err.inner_text()
+        assert text.startswith("Mana value not saved:") and text.endswith("Cultivate is back to 3."), text
+        assert row.get_attribute("data-mv") == "3"
+        assert _rows(server, "Cultivate")[0]["customCmc"] == 3
+        # the form opens on the value the deck really has
+        row.click(button="right")
+        page.locator(".ctxmenu [role=menuitem]", has_text="Mana value").click()
+        assert page.locator(".ctxmenu .mvform input").input_value() == "3"
+        assert errors == []
+        browser.close()
