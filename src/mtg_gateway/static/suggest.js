@@ -80,6 +80,12 @@
     list.className = "suggest-list";
     list.id = id;
     list.setAttribute("role", "listbox");
+    // the list's accessible name (L12): its heading's words, else the box's own label
+    var named = input.getAttribute("data-suggest-head");
+    var lab = input.labels && input.labels[0];
+    if (named) list.setAttribute("aria-label", named);
+    else if (lab) { if (!lab.id) lab.id = id + "-label"; list.setAttribute("aria-labelledby", lab.id); }
+    else if (input.getAttribute("aria-label")) list.setAttribute("aria-label", input.getAttribute("aria-label"));
     list.hidden = true;
     wrap.appendChild(list);
     var status = document.createElement("span");

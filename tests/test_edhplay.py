@@ -7,6 +7,7 @@ drops tokens (export_formats.to_edhplay)."""
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -682,4 +683,136 @@ def test_the_box_says_what_to_set_on_edhplay(server: Server, width: int, scheme:
         assert page.evaluate(CONTRAST) >= 4.5  # the notice lines are among the dialog's p
         assert _overflow(page) <= 0 and errors == []
         _shot(page, f"edhplay-set-on-edhplay-{width}-{scheme}")
+        browser.close()
+
+
+def _answer(status: int, text: str):
+    return lambda route: route.fulfill(status=status, content_type="application/json", body=text)
+
+
+@pytest.mark.parametrize(("width", "scheme"), [(390, "dark"), (1280, "light")])
+def test_the_box_shows_only_the_approved_messages(server: Server, width: int, scheme: str) -> None:
+    """M8, Q67 (approved only): whatever the gateway answers, the box shows one of the three Q53
+    messages, never the gateway's own text. Q69: signed out, retrying can't help, so there is no
+    Try again; the two load failures keep it."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    busy = "Archidekt is busy right now; try again in a minute."
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, color_scheme=scheme)
+        page.goto(f"{server.base}/decks/42", wait_until="networkidle")
+        logged: list[str] = []
+        page.on("console", lambda m: logged.append(m.text))
+        answers = [
+            (503, {"ok": False, "error": "unavailable", "message": busy}),
+            (404, {"ok": False, "error": "not_found", "message": "That deck is private on Archidekt."}),
+            (200, {"ok": False, "message": "<b>odd</b>"}),
+            (500, "not json"),
+        ]
+        for status, body in answers:
+            page.route(
+                "**/edhplay.json", _answer(status, body if isinstance(body, str) else json.dumps(body))
+            )
+            dialog = _open_dialog(page, ready=False)
+            err = dialog.locator(".notice.error")
+            err.wait_for()
+            assert err.locator("span").inner_text() == "The deck list couldn't be loaded.", status
+            assert err.locator("button", has_text="Try again").count() == 1
+            assert busy not in dialog.inner_text() and "private" not in dialog.inner_text()
+            if status == 503:
+                _shot(page, f"m8-edhplay-error-{width}-{scheme}")
+            page.keyboard.press("Escape")
+            page.unroute("**/edhplay.json")
+        assert any(busy in line for line in logged)  # the reason goes to the console only
+        # signed out: the message, and nothing to retry
+        page.route(
+            "**/edhplay.json",
+            lambda route: route.fulfill(
+                status=401, content_type="application/json", body='{"ok": false, "error": "unauthenticated"}'
+            ),
+        )
+        dialog = _open_dialog(page, ready=False)
+        err = dialog.locator(".notice.error")
+        err.wait_for()
+        assert err.locator("span").inner_text() == "You're signed out. Reload the page to sign in."
+        assert (
+            err.locator("button").count() == 0 and dialog.locator("button", has_text="Try again").count() == 0
+        )
+        focus = (
+            "() => document.activeElement.getAttribute('aria-label') || document.activeElement.textContent"
+        )
+        cycle = []
+        for _ in range(3):
+            page.keyboard.press("Tab")
+            cycle.append(page.evaluate(focus))
+        assert cycle == ["Close", "How to import", GO]
+        assert page.evaluate(CONTRAST) >= 4.5 and _overflow(page) <= 0
+        _shot(page, f"q69-edhplay-signed-out-{width}-{scheme}")
+        assert errors == []
+        browser.close()
+
+
+# the backdrop over the top bar, the phone tab bar and the Fold rail: what a tap in each one's
+# middle lands on (the box's own backdrop when it covers them)
+UNDER = """() => [".topbar", ".tabbar"].map(sel => {
+  const e = document.querySelector(sel);
+  if (!e) return [sel, "none"];
+  const r = e.getBoundingClientRect();
+  if (!r.width || !r.height) return [sel, "hidden"];
+  const hit = document.elementFromPoint(r.left + r.width / 2, r.top + Math.min(r.height / 2, 30));
+  return [sel, hit && hit.classList.contains("edhplay-dialog") ? "covered" : (hit && hit.className) || "?"];
+})"""
+
+
+@pytest.mark.parametrize(
+    ("width", "height", "scheme", "touch"),
+    [
+        (344, 882, "dark", True),
+        (390, 844, "light", True),
+        (673, 841, "dark", True),
+        (1280, 800, "light", False),
+    ],
+)
+def test_the_box_covers_the_bars_and_takes_the_old_note_down(
+    server: Server, width: int, height: int, scheme: str, touch: bool
+) -> None:
+    """L10: the backdrop dims the top bar, the phone's tab bar and the Fold's rail too, and a
+    "Deck list copied" note left from an earlier launch is gone when the box opens again. L9: the
+    box's x and How to import are finger-sized (44 px)."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(
+            p,
+            server,
+            sid,
+            width,
+            color_scheme=scheme,
+            permissions=["clipboard-read", "clipboard-write"],
+            has_touch=touch,
+            is_mobile=touch,
+        )
+        page.set_viewport_size({"width": width, "height": height})
+        page.context.route(re.compile(r"https://edhplay\.com/.*"), lambda route: route.fulfill(status=200))
+        page.goto(f"{server.base}/decks/42", wait_until="networkidle")
+        _open_dialog(page)
+        _launch(page)
+        assert page.locator(".edhplay-toast").is_visible()
+        dialog = _open_dialog(page)
+        assert page.locator(".edhplay-toast").count() == 0
+        bars = dict(page.evaluate(UNDER))
+        assert bars[".topbar"] == "covered", bars
+        if width < 900:  # the tab bar (phone) or the rail (Fold, open)
+            assert bars[".tabbar"] == "covered", bars
+        for target in (dialog.locator("button[aria-label='Close']"), dialog.locator("summary")):
+            box = target.bounding_box()
+            assert box["height"] >= 44 and box["width"] >= 44, box
+        dialog.locator("summary").click()  # folded after a launch: open it for the picture
+        assert page.evaluate(CONTRAST) >= 4.5 and _overflow(page) <= 0
+        _shot(page, f"l10-edhplay-reopened-{width}-{scheme}")
+        assert errors == []
         browser.close()

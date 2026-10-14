@@ -96,6 +96,26 @@
   }
 
   var known = {}; // lower name -> card summary from the suggestion list (picture, mana, type)
+  // A card added before the list's details came back (a quick Enter, or a typed name): its
+  // picture, mana cost and type line are asked for and drawn when they arrive. Not a change of
+  // its own: no history entry; an Undo meanwhile simply leaves nothing to fill.
+  function detailsLater(key, name) {
+    fetch("/scan/api/peek?names=" + encodeURIComponent(name), { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        var c = ((d && d.cards) || []).filter(function (x) { return x && String(x.name || "").toLowerCase() === name.toLowerCase(); })[0];
+        if (!c) return;
+        known[name.toLowerCase()] = c;
+        var fill = function (a) {
+          if (!a || a.name !== name || a.mana || a.image) return;
+          a.image = c.image_small || null; a.mana = c.mana_cost || ""; a.type = c.type_line || "";
+        };
+        fill(added[key]);
+        history.concat(future).forEach(function (s) { fill(s.added && s.added[key]); });  // a Redo shows it too
+        render();
+      })
+      .catch(function () { /* offline: the row keeps its name only, as before */ });
+  }
   function addCard(name, qty, category, printing, finish, zone) {
     zone = zone === "side" ? "side" : "main";
     var key = keyFor(name, zone);
@@ -107,6 +127,7 @@
       added[key] = { name: name, zone: zone, quantity: qty, category: category || null };
       var k = known[name.toLowerCase()];
       if (k) { added[key].image = k.image_small || null; added[key].mana = k.mana_cost || ""; added[key].type = k.type_line || ""; }
+      else detailsLater(key, name);
       // a pinned printing or a foil goes to the deck proper only (the gateway refuses them for zone side)
       if (zone === "main" && printing && printing.set_code && printing.collector_number) {
         added[key].set_code = printing.set_code;

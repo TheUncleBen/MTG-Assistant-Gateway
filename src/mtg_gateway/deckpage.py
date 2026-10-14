@@ -2312,7 +2312,10 @@ html.cardview-open{overflow:hidden}
 .picker.edhplay-dialog{padding:1rem;align-items:center}
 .picker.edhplay-dialog .pickbox{width:min(100%,30rem);max-height:100%;overflow:auto;padding:1rem 1.15rem;
   border-radius:var(--radius-panel);border-bottom:1px solid var(--border)}
-.edhplay-dialog details.disclosure{margin:0;padding-top:.35rem}
+.edhplay-dialog details.disclosure{margin:0;padding-top:.15rem}
+/* finger-sized (44 px): the fold's summary and the box's x (L9) */
+.edhplay-dialog details.disclosure > summary{min-height:44px}
+.picker.edhplay-dialog .pickbox .close{width:44px;min-height:44px;height:44px;margin:-.2rem -.35rem 0 0}
 .edhplay-dialog .steps{margin:.15rem 0 .2rem;padding-left:1.4rem;display:flex;flex-direction:column;gap:.4rem}
 .edhplay-dialog p{margin:0}
 .edhplay-dialog .edhplay-state{display:flex;flex-direction:column;gap:.5rem}
@@ -2598,6 +2601,10 @@ ul.plain.taglist{display:flex;flex-wrap:wrap;gap:.5rem;margin:0 0 1rem}
 .addtag .field,.moveform .field{margin:0;flex:1 1 10rem;max-width:24rem;min-width:0}
 /* (main form > button is full width on a phone; here the button keeps its own width) */
 main .panel form.addtag > button,main .panel form.moveform > button{flex:none;width:auto}
+/* the Fold's cover screen (under 360px): the buttons drop their icon, so the box keeps room for its
+   whole placeholder ("Pick someone you follow", L11) and the two still share a row */
+@media (max-width:359.98px){ main .panel form.addtag > button svg,
+  main .panel form.moveform > button svg{display:none} }
 .tagbox .notice,.collabbox .notice,.folderbox .notice,.coverbox .notice{margin:.75rem 0 0}
 /* collaborators: one row each, like the page's other lists, the remove button at the end */
 ul.plain.collablist{margin:0 0 .75rem;border-bottom:1px solid var(--surface-2)}

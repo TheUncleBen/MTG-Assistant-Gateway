@@ -253,3 +253,51 @@ def test_phone_drawer_folds_and_nothing_overflows_at_360(server: Server) -> None
         page.wait_for_function("() => !document.querySelector('details.gnav').open")
         assert errors == []
         browser.close()
+
+
+@pytest.mark.parametrize("width", [390, 1366])
+def test_search_results_are_walked_with_the_arrow_keys(server: Server, width: int) -> None:
+    """L13: Down from the box reaches the first match, Down and Up go on through the list (Up from
+    the first one goes back to the box), Home and End jump to its ends, and Escape goes back to the
+    box with the search kept. Enter on a match opens it, as a click does."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width)
+        if width < 900:
+            page.locator("details.gnav > summary").click()  # the phone drawer holds the search
+        box = page.locator("#guide-q")
+        box.fill("deck")
+        page.wait_for_function("() => document.querySelectorAll('#guide-results a').length >= 4")
+        hrefs = page.locator("#guide-results a").evaluate_all("els => els.map(a => a.getAttribute('href'))")
+        focus = "() => document.activeElement.getAttribute('href') || document.activeElement.id"
+        box.press("ArrowDown")
+        assert page.evaluate(focus) == hrefs[0]
+        page.keyboard.press("ArrowDown")
+        assert page.evaluate(focus) == hrefs[1]
+        page.keyboard.press("ArrowDown")
+        assert page.evaluate(focus) == hrefs[2]
+        page.keyboard.press("ArrowUp")
+        assert page.evaluate(focus) == hrefs[1]
+        page.keyboard.press("End")
+        assert page.evaluate(focus) == hrefs[-1]
+        page.keyboard.press("ArrowDown")  # the last one stays put
+        assert page.evaluate(focus) == hrefs[-1]
+        page.keyboard.press("Home")
+        assert page.evaluate(focus) == hrefs[0]
+        page.keyboard.press("ArrowUp")  # from the first, back to the box
+        assert page.evaluate(focus) == "guide-q"
+        box.press("ArrowDown")
+        page.keyboard.press("ArrowDown")
+        page.keyboard.press("Escape")
+        assert page.evaluate(focus) == "guide-q" and box.input_value() == "deck"
+        assert page.evaluate("() => window.scrollY") >= 0  # the arrows moved focus, not the page
+        box.press("ArrowDown")
+        page.keyboard.press("ArrowDown")
+        page.keyboard.press("Enter")
+        page.wait_for_function(f"() => location.hash === '{hrefs[1]}'")
+        assert _overflow(page) == 0
+        assert errors == []
+        browser.close()
