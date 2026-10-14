@@ -188,14 +188,16 @@ def test_one_reload_after_the_connection_returns_loads_the_page(served) -> None:
                 page.get_by_role("link", name="Try again").click()
             assert page.title().startswith("History"), page.title()
 
+            # The gateway is cut off here rather than the browser set offline: on newer Chromium,
+            # Playwright's set_offline never returns once the worker has been stopped.
             step = "the browser stopping the idle worker while offline"
             cdp = ctx.new_cdp_session(page)
             cdp.send("ServiceWorker.enable")
-            ctx.set_offline(True)
+            relay.cut()
             page.goto(f"{base}/decks")
             assert _offline(page)
             cdp.send("ServiceWorker.stopAllWorkers")
-            ctx.set_offline(False)
+            relay.restore()
             page.reload()
             assert page.title().startswith("My decks"), page.title()
             step = "closing Chromium"
