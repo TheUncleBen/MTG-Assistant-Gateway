@@ -6,43 +6,17 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 
 import pytest
-from mcp import Client
 
-from mtg_gateway.archidekt import ArchidektClient, Pacer
-from mtg_gateway.mf_proxy import MysticForgeProxy
-from mtg_gateway.scan.scryfall import ScryfallClient
-
-from .conftest import FakeIdP, Harness, make_settings, running, sse_json
-from .fake_archidekt import FakeArchidekt
-from .fake_scryfall import FakeScryfall
-from .test_decks_and_proxy import Browser, call, fake_mystic_forge, mcp_token, structured
+from .conftest import COLLECTION, Stack, sse_json, stack_with
+from .test_decks_and_proxy import Browser, call, mcp_token, structured
 
 NAV = {"Sec-Fetch-Mode": "navigate", "Accept": "text/html"}
 APP_UA = {"User-Agent": "Mozilla/5.0 (Linux; Android 16) Chrome/140 Mobile Safari/537.36 MTGAssistant/0.6.4"}
 
 
-class Stack:
-    def __init__(self, h: Harness, ark: FakeArchidekt, sf: FakeScryfall):
-        self.h = h
-        self.ark = ark
-        self.sf = sf
-
-
-@pytest.fixture
-async def stack(tmp_path: Path, idp: FakeIdP):
-    ark = FakeArchidekt()
-    sf = FakeScryfall()
-    settings = make_settings(tmp_path, writes_enabled=True, archidekt_base="https://ark.test/api")
-    client = ArchidektClient(settings.archidekt_base, "test-agent", Pacer(0.0), http=ark.client())
-    proxy = MysticForgeProxy("http://mf.test/mcp", client_factory=lambda: Client(fake_mystic_forge()))
-    async with running(Harness(settings, idp, archidekt=client, mf_proxy=proxy)) as h:
-        h.app.state.gateway.scan.scryfall = ScryfallClient(
-            "https://scryfall.test", min_interval=0.0, http=sf.client()
-        )
-        yield Stack(h, ark, sf)
+stack_options = stack_with(COLLECTION)
 
 
 async def linked(stack: Stack) -> Browser:

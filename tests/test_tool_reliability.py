@@ -12,10 +12,8 @@ from mcp import Client
 from mcp.server.mcpserver import MCPServer
 from pydantic import BaseModel, Field
 
-from mtg_gateway.archidekt import ArchidektClient, Pacer
 from mtg_gateway.decklist import parse_decklist
 from mtg_gateway.mf_proxy import MysticForgeProxy
-from mtg_gateway.scan.scryfall import ScryfallClient
 from mtg_gateway.schemas import (
     DeckChange,
     DeckDetails,
@@ -26,9 +24,7 @@ from mtg_gateway.schemas import (
     inline_refs,
 )
 
-from .conftest import FakeIdP, Harness, make_settings, running
-from .fake_archidekt import FakeArchidekt
-from .fake_scryfall import FakeScryfall
+from .conftest import AUTO, FakeIdP, Harness, Stack, make_settings, open_stack, running, stack_with
 from .test_decks_and_proxy import Browser, call, linked_user, mcp_token, sse_json, structured
 
 NAV = {"Sec-Fetch-Mode": "navigate", "Accept": "text/html"}
@@ -96,36 +92,15 @@ def real_shaped_mystic_forge() -> MCPServer:
     return mf
 
 
-class Stack:
-    def __init__(self, h: Harness, ark: FakeArchidekt, sf: FakeScryfall):
-        self.h, self.ark, self.sf = h, ark, sf
-
-
-async def _stack(tmp_path: Path, idp: FakeIdP, mode: str):
-    ark = FakeArchidekt()
-    sf = FakeScryfall()
-    settings = make_settings(
-        tmp_path, writes_enabled=True, approval_mode_default=mode, archidekt_base="https://ark.test/api"
-    )
-    client = ArchidektClient(settings.archidekt_base, "test-agent", Pacer(0.0), http=ark.client())
-    proxy = MysticForgeProxy("http://mf.test/mcp", client_factory=lambda: Client(real_shaped_mystic_forge()))
-    async with running(Harness(settings, idp, archidekt=client, mf_proxy=proxy)) as h:
-        h.app.state.gateway.scan.scryfall = ScryfallClient(
-            "https://scryfall.test", min_interval=0.0, http=sf.client()
-        )
-        yield Stack(h, ark, sf)
-
-
-@pytest.fixture
-async def stack(tmp_path: Path, idp: FakeIdP):
-    async for s in _stack(tmp_path, idp, "auto"):
-        yield s
+RELIABILITY = AUTO.but(mystic_forge=real_shaped_mystic_forge, scryfall=True)
+stack_options = stack_with(RELIABILITY)
 
 
 @pytest.fixture
 async def manual(tmp_path: Path, idp: FakeIdP):
-    async for s in _stack(tmp_path, idp, "manual"):
-        yield s
+    settings = {"writes_enabled": True, "approval_mode_default": "manual"}
+    async with open_stack(tmp_path, idp, RELIABILITY.but(settings=settings)) as st:
+        yield st
 
 
 async def tools(h: Harness, token: str) -> dict[str, dict]:

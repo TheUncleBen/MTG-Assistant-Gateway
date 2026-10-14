@@ -6,8 +6,11 @@ from __future__ import annotations
 
 from mtg_gateway import modes
 
-from .test_browse_collection import Stack, api, linked, stack  # noqa: F401 - fixture
+from .conftest import COLLECTION, Stack, stack_with
+from .test_browse_collection import api, linked
 from .test_round4_data import _app_token
+
+stack_options = stack_with(COLLECTION)
 
 
 def test_hand_edit_confirmation_rule() -> None:

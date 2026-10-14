@@ -9,7 +9,7 @@ import pytest
 
 from mtg_gateway import cardquery as cq
 
-from .test_browse_collection import Stack, linked, stack  # noqa: F401 - fixture
+from .test_browse_collection import Stack, linked, stack_options  # noqa: F401 - fixture
 
 
 def q(**params: object) -> str:
@@ -260,14 +260,14 @@ def test_text_is_trimmed_and_capped(raw: str) -> None:
 
 
 # -- the live results API -----------------------------------------------------------------------
-async def test_the_api_needs_a_sign_in(stack: Stack) -> None:  # noqa: F811
+async def test_the_api_needs_a_sign_in(stack: Stack) -> None:
     r = await stack.h.http.get("/cards/api/search?q=sol")
     assert r.status_code == 401
     r = await stack.h.http.get("/cards/api/options")
     assert r.status_code == 401
 
 
-async def test_the_api_answers_the_page_html_and_pages_on(stack: Stack) -> None:  # noqa: F811
+async def test_the_api_answers_the_page_html_and_pages_on(stack: Stack) -> None:
     stack.sf.page_size = 2
     b = await linked(stack)
     try:
@@ -290,7 +290,7 @@ async def test_the_api_answers_the_page_html_and_pages_on(stack: Stack) -> None:
         await b.aclose()
 
 
-async def test_a_page_already_read_is_not_asked_again(stack: Stack) -> None:  # noqa: F811
+async def test_a_page_already_read_is_not_asked_again(stack: Stack) -> None:
     b = await linked(stack)
     try:
         await b.http.get("/cards/api/search", params={"q": "sol"})
@@ -305,7 +305,7 @@ async def test_a_page_already_read_is_not_asked_again(stack: Stack) -> None:  # 
         await b.aclose()
 
 
-async def test_the_list_view_is_drawn_and_remembered(stack: Stack) -> None:  # noqa: F811
+async def test_the_list_view_is_drawn_and_remembered(stack: Stack) -> None:
     b = await linked(stack)
     try:
         r = await b.http.get("/cards/api/search", params={"q": "sol", "view": "list"})
@@ -320,7 +320,7 @@ async def test_the_list_view_is_drawn_and_remembered(stack: Stack) -> None:  # n
         await b.aclose()
 
 
-async def test_printing_searches_pin_the_printing_on_add(stack: Stack) -> None:  # noqa: F811
+async def test_printing_searches_pin_the_printing_on_add(stack: Stack) -> None:
     b = await linked(stack)
     try:
         d = (await b.http.get("/cards/api/search", params={"q": "sol ring", "prints": "1"})).json()
@@ -333,7 +333,7 @@ async def test_printing_searches_pin_the_printing_on_add(stack: Stack) -> None: 
         await b.aclose()
 
 
-async def test_a_bad_search_is_a_400_with_scryfalls_reason(stack: Stack) -> None:  # noqa: F811
+async def test_a_bad_search_is_a_400_with_scryfalls_reason(stack: Stack) -> None:
     b = await linked(stack)
     try:
         r = await b.http.get("/cards/api/search", params={"x": "bad:thing"})
@@ -346,7 +346,7 @@ async def test_a_bad_search_is_a_400_with_scryfalls_reason(stack: Stack) -> None
         await b.aclose()
 
 
-async def test_the_options_list_sets_blocks_types_and_criteria_once_a_day(stack: Stack) -> None:  # noqa: F811
+async def test_the_options_list_sets_blocks_types_and_criteria_once_a_day(stack: Stack) -> None:
     b = await linked(stack)
     try:
         r = await b.http.get("/cards/api/options")
@@ -365,7 +365,7 @@ async def test_the_options_list_sets_blocks_types_and_criteria_once_a_day(stack:
         await b.aclose()
 
 
-async def test_the_page_keeps_every_filter_in_its_controls(stack: Stack) -> None:  # noqa: F811
+async def test_the_page_keeps_every_filter_in_its_controls(stack: Stack) -> None:
     b = await linked(stack)
     try:
         r = await b.http.get(

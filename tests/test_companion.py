@@ -6,41 +6,20 @@ from __future__ import annotations
 import html
 import json
 import re
-from pathlib import Path
 
-import pytest
-from mcp import Client
-
-from mtg_gateway.archidekt import ArchidektClient, Pacer
-from mtg_gateway.mf_proxy import MysticForgeProxy
-
-from .conftest import FakeIdP, Harness, make_settings, running, sse_json
-from .fake_archidekt import FakeArchidekt
-from .test_decks_and_proxy import Browser, call, fake_mystic_forge, mcp_token, structured
+from .conftest import AUTO_PROXY, FakeIdP, Stack, sse_json, stack_with
+from .test_decks_and_proxy import Browser, call, mcp_token, structured
 
 NAV = {"Sec-Fetch-Mode": "navigate", "Accept": "text/html"}
 
 
-class Stack:
-    def __init__(self, h: Harness, ark: FakeArchidekt):
-        self.h = h
-        self.ark = ark
-
-
-@pytest.fixture
-async def stack(tmp_path: Path, idp: FakeIdP):
-    ark = FakeArchidekt()
-    settings = make_settings(
-        tmp_path,
-        writes_enabled=True,
-        approval_mode_default="auto",
-        archidekt_base="https://ark.test/api",
-        android_assetlinks='[{"relation": ["delegate_permission/common.handle_all_urls"]}]',
-    )
-    client = ArchidektClient(settings.archidekt_base, "test-agent", Pacer(0.0), http=ark.client())
-    proxy = MysticForgeProxy("http://mf.test/mcp", client_factory=lambda: Client(fake_mystic_forge()))
-    async with running(Harness(settings, idp, archidekt=client, mf_proxy=proxy)) as h:
-        yield Stack(h, ark)
+COMPANION = AUTO_PROXY.but(
+    settings={
+        **AUTO_PROXY.settings,
+        "android_assetlinks": '[{"relation": ["delegate_permission/common.handle_all_urls"]}]',
+    }
+)
+stack_options = stack_with(COMPANION)
 
 
 async def linked_browser(stack: Stack) -> Browser:

@@ -10,8 +10,11 @@ import pytest
 
 from mtg_gateway import api as api_module
 
-from .test_browse_collection import Stack, api, linked, stack  # noqa: F401 - fixture
+from .conftest import COLLECTION, Stack, stack_with
+from .test_browse_collection import api, linked
 from .test_round4_data import _app_token
+
+stack_options = stack_with(COLLECTION)
 
 
 def _deck_card(st: Stack, name: str, *, zone: str | None = None) -> list[dict]:

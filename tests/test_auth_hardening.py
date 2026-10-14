@@ -23,10 +23,20 @@ from mtg_gateway.cimd import (
 )
 from mtg_gateway.clickguard import MIN_FORM_AGE, form_stamp, submitted_too_soon
 from mtg_gateway.oidc import pkce_pair
-from tests.conftest import GATEWAY, FakeIdP, Harness, make_settings, running
-from tests.fake_archidekt import FakeArchidekt
+from tests.conftest import (
+    GATEWAY,
+    FakeIdP,
+    Harness,
+    Stack,
+    StackOptions,
+    build_stack,
+    make_settings,
+    run_stack,
+    running,
+    stack_with,
+)
 from tests.test_cimd import CLIENT_URL, DocHost, document
-from tests.test_decks_and_proxy import Browser, Stack, _client, call, linked_user, structured
+from tests.test_decks_and_proxy import Browser, call, linked_user, structured
 
 
 def _authorize_params(client_id: str, **over: str) -> dict[str, str]:
@@ -357,12 +367,8 @@ def test_form_stamp_rules():
 # -- 24/26: proposal review page click guard -------------------------------------------------------
 
 
-@pytest.fixture
-async def stack(tmp_path: Path, idp: FakeIdP):
-    ark = FakeArchidekt()
-    settings = make_settings(tmp_path, writes_enabled=True, archidekt_base="https://ark.test/api")
-    async with running(Harness(settings, idp, archidekt=_client(settings, ark))) as h:
-        yield Stack(h, ark)
+# Writes on with the shipped approval mode.
+stack_options = stack_with(StackOptions(settings={"writes_enabled": True}))
 
 
 async def test_review_page_apply_is_guarded(stack: Stack):
@@ -429,10 +435,10 @@ async def test_review_page_submit_without_a_stamp_changes_nothing(stack: Stack, 
 
 async def test_review_page_reject_without_writes_carries_a_stamp(tmp_path: Path, idp: FakeIdP):
     """With writes off the page offers only a plain Reject form; it carries the stamp too."""
-    ark = FakeArchidekt()
-    settings = make_settings(tmp_path, writes_enabled=False, archidekt_base="https://ark.test/api")
-    async with running(Harness(settings, idp, archidekt=_client(settings, ark))) as h:
-        token = await linked_user(Stack(h, ark))
+    st = build_stack(tmp_path, idp, StackOptions(settings={"writes_enabled": False}))
+    async with run_stack(st):
+        h = st.h
+        token = await linked_user(st)
         p = structured(
             await call(
                 h,

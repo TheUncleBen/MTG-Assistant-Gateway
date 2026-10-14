@@ -13,10 +13,11 @@ from mtg_gateway.archidekt import rich_text
 from mtg_gateway.decks import DeckError, parse_changes, split_label
 from mtg_gateway.scan.scryfall import ScryfallClient
 
+from .conftest import AUTO_PROXY, Stack, stack_with
 from .fake_scryfall import FakeScryfall
-from .test_decks_and_proxy import Browser, Stack, call, linked_user, stack, structured
+from .test_decks_and_proxy import Browser, call, linked_user, structured
 
-__all__ = ["stack"]
+stack_options = stack_with(AUTO_PROXY)
 
 NAV = {"Sec-Fetch-Mode": "navigate", "Accept": "text/html"}
 

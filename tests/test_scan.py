@@ -15,26 +15,15 @@ from mtg_gateway.scan import service as scan_service
 from mtg_gateway.scan.scryfall import ScryfallClient
 from mtg_gateway.scan.service import parse_text
 
-from .conftest import GATEWAY, FakeIdP, Harness, make_settings, running
+from .conftest import GATEWAY, Stack, StackOptions, stack_with
 from .fake_scryfall import FakeScryfall
 from .test_decks_and_proxy import Browser, call, mcp_token
 
 VENDOR = Path(__file__).resolve().parents[1] / "src" / "mtg_gateway" / "scan" / "static" / "vendor"
 
 
-class Stack:
-    def __init__(self, h: Harness, sf: FakeScryfall):
-        self.h = h
-        self.sf = sf
-
-
-@pytest.fixture
-async def stack(tmp_path: Path, idp: FakeIdP):
-    sf = FakeScryfall()
-    async with running(Harness(make_settings(tmp_path), idp)) as h:
-        service = h.app.state.gateway.scan
-        service.scryfall = ScryfallClient("https://scryfall.test", min_interval=0.0, http=sf.client())
-        yield Stack(h, sf)
+# The shipped settings, no Archidekt, and a fake Scryfall the test can inspect (``stack.sf``).
+stack_options = stack_with(StackOptions(settings={}, archidekt=None, scryfall=True))
 
 
 async def api(b: Browser, method: str, path: str, body: dict | None = None, *, csrf: str | None = None):

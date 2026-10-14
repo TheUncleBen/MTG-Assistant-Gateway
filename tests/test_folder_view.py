@@ -9,7 +9,7 @@ import re
 
 from mtg_gateway import folderview as fv
 
-from .test_companion import NAV, Stack, linked_browser, stack  # noqa: F401  (fixture)
+from .test_companion import NAV, Stack, linked_browser, stack_options  # noqa: F401  (fixture)
 
 ROOT = 1
 
@@ -189,7 +189,7 @@ def test_the_html_breadcrumb_tiles_and_empty_states() -> None:
 # -- the pages -------------------------------------------------------------------------------------
 
 
-async def test_my_decks_opens_folders_and_hides_the_backup_folder(stack: Stack) -> None:  # noqa: F811
+async def test_my_decks_opens_folders_and_hides_the_backup_folder(stack: Stack) -> None:
     ark = stack.ark
     root = 1000 + ark.users["alice"]["id"]
     ark.folders["alice"] = [
@@ -222,7 +222,7 @@ async def test_my_decks_opens_folders_and_hides_the_backup_folder(stack: Stack) 
         await b.aclose()
 
 
-async def test_a_folder_write_drops_the_kept_tree(stack: Stack) -> None:  # noqa: F811
+async def test_a_folder_write_drops_the_kept_tree(stack: Stack) -> None:
     ark = stack.ark
     ark.folders["alice"] = [{"id": 601, "name": "Brews", "private": False}]
     b = await linked_browser(stack)
@@ -236,7 +236,7 @@ async def test_a_folder_write_drops_the_kept_tree(stack: Stack) -> None:  # noqa
         await b.aclose()
 
 
-async def test_home_goldfish_and_compare_do_without_deck_js(stack: Stack) -> None:  # noqa: F811
+async def test_home_goldfish_and_compare_do_without_deck_js(stack: Stack) -> None:
     """AUDIT F1/F2 (A25): Home loads only decks.js; Goldfish and Compare load the card viewer
     without deck.js; the deck page and My decks still load it."""
     b = await linked_browser(stack)

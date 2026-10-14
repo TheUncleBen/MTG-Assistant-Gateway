@@ -18,31 +18,21 @@ from mtg_gateway.archidekt import ArchidektError, parse_deck
 from mtg_gateway.db import Database
 from mtg_gateway.mf_proxy import MysticForgeProxy
 
-from .conftest import FakeIdP, Harness, make_settings, running
+from .conftest import AUTO, FakeIdP, Harness, Stack, make_settings, open_stack, running
 from .fake_archidekt import FakeArchidekt
-from .test_decks_and_proxy import Browser, Stack, _client, call, linked_user, structured
+from .test_decks_and_proxy import Browser, _client, call, linked_user, structured
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
-@pytest.fixture
-async def stack(tmp_path: Path, idp: FakeIdP):
-    ark = FakeArchidekt()
-    settings = make_settings(
-        tmp_path, writes_enabled=True, approval_mode_default="auto", archidekt_base="https://ark.test/api"
-    )
-    async with running(Harness(settings, idp, archidekt=_client(settings, ark))) as h:
-        yield Stack(h, ark)
+# ``stack`` is the shared AUTO stack (tests/conftest.py): writes on, applies allowed over MCP.
 
 
 @pytest.fixture
 async def stack_browser_only(tmp_path: Path, idp: FakeIdP):
-    ark = FakeArchidekt()
-    settings = make_settings(
-        tmp_path, writes_enabled=True, approval_mode_default="manual", archidekt_base="https://ark.test/api"
-    )
-    async with running(Harness(settings, idp, archidekt=_client(settings, ark))) as h:
-        yield Stack(h, ark)
+    manual = AUTO.but(settings={"writes_enabled": True, "approval_mode_default": "manual"})
+    async with open_stack(tmp_path, idp, manual) as st:
+        yield st
 
 
 async def _app_token(h: Harness, name: str, scope: str = "mtg") -> tuple[str, str]:

@@ -23,14 +23,10 @@ from starlette.routing import Route
 
 from mtg_gateway import db as db_module
 from mtg_gateway import notify, prices
-from mtg_gateway.archidekt import ArchidektClient, Pacer
 from mtg_gateway.config import ConfigError, load_settings
 from mtg_gateway.db import Database
-from mtg_gateway.scan.scryfall import ScryfallClient
 
-from .conftest import FakeIdP, Harness, make_settings, running
-from .fake_archidekt import FakeArchidekt
-from .fake_scryfall import FakeScryfall
+from .conftest import FakeIdP, Stack, StackOptions, build_stack, open_stack, run_stack, stack_with
 from .test_decks_and_proxy import Browser, call, mcp_token, structured
 
 SOL_RING = "Sol Ring"  # frc 21 in the fixtures: $1.28, €1.13, non-foil only
@@ -69,46 +65,31 @@ class Clock:
         return prices.day_of(self.t)
 
 
-class Stack:
-    def __init__(self, h: Harness, ark: FakeArchidekt, sf: FakeScryfall, ntfy: FakeNtfy):
-        self.h, self.ark, self.sf, self.ntfy = h, ark, sf, ntfy
-
-    @property
-    def gw(self):
-        return self.h.app.state.gateway
-
-
-def _harness(tmp_path: Path, idp: FakeIdP, ark: FakeArchidekt, **over: object) -> Harness:
-    over.setdefault("watchlists_enabled", True)  # off by default (MTG_WATCHLISTS_ENABLED); see below
-    settings = make_settings(tmp_path, writes_enabled=True, archidekt_base="https://ark.test/api", **over)
-    client = ArchidektClient(settings.archidekt_base, "test-agent", Pacer(0.0), http=ark.client())
-    return Harness(settings, idp, archidekt=client)
+def _with_ntfy(st: Stack) -> None:
+    """The gateway's notifier posts to a FakeNtfy (``stack.ntfy``)."""
+    st.ntfy = FakeNtfy()
+    st.gw.notifier._http = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=st.ntfy.app), base_url="https://ntfy.test"
+    )
 
 
-async def _stack(h: Harness, ark: FakeArchidekt):
-    sf, ntfy = FakeScryfall(), FakeNtfy()
-    async with running(h):
-        gw = h.app.state.gateway
-        gw.scan.scryfall = ScryfallClient("https://scryfall.test", min_interval=0.0, http=sf.client())
-        gw.notifier._http = httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=ntfy.app), base_url="https://ntfy.test"
-        )
-        yield Stack(h, ark, sf, ntfy)
+def _options(**over: object) -> StackOptions:
+    """Writes on with the shipped approval mode, watchlists on (off by default,
+    MTG_WATCHLISTS_ENABLED; see below), a fake Scryfall and ntfy; ``over`` changes settings."""
+    return StackOptions(
+        settings={"writes_enabled": True, "watchlists_enabled": True, **over},
+        scryfall=True,
+        started=_with_ntfy,
+    )
 
 
-@pytest.fixture
-async def stack(tmp_path: Path, idp: FakeIdP):
-    ark = FakeArchidekt()
-    h = _harness(tmp_path, idp, ark, ntfy_url="https://ntfy.test", ntfy_token=TOKEN)
-    async for st in _stack(h, ark):
-        yield st
+stack_options = stack_with(_options(ntfy_url="https://ntfy.test", ntfy_token=TOKEN))
 
 
 @pytest.fixture
 async def plain(tmp_path: Path, idp: FakeIdP):
     """A gateway as a self-hoster runs it without setting anything new: no ntfy server."""
-    ark = FakeArchidekt()
-    async for st in _stack(_harness(tmp_path, idp, ark), ark):
+    async with open_stack(tmp_path, idp, _options()) as st:
         yield st
 
 
@@ -259,8 +240,7 @@ async def test_a_scryfall_429_stops_the_check_and_it_runs_again_later(stack: Sta
 
 async def test_watch_refusals_limits_and_unknown_cards(tmp_path: Path, idp: FakeIdP, monkeypatch) -> None:
     Clock(monkeypatch)
-    ark = FakeArchidekt()
-    async for st in _stack(_harness(tmp_path, idp, ark, watch_max_cards=1), ark):
+    async with open_stack(tmp_path, idp, _options(watch_max_cards=1)) as st:
         b = await _browser(st)
         try:
             r = await _watch(b, name="No Such Card Anywhere")
@@ -652,15 +632,15 @@ async def test_watchlists_off_hide_the_page_links_tools_and_daily_job(
     tmp_path: Path, idp: FakeIdP, monkeypatch
 ) -> None:
     made = _record_daily_jobs(monkeypatch)
-    ark = FakeArchidekt()
-    h = _harness(tmp_path, idp, ark, watchlists_enabled=False)
+    built = build_stack(tmp_path, idp, _options(watchlists_enabled=False))
+    h = built.h
     # a member's watch from when the switch was on stays in the database
     h.db.upsert_user("user-1", email="u@example.test", name="U", preferred_username="u", groups=[])
     with h.db.tx() as c:
         c.execute(
             "INSERT INTO watch_cards (id, sub, name, created_at) VALUES ('w1', 'user-1', 'Sol Ring', 0)"
         )
-    async for st in _stack(h, ark):
+    async with run_stack(built) as st:
         assert st.gw.prices is None and made == []  # no price service, no daily job
         b = await _browser(st)
         try:
@@ -688,9 +668,9 @@ async def test_watchlists_off_with_ntfy_keep_the_summary_without_prices(
 ) -> None:
     clock = Clock(monkeypatch)
     made = _record_daily_jobs(monkeypatch)
-    ark = FakeArchidekt()
-    h = _harness(tmp_path, idp, ark, watchlists_enabled=False, ntfy_url="https://ntfy.test")
-    async for st in _stack(h, ark):
+    async with open_stack(
+        tmp_path, idp, _options(watchlists_enabled=False, ntfy_url="https://ntfy.test")
+    ) as st:
         assert [p for p, _s in made] == [None]  # the daily job runs the summaries only
         b = await _browser(st)
         try:
@@ -728,8 +708,7 @@ async def test_watchlists_on_show_the_links_and_tools(stack: Stack) -> None:
 
 async def test_watchlists_on_start_the_daily_job(tmp_path: Path, idp: FakeIdP, monkeypatch) -> None:
     made = _record_daily_jobs(monkeypatch)
-    ark = FakeArchidekt()
-    async for st in _stack(_harness(tmp_path, idp, ark), ark):
+    async with open_stack(tmp_path, idp, _options()) as st:
         assert len(made) == 1 and made[0][0] is st.gw.prices
         assert st.gw.prices is not None
 

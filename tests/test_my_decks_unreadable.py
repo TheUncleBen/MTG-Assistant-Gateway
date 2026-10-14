@@ -10,9 +10,12 @@ from typing import Any
 
 from mtg_gateway.archidekt import ArchidektClient, Pacer
 
+from .conftest import COLLECTION, Stack, stack_with
 from .test_backup_copies_hidden import UNREADABLE_OWNER_ROWS
-from .test_browse_collection import NAV, Stack, linked, stack  # noqa: F401 - fixture
+from .test_browse_collection import NAV, linked
 from .test_decks_and_proxy import call, linked_user, structured
+
+stack_options = stack_with(COLLECTION)
 
 NONE_READ = html.escape("Your deck list couldn't be read from Archidekt. Try again in a moment.")
 SOME_READ = html.escape(
