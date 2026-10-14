@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from .test_deck_menu_browser import EDIT_URL, Server, _chromium, _overflow, _page
+from .test_deck_menu_browser import EDIT_URL, Server, _cats, _chromium, _edits, _file_under, _overflow, _page
 
 pytest.importorskip("playwright")
 
@@ -644,5 +644,294 @@ def test_mana_value_saves_in_the_background(server: Server, width: int, scheme: 
         row.click(button="right")
         page.locator(".ctxmenu [role=menuitem]", has_text="Mana value").click()
         assert page.locator(".ctxmenu .mvform input").input_value() == "3"
+        assert errors == []
+        browser.close()
+
+
+# 0.7.27 (T-159): the card menu's Quantity, Move to and Remove from deck save in the background, as
+# Mana value does: the change is on the page at once, the menu never fades, a Saving note shows
+# until Archidekt answers (then Saved with Undo), and a save Archidekt refuses puts the card back
+# as it was with a red note saying why. Shots go to MTG_SHOTS as t159-menu-*.
+MENU_SIZES = [(390, 844, "dark"), (1280, 800, "light"), (673, 841, "light")]
+ORDER_JS = "() => [...document.querySelectorAll('.deckview .row')].map(r => r.dataset.card)"
+
+
+def _menu_page(p, server: Server, width: int, height: int, scheme: str):
+    sid = server.sign_in_and_link()
+    browser, page, errors = _page(p, server, sid, width, color_scheme=scheme)
+    page.set_viewport_size({"width": width, "height": height})
+    page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+    return browser, page, errors
+
+
+def _menu_shot(page, what: str, width: int, scheme: str) -> None:
+    device = "phone" if width < 500 else "fold" if width < 1000 else "desktop"
+    _shot(page, f"t159-menu-{what}-{scheme}-{device}")
+
+
+def _open_menu(page, row):
+    row.scroll_into_view_if_needed()
+    row.click(button="right")
+    menu = page.locator(".ctxmenu[role=menu]")
+    menu.wait_for(timeout=3000)
+    return menu
+
+
+def _held(server: Server):
+    import threading
+
+    held = threading.Event()
+    server.ark.hold_card_writes = held
+    return held
+
+
+def _error(page) -> str:
+    err = page.locator(".deck-toast.error .msg")
+    err.wait_for(timeout=8000)
+    return err.inner_text()
+
+
+@pytest.mark.parametrize(("width", "height", "scheme"), MENU_SIZES)
+def test_quantity_steps_save_in_the_background(server: Server, width: int, height: int, scheme: str) -> None:
+    """Quantity + and - change the count on the card and in the menu at once; the menu stays open
+    and usable for more steps, the steps of a quick burst go to Archidekt as one save of the final
+    count, a step made while that save is out follows it, and the count never jumps back while
+    saving. Refused: the count Archidekt has comes back, with the reason."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    with sync_playwright() as p:
+        browser, page, errors = _menu_page(p, server, width, height, scheme)
+        sent = _edits(page)
+        row = page.locator(".deckview .row[data-card='Cultivate']").first
+        held = _held(server)
+        try:
+            menu = _open_menu(page, row)
+            # Move to's list stays folded until it is asked for (it used to show at all times)
+            assert menu.locator(".sub").is_hidden()
+            plus = menu.locator(".qtyrow .step").nth(1)
+            plus.click()
+            # on the page at once; the menu stays open, not faded, for more steps
+            assert menu.locator(".qtyrow .n").inner_text() == "2"
+            assert row.get_attribute("data-qty") == "2"
+            assert menu.evaluate("m => getComputedStyle(m).opacity") == "1"
+            plus.click()
+            plus.click()
+            assert menu.locator(".qtyrow .n").inner_text() == "4" and row.get_attribute("data-qty") == "4"
+            page.locator(".deck-toast .msg", has_text="Saving Cultivate: 4 copies").wait_for(timeout=3000)
+            page.wait_for_timeout(800)  # the save is out by now, held by Archidekt
+            assert [ch[0]["quantity"] for ch in sent] == [4]
+            _menu_shot(page, "quantity-saving", width, scheme)
+            # a step while that save is out waits for it; the count stays where the person put it
+            plus.click()
+            assert menu.locator(".qtyrow .n").inner_text() == "5"
+        finally:
+            held.set()
+        # the first save lands, then the step made meanwhile goes out on its own; the count stays 5
+        for _ in range(160):
+            if len(sent) == 2 and server.quantity("Cultivate") == 5:
+                break
+            assert row.get_attribute("data-qty") == "5"
+            page.wait_for_timeout(50)
+        page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
+        page.wait_for_timeout(300)
+        assert [ch[0]["quantity"] for ch in sent] == [4, 5], sent  # in order, never one back
+        assert server.quantity("Cultivate") == 5 and row.get_attribute("data-qty") == "5"
+        assert menu.locator(".qtyrow .n").inner_text() == "5"
+        # Undo takes back the last save
+        page.keyboard.press("Escape")
+        page.locator(".deck-toast button", has_text="Undo").click()
+        page.locator(".deck-toast .msg", has_text="Undone").wait_for(timeout=8000)
+        assert sent[-1] == [{"action": "set_quantity", "card_name": "Cultivate", "quantity": 4}]
+        assert row.get_attribute("data-qty") == "4" and server.quantity("Cultivate") == 4
+
+        # Archidekt refuses: the count it has comes back, in the menu too, with the reason
+        server.ark.fail_card_writes = True
+        menu = _open_menu(page, row)
+        menu.locator(".qtyrow .step").nth(0).click()
+        assert row.get_attribute("data-qty") == "3"
+        text = _error(page)
+        assert text.startswith("Quantity not saved:"), text
+        assert text.endswith("Cultivate is back to 4 copies."), text
+        assert row.get_attribute("data-qty") == "4" and menu.locator(".qtyrow .n").inner_text() == "4"
+        assert server.quantity("Cultivate") == 4
+        _menu_shot(page, "quantity-error", width, scheme)
+        assert _overflow(page) == 0
+        assert errors == []
+        browser.close()
+
+
+@pytest.mark.parametrize(("width", "height", "scheme"), MENU_SIZES[:2])
+def test_move_to_saves_in_the_background(server: Server, width: int, height: int, scheme: str) -> None:
+    """Move to closes the menu and files the card in its new stack at once; refused, it goes back."""
+    from playwright.sync_api import sync_playwright
+
+    _file_under(server, "Rampant Growth", ["Lands"])
+    _file_under(server, "Cultivate", ["Ramp"])
+    _chromium()
+    with sync_playwright() as p:
+        browser, page, errors = _menu_page(p, server, width, height, scheme)
+        sent = _edits(page)
+        row = page.locator(".deckview .row[data-card='Cultivate']").first
+        held = _held(server)
+        try:
+            menu = _open_menu(page, row)
+            menu.locator(".more").click()
+            menu.locator(".sub button", has_text="Lands").click()
+            assert page.locator(".ctxmenu").count() == 0
+            assert page.locator(".stack[data-group='Lands'] .row[data-card='Cultivate']").count() == 1
+            assert page.locator(".stack[data-group='Ramp']").count() == 0  # emptied, so gone
+            page.locator(".deck-toast .msg", has_text="Moving Cultivate to Lands").wait_for(timeout=3000)
+            row.scroll_into_view_if_needed()
+            page.wait_for_timeout(300)
+            _menu_shot(page, "move-saving", width, scheme)
+        finally:
+            held.set()
+        page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
+        assert sent == [[{"action": "set_category", "card_name": "Cultivate", "category": "Lands"}]]
+        assert _cats(server, "Cultivate") == ["Lands"]
+        assert page.locator(".deck-toast button", has_text="Undo").count() == 1
+
+        # refused: the card goes back to Lands, where Archidekt still has it
+        server.ark.fail_card_writes = True
+        before = page.evaluate(ORDER_JS)
+        menu = _open_menu(page, row)
+        menu.locator(".more").click()
+        menu.locator(".sub button", has_text="Ramp").click()
+        text = _error(page)
+        assert text.startswith("Move not saved:") and text.endswith("Cultivate is back in Lands."), text
+        assert page.locator(".stack[data-group='Lands'] .row[data-card='Cultivate']").count() == 1
+        assert page.locator(".stack[data-group='Ramp']").count() == 0
+        assert page.evaluate(ORDER_JS) == before
+        assert _cats(server, "Cultivate") == ["Lands"]
+        row.scroll_into_view_if_needed()
+        _menu_shot(page, "move-error", width, scheme)
+        assert _overflow(page) == 0
+        assert errors == []
+        browser.close()
+
+
+@pytest.mark.parametrize(("width", "height", "scheme"), MENU_SIZES[:2])
+def test_remove_saves_in_the_background(server: Server, width: int, height: int, scheme: str) -> None:
+    """Remove from deck closes the menu and takes the card off at once; refused, it comes back in
+    its place."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    with sync_playwright() as p:
+        browser, page, errors = _menu_page(p, server, width, height, scheme)
+        sent = _edits(page)
+        rows = page.locator(".deckview .row[data-card='Cultivate']")
+        stack_of = (
+            "() => document.querySelector('.deckview .row[data-card=\"Cultivate\"]')"
+            ".closest('.stack').dataset.group"
+        )
+        home = page.evaluate(stack_of)
+        assert home  # filed under no category of its own, it sits in a type's stack
+        held = _held(server)
+        try:
+            menu = _open_menu(page, rows.first)
+            menu.locator("[role=menuitem]", has_text="Remove from deck").click()
+            assert page.locator(".ctxmenu").count() == 0
+            assert rows.count() == 0  # off the page before Archidekt answers
+            page.locator(".deck-toast .msg", has_text="Removing Cultivate").wait_for(timeout=3000)
+            page.wait_for_timeout(300)
+            _menu_shot(page, "remove-saving", width, scheme)
+        finally:
+            held.set()
+        page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
+        assert sent == [[{"action": "remove", "card_name": "Cultivate"}]]
+        assert server.quantity("Cultivate") == 0 and rows.count() == 0
+        # Undo brings it back
+        page.locator(".deck-toast button", has_text="Undo").click()
+        page.locator(".deck-toast .msg", has_text="Undone").wait_for(timeout=8000)
+        assert rows.count() == 1 and server.quantity("Cultivate") == 1
+        # back in the stack it was in (it used to come back in a new stack with no name)
+        assert page.evaluate(stack_of) == home and page.locator(".stack[data-group='']").count() == 0
+
+        # refused: the card comes back where it was
+        server.ark.fail_card_writes = True
+        before = page.evaluate(ORDER_JS)
+        menu = _open_menu(page, rows.first)
+        menu.locator("[role=menuitem]", has_text="Remove from deck").click()
+        text = _error(page)
+        assert text.startswith("Removal not saved:") and text.endswith("Cultivate is back in the deck."), text
+        assert page.evaluate(ORDER_JS) == before
+        assert server.quantity("Cultivate") == 1
+        rows.first.scroll_into_view_if_needed()
+        _menu_shot(page, "remove-error", width, scheme)
+        assert _overflow(page) == 0
+        assert errors == []
+        browser.close()
+
+
+@pytest.mark.parametrize(("width", "height", "scheme"), MENU_SIZES[:2])
+def test_mana_value_grouping_restacks_at_once(server: Server, width: int, height: int, scheme: str) -> None:
+    """0.7.27: grouped by Mana value, a card whose mana value is changed moves to its new stack at
+    once (a new stack in its place in the order when there is none), and back on an error, an Undo
+    or a Clear; the Table view's MV column shows the new value too. Both used to stay as they were
+    until a reload."""
+    from playwright.sync_api import sync_playwright
+
+    stacks = (
+        "() => Object.fromEntries([...document.querySelectorAll('.deckview .stack')].map(s =>"
+        " [s.dataset.group, [...s.querySelectorAll('.row')].map(r => r.dataset.card)]))"
+    )
+    order = "() => [...document.querySelectorAll('.deckview .stack')].map(s => s.dataset.group)"
+    _chromium()
+    with sync_playwright() as p:
+        sid = server.sign_in_and_link()
+        browser, page, errors = _page(p, server, sid, width, color_scheme=scheme)
+        page.set_viewport_size({"width": width, "height": height})
+        page.goto(f"{server.base}/decks/42?view=table&group=mv", wait_until="networkidle")
+        row = page.locator(".deckview .row[data-card='Cultivate']").first
+        cell = row.locator(".mv")
+
+        def save(value: str) -> None:
+            _open_menu(page, row)
+            page.locator(".ctxmenu [role=menuitem]", has_text="Mana value").click()
+            page.locator(".ctxmenu .mvform input").fill(value)
+            page.locator(".ctxmenu .mvform button", has_text="Save").click()
+
+        held = _held(server)
+        try:
+            save("12")
+            now = page.evaluate(stacks)
+            assert "Cultivate" in now["12 mana value"] and "Cultivate" not in now["3 mana value"]
+            assert page.evaluate(order)[-3:] == ["12 mana value", "Land", "No mana value"]
+            assert cell.inner_text() == "12"
+            head = page.locator(".stack[data-group='12 mana value'] .stackhead")
+            assert head.locator("h2 .title").inner_text() == "12 mana value"
+            assert head.locator(".meta").inner_text() == "Qty: 1"
+            row.scroll_into_view_if_needed()
+            _menu_shot(page, "mv-group-saving", width, scheme)
+        finally:
+            held.set()
+        page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
+        assert "Cultivate" in page.evaluate(stacks)["12 mana value"]
+        # Undo: back in 3 mana value, and the stack it made is gone again
+        page.locator(".deck-toast button", has_text="Undo").click()
+        page.locator(".deck-toast .msg", has_text="Undone").wait_for(timeout=8000)
+        now = page.evaluate(stacks)
+        assert "Cultivate" in now["3 mana value"] and "12 mana value" not in now
+        assert cell.inner_text() == "3"
+        # refused: back where it was
+        server.ark.fail_card_writes = True
+        save("4")
+        assert "Cultivate" in page.evaluate(stacks)["4 mana value"]
+        assert _error(page).endswith("Cultivate is back to its own mana value.")
+        assert "Cultivate" in page.evaluate(stacks)["3 mana value"] and cell.inner_text() == "3"
+        # Clear puts it back under its printed mana value
+        server.ark.fail_card_writes = False
+        save("5")
+        page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
+        assert "Cultivate" in page.evaluate(stacks)["5 mana value"]
+        _open_menu(page, row)
+        page.locator(".ctxmenu [role=menuitem]", has_text="Mana value").click()
+        page.locator(".ctxmenu .mvform button", has_text="Clear").click()
+        assert "Cultivate" in page.evaluate(stacks)["3 mana value"] and cell.inner_text() == "3"
+        page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
+        assert _rows(server, "Cultivate")[0].get("customCmc") is None
+        assert _overflow(page) == 0
         assert errors == []
         browser.close()
