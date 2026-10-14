@@ -73,12 +73,14 @@ li.add .act{color:var(--green)} li.remove .act{color:var(--red)}
 ul.changes li .qty{white-space:normal;text-align:right;overflow-wrap:anywhere;max-width:min(20em,32vw)}
 /* On a narrow card the count or change sits on the action's line, so a row takes two lines, not three. */
 @media (max-width:420px){
-  ul.changes li:not(.group):not(.more-row){grid-template-columns:auto minmax(0,1fr) auto;
-    grid-template-areas:"pic act qty" "pic name name";row-gap:2px}
-  ul.changes li.nopic{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"act qty" "name name"}
+  /* the action label keeps its own width and a long change (Main → Maybeboard …) wraps beside
+     it, so the two never overlap */
+  ul.changes li:not(.group):not(.more-row){grid-template-columns:auto max-content minmax(0,1fr);
+    grid-template-areas:"pic act qty" "pic name name";row-gap:2px;column-gap:10px}
+  ul.changes li.nopic{grid-template-columns:max-content minmax(0,1fr);grid-template-areas:"act qty" "name name"}
   ul.changes li .txt{display:contents}
   ul.changes li .pic{grid-area:pic} ul.changes li .act{grid-area:act;align-self:end}
-  ul.changes li .name{grid-area:name} ul.changes li .qty{grid-area:qty;align-self:end;max-width:none}
+  ul.changes li .name{grid-area:name} ul.changes li .qty{grid-area:qty;align-self:end;max-width:none;justify-self:end}
 }
 li.add .qty{color:var(--green)} li.remove .qty{color:var(--red)}
 ul.changes li.group{display:block;padding:5px 10px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
