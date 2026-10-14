@@ -119,7 +119,10 @@ def add_history_routes(
         has_more = len(events) > query["offset"] + PAGE
         shown = events[query["offset"] : query["offset"] + PAGE]
         current, gone = deck_filter_groups(
-            {**reports.decks_seen(sub), **state.db.history_decks(sub)}, live, complete=listed is not None
+            {**reports.decks_seen(sub), **state.db.history_decks(sub)},
+            live,
+            listed=listed["ids"] if listed else None,
+            own=state.db.own_history_deck_ids(sub),
         )
         # The backup copies the gateway made on Archidekt (D-03): kept out of Home and My decks,
         # listed here on the first, unfiltered page (and on a deck's own history).

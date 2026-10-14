@@ -289,3 +289,52 @@ async def test_a_failed_apply_that_changed_the_deck_keeps_its_backup_copy(stack:
     result = h.db.get_proposal(p["proposal_id"], "user-1")["result"]
     assert result.get("backup_deck_id") and not result.get("backup_deleted"), result
     assert ark.deleted == []
+
+
+def _refuse_once(ark: FakeArchidekt, when) -> dict[str, int]:
+    """Answer the first request ``when`` matches with a 429 (Retry-After 1), as Archidekt does when
+    it wants the gateway to slow down: the request was not acted on."""
+    orig = ark.transport.handler
+    refused = {"n": 0}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if not refused["n"] and when(req):
+            refused["n"] += 1
+            return httpx.Response(429, json={"detail": "slow down"}, headers={"Retry-After": "1"})
+        return orig(req)
+
+    ark.transport.handler = handler
+    return refused
+
+
+async def test_a_new_deck_whose_create_meets_a_429_is_created_once(stack: Stack) -> None:
+    """The deck-creating POST refused with a 429 is waited out and sent again: one deck is made
+    (a 429 means Archidekt did not create it), filled and verified."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    cards = [{"name": "Sol Ring"}, {"name": "Island"}]
+    p = structured(await call(h, token, "propose_new_deck", {"name": "Paced", "cards": cards}))
+    before = set(ark.decks)
+    refused = _refuse_once(ark, lambda r: r.method == "POST" and r.url.path == "/api/decks/v2/")
+    structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    await _until(lambda: h.db.get_proposal(p["proposal_id"], "user-1")["state"] != "applying")
+    row = h.db.get_proposal(p["proposal_id"], "user-1")
+    assert row["state"] == "applied", row
+    made = set(ark.decks) - before
+    assert refused["n"] == 1 and len(made) == 1, made
+    assert row["result"]["deck_id"] == str(made.pop()) and row["result"]["verified"] is True
+
+
+async def test_a_copy_whose_post_meets_a_429_is_made_once(stack: Stack) -> None:
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    p = structured(await call(h, token, "propose_clone_deck", {"deck_id": "42", "name": "Paced copy"}))
+    assert p["ok"], p
+    before = set(ark.decks)
+    refused = _refuse_once(ark, lambda r: r.method == "POST" and r.url.path == "/api/decks/copy/")
+    structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    await _until(lambda: h.db.get_proposal(p["proposal_id"], "user-1")["state"] != "applying")
+    row = h.db.get_proposal(p["proposal_id"], "user-1")
+    assert row["state"] == "applied", row
+    made = [d for d in set(ark.decks) - before if ark.decks[d]["name"] == "Paced copy"]
+    assert refused["n"] == 1 and len(made) == 1, made
