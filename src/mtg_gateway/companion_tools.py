@@ -386,7 +386,9 @@ def add_deck_tool_routes(
         """The deck in EDHPlay's import format, for the deck page's Play on EDHPlay box (deck.js),
         which asks for it when the box opens. The deck as the deck page read it (page_deck: the same
         read, kept a short while, so no new Archidekt request while it is fresh), for anyone who may
-        open that page. ``left_out`` names the sideboard copies past EDHPlay's 15."""
+        open that page. ``left_out`` names the sideboard copies past EDHPlay's 15; ``companion`` says
+        the deck sends one, which EDHPlay's import leaves for the member to set, and
+        ``no_commander`` that no commander is marked, so the member chooses one there."""
         from .export_formats import to_edhplay
 
         headers = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
@@ -408,6 +410,8 @@ def add_deck_tool_routes(
                 "list": edh.text,
                 "left_out": ", ".join(name if n == 1 else f"{n} {name}" for n, name in edh.left_out),
                 "left_count": sum(n for n, _name in edh.left_out),
+                "companion": edh.companion,
+                "no_commander": not edh.commanders,
             },
             headers=headers,
         )

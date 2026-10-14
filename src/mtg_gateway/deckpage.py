@@ -2287,6 +2287,7 @@ html.cardview-open{overflow:hidden}
 .edhplay-dialog details.disclosure{margin:0;padding-top:.35rem}
 .edhplay-dialog .steps{margin:.15rem 0 .2rem;padding-left:1.4rem;display:flex;flex-direction:column;gap:.4rem}
 .edhplay-dialog p{margin:0}
+.edhplay-dialog .edhplay-state{display:flex;flex-direction:column;gap:.5rem}
 .edhplay-dialog .acts{display:flex;margin-top:.25rem}
 .edhplay-dialog .acts .btn{margin:0;flex:1;justify-content:center}
 /* the list could not be had: the reason, and Try again beside it (a wrapped line on a phone) */
