@@ -836,6 +836,8 @@ async def test_a_partly_landed_failure_stores_the_message_its_caller_got(stack: 
     row = await _finished(h, p["proposal_id"])
     assert row["state"] == "failed" and row["result"]["sent_entries"] == 1, row["result"]
     assert "1 of 3 deck row changes had already been sent" in out["message"], out
+    # the reason ends its own sentence before the note ("... HTTP 503. 1 of 3 ...")
+    assert out["message"].startswith("Archidekt returned HTTP 503. 1 of 3 "), out["message"]
     assert row["result"]["detail"] == out["message"], (row["result"], out)
 
 
