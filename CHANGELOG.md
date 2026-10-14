@@ -7,6 +7,50 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.27] - 2026-10-14
+
+Bug fixes and small fixes from the owner's checks of 0.7.26. No new images besides the gateway's;
+the database stays at schema 12, so going back to 0.7.26 is a plain image swap.
+
+### Fixed
+- A long apply (a new 100-card deck, a big edit) no longer fails halfway when Archidekt asks the
+  gateway to slow down: it waits out Archidekt's pause and carries on by itself, at most 6 times
+  and 5 minutes for one request. The review page says it is waiting. Outside an apply nothing
+  changed: a 429 still pauses every call and is not retried.
+- When Archidekt refuses a request (HTTP 403), the message now says so, with Archidekt's own
+  reason, instead of "relink your account" or "this deck belongs to another Archidekt account".
+  Likes, bookmarks, follows and Collection edits no longer report a refusal as a sign-in problem.
+- Deck tags come from Archidekt's own tag list: archidekt.com never creates a new tag, so the
+  gateway no longer tries to. A name Archidekt doesn't have is refused when the proposal is made,
+  with close matches.
+- The deck cover is set the way archidekt.com's own "Set Deck Image" does it (`customFeatured`
+  only). Not yet tried against live Archidekt.
+- When an apply fails before it changed the deck, the backup copy it had just made on Archidekt is
+  deleted again. When part of the change landed, the copy is kept as the way back. The gateway's
+  own snapshot is always kept.
+- History's deck filter lists your decks by their current Archidekt names. Decks that are no
+  longer on Archidekt are listed under "No longer on Archidekt", below the others.
+- The deck page's Mana value form closes as soon as you press Save. The card takes the new value
+  at once and a "Saving…" note shows until Archidekt answers. If the save fails, the old value comes
+  back and the note says why.
+- The Guide's search lists the matching sections right under the box, with a short snippet and a
+  link to each. Enter goes to the first match, and on phones the contents drawer folds away.
+- The setup page (`/install`) and the Guide give plain instructions, without research notes such
+  as "(reported)", "(OpenAI's pages)", "not documented" or test dates.
+
+### Changed
+- Home is always in the navigation: left of Decks in the top bar and the phone's tab bar, and first
+  in the side rail on an unfolded foldable, a tablet and the Android app from 600 px wide. The rail
+  lists every page and has no More menu. On phones, Proposals moves into More.
+- Play on EDHPlay first opens a small dialog, "Copy and launch EDHPlay", with three short steps.
+  Its button copies the deck and opens EDHPlay. The first-use tip is gone.
+- The deck editor's "Also keep a backup copy on Archidekt" box is unticked by default.
+- With `MTG_WRITES_ENABLED` false, likes, bookmarks, follows, comments, collaborators and
+  Collection edits made by hand are refused too, and nothing is sent to Archidekt.
+- A deck's Collaborators section says that only people you follow on Archidekt can be added, and
+  its add box suggests them. A name you don't follow is refused with a link to that person's
+  Archidekt profile, where you can follow them.
+
 ## [0.7.26] - 2026-10-12
 
 Clean-up release before the next deployment: old, unused and half-removed code is gone, the two
