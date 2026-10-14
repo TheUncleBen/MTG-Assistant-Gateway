@@ -467,15 +467,21 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
           var meta = {};
           if (sc.state === "pending" && heldCode) meta[APPROVAL_KEY] = heldCode;
           render({ structuredContent: sc, _meta: meta });
+          var r = sc.result || {};
           if (sc.state === "pending") {
-            var r = sc.result || {};
-            setStatus(String((r.error === "rate_limited" && r.detail) || sc.next_step || ""), "err");
-            tellModel("Proposal " + pid + " stopped applying: it is pending again.");
+            // the stop's own message, shown here and told to the assistant as it is (Q95: the
+            // approved stop message, no other line)
+            var stop = String((r.error === "rate_limited" && r.detail) || sc.next_step || "");
+            setStatus(stop, "err");
+            if (stop) tellModel(stop);
           } else if (sc.state === "applied") {
             setStatus("Applied. The deck on Archidekt matches this proposal.", "ok");
             tellModel("Proposal " + pid + " finished applying to Archidekt.");
           } else if (sc.state !== "applying") {
-            setStatus(String(sc.next_step || ("Now " + sc.state)), "err");
+            // failed: the same text as an Approve that failed at once (review F2, D1.2), from the
+            // reason the proposal stored, never the assistant's next_step
+            setStatus(sc.state === "failed" ? failedText(String(r.detail || ""))
+              : String(sc.next_step || ("Now " + sc.state)), "err");
             tellModel("Proposal " + pid + " stopped applying: it is now " + sc.state + ".");
           }
         })
