@@ -71,7 +71,8 @@ _ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
 
 class CollectionError(Exception):
     """User-facing failure. ``kind``: invalid, not_found, not_linked, unavailable, rate_limited,
-    busy, auth, forbidden. ``retry_after`` copies DeckError's (seconds to wait, when known)."""
+    busy, auth, forbidden, writes_disabled. ``retry_after`` copies DeckError's (seconds to wait,
+    when known)."""
 
     def __init__(self, kind: str, message: str, *, retry_after: int | None = None):
         super().__init__(message)
@@ -299,6 +300,13 @@ class CollectionService:
             raise CollectionError("not_linked", "The linked Archidekt account has no user id; relink it.")
         return str(uid)
 
+    def _writes_on(self) -> None:
+        """Collection edits obey MTG_WRITES_ENABLED like every other Archidekt write."""
+        try:
+            self.decks._writes_switch()
+        except DeckError as exc:
+            raise CollectionError(exc.kind, str(exc)) from exc
+
     async def _run(self, sub: str, fn: Any) -> Any:
         try:
             return await self.decks._call(sub, fn)
@@ -380,6 +388,7 @@ class CollectionService:
         ``collector_number``; ``quantity``, ``finish`` (or ``foil: true``) and ``condition`` are
         optional. A printing already in the collection in that finish gets its copies added to the
         existing record (as the site's own add does); otherwise a record is created."""
+        self._writes_on()
         wanted = [
             (it, {k: it[k] for k in ("quantity", "finish", "condition")}) for it in normalise_items(items)
         ]
@@ -478,6 +487,7 @@ class CollectionService:
         raise CollectionError("not_found", "no such card in your collection")
 
     async def set_quantity(self, sub: str, rid: int, quantity: int) -> dict[str, Any]:
+        self._writes_on()
         rec = await self._record(sub, rid)
         if quantity <= 0:
             await self._run(sub, lambda token: self.client.collection_delete(token, [rid]))
@@ -489,6 +499,7 @@ class CollectionService:
     async def update(self, sub: str, rid: int, data: dict[str, Any]) -> dict[str, Any]:
         """Change a record's details: finish, condition, language and price paid (the fields
         Archidekt's own row editor offers; tags are read-only here)."""
+        self._writes_on()
         rec = await self._record(sub, rid)
         opts = _item_options({k: v for k, v in data.items() if k in ("finish", "foil", "condition")}, 0)
         changes: dict[str, Any] = {}
@@ -522,6 +533,7 @@ class CollectionService:
         return {"row": row}
 
     async def remove(self, sub: str, rid: int, quantity: int | None = None) -> dict[str, Any]:
+        self._writes_on()
         rec = await self._record(sub, rid)
         have = int(rec.get("quantity") or 0)
         if quantity is None or quantity >= have:
@@ -628,6 +640,7 @@ _STATUS = {
     "not_linked": 409,
     "auth": 409,
     "forbidden": 403,
+    "writes_disabled": 403,
     "unavailable": 503,
     "rate_limited": 503,
     "busy": 429,
@@ -980,6 +993,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             "invalid": "That was not a valid request.",
             "lookup": "Archidekt is not answering right now. Try again in a moment.",
             "link": "Link your Archidekt account on the Account page first.",
+            "writes": "Archidekt writes are switched off on this gateway, so nothing was changed.",
         }
         if not code or code not in msgs:
             return ""
@@ -1242,6 +1256,8 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                 code = "err=link"
             elif exc.kind in ("unavailable", "rate_limited", "busy"):
                 code = "err=lookup"
+            elif exc.kind == "writes_disabled":
+                code = "err=writes"
             else:
                 code = "err=invalid"
         sep = "&" if "?" in back else "?"

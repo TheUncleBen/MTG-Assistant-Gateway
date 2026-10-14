@@ -956,3 +956,55 @@ async def test_cover_tags_move_and_folder_rename_obey_the_writes_switch(stack: S
         with pytest.raises(DeckError) as exc:
             await pending
         assert exc.value.kind == "writes_disabled"
+
+
+async def test_likes_bookmarks_follows_comments_and_collection_edits_obey_the_writes_switch(
+    stack: Stack,
+) -> None:
+    """R-160: with MTG_WRITES_ENABLED false the member's own likes, bookmarks, follows, comments,
+    collaborators and collection edits are refused too, and nothing is sent to Archidekt."""
+    import dataclasses
+
+    from mtg_gateway.collection import CollectionError
+
+    h, ark = stack.h, stack.ark
+    await linked_user(stack)
+    decks = h.app.state.gateway.decks
+    social = decks.social
+    collection = h.app.state.gateway.collection
+    decks.settings = dataclasses.replace(decks.settings, writes_enabled=False)
+    calls = len(ark.calls)
+    for pending in (
+        social.vote(SUB, "42", 1),
+        social.vote_comment(SUB, "42", 1, 1),
+        social.bookmark(SUB, "42", True),
+        social.follow(SUB, 7, True),
+        social.comment(SUB, "42", "hello", None),
+        social.edit_comment(SUB, "42", 1, "edited"),
+        social.delete_comment(SUB, "42", 1),
+        social.add_collaborator(SUB, "42", 7),
+        social.remove_collaborator(SUB, "42", 7),
+    ):
+        with pytest.raises(DeckError) as exc:
+            await pending
+        assert exc.value.kind == "writes_disabled"
+    for pending in (
+        collection.add(SUB, [{"name": "Sol Ring"}], source="test"),
+        collection.set_quantity(SUB, 1, 2),
+        collection.update(SUB, 1, {"condition": "NM"}),
+        collection.remove(SUB, 1),
+    ):
+        with pytest.raises(CollectionError) as cexc:
+            await pending
+        assert cexc.value.kind == "writes_disabled"
+    assert ark.calls[calls:] == []  # refused before anything, reads included, was sent
+    b = Browser(h)
+    try:
+        await b.login()
+        csrf = await b.csrf()
+        r = await b.http.post(
+            "/social/api/decks/42/bookmark", json={"on": True}, headers={"X-CSRF-Token": csrf}
+        )
+        assert r.status_code == 403 and r.json()["error"] == "writes_disabled", r.text
+    finally:
+        await b.aclose()

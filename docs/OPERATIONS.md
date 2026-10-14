@@ -539,8 +539,10 @@ can be applied. The code default is off; the example env files
 - **To turn writes off:** set it to `false` (or remove it) and update the
   stack. It kicks in when the service restarts. It also covers every change
   made by hand on the deck settings page and the Folders page: deleting a
-  deck and creating a folder (since 0.7.25), and the cover image, tags,
-  moving a deck to a folder and renaming a folder (since 0.7.26).
+  deck and creating a folder (since 0.7.25), the cover image, tags,
+  moving a deck to a folder and renaming a folder (since 0.7.26), and likes,
+  bookmarks, follows, comments, collaborators and Collection edits (since
+  0.7.27). Nothing is sent to Archidekt for any of them.
 
 With writes off, people can still sign in, link Archidekt, use research
 tools, and make and review proposals. Applying returns "Deck writes are
