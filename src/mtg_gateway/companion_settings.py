@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from .actions import COLLABORATOR_NOTE, collaborator_by_hand, collaborator_target
+from .actions import COLLABORATOR_NOTE, collaborator_by_hand, collaborator_target, profile_url
 from .archidekt import ArchidektError, Deck, featured_scryfall_id, format_label
 from .busy import busy_response
 from .companion import DECK_CSP, FORMAT_CHOICES, INDENT, LIST_OK_MESSAGES, SETTINGS_OK_MESSAGES
@@ -58,6 +58,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
         *,
         folders: dict[str, Any] | None = None,
         collaborators: list[dict[str, Any]] | None = None,
+        following: list[str] | None = None,
+        follow_hint: str = "",
         ok: str = "",
     ) -> str:
         v = values or {}
@@ -150,7 +152,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             + cover_section(deck, csrf)
             + tags_section(deck, csrf)
             + folder_section(deck, csrf, folders)
-            + collaborator_section(deck, csrf, collaborators)
+            + collaborator_section(deck, csrf, collaborators, following, follow_hint)
             + "<section class='panel danger' id='delete'><h2>Delete this deck</h2>"
             "<p class='muted small'>Deletes the deck on Archidekt after you type its name. A snapshot is "
             "kept under History"
@@ -247,10 +249,19 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             "› Folders</a>.</p></section>"
         )
 
-    def collaborator_section(deck: Deck, csrf: str | None, rows: list[dict[str, Any]] | None) -> str:
+    def collaborator_section(
+        deck: Deck,
+        csrf: str | None,
+        rows: list[dict[str, Any]] | None,
+        following: list[str] | None = None,
+        follow_hint: str = "",
+    ) -> str:
         """Archidekt's deck collaborators. Adding or removing one changes who can edit the deck, so
         each form asks once more (a confirmation page) before it is sent to Archidekt. These are the
-        member's own presses; an assistant's proposal for the same thing waits on its review page."""
+        member's own presses; an assistant's proposal for the same thing waits on its review page.
+        The add box suggests the people the member follows (``following``, the only people Archidekt
+        accepts); ``follow_hint`` is a name just refused for not being followed, linked to its
+        Archidekt profile to follow it there."""
         did = _esc(deck.id)
         csrf_in = f"<input type='hidden' name='csrf' value='{_esc(csrf)}'>"
         if rows is None:
@@ -273,16 +284,36 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             )
             empty = "<li class=muted>No collaborators.</li>"
             listing = f"<ul class='plain taglist collablist'>{items or empty}</ul>"
+        taken = {str(r["username"]).casefold() for r in rows or []}
+        people = sorted((n for n in following or [] if n.casefold() not in taken), key=str.casefold)
+        options = "".join(f"<option value='{_esc(n)}'></option>" for n in people)
+        follow = (
+            f"<p class='muted small'>To add {_esc(follow_hint)}, follow them on Archidekt first: "
+            f"<a href='{_esc(profile_url(follow_hint))}' target='_blank' rel='noopener'>open "
+            f"{_esc(follow_hint)}'s profile</a>, press Follow, then add them here.</p>"
+            if follow_hint
+            else ""
+        )
         return (
             "<section class='panel tagbox' id='collaborators'><h2>Collaborators</h2>"
+            "<p class='muted small'>Only people you follow on Archidekt can be added. That is "
+            "Archidekt's own rule.</p>"
             + listing
             + f"<form method='post' action='/decks/{did}/collaborators' class='addtag'>{csrf_in}"
             "<input type='hidden' name='action' value='add'>"
             "<div class='field grow'><label for='collabname'>Add someone you follow on Archidekt</label>"
             "<input id='collabname' type='text' name='username' maxlength='60' autocomplete='off' "
-            "placeholder='Archidekt username' required>"
-            f"</div><button>{icon('plus')} Add</button></form>"
-            "<p class='muted small'>A collaborator can make any change to this deck that you can, except "
+            + ("list='collab-follows' " if people else "")
+            + "placeholder='Start typing a name you follow' required>"
+            + (f"<datalist id='collab-follows'>{options}</datalist>" if people else "")
+            + f"</div><button>{icon('plus')} Add</button></form>"
+            + follow
+            + (
+                "<p class='muted small'>You don't follow anyone on Archidekt yet.</p>"
+                if following is not None and not following
+                else ""
+            )
+            + "<p class='muted small'>A collaborator can make any change to this deck that you can, except "
             "its main settings. You confirm each change once before it is sent to Archidekt.</p></section>"
         )
 
@@ -292,6 +323,16 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             return None
         try:
             return await social.collaborators(sub, deck_id, owned=True)  # the page just read it as own
+        except (DeckError, ArchidektError):
+            return None
+
+    async def following_or_none(sub: str) -> list[str] | None:
+        """The usernames the member follows on Archidekt (cached briefly), None when unreadable."""
+        social = state.social
+        if social is None:
+            return None
+        try:
+            return list((await social.following_names(sub)).values())
         except (DeckError, ArchidektError):
             return None
 
@@ -333,6 +374,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 _csrf(s, sid),
                 folders=await folders_or_none(sub),
                 collaborators=await collaborators_or_none(sub, deck.id),
+                following=await following_or_none(sub),
                 ok=ok,
             ),
             sub=sub,
@@ -369,6 +411,8 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                     error=str(exc),
                     folders=await folders_or_none(sub),
                     collaborators=await collaborators_or_none(sub, deck.id),
+                    following=await following_or_none(sub),
+                    follow_hint=str(exc.extra.get("follow_username") or ""),
                 ),
                 sub=sub,
                 sid=sid,
