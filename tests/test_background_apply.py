@@ -245,3 +245,47 @@ async def test_an_apply_waits_out_archidekts_429_and_finishes(stack: Stack) -> N
     assert out["progress"].get("waiting_for_archidekt"), out
     await _until(lambda: h.db.get_proposal(p["proposal_id"], "user-1")["state"] == "applied")
     assert refused["n"] == 1 and len(ark.patches) == 3
+
+
+async def test_a_failed_apply_that_changed_nothing_deletes_its_backup_copy(stack: Stack) -> None:
+    """Q14: Archidekt refuses the first write, so the deck is as it was; the backup copy the apply
+    made a moment before is deleted again. The gateway's own snapshot stays."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": THREE}))
+    orig = ark.transport.handler
+
+    def refuse(req: httpx.Request) -> httpx.Response:
+        if req.method == "PATCH" and "modifyCards" in req.url.path:
+            return httpx.Response(403, json={"detail": "You do not have permission."})
+        return orig(req)
+
+    ark.transport.handler = refuse
+    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert out["ok"] is False and out["error"] == "forbidden", out
+    assert "You do not have permission" in out["message"] and "relink" not in out["message"]
+    result = h.db.get_proposal(p["proposal_id"], "user-1")["result"]
+    assert result.get("backup_deleted") is True and "backup_deck_id" not in result, result
+    assert len(ark.deleted) == 1  # the copy, and nothing else
+    assert ark.deleted[0] != 42
+    snap = h.db.get_snapshot(result["snapshot_id"], "user-1")
+    assert snap is not None and snap["backup_deck_id"] is None
+
+
+async def test_a_failed_apply_that_changed_the_deck_keeps_its_backup_copy(stack: Stack) -> None:
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": THREE}))
+    orig = ark.transport.handler
+
+    def fail_second(req: httpx.Request) -> httpx.Response:
+        if req.method == "PATCH" and "modifyCards" in req.url.path and len(ark.patches) >= 1:
+            return httpx.Response(503, json={"detail": "down"})
+        return orig(req)
+
+    ark.transport.handler = fail_second
+    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert out["ok"] is False, out
+    result = h.db.get_proposal(p["proposal_id"], "user-1")["result"]
+    assert result.get("backup_deck_id") and not result.get("backup_deleted"), result
+    assert ark.deleted == []

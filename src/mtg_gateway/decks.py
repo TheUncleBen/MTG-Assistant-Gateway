@@ -2694,6 +2694,7 @@ class DeckService:
             except DeckError as exc:
                 if exc.kind == "backup_failed":  # nothing was sent; the proposal is pending again
                     raise
+                await self._drop_unused_backup(sub, proposal_id, progress)
                 self.db.finish_proposal(
                     proposal_id, state="failed", result={**progress, "error": exc.kind, "detail": str(exc)}
                 )
@@ -2948,7 +2949,7 @@ class DeckService:
         fails partway says how far it got."""
         progress["sent_entries"], progress["of_entries"] = 0, len(payload)
         for entry in payload:
-            await self._call(sub, self.client.modify_card, deck_id, entry)
+            await _writing(progress, self._call(sub, self.client.modify_card, deck_id, entry))
             progress["sent_entries"] += 1
 
     async def _current_deck_for(self, sub: str, row: dict[str, Any]) -> Deck:
@@ -2992,6 +2993,35 @@ class DeckService:
             )
         self.db.finish_proposal(row["id"], state="applying", snapshot_id=snapshot_id)
         return snapshot_id
+
+    async def _drop_unused_backup(self, sub: str, proposal_id: str, progress: dict[str, Any]) -> None:
+        """An apply that failed before it changed the deck deletes the backup copy it made a moment
+        earlier on Archidekt: the deck is as it was, so the copy would only pile up in the backup
+        folder. When the deck may have changed the copy is kept, as the readable way back. The
+        gateway's own snapshot is always kept. Only the copy this apply made is ever deleted."""
+        backup_id = progress.get("backup_deck_id")
+        if not backup_id or progress.get("deck_written"):
+            return
+        try:
+            await self._call(sub, self.client.delete_deck, str(backup_id))
+        except DeckError as exc:
+            progress["backup_note"] = (
+                "The unused backup copy could not be deleted; it stays in the backup folder."
+            )
+            self._audit(
+                "backup_delete_failed",
+                sub=sub,
+                detail={"proposal_id": proposal_id, "backup_deck_id": backup_id, "error": exc.kind},
+            )
+            return
+        if progress.get("snapshot_id"):
+            self.db.clear_snapshot_backup(progress["snapshot_id"])
+        progress.pop("backup_deck_id", None)
+        progress.pop("backup_url", None)
+        progress["backup_deleted"] = True
+        self._audit(
+            "backup_deleted", sub=sub, detail={"proposal_id": proposal_id, "backup_deck_id": backup_id}
+        )
 
     async def _backup_on_archidekt(
         self, sub: str, row: dict[str, Any], deck: Deck, snapshot_id: str
@@ -3199,7 +3229,9 @@ class DeckService:
         # since the proposal is not sent again.
         details, _lines = details_rows(deck, snapshot_details(wanted))
         if details:
-            await self._call(sub, self.client.update_deck, deck.id, details_payload(details))
+            await _writing(
+                progress, self._call(sub, self.client.update_deck, deck.id, details_payload(details))
+            )
         verified = await self.get_deck(sub, deck.id)
         _left, mismatches = restore_steps(wanted, verified)
         still, _lines = details_rows(verified, snapshot_details(wanted)) if details else ({}, [])
@@ -3514,22 +3546,27 @@ class DeckService:
                 rows.append(_row("detail", field="cover", before="current", after=card.name))
         return plan, rows
 
-    async def _apply_organise(self, sub: str, deck_id: str, plan: dict[str, Any]) -> list[str]:
+    async def _apply_organise(
+        self, sub: str, deck_id: str, plan: dict[str, Any], progress: dict[str, Any]
+    ) -> list[str]:
         """Carry out a details proposal's organisation plan with the same verified calls as the
-        deck page's own buttons; each re-reads the deck. Returns the fields done."""
+        deck page's own buttons; each re-reads the deck. Returns the fields done. Marks
+        ``deck_written`` once a step may have changed the deck: a step refused before it wrote
+        anything (an unknown tag, Archidekt's 403 or 429) leaves the deck as it was."""
         done: list[str] = []
+
+        async def step(label: str, work: Awaitable[Any]) -> None:
+            await _writing(progress, work)
+            done.append(label)
+
         if "folder_id" in plan:
-            await self.move_deck(sub, deck_id, int(plan["folder_id"]))
-            done.append("folder")
+            await step("folder", self.move_deck(sub, deck_id, int(plan["folder_id"])))
         for name in plan.get("add_tags") or []:
-            await self.add_tag(sub, deck_id, name)
-            done.append(f"tag +{name}")
+            await step(f"tag +{name}", self.add_tag(sub, deck_id, name))
         for rel in plan.get("remove_tags") or []:
-            await self.remove_tag(sub, deck_id, int(rel["id"]))
-            done.append(f"tag -{rel['name']}")
+            await step(f"tag -{rel['name']}", self.remove_tag(sub, deck_id, int(rel["id"])))
         if "cover_uid" in plan:
-            await self.set_cover(sub, deck_id, plan["cover_uid"])
-            done.append("cover")
+            await step("cover", self.set_cover(sub, deck_id, plan["cover_uid"]))
         return done
 
     async def _apply_details(self, sub: str, row: dict[str, Any], progress: dict[str, Any]) -> dict[str, Any]:
@@ -3554,14 +3591,16 @@ class DeckService:
                 "Nothing was sent. Create a new proposal from the current deck.",
             )
         if changes:
-            await self._call(sub, self.client.update_deck, deck.id, details_payload(changes))
+            await _writing(
+                progress, self._call(sub, self.client.update_deck, deck.id, details_payload(changes))
+            )
         verified = await self.get_deck(sub, deck.id)
         still, _lines = details_diff(verified, wanted)
         mismatches = sorted(still)
         organised: list[str] = []
         if organise and not mismatches:
             try:
-                organised = await self._apply_organise(sub, deck.id, organise)
+                organised = await self._apply_organise(sub, deck.id, organise, progress)
             except DeckError as exc:
                 progress.update({"snapshot_id": snapshot_id, **backup, "fields": sorted(changes)})
                 raise DeckError(
@@ -4167,6 +4206,26 @@ def _same_account(a: dict[str, Any], b: dict[str, Any]) -> bool:
 
 def _sent(progress: dict[str, Any]) -> dict[str, Any]:
     return {k: progress[k] for k in ("sent_entries", "of_entries", "snapshot_id", "deck_id") if k in progress}
+
+
+# Failures that mean Archidekt did not act on the write: refused before it was sent, or answered
+# 403 or 429 (neither changes anything).
+NOTHING_WRITTEN = frozenset(
+    {"invalid", "forbidden", "not_found", "not_linked", "writes_disabled", "rate_limited", "stale"}
+)
+
+
+async def _writing(progress: dict[str, Any], work: Awaitable[Any]) -> Any:
+    """Await one write of an apply; ``progress["deck_written"]`` is set once the deck may have
+    changed (the write succeeded, or failed in a way that may still have landed)."""
+    try:
+        out = await work
+    except DeckError as exc:
+        if exc.kind not in NOTHING_WRITTEN:
+            progress["deck_written"] = True
+        raise
+    progress["deck_written"] = True
+    return out
 
 
 def _cover_is(deck: Deck, uid: str) -> bool:

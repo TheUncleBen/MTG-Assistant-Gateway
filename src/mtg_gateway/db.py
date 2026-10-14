@@ -1770,6 +1770,13 @@ class Database:
                 (backup_deck_id, backup_url, snapshot_id),
             )
 
+    def clear_snapshot_backup(self, snapshot_id: str) -> None:
+        """The snapshot's Archidekt backup copy was deleted (an apply that failed before it wrote)."""
+        with self.tx() as c:
+            c.execute(
+                "UPDATE snapshots SET backup_deck_id = NULL, backup_url = NULL WHERE id = ?", (snapshot_id,)
+            )
+
     def get_snapshot(self, snapshot_id: str, owner_sub: str) -> dict[str, Any] | None:
         row = self._one("SELECT * FROM snapshots WHERE id = ? AND owner_sub = ?", (snapshot_id, owner_sub))
         if row is None:
