@@ -728,3 +728,125 @@ async def test_a_stop_whose_backup_copy_could_not_be_deleted_queues_its_delete(
         "deleted from the backup folder by itself once Archidekt allows it. The proposal is still "
         "pending, so you can apply it again in a few minutes."
     ) in page
+
+
+# -- review D1: a clone stopped after its copy was made ---------------------------------------------
+def _clone_copied_then(ark: FakeArchidekt, answer: httpx.Response) -> dict[str, bool]:
+    """The clone's POST /decks/copy/ goes through; every deck read after it gets ``answer``."""
+    orig = ark.transport.handler
+    state = {"copied": False}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "POST" and req.url.path == "/api/decks/copy/":
+            state["copied"] = True
+            return orig(req)
+        if state["copied"] and req.method == "GET" and "/decks/" in req.url.path:
+            return answer
+        return orig(req)
+
+    ark.transport.handler = handler
+    state["orig"] = orig  # type: ignore[assignment]
+    return state
+
+
+def _copy_made(copy_id: str) -> str:
+    return (
+        f"The copy {copy_id} was made on Archidekt, but the gateway could not check it. Look at it on "
+        "Archidekt before asking for another copy."
+    )
+
+
+@pytest.mark.usefixtures("quick_waits", "whole_apply")
+async def test_a_clone_stopped_after_its_copy_was_made_stays_failed_and_is_never_copied_twice(
+    stack: Stack,
+) -> None:
+    """Review D1 (the reviewer's repro): the copy was made, then the read-back met a 429 longer
+    than the apply may wait. Something changed on Archidekt, so the proposal stays failed (not
+    pending), records the new deck, says the copy was made (never "no cards were added": a copy
+    holds the cards), and a second approval makes no second copy."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    p = structured(await call(h, token, "propose_clone_deck", {"deck_id": "42", "name": "Paced copy"}))
+    assert p["ok"], p
+    before = set(ark.decks)
+    state = _clone_copied_then(
+        ark, httpx.Response(429, json={"detail": "slow"}, headers={"Retry-After": "3600"})
+    )
+    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    row = await _finished(h, p["proposal_id"])
+    made = [d for d in set(ark.decks) - before if ark.decks[d]["name"] == "Paced copy"]
+    assert len(made) == 1, made
+    assert row["state"] == "failed", ("copy made but proposal back to pending", row["result"])
+    result = row["result"]
+    assert result["error"] == "rate_limited" and result["deck_id"] == str(made[0]), result
+    assert result["detail"] == f"{ark_mod.PATIENCE_SPENT} {_copy_made(str(made[0]))}", result["detail"]
+    assert out["ok"] is False and out.get("state") != "pending", out
+    got = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
+    assert got["next_step"] == f"{ark_mod.PATIENCE_SPENT} {_copy_made(str(made[0]))}", got["next_step"]
+    ark.transport.handler = state["orig"]
+    h.app.state.gateway.decks.client.pacer._retry_until = 0
+    again = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert again["ok"] is False, again
+    assert [d for d in set(ark.decks) - before if ark.decks[d]["name"] == "Paced copy"] == made
+
+
+@pytest.mark.usefixtures("whole_apply")
+async def test_a_clone_whose_read_back_fails_says_the_copy_was_made(stack: Stack) -> None:
+    """Review D1: a clone whose read-back meets a 5xx after the copy was made fails with the new
+    deck recorded, and its message says the copy was made."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    p = structured(await call(h, token, "propose_clone_deck", {"deck_id": "42", "name": "Down copy"}))
+    before = set(ark.decks)
+    _clone_copied_then(ark, httpx.Response(503, json={"detail": "down"}))
+    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    row = await _finished(h, p["proposal_id"])
+    [made] = [d for d in set(ark.decks) - before if ark.decks[d]["name"] == "Down copy"]
+    assert row["state"] == "failed" and row["result"]["deck_id"] == str(made), row["result"]
+    assert row["result"]["detail"] == out["message"], row["result"]
+    assert out["message"].startswith("Archidekt returned HTTP 503"), out
+    assert out["message"].endswith(f" {_copy_made(str(made))}"), out
+    assert "no cards were added" not in out["message"]
+
+
+def _second_patch(ark: FakeArchidekt, answer) -> None:
+    """The first card write goes through; the second gets ``answer`` (a response, or an exception
+    class raised inside the gateway)."""
+    orig = ark.transport.handler
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "PATCH" and "modifyCards" in req.url.path and len(ark.patches) >= 1:
+            if isinstance(answer, httpx.Response):
+                return answer
+            raise answer("unexpected")
+        return orig(req)
+
+    ark.transport.handler = handler
+
+
+@pytest.mark.usefixtures("whole_apply")
+async def test_a_partly_landed_failure_stores_the_message_its_caller_got(stack: Stack) -> None:
+    """The stored detail (read by the chat card after a slow Approve and by the review page) is the
+    same message the apply's caller got, with how much had been sent."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": THREE}))
+    _second_patch(ark, httpx.Response(503, json={"detail": "down"}))
+    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    row = await _finished(h, p["proposal_id"])
+    assert row["state"] == "failed" and row["result"]["sent_entries"] == 1, row["result"]
+    assert "1 of 3 deck row changes had already been sent" in out["message"], out
+    assert row["result"]["detail"] == out["message"], (row["result"], out)
+
+
+@pytest.mark.usefixtures("whole_apply")
+async def test_an_unexpected_failure_stores_the_message_its_caller_got(stack: Stack) -> None:
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": THREE}))
+    _second_patch(ark, RuntimeError)
+    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    row = await _finished(h, p["proposal_id"])
+    assert row["state"] == "failed" and row["result"]["error"] == "internal", row["result"]
+    assert out["message"].startswith("Applying failed unexpectedly. 1 of 3 deck row changes"), out
+    assert row["result"]["detail"] == out["message"], (row["result"], out)
