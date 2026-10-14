@@ -6,6 +6,8 @@ client is paused, with a backoff and a limit, and only after the same safety che
 from __future__ import annotations
 
 import asyncio
+import dataclasses
+import datetime
 import time
 
 import httpx
@@ -617,3 +619,237 @@ async def test_an_unexpected_error_is_retried_on_the_backoff_then_given_up(stack
     _due_now(h)
     assert await svc.delete_one_queued_backup() == {"given_up": snap_id, "error": "internal"}
     _kept(h, pid, snap_id, copy, ark, "internal")
+
+
+# -- review L1: the backup copy made before a deck delete is recorded like any apply's -------------
+@pytest.mark.usefixtures("quick_waits")
+async def test_a_deck_delete_stopped_on_a_long_429_records_its_copy_and_never_leaves_one_behind(
+    stack: Stack,
+) -> None:
+    """Review L1 (Q77, Q78): the backup copy made before a delete-deck action is kept in the
+    apply's progress, as every other apply's is. A stop on Archidekt's waits before the deck was
+    deleted is still back to pending with the approved sentence, and the copy's delete is queued.
+    A second approval makes one new copy and deletes the deck; the first copy is deleted later,
+    never left behind unrecorded."""
+    from .test_account_actions import _browser_apply
+
+    h, ark = stack.h, stack.ark
+    svc = h.app.state.gateway.decks
+    token = await linked_user(stack)
+    p = structured(await call(h, token, "propose_delete_deck", {"deck_id": "42"}))
+    pid = p["proposal_id"]
+    orig = ark.transport.handler
+    seen = {"copies": 0, "busy": True}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "POST" and req.url.path.endswith("/decks/copy/"):
+            seen["copies"] += 1
+        if seen["busy"] and req.method == "DELETE" and req.url.path.endswith("/decks/42/"):
+            return httpx.Response(429, json={"detail": "slow down"}, headers={"Retry-After": "30"})
+        return orig(req)
+
+    ark.transport.handler = handler
+    await _browser_apply(h, pid)
+    row = await _finished(h, pid)
+    result = row["result"]
+    assert row["state"] == "pending" and 42 in ark.decks and seen["copies"] == 1, row
+    assert result["detail"] == f"{ark_mod.PATIENCE_SPENT} {LATER}", result
+    first, snap_id = int(result["backup_deck_id"]), result["snapshot_id"]
+    assert result["backup_url"] == f"https://archidekt.com/decks/{first}"
+    assert result["backup_note"] == decks_mod.BACKUP_LATER and first in ark.decks
+    [job] = h.db.queued_backup_deletes()
+    assert job["backup_deck_id"] == str(first) and job["snapshot_id"] == snap_id and job["proposal_id"] == pid
+    # the second approval: one new copy, the deck deleted, the first copy still queued
+    seen["busy"] = False
+    svc.client.pacer._retry_until = 0
+    await _browser_apply(h, pid)
+    row = await _finished(h, pid)
+    assert row["state"] == "applied" and 42 not in ark.decks and seen["copies"] == 2, row
+    second = int(row["result"]["backup_deck_id"])
+    assert second != first and second in ark.decks
+    assert [j["backup_deck_id"] for j in h.db.queued_backup_deletes()] == [str(first)]
+    _due_now(h)
+    assert await svc.delete_one_queued_backup() == {"deleted": snap_id}
+    assert first not in ark.decks and second in ark.decks and h.db.queued_backup_deletes() == []
+
+
+@pytest.mark.usefixtures("quick_waits")
+async def test_a_deck_delete_whose_copy_post_timed_out_stays_pending_and_deletes_nothing(
+    stack: Stack,
+) -> None:
+    """Review L1: a backup POST that timed out may still have made the copy, but no id came back,
+    so there is nothing to record or delete. As for every apply (the existing backup_failed path),
+    the deck is not deleted and the proposal is pending again; such a copy, if it was made, stays
+    in the backup folder, and the gateway deletes nothing it cannot name."""
+    from .test_account_actions import _browser_apply
+
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    p = structured(await call(h, token, "propose_delete_deck", {"deck_id": "42"}))
+    pid = p["proposal_id"]
+    orig = ark.transport.handler
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "POST" and req.url.path.endswith("/decks/copy/"):
+            orig(req)  # the copy is made, but the answer never arrives
+            raise httpx.ReadTimeout("timed out", request=req)
+        return orig(req)
+
+    ark.transport.handler = handler
+    before = set(ark.decks)
+    await _browser_apply(h, pid)
+    row = await _finished(h, pid)
+    assert row["state"] == "pending" and row["result"]["error"] == "backup_failed", row
+    assert 42 in ark.decks and ark.deleted == [] and h.db.queued_backup_deletes() == []
+    assert len(set(ark.decks) - before) == 1  # the unnamed copy stays in the backup folder
+
+
+# -- review L2, L3: the copy's own clock --------------------------------------------------------
+def _at(value: str, seconds: float) -> str:
+    when = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return (when + datetime.timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+@pytest.mark.usefixtures("quick_waits")
+@pytest.mark.parametrize(
+    "case",
+    [
+        "edited_a_minute_later",
+        "created_missing",
+        "created_unreadable",
+        "created_without_zone",
+        "updated_without_zone",
+    ],
+)
+async def test_the_later_delete_reads_the_copys_own_clock(stack: Stack, case: str) -> None:
+    """Review L2: the copy is unchanged only while Archidekt's updatedAt is no later than its own
+    createdAt plus the time the gateway's own writes to it took (measured as it made the copy)
+    plus BACKUP_UNCHANGED_SLACK: one clock, Archidekt's. An edit a minute after the copy was
+    made is kept, though that is within two minutes of the delete being queued. A missing or
+    unreadable createdAt keeps the copy. Review L3: a time with no zone is unreadable."""
+    h, ark = stack.h, stack.ark
+    svc = h.app.state.gateway.decks
+    token = await linked_user(stack)
+    pid, result, seen = await _stop(h, ark, token)
+    copy, snap_id = int(result["backup_deck_id"]), result["snapshot_id"]
+    _calm(h, ark, seen)
+    made = ark.decks[copy]
+    if case == "edited_a_minute_later":
+        made["updatedAt"] = _at(made["createdAt"], 60)
+    elif case == "created_missing":
+        del made["createdAt"]
+    elif case == "created_unreadable":
+        made["createdAt"] = "yesterday"
+    elif case == "created_without_zone":
+        made["createdAt"] = made["createdAt"].removesuffix("Z")
+        made["updatedAt"] = made["updatedAt"].removesuffix("Z")
+    else:
+        made["updatedAt"] = made["updatedAt"].removesuffix("Z")
+    _due_now(h)
+    assert await svc.delete_one_queued_backup() == {"given_up": snap_id, "error": "copy_changed"}
+    _kept(h, pid, snap_id, copy, ark, "copy_changed")
+
+
+def test_backup_unchanged_uses_the_copys_created_time_and_the_measured_writes() -> None:
+    """Review L2: the bound is createdAt + the gateway's measured writes + the slack, inclusive;
+    a second later is a change. Without the measured writes the copy is kept."""
+    from mtg_gateway.archidekt import Deck
+
+    expect = {"name": "B", "description": "d", "folder_id": "7", "written_within": 3}
+    created = "2026-10-14T10:00:00.000000Z"
+    bound = 3 + decks_mod.BACKUP_UNCHANGED_SLACK
+
+    def copy(updated: str, created_at: str = created) -> Deck:
+        return Deck(
+            id="9",
+            name="B",
+            owner="alice",
+            updated_at=updated,
+            cards=[],
+            categories=[],
+            raw={},
+            description="d",
+            parent_folder=7,
+            created_at=created_at,
+        )
+
+    job = {"expect": expect, "queued_at": 0}
+    assert decks_mod._backup_as_made(copy(_at(created, bound)), job)
+    assert not decks_mod._backup_as_made(copy(_at(created, bound + 1)), job)
+    assert decks_mod._backup_as_made(copy("2026-10-14T12:00:01+02:00", "2026-10-14T10:00:00Z"), job)
+    old = {"expect": {k: v for k, v in expect.items() if k != "written_within"}, "queued_at": 0}
+    assert not decks_mod._backup_as_made(copy(created), old)
+
+
+def test_a_time_without_a_zone_is_unreadable() -> None:
+    """Review L3."""
+    assert decks_mod._iso_time("2026-10-14T10:00:00") is None
+    assert decks_mod._iso_time("2026-10-14T10:00:00.123456") is None
+    assert decks_mod._iso_time("2026-10-14T10:00:00Z") == decks_mod._iso_time("2026-10-14T12:00:00+02:00")
+    assert decks_mod._iso_time("2026-10-14T10:00:00.5Z") is not None
+
+
+# -- review L4: the copy's owner, and a relink inside the same second ---------------------------
+@pytest.mark.usefixtures("quick_waits")
+@pytest.mark.parametrize("case", ["other_account", "link_without_id", "copy_without_owner_id"])
+async def test_a_copy_not_owned_by_the_linked_account_is_kept(stack: Stack, monkeypatch, case: str) -> None:
+    """Review L4: the later delete deletes the copy only when its owner id is the linked account's
+    Archidekt user id as stored on the link. Missing or different: it gives up and keeps it."""
+    h, ark = stack.h, stack.ark
+    svc = h.app.state.gateway.decks
+    token = await linked_user(stack)
+    assert h.db.get_link(SUB)["archidekt_user_id"]
+    pid, result, seen = await _stop(h, ark, token)
+    copy, snap_id = int(result["backup_deck_id"]), result["snapshot_id"]
+    _calm(h, ark, seen)
+    if case == "copy_without_owner_id":
+        read = svc.client.get_deck
+
+        async def no_owner_id(*a, **k):
+            return dataclasses.replace(await read(*a, **k), owner_id=None)
+
+        monkeypatch.setattr(svc.client, "get_deck", no_owner_id)
+    else:
+        with h.db.tx() as c:
+            c.execute(
+                "UPDATE archidekt_links SET archidekt_user_id = ? WHERE sub = ?",
+                ("999999" if case == "other_account" else None, SUB),
+            )
+    _due_now(h)
+    assert await svc.delete_one_queued_backup() == {"given_up": snap_id, "error": "not_owner"}
+    _kept(h, pid, snap_id, copy, ark, "not_owner")
+
+
+@pytest.mark.usefixtures("quick_waits")
+async def test_a_relink_in_the_same_second_as_the_read_still_stops_the_delete(
+    stack: Stack, monkeypatch
+) -> None:
+    """Review L4: a relink while the later delete reads the copy stops it, even when the new link's
+    created_at (whole seconds) equals the old one's: the relink dropped the queued delete, and
+    the pass checks that it is still queued before it deletes."""
+    h, ark = stack.h, stack.ark
+    svc = h.app.state.gateway.decks
+    token = await linked_user(stack)
+    pid, result, seen = await _stop(h, ark, token)
+    copy, snap_id = int(result["backup_deck_id"]), result["snapshot_id"]
+    _calm(h, ark, seen)
+    read = svc.client.get_deck
+
+    async def read_then_relink(*a, **k):
+        out = await read(*a, **k)
+        link = h.db.get_link(SUB)
+        h.db.save_link(
+            SUB,
+            username=link["archidekt_username"],
+            user_id=link["archidekt_user_id"],
+            secret_enc=link["secret_enc"],
+        )
+        with h.db.tx() as c:  # in the same second as the link it replaced
+            c.execute("UPDATE archidekt_links SET created_at = ? WHERE sub = ?", (link["created_at"], SUB))
+        svc._drop_backup_deletes_on_relink(SUB)
+        return out
+
+    monkeypatch.setattr(svc.client, "get_deck", read_then_relink)
+    _due_now(h)
+    assert await svc.delete_one_queued_backup() == {"relinked": snap_id}
+    _kept(h, pid, snap_id, copy, ark, "relinked")

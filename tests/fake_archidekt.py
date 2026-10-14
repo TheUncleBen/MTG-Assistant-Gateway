@@ -7,6 +7,7 @@ Shapes follow the handoff's endpoint map and the project's real CSV export
 from __future__ import annotations
 
 import base64
+import datetime
 import json
 import time
 from pathlib import Path
@@ -15,6 +16,12 @@ from typing import Any
 import httpx
 
 from mtg_gateway.archidekt_csv import parse_export, to_deck_json
+
+
+def _now_iso() -> str:
+    """The time now as Archidekt writes it: UTC, with microseconds and a "Z"."""
+    return datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample_deck.csv"
 
@@ -127,6 +134,10 @@ class FakeArchidekt:
         self.fail_deck_update = False
         self.updates: list[dict[str, Any]] = []  # bodies of PATCH /decks/{id}/update/, with deck_id
         self.fail_backup = False  # POST /decks/copy/ answers 503
+        # Copies made here (POST /decks/copy/) carry createdAt and updatedAt as the time they were
+        # made, in Archidekt's "...Z" form with fractions, and an update moves their updatedAt to
+        # its own time (inferred, not seen live). Every other deck keeps its fixed times.
+        self.timed: set[int] = set()
         # Like the real site: the old owner= filter is ignored and every deck comes back.
         self.ignore_owner_username = False
         # Suspected live behaviour (unverified): the ownerUsername listing leaves the owner's
@@ -511,7 +522,10 @@ class FakeArchidekt:
                 owner={"username": who},
                 description="",
                 private=body["private"],
+                createdAt=_now_iso(),
             )
+            copy["updatedAt"] = copy["createdAt"]
+            self.timed.add(self.next_deck_id)
             self.decks[self.next_deck_id] = copy
             self.private.add(self.next_deck_id)
             self.deck_folder[self.next_deck_id] = body["parent_folder"]
@@ -878,7 +892,7 @@ class FakeArchidekt:
                     deck["customFeatured"] = body.get("customFeatured") or ""
                 if "private" in body:
                     (self.private.add if body["private"] else self.private.discard)(deck["id"])
-                deck["updatedAt"] = "2026-10-03T00:00:00Z"
+                deck["updatedAt"] = _now_iso() if deck["id"] in self.timed else "2026-10-03T00:00:00Z"
                 return httpx.Response(200, json={"id": deck["id"], "name": deck["name"]})
             if parts[3:] == ["modifyCards", "v2"] and request.method == "PATCH":
                 if self.hold_card_writes is not None:

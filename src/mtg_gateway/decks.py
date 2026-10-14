@@ -159,9 +159,11 @@ BACKUP_DELETE_TRIES = 4
 BACKUP_DELETE_EVERY = 60.0  # seconds between the loop's passes
 # Review D4: before a later delete, the copy is read once and deleted only while it is as the
 # gateway made it: in the backup folder, with the name and description it was given, and with
-# Archidekt's updatedAt no later than this many seconds after the delete was queued (the gateway's
-# last write to the copy came before that; the slack covers the two clocks).
-BACKUP_UNCHANGED_SLACK = 120
+# Archidekt's updatedAt no later than its own createdAt plus the time the gateway's own writes to
+# the copy took (measured as it made the copy, rounded up to whole seconds) plus this many seconds.
+# One clock, Archidekt's (review L2). The slack covers a time that Archidekt might keep to whole
+# seconds only (up to 1 s off each way); everything the gateway writes is in the measured part.
+BACKUP_UNCHANGED_SLACK = 2
 BACKUPS_REMEMBERED = 256  # backup copies made recently whose name and description are kept
 BROWSER_CLIENT = "__browser__"  # the same value as pages.BROWSER_CLIENT_ID
 # An administrator acting on a member's account from the admin pages (unlink): recorded in the
@@ -3305,18 +3307,34 @@ class DeckService:
             )
             return {"skipped": sid}
         attempts = int(job["attempts"]) + 1
-        linked_at = (self.db.get_link(sub) or {}).get("created_at")
+        link = self.db.get_link(sub) or {}
+        linked = _link_identity(link)
+
+        def relinked() -> bool:
+            # Review D3, L4: a relink drops the member's queued deletes in the same step as it
+            # stores the new link, so "still queued" sees any relink, even one within the same
+            # second as the old link (created_at is whole seconds); the link itself is compared too
+            # (an unlink, or another account).
+            return (
+                not self.db.backup_delete_queued(sid) or _link_identity(self.db.get_link(sub) or {}) != linked
+            )
+
         gone = False
         try:
             # Review D4: one read of the copy first; a 404 there means it is already gone.
             copy = await self._call(sub, self.client.get_deck, backup_id)
+            if relinked():
+                return {"relinked": sid}  # relinked meanwhile: the relink dropped this delete (D3)
+            # Review L4: only a copy the linked account owns, by the Archidekt user id stored on
+            # the link; a missing id on either side keeps the copy.
+            user_id = str(link.get("archidekt_user_id") or "")
+            if not user_id or not copy.owner_id or str(copy.owner_id) != user_id:
+                return self._give_up_backup_delete(job, attempts, "not_owner")
             if not _backup_as_made(copy, job):
                 return self._give_up_backup_delete(job, attempts, "copy_changed")
-            if (self.db.get_link(sub) or {}).get("created_at") != linked_at:
-                return {"relinked": sid}  # relinked meanwhile: the relink dropped this delete (D3)
             await self._call(sub, self.client.delete_deck, backup_id)
         except DeckError as exc:
-            if (self.db.get_link(sub) or {}).get("created_at") != linked_at:
+            if relinked():
                 return {"relinked": sid}  # an answer for another link proves nothing (D3)
             if exc.kind == "not_found":  # already gone from Archidekt: nothing left to do
                 gone = True
@@ -3472,18 +3490,24 @@ class DeckService:
                 sub,
                 lambda token, *_: self.client.ensure_folder(token, name=folder_name),
             )
+            # Review L2: how long the gateway's own writes to the copy took (the copy POST and its
+            # description PATCH, which come back together): Archidekt's createdAt and every
+            # updatedAt those writes set fall inside it, whatever Archidekt's clock says.
+            started = time.monotonic()
             copy = await self._call(
                 sub,
                 lambda token, *_: self.client.backup_deck(
                     token, deck, name=name, folder_id=str(folder["id"]), description=description
                 ),
             )
+            written_within = math.ceil(time.monotonic() - started)
         backup = {"backup_deck_id": str(copy["id"]), "backup_url": str(copy.get("url") or "")}
         self.db.set_snapshot_backup(snapshot_id, **backup)
         self._backups_made[str(copy["id"])] = {
             "name": name,
             "description": description,
             "folder_id": str(folder["id"]),
+            "written_within": written_within,
         }
         while len(self._backups_made) > BACKUPS_REMEMBERED:
             self._backups_made.pop(next(iter(self._backups_made)))
@@ -4099,10 +4123,15 @@ class DeckService:
                 "nothing was sent to Archidekt.",
             )
 
-    async def delete_deck(self, sub: str, deck_id: str, typed_name: str) -> dict[str, Any]:
+    async def delete_deck(
+        self, sub: str, deck_id: str, typed_name: str, *, progress: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """Delete one of the member's own decks after they typed its exact name. A snapshot is kept
         in the gateway and, when backups are on, a copy in the backup folder on Archidekt; the
-        deletion is verified by reading the deck back (it must be gone)."""
+        deletion is verified by reading the deck back (it must be gone). ``progress``: a
+        delete-deck action's apply, which records the snapshot and the copy in it as every apply
+        does (review L1), so an apply that stops before the deck is deleted deletes the unused
+        copy or queues its delete (Q77) instead of leaving it unrecorded."""
         self._writes_switch()
         deck = await self.get_own_deck(sub, deck_id)
         if clean_text(typed_name).casefold() != clean_text(deck.name).casefold():
@@ -4110,10 +4139,14 @@ class DeckService:
                 "invalid", "The name you typed does not match the deck's name. Nothing was deleted."
             )
         snapshot_id = self._hand_snapshot(sub, deck)
+        if progress is not None:
+            progress["snapshot_id"] = snapshot_id
         backup: dict[str, Any] = {}
         if self.settings.archidekt_backups:
             try:
                 backup = await self._backup_copy(sub, deck, snapshot_id, reason="before it was deleted")
+                if progress is not None:
+                    progress.update(backup)
             except DeckError as exc:
                 self._audit(
                     "backup_failed", sub=sub, detail={"deck_id": deck.id, "error": exc.kind, "hand": "delete"}
@@ -4751,35 +4784,47 @@ async def _writing(progress: dict[str, Any] | None, work: Awaitable[Any]) -> Any
     return out
 
 
+def _link_identity(link: dict[str, Any]) -> tuple[Any, ...]:
+    """Which link a queued backup delete started with (review D3, L4): when it was made and the
+    Archidekt account it names. A token refresh changes none of these."""
+    return (link.get("created_at"), link.get("archidekt_user_id"), link.get("archidekt_username"))
+
+
 def _iso_time(value: str) -> float | None:
-    """Seconds since the epoch for an ISO 8601 time as Archidekt writes it ("...Z", with or without
-    fractions; no zone read as UTC), or None when it cannot be read."""
+    """Seconds since the epoch for an ISO 8601 time as Archidekt writes it ("...Z" or another
+    offset, with or without fractions), or None when it cannot be read. A time with no zone is
+    unreadable (review L3): which clock it is on is not known."""
     try:
         when = datetime.datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
     except (ValueError, AttributeError):
         return None
     if when.tzinfo is None:
-        when = when.replace(tzinfo=datetime.UTC)
+        return None
     return when.timestamp()
 
 
 def _backup_as_made(copy: Deck, job: dict[str, Any]) -> bool:
     """Whether a queued backup copy is still as the gateway made it (review D4): in the backup
     folder it was made in, with the name and description it was given, and with Archidekt's
-    updatedAt no later than BACKUP_UNCHANGED_SLACK seconds after its delete was queued. Anything
-    missing or unreadable counts as changed, so the copy is kept."""
+    updatedAt no later than the copy's own createdAt plus the time the gateway's writes to it
+    took plus BACKUP_UNCHANGED_SLACK (review L2). Anything missing or unreadable counts as
+    changed, so the copy is kept."""
     expect = job.get("expect")
     if not isinstance(expect, dict):
         return False
     updated = _iso_time(copy.updated_at)
-    queued = job.get("queued_at")
+    created = _iso_time(copy.created_at)
+    within = expect.get("written_within")
     return (
         str(copy.parent_folder) == str(expect.get("folder_id"))
         and copy.name == expect.get("name")
         and same_rich_text(copy.description, str(expect.get("description") or ""))
         and updated is not None
-        and isinstance(queued, int)
-        and updated <= queued + BACKUP_UNCHANGED_SLACK
+        and created is not None
+        and isinstance(within, int)
+        and not isinstance(within, bool)
+        and within >= 0
+        and updated <= created + within + BACKUP_UNCHANGED_SLACK
     )
 
 

@@ -129,7 +129,8 @@ stays at schema 12, so going back to 0.7.26 is a plain image swap. The Android a
   then stays in the backup folder, as before). The messages say so until it is done. Waiting
   deletes are kept in the database, so a restart doesn't lose them. Before it deletes a copy, the
   gateway reads it once and keeps it if it was moved out of the backup folder, renamed, given
-  another description or changed since. Linking an Archidekt account again cancels your waiting
+  another description or changed since it was made, or if it isn't owned by the Archidekt account
+  you're linked to. Linking an Archidekt account again cancels your waiting
   deletes, and those copies stay.
 - Only a Commander deck has a bracket, as on archidekt.com: moving a deck to another format clears
   its bracket, and a bracket for another format is refused.
