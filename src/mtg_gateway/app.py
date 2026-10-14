@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import html
 import json
 import logging
@@ -646,6 +647,9 @@ def build_mcp_server(state: AppState) -> MCPServer:
             )
         if state.sync is not None and state.sync.enabled:
             tasks.append(asyncio.create_task(state.sync.loop()))
+        # unused backup copies whose delete Archidekt refused for a while (Q77), one at a time,
+        # in a context of its own (never inside a member's apply or slot)
+        tasks.append(asyncio.create_task(state.decks.backup_delete_loop(), context=contextvars.Context()))
         updates = UpdateChecker(s.update_check)
         if updates.enabled:
             tasks.append(asyncio.create_task(updates.loop()))

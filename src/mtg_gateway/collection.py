@@ -36,7 +36,7 @@ from .archidekt import (
 )
 from .busy import busy_response
 from .deckpage import image_url, mana_html
-from .decks import DeckError, current_client
+from .decks import DeckError, _writing, current_client
 from .pages import (
     NO_STORE,
     _csrf,
@@ -315,11 +315,17 @@ class CollectionService:
         except DeckError as exc:
             raise CollectionError(exc.kind, str(exc)) from exc
 
-    async def _run(self, sub: str, fn: Any) -> Any:
+    async def _run(self, sub: str, fn: Any, *, progress: dict[str, Any] | None = None) -> Any:
+        """``progress``: a write of a collection proposal's apply, recorded there (one record
+        changed, or a write that may have landed) so a stop says what had changed and a proposal
+        that changed something never goes back to pending (Q78)."""
         try:
-            return await self.decks._call(sub, fn)
+            out = await _writing(progress, self.decks._call(sub, fn))
         except (DeckError, ArchidektError) as exc:
             raise _wrap(exc) from exc
+        if progress is not None:
+            progress["sent_entries"] = int(progress.get("sent_entries") or 0) + 1
+        return out
 
     # -- reads -----------------------------------------------------------------------------------
     async def page(
@@ -390,12 +396,15 @@ class CollectionService:
         return [r for r in out["rows"] if r["name"].casefold() == want]
 
     # -- writes ----------------------------------------------------------------------------------
-    async def add(self, sub: str, items: Any, *, source: str) -> dict[str, Any]:
+    async def add(
+        self, sub: str, items: Any, *, source: str, progress: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """Add cards to the member's Archidekt Collection. Each item names a printing by
         ``scryfall_id`` (a scan result) or by ``name`` with optional ``set`` and
         ``collector_number``; ``quantity``, ``finish`` (or ``foil: true``) and ``condition`` are
         optional. A printing already in the collection in that finish gets its copies added to the
-        existing record (as the site's own add does); otherwise a record is created."""
+        existing record (as the site's own add does); otherwise a record is created. ``progress``:
+        a collection proposal's apply, which counts each record written (``_run``)."""
         self._writes_on()
         wanted = [
             (it, {k: it[k] for k in ("quantity", "finish", "condition")}) for it in normalise_items(items)
@@ -435,6 +444,7 @@ class CollectionService:
                 out = await self._run(
                     sub,
                     lambda token, have=have, qty=qty: self.client.collection_set(token, have, quantity=qty),
+                    progress=progress,
                 )
                 rec = {**have, **out, "card": have.get("card")}
             else:
@@ -450,6 +460,7 @@ class CollectionService:
                         condition=opts["condition"] or "NM",
                         language="EN",
                     ),
+                    progress=progress,
                 )
                 rec = {**out, "modifier": MODIFIERS[finish], "card": self._card_stub(printing, spec, out)}
             existing[key] = rec
@@ -544,16 +555,20 @@ class CollectionService:
             )
         return {"row": row}
 
-    async def remove(self, sub: str, rid: int, quantity: int | None = None) -> dict[str, Any]:
+    async def remove(
+        self, sub: str, rid: int, quantity: int | None = None, *, progress: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         self._writes_on()
         rec = await self._record(sub, rid)
         have = int(rec.get("quantity") or 0)
         if quantity is None or quantity >= have:
-            await self._run(sub, lambda token: self.client.collection_delete(token, [rid]))
+            await self._run(sub, lambda token: self.client.collection_delete(token, [rid]), progress=progress)
             left = None
         else:
             out = await self._run(
-                sub, lambda token: self.client.collection_set(token, rec, quantity=have - max(1, quantity))
+                sub,
+                lambda token: self.client.collection_set(token, rec, quantity=have - max(1, quantity)),
+                progress=progress,
             )
             left = row_out({**rec, **out, "card": rec.get("card")})
         self.decks.db.audit("collection_removed", sub=sub, detail={"id": rid, "quantity": quantity})
@@ -1456,22 +1471,22 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
         adds = changes.get("add") or []
         result: dict[str, Any] = {"added": [], "skipped": [], "removed": []}
         expected: dict[Any, int | None] = {}  # record id -> copies it should now hold (None: gone)
+        # each record written counts one (CollectionService._run), of every add and removal
+        progress["of_entries"] = len(adds) + len(changes.get("remove") or [])
         try:
             if adds:
                 source = str(changes.get("source") or "assistant")
-                out = await service.add(sub, adds, source=source)
+                out = await service.add(sub, adds, source=source, progress=progress)
                 result["added"], result["skipped"] = out["added"], out["skipped"]
                 for row in out["added"]:
                     expected[row["id"]] = int(row["quantity"])
-                progress["sent_entries"] = len(out["added"])
                 session_id = changes.get("scan_session_id")
                 if session_id and service.scan is not None and not out["skipped"]:
                     service.scan.store.delete(str(session_id), sub)
             for r in changes.get("remove") or []:
-                gone = await service.remove(sub, _rid(r["id"]), int(r["quantity"]))
+                gone = await service.remove(sub, _rid(r["id"]), int(r["quantity"]), progress=progress)
                 result["removed"].append(gone["removed"])
                 expected[_rid(r["id"])] = int(gone["row"]["quantity"]) if gone.get("row") else None
-                progress["sent_entries"] = int(progress.get("sent_entries") or 0) + 1
         except CollectionError as exc:
             raise DeckError(exc.kind, str(exc)) from exc
         result["verified"], result["mismatches"] = await _read_back(sub, expected)

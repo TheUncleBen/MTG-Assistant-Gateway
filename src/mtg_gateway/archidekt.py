@@ -779,6 +779,11 @@ class Pacer:
         now = time.monotonic()
         return now < self._open_until or now < self._retry_until
 
+    def pause_left(self) -> float:
+        """Seconds until calls are no longer refused (the breaker and a Retry-After pause alike);
+        0 when none is running."""
+        return max(0.0, max(self._open_until, self._retry_until) - time.monotonic())
+
     def record(self, ok: bool, retry_after: float | None = None, *, breaker: bool = True) -> None:
         """Note a call's outcome. ``breaker=False`` (a 429 met during a member's apply, Q62) sets
         the Retry-After pause like any 429 but does not count towards the breaker, so an apply
