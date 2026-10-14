@@ -27,7 +27,7 @@ SHOTS = os.environ.get("MTG_SHOTS")
 
 @pytest.fixture
 def server(tmp_path: Path):
-    s = Server(tmp_path)
+    s = Server(tmp_path, writes_enabled=True)  # a comment vote is a write (the writes switch)
     s.ark.private.discard(43)  # amy's deck is public: someone else's comments to vote on
     s.ark.comments[300043] = [
         {
