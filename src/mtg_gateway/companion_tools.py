@@ -229,13 +229,15 @@ def add_deck_tool_routes(
             "<span class='pastestatus muted small' role='status'></span></div></form></details>"
             "<ul class='erows added'></ul></section>"
             "<div class='cats existing'></div>"
-            "<div class='picker' hidden></div>"
             "</div>"
             + "".join(
                 f"<template id='icon-{n}'>{icon(n)}</template>"
                 for n in ("minus", "plus", "more", "x", "swap")
             )
             + "<script src='/static/cardview.js' defer></script>"
+            # the printing picker the deck page's card menu shares (Change printing, the add
+            # box's printings)
+            + "<script src='/static/printpick.js' defer></script>"
             + "<script src='/static/companion.js' defer></script>"
         )
         return page(

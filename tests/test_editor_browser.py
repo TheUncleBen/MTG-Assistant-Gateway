@@ -115,8 +115,8 @@ def test_add_a_card_with_rich_suggestions(server: Server, width: int) -> None:
         page.locator("[role=option] mark", has_text="Sol R").first.wait_for(timeout=3000)  # list for "sol r"
         assert page.locator("[role=option]").first.get_attribute("data-name") == "Sol Ring"
         if width >= 900:
-            page.locator(".addprints:visible .print").first.wait_for(timeout=3000)
-            page.locator(".addprints .print").first.click()
+            page.locator(".addprints:visible .pptile").first.wait_for(timeout=3000)
+            page.locator(".addprints .pptile").first.click()
             status = page.locator(".addstatus").inner_text()
             assert "Added 3 × Sol Ring (" in status and "to Land" in status, status
         else:
@@ -139,13 +139,13 @@ def test_add_a_card_with_rich_suggestions(server: Server, width: int) -> None:
         # the printing picker is a dialog, closed by Escape
         page.locator(".erow:not(.new) details.rowmenu summary").first.click()
         page.locator(".erow:not(.new) .menu button", has_text="Change printing").first.click()
-        picker = page.locator(".picker[role=dialog]")
+        picker = page.locator(".printpick[role=dialog]")
         picker.wait_for(state="visible", timeout=3000)
-        page.locator(".picker .print").first.wait_for(timeout=5000)
+        page.locator(".printpick .pptile").first.wait_for(timeout=5000)
         assert page.evaluate("() => document.activeElement.className").startswith("close")
         page.keyboard.press("Escape")
         picker.wait_for(state="hidden", timeout=3000)
-        assert page.locator(".picker:visible").count() == 0
+        assert page.locator(".printpick:visible").count() == 0
         assert page.evaluate("() => document.documentElement.scrollWidth") <= width
         assert errors == []
         browser.close()

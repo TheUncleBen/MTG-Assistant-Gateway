@@ -347,77 +347,27 @@
     });
   }
 
-  // printing picker: one card's printings from Scryfall through the gateway
-  var picker = root.querySelector(".picker");
-  picker.setAttribute("role", "dialog");
-  picker.setAttribute("aria-modal", "true");
-  picker.setAttribute("aria-label", "Printings");
-  picker.addEventListener("click", function (e) { if (e.target === picker) closePicker(); });
-  document.addEventListener("keydown", function (e) {
-    if (picker.hidden) return;
-    if (e.key === "Escape") { e.preventDefault(); closePicker(); return; }
-    if (e.key === "Tab") {  // keep focus inside the dialog
-      var f = picker.querySelectorAll("button:not([disabled]),a[href],input,select,[tabindex]:not([tabindex='-1'])");
-      if (!f.length) return;
-      var first = f[0], last = f[f.length - 1];
-      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-    }
-  });
-  var pickerFocus = null;
+  // printing picker (static/printpick.js, shared with the deck page's card menu): a pick is queued
+  // with the other changes until Save. When the printing is not made in the card's finish, the
+  // finish changes with it (P6) and the row's note says so. Picking the deck's own printing again
+  // takes a queued printing change back.
   function openPicker(r) {
-    pickerFocus = document.activeElement;
-    picker.hidden = false;
-    picker.textContent = "";
-    var closeBtn = el("button", { type: "button", class: "close icon-only", "aria-label": "Close", title: "Close", onclick: closePicker }, [el("span", { class: "x", text: "\u00d7" })]);
-    picker.setAttribute("aria-labelledby", "picker-title");
-    var box = el("div", { class: "pickbox" }, [
-      el("div", { class: "head" }, [
-        el("h2", { id: "picker-title", text: "Printings of " + r.name }),
-        closeBtn
-      ]),
-      el("p", { class: "muted small status", text: "Looking up printings…" }),
-      el("div", { class: "prints" })
-    ]);
-    picker.appendChild(box);
-    closeBtn.focus();
-    var status = box.querySelector(".status");
-    fetch("/scan/api/resolve", {
-      method: "POST", credentials: "same-origin",
-      headers: { "Content-Type": "application/json", "X-CSRF-Token": cfg.csrf },
-      body: JSON.stringify({ cards: [{ name: r.name, quantity: 1 }] })
-    })
-      .then(function (res) { return res.json(); })
-      .then(function (d) {
-        var card = d && d.cards && d.cards[0] && d.cards[0].card;
-        if (!card || !card.oracle_id) throw new Error(d && d.message ? d.message : "card not found");
-        return fetch("/scan/api/prints?oracle_id=" + encodeURIComponent(card.oracle_id), { credentials: "same-origin" }).then(function (res) { return res.json(); });
-      })
-      .then(function (d) {
-        var list = (d && d.cards) || [];
-        if (!list.length) throw new Error("no printings found");
-        status.textContent = list.length + " printing" + (list.length === 1 ? "" : "s") + (d.has_more ? " (newest shown)" : "") + ". Tap one to use it.";
-        var grid = box.querySelector(".prints");
-        list.forEach(function (p) {
-          var current = p.set && p.set.toLowerCase() === r.set.toLowerCase() && String(p.collector_number) === String(r.number);
-          var b = el("button", { type: "button", class: "print" + (current ? " current" : ""), title: (p.set_name || "") + " " + (p.collector_number || ""),
-            onclick: function () {
-              mutate(function () { r.printing = current ? null : { set_code: p.set, collector_number: String(p.collector_number) }; });
-              closePicker();
-            } }, [
-            p.image_small ? el("img", { src: p.image_small, alt: "", loading: "lazy" }) : el("span", { class: "ph", text: p.name }),
-            el("span", { class: "cap", text: (p.set || "").toUpperCase() + " " + (p.collector_number || "") + (current ? " · current" : "") })
-          ]);
-          grid.appendChild(b);
+    if (!window.MtgPrintPick) return;
+    window.MtgPrintPick.open({
+      name: r.name,
+      current: r.set ? { set: r.set, number: r.number } : null,
+      pending: r.printing ? { set: r.printing.set_code, number: r.printing.collector_number } : null,
+      finish: r.setFinish || r.finish,
+      onPick: function (p, info) {
+        mutate(function () {
+          var mine = r.set && String(p.set).toLowerCase() === r.set.toLowerCase() && String(p.collector_number) === String(r.number);
+          r.printing = mine ? null : { set_code: p.set, collector_number: String(p.collector_number) };
+          if (info.changed) r.setFinish = info.finish === r.finish ? null : info.finish;
         });
-      })
-      .catch(function (e) { status.textContent = "Printings could not be loaded: " + (e && e.message ? e.message : "network error"); status.className = "notice error"; });
+      }
+    });
   }
-  function closePicker() {
-    picker.hidden = true;
-    picker.textContent = "";
-    if (pickerFocus && pickerFocus.focus) pickerFocus.focus();
-  }
+  function pickerOpen() { return !!(window.MtgPrintPick && window.MtgPrintPick.isOpen()); }
 
   // existing cards, by category
   var existing = root.querySelector(".existing");
@@ -531,57 +481,64 @@
     addTyped(input.value, pendingPrint());
   });
 
-  // printings beside the suggestion list (wide screens): the highlighted card's printings as
-  // pictures; the set used last on this deck is pre-selected and goes with Enter; a click adds
+  // printings beside the suggestion list (wide screens): the highlighted card's printings as the
+  // shared picker's tiles (static/printpick.js, its default list: released paper printings in
+  // English); the set used last on this deck is pre-selected and goes with Enter; a click adds
+  // that one, and "All printings…" opens the whole picker (search, filters, every page)
   var printsBox = root.querySelector(".addprints");
-  var printsFor = "", printsCache = {}, printsSeq = 0, chosenPrint = null;
+  var printsFor = "", printsSeq = 0, chosenPrint = null;
   function wideEnough() { return window.matchMedia && window.matchMedia("(min-width: 900px)").matches; }
   function hidePrints() { if (printsBox) { printsBox.hidden = true; printsBox.textContent = ""; } printsFor = ""; chosenPrint = null; }
   function pendingPrint() { return chosenPrint; }
-  function showPrints(name, list, hasMore) {
+  function showPrints(name, oid, list, hasMore) {
+    var Pick = window.MtgPrintPick;
     printsBox.textContent = "";
     chosenPrint = null;
     var remembered = lastSet().toLowerCase();
+    var shown = Pick.defaults(list);
+    if (!shown.length) shown = list;
     var head = el("div", { class: "head" }, [
       el("b", { text: name }),
-      el("span", { class: "muted small", text: list.length + " printing" + (list.length === 1 ? "" : "s") + (hasMore ? ", newest shown" : "") })
+      el("span", { class: "muted small", text: shown.length + " printing" + (shown.length === 1 ? "" : "s") + (hasMore ? ", newest shown" : "") })
     ]);
     printsBox.appendChild(head);
-    var grid = el("div", { class: "pgrid" });
-    list.slice(0, 12).forEach(function (p) {
+    var grid = el("ul", { class: "pgrid" });
+    shown.slice(0, 12).forEach(function (p) {
       var printing = { set_code: p.set, collector_number: String(p.collector_number) };
       var pre = remembered && p.set && p.set.toLowerCase() === remembered;
       if (pre && !chosenPrint) chosenPrint = printing;
-      var b = el("button", { type: "button", class: "print" + (pre ? " current" : ""), tabindex: "-1",
-        title: (p.set_name || "") + " " + (p.collector_number || "") + ": click to add this printing",
-        onclick: function () { rememberSet(p.set || ""); addTyped(input.value, printing, name); } }, [
-        p.image_small ? el("img", { src: p.image_small, alt: "", loading: "lazy" }) : el("span", { class: "ph", text: p.name }),
-        el("span", { class: "cap", text: (p.set || "").toUpperCase() + " " + (p.collector_number || "") })
-      ]);
-      grid.appendChild(b);
+      var b = Pick.tile(p, { compact: true });
+      if (pre) b.classList.add("current");
+      b.tabIndex = -1;
+      b.title = (p.set_name || "") + " " + (p.collector_number || "") + ": click to add this printing";
+      b.addEventListener("click", function () { rememberSet(p.set || ""); addTyped(input.value, printing, name); });
+      grid.appendChild(el("li", {}, [b]));
     });
     printsBox.appendChild(grid);
     printsBox.appendChild(el("p", { class: "muted small hint", text: chosenPrint ? "Enter adds the " + chosenPrint.set_code.toUpperCase() + " printing (used last here); click another to add that one." : "Enter adds the newest printing; click a picture to add that one." }));
+    printsBox.appendChild(el("button", { type: "button", class: "btn allprints", tabindex: "-1", onclick: function () {
+      var raw = input.value;
+      hidePrints();
+      Pick.open({ name: name, oracleId: oid, pickLabel: "Add this printing", finish: foilIn && foilIn.checked ? "foil" : "normal", returnFocus: input,
+        onPick: function (p) { rememberSet(p.set || ""); addTyped(raw, { set_code: p.set, collector_number: String(p.collector_number) }, name); } });
+    } }, [el("span", { text: "All printings…" })]));
     printsBox.hidden = false;
   }
   input.addEventListener("suggest:active", function (ev) {
-    if (!printsBox || !wideEnough()) return;
+    if (!printsBox || !wideEnough() || !window.MtgPrintPick) return;
     var d = ev.detail || {};
     if (!d.name || !d.card || !d.card.oracle_id) { if (d.name !== printsFor) hidePrints(); return; }
     if (d.name === printsFor) return;
     printsFor = d.name;
     var mine = ++printsSeq;
-    var cached = printsCache[d.card.oracle_id];
-    if (cached) { showPrints(d.name, cached.cards, cached.has_more); return; }
     printsBox.hidden = false;
     printsBox.textContent = "";
     printsBox.appendChild(el("p", { class: "muted small", text: "Printings of " + d.name + "…" }));
-    fetch("/scan/api/prints?oracle_id=" + encodeURIComponent(d.card.oracle_id), { credentials: "same-origin" })
-      .then(function (r) { return r.ok ? r.json() : null; })
+    var oid = d.card.oracle_id;
+    window.MtgPrintPick.pageFor(oid, {}, 1)  // kept by the picker: the next highlight of it costs nothing
       .then(function (res) {
         if (!res || !res.cards || !res.cards.length) { if (mine === printsSeq) hidePrints(); return; }
-        printsCache[d.card.oracle_id] = res;
-        if (mine === printsSeq && printsFor === d.name) showPrints(d.name, res.cards, res.has_more);
+        if (mine === printsSeq && printsFor === d.name) showPrints(d.name, oid, res.cards, res.has_more);
       })
       .catch(function () { if (mine === printsSeq) hidePrints(); });
   });
@@ -639,7 +596,7 @@
     var t = ev.target, tag = t && t.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (t && t.isContentEditable)) return;
     // not behind the printing picker or the card viewer, and not while a save is on its way
-    if (!picker.hidden || document.documentElement.classList.contains("cardview-open") || locked()) return;
+    if (pickerOpen() || document.documentElement.classList.contains("cardview-open") || locked()) return;
     var k = (ev.key || "").toLowerCase();
     if (k === "z" && !ev.shiftKey && history.length) { ev.preventDefault(); undo(); }
     else if (((k === "z" && ev.shiftKey) || (k === "y" && !ev.metaKey)) && future.length) { ev.preventDefault(); redo(); }
@@ -651,7 +608,7 @@
   });
   document.addEventListener("keydown", function (ev) {
     if (ev.key === "Escape") {
-      closePicker();
+      // the printing picker closes itself (printpick.js)
       Array.prototype.forEach.call(root.querySelectorAll("details.dd[open]"), function (d) { d.removeAttribute("open"); });
     }
   });

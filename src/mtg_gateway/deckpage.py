@@ -778,7 +778,7 @@ def cards_html(
         "<template class='icons'>"
         + "".join(
             f"<span data-ic='{n}'>{icon(n)}</span>"
-            for n in ("eye", "swap", "tag", "eye-off", "x", "edit", "external")
+            for n in ("eye", "swap", "tag", "eye-off", "x", "edit", "external", "image")
         )
         + "</template>"
     )
@@ -2298,6 +2298,9 @@ html.cardview-open{overflow:hidden}
 .ctxmenu .qtyrow .n{min-width:1.6rem;text-align:center;font-variant-numeric:tabular-nums}
 .ctxmenu .more .chev{margin-left:auto;color:var(--text-muted);font-size:1.2rem;line-height:1}
 .ctxmenu .more[aria-expanded=true] .chev{transform:rotate(90deg)}
+/* The menu scrolls as a whole when the window is short; its items never shrink to make room (a
+   "Move to" list opened near the bottom of the window was squeezed to 2 px and could not be used) */
+.ctxmenu > *{flex-shrink:0}
 .ctxmenu .sub{display:flex;flex-direction:column;background:var(--surface);border-top:1px solid var(--border);
   border-bottom:1px solid var(--border);max-height:40vh;overflow:auto}
 .ctxmenu .sub[hidden]{display:none}
@@ -2565,15 +2568,11 @@ ul.decklist.list .deck{margin-bottom:.5rem}
   .addprints .head{display:flex;justify-content:space-between;gap:.5rem;align-items:baseline;
     margin-bottom:.5rem}
   .addprints .head b{overflow-wrap:anywhere}
-  .addprints .pgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.4rem}
-  .addprints .print{border:2px solid transparent;border-radius:6px;background:var(--surface-2);padding:.2rem;
-    margin:0;height:auto;display:flex;flex-direction:column;gap:.15rem;align-items:center;cursor:pointer;
-    min-width:0}
-  .addprints .print img{width:100%;aspect-ratio:5/7;border-radius:4.5%;object-fit:cover}
-  .addprints .print .cap{font-size:.7rem;color:var(--text-muted);white-space:nowrap}
-  .addprints .print.current{border-color:var(--orange)}
-  .addprints .print:hover,.addprints .print:focus-visible{border-color:var(--link)}
-  .addprints .hint{margin:.5rem 0 0} }
+  .addprints .pgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.4rem;margin:0;
+    padding:0;list-style:none}
+  .addprints .pgrid li{min-width:0}
+  .addprints .hint{margin:.5rem 0 0}
+  .addprints .allprints{width:100%;margin:.5rem 0 0;min-height:36px} }
 @media (max-width:600px){
   .addbox form.addcard{grid-template-columns:1fr}
   .addbox form.addcard .go{justify-content:space-between}
@@ -2676,19 +2675,131 @@ ul.plain.collablist{margin:0 0 .75rem;border-bottom:1px solid var(--surface-2)}
 .picker .pickbox .close{flex:none;margin:0;width:2.4rem;min-height:2.4rem;height:2.4rem;font-size:1.5rem;
   line-height:1;font-weight:400;border-radius:50%}
 .picker .status{margin:0}
-.picker .prints{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:.6rem;
-  overflow:auto;min-height:0;padding:2px}
-.picker .print{border:2px solid transparent;border-radius:6px;background:var(--surface-2);padding:.3rem;
-  margin:0;height:auto;display:flex;flex-direction:column;gap:.3rem;align-items:center;cursor:pointer}
-.picker .print img{width:100%;aspect-ratio:5/7;border-radius:4.5%;object-fit:cover}
-.picker .print .cap{font-size:.75rem;color:var(--text-muted)}
-.picker .print.current{border-color:var(--orange)}
-.picker .print:hover{border-color:var(--link)}
 @media (max-width:700px){
   .picker{padding:0;align-items:flex-end;-webkit-backdrop-filter:none;backdrop-filter:none}
   .picker .pickbox{width:100%;max-height:94vh;border-radius:var(--radius-panel) var(--radius-panel) 0 0;
+    border-bottom:0;padding:.75rem .75rem calc(.75rem + env(safe-area-inset-bottom))} }
+/* The printing picker (static/printpick.js), shared by the deck page's card menu and the deck
+   editor: a dialog themed like the card viewer, a bottom sheet on a phone. The list of tiles
+   scrolls on its own; beside it on a wide screen the preview shows the pointed-at printing
+   whole, and below 900px the preview is a sheet over the list, opened by a tap. */
+.printpick{position:fixed;inset:0;z-index:62;display:none;align-items:center;justify-content:center;
+  background:var(--scrim-strong,rgba(0,0,0,.78));padding:1.5rem;
+  -webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
+.printpick.open{display:flex}
+html.printpick-open{overflow:hidden}
+.printpick .ppbox{position:relative;width:min(100%,76rem);height:min(100%,56rem);display:flex;
+  flex-direction:column;gap:.6rem;background:var(--surface);color:var(--text);border:1px solid var(--border);
+  border-radius:var(--radius-panel);padding:1.25rem;box-shadow:0 12px 40px rgba(0,0,0,.5);overflow:hidden;
+  animation:cardin .16s ease-out}
+@media (prefers-reduced-motion:reduce){ .printpick .ppbox{animation:none} }
+.printpick .pphead{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;min-width:0;
+  flex:none}
+.printpick .pphead h2{margin:0;font-size:1.3rem;line-height:1.25;overflow-wrap:anywhere;min-width:0}
+.printpick .close{flex:none;margin:0;width:2.4rem;min-height:2.4rem;height:2.4rem;font-size:1.5rem;
+  line-height:1;font-weight:400;border-radius:50%}
+.printpick .pptools{display:flex;flex-direction:column;gap:.5rem;flex:none;min-width:0}
+.printpick .ppsearch{display:flex;gap:.5rem;min-width:0}
+.printpick .ppsearch input{flex:1 1 auto;min-width:0;width:auto;margin:0}
+.printpick .ppfiltbtn{display:none;margin:0;flex:none}
+.printpick .ppfilters{display:grid;grid-template-columns:repeat(4,minmax(0,1fr)) auto;gap:.5rem;
+  align-items:center;min-width:0}
+.printpick .ppfilters select,.printpick .ppfilters .msel-btn{width:100%;min-width:0;margin:0}
+.printpick .ppall{margin:0;font-size:.93rem;line-height:1.3}
+.printpick .ppstatus{margin:0;font-size:.93rem;color:var(--text-muted);flex:none;display:flex;flex-wrap:wrap;
+  align-items:center;gap:.5rem}
+.printpick .ppstatus.error{color:var(--text)}
+.printpick .ppstatus .btn{margin:0}
+.printpick .ppmain{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 21rem;
+  gap:1rem}
+.printpick .ppscroll{overflow:auto;min-height:0;overscroll-behavior:contain;padding:3px}
+.printpick .ppgrid{list-style:none;margin:0;padding:0;display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:.75rem}
+.printpick .ppgrid li,.addprints .pgrid li{min-width:0;display:flex}
+.pptile{position:relative;display:flex;flex-direction:column;align-items:stretch;justify-content:flex-start;
+  gap:.4rem;width:100%;height:auto;min-width:0;margin:0;padding:.4rem;border:2px solid var(--border-soft);
+  border-radius:8px;background:var(--surface-2);color:var(--text);text-align:left;font-weight:400;
+  cursor:pointer}
+.pptile:hover{border-color:var(--link);background:var(--surface-2);color:var(--text)}
+.pptile:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.pptile.current,.pptile.picked{border-color:var(--orange)}
+.pptile.on{border-color:var(--link);box-shadow:0 0 0 2px var(--link)}
+.pptile .ppimg{display:block;width:100%;aspect-ratio:5/7;border-radius:4.5%;overflow:hidden;
+  background:var(--surface-3)}
+.pptile .ppimg img{display:block;width:100%;height:100%;object-fit:cover}
+.pptile .ph,.pppreview .ph{display:flex;align-items:center;justify-content:center;width:100%;height:100%;
+  padding:.5rem;text-align:center;font-weight:700;color:var(--text-muted);overflow-wrap:anywhere}
+.pptile .ppcap{display:flex;flex-direction:column;gap:.2rem;min-width:0}
+.pptile .ppsetname{font-weight:700;font-size:.9rem;line-height:1.25;overflow-wrap:anywhere;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.pptile .ppcode{font-size:.82rem;color:var(--text-muted);font-variant-numeric:tabular-nums;
+  overflow-wrap:anywhere}
+.pptile .ppprice{font-weight:700;font-size:.9rem;font-variant-numeric:tabular-nums}
+.pptile .ppprice.none{font-weight:400;color:var(--text-muted)}
+.pptile .ppmark{position:absolute;top:.7rem;left:.7rem;padding:.1rem .55rem;border-radius:1rem;
+  background:var(--orange);color:var(--on-orange);font-size:.78rem;font-weight:700;box-shadow:var(--shadow)}
+.ppchips{display:flex;flex-wrap:wrap;gap:.25rem}
+.ppchip{display:inline-block;padding:.05rem .45rem;border-radius:1rem;border:1px solid var(--border);
+  background:var(--surface);color:var(--text);font-size:.76rem;line-height:1.45}
+.ppchip.ppflag{border-color:var(--orange);color:var(--orange-text);font-weight:700}
+.ppchip.ppmine{border-color:var(--orange);font-weight:700}
+.pptile.compact{padding:.2rem;gap:.15rem;border-radius:6px;border-color:transparent}
+.pptile.compact.current{border-color:var(--orange)}
+.pptile.compact .ppcode{font-size:.7rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  text-align:center}
+.printpick .ppempty{display:flex;flex-direction:column;align-items:flex-start;gap:.5rem;padding:1rem 0}
+.printpick .ppempty p{margin:0}
+.printpick .ppempty .btn{margin:0}
+.printpick .ppempty[hidden],.printpick .ppmore[hidden]{display:none}
+.printpick .ppmore{display:flex;justify-content:center;padding:1rem 0 .5rem}
+.printpick .ppmore .btn{margin:0}
+.printpick .pppreview{min-height:0;overflow:auto;overscroll-behavior:contain;display:flex;
+  flex-direction:column;
+  gap:.75rem;border-left:1px solid var(--border-soft);padding:0 .25rem 0 1rem}
+.pppreview .ppbig{width:100%;max-width:18rem;align-self:center;flex:none}
+.pppreview .ppbig img,.pppreview .ppbig .ph{display:flex;width:100%;aspect-ratio:5/7;border-radius:4.5%;
+  object-fit:cover;background:var(--surface-2)}
+.pppreview .ppinfo{display:flex;flex-direction:column;gap:.4rem;min-width:0}
+.pppreview h3{margin:0;font-size:1.15rem;line-height:1.25;overflow-wrap:anywhere}
+.pppreview .ppline{margin:0;color:var(--text-muted);font-size:.9rem;font-variant-numeric:tabular-nums}
+.pppreview .ppprices{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:.2rem .9rem;
+  margin:.25rem 0 0;font-variant-numeric:tabular-nums}
+.pppreview .ppprices dt{color:var(--text-muted);font-weight:700}
+.pppreview .ppprices dd{margin:0}
+.pppreview .ppnote{margin:.25rem 0 0;padding:.5rem .65rem;border-left:3px solid var(--orange);
+  background:var(--surface-2);font-size:.9rem;color:var(--text)}
+.pppreview .ppacts{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.5rem}
+.pppreview .ppacts button{margin:0;flex:1 1 auto}
+.pppreview .ppback{display:none}
+.pppreview .pphint{margin:0}
+@media (max-width:899.98px){
+  .printpick .ppmain{grid-template-columns:minmax(0,1fr);position:relative}
+  /* the preview covers the list (the heading and its Close button stay); the search and filters
+     step aside meanwhile */
+  .printpick .pppreview{display:none;position:absolute;inset:0;z-index:2;background:var(--surface);
+    border:0;border-radius:0;padding:.25rem .25rem env(safe-area-inset-bottom)}
+  .printpick .ppbox.previewing .pppreview{display:flex}
+  .printpick .ppbox.previewing .pptools,.printpick .ppbox.previewing .ppstatus{display:none}
+  .printpick .pppreview .ppback{display:inline-flex}
+  .pppreview .ppbig{max-width:min(20rem,72%)}
+  .printpick .ppfilters{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .printpick .ppall{grid-column:1 / -1} }
+@media (max-width:700px){
+  .printpick{padding:0;align-items:flex-end;-webkit-backdrop-filter:none;backdrop-filter:none}
+  .printpick .ppbox{width:100%;height:94vh;height:94dvh;
+    border-radius:var(--radius-panel) var(--radius-panel) 0 0;
     border-bottom:0;padding:.75rem .75rem calc(.75rem + env(safe-area-inset-bottom))}
-  .picker .prints{grid-template-columns:repeat(auto-fill,minmax(96px,1fr))} }
+  .printpick .ppgrid{grid-template-columns:repeat(auto-fill,minmax(138px,1fr));gap:.5rem} }
+@media (max-width:599.98px){
+  .printpick .ppfiltbtn{display:inline-flex}
+  .printpick .ppfilters:not(.open){display:none} }
+/* finger-sized on a touch screen (44 px) */
+@media (pointer:coarse){
+  .printpick .close{width:44px;min-height:44px;height:44px}
+  .printpick input[type=search],.printpick .msel-btn,.printpick select{height:44px;min-height:44px}
+  .printpick .ppfiltbtn,.printpick .ppacts button,.printpick .ppmore .btn,.printpick .ppempty .btn,
+  .printpick .ppstatus .btn{min-height:44px}
+  .printpick .ppall{min-height:44px} }
 /* Compact width: the save bar sits fixed on top of the bottom tab bar. The same breakpoint as the
    tab bar (theme.py's __MOBILE__, under 600px): at exactly 600px the rail or the top bar is
    showing and the bar stays sticky at the top, so nothing is left under a fixed bar with no room

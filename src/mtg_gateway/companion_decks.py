@@ -427,7 +427,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             csp=DECK_CSP,
             heading=False,
             deck_css=True,
-            extra_scripts=("deckstats.js",),
+            extra_scripts=("deckstats.js", "printpick.js"),
         )
         return remember_view(resp, "deck", view, secure=secure) if remember else resp
 
