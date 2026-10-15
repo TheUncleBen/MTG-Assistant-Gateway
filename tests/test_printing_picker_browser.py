@@ -342,6 +342,7 @@ def test_change_printing_from_the_card_menu_saves_with_undo(server: Server) -> N
         assert len(_tiles(page)) == 8
         _choose(page, "Sort", "Oldest first")
         assert _tiles(page)[0] == "LEA #270 · 1993"
+        assert "$3,500.00" in page.locator(".printpick .pptile", has_text="LEA #270").inner_text()
         _choose(page, "Sort", "Cheapest (USD)")
         cheap = _tiles(page)
         assert cheap[:3] == ["4ED #325 · 1995", "FRC #21 · 2026", "CMR #472 · 2020"], cheap
@@ -840,7 +841,7 @@ def test_saving_messages_and_picked_states_read_at_every_size(server: Server, wi
             first = strip.locator(".pptile").first
             assert (
                 first.get_attribute("title")
-                == "Reality Fracture Commander FRC #21: click to add this printing"
+                == "Reality Fracture Commander FRC #21 · 2026: click to add this printing"
             )
             assert first.locator(".ppcode").evaluate("e => e.scrollWidth <= e.clientWidth")  # never cut off
             allp = strip.locator(".allprints")

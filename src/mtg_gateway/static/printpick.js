@@ -56,7 +56,7 @@
     var n = v === undefined || v === null || v === "" ? NaN : Number(v);
     return isNaN(n) ? null : n;
   }
-  function money(n) { return "$" + n.toFixed(2); }
+  function money(n) { return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
   function samePrint(p, ref) {
     return !!(ref && p && String(p.set || "").toLowerCase() === String(ref.set || "").toLowerCase() &&
       String(p.collector_number) === String(ref.number));

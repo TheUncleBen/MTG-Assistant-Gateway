@@ -418,7 +418,7 @@
         thumb(r, c.name),
         el("span", { class: "main" }, [
           nameEl,
-          el("span", { class: "meta", text: (r.set ? r.set.toUpperCase() + " " + r.number : "") + (r.finish !== "normal" ? " · " + r.finish : "") + (r.price != null ? " · $" + Number(r.price).toFixed(2) : "") }),
+          el("span", { class: "meta", text: (r.set ? r.set.toUpperCase() + " " + r.number : "") + (r.finish !== "normal" ? " · " + r.finish : "") + (r.price != null ? " · $" + Number(r.price).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "") }),
           el("span", { class: "note muted small" })
         ]),
         qtyControls(function () { return r.after; }, function (v) { mutate(function () { r.after = v; }); }, c.name),
@@ -510,7 +510,8 @@
       var b = Pick.tile(p, { compact: true });
       if (pre) b.classList.add("current");
       b.tabIndex = -1;
-      b.title = (p.set_name || "") + " " + String(p.set || "").toUpperCase() + " #" + (p.collector_number || "") + ": click to add this printing";
+      b.title = (p.set_name || "") + " " + String(p.set || "").toUpperCase() + " #" + (p.collector_number || "") +
+        (p.released_at ? " · " + String(p.released_at).slice(0, 4) : "") + ": click to add this printing";
       b.addEventListener("click", function () { rememberSet(p.set || ""); addTyped(input.value, printing, name); });
       grid.appendChild(el("li", {}, [b]));
     });
