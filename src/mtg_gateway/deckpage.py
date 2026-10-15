@@ -2572,7 +2572,7 @@ ul.decklist.list .deck{margin-bottom:.5rem}
     padding:0;list-style:none}
   .addprints .pgrid li{min-width:0}
   .addprints .hint{margin:.5rem 0 0}
-  .addprints .allprints{width:100%;margin:.5rem 0 0;min-height:36px} }
+  .addprints .allprints{width:100%;margin:.5rem 0 0;min-height:36px;position:sticky;bottom:0} }
 @media (max-width:600px){
   .addbox form.addcard{grid-template-columns:1fr}
   .addbox form.addcard .go{justify-content:space-between}

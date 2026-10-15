@@ -510,7 +510,7 @@
       var b = Pick.tile(p, { compact: true });
       if (pre) b.classList.add("current");
       b.tabIndex = -1;
-      b.title = (p.set_name || "") + " " + (p.collector_number || "") + ": click to add this printing";
+      b.title = (p.set_name || "") + " " + String(p.set || "").toUpperCase() + " #" + (p.collector_number || "") + ": click to add this printing";
       b.addEventListener("click", function () { rememberSet(p.set || ""); addTyped(input.value, printing, name); });
       grid.appendChild(el("li", {}, [b]));
     });

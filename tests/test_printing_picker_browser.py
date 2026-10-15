@@ -334,6 +334,7 @@ def test_change_printing_from_the_card_menu_saves_with_undo(server: Server) -> N
         assert _tiles(page) == ["4ED #325 · 1995", "LEA #270 · 1993"]
         _choose(page, "Border", "White border")
         assert _tiles(page) == ["4ED #325 · 1995"]
+        assert "1 of 8 printings matches." in page.locator(".ppstatus").inner_text()
         _choose(page, "Border", "Borderless")
         assert _tiles(page) == []
         assert page.locator(".ppempty", has_text="No printing matches these filters.").is_visible()
@@ -392,8 +393,8 @@ def test_change_printing_from_the_card_menu_saves_with_undo(server: Server) -> N
         toast = page.locator(".deck-toast .msg", has_text="Saved")
         toast.wait_for(timeout=8000)
         assert toast.inner_text() == (
-            "Saved. Sol Ring is now SLD 1074, etched: that printing is not made in non-foil. "
-            "Snapshot kept under History"
+            "Saved. Sol Ring is now SLD #1074, etched: that printing is not made in non-foil. "
+            "Snapshot kept under History."
         )
         assert server.sol_ring() == [("sld", "1074", "Etched")]
         assert card.locator(".set").inner_text() == "SLD" and card.locator(".finish").inner_text() == "E"
@@ -423,7 +424,7 @@ def test_change_printing_from_the_card_menu_saves_with_undo(server: Server) -> N
         page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
         assert (
             page.locator(".deck-toast .msg").inner_text()
-            == "Saved. Sol Ring is now SLD 1075. Snapshot kept under History"
+            == "Saved. Sol Ring is now SLD #1075. Snapshot kept under History."
         )
         assert server.sol_ring() == [("sld", "1075", "Normal")]
         assert errors == []
@@ -728,5 +729,149 @@ def test_picker_fits_reads_and_touches_at_every_size(server: Server, width: int,
         if touch:
             assert page.evaluate(SMALL) == []
         _shot(page, f"preview-{width}-{theme}")
+        assert errors == []
+        browser.close()
+
+
+TOAST = ".deck-toast .msg, .deck-toast button"
+
+
+@pytest.mark.parametrize(("width", "theme"), SIZES)
+def test_saving_messages_and_picked_states_read_at_every_size(server: Server, width: int, theme: str) -> None:
+    """The deck page's messages for a printing change (saving, saved, saved with the finish
+    changed, after Undo, and refused, which puts the card back to the printing Archidekt has),
+    the picker on the deck's own printing, and the editor's add strip and a queued pick: nothing
+    scrolls sideways or is covered, and text keeps 4.5:1."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    server.app.state.gateway.scan.names.set_names(sorted({c["name"] for c in server.sf.cards}))
+    touch = width < 900
+    tag = f"{width}-{theme}"
+
+    def press(loc) -> None:
+        if touch:
+            loc.tap()
+        else:
+            loc.click()
+
+    def check(name: str, texts: str) -> None:
+        page.wait_for_timeout(150)
+        _shot(page, f"{name}-{tag}")
+        assert page.evaluate(MEASURE) == [], name
+        assert page.evaluate(CONTRAST, texts) == [], name
+        _shot(page, f"{name}-{tag}")
+
+    def close() -> None:
+        # Escape steps back: on a phone it first leaves the whole-card view, then closes
+        for _ in range(3):
+            if not page.locator(".printpick.open").count():
+                return
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(200)
+        assert page.locator(".printpick.open").count() == 0
+
+    def pick(code: str) -> None:
+        _open_picker(page, card)
+        press(page.locator(".printpick .pptile", has_text=code))
+        press(page.locator(".pppreview .ppuse"))
+
+    with sync_playwright() as p:
+        browser, page, errors = _page(
+            p, server, sid, width, theme=theme, touch=touch, height=800 if touch else 900
+        )
+        page.goto(f"{server.base}/decks/42?view=grid", wait_until="networkidle")
+        card = page.locator(".deckview .c[data-card='Sol Ring'][data-zone='main']")
+        # the deck's own printing: In the deck now, and the button greyed out
+        _open_picker(page, card)
+        press(page.locator(".printpick .pptile.current"))
+        use = page.locator(".pppreview .ppuse")
+        assert use.inner_text() == "Already in the deck" and use.is_disabled()
+        assert "In the deck now" in page.locator(".pppreview").inner_text()
+        check("deck-current", TEXT)
+        close()
+        # saving, held until the screenshot is taken
+        held: list = []
+        page.route(EDIT_URL, lambda route: held.append(route))
+        pick("SLD #1074")
+        msg = page.locator(".deck-toast .msg")
+        msg.filter(has_text="Changing").wait_for(timeout=5000)
+        assert msg.inner_text() == "Changing Sol Ring to SLD #1074…"
+        check("toast-saving", TOAST)
+        for _ in range(50):
+            if held:
+                break
+            page.wait_for_timeout(100)
+        held[0].continue_()
+        page.unroute(EDIT_URL)
+        msg.filter(has_text="Saved").wait_for(timeout=8000)
+        assert msg.inner_text() == (
+            "Saved. Sol Ring is now SLD #1074, etched: that printing is not made in non-foil. "
+            "Snapshot kept under History."
+        )
+        check("toast-saved-finish", TOAST)
+        press(page.locator(".deck-toast button", has_text="Undo"))
+        msg.filter(has_text="Undone").wait_for(timeout=8000)
+        assert msg.inner_text() == "Undone. Snapshots are under History."
+        assert server.sol_ring() == [("cmr", "472", "Normal")]
+        check("toast-undo", TOAST)
+        pick("SLD #1075")
+        msg.filter(has_text="Saved").wait_for(timeout=8000)
+        assert msg.inner_text() == "Saved. Sol Ring is now SLD #1075. Snapshot kept under History."
+        check("toast-saved", TOAST)
+        server.ark.fail_card_writes = True
+        pick("SLD #1074")
+        err = page.locator(".deck-toast.error .msg")
+        err.wait_for(timeout=8000)
+        assert err.inner_text().startswith("Printing not saved:"), err.inner_text()
+        assert err.inner_text().endswith("Sol Ring is back to SLD #1075."), err.inner_text()
+        check("toast-error", TOAST)
+        server.ark.fail_card_writes = False
+        # the editor: the add strip and the full picker to add (wide screens: phones have no strip),
+        # and a queued pick
+        page.goto(f"{server.base}/decks/42/edit", wait_until="networkidle")
+        if not touch:
+            box = page.locator("#addname")
+            box.click()
+            box.press_sequentially("sol r", delay=30)
+            strip = page.locator(".addprints:visible")
+            strip.locator(".pptile").first.wait_for(timeout=5000)
+            first = strip.locator(".pptile").first
+            assert (
+                first.get_attribute("title")
+                == "Reality Fracture Commander FRC #21: click to add this printing"
+            )
+            assert first.locator(".ppcode").evaluate("e => e.scrollWidth <= e.clientWidth")  # never cut off
+            allp = strip.locator(".allprints")
+            assert allp.is_visible() and allp.evaluate(
+                "b => { const r = b.getBoundingClientRect(), s = b.parentElement.getBoundingClientRect();"
+                " return r.bottom <= s.bottom + 1; }"
+            )  # in reach without scrolling the list
+            _shot(page, f"editor-strip-{tag}")  # a pop-over: it covers the page below by design
+            assert (
+                page.evaluate(CONTRAST, ".addprints .ppcode, .addprints .head, .addprints .allprints") == []
+            )
+            press(page.locator(".addprints .allprints"))
+            page.locator(".printpick .pptile").first.wait_for(timeout=5000)
+            press(page.locator(".printpick .pptile", has_text="SLD #1074"))
+            assert page.locator(".pppreview .ppuse").inner_text() == "Add this printing"
+            check("editor-add", TEXT)
+            page.keyboard.press("Escape")
+            page.locator(".printpick.open").wait_for(state="detached", timeout=3000)
+        row = page.locator(".erow[id='card-Sol Ring']")
+        for _ in range(2):  # queue a pick, then open the picker again on it
+            press(row.locator("details.rowmenu summary"))
+            press(row.locator(".menu button", has_text="Change printing"))
+            page.locator(".printpick .pptile").first.wait_for(timeout=5000)
+            if not page.locator(".printpick .pptile.picked").count():
+                press(page.locator(".printpick .pptile", has_text="SLD #1074"))
+                press(page.locator(".pppreview .ppuse"))
+                page.locator(".printpick.open").wait_for(state="detached", timeout=3000)
+        press(page.locator(".printpick .pptile.picked"))
+        use = page.locator(".pppreview .ppuse")
+        assert use.inner_text() == "Already picked" and use.is_disabled()
+        assert "Picked, not saved yet" in page.locator(".pppreview").inner_text()
+        check("editor-picked", TEXT)
         assert errors == []
         browser.close()
