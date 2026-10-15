@@ -204,9 +204,9 @@ def add_scan_tools(server: MCPServer, service: ScanService, *, links: CardLinks 
             "`matching_total` printings match, `returned_count` of them are in `cards`; `limit` caps the "
             "rows (default 25) and `truncated` means that cap cut the list. `sets` lists the sets the card "
             "was printed in, newest first, not narrowed by set_code or finish; `limit` caps it too, "
-            "`sets_total` counts them all and `sets_truncated` means the cap cut it. In an app that shows cards, the user sees "
-            "every printing's picture and taps the one they mean; wait for that pick. Does not touch "
-            "Archidekt."
+            "`sets_total` counts them all and `sets_truncated` means the cap cut it. In an app that "
+            "shows cards, the user sees every printing's picture and taps the one they mean; wait for "
+            "that pick. Does not touch Archidekt."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
         meta=tool_meta(PRINTINGS_CARD_URI) if links is not None else None,

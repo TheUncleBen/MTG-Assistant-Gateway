@@ -279,9 +279,10 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         info = await decks.folders(sub)
         inside = clean_text(str(params.get("inside") or ""))
         if inside:
-            hits = [f for f in info["folders"] if f["depth"] and f["name"].casefold() == inside.casefold()]
+            shown = [f for f in info["folders"] if f["depth"] and not f.get("backup")]  # Q21
+            hits = [f for f in shown if f["name"].casefold() == inside.casefold()]
             if len(hits) != 1:
-                names = ", ".join(f"'{f['name']}'" for f in info["folders"] if f["depth"]) or "none"
+                names = ", ".join(f"'{f['name']}'" for f in shown) or "none"
                 raise DeckError(
                     "not_found" if not hits else "invalid",
                     f"inside must name exactly one of your folders (yours: {names})",

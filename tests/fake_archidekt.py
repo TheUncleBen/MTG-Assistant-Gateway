@@ -409,10 +409,19 @@ class FakeArchidekt:
             return httpx.Response(401, json={"detail": "Authentication credentials were not provided."})
         if path == "/api/decks/folderTree/" and request.method == "GET":
             root = 1000 + self.users[who]["id"]
-            kids = [{**f, "children": None} for f in self.folders.get(who, [])]
-            return httpx.Response(
-                200, json={"id": root, "name": "root", "children": kids or None, "private": False}
-            )
+            mine = self.folders.get(who, [])
+
+            def kids(parent: int) -> list[dict[str, Any]] | None:
+                # a folder sits under the root unless it names another folder as its "parent"
+                got = [
+                    {**{k: v for k, v in f.items() if k != "parent"}, "children": kids(f["id"])}
+                    for f in mine
+                    if f.get("parent", root) == parent
+                ]
+                return got or None
+
+            tree = {"id": root, "name": "root", "children": kids(root), "private": False}
+            return httpx.Response(200, json=tree)
         if path == "/api/decks/folders/" and request.method == "POST":
             body = json.loads(request.content)
             assert body["parentFolder"] == 1000 + self.users[who]["id"], body

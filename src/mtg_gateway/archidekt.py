@@ -327,6 +327,7 @@ def list_row(d: dict[str, Any]) -> dict[str, Any]:
     bracket = d.get("edhBracket")
     size = d.get("size")
     folder = d.get("parentFolderName")
+    folder_id = d.get("parentFolderId")
     views = d.get("viewCount")
     return {
         "id": str(d["id"]),
@@ -338,6 +339,8 @@ def list_row(d: dict[str, Any]) -> dict[str, Any]:
         "private": bool(d.get("private", False)),
         "unlisted": bool(d.get("unlisted", False)),
         "folder": str(folder) if isinstance(folder, str) and folder else None,
+        # the folder's id (verified in the v3 listing 2026-10-05); None at the top level
+        "folder_id": folder_id if isinstance(folder_id, int) and not isinstance(folder_id, bool) else None,
         "colors": {k: v for k, v in colors.items() if k in "WUBRG" and isinstance(v, int)},
         "size": size if isinstance(size, int) and not isinstance(size, bool) else None,
         "bracket": bracket if isinstance(bracket, int) and not isinstance(bracket, bool) else None,

@@ -1858,37 +1858,28 @@ def deck_list_controls_html(
     q: str,
     order: str,
     view: str,
-    folders: list[str],
     folder: str,
     total: int | None,
     pending: bool = False,
 ) -> str:
-    """The toolbar over the deck list. ``pending``: the list is still being read (the folder picker
-    is rendered hidden and the total left blank; decks.js fills both). ``total`` None: the list
-    couldn't be read (Q64), so no count is shown."""
-    folder_opts = "".join(
-        f"<option value='{esc(f)}'{' selected' if f == folder else ''}>{esc(f)}</option>" for f in folders
-    )
+    """The toolbar over the deck list. ``folder``: the open folder's id ("" at the top level),
+    kept when the toolbar is sent so Order by and View as stay in that folder (the name filter
+    searches every folder, Q20). ``pending``: the list is still being read (the total is left
+    blank; decks.js fills it). ``total`` None: the list couldn't be read (Q64), so no count."""
     return (
         "<section class='panel listbar'><form method='get' action='/decks' class='controls' id='listform'>"
-        "<div class='field grow'><label for='q'>Filter deck name</label><span class='search'>"
+        + (f"<input type='hidden' name='folder' value='{esc(folder)}'>" if folder else "")
+        + "<div class='field grow'><label for='q'>Filter deck name</label><span class='search'>"
         f"<input id='q' type='search' name='q' value='{esc(q)}' placeholder='Example deck name'>"
         f"<button type='submit' aria-label='Filter' title='Filter'>{icon('search')}</button></span></div>"
         + _select(
             "view", {"grid": "Grid", "list": "List"}, view, "View as", "list" if view == "list" else "grid"
         )
         + _select("order", LIST_ORDERS, order, "Order by", "sort")
-        + (
-            f"<div class='field' id='folder-field'{' hidden' if pending else ''}><label for='f-folder'>"
-            f"Folder</label><span class='sel'>{icon('decks')}<select id='f-folder' name='folder'>"
-            f"<option value=''>All folders</option>{folder_opts}</select></span></div>"
-            if folders or pending
-            else ""
-        )
         + "<div class='field'><span class='lbl' id='decks-total'"
         + (" hidden" if total is None and not pending else "")
         + f">Total decks: {'…' if pending or total is None else total}</span>"
-        f"<a class='btn' href='/folders'>{icon('folder')} Folders</a>"
+        f"<a class='btn' href='/folders'>{icon('folder')} Manage folders</a>"
         f"<a class='btn btn-primary' href='/decks/new'>{icon('plus')} New deck</a></div>"
         "<noscript><button type='submit' class='apply'>Apply</button></noscript>"
         "</form></section>"
@@ -2458,7 +2449,7 @@ table.qty td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-
 .description{font-size:16px} .description .empty{color:var(--text-muted)}
 
 /* deck list (deckLink grid: thumbnail with colour bar, info block, tags strip) */
-.listbar .controls{display:grid;grid-template-columns:1fr repeat(3,minmax(140px,auto)) auto;gap:1rem;
+.listbar .controls{display:grid;grid-template-columns:1fr repeat(2,minmax(140px,auto)) auto;gap:1rem;
   align-items:end}
 .listbar .field.grow{min-width:12rem}
 .listbar .field .btn{margin:0}

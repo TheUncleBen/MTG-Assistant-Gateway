@@ -65,7 +65,8 @@ def test_cold_deck_pages_fill_their_placeholders(server: Server) -> None:
         assert page.locator("[aria-busy=true]").count() == 0
         assert "Sample Commander Deck" in page.locator("ul.decklist").inner_text()
         assert page.locator("#decks-total").inner_text() == "Total decks: 1"
-        assert page.locator("#folder-field").get_attribute("hidden") is not None  # no folders: stays hidden
+        assert page.locator("#folder-field").count() == 0  # opening folders replaced the dropdown (F3)
+        assert page.locator(".listbar a[href='/folders']").inner_text().strip() == "Manage folders"
         # home, cold again
         svc.deck_lists.drop("user-1")
         page.goto(f"{server.base}/", wait_until="commit")
