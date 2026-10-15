@@ -14,7 +14,7 @@ from mtg_gateway.collection import (
     parse_collection_import,
 )
 
-from .test_browse_collection import NAV, Stack, linked, stack  # noqa: F401  (fixture)
+from .test_browse_collection import NAV, Stack, linked, stack_options  # noqa: F401  (fixture)
 
 
 def test_import_reads_language_in_either_code_set_and_defaults_to_english():
@@ -68,7 +68,7 @@ def test_export_help_gives_every_column_type():
     assert "Skip first line" in html and "Archidekt does not read the column names" in html
 
 
-async def test_import_and_export_round_trip_archidekt_codes(stack: Stack) -> None:  # noqa: F811
+async def test_import_and_export_round_trip_archidekt_codes(stack: Stack) -> None:
     b = await linked(stack)
     try:
         page = await b.http.get("/collection", headers=NAV)
