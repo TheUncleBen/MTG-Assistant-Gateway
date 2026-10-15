@@ -432,6 +432,7 @@ class DeckCard:
     # Archidekt's custom mana value for this row (the deck's own override of the card's), or None
     custom_cmc: float | None = None
     companion: bool = False
+    flipped_default: bool = False  # the row shows its back face by default (the site's flippedDefault)
     image_hash: str = ""
     scryfall_uid: str = ""
     default_category: str = ""  # Archidekt's auto category for cards with categories null
@@ -2146,6 +2147,7 @@ def parse_deck(body: Any) -> Deck:
                 label=str(entry.get("label") or ""),
                 custom_cmc=_number(entry.get("customCmc")),
                 companion=entry.get("companion") is True,
+                flipped_default=entry.get("flippedDefault") is True,
                 image_hash=str(card.get("scryfallImageHash") or ""),
                 scryfall_uid=str(card.get("uid") or ""),
                 default_category=str(oracle.get("defaultCategory") or ""),

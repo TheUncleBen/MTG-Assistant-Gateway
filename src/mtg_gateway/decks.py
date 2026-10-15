@@ -1475,8 +1475,10 @@ def _entry(action: str, card: Any, qty: int, categories: list[str] | None = None
     A row with no tag sends Archidekt's empty one, ``NO_LABEL``, as its editor does (Q58)."""
     mods: dict[str, Any] = {
         "quantity": qty,
-        "companion": False,
-        "flippedDefault": False,
+        # the row's own flags, as the site sends them (its site code, read 2026-10-14): sending
+        # False would clear a companion or a back-face default on any change to the row (A50)
+        "companion": bool(getattr(card, "companion", False)),
+        "flippedDefault": bool(getattr(card, "flipped_default", False)),
         "modifier": card.modifier or "Normal",
         "label": getattr(card, "label", "") or NO_LABEL,
     }
