@@ -1081,9 +1081,10 @@ def category_plan_rows(
 
     ``set_category`` moves every row of the card to exactly that one category (or, with
     ``categories``, exactly those, the first the primary one). ``set_commander``
-    files the card under Commander as its primary category, keeping its other categories (K10),
-    and takes Commander off every other row that has it (keeping that row's other categories), so after the change the commanders are exactly the cards named
-    by this proposal's set_commander changes (two for partners). Rows that already have the
+    files the card under Commander as its primary category, keeping its other categories,
+    and takes Commander off every other row that has it (keeping that row's other
+    categories), so after the change the commanders are exactly the cards named by this
+    proposal's set_commander changes (two for partners). Rows that already have the
     wanted categories are left alone; a card that is not in the deck is an error.
     """
     cat_changes = [ch for ch in changes if ch.action in CATEGORY_ACTIONS]
