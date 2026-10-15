@@ -273,13 +273,13 @@
   function describe(ch) {
     var side = ch.zone === "side" ? " · " + (cfg.sideCategory || "maybeboard").toLowerCase() : "";
     switch (ch.action) {
-      case "add": return "+" + ch.quantity + (ch.set_code ? " (" + ch.set_code.toUpperCase() + " " + ch.collector_number + ")" : "") + (ch.foil ? " foil" : "") + side;
+      case "add": return "+" + ch.quantity + (ch.set_code ? " (" + ch.set_code.toUpperCase() + " #" + ch.collector_number + ")" : "") + (ch.foil ? " foil" : "") + side;
       case "remove": return "remove" + side;
       case "set_quantity": return "→ " + ch.quantity + side;
       case "set_commander": return "commander";
       case "set_category": return "→ " + ch.category;
       case "set_finish": return "→ " + ch.finish;
-      case "set_printing": return "→ " + ch.set_code.toUpperCase() + " " + ch.collector_number + (ch.finish ? " " + ch.finish : "");
+      case "set_printing": return "→ " + ch.set_code.toUpperCase() + " #" + ch.collector_number + (ch.finish ? " " + ch.finish : "");
     }
     return "";
   }
@@ -321,7 +321,7 @@
         a.image ? el("img", { class: "thumb", src: a.image, alt: "", loading: "lazy" }) : el("span", { class: "thumb ph" }, [svg("plus")]),
         el("span", { class: "main" }, [
           nameEl,
-          el("span", { class: "meta", text: [a.type || "", a.set_code ? a.set_code.toUpperCase() + " " + a.collector_number : "", a.foil ? "foil" : "", a.zone === "side" ? "new " + (cfg.sideCategory || "maybeboard").toLowerCase() + " card" : "new card"].filter(Boolean).join(" · ") })
+          el("span", { class: "meta", text: [a.type || "", a.set_code ? a.set_code.toUpperCase() + " #" + a.collector_number : "", a.foil ? "foil" : "", a.zone === "side" ? "new " + (cfg.sideCategory || "maybeboard").toLowerCase() + " card" : "new card"].filter(Boolean).join(" · ") })
         ]),
         qtyControls(function () { return a.quantity; }, function (v) { mutate(function () { if (v === 0) delete added[k]; else a.quantity = v; }); }, a.name),
         a.zone === "side" ? el("span", { class: "s muted small", text: cfg.sideCategory || "Maybeboard" }) : categorySelect(a.category || "", function (v) { mutate(function () { a.category = v || null; }); }, true, false, a.name),
@@ -340,7 +340,7 @@
       li.classList.toggle("removed", r.after === 0);
       var note = li.querySelector(".note");
       var parts = [];
-      if (r.printing) parts.push("printing → " + r.printing.set_code.toUpperCase() + " " + r.printing.collector_number);
+      if (r.printing) parts.push("printing → " + r.printing.set_code.toUpperCase() + " #" + r.printing.collector_number);
       if (r.setFinish && r.setFinish !== r.finish) parts.push("finish → " + r.setFinish);
       if (rc.waiting.length) parts.push("the " + rc.waiting.join(" and ") + " change waits for the next save");
       note.textContent = parts.join(" · ");
@@ -386,7 +386,7 @@
           thumb(r, c.name),
           el("span", { class: "main" }, [
             el("span", { class: "name", text: c.name }),
-            el("span", { class: "meta", text: (r.set ? r.set.toUpperCase() + " " + r.number : "") + (r.finish !== "normal" ? " · " + r.finish : "") + " · not in the deck's count" }),
+            el("span", { class: "meta", text: (r.set ? r.set.toUpperCase() + " #" + r.number : "") + (r.finish !== "normal" ? " · " + r.finish : "") + " · not in the deck's count" }),
             el("span", { class: "note muted small" })
           ]),
           qtyControls(function () { return r.after; }, function (v) { mutate(function () { r.after = v; }); }, c.name),
@@ -418,7 +418,7 @@
         thumb(r, c.name),
         el("span", { class: "main" }, [
           nameEl,
-          el("span", { class: "meta", text: (r.set ? r.set.toUpperCase() + " " + r.number : "") + (r.finish !== "normal" ? " · " + r.finish : "") + (r.price != null ? " · $" + Number(r.price).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "") }),
+          el("span", { class: "meta", text: (r.set ? r.set.toUpperCase() + " #" + r.number : "") + (r.finish !== "normal" ? " · " + r.finish : "") + (r.price != null ? " · $" + Number(r.price).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "") }),
           el("span", { class: "note muted small" })
         ]),
         qtyControls(function () { return r.after; }, function (v) { mutate(function () { r.after = v; }); }, c.name),
@@ -470,7 +470,7 @@
     var finish = foilIn && foilIn.checked ? "foil" : null;
     mutate(function () { addCard(parts.name, parts.qty, catIn.value || null, printing || null, finish, zone); });
     var where = zone === "side" ? cfg.sideCategory || "Maybeboard" : (catIn.value || "the deck");
-    var print = printing && printing.set_code ? " (" + printing.set_code.toUpperCase() + " " + printing.collector_number + ")" : "";
+    var print = printing && printing.set_code ? " (" + printing.set_code.toUpperCase() + " #" + printing.collector_number + ")" : "";
     if (addStatus) addStatus.textContent = "Added " + parts.qty + " × " + parts.name + print + " to " + where + ". Type the next card, or save.";
     input.value = "";
     hidePrints();

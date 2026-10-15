@@ -653,9 +653,9 @@ def test_the_editor_uses_the_shared_picker_and_queues_the_change(server: Server)
         # queued, not saved: the row says what changes and the pending list has it
         assert dlg.count() == 0
         note = row.locator(".note").inner_text()
-        assert note == "printing → SLD 1074 · finish → etched", note
+        assert note == "printing → SLD #1074 · finish → etched", note
         assert page.locator(".pendingbox .n").inner_text() == "1"
-        assert "→ SLD 1074 etched" in page.locator(".pending").text_content()
+        assert "→ SLD #1074 etched" in page.locator(".pending").text_content()
         assert server.sol_ring() == [("cmr", "472", "Normal")]
         # the picker opened again marks the pick waiting; picking the deck's own takes it back
         row.locator("details.rowmenu summary").click()
@@ -677,7 +677,7 @@ def test_the_editor_uses_the_shared_picker_and_queues_the_change(server: Server)
         use = page.locator(".pppreview .ppuse")
         assert use.inner_text() == "Add this printing"
         use.click()
-        assert "Added 1 × Sol Ring (SLD 1075)" in page.locator(".addstatus").inner_text()
+        assert "Added 1 × Sol Ring (SLD #1075)" in page.locator(".addstatus").inner_text()
         assert errors == []
         browser.close()
 
