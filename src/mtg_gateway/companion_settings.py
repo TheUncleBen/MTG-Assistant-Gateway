@@ -18,6 +18,7 @@ from .deckpage import (
     card_image,
 )
 from .decks import DeckError, current_client
+from .folderview import visible_folders
 from .pages import (
     BROWSER_CLIENT_ID,
     _csrf,
@@ -280,10 +281,12 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 + "<p class='muted'>Your folders could not be read from Archidekt right now.</p></section>"
             )
         current = deck.parent_folder if deck.parent_folder is not None else folders["root_id"]
+        # the backup folder is no place to move a deck to (Q21); a deck already in it keeps its row
         opts = "".join(
             f"<option value='{f['id']}'{' selected' if f['id'] == current else ''}>"
             f"{_esc(INDENT * f['depth'] + f['name'])}</option>"
             for f in folders["folders"]
+            if not f.get("backup") or f["id"] == current
         )
         return (
             f"<section class='panel folderbox' id='folder'><h2>Folder</h2>"
@@ -695,11 +698,11 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
                 "<div class='panel'><p>Your folders could not be read from Archidekt right now.</p>"
                 "<a class='btn' href='/decks'>Back to My decks</a></div>"
             )
-        rows = folders["folders"]
+        rows = visible_folders(folders)  # never the gateway's backup folder (Q21)
         tree = "".join(
             f"<li style='--depth:{f['depth']}'><span class='name'>{icon('folder')} {_esc(f['name'])}</span>"
             + ("<span class='badge'>private</span>" if f["private"] else "")
-            + (f"<a class='btn' href='/decks?folder={_esc(f['name'])}'>Show decks</a>" if f["depth"] else "")
+            + (f"<a class='btn' href='/decks?folder={f['id']}'>Show decks</a>" if f["depth"] else "")
             + "</li>"
             for f in rows
         )

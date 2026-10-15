@@ -192,7 +192,7 @@ async def test_cold_pages_render_a_placeholder_and_the_json_endpoint_fills_it(st
             in r.text
         )
         assert "decklist list skeleton" in r.text and "Total decks: …" in r.text
-        assert "id='folder-field' hidden" in r.text and "/static/decks.js" in r.text
+        assert "folder-field" not in r.text and "/static/decks.js" in r.text  # no Folder dropdown (F3)
         assert "Sample Commander Deck" not in r.text
         assert "script-src 'self'" in r.headers["content-security-policy"]
         assert "connect-src 'self'" in r.headers["content-security-policy"]
@@ -200,7 +200,7 @@ async def test_cold_pages_render_a_placeholder_and_the_json_endpoint_fills_it(st
         j = await b.http.get("/api/decks/mine?shape=list&order=name&view=list")
         assert j.status_code == 200 and j.headers["cache-control"] == "no-store"
         data = j.json()
-        assert data["ok"] is True and data["total"] == 1 and data["count"] == 1 and data["folders"] == []
+        assert data["ok"] is True and data["total"] == 1 and data["count"] == 1 and "folders" not in data
         assert data["fetched_at"] and data["decks"][0]["id"] == "42"
         assert data["decks"][0]["url"] == "https://archidekt.com/decks/42"
         assert "decklist list'" in data["html"] and "Sample Commander Deck" in data["html"]

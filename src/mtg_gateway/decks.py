@@ -1636,6 +1636,9 @@ class DeckService:
             keep_for=lambda rows: DECK_LIST_PARTIAL if getattr(rows, "unreadable", 0) else None,
         )
         self.deck_list_wait = DECK_LIST_COLD_WAIT
+        # The member's folder tree as My decks shows it (folder_view), kept like the deck list and
+        # dropped by the same writes. The Folders page and every folder write read Archidekt live.
+        self.folder_trees = MemberCache(DECK_LIST_FRESH, DECK_LIST_STALE)
         # (member, deck id) -> (when read, the deck): what a deck page showed, for the next view of
         # it (page_deck). Every write the gateway sends empties it; the counter tells a read that
         # was under way during a write not to keep what it got.
@@ -1663,12 +1666,14 @@ class DeckService:
             return
         if not path.startswith("/collection"):
             self.deck_lists.drop(sub)
+            self.folder_trees.drop(sub)
         for hook in self.write_hooks:
             hook(sub, path)
 
     def forget_member(self, sub: str) -> None:
         """Drop everything cached for a member (their link changed or their data was deleted)."""
         self.deck_lists.drop(sub)
+        self.folder_trees.drop(sub)
         self._forget_page_decks()
         for hook in self.write_hooks:
             hook(sub, "")
@@ -3945,9 +3950,11 @@ class DeckService:
             if not want or want in ("top", "top level", "none"):
                 target = by_id[root]
             else:
-                hits = [f for f in info["folders"] if f["depth"] > 0 and f["name"].casefold() == want]
+                # the gateway's backup folder is never a place to move a deck to (Q21)
+                shown = [f for f in info["folders"] if f["depth"] > 0 and not f.get("backup")]
+                hits = [f for f in shown if f["name"].casefold() == want]
                 if len(hits) != 1:
-                    names = ", ".join(sorted({f["name"] for f in info["folders"] if f["depth"] > 0})[:30])
+                    names = ", ".join(sorted({f["name"] for f in shown})[:30])
                     what = "No folder" if not hits else "More than one folder"
                     raise DeckError("invalid", f"{what} is called '{raw['folder']}'. Your folders: {names}")
                 target = hits[0]
@@ -4234,32 +4241,58 @@ class DeckService:
     # Folders -----------------------------------------------------------------------------------
     async def folders(self, sub: str) -> dict[str, Any]:
         """The member's folder tree flattened, root first: ``{root_id, folders: [{id, name, depth,
-        parent, private}]}``. The gateway's backup folder is listed like any other."""
+        parent, private, backup}]}``, read from Archidekt now. ``backup`` marks the gateway's
+        backup folder and everything inside it (``visible_folders`` leaves them out, Q21); the
+        checks before a folder write still see them."""
         tree = await self._call(sub, self.client.folder_tree)
+        return self._flatten_folders(tree)
+
+    async def folder_view(self, sub: str, *, wait: float | None = None) -> dict[str, Any] | None:
+        """``folders`` from the member cache (fresh for DECK_LIST_FRESH, then refreshed in the
+        background like the deck list), for My decks. None when the tree is cold and ``wait``
+        ran out; the read carries on and lands in the cache."""
+
+        async def fetch() -> dict[str, Any]:
+            return await self._call(sub, self.client.folder_tree)
+
+        tree = await self.folder_trees.get(sub, fetch, wait=wait)
+        return None if tree is None else self._flatten_folders(tree)
+
+    def _is_backup_folder(self, name: str, depth: int) -> bool:
+        """The gateway's backup folder: the folder the deck list treats as it (its exact name, as
+        archidekt.list_decks compares), or the one ensure_folder would reuse (the same name in
+        other capitals, directly under the top level). Only while backups are on."""
+        wanted = self.settings.archidekt_backup_folder if self.settings.archidekt_backups else None
+        if not wanted:
+            return False
+        return name == wanted or (depth == 1 and name.casefold() == wanted.casefold())
+
+    def _flatten_folders(self, tree: dict[str, Any]) -> dict[str, Any]:
         out: list[dict[str, Any]] = []
 
-        def walk(node: dict[str, Any], depth: int, parent: int | None) -> None:
+        def walk(node: dict[str, Any], depth: int, parent: int | None, hidden: bool) -> None:
             if len(out) >= self.MAX_FOLDERS or not isinstance(node.get("id"), int):
                 return
+            raw = clean_text(str(node.get("name") or ""))
+            hidden = hidden or (depth > 0 and self._is_backup_folder(raw, depth))
             out.append(
                 {
                     "id": node["id"],
                     # Archidekt's top-level folder has a technical name; the pages call it by what it is
-                    "name": "Top level (no folder)"
-                    if depth == 0
-                    else clean_text(str(node.get("name") or "")) or "Folder",
+                    "name": "Top level (no folder)" if depth == 0 else raw or "Folder",
                     "depth": depth,
                     "parent": parent,
                     "private": bool(node.get("private")),
+                    "backup": hidden,
                 }
             )
             children = node.get("children") or []
             for child in sorted(
                 (c for c in children if isinstance(c, dict)), key=lambda c: str(c.get("name") or "").lower()
             ):
-                walk(child, depth + 1, node["id"])
+                walk(child, depth + 1, node["id"], hidden)
 
-        walk(tree, 0, None)
+        walk(tree, 0, None, False)
         return {"root_id": tree["id"], "folders": out}
 
     async def _folder_in(self, sub: str, folder_id: int) -> tuple[dict[str, Any], dict[str, Any]]:
