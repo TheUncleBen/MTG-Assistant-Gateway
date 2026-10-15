@@ -735,7 +735,7 @@
       histBusy = false;
       past.push(entry);
       syncHist();
-      toast("Redone. Snapshot kept under History", { actions: [histButton("Undo", undoLast), historyLink()] });
+      toast("Redone. Snapshot kept under History.", { actions: [histButton("Undo", undoLast), historyLink()] });
     }).catch(function (err) {
       histBusy = false;
       future.push(entry);
@@ -761,7 +761,7 @@
   // note: what the Saved message says in place of the plain "Saved." (a printing change says
   // which printing, and when the finish had to change with it)
   function applyAnswer(d, changes, undoChanges, replay, note) {
-    var saved = note || "Saved. Snapshot kept under History";
+    var saved = note || "Saved. Snapshot kept under History.";
     var names = namesOf(changes);
     drawRows(d.rows, names);
     drawStats(d);
@@ -1059,11 +1059,14 @@
     });
   }
   var FINISH_WORDS = { normal: "non-foil", foil: "foil", etched: "etched" };
+  // "SLD 1075" (the page's data-set) as the picker writes it: "SLD #1075"
+  function printLabel(set) { return String(set || "").trim().replace(/\s+/, " #"); }
   function savePrinting(card, p, info) {
     var name = card.getAttribute("data-card") || "";
     var was = printingOf(card);
     var wasPr = was.set.trim().split(/\s+/);
-    var label = String(p.set).toUpperCase() + " " + p.collector_number;
+    var label = String(p.set).toUpperCase() + " " + p.collector_number;  // data-set, as the page draws it
+    var said = printLabel(label);
     var ch = { action: "set_printing", card_name: name, set_code: String(p.set).toLowerCase(), collector_number: String(p.collector_number) };
     if (info.changed) ch.finish = info.finish;
     // Undo: the old printing (and finish, when this pick changed it). Another row of the card in
@@ -1078,14 +1081,14 @@
     var now = { set: label, img: p.image_normal || p.image_small || "", price: window.MtgPrintPick.priceOf(p, info.finish), finish: fin };
     var held = holdConfirmed(card, "Printing", function () { return was; }), gen = held.gen;
     held.queued++;
-    var saying = "Changing " + name + " to " + label + "…";
+    var saying = "Changing " + name + " to " + said + "…";
     showPrinting(card, now);
     refreshStacks();
     savingNote(saying, false, card, "Printing");
     // P6: the Saved message says when the finish changed with the printing
-    var note = "Saved. " + name + " is now " + label +
+    var note = "Saved. " + name + " is now " + said +
       (info.changed ? ", " + FINISH_WORDS[info.finish] + ": that printing is not made in " + FINISH_WORDS[info.from] : "") +
-      ". Snapshot kept under History";
+      ". Snapshot kept under History.";
     background({
       card: card, what: "Printing",
       // an earlier printing change of this card was refused: this one was made over a printing Archidekt never had
@@ -1096,7 +1099,7 @@
         var back = held.state;
         showPrinting(card, back);
         refreshStacks();
-        return name + " is back to " + back.set + "." +
+        return name + " is back to " + printLabel(back.set) + "." +
           droppedNote(held, "Your later printing change was not sent.", "Your later printing changes were not sent.");
       },
       done: function () { held.queued--; releaseConfirmed(held); }

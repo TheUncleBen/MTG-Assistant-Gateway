@@ -126,7 +126,8 @@
     b.appendChild(pic);
     var cap = el("span", "ppcap");
     if (!o.compact) cap.appendChild(el("span", "ppsetname", p.set_name || String(p.set || "").toUpperCase()));
-    cap.appendChild(el("span", "ppcode", code(p) + (year(p) ? " · " + year(p) : "")));
+    // a small tile has room for the set and number only; its name says the year
+    cap.appendChild(el("span", "ppcode", code(p) + (year(p) && !o.compact ? " · " + year(p) : "")));
     if (!o.compact) {
       cap.appendChild(chips(p));
       var price = priceOf(p, o.finish || "nonfoil");
@@ -469,10 +470,12 @@
     var filtered = st.q || st.params.finish || st.params.frame || st.params.border;
     var english_n = st.list.filter(function (p) { return english(p) && (st.all || !(preview(p) || digital(p))); }).length;
     var words;
-    if (!st.list.length) words = filtered ? "No printing matches." : "Scryfall lists no printing of this card.";
-    else if (st.complete) words = filtered ? shown.length + " of " + plural(english_n, "printing") + " match." : plural(shown.length, "printing") + ".";
-    else words = (st.q ? shown.length + " match. " : "") + "Showing " + st.list.length + " of " + plural(st.total, "printing") + ".";
-    if (hidden) words += " " + plural(hidden, "digital-only or preview printing") + " hidden.";
+    // the box below says it when filters leave nothing: the count line then says nothing more
+    if (!st.list.length) words = filtered || st.all ? "" : "Scryfall lists no printing of this card.";
+    else if (st.complete) words = filtered ? shown.length + " of " + plural(english_n, "printing") + (shown.length === 1 ? " matches." : " match.") : plural(shown.length, "printing") + ".";
+    else words = (st.q ? plural(shown.length, "match", "matches") + ". " : "") + "Showing " + st.list.length + " of " + plural(st.total, "printing") + ".";
+    if (hidden) words += (words ? " " : "") + plural(hidden, "digital-only or preview printing") + " hidden.";
+    if (!words && !shown.length) words = "No printing matches these filters.";  // read out; the box shows it
     st.status.className = "ppstatus";
     st.status.textContent = words;
     // nothing to show: say why, with a way back
