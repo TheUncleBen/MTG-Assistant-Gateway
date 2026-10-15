@@ -276,7 +276,18 @@ def add_scan_routes(server: MCPServer, state: AppState, service: ScanService) ->
         if isinstance(who, Response):
             return who
         try:
-            out = await service.printings(request.query_params.get("oracle_id", ""), owner=who[0])
+            # the printing picker (static/printpick.js): a page at a time, filtered and sorted on
+            # Scryfall's side for a card with more printings than one page
+            qp = request.query_params
+            out = await service.printings(
+                qp.get("oracle_id", ""),
+                owner=who[0],
+                page=qp.get("page") or 1,
+                finish=qp.get("finish"),
+                frame=qp.get("frame"),
+                border=qp.get("border"),
+                order=qp.get("order"),
+            )
         except ScanError as exc:
             return fail(exc)
         return JSONResponse(

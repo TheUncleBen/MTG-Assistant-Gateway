@@ -256,7 +256,13 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         named; ``{refresh: true, names: [...]}`` only reads the deck again (the page's follow-up
         when an answer was stale). Browser session only; apps propose through /api/v1/proposals."""
         from .archidekt import front_face, parse_deck
-        from .deckpage import checks_panel_html, legal_problems, legality_chip_html, legality_panel_html
+        from .deckpage import (
+            card_image,
+            checks_panel_html,
+            legal_problems,
+            legality_chip_html,
+            legality_panel_html,
+        )
 
         if who.via != "browser":
             raise DeckError(
@@ -285,6 +291,11 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                         "label": c.label,
                         "mana_value": c.custom_cmc,
                         "notes": c.notes or "",
+                        # the printing, so a printing change (and its Undo) redraws the picture
+                        "set_code": c.set_code,
+                        "collector_number": c.collector_number,
+                        "image": card_image(c),
+                        "price": c.price,
                     }
                     for c in deck.cards
                     if front_face(c.name).casefold() in touched
