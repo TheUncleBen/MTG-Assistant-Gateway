@@ -60,9 +60,11 @@ SERVER_DESCRIPTION = (
     "Magic: The Gathering deck research, goldfish testing and safe Archidekt deck edits, "
     "from a self-hosted gateway."
 )
-# The icon to upload when adding the connector by hand. ChatGPT takes a PNG of at most 10 KB, so
-# this one is kept small (a test checks it); it is first in serverInfo.icons too. /static/ needs
-# no sign-in, so it downloads on a phone as well.
+# The icon to upload when adding the connector by hand. OpenAI's docs (read 2026-10-14) say an app
+# icon is PNG, JPEG, WebP or SVG, at most 5 MiB, square and at least 48x48 pixels. Where the
+# 10 KB limit below comes from is unknown: it is not in those docs (docs/CONNECT.md reports it as
+# seen in ChatGPT's form). This icon is kept under it anyway (a test checks it); it is first in
+# serverInfo.icons too. /static/ needs no sign-in, so it downloads on a phone as well.
 CONNECTOR_ICON_PATH = "/static/gateway-icon-connector.png"
 CONNECTOR_ICON_PX = 256
 CONNECTOR_ICON_MAX_BYTES = 10 * 1024

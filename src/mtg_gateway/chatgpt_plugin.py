@@ -82,7 +82,7 @@ def manifest(base: Path, site: str, public_url: str) -> dict:
             "com.openai": {
                 "interface": {
                     "displayName": plugin_label(site),
-                    "shortDescription": "Magic: The Gathering decks and research",
+                    "shortDescription": "MTG decks and research",  # OpenAI documents at most 30 characters
                     "longDescription": SERVER_DESCRIPTION
                     + " Every deck change is shown to you first and applied only after you approve.",
                     "developerName": developer,
