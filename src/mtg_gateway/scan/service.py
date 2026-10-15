@@ -17,7 +17,18 @@ from ..db import Database
 from ..decklist import ListCard, to_text
 from .art import art_owner
 from .names import NameCatalog
-from .scryfall import ScryfallClient, ScryfallError, default_printing, good_default, summarize
+from .scryfall import (
+    PRINT_BORDERS,
+    PRINT_FINISHES,
+    PRINT_FRAMES,
+    PRINT_ORDERS,
+    PRINT_PAGES,
+    ScryfallClient,
+    ScryfallError,
+    default_printing,
+    good_default,
+    summarize,
+)
 from .store import ScanStore
 
 logger = logging.getLogger(__name__)
@@ -862,20 +873,51 @@ class ScanService:
                 raise ScanError("rate_limited", str(exc)) from exc
             return []
 
-    async def printings(self, oracle_id: str, *, owner: str | None = None) -> dict[str, Any]:
+    async def printings(
+        self,
+        oracle_id: str,
+        *,
+        owner: str | None = None,
+        page: int | str | None = 1,
+        finish: str | None = None,
+        frame: str | None = None,
+        border: str | None = None,
+        order: str | None = None,
+    ) -> dict[str, Any]:
         """Every printing of one card for the picker, as card summaries: the released paper
         printings first, newest first, then the rest (previews marked ``unreleased``, printings
         not sold on paper marked ``paper: false``), also newest first. So the first is the default.
 
-        ``{"cards": [...], "has_more": bool, "total_cards": int}``; ``has_more`` means the card has
-        more printings than the one page shown (Scryfall pages at 175).
+        ``{"cards": [...], "has_more": bool, "total_cards": int, "page": int}``; ``has_more`` means
+        the card has more printings than the pages read so far (Scryfall pages at 175): ``page``
+        (1 to 20) reads the next. ``finish`` (nonfoil, foil, etched), ``frame`` (1993, 1997, 2003,
+        2015, future) and ``border`` (black, white, borderless, silver, gold) narrow the list and
+        ``order`` (newest, oldest, cheapest) sorts it, on Scryfall's side; with ``oldest`` or
+        ``cheapest`` the list keeps that order. An unknown value is ``invalid``.
         """
         oid = str(oracle_id or "").strip().lower()
         if not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", oid):
             raise ScanError("invalid", "oracle_id must be a Scryfall oracle id")
+        num = str(page if page not in (None, "") else 1).strip()
+        if not num.isdigit() or not 1 <= int(num) <= PRINT_PAGES:
+            raise ScanError("invalid", f"page must be a whole number from 1 to {PRINT_PAGES}")
+        picks: dict[str, str | None] = {}
+        for key, value, allowed in (
+            ("finish", finish, PRINT_FINISHES),
+            ("frame", frame, PRINT_FRAMES),
+            ("border", border, PRINT_BORDERS),
+            ("order", order, tuple(PRINT_ORDERS)),
+        ):
+            v = str(value or "").strip().lower() or None
+            if v is not None and v not in allowed:
+                raise ScanError("invalid", f"{key} must be one of: {', '.join(allowed)}")
+            picks[key] = v
+        sort = picks.pop("order") or "newest"
         try:
             with self._lookup_slot(owner):
-                out = await self.scryfall.prints(oid)
+                out = await self.scryfall.prints(oid, page=int(num), order=sort, **picks)
+                if sort != "newest":
+                    return out
                 return {**out, "cards": sorted(out["cards"], key=lambda c: not good_default(c))}
         except ScryfallError as exc:
             if exc.kind in ("unavailable", "rate_limited", "not_found"):

@@ -93,6 +93,7 @@ class FakeScryfall:
         self.page_size = 175
         self.extra_cards: list[dict[str, Any]] = []
         self.searches: list[dict[str, str]] = []
+        self.print_searches: list[dict[str, str]] = []  # the printing picker's oracleid: searches
         self.sets: list[dict[str, Any]] = [
             {
                 "object": "set",
@@ -218,6 +219,52 @@ class FakeScryfall:
             200, json={"object": "list", "total_cards": len(found), "has_more": more, "data": chunk}
         )
 
+    def printings(self, q: dict[str, str], request: httpx.Request) -> httpx.Response:
+        """One card's printings (``oracleid:<id>``, the printing picker's search): the terms
+        ``is:nonfoil|foil|etched``, ``frame:`` and ``border:`` narrow it, ``order`` released or
+        usd with ``dir`` sorts it, and it pages at ``page_size`` with Scryfall's ``has_more`` and
+        ``next_page`` (this same search, ``page`` one higher)."""
+        self.print_searches.append(dict(q))
+        terms = q.get("q", "").split()
+        m2 = re.fullmatch(r"oracleid:([0-9a-f-]+)", terms[0] if terms else "")
+        if not m2:
+            return httpx.Response(400, json={"object": "error", "details": "unsupported query"})
+        found = [c for c in self.cards + self.extra_cards if _oracle(c) == m2.group(1)]
+        for t in terms[1:]:
+            key, _, value = t.partition(":")
+            if key == "is" and value in ("nonfoil", "foil", "etched"):
+                found = [c for c in found if value in (c.get("finishes") or [])]
+            elif key == "frame":
+                found = [c for c in found if str(c.get("frame") or "") == value]
+            elif key == "border":
+                found = [c for c in found if str(c.get("border_color") or "") == value]
+            else:
+                return httpx.Response(400, json={"object": "error", "details": f"unsupported term {t}"})
+        if q.get("order") == "usd":
+            priced = [c for c in found if (c.get("prices") or {}).get("usd")]
+            unpriced = [c for c in found if not (c.get("prices") or {}).get("usd")]
+            priced.sort(key=lambda c: float(c["prices"]["usd"]), reverse=q.get("dir") == "desc")
+            found = priced + unpriced  # as Scryfall: a printing with no price comes last
+        else:
+            found.sort(key=lambda c: c.get("released_at", ""), reverse=q.get("dir", "desc") != "asc")
+        if not found:
+            return self.not_found("Your query didn’t match any cards.")
+        page = int(q.get("page") or 1)
+        start = (page - 1) * self.page_size
+        chunk = found[start : start + self.page_size]
+        if not chunk:
+            return self.not_found("You have paged past the end of the results.")
+        body: dict[str, Any] = {
+            "object": "list",
+            "total_cards": len(found),
+            "has_more": start + self.page_size < len(found),
+            "data": chunk,
+        }
+        if body["has_more"]:
+            nxt = {**q, "page": str(page + 1)}
+            body["next_page"] = str(request.url.copy_with(params=nxt))
+        return httpx.Response(200, json=body)
+
     @staticmethod
     def not_found(detail: str) -> httpx.Response:
         return httpx.Response(
@@ -305,16 +352,7 @@ class FakeScryfall:
                 200, json={"object": "catalog", "total_values": len(values), "data": values}
             )
         if path == "/cards/search":
-            m2 = re.fullmatch(r"oracleid:([0-9a-f-]+)", q.get("q", ""))
-            if not m2:
-                return httpx.Response(400, json={"object": "error", "details": "unsupported query"})
-            found = [c for c in self.cards if _oracle(c) == m2.group(1)]
-            found.sort(key=lambda c: c.get("released_at", ""), reverse=True)  # as Scryfall: newest first
-            if not found:
-                return self.not_found("Your query didn’t match any cards.")
-            return httpx.Response(
-                200, json={"object": "list", "total_cards": len(found), "has_more": False, "data": found}
-            )
+            return self.printings(q, request)
         if path == "/cards/collection" and request.method == "POST":
             body = json.loads(request.content)
             idents = body["identifiers"]

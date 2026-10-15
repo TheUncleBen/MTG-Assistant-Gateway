@@ -90,6 +90,15 @@ def default_printing(cards: list[dict[str, Any]], finish: str | None = None) -> 
     return next((c for c in cards if good_default(c, finish)), None)
 
 
+# The printing picker's filters and sorts, as Scryfall's search writes them: ``is:foil``,
+# ``frame:2015``, ``border:borderless``; ``order=usd`` with ``dir=asc`` is cheapest first.
+PRINT_FINISHES = ("nonfoil", "foil", "etched")
+PRINT_FRAMES = ("1993", "1997", "2003", "2015", "future")
+PRINT_BORDERS = ("black", "white", "borderless", "silver", "gold")
+PRINT_ORDERS = {"newest": ("released", "desc"), "oldest": ("released", "asc"), "cheapest": ("usd", "asc")}
+PRINT_PAGES = 20  # 3,500 printings, more than any card has (a basic land has about 1,000)
+
+
 def summarize(card: dict[str, Any]) -> dict[str, Any]:
     """The subset of a Scryfall card object the gateway stores and returns."""
     faces = card.get("card_faces") or []
@@ -262,9 +271,10 @@ class ScryfallClient:
         self.cards = _Cache(ttl=24 * 3600, max_items=5000)
         self.names = _Cache(ttl=6 * 3600, max_items=5000)
         # Cards are kept slimmed (``slim``, under 1 KB each), so 5,000 entries stay a few MB.
-        # Printing lists are summaries (about 2 KB a card in memory, up to 175 a card), in a small
-        # cache of their own so a picker browsing many cards cannot crowd out names; 60 lists stay
-        # under about 25 MB even when every one is a full page of printings.
+        # Printing lists are summaries (about 2 KB a card in memory, up to 175 a page), in a small
+        # cache of their own so a picker browsing many cards cannot crowd out names; 60 pages stay
+        # under about 25 MB even when every one is full. A later page or a filtered page of a card
+        # with more than 175 printings is a page of its own here.
         self.prints_cache = _Cache(ttl=3600, max_items=60)
         # Card search pages (up to 175 browse rows, about 1.5 KB each in memory): 40 pages stay
         # under about 10 MB; a quarter of an hour is long enough for paging back and a reload.
@@ -404,33 +414,72 @@ class ScryfallClient:
             raise ScryfallError("contract", f"Scryfall's card-name catalog is too short ({len(out)})")
         return out
 
-    async def prints(self, oracle_id: str) -> dict[str, Any]:
-        """Every printing of one card (the ``prints_search_uri`` query), newest first, summarized.
+    async def prints(
+        self,
+        oracle_id: str,
+        *,
+        page: int = 1,
+        finish: str | None = None,
+        frame: str | None = None,
+        border: str | None = None,
+        order: str = "newest",
+    ) -> dict[str, Any]:
+        """One page of every printing of one card (the ``prints_search_uri`` query), summarized
+        with what the printing picker shows (``browse_row``: prices, frame, border).
 
-        Returns ``{"cards": [summaries], "has_more": bool, "total_cards": int}``. One page only
-        (Scryfall pages at 175 cards); ``has_more`` says when a card has more printings than that,
-        so a picker can say it shows the newest 175.
+        Returns ``{"cards": [rows], "has_more": bool, "total_cards": int, "page": int}``. Scryfall
+        pages at 175 cards and says ``has_more`` with a ``next_page`` link, which is this same
+        search with ``page`` one higher: the next page is asked for as ``page + 1``. ``finish``
+        (PRINT_FINISHES), ``frame`` (PRINT_FRAMES) and ``border`` (PRINT_BORDERS) narrow the
+        search on Scryfall's side and ``order`` (PRINT_ORDERS) sorts it, so a card with more
+        printings than one page is filtered and sorted over all of them; the caller checks the
+        values. Every page of every filter is kept in ``prints_cache`` (the plain first page under
+        the oracle id alone, as before).
         """
+        if order not in PRINT_ORDERS:
+            raise ScryfallError("invalid", "order must be newest, oldest or cheapest")
+        terms = " ".join(
+            t
+            for t in (
+                f"is:{finish}" if finish else "",
+                f"frame:{frame}" if frame else "",
+                f"border:{border}" if border else "",
+            )
+            if t
+        )
         key = oracle_id.lower()
+        if page != 1 or terms or order != "newest":
+            key = f"{key}|{page}|{terms}|{order}"
         if (hit := self.prints_cache.get(key)) is not None:
             return hit
-        resp = await self._request(
-            "GET",
-            "/cards/search",
-            params={"order": "released", "dir": "desc", "q": f"oracleid:{oracle_id}", "unique": "prints"},
-            interval=self.lookup_interval,
-        )
+        sort, direction = PRINT_ORDERS[order]
+        params: dict[str, Any] = {
+            "order": sort,
+            "dir": direction,
+            "q": f"oracleid:{oracle_id}" + (f" {terms}" if terms else ""),
+            "unique": "prints",
+        }
+        if page > 1:
+            params["page"] = page
+        resp = await self._request("GET", "/cards/search", params=params, interval=self.lookup_interval)
         data = self._json(resp)
         if resp.status_code == 404 or data.get("object") == "error":
+            if resp.status_code == 404 and (terms or page > 1):
+                # a filter that matches nothing (or a page past the end): an empty page, not a
+                # card that does not exist
+                empty: dict[str, Any] = {"cards": [], "has_more": False, "total_cards": 0, "page": page}
+                self.prints_cache.put(key, empty)
+                return empty
             raise ScryfallError("not_found", str(data.get("details") or "no printings found"))
         if data.get("object") != "list" or not isinstance(data.get("data"), list):
             raise ScryfallError("contract", "Scryfall search returned an unexpected body")
-        cards = [summarize(c) for c in data["data"] if isinstance(c, dict) and c.get("object") == "card"]
+        cards = [browse_row(c) for c in data["data"] if isinstance(c, dict) and c.get("object") == "card"]
         total = data.get("total_cards")
         out = {
             "cards": cards,
-            "has_more": bool(data.get("has_more")),
+            "has_more": bool(data.get("has_more")) and page < PRINT_PAGES,
             "total_cards": total if isinstance(total, int) else len(cards),
+            "page": page,
         }
         self.prints_cache.put(key, out)
         return out

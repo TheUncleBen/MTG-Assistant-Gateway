@@ -60,8 +60,14 @@ async def test_quantity_remove_and_category_edits_answer_with_fresh_rows_and_che
                 "label": ",#656565",  # archidekt.com's empty tag, sent with every modify (Q58)
                 "mana_value": None,
                 "notes": "",
+                # the row's printing, so a printing change redraws the picture (Change printing…)
+                "set_code": d["rows"][0]["set_code"],
+                "collector_number": d["rows"][0]["collector_number"],
+                "image": d["rows"][0]["image"],
+                "price": d["rows"][0]["price"],
             }
         ]
+        assert d["rows"][0]["set_code"] and d["rows"][0]["collector_number"]
         assert _deck_card(stack, "Cultivate")[0]["quantity"] == 2
         # the checks are computed from the re-read deck: 101 cards now, so the deck size check fails
         st = d["stats"]
@@ -108,8 +114,14 @@ async def test_quantity_remove_and_category_edits_answer_with_fresh_rows_and_che
                 "label": ",#656565",
                 "mana_value": None,
                 "notes": "",
+                # the row's printing, so a printing change redraws the picture (Change printing…)
+                "set_code": d["rows"][0]["set_code"],
+                "collector_number": d["rows"][0]["collector_number"],
+                "image": d["rows"][0]["image"],
+                "price": d["rows"][0]["price"],
             }
         ]
+        assert d["rows"][0]["set_code"] and d["rows"][0]["collector_number"]
         assert _deck_card(stack, "Acidic Slime")[0]["categories"] == ["Removal"]
     finally:
         await b.aclose()
