@@ -1191,11 +1191,14 @@ async def test_card_printings_lists_released_paper_first_and_clear_counts(stack:
         ("fdn", None, None),
         ("mdd", True, False),
     ]
-    assert out["matching_total"] == out["matching"] == 3 and out["returned_count"] == 2
+    assert out["matching_total"] == 3 and "matching" not in out and out["returned_count"] == 2
     assert out["truncated"] is True and out["has_more"] is False and out["total_cards"] == 3
-    assert {s["set"] for s in out["sets"]} == {"fdn", "mdd", "ea1"} and "not narrowed" in out["sets_scope"]
+    # the limit caps the set list too (A17); the count says how many there are
+    assert len(out["sets"]) == 2 and out["sets_total"] == 3 and out["sets_truncated"] is True
+    assert "not narrowed" in out["sets_scope"]
     one = (await call(stack.h, token, "card_printings", {"name": "Swamp", "set_code": "ea1"}))[
         "structuredContent"
     ]
     assert one["matching_total"] == 1 and one["returned_count"] == 1 and one["truncated"] is False
+    assert {s["set"] for s in one["sets"]} == {"fdn", "mdd", "ea1"} and one["sets_truncated"] is False
     assert len(one["sets"]) == 3  # every set of the card, whatever the filter
