@@ -695,7 +695,8 @@ def export_help_html() -> str:
         f"<tr><th scope='row'>{_esc(col)}</th><td>{_esc(kind)}</td></tr>" for col, kind in EXPORT_COLUMN_TYPES
     )
     return (
-        f"<details class='addfold csvhelp'><summary>{icon('download')} Importing the CSV on archidekt.com"
+        f"<details class='addfold csvhelp'><summary>{icon('download')} "
+        "<span class='t'>Importing the CSV on archidekt.com</span>"
         "<span class='chev'>column types</span></summary><section class='panel'>"
         "<p>Archidekt does not read the column names. When you import the file on archidekt.com, pick "
         "each column's type as below and leave <strong>Skip first line</strong> on.</p>"
@@ -990,6 +991,9 @@ details.rowmenu.details .menu .actions button{width:100%;margin:0}
 .coll-empty{text-align:center;padding:2rem 1rem}
 .coll-empty .actions{justify-content:center}
 /* how to import the Export CSV on archidekt.com: a two-column table in the fold */
+/* with large text the title wraps, even inside "archidekt.com", rather than push the page wider */
+.collection details.csvhelp > summary{flex-wrap:wrap}
+.collection details.csvhelp > summary .t{min-width:0;overflow-wrap:anywhere}
 .csvhelp .tbl{overflow-x:auto;max-width:min(100%,40rem)}
 .csvhelp table{border-collapse:collapse;width:100%;font-size:.95rem}
 .csvhelp th,.csvhelp td{text-align:left;vertical-align:top;padding:.4rem .5rem;overflow-wrap:anywhere;
