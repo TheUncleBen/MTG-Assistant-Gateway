@@ -7,6 +7,26 @@ Notable changes for people who run or use the gateway. The format follows
 with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 (`release/1.2.3`); `latest` is always the newest.
 
+## [0.7.28] - Unreleased
+
+Card search with every Scryfall filter, My decks by folder, and leftover fixes. The database stays
+at schema 12.
+
+### Added
+- Card search (`/cards`) has every field of Scryfall's advanced search, paper cards by default:
+  the main filters on top, the rest under More filters, a full-screen panel on phones. Results
+  update as you change a filter, the address keeps the search, grid or list view, Scryfall's sorts,
+  and the next cards load as you scroll.
+- My decks shows your Archidekt folders: open a folder into its own view, go back with the
+  breadcrumb, and filter by name across every folder (each match says which folder it is in).
+  The gateway's backup folder never shows, here or on the Folders page.
+
+### Fixed
+- Changing a companion or a double-faced card set to show its back (its category, quantity,
+  label or mana value) no longer clears that setting on Archidekt.
+- Card-name suggestions answer faster while typing; a card Scryfall doesn't know is remembered.
+- The assistant's printing list respects its limit for the set list too.
+
 ## [0.7.27] - 2026-10-14
 
 Bug fixes and small fixes from the owner's checks of 0.7.26, a check of every Archidekt write
