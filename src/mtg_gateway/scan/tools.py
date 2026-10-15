@@ -202,8 +202,9 @@ def add_scan_tools(server: MCPServer, service: ScanService, *, links: CardLinks 
             "not sold on paper (`paper: false`). Give `oracle_id` from a resolve_cards result, or `name`. "
             "Narrow it with `set_code` (e.g. cmr) and `finish` (foil or etched: printings that come in it). "
             "`matching_total` printings match, `returned_count` of them are in `cards`; `limit` caps the "
-            "rows (default 25) and `truncated` means that cap cut the list. `sets` lists every set the card "
-            "was printed in, not narrowed by set_code or finish. In an app that shows cards, the user sees "
+            "rows (default 25) and `truncated` means that cap cut the list. `sets` lists the sets the card "
+            "was printed in, newest first, not narrowed by set_code or finish; `limit` caps it too, "
+            "`sets_total` counts them all and `sets_truncated` means the cap cut it. In an app that shows cards, the user sees "
             "every printing's picture and taps the one they mean; wait for that pick. Does not touch "
             "Archidekt."
         ),
@@ -245,7 +246,6 @@ def add_scan_tools(server: MCPServer, service: ScanService, *, links: CardLinks 
             "ok": True,
             "oracle_id": oracle_id,
             "name": name or (cards[0].get("name") if cards else None),
-            "matching": len(cards),  # kept for older clients; matching_total says the same
             "matching_total": len(cards),
             "returned_count": len(rows),
             "cards": rows,
@@ -254,8 +254,10 @@ def add_scan_tools(server: MCPServer, service: ScanService, *, links: CardLinks 
             # Scryfall shows 175 printings a page; past that, filters only see the newest 175
             "has_more": bool(out.get("has_more")),
             "total_cards": out.get("total_cards"),  # every printing of the card, before any filter
-            "sets": sets,
-            "sets_scope": "every set the card was printed in, not narrowed by set_code or finish",
+            "sets": sets[:shown],
+            "sets_total": len(sets),
+            "sets_truncated": len(sets) > shown,
+            "sets_scope": "the sets the card was printed in, not narrowed by set_code or finish",
             "note": (
                 "Every printing with its picture is on the card in the chat, where the user can tap the "
                 "one they mean. Without the card, ask which set, then call again with set_code."

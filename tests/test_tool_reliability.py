@@ -521,9 +521,9 @@ async def test_card_printings_filters_and_limits(stack: Stack) -> None:
     token = await mcp_token(stack.h)
     name = "Aesi, Tyrant of Gyre Strait"
     every = structured(await call(stack.h, token, "card_printings", {"name": name}))
-    assert every["total_cards"] == 4 and every["matching"] == 4
+    assert every["total_cards"] == 4 and every["matching_total"] == 4
     cmr = structured(await call(stack.h, token, "card_printings", {"name": name, "set_code": "CMR"}))
-    assert [c["set"] for c in cmr["cards"]] == ["cmr"] and cmr["matching"] == 1
+    assert [c["set"] for c in cmr["cards"]] == ["cmr"] and cmr["matching_total"] == 1
     one = structured(await call(stack.h, token, "card_printings", {"name": name, "limit": 1}))
     assert len(one["cards"]) == 1 and one["truncated"] is True
 
