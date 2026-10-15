@@ -140,3 +140,37 @@ def test_short_queries_answer_nothing(query: str) -> None:
     cat = NameCatalog(lambda: None)
     cat.set_names(NAMES)
     assert cat.suggest(query) == []
+
+
+def test_a_longer_text_searches_only_the_names_the_shorter_one_matched() -> None:
+    """A12: each keystroke narrows the last keystroke's matches; the answers are the same as a
+    scan of the whole catalog, in the same order."""
+    import random
+
+    rnd = random.Random(7)
+    words = [
+        "".join(rnd.choice("abcdeilnorst") for _ in range(rnd.randint(3, 8))).title() for _ in range(800)
+    ]
+    names = [" ".join(rnd.choice(words) for _ in range(rnd.randint(1, 4))) for _ in range(6000)]
+    narrowed = NameCatalog(lambda: None)
+    narrowed.set_names(names)
+
+    def whole(q: str) -> list[str]:
+        fresh = NameCatalog(lambda: None)
+        fresh.set_names(names)
+        return fresh.suggest(q) or []
+
+    for text in ("sol", "solemn", "an ab", "tri", "trice", "zz"):
+        for k in range(2, len(text) + 1):
+            assert narrowed.suggest(text[:k]) == whole(text[:k]), text[:k]
+    # backspacing and retyping reuses the kept answer; a new catalog forgets them all
+    assert "so" in narrowed._hits and "sol" in narrowed._hits
+    narrowed.set_names(names[:10])
+    assert not narrowed._hits
+    assert narrowed.suggest("zz") == whole_small(names[:10], "zz")
+
+
+def whole_small(names: list[str], q: str) -> list[str]:
+    c = NameCatalog(lambda: None)
+    c.set_names(names)
+    return c.suggest(q) or []
