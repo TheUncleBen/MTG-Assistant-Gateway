@@ -575,7 +575,7 @@ def add_deck_tool_routes(
             two_pane=True,
             current="/decks",
             csp=DECK_CSP,
-            scripts=True,
+            viewer_only=True,  # the card viewer only: none of deck.js's hooks are on this page
             heading=False,
             deck_css=True,  # the card viewer's styles
             extra_css=GOLDFISH_CSS,
@@ -654,7 +654,7 @@ def add_deck_tool_routes(
             two_pane=True,
             current="/decks",
             csp=DECK_CSP,
-            scripts=True,
+            viewer_only=True,  # the card viewer only: none of deck.js's hooks are on this page
             heading=False,
             deck_css=True,
             extra_scripts=("compare.js",),

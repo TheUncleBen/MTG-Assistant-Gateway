@@ -100,15 +100,24 @@
   var q = $("#q");
   var cards = $("#cards");
   if (q && cards) {
-    var items = $$("[data-name]", cards);
-    var stacks = $$(".stack", cards);
+    // the cards and each stack's cards are collected once, and again only after the view changed
+    // (a save redraws cards in place), not on every keystroke (AUDIT F7)
+    var items = null, stacks = null;
+    var collect = function () {
+      items = $$("[data-name]", cards);
+      stacks = $$(".stack", cards).map(function (st) { return { el: st, cards: $$("[data-name]", st) }; });
+    };
+    if (window.MutationObserver) {
+      new MutationObserver(function () { items = null; }).observe(cards, { childList: true, subtree: true });
+    }
     var apply = function () {
+      if (!items || !window.MutationObserver) collect();
       var needle = q.value.trim().toLowerCase();
       items.forEach(function (el) {
         el.style.display = !needle || el.getAttribute("data-name").indexOf(needle) >= 0 ? "" : "none";
       });
       stacks.forEach(function (st) {
-        st.style.display = $$("[data-name]", st).some(function (el) { return el.style.display !== "none"; }) ? "" : "none";
+        st.el.style.display = st.cards.some(function (el) { return el.style.display !== "none"; }) ? "" : "none";
       });
     };
     q.addEventListener("input", apply);

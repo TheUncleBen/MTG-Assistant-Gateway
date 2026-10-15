@@ -241,6 +241,7 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
         csp: str | None = None,
         current: str | None = None,
         scripts: bool = False,
+        viewer_only: bool = False,
         heading: bool = True,
         deck_css: bool = False,
         extra_scripts: tuple[str, ...] = (),
@@ -262,12 +263,10 @@ def add_companion_routes(server: MCPServer, state: AppState, reports: ReportServ
             heading=heading,
             head_extra=(stylesheet_link("deck.css") if deck_css else "")
             + (f"<style>{extra_css}</style>" if extra_css else "")
-            + (
-                "<script src='/static/cardview.js' defer></script>"
-                "<script src='/static/deck.js' defer></script>"
-                if scripts
-                else ""
-            )
+            # ``viewer_only``: a page that shows cards but none of the deck page's own hooks
+            # (Goldfish, Compare) loads the card viewer without deck.js (AUDIT F2)
+            + ("<script src='/static/cardview.js' defer></script>" if scripts or viewer_only else "")
+            + ("<script src='/static/deck.js' defer></script>" if scripts and not viewer_only else "")
             + "".join(f"<script src='/static/{name}' defer></script>" for name in extra_scripts),
         )
         if csp:
