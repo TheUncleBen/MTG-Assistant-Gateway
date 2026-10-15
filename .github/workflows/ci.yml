@@ -1,7 +1,7 @@
 name: CI
 
 # What runs where:
-#   pull request   lint + unit tests (and a Python 3.11 compile and import check) always; the amd64 container smoke test unless the pull request is a
+#   pull request   lint + unit tests (and a Python 3.11 compile and import check, which also gates a release) always; the amd64 container smoke test unless the pull request is a
 #                  draft or touches only documentation and/or android/. A non-draft pull request that changes android/ also
 #                  gets the Android unit tests and a debug build (no secrets). The version check makes sure
 #                  VERSION was raised above every released version (docs/VERSIONS.md). No image is pushed.
@@ -108,8 +108,9 @@ jobs:
   claim:
     # Creates the tag v<version> on this commit before anything is published. Creating a ref that exists
     # fails, so of two commits that carry the same version only the first gets this far; a re-run of the
-    # same commit finds its own tag and goes on. Runs no repository code.
-    needs: [test, version]
+    # same commit finds its own tag and goes on. Runs no repository code. The Python 3.11 check
+    # must pass too, so nothing is published that fails on the oldest Python pyproject allows.
+    needs: [test, version, py311]
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
