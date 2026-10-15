@@ -141,12 +141,13 @@ async def test_reactive_refresh_on_401_then_retry_succeeds(stack: Stack) -> None
     assert _audit_events(stack, "archidekt_link_expired") == []
 
 
-async def test_expired_access_token_by_clock_is_refreshed(stack: Stack) -> None:
+async def test_expired_access_token_by_clock_is_refreshed(stack: Stack, monkeypatch) -> None:
     """The fake rejects an access token whose exp has passed, like the real site."""
     h, ark = stack.h, stack.ark
     ark.access_ttl = 1
     token = await linked_user(stack)
-    time.sleep(1.1)
+    wall = time.time
+    monkeypatch.setattr(time, "time", lambda: wall() + 1.1)  # 1.1 s on, for the gateway and the fake
     ark.access_ttl = 3600
     out = structured(await call(h, token, "list_my_decks"))
     assert out["ok"] is True, out
