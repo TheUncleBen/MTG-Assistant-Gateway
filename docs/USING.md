@@ -275,7 +275,12 @@ condition and count.
   Archidekt's codes (D for DMG; JP, KR, SP, CS, CT for JA, KO, ES, ZHS, ZHT).
   **Import a list** adds cards from that CSV, from a CSV with Archidekt's
   column names or from a plain card list, pasted or chosen as a file, up to
-  100 rows at a time.
+  100 rows at a time. Afterwards the page says how many cards went in and
+  names the lines it could not take as given: a language Archidekt's
+  collection has no place for (such as Phyrexian) is kept as English, copies
+  of a card you already own in another language are added to that copy, and
+  cards Archidekt cannot find are left out. When the text itself cannot be
+  read, nothing is imported and the page says which line is wrong.
 - A scan is a draft that stays as long as you like, up to a whole deck:
   fix misread cards, printings and quantities first, then send it to your
   collection or a deck, which removes the draft. Nothing expires by age.

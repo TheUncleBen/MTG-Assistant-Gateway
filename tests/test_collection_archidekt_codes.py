@@ -36,9 +36,13 @@ def test_import_reads_language_in_either_code_set_and_defaults_to_english():
     assert parse_collection_import("1 Sol Ring\n")[0]["language"] == "EN"
 
 
-def test_an_unknown_language_refuses_the_import_like_other_bad_values():
-    with pytest.raises(CollectionError, match=r"^line 3: language 'XX' is not a known language code$"):
-        parse_collection_import("Name,Language\nSol Ring,EN\nOpt,XX\n")
+def test_a_language_archidekt_cannot_store_is_kept_as_english_and_named():
+    items = parse_collection_import("Name,Language\nSol Ring,EN\nOpt,XX\n")
+    assert [(i["name"], i["language"], i.get("language_given")) for i in items] == [
+        ("Sol Ring", "EN", None),
+        ("Opt", "EN", "XX"),
+    ]
+    assert items[1]["line"] == 3
 
 
 def test_item_options_take_archidekt_codes():
@@ -76,7 +80,7 @@ async def test_import_and_export_round_trip_archidekt_codes(stack: Stack) -> Non
         csrf = await b.csrf("/collection")
         text = "Quantity,Name,Finish,Condition,Language\n2,Sol Ring,Normal,D,JP\n1,Opt,Foil,LP,CS\n"
         r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": text})
-        assert r.headers["location"] == "/collection?ok=imported", r.headers
+        assert r.headers["location"].startswith("/collection?ok=imported&r="), r.headers
         recs = {c["card"]["oracleCard"]["name"]: c for c in stack.ark.collections["alice"].values()}
         # Archidekt's numbers: JP = 6, CS = 10, D = 5, LP = 2
         assert (recs["Sol Ring"]["language"], recs["Sol Ring"]["condition"]) == (6, 5)
@@ -91,12 +95,18 @@ async def test_import_and_export_round_trip_archidekt_codes(stack: Stack) -> Non
         # the page keeps the gateway's own labels
         page = await b.http.get("/collection?view=list", headers=NAV)
         assert "<span class='pill cond'>DMG</span>" in page.text
-        # an unknown language adds nothing and the page says the text could not be read
-        bad = "Name,Language\nForest,XX\n"
-        r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": bad})
-        assert r.headers["location"] == "/collection?err=unreadable"
-        assert "Forest" not in {
-            c["card"]["oracleCard"]["name"] for c in stack.ark.collections["alice"].values()
-        }
+        # a language Archidekt's collection has no code for is imported as English, and named
+        odd = "Name,Language\nForest,XX\n"
+        r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": odd})
+        assert r.headers["location"].startswith("/collection?ok=imported&r=")
+        shown = await b.http.get(r.headers["location"], headers=NAV)
+        assert (
+            "Kept as English, because Archidekt has no XX for collection cards: line 2 (Forest)."
+            in shown.text
+        )
+        forest = [
+            c for c in stack.ark.collections["alice"].values() if c["card"]["oracleCard"]["name"] == "Forest"
+        ]
+        assert [c["language"] for c in forest] == [1]  # English
     finally:
         await b.aclose()
