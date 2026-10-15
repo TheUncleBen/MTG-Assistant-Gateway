@@ -272,7 +272,9 @@ condition and count.
   read the column names: on archidekt.com you pick each column's type when
   you import (the page's **Importing the CSV on archidekt.com** lists them)
   and leave **Skip first line** on. Condition and Language are written in
-  Archidekt's codes (D for DMG; JP, KR, SP, CS, CT for JA, KO, ES, ZHS, ZHT).
+  Archidekt's own codes: D for Damaged, and JP Japanese, KR Korean, SP
+  Spanish, CS Chinese (Simplified), CT Chinese (Traditional); the other codes
+  are the same as the gateway's.
   **Import a list** adds cards from that CSV, from a CSV with Archidekt's
   column names or from a plain card list, pasted or chosen as a file, up to
   100 rows at a time. Afterwards the page says how many cards went in and

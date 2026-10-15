@@ -436,11 +436,11 @@ class CollectionService:
         ``collector_number``; ``quantity``, ``finish`` (or ``foil: true``), ``condition`` and
         ``language`` (English when not given; a new record only) are optional. A printing
         already in the collection in that finish gets its copies added to the existing record
-        (as the site's own add does, whatever its language; ``merged`` names each such item whose
-        language differs from the record's, with ``index`` its position in ``items``, ``language``
-        and ``existing_language``); otherwise a record is created. ``skipped`` items carry
-        ``index`` too. ``progress``:
-        a collection proposal's apply, which counts each record written (``_run``)."""
+        (whatever its language, as the site's own add is thought to do, unchecked; ``merged``
+        names each such item whose language differs from the record's, with ``index`` its
+        position in ``items``, ``language`` and ``existing_language``); otherwise a record is
+        created. ``skipped`` items carry ``index`` too. ``progress``: a collection proposal's
+        apply, which counts each record written (``_run``)."""
         self._writes_on()
         wanted = [
             (it, {k: it[k] for k in ("quantity", "finish", "condition", "language")})
