@@ -85,14 +85,27 @@ window.teardown = () => { frame.contentWindow.postMessage(
 </script></body></html>"""
 
 
-def _open(page, result: dict, confirm_reply: dict | None = None, get_reply: dict | None = None):
+def _open(
+    page,
+    result: dict,
+    confirm_reply: dict | None = None,
+    get_reply: dict | None = None,
+    *,
+    arm_ms: int | None = None,
+):
+    """The card in the host page. ``arm_ms``: a longer arming delay than the card's 700 ms, for a
+    test that reads the disabled buttons, so a loaded machine cannot run past it first."""
+    html = card_html()
+    if arm_ms is not None:
+        assert "var ARM_DELAY_MS = 700;" in html
+        html = html.replace("var ARM_DELAY_MS = 700;", f"var ARM_DELAY_MS = {arm_ms};")
     # the card's pictures come from Scryfall: a stand-in picture keeps the test offline
     page.route("https://api.scryfall.com/**", lambda r: r.fulfill(content_type="image/png", body=PNG))
     page.set_content(HOST)
     page.evaluate("(r) => { window.toolResult = r; }", result)
     page.evaluate("(r) => { window.confirmReply = r; }", confirm_reply)
     page.evaluate("(r) => { window.getReply = r; }", get_reply)
-    page.evaluate("(html) => { document.getElementById('f').srcdoc = html; }", card_html())
+    page.evaluate("(html) => { document.getElementById('f').srcdoc = html; }", html)
     page.wait_for_function(
         "() => window.log.some(m => m.method === 'ui/notifications/initialized')", timeout=10_000
     )
@@ -124,12 +137,15 @@ def test_card_renders_and_approve_calls_confirm_with_the_code() -> None:
                 "result": {"deck_url": "https://archidekt.com/decks/42"},
             }
             card = _open(
-                page, {"structuredContent": PROPOSAL, "_meta": {APPROVAL_META_KEY: "code-123"}}, applied
+                page,
+                {"structuredContent": PROPOSAL, "_meta": {APPROVAL_META_KEY: "code-123"}},
+                applied,
+                arm_ms=4000,
             )
             # Drawn from the fields, never as markup: the hostile names appear as text.
             card.locator("#title").wait_for()
-            # The buttons start disabled for a moment after drawing (ARM_DELAY_MS): read that first,
-            # before the other assertions, so a slow machine cannot run past the arming delay.
+            # The buttons start disabled for a moment after drawing (ARM_DELAY_MS, 4 s here so a
+            # loaded machine cannot run past it): read that first, before the other assertions.
             approve = card.locator("#approve")
             assert approve.is_disabled() and card.locator("#reject").is_disabled()
             assert card.locator("#title").inner_text() == "Change to Sample <b>Deck</b>"
@@ -149,7 +165,7 @@ def test_card_renders_and_approve_calls_confirm_with_the_code() -> None:
             assert page.frame_locator("#f").locator("html").get_attribute("data-theme") == "dark"
             assert card.locator("#title").evaluate("e => getComputedStyle(e).color") == "rgb(1, 2, 3)"
             # Buttons: Approve and Reject come live once the arming delay has passed.
-            card.locator("#approve:enabled").wait_for(timeout=5_000)
+            card.locator("#approve:enabled").wait_for(timeout=10_000)
             assert approve.is_enabled() and card.locator("#reject").is_enabled()
             assert _confirms(page) == []  # nothing was confirmed by itself
             reads = _calls(page, "tools/call")  # one read-only look at the proposal's state, at most
