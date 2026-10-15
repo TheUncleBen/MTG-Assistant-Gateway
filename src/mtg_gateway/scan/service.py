@@ -959,6 +959,72 @@ class ScanService:
                     self.scryfall.cards.put(f"peek:{key}", summary)
         return [out[_norm(n)] for n in wanted if _norm(n) in out]
 
+    async def search_cards(
+        self,
+        query: str,
+        *,
+        order: str = "name",
+        direction: str = "auto",
+        page: int = 1,
+        owner: str | None = None,
+    ) -> dict[str, Any]:
+        """One page of a card search (the /cards page) through the member's lookup slot and the
+        shared pacer; Scryfall keeps the pages a while (ScryfallClient.search)."""
+        try:
+            with self._lookup_slot(owner):
+                return await self.scryfall.search(query, order=order, direction=direction, page=page)
+        except ScryfallError as exc:
+            if exc.kind in ("unavailable", "rate_limited", "invalid"):
+                raise ScanError(exc.kind, str(exc)) from exc
+            raise ScanError("unavailable", str(exc)) from exc
+
+    TYPE_CATALOGS = (
+        ("card-types", "Types"),
+        ("supertypes", "Supertypes"),
+        ("artifact-types", "Artifact types"),
+        ("enchantment-types", "Enchantment types"),
+        ("land-types", "Land types"),
+        ("spell-types", "Spell types"),
+        ("planeswalker-types", "Planeswalker types"),
+        ("creature-types", "Creature types"),
+        ("battle-types", "Battle types"),
+    )
+
+    async def search_options(self, *, owner: str | None = None) -> dict[str, Any]:
+        """What the card search's set, block and type pickers list: Scryfall's set list and its
+        type catalogs, each read once a day. A catalog that cannot be read now is left out (the
+        picker still takes a typed type), and ``partial`` says so."""
+        partial = False
+        sets: list[dict[str, Any]] = []
+        groups: list[dict[str, Any]] = []
+        with self._lookup_slot(owner):
+            try:
+                sets = await self.scryfall.sets_list()
+            except ScryfallError as exc:
+                if exc.kind == "rate_limited":
+                    raise ScanError(exc.kind, str(exc)) from exc
+                partial = True
+            for name, label in self.TYPE_CATALOGS:
+                try:
+                    values = await self.scryfall.catalog(name)
+                except ScryfallError as exc:
+                    if exc.kind == "rate_limited":
+                        partial = True
+                        break
+                    partial = True
+                    continue
+                groups.append({"label": label, "values": values})
+        blocks: dict[str, str] = {}
+        for row in sets:
+            if row["block_code"] and row["block_code"] not in blocks:
+                blocks[row["block_code"]] = row["block"] or row["block_code"].upper()
+        return {
+            "sets": [{k: row[k] for k in ("code", "name", "type", "released", "digital")} for row in sets],
+            "blocks": [{"code": code, "name": name} for code, name in blocks.items()],
+            "types": groups,
+            "partial": partial,
+        }
+
     def describe(self, results: list[Resolution]) -> dict[str, Any]:
         items = [r.as_dict() for r in results]
         counts = {s: 0 for s in STATUSES}

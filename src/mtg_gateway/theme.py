@@ -1084,7 +1084,7 @@ def layout_from_cookie(value: str | None) -> str:
 # flash of the default, no script). The page sets it whenever the view is picked in its address
 # (the toolbar's form puts it there); a visit without one renders the remembered view.
 VIEW_COOKIE = "mtg_view_"
-VIEW_KINDS = ("deck", "decks", "collection")
+VIEW_KINDS = ("deck", "decks", "collection", "cards")
 
 
 def view_choice(request: Any, kind: str, allowed: Iterable[str], default: str) -> tuple[str, bool]:
