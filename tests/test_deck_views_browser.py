@@ -58,6 +58,9 @@ def test_table_and_scroll_views(server: Server, width: int, scheme: str) -> None
         row.click()
         page.wait_for_selector(".cardview.open", timeout=3000)
         page.keyboard.press("Escape")
+        # the viewer closes through history.back(): wait for it, or the next goto can be aborted
+        # by that traversal on a busy machine (net::ERR_ABORTED)
+        page.wait_for_selector(".cardview.open", state="detached", timeout=3000)
 
         page.goto(f"{server.base}/decks/42?view=scroll", wait_until="networkidle")
         strip = page.locator(".deckview.scroll .cards").first
