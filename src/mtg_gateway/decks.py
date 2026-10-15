@@ -1147,7 +1147,12 @@ def category_plan_rows(
                 continue
             if c.relation_id is None:
                 raise DeckError("contract", f"Archidekt did not number the deck rows of '{c.name}'.")
-            want[c.relation_id] = [cat for cat in c.categories if cat != COMMANDER]
+            rest = [cat for cat in c.categories if cat != COMMANDER]
+            if not rest and c.default_category and c.default_category != COMMANDER:
+                # archidekt.com never sends an empty list: it falls back to the card's default
+                # category (A50 M2); without one the row is left with none, as before
+                rest = [c.default_category]
+            want[c.relation_id] = rest
         old_names = sorted(set(old_commanders), key=str.lower)
         new_names = sorted(set(new_commanders), key=str.lower)
         if [n.lower() for n in old_names] != [n.lower() for n in new_names]:
