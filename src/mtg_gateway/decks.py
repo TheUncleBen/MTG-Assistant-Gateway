@@ -1081,8 +1081,8 @@ def category_plan_rows(
 
     ``set_category`` moves every row of the card to exactly that one category (or, with
     ``categories``, exactly those, the first the primary one). ``set_commander``
-    files the card under Commander and takes Commander off every other row that has it (keeping
-    that row's other categories), so after the change the commanders are exactly the cards named
+    files the card under Commander as its primary category, keeping its other categories (K10),
+    and takes Commander off every other row that has it (keeping that row's other categories), so after the change the commanders are exactly the cards named
     by this proposal's set_commander changes (two for partners). Rows that already have the
     wanted categories are left alone; a card that is not in the deck is an error.
     """
@@ -1111,9 +1111,19 @@ def category_plan_rows(
         new = list(ch.categories) or [ch.category or COMMANDER]
         if ch.action == "set_commander":
             new_commanders.append(rows[0].name)
-        changed = [r for r in rows if sorted(r.categories) != sorted(new)]
+        # K10: a new commander keeps its other categories, Commander first (the primary), as
+        # archidekt.com's "Set Commander as primary" does
+        per_row = {
+            r.relation_id: (
+                [COMMANDER] + [c for c in r.categories if c != COMMANDER]
+                if ch.action == "set_commander"
+                else new
+            )
+            for r in rows
+        }
+        changed = [r for r in rows if sorted(r.categories) != sorted(per_row[r.relation_id])]
         for r in changed:
-            want[r.relation_id] = new
+            want[r.relation_id] = per_row[r.relation_id]
         if ch.action == "set_category" and changed:
             old = sorted({", ".join(sorted(clean_text(c) for c in r.categories)) or "(none)" for r in rows})
             lines.append(
