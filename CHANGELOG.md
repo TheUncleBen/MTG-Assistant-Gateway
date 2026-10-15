@@ -9,8 +9,9 @@ with its own image (`1.2.3`), git tag (`v1.2.3`) and read-only branch
 
 ## [0.7.28] - Unreleased
 
-Card search with every Scryfall filter, My decks by folder, and leftover fixes. The database stays
-at schema 12.
+Card search with every Scryfall filter, My decks by folder, a printing picker on the deck page and
+in the editor, a clearer collection import, and leftover fixes. The database stays at schema 12,
+so going back to 0.7.27 is a plain image swap. The Android app is unchanged.
 
 ### Added
 - Card search (`/cards`) has every field of Scryfall's advanced search, paper cards by default:
@@ -19,13 +20,53 @@ at schema 12.
   and the next cards load as you scroll.
 - My decks shows your Archidekt folders: open a folder into its own view, go back with the
   breadcrumb, and filter by name across every folder (each match says which folder it is in).
-  The gateway's backup folder never shows, here or on the Folders page.
+  The gateway's backup folder never shows, here or on the Folders page. The Folders button is now
+  Manage folders.
+- Change printing… in the deck page's card menu (right-click, or press and hold on a phone) opens
+  a printing picker: search by set name or code, filter by finish, frame and border, sort newest,
+  oldest or cheapest, and see the whole card before you pick. Digital-only and preview printings
+  are hidden until you ask for them, and only English printings are listed. The change saves at
+  once with Undo; when the new printing isn't made in the card's finish, the picker says so first
+  and the card takes a finish that printing has.
+- The deck editor uses the same picker: Change printing on a card's row, and All printings… next
+  to the small printings when adding a card.
+- The Collection page explains how to import its Export CSV on archidekt.com: the column type to
+  pick for each column, and what each condition and language code means.
+- After a collection import the page says how many cards went in and names each line it could
+  not take as given: a language Archidekt's collection can't store (kept as English), a copy
+  added to a card you already have in another language, and cards not found. A refused import
+  says why and which line.
+- The collection import reads a Language column, in the gateway's codes, Archidekt's codes or
+  the language's English name. Assistants can give a language when they add to the collection.
+
+### Changed
+- The collection CSV export writes condition and language in Archidekt's own codes (D for
+  Damaged; JP, KR, SP, CS, CT for Japanese, Korean, Spanish and Chinese), so archidekt.com reads
+  them. The gateway's own import reads both.
+- Set as commander keeps the card's other categories, with Commander first, as archidekt.com's
+  "Set Commander as primary" does. A commander that is replaced and had no other category gets
+  its default category, as archidekt.com does.
+- ChatGPT: the plugin's short description is "MTG decks and research", the server instructions
+  put the safety rules first, and the install page says that ChatGPT shows the name and
+  description you type and may not show the gateway's icon for a connector added by hand.
+- The ChatGPT install step no longer calls 10 KB ChatGPT's limit for the icon.
+- Prices over a thousand read with a separator ($3,500.00) in the printing picker, the card
+  viewer and the editor; the editor writes printings as SET #number.
+- The admin page's clean-up row says each state in plain words.
+- CI also checks that the code compiles and imports on Python 3.11, the oldest version the
+  package allows, and a release waits for that check.
 
 ### Fixed
 - Changing a companion or a double-faced card set to show its back (its category, quantity,
   label or mana value) no longer clears that setting on Archidekt.
 - Card-name suggestions answer faster while typing; a card Scryfall doesn't know is remembered.
 - The assistant's printing list respects its limit for the set list too.
+- Undo of a move on the deck page files a card back under every category it had.
+- In the stacks view a card can be dragged onto the stack directly below it.
+- The deck editor's save bar sits under the top bar instead of over it.
+- Home, Goldfish and Compare load only the scripts they use, and the deck page's card filter is
+  quicker on big decks.
+- Every guarded form needs its render stamp, so a form can't be sent before it was shown.
 
 ## [0.7.27] - 2026-10-14
 
