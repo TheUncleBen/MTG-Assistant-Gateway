@@ -30,10 +30,12 @@ CONTROLS = """
 (sel) => {
   const vw = document.documentElement.clientWidth, out = [];
   const root = document.querySelector(sel);
-  for (const c of root.querySelectorAll('button, input:not([type=hidden]), select:not(.msel-native), summary, a')) {
+  const sel2 = 'button, input:not([type=hidden]), select:not(.msel-native), summary, a';
+  for (const c of root.querySelectorAll(sel2)) {
     if (c.checkVisibility && !c.checkVisibility({visibilityProperty: true, opacityProperty: true})) continue;
     if (!c.getClientRects().length) continue;
-    c.scrollIntoView({block: 'center', inline: 'nearest'});   // under a sticky head or foot only while scrolled
+    // a control is under a sticky head or foot only while scrolled there
+    c.scrollIntoView({block: 'center', inline: 'nearest'});
     const b = c.getBoundingClientRect();
     if (!(b.width > 0 && b.height > 0)) continue;
     const label = c.id || c.name || c.innerText.slice(0, 20) || c.className;
@@ -54,7 +56,10 @@ CONTRAST = """
 (sel) => {
   function rgb(s) { const m = s.match(/[\\d.]+/g); return m ? m.map(Number) : [0, 0, 0, 0]; }
   function lum(c) {
-    const v = c.slice(0, 3).map(x => { x /= 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); });
+    const v = c.slice(0, 3).map(x => {
+      x /= 255;
+      return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4);
+    });
     return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
   }
   function bg(el) {
@@ -136,7 +141,9 @@ def test_typing_updates_the_tiles_in_place_and_the_address_follows(server: Serve
         assert len(sol) == 1, sol
         # a name nothing matches says so, and the old tiles go
         page.locator("#c-q").fill("zzzz")
-        page.wait_for_function("() => /No card matches/.test(document.getElementById('cs-results').innerText)")
+        page.wait_for_function(
+            "() => /No card matches/.test(document.getElementById('cs-results').innerText)"
+        )
         assert page.locator("#cardgrid .cc").count() == 0
         # the address restores the search on reload
         page.locator("#c-q").fill("sol r")
@@ -272,7 +279,8 @@ def test_the_filters_fit_every_width_and_the_phone_panel_opens_and_closes(
         page.locator(".cs-more summary").click()
         page.locator("#f-o").wait_for(state="visible", timeout=3000)
         assert page.evaluate(MEASURE) == []
-        assert page.evaluate(CONTRAST, ".cs .chips li .nm, .cs label, .cs legend, .cs .hint, .cs summary") == []
+        texts = ".cs .chips li .nm, .cs label, .cs legend, .cs .hint, .cs summary"
+        assert page.evaluate(CONTRAST, texts) == []
         # the type list's options are readable in both themes
         page.locator("#p-t").click()
         page.locator("#o-t li.opt").first.wait_for(timeout=5000)
