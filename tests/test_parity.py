@@ -87,7 +87,7 @@ async def test_deck_list_controls_and_views(stack: Stack) -> None:
         rows = await b.http.get("/decks?view=list&order=name&q=sample", headers=NAV)
         assert rows.status_code == 200 and "decklist list'" in rows.text
         none = await b.http.get("/decks?q=zzz", headers=NAV)
-        assert none.status_code == 200 and "No decks yet matching" in none.text
+        assert none.status_code == 200 and "No decks matching “zzz” in any folder." in none.text
         # the deck page: text, stacks and grid views; grouping and sorting; the local filter
         deck = await b.http.get("/decks/42", headers=NAV)
         assert deck.status_code == 200
