@@ -800,15 +800,21 @@ def import_result_html(result: dict[str, Any]) -> str:
 
     notes: list[str] = []
     for group in result.get("kept") or []:
+        lang = group["language"]
+        # a language Archidekt lacks is named; anything else is quoted as it was typed
+        said = lang if lang in OTHER_LANGUAGE_NAMES.values() else f"“{lang}”"
         notes.append(
-            f"Kept as English, because Archidekt has no {group['language']} for collection cards: "
+            f"Kept as English, because {said} is not a language Archidekt stores for collection cards: "
             f"{rows(group['rows'])}."
         )
     merged = result.get("merged") or []
     if merged:
         langs = {m["existing"] for m in merged}
+        one = len(merged) == 1
         count_as = (
-            f"they count as {next(iter(langs))}" if len(langs) == 1 else "they count in that copy's language"
+            f"{'it counts' if one else 'they count'} as {next(iter(langs))}"
+            if len(langs) == 1
+            else "each counts in that copy's language"
         )
         entries = [{**m, "how": f"{m['language']} added to {m['existing']}"} for m in merged]
         notes.append(
@@ -820,7 +826,7 @@ def import_result_html(result: dict[str, Any]) -> str:
         n = int(result.get("cards") or 0)
         lead, cls = f"Imported {n} {'card' if n == 1 else 'cards'} into your Archidekt collection.", "ok"
     else:
-        lead, cls = "Nothing was added: no card matched. Check the name or pick a suggestion.", "error"
+        lead, cls = "Nothing was imported: no card in the list was found.", "error"
     items = "".join(f"<li>{_esc(n)}</li>" for n in notes)
     return (
         f"<div class='notice {cls} importres' role='status'><p>{_esc(lead)}</p>"
@@ -844,9 +850,10 @@ def export_help_html() -> str:
         "<th scope='col'>Type to pick on archidekt.com</th></tr></thead>"
         f"<tbody>{rows}</tbody></table></div>"
         "<p class='muted small'>The file writes Condition and Language in Archidekt's own codes. "
-        "Condition: NM, LP, MP, HP, and D for Damaged. Language: EN English, DE German, FR French, "
-        "IT Italian, PT Portuguese, RU Russian, JP Japanese, KR Korean, SP Spanish, "
-        "CS Chinese (Simplified), CT Chinese (Traditional).</p></section></details>"
+        "Condition: NM Near Mint, LP Lightly Played, MP Moderately Played, HP Heavily Played and "
+        "D Damaged. Language: EN English, DE German, FR French, IT Italian, PT Portuguese, "
+        "RU Russian, JP Japanese, KR Korean, SP Spanish, CS Chinese (Simplified) and "
+        "CT Chinese (Traditional).</p></section></details>"
     )
 
 
@@ -1258,7 +1265,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         return hit[2] if time.monotonic() - hit[1] <= IMPORT_RESULT_TTL else None
 
     def notice(code: str | None, *, sub: str = "", token: str | None = None) -> str:
-        if code in ("imported", "nothing", "toomany", "unreadable") and token:
+        if code in ("imported", "nothingimported", "toomany", "unreadable") and token:
             result = take_result(sub, token)
             if result is not None:
                 return import_result_html(result)
@@ -1267,6 +1274,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             "removed": "Removed from your Archidekt collection.",
             "updated": "Card details saved to your Archidekt collection.",
             "nothing": "Nothing was added: no card matched. Check the name or pick a suggestion.",
+            "nothingimported": "Nothing was imported: no card in the list was found.",
             "imported": "Imported into your Archidekt collection.",
             "toomany": f"An import adds at most {MAX_IMPORT_ROWS} rows at a time. Split the file and "
             "import the rest after.",
@@ -1315,6 +1323,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         open_add = bool(qp.get("add")) or (qp.get("ok") or qp.get("err")) in (
             "added",
             "nothing",
+            "nothingimported",
             "imported",
             "toomany",
             "unreadable",
@@ -1509,7 +1518,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                     code += "&r=" + keep_result(sub, {"refused": str(exc)})
                     return RedirectResponse(f"{back}{'&' if '?' in back else '?'}{code}", status_code=303)
                 out = await service.add(sub, items, source="manual")
-                code = "ok=imported" if out["added"] else "err=nothing"
+                code = "ok=imported" if out["added"] else "err=nothingimported"
                 code += "&r=" + keep_result(sub, import_result(items, out))
             elif action == "details":
                 rid = _rid(data.get("id"))

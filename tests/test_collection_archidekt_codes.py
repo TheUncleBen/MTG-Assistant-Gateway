@@ -101,8 +101,8 @@ async def test_import_and_export_round_trip_archidekt_codes(stack: Stack) -> Non
         assert r.headers["location"].startswith("/collection?ok=imported&r=")
         shown = await b.http.get(r.headers["location"], headers=NAV)
         assert (
-            "Kept as English, because Archidekt has no XX for collection cards: line 2 (Forest)."
-            in shown.text
+            "Kept as English, because “XX” is not a language Archidekt stores "
+            "for collection cards: line 2 (Forest)." in shown.text
         )
         forest = [
             c for c in stack.ark.collections["alice"].values() if c["card"]["oracleCard"]["name"] == "Forest"

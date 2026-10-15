@@ -381,7 +381,7 @@ def section(key: str, ctx: Context) -> Section:
                     steps=(
                         Step("On a computer, open chatgpt.com and sign in."),
                         Step(
-                            "Download the connector icon, a small PNG that ChatGPT's form takes.",
+                            "Download the connector icon (a small PNG).",
                             link=Link(
                                 "Download the icon (PNG)",
                                 CONNECTOR_ICON_PATH,

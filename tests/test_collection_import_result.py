@@ -81,10 +81,12 @@ def test_the_result_names_every_kind_of_row_and_escapes_them() -> None:
     html = import_result_html(result)
     assert html == (
         "<div class='notice ok importres' role='status'><p>Imported 7 cards into your Archidekt "
-        "collection.</p><ul><li>Kept as English, because Archidekt has no Phyrexian for collection cards: "
+        "collection.</p><ul><li>Kept as English, because Phyrexian is not a language Archidekt stores "
+        "for collection cards: "
         "line 2 (Sol Ring), line 5 (Forest).</li>"
-        "<li>Kept as English, because Archidekt has no XYZ for collection cards: line 6 (Island).</li>"
-        "<li>Added to a copy you already had in another language, so they count as English: line 4 (Opt, "
+        "<li>Kept as English, because “XYZ” is not a language Archidekt stores "
+        "for collection cards: line 6 (Island).</li>"
+        "<li>Added to a copy you already had in another language, so it counts as English: line 4 (Opt, "
         "Japanese added to English).</li>"
         "<li>Not found, so not imported: line 3 (&lt;b&gt;Foo&lt;/b&gt;), line 7 (Mountain).</li></ul></div>"
     )
@@ -105,7 +107,7 @@ def test_one_card_two_existing_languages_and_nothing_added() -> None:
     )
     assert import_result_html(one) == (
         "<div class='notice ok importres' role='status'><p>Imported 2 cards into your Archidekt "
-        "collection.</p><ul><li>Added to a copy you already had in another language, so they count in "
+        "collection.</p><ul><li>Added to a copy you already had in another language, so each counts in "
         "that copy&#x27;s language: row 1 (Opt, English added to Chinese (Traditional)), row 2 (Forest, "
         "English added to Korean).</li></ul></div>"
     )
@@ -113,8 +115,8 @@ def test_one_card_two_existing_languages_and_nothing_added() -> None:
     assert "<p>Imported 1 card into your Archidekt collection.</p></div>" in import_result_html(single)
     none = import_result(items, {"added": [], "skipped": [{"index": 0}, {"index": 1}], "merged": []})
     assert import_result_html(none) == (
-        "<div class='notice error importres' role='status'><p>Nothing was added: no card matched. Check the "
-        "name or pick a suggestion.</p><ul><li>Not found, so not imported: row 1 (Opt), row 2 (Forest)."
+        "<div class='notice error importres' role='status'><p>Nothing was imported: no card in the list was "
+        "found.</p><ul><li>Not found, so not imported: row 1 (Opt), row 2 (Forest)."
         "</li></ul></div>"
     )
 
@@ -141,10 +143,11 @@ async def test_import_through_the_page_reports_merges_and_misses_once(stack: Sta
         page = (await b.http.get(where, headers=NAV)).text
         assert "Imported 3 cards into your Archidekt collection." in page
         assert (
-            "Kept as English, because Archidekt has no Phyrexian for collection cards: line 3 (Opt)." in page
+            "Kept as English, because Phyrexian is not a language Archidekt stores "
+            "for collection cards: line 3 (Opt)." in page
         )
         assert (
-            "Added to a copy you already had in another language, so they count as English: line 2 "
+            "Added to a copy you already had in another language, so it counts as English: line 2 "
             "(Sol Ring, Japanese added to English)." in page
         )
         assert "Not found, so not imported: line 4 (Foo Bar)." in page
@@ -160,10 +163,10 @@ async def test_import_through_the_page_reports_merges_and_misses_once(stack: Sta
         assert "Nothing was imported: line 3: quantity &#x27;x&#x27; is not a number." in page
         # nothing found: the plain notice, with the rows not found
         r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": "1 Foo Bar\n"})
-        assert r.headers["location"].startswith("/collection?err=nothing&r=")
+        assert r.headers["location"].startswith("/collection?err=nothingimported&r=")
         page = (await b.http.get(r.headers["location"], headers=NAV)).text
         assert (
-            "Nothing was added: no card matched." in page
+            "Nothing was imported: no card in the list was found." in page
             and "Not found, so not imported: row 1 (Foo Bar)." in page
         )
     finally:
