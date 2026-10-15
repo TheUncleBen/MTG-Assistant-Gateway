@@ -372,6 +372,12 @@ def section(key: str, ctx: Context) -> Section:
                 ),
                 Block(
                     "Add the connector",
+                    paras=(
+                        "ChatGPT shows the name and description you type when you add the connector. "
+                        f"Use “{site}” and the description below.",
+                        "OpenAI's instructions say ChatGPT takes an app's icon from its plugin file or an "
+                        "upload, so the gateway's icon may not show for a connector added by hand.",
+                    ),
                     steps=(
                         Step("On a computer, open chatgpt.com and sign in."),
                         Step(
