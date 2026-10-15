@@ -212,7 +212,7 @@
       card.finish && card.finish.toLowerCase() !== "normal" && card.finish.toLowerCase() !== "nonfoil" ? titleCase(card.finish) : ""].filter(Boolean).join(" · ");
     fact(dl, "Printing", printing);
     fact(dl, "Artist", card.artist);
-    fact(dl, "Price", card.price ? "$" + card.price : "");
+    fact(dl, "Price", card.price && !isNaN(Number(card.price)) ? money(card.price, "usd") : "");
     fact(dl, "Salt", card.salt ? String(card.salt) : "");
     fact(dl, "EDHREC rank", card.rank ? Number(card.rank).toLocaleString() : "");
     if (card.gc) fact(dl, "Note", "Game changer", "gc");
@@ -313,7 +313,7 @@
      asks Scryfall; watching does once (the same as the Watchlist page). */
   function money(v, cur) {
     if (v === null || v === undefined) return "no price";
-    return (cur === "eur" ? "€" : "$") + Number(v).toFixed(2);
+    return (cur === "eur" ? "€" : "$") + Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
   function priceButton(card) {
     var btn = el("button", "btn small", "Price history");

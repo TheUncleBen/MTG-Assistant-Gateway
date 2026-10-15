@@ -703,8 +703,10 @@ def export_help_html() -> str:
         "<div class='tbl'><table><thead><tr><th scope='col'>Column in this file</th>"
         "<th scope='col'>Type to pick on archidekt.com</th></tr></thead>"
         f"<tbody>{rows}</tbody></table></div>"
-        "<p class='muted small'>Condition and Language are written in Archidekt's codes: D for DMG, and "
-        "JP, KR, SP, CS and CT for JA, KO, ES, ZHS and ZHT.</p></section></details>"
+        "<p class='muted small'>The file writes Condition and Language in Archidekt's own codes. "
+        "Condition: NM, LP, MP, HP, and D for Damaged. Language: EN English, DE German, FR French, "
+        "IT Italian, PT Portuguese, RU Russian, JP Japanese, KR Korean, SP Spanish, "
+        "CS Chinese (Simplified), CT Chinese (Traditional).</p></section></details>"
     )
 
 
@@ -992,8 +994,10 @@ details.rowmenu.details .menu .actions button{width:100%;margin:0}
 .coll-empty .actions{justify-content:center}
 /* how to import the Export CSV on archidekt.com: a two-column table in the fold */
 /* with large text the title wraps, even inside "archidekt.com", rather than push the page wider */
-.collection details.csvhelp > summary{flex-wrap:wrap}
+.collection details.csvhelp > summary{flex-wrap:wrap;padding-right:.35rem}
 .collection details.csvhelp > summary .t{min-width:0;overflow-wrap:anywhere}
+/* on a phone the side text would wrap alone against the edge: the title says enough */
+@media (max-width:600px){ .collection details.csvhelp > summary .chev{display:none} }
 .csvhelp .tbl{overflow-x:auto;max-width:min(100%,40rem)}
 .csvhelp table{border-collapse:collapse;width:100%;font-size:.95rem}
 .csvhelp th,.csvhelp td{text-align:left;vertical-align:top;padding:.4rem .5rem;overflow-wrap:anywhere;

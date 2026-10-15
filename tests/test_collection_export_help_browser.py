@@ -65,7 +65,19 @@ def test_export_help_fits_and_reads_at_every_width(server: Server, width: int, t
         assert page.evaluate(FITS) == []
         texts = "details.csvhelp summary, details.csvhelp p, details.csvhelp th, details.csvhelp td"
         assert page.evaluate(CONTRAST, texts) == []
+        # the summary's text stays inside the fold (the side text is dropped on a phone)
+        assert fold.evaluate(
+            "d => { const b = d.getBoundingClientRect();"
+            " return [...d.querySelectorAll('summary > span')].filter(s => s.offsetParent)"
+            ".every(s => s.getBoundingClientRect().right <= b.right - 1); }"
+        )
+        assert fold.locator("summary .chev").is_visible() == (width > 600)
         if SHOTS:
-            fold.screenshot(path=str(Path(SHOTS) / f"csvhelp-{width}-{theme}.png"))
+            fold.scroll_into_view_if_needed()
+            box = fold.bounding_box()
+            page.screenshot(  # with the page's margins, so the edges show
+                path=str(Path(SHOTS) / f"csvhelp-{width}-{theme}.png"),
+                clip={"x": 0, "y": max(0, box["y"] - 16), "width": width, "height": box["height"] + 32},
+            )
         assert errors == [], errors
         browser.close()
