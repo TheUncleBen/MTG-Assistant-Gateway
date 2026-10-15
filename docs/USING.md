@@ -268,10 +268,14 @@ condition and count.
   are shown as Archidekt holds them).
 - Cards you own show a **green dot** on every deck page, your own decks and
   public ones alike, with the number of copies Archidekt knows about.
-- **Export CSV** downloads the whole collection in the column layout
-  Archidekt's own import reads. **Import a list** adds cards from that CSV,
-  from a CSV with Archidekt's column names or from a plain card list, pasted
-  or chosen as a file, up to 100 rows at a time.
+- **Export CSV** downloads the whole collection. Archidekt's import does not
+  read the column names: on archidekt.com you pick each column's type when
+  you import (the page's **Importing the CSV on archidekt.com** lists them)
+  and leave **Skip first line** on. Condition and Language are written in
+  Archidekt's codes (D for DMG; JP, KR, SP, CS, CT for JA, KO, ES, ZHS, ZHT).
+  **Import a list** adds cards from that CSV, from a CSV with Archidekt's
+  column names or from a plain card list, pasted or chosen as a file, up to
+  100 rows at a time.
 - A scan is a draft that stays as long as you like, up to a whole deck:
   fix misread cards, printings and quantities first, then send it to your
   collection or a deck, which removes the draft. Nothing expires by age.

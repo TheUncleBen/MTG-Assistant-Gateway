@@ -55,13 +55,23 @@ for the screenshots, not on a phone. The Collection page's **Import a list** has
 **Collection > Import a list** adds cards to your Archidekt Collection from pasted or uploaded
 text: the gateway's own **Export CSV** (so the collection round-trips, same printings and
 finishes, copies topped up), a CSV with Archidekt's collection column names (`Quantity`, `Name`,
-`Finish` or `Foil`, `Condition`, `Edition Code` or `Set Code`, `Collector Number`, `Scryfall ID`;
-headers are matched by name in any order and extra columns are ignored), or a plain card list
+`Finish` or `Foil`, `Condition`, `Language` or `Lang`, `Edition Code` or `Set Code`, `Collector
+Number`, `Scryfall ID`; headers are matched by name in any order and extra columns are ignored;
+Condition and Language take the gateway's codes or Archidekt's, `D` for DMG and `JP`, `KR`, `SP`,
+`CS`, `CT` for JA, KO, ES, ZHS, ZHT; an empty Language is English; an unknown language code
+refuses the whole import, like a bad quantity), or a plain card list
 (`2 Sol Ring (CMR) 436 *F*`). At most 100 rows per import, because Archidekt is written one card
 at a time about a second apart; split a bigger file and import the rest after. **Verified**
 against the test double (`tests/test_browse_collection.py::test_collection_import_from_csv_and_plain_list`).
 Whether archidekt.com's own collection CSV export carries exactly these headers is **reported**
 from its collection import page, not verified against a live file.
+
+The other way, archidekt.com's collection import does not read column names: the person picks each
+column's type (read from its site's import page, 2026-10-14). For the gateway's Export CSV:
+Quantity→Quantity, Name→Card name, Finish→Foil/Variant, Condition→Condition,
+Language→Language, Edition Code→Edition code, Edition Name→Edition name, Collector
+Number→Collector number, Scryfall ID→Scryfall ID, Date Added→Ignore, with "Skip first line" on.
+The export writes Condition and Language in Archidekt's codes. Not tried against a live import.
 
 ## From the phone app
 
