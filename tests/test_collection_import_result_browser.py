@@ -87,8 +87,9 @@ def test_import_result_reads_at_every_width(server: Server, width: int, theme: s
         lines = page.locator(".notice li").all_inner_texts()
         assert page.locator(".notice p").inner_text() == "Imported 4 cards into your Archidekt collection."
         assert lines == [
-            "Kept as English, because Archidekt has no Phyrexian for collection cards: line 3 (Opt).",
-            "Added to a copy you already had in another language, so they count as English: line 2 "
+            "Kept as English, because Phyrexian is not a language Archidekt stores "
+            "for collection cards: line 3 (Opt).",
+            "Added to a copy you already had in another language, so it counts as English: line 2 "
             "(Sol Ring, Japanese added to English).",
             "Not found, so not imported: line 4 (Foo Bar Not A Card).",
         ], lines
