@@ -127,7 +127,7 @@ def test_a_large_0_7_28_database_is_upgraded_to_13_and_keeps_every_row(
     monkeypatch.undo()
     new = Database(path)
     try:
-        assert new.schema_version == db_module.SCHEMA_VERSION == 13
+        assert new.schema_version == db_module.SCHEMA_VERSION == 14
         c = new._conn
         (count,) = c.execute("SELECT COUNT(*) FROM snapshots").fetchone()
         assert count == db_module._STEP_13_BATCH * 5 + 38
@@ -205,7 +205,7 @@ def test_an_interrupted_13_upgrade_leaves_12_and_runs_again(tmp_path: Path, monk
     monkeypatch.setattr(db_module, "snapshot_summary", real)
     again = Database(path)
     try:
-        assert again.schema_version == 13
+        assert again.schema_version == db_module.SCHEMA_VERSION
         assert again._conn.execute("SELECT COUNT(*) FROM backup_deletes").fetchone()[0] == 3
         assert (
             again._conn.execute("SELECT COUNT(*) FROM snapshots WHERE deck_name IS NULL").fetchone()[0] == 0
