@@ -205,3 +205,120 @@ def test_review_round_1_settings_details(server: Server, width: int, zoom: str) 
         assert page.evaluate(CONTRAST, TEXT) == []
         browser.close()
     assert errors == []
+
+
+# Ben, 10-16 19:45Z: a setting the stack sets is shown where it would be changed, greyed out, with
+# its value, and nothing on the page can change it.
+LOCKED = {
+    "forge_games": 12,
+    "archidekt_backups": False,
+    "approval_mode_max": "semi",
+    "server_name": "Our Table",
+    "log_level": "WARNING",
+    "deck_sync_minutes": 60,
+}
+
+# Per locked row: its controls' state, shown value, text contrast over the greyed background
+# (opacity and alpha blended in), and the background against an editable control's.
+LOCKED_ROWS = """
+(keys) => {
+  function rgb(s) { const m = s.match(/[\\d.]+/g); return m ? m.map(Number) : [0, 0, 0, 1]; }
+  function lum(c) {
+    const v = c.slice(0, 3).map(x => {
+      x /= 255;
+      return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
+  }
+  function bg(el) {
+    for (let e = el; e; e = e.parentElement) {
+      const c = rgb(getComputedStyle(e).backgroundColor);
+      if (c.length < 4 || c[3] > 0.9) return c;
+    }
+    return rgb(getComputedStyle(document.body).backgroundColor);
+  }
+  function ratio(el) {
+    const cs = getComputedStyle(el), b = bg(el), f = rgb(cs.webkitTextFillColor || cs.color);
+    const op = parseFloat(cs.opacity);
+    let c = f.length > 3 ? f.slice(0, 3).map((x, i) => x * f[3] + b[i] * (1 - f[3])) : f;
+    if (op < 1) c = c.map((x, i) => x * op + b[i] * (1 - op));
+    const a = lum(c), z = lum(b);
+    return (Math.max(a, z) + 0.05) / (Math.min(a, z) + 0.05);
+  }
+  const editable = getComputedStyle(document.querySelector('#f-proposal_expiry_days')).backgroundColor;
+  return keys.map(key => {
+    const row = document.getElementById('s-row-' + key);
+    const ctls = [...row.querySelectorAll('input, select, button')];
+    const shown = ctls.filter(c => c.type !== 'radio' || c.checked)
+      .map(c => c.type === 'radio' ? c.value : (c.classList.contains('msel-btn') ? c.innerText : c.value))
+      .filter(v => v);
+    const faces = [...row.querySelectorAll(
+      'input:not([type=radio]), .msel-btn, .set-seg label, .set-choices label')]
+      .filter(e => e.getBoundingClientRect().width);
+    return {
+      key,
+      locked: row.classList.contains('locked'),
+      line: row.querySelector('.set-lock') && row.querySelector('.set-lock').innerText,
+      all_disabled: ctls.length > 0 && ctls.every(c => c.disabled),
+      shown,
+      low: faces.map(e => ratio(e)).filter(r => r < 4.5).map(r => r.toFixed(2)),
+      grey: faces.every(e => getComputedStyle(e).backgroundColor !== editable),
+      reset: !!row.querySelector('.reset'),
+      tick: !!row.querySelector('.set-confirm'),
+    };
+  });
+}
+"""
+
+
+@pytest.fixture
+def locked_server(tmp_path: Path):
+    s = Server(tmp_path, admin_group="mtg-admins", env_set=frozenset(LOCKED), **LOCKED)
+    s.start()
+    try:
+        yield s
+    finally:
+        s.stop()
+
+
+@pytest.mark.parametrize("width,theme", [*SIZES, (673, "light"), (673, "dark"), (344, "light")])
+def test_a_setting_the_stack_sets_shows_greyed_out_and_cannot_be_changed(
+    locked_server: Server, width: int, theme: str
+) -> None:
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid = _admin(locked_server)
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, locked_server, sid, width, theme, exe)
+        page.goto(f"{locked_server.base}/admin/settings", wait_until="networkidle")
+        rows = {r["key"]: r for r in page.evaluate(LOCKED_ROWS, list(LOCKED))}
+        for key, r in rows.items():
+            env = "MTG_" + key.upper()
+            assert r["locked"] and r["all_disabled"] and not r["reset"] and not r["tick"], r
+            assert r["line"] == (
+                f"Set in your stack ({env}). To change it here, remove it from your stack and redeploy."
+            )
+            assert r["low"] == [] and r["grey"], r
+        assert rows["forge_games"]["shown"] == ["12"]
+        assert rows["archidekt_backups"]["shown"] == ["off"]
+        assert rows["approval_mode_max"]["shown"] == ["semi"]
+        assert rows["server_name"]["shown"] == ["Our Table"]
+        assert "WARNING" in rows["log_level"]["shown"]
+        assert rows["deck_sync_minutes"]["shown"] == ["60"]
+        # the keyboard never lands on a locked control
+        landed = set()
+        for _ in range(150):
+            page.keyboard.press("Tab")
+            landed.add(page.evaluate("() => (document.activeElement.closest('.set-row') || {}).id || ''"))
+        assert not {f"s-row-{k}" for k in LOCKED} & landed
+        # a screen reader hears the row's name, that it is unavailable, and the stack line
+        num = page.locator("#f-forge_games")
+        assert num.get_attribute("disabled") is not None
+        assert "s-forge_games" in num.get_attribute("aria-describedby")
+        assert page.evaluate(MEASURE) == []
+        assert page.evaluate(CONTRAST, TEXT) == []
+        _shot(page, f"settings-locked-{width}-{theme}.png", page.locator("#g-general"))
+        _shot(page, f"settings-locked-approvals-{width}-{theme}.png", page.locator("#g-approvals"))
+        browser.close()
+    assert errors == []

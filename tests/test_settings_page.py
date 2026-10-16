@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from mtg_gateway import settings_page
-from mtg_gateway.config import MANAGED_SETTINGS, LiveSettings, with_stored
+from mtg_gateway.config import MANAGED_SETTINGS, LiveSettings, SettingError, with_stored
 from mtg_gateway.db import Database
 
 from .conftest import FakeIdP, Harness, make_settings, running
@@ -309,3 +309,44 @@ async def test_back_to_default_keeps_the_sections_other_typed_values(gw: Harness
         assert r.status_code == 303
     finally:
         await b.aclose()
+
+
+async def test_a_stack_value_holds_for_every_kind_of_setting(tmp_path: Path, idp: FakeIdP) -> None:
+    """Ben, 10-16: a value the stack sets is set in stone until the stack changes. No form post,
+    Back to default, stored value or restart changes it; every other write path goes through
+    LiveSettings.set and reset, which refuse it."""
+    locked = {
+        "archidekt_backups": False,
+        "approval_mode_max": "semi",
+        "server_name": "Our Table",
+        "log_level": "WARNING",
+        "deck_sync_minutes": 60,
+    }
+    settings = make_settings(
+        tmp_path, required_group="mtg-users", admin_group="mtg-admins", env_set=frozenset(locked), **locked
+    )
+    # a value stored on the page before the stack set it is ignored, at start and after
+    db = Database(settings.db_path)
+    db.save_setting("deck_sync_minutes", 30, by="admin-1")
+    db.close()
+    async with running(_with_admin(Harness(settings, idp))) as h:
+        live = _live(h)
+        b = await admin_browser(h)
+        try:
+            tries = {"archidekt_backups": "on", "approval_mode_max": "auto", "server_name": "Other"}
+            tries |= {"log_level": "DEBUG", "deck_sync_minutes": "120"}
+            for key, raw in tries.items():
+                r = await _post(b, {"group": MANAGED_SETTINGS[key].group, f"v_{key}": raw})
+                assert r.status_code == 303, key  # the locked field is ignored, nothing else sent
+            for key in locked:
+                r = await _post(b, {"reset": key})
+                assert r.status_code == 400 and "Set in your stack" in r.text, key
+                with pytest.raises(SettingError):
+                    live.set(key, MANAGED_SETTINGS[key].default, by="admin-1")
+                with pytest.raises(SettingError):
+                    live.reset(key, by="admin-1")
+                assert live.get(key) == locked[key] and live.source(key) == "deployment", key
+            assert h.app.state.gateway.settings.deck_sync_minutes == 60
+        finally:
+            await b.aclose()
+    assert with_stored(settings, Database(settings.db_path)).deck_sync_minutes == 60

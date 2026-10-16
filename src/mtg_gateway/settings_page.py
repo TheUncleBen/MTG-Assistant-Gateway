@@ -247,6 +247,16 @@ SETTINGS_CSS = """
 .set-choices label:has(input:disabled){cursor:default;color:var(--text-muted)}
 .set-lock code{overflow-wrap:anywhere}
 .set-confirm{grid-column:1 / -1}
+/* Set in the stack: shown where it would be changed, greyed out, its value still readable (4.5:1) */
+.set-row.locked input:disabled,.set-row.locked select:disabled,.set-row.locked .msel-btn:disabled{
+  background:var(--surface-2);color:var(--text-muted);-webkit-text-fill-color:var(--text-muted);
+  border-style:dashed;opacity:1;cursor:not-allowed}
+.set-row.locked .set-seg,.set-row.locked .set-choices{border-style:dashed}
+.set-row.locked input[type=radio]{accent-color:var(--text-muted)}
+.set-row.locked .set-seg label,.set-row.locked .set-choices label{background:var(--surface-2);
+  cursor:not-allowed}
+.set-row.locked .set-seg label:has(input:checked),.set-row.locked .set-choices label:has(input:checked){
+  background:var(--surface-2);box-shadow:inset 0 0 0 2px var(--text-muted)}
 .set-save{display:flex;flex-wrap:wrap;gap:.75rem;align-items:center;padding-top:.9rem;
   border-top:1px solid var(--border-soft)}
 .set-save button{min-height:var(--ctl)}
@@ -476,7 +486,7 @@ def _row(
             f"{html.escape(CONFIRM[key][1])}</label>"
         )
     return (
-        f"<div class='set-row{' bad' if err else ''}' id='s-row-{key}'>"
+        f"<div class='set-row{' bad' if err else ''}{' locked' if locked else ''}' id='s-row-{key}'>"
         f"<div class='set-text'>{title}"
         + (
             f"<p class='set-help muted small' id='{help_id}'>{html.escape(help_text)}</p>"
