@@ -5,6 +5,7 @@ proposal card's line about the other changes waiting on its deck (Q134 A3)."""
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -259,3 +260,32 @@ async def test_a_page_that_shared_a_failed_sync_read_reads_again_on_its_own() ->
     with pytest.raises(RuntimeError):
         await cache.get("u", failing, wait=5)
     assert calls.count("own") == 1
+
+
+async def test_the_waiting_card_rows_carry_why_one_needs_a_look(stack: Stack) -> None:
+    """The waiting card shows the why of a "needs a look" row from the board line's status_reason."""
+    from mtg_gateway import recheck
+
+    h = stack.h
+    token = await linked_user(stack)
+    pid = structured(await _propose(h, token, "Opt"))["proposal_id"]
+    with h.db.tx() as c:
+        c.execute(
+            "UPDATE proposals SET status = 'needs_look', status_reason = ? WHERE id = ?",
+            (recheck.REASON_CHANGED, pid),
+        )
+    sc = structured(await call(h, token, "show_waiting_changes", {"deck_id": "42"}))
+    row = sc["waiting"][0]
+    assert row["status"] == "needs_look" and "changed on Archidekt" in row["status_reason"], row
+    card = (
+        Path(__file__).resolve().parents[1] / "src/mtg_gateway/static/cards/waiting-card.html"
+    ).read_text()
+    assert "x.status_reason" in card
+
+
+def test_a_refusal_without_a_stored_reason_still_reads_as_a_sentence() -> None:
+    from mtg_gateway.decks import needs_look_error
+
+    msg = str(needs_look_error(None))
+    assert msg.startswith("Not applied: The deck changed on Archidekt since this was made. Nothing")
+    assert "  " not in msg

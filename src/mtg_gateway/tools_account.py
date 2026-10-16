@@ -134,7 +134,8 @@ def add_account_tools(state: AppState, h: SimpleNamespace) -> None:
             "'like', 'vote_down' or 'clear_vote' (the deck's like), 'bookmark' or 'unbookmark', "
             "'follow_owner' or 'unfollow_owner' (Archidekt follows people, not decks: this follows the "
             "deck's owner). Returns a proposal (kind 'action', risk 'consent') that only the user applies, "
-            "on the review page, in every approval mode: never call apply_proposal for it. "
+            "with their press on the card in the chat or on its review page, in every approval mode: never "
+            "call apply_proposal for it. "
             "Changes nothing by itself."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
@@ -281,8 +282,9 @@ def add_account_tools(state: AppState, h: SimpleNamespace) -> None:
             "'remove'; username: the person's Archidekt username. 'add' takes only people the user follows "
             "on Archidekt (as Archidekt's own settings page does); a collaborator can change anything in "
             "the deck except its main settings. Only when the user asked for this person. Returns a "
-            "proposal (kind 'action', risk 'consent') that only the user applies, on the review page, in "
-            "every approval mode: never call apply_proposal for it. Changes nothing by itself."
+            "proposal (kind 'action', risk 'consent') that only the user applies, with their press on the "
+            "card in the chat or on its review page, in every approval mode: never call apply_proposal "
+            "for it. Changes nothing by itself."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
         meta=card_meta,

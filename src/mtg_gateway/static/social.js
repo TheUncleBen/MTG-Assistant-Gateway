@@ -23,7 +23,13 @@
       method: method, credentials: "same-origin",
       headers: { "Content-Type": "application/json", "X-CSRF-Token": CSRF },
       body: body === undefined ? undefined : JSON.stringify(body)
-    }).then(function (r) { return r.json().then(function (d) { d.status = r.status; return d; }); });
+    }).then(function (r) {
+      return r.json().then(function (d) { d.status = r.status; return d; }, function () {
+        // not the gateway's JSON answer (an error page): the request reached it, the outcome is unknown
+        return { ok: false, status: r.status, error: "server",
+                 message: "The gateway hit a problem. Reload the page to see what reached Archidekt." };
+      });
+    });
   }
   function socialProblem(d) {
     if (d && (d.error === "not_linked" || d.error === "auth")) {
@@ -41,6 +47,7 @@
     if (old) old.dismiss(); // one question at a time; the other button comes back
     var chip = el("span", "confirm");
     chip.setAttribute("role", "group");
+    chip.setAttribute("aria-label", question);
     chip.appendChild(el("span", "", question)); // in a span, so a long name in it can wrap (.confirm > span)
     var yes = el("button", "btn-primary", yesLabel);
     yes.type = "button";
@@ -48,13 +55,15 @@
     no.type = "button";
     chip.appendChild(yes);
     chip.appendChild(no);
-    btn.hidden = true;
+    // hidden by style too: a button styled display:block (a form's Save) ignores the hidden attribute
+    var show = function (on) { btn.hidden = !on; btn.style.display = on ? "" : "none"; };
+    show(false);
     btn.parentNode.insertBefore(chip, btn.nextSibling);
-    var restore = function () { chip.remove(); btn.hidden = false; btn.focus(); };
-    chip.dismiss = function () { chip.remove(); btn.hidden = false; };
+    var restore = function () { chip.remove(); show(true); btn.focus(); };
+    chip.dismiss = function () { chip.remove(); show(true); };
     no.addEventListener("click", restore);
     chip.addEventListener("keydown", function (e) { if (e.key === "Escape") restore(); });
-    yes.addEventListener("click", function () { chip.remove(); btn.hidden = false; onYes(); });
+    yes.addEventListener("click", function () { chip.remove(); show(true); onYes(); });
     yes.focus();
   }
   var social = $(".banner .social");
@@ -179,6 +188,7 @@
       var acts = el("div", "acts");
       var reply = el("button", "btn-ghost", "Reply");
       reply.type = "button";
+      reply.setAttribute("aria-label", "Reply to " + (c.owner.username || "this comment"));
       reply.addEventListener("click", function () {
         parentId = c.id; parentPage = pg;
         replyTo.hidden = false;
@@ -212,7 +222,11 @@
                 c.user_vote = d.vote; c.points = d.points;
                 showPoints();
                 Array.prototype.forEach.call(acts.querySelectorAll("button.vote"), function (x) { if (x.relabel) x.relabel(); });
-              }).catch(function () { btn.disabled = false; });
+              }).catch(function () {
+                btn.disabled = false;
+                var n = el("p", "notice error", "No connection; the vote was not sent."); n.setAttribute("role", "alert");
+                acts.appendChild(n); setTimeout(function () { n.remove(); }, 8000);
+              });
             });
           });
           btn.relabel = label;
@@ -224,6 +238,7 @@
       if (me !== null && c.owner && c.owner.id === me) {
         var edit = el("button", "btn-ghost", "Edit");
         edit.type = "button";
+        edit.setAttribute("aria-label", "Edit your comment");
         edit.addEventListener("click", function () {
           if ($("form.editcomment", box)) return;
           var f = el("form", "editcomment");
@@ -238,12 +253,15 @@
             ev.preventDefault();
             var text = ta.value.trim();
             if (!text) { ta.focus(); return; }
-            save.disabled = true; note.textContent = "Saving…";
-            socialRequest("PATCH", deckUrl + "/" + encodeURIComponent(c.id), { text: text, page: pg }).then(function (d) {
-              if (!d.ok) { save.disabled = false; note.textContent = ""; note.appendChild(socialProblem(d)); return; }
-              c.text = d.comment.text; p.textContent = c.text; p.hidden = false; f.remove();
-              if (!/edited/.test(who.textContent)) who.appendChild(document.createTextNode(" · edited"));
-            }).catch(function () { save.disabled = false; note.textContent = "Network error; nothing was changed."; });
+            // asked first, like every other write (social review, 0.7.29)
+            confirmChip(save, "Change your public comment on Archidekt?", "Change", function () {
+              save.disabled = true; note.textContent = "Saving…";
+              socialRequest("PATCH", deckUrl + "/" + encodeURIComponent(c.id), { text: text, page: pg }).then(function (d) {
+                if (!d.ok) { save.disabled = false; note.textContent = ""; note.appendChild(socialProblem(d)); return; }
+                c.text = d.comment.text; p.textContent = c.text; p.hidden = false; f.remove();
+                if (!/edited/.test(who.textContent)) who.appendChild(document.createTextNode(" · edited"));
+              }).catch(function () { save.disabled = false; note.textContent = "No connection; the comment was not changed."; });
+            });
           });
           p.hidden = true;
           box.insertBefore(f, acts);
@@ -252,10 +270,13 @@
         acts.appendChild(edit);
         var del = el("button", "btn-ghost del", "Delete");
         del.type = "button";
+        del.setAttribute("aria-label", "Delete your comment");
         del.addEventListener("click", function () {
           if ($(".confirmbar", box)) return;
           var bar = el("div", "confirmbar notice warn");
           bar.setAttribute("role", "alertdialog");
+          bar.setAttribute("aria-label", "Delete this comment on Archidekt?");
+          bar.addEventListener("keydown", function (e) { if (e.key === "Escape") { bar.remove(); del.focus(); } });
           bar.appendChild(document.createTextNode("Delete this comment on Archidekt? "));
           var yes = el("button", "btn-danger", "Delete"); yes.type = "button";
           var no = el("button", "", "Keep"); no.type = "button";
@@ -268,7 +289,7 @@
               box.remove();
               if (countEl) countEl.textContent = d.count === 1 ? "1 comment" : d.count + " comments";
               if (!$(".cmt", thread)) thread.appendChild(el("p", "muted", "No comments yet. Be the first."));
-            }).catch(function () { yes.disabled = false; bar.textContent = "Network error; nothing was changed."; });
+            }).catch(function () { yes.disabled = false; bar.textContent = "No connection; the comment was not deleted."; });
           });
           box.insertBefore(bar, acts.nextSibling);
           yes.focus();
@@ -305,7 +326,11 @@
       loading.setAttribute("role", "status");
       thread.appendChild(loading);
       socialRequest("GET", thread.getAttribute("data-src")).then(function (d) {
-        if (!d.ok) { thread.textContent = ""; var p = el("p", "muted"); p.appendChild(socialProblem(d)); thread.appendChild(p); return; }
+        if (!d.ok) {
+          if (d.error === "not_linked" || d.error === "auth") { thread.textContent = ""; var p = el("p", "muted"); p.appendChild(socialProblem(d)); thread.appendChild(p); return; }
+          failed(d.message || "The comments could not be loaded.");  // Archidekt busy: offer another try
+          return;
+        }
         thread.textContent = "";
         me = typeof d.me === "number" ? d.me : null;
         if (countEl) countEl.textContent = d.count === 1 ? "1 comment" : d.count + " comments";
@@ -372,8 +397,8 @@
         yes.disabled = true;
         socialRequest("POST", "/social/api/decks/" + encodeURIComponent(commentsPanel.getAttribute("data-deck")) + "/comments", { text: text, parent: parentId, page: parentPage }).then(function (d) {
           bar.remove();
-          if (!d.ok) { var p = el("p", "notice error"); p.appendChild(socialProblem(d)); form.insertBefore(p, form.firstChild); return; }
-          var old = $(".notice", form); if (old) old.remove();
+          var old = $(".notice", form); if (old) old.remove();  // one notice at a time
+          if (!d.ok) { var p = el("p", "notice error"); p.setAttribute("role", "alert"); p.appendChild(socialProblem(d)); form.insertBefore(p, form.firstChild); return; }
           var node = render(d.comment, parentId ? parentPage : 1);
           var parentBox = parentId ? $("[data-id='" + parentId + "']", thread) : null;
           if (parentBox) {
@@ -384,7 +409,8 @@
             thread.insertBefore(node, thread.firstChild);
           }
           textarea.value = ""; parentId = null; replyTo.hidden = true;
-          if (countEl) { var n = (parseInt(countEl.textContent, 10) || 0) + 1; countEl.textContent = n === 1 ? "1 comment" : n + " comments"; }
+          // the count is of comments on the deck, not replies (Archidekt's thread count)
+          if (countEl && !parentBox) { var n = (parseInt(countEl.textContent, 10) || 0) + 1; countEl.textContent = n === 1 ? "1 comment" : n + " comments"; }
         }).catch(function () {
           bar.remove();
           var old = $(".notice", form); if (old) old.remove();

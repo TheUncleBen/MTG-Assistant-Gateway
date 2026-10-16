@@ -188,3 +188,114 @@ def test_show_more_comments_then_vote_on_page_two_in_the_browser(tmp_path) -> No
             browser.close()
     finally:
         server.stop()
+
+
+def test_post_reply_edit_and_delete_a_comment_in_the_browser(tmp_path) -> None:
+    """The social review (G14/Q47) on a phone: every comment write asks first (an edit too, which
+    used to save at once), the count counts comments not replies, and a refused write says why."""
+    import os
+
+    import pytest
+    from playwright.sync_api import sync_playwright
+
+    from .test_scan_browser import _chromium_path
+    from .test_social_browser import Server
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    server = Server(tmp_path)
+    server.ark.comments[ROOT] = [_comment(555001, 3)]
+    server.start()
+    shots = os.environ.get("MTG_SHOTS_DIR")
+    try:
+        sid = server.sign_in_and_link()
+        with sync_playwright() as p:
+            browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+            ctx = browser.new_context(viewport={"width": 412, "height": 915}, is_mobile=True, has_touch=True)
+            ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+            page = ctx.new_page()
+            errors: list[str] = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.goto(f"{server.base}/decks/43#comments", wait_until="networkidle")
+            page.locator("#comments").scroll_into_view_if_needed()
+            page.wait_for_selector("#comments .cmt[data-id='555001']", timeout=10000)
+            count = page.locator("#comments [data-count]")
+            # a top-level comment: asked first, then posted, and counted
+            page.fill("#comments form.newcomment textarea", "Nice deck.")
+            page.click("#comments form.newcomment button[type=submit]")
+            page.locator("#comments .confirmbar button.btn-primary").click()
+            page.wait_for_function("() => document.querySelectorAll('#comments .thread > .cmt').length === 2")
+            assert count.inner_text() == "2 comments"
+            # a reply: posted under its comment, the count stays (it counts comments, not replies)
+            page.locator("#comments .cmt[data-id='555001'] button", has_text="Reply").click()
+            page.fill("#comments form.newcomment textarea", "Thanks!")
+            page.click("#comments form.newcomment button[type=submit]")
+            page.locator("#comments .confirmbar button.btn-primary").click()
+            page.wait_for_selector("#comments .cmt[data-id='555001'] .replies .cmt", timeout=10000)
+            assert count.inner_text() == "2 comments"
+            # the new comment is the member's own at once: Edit and Delete, no vote buttons
+            mine = page.locator("#comments .thread > .cmt").first
+            assert mine.locator("button.vote").count() == 0
+            mine.locator("button", has_text="Edit").click()
+            mine.locator("form.editcomment textarea").fill("Nice deck, great curve.")
+            mine.locator("form.editcomment button", has_text="Save").click()
+            chip = mine.locator(".confirm")
+            chip.wait_for(timeout=5000)
+            assert "Change your public comment on Archidekt?" in chip.inner_text()
+            from mtg_gateway.archidekt import rich_text
+
+            sent = [c for c in server.ark.comments[ROOT] if rich_text(c["text"]) == "Nice deck."]
+            assert sent, "nothing is changed before the confirmation"
+            if shots:
+                page.screenshot(path=f"{shots}/social-edit-confirm-phone-light.png")
+            chip.locator("button", has_text="Change").click()
+            page.wait_for_function(
+                "() => [...document.querySelectorAll('#comments .cmt p')].some(p => p.textContent === "
+                "'Nice deck, great curve.')"
+            )
+            assert any(rich_text(c["text"]) == "Nice deck, great curve." for c in server.ark.comments[ROOT])
+            # delete: asked first, then gone
+            mine.locator("button", has_text="Delete").click()
+            mine.locator(".confirmbar button.btn-danger").click()
+            page.wait_for_function("() => document.querySelectorAll('#comments .thread > .cmt').length === 1")
+            assert count.inner_text() == "1 comment"
+            width = page.evaluate("document.documentElement.scrollWidth")
+            assert width <= 412, width
+            assert errors == [], errors
+            browser.close()
+    finally:
+        server.stop()
+
+
+async def test_a_reply_says_when_archidekt_is_busy_instead_of_not_in_thread(
+    stack: Stack, monkeypatch
+) -> None:
+    """The social review: a reply whose thread read fails says why, not "not in this deck's thread"."""
+    from mtg_gateway.decks import DeckError
+    from mtg_gateway.social import SocialService
+
+    async def busy(*a, **k):
+        raise DeckError("rate_limited", "Archidekt asked us to slow down; try again in a minute.")
+
+    b = await linked(stack)
+    try:
+        _thread(stack)
+        monkeypatch.setattr(SocialService, "find_comment", busy)
+        r = await post(b, "/social/api/decks/43/comments", {"text": "Agreed.", "parent": 555001})
+        assert r.status_code == 503 and r.json()["error"] == "rate_limited", r.text
+    finally:
+        await b.aclose()
+
+
+async def test_a_bookmark_already_so_says_so(stack: Stack) -> None:
+    """The social review: like and follow said "already the case"; a bookmark now does too."""
+    h = stack.h
+    token = await linked_user(stack)
+    stack.ark.private.discard(43)
+    note = "(already the case; applying changes nothing)"
+    stack.ark.bookmarks["alice"] = {43}
+    p = structured(await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "bookmark"}))
+    assert p["rows"][0]["text"].endswith(note), p
+    p = structured(await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "unbookmark"}))
+    assert not p["rows"][0]["text"].endswith(note), p
