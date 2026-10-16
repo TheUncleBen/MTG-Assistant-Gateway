@@ -206,6 +206,50 @@ def test_set_category_categories_round_trip_through_the_stored_proposal() -> Non
     assert "categories" not in one.as_dict()
 
 
+async def test_an_add_puts_back_the_companion_and_flip_flags(stack: Stack) -> None:  # noqa: F811
+    """The deck page's Undo of a removal names the row's companion and "flipped by default"
+    flags; the add puts them back, as a printing change and a restore already do (M2)."""
+    row = _deck_card(stack, "Cultivate")[0]
+    row.update(companion=True, flippedDefault=True)
+    b = await linked(stack)
+    try:
+        r = await api(
+            b, "POST", "/api/v1/decks/42/edit", {"changes": [{"action": "remove", "card_name": "Cultivate"}]}
+        )
+        assert r.status_code == 201 and _deck_card(stack, "Cultivate") == [], r.text
+        add = {"action": "add", "card_name": "Cultivate", "quantity": 1, "category": "Ramp",
+               "companion": True, "flipped_default": True}  # fmt: skip
+        r = await api(b, "POST", "/api/v1/decks/42/edit", {"changes": [add]})
+        assert r.status_code == 201, r.text
+        back = _deck_card(stack, "Cultivate")
+        assert [(x["companion"], x["flippedDefault"]) for x in back] == [(True, True)]
+        # an add without them stays as before; they go with an add only, as true or false
+        r = await api(
+            b, "POST", "/api/v1/decks/42/edit", {"changes": [{"action": "add", "card_name": "Opt"}]}
+        )
+        assert r.status_code == 201 and _deck_card(stack, "Opt")[0]["companion"] is False, r.text
+        for bad in (
+            {"action": "set_quantity", "card_name": "Cultivate", "quantity": 2, "companion": True},
+            {"action": "add", "card_name": "Opt", "flipped_default": "yes"},
+        ):
+            r = await api(b, "POST", "/api/v1/decks/42/edit", {"changes": [bad]})
+            assert r.status_code == 400 and r.json()["error"] == "invalid", (bad, r.text)
+    finally:
+        await b.aclose()
+
+
+def test_add_flags_round_trip_through_the_stored_proposal() -> None:
+    from mtg_gateway.decks import parse_changes
+
+    ch = parse_changes(
+        [{"action": "add", "card_name": "Lurrus", "companion": True, "flipped_default": True}]
+    )[0]
+    assert ch.companion and ch.flipped_default
+    assert parse_changes([ch.as_dict()]) == [ch]
+    plain = parse_changes([{"action": "add", "card_name": "Opt"}])[0].as_dict()
+    assert "companion" not in plain and "flipped_default" not in plain
+
+
 def test_add_categories_round_trip_through_the_stored_proposal() -> None:
     from mtg_gateway.decks import parse_changes
 

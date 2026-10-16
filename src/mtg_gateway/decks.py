@@ -596,6 +596,10 @@ class Change:
     # the row's primary one). The deck page's Undo of a removal or a move sends it, so a card
     # filed under several categories comes back under all of them.
     categories: tuple[str, ...] = ()
+    # add: the row's companion and "flipped by default" flags. The deck page's Undo of a removal
+    # sends them, so a companion or a card set to show its back comes back as it was.
+    companion: bool = False
+    flipped_default: bool = False
 
     @property
     def pinned(self) -> bool:
@@ -631,6 +635,10 @@ class Change:
                 d["color"] = colour
         if self.action == "set_mana_value":
             d["mana_value"] = self.mana_value
+        if self.companion:
+            d["companion"] = True
+        if self.flipped_default:
+            d["flipped_default"] = True
         if self.zone == "side":
             d["zone"] = "side"
         return d
@@ -735,7 +743,19 @@ def parse_changes(raw: Any) -> list[Change]:
             raise DeckError(
                 "invalid", f"change {i}: a pinned printing is added to the deck proper, not zone side"
             )
-        out.append(Change(action, name, qty, cat, set_code, number, finish, zone=zone, categories=cats))
+        flags = {}
+        for flag in ("companion", "flipped_default"):
+            given = item.get(flag)
+            if given is None:
+                continue
+            if not isinstance(given, bool):
+                raise DeckError("invalid", f"change {i}: {flag} must be true or false")
+            if given and action != "add":
+                raise DeckError("invalid", f"change {i}: {flag} applies to add only")
+            flags[flag] = given
+        out.append(
+            Change(action, name, qty, cat, set_code, number, finish, zone=zone, categories=cats, **flags)
+        )
     pinned = [ch.card_name.lower() for ch in out if ch.pinned]
     if len(pinned) != len(set(pinned)):
         raise DeckError("invalid", "one pinned printing per card name per proposal")
@@ -1405,8 +1425,14 @@ def build_payload(
     recategorise: dict[int, list[str]] | None = None,
     after_side: dict[str, int] | None = None,
     side_categories: dict[str, list[str]] | None = None,
+    flags: dict[str, tuple[bool, bool]] | None = None,
+    side_flags: dict[str, tuple[bool, bool]] | None = None,
 ) -> list[dict[str, Any]]:
     """Per-card entries for PATCH modifyCards/v2, one entry per request.
+
+    ``flags`` and ``side_flags`` (from ``add_flags``) give a new row its companion and
+    flippedDefault flags, as the deck page's Undo of a removal asks; a row that is already
+    there keeps its own.
 
     ``after_side`` are the maybeboard and sideboard counts after the zone-side changes (as
     ``plan_zones`` returns them); those rows are modified, removed or added (in
@@ -1452,7 +1478,13 @@ def build_payload(
                 qty -= same[0].quantity + int(pin["quantity"])
             else:
                 payload.append(
-                    _add_entry(pin["cardid"], int(pin["quantity"]), pin.get("categories"), pin["modifier"])
+                    _add_entry(
+                        pin["cardid"],
+                        int(pin["quantity"]),
+                        pin.get("categories"),
+                        pin["modifier"],
+                        (flags or {}).get(name, (False, False)),
+                    )
                 )
                 qty -= int(pin["quantity"])
             if qty < sum(c.quantity for c in existing if c not in same):
@@ -1470,7 +1502,11 @@ def build_payload(
         else:
             payload.append(
                 _add_entry(
-                    resolve[name], qty, (categories or {}).get(name), (modifiers or {}).get(name, "Normal")
+                    resolve[name],
+                    qty,
+                    (categories or {}).get(name),
+                    (modifiers or {}).get(name, "Normal"),
+                    (flags or {}).get(name, (False, False)),
                 )
             )
     side_by_name: dict[str, list[Any]] = {}
@@ -1491,6 +1527,7 @@ def build_payload(
                     qty,
                     (side_categories or {}).get(name) or [deck.side_category()],
                     (modifiers or {}).get(name, "Normal"),
+                    (side_flags or {}).get(name, (False, False)),
                 )
             )
     for card in deck.cards:
@@ -1499,7 +1536,14 @@ def build_payload(
     return payload
 
 
-def _add_entry(cardid: int, qty: int, categories: list[str] | None, modifier: str) -> dict[str, Any]:
+def _add_entry(
+    cardid: int,
+    qty: int,
+    categories: list[str] | None,
+    modifier: str,
+    flags: tuple[bool, bool] = (False, False),
+) -> dict[str, Any]:
+    """A new row; ``flags`` are its companion and flippedDefault (an Undo of a removal)."""
     return {
         "action": "add",
         "cardid": cardid,
@@ -1507,11 +1551,25 @@ def _add_entry(cardid: int, qty: int, categories: list[str] | None, modifier: st
         "categories": list(categories or []),
         "modifications": {
             "quantity": qty,
-            "companion": False,
-            "flippedDefault": False,
+            "companion": flags[0],
+            "flippedDefault": flags[1],
             "modifier": modifier,
         },
     }
+
+
+def add_flags(changes: list[Change], counts: dict[str, int], zone: str) -> dict[str, tuple[bool, bool]]:
+    """The companion and flippedDefault flags the adds in ``zone`` ask for, keyed by the spelling
+    in ``counts`` (``after`` or ``after_side``, as build_payload reads them); only names with a
+    flag set."""
+    out: dict[str, tuple[bool, bool]] = {}
+    for ch in changes:
+        if ch.action != "add" or ch.zone != zone or not (ch.companion or ch.flipped_default):
+            continue
+        key = next((k for k in counts if k.lower() == ch.card_name.lower()), ch.card_name)
+        was = out.get(key, (False, False))
+        out[key] = (was[0] or ch.companion, was[1] or ch.flipped_default)
+    return out
 
 
 def _entry(action: str, card: Any, qty: int, categories: list[str] | None = None) -> dict[str, Any]:
@@ -2991,7 +3049,17 @@ class DeckService:
             sub, deck, changes, after, after_side
         )
         payload = build_payload(
-            deck, after, resolve, new_cats, modifiers, pinned, recategorise, after_side, side_cats
+            deck,
+            after,
+            resolve,
+            new_cats,
+            modifiers,
+            pinned,
+            recategorise,
+            after_side,
+            side_cats,
+            add_flags(changes, after, "main"),
+            add_flags(changes, after_side, "side"),
         )
         specs, _print_lines = printing_plan_rows(deck, changes)
         payload += await self._printing_entries(sub, deck, specs)

@@ -683,7 +683,9 @@ def _card_data(card: DeckCard, deck: Deck) -> str:
     or side), first category (empty when Archidekt has none) and relation id, which pick the row
     an edit targets when the same card sits in the deck and on the maybeboard. A row in more than
     one category lists them all in data-allcats, so an Undo of its removal puts every one back.
-    data-cmc is the printed mana value, which a cleared custom one (data-mv) goes back to."""
+    data-cmc is the printed mana value, which a cleared custom one (data-mv) goes back to.
+    data-companion and data-flipped mark a companion and a card set to show its back, which an
+    Undo of its removal puts back too."""
     zone = "main" if deck.in_deck(card) else "side"
     cat = card.categories[0] if card.categories else ""
     rel = f" data-rel='{card.relation_id}'" if card.relation_id is not None else ""
@@ -699,6 +701,8 @@ def _card_data(card: DeckCard, deck: Deck) -> str:
         + (f" data-mv='{mana_value_text(card.custom_cmc)}'" if card.custom_cmc is not None else "")
         + (f" data-cmc='{card.cmc:g}'" if card.cmc is not None else "")
         + (f" data-notes='{esc(card.notes)}'" if card.notes else "")
+        + (" data-companion='1'" if card.companion else "")
+        + (" data-flipped='1'" if card.flipped_default else "")
     )
 
 

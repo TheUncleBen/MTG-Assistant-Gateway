@@ -819,7 +819,7 @@
     else if (ch.action === "remove") {
       // put the row back as it was: every one of its categories (in order, the primary first),
       // its printing (the deck proper only; a maybeboard add takes no pinned printing), finish,
-      // color tag and custom mana value, not just name and category. Its notes cannot come back:
+      // color tag, custom mana value and companion and flip flags, not just name and category. Its notes cannot come back:
       // Archidekt has no way for the gateway to write them (confirmNotes warns first).
       inv = { action: "add", card_name: name, quantity: qty };
       var cats = catsOf(card);
@@ -829,6 +829,9 @@
       if (zone === "main" && pr.length === 2 && pr[0] && pr[1]) { inv.set_code = pr[0].toLowerCase(); inv.collector_number = pr[1]; }
       var fin = (card.getAttribute("data-finish") || "").toLowerCase();
       if (fin === "foil" || fin === "etched") inv.finish = fin;
+      // a companion, or a card set to show its back, comes back as one
+      if (card.hasAttribute("data-companion")) inv.companion = true;
+      if (card.hasAttribute("data-flipped")) inv.flipped_default = true;
       var more = [inv];
       var tag = splitLabel(card.getAttribute("data-label") || "");
       if (tag.name) more.push({ action: "set_label", card_name: name, label: tag.name, color: tag.colour || undefined });
