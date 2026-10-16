@@ -615,16 +615,19 @@ default, and an install that leaves it off behaves exactly as before.
     `MTG_FORGE_URL=http://mtg-assistant-forge:8000`, then update the stack.
   - Docker Compose: start the `forge` profile (`COMPOSE_PROFILES=forge`) and set
     `MTG_FORGE_URL=http://forge:8000`.
-- **Load:** Java starts only while a simulation runs, one run at a time, capped by `FORGE_MEMORY_LIMIT`
+- **Load:** Java starts only while Forge plays a run, one run at a time, capped by `FORGE_MEMORY_LIMIT`
   (default 1536M) and `FORGE_CPUS` (default 2). `MTG_FORGE_GAMES` (default 10) sets the games per
   report. An idle Forge service holds no Java memory.
-- **Games at once:** a run's games are cut into slices of at most five, the same way whatever the
-  setting, so a seed always gives the same games. `MTG_FORGE_PARALLEL_GAMES` (default 1, or the admin
-  Settings page) asks for that many slices at once, and `FORGE_MAX_PARALLEL` on the Forge service
-  (default 1) is the most it allows. Each slice is its own Java process with up to `FORGE_XMX` of
-  memory, and one four-player game has peaked near 790 MiB, so raise `FORGE_MEMORY_LIMIT` before
-  raising `FORGE_MAX_PARALLEL` above 1. `FORGE_GAME_SECONDS` (default 600) is how long
-  one game may run before Forge calls it a draw; such games are counted as draws in the report.
+- **Games at once:** a run's games are cut into groups of at most five, the same way whatever the
+  setting. Each group starts from its own seed, so the first games of a group repeat, but later games
+  can differ (Forge's AI also depends on timing). `MTG_FORGE_PARALLEL_GAMES` (default 1, or the admin
+  Settings page) asks for that many groups at once, and `FORGE_MAX_PARALLEL` on the Forge service
+  (default 1) is the most it allows. Each group is its own Java process with up to `FORGE_XMX` of
+  memory. One four-player game has peaked at about 790 to 930 MiB in the measurements so far, and two
+  at once at about 1.8 GB, more than the default `FORGE_MEMORY_LIMIT` of 1536M, so raise
+  `FORGE_MEMORY_LIMIT` before raising `FORGE_MAX_PARALLEL` above 1. `FORGE_GAME_SECONDS` (default
+  600) is how long one game may run before Forge calls it a draw; such games are counted as draws in
+  the report.
 - **No upkeep:** the image carries Forge's card scripts, an index of Scryfall's alternative printed
   names, and the newest Commander precons as opponents, each with a bracket estimated from the game
   changers it holds (Scryfall's list, read once when CI builds the image). The gateway seats the

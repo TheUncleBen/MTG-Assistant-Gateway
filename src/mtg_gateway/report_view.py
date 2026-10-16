@@ -336,7 +336,9 @@ def parse_goldfish(block: Any, *, deck_size: int | None = None) -> dict[str, Any
     out["honesty"] = honesty
     if not out["metrics"] and not out["summary"]:
         # A refusal or an outage: the simulator's sentence is the whole story.
-        out["message"] = plain_words(preamble or text)[:600] or ("Not played." if not ok else "")
+        out["message"] = plain_words(preamble or text)[:600] or (
+            "The solo test did not run for this report." if not ok else ""
+        )
     return out
 
 
@@ -757,17 +759,23 @@ def coverage_text(g: dict[str, Any]) -> str:
 
 # The cards the simulator plays without their effect (its "unrecognized" group), in plain words.
 UNMODELED_HEADING = "Played without their effect"
+# Q136 item 1: an assistant can describe only some of these (about 6 to 8 of Liesa's 33), so the
+# text says so; the sentence on saving shows only when the gateway can save (the schema 14 table).
 UNMODELED_TEXT = (
-    "The simulator found these cards and their exact text, but it has no model yet of what they do, "
-    "so it drew and cast them without their effect. Whatever they would do in a real game is missing "
-    "from the numbers above. Your assistant can write a model for each card from its exact text. The "
-    "gateway keeps each model it accepts, and from then on every solo test plays that card, for every "
-    "member's decks."
+    "The solo test found these cards and their exact text, but has no description yet of what they "
+    "do, so it drew and cast them without their effect. Whatever they would do in a real game is "
+    "missing from the numbers above. Your assistant may be able to describe some of them from their "
+    "exact text, in a form the solo test can play. Many cards need things the solo test does not "
+    "model, such as opponents to interact with."
 )
-KEPT_HEADING = "Played from kept card models"
+UNMODELED_SAVED_TEXT = (
+    "The gateway saves each description that passes its check, and later solo tests of any member's "
+    "deck play that card with it."
+)
+KEPT_HEADING = "Played with saved card descriptions"
 KEPT_TEXT = (
-    "An assistant wrote a model for each of these cards from the card's exact text, and the gateway "
-    "kept it. This run played them with those models."
+    "An assistant described each of these cards in a form the solo test can play, and the gateway "
+    "checked its format and saved it. This run played these cards with those descriptions."
 )
 
 
@@ -782,7 +790,7 @@ def kept_models(r: dict[str, Any]) -> list[dict[str, Any]]:
 def _kept_who(u: dict[str, Any]) -> str:
     who = "added by you" if u.get("yours") else "added by another member"
     when = time_text(u.get("changed_at"))[:10]
-    return f"{who}, {when}" if when else who
+    return f"{who}, last changed {when}" if when else who
 
 
 def kept_models_html(used: list[dict[str, Any]]) -> str:
@@ -810,8 +818,8 @@ def ask_prompt(deck_name: str, deck_url: str, cards: list[dict[str, Any]]) -> st
         f"are played without their effect: {names}. Use the gateway's goldfish annotation tool on the "
         "deck to see what each one needs, and write each model only from the card's exact Oracle text "
         "(the gateway's card text and rules tools), never from memory. Then run a new deck report for "
-        "the deck with your models as its annotations, and tell me what changed and which models the "
-        "gateway kept."
+        "the deck with your models as its annotations, and tell me what changed, which cards you could "
+        "not describe, and which models the gateway kept, if any."
     )
 
 
@@ -859,7 +867,12 @@ def honesty_html(g: dict[str, Any], ask: str = "") -> str:
         parts.append(
             f"<div class='group unmodeled'><h3>{UNMODELED_HEADING} <small>"
             f"{_esc(_share(_copies(unrec), size))}</small></h3>"
-            f"<p>{UNMODELED_TEXT}</p>" + _names(unrec) + ask + "</div>"
+            f"<p>{UNMODELED_TEXT}"
+            + (f" {UNMODELED_SAVED_TEXT}" if g.get("models_saved") else "")
+            + "</p>"
+            + _names(unrec)
+            + ask
+            + "</div>"
         )
     oos = h.get("out_of_scope") or []
     if oos:
@@ -1027,10 +1040,10 @@ def forge_results_html(f: dict[str, Any]) -> str:
             "value": _pct(_float(mine.get("win_rate"))),
             "rate": {"lo": _float(low), "hi": _float(high)},
         },
-        {
-            "label": "Median game time",
-            "value": _seconds_text(res.get("median_game_seconds", res.get("average_game_seconds"))),
-        },
+        # runs stored before 0.7.30 have only the average, and say so
+        {"label": "Median game time", "value": _seconds_text(res["median_game_seconds"])}
+        if res.get("median_game_seconds") is not None
+        else {"label": "Average game time", "value": _seconds_text(res.get("average_game_seconds"))},
     ]
     if res.get("median_turn") is not None:
         span = res.get("turns_range") if isinstance(res.get("turns_range"), list) else []
@@ -1082,8 +1095,9 @@ def forge_results_html(f: dict[str, Any]) -> str:
         + ended_rows
         + "</ul>"
         + (
-            "<p class='muted small'>A game Forge stops at its time limit is a draw; many of them mean the "
-            "engine had too little time for these decks, and the win rates say less.</p>"
+            "<p class='muted small'>Forge counts a game that reaches its time limit as a draw. If many "
+            "games end this way, Forge had too little time for these decks, and the win rates say "
+            "less.</p>"
             if _int(ended.get("time_limit"))
             else ""
         )
@@ -1122,7 +1136,7 @@ def _interval(pair: Any) -> str:
     return f"{_pct(low)} to {_pct(high)}" if _float(low) is not None and _float(high) is not None else ""
 
 
-def forge_lines(f: dict[str, Any], *, results: bool = True) -> list[str]:
+def forge_lines(f: dict[str, Any], *, results: bool = True, markdown: bool = False) -> list[str]:
     """Forge's result as plain sentences, shared by the page and the Markdown export. The page
     draws the results themselves as a table (forge_results_html) and passes ``results=False``."""
     res = f.get("result") or {}
@@ -1189,7 +1203,15 @@ def forge_lines(f: dict[str, Any], *, results: bool = True) -> list[str]:
         seated = ", ".join(f"{front_face(n)} (bracket {b})" for n, b in rated.items())
         out.append(f"Opponents: {choice['note']}" + (f" Seated: {seated}." if seated else ""))
     if f.get("seed") is not None:
-        chosen = " (chosen by the gateway; pass it as options.forge_seed to replay these games)"
+        # The same seed does not always replay the same games (C-1, 10-16 runs: later games of a
+        # group of five can differ), so the page promises nothing and the export says what holds.
+        chosen = (
+            " (chosen by the gateway; with options.forge_seed the first games of each group of five "
+            "usually repeat, but later games can differ, so compare runs by their win rates and "
+            "intervals, not game by game)"
+            if markdown
+            else " (chosen by the gateway and kept with the report)"
+        )
         out.append(f"Seed: {f['seed']}{chosen if f.get('seed_source') == 'gateway' else ''}.")
     elif f.get("state") in ("done", "running") and f.get("job_id"):
         out.append("Seed: none recorded (this run was started without one).")
@@ -1408,7 +1430,10 @@ def report_body_html(
             "the deck statistics below.</p></div>"
         )
     elif g is None:
-        body += f"<div class='card'><h2>{_esc(solo_heading(g))}</h2><p class='muted'>Not played.</p></div>"
+        body += (
+            f"<div class='card'><h2>{_esc(solo_heading(g))}</h2>"
+            "<p class='muted'>The solo test did not run for this report.</p></div>"
+        )
     elif g.get("message") and not g.get("metrics"):
         body += (
             f"<div class='card'><h2>{_esc(solo_heading(g))} <span class='badge danger'>not run</span></h2>"
@@ -1431,7 +1456,7 @@ def report_body_html(
             )
         body += (
             f"<div class='card'><h2>{_esc(solo_heading(g))}</h2>"
-            "<p class='muted small'>Each solo test game is played against an opponent who does nothing: "
+            "<p class='muted small'>Each solo test game is played alone, with no opponent to interact: "
             "the deck draws, plays lands, casts what it can and attacks. The numbers say how fast the "
             "deck does its own thing, not how it fares against interaction.</p>"
             + warn
@@ -1510,7 +1535,7 @@ def report_markdown(r: dict[str, Any]) -> str:
         lines += [f"## {FORGE_HEADING}", ""]
         if forge.get("state") != "done":
             lines += [str(forge.get("error") or FORGE_STATE_TEXT.get(_forge_key(forge), "")), ""]
-        lines += [f"- {ln}" for ln in forge_lines(forge)]
+        lines += [f"- {ln}" for ln in forge_lines(forge, markdown=True)]
         if forge.get("not_played"):
             lines.append("- Cards Forge could not play: " + ", ".join(forge["not_played"]))
         lines.append("")
@@ -1522,17 +1547,17 @@ def report_markdown(r: dict[str, Any]) -> str:
             if (h["unrecognized"] or h["out_of_scope"]) and coverage_text(g):
                 lines += [coverage_text(g), ""]
         if h["unrecognized"]:
-            lines.append(f"{UNMODELED_HEADING} — {_share(_copies(h['unrecognized']), size)}:")
+            lines.append(f"{UNMODELED_HEADING}: {_share(_copies(h['unrecognized']), size)}.")
             lines.append(", ".join(_md_name(c) for c in h["unrecognized"]))
             lines.append("")
         if h["out_of_scope"]:
             total = _copies([c for grp in h["out_of_scope"] for c in grp["cards"]])
-            lines.append(f"Out of scope — {_share(total, size)}:")
+            lines.append(f"Out of scope: {_share(total, size)}.")
             for grp in h["out_of_scope"]:
                 lines.append(f"- {grp['label']}: " + ", ".join(_md_name(c) for c in grp["cards"]))
             lines.append("")
         if h["low_impact"]:
-            lines.append(f"Modeled but never mattered — {_share(len(h['low_impact']), size)}:")
+            lines.append(f"Modeled but never mattered: {_share(len(h['low_impact']), size)}.")
             lines.append(", ".join(front_face(n) for n in h["low_impact"]))
             lines.append("")
     if v is not None:

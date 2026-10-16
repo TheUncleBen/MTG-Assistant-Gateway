@@ -484,7 +484,7 @@ def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) ->
         assert min(state["targets"]) >= 44, state["targets"]
         text = page.locator(".rp-queue").inner_text()
         assert "Playing: 0 of 10 games" in text
-        assert "Waiting, place 1" in text
+        assert "Waiting: number 1 in line" in text
         page.select_option("#rp-deck", "43")
         page.locator(".rp-filter .btn").click()
         page.wait_for_load_state("networkidle")

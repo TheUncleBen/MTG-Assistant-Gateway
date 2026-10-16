@@ -142,16 +142,23 @@ def main() -> int:
 
     decks = [d for p in args.decks for d in read_decks(p)]
     rows = measure(decks, derive)
-    print("| Deck | Cards | Modeled | Out of scope | Needs a model | Not on Scryfall | Known |")
-    print("|---|---:|---:|---:|---:|---:|---:|")
+    print(
+        "| Deck | Cards | Modeled | Set aside on purpose | Needs a model | Not on Scryfall | Modeled share "
+        "| Modeled or set aside on purpose |"
+    )
+    print("|---|---:|---:|---:|---:|---:|---:|---:|")
     for r in rows:
         print(
             f"| {r['deck']} | {r['cards']} | {r['modeled']} | {r['out_of_scope']} | {r['needs_model']} "
-            f"| {r['not_found']} | {r['known_share']}% |"
+            f"| {r['not_found']} | {r['modeled_share']}% | {r['known_share']}% |"
         )
     total = sum(r["cards"] for r in rows) or 1
-    known = sum(r["modeled"] + r["out_of_scope"] for r in rows)
-    print(f"\nAll decks: {round(100 * known / total, 1)}% of {total} cards known to the solo test.")
+    modeled = sum(r["modeled"] for r in rows)
+    known = modeled + sum(r["out_of_scope"] for r in rows)
+    print(
+        f"\nAll decks: {round(100 * modeled / total, 1)}% of {total} cards modeled; "
+        f"{round(100 * known / total, 1)}% modeled or set aside on purpose."
+    )
     if args.json:
         args.json.write_text(json.dumps(rows, indent=1), "utf-8")
     return 0

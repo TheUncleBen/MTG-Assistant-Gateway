@@ -328,7 +328,8 @@ def guide_body(
     )
     tut_first_sim = (
         "<p>The solo test tells you how the deck plays on its own: how fast the commander lands, how "
-        "often the mana flows, how much damage it deals with no opponent. A deck without a commander "
+        "often the mana flows, how much damage it would deal to an opponent who does nothing. A deck "
+        "without a commander "
         "and with 60 or more cards plays a 60-card game instead (20 life, on the play).</p>"
         "<ol class='steps'>"
         "<li><span>Open one of your decks and press <strong>Run full test</strong>. The button says the "

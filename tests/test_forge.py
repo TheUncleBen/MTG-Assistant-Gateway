@@ -391,6 +391,7 @@ def test_report_page_and_markdown_show_forge_results() -> None:
     assert "<li><span>Won by a player</span><b>3</b></li>" in page
     assert "<li><span>Stopped at the time limit (counted as a draw)</span><b>1</b></li>" in page
     assert "Fake Sticker Card" in page and "Seed: 7." in page
+    assert "Average game time" in page and "Median game time" not in page  # stored before 0.7.30
     running = forge_html({"state": "running", "not_played": []})
     assert "running" in running and "data-forge-live" not in running  # an export: no refresh
     live = forge_html({"state": "running", "not_played": []}, live=True)
@@ -517,7 +518,17 @@ def test_report_page_shows_a_queued_run_and_its_place() -> None:
     md = report_markdown({"deck_name": "Aesi", "deck_id": "42", "stats": {}, "forge": queued})
     assert "Number 1 in your queue" in md
     seeded = forge_html({"state": "done", "seed": 12, "seed_source": "gateway", "result": {"games": 1}})
-    assert "Seed: 12 (chosen by the gateway; pass it as options.forge_seed to replay these games)." in seeded
+    assert "Seed: 12 (chosen by the gateway and kept with the report)." in seeded
+    assert "forge_seed" not in seeded  # the page promises no replay (C-1)
+    seeded_md = report_markdown(
+        {
+            "deck_name": "Aesi",
+            "deck_id": "42",
+            "stats": {},
+            "forge": {"state": "done", "seed": 12, "seed_source": "gateway"},
+        }
+    )
+    assert "later games can differ, so compare runs by their win rates and intervals" in seeded_md
 
 
 async def test_report_keeps_a_text_result_once(tmp_path: Path) -> None:

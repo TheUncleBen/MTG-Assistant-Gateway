@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Measures Forge games played one at a time and two at once, inside the deployment's own limits
+# Measures Forge games played one, two and three at once (Q136 item 5), inside the deployment's own limits
 # (FORGE_MEMORY_LIMIT 1536M, FORGE_CPUS 2): run time, peak memory, whether the container was killed
-# for memory, and whether the same seed gave the same games both ways. Numbers only: it never fails
+# for memory, and whether the same seed gave the same games each way. Numbers only: it never fails
 # the job (.github/workflows/forge-image.yml runs it with continue-on-error).
 #   scripts/ci_measure_forge.sh <local image tag> [games]
 set -u
@@ -10,7 +10,7 @@ games="${2:-6}"
 summary="${GITHUB_STEP_SUMMARY:-/dev/stdout}"
 docker rm -f forge-measure >/dev/null 2>&1 || true
 docker run -d --name forge-measure -p 18101:8000 --memory 1536m --cpus 2 \
-  -e FORGE_XMX=1g -e FORGE_MAX_PARALLEL=2 "$image" >/dev/null
+  -e FORGE_XMX=1g -e FORGE_MAX_PARALLEL=3 "$image" >/dev/null
 for i in $(seq 1 60); do curl -fsS http://127.0.0.1:18101/health >/dev/null 2>&1 && break; sleep 1; done
 echo "Runner: $(nproc) CPUs, $(free -m | awk '/Mem:/ {print $2}') MiB; container limit 1536 MiB, 2 CPUs"
 precons=$(curl -fsS http://127.0.0.1:18101/precons | python3 -c 'import json,sys; p=json.load(sys.stdin)["precons"]; print(json.dumps([{"precon": d["name"]} for d in p[:4]]))')
@@ -46,12 +46,15 @@ print("parallel %s (used %s): state %s, %d of %d games, run %.0f s, peak %s MiB,
   echo '```'
   measure 1
   measure 2
+  measure 3
   python3 - <<'PY'
-import json
-a = json.load(open("results-1.json"))["results"]
-b = json.load(open("results-2.json"))["results"]
+import json, os
 key = lambda rs: [(r["game"], r.get("winner"), r.get("draw"), r.get("turn")) for r in rs]
-print("same seed, same games at 1 and at 2:", "yes" if key(a) == key(b) and a else "no", key(a), key(b))
+runs = {p: json.load(open(f"results-{p}.json"))["results"] for p in (1, 2, 3) if os.path.exists(f"results-{p}.json")}
+for p in (2, 3):
+    if 1 in runs and p in runs:
+        same = key(runs[1]) == key(runs[p]) and runs[1]
+        print(f"same seed, same games at 1 and at {p}:", "yes" if same else "no", key(runs[1]), key(runs[p]))
 PY
   echo '```'
 } | tee -a "$summary"

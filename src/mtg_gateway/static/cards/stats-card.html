@@ -115,7 +115,7 @@ ul.facts li b{font-weight:600;text-align:right;overflow-wrap:anywhere}
     if (st.archidekt_bracket != null) lines.push("Bracket: " + bracketName(st.archidekt_bracket) + ", set on the deck.");
     else if (br.bracket != null) {
       lines.push("Archidekt's estimate from cards: " + bracketName(br.bracket) + ".");
-      (Array.isArray(br.notes) ? br.notes : []).forEach(function (n) { lines.push(String(n) + "."); });
+      (Array.isArray(br.notes) ? br.notes : []).forEach(function (n) { lines.push("Archidekt notes: “" + String(n) + "”."); });
     }
     v.appendChild(el("span", "", head + (lines.length ? " " + lines.join(" ") : "") + (problems.length ? " To look at:" : "")));
     if (problems.length) {

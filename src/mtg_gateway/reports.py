@@ -458,11 +458,7 @@ class ReportService:
         if not isinstance(section, dict) or not (
             section.get("seats") or (section.get("start") or {}).get("text")
         ):
-            raise DeckError(
-                "invalid",
-                "That report has no Forge games, so there are no opponents to share. Run it again with "
-                "Forge, then compare.",
-            )
+            raise DeckError("invalid", NO_FORGE_TO_SHARE)
         return {"report_id": str(row["id"]), "deck_name": str(row["deck_name"] or "")}
 
     def _shared_now(self, sub: str | None, shared: dict[str, Any]) -> dict[str, Any]:
@@ -811,6 +807,8 @@ class ReportService:
         goldfish = await self._mf(sub, "goldfish_run", _run_args(text, games, opts, mode))
         if used:
             goldfish["kept_models"] = used
+        if self.models.available:
+            goldfish["models_saved"] = True  # the report may say descriptions are saved (Q136 K1)
         own = [a for a in options.get("annotations") or [] if isinstance(a, dict)]
         if own and goldfish.get("ok") and self.models.available:
             goldfish["models_kept"] = self.models.keep(sub, own, names)
@@ -1056,12 +1054,19 @@ class ReportService:
             "has_goldfish": bool(goldfish and goldfish.get("ok")),
             "has_validation": bool(validation and validation.get("ok")),
             "bracket_estimate": (stats.get("bracket_estimate") or {}).get("bracket"),
+            "bracket_set": stats.get("archidekt_bracket"),
             "created_by_client": d.get("created_by_client"),
             "status": report_status(goldfish, validation, forge),
             "engine": "preflight_only" if preflight else "forge",
             "engine_label": PREFLIGHT_ONLY if preflight else "Forge rules engine",
             "settings": run_settings(stats, goldfish, forge),
         }
+
+
+NO_FORGE_TO_SHARE = (
+    "That report has no Forge games, so there are no opponents to share. Run it again with Forge, then "
+    "compare."
+)
 
 
 def _number(value: Any) -> bool:
@@ -1339,8 +1344,8 @@ def _commander_aside(goldfish: dict[str, Any], commander: str | None) -> None:
 # What a successful simulation's text always contains (Mystic Forge's renderers).
 SIM_RESULT_MARKERS = {"goldfish_run": "## Metrics", "goldfish_ab": "## Deltas"}
 NO_COMMANDER_TEXT = (
-    "No solo test: the solo test plays Commander decks and needs one card in the "
-    "deck's Commander (premier) category. Put the commander in that category and run again."
+    "No solo test: a Commander deck needs its commander in the deck's Commander (premier) category. "
+    "Put it there and run again."
 )
 # A deck without a commander is played as a 60-card game: Mystic Forge's ``constructed`` games
 # (docker/mystic-forge/patches/0007): no command zone, 20 life, a 7-card London mulligan with no
@@ -1362,8 +1367,8 @@ UNMARKED_COMMANDER_TEXT = (
     '(premier) category, or under a "Commander" heading in a pasted list, and run again.'
 )
 MIXED_MODES_TEXT = (
-    "No solo test: one deck has a commander and the other does not. The A/B compares two "
-    "Commander decks or two 60-card decks."
+    "No comparison games: one deck has a commander and the other does not. The comparison plays "
+    "two Commander decks or two 60-card decks."
 )
 
 

@@ -139,10 +139,13 @@ async def test_a_kept_model_plays_in_every_members_later_runs(tmp_path: Path) ->
     sent = mf.calls[-1][1]
     assert sent["annotations"] == [clean_model(model, card=name)]
     used = second["goldfish"]["kept_models"]
+    assert second["goldfish"]["models_saved"] is True
     assert [(u["name"], u["yours"]) for u in used] == [(name, False)] and len(used[0]["model"]) == 12
     page = report_body_html(second)
     assert (
-        "Played from kept card models" in page and "added by another member" in page and "alice" not in page
+        "Played with saved card descriptions" in page
+        and "added by another member" in page
+        and "alice" not in page
     )
     assert "added by another member" in report_markdown(second)
     # alice's own later run says "added by you"; her assistant's own model for the card wins
@@ -161,7 +164,10 @@ async def test_each_member_keeps_at_most_the_cap(tmp_path: Path, monkeypatch: An
     models = [{"name": n, "inert": True} for n in names]
     out = await reports.run("alice", "42", options={"annotations": models})
     assert out["goldfish"]["models_kept"]["kept"] == [{"name": names[0]}]
-    assert "you keep 1 card models already" in out["goldfish"]["models_kept"]["refused"][0]["why"]
+    assert (
+        "you already keep 1 card models, the most one member can keep"
+        in out["goldfish"]["models_kept"]["refused"][0]["why"]
+    )
 
 
 async def test_nothing_is_kept_without_the_schema_14_table(tmp_path: Path) -> None:
@@ -172,3 +178,13 @@ async def test_nothing_is_kept_without_the_schema_14_table(tmp_path: Path) -> No
     assert not KeptModels(db).available
     out = await reports.run("alice", "42", options={"annotations": [{"name": "Sol Ring", "inert": True}]})
     assert "models_kept" not in out["goldfish"] and "kept_models" not in out["goldfish"]
+    assert "models_saved" not in out["goldfish"]  # so no page says descriptions are saved
+
+
+def test_the_saving_sentence_shows_only_when_the_gateway_saves() -> None:
+    from mtg_gateway.report_view import UNMODELED_SAVED_TEXT, honesty_html
+
+    g = {"deck_size": 100, "honesty": {"unrecognized": [{"name": "Odd Card", "count": 1}]}}
+    assert "Your assistant may be able to describe some of them" in honesty_html(g)
+    assert UNMODELED_SAVED_TEXT not in honesty_html(g)
+    assert UNMODELED_SAVED_TEXT in honesty_html({**g, "models_saved": True})

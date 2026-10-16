@@ -123,7 +123,7 @@ One deck:
   have none. The page shows the library count and works with a mouse, a
   finger or the keyboard. Nothing is sent to Archidekt and nothing is kept.
 - **Run full test** runs the statistics, the decklist validation and the
-  solo test (300 games against no opponent) and opens the result, filed under
+  solo test (300 games, no opponents) and opens the result, filed under
   History. It is the same run the assistant's `run_deck_report` makes, so
   the numbers match whichever way it is started. A Commander deck is played
   from the command zone against 40 life. A deck without a commander and with
@@ -337,8 +337,13 @@ assistant applies what that mode allows, always with a snapshot.
   **Restore** puts a deck back exactly as a snapshot had it, cards and the
   deck's own name, description, format, bracket and privacy alike (another
   proposal you approve).
-- **Reports** store a deck's statistics, a legality check and a goldfish
-  simulation so you can follow how it develops.
+- **Reports** (under More) list every deck report you or your assistant
+  ran, with what Forge is playing now. Each holds the deck's statistics, a legality check and the
+  solo test, so you can follow how a deck develops.
+- **Compare** has **Test both in Forge against the same opponents** when
+  Forge is on: both decks play Forge games against the same three precons.
+- The **Goldfish** page's **How to play** guide walks a first game step by
+  step; you can hide it.
 
 ## Watchlist and prices
 
