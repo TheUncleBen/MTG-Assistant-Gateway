@@ -1618,6 +1618,21 @@ class Database:
                     "DELETE FROM deck_covers WHERE deck_id = ? AND owner_sub IS NULL", (deck_id,)
                 ).rowcount
             out["deck_covers"] = covers
+            # Review round 1, finding 5: the records of their backup copies (each holds the deck's
+            # name and URL) go now, not at the next hourly clean-up: those their snapshots name,
+            # and those recorded for them. Taken before the snapshots go.
+            out["backup_records"] = (
+                c.execute(
+                    """DELETE FROM job_runs WHERE substr(name, 1, ?) = ?
+                    AND (CASE WHEN json_valid(detail_json) THEN json_extract(detail_json, '$.sub') END = ?
+                         OR substr(name, ? + 1) IN (
+                             SELECT backup_deck_id FROM snapshots
+                             WHERE owner_sub = ? AND backup_deck_id IS NOT NULL))""",
+                    (len(BACKUP_MADE_JOB), BACKUP_MADE_JOB, sub, len(BACKUP_MADE_JOB), sub),
+                ).rowcount
+                if "snapshots" in present
+                else 0
+            )
             for table, column in self.MEMBER_TABLES:
                 if table in present:
                     out[table] = c.execute(f"DELETE FROM {table} WHERE {column} = ?", (sub,)).rowcount
