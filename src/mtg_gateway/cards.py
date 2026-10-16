@@ -70,6 +70,7 @@ COMPARE_CARD_URI = URI_BASE + "compare-card"
 STATS_CARD_URI = URI_BASE + "stats-card"
 DECK_LIST_CARD_URI = URI_BASE + "deck-list-card"
 SCAN_CARD_URI = URI_BASE + "scan-card"
+WAITING_CARD_URI = URI_BASE + "waiting-card"  # show_waiting_changes (0.7.29, Q134 A6)
 CARD_META_KEY = "mtg/card"  # tool-result _meta key a card reads its link or data from
 LINK_TTL = 600  # seconds a signed link stays valid
 LINK_PATH = "/cards/data/"
@@ -161,6 +162,18 @@ def add_card_resources(apps: Apps, public_url: str) -> None:
         title="Deck",
         description="A deck by category with card pictures; tap a card for its rules text.",
         csp=ResourceCsp(resource_domains=list(CARD_IMAGE_HOSTS), connect_domains=[gateway, SCRYFALL_API]),
+        prefers_border=True,
+    )
+    _add_card(
+        apps,
+        WAITING_CARD_URI,
+        card_html("waiting-card", public_url),
+        name="waiting-card",
+        title="Waiting changes",
+        description=(
+            "The changes waiting for the user's approval, each with Approve and Reject, and Apply all."
+        ),
+        csp=ResourceCsp(),
         prefers_border=True,
     )
     _add_card(

@@ -242,7 +242,7 @@ def test_big_edit_shows_a_summary_first_and_the_auto_modes_hide_the_buttons() ->
             card = _open(page, {"structuredContent": auto})
             card.locator("#title").wait_for()
             page.wait_for_timeout(900)
-            assert "assistant applies this itself" in card.locator("#note").inner_text()
+            assert "lets your assistant apply this itself" in card.locator("#note").inner_text()
             assert card.locator("button:visible").count() == 0
             assert card.locator("a.link", has_text="Open in the app or browser").count() == 1
             assert not errors, errors

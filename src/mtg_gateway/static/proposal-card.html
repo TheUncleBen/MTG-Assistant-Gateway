@@ -113,6 +113,10 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
 .why textarea{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);
   width:100%;min-height:64px;padding:8px 10px;resize:vertical}
 .why .actions{margin-top:8px}
+/* The other changes waiting on this deck (Q134 A3): one line, Apply all and Review all. */
+.also{margin-top:12px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg2)}
+.also p{margin:0;font-size:13px;overflow-wrap:anywhere}
+.also .actions{margin-top:8px}
 </style>
 </head>
 <body>
@@ -123,6 +127,10 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
   <p class="note hidden" id="note"></p>
   <p class="foot" id="foot"></p>
   <div class="actions" id="actions"></div>
+  <div class="also hidden" id="also" role="group" aria-labelledby="also-text">
+    <p id="also-text"></p>
+    <div class="actions" id="also-actions"></div>
+  </div>
   <div class="why hidden" id="why">
     <label for="reason">Tell your assistant why (optional), so it can propose something better:</label>
     <textarea id="reason" maxlength="500" placeholder="e.g. keep the Islands, cut a creature instead"></textarea>
@@ -136,11 +144,13 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
   var APP = { name: "Proposal card", version: "1" }; // no project name: the file is public
   var PROTOCOL = "2026-01-26";
   var APPROVAL_KEY = "mtg/approval";
+  var SET_KEY = "mtg/approval_set"; // "Apply all": this app's waiting changes on the deck (Q134 A3)
   var MAX_IMAGES = 24;   // Scryfall thumbnails at most, over the whole card
   var COLLAPSE_AT = 8;   // a longer list shows a summary and this many rows until "Show all"
   var ARM_DELAY_MS = 700; // buttons stay disabled this long after the card is drawn
   var host = window.parent;
   var pending = {}, nextId = 1, hostCaps = null, proposal = null, approval = null, armed = false, busy = false, heldCode = null;
+  var applySet = null, confirming = false;
 
   function post(msg) { host.postMessage(msg, "*"); }
   function request(method, params) {
@@ -342,6 +352,9 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
     var sc = result.structuredContent || {};
     var meta = result._meta || {};
     approval = typeof meta[APPROVAL_KEY] === "string" ? meta[APPROVAL_KEY] : null;
+    var st0 = meta[SET_KEY];
+    applySet = st0 && Array.isArray(st0.ids) && typeof st0.code === "string" ? { ids: st0.ids.map(String), code: st0.code } : null;
+    confirming = false;
     // T-151: the assistant's apply_proposal of a change the user must approve answers with the
     // proposal itself (error browser_required), so its card shows the change and the buttons.
     var needsPress = sc.ok === false && sc.error === "browser_required" && sc.proposal_id && sc.state === "pending";
@@ -385,6 +398,7 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
     }
     $("foot").textContent = foot.join(" · ");
     renderActions();
+    renderAlso();
     if (sc.state === "applying") { setStatus(progressText(sc), ""); pollApplying(sc.proposal_id); }
     else setStatus(closedText(sc), "");
   }
@@ -537,8 +551,9 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
     var a = $("actions"); a.replaceChildren();
     if (!proposal) return;
     var p = proposal;
-    // Only a proposal the member may approve in the chat has a code. An account action (a like, a
-    // comment, a deck deletion...) never gets one (R-142), so it takes the "review page" branch below.
+    // Only a proposal the member may approve in the chat has a code. Since 0.7.29 (Q8) an account
+    // action (a like, a comment, a folder...) has one too; a deck deletion never does (R-142), so it
+    // takes the "review page" branch below.
     if (p.state === "pending" && p.writes_enabled && approval) {
       var ok = el("button", "primary", "Approve: apply to Archidekt");
       ok.type = "button"; ok.id = "approve";
@@ -560,12 +575,110 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
       deck.onclick = function (e) { e.preventDefault(); openLink(p.result.deck_url); };
       a.appendChild(deck);
     }
+    if (p.state === "applied" && p.review_url) {
+      var undo = el("a", "link", "Undo on the review page"); undo.href = "#";
+      undo.onclick = function (e) { e.preventDefault(); openLink(p.review_url); };
+      a.appendChild(undo);
+    }
     if (p.review_url) {
       var rv = el("a", "link", "Open in the app or browser"); rv.href = "#";
       rv.onclick = function (e) { e.preventDefault(); openLink(p.review_url); };
       a.appendChild(rv);
     }
     reportSize();
+  }
+
+  // Q134 A3: the other changes waiting on this deck, in one line ("1 from ChatGPT also waits"),
+  // with Apply all for this app's own (a confirm lists them first) and Review all for the rest.
+  function renderAlso() {
+    var box = $("also"), acts = $("also-actions");
+    acts.replaceChildren();
+    var p = proposal, w = p && p.state === "pending" ? p.deck_waiting : null;
+    if (!w || !Number(w.earlier)) { box.className = "also hidden"; return; }
+    var bits = [];
+    var mine = Math.max(0, Number(w.same_app || 0) - 1);
+    if (mine) bits.push(mine + " more from this chat " + (mine === 1 ? "waits" : "wait") + " on this deck.");
+    (w.other_apps || []).forEach(function (o) {
+      var who = o.app === "you" ? "your browser" : String(o.app);
+      bits.push(Number(o.count) + " from " + who + " also " + (Number(o.count) === 1 ? "waits" : "wait") + ".");
+    });
+    var n = applySet ? applySet.ids.length : 0;
+    $("also-text").textContent = confirming
+      ? "Apply these " + n + " changes to this deck, oldest first? Each is checked against the deck just before it is sent; one that no longer fits stays waiting."
+      : bits.join(" ");
+    if (applySet && n >= 2 && p.writes_enabled && !busy) {
+      var all = el("button", confirming ? "primary" : "", confirming ? "Apply " + n + " changes" : "Apply all " + n);
+      all.type = "button"; all.id = "apply-all";
+      // locked for a moment after it is drawn, as Approve is, so a tap meant for something else
+      // never presses it
+      all.disabled = true;
+      setTimeout(function () { if (!busy) all.disabled = false; }, ARM_DELAY_MS);
+      all.onclick = function () { if (!confirming) { confirming = true; renderAlso(); } else applyAll(); };
+      acts.appendChild(all);
+      if (confirming) {
+        var cancel = el("button", "", "Cancel"); cancel.type = "button";
+        cancel.onclick = function () { confirming = false; renderAlso(); };
+        acts.appendChild(cancel);
+      }
+    }
+    if (w.review_all_url && !confirming) {
+      var rv = el("a", "link", "Review all"); rv.href = "#";
+      rv.onclick = function (e) { e.preventDefault(); openLink(w.review_all_url); };
+      acts.appendChild(rv);
+    }
+    box.className = "also";
+    reportSize();
+  }
+
+  function applyAll() {
+    if (!proposal || !applySet || busy) return;
+    busy = true; confirming = false;
+    var set = applySet, pid = proposal.proposal_id;
+    renderAlso();
+    var ok = $("approve"), no = $("reject");
+    if (ok) ok.disabled = true; if (no) no.disabled = true;
+    setStatus("Applying to Archidekt…", "");
+    request("tools/call", { name: "confirm_waiting", arguments: { proposal_ids: set.ids, approval: set.code } })
+      .then(function (res) {
+        busy = false;
+        var sc = (res && res.structuredContent) || {};
+        if (sc.ok === false || (res && res.isError)) {
+          var msg = String(sc.message || (res && res.content && res.content[0] && res.content[0].text) || "The gateway refused.");
+          applySet = null;
+          if (ok) ok.disabled = false; if (no) no.disabled = false;
+          renderAlso();
+          setStatus(msg, "err");
+          tellModel("The user pressed Apply all on the proposal card, but the gateway answered: " + msg);
+          return;
+        }
+        applySet = null;
+        var summary = String(sc.summary || "");
+        request("tools/call", { name: "get_proposal", arguments: { proposal_id: pid } })
+          .then(function (r2) {
+            var p2 = (r2 && r2.structuredContent) || {};
+            if (p2.state) render({ structuredContent: p2, _meta: (r2 && r2._meta) || {} });
+            done();
+          })
+          .catch(done);
+        function done() {
+          setStatus(summary + (sc.state === "applying" ? " Still applying; the Proposals page shows how it goes." : ""), (sc.failed || []).length ? "err" : "ok");
+          if (sc.result_url && (sc.applied || []).length) {
+            var u = el("a", "link", "Undo or see the details"); u.href = "#";
+            u.onclick = function (e) { e.preventDefault(); openLink(sc.result_url); };
+            $("actions").appendChild(u);
+            reportSize();
+          }
+          tellModel("The user pressed Apply all on the proposal card. " + summary +
+            ((sc.applied || []).length ? " Applied: " + sc.applied.map(function (c) { return c.proposal_id; }).join(", ") + "." : "") +
+            ((sc.not_sent || []).length ? " Not sent: " + sc.not_sent.map(function (c) { return c.proposal_id; }).join(", ") + "." : ""));
+        }
+      })
+      .catch(function (err) {
+        busy = false;
+        if (ok) ok.disabled = false; if (no) no.disabled = false;
+        renderAlso();
+        setStatus("Could not reach the gateway: " + ((err && err.message) || "unknown error") + ". Use the Proposals page instead.", "err");
+      });
   }
 
   function openLink(url) {

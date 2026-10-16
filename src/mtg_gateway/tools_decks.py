@@ -26,6 +26,7 @@ from .cards import (
 from .decklist import DecklistError, parse_decklist, to_text
 from .deckpage import decks_unreadable_text
 from .decks import (
+    APPLY_WAIT_SECONDS,
     DeckError,
     _clean_deck_id,
 )
@@ -423,6 +424,86 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             return _proposal({"ok": True, **(await state.decks.combine(_sub(), proposal_ids))})
         except DeckError as exc:
             return _proposal(_tool_error(exc))
+
+    from .cards import WAITING_CARD_URI, tool_meta
+
+    waiting_card_meta = tool_meta(WAITING_CARD_URI) if s.apply_in_chat else None
+
+    @server.tool(
+        name="show_waiting_changes",
+        title="Show the waiting changes",
+        description=(
+            "Show the user every change waiting for their approval (of one deck with deck_id, or all), "
+            "oldest first, as list_my_proposals with pending_only does. In an app that shows cards, the "
+            "card lets the user approve or reject each of your own waiting changes and apply all of them "
+            "with one press, each re-checked against the deck just before it is sent; another app's are "
+            "listed with their review link. Use it when the user asks what is waiting or wants to "
+            "approve several at once. Changes nothing by itself."
+        ),
+        annotations={"readOnlyHint": True, "openWorldHint": False},
+        meta={**waiting_card_meta, "openai/widgetAccessible": True} if waiting_card_meta else None,
+    )
+    async def show_waiting_changes(
+        deck_id: Annotated[str | None, Field(description="Only this deck's (id or URL).")] = None,
+    ) -> CallToolResult:
+        try:
+            data, meta = state.decks.waiting_board(_sub(), deck_id, in_chat=s.apply_in_chat)
+        except DeckError as exc:
+            return _card_result(_tool_error(exc), None)
+        res = _card_result(data, None)
+        if meta:
+            res.meta = meta
+        return res
+
+    @server.tool(
+        name="confirm_waiting",
+        title="Apply several waiting changes from a card",
+        description=(
+            "Called by the Apply all button of a card in the chat; not for the assistant. It needs the "
+            "card's one-time approval code for exactly these proposals, which the assistant never has: "
+            "calls without it are refused and logged, and nothing is sent to Archidekt."
+        ),
+        annotations={
+            "readOnlyHint": False,
+            "destructiveHint": True,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+        meta=dict(CONFIRM_TOOL_META),
+    )
+    async def confirm_waiting(proposal_ids: list[str], approval: str) -> CallToolResult:
+        try:
+            sub = _sub()
+            if not s.apply_in_chat:
+                raise DeckError(
+                    "in_chat_disabled",
+                    "This gateway does not apply proposals from the chat card (MTG_APPLY_IN_CHAT is "
+                    "off). Use the Proposals page.",
+                )
+            ids = state.decks.check_set_approval(sub, proposal_ids, approval)
+            run = state.decks.apply_selection(sub, ids, via="app")
+            await state.decks.batches.wait(run["batch_id"], APPLY_WAIT_SECONDS)
+            return _card_result(state.decks.selection_result(run), None)
+        except DeckError as exc:
+            return _card_result(_tool_error(exc), None)
+
+    @server.tool(
+        name="get_apply_result",
+        title="Read how an Apply all went",
+        description=(
+            "Called by a card after Apply all, to follow a long apply; not for the assistant. The "
+            "outcome of one selection the user applied: applied, not sent (with why) and failed."
+        ),
+        annotations={"readOnlyHint": True, "openWorldHint": False},
+        meta=dict(CONFIRM_TOOL_META),
+    )
+    async def get_apply_result(batch_id: str) -> CallToolResult:
+        run = state.decks.batches.get(_sub(), str(batch_id))
+        if run is None:
+            return _card_result(
+                {"ok": False, "error": "not_found", "message": "This result is no longer kept."}, None
+            )
+        return _card_result(state.decks.selection_result(run), None)
 
     @server.tool(
         name="get_proposal",

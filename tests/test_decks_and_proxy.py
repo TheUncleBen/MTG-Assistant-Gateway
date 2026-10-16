@@ -31,6 +31,7 @@ from .conftest import (
 )
 from .fake_archidekt import FakeArchidekt
 from .fake_mystic_forge import SIM_CALLS, _ValidateDecklistInput, fake_mystic_forge
+from .track_a_helpers import apply_any
 
 
 def _client(settings, ark: FakeArchidekt) -> ArchidektClient:
@@ -274,6 +275,32 @@ async def test_propose_then_apply_happy_path(stack: Stack) -> None:
 
 
 async def test_apply_rejects_stale_deck(stack: Stack) -> None:
+    """0.7.29 (K1): a change made elsewhere to a card the proposal touches means it would no longer
+    do what was reviewed: nothing is sent and the proposal waits again, marked Needs a look."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    first = ark.decks[42]["cards"][0]["card"]["oracleCard"]["name"]
+    p = structured(
+        await call(
+            h,
+            token,
+            "propose_deck_changes",
+            {"deck_id": "42", "changes": [{"action": "remove", "card_name": first}]},
+        )
+    )
+    ark.bump(42)  # one more copy of that same card, added on Archidekt
+    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    assert a["ok"] is False and a["error"] == "stale", a
+    assert a["state"] == "pending" and a["status"] == "needs_look", a
+    assert ark.patches == []
+    got = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
+    assert got["state"] == "pending" and got["status"] == "needs_look", got
+    assert got["assistant_may_apply"] is False
+
+
+async def test_an_unrelated_change_elsewhere_still_applies(stack: Stack) -> None:
+    """0.7.29 (K1, K2): a change elsewhere that leaves the proposal's rows as reviewed only moves
+    its baseline ("Updated"), so it still applies."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     p = structured(
@@ -284,14 +311,10 @@ async def test_apply_rejects_stale_deck(stack: Stack) -> None:
             {"deck_id": "42", "changes": [{"action": "add", "card_name": "Arcane Signet"}]},
         )
     )
-    ark.bump(42)
+    ark.bump(42)  # another card's count changed on Archidekt
     a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
-    assert a["ok"] is False and a["error"] == "stale"
-    assert ark.patches == []
-    assert (
-        structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))["state"]
-        == "failed"
-    )
+    assert a["ok"] and a["state"] == "applied", a
+    assert len(ark.patches) == 1
 
 
 async def test_apply_reports_verify_mismatch_and_keeps_snapshot(stack: Stack) -> None:
@@ -702,7 +725,7 @@ async def test_propose_new_deck_from_decklist_and_apply(stack: Stack) -> None:
     )
     assert "+1 Sol Ring [Ramp]" in p["diff"] and "+1 Island [Sideboard]" in p["diff"]
     assert len(ark.decks) == 2  # nothing created yet
-    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    a = await apply_any(h, token, p["proposal_id"])
     assert a["ok"], a
     assert a["state"] == "applied" and a["result"]["verified"] is True
     new_id = int(a["result"]["deck_id"])
@@ -733,7 +756,7 @@ async def test_new_deck_apply_reads_deck_back_when_create_returns_no_cards(stack
             h, token, "propose_new_deck", {"name": "Short reply", "decklist_text": "1 Sol Ring\n2 Forest"}
         )
     )
-    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    a = await apply_any(h, token, p["proposal_id"])
     assert a["ok"] and a["state"] == "applied" and a["result"]["verified"] is True, a
     new_id = int(a["result"]["deck_id"])
     assert ("GET", f"/api/decks/{new_id}/") in ark.calls  # verified by reading it back
@@ -749,7 +772,7 @@ async def test_new_deck_id_is_kept_when_read_back_fails(stack: Stack) -> None:
     p = structured(
         await call(h, token, "propose_new_deck", {"name": "No read", "decklist_text": "1 Sol Ring"})
     )
-    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    a = await apply_any(h, token, p["proposal_id"])
     assert a["ok"] is False
     got = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
     assert got["state"] == "failed" and got["deck_id"] == str(ark.next_deck_id), got
@@ -873,12 +896,12 @@ async def test_verification_ignores_name_case(stack: Stack) -> None:
         )
     )
     assert p["ok"], p
-    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    a = await apply_any(h, token, p["proposal_id"])
     assert a["ok"] and a["state"] == "applied", a
     p2 = structured(
         await call(h, token, "propose_new_deck", {"name": "lower", "decklist_text": "1 sol ring\n2 forest\n"})
     )
-    a2 = structured(await call(h, token, "apply_proposal", {"proposal_id": p2["proposal_id"]}))
+    a2 = await apply_any(h, token, p2["proposal_id"])
     assert a2["ok"] and a2["state"] == "applied" and a2["result"]["verified"], a2
     # 42, 43, the new deck; the edit's backup copy sits in the backup folder
     assert len([d for d in ark.decks if d not in ark.deck_folder]) == 3
@@ -1087,7 +1110,7 @@ async def test_snapshots_list_and_restore_through_a_proposal(stack: Stack) -> No
         {"action": "set_quantity", "card_name": "Forest", "quantity": 14},
     ]
     p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": changes}))
-    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    a = await apply_any(h, token, p["proposal_id"])
     assert a["ok"] and a["state"] == "applied", a
     # Meanwhile the user also changed a finish and the commander's category by hand on Archidekt.
     aesi = next(c for c in ark.decks[42]["cards"] if c["card"]["oracleCard"]["name"].startswith("Aesi"))
@@ -1122,7 +1145,7 @@ async def test_snapshots_list_and_restore_through_a_proposal(stack: Stack) -> No
     }, lines
     assert len(ark.patches) == 3  # proposing wrote nothing
 
-    a2 = structured(await call(h, token, "apply_proposal", {"proposal_id": r["proposal_id"]}))
+    a2 = await apply_any(h, token, r["proposal_id"])
     assert a2["ok"] and a2["state"] == "applied" and a2["result"]["verified"] is True, a2
     assert a2["result"]["restored_snapshot_id"] == a["snapshot_id"]
     rows = {c["card"]["oracleCard"]["name"]: c for c in ark.decks[42]["cards"]}
@@ -1379,7 +1402,7 @@ async def test_new_deck_says_when_a_listed_printing_was_not_found(stack: Stack) 
         )
     )
     assert p["ok"], p
-    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    a = await apply_any(h, token, p["proposal_id"])
     assert a["ok"] and a["result"]["verified"], a
     sent = {e["cardid"] for e in (pt["cards"][0] for pt in ark.patches)}
     assert {91043, 9008, 9004} <= sent  # CMR 472 pinned; Swamp and Forest by name
@@ -1399,7 +1422,7 @@ async def test_new_deck_verify_fails_when_a_finish_or_printing_is_lost(stack: St
     async def create() -> dict:
         p = structured(await call(h, token, "propose_new_deck", {"name": "Finishes", "decklist_text": text}))
         assert p["ok"], p
-        return structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+        return await apply_any(h, token, p["proposal_id"])
 
     good = await create()
     assert good["ok"] and good["result"]["verified"] is True, good

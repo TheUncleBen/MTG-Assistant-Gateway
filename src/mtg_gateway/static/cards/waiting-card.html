@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Waiting changes</title>
+<style>
+/*@BASE@*/
+.wl{list-style:none;margin:0;padding:0;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.wl li{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:9px 10px;border-top:1px solid var(--border)}
+.wl li:first-child{border-top:0}
+.wl .what{flex:1 1 220px;min-width:0}
+.wl .what .name{display:block;font-weight:600;overflow-wrap:anywhere}
+.wl .what .sub{display:block;font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.wl .what .why{display:block;font-size:12px;color:var(--amber);overflow-wrap:anywhere;margin-top:2px}
+.wl .btns{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.wl .btns button{min-height:44px}
+.wl .done{font-size:13px;font-weight:600;color:var(--muted)}
+.wl .done.ok{color:var(--green)} .wl .done.err{color:var(--red)}
+.order{margin:8px 0 0;padding-left:22px;font-size:13px}
+.order li{margin:3px 0;overflow-wrap:anywhere}
+.confirm{margin-top:12px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg2)}
+.confirm p{margin:0;font-size:13px}
+.res{margin:8px 0 0;padding-left:18px;font-size:13px}
+.res li{margin:3px 0;overflow-wrap:anywhere}
+h2.dh{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:12px 0 4px}
+/* Locked (the 700 ms after drawing, and while a press is out), a button keeps a label that reads
+   (R-181, as the proposal card) */
+button:disabled{opacity:1;background:transparent;border:1px dashed currentColor;color:var(--text)}
+button.danger:disabled{color:var(--red)}
+@media (max-width:480px){.wl .btns{flex:1 1 100%}.wl .btns button{flex:1 1 0}}
+</style>
+</head>
+<body>
+<div class="card" id="card">
+  <div class="head"><h1 id="title">Waiting changes</h1><span class="badge info hidden" id="count"></span></div>
+  <p class="sum" id="summary"></p>
+  <ul class="wl hidden" id="list" aria-labelledby="title"></ul>
+  <p class="note hidden" id="note"></p>
+  <div class="confirm hidden" id="confirm" role="group" aria-labelledby="confirm-text">
+    <p id="confirm-text"></p>
+    <ol class="order" id="order"></ol>
+    <div class="actions">
+      <button type="button" class="primary" id="go"></button>
+      <button type="button" id="cancel">Cancel</button>
+    </div>
+  </div>
+  <div class="hidden" id="result">
+    <h2 class="dh" id="res-head">Result</h2>
+    <ul class="res" id="res-list" aria-labelledby="res-head"></ul>
+  </div>
+  <div class="actions" id="actions"></div>
+  <div class="status hidden" id="status" role="status" aria-live="polite"></div>
+</div>
+<script>
+/*@BRIDGE@*/
+(function () {
+  "use strict";
+  // The waiting changes as a card (show_waiting_changes; Q134 A6). Each of this app's own waiting
+  // changes has Approve and Reject (confirm_proposal, with the per-proposal code in _meta);
+  // another app's has its review link only (O9). "Apply all N" applies this app's own together,
+  // after a confirm that lists the order, each re-checked against the deck just before it is
+  // sent (confirm_waiting, with the set's code); get_apply_result follows a long run. Undo is on
+  // the result page, which needs the member's sign-in.
+  var B = Bridge, el = B.el, $ = B.$;
+  var APPROVALS_KEY = "mtg/approvals", SET_KEY = "mtg/approval_set";
+  var ARM_DELAY_MS = 700; // buttons stay disabled this long after the card is drawn
+  var MAX_ROWS = 100;
+  var data = null, codes = {}, set = null, armed = false, busy = false, decided = {};
+
+  function creator(label) {
+    var s = String(label || ""), m = /^app: (.+) \((.+)\)$/.exec(s);
+    if (m) return m[1];
+    if (s.indexOf("app: ") === 0) return "an assistant";
+    return s === "browser" ? "you, in your browser" : s === "admin" ? "the administrator" : s;
+  }
+  function ago(t) {
+    var s = Math.max(0, Date.now() / 1000 - Number(t || 0));
+    if (s < 3600) return Math.max(1, Math.floor(s / 60)) + " min ago";
+    if (s < 2 * 86400) return Math.floor(s / 3600) + " h ago";
+    return Math.floor(s / 86400) + " d ago";
+  }
+  function label(x) { return (x.board_no ? "#" + x.board_no + " " : "") + String(x.summary || "(no changes listed)"); }
+  function statusWord(x) {
+    return { updated: "Updated", needs_look: "Needs a look", held: "Held" }[x.status] || "Waiting";
+  }
+  function stillWaiting() {
+    return set ? set.ids.filter(function (id) { return !decided[id]; }) : [];
+  }
+
+  function draw() {
+    var rows = (data.waiting || []).slice(0, MAX_ROWS);
+    var n = Math.max(0, Number(data.count || 0) - Object.keys(decided).length);
+    $("title").textContent = data.deck_name ? "Waiting changes to " + data.deck_name : "Waiting changes";
+    var c = $("count"); c.textContent = n + " waiting"; c.className = "badge info";
+    $("summary").textContent = n ? "Oldest first. Nothing is sent to Archidekt until you approve it."
+      : "Nothing is waiting for your approval.";
+    var list = $("list"); list.replaceChildren(); list.className = rows.length ? "wl" : "wl hidden";
+    rows.forEach(function (x) {
+      var li = el("li"); li.id = "row-" + x.proposal_id;
+      var what = el("span", "what");
+      what.appendChild(el("span", "name", label(x)));
+      var sub = [statusWord(x), "by " + creator(x.created_by), ago(x.created_at)];
+      if (Number(x.version) > 1) sub.push("version " + Number(x.version));
+      if (!data.deck_id && x.deck_name) sub.unshift(String(x.deck_name));
+      what.appendChild(el("span", "sub", sub.join(" · ")));
+      if ((x.status === "needs_look" || x.status === "held") && x.status_text) what.appendChild(el("span", "why", x.status_text));
+      li.appendChild(what);
+      var btns = el("span", "btns");
+      if (decided[x.proposal_id]) {
+        var d = decided[x.proposal_id];
+        btns.appendChild(el("span", "done " + (d.kind || ""), d.text));
+      } else if (codes[x.proposal_id] && data.writes_enabled) {
+        var ok = el("button", "primary small", "Approve"); ok.type = "button";
+        ok.setAttribute("aria-label", "Approve " + label(x));
+        var no = el("button", "danger small", "Reject"); no.type = "button";
+        no.setAttribute("aria-label", "Reject " + label(x));
+        ok.disabled = no.disabled = !armed || busy;
+        ok.onclick = function () { decide(x, "approve"); };
+        no.onclick = function () { decide(x, "reject"); };
+        btns.appendChild(ok); btns.appendChild(no);
+      }
+      var rv = el("a", "link", "Review"); rv.href = "#";
+      rv.setAttribute("aria-label", "Review " + label(x));
+      rv.onclick = function (e) { e.preventDefault(); B.openLink(x.review_url, B.setStatus); };
+      btns.appendChild(rv);
+      li.appendChild(btns);
+      list.appendChild(li);
+    });
+    var notes = [];
+    if (n > rows.length) notes.push((n - rows.length) + " more on the Proposals page.");
+    (data.other_apps || []).forEach(function (o) {
+      notes.push(o.count + " from " + (o.app === "you" ? "you, in your browser," : o.app) + " also " + (o.count === 1 ? "waits" : "wait") + ". Approve " + (o.count === 1 ? "it" : "them") + " on the Proposals page.");
+    });
+    if (n && !data.writes_enabled) notes.push("Deck writes are switched off on this gateway; this is a preview only.");
+    $("note").textContent = notes.join(" "); $("note").className = notes.length ? "note" : "note hidden";
+    drawActions();
+    B.reportSize();
+  }
+
+  function drawActions() {
+    var a = $("actions"); a.replaceChildren();
+    var left = stillWaiting();
+    if (set && left.length >= 2 && data.writes_enabled && $("confirm").className.indexOf("hidden") >= 0 && !busy) {
+      var all = el("button", "primary", "Apply all " + left.length); all.type = "button"; all.id = "apply-all";
+      all.disabled = !armed;
+      all.onclick = showConfirm;
+      a.appendChild(all);
+    }
+    if (data.review_all_url && Number(data.count || 0)) {
+      var rv = el("a", "link", "Review all"); rv.href = "#";
+      rv.onclick = function (e) { e.preventDefault(); B.openLink(data.review_all_url, B.setStatus); };
+      a.appendChild(rv);
+    }
+    B.reportSize();
+  }
+
+  function showConfirm() {
+    if (!set || busy) return;
+    var left = stillWaiting();
+    var byId = {};
+    (data.waiting || []).forEach(function (x) { byId[x.proposal_id] = x; });
+    $("confirm-text").textContent = "Apply " + left.length + " changes in this order, oldest first. Each is checked against the deck just before it is sent; one that no longer fits stays waiting.";
+    var ol = $("order"); ol.replaceChildren();
+    left.forEach(function (id) {
+      var x = byId[id];
+      ol.appendChild(el("li", "", x ? (data.deck_id ? "" : String(x.deck_name || "") + ": ") + label(x) : id));
+    });
+    $("go").textContent = "Apply " + left.length + " changes";
+    $("go").disabled = true;
+    $("confirm").className = "confirm";
+    drawActions();
+    setTimeout(function () { $("go").disabled = false; }, ARM_DELAY_MS);
+  }
+  $("cancel").onclick = function () { $("confirm").className = "confirm hidden"; drawActions(); };
+  $("go").onclick = function () {
+    if (!set || busy) return;
+    busy = true; $("go").disabled = true; $("cancel").disabled = true;
+    B.setStatus("Applying to Archidekt…", "");
+    B.request("tools/call", { name: "confirm_waiting", arguments: { proposal_ids: set.ids, approval: set.code } })
+      .then(function (res) {
+        var sc = (res && res.structuredContent) || {};
+        $("confirm").className = "confirm hidden"; $("cancel").disabled = false;
+        if (sc.ok === false || (res && res.isError)) {
+          busy = false;
+          var msg = String(sc.message || (res && res.content && res.content[0] && res.content[0].text) || "The gateway refused.");
+          B.setStatus(msg, "err");
+          if (sc.error === "changed" || sc.error === "invalid_approval") set = null;
+          draw();
+          B.tellModel("The user pressed Apply all on the waiting changes card, but the gateway answered: " + msg);
+          return;
+        }
+        showResult(sc);
+      })
+      .catch(function (err) {
+        busy = false; $("cancel").disabled = false;
+        B.setStatus("Could not reach the gateway: " + ((err && err.message) || "unknown error") + ". Use the Proposals page instead.", "err");
+        draw();
+      });
+  };
+
+  var polls = 0;
+  function showResult(sc) {
+    var rl = $("res-list"); rl.replaceChildren();
+    (sc.applied || []).forEach(function (c) { decided[c.proposal_id] = { text: "Applied", kind: "ok" }; rl.appendChild(el("li", "", "Applied: " + label(c))); });
+    (sc.not_sent || []).forEach(function (c) { rl.appendChild(el("li", "", "Not sent: " + label(c) + (c.why ? ". " + c.why : ""))); });
+    (sc.failed || []).forEach(function (c) { decided[c.proposal_id] = { text: "Failed", kind: "err" }; rl.appendChild(el("li", "", "Failed: " + label(c) + (c.why ? ". " + c.why : ""))); });
+    $("result").className = rl.children.length ? "" : "hidden";
+    var running = sc.state === "applying";
+    B.setStatus(running ? "Still applying. " + String(sc.summary || "") : String(sc.summary || "Done."), running ? "" : (sc.failed && sc.failed.length ? "err" : "ok"));
+    var a = $("actions");
+    busy = running;
+    draw();
+    if (sc.result_url && (sc.applied || []).length) {
+      var u = el("a", "link", "Undo or see the details"); u.href = "#";
+      u.onclick = function (e) { e.preventDefault(); B.openLink(sc.result_url, B.setStatus); };
+      a.appendChild(u);
+    }
+    if (running && polls < 150) {
+      polls += 1;
+      setTimeout(function () {
+        B.request("tools/call", { name: "get_apply_result", arguments: { batch_id: sc.batch_id } })
+          .then(function (res) {
+            var r = (res && res.structuredContent) || {};
+            if (r.ok === false || (res && res.isError)) { B.setStatus("Still applying, but the card can't read how it is going. The Proposals page shows it.", "err"); return; }
+            showResult(r);
+          })
+          .catch(function () { showResult(sc); });
+      }, 4000);
+    } else if (!running) {
+      B.tellModel("The user pressed Apply all on the waiting changes card. " + String(sc.summary || "") +
+        ((sc.applied || []).length ? " Applied: " + sc.applied.map(function (c) { return c.proposal_id; }).join(", ") + "." : "") +
+        ((sc.not_sent || []).length ? " Not sent (still waiting or closed): " + sc.not_sent.map(function (c) { return c.proposal_id; }).join(", ") + "." : ""));
+    }
+  }
+
+  function decide(x, decision) {
+    var code = codes[x.proposal_id];
+    if (!code || !armed || busy) return;
+    busy = true; draw();
+    B.setStatus(decision === "approve" ? "Applying to Archidekt…" : "Rejecting…", "");
+    B.request("tools/call", { name: "confirm_proposal", arguments: { proposal_id: x.proposal_id, approval: code, decision: decision } })
+      .then(function (res) {
+        busy = false;
+        var sc = (res && res.structuredContent) || {};
+        if (sc.ok === false || (res && res.isError)) {
+          var msg = String(sc.message || (res && res.content && res.content[0] && res.content[0].text) || "The gateway refused.");
+          if (sc.state && sc.state !== "pending") { delete codes[x.proposal_id]; decided[x.proposal_id] = { text: "Now " + sc.state, kind: "" }; }
+          B.setStatus(msg, "err");
+          draw();
+          B.tellModel("The user pressed " + decision + " for proposal " + x.proposal_id + " on the waiting changes card, but the gateway answered: " + msg);
+          return;
+        }
+        delete codes[x.proposal_id];
+        var st = String(sc.state || "");
+        decided[x.proposal_id] = st === "applied" ? { text: "Applied", kind: "ok" }
+          : st === "rejected" ? { text: "Rejected", kind: "" }
+          : st === "applying" ? { text: "Applying… the review page shows how it goes", kind: "" }
+          : { text: "Now " + st, kind: "err" };
+        B.setStatus(st === "applied" ? "Applied. The deck on Archidekt matches this change." : st === "rejected" ? "Rejected. Nothing was sent to Archidekt." : String(sc.next_step || ""), st === "applied" ? "ok" : "");
+        draw();
+        B.tellModel("The user pressed " + (decision === "approve" ? "Approve" : "Reject") + " on the waiting changes card; proposal " + x.proposal_id + " is " + (st || "unchanged") + ".");
+      })
+      .catch(function (err) {
+        busy = false; draw();
+        B.setStatus("Could not reach the gateway: " + ((err && err.message) || "unknown error") + ". Use the review page instead.", "err");
+      });
+  }
+
+  function load(result) {
+    var sc = result.structuredContent || {};
+    var meta = result._meta || {};
+    if (result.isError || sc.ok === false) {
+      B.setStatus(String(sc.message || (result.content && result.content[0] && result.content[0].text) || "The waiting changes could not be read."), "err");
+      return;
+    }
+    data = sc; decided = {}; busy = false; armed = false;
+    codes = meta[APPROVALS_KEY] && typeof meta[APPROVALS_KEY] === "object" ? Object.assign({}, meta[APPROVALS_KEY]) : {};
+    var s = meta[SET_KEY];
+    set = s && Array.isArray(s.ids) && typeof s.code === "string" ? { ids: s.ids.map(String), code: s.code } : null;
+    $("result").className = "hidden"; $("confirm").className = "confirm hidden";
+    B.setStatus("", "");
+    draw();
+    setTimeout(function () { armed = true; if (!busy) draw(); }, ARM_DELAY_MS);
+  }
+  B.start("MTG Assistant Gateway waiting changes card", load, {});
+})();
+</script>
+</body>
+</html>

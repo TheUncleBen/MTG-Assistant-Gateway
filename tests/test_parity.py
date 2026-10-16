@@ -16,6 +16,7 @@ from mtg_gateway.scan.scryfall import ScryfallClient
 from .conftest import AUTO_PROXY, Stack, stack_with
 from .fake_scryfall import FakeScryfall
 from .test_decks_and_proxy import Browser, call, linked_user, structured
+from .track_a_helpers import apply_any
 
 stack_options = stack_with(AUTO_PROXY)
 
@@ -795,13 +796,13 @@ async def test_a_snapshot_of_a_non_commander_deck_with_a_bracket_restores(stack:
     rename = {"deck_id": "42", "details": {"name": "New"}}
     p = structured(await call(h, token, "propose_deck_details", rename))
     assert p["ok"], p
-    a = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    a = await apply_any(h, token, p["proposal_id"])
     assert a["ok"] and a["snapshot_id"], a
     r = structured(await call(h, token, "propose_restore_snapshot", {"snapshot_id": a["snapshot_id"]}))
     assert r["ok"], r
     assert 'name: "New" -> "Sample Commander Deck"' in r["diff"], r["diff"]
     assert "bracket: 2 -> none" in r["diff"], r["diff"]
-    done = structured(await call(h, token, "apply_proposal", {"proposal_id": r["proposal_id"]}))
+    done = await apply_any(h, token, r["proposal_id"])
     assert done["ok"] and done["result"]["verified"] is True, done
     assert ark.decks[42]["name"] == "Sample Commander Deck" and ark.decks[42]["deckFormat"] == 2
     assert ark.decks[42]["edhBracket"] is None

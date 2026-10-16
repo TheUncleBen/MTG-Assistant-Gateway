@@ -9,6 +9,7 @@ import re
 
 from .conftest import AUTO_PROXY, FakeIdP, Stack, sse_json, stack_with
 from .test_decks_and_proxy import Browser, call, mcp_token, structured
+from .track_a_helpers import apply_any
 
 NAV = {"Sec-Fetch-Mode": "navigate", "Accept": "text/html"}
 
@@ -484,7 +485,7 @@ async def test_export_import_round_trip_keeps_every_card_finish_and_commander(st
             )
         )
         assert p["ok"], p
-        assert structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))["ok"]
+        assert (await apply_any(h, token, p["proposal_id"]))["ok"]
         ark.add_side_row(42, "Opt", 2)
 
         def shape(deck: dict) -> set[tuple]:
@@ -510,7 +511,7 @@ async def test_export_import_round_trip_keeps_every_card_finish_and_commander(st
                 await call(h, token, "propose_new_deck", {"name": f"Round trip {label}", field: text})
             )
             assert made["ok"], (label, made)
-            applied = structured(await call(h, token, "apply_proposal", {"proposal_id": made["proposal_id"]}))
+            applied = await apply_any(h, token, made["proposal_id"])
             assert applied["ok"] and applied["result"]["verified"], (label, applied)
             copy = structured(
                 await call(h, token, "get_deck", {"deck_ref": applied["result"]["deck_id"], "view": "cards"})

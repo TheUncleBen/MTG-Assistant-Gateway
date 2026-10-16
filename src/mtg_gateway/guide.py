@@ -730,12 +730,14 @@ def guide_body(
             "fixed sentences from the gateway's own data, with or without notifications",
         ),
         (
-            "Proposals: list, read, approve with the card's code, reject (with a reason on the card), apply",
+            "Proposals: list, read, approve with the card's code, reject (with a reason on the card), "
+            "apply; tidy the waiting ones (amend, withdraw, combine)",
             "<code>list_my_proposals</code>, <code>get_proposal</code>, <code>confirm_proposal</code>, "
-            "<code>reject_proposal</code>, <code>apply_proposal</code>",
+            "<code>reject_proposal</code>, <code>apply_proposal</code>, <code>amend_proposal</code>, "
+            "<code>withdraw_proposal</code>, <code>combine_proposals</code>",
             "apply writes",
-            "<code>apply_proposal</code> succeeds only when the mode allows; an out-of-date proposal is "
-            "refused",
+            "<code>apply_proposal</code> succeeds only when the mode allows; one that would now do "
+            "something else than what was reviewed is not sent and waits as Needs a look",
         ),
     ]
     if watchlists:

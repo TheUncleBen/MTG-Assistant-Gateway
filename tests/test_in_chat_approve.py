@@ -55,12 +55,12 @@ async def no_card(tmp_path, idp: FakeIdP):
         yield st
 
 
-async def _propose(h, token: str) -> dict:
+async def _propose(h, token: str, card: str = "Sol Ring") -> dict:
     return await call(
         h,
         token,
         "propose_deck_changes",
-        {"deck_id": "42", "changes": [{"action": "add", "card_name": "Sol Ring"}]},
+        {"deck_id": "42", "changes": [{"action": "add", "card_name": card}]},
     )
 
 
@@ -221,7 +221,7 @@ async def test_code_is_bound_to_the_proposal_the_member_and_the_app(stack: Stack
     h = stack.h
     token = await linked_user(stack)
     a = await _propose(h, token)
-    b = await _propose(h, token)
+    b = await _propose(h, token, "Arcane Signet")  # 0.7.29 (A5): a repeat would be the same proposal
     pa, ca = structured(a)["proposal_id"], a["_meta"][APPROVAL_META_KEY]
     pb, cb = structured(b)["proposal_id"], b["_meta"][APPROVAL_META_KEY]
     assert ca != cb

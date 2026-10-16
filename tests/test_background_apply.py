@@ -15,6 +15,7 @@ from mtg_gateway.archidekt import ArchidektClient
 from .conftest import AUTO, Stack, StackOptions
 from .fake_archidekt import FakeArchidekt
 from .test_decks_and_proxy import Browser, call, linked_user, structured
+from .track_a_helpers import press_approve
 
 THREE = [
     {"action": "set_quantity", "card_name": "Forest", "quantity": 3},
@@ -106,7 +107,7 @@ async def test_a_new_deck_shows_how_many_cards_were_looked_up(stack: Stack) -> N
         return seen["n"] == 2
 
     release = _hold(ark, second_card)
-    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    out = await press_approve(h, token, p["proposal_id"])
     assert out["state"] == "applying", out
     assert out["progress"] == {"resolved_cards": 1, "of_cards": 3}, out
     release.set()
@@ -327,7 +328,7 @@ async def test_a_new_deck_whose_create_meets_a_429_is_created_once(stack: Stack)
     p = structured(await call(h, token, "propose_new_deck", {"name": "Paced", "cards": cards}))
     before = set(ark.decks)
     refused = _refuse_once(ark, lambda r: r.method == "POST" and r.url.path == "/api/decks/v2/")
-    structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    await press_approve(h, token, p["proposal_id"])
     await _until(lambda: h.db.get_proposal(p["proposal_id"], "user-1")["state"] != "applying")
     row = h.db.get_proposal(p["proposal_id"], "user-1")
     assert row["state"] == "applied", row
@@ -613,7 +614,7 @@ async def test_a_stop_after_the_new_deck_was_made_says_so_to_the_assistant(
     p = structured(await call(h, token, "propose_new_deck", {"name": "New", "cards": cards}))
     assert p["ok"], p
     _every_patch_429(ark)
-    await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]})
+    await press_approve(h, token, p["proposal_id"])
     row = await _finished(h, p["proposal_id"])
     result = row["result"]
     assert row["state"] == "failed" and result["error"] == "rate_limited" and result["deck_id"], result

@@ -241,6 +241,11 @@ WRITE_TOOLS = frozenset(
         "apply_proposal",
         "confirm_proposal",
         "reject_proposal",
+        # 0.7.29: tidying the waiting changes and "Apply all" on a card (Track A)
+        "amend_proposal",
+        "withdraw_proposal",
+        "combine_proposals",
+        "confirm_waiting",
         "run_deck_report",
         "save_scan_session",
         "propose_collection_changes",

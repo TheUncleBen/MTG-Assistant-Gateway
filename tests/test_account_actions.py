@@ -1,8 +1,9 @@
 """0.7.17: the Archidekt account actions an assistant can propose (actions.py): like, bookmark
 and follow; post, edit, delete and vote on comments; delete a deck; create a folder. Each is a
 proposal, and (R-142) none of them is ever applied by the assistant, whatever the approval mode:
-the member applies each one with their own press on its review page. Since 0.7.19 the in-chat
-card cannot apply one either: it gets no approval code and only opens the review page."""
+the member applies each one with their own press. From 0.7.19 to 0.7.28 only the review page
+applied one; since 0.7.29 (Q8, G3) the member's press on the in-chat card does too, with its
+one-time code, except a deck deletion, which stays review page only."""
 
 from __future__ import annotations
 
@@ -49,11 +50,23 @@ async def _browser_apply(h, pid: str) -> dict:
 
 
 async def _press(h, token: str, res) -> dict:
-    """The member's press on the review page, the only place an account action is applied. The
-    in-chat card got no approval code for it."""
+    """The member's own press: on the in-chat card with its one-time code (0.7.29, Q8), or, for a
+    deck deletion, which has no code (R-142), on its review page."""
     p = structured(res)
-    assert not (res.get("_meta") or {}).get(APPROVAL_META_KEY), res.get("_meta")
-    out = await _browser_apply(h, p["proposal_id"])
+    code = (res.get("_meta") or {}).get(APPROVAL_META_KEY)
+    if p["risk"] == "destructive":
+        assert not code, res.get("_meta")
+        out = await _browser_apply(h, p["proposal_id"])
+    else:
+        assert code, res.get("_meta")
+        out = structured(
+            await call(
+                h,
+                token,
+                "confirm_proposal",
+                {"proposal_id": p["proposal_id"], "approval": code, "decision": "approve"},
+            )
+        )
     assert out["ok"] and out["state"] == "applied", out
     return out
 
@@ -516,47 +529,68 @@ async def test_no_vote_proposal_for_an_archived_comment(stack: Stack) -> None:
 @pytest.mark.parametrize(
     ("tool", "args"), ACCOUNT_ACTIONS, ids=[f"{t}:{a.get('action', 'folder')}" for t, a in ACCOUNT_ACTIONS]
 )
-async def test_the_in_chat_card_cannot_apply_an_account_action(stack: Stack, tool: str, args: dict) -> None:
-    """R-142, 0.7.19: the card's press runs inside the chat app, so for an account action the card
-    gets no approval code, and even a valid code for it is refused: only the review page applies."""
+async def test_the_in_chat_card_applies_an_account_action_only_with_the_members_press(
+    stack: Stack, tool: str, args: dict
+) -> None:
+    """0.7.29 (Q8, G3; R-142): the member's press on the in-chat card applies an account action
+    with its one-time code; a deck deletion gets no code and stays review page only. The
+    assistant's own apply and the REST apply with its bearer token stay refused (Q9)."""
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     _seed_comment(ark)
     res = await call(h, token, tool, args)
     p = structured(res)
     assert p["ok"] and p["kind"] == "action", p
-    assert not (res.get("_meta") or {}).get(APPROVAL_META_KEY), res.get("_meta")
-    assert "review page" in p["next_step"] and "card or the review page" not in p["next_step"]
-    # 0.7.24: the gateway refuses to make a code for it at all (approval_for refuses at the source)
+    deletion = tool == "propose_delete_deck"
+    code = (res.get("_meta") or {}).get(APPROVAL_META_KEY)
     decks = h.app.state.gateway.decks
     row = h.db.get_proposal(p["proposal_id"], SUB)
-    with pytest.raises(DeckError) as no_code:
-        decks.approval_for(SUB, row)
-    assert no_code.value.kind == "browser_required"
-    # and a correctly signed code for this proposal, as an older card would have held, is refused
-    # all the same, with the row's real tier (destructive for a deck deletion)
-    code = approval_code(
-        decks.settings.session_secret,
-        proposal_id=row["id"],
-        sub=SUB,
-        client_id=row.get("created_by_client") or "",
-        created_at=int(row["created_at"]),
-    )
-    out = structured(
-        await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": code})
-    )
+    before = _archidekt_state(ark)
+    # the assistant's own apply and the REST apply with the assistant's bearer token: refused
+    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     assert out["ok"] is False and out["error"] == "browser_required", out
-    assert out["risk"] == ("destructive" if tool == "propose_delete_deck" else "consent"), out
-    # and the REST apply with the assistant's bearer token is the assistant's apply: refused too
     r = await h.http.post(
         f"/api/v1/proposals/{p['proposal_id']}/apply", headers={"Authorization": f"Bearer {token}"}
     )
     assert r.json().get("error") == "browser_required", r.text
-    assert ark.votes == {} and ark.deleted == [] and not any(ark.follows.values())
-    assert (
-        structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))["state"]
-        == "pending"
+    assert _archidekt_state(ark) == before
+    if deletion:
+        assert not code, res.get("_meta")
+        assert "review page" in p["next_step"] and "proposal card in the chat" not in p["next_step"]
+        with pytest.raises(DeckError) as no_code:
+            decks.approval_for(SUB, row)
+        assert no_code.value.kind == "browser_required"
+        # a correctly signed code, as a card before 0.7.19 could have held, is refused all the same
+        signed = approval_code(
+            decks.settings.session_secret,
+            proposal_id=row["id"],
+            sub=SUB,
+            client_id=row.get("created_by_client") or "",
+            created_at=int(row["created_at"]),
+        )
+        out = structured(
+            await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": signed})
+        )
+        assert out["ok"] is False and out["error"] == "browser_required" and out["risk"] == "destructive"
+        assert ark.deleted == [] and h.db.get_proposal(p["proposal_id"], SUB)["state"] == "pending"
+        return
+    assert code, res.get("_meta")
+    assert "proposal card in the chat" in p["next_step"] and "Do not call apply_proposal" in p["next_step"]
+    # a wrong code does nothing; the card's own code applies it
+    bad = structured(
+        await call(h, token, "confirm_proposal", {"proposal_id": p["proposal_id"], "approval": "x" * 40})
     )
+    assert bad["ok"] is False and _archidekt_state(ark) == before, bad
+    out = structured(
+        await call(
+            h,
+            token,
+            "confirm_proposal",
+            {"proposal_id": p["proposal_id"], "approval": code, "decision": "approve"},
+        )
+    )
+    assert out["ok"] and out["state"] == "applied", out
+    assert _archidekt_state(ark) != before
 
 
 # -- 0.7.20: deck collaborators (Archidekt's "editors"). Adding or removing one changes who can
@@ -634,7 +668,7 @@ async def test_no_mode_lets_the_assistant_change_collaborators(stack: Stack, mod
     res = await call(h, token, "propose_collaborator", {"deck_id": "42", "action": action, "username": "amy"})
     p = structured(res)
     assert p["ok"] and p["kind"] == "action" and p["risk"] in modes.MEMBER_ONLY, p
-    assert not (res.get("_meta") or {}).get(APPROVAL_META_KEY)  # the in-chat card cannot apply it
+    assert (res.get("_meta") or {}).get(APPROVAL_META_KEY)  # Q8: the member's press on the card may
     before = [dict(r) for r in ark.editors.get(42, [])]
     out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     assert out["ok"] is False and out["error"] == "browser_required", out
@@ -811,7 +845,7 @@ ALL_ACCOUNT_ACTIONS = ACCOUNT_ACTIONS + [
 ]
 
 
-@pytest.mark.parametrize("via", ["browser", "app", "mcp", "auto", ""])
+@pytest.mark.parametrize("via", ["browser", "mcp", "auto", ""])
 @pytest.mark.parametrize(
     ("tool", "args"),
     ALL_ACCOUNT_ACTIONS,
@@ -820,6 +854,8 @@ ALL_ACCOUNT_ACTIONS = ACCOUNT_ACTIONS + [
 async def test_only_the_review_page_marker_applies_an_account_action(
     stack: Stack, via: str, tool: str, args: dict
 ) -> None:
+    """Every route but the member's own presses is refused. The card's press ("app", 0.7.29 Q8)
+    is tested with its code in test_the_in_chat_card_applies_an_account_action_only_with_the_members_press."""
     from mtg_gateway.decks import REVIEW_PAGE, DeckError
 
     h, ark = stack.h, stack.ark
@@ -911,10 +947,13 @@ async def test_the_refusal_reports_the_rows_real_tier(stack: Stack, via: str) ->
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     decks = h.app.state.gateway.decks
-    for tool, args, risk in (
+    cases = [
         ("propose_delete_deck", {"deck_id": "42"}, "destructive"),
         ("propose_create_folder", {"name": "Brews"}, "consent"),
-    ):
+    ]
+    if via == "app":  # 0.7.29 (Q8): the card's press may apply a folder; only a deletion is refused
+        cases = cases[:1]
+    for tool, args, risk in cases:
         p = structured(await call(h, token, tool, args))
         with pytest.raises(DeckError) as refused:
             await decks.apply(SUB, p["proposal_id"], via=via)
@@ -957,9 +996,13 @@ async def test_the_rest_apply_refuses_an_account_action_in_every_mode(stack: Sta
             assert r.status_code == 403 and r.json()["error"] == "browser_required", r.text
         finally:
             await b.aclose()
-        # the assistant's apply_proposal and the card's confirm (with a correctly signed code) too
+        # the assistant's apply_proposal too
         out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
         assert out["ok"] is False and out["error"] == "browser_required" and out["risk"] == risk, out
+        assert h.db.get_proposal(p["proposal_id"], SUB)["state"] == "pending"
+        if risk != "destructive":
+            continue  # 0.7.29 (Q8): the card's confirm with its code is the member's press
+        # a deck deletion: the card's confirm with a correctly signed code is refused as well
         row = h.db.get_proposal(p["proposal_id"], SUB)
         code = approval_code(
             h.app.state.gateway.decks.settings.session_secret,
@@ -998,8 +1041,9 @@ async def test_reject_attribution_uses_the_review_page_marker(stack: Stack) -> N
 
 
 def test_the_card_has_no_branch_for_an_action_with_a_code() -> None:
-    """Bug 12: an account action never gets an in-chat code, so the card's red Delete button and
-    its warning (which needed one) are gone; such a card only opens the review page."""
+    """Bug 12: a deck deletion never gets an in-chat code, so the card's red Delete button and its
+    warning (which needed one) are gone; its card only opens the review page. Since 0.7.29 (Q8) the
+    other account actions use the card's ordinary Approve button."""
     from mtg_gateway.approve import card_html
 
     html = card_html()
