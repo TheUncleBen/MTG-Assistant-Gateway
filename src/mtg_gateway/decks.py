@@ -223,6 +223,13 @@ OUT_OF_DATE_STEP = (
 )
 
 
+# A selection with a change and the change that replaces it (wording draft, WORDING-3 item 6).
+PICK_ONE = (
+    "{new} replaces {old} on {deck}, so they can't be applied together. Nothing was sent. "
+    "Untick one of them, then apply again."
+)
+
+
 def _made_by_another_app(row: dict[str, Any], client: str | None) -> bool:
     """Whether a note was made or changed by an app other than ``client`` (G5, Q27m)."""
     apps = {row.get("created_by_client"), row.get("amended_by_client")} - {None, ""}
@@ -3314,9 +3321,31 @@ class DeckService:
     def plan_selection(
         self, sub: str, proposal_ids: list[str], versions: dict[str, int] | None = None
     ) -> dict[str, Any]:
-        """What applying these waiting changes together would do (batch.plan): the confirm."""
+        """What applying these waiting changes together would do (batch.plan): the confirm.
+        Refused when it holds a change and one that replaces it (another app's change, left
+        waiting until its replacement is applied): the member picks one (the Q142 check)."""
         self.db.hold_blocked(sub)
+        self._refuse_replaced_pairs(sub, [str(p) for p in proposal_ids][:MAX_SELECTION])
         return batch.plan(self, sub, [str(p) for p in proposal_ids][:MAX_SELECTION], versions)
+
+    def _refuse_replaced_pairs(self, sub: str, picks: list[str]) -> None:
+        chosen = set(picks)
+        for link in self.db.proposal_links(sub, sorted(chosen)):
+            new, old = link["proposal_id"], link["other_id"]
+            if link["kind"] != "replaces" or new not in chosen or old not in chosen:
+                continue
+            row = self.db.get_proposal(old, sub) or {}
+            if row.get("state") != "pending":
+                continue
+            nos = self.db.proposal_board_numbers(sub, [new, old])
+            raise DeckError(
+                "pick_one",
+                PICK_ONE.format(
+                    new=f"#{nos[new]}" if nos.get(new) else "One change",
+                    old=f"#{nos[old]}" if nos.get(old) else "another",
+                    deck=row.get("deck_name") or "this deck",
+                ),
+            )
 
     def apply_selection(
         self, sub: str, proposal_ids: list[str], *, via: str, versions: dict[str, int] | None = None
