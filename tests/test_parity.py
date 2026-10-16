@@ -35,13 +35,13 @@ async def test_theme_cookie_and_shell(stack: Stack) -> None:
     try:
         csrf = await b.csrf()
         page = await b.http.get("/decks", headers=NAV)
-        assert "<html lang='en'>" in page.text
+        assert "<html lang='en' data-card-size=m>" in page.text
         assert "class='tabbar'" in page.text and "Site theme" in page.text
         r = await b.http.post("/theme", data={"csrf": csrf, "theme": "light", "next": "/decks"})
         assert r.status_code == 303 and r.headers["location"] == "/decks"
         assert "mtg_theme=light" in r.headers["set-cookie"]
         page = await b.http.get("/decks", headers=NAV)
-        assert "<html lang='en' data-theme=light>" in page.text
+        assert "<html lang='en' data-theme=light data-card-size=m>" in page.text
         # an unknown theme falls back to system (cookie cleared), an off-site next is ignored
         r = await b.http.post("/theme", data={"csrf": csrf, "theme": "neon", "next": "https://evil.test/"})
         assert r.status_code == 303 and r.headers["location"] == "/account"

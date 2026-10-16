@@ -25,11 +25,23 @@ async def test_the_pages_save_and_read_choices(stack: Stack) -> None:
             b,
             "POST",
             "/api/v1/prefs",
-            {"set": {"card.size": "l", "stack:42:category": ["Lands", "Commander"], "view.deck": "grid"}},
+            {
+                "set": {
+                    "card.size": "l",
+                    "stack:42:category": ["Lands", "Commander"],
+                    "view.deck": "grid",
+                    "deckstats": {"curve": "category", "chart": "pie", "lands": True},  # as deckstats.js
+                }
+            },
         )
         assert r.status_code == 200 and r.json()["refused"] == [], r.text
         got = (await b.http.get("/api/v1/prefs")).json()["prefs"]
-        assert got == {"card.size": "l", "stack:42:category": ["Lands", "Commander"], "view.deck": "grid"}
+        assert got == {
+            "card.size": "l",
+            "stack:42:category": ["Lands", "Commander"],
+            "view.deck": "grid",
+            "deckstats": {"curve": "category", "chart": "pie", "lands": True},
+        }
         # null forgets one
         r = await api(b, "POST", "/api/v1/prefs", {"set": {"card.size": None}})
         assert r.json()["saved"] == ["card.size"] and stack.h.db.get_pref(SUB, "card.size") is None
@@ -48,7 +60,7 @@ async def test_only_well_formed_choices_are_kept(stack: Stack) -> None:
             "stack:42:category": "not a list",
             "theme": "dark",  # light or dark stays on each device
             "edhplay.steps": "yes",
-            "deckstats": {"chart": "x" * 41},
+            "deckstats": {"chart": "x" * 41, "lands": 1},
         }
         r = await api(b, "POST", "/api/v1/prefs", {"set": bad})
         assert sorted(r.json()["refused"]) == sorted(bad) and stack.h.db.get_prefs(SUB) == {}

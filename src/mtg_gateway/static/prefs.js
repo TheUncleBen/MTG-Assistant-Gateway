@@ -41,6 +41,20 @@
     }
   };
 
+  // -- card size: the S / M / L switch next to "View as" (theme.card_size_control) and in the
+  // printing picker. It applies at once on <html data-card-size> and follows the account.
+  document.addEventListener("click", function (e) {
+    var btn = e.target && e.target.closest ? e.target.closest("[data-card-size-set]") : null;
+    if (!btn) return;
+    var size = btn.getAttribute("data-card-size-set");
+    if (size !== "s" && size !== "m" && size !== "l") return;
+    document.documentElement.setAttribute("data-card-size", size);
+    Array.prototype.forEach.call(document.querySelectorAll("[data-card-size-set]"), function (b) {
+      b.setAttribute("aria-pressed", b.getAttribute("data-card-size-set") === size ? "true" : "false");
+    });
+    window.MtgPrefs.set("card.size", size);
+  });
+
   // -- the one-time copy of this browser's pre-0.7.29 choices ---------------------------------
   var store;
   try { store = window.localStorage; } catch (e) { return; }  // private window: nothing kept
