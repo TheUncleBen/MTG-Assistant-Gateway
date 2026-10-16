@@ -88,6 +88,9 @@ project's newest release, and when that is newer, every page shows admins a noti
 overview (**Admin**, **Updates**) shows these steps with the version filled in. It never pulls an
 image or restarts itself. `MTG_UPDATE_CHECK=false` turns the check off.
 
+Updating to 0.7.29 from an earlier version has two steps first: see
+[DEPLOY.md](DEPLOY.md#updating-to-0729-from-an-earlier-version).
+
 In Portainer: **Stacks** → `mtg` → **Update the stack**, with "Re-pull
 image" ticked. With `MTG_TAG=latest` that pulls the newest version; with a
 pinned version (for example `0.6.6`), change `MTG_TAG` first
@@ -840,10 +843,14 @@ or your stack.
 - **A value set in your stack wins.** When the stack's environment (Portainer's
   variables or `.env`) sets one of these, the page shows it as set in your
   stack, read-only, and says which variable to change. The shipped stack and
-  Compose files pass these settings through empty unless you set them, and the
-  example env files list them commented out (`# MTG_…=`) with the default, so
-  out of the box the page manages them. Remove the line from your environment
-  (or leave it empty) to manage one on the page; add it to fix it in the stack.
+  Compose files pass the settings marked *stack* in
+  [DEPLOY.md](DEPLOY.md#environment-reference) through empty unless you set
+  them, and the example env files list those commented out (`# MTG_…=`) with
+  the default, so out of the box the page manages them. Remove the line from
+  your environment (or leave it empty) to manage one on the page. To fix one in
+  the stack, set it in your environment; for a setting the stack file doesn't
+  list, also add it under the gateway's `environment:`. Updating from an
+  earlier version: [DEPLOY.md](DEPLOY.md#updating-to-0729-from-an-earlier-version).
 - **Pacing only gets gentler here.** The Archidekt and Scryfall pacing can be
   made slower on the page, never faster than the gateway's defaults. Only the
   stack can set faster values, within the bounds in
@@ -851,8 +858,8 @@ or your stack.
 - **Some settings stay in the stack only**: sign-in, secrets, token and session
   lifetimes, the membership check, `MTG_WRITES_ENABLED`, the backup folder's
   name and the folders on disk.
-- Every change is written to the audit log (`setting_changed`) under the
-  admin's subject. Three ask for a tick first: turning Archidekt backup copies
+- Every change is written to the activity log ("Setting changed", with the
+  setting's name and its old and new value) under the admin's account. Three ask for a tick first: turning Archidekt backup copies
   off, and lowering the backup copies or the restore points kept per deck,
   because older copies or restore points are then deleted.
 

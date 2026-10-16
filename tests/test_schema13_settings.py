@@ -551,7 +551,8 @@ def test_live_settings_default_stored_and_deployment_values(tmp_path: Path) -> N
         assert live.source("forge_games") == "deployment"
         with pytest.raises(
             SettingError,
-            match=r"^forge_games is set in your stack \(MTG_FORGE_GAMES\)\. Change it there and redeploy\.$",
+            match=r"^forge_games is set in your stack \(MTG_FORGE_GAMES\)\. To change it here, remove it "
+            r"from your stack and redeploy\.$",
         ):
             live.set("forge_games", 20, by="admin-1")
         with pytest.raises(SettingError):
@@ -644,6 +645,31 @@ def test_the_deployment_marks_what_it_set(tmp_path: Path, monkeypatch: pytest.Mo
         assert not live.locked("server_name")
     finally:
         db.close()
+
+
+def test_a_setting_of_only_spaces_is_unset_at_start_up_too(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.7.29 proofread: only spaces counted as unset for the page's lock but not at start-up, so
+    every number setting stopped the gateway, four on/off settings read Off and a log level of
+    spaces broke logging. Now start-up reads it as unset, and spaces around a value are dropped."""
+    _env(tmp_path, monkeypatch)
+    defaults = load_settings()
+    for spec in MANAGED_SETTINGS.values():
+        monkeypatch.setenv(spec.env, "   ")
+    s = load_settings()
+    assert s.env_set == frozenset()
+    for key in MANAGED_SETTINGS:
+        assert getattr(s, key) == getattr(defaults, key), key
+    assert s.archidekt_backups is True and s.apply_in_chat is True and s.log_level == "INFO"
+    for env, value in (
+        ("MTG_DECK_SYNC_MINUTES", " 60 "),
+        ("MTG_LOG_LEVEL", " debug "),
+        ("MTG_APPLY_IN_CHAT", " false "),
+    ):
+        monkeypatch.setenv(env, value)
+    s = load_settings()
+    assert (s.deck_sync_minutes, s.log_level, s.apply_in_chat) == (60, "DEBUG", False)
 
 
 async def test_the_gateway_shares_one_live_settings(stack: Stack) -> None:
