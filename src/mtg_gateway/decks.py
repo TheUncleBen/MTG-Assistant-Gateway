@@ -19,7 +19,6 @@ import asyncio
 import contextvars
 import dataclasses
 import datetime
-import functools
 import json
 import logging
 import math
@@ -33,6 +32,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
+from functools import wraps
 from typing import Any
 from urllib.parse import urlparse
 
@@ -1738,7 +1738,7 @@ def _dedupe(fn: Any) -> Any:
     """For the propose methods: an exact duplicate of a waiting note of the same app returns that
     note ("already waiting as #2") instead of a second one (Q27k, BOARD §3)."""
 
-    @functools.wraps(fn)
+    @wraps(fn)
     async def run(self: DeckService, sub: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
         try:
             return await fn(self, sub, *args, **kwargs)
@@ -3498,7 +3498,7 @@ class DeckService:
         payload += await self._printing_entries(sub, deck, specs)
         snapshot_id = self._take_snapshot(sub, row, deck)
         progress["snapshot_id"] = snapshot_id
-        backup = await self._backup_on_archidekt(sub, row, deck, snapshot_id)
+        backup = await self._backup_shared(sub, row, deck, snapshot_id)
         progress.update(backup)
         await self._rows_unchanged(sub, deck)  # lookups and backup take a while: check again
         await self._send(sub, deck.id, payload, progress)
@@ -3799,11 +3799,11 @@ class DeckService:
         backup_id = progress.get("backup_deck_id")
         if not backup_id or _changed_anything(progress):
             return
+        snap = self.db.get_snapshot(str(progress.get("snapshot_id") or ""), sub)
         shared = batch.shared_snapshots.get()
         for made in (shared or {}).values():
             if str((made.get("backup") or {}).get("backup_deck_id")) == str(backup_id):
                 made.pop("backup")  # the selection's next change on this deck makes its own
-        snap = self.db.get_snapshot(str(progress.get("snapshot_id") or ""), sub)
         if (
             not str(backup_id).isdigit()
             or str(backup_id) == str(source_deck_id)
@@ -4054,6 +4054,17 @@ class DeckService:
         if proposal_id:
             self.db.edit_proposal_result(proposal_id, sub, reword)
 
+    async def _backup_shared(
+        self, sub: str, row: dict[str, Any], deck: Deck, snapshot_id: str
+    ) -> dict[str, Any]:
+        """G16: the backup copy before a change, which the selection's later changes to the same
+        deck share: the copy the first one made is remembered for them."""
+        made = await self._backup_on_archidekt(sub, row, deck, snapshot_id)
+        shared = (batch.shared_snapshots.get() or {}).get(str(deck.id))
+        if shared is not None and made.get("backup_deck_id") and not made.get("backup_shared"):
+            shared["backup"] = dict(made)
+        return made
+
     async def _backup_on_archidekt(
         self, sub: str, row: dict[str, Any], deck: Deck, snapshot_id: str
     ) -> dict[str, Any]:
@@ -4071,10 +4082,7 @@ class DeckService:
             return {"backup_url": shared["backup"].get("backup_url", ""), "backup_shared": True}
         reason = f"before proposal {row['id']} changed this deck ({row.get('kind') or 'edit'})"
         try:
-            made = await self._backup_copy(sub, deck, snapshot_id, reason=reason)
-            if shared is not None:
-                shared["backup"] = dict(made)
-            return made
+            return await self._backup_copy(sub, deck, snapshot_id, reason=reason)
         except DeckError as exc:
             # Kept on the proposal so get_proposal and the review page say why it is pending again,
             # also when the apply was answered "applying" before the backup failed.
@@ -4275,7 +4283,7 @@ class DeckService:
         payload, _lines = restore_steps(wanted, deck)
         snapshot_id = self._take_snapshot(sub, row, deck)
         progress["snapshot_id"] = snapshot_id
-        backup = await self._backup_on_archidekt(sub, row, deck, snapshot_id)
+        backup = await self._backup_shared(sub, row, deck, snapshot_id)
         progress.update(backup)
         await self._rows_unchanged(sub, deck)  # the backup takes a while: check again before writing
         if payload:
@@ -4947,7 +4955,7 @@ class DeckService:
             raise DeckError("invalid", "The deck already has these details; nothing was sent.")
         snapshot_id = self._take_snapshot(sub, row, deck)
         progress["snapshot_id"] = snapshot_id
-        backup = await self._backup_on_archidekt(sub, row, deck, snapshot_id)
+        backup = await self._backup_shared(sub, row, deck, snapshot_id)
         progress.update(backup)
         # The backup takes a while: check again before writing, like card edits do. The details
         # are compared rather than the fingerprint, which the backup copy may bump.

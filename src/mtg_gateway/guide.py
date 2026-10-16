@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
 
     from .app import AppState
+    from .config import LiveSettings
 
 _esc = html.escape
 
@@ -210,7 +211,11 @@ def guide_body(
     archidekt_backups: bool = True,
     backup_folder: str = "MTG Gateway backups",
     watchlists: bool = False,
+    live: LiveSettings | None = None,
 ) -> str:
+    if live is not None:  # the approval rows as set now (live settings), over the start-up values
+        max_rows = int(live.get("auto_apply_max_rows"))
+        big_rows = int(live.get("auto_big_edit_rows"))
     folder = _esc(backup_folder)
     writes = (
         "Edits are switched on here: what you save in the app goes to Archidekt at once, and an "
@@ -1190,10 +1195,10 @@ def add_guide_routes(server: MCPServer, state: AppState) -> None:
             "Guide",
             guide_body(
                 site=s.server_name,
+                live=state.decks.live,
                 writes_enabled=bool(s.writes_enabled),
                 has_collection=getattr(state, "collection", None) is not None,
-                max_rows=int(state.decks.live.get("auto_apply_max_rows")),
-                big_rows=int(state.decks.live.get("auto_big_edit_rows")),
+                max_rows=int(getattr(s, "auto_apply_max_rows", modes.DEFAULT_MAX_ROWS)),
                 archidekt_backups=bool(getattr(s, "archidekt_backups", True)),
                 backup_folder=s.archidekt_backup_folder,
                 watchlists=bool(s.watchlists_enabled),
