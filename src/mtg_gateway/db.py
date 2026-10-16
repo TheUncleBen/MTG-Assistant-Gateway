@@ -182,6 +182,11 @@ BUSY_TIMEOUT_MS = 5000
 MAX_PREFS_PER_ACCOUNT = 300
 MAX_PREF_BYTES = 4096
 MAX_PREF_NAME = 120
+# One simulator card model (card_models.model_json, schema 14): the shape Mystic Forge validated,
+# at most this many bytes as JSON.
+MAX_CARD_MODEL_BYTES = 4096
+# Card models read in one query (get_card_models), under SQLite's limit on bound values.
+_CARD_MODEL_BATCH = 500
 # Earlier versions kept per waiting proposal (proposal_versions): past it an amend is refused, so an
 # app that keeps amending one note can't grow the database without bound (step 0 review, fix 3).
 MAX_PROPOSAL_VERSIONS = 50
@@ -621,6 +626,29 @@ def _step_13(conn: sqlite3.Connection) -> None:
     conn.execute("DELETE FROM job_runs WHERE name LIKE ? ESCAPE '\\'", (_like_prefix(BACKUP_DELETE_JOB),))
 
 
+def _step_14(conn: sqlite3.Connection) -> None:
+    """0.7.30, the one small upgrade the simulator needs (Q128, Q136): ``card_models``, the models
+    members taught the simulator for cards it plays without their effect. One model per card for
+    the whole gateway, keyed by the card's front face, casefolded.
+
+    ``added_by`` is the member whose model is kept now (never shown to other members). It has no
+    foreign key on purpose: whether a deleted member's models go with them is still Ben's to decide
+    (TODO, Track C's card), and a cascade here would decide it in the schema.
+    """
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS card_models (
+            card_key TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            model_json TEXT NOT NULL CHECK (length(CAST(model_json AS BLOB)) <= 4096),
+            oracle_hash TEXT,
+            added_by TEXT NOT NULL,
+            added_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        )"""
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_card_models_added_by ON card_models(added_by)")
+
+
 # Applied in order; ``PRAGMA user_version`` records how many have run. Append, never edit.
 MIGRATIONS = [
     _step_1,
@@ -636,6 +664,7 @@ MIGRATIONS = [
     _step_11,
     _step_12,
     _step_13,
+    _step_14,
 ]
 SCHEMA_VERSION = len(MIGRATIONS)
 
@@ -2830,3 +2859,69 @@ class Database:
     def delete_pref(self, sub: str, name: str) -> bool:
         with self.tx() as c:
             return c.execute("DELETE FROM account_prefs WHERE sub = ? AND name = ?", (sub, name)).rowcount > 0
+
+    # -- simulator card models (schema 14, Track C) --------------------------------------------
+    # TODO(Ben, Track C's next card): a cap on the models one member keeps (C proposes 200; the
+    # caller counts put_card_model's True answers against count_card_models), whether a member's
+    # models go when their data is deleted (they are not in MEMBER_TABLES yet), whether any member
+    # may replace another's model (put_card_model lets the newest win, as C's code expects), and
+    # who may delete one. Nothing here enforces any of these yet.
+
+    def get_card_models(self, keys: list[str]) -> list[dict[str, Any]]:
+        """The models kept for these card keys (front face, casefolded), in no particular order;
+        a key with no model is simply absent."""
+        wanted = list(dict.fromkeys(str(k) for k in keys if k))
+        out: list[dict[str, Any]] = []
+        for i in range(0, len(wanted), _CARD_MODEL_BATCH):
+            part = wanted[i : i + _CARD_MODEL_BATCH]
+            with self._lock:
+                rows = self._conn.execute(
+                    "SELECT card_key, name, model_json, oracle_hash, added_by, added_at, updated_at "
+                    f"FROM card_models WHERE card_key IN ({_marks(part)})",
+                    part,
+                ).fetchall()
+            out += [dict(r) for r in rows]
+        return out
+
+    def put_card_model(
+        self, card_key: str, name: str, model_json: str, sub: str, now: int, *, oracle_hash: str | None = None
+    ) -> bool:
+        """Keep ``model_json`` as the card's one model, made by ``sub`` (the newest model wins).
+        ``added_at`` stays that of the card's first model. True when the model now counts toward
+        ``sub`` and didn't before: a new card, or a card another member's model was kept for.
+        Raises ValueError for an empty key or a model over MAX_CARD_MODEL_BYTES."""
+        if not card_key or not sub:
+            raise ValueError("a card model needs a card key and a member")
+        if len(model_json.encode("utf-8")) > MAX_CARD_MODEL_BYTES:
+            raise ValueError(f"a card model is at most {MAX_CARD_MODEL_BYTES} bytes")
+        with self.tx() as c:
+            row = c.execute("SELECT added_by FROM card_models WHERE card_key = ?", (card_key,)).fetchone()
+            if row is None:
+                c.execute(
+                    "INSERT INTO card_models (card_key, name, model_json, oracle_hash, added_by, added_at, "
+                    "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (card_key, name, model_json, oracle_hash, sub, int(now), int(now)),
+                )
+                return True
+            c.execute(
+                "UPDATE card_models SET name = ?, model_json = ?, oracle_hash = ?, added_by = ?, "
+                "updated_at = ? WHERE card_key = ?",
+                (name, model_json, oracle_hash, sub, int(now), card_key),
+            )
+            return str(row["added_by"]) != sub
+
+    def delete_card_model(self, card_key: str, sub: str) -> bool:
+        """Delete the card's model when ``sub``'s is the one kept (the narrowest reading until Ben
+        decides who may delete one; see the TODO above). True when a model was deleted."""
+        with self.tx() as c:
+            return (
+                c.execute(
+                    "DELETE FROM card_models WHERE card_key = ? AND added_by = ?", (card_key, sub)
+                ).rowcount
+                > 0
+            )
+
+    def count_card_models(self, sub: str) -> int:
+        """How many of the kept models are ``sub``'s."""
+        row = self._one("SELECT COUNT(*) AS n FROM card_models WHERE added_by = ?", (sub,))
+        return int(row["n"]) if row else 0
