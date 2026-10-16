@@ -31,11 +31,13 @@ from starlette.responses import PlainTextResponse, Response
 from . import __version__
 from .plugin_page import (
     DEFAULT_SITE,
+    DEVELOPER_NAME_MAX,
     PLUGIN_NAME,
     SERVER_DESCRIPTION,
     _renamed,
     chatgpt_label,
     chatgpt_zip_name,
+    cut_at_word,
     plugin_dir,
     plugin_label,
     plugin_slug,
@@ -64,18 +66,6 @@ DEFAULT_PROMPTS = [
 ]
 
 
-DEVELOPER_NAME_MAX = 120
-
-
-def _cut(text: str, limit: int) -> str:
-    """``text`` cut to ``limit`` characters at the last space before it (mid-word only when one
-    word is longer than that)."""
-    if len(text) <= limit:
-        return text
-    head = text[:limit]
-    return (head.rsplit(" ", 1)[0] if " " in head else head).rstrip(" .-_'") or head
-
-
 def manifest(base: Path, site: str, public_url: str, chatgpt_name: str | None = None) -> dict:
     """``plugin.json``: the repository's portable manifest, renamed under an owner's name, with
     the schema, this version and ChatGPT's display fields added. ``displayName`` is the owner's
@@ -87,10 +77,11 @@ def manifest(base: Path, site: str, public_url: str, chatgpt_name: str | None = 
     doc = json.loads(raw)
     # OpenAI's package validation refuses an author.name or interface.developerName over 120
     # characters (plugin_author_name_too_long, plugin_developer_name_too_long; its plugin docs,
-    # read 2026-10-16): a long MTG_SERVER_NAME is cut there, at a word, so the file still uploads
+    # read 2026-10-16): a long MTG_SERVER_NAME is cut there, at a word, so the file still uploads,
+    # and the owner is told so (developer_name_warning: admin page and log)
     if isinstance(doc.get("author"), dict) and isinstance(doc["author"].get("name"), str):
-        doc["author"]["name"] = _cut(doc["author"]["name"], DEVELOPER_NAME_MAX)
-    developer = _cut((doc.get("author") or {}).get("name") or plugin_label(site), DEVELOPER_NAME_MAX)
+        doc["author"]["name"] = cut_at_word(doc["author"]["name"], DEVELOPER_NAME_MAX)
+    developer = cut_at_word((doc.get("author") or {}).get("name") or plugin_label(site), DEVELOPER_NAME_MAX)
     return {
         "$schema": PLUGIN_SCHEMA,
         "name": name,

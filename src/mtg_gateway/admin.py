@@ -32,7 +32,7 @@ from .pages import (
     login_redirect,
     read_limited,
 )
-from .plugin_page import CHATGPT_NAME_MAX, chatgpt_name_too_long
+from .plugin_page import CHATGPT_NAME_MAX, chatgpt_name_too_long, developer_name_warning
 from .theme import display_name, plural, render
 
 if TYPE_CHECKING:
@@ -423,15 +423,19 @@ def system_data(state: Any) -> dict[str, Any]:
 def _chatgpt_name_warning(settings: Any) -> str:
     """A notice when the ChatGPT connector name (MTG_CHATGPT_NAME, else MTG_SERVER_NAME) is over
     the limit ChatGPT puts on a plugin file's name."""
+    out = ""
     long = chatgpt_name_too_long(settings.server_name, getattr(settings, "chatgpt_name", None))
-    if not long:
-        return ""
-    text = (
-        f"The ChatGPT connector name, “{long[0]}”, is {long[1]} characters; ChatGPT refuses a plugin "
-        f"file whose name is over {CHATGPT_NAME_MAX} characters. Set MTG_CHATGPT_NAME to a name of "
-        f"{CHATGPT_NAME_MAX} characters or fewer (see docs/DEPLOY.md)."
-    )
-    return f"<div class='notice warn'>{html.escape(text)}</div>"
+    if long:
+        text = (
+            f"The ChatGPT connector name, “{long[0]}”, is {long[1]} characters; ChatGPT refuses a plugin "
+            f"file whose name is over {CHATGPT_NAME_MAX} characters. Set MTG_CHATGPT_NAME to a name of "
+            f"{CHATGPT_NAME_MAX} characters or fewer (see docs/DEPLOY.md)."
+        )
+        out += f"<div class='notice warn'>{html.escape(text)}</div>"
+    # the plugin file's developer and author name: a long MTG_SERVER_NAME shortened (B4 b)
+    if cut := developer_name_warning(settings.server_name):
+        out += f"<div class='notice warn'>{html.escape(cut)}</div>"
+    return out
 
 
 def _updates_card(u: dict[str, Any]) -> str:

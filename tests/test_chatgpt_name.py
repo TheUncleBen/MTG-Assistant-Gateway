@@ -330,3 +330,57 @@ def test_a_long_server_name_is_cut_where_openai_limits_the_developer_name() -> N
     short = chatgpt_plugin.manifest(REPO_PLUGIN, "Deck Helper", GATEWAY)
     assert short["extensions"]["com.openai"]["interface"]["developerName"] == short["author"]["name"]
     assert "Deck Helper" in short["author"]["name"]
+
+
+def test_a_shortened_developer_name_is_told_to_the_owner() -> None:
+    """B4 b: when MTG_SERVER_NAME (filtered as the plugin file writes it) is over 120 characters,
+    the plugin file shortens it, and the owner's notice says so with the shortened name. With no
+    space in the first 120 characters the name is cut at 120, inside the word."""
+    from mtg_gateway.plugin_page import developer_name_cut, developer_name_warning
+
+    site = " ".join(["Commander"] * 14)  # 139 characters
+    cut = " ".join(["Commander"] * 12)
+    assert developer_name_cut(site) == (139, cut)
+    assert developer_name_warning(site) == (
+        "MTG_SERVER_NAME is 139 characters. OpenAI's plugin check refuses a plugin file whose developer "
+        f"name is over 120 characters, so the ChatGPT plugin file uses it shortened to “{cut}”, as its "
+        "developer name and its author name."
+    )
+    assert developer_name_cut("x" * 130) == (130, "x" * 120)
+    assert developer_name_cut("x" * 120) is None and developer_name_warning("x" * 120) is None
+    # counted after the filter: "a~" runs become "a " (two characters each), 61 of them 121
+    assert developer_name_cut("a~~~" * 61) == (121, " ".join(["a"] * 60))
+
+
+async def test_admin_and_log_tell_the_owner_about_a_shortened_developer_name(
+    tmp_path: Path, idp: FakeIdP, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from mtg_gateway.__main__ import main
+    from mtg_gateway.plugin_page import developer_name_warning
+
+    site = " ".join(["Commander"] * 14)
+    text = developer_name_warning(site)
+    settings = make_settings(
+        tmp_path, required_group="mtg-users", admin_group="mtg-admins", server_name=site, chatgpt_name="Decks"
+    )
+    async with running(_with_admin(Harness(settings, idp))) as h:
+        b = await admin_browser(h)
+        try:
+            r = await b.http.get("/admin", headers=NAVIGATE)
+        finally:
+            await b.aclose()
+    assert r.status_code == 200
+    assert f"<div class='notice warn'>{html.escape(text)}</div>" in r.text
+    _write_secrets(tmp_path, monkeypatch)
+    monkeypatch.setenv("MTG_SERVER_NAME", site)
+    monkeypatch.setenv("MTG_CHATGPT_NAME", "Decks")
+    loggers = [logging.getLogger(n) for n in ("httpx", "httpcore")]
+    before = [lg.level for lg in loggers]
+    try:
+        with caplog.at_level(logging.WARNING, logger="mtg_gateway.config"):
+            assert main(["check-config"]) == 0
+    finally:
+        for lg, lvl in zip(loggers, before, strict=True):
+            lg.setLevel(lvl)
+    logged = [r.getMessage() for r in caplog.records if r.name == "mtg_gateway.config"]
+    assert logged == [text]

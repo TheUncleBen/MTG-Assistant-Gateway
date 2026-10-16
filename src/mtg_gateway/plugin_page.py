@@ -50,6 +50,9 @@ SLUG_MAX = 40
 # ChatGPT refuses a plugin file whose displayName is over 80 characters (OpenAI's plugin docs,
 # plugin_display_name_too_long, read 2026-10-15; 30 applies only to its public directory).
 CHATGPT_NAME_MAX = 80
+# OpenAI's package validation: author.name and interface.developerName at most 120 characters
+# (plugin_author_name_too_long, plugin_developer_name_too_long; its plugin docs, read 2026-10-16)
+DEVELOPER_NAME_MAX = 120
 IMAGE_PLUGIN_DIR = Path("/usr/share/mtg-gateway/plugin")
 REPO_PLUGIN_DIR = Path(__file__).resolve().parents[2] / "plugin"
 MAX_FILE_BYTES = 512 * 1024
@@ -120,6 +123,36 @@ def chatgpt_name_too_long(site: str, chatgpt_name: str | None = None) -> tuple[s
     """The name ChatGPT shows and its length when that is over CHATGPT_NAME_MAX, else None."""
     label = chatgpt_label(site, chatgpt_name)
     return (label, len(label)) if len(label) > CHATGPT_NAME_MAX else None
+
+
+def cut_at_word(text: str, limit: int) -> str:
+    """``text`` cut to ``limit`` characters at the last space before it; when the first ``limit``
+    characters hold no space, at ``limit`` itself, inside the word. Trailing spaces and . - _ '
+    go too."""
+    if len(text) <= limit:
+        return text
+    head = text[:limit]
+    return (head.rsplit(" ", 1)[0] if " " in head else head).rstrip(" .-_'") or head
+
+
+def developer_name_cut(site: str) -> tuple[int, str] | None:
+    """When the owner's MTG_SERVER_NAME, filtered as the plugin file writes it (plugin_label), is
+    over DEVELOPER_NAME_MAX: its length and the shortened name the ChatGPT plugin file uses as
+    its developer and author name; else None."""
+    label = plugin_label(site)
+    return (len(label), cut_at_word(label, DEVELOPER_NAME_MAX)) if len(label) > DEVELOPER_NAME_MAX else None
+
+
+def developer_name_warning(site: str) -> str | None:
+    """The owner's notice (admin page, log at start) when the plugin file shortens their name."""
+    cut = developer_name_cut(site)
+    if not cut:
+        return None
+    return (
+        f"MTG_SERVER_NAME is {cut[0]} characters. OpenAI's plugin check refuses a plugin file whose "
+        f"developer name is over {DEVELOPER_NAME_MAX} characters, so the ChatGPT plugin file uses it "
+        f"shortened to “{cut[1]}”, as its developer name and its author name."
+    )
 
 
 def _renamed(data: bytes, rel: str, site: str, name: str) -> bytes:
