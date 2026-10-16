@@ -598,7 +598,8 @@ async def test_folder_tags_and_cover_go_through_a_details_proposal(stack: Stack)
     uid = "be68e315-ffef-40a8-8a46-1c042b148c03"
     ark.decks[42]["cards"][0]["card"]["uid"] = uid  # the fixture deck has no Scryfall ids
     cover_name = ark.decks[42]["cards"][0]["card"]["oracleCard"]["name"]
-    ark.folders["alice"] = [{"id": 501, "name": "Cube", "private": False, "parentFolder": 1077}]
+    # 901, not 501: the fake gives the backup folder made during the apply the ids from 501 up
+    ark.folders["alice"] = [{"id": 901, "name": "Cube", "private": False, "parentFolder": 1077}]
     details = {"folder": "cube", "add_tags": ["budget", "Spicy"], "cover": cover_name}
     p = structured(await call(stack.h, token, "propose_deck_details", {"deck_id": "42", "details": details}))
     assert p["ok"] and p["kind"] == "details" and p["risk"] == "high", p
@@ -618,7 +619,7 @@ async def test_folder_tags_and_cover_go_through_a_details_proposal(stack: Stack)
         a = r.json()
         await b.aclose()
     assert a.get("state") == "applied", a
-    assert ark.deck_folder[42] == 501
+    assert ark.deck_folder[42] == 901
     assert [x["name"] for x in ark.deck_tags[42]] == ["budget", "Spicy"]
     assert ark.updates[-1]["customFeatured"].endswith(f"/{uid}.webp?11") and "featured" not in ark.updates[-1]
     # a tag Archidekt doesn't have is refused when the proposal is made, not when it is applied
