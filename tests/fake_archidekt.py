@@ -157,6 +157,7 @@ class FakeArchidekt:
         self.votes: dict[tuple[str, int], int] = {}
         self.vote_calls: list[dict[str, Any]] = []  # path and body of each vote PUT
         self.comments: dict[int, list[dict[str, Any]]] = {}  # thread root -> flat list of comments
+        self.comment_page_size = 0  # 0: a thread comes on one page; else paged by points (A29)
         self.next_comment_id = 800000
         # Hand actions added 2026-10-07: global deck tags (id -> name), each deck's tag relations
         # (deck id -> [{id, tag, name, position}]), deleted deck ids and massUpdate bodies.
@@ -795,6 +796,14 @@ class FakeArchidekt:
                 ]
 
             top = tree(root)
+            total, more = len(top), False
+            if self.comment_page_size:
+                # paged as Archidekt pages a thread: most points first, ``page`` of ``comment_page_size``
+                top.sort(key=lambda c: -c["points"])
+                page = int(request.url.params.get("page", "1"))
+                size = self.comment_page_size
+                more = page * size < total
+                top = top[(page - 1) * size : page * size]
             return httpx.Response(
                 200,
                 json={
@@ -808,10 +817,10 @@ class FakeArchidekt:
                     "parent": None,
                     "originalPost": None,
                     "deck": {"id": deck["id"]},
-                    "childrenCount": len(top),
+                    "childrenCount": total,
                     "children": {
-                        "links": {"next": None, "previous": None},
-                        "count": len(top),
+                        "links": {"next": "https://ark.test/next" if more else None, "previous": None},
+                        "count": total,
                         "results": top,
                     },
                     "createdAt": "2026-10-01T10:00:00Z",

@@ -98,17 +98,21 @@ def _owner(deck: Any) -> str:
 
 
 async def _thread_comment(
-    decks: DeckService, sub: str, deck_id: str, comment_id: Any, *, keep_doc: bool = False
+    decks: DeckService, sub: str, deck_id: str, comment_id: Any, *, keep_doc: bool = False, page: int = 1
 ) -> dict[str, Any]:
-    from .social import _find
-
     if not isinstance(comment_id, int) or isinstance(comment_id, bool) or comment_id <= 0:
         raise DeckError("invalid", "comment_id must be a comment's number (get_deck_comments lists them)")
-    thread = await _social(decks).comments(sub, deck_id, keep_doc=keep_doc)
-    found = _find(thread["comments"], comment_id)
-    if found is None:
-        raise DeckError("not_found", "that comment is not in this deck's thread (or not on its first page)")
-    return {**found, "_me": thread.get("me")}
+    found, thread = await _social(decks).find_comment(sub, deck_id, comment_id, page, keep_doc=keep_doc)
+    return {**found, "_me": thread.get("me"), "_page": thread["page"]}
+
+
+def _page(value: Any) -> int:
+    """The page of the comment thread a comment was read from (get_deck_comments' page)."""
+    if value is None:
+        return 1
+    if not isinstance(value, int) or isinstance(value, bool) or not 1 <= value <= 1000:
+        raise DeckError("invalid", "page must be the thread page get_deck_comments read (1 or more)")
+    return value
 
 
 def profile_url(username: str) -> str:
@@ -202,6 +206,8 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             else await decks.get_any_deck(sub, deck_id)
         )
         changes["deck_id"] = deck.id
+        if social is not None:
+            social.note_root(sub, deck)
         # the deck's name is on the card's title and the page's Deck line; it is left out of this
         # sentence so a name written to read like more of it cannot change what the sentence says
         where = f"by {_owner(deck)}"
@@ -235,21 +241,24 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             row["text"] += " (already the case; applying changes nothing)"
     elif action == "comment_post":
         text = _comment_text(params.get("text"))
-        thread = await social.comments(sub, deck.id)
-        if thread["root"] is None:
+        if deck.comment_root is None:
             raise DeckError("unavailable", "Archidekt reports no comment thread for this deck")
         parent = params.get("reply_to")
         if parent is not None:
-            found = await _thread_comment(decks, sub, deck.id, parent)
+            found = await _thread_comment(decks, sub, deck.id, parent, page=_page(params.get("page")))
+            changes["page"] = found["_page"]
             row["text"] = f"Reply publicly to {found['owner']['username'] or 'a comment'} on the deck {where}"
         else:
             row["text"] = f"Post a public comment on the deck {where}"
         changes.update(text=text, parent=parent)
         row["after_text"] = text
     elif action in ("comment_edit", "comment_delete", "comment_vote"):
-        found = await _thread_comment(decks, sub, deck.id, params.get("comment_id"), keep_doc=True)
+        found = await _thread_comment(
+            decks, sub, deck.id, params.get("comment_id"), keep_doc=True, page=_page(params.get("page"))
+        )
         own = found["_me"] is not None and found["owner"]["id"] == found["_me"]
         changes["comment_id"] = found["id"]
+        changes["page"] = found["_page"]
         row["before_text"] = found["text"]
         if action == "comment_vote":
             if own:
@@ -361,7 +370,9 @@ async def apply(
     elif action == "follow":
         result = await _social(decks).follow(sub, int(c["user_id"]), bool(c["on"]))
     elif action == "comment_post":
-        out = await _social(decks).comment(sub, deck_id, str(c["text"]), c.get("parent"))
+        out = await _social(decks).comment(
+            sub, deck_id, str(c["text"]), c.get("parent"), int(c.get("page") or 1)
+        )
         result = {"comment_id": out["comment"]["id"], "parent": out["parent"]}
     elif action == "comment_edit":
         # Q137: the comment's formatting is kept as the review showed it (after_doc), or not sent
@@ -373,6 +384,7 @@ async def apply(
                 int(c["comment_id"]),
                 str(c["text"]),
                 expect_doc=str(reviewed.get("after_doc") or ""),
+                page=int(c.get("page") or 1),
             )
         except DeckError as exc:
             if exc.kind == "stale":
@@ -380,10 +392,12 @@ async def apply(
             raise
         result = {"comment_id": out["comment"]["id"], "verified": True}
     elif action == "comment_delete":
-        out = await _social(decks).delete_comment(sub, deck_id, int(c["comment_id"]))
+        out = await _social(decks).delete_comment(sub, deck_id, int(c["comment_id"]), int(c.get("page") or 1))
         result = {"deleted": out["deleted"], "verified": True}
     elif action == "comment_vote":
-        result = await _social(decks).vote_comment(sub, deck_id, int(c["comment_id"]), int(c["vote"]))
+        result = await _social(decks).vote_comment(
+            sub, deck_id, int(c["comment_id"]), int(c["vote"]), int(c.get("page") or 1)
+        )
     elif action == "delete_deck":
         deck = await decks.get_own_deck(sub, deck_id)
         if deck.fingerprint() != row["baseline_fingerprint"]:

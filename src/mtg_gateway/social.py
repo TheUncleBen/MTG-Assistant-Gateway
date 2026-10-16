@@ -53,6 +53,14 @@ _STATUS = {
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
+# Comment thread pages: the highest page asked for, and how long a member's read of a deck's thread
+# root is reused for their next vote or comment (the root never changes for a deck).
+MAX_PAGE = 1000
+ROOT_TTL = 600.0
+ROOT_MAX = 2000
+NOT_IN_THREAD = "that comment is not in this deck's thread (or no longer on the page it was shown on)"
+
+
 def comment_text(text: str) -> str:
     """A comment as it will be written: plain text only (Q70; a Quill document is kept as its words
     alone, see ``plain_text``), without control characters or surrounding white space. Cleaning
@@ -141,6 +149,10 @@ class SocialService:
         self.client = state.decks.client
         self._following: dict[str, tuple[float, dict[int, str]]] = {}
         self._following_fresh: dict[str, float] = {}  # sub -> when a fresh read was last forced
+        # (sub, deck id) -> (when, the deck's comment thread root) from that member's last read, so a
+        # vote or a comment write straight after the thread loaded skips reading the whole deck
+        # again (A29: one thread read and the write, not three calls per vote)
+        self._roots: dict[tuple[str, str], tuple[float, int | None]] = {}
 
     def _me(self, sub: str) -> tuple[str, str]:
         """(Archidekt user id, username) of the member's linked account."""
@@ -174,19 +186,16 @@ class SocialService:
         self.state.db.audit("deck_voted", sub=sub, detail={"deck_id": deck.id, "vote": want})
         return {"vote": want, "points": points}
 
-    async def vote_comment(self, sub: str, deck_id: str, comment_id: int, want: int) -> dict[str, Any]:
-        """Vote on one comment of the deck's thread (first page): PUT /comments/vote/{id}/ with
-        {up, remove}, the body archidekt.com's own comment vote sends (its bundle, read 2026-10-10).
-        The new score is worked out the way the site does, from the thread's points and the
-        member's earlier vote."""
+    async def vote_comment(
+        self, sub: str, deck_id: str, comment_id: int, want: int, page: int = 1
+    ) -> dict[str, Any]:
+        """Vote on one comment of the deck's thread, found on the page of the thread it was shown
+        on: PUT /comments/vote/{id}/ with {up, remove}, the body archidekt.com's own comment vote
+        sends (its bundle, read 2026-10-10). The new score is worked out the way the site does,
+        from the thread's points and the member's earlier vote."""
         self.decks._writes_switch()
         uid, _name = self._me(sub)
-        thread = await self.comments(sub, deck_id)
-        found = _find(thread["comments"], comment_id)
-        if found is None:
-            raise DeckError(
-                "not_found", "that comment is not in this deck's thread (or not on its first page)"
-            )
+        found, _thread = await self.find_comment(sub, deck_id, comment_id, page)
         if str(found["owner"]["id"]) == uid:
             raise DeckError("invalid", "that is your own comment")
         if found["archived"]:
@@ -312,20 +321,36 @@ class SocialService:
         self.state.db.audit("user_followed", sub=sub, detail={"user_id": user_id, "on": on})
         return {"following": on}
 
-    async def comments(
-        self, sub: str, deck_id: str, page: int = 1, *, keep_doc: bool = False
-    ) -> dict[str, Any]:
+    def note_root(self, sub: str, deck: Deck) -> None:
+        """Remember the comment thread root of a deck the member just read."""
+        if len(self._roots) >= ROOT_MAX:
+            self._roots.clear()
+        self._roots[(sub, str(deck.id))] = (time.monotonic(), deck.comment_root)
+
+    async def _root(self, sub: str, deck_id: str, *, reuse: bool) -> int | None:
+        """The deck's comment thread root: from the member's own read in the last ROOT_TTL seconds
+        when ``reuse`` (their writes), else read from the deck."""
+        key = (sub, str(deck_id))
+        hit = self._roots.get(key)
+        if reuse and hit is not None and time.monotonic() - hit[0] < ROOT_TTL:
+            return hit[1]
         deck = await self.deck(sub, deck_id)
-        if deck.comment_root is None:
+        self.note_root(sub, deck)
+        return deck.comment_root
+
+    async def comments(
+        self, sub: str, deck_id: str, page: int = 1, *, keep_doc: bool = False, reuse_root: bool = False
+    ) -> dict[str, Any]:
+        page = max(1, min(int(page), MAX_PAGE))
+        root = await self._root(sub, deck_id, reuse=reuse_root and self.state.db.get_link(sub) is not None)
+        if root is None:
             return {"root": None, "count": 0, "comments": [], "page": 1, "has_more": False}
         linked = self.state.db.get_link(sub) is not None
         if linked:
-            body = await self.decks._call(
-                sub, lambda t: self.client.comment_thread(t, deck.comment_root, page=page)
-            )
+            body = await self.decks._call(sub, lambda t: self.client.comment_thread(t, root, page=page))
         else:
             async with self.decks.archidekt_slot(sub):
-                body = await self.client.comment_thread(None, deck.comment_root, page=page)
+                body = await self.client.comment_thread(None, root, page=page)
         kids = body.get("children")
         results = kids.get("results") if isinstance(kids, dict) else kids if isinstance(kids, list) else []
         links = kids.get("links") if isinstance(kids, dict) else {}
@@ -335,7 +360,7 @@ class SocialService:
         raw_me = str((link or {}).get("archidekt_user_id") or "")
         me = int(raw_me) if raw_me.isdigit() else None
         return {
-            "root": deck.comment_root,
+            "root": root,
             "count": count if isinstance(count, int) else len(comments),
             "comments": comments,
             "page": page,
@@ -344,20 +369,41 @@ class SocialService:
             "me": me,
         }
 
-    def _own_comment(self, sub: str, thread: dict[str, Any], comment_id: int) -> dict[str, Any]:
-        """The member's own comment ``comment_id`` from the thread's first page, else a refusal."""
-        uid, _name = self._me(sub)
+    async def find_comment(
+        self, sub: str, deck_id: str, comment_id: int, page: int = 1, *, keep_doc: bool = False
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """(the comment, the thread page it is on): looked for on ``page``, the page of the thread it
+        was shown on. The thread is ordered by points, so a vote since can move a comment to the
+        page beside it: those two are read only when it is not where it was shown."""
+        thread = await self.comments(sub, deck_id, page, keep_doc=keep_doc, reuse_root=True)
         found = _find(thread["comments"], comment_id)
+        for near in (thread["page"] - 1, thread["page"] + 1):
+            if found is not None or near < 1 or (near > thread["page"] and not thread["has_more"]):
+                continue
+            other = await self.comments(sub, deck_id, near, keep_doc=keep_doc, reuse_root=True)
+            found = _find(other["comments"], comment_id)
+            if found is not None:
+                thread = other
         if found is None:
-            raise DeckError(
-                "not_found", "that comment is not in this deck's thread (or not on its first page)"
-            )
+            raise DeckError("not_found", NOT_IN_THREAD)
+        return found, thread
+
+    def _own_comment(self, sub: str, found: dict[str, Any]) -> dict[str, Any]:
+        """``found`` when it is the member's own comment, else a refusal."""
+        uid, _name = self._me(sub)
         if str(found["owner"]["id"]) != uid:
             raise DeckError("forbidden", "only your own comments can be edited or deleted here")
         return found
 
     async def edit_comment(
-        self, sub: str, deck_id: str, comment_id: int, text: str, *, expect_doc: str | None = None
+        self,
+        sub: str,
+        deck_id: str,
+        comment_id: int,
+        text: str,
+        *,
+        expect_doc: str | None = None,
+        page: int = 1,
     ) -> dict[str, Any]:
         """Change the text of one of the member's own comments (Archidekt's edit); verified by
         re-reading the thread. The new words are plain, and the comment's bold text, links and
@@ -370,8 +416,8 @@ class SocialService:
             raise DeckError("invalid", "write something first")
         if len(text) > MAX_COMMENT:
             raise DeckError("invalid", f"a comment can be at most {MAX_COMMENT} characters")
-        thread = await self.comments(sub, deck_id, keep_doc=True)
-        found = self._own_comment(sub, thread, comment_id)
+        found, thread = await self.find_comment(sub, deck_id, comment_id, page, keep_doc=True)
+        self._own_comment(sub, found)
         kept = formatting.keep_formatting(found.get("_doc"), text)
         if expect_doc is not None and (kept[0] if kept else "") != expect_doc:
             raise DeckError(
@@ -381,7 +427,9 @@ class SocialService:
             )
         write: str = QuillDoc(kept[0]) if kept else text
         await self.decks._call(sub, lambda t: self.client.comment_update(t, comment_id, write))
-        after = _find((await self.comments(sub, deck_id))["comments"], comment_id)
+        after = _find(
+            (await self.comments(sub, deck_id, thread["page"], reuse_root=True))["comments"], comment_id
+        )
         ok = after is not None and after["text"] == text
         self.state.db.audit(
             "deck_comment_edited", sub=sub, detail={"deck_id": deck_id, "comment": comment_id, "verified": ok}
@@ -392,13 +440,13 @@ class SocialService:
             )
         return {"comment": after}
 
-    async def delete_comment(self, sub: str, deck_id: str, comment_id: int) -> dict[str, Any]:
-        """Delete one of the member's own comments; verified by re-reading the thread."""
+    async def delete_comment(self, sub: str, deck_id: str, comment_id: int, page: int = 1) -> dict[str, Any]:
+        """Delete one of the member's own comments; verified by re-reading the thread page it was on."""
         self.decks._writes_switch()
-        thread = await self.comments(sub, deck_id)
-        self._own_comment(sub, thread, comment_id)
+        found, thread = await self.find_comment(sub, deck_id, comment_id, page)
+        self._own_comment(sub, found)
         await self.decks._call(sub, lambda t: self.client.comment_delete(t, comment_id))
-        after = await self.comments(sub, deck_id)
+        after = await self.comments(sub, deck_id, thread["page"], reuse_root=True)
         gone = _find(after["comments"], comment_id) is None
         self.state.db.audit(
             "deck_comment_deleted",
@@ -411,7 +459,9 @@ class SocialService:
             )
         return {"deleted": comment_id, "count": after["count"]}
 
-    async def comment(self, sub: str, deck_id: str, text: str, parent: int | None) -> dict[str, Any]:
+    async def comment(
+        self, sub: str, deck_id: str, text: str, parent: int | None, page: int = 1
+    ) -> dict[str, Any]:
         self.decks._writes_switch()
         _uid, name = self._me(sub)
         text = comment_text(text)
@@ -419,13 +469,17 @@ class SocialService:
             raise DeckError("invalid", "write something first")
         if len(text) > MAX_COMMENT:
             raise DeckError("invalid", f"a comment can be at most {MAX_COMMENT} characters")
-        thread = await self.comments(sub, deck_id)
-        root = thread["root"]
-        if root is None:
-            raise DeckError("unavailable", "Archidekt reports no thread for this deck")
-        target = root if parent is None else parent
-        if target != root and target not in _ids(thread["comments"]):
-            raise DeckError("invalid", "that comment is not in this deck's thread (or not on its first page)")
+        if parent is None:
+            root = await self._root(sub, deck_id, reuse=True)
+            if root is None:
+                raise DeckError("unavailable", "Archidekt reports no thread for this deck")
+            target = root
+        else:
+            try:
+                await self.find_comment(sub, deck_id, parent, page)
+            except DeckError as exc:
+                raise DeckError("invalid", NOT_IN_THREAD) from exc
+            target = parent
         created = await self.decks._call(sub, lambda t: self.client.comment_create(t, target, text))
         self.state.db.audit("deck_commented", sub=sub, detail={"deck_id": deck_id, "parent": target})
         out = comment_out(created)
@@ -559,10 +613,18 @@ def add_social_routes(server: MCPServer, state: AppState) -> SocialService:
         if not isinstance(data.get("text"), str):
             return _fail("invalid", "text must be a string")
         try:
-            out = await service.comment(sub, deck_id(request), data["text"], parent)
+            out = await service.comment(sub, deck_id(request), data["text"], parent, page_of(request, data))
         except (DeckError, ArchidektError) as exc:
             return _err(exc)
         return JSONResponse({"ok": True, **out}, status_code=201, headers=NO_STORE)
+
+    def page_of(request: Request, data: dict[str, Any] | None = None) -> int:
+        """The page of the thread a comment was shown on (1 when not said)."""
+        raw = (data or {}).get("page", request.query_params.get("page"))
+        try:
+            return max(1, min(int(raw or 1), MAX_PAGE))
+        except (TypeError, ValueError):
+            return 1
 
     def comment_id(request: Request) -> int | None:
         raw = str(request.path_params.get("comment_id") or "")
@@ -584,7 +646,9 @@ def add_social_routes(server: MCPServer, state: AppState) -> SocialService:
         if not isinstance(data.get("text"), str):
             return _fail("invalid", "text must be a string")
         try:
-            out = await service.edit_comment(sub, deck_id(request), cid, data["text"])
+            out = await service.edit_comment(
+                sub, deck_id(request), cid, data["text"], page=page_of(request, data)
+            )
         except (DeckError, ArchidektError) as exc:
             return _err(exc)
         return JSONResponse({"ok": True, **out}, headers=NO_STORE)
@@ -606,7 +670,7 @@ def add_social_routes(server: MCPServer, state: AppState) -> SocialService:
         if want is None:
             return _fail("invalid", "vote must be up, down or none")
         try:
-            out = await service.vote_comment(sub, deck_id(request), cid, want)
+            out = await service.vote_comment(sub, deck_id(request), cid, want, page_of(request, data))
         except (DeckError, ArchidektError) as exc:
             return _err(exc)
         return JSONResponse({"ok": True, **out}, headers=NO_STORE)
@@ -622,7 +686,7 @@ def add_social_routes(server: MCPServer, state: AppState) -> SocialService:
         if cid is None:
             return _fail("invalid", "comment id must be a number")
         try:
-            out = await service.delete_comment(sub, deck_id(request), cid)
+            out = await service.delete_comment(sub, deck_id(request), cid, page_of(request))
         except (DeckError, ArchidektError) as exc:
             return _err(exc)
         return JSONResponse({"ok": True, **out}, headers=NO_STORE)
