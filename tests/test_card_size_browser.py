@@ -20,6 +20,8 @@ from .test_printing_picker_browser import Server, _chromium, _open_picker, _page
 pytest.importorskip("playwright")
 
 SHOTS = os.environ.get("MTG_SIZE_SHOTS", "")
+# the size switch's save (static/prefs.js): the test waits for its answer, not a fixed time
+SAVED = "**/api/v1/prefs"
 COLS = "s => getComputedStyle(document.querySelector(s)).gridTemplateColumns.split(' ').length"
 
 
@@ -86,12 +88,12 @@ def test_the_switch_applies_at_once_and_follows_the_account(server: Server, widt
         assert page.get_attribute(".toolbar [data-card-size-set=m]", "aria-pressed") == "true"
         url = page.url
         before = page.evaluate(COLS, ".deckview.stacks")
-        page.locator(".toolbar [data-card-size-set=s]").click()
+        with page.expect_response(SAVED) as saved:
+            page.locator(".toolbar [data-card-size-set=s]").click()
+        assert saved.value.ok  # the account has it once the save answers: no fixed wait
         assert page.get_attribute("html", "data-card-size") == "s" and page.url == url  # no reload
         assert page.get_attribute(".toolbar [data-card-size-set=s]", "aria-pressed") == "true"
         assert page.evaluate(COLS, ".deckview.stacks") > before
-        page.wait_for_function("() => true")
-        page.wait_for_timeout(300)
         assert server.db.get_pref("user-1", "card.size") == "s"
         # as tall as the selects beside it (39 px with its border; 46 px on a touch screen)
         height = page.evaluate(
@@ -138,8 +140,9 @@ def test_the_printing_picker_has_the_same_switch(server: Server) -> None:
             assert page.get_attribute(".printpick [data-card-size-set=m]", "aria-pressed") == "false"
             assert page.evaluate(MEASURE) == []
             _shot(page, f"picker-large-{width}.png")
-            page.locator(".printpick [data-card-size-set=m]").click()
-            page.wait_for_timeout(300)
+            with page.expect_response(SAVED) as saved:
+                page.locator(".printpick [data-card-size-set=m]").click()
+            assert saved.value.ok
             assert server.db.get_pref("user-1", "card.size") == "m"
             browser.close()
             assert errors == []
@@ -174,5 +177,49 @@ def test_collection_my_decks_and_card_search_show_the_switch_with_the_grid_only(
         page.goto(f"{server.base}/cards?q=sol&view=grid", wait_until="networkidle")
         page.locator(".cs-head .seg label", has_text="List").click()
         page.wait_for_function("() => !document.querySelector('.cs-head .cardsize').offsetParent")
+        browser.close()
+    assert errors == []
+
+
+# Each stack name at least as wide as its text (not cut, not a sliver).
+STACK_NAMES = """
+() => [...document.querySelectorAll('.deckview.stacks .stackhead .title')]
+  .filter(t => t.scrollWidth > t.clientWidth + 1 || t.clientWidth < 40)
+  .map(t => t.textContent + ' ' + t.clientWidth + '/' + t.scrollWidth)
+"""
+
+# The first letter of each picture-less tile's name, outside the quantity corner's triangle.
+UNDER_CORNER = """
+() => [...document.querySelectorAll('.deckview .c')].filter(c => c.querySelector('.ph .nm')).map(c => {
+  const nm = c.querySelector('.ph .nm'), q = c.querySelector('.qty').getBoundingClientRect();
+  const r = document.createRange();
+  r.setStart(nm.firstChild, 0); r.setEnd(nm.firstChild, 1);
+  const a = r.getBoundingClientRect();
+  // the triangle is x + y < 38 from the tile's corner; the letter's top left must be outside it
+  return (a.left - q.left) + (a.top - q.top) < q.width ? nm.textContent : null;
+}).filter(Boolean)
+"""
+
+
+@pytest.mark.parametrize("width", [344, 360, 673, 1280])
+def test_small_cards_keep_stack_names_and_card_names_readable(server: Server, width: int) -> None:
+    """Review round 1, findings 3 and 8: at S the stack names show whole on a phone and a Fold,
+    and a tile without a picture starts its name below the quantity corner."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    _size(server, "s")
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width)
+        page.goto(f"{server.base}/decks/42?view=stacks", wait_until="networkidle")
+        assert page.locator(".deckview.stacks .stackhead .title").count() >= 3
+        assert page.evaluate(STACK_NAMES) == []
+        assert page.evaluate(MEASURE) == []
+        for view in ("stacks", "grid", "scroll"):
+            page.goto(f"{server.base}/decks/42?view={view}", wait_until="networkidle")
+            assert page.locator(".deckview .c .ph .nm").count() > 0, view
+            assert page.evaluate(UNDER_CORNER) == [], view
+        _shot(page, f"small-names-{width}.png")
         browser.close()
     assert errors == []

@@ -906,6 +906,13 @@ html[data-card-size=l] .deckview.stacks{grid-template-columns:repeat(auto-fill,m
 html[data-card-size=s] .deckview.grid .cards{grid-template-columns:repeat(auto-fill,minmax(128px,1fr))}
 html[data-card-size=l] .deckview.grid .cards{grid-template-columns:repeat(auto-fill,minmax(230px,1fr))}
 html[data-card-size=s] .deckview.scroll .c{flex-basis:clamp(105px,16.5vw,150px)}
+/* at S a stack's name gets its own line under the grip and menu, so a narrow stack still shows it
+   whole (review round 1, finding 3), and a tile without a picture starts its name below the 38 px
+   quantity corner (finding 8) */
+html[data-card-size=s] .deckview.stacks .stackhead h2{flex-wrap:wrap;row-gap:0}
+html[data-card-size=s] .deckview.stacks .stackhead .title{
+  order:2;flex:1 0 100%;white-space:normal;overflow-wrap:anywhere}
+html[data-card-size=s] .deckview .c .ph{padding-top:max(12%,34px)}
 html[data-card-size=l] .deckview.scroll .c{flex-basis:clamp(190px,30vw,270px)}
 /* My decks and the folders in it */
 html[data-card-size=s] ul.decklist.grid{grid-template-columns:repeat(6,minmax(0,1fr))}
