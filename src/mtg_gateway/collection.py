@@ -195,7 +195,7 @@ def parse_collection_import(text: str) -> list[dict[str, Any]]:
                 break
     except csv.Error:
         pass  # no CSV header: a plain list's own check says what is wrong with it
-    is_csv = "name" in first or "card name" in first
+    is_csv = any(n in first for n in _IMPORT_COLUMNS["name"])  # any Name column the reader takes
     if is_csv:
         _read_csv_rows(reader, first, items)
     else:
