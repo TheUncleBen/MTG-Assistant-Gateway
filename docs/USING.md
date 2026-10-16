@@ -133,19 +133,20 @@ One deck:
   deck without a card in its Commander category, or a smaller deck without
   one, gets no solo test and the report says why.
 - When the gateway runs Forge, a Commander deck's report also has Forge
-  games against three precons. They are precons of the deck's bracket: the
-  bracket set on the deck in Archidekt, or else Archidekt's estimate from
-  the cards. Each precon's bracket comes from the game changers it holds. When there are not
+  games against three precons. They are picked for the bracket set on the
+  deck in Archidekt, or, when none is set, for Archidekt's estimate from the
+  cards. Each precon's bracket comes from the game changers it holds. When there are not
   enough precons of that bracket, the nearest bracket fills in, and an older
   Forge image without precon brackets plays the newest precons; the report
   names the opponents, their brackets and why they were picked. Forge plays
   10 games per report by default (`MTG_FORGE_GAMES`) and shows each win rate
-  with its 95% range. Forge does not run 60-card decks (its opponents are
+  with its 95% interval. Forge does not run 60-card decks (its opponents are
   Commander precons): their reports never start or queue a Forge run and say
   why. When the Forge engine is busy
   with other runs, a report waits in the queue and starts by itself. Unless you
   use the Compare page's Forge button (or your assistant asks for the same
-  opponents), each deck meets precons of its own bracket, so two decks' Forge
+  opponents), each deck meets precons picked for its own bracket (or its
+  estimate), so two decks' Forge
   win rates are not a like-for-like comparison; the paired goldfish A/B of
   `compare_decks` is.
 - A report without Forge games (Forge not set up, a 60-card deck, or Forge
@@ -180,8 +181,8 @@ One deck:
   the four-copies limit, restricted cards, companion, sideboard size, cards
   banned or not legal in the format, the bracket you set against the
   estimate, uncategorised cards; a deck with a banned card is never reported
-  fine), the bracket (the one set on the deck, else Archidekt's estimate from
-  the cards) and the description.
+  fine), the bracket set on the deck (or, when none is set, Archidekt's
+  estimate from the cards) and the description.
 - **Export** (More menu) shows the deck as Archidekt import text (every row
   with printing, finish, categories and labels; paste it into Archidekt's
   Import dialog or the gateway's New deck page), as a plain decklist and as

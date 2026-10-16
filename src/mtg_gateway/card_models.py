@@ -304,8 +304,8 @@ def clean_model(raw: Any, *, card: str) -> dict[str, Any]:
 
 
 ANOTHER_MEMBERS_TEXT = (
-    "another member saved a model for this card; only they or an admin can replace it (your own "
-    "annotation still plays in your runs)"
+    "another member saved a model for this card; only they or an admin can replace it (your "
+    "annotation still played in this run; pass it again to use it in later runs)"
 )
 
 

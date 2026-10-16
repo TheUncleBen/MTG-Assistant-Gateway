@@ -314,7 +314,7 @@ class _Store:
 
 
 async def test_the_adder_removes_a_saved_model_from_the_report_and_through_the_assistant(
-    stack: Stack,
+    stack: Stack, monkeypatch: Any
 ) -> None:
     """Q138 item 4: the report page offers Remove only for the member's own saved descriptions;
     the assistant's remove_card_model removes the member's own and nobody else's."""
@@ -365,6 +365,14 @@ async def test_the_adder_removes_a_saved_model_from_the_report_and_through_the_a
         gw.reports.models = KeptModels(SimpleNamespace())  # a store without the schema 14 methods
         out = structured(await call(h, token, "remove_card_model", {"card_name": "Sol Ring"}))
         assert out["ok"] is False and "does not save card models" in out["message"]
+        # switched off (Q140 item 1 held): the Remove route removes nothing and no notice shows
+        gw.reports.models = KeptModels(store)
+        monkeypatch.setattr(card_models, "SWITCHED_ON", False)
+        store.put_card_model("sol ring", "Sol Ring", model, sub, 3)
+        off = await b.http.post(url, data={"csrf": csrf, "card": "Sol Ring"})
+        assert off.status_code == 404 and "sol ring" in store.rows
+        quiet = await b.http.get("/history/reports/rep_kept?models=removed", headers=NAV)
+        assert "The saved description was removed." not in quiet.text
     finally:
         gw.reports.models = real
         await b.aclose()

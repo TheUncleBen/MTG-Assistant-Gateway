@@ -511,7 +511,7 @@ def test_report_page_shows_a_queued_run_and_its_place() -> None:
     live = forge_html(queued, live=True)
     assert "queued" in live and "data-forge-live" in live
     assert "Waiting for your earlier Forge run to finish." in live
-    assert "Waiting: number 1 in line, behind your report of Liesa:" in live
+    assert "Waiting: number 1 in line, behind your report of Liesa. It starts by itself" in live
     assert "Expected to finish in about 79 minutes (at the measured 235.6 seconds a game)." in live
     assert "href='/history/reports/rep_ahead'" in live
     assert "href=" not in forge_html(queued)  # an export links nowhere
@@ -523,7 +523,7 @@ def test_report_page_shows_a_queued_run_and_its_place() -> None:
     # none promises a replay
     for source, said in (
         ("gateway", "(chosen by the gateway, kept for the record)"),
-        ("request", "(from the request)"),
+        ("request", "(set when this report was asked for)"),
     ):
         forge = {"state": "done", "seed": 12, "seed_source": source, "result": {"games": 1}}
         md = report_markdown({"deck_name": "Aesi", "deck_id": "42", "stats": {}, "forge": forge})
@@ -895,10 +895,24 @@ async def test_shared_opponents_that_left_the_engine_or_never_sat() -> None:
     names, why = shared_opponents(precons, {"deck_name": "Deck A", "bracket": [2, "archidekt"]})
     assert names == ["New 2", "Older 2", "New 3"]
     assert why["rule"] == "shared" and why["bracket"] == 2
-    assert "picked for Deck A's Forge games by the bracket set on the deck in Archidekt" in why["note"]
+    assert why["note"] == (
+        "The same opponents Deck A's Forge games get, so both decks meet the same table. Bracket 2 (the "
+        "bracket set on the deck in Archidekt): only 2 bracket 2 precons are here; the rest come from the "
+        "nearest bracket (3)."
+    )
     # N20: an estimate is never called the deck's bracket
     _, est = shared_opponents(precons, {"deck_name": "Deck A", "bracket": [2, "estimate"]})
-    assert (
-        "by Archidekt's estimate from the deck's cards" in est["note"]
-        and "Deck A's bracket" not in est["note"]
+    assert "Archidekt's estimate from the deck's cards is bracket 2: only 2" in est["note"]
+    assert "Deck A's bracket" not in est["note"]
+    # P1: with no bracket, or precons without brackets, the note says the newest precons play
+    _, none = shared_opponents(precons, {"deck_name": "Deck A"})
+    assert none["note"].endswith(
+        "The deck has no bracket (none set on Archidekt and no estimate), so the newest precons play."
     )
+    unrated = [{"name": n} for n in BRACKETED]
+    _, old = shared_opponents(unrated, {"deck_name": "Deck A", "bracket": [3, "estimate"]})
+    assert (
+        "Archidekt's estimate from the deck's cards is bracket 3, but this Forge image's precons carry no "
+        "bracket, so the newest precons play." in old["note"]
+    )
+    assert "picked" not in none["note"] + old["note"]
