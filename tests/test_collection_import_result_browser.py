@@ -1,6 +1,7 @@
 """The Collection page's import result in headless Chromium: a CSV imported through the page's own
-form names the row kept as English (Phyrexian), the row added to a copy already held in English
-and the row Archidekt could not find; a CSV with a bad quantity is refused with its line number.
+form names the row kept as English (Phyrexian), the row kept as Near Mint ("EX"), the row added
+to a copy already held in English and the row Archidekt could not find; a CSV with a bad quantity
+is refused with its line number.
 At 360, 720 and 1280 px, light and dark, nothing scrolls sideways, nothing is clipped or covered
 and the notice keeps a 4.5:1 contrast. Set MTG_IMPORT_SHOTS=<dir> to also save screenshots.
 Skipped without a Chromium build."""
@@ -39,7 +40,9 @@ FITS = """
 """
 
 FIRST = "Quantity,Name,Language\n1,Sol Ring,EN\n"
-MIXED = "Quantity,Name,Language\n2,Sol Ring,JP\n1,Opt,PH\n1,Foo Bar Not A Card,EN\n1,Forest,\n"
+MIXED = (
+    "Quantity,Name,Language,Condition\n2,Sol Ring,JP,\n1,Opt,PH,\n1,Foo Bar Not A Card,EN,\n1,Forest,,EX\n"
+)
 BAD = "Quantity,Name\n1,Opt\nx,Sol Ring\n"
 
 
@@ -89,6 +92,8 @@ def test_import_result_reads_at_every_width(server: Server, width: int, theme: s
         assert lines == [
             "Kept as English, because Phyrexian is not a language Archidekt stores "
             "for collection cards: line 3 (Opt).",
+            "Kept as Near Mint, because “EX” is not a condition Archidekt stores "
+            "for collection cards: line 5 (Forest).",
             "Added to a copy you already had in another language, so it counts as English: line 2 "
             "(Sol Ring, Japanese added to English).",
             "Not found, so not imported: line 4 (Foo Bar Not A Card).",

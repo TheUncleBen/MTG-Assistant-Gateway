@@ -65,13 +65,16 @@ and import the rest after.
 
 Archidekt's collection stores eleven languages (EN, ES, FR, DE, IT, PT, JA, KO, RU, ZHS, ZHT). A
 row in any other language (Phyrexian, Hebrew, Latin, Arabic, Sanskrit, Ancient Greek, or a value
-the gateway does not know) is imported as English and the result names its line. A row whose
+the gateway does not know) is imported as English and the result names its line. A Condition
+the gateway does not know (anything but NM, LP, MP, HP, DMG or D, such as `EX`) is imported as NM
+and the result names its line too. A row whose
 printing and finish you already own is added to that record whatever its language (archidekt.com's
 own add is thought to do the same; not checked against the site); when the languages differ the
 result names the line and both languages. Rows Archidekt cannot find are left out and named too. A whole import is refused only
 for a problem with the text itself (no Name column, a line with no card name, a quantity that is
-not a whole number, more than 100 rows, nothing to read), and the page gives that reason with its
-line number. **Verified** against the test double
+not a whole number from 1 to 9999, a cell longer than 131,072 characters, more than 100 rows,
+nothing to read), and the page gives that reason with its line number, counted as the file's own
+lines (blank lines and line breaks inside a quoted cell included). **Verified** against the test double
 (`tests/test_browse_collection.py::test_collection_import_from_csv_and_plain_list`,
 `tests/test_collection_import_result.py`, and in a browser at phone, Fold and desktop widths in
 `tests/test_collection_import_result_browser.py`).
