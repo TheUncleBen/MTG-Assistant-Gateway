@@ -8,8 +8,11 @@
 # behind never carries into the next run. The container gets no swap (--memory-swap equal to --memory):
 # a run that needs more than 1536 MiB is killed instead of swapping, so the peak cannot hide memory that
 # went to swap. A deployment whose host has swap may get further before a kill; that is not measured.
-# Peak memory and kills are read from the container's own cgroup (memory.peak, memory.events oom_kill),
-# with polled `docker stats` as a fallback for the peak.
+# Three memory peaks are reported, as they measure different things: the programs' own memory (the
+# cgroup's memory.stat anon, polled about every 2 s), `docker stats` (RAM less inactive file cache,
+# polled), and the cgroup's memory.peak (exact, but it includes file cache such as Forge's card data).
+# Kills come from the cgroup's memory.events oom_kill. A Java heap error (OutOfMemoryError) is not a
+# kernel kill: read the kill count together with the state and the number of games.
 # Numbers only: it never fails the job (.github/workflows/forge-image.yml runs it with continue-on-error).
 #   scripts/ci_measure_forge.sh <local image tag> [games]
 set -u
@@ -32,9 +35,11 @@ start() {
 # cg <file>: a value from the container's cgroup v2 files, or "unknown"
 cg() { docker exec forge-measure cat "/sys/fs/cgroup/$1" 2>/dev/null || echo unknown; }
 
-echo "Runner: $(nproc) CPUs, $(free -m | awk '/Mem:/ {print $2}') MiB RAM, $(free -m | awk '/Swap:/ {print $2}') MiB swap; container limit 1536 MiB, no swap, 2 CPUs"
 start || { echo "Forge service did not start"; exit 0; }
 precons=$(curl -fsS "$url/precons" | python3 -c 'import json,sys; p=json.load(sys.stdin)["precons"]; print(json.dumps([{"precon": d["name"]} for d in p[:4]]))')
+
+# mib <docker stats figure>: the figure in MiB
+mib() { python3 -c 'import re,sys; v=sys.argv[1]; n=float(re.match(r"[\d.]+",v).group()); print(int(n*1024 if "GiB" in v else n/1024 if "KiB" in v else n))' "$1" 2>/dev/null || echo 0; }
 
 # measure <parallel>: one job of $games four-player Commander games, seed 42, in a fresh container;
 # prints a summary line and leaves the job's results in results-<parallel>.json
@@ -43,52 +48,69 @@ measure() {
   body="{\"format\":\"Commander\",\"games\":$games,\"seed\":42,\"parallel\":$1,\"decks\":$precons}"
   job=$(curl -fsS -X POST "$url/jobs" -H 'Content-Type: application/json' -d "$body" \
     | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') || { echo "asked $1 at once: not started"; return; }
-  polled=0
+  polled=0  # docker stats (RAM less inactive file cache), polled
+  anon=0    # the programs' own memory (memory.stat anon, no file cache), polled
   view='{}'
   cut=no
+  lost=no
   end=$((SECONDS + run_limit))
   while :; do
     if [ "$SECONDS" -ge "$end" ]; then
       cut=yes
       curl -fsS -X DELETE "$url/jobs/$job" >/dev/null 2>&1 || true
+      sleep 2
+      view=$(curl -fsS "$url/jobs/$job") || lost=yes  # the state after the cancel
       break
     fi
-    mem=$(docker stats --no-stream --format '{{.MemUsage}}' forge-measure | awk '{print $1}')
-    mib=$(python3 -c 'import re,sys; v=sys.argv[1]; n=float(re.match(r"[\d.]+",v).group()); print(int(n*1024 if "GiB" in v else n/1024 if "KiB" in v else n))' "$mem" 2>/dev/null || echo 0)
-    [ "$mib" -gt "$polled" ] && polled=$mib
-    view=$(curl -fsS "$url/jobs/$job") || break
+    m=$(mib "$(docker stats --no-stream --format '{{.MemUsage}}' forge-measure | awk '{print $1}')")
+    [ "$m" -gt "$polled" ] && polled=$m
+    a=$(cg memory.stat | awk '$1 == "anon" {print int($2 / 1048576)}')
+    [ -n "$a" ] && [ "$a" -gt "$anon" ] 2>/dev/null && anon=$a
+    next=$(curl -fsS "$url/jobs/$job") || { lost=yes; break; }
+    view=$next
     state=$(echo "$view" | python3 -c 'import json,sys; print(json.load(sys.stdin)["state"])')
     case "$state" in queued|running) sleep 2 ;; *) break ;; esac
   done
   peak=$(cg memory.peak)
   kills=$(cg memory.events | awk '$1 == "oom_kill" {print $2}')
+  gone=""
+  if [ "$lost" = yes ]; then
+    gone=$(docker inspect -f 'running {{.State.Running}}, OOM-killed {{.State.OOMKilled}}, exit code {{.State.ExitCode}}' forge-measure 2>/dev/null || echo "container gone")
+  fi
   echo "$view" > "results-$1.json"
   echo "$view" | python3 -c '
 import json, sys
+p, polled, anon, peak, kills, cut, gone = sys.argv[1:8]
 v = json.loads(sys.stdin.read() or "{}")
 games = v.get("results") or []
-peak = sys.argv[3]
-peak = "%d MiB (cgroup)" % (int(peak) // 2**20) if peak.isdigit() else "%s MiB (polled; cgroup peak unknown)" % sys.argv[2]
-print("asked %s at once (played %s at once): state %s, %d of %s games, run %.0f s, peak %s, killed for memory %s time(s), cut off at the time limit %s, game ms %s" % (
-    sys.argv[1], v.get("parallel"), v.get("state"), len(games), v.get("games_requested"), v.get("run_s") or 0,
-    peak, sys.argv[4] or "unknown", sys.argv[5], [r.get("ms") for r in games]))' "$1" "$polled" "$peak" "$kills" "$cut"
+state = "the service stopped answering (%s); last state seen %s" % (gone, v.get("state")) if gone else "state %s" % v.get("state")
+mem = "peak: programs %s MiB (anon, polled), docker stats %s MiB (polled)" % (anon if anon != "0" else "unknown", polled)
+mem += ", cgroup %d MiB (includes file cache)" % (int(peak) // 2**20) if peak.isdigit() else ", cgroup peak unknown"
+print("asked %s at once (played %s at once): %s, %d of %s games, run %.0f s, %s, killed for memory: %s, cut off at the time limit: %s, game ms %s" % (
+    p, v.get("parallel"), state, len(games), v.get("games_requested"), v.get("run_s") or 0,
+    mem, kills or "unknown", cut, [r.get("ms") for r in games]))' "$1" "$polled" "$anon" "$peak" "$kills" "$cut" "$gone"
   docker logs forge-measure 2>&1 | tail -3
 }
 
 {
   echo "### Forge games at once (${games} four-player games, seed 42, 1536 MiB with no swap / 2 CPUs, a fresh container per run)"
   echo '```'
+  echo "Runner: $(nproc) CPUs, $(free -m | awk '/Mem:/ {print $2}') MiB RAM, $(free -m | awk '/Swap:/ {print $2}') MiB swap"
   measure 1
   measure 2
   measure 3
   python3 - <<'PY'
 import json, os
 key = lambda rs: [(r["game"], r.get("winner"), r.get("draw"), r.get("turn")) for r in rs]
-runs = {p: json.load(open(f"results-{p}.json")).get("results") or [] for p in (1, 2, 3) if os.path.exists(f"results-{p}.json")}
+runs = {p: json.load(open(f"results-{p}.json")) for p in (1, 2, 3) if os.path.exists(f"results-{p}.json")}
+done = lambda v: v.get("state") == "done" and len(v.get("results") or []) == v.get("games_requested")
 for p in (2, 3):
-    if 1 in runs and p in runs:
-        same = key(runs[1]) == key(runs[p]) and runs[1]
-        print(f"same seed, same results at 1 and at {p} at once:", "yes" if same else "no", key(runs[1]), key(runs[p]))
+    if 1 not in runs or p not in runs or not (done(runs[1]) and done(runs[p])):
+        print(f"same seed at 1 and at {p} at once: not compared (a run did not finish)")
+        continue
+    same = key(runs[1]["results"]) == key(runs[p]["results"])
+    print(f"same seed, same results at 1 and at {p} at once:", "yes" if same else "no",
+          key(runs[1]["results"]), key(runs[p]["results"]))
 PY
   echo '```'
 } | tee -a "$summary"

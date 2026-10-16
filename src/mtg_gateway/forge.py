@@ -249,30 +249,41 @@ class ForgeClient:
 
 BRACKET_SOURCES = {
     "archidekt": "the bracket set on the deck in Archidekt",
-    "estimate": "Archidekt's estimate from the deck's cards",
+    "estimate": "Archidekt's estimate from cards",
 }
 
 
+def _source_text(source: str | None, deck: str | None) -> str:
+    """Where the bracket came from, naming ``deck`` when the notes are about another deck (a
+    shared run, read in the second deck's report)."""
+    if deck and source == "archidekt":
+        return f"the bracket set on {deck} in Archidekt"
+    if deck and source == "estimate":
+        return f"Archidekt's estimate from cards for {deck}"
+    return BRACKET_SOURCES.get(source or "", f"{deck}'s bracket" if deck else "the deck's bracket")
+
+
 def pick_opponents(
-    precons: list[dict[str, Any]], bracket: int | None, source: str | None
+    precons: list[dict[str, Any]], bracket: int | None, source: str | None, *, deck: str | None = None
 ) -> tuple[list[str], dict[str, Any]]:
     """The precons to seat against a deck, and why: those of the deck's bracket first, then the
     nearest brackets, newest first within a bracket (the Forge service lists its precons newest
     first). A precon's bracket comes from the Forge image (docker/forge/precons.py: the game
     changers it holds). Without a bracket for the deck, or precons that carry none (an older
-    Forge image), the newest precons play and ``opponent_choice`` says so."""
+    Forge image), the newest precons play and ``opponent_choice`` says so. ``deck`` names the deck
+    the bracket belongs to when the notes appear in another deck's report (shared_opponents)."""
     newest = [p["name"] for p in precons][:DEFAULT_OPPONENTS]
     rated = [p for p in precons if isinstance(p.get("bracket"), int)]
     if bracket is None:
         return newest, {
             "rule": "newest",
-            "note": "The deck has no bracket (none set on Archidekt and no estimate), so the newest "
-            "precons play.",
+            "note": f"{deck or 'The deck'} has no bracket (none set on Archidekt and no estimate), so the "
+            "newest precons play.",
         }
-    why = BRACKET_SOURCES.get(source or "", "the deck's bracket")
+    why = _source_text(source, deck)
     # Q49 / O14: an estimate is never called the deck's bracket
     lead = (
-        f"Archidekt's estimate from the deck's cards is bracket {bracket}"
+        f"{why[0].upper()}{why[1:]} is bracket {bracket}"
         if source == "estimate"
         else f"Bracket {bracket} ({why})"
     )
@@ -336,7 +347,7 @@ def shared_opponents(
     # TODO(Q136 item 6, held for Ben's re-confirmation): seats opponents picked by the first deck's
     # bracket (or Archidekt's estimate when none is set); finish or change only after his answer.
     level, source = shared.get("bracket") or (None, None)
-    chosen, picked = pick_opponents(precons, level if isinstance(level, int) else None, source)
+    chosen, picked = pick_opponents(precons, level if isinstance(level, int) else None, source, deck=deck)
     # how they were picked is pick_opponents' own note, true also with no bracket or unrated precons
     return chosen, {
         **picked,

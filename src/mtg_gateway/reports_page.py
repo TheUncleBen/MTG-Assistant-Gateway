@@ -38,7 +38,7 @@ def engines_text(r: dict[str, Any]) -> str:
     if r.get("engine") == "forge":
         parts.append("Forge games")
     if r.get("has_validation"):
-        parts.append("decklist check")
+        parts.append("legality check")
     parts.append("statistics")
     text = ", ".join(parts)
     return text[:1].upper() + text[1:]

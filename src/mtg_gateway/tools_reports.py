@@ -284,7 +284,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "waiting_for, and starts by itself; at most two wait, then a report gets no Forge games; when "
             "the engine itself is busy the run waits too, engine_busy with retry_after seconds), "
             "with the seed Forge used (kept for the record: the same seed does not always replay the "
-            "same Forge games, so compare runs by win rate and interval), the cards it could not play "
+            "same Forge games, so compare runs by win rate and 95% interval), the cards it could not play "
             "in not_played and forge_status "
             "(state, games_done of games_requested, expected_seconds); its result has each seat's wins "
             "with a 95% interval and how it lost, the median game time and turn, and how the games "
@@ -293,8 +293,9 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "report never starts it (forge state skipped, with the reason). forge=false leaves Forge out "
             "for a quick solo-test-only report (default: as simulate). A report without Forge games is "
             "labelled engine_label 'Preflight only (no rules engine)'. same_opponents_as (another of the "
-            "user's report ids, one with Forge games) seats that report's opponents instead of this "
-            "deck's bracket's, so two decks' Forge numbers come from the same table; the forge section's "
+            "user's report ids, one with Forge games) seats that report's opponents instead of the precons "
+            "picked for this deck's bracket (or Archidekt's estimate when none is set), so two decks' "
+            "Forge numbers come from the same table; the forge section's "
             "opponent_choice then has rule 'shared' and shared_with. status is the report's overall "
             "state: queued, running, complete, partial or failed. "
             "This is the one tool that "
@@ -412,7 +413,14 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
         async def remove_card_model(card_name: str) -> dict[str, object]:
             if not state.reports.models.available:
                 return {"ok": False, "removed": False, "message": "This gateway does not save card models."}
-            removed = state.reports.models.remove(_sub(), card_name)
+            try:
+                removed = state.reports.models.remove(_sub(), card_name)
+            except card_models.StoreError:
+                return {
+                    "ok": False,
+                    "removed": False,
+                    "message": "The gateway could not remove the saved model. Try again later.",
+                }
             out: dict[str, object] = {"ok": True, "removed": removed}
             if not removed:
                 out["message"] = "No saved model of yours for this card (another member's, or none)."

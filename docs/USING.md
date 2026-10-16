@@ -134,7 +134,7 @@ One deck:
   one, gets no solo test and the report says why.
 - When the gateway runs Forge, a Commander deck's report also has Forge
   games against three precons. They are picked for the bracket set on the
-  deck in Archidekt, or, when none is set, for Archidekt's estimate from the
+  deck in Archidekt, or, when none is set, for Archidekt's estimate from
   cards. Each precon's bracket comes from the game changers it holds. When there are not
   enough precons of that bracket, the nearest bracket fills in, and an older
   Forge image without precon brackets plays the newest precons; the report
@@ -182,7 +182,7 @@ One deck:
   banned or not legal in the format, the bracket you set against the
   estimate, uncategorised cards; a deck with a banned card is never reported
   fine), the bracket set on the deck (or, when none is set, Archidekt's
-  estimate from the cards) and the description.
+  estimate from cards) and the description.
 - **Export** (More menu) shows the deck as Archidekt import text (every row
   with printing, finish, categories and labels; paste it into Archidekt's
   Import dialog or the gateway's New deck page), as a plain decklist and as

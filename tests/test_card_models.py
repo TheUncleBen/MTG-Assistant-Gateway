@@ -365,8 +365,23 @@ async def test_the_adder_removes_a_saved_model_from_the_report_and_through_the_a
         gw.reports.models = KeptModels(SimpleNamespace())  # a store without the schema 14 methods
         out = structured(await call(h, token, "remove_card_model", {"card_name": "Sol Ring"}))
         assert out["ok"] is False and "does not save card models" in out["message"]
-        # switched off (Q140 item 1 held): the Remove route removes nothing and no notice shows
+        # N4: a store that fails is never reported as "already removed"
         gw.reports.models = KeptModels(store)
+        store.put_card_model("sol ring", "Sol Ring", model, sub, 3)
+
+        def boom(key: str, who: str) -> bool:
+            raise OSError("disk")
+
+        monkeypatch.setattr(store, "delete_card_model", boom)
+        failed = await b.http.post(url, data={"csrf": csrf, "card": "Sol Ring"})
+        assert failed.headers["location"] == "/history/reports/rep_kept?models=error"
+        shown = await b.http.get(failed.headers["location"], headers=NAV)
+        assert "could not be removed. Try again later." in shown.text and "already removed" not in shown.text
+        out = structured(await call(h, token, "remove_card_model", {"card_name": "Sol Ring"}))
+        assert out["ok"] is False and "could not remove" in out["message"]
+        monkeypatch.undo()
+        monkeypatch.setattr(card_models, "SWITCHED_ON", True)
+        # switched off (Q140 item 1 held): the Remove route removes nothing and no notice shows
         monkeypatch.setattr(card_models, "SWITCHED_ON", False)
         store.put_card_model("sol ring", "Sol Ring", model, sub, 3)
         off = await b.http.post(url, data={"csrf": csrf, "card": "Sol Ring"})

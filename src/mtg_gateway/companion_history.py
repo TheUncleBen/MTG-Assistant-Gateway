@@ -299,10 +299,13 @@ def add_history_routes(
                 sid=sid,
                 status=404,
             )
-        done = reports.models.remove(sub, str(data.get("card") or ""))
-        return RedirectResponse(
-            f"/history/reports/{_esc(rid)}?models={'removed' if done else 'gone'}", status_code=303
-        )
+        from .card_models import StoreError
+
+        try:
+            outcome = "removed" if reports.models.remove(sub, str(data.get("card") or "")) else "gone"
+        except StoreError:
+            outcome = "error"
+        return RedirectResponse(f"/history/reports/{_esc(rid)}?models={outcome}", status_code=303)
 
     def _report_file(r: dict[str, Any], ext: str, body: str, media_type: str) -> Response:
         name = _filename(r.get("deck_name") or r["deck_id"])

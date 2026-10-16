@@ -151,7 +151,7 @@ jobs:
       - name: Measure Forge games at once (numbers only)
         if: github.event_name == 'pull_request' && env.MEASURE_PARALLEL == '1'
         continue-on-error: true
-        timeout-minutes: 160
+        timeout-minutes: 170
         run: scripts/ci_measure_forge.sh forge:ci-arm64 15
       # One-off figure for card recognition (0.7.30): how much of the newest precons and the
       # repository's test decks the solo test (Mystic Forge, at the commit its image pins) models,
