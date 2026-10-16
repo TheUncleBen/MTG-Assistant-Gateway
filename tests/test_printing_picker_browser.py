@@ -638,6 +638,13 @@ def test_card_menu_near_the_bottom_keeps_move_to_usable(server: Server) -> None:
             target.click()
         assert json.loads(req.value.post_data)["changes"][0]["category"] == to
         page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
+        # "Saved. Refreshing…" redraws the rows once more a moment later, which closes a menu
+        # opened on the old row: wait for the save to have settled
+        page.wait_for_function(
+            "() => { const m = document.querySelector('.deck-toast .msg');"
+            " return !/Refreshing|Saving/.test(m ? m.innerText : ''); }",
+            timeout=8000,
+        )
         # and in a window too short for the whole menu, it scrolls rather than shrink an item
         page.set_viewport_size({"width": 1366, "height": 420})
         card.evaluate(
