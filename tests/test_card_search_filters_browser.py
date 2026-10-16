@@ -482,3 +482,27 @@ def test_a_tap_above_a_dropdown_sheet_in_the_phone_panel_only_closes_it(server: 
         assert not colour.is_checked()
         assert errors == [], errors
         browser.close()
+
+
+def test_one_escape_closes_the_dropdown_sheet_and_not_the_filters_panel(server: Server) -> None:
+    """Review round 5: on a phone, Escape on an open dropdown sheet in the Filters panel closes the
+    sheet only; the next Escape closes the panel."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid = _link(server)
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 360, "light", exe)
+        page.goto(f"{server.base}/cards?q=sol", wait_until="networkidle")
+        page.locator(".cs-open").click()
+        panel = page.locator("#cs-filters.open")
+        panel.wait_for(timeout=3000)
+        page.locator("#cs-filters .msel-btn[aria-label='Format']").click()
+        page.locator(".msel-list.sheet").wait_for(timeout=3000)
+        page.keyboard.press("Escape")
+        assert page.locator(".msel-list").count() == 0
+        assert panel.count() == 1, "one Escape closed the Filters panel too"
+        page.keyboard.press("Escape")
+        page.wait_for_function("() => !document.getElementById('cs-filters').classList.contains('open')")
+        assert errors == [], errors
+        browser.close()

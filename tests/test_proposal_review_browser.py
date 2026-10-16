@@ -146,10 +146,18 @@ def test_review_page_reads_in_both_themes_on_desktop_and_phone(server: Server) -
 LABEL_FITS = """() => [...document.querySelectorAll('ul.changes li')].map(li => {
   const act = li.querySelector('.act'), name = li.querySelector('.name');
   const a = act.getBoundingClientRect(), n = name.getBoundingClientRect(), r = li.getBoundingClientRect();
-  const words = document.createRange();
-  words.selectNodeContents(act);
+  const whole = document.createRange();
+  whole.selectNodeContents(act);
+  // a word drawn on more than one line was split inside it
+  const text = act.firstChild, split = [];
+  for (const m of act.textContent.matchAll(/[^ ]+/g)) {
+    const word = document.createRange();
+    word.setStart(text, m.index);
+    word.setEnd(text, m.index + m[0].length);
+    if (new Set([...word.getClientRects()].map(q => Math.round(q.top))).size > 1) split.push(m[0]);
+  }
   return {label: act.textContent, over: act.scrollWidth - act.clientWidth, room: n.width / r.width,
-          lines: words.getClientRects().length, words: act.textContent.trim().split(/\s+/).length,
+          lines: whole.getClientRects().length, split: split,
           inside: a.left >= r.left - 0.5 && a.right <= r.right + 0.5,
           clear: a.right <= n.left + 0.5 || a.bottom <= n.top + 0.5};
 })"""
@@ -212,7 +220,7 @@ def test_every_change_label_fits_its_box(server: Server, tmp_path: Path) -> None
                     if zoom == "none":  # at the normal text size every label is whole, on one line
                         assert all(g["lines"] == 1 for g in got), (vw, got)
                     # at any size a label breaks only between its words (review R4-5)
-                    assert all(g["lines"] <= g["words"] for g in got), (vw, zoom, got)
+                    assert all(not g["split"] for g in got), (vw, zoom, got)
                     ctx.close()
         finally:
             browser.close()

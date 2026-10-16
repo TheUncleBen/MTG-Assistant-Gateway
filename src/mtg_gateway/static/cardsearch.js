@@ -332,6 +332,8 @@
     if (openBtn) { openBtn.setAttribute("aria-expanded", "false"); openBtn.focus(); }
   }
   document.addEventListener("keydown", function (e) {
+    // an Escape a dropdown already used (to close its list or sheet) leaves the panel open
+    if (e.defaultPrevented) return;
     if (e.key === "Escape" && panel.classList.contains("open") && !(window.MtgSelect && window.MtgSelect.isOpen())
         && !document.querySelector(".cs .opts:not([hidden])")) closePanel();
   });
