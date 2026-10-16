@@ -302,7 +302,7 @@ async def test_reports_page_lists_every_report_and_what_forge_plays(stack: Stack
         assert (
             "Sample Commander Deck" in listed.text and "/history?deck_id=42&amp;type=reports" in listed.text
         )
-        assert "<option value='42'" in listed.text and "<span class='rp-what'>" in listed.text
+        assert "<option value='42'" in listed.text and "<p class='rp-meta'>" in listed.text
         none = await b.http.get("/reports?deck_id=999", headers=NAV)
         assert "No reports for this deck yet" in none.text
         reports.forge = fake.client()
