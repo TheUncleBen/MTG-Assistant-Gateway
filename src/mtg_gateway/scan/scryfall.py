@@ -139,6 +139,12 @@ def summarize(card: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _cn(number: str) -> str:
+    """A collector number for Scryfall's ``cn:``: as it is when it is plain letters and digits,
+    else in double quotes (numbers such as ``1★``)."""
+    return number if re.fullmatch(r"[A-Za-z0-9]+", number) else f'"{number}"'
+
+
 def browse_row(card: dict[str, Any]) -> dict[str, Any]:
     """A summary plus what the card search's list view and the printing picker show: prices,
     power, toughness and loyalty, and the printing's frame, border and treatments."""
@@ -423,6 +429,8 @@ class ScryfallClient:
         frame: str | None = None,
         border: str | None = None,
         order: str = "newest",
+        set_code: str | None = None,
+        number: str | None = None,
     ) -> dict[str, Any]:
         """One page of every printing of one card (the ``prints_search_uri`` query), summarized
         with what the printing picker shows (``browse_row``: prices, frame, border).
@@ -434,7 +442,8 @@ class ScryfallClient:
         search on Scryfall's side and ``order`` (PRINT_ORDERS) sorts it, so a card with more
         printings than one page is filtered and sorted over all of them; the caller checks the
         values. Every page of every filter is kept in ``prints_cache`` (the plain first page under
-        the oracle id alone, as before).
+        the oracle id alone, as before). ``set_code`` with ``number`` asks for that one printing
+        (Scryfall's ``set:`` and ``cn:``), checked by the caller.
         """
         if order not in PRINT_ORDERS:
             raise ScryfallError("invalid", "order must be newest, oldest or cheapest")
@@ -444,6 +453,7 @@ class ScryfallClient:
                 f"is:{finish}" if finish else "",
                 f"frame:{frame}" if frame else "",
                 f"border:{border}" if border else "",
+                f"set:{set_code} cn:{_cn(number)}" if set_code and number else "",
             )
             if t
         )

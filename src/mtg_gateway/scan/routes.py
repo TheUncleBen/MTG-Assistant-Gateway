@@ -287,6 +287,8 @@ def add_scan_routes(server: MCPServer, state: AppState, service: ScanService) ->
                 frame=qp.get("frame"),
                 border=qp.get("border"),
                 order=qp.get("order"),
+                set_code=qp.get("set"),
+                number=qp.get("number"),
             )
         except ScanError as exc:
             return fail(exc)

@@ -108,6 +108,24 @@ async def test_printings_filter_and_sort_on_scryfalls_side(stack: Stack) -> None
         await b.aclose()
 
 
+async def test_one_printing_by_set_and_number(stack: Stack) -> None:
+    """The picker's own printing (N7), for a card with more printings than a page: one search by
+    set and collector number, kept like every page; another card's printing is not given."""
+    stack.sf.extra_cards = sol_ring_printings()
+    b = await linked(stack)
+    try:
+        base = f"/scan/api/prints?oracle_id={SOL_RING_ORACLE}"
+        one = (await b.http.get(base + "&set=CMR&number=472")).json()
+        assert [(c["set"], c["collector_number"]) for c in one["cards"]] == [("cmr", "472")]
+        assert _prints_calls(stack)[-1]["q"] == f"oracleid:{SOL_RING_ORACLE} set:cmr cn:472"
+        assert (await b.http.get(base + "&set=cmr&number=472")).status_code == 200
+        assert len(_prints_calls(stack)) == 1  # kept
+        none = (await b.http.get(base + "&set=lea&number=999")).json()
+        assert none["cards"] == [] and none["has_more"] is False
+    finally:
+        await b.aclose()
+
+
 async def test_printings_refuse_values_they_do_not_know(stack: Stack) -> None:
     stack.sf.extra_cards = sol_ring_printings()
     b = await linked(stack)
@@ -121,6 +139,12 @@ async def test_printings_refuse_values_they_do_not_know(stack: Stack) -> None:
             "&page=0",
             "&page=21",
             "&page=x",
+            "&page=%C2%B2",  # "²": isdigit() says yes, int() says no
+            "&page=%D9%A3",  # an Arabic-Indic 3
+            "&set=cmr",  # set and number go together
+            "&number=472",
+            "&set=c%20mr&number=472",
+            "&set=cmr&number=472&page=2",
         ):
             r = await b.http.get(base + bad)
             assert r.status_code == 400 and r.json()["error"] == "invalid", (bad, r.text)

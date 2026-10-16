@@ -243,6 +243,10 @@ class FakeScryfall:
                 found = [c for c in found if str(c.get("frame") or "") == value]
             elif key == "border":
                 found = [c for c in found if str(c.get("border_color") or "") == value]
+            elif key == "set":
+                found = [c for c in found if str(c.get("set") or "") == value]
+            elif key == "cn":
+                found = [c for c in found if str(c.get("collector_number") or "") == value.strip('"')]
             else:
                 return httpx.Response(400, json={"object": "error", "details": f"unsupported term {t}"})
         if q.get("order") == "usd":

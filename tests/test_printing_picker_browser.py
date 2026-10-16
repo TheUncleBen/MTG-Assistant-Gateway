@@ -319,24 +319,36 @@ def test_change_printing_from_the_card_menu_saves_with_undo(server: Server) -> N
         page.mouse.move(640, 4)
         assert "Commander Legends" in page.locator(".pppreview h3").inner_text()
         assert page.locator(".pppreview .ppuse").is_disabled()
-        # search: set name or code
+        # search: set name or code; the card's current printing (CMR #472) always shows (N7), and
+        # the count line counts only what matches and says why it is there
+        status = page.locator(".ppstatus")
+        own = "The card's current printing is shown too."
         page.locator("#pp-q").fill("secret")
-        assert sorted(_tiles(page)) == ["SLD #1074 · 2022", "SLD #1075 · 2022"]
+        assert sorted(_tiles(page)[:2]) == ["SLD #1074 · 2022", "SLD #1075 · 2022"]
+        assert _tiles(page)[2:] == ["CMR #472 · 2020"]
+        assert status.inner_text().startswith("2 of 8 printings match. " + own)
+        assert page.locator(".printpick .pptile.current", has_text="CMR #472").count() == 1
         page.locator("#pp-q").fill("LEA")
-        assert _tiles(page) == ["LEA #270 · 1993"]
+        assert _tiles(page) == ["CMR #472 · 2020", "LEA #270 · 1993"]
+        assert status.inner_text().startswith("1 of 8 printings matches. " + own)
+        page.locator("#pp-q").fill("CMR")
+        assert _tiles(page) == ["CMR #472 · 2020"]
+        assert own not in status.inner_text()  # it matches: nothing to explain
         page.locator("#pp-q").fill("")
         # filters (every printing is here already, so they apply at once) and the sorts
         _choose(page, "Finish", "Etched")
-        assert sorted(_tiles(page)) == ["SLD #1074 · 2022", "SLD #1075 · 2022"]
-        assert "2 of 8 printings match." in page.locator(".ppstatus").inner_text()
+        assert sorted(_tiles(page)[:2]) == ["SLD #1074 · 2022", "SLD #1075 · 2022"]
+        assert _tiles(page)[2:] == ["CMR #472 · 2020"]
+        assert status.inner_text().startswith("2 of 8 printings match. " + own)
         _choose(page, "Finish", "Any finish")
         _choose(page, "Frame", "1993 frame")
-        assert _tiles(page) == ["4ED #325 · 1995", "LEA #270 · 1993"]
+        assert _tiles(page) == ["CMR #472 · 2020", "4ED #325 · 1995", "LEA #270 · 1993"]
         _choose(page, "Border", "White border")
-        assert _tiles(page) == ["4ED #325 · 1995"]
-        assert "1 of 8 printings matches." in page.locator(".ppstatus").inner_text()
+        assert _tiles(page) == ["CMR #472 · 2020", "4ED #325 · 1995"]
+        assert status.inner_text().startswith("1 of 8 printings matches. " + own)
         _choose(page, "Border", "Borderless")
-        assert _tiles(page) == []
+        assert _tiles(page) == ["CMR #472 · 2020"]
+        assert status.inner_text().startswith("0 of 8 printings match. " + own)
         assert page.locator(".ppempty", has_text="No printing matches these filters.").is_visible()
         page.locator(".ppempty button", has_text="Clear filters").click()
         assert len(_tiles(page)) == 8
@@ -520,18 +532,26 @@ def test_load_more_pages_and_filters_go_to_scryfall(tmp_path: Path) -> None:
                 "() => document.querySelector('.ppstatus').innerText.startsWith('Showing 30 of 30')"
             )
             assert page.locator(".printpick .ppmore").is_hidden()
-            assert [q.get("page") for q in s.sf.print_searches] == [None, "2", "3"]
-            # a filter now: Scryfall filters all 30 (not only the pages read)
+            pages = [q for q in s.sf.print_searches if " set:" not in q["q"]]
+            assert [q.get("page") for q in pages] == [None, "2", "3"]
+            # the card's own printing, when page 1 didn't list it, was asked for once by set and
+            # number (N7)
+            own = [q for q in s.sf.print_searches if " set:" in q["q"]]
+            assert [q["q"].split(" ", 1)[1] for q in own] in ([], ["set:cmr cn:472"])
+            # a filter now: Scryfall filters all 30 (not only the pages read); the card's own
+            # printing (CMR #472, not a 1993 frame) still shows
             _choose(page, "Frame", "1993 frame")
-            page.wait_for_function("() => document.querySelectorAll('.printpick .pptile').length === 2")
-            assert _tiles(page) == ["4ED #325 · 1995", "LEA #270 · 1993"]
-            assert s.sf.print_searches[-1]["q"].endswith(" frame:1993")
+            page.wait_for_function("() => document.querySelectorAll('.printpick .pptile').length === 3")
+            assert _tiles(page) == ["CMR #472 · 2020", "4ED #325 · 1995", "LEA #270 · 1993"]
+            assert "The card's current printing is shown too." in status.inner_text()
+            assert [q for q in s.sf.print_searches if " set:" not in q["q"]][-1]["q"].endswith(" frame:1993")
             _choose(page, "Frame", "Any frame")
             _choose(page, "Sort", "Cheapest (USD)")
             page.wait_for_function(
                 "() => document.querySelector('.ppstatus').innerText.startsWith('Showing 10 of 30')"
             )
-            assert s.sf.print_searches[-1]["order"] == "usd" and s.sf.print_searches[-1]["dir"] == "asc"
+            last = [q for q in s.sf.print_searches if " set:" not in q["q"]][-1]
+            assert last["order"] == "usd" and last["dir"] == "asc"
             assert _tiles(page)[0] == "4ED #325 · 1995"
             assert errors == []
             browser.close()
