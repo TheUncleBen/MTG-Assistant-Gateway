@@ -5,6 +5,7 @@ details cross the redirect by a one-time token, never as text in the URL."""
 
 from __future__ import annotations
 
+import html
 import re
 
 import pytest
@@ -263,7 +264,7 @@ def test_a_quoted_cell_in_a_refusal_is_cut() -> None:
     assert str(caught.value) == "line 2: quantity 'xxxxxxxxxxxxxxxxxxxx…' is not a number"
 
 
-TOO_LONG = "a cell is longer than 131,072 characters; check for a quote that is not closed"
+TOO_LONG = 'a cell is longer than 131,072 characters; check for a quotation mark (") that is not closed'
 
 
 # Review L11: a cell over the csv module's limit, or a quantity int() refuses, is a refusal with its
@@ -293,7 +294,7 @@ async def test_huge_cells_and_an_unknown_condition_through_the_page(stack: Stack
     try:
         csrf = await b.csrf("/collection")
         for text, said in [
-            ("Quantity,Name\n1," + "x" * 140_000 + "\n", f"line 2: {TOO_LONG}"),
+            ("Quantity,Name\n1," + "x" * 140_000 + "\n", "line 2: " + html.escape(TOO_LONG)),
             ("Quantity,Name\n" + "9" * 5000 + ",Opt\n", "line 2: quantity &#x27;99999999999999999999…&#x27;"),
             (
                 "Quantity,Name\n" + "y" * 100_000 + ",Opt\n",

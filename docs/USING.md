@@ -280,7 +280,8 @@ condition and count.
   100 rows at a time. Afterwards the page says how many cards went in and
   names the lines it could not take as given: a language Archidekt's
   collection has no place for (such as Phyrexian) is kept as English, a
-  condition it does not know (such as EX) is kept as Near Mint, copies
+  condition Archidekt's collection doesn't store (such as EX) is kept as
+  Near Mint, copies
   of a card you already own in another language are added to that copy, and
   cards Archidekt cannot find are left out. When the text itself cannot be
   read, nothing is imported and the page says which line is wrong.
