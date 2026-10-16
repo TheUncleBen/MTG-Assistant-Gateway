@@ -1857,28 +1857,30 @@
 
   // -- stack order: drag a stack's handle (mouse, touch or pen), or focus it and press the arrow
   // keys, to put the stacks in your own order. Archidekt keeps no stack order of its own that the
-  // gateway could find, so the order is remembered in this browser, per deck and per grouping:
-  // on this device only (it is not a deck save, has no Undo, and the handle and Reset say so).
+  // gateway could find, so the order is kept on the member's account (0.7.29, prefs.js), per deck
+  // and per grouping: it is not a deck save and has no Undo; Reset puts the deck's order back.
   if (cards && cards.classList.contains("deckview")) (function () {
-    var key = "mtg-stack-order:" + cards.getAttribute("data-deck") + ":" + (cards.getAttribute("data-grouping") || "");
+    var prefs = window.MtgPrefs;
+    var key = "stack:" + cards.getAttribute("data-deck") + ":" + (cards.getAttribute("data-grouping") || "");
     function stacksNow() { return $$(".stack", cards); }
     function nameOf(st) { return st.getAttribute("data-group") || ""; }
     function save() {
-      try { localStorage.setItem(key, JSON.stringify(stacksNow().map(nameOf))); } catch (e) { /* private window */ }
+      if (prefs) prefs.set(key, stacksNow().map(nameOf));
       showReset();
     }
     function saved() {
-      try { var v = JSON.parse(localStorage.getItem(key) || "null"); return Array.isArray(v) ? v : null; } catch (e) { return null; }
+      var v = prefs ? prefs.get(key) : null;
+      return Array.isArray(v) ? v : null;
     }
     var reset = null;
     function showReset() {
       if (!reset) {
-        reset = el("button", "btn-ghost small stack-reset", "Reset stack order (this device only)");
+        reset = el("button", "btn-ghost small stack-reset", "Reset stack order");
         reset.type = "button";
-        reset.title = "Your stack order is kept in this browser on this device only, not on Archidekt; " +
+        reset.title = "Your stack order is kept with your account, not on Archidekt; " +
           "this puts the deck's own order back";
         reset.addEventListener("click", function () {
-          try { localStorage.removeItem(key); } catch (e) { /* nothing kept */ }
+          if (prefs) prefs.set(key, null);
           var later = stacksNow().filter(function (st) { return original.indexOf(st) < 0; });
           original.concat(later).forEach(function (st) { if (st.parentNode === cards) cards.appendChild(st); });
           reset.hidden = true;
@@ -1912,8 +1914,8 @@
       var grip = el("button", "stackgrip icon-only btn-ghost", "⠿");
       grip.type = "button";
       grip.setAttribute("aria-label", "Move the stack " + nameOf(st) + " (drag, or use the arrow keys; " +
-        "the order is kept on this device only)");
-      grip.title = "Drag to reorder (kept on this device only); arrow keys move it too";
+        "the order is kept with your account)");
+      grip.title = "Drag to reorder (kept with your account); arrow keys move it too";
       head.insertBefore(grip, head.firstChild);
       grip.addEventListener("keydown", function (e) {
         var list = stacksNow(), i = list.indexOf(st);
@@ -2051,7 +2053,7 @@
    button's data-src, made by export_formats.to_edhplay) and the button turns on once it is here,
    so the copy can still be made inside that press, the way the app's WebView allows it; a list
    that can't be had shows why, with Try again. The two import steps show open until the member
-   has launched once on this device, then sit folded in the same box (Ben, 01:36Z 10-14). The box
+   has launched once (kept on the account from 0.7.29), then sit folded in the same box (Ben, 01:36Z 10-14). The box
    closes with ×, Escape or a press outside it (Ben, 02:08Z 10-14: no Cancel). Sideboard cards left
    out to fit EDHPlay's 15-card limit are named in the box and in the note that follows. Without
    script the button is a plain link to EDHPlay. */
@@ -2081,10 +2083,9 @@
   }
   // 0.7.25 and 0.7.26 kept a first-time tip's "seen" mark here; the box replaced that tip
   try { localStorage.removeItem("mtg.edhplay.tip"); } catch (e) { /* private window */ }
-  var STEPS_SEEN = "mtg.edhplay.steps";  // set once the member has launched from the box here
-  function stepsSeen() {
-    try { return localStorage.getItem(STEPS_SEEN) === "1"; } catch (e) { return false; }
-  }
+  // set once the member has launched from the box; kept on the account (0.7.29, prefs.js)
+  var STEPS_SEEN = "edhplay.steps";
+  function stepsSeen() { return !!(window.MtgPrefs && window.MtgPrefs.get(STEPS_SEEN) === true); }
   function make(tag, cls, text) {
     var e = document.createElement(tag);
     if (cls) e.className = cls;
@@ -2242,7 +2243,7 @@
       // the copy happens inside this press; the link itself opens EDHPlay (nothing is prevented)
       var copied = copyNow(data.list);
       var cut = data.left_count || 0, leftOut = data.left_out || "";
-      try { localStorage.setItem(STEPS_SEEN, "1"); } catch (err) { /* private window */ }
+      if (window.MtgPrefs && !stepsSeen()) window.MtgPrefs.set(STEPS_SEEN, true);
       close();
       copied.then(function (ok) {
         if (!ok) {

@@ -93,6 +93,7 @@ def test_main_pages_hold_together_at_200_percent_text(server: Server, zoom: str)
         for path in [*PAGES, f"/proposals/{pending}"]:
             for w in WIDTHS:
                 ctx.clear_cookies(name=re.compile(r"^mtg_view_"))
+                server.db.delete_prefs("user-1", prefixes=("view.",))  # on the account from 0.7.29
                 page.set_viewport_size({"width": w, "height": 800})
                 r = page.goto(f"{server.base}{path}", wait_until="networkidle")
                 assert r is not None and r.status == 200, (path, r and r.status)

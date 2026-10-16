@@ -256,6 +256,12 @@ def test_pruning_restore_points_keeps_the_ones_a_copy_or_a_queued_delete_needs(t
     with db.tx() as c:
         left = {r[0] for r in c.execute("SELECT id FROM snapshots")}
     assert left == {"s0", "s1", "s5", "s6", "s7"}
+    # a copy the member changed (kept, no longer counted) holds no snapshot past the newest
+    db.record_backup_made("500", {"name": "x", "kept": True})
+    db.purge_expired()
+    with db.tx() as c:
+        left = {r[0] for r in c.execute("SELECT id FROM snapshots")}
+    assert left == {"s1", "s5", "s6", "s7"}
     db.close()
 
 

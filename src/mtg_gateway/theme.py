@@ -21,7 +21,7 @@ import hashlib
 import html
 import re
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
@@ -1084,31 +1084,11 @@ def layout_from_cookie(value: str | None) -> str:
     return value if value in LAYOUTS else "auto"
 
 
-# "View as" on the deck page, the deck list and the collection is remembered per browser the same
-# way as the theme: a cookie, so the page that comes back renders the chosen view at once (no
-# flash of the default, no script). The page sets it whenever the view is picked in its address
-# (the toolbar's form puts it there); a visit without one renders the remembered view.
+# "View as" on the deck page, the deck list, card search and the collection follows the account
+# from 0.7.29 (prefs.py, G7). Before that it was a cookie per browser with these names; prefs.py
+# copies a cookie's value to the account once and removes the cookie.
 VIEW_COOKIE = "mtg_view_"
 VIEW_KINDS = ("deck", "decks", "collection", "cards")
-
-
-def view_choice(request: Any, kind: str, allowed: Iterable[str], default: str) -> tuple[str, bool]:
-    """The view to render for ``kind``: the address's ``view`` when it is a known one (and True:
-    remember it), else the remembered one, else ``default`` (and False)."""
-    allowed = tuple(allowed)
-    asked = request.query_params.get("view")
-    if asked in allowed:
-        return asked, asked != request.cookies.get(VIEW_COOKIE + kind)
-    saved = request.cookies.get(VIEW_COOKIE + kind)
-    return (saved if saved in allowed else default), False
-
-
-def remember_view(response: Any, kind: str, view: str, *, secure: bool) -> Any:
-    assert kind in VIEW_KINDS
-    response.set_cookie(
-        VIEW_COOKIE + kind, view, max_age=365 * 86400, path="/", secure=secure, httponly=True, samesite="lax"
-    )
-    return response
 
 
 def current_layout() -> str:
@@ -1398,7 +1378,12 @@ def render(
         "<link rel='icon' href='/static/gateway-icon.svg' type='image/svg+xml'>"
         "<link rel='apple-touch-icon' href='/apple-touch-icon.png'>"
         f"<title>{html.escape(title)} · {html.escape(site)}</title>"
-        f"{stylesheet_link('site.css')}{head_extra}</head>"
+        f"{stylesheet_link('site.css')}"
+        # static/prefs.js: the choices that follow the account (prefs.py), ready before any page
+        # script that reads them (deferred scripts run in document order; pages add theirs in
+        # head_extra)
+        + ("<script src='/static/prefs.js' defer></script>" if signed_in else "")
+        + f"{head_extra}</head>"
         f"<body class='{classes}'{' data-watchlist' if WATCHLISTS else ''}>"
         f"<a class='skip' href='#main'>Skip to content</a>{SPRITE}"
         "<header class='topbar'><div class='wrap'><div class='left'>"

@@ -19,7 +19,7 @@ from urllib.parse import parse_qs, quote
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from . import app_signin, link_disclosure, modes, notify
+from . import app_signin, link_disclosure, modes, notify, prefs
 from .archidekt import PATIENCE_SPENT
 from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
 from .avatars import initials_svg
@@ -28,6 +28,8 @@ from .decks import REVIEW_PAGE, DeckError, current_client, row_label, row_line, 
 from .theme import (
     LAYOUT_COOKIE,
     THEME_COOKIE,
+    VIEW_COOKIE,
+    VIEW_KINDS,
     app_version,
     display_name,
     in_app,
@@ -362,6 +364,15 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 detail={"from": before, "to": mode, "by": "user"},
             )
             return RedirectResponse(f"/account?ok=mode_{mode}", status_code=303)
+        if action == "forget_choices":
+            if data.get("confirm") != "yes":
+                return RedirectResponse("/account?err=confirm_forget#choices", status_code=303)
+            n = prefs.forget(state.db, sub)
+            state.db.audit("view_choices_forgotten", sub=sub, client_id=BROWSER_CLIENT_ID, detail={"n": n})
+            resp = RedirectResponse("/account?ok=choices_forgotten#choices", status_code=303)
+            for kind in VIEW_KINDS:  # this browser's pre-0.7.29 view cookies, if any are left
+                resp.delete_cookie(VIEW_COOKIE + kind, path="/", secure=secure, httponly=True, samesite="lax")
+            return resp
         if action == "delete_data":
             if data.get("confirm") != "yes":
                 return RedirectResponse("/account?err=confirm_delete", status_code=303)
@@ -666,6 +677,7 @@ OK_MESSAGES = {
     "Its pending proposals were rejected.",
     "disconnected_all": "Every connected app was disconnected. Each has to be connected and approved again. "
     "Their pending proposals were rejected.",
+    "choices_forgotten": "Done. Every page starts with its usual view again, on all your devices.",
     "mode_manual": "Saved: your assistant asks you every time.",
     "mode_semi": "Saved: your assistant applies small, low-risk edits without asking and asks for "
     "everything else.",
@@ -675,6 +687,7 @@ OK_MESSAGES = {
 }
 ERR_MESSAGES = {
     "confirm_delete": "Nothing was deleted. Tick the box to confirm, then press Delete my data.",
+    "confirm_forget": "Nothing was forgotten. Tick the box to confirm, then press Forget my view choices.",
     "mode_invalid": "That approval mode does not exist, or this gateway does not allow it. Nothing changed.",
     "failed": "This proposal could not be applied. Details are in the result below, if any.",
     "writes_disabled": "Deck writes are switched off on this gateway. The proposal is kept for review; "
@@ -853,6 +866,7 @@ def _account_body(state: Any, sub: str, csrf: str | None, *, disclosure_read: bo
             "<button class='primary'>Link account</button></form></div>"
         )
     s = state.settings
+    out.append(_forget_choices_card(csrf_in))
     out.append(_delete_card(csrf_in, s.backup_keep_days if s.backup_dir is not None else None))
     return "".join(out)
 
@@ -943,6 +957,20 @@ def _apps_card(state: Any, sub: str, csrf_in: str) -> str:
 
 def _short_id(client_id: str) -> str:
     return client_id if len(client_id) <= 40 else client_id[:37] + "..."
+
+
+def _forget_choices_card(csrf_in: str) -> str:
+    """B9: once view choices follow the account, signing out no longer resets them; this does.
+    Draft wording (WORDING-AND-CALLS-2 W3)."""
+    return (
+        "<div class='card' id='choices'><h2>Your view choices</h2>"
+        "<p>Your views, card size, stack orders, stats choices and dismissed tips follow your "
+        "account to every device. Light or dark mode stays on each device.</p>"
+        f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='forget_choices'>"
+        "<label class='check'><input type='checkbox' name='confirm' value='yes' required> "
+        "Yes, put every page back to how it starts</label>"
+        "<button>Forget my view choices</button></form></div>"
+    )
 
 
 def _delete_card(csrf_in: str, backup_days: int | None = None) -> str:

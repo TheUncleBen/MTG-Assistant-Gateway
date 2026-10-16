@@ -1,5 +1,6 @@
 """0.7.18 in headless Chromium: the deck page's Table and Scroll views; putting stacks in your own
-order (arrow keys on a stack's handle, kept in this browser per deck and grouping, Reset puts the
+order (arrow keys on a stack's handle, kept per deck and grouping (on the account from 0.7.29,
+so another device shows the same order; an order kept in the browser before is copied once), Reset puts the
 deck's order back; 0.7.22: dragging a handle by mouse or finger, the page scrolling on near the
 window's edge, a card held and slid to a category off screen); selecting several cards and moving,
 refinishing or removing them in one save with one Undo. Screenshots go to MTG_SHOTS when it is set.
@@ -97,13 +98,54 @@ def test_stack_order_by_keyboard_is_kept_and_reset(server: Server) -> None:
         page.reload(wait_until="networkidle")
         kept = page.eval_on_selector_all(".deckview .stack", "l => l.map(s => s.dataset.group)")
         assert kept == now
-        # the order is per grouping: another grouping keeps its own
+        # 0.7.29: kept on the account, so a fresh browser (another device) shows it too
+        assert server.db.get_pref("user-1", "stack:42:category") == now
+        other = browser.new_context(viewport={"width": 1366, "height": 900})
+        other.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page2 = other.new_page()
+        page2.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+        assert page2.eval_on_selector_all(".deckview .stack", "l => l.map(s => s.dataset.group)") == now
+        assert "this device" not in page2.locator(".stack-reset").inner_text()
+        other.close()
         page.locator(".stack-reset").click()
         back = page.eval_on_selector_all(".deckview .stack", "l => l.map(s => s.dataset.group)")
         assert back == names
         page.reload(wait_until="networkidle")
         assert page.eval_on_selector_all(".deckview .stack", "l => l.map(s => s.dataset.group)") == names
         assert page.locator(".stack-reset").count() == 0
+        assert server.db.get_pref("user-1", "stack:42:category") is None
+        assert errors == []
+        browser.close()
+
+
+def test_choices_kept_in_the_browser_before_are_copied_to_the_account_once(server: Server) -> None:
+    """B7: a stack order, the stats toggles and the dismissed EDHPlay steps that 0.7.28 kept in
+    this browser show at once on the first visit after the update, are saved to the account, and
+    are removed from the browser; a value the account already has wins."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    server.db.set_pref("user-1", "edhplay.steps", True)
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1366)
+        page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+        names = page.eval_on_selector_all(".deckview .stack", "l => l.map(s => s.dataset.group)")
+        mine = [names[2], names[0], names[1], *names[3:]]
+        page.evaluate(
+            "o => { localStorage.setItem('mtg-stack-order:42:category', JSON.stringify(o));"
+            " localStorage.setItem('mtg.deckstats', JSON.stringify({chart: 'pie'}));"
+            " localStorage.setItem('mtg.edhplay.steps', '1'); localStorage.setItem('mtg-other', 'x'); }",
+            mine,
+        )
+        page.reload(wait_until="networkidle")
+        assert page.eval_on_selector_all(".deckview .stack", "l => l.map(s => s.dataset.group)") == mine
+        page.wait_for_function("() => localStorage.getItem('mtg-stack-order:42:category') === null")
+        assert server.db.get_pref("user-1", "stack:42:category") == mine
+        assert server.db.get_pref("user-1", "deckstats") == {"chart": "pie"}
+        assert server.db.get_pref("user-1", "edhplay.steps") is True
+        left = page.evaluate("() => Object.keys(localStorage).sort()")
+        assert left == ["mtg-other"]
         assert errors == []
         browser.close()
 

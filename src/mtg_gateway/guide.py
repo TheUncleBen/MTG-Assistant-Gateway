@@ -388,7 +388,7 @@ def guide_body(
         "<li><strong>Undo</strong> and <strong>Redo</strong> (beside Select cards, and the toast's Undo) "
         "take back or redo any change saved on the page, with the editor's keys: Ctrl+Z, and Ctrl+Shift+Z "
         "or Ctrl+Y. Removing a card that has notes asks first: Archidekt gives the gateway no way to "
-        "write notes, so they do not come back. Your own stack order is kept on this device only.</li>"
+        "write notes, so they do not come back. Your own stack order is kept with your account.</li>"
         "<li><strong>Quick add</strong> types a card name and takes you to the editor with it filled "
         "in.</li></ul>"
         f"<p class='tip'>{_esc(writes)}</p>"

@@ -192,8 +192,7 @@ def test_scan_page_asks_with_a_themed_bar(server: Server) -> None:
     exe = _exe()
     with sync_playwright() as p:
         browser, page, dialogs, errors = _open(p, exe, server, sid, width=390)
-        page.goto(f"{server.base}/scan", wait_until="networkidle")
-        page.evaluate("() => localStorage.setItem('mtg-scan-intro-seen', '1')")
+        server.db.set_pref("user-1", "scan.intro", True)  # the intro dismissed (on the account)
         page.goto(f"{server.base}/scan", wait_until="networkidle")
         # the step numbers and the list badge use dark text on orange
         page.locator("[data-tab=list]").click()

@@ -1306,7 +1306,9 @@ class Database:
         """Keep the newest ``keep`` snapshots of each member's deck, and any snapshot a pending or
         running proposal (a restore) still points at; delete the rest. Also kept (QUESTIONS-2 B13):
         the snapshot each recorded Archidekt backup copy was made with, and any snapshot with a
-        queued backup delete, so the gateway never loses its record of a copy it may delete."""
+        queued backup delete, so the gateway never loses its record of a copy it may delete (card
+        Q135 item 9, Ben's "Approve all" 10-16). A copy the member changed on Archidekt is kept
+        and no longer counted (B11), so its snapshot is not held past the newest ``keep``."""
         return c.execute(
             """DELETE FROM snapshots WHERE id IN (
                    SELECT id FROM (
@@ -1322,8 +1324,10 @@ class Database:
                                    WHERE s2.owner_sub = s.owner_sub AND s2.deck_id = s.deck_id
                                      AND s2.backup_deck_id = s.backup_deck_id
                                    ORDER BY s2.taken_at, s2.rowid LIMIT 1)
-                           FROM snapshots s WHERE s.backup_deck_id IS NOT NULL)""",
-            (keep,),
+                           FROM snapshots s WHERE s.backup_deck_id IS NOT NULL
+                             AND NOT EXISTS (SELECT 1 FROM job_runs j WHERE j.name = ? || s.backup_deck_id
+                                             AND json_extract(j.detail_json, '$.kept') = 1))""",
+            (keep, BACKUP_MADE_JOB),
         ).rowcount
 
     @staticmethod
@@ -2773,10 +2777,14 @@ class Database:
         except ValueError:
             return default
 
-    def set_pref(self, sub: str, name: str, value: Any) -> bool:
+    def set_pref(
+        self, sub: str, name: str, value: Any, *, keep_newest: tuple[str, int] | None = None
+    ) -> bool:
         """Remember one choice for the account. Refused (False) for a name that is empty or over
         MAX_PREF_NAME characters, a value over MAX_PREF_BYTES as JSON, an account that is not a
-        known user, and a new name once the account keeps MAX_PREFS_PER_ACCOUNT choices."""
+        known user, and a new name once the account keeps MAX_PREFS_PER_ACCOUNT choices.
+        ``keep_newest=(prefix, n)``: a new name starting with ``prefix`` first forgets the oldest
+        choices with that prefix so at most ``n`` remain with it (B8: stack orders)."""
         name = str(name)
         raw = json.dumps(value, separators=(",", ":"))
         if not name or len(name) > MAX_PREF_NAME or len(raw.encode("utf-8")) > MAX_PREF_BYTES:
@@ -2787,6 +2795,14 @@ class Database:
             known = c.execute(
                 "SELECT 1 FROM account_prefs WHERE sub = ? AND name = ?", (sub, name)
             ).fetchone()
+            if known is None and keep_newest is not None and name.startswith(keep_newest[0]):
+                prefix, n = keep_newest
+                c.execute(
+                    "DELETE FROM account_prefs WHERE sub = ? AND rowid IN (SELECT rowid FROM account_prefs "
+                    "WHERE sub = ? AND name LIKE ? ESCAPE '\\' ORDER BY updated_at DESC, rowid DESC "
+                    "LIMIT -1 OFFSET ?)",
+                    (sub, sub, _like_prefix(prefix), max(0, n - 1)),
+                )
             if known is None:
                 (count,) = c.execute("SELECT COUNT(*) FROM account_prefs WHERE sub = ?", (sub,)).fetchone()
                 if count >= MAX_PREFS_PER_ACCOUNT:
@@ -2798,6 +2814,18 @@ class Database:
                 (sub, name, raw, int(time.time())),
             )
         return True
+
+    def delete_prefs(self, sub: str, *, names: Iterable[str] = (), prefixes: Iterable[str] = ()) -> int:
+        """Forget the account's choices with these names or name prefixes. Returns how many."""
+        names, prefixes = list(names), list(prefixes)
+        where = ["name = ?"] * len(names) + ["name LIKE ? ESCAPE '\\'"] * len(prefixes)
+        if not where:
+            return 0
+        with self.tx() as c:
+            return c.execute(
+                f"DELETE FROM account_prefs WHERE sub = ? AND ({' OR '.join(where)})",
+                (sub, *names, *(_like_prefix(p) for p in prefixes)),
+            ).rowcount
 
     def delete_pref(self, sub: str, name: str) -> bool:
         with self.tx() as c:
