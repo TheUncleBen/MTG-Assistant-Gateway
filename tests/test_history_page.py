@@ -472,7 +472,7 @@ async def test_report_page_and_exports(stack: Stack) -> None:
         assert anon.status_code == 302 and anon.headers["location"].startswith("/login")
         # the deck page's button explains the wait and shows busy while the run blocks
         deck = await b.http.get("/decks/42", headers=NAV)
-        assert "data-busy-label='Testing…'" in deck.text and "takes up to a minute" in deck.text
+        assert "data-busy-label='Simulating…'" in deck.text and "takes up to a minute" in deck.text
         assert "run_deck_report" not in deck.text
     finally:
         await b.aclose()

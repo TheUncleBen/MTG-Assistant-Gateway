@@ -962,15 +962,15 @@ def _triggers_html(g: dict[str, Any]) -> str:
 
 
 FORGE_STATE_TEXT = {
-    "queued": "Waiting for the simulation engine.",
+    "queued": "Waiting for Forge.",
     "waiting": "Waiting for your earlier Forge run to finish.",
     "running": "Games are being played now.",
     "failed": "The games could not run.",
     "timeout": "The games ran out of time before finishing.",
     "cancelled": "The games were stopped.",
-    "lost": "The simulation engine lost this run.",
+    "lost": "Forge lost this run.",
     "skipped": "No Forge games for this report.",
-    "busy": "The simulation engine is busy with other runs; this one waits in the queue.",
+    "busy": "Forge is busy with other runs. This one waits in the queue.",
 }
 # A report without Forge games (Forge off, or left out of this report) says so where Forge's games
 # would be (reports.PREFLIGHT_ONLY).

@@ -179,9 +179,7 @@ class ForgeClient:
         try:
             r = await self._client.request(method, path, json=body)
         except httpx.HTTPError as exc:
-            raise ForgeError(
-                "unavailable", f"The simulation engine did not answer ({type(exc).__name__})."
-            ) from exc
+            raise ForgeError("unavailable", f"Forge did not answer ({type(exc).__name__}).") from exc
         try:
             data = r.json()
         except ValueError:
@@ -191,7 +189,7 @@ class ForgeClient:
         if r.status_code == 422:
             raise ForgeError("unknown_cards", "Forge does not have some of these cards.", data)
         if r.status_code == 429:
-            raise ForgeError("busy", "The simulation engine's queue is full; try again later.")
+            raise ForgeError("busy", "Forge's queue is full. Try again later.")
         if r.status_code >= 400:
             raise ForgeError("invalid", data.get("error") or f"HTTP {r.status_code}")
         return data
@@ -386,7 +384,7 @@ async def start_run(
     else:
         chosen, choice = pick_opponents(precons, bracket, bracket_source)
     if not chosen:
-        return {"state": "failed", "error": "The simulation engine has no opponent decks."}
+        return {"state": "failed", "error": "Forge has no opponent decks."}
     seats = [deck_name, *chosen]
     # Forge takes seeds from 0 to 2**63 - 1 (it reads "-5" as a flag); the gateway's seeds may be
     # negative, so they are mapped onto that range, the same seed always to the same Forge seed.
@@ -422,20 +420,20 @@ async def refresh(client: ForgeClient, section: dict[str, Any]) -> dict[str, Any
     try:
         job = await client.job(section["job_id"])
         if not isinstance(job, dict) or job.get("state") not in {"queued", "running", *FINAL_STATES}:
-            raise ForgeError("invalid", "The simulation engine gave an unexpected answer.")
+            raise ForgeError("invalid", "Forge gave an unexpected answer.")
     except ForgeError as exc:
         if time.time() - section.get("started_at", time.time()) > GIVE_UP_SECONDS:
             return {
                 **section,
                 "state": "lost",
-                "error": "The simulation engine stopped answering about this run.",
+                "error": "Forge stopped answering about this run.",
             }
         if exc.kind == "not_found":
             # The Forge service restarted and the job is gone.
             return {
                 **section,
                 "state": "lost",
-                "error": "The simulation engine restarted before this run finished.",
+                "error": "Forge restarted before this run finished.",
             }
         return section
     out = {**section, "state": job["state"], "result": summarise(job, section.get("seats") or [])}

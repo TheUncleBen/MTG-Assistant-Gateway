@@ -88,8 +88,7 @@ FORGE_NO_COMMANDER = (
     "its Commander category, so Forge does not run it."
 )
 FORGE_BUSY_GAVE_UP = (
-    "The simulation engine stayed busy with other runs for four hours, so this run was given up. "
-    "Run the report again later."
+    "Forge stayed busy with other runs for four hours, so this run was given up. Run the report again later."
 )
 
 
@@ -554,7 +553,7 @@ class ReportService:
                 }
         except Exception:  # an unexpected reply must not turn a stored report into a tool error
             logger.exception("starting a Forge run failed for %s", rid)
-            section = {"state": "failed", "error": "The simulation engine gave an unexpected answer."}
+            section = {"state": "failed", "error": "Forge gave an unexpected answer."}
         if not self._save_forge(rid, section):  # the report was deleted while the run started
             self._cancel_forge(section)
             return
