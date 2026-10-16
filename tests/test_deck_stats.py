@@ -1059,8 +1059,9 @@ def test_list_rows_come_from_one_builder() -> None:
     text = card_row(c, deck=d, view="text")
     assert text.startswith("<li class='row' tabindex='0' role='button' data-name='opt' data-card='Opt'")
     assert "<span class='q'>2</span><span class='n'><span class='name' title='Opt'>Opt</span></span>" in text
-    assert "<span class='set' title='XLN 65'>XLN</span><span class='price'>$0.25</span></li>" in text
+    assert "<span class='set' title='XLN #65'>XLN</span><span class='price'>$0.25</span></li>" in text
     table = card_row(c, deck=d, view="table")
+    assert "<span class='set' title='XLN #65'>XLN #65</span>" in table  # N15
     assert (
         "<span class='ty' title='Instant'>Instant</span><span class='mv'>1</span><span class='mc'>" in table
     )

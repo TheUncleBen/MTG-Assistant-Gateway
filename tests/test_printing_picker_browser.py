@@ -410,6 +410,8 @@ def test_change_printing_from_the_card_menu_saves_with_undo(server: Server) -> N
             "Snapshot kept under History."
         )
         assert server.sol_ring() == [("sld", "1074", "Etched")]
+        # the row's set reads as the toast writes it (N15)
+        assert card.locator(".set").first.get_attribute("title") == "SLD #1074"
         assert card.locator(".set").inner_text() == "SLD" and card.locator(".finish").inner_text() == "E"
         assert page.url == url
         # Undo: the old printing and finish
