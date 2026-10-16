@@ -49,6 +49,9 @@ _STATUS = {
     "busy": 429,
     "contract": 502,
     "writes_disabled": 403,
+    # the write may have reached Archidekt: not a refusal of the request (social review, 0.7.29)
+    "verify_mismatch": 502,
+    "stale": 409,
 }
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
@@ -478,6 +481,8 @@ class SocialService:
             try:
                 await self.find_comment(sub, deck_id, parent, page)
             except DeckError as exc:
+                if exc.kind != "not_found":  # Archidekt busy, a session to relink: said as it is
+                    raise
                 raise DeckError("invalid", NOT_IN_THREAD) from exc
             target = parent
         created = await self.decks._call(sub, lambda t: self.client.comment_create(t, target, text))
@@ -485,6 +490,8 @@ class SocialService:
         out = comment_out(created)
         if not out["owner"]["username"]:
             out["owner"]["username"] = name
+        if out["owner"].get("id") is None and _uid.isdigit():
+            out["owner"]["id"] = int(_uid)  # so the page offers Edit and Delete on it at once
         return {"comment": out, "parent": target}
 
 

@@ -5859,7 +5859,8 @@ def needs_look_error(reason: str | None) -> DeckError:
 
     exc = DeckError(
         "stale",
-        f"Not applied: {recheck.reason_text(reason)} Nothing was sent to Archidekt. The proposal is "
+        f"Not applied: {recheck.reason_text(reason or recheck.REASON_CHANGED)} Nothing was sent to "
+        "Archidekt. The proposal is "
         "still waiting, marked Needs a look: review it again, then apply, amend or reject it.",
         state="pending",
         status="needs_look",

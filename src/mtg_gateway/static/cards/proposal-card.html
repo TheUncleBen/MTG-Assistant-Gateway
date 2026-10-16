@@ -113,6 +113,15 @@ button.danger:disabled{color:var(--red)}
     if (!t) return "changed, " + len + " chars";
     return "“" + (t.length > 300 ? t.slice(0, 299) + "…" : t) + "”";
   }
+  // An account action in words; a comment edit, delete or vote also quotes the comment it is about,
+  // as the review page does, so the right one is approved (social review, 0.7.29).
+  function actionLine(r) {
+    var t = String(r.text || "");
+    var was = r.before_text ? excerpt(r.before_text, String(r.before_text).length) : "";
+    if (r.after_text && was) return t + ": " + was + " → " + excerpt(r.after_text, String(r.after_text).length);
+    if (r.after_text) return t + ": " + excerpt(r.after_text, String(r.after_text).length);
+    return was ? t + ": " + was : t;
+  }
   // Under a tags row, which tags are added and which taken off (as the review page says it).
   function tagNote(r) {
     if (r.field !== "tags") return "";
@@ -145,7 +154,7 @@ button.danger:disabled{color:var(--red)}
       case "restore": return ["Restore", "snapshot " + r.snapshot_id + " taken " + r.taken + " (" + r.rows + " rows)", ""];
       case "description": return ["Description", r.after_len ? excerpt(r.after_text, r.after_len) : "cleared", ""];
       case "detail": return [String(r.field || "Setting"), arrow(r.before, r.after), "", tagNote(r)];
-      case "action": return [String(r.label || "Action"), String(r.text || "") + (r.after_text ? ": " + excerpt(r.after_text, String(r.after_text).length) : ""), r.cannot_undo ? "Can't be undone" : ""];
+      case "action": return [String(r.label || "Action"), actionLine(r), r.cannot_undo ? "Can't be undone" : ""];
       default: return ["Change", r.text || "", ""];
     }
   }
@@ -444,7 +453,8 @@ button.danger:disabled{color:var(--red)}
       deck.onclick = function (e) { e.preventDefault(); openLink(p.result.deck_url); };
       a.appendChild(deck);
     }
-    if (p.state === "applied" && p.review_url) {
+    // Undo exists for a deck edit, a details change and a restore (the review page's Undo)
+    if (p.state === "applied" && p.review_url && /^(edit|details|restore)$/.test(String(p.kind || "edit"))) {
       var undo = el("a", "link", "Undo on the review page"); undo.href = "#";
       undo.onclick = function (e) { e.preventDefault(); openLink(p.review_url); };
       a.appendChild(undo);

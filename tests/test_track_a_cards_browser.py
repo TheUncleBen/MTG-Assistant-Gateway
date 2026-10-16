@@ -82,7 +82,7 @@ WAITING = {
             2,
             "-1 Island <img src=x onerror=alert(1)>",
             status="needs_look",
-            status_text="Island is at 13 now.",
+            status_reason="Island is at 13 now.",
         ),
         _line("p3", 3, "+1 Swamp", own=False),
     ],
@@ -311,6 +311,54 @@ def test_the_proposal_card_names_the_others_and_applies_all(width: int, theme: s
             overflow = card.locator("body").evaluate("b => b.scrollWidth - b.clientWidth")
             assert overflow <= 0, overflow
             _shot(page, f"proposal-card-applied-{width}-{theme}")
+        finally:
+            browser.close()
+    assert not errors, errors
+
+
+@pytest.mark.parametrize("width,theme", [(360, "light"), (1280, "dark")])
+def test_the_card_quotes_the_comment_and_offers_no_undo_for_an_account_action(width: int, theme: str) -> None:
+    """The social review: a comment delete names the comment it deletes (as the review page does),
+    and once applied the card offers no "Undo on the review page", which has no Undo for it."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    action = {
+        **PROPOSAL,
+        "kind": "action",
+        "diff": "Delete your comment on the deck by amy",
+        "rows": [
+            {
+                "kind": "action",
+                "action": "comment_delete",
+                "label": "Delete comment",
+                "text": "Delete your comment on the deck by amy",
+                "before_text": "Cut the second Sol Ring.",
+                "cannot_undo": True,
+            }
+        ],
+        "deck_waiting": None,
+    }
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            page = browser.new_page(viewport={"width": width, "height": 900})
+            errors: list[str] = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            applied = {**action, "state": "applied", "applied_at": NOW}
+            card = _open(
+                page,
+                card_html(),
+                {"structuredContent": applied, "_meta": {}},
+                {"get_proposal": applied},
+                theme,
+            )
+            card.locator("#rows li").first.wait_for()
+            text = card.locator("#rows").inner_text()
+            assert "Delete your comment on the deck by amy: “Cut the second Sol Ring.”" in text, text
+            assert card.locator("a.link", has_text="Undo on the review page").count() == 0
+            assert card.locator("a.link", has_text="Open in the app or browser").count() == 1
+            _shot(page, f"proposal-card-comment-delete-{width}-{theme}")
         finally:
             browser.close()
     assert not errors, errors

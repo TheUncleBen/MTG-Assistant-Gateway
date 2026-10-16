@@ -2,9 +2,9 @@
 it, follow its owner, post, edit, delete or vote on a comment, delete a deck and create a
 folder; 0.7.20 adds and removes a deck's collaborators. Each is a proposal of kind ``action``
 with one review row, so it goes through the same approval flow as every other write, but (R-142)
-only the member's press on the signed-in review page applies one: never the assistant, whatever
-the approval mode (modes.py), and not the in-chat card, which only opens the review page for
-these. The work itself is the code the gateway's own pages already use (the deck page's social
+only the member's own press applies one: on the in-chat card (0.7.29, Q8) or on the signed-in
+review page (a deck deletion: the review page only), never the assistant, whatever the approval
+mode (modes.py). The work itself is the code the gateway's own pages already use (the deck page's social
 buttons in social.py, the delete and folder pages in decks.py), so a proposal does exactly what
 the matching button does, with the same checks again at apply time."""
 
@@ -225,6 +225,8 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
         on = params.get("on") is not False
         changes["on"] = on
         row["text"] = ("Bookmark" if on else "Remove your bookmark from") + f" the deck {where}"
+        if deck is not None and deck.bookmarked == on:
+            row["text"] += " (already the case; applying changes nothing)"
     elif action == "follow":
         on = params.get("on") is not False
         owner_id = int(deck.owner_id) if deck and str(deck.owner_id or "").isdigit() else None

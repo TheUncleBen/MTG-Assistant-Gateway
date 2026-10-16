@@ -105,7 +105,9 @@ button.danger:disabled{color:var(--red)}
       if (Number(x.version) > 1) sub.push("version " + Number(x.version));
       if (!data.deck_id && x.deck_name) sub.unshift(String(x.deck_name));
       what.appendChild(el("span", "sub", sub.join(" · ")));
-      if ((x.status === "needs_look" || x.status === "held") && x.status_text) what.appendChild(el("span", "why", x.status_text));
+      // the why: status_text on a page's line, status_reason on the board's (show_waiting_changes)
+      var why = x.status_text || x.status_reason;
+      if ((x.status === "needs_look" || x.status === "held") && why) what.appendChild(el("span", "why", String(why)));
       if (x.review_page_only && x.own) what.appendChild(el("span", "why", "Approve it on its review page."));
       li.appendChild(what);
       var btns = el("span", "btns");
