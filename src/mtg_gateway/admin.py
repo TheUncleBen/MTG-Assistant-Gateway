@@ -571,8 +571,8 @@ def _cleanup_warning(c: dict[str, Any]) -> str:
         return ""
     text = (
         "The removed-member clean-up is off: its Authentik API token can't be read. If you replaced "
-        "the stack file, check that its mtg_authentik_api_token lines are still uncommented, then "
-        "redeploy."
+        'the stack file or docker-compose.yml, check that you removed the "# " from its '
+        "mtg_authentik_api_token lines again, then redeploy."
     )
     return f"<div class='notice warn'>{html.escape(text)}</div>"
 
