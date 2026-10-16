@@ -209,8 +209,12 @@ def test_right_click_menu_and_quantity_plus_redraw_in_place(server: Server, widt
             "confirmed": False,
         }
         assert req.value.headers.get("x-csrf-token")
-        page.locator(".deck-toast").wait_for(timeout=8000)
-        page.wait_for_timeout(200)
+        # until the save answers the toast says "Saving…" (a slow CI runner took longer than 200 ms)
+        page.wait_for_function(
+            "() => /Saved\\. Snapshot kept under History/.test("
+            "(document.querySelector('.deck-toast .msg') || {}).textContent || '')",
+            timeout=8000,
+        )
         assert page.url == url
         # the menu stays open for more steps (0.7.27, T-159), showing the saved count
         assert page.locator(".ctxmenu").count() == 1 and menu.locator(".qtyrow .n").inner_text() == "2"
