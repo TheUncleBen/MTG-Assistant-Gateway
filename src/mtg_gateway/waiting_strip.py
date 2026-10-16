@@ -67,6 +67,8 @@ def line_for(db: Any, sub: str, row: dict[str, Any]) -> dict[str, Any]:
 def waiting_changes(db: Any, sub: str, deck_id: int | str, *, own: bool) -> list[dict[str, Any]]:
     """The strip's rows for this member and deck, oldest first: their own waiting changes to
     the deck (on someone else's deck, their waiting likes, comments or follows)."""
+    if db is None:  # no database to ask (the step 0 seam's contract): nothing waits
+        return []
     return [line_for(db, sub, r) for r in db.pending_board(sub, str(deck_id))]
 
 
