@@ -572,7 +572,7 @@ def test_saved_descriptions_and_remove_fit_and_read(
         assert not state["low"], state["low"]
         assert len(state["buttons"]) == 1 and state["buttons"][0] >= 44, state["buttons"]
         coverage = page.locator(".report .coverage").inner_text()
-        assert "Played with their effect:" in coverage and "left out on purpose:" in coverage
+        assert "Played with their effect:" in coverage and "Known:" in coverage
         page.get_by_role("button", name="Remove the saved description of Sol Ring").click()
         page.wait_for_load_state("networkidle")
         assert "models=removed" in page.url and "sol ring" not in store.rows

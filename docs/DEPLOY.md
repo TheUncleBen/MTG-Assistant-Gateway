@@ -621,7 +621,7 @@ default, and an install that leaves it off behaves exactly as before.
 - **Games at once:** a run's games are cut into groups of at most five, the same way whatever the
   setting, and each group starts from its own seed. The seed is kept with the report for the
   record: Forge does not always replay a game exactly, so compare runs by their win rates and
-  ranges, not game by game. `MTG_FORGE_PARALLEL_GAMES` (default 1, or
+  95% intervals, not game by game. `MTG_FORGE_PARALLEL_GAMES` (default 1, or
   the admin Settings page) asks for that many groups at once, and `FORGE_MAX_PARALLEL` on the Forge
   service (default 1) is the most it allows. Each group is its own Java process with up to
   `FORGE_XMX` of memory. One four-player game has used up to about 930 MiB in the measurements so

@@ -760,8 +760,8 @@ def coverage_text(g: dict[str, Any]) -> str:
     # Q138 item 6: both figures, as scripts/measure_recognition.py prints them
     return (
         f"Played with their effect: {c['modeled']} of {c['deck_size']} cards ({c['pct']}% of the deck). "
-        f"Played with their effect or left out on purpose: {c['known']} ({c['known_pct']}%). The rest are "
-        "listed below."
+        f"Known: {c['known']} ({c['known_pct']}%), the cards played with their effect plus those left out "
+        "on purpose. The rest are listed below."
     )
 
 
@@ -806,7 +806,7 @@ REMOVE_MODEL_LABEL = "Remove"
 MODEL_NOTICES = {
     "removed": "The saved description was removed. Later solo tests play that card without its effect "
     "again, until a new description is saved.",
-    "gone": "That saved description was already removed, or another member's replaced it.",
+    "gone": "That saved description was already removed, or an admin removed or replaced it.",
 }
 
 
@@ -932,8 +932,8 @@ def honesty_html(g: dict[str, Any], ask: str = "") -> str:
     low = h.get("low_impact") or []
     if low:
         parts.append(
-            f"<div class='group'><h3>Modeled but never mattered <small>{_esc(_share(len(low), size))}"
-            "</small></h3>"
+            "<div class='group'><h3>Played with their effect but never mattered "
+            f"<small>{_esc(_share(len(low), size))}</small></h3>"
             "<p>These cards were understood, drawn and played, and nothing they do changed a solo test game. "
             "A solo test game has no opponent and no interaction, so this says nothing about how the card "
             "does at a real table.</p>" + _names([{"name": n} for n in low]) + "</div>"
@@ -1183,7 +1183,7 @@ def _interval(pair: Any) -> str:
 # exact words wait on his answer (WORDING-1-TEXT-r3); the slot is on the page and every export.
 FORGE_DRIFT_NOTE = (
     "Forge does not always replay the same games from the same seed, so compare runs by their win "
-    "rates and ranges, not game by game."
+    "rates and 95% intervals, not game by game."
 )
 
 
@@ -1201,7 +1201,7 @@ def forge_lines(f: dict[str, Any], *, results: bool = True) -> list[str]:
         behind = (
             f", behind your report of {front_face(ahead.get('deck_name')) or 'another deck'}" if ahead else ""
         )
-        out.append(f"{place}{behind}: it starts by itself when the run ahead of it ends.")
+        out.append(f"{place}{behind}. It starts by itself when the run ahead of it ends.")
     elif f.get("state") == "running" and f.get("games_requested"):
         out.append(f"Games finished so far: {res.get('games') or 0} of {f['games_requested']}.")
     if f.get("state") in ("queued", "running") and f.get("expected_seconds"):
@@ -1253,7 +1253,10 @@ def forge_lines(f: dict[str, Any], *, results: bool = True) -> list[str]:
     if f.get("seed") is not None:
         # The seed is kept for the record only, never as a way to replay the games (R-207; Ben's
         # re-confirmation card), and every report says why, the page and the export alike.
-        whose = {"gateway": " (chosen by the gateway, kept for the record)", "request": " (from the request)"}
+        whose = {
+            "gateway": " (chosen by the gateway, kept for the record)",
+            "request": " (set when this report was asked for)",
+        }
         out.append(f"Seed: {f['seed']}{whose.get(str(f.get('seed_source')), '')}.")
         out.append(FORGE_DRIFT_NOTE)
     elif f.get("state") in ("done", "running") and f.get("job_id"):
@@ -1604,7 +1607,9 @@ def report_markdown(r: dict[str, Any]) -> str:
                 lines.append(f"- {grp['label']}: " + ", ".join(_md_name(c) for c in grp["cards"]))
             lines.append("")
         if h["low_impact"]:
-            lines.append(f"Modeled but never mattered: {_share(len(h['low_impact']), size)}.")
+            lines.append(
+                f"Played with their effect but never mattered: {_share(len(h['low_impact']), size)}."
+            )
             lines.append(", ".join(front_face(n) for n in h["low_impact"]))
             lines.append("")
     if v is not None:

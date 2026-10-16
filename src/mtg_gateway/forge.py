@@ -270,12 +270,18 @@ def pick_opponents(
             "precons play.",
         }
     why = BRACKET_SOURCES.get(source or "", "the deck's bracket")
+    # Q49 / O14: an estimate is never called the deck's bracket
+    lead = (
+        f"Archidekt's estimate from the deck's cards is bracket {bracket}"
+        if source == "estimate"
+        else f"Bracket {bracket} ({why})"
+    )
     if not rated:
         return newest, {
             "bracket": bracket,
             "source": source,
             "rule": "newest",
-            "note": f"Bracket {bracket} ({why}), but this Forge image's precons carry no bracket, so "
+            "note": f"{lead}, but this Forge image's precons carry no bracket, so "
             "the newest precons play. A newer Forge image matches opponents by bracket.",
         }
     order = sorted(range(len(rated)), key=lambda i: (abs(rated[i]["bracket"] - bracket), i))
@@ -288,9 +294,9 @@ def pick_opponents(
         nearest = f"the nearest bracket{'s' if len(others) != 1 else ''} ({', '.join(map(str, others))})"
         if exact:
             have = f"{exact} bracket {bracket} precon{'s are' if exact != 1 else ' is'} here"
-            note = f"Bracket {bracket} ({why}): only {have}; the rest come from {nearest}."
+            note = f"{lead}: only {have}; the rest come from {nearest}."
         else:
-            note = f"Bracket {bracket} ({why}): no bracket {bracket} precon is here, so {nearest} play."
+            note = f"{lead}: no bracket {bracket} precon is here, so {nearest} play."
     return [p["name"] for p in chosen], {
         "bracket": bracket,
         "source": source,
@@ -331,12 +337,13 @@ def shared_opponents(
     # bracket (or Archidekt's estimate when none is set); finish or change only after his answer.
     level, source = shared.get("bracket") or (None, None)
     chosen, picked = pick_opponents(precons, level if isinstance(level, int) else None, source)
-    why = BRACKET_SOURCES.get(source or "", "the deck's bracket")
+    # how they were picked is pick_opponents' own note, true also with no bracket or unrated precons
     return chosen, {
         **picked,
         "rule": "shared",
         "shared_with": link,
-        "note": f"The opponents picked for {deck}'s Forge games by {why}, so both decks meet the same table.",
+        "note": f"The same opponents {deck}'s Forge games get, so both decks meet the same table. "
+        f"{picked['note']}",
     }
 
 

@@ -245,7 +245,12 @@ def add_history_routes(
             for k in reports.models.for_cards(used).values()
             if k.get("added_by") == sub
         )
-        notice = MODEL_NOTICES.get(request.query_params.get("models") or "", "")
+        # only while descriptions are saved: the notice comes from the address, which anyone can edit
+        notice = (
+            MODEL_NOTICES.get(request.query_params.get("models") or "", "")
+            if reports.models.available
+            else ""
+        )
         body = (f"<p class='notice'>{notice}</p>" if notice else "") + report_body_html(
             r,
             stats_html=stats_strip(r.get("stats")),
@@ -273,6 +278,10 @@ def add_history_routes(
         rid = request.path_params["rid"]
         if not sub:
             return login_redirect("/history")
+        # TODO(Q136 item 2, held for Ben's re-confirmation card): nothing to remove while kept models
+        # are switched off (card_models.SWITCHED_ON)
+        if not reports.models.available:
+            return Response(status_code=404)
         data = await form(request)
         if not check_csrf(sid, data):
             return page(

@@ -1585,7 +1585,7 @@ def compare_forge_html(deck: Deck, other: Any, other_name: str, *, csrf: str | N
         f"<p class='muted small'>Forge plays each deck against the same three precons, picked for "
         f"{name}'s bracket, or Archidekt's estimate from cards when none is set. Each deck gets its "
         "own report on the <a href='/reports'>Reports</a> page (and in History) with the deck "
-        "statistics, the decklist check and the Forge games (no solo test). The games play in the "
+        "statistics, the legality check and the Forge games (no solo test). The games play in the "
         "background, one deck after the other. Compare the two decks' 95% intervals, not only their "
         "win rates.</p>"
         f"<form method='post' action='/decks/{esc(deck.id)}/compare/forge'>"
