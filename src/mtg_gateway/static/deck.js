@@ -769,7 +769,7 @@
     if (replay) {
       // an Undo or Redo step: the history says what was done; a stale read is read once more
       if (d.stale) setTimeout(function () {
-        api(editUrl, { refresh: true, names: names }).then(function (r) { if (r.ok) { drawRows(r.rows, names); drawStats(r); } }).catch(function () { /* the next view shows it */ });
+        api(editUrl, { refresh: true, names: names }).then(function (r) { if (r.ok) { drawRows(r.rows, names); drawStats(r); if (menu && !menuCard.isConnected) closeMenu(); } }).catch(function () { /* the next view shows it */ });
       }, 1500);
       return;
     }
@@ -784,7 +784,7 @@
       toast("Saved. Refreshing…", { sticky: true, actions: actions });
       setTimeout(function () {
         api(editUrl, { refresh: true, names: names }).then(function (r) {
-          if (r.ok) { drawRows(r.rows, names); drawStats(r); }
+          if (r.ok) { drawRows(r.rows, names); drawStats(r); if (menu && !menuCard.isConnected) closeMenu(); }
           toast(saved, { actions: actions });
         }).catch(function () { toast(saved, { actions: actions }); });
       }, 1500);
