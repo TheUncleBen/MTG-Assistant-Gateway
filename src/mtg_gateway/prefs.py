@@ -39,6 +39,11 @@ SCAN_INTRO = "scan.intro"
 STACK = "stack:"  # + deck id + ":" + grouping
 MAX_STACK_ORDERS = 150  # B8: the newest 150; saving one more forgets the oldest
 MAX_STACK_NAMES = 300  # stacks in one order (a deck has far fewer groups)
+# Set by "Forget my view choices" and kept: from then on a device's pre-0.7.29 choices (a view
+# cookie, the browser's stored ones) are never copied to the account, so a device not used since
+# the update can't bring the forgotten choices back. Not a choice: the pages' API can't read or
+# set it.
+FORGOTTEN = "prefs.forgotten"
 
 _STACK_NAME = re.compile(r"^stack:(\d{1,12}):([a-z0-9_-]{0,40})$")
 _WORD = re.compile(r"^[a-z0-9_-]{1,40}$")
@@ -97,11 +102,18 @@ def valid_name(name: str) -> bool:
 def forget(db: Database, sub: str) -> int:
     """ "Forget my view choices" (B9): views, card size, stack orders, stats toggles and the
     dismissed tips. Other things kept on the account (notifications, approval mode) stay."""
-    return db.delete_prefs(
+    n = db.delete_prefs(
         sub,
         names=(CARD_SIZE, DECKSTATS, EDHPLAY_STEPS, SCAN_INTRO),
         prefixes=(VIEW, STACK),
     )
+    db.set_pref(sub, FORGOTTEN, True)
+    return n
+
+
+def copies_refused(db: Database, sub: str) -> bool:
+    """True once the member used "Forget my view choices": old per-device choices aren't copied."""
+    return db.get_pref(sub, FORGOTTEN) is True
 
 
 def card_size(db: Database, sub: str | None) -> str:
@@ -124,6 +136,8 @@ def view_choice(
         return stored, VIEW_COOKIE + kind in request.cookies
     cookie = request.cookies.get(VIEW_COOKIE + kind)
     if cookie in allowed:
+        if copies_refused(db, sub):  # forgotten: the cookie goes, its view isn't copied
+            return default, True
         return cookie, True
     return default, False
 
@@ -190,6 +204,8 @@ def add_prefs_routes(server: MCPServer, state: AppState) -> None:
         if not isinstance(changes, dict) or not isinstance(copy, dict) or len(changes) + len(copy) > 400:
             return JSONResponse({"ok": False, "error": "invalid", "message": "set and copy are objects"}, 400)
         have = state.db.get_prefs(sub) if copy else {}
+        if copy and have.get(FORGOTTEN) is True:
+            copy = {}  # forgotten: this device's old choices are dropped, not copied
         saved, refused = [], []
         for name, value in [*((n, v) for n, v in copy.items() if n not in have), *changes.items()]:
             (saved if save(state.db, sub, str(name), value) else refused).append(str(name))

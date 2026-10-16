@@ -166,8 +166,22 @@ async def test_forget_my_view_choices(stack: Stack) -> None:
         assert db.get_pref(SUB, "card.size") == "l"
         r = await b.http.post("/account", data={"csrf": csrf, "action": "forget_choices", "confirm": "yes"})
         assert r.status_code == 303 and "ok=choices_forgotten" in r.headers["location"]
-        assert db.get_prefs(SUB) == {"track.a.something": True}
-        done = html.unescape((await b.http.get(r.headers["location"])).text)
+        where = r.headers["location"]
+        assert db.get_prefs(SUB) == {"track.a.something": True, prefs.FORGOTTEN: True}
+        # a device not used since the update can't bring the forgotten choices back (K5): its
+        # stored choices aren't copied, and its view cookie is dropped, not copied
+        r = await api(b, "POST", "/api/v1/prefs", {"copy": {"stack:42:type": ["Land"], "scan.intro": True}})
+        assert r.json()["ok"] is True and r.json()["saved"] == []
+        b.http.cookies.set("mtg_view_cards", "list")
+        page = await b.http.get("/cards", params={"q": "sol"})
+        assert "value='list' form='cs-form' checked" not in page.text
+        assert 'mtg_view_cards=""' in page.headers.get("set-cookie", "")
+        assert db.get_pref(SUB, "stack:42:type") is None and db.get_pref(SUB, "view.cards") != "list"
+        # a choice made after forgetting is kept as usual, and the marker isn't a choice
+        r = await api(b, "POST", "/api/v1/prefs", {"set": {"card.size": "s", prefs.FORGOTTEN: False}})
+        assert r.json()["saved"] == ["card.size"] and r.json()["refused"] == [prefs.FORGOTTEN]
+        assert prefs.FORGOTTEN not in (await b.http.get("/api/v1/prefs")).json()["prefs"]
+        done = html.unescape((await b.http.get(where)).text)
         assert "Every page starts with its usual view again, on all your devices." in done
         assert [e for e in db.audit_recent(20, sub=SUB) if e["event"] == "view_choices_forgotten"]
     finally:
