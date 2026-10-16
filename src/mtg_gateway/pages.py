@@ -489,7 +489,23 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         versions = _picked_versions(data, picks)
         back = _list_back(data.get("back"))
         if submitted_too_soon(s.session_secret, f"select:{sub}", data.get("shown")):
-            return RedirectResponse(_with_query(back, "err=none_selected"), status_code=303)
+            # Faster than a person reads the confirm (or a stamp that is not ours): nothing is
+            # applied and the same confirm is shown again, as the single review page does.
+            return page(
+                "Apply these changes?",
+                _confirm_body(
+                    state.decks.plan_selection(sub, picks, versions),
+                    _csrf(s, sid),
+                    form_stamp(s.session_secret, f"select:{sub}"),
+                    versions,
+                    back,
+                    s.writes_enabled,
+                ),
+                sub=sub,
+                sid=sid,
+                current="/proposals",
+                head_extra=LIST_STYLE,
+            )
         current_client.set(BROWSER_CLIENT_ID)
         try:
             run = state.decks.apply_selection(sub, picks, via=REVIEW_PAGE, versions=versions)

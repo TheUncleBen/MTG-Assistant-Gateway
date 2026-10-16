@@ -115,7 +115,10 @@ async def test_apply_confirms_the_order_then_applies_and_offers_undo(stack: Stac
             "/proposals/apply",
             data={"csrf": csrf, "action": "apply", "picks": picks, "shown": "1.x", "back": "/proposals"},
         )
-        assert r.headers["location"] == "/proposals?err=none_selected" and _qty(ark, "Opt") == 0
+        # nothing applied; the same confirm again, not "check at least one" (the ticks were kept)
+        assert r.status_code == 200 and _qty(ark, "Opt") == 0
+        assert "Apply 2 changes" in r.text and f"name='picks' value='{picks}'" in r.text
+        assert "Check at least one" not in r.text
         shown = aged_stamp(h.settings, f"select:{SUB}")
         r = await b.http.post(
             "/proposals/apply",
@@ -187,3 +190,14 @@ async def test_the_deck_page_shows_the_strip_and_home_counts_the_decks(stack: St
         assert "2 waiting on 1 deck." in home
     finally:
         await b.aclose()
+
+
+def test_a_row_with_no_recorded_app_has_no_stray_comma() -> None:
+    """A change with no recorded app (made before 0.7.29) reads "1 min ago", not ", 1 min ago"."""
+    from mtg_gateway import waiting_strip
+
+    line = {"proposal_id": "p1", "summary": "+1 Opt", "created_by": "", "created_at": 1000}
+    out = waiting_strip.row_html(line, now=1060)
+    assert "<span class='by'>1 min ago</span>" in out, out
+    line["created_by"] = "browser"
+    assert "<span class='by'>you, 1 min ago</span>" in waiting_strip.row_html(line, now=1060)
