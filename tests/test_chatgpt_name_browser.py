@@ -174,7 +174,25 @@ def test_both_name_notices_read_together(tmp_path: Path, width: int, theme: str)
             assert w14.bounding_box()["y"] < dev.bounding_box()["y"]
             assert page.evaluate(CONTRAST, ".notice.warn") == []
             assert page.evaluate(MEASURE) == []
-            _shot(page, dev.locator("xpath=.."), f"admin-both-notices-{width}-{theme}.png")
+            if SHOTS:
+                # both notices, from the top of the first to the bottom of the second, in page
+                # coordinates: on a phone they are taller than the window
+                box = page.evaluate(
+                    """() => {
+                      const n = [...document.querySelectorAll('.notice.warn')]
+                        .map(e => e.getBoundingClientRect());
+                      const top = Math.min(...n.map(r => r.top));
+                      const bottom = Math.max(...n.map(r => r.bottom));
+                      return {y: top + scrollY, h: bottom - top, w: document.documentElement.clientWidth};
+                    }"""
+                )
+                Path(SHOTS).mkdir(parents=True, exist_ok=True)
+                clip = {"x": 0, "y": max(0, box["y"] - 24), "width": box["w"], "height": box["h"] + 48}
+                page.screenshot(
+                    path=str(Path(SHOTS) / f"admin-both-notices-{width}-{theme}.png"),
+                    full_page=True,
+                    clip=clip,
+                )
             browser.close()
         assert errors == []
     finally:
