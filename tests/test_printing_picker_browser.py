@@ -270,6 +270,15 @@ def _shot(page, name: str) -> None:
         page.screenshot(path=str(Path(SHOTS) / f"{name}.png"))
 
 
+def _shots_both_themes(page, name: str) -> None:
+    if SHOTS:
+        for theme in ("light", "dark"):
+            page.evaluate("t => document.documentElement.setAttribute('data-theme', t)", theme)
+            page.wait_for_timeout(100)
+            _shot(page, f"{name}-{theme}")
+        page.evaluate("() => document.documentElement.setAttribute('data-theme', 'light')")
+
+
 def test_change_printing_from_the_card_menu_saves_with_undo(server: Server) -> None:
     from playwright.sync_api import sync_playwright
 
@@ -521,6 +530,7 @@ def test_load_more_pages_and_filters_go_to_scryfall(tmp_path: Path) -> None:
             _open_picker(page, page.locator(".deckview .row[data-card='Sol Ring'][data-zone='main']"))
             status = page.locator(".ppstatus")
             assert status.inner_text().startswith("Showing 10 of 30 printings."), status.inner_text()
+            _shots_both_themes(page, "own-more-pages-1280")
             more = page.locator(".printpick .ppmore button")
             assert more.inner_text() == "Load more printings"
             first = len(_tiles(page))
@@ -553,6 +563,7 @@ def test_load_more_pages_and_filters_go_to_scryfall(tmp_path: Path) -> None:
             page.wait_for_function("() => document.querySelectorAll('.printpick .pptile').length === 1")
             assert page.locator(".ppempty", has_text="No printing matches these filters.").is_visible()
             assert status.inner_text() == "The card's current printing is shown too.", status.inner_text()
+            _shots_both_themes(page, "own-scryfall-none-1280")
             _choose(page, "Border", "Any border")
             _choose(page, "Frame", "Any frame")
             _choose(page, "Sort", "Cheapest (USD)")
@@ -562,6 +573,15 @@ def test_load_more_pages_and_filters_go_to_scryfall(tmp_path: Path) -> None:
             last = [q for q in s.sf.print_searches if " set:" not in q["q"]][-1]
             assert last["order"] == "usd" and last["dir"] == "asc"
             assert _tiles(page)[0] == "4ED #325 · 1995"
+            # oldest first: the card's own printing (2020) is not on the first page of 10; it is
+            # shown after that page's tiles, not counted, and the count line says so (B3)
+            _choose(page, "Sort", "Oldest first")
+            page.wait_for_function(
+                "() => document.querySelector('.ppstatus').innerText.includes('printing is shown too')"
+            )
+            assert status.inner_text().startswith("Showing 10 of 30 printings."), status.inner_text()
+            assert len(_tiles(page)) == 11 and _tiles(page)[-1] == "CMR #472 · 2020", _tiles(page)
+            _shots_both_themes(page, "own-more-pages-off-page-1280")
             assert errors == []
             browser.close()
     finally:
