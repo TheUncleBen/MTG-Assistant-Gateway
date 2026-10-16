@@ -1,5 +1,5 @@
 """The shipped deployment files keep the safer settings: the example env files leave in-chat applying
-off, the Compose services are capped,
+off, the Compose services are capped, the settings the admin Settings page manages are left to it,
 and CI checks the Gradle wrapper before any Android build. Plain text checks, no YAML parser."""
 
 from __future__ import annotations
@@ -27,7 +27,9 @@ def test_example_env_keeps_the_default_approval_mode_manual(name: str):
     # Out of the box every change waits for the member's own press; members loosen their own
     # mode on the Account page, and the examples do not cap it.
     env = _env(ROOT / name)
-    assert env["MTG_APPROVAL_MODE_DEFAULT"] == "manual" and env["MTG_APPROVAL_MODE_MAX"] == "auto"
+    text = (ROOT / name).read_text()
+    assert "\n# MTG_APPROVAL_MODE_DEFAULT=manual\n" in text and "\n# MTG_APPROVAL_MODE_MAX=auto\n" in text
+    assert "MTG_APPROVAL_MODE_DEFAULT" not in env and "MTG_APPROVAL_MODE_MAX" not in env
     assert "MTG_APPLY_VIA_MCP" not in env and "MTG_APPLY_MIN_AGE_SECONDS" not in env
 
 
@@ -99,9 +101,38 @@ def _glob_match(rel: str, pattern: str) -> bool:
 
 @pytest.mark.parametrize("name", ["deploy/stack.env.example", "deploy/compose/.env.example"])
 def test_example_env_keeps_watchlists_off(name: str):
-    assert _env(ROOT / name)["MTG_WATCHLISTS_ENABLED"] == "false"
+    assert "MTG_WATCHLISTS_ENABLED" not in _env(ROOT / name)
+    assert "\n# MTG_WATCHLISTS_ENABLED=false\n" in (ROOT / name).read_text()
+    from mtg_gateway.config import MANAGED_SETTINGS
+
+    assert MANAGED_SETTINGS["watchlists_enabled"].default is False
 
 
 @pytest.mark.parametrize("name", ["deploy/portainer-stack.yml", "deploy/compose/docker-compose.yml"])
-def test_stack_files_pass_watchlists_off_by_default(name: str):
-    assert "MTG_WATCHLISTS_ENABLED: ${MTG_WATCHLISTS_ENABLED:-false}\n" in (ROOT / name).read_text()
+def test_stack_files_leave_the_settings_page_its_settings(name: str):
+    """0.7.29 (Q17): a setting the Settings page manages is passed empty unless the
+    env sets it. A default written here would count as "set in your stack" and lock it there."""
+    from mtg_gateway.config import MANAGED_SETTINGS
+
+    text = (ROOT / name).read_text()
+    for spec in MANAGED_SETTINGS.values():
+        lines = re.findall(rf"^\s*{spec.env}:.*$", text, re.M)
+        assert lines in ([], [f"      {spec.env}: ${{{spec.env}:-}}"]), lines
+    assert "MTG_WATCHLISTS_ENABLED: ${MTG_WATCHLISTS_ENABLED:-}\n" in text
+
+
+@pytest.mark.parametrize("name", ["deploy/stack.env.example", "deploy/compose/.env.example"])
+def test_example_env_files_leave_the_settings_page_its_settings(name: str):
+    """Each managed setting is shown commented out, with the gateway's own default."""
+    from mtg_gateway.config import MANAGED_SETTINGS
+
+    env, text = _env(ROOT / name), (ROOT / name).read_text()
+    for spec in MANAGED_SETTINGS.values():
+        assert spec.env not in env, spec.env
+        for value in re.findall(rf"^# {spec.env}=(.*)$", text, re.M):
+            default = spec.default
+            shown = str(default).lower() if isinstance(default, bool) else str(default)
+            assert value == shown or (value == "" and spec.env in ("MTG_SERVER_NAME", "MTG_CHATGPT_NAME")), (
+                spec.env,
+                value,
+            )

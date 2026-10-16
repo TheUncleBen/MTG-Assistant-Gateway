@@ -684,8 +684,8 @@ def test_a_dev_null_copy_folder_means_no_copies(monkeypatch: pytest.MonkeyPatch,
 @pytest.mark.parametrize("path", ["deploy/portainer-stack.yml", "deploy/compose/docker-compose.yml"])
 def test_stack_files_pass_every_limit_and_the_optional_copy_mount(path: str) -> None:
     text = (ROOT / path).read_text()
-    for name, (_attr, default) in GENTLE.items():
-        assert f"{name}: ${{{name}:-{default}}}" in text, name
+    for name in GENTLE:  # empty unless the env sets it: the Settings page manages them (0.7.29)
+        assert f"{name}: ${{{name}:-}}\n" in text, name
     assert "MTG_BACKUP_COPY_DIR: /backup-copy" in text
     assert "source: ${MTG_BACKUP_COPY_DIR:-/dev/null}\n        target: /backup-copy" in text
 
@@ -694,7 +694,7 @@ def test_stack_files_pass_every_limit_and_the_optional_copy_mount(path: str) -> 
 def test_example_env_files_list_the_limits(path: str) -> None:
     text = (ROOT / path).read_text()
     for name, (_attr, default) in GENTLE.items():
-        assert f"\n{name}={default}\n" in text, name
+        assert f"\n# {name}={default}\n" in text, name
     assert "#MTG_BACKUP_COPY_DIR=" in text
 
 

@@ -802,6 +802,8 @@ What it shows:
   for one person from the Users page (`?sub=`).
 - **Metrics** (`/admin/metrics`): 30-day totals per counter (see
   [the metrics table](#the-metrics-table) below).
+- **Settings** (`/admin/settings`, since 0.7.29): the gateway's settings an
+  admin may change without a redeploy (see [the Settings page](#the-settings-page) below).
 
 The same data is at `/api/v1/admin/overview`, `/api/v1/admin/users` and
 `/api/v1/admin/metrics`, and the actions at `POST /api/v1/admin/users/<sub>`
@@ -825,6 +827,34 @@ counter in the metrics table. The person's own activity log shows the
 action too, as done by an administrator. The admin page never creates a user or changes a group: that
 stays in the identity provider. Disabling only refuses the account on this
 gateway; the account itself is untouched.
+
+### The Settings page
+
+Since 0.7.29 `/admin/settings` lists, by section, the settings an admin may
+change while the gateway runs: approvals, deck sync, backups, simulation,
+watchlists and prices, the gateway's name, Archidekt and Scryfall pacing, and
+card scanning (folded away). Each one shows its allowed range and where its
+value comes from: the gateway's default, a change made here (who and when),
+or your stack.
+
+- **A value set in your stack wins.** When the stack's environment (Portainer's
+  variables or `.env`) sets one of these, the page shows it as set in your
+  stack, read-only, and says which variable to change. The shipped stack and
+  Compose files pass these settings through empty unless you set them, and the
+  example env files list them commented out (`# MTG_…=`) with the default, so
+  out of the box the page manages them. Remove the line from your environment
+  (or leave it empty) to manage one on the page; add it to fix it in the stack.
+- **Pacing only gets gentler here.** The Archidekt and Scryfall pacing can be
+  made slower on the page, never faster than the gateway's defaults. Only the
+  stack can set faster values, within the bounds in
+  [DEPLOY.md](DEPLOY.md#environment-reference).
+- **Some settings stay in the stack only**: sign-in, secrets, token and session
+  lifetimes, the membership check, `MTG_WRITES_ENABLED`, the backup folder's
+  name and the folders on disk.
+- Every change is written to the audit log (`setting_changed`) under the
+  admin's subject. Three ask for a tick first: turning Archidekt backup copies
+  off, and lowering the backup copies or the restore points kept per deck,
+  because older copies or restore points are then deleted.
 
 ### The metrics table
 

@@ -111,6 +111,13 @@ reaches the gateway if `docker-compose.yml` lists it under the gateway's
 `environment:`; for one that isn't there yet, add a line there as well as in
 `.env`.
 
+Lines in `.env` that start `# MTG_` (the approval modes, `MTG_APPLY_IN_CHAT`,
+`MTG_UPDATE_CHECK` and the other tuning settings) are left to the gateway's
+admin Settings page (`/admin/settings`, since 0.7.29), starting from the
+default shown. Remove the `# ` to fix one in `.env` instead; the page then
+shows it as set in your stack, read-only
+([OPERATIONS.md](OPERATIONS.md#the-settings-page)).
+
 Create the folders and give them to `PUID:PGID`:
 
 ```bash
