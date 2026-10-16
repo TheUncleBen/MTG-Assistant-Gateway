@@ -143,8 +143,8 @@ def main() -> int:
     decks = [d for p in args.decks for d in read_decks(p)]
     rows = measure(decks, derive)
     print(
-        "| Deck | Cards | Modeled | Set aside on purpose | Needs a model | Not on Scryfall | Modeled share "
-        "| Modeled or set aside on purpose |"
+        "| Deck | Cards | Played with their effect | Left out on purpose | Needs a model | Not on Scryfall "
+        "| Played with their effect (share) | Played with their effect or left out on purpose (share) |"
     )
     print("|---|---:|---:|---:|---:|---:|---:|---:|")
     for r in rows:
@@ -156,8 +156,8 @@ def main() -> int:
     modeled = sum(r["modeled"] for r in rows)
     known = modeled + sum(r["out_of_scope"] for r in rows)
     print(
-        f"\nAll decks: {round(100 * modeled / total, 1)}% of {total} cards modeled; "
-        f"{round(100 * known / total, 1)}% modeled or set aside on purpose."
+        f"\nAll decks: {round(100 * modeled / total, 1)}% of {total} cards played with their effect; "
+        f"{round(100 * known / total, 1)}% played with their effect or left out on purpose."
     )
     if args.json:
         args.json.write_text(json.dumps(rows, indent=1), "utf-8")

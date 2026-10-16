@@ -79,7 +79,7 @@ MAX_FORGE_WAITING = 2
 # taken out again when the report is read (``settings``).
 RUN_KEY = "_run"
 # Why a report has no Forge games although the gateway runs Forge (a "skipped" section's note).
-FORGE_NOT_ASKED = "Forge was not asked for this report (a quick goldfish-only run)."
+FORGE_NOT_ASKED = "Forge was not asked for this report (solo test only)."
 FORGE_CONSTRUCTED = (
     "Forge plays Commander games against Commander precons only, so it does not run a 60-card deck."
 )

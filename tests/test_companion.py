@@ -279,7 +279,8 @@ async def test_compare_page_tests_both_decks_against_the_same_forge_opponents(st
         h.app.state.gateway.db._conn.execute("DELETE FROM reports")  # nothing to reuse
         none = await b.http.post("/decks/42/compare/forge", data={"csrf": csrf, "with": "43"})
         assert none.status_code == 409, none.text
-        assert "Forge could not start games for" in none.text and "That report" not in none.text
+        assert "Forge could not start games for Sample Commander Deck, so" in none.text, none.text
+        assert "That report" not in none.text and "the first deck" not in none.text
         assert "If your Forge queue is full, wait for a run to finish" in none.text
         assert re.search(r"href='/history/reports/rep_[^']+'>Its report</a>", none.text)
     finally:

@@ -672,13 +672,14 @@ def add_deck_tool_routes(
                 if str(exc) != NO_FORGE_TO_SHARE:
                     raise
                 # the member picked no report here: say which deck got no Forge games, and why it may be
-                name = (first.get("deck") or {}).get("name") or "the first deck"
+                name = first.get("deck_name") or "the first deck"
                 return page(
                     "Compare",
                     "<div class='panel'><p class='notice error'>"
                     f"Forge could not start games for {_esc(name)}, so there are no opponents to share. "
-                    f"<a href='/history/reports/{_esc(first['report_id'])}'>Its report</a> is under "
-                    "Reports. If your Forge queue is full, wait for a run to finish, then try again."
+                    f"<a href='/history/reports/{_esc(first['report_id'])}'>Its report</a> is on the "
+                    "<a href='/reports'>Reports</a> page. If your Forge queue is full, wait for a run to "
+                    "finish, then try again."
                     f"</p>{back}</div>",
                     sub=sub,
                     sid=sid,
