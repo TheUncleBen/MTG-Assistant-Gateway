@@ -435,6 +435,9 @@ def banner_html(
 
 
 WRITES_OFF_TITLE = "Archidekt writes are switched off on this gateway"
+# shown under the greyed buttons too: a phone shows no tooltip (social review, Q141 check)
+WRITES_OFF_LINE = "Archidekt writes are switched off on this gateway, so these buttons are off."
+WRITES_OFF_FOLLOW = "Archidekt writes are switched off on this gateway, so Follow is off."
 
 
 def social_html(deck: Deck, *, own: bool, writes_enabled: bool = True) -> str:
@@ -473,10 +476,15 @@ def social_html(deck: Deck, *, own: bool, writes_enabled: bool = True) -> str:
     comments = (
         f"<a class='soc' href='#comments' data-social='comments'>{icon('comment')}<span>Comments</span></a>"
     )
-    off = "" if writes_enabled else " data-writes='off'"
+    off = "" if writes_enabled else " data-writes='off' aria-describedby='social-off'"
     return (
         f"<div class='social' role='group' data-deck='{did}' aria-label='Archidekt actions'{off}>"
         f"{like}{bookmark}{follow}{comments}</div>"
+        + (
+            ""
+            if writes_enabled
+            else f"<p class='social-off muted small' id='social-off'>{WRITES_OFF_LINE}</p>"
+        )
     )
 
 
@@ -520,6 +528,8 @@ DECK_CSS_A = (
 .banner .social .soc{height:auto;min-height:34px;max-width:100%}
 .banner .social .soc span{min-width:0;overflow-wrap:anywhere;line-height:1.2;padding:.35rem 0}
 .banner .social[data-writes=off] .soc[disabled]{cursor:not-allowed}
+.banner .social-off{display:inline-block;margin:.5rem 0 0;padding:.3rem .65rem;border-radius:6px;
+  background:rgba(0,0,0,.72);color:#fff;font-size:.85rem;overflow-wrap:anywhere}
 .comments .cmt .who{flex-wrap:wrap}
 .comments .cmt .who b{overflow-wrap:anywhere}
 @media (max-width:600px){.comments .cmt .replies{margin-left:.35rem;padding-left:.5rem}}

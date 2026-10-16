@@ -184,18 +184,24 @@ MAX_PREF_NAME = 120
 MAX_PROPOSAL_VERSIONS = 50
 
 
-#: States of a note that hold the notes depending on it (K6, Q27j).
-HOLDING_STATES = ("rejected", "withdrawn", "failed")
+#: States of a note that hold the notes depending on it (K6, Q27j). "expired" holds them as the
+#: safe default until Ben answers (review round 1, finding 3; pending a card).
+HOLDING_STATES = ("rejected", "withdrawn", "failed", "expired")
+
+# A note's state as the member sees it: a waiting one past its expiry is "expired" even before
+# the prune marks it so (the ``o`` alias, with the time as ``:now``).
+_SEEN_STATE = "(CASE WHEN o.state = 'pending' AND o.expires_at < :now THEN 'expired' ELSE o.state END)"
+_HOLDING_SQL = "(" + ", ".join(f"'{s}'" for s in HOLDING_STATES) + ")"
 
 
 def _blocking_dependency(c: sqlite3.Connection, proposal_id: str) -> dict[str, Any] | None:
-    """The first note ``proposal_id`` depends on that is rejected, withdrawn or failed (its id,
-    board number and state), or None."""
+    """The first note ``proposal_id`` depends on that is rejected, withdrawn, failed or expired
+    (its id, board number and state), or None."""
     row = c.execute(
-        f"SELECT o.id, o.board_no, o.state FROM proposal_links l JOIN proposals o ON o.id = l.other_id "
-        f"WHERE l.proposal_id = ? AND l.kind = 'depends_on' AND o.state IN ({_marks(HOLDING_STATES)}) "
-        f"ORDER BY l.created_at, l.rowid LIMIT 1",
-        (proposal_id, *HOLDING_STATES),
+        f"SELECT o.id, o.board_no, {_SEEN_STATE} AS state FROM proposal_links l "
+        f"JOIN proposals o ON o.id = l.other_id WHERE l.proposal_id = :pid AND l.kind = 'depends_on' "
+        f"AND {_SEEN_STATE} IN {_HOLDING_SQL} ORDER BY l.created_at, l.rowid LIMIT 1",
+        {"pid": proposal_id, "now": int(time.time())},
     ).fetchone()
     return dict(row) if row else None
 
@@ -1962,6 +1968,7 @@ class Database:
             "board_no, archidekt_user_id FROM proposals "
             "WHERE owner_sub = ? AND state = 'pending' AND expires_at >= ?"
         )
+        self.hold_blocked(owner_sub)
         args: list[Any] = [owner_sub, int(time.time())]
         if deck_id is not None:
             sql += " AND deck_id = ?"
@@ -2269,6 +2276,25 @@ class Database:
                 (proposal_id, owner_sub, int(time.time())),
             ).fetchall()
         return [str(r[0]) for r in rows]
+
+    def hold_blocked(self, owner_sub: str) -> int:
+        """Hold each live waiting note of the owner that depends on a rejected, withdrawn, failed
+        or expired note and is not held yet (K6). The apply paths settle their own links; this
+        catches the ones that close a note without them: a restart mid-apply, a shutdown cancel,
+        the six-hour backstop and expiry (review round 1, finding 3). Returns how many it held."""
+        first = (
+            f"SELECT {{}} FROM proposal_links l JOIN proposals o ON o.id = l.other_id "
+            f"WHERE l.proposal_id = proposals.id AND l.kind = 'depends_on' "
+            f"AND {_SEEN_STATE} IN {_HOLDING_SQL} ORDER BY l.created_at, l.rowid LIMIT 1"
+        )
+        reason = first.format("'depends:' || o.id || ':' || " + _SEEN_STATE)
+        with self.tx() as c:
+            return c.execute(
+                f"UPDATE proposals SET status = 'held', status_at = :now, status_reason = ({reason}) "
+                f"WHERE owner_sub = :sub AND state = 'pending' AND expires_at >= :now "
+                f"AND COALESCE(status, '') <> 'held' AND EXISTS ({first.format('1')})",
+                {"sub": owner_sub, "now": int(time.time())},
+            ).rowcount
 
     def set_hold(self, proposal_id: str, owner_sub: str, reason: str | None) -> bool:
         """Hold a waiting proposal (``reason``) or lift its hold (None: back to plain waiting).

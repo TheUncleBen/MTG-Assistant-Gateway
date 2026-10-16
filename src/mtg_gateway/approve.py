@@ -250,11 +250,31 @@ def deck_waiting(data: dict[str, Any], *, decks: Any, sub: str) -> tuple[dict[st
         "same_app": len(mine),
         "other_apps": [{"app": a, "count": n} for a, n in sorted(apps.items())],
         "review_all_url": f"{decks.settings.public_url}/proposals#deck-{deck_id}",
+        # the app asking, so the card names it ("2 more from Claude"): the count is per app
+        **({"this_app": decks._creator_label(client)} if client else {}),
     }
     full = [decks.db.get_proposal(r["id"], sub) or {} for r in mine]
     items = [(r["id"], int(r.get("version") or 1)) for r in full if r and decks.card_may_approve(r)]
     if len(items) < 2 or not client:
         return info, None
+    # what "Apply all" would apply, listed on its confirm before the press (Q134 item 8: a held
+    # one says so; G16: an amended one says who changed it and what)
+    keys = (
+        "proposal_id",
+        "board_no",
+        "summary",
+        "status",
+        "status_reason",
+        "version",
+        "changed_by",
+        "what_changed",
+    )
+    in_set = {pid for pid, _v in items}
+    info["set_lines"] = [
+        {k: x[k] for k in keys if k in x}
+        for x in decks.board_lines(sub, str(deck_id))
+        if x["proposal_id"] in in_set
+    ]
     code = approval_set_code(decks.settings.session_secret, sub=sub, client_id=client, items=items)
     return info, {"ids": [i for i, _v in items], "code": code}
 

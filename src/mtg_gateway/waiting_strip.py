@@ -130,12 +130,12 @@ def action_bar(*, inline: bool = False) -> str:
     Without JavaScript it is always there and acts on the checked rows."""
     return (
         f"<div class='wbar{' inline' if inline else ''}' role='group' aria-label='Checked changes'>"
-        "<span class='count' aria-live='polite'></span>"
+        "<div class='wtop'><span class='count' aria-live='polite'></span>"
+        "<button type='button' class='btn clear' hidden>Clear</button></div>"
         "<button type='submit' name='action' value='apply' class='btn-primary' data-label='Apply'>"
         "Apply checked</button>"
         "<button type='submit' name='action' value='reject' class='danger' data-label='Reject'>"
-        "Reject checked</button>"
-        "<button type='button' class='btn clear' hidden>Clear</button></div>"
+        "Reject checked</button></div>"
     )
 
 
@@ -150,7 +150,7 @@ def strip_html(lines: list[dict[str, Any]], *, csrf: str | None, deck_id: str) -
     head = (
         f"<summary><b>{n} waiting change{'s' if n != 1 else ''}</b>"
         f"<span class='sep'>·</span><span>oldest {oldest}</span>"
-        "<span class='sep'>·</span><span class='open'>Review</span></summary>"
+        "<span class='open'><span class='sep'>·</span><span class='go'>Review</span></span></summary>"
     )
     rows = "".join(row_html(x, now=now, group=deck_id) for x in lines)
     return (
@@ -172,19 +172,20 @@ def strip_html(lines: list[dict[str, Any]], *, csrf: str | None, deck_id: str) -
 # tokens (theme.py), each pair at least 4.5:1 in light and dark; rows are at least 44 px high.
 LIST_CSS = """
 .wlist{list-style:none;margin:0;padding:0}
-.wrow{display:flex;align-items:stretch;gap:.5rem;border-top:1px solid var(--surface-2)}
+.wrow{display:flex;flex-wrap:wrap;align-items:stretch;column-gap:.5rem;border-top:1px solid var(--surface-2)}
 .wrow:first-child{border-top:0}
-.pick{display:flex;align-items:flex-start;gap:.6rem;flex:1 1 auto;min-width:0;min-height:44px;
+/* with big text the row has no room for Review beside it, so Review goes under (finding 8) */
+.pick{display:flex;align-items:flex-start;gap:.6rem;flex:1 1 12em;min-width:0;min-height:44px;
   padding:.55rem .25rem;cursor:pointer;flex-wrap:wrap}
 .pick input[type=checkbox]{width:1.25rem;height:1.25rem;margin:.1rem 0 0;flex:none;
   accent-color:var(--orange-ctl)}
-.pick .what{flex:1 1 14rem;min-width:0;overflow-wrap:anywhere}
+.pick .what{flex:1 1 14rem;min-width:0;overflow-wrap:break-word}
 .pick .chips{display:flex;flex-wrap:wrap;gap:.3rem}
 .pick .by{color:var(--text-muted);font-size:.86rem;flex:0 1 auto}
 .pick .why{flex:1 1 100%;font-size:.88rem;color:var(--text-muted);padding-left:1.85rem}
 .pick.all{border-bottom:1px solid var(--border-soft);font-weight:700}
-.wrow .review{display:flex;align-items:center;padding:0 .6rem;min-width:44px;justify-content:center;
-  white-space:nowrap}
+.wrow .review{display:flex;align-items:center;padding:0 .6rem;min-width:44px;min-height:44px;
+  justify-content:center;white-space:nowrap}
 .st{display:inline-block;padding:.05rem .45rem;border-radius:3px;font-size:.8rem;font-weight:700;
   border:1px solid var(--border-soft);background:var(--surface-2);color:var(--text)}
 .st.upd{color:var(--green-text);background:var(--green-tint);border-color:var(--green)}
@@ -197,6 +198,9 @@ LIST_CSS = """
 .wbar .count{flex:1 1 auto;font-weight:700}
 .wbar button{margin:0;width:auto;min-height:44px}
 .wbar[data-none] button[name=action]{opacity:.6}
+.wbar .wtop{display:flex;align-items:center;gap:.5rem;flex:1 1 auto;min-width:0}
+.wbar .clear{background:none;border:0;color:var(--link);text-decoration:underline;padding:0 .4rem}
+.wbar .clear[hidden]{display:none}
 .dgroup{margin:0 0 1rem}
 .dgroup h2{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;font-size:1.1rem;margin:0 0 .25rem}
 .dgroup h2 .pick{flex:0 1 auto;padding:.3rem 0;min-height:44px;align-items:center}
@@ -206,20 +210,25 @@ LIST_CSS = """
 .wstrip > summary{cursor:pointer;display:flex;flex-wrap:wrap;align-items:center;gap:.4rem;min-height:44px;
   padding:.35rem .75rem;list-style:none}
 .wstrip > summary::-webkit-details-marker{display:none}
-.wstrip > summary .open{color:var(--link);text-decoration:underline}
+.wstrip > summary .open{display:inline-flex;gap:.4rem}
+.wstrip > summary .open .go{color:var(--link);text-decoration:underline}
 .wstrip[open] > summary .open{display:none}
 .wstrip .sep{color:var(--text-muted)}
 .wstrip .wform{padding:0 .75rem .6rem}
 .wstrip .more{margin:.5rem 0 0}
+/* links a thumb taps on their own are 44 px tall (review round 1, finding 13) */
+.wstrip .more a,.dgroup h2 > a,.results li > a{display:inline-flex;align-items:center;min-height:44px}
 .order{margin:0 0 1rem;padding-left:1.4rem}
-.order li{margin:.3rem 0;overflow-wrap:anywhere}
+.order li{margin:.3rem 0;overflow-wrap:break-word}
 .order .held{display:block;color:var(--red-text);font-size:.9rem}
-.skips li,.results li{margin:.35rem 0;overflow-wrap:anywhere}
+.skips li,.results li{margin:.35rem 0;overflow-wrap:break-word}
 @media (max-width:700px){
   .wbar:not(.inline){position:fixed;left:0;right:0;bottom:0;margin:0;border-radius:0;border-width:1px 0 0;
     padding:.5rem .75rem calc(.5rem + env(safe-area-inset-bottom))}
-  .wbar:not(.inline) .count{flex-basis:100%}
-  .wbar button{flex:1 1 6rem}
+  /* the count and Clear on one row, Apply and Reject side by side on the next: two rows at
+     200% text too (review round 1, finding 8) */
+  .wbar:not(.inline) .wtop{flex-basis:100%}
+  .wbar button[name=action]{flex:1 1 0;min-width:0}
   .pick .by{flex-basis:100%;padding-left:1.85rem}
   .wrow .review{padding:0 .4rem}
 }

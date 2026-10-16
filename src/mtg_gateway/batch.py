@@ -264,13 +264,10 @@ async def _run(svc: Any, sub: str, run: dict[str, Any], *, via: str) -> None:
                         continue
                     # A9: it waits while a change it depends on is still waiting (not selected,
                     # selected on a deck that comes later) or was not sent in this selection. A
-                    # rejected, withdrawn or failed one only holds it, and the member may apply a
-                    # held change (A8): the confirm said so.
+                    # rejected, withdrawn, failed or expired one only holds it, and the member may
+                    # apply a held change (A8): the confirm said so.
                     blocked = [
-                        d
-                        for d in _depends(svc, sub, pid)
-                        if d in not_applied
-                        or (svc.db.get_proposal(d, sub) or {}).get("state") in ("pending", "applying")
+                        d for d in _depends(svc, sub, pid) if d in not_applied or _still_open(svc, sub, d)
                     ]
                     if blocked:
                         no = svc.db.proposal_board_numbers(sub, blocked).get(blocked[0])
@@ -342,3 +339,11 @@ def summary_text(run: dict[str, Any]) -> str:
     if run["failed"]:
         bits.append(f"{len(run['failed'])} failed.")
     return " ".join(bits)
+
+
+def _still_open(svc: Any, sub: str, proposal_id: str) -> bool:
+    """A note still on its way: waiting and unexpired, or being applied."""
+    row = svc.db.get_proposal(proposal_id, sub) or {}
+    if row.get("state") == "applying":
+        return True
+    return row.get("state") == "pending" and int(row.get("expires_at") or 0) >= int(time.time())

@@ -23,7 +23,7 @@ from starlette.responses import Response
 
 from .archidekt import FORMAT_IDS, FORMAT_NAMES, SEARCH_ORDERS, format_label, list_row
 from .busy import busy_response
-from .deckpage import avatar_html, covers_for, deck_list_html
+from .deckpage import WRITES_OFF_FOLLOW, WRITES_OFF_TITLE, avatar_html, covers_for, deck_list_html
 from .decks import DeckError
 from .pages import _csrf, browser_session, login_redirect
 from .theme import display_name, icon, render, stylesheet_link
@@ -109,6 +109,7 @@ BROWSE_CSS = """
    two no longer fit side by side, so neither squeezes the other (gate R5-2: a 64-character name). */
 .profile{display:flex;flex-wrap:wrap;align-items:center;gap:1rem;margin:0 0 1rem;min-width:0}
 .profile .who .uname{overflow-wrap:anywhere}
+.profile .social-off{flex-basis:100%;margin:0}
 .profile .who{display:flex;flex-direction:column;flex:1 1 16rem;min-width:0}
 .profile .who .uname{font-size:1.5rem;font-weight:900}
 .profile .who .sub{color:var(--text-muted)}
@@ -461,11 +462,22 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
         shown = rows[0]["owner"] if rows else username
         owner_id = rows[0].get("owner_id") if rows else None
         link = state.db.get_link(sub) or {}
+        writes = bool(state.settings.writes_enabled)
         follow = (
             f"<button type='button' class='btn soc' data-social='follow' data-user='{_esc(owner_id)}' "
-            f"data-name='{_esc(shown)}' data-state='unknown' title='Follow {_esc(shown)} on Archidekt'>"
-            f"{icon('follow')}<span>Follow {_esc(shown)}</span></button>"
+            f"data-name='{_esc(shown)}' data-state='unknown' "
+            + (
+                f"title='Follow {_esc(shown)} on Archidekt'>"
+                if writes  # writes switched off: shown, disabled, and the reason is on the page
+                else f"disabled title='{WRITES_OFF_TITLE}' aria-describedby='social-off'>"
+            )
+            + f"{icon('follow')}<span>Follow {_esc(shown)}</span></button>"
             if owner_id and str(link.get("archidekt_user_id") or "") != str(owner_id)
+            else ""
+        )
+        follow_off = (
+            f"<p class='social-off muted small' id='social-off'>{WRITES_OFF_FOLLOW}</p>"
+            if follow and not writes
             else ""
         )
         order_opts = "".join(
@@ -480,7 +492,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             f"<div class='social'>{follow}"
             f"<a class='btn ext' href='https://archidekt.com/u/{_esc(shown)}' "
             "target='_blank' rel='noreferrer noopener'>"
-            f"{icon('external')} Archidekt profile</a></div></section>"
+            f"{icon('external')} Archidekt profile</a></div>{follow_off}</section>"
             f"<form method='get' class='panel listbar' id='listform'><div class='controls'>"
             f"<div class='field'><label for='f-order'>Sort by</label><span class='sel'>{icon('sort')}"
             f"<select id='f-order' name='order'>{order_opts}</select></span></div>"

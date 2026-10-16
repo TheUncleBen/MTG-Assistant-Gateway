@@ -221,9 +221,22 @@ OUT_OF_DATE_STEP = (
     "other than what was reviewed, so applying it will be refused and nothing will be sent. Amend "
     "it to fit the deck as it is now, or reject it. "
 )
+
+
+def _made_by_another_app(row: dict[str, Any], client: str | None) -> bool:
+    """Whether a note was made or changed by an app other than ``client`` (G5, Q27m)."""
+    apps = {row.get("created_by_client"), row.get("amended_by_client")} - {None, ""}
+    return any(a != client for a in apps)
+
+
+# Undo refused: the deck changed after its preview was shown (wording draft, WORDING-3 item 4).
+UNDO_CHANGED = (
+    "The deck changed since this Undo was shown, so nothing was sent. Go back to Proposals and "
+    "open Undo again to see what it would put back now."
+)
 # Said first in a held proposal's next_step (Q27j, A8).
 HELD_STEP = (
-    "Held: a proposal this one depends on was rejected, withdrawn or failed. An assistant never "
+    "Held: a proposal this one depends on was rejected, withdrawn, failed or expired. An assistant never "
     "applies it in any mode; the user may still apply it themselves, or it can be amended. "
 )
 # Archidekt work one member may start per ARCHIDEKT_BUDGET_WINDOW seconds (each deck read,
@@ -2429,12 +2442,46 @@ class DeckService:
         creator, amender = row.get("created_by_client"), row.get("amended_by_client")
         if risk not in modes.MEMBER_ONLY and amender and amender != creator:
             return "high", "was changed by another app after it was made", mode, False
+        if risk not in modes.MEMBER_ONLY and self._takes_over_another_app(sub, row):
+            # G5 through combine or replace: another app's waiting work, now in this note, still
+            # needs the member's own press (until Ben decides on cross-app combine, Q141 check)
+            return "high", "combines or replaces a change another app made", mode, False
         if risk not in modes.MEMBER_ONLY and row.get("status") == "held" and row.get("state") == "pending":
-            return "high", "is held: a proposal it depends on was rejected, withdrawn or failed", mode, False
+            return (
+                "high",
+                "is held: a proposal it depends on was rejected, withdrawn, failed or expired",
+                mode,
+                False,
+            )
+        first = self._first_step_not_applied(sub, row["id"]) if risk not in modes.MEMBER_ONLY else None
+        if first is not None:
+            # Q134 item 9, Q140 item 8: a second step never lands without its first; the member's
+            # own press still may (A8), as for a held one
+            which = f"#{first['board_no']}" if first.get("board_no") else "another proposal"
+            return "high", f"depends on {which}, which has not been applied yet", mode, False
         wait = modes.auto_waits(kind, row.get("rows"), big_rows=int(self.live.get("auto_big_edit_rows")))
         if mode == "auto" and wait and risk not in modes.MEMBER_ONLY:
             why = wait  # what the assistant is told: why auto mode still waits for the user
         return risk, why, mode, modes.assistant_may_apply(mode, risk, auto_wait=wait)
+
+    def _takes_over_another_app(self, sub: str, row: dict[str, Any]) -> bool:
+        """Whether this note replaces (or was combined from) a note that another app made or
+        changed."""
+        creator = row.get("created_by_client")
+        for link in self.db.proposal_links(sub, [row["id"]]):
+            if link["proposal_id"] == row["id"] and link["kind"] == "replaces":
+                if _made_by_another_app(self.db.get_proposal(link["other_id"], sub) or {}, creator):
+                    return True
+        return False
+
+    def _first_step_not_applied(self, sub: str, proposal_id: str) -> dict[str, Any] | None:
+        """The first note ``proposal_id`` depends on that is not applied (its row), or None."""
+        for link in self.db.proposal_links(sub, [proposal_id]):
+            if link["proposal_id"] == proposal_id and link["kind"] == "depends_on":
+                other = self.db.get_proposal(link["other_id"], sub)
+                if other is not None and other["state"] != "applied":
+                    return other
+        return None
 
     def _status_fields(self, sub: str, row: dict[str, Any]) -> dict[str, Any]:
         """A waiting proposal's status and its reason in words: "updated" (re-checked, still the
@@ -2642,6 +2689,9 @@ class DeckService:
         return out
 
     def describe(self, sub: str, proposal_id: str) -> dict[str, Any]:
+        # A note closed without settling its links (a restart, a cancel, expiry) holds its
+        # dependents before anything about them is shown or decided (K6).
+        self.db.hold_blocked(sub)
         row = self.db.get_proposal(proposal_id, sub)
         if row is None:
             raise DeckError("not_found", "No such proposal for your account.")
@@ -2724,6 +2774,15 @@ class DeckService:
             # 0.7.29: every note has a version (an amend makes the next one) and a number on its
             # deck's board; a waiting one may be "updated", "needs_look" or "held" (with why).
             "version": int(row.get("version") or 1),
+            # G16, Q134 item 5: an amended note says which app changed it and what changed
+            **(
+                {
+                    "changed_by": self._creator_label(row["amended_by_client"]),
+                    "what_changed": str(row.get("version_note") or ""),
+                }
+                if int(row.get("version") or 1) > 1 and row.get("amended_by_client")
+                else {}
+            ),
             "board_no": row.get("board_no"),
             **status_info,
             "next_step": (OUT_OF_DATE_STEP + status_info["status_reason"] + " " if out_of_date else "")
@@ -3256,6 +3315,7 @@ class DeckService:
         self, sub: str, proposal_ids: list[str], versions: dict[str, int] | None = None
     ) -> dict[str, Any]:
         """What applying these waiting changes together would do (batch.plan): the confirm."""
+        self.db.hold_blocked(sub)
         return batch.plan(self, sub, [str(p) for p in proposal_ids][:MAX_SELECTION], versions)
 
     def apply_selection(
@@ -3302,11 +3362,20 @@ class DeckService:
             "later": len(later),
             "outside": outside,
             "warning": undo_warning(len(later), outside),
+            # the press is refused if the deck is no longer the one this showed (G16 for Undo)
+            "fingerprint": deck.fingerprint(),
         }
 
-    async def undo(self, sub: str, snapshot_id: str) -> dict[str, Any]:
+    async def undo(self, sub: str, snapshot_id: str, *, seen: str | None = None) -> dict[str, Any]:
         """The member's "Undo": a restore of the snapshot, applied at once by their own press (the
-        restore is an ordinary proposal, so it can itself be undone)."""
+        restore is an ordinary proposal, so it can itself be undone). ``seen`` is the deck's
+        fingerprint when the preview was shown: a deck changed since is refused before anything
+        is made, as the preview's list and warning no longer hold (review round 1, finding 11)."""
+        if seen is not None:
+            snap = self.snapshot(sub, str(snapshot_id))
+            deck = await self.get_own_deck(sub, snap["deck_id"])
+            if deck.fingerprint() != seen:
+                raise DeckError("changed", UNDO_CHANGED)
         made = await self.propose_restore(sub, snapshot_id)
         return await self.apply(sub, made["proposal_id"], via="browser")
 
@@ -4625,12 +4694,19 @@ class DeckService:
         board.settle(self, sub, proposal_id, "pending")
         return self.describe(sub, proposal_id)
 
-    def mark_replaced(self, sub: str, new_id: str, old_ids: list[str]) -> list[str]:
+    def mark_replaced(self, sub: str, new_id: str, old_ids: list[str]) -> tuple[list[str], list[str]]:
         """Close each old note as replaced by ``new_id`` (kept, linked, and back if the new one is
-        rejected: Q27l). Returns the ids closed."""
+        rejected: Q27l). A note another app made or changed is only linked: it stays waiting
+        until the member's press applies ``new_id`` (Q27m, G5; the Q142 check), and then
+        board.settle closes it. Returns (the ids closed, the ids left waiting)."""
         no = self.db.proposal_board_numbers(sub, [new_id]).get(new_id)
-        done = []
+        client = current_client.get()
+        done, later = [], []
         for old in old_ids:
+            if _made_by_another_app(self.db.get_proposal(old, sub) or {}, client):
+                if self.db.link_proposals(new_id, sub, "replaces", old):
+                    later.append(old)
+                continue
             if self.db.link_proposals(new_id, sub, "replaces", old) and self.db.close_proposal(
                 old,
                 sub,
@@ -4640,7 +4716,7 @@ class DeckService:
             ):
                 done.append(old)
                 board.settle(self, sub, old, "withdrawn")
-        return done
+        return done, later
 
     def check_replaceable(self, sub: str, deck_id: str, old_ids: Any) -> list[str]:
         """The notes a new proposal will replace (Q27m: any app's, labelled): waiting, on the
@@ -4677,11 +4753,17 @@ class DeckService:
             return out
         pid = out["proposal_id"]
         self.link_depends(sub, pid, depends_on)
-        done = self.mark_replaced(sub, pid, old)
-        if not depends_on and not done:
+        done, later = self.mark_replaced(sub, pid, old)
+        if not depends_on and not done and not later:
             return out
         fresh = self.describe(sub, pid)
-        return {**out, **fresh, **({"replaced": done} if done else {})}
+        return {
+            **out,
+            **fresh,
+            **({"replaced": done} if done else {}),
+            # another app's changes: closed only once the member's press applies this one
+            **({"replaces_when_applied": later} if later else {}),
+        }
 
     async def combine(self, sub: str, proposal_ids: Any) -> dict[str, Any]:
         """One note of several waiting card edits on one deck, their changes oldest first; the old
@@ -4700,7 +4782,26 @@ class DeckService:
             raise DeckError("invalid", "Only proposals for the same deck can be combined.")
         rows.sort(key=lambda r: (r["created_at"], r.get("board_no") or 0))
         changes = [c for r in rows for c in r["changes"]]
-        return await self.propose_linked(sub, rows[0]["deck_id"], changes, replaces=[r["id"] for r in rows])
+        parts = [r["id"] for r in rows]
+        out = await self.propose_linked(sub, rows[0]["deck_id"], changes, replaces=parts)
+        if out.get("duplicate_of"):
+            return out
+        pid = out["proposal_id"]
+        # The combined note keeps what held its parts back (K6, A9): it waits for the notes they
+        # depended on, and a held part makes it held, so no assistant applies it on its own. (A
+        # part another app made: _assistant_policy reads it from the "replaces" links.)
+        carried = False
+        for link in self.db.proposal_links(sub, parts):
+            if (
+                link["proposal_id"] in parts
+                and link["kind"] == "depends_on"
+                and link["other_id"] not in parts
+            ):
+                carried = self.db.link_proposals(pid, sub, "depends_on", link["other_id"]) or carried
+        held = next((r for r in rows if r.get("status") == "held" and r.get("status_reason")), None)
+        if held is not None:
+            carried = self.db.set_hold(pid, sub, str(held["status_reason"])) or carried
+        return {**out, **self.describe(sub, pid)} if carried else out
 
     def link_depends(self, sub: str, proposal_id: str, others: Any) -> None:
         """Record that a new note depends on waiting notes (Q27j): it is held if one of them is

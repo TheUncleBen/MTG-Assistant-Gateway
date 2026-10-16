@@ -58,8 +58,11 @@ async def test_the_website_reads_and_votes_on_a_later_page(stack: Stack) -> None
         # the thread page and the vote: the deck is not read again for its thread root
         assert len(sent) == 2, sent
         assert sent[0][0] == "GET" and "/comments/" in sent[0][1] and sent[1][0] == "PUT"
-        # the old page-1-only lookup refused this comment
+        # shown on page 1, it is found on the last page too (a new comment sits there: finding 6)
         r = await post(b, "/social/api/decks/43/comments/555005/vote", {"vote": "none"})
+        assert r.json()["ok"] is True and ("alice", 555005) not in stack.ark.votes
+        # one that is in no page read is still refused
+        r = await post(b, "/social/api/decks/43/comments/555099/vote", {"vote": "up"})
         assert r.json()["ok"] is False and "no longer on the page" in r.json()["message"]
     finally:
         await b.aclose()
@@ -303,11 +306,16 @@ async def test_a_bookmark_already_so_says_so(stack: Stack) -> None:
 
 def test_with_writes_switched_off_the_deck_page_is_read_only(tmp_path, monkeypatch) -> None:
     """The social review: with MTG_WRITES_ENABLED off, the social buttons show their state but are
-    disabled with the reason, and the comment thread has no form, Reply, votes or edits."""
+    disabled, with the reason on the page (a phone shows no tooltip), and the comment thread has no
+    form, Reply, votes or edits. A user's page has its Follow off the same way. Phone and desktop,
+    light and dark; the reason reads at 4.5:1."""
+    import os
+
     import pytest
     from playwright.sync_api import sync_playwright
 
     from . import test_social_browser
+    from .test_proposal_review_browser import CONTRAST
     from .test_scan_browser import _chromium_path
 
     exe = _chromium_path()
@@ -320,28 +328,97 @@ def test_with_writes_switched_off_the_deck_page_is_read_only(tmp_path, monkeypat
     server = test_social_browser.Server(tmp_path)
     server.ark.comments[ROOT] = [_comment(555001, 3)]
     server.start()
+    shots = os.environ.get("MTG_SHOTS_DIR")
     try:
         sid = server.sign_in_and_link()
         with sync_playwright() as p:
             browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
-            ctx = browser.new_context(viewport={"width": 412, "height": 915}, is_mobile=True, has_touch=True)
-            ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
-            page = ctx.new_page()
-            errors: list[str] = []
-            page.on("pageerror", lambda e: errors.append(str(e)))
-            page.goto(f"{server.base}/decks/43#comments", wait_until="networkidle")
-            like = page.locator("[data-social=vote]")
-            assert like.is_disabled() and like.get_attribute("title") == (
-                "Archidekt writes are switched off on this gateway"
-            )
-            assert page.locator("[data-social=bookmark]").is_disabled()
-            page.locator("#comments").scroll_into_view_if_needed()
-            page.wait_for_selector("#comments .cmt[data-id='555001']", timeout=10000)
-            assert page.locator("#comments form.newcomment").count() == 0
-            assert "can be read here but not posted" in page.locator("#comments").inner_text()
-            assert page.locator("#comments .cmt button").count() == 0  # no Reply, votes or edits
-            assert server.ark.votes == {}
-            assert errors == [], errors
+            for name, size, mobile, scheme in (
+                ("phone", (412, 915), True, "light"),
+                ("phone", (412, 915), True, "dark"),
+                ("desktop", (1366, 900), False, "dark"),
+            ):
+                where = f"{name}-{scheme}"
+                ctx = browser.new_context(
+                    viewport={"width": size[0], "height": size[1]},
+                    is_mobile=mobile,
+                    has_touch=mobile,
+                    color_scheme=scheme,
+                )
+                ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+                page = ctx.new_page()
+                errors: list[str] = []
+                page.on("pageerror", lambda e, errors=errors: errors.append(str(e)))
+                page.goto(f"{server.base}/decks/43#comments", wait_until="networkidle")
+                like = page.locator("[data-social=vote]")
+                assert like.is_disabled() and like.get_attribute("title") == (
+                    "Archidekt writes are switched off on this gateway"
+                )
+                assert page.locator("[data-social=bookmark]").is_disabled()
+                assert page.locator("[data-social=follow]").is_disabled()
+                reason = page.locator(".banner .social-off")
+                assert reason.is_visible(), where
+                assert reason.inner_text() == (
+                    "Archidekt writes are switched off on this gateway, so these buttons are off."
+                )
+                got = reason.evaluate(CONTRAST)
+                assert got["ratio"] >= 4.5, (where, got)
+                if shots:
+                    reason.scroll_into_view_if_needed()
+                    page.wait_for_timeout(300)  # let the scroll settle before the picture
+                    page.screenshot(path=f"{shots}/a-writes-off-deck-{where}.png")
+                page.locator("#comments").scroll_into_view_if_needed()
+                page.wait_for_selector("#comments .cmt[data-id='555001']", timeout=10000)
+                assert page.locator("#comments form.newcomment").count() == 0
+                assert "can be read here but not posted" in page.locator("#comments").inner_text()
+                assert page.locator("#comments .cmt button").count() == 0  # no Reply, votes or edits
+                # a user's page: Follow is off too, and says why
+                page.goto(f"{server.base}/users/amy", wait_until="networkidle")
+                follow = page.locator("[data-social=follow]")
+                assert follow.count() == 1 and follow.is_disabled(), where
+                line = page.locator(".profile .social-off")
+                assert line.is_visible() and line.inner_text().endswith("so Follow is off."), where
+                got = line.evaluate(CONTRAST)
+                assert got["ratio"] >= 4.5, (where, got)
+                follow.click(force=True)  # a disabled button sends nothing
+                width = page.evaluate("document.documentElement.scrollWidth")
+                assert width <= size[0], f"{where}: page scrolls sideways ({width}px)"
+                if shots:
+                    page.screenshot(path=f"{shots}/a-writes-off-user-{where}.png")
+                assert server.ark.votes == {} and not any(server.ark.follows.values()), where
+                assert errors == [], errors
+                ctx.close()
             browser.close()
     finally:
         server.stop()
+
+
+async def test_a_comment_just_posted_can_be_changed_and_deleted_on_a_long_thread(stack: Stack) -> None:
+    """Review round 1, finding 6: the page draws a new comment at the top (page 1), but with no
+    points it is on the last page of a thread of 3 or more pages."""
+    b = await linked(stack)
+    try:
+        _thread(stack)
+        r = await post(b, "/social/api/decks/43/comments", {"text": "New here."})
+        assert r.status_code == 201, r.text
+        cid = r.json()["comment"]["id"] if "comment" in r.json() else r.json()["id"]
+        third = (await b.http.get("/social/api/decks/43/comments?page=3")).json()
+        assert cid in [c["id"] for c in third["comments"]], third
+        csrf = await b.csrf("/decks")
+        r = await b.http.patch(
+            f"/social/api/decks/43/comments/{cid}",
+            json={"text": "New here, changed.", "page": 1},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert r.json().get("ok") is True, r.text
+        assert (
+            next(c for c in stack.ark.comments[ROOT] if c["id"] == cid)["text"].count("New here, changed.")
+            == 1
+        )
+        r = await b.http.request(
+            "DELETE", f"/social/api/decks/43/comments/{cid}?page=1", headers={"X-CSRF-Token": csrf}
+        )
+        assert r.json().get("ok") is True, r.text
+        assert all(c["id"] != cid for c in stack.ark.comments[ROOT])
+    finally:
+        await b.aclose()

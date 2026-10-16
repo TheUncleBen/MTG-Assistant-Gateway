@@ -111,12 +111,32 @@ def settle(svc: Any, sub: str, proposal_id: str, state: str) -> None:
                             if db.reopen_proposal(old["id"], sub, max_pending=svc.max_pending()):
                                 settle(svc, sub, old["id"], "pending")
         elif state in ("applied", "pending"):
+            if state == "applied":
+                close_replaced_on_apply(svc, sub, proposal_id)
             for dep in db.dependents(sub, proposal_id):
                 row = db.get_proposal(dep, sub)
                 if row and row.get("status") == "held" and not _still_blocked(db, sub, dep):
                     db.set_hold(dep, sub, None)
     except Exception:
         logger.exception("settling the links of a proposal failed")
+
+
+def close_replaced_on_apply(svc: Any, sub: str, proposal_id: str) -> None:
+    """Once a note is applied, the notes it replaces that were left waiting (another app's:
+    DeckService.mark_replaced) are closed as replaced by it, as a replace by the same app is at
+    once (Q27m, G5)."""
+    db = svc.db
+    no = db.proposal_board_numbers(sub, [proposal_id]).get(proposal_id)
+    for link in db.proposal_links(sub, [proposal_id]):
+        if link["proposal_id"] != proposal_id or link["kind"] != "replaces":
+            continue
+        old = db.get_proposal(link["other_id"], sub)
+        if (
+            old is not None
+            and old["state"] == "pending"
+            and db.close_proposal(old["id"], sub, "replaced", f"replaced by #{no}" if no else "replaced")
+        ):
+            settle(svc, sub, old["id"], "withdrawn")
 
 
 def status_text(db: Any, sub: str, row: dict[str, Any]) -> str:
@@ -130,7 +150,12 @@ def status_text(db: Any, sub: str, row: dict[str, Any]) -> str:
     if status == "held" and reason.startswith("depends:"):
         _tag, other, closed = (reason.split(":", 2) + ["", ""])[:3]
         no = db.proposal_board_numbers(sub, [other]).get(other)
-        words = {"rejected": "you rejected", "withdrawn": "was withdrawn", "failed": "failed"}
+        words = {
+            "rejected": "you rejected",
+            "withdrawn": "was withdrawn",
+            "failed": "failed",
+            "expired": "expired",
+        }
         which = f"#{no}" if no else "another proposal"
         return f"It depends on {which}, which {words.get(closed, closed)}."
     if status == "updated":

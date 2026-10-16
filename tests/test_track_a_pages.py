@@ -110,10 +110,25 @@ async def test_apply_confirms_the_order_then_applies_and_offers_undo(stack: Stac
         assert _qty(ark, "Opt") == 0  # the confirm sends nothing
         picks = re.search(r"name='picks' value='([^']+)'", confirm).group(1)
         assert picks == f"{a},{c}"
-        # a press faster than a person reads is refused (click guard)
+        vs = {f"v_{a}": "1", f"v_{c}": "1"}  # the versions the confirm carries (G16)
+        assert f"name='v_{a}' value='1'" in confirm
+        # without them, nothing is applied: the change may have been updated since (G16)
         r = await b.http.post(
             "/proposals/apply",
             data={"csrf": csrf, "action": "apply", "picks": picks, "shown": "1.x", "back": "/proposals"},
+        )
+        assert r.headers["location"] == "/proposals?err=changed" and _qty(ark, "Opt") == 0
+        # a press faster than a person reads is refused (click guard)
+        r = await b.http.post(
+            "/proposals/apply",
+            data={
+                **vs,
+                "csrf": csrf,
+                "action": "apply",
+                "picks": picks,
+                "shown": "1.x",
+                "back": "/proposals",
+            },
         )
         # nothing applied; the same confirm again, not "check at least one" (the ticks were kept)
         assert r.status_code == 200 and _qty(ark, "Opt") == 0
@@ -122,7 +137,14 @@ async def test_apply_confirms_the_order_then_applies_and_offers_undo(stack: Stac
         shown = aged_stamp(h.settings, f"select:{SUB}")
         r = await b.http.post(
             "/proposals/apply",
-            data={"csrf": csrf, "action": "apply", "picks": picks, "shown": shown, "back": "/proposals"},
+            data={
+                **vs,
+                "csrf": csrf,
+                "action": "apply",
+                "picks": picks,
+                "shown": shown,
+                "back": "/proposals",
+            },
         )
         assert r.status_code == 303 and r.headers["location"].startswith("/proposals/applied/"), r.text
         result = (await b.http.get(r.headers["location"])).text
@@ -133,9 +155,29 @@ async def test_apply_confirms_the_order_then_applies_and_offers_undo(stack: Stac
         r = await b.http.post("/proposals/undo", data={"csrf": csrf, "action": "preview", **form})
         assert r.status_code == 200 and "Undo puts the deck back" in r.text, r.text
         assert "This also reverts" not in r.text
+        seen = re.search(r"name='deck_seen' value='([0-9a-f]{64})'", r.text)
+        assert seen, r.text
         shown = aged_stamp(h.settings, f"undo:{SUB}:{form['snapshot']}")
+        # the deck changed on Archidekt after the preview: refused, nothing sent (finding 11)
+        ark.decks[42]["updatedAt"] = "2026-10-15T09:00:00Z"
+        sent = len(ark.patches)
+        r = await b.http.post(
+            "/proposals/undo",
+            data={"csrf": csrf, "action": "undo", "shown": shown, "deck_seen": seen.group(1), **form},
+        )
+        assert r.status_code == 409 and "The deck changed since this Undo was shown" in r.text, r.text
+        assert len(ark.patches) == sent and _qty(ark, "Opt") == 1
+        # a form without it is refused the same way
         r = await b.http.post(
             "/proposals/undo", data={"csrf": csrf, "action": "undo", "shown": shown, **form}
+        )
+        assert r.status_code == 409 and len(ark.patches) == sent
+        # looked at again, it goes
+        r = await b.http.post("/proposals/undo", data={"csrf": csrf, "action": "preview", **form})
+        seen = re.search(r"name='deck_seen' value='([0-9a-f]{64})'", r.text)
+        r = await b.http.post(
+            "/proposals/undo",
+            data={"csrf": csrf, "action": "undo", "shown": shown, "deck_seen": seen.group(1), **form},
         )
         assert r.status_code == 303 and r.headers["location"].endswith("?ok=undone"), r.text
         assert _qty(ark, "Opt") == 0 and _qty(ark, "Delver of Secrets") == 0
