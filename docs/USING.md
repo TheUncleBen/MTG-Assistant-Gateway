@@ -279,10 +279,10 @@ condition and count.
   column names or from a plain card list, pasted or chosen as a file, up to
   100 rows at a time. Afterwards the page says how many cards went in and
   names the lines it could not take as given: a language Archidekt's
-  collection has no place for (such as Phyrexian) is kept as English, a
+  collection doesn't store (such as Phyrexian) is kept as English, a
   condition Archidekt's collection doesn't store (such as EX) is kept as
-  Near Mint, copies
-  of a card you already own in another language are added to that copy, and
+  Near Mint, copies of a card you already own in another language are added
+  to that copy, and
   cards Archidekt cannot find are left out. When the text itself cannot be
   read, nothing is imported and the page says which line is wrong.
 - A scan is a draft that stays as long as you like, up to a whole deck:
