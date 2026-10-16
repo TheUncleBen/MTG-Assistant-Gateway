@@ -106,6 +106,7 @@ button.danger:disabled{color:var(--red)}
       if (!data.deck_id && x.deck_name) sub.unshift(String(x.deck_name));
       what.appendChild(el("span", "sub", sub.join(" · ")));
       if ((x.status === "needs_look" || x.status === "held") && x.status_text) what.appendChild(el("span", "why", x.status_text));
+      if (x.review_page_only && x.own) what.appendChild(el("span", "why", "Approve it on its review page."));
       li.appendChild(what);
       var btns = el("span", "btns");
       if (decided[x.proposal_id]) {

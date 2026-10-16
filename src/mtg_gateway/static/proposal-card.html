@@ -330,6 +330,9 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
   function modeNote(p) {
     if (p.state !== "pending" || !p.writes_enabled) return "";
     if (p.card_other_app) return "This change was made in another app, so its Approve button works only there. You can approve it here on the review page.";
+    // Q137: a change that keeps formatting is approved on the review page, which shows it
+    var keeps = (p.rows || []).some(function (r) { return r && r.after_doc; });
+    if (keeps && !p.assistant_may_apply) return "This keeps the bold text, links or pictures already there. Open it to see how it will look, and approve it there.";
     if (p.assistant_may_apply) {
       return p.approval_mode === "auto"
         ? "Your approval mode lets your assistant apply this itself, without asking."

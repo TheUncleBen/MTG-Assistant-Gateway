@@ -37,7 +37,7 @@ from urllib.parse import urlparse
 
 from cryptography.fernet import Fernet, InvalidToken
 
-from . import batch, board, modes
+from . import batch, board, formatting, modes
 from .approve import approval_code, approval_matches, approval_set_code
 from .archidekt import (
     FORMAT_IDS,
@@ -423,7 +423,7 @@ class MemberCache:
 # Every proposal stores its change as structured rows (kind, name, before, after...) next to the
 # plain-text diff. The review page renders the rows and never re-parses the text, so a card name,
 # category or deck name cannot make one row look like another. The text lines come from the rows.
-FULL_TEXT_FIELDS = ("before_text", "after_text")
+FULL_TEXT_FIELDS = ("before_text", "after_text", "after_doc")  # after_doc: the Quill document (Q137)
 
 
 def _row(kind: str, **fields: Any) -> dict[str, Any]:
@@ -2728,6 +2728,7 @@ class DeckService:
                 partial=bool((row["result"] or {}).get("sent_entries")),
                 kind=kind,
                 card_may_approve=self.card_may_approve(row),
+                opens_first=formatting_review_only(row) if formatting.keeps_formatting(row) else "",
                 rate_limited=(
                     _rate_limited_note(
                         row["result"] or {},
@@ -2888,12 +2889,21 @@ class DeckService:
         """The refusal for any caller but the review page's own form that tries to apply an
         Archidekt account action (R-142), with the row's real risk tier (consent, or destructive
         for a deck deletion). Audited as ``apply_needs_user``."""
-        risk, _why = modes.risk_of("action", row.get("rows"))
+        risk, _why = modes.risk_of(row.get("kind") or "edit", row.get("rows"))
         self._audit(
             "apply_needs_user",
             sub=sub,
             detail={"proposal_id": row["id"], "deck_id": row["deck_id"], "risk": risk},
         )
+        if formatting.keeps_formatting(row):  # Q137: approved where its formatting is shown
+            return DeckError(
+                "browser_required",
+                formatting_review_only(row) + " Nothing was sent to Archidekt; do not retry.",
+                review_url=f"{self.settings.public_url}/proposals/{row['id']}",
+                state=row["state"],
+                approval_mode=self.mode_of(sub),
+                risk=risk,
+            )
         where = (
             "on the review page (review_url)"
             if not self.card_may_approve(row)
@@ -2913,10 +2923,14 @@ class DeckService:
     @staticmethod
     def card_may_approve(row: dict[str, Any]) -> bool:
         """Whether the in-chat card may approve this proposal: everything but a deck deletion,
-        which only its review page applies (R-142). Account actions (likes, comments, folders,
-        collaborators...) may since 0.7.29 (Q8, G3): the member's press on the card, never the
-        assistant's own apply (Q9)."""
-        return not (row.get("kind") == "action" and (row.get("changes") or {}).get("action") == "delete_deck")
+        which only its review page applies (R-142), and a change that keeps formatting (Q137).
+        Account actions (likes, comments, folders, collaborators...) may since 0.7.29 (Q8, G3):
+        the member's press on the card, never the assistant's own apply (Q9)."""
+        if row.get("kind") == "action" and (row.get("changes") or {}).get("action") == "delete_deck":
+            return False
+        # Q137: a change that keeps a description's or comment's formatting is approved where its
+        # formatting is shown, the review page; the card asks the member to open it there
+        return not formatting.keeps_formatting(row)
 
     def approval_for(self, sub: str, row: dict[str, Any], *, version: int | None = None) -> str:
         """The in-chat card's one-time code for a proposal (approve.py), bound to the proposal,
@@ -2926,7 +2940,9 @@ class DeckService:
         if not self.card_may_approve(row):
             raise DeckError(
                 "browser_required",
-                "Deleting a deck has no in-chat approval code; only its review page applies it.",
+                formatting_review_only(row)
+                if formatting.keeps_formatting(row)
+                else "Deleting a deck has no in-chat approval code; only its review page applies it.",
                 review_url=f"{self.settings.public_url}/proposals/{row['id']}",
             )
         return approval_code(
@@ -4435,6 +4451,8 @@ class DeckService:
                     ],
                     "links": board.links_text(self.db, sub, line["id"]),
                     "review_url": f"{self.settings.public_url}/proposals/{line['id']}",
+                    # a deck deletion, or a change that keeps formatting (Q137): never on a card
+                    "review_page_only": not self.card_may_approve(row) if row else False,
                 }
             )
         return out
@@ -4500,6 +4518,7 @@ class DeckService:
             )
             wanted = parse_details(raw) if raw or not organise_raw else {}
             stored, rows = details_rows(deck, wanted)
+            stored = stored_details(stored)
             organise, organise_rows = await self._organise_plan(sub, deck, organise_raw)
             if organise:
                 stored = {**stored, "organise": organise}
@@ -4754,6 +4773,7 @@ class DeckService:
         deck = await self.get_own_deck(sub, deck_id)
         self.recheck_waiting(sub, deck)  # K2
         changes, rows = details_rows(deck, wanted)
+        changes = stored_details(changes)
         organise, organise_rows = await self._organise_plan(sub, deck, organise_raw)
         if organise:
             changes = {**changes, "organise": organise}
@@ -4899,7 +4919,11 @@ class DeckService:
         organise = stored.pop("organise", None) or {}
         wanted = parse_details(stored) if stored else {}
         deck = await self._current_deck_for(sub, row)
-        changes, _lines = details_diff(deck, wanted)
+        changes, now_rows = details_rows(deck, wanted)
+        # Q137: a description that keeps formatting is written as its review drew it, or not at all
+        # (the deck's fingerprint is its cards, so the re-check does not see a description edit)
+        if _description_doc(now_rows) != _description_doc(row.get("rows")):
+            raise needs_look_error(DESCRIPTION_CHANGED)
         if not changes and not organise:
             raise DeckError("invalid", "The deck already has these details; nothing was sent.")
         snapshot_id = self._take_snapshot(sub, row, deck)
@@ -5499,12 +5523,20 @@ def details_rows(deck: Deck, wanted: dict[str, Any]) -> tuple[dict[str, Any], li
     lines: list[dict[str, Any]] = []
     for key, value in wanted.items():
         new = FORMAT_IDS[value] if key == "deck_format" else value
+        kept: tuple[str, int] | None = None
         if key == "description":
             # Archidekt keeps a Quill document (see rich_doc): the texts are compared, and the row
             # shows the very text the write sends (written_text), never a reading of it
             current, after = rich_text(deck.description), written_text(value)
             if after.strip() == current.strip():
                 continue
+            # Q137: new words are plain, and the parts of a formatted description whose words did
+            # not change keep their bold, links and pictures; the row carries the document that is
+            # written, which the review page draws before the member approves
+            if not isinstance(value, QuillDoc):
+                kept = formatting.keep_formatting(deck.description, after)
+                if kept is not None:
+                    value = QuillDoc(kept[0])
         elif new == _current_detail(deck, key):
             continue
         changes[key] = value
@@ -5516,6 +5548,7 @@ def details_rows(deck: Deck, wanted: dict[str, Any]) -> tuple[dict[str, Any], li
                     after_len=len(after),
                     before_text=current,
                     after_text=after,
+                    **({"after_doc": kept[0], "dropped_embeds": kept[1]} if kept else {}),
                 )
             )
         elif key == "deck_format":
@@ -5539,6 +5572,27 @@ def details_rows(deck: Deck, wanted: dict[str, Any]) -> tuple[dict[str, Any], li
                 )
             )
     return changes, lines
+
+
+# A description edit that keeps formatting (Q137) whose description changed since its review: its
+# "needs a look" reason, in words (recheck.reason_text shows any other text as it is)
+DESCRIPTION_CHANGED = (
+    "The description changed on Archidekt since this was reviewed, so it would not look as reviewed."
+)
+
+
+def _description_doc(rows: list[dict[str, Any]] | None) -> str:
+    """The document a details change writes for the description when it keeps formatting, else ""."""
+    return next((str(r.get("after_doc") or "") for r in rows or [] if r.get("kind") == "description"), "")
+
+
+def stored_details(changes: dict[str, Any]) -> dict[str, Any]:
+    """Details changes as a proposal stores them: a description as its plain words, also when
+    ``details_rows`` made it a document that keeps formatting (Q137). The apply works the document
+    out again on the deck as it is then, and the re-check compares it with the reviewed one."""
+    if isinstance(changes.get("description"), QuillDoc):
+        return {**changes, "description": written_text(changes["description"])}
+    return changes
 
 
 def snapshot_details(snapshot: Deck) -> dict[str, Any]:
@@ -6045,6 +6099,15 @@ def _needs_user_message(mode: str, why: str) -> str:
     )
 
 
+def formatting_review_only(row: dict[str, Any]) -> str:
+    """Why a change that keeps formatting (Q137) is approved on its review page only."""
+    noun = "comment" if row.get("kind") == "action" else "description"
+    return (
+        f"It keeps the bold text, links or pictures already in the {noun}, which only the review page "
+        "shows, so the user approves it there (review_url), not on a card in the chat."
+    )
+
+
 def _next_step(
     state: str,
     writes_enabled: bool,
@@ -6060,6 +6123,7 @@ def _next_step(
     closed_by_app: str | None = None,
     rate_limited: str = "",
     card_may_approve: bool = True,
+    opens_first: str = "",
 ) -> str:
     """What the assistant should do next with a proposal in ``state``. ``rate_limited``: for an
     apply that stopped on Archidekt's waits, the same note its stored message ends with
@@ -6088,6 +6152,8 @@ def _next_step(
             f"The user chose {chose}: tell them {what} in one line and call apply_proposal now. "
             "They can also press Apply on the review page."
         )
+    if state == "pending" and opens_first:  # Q137: a change that keeps formatting
+        return f"Show the user {what} and the review link. {opens_first} Do not call apply_proposal."
     if state == "pending" and risk in modes.MEMBER_ONLY:
         if not card_may_approve:  # a deck deletion (R-142): its review page only
             return (

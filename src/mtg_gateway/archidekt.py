@@ -188,8 +188,9 @@ def words_only_note(noun: str) -> str:
     document that lost more than its words (``drops_formatting``), so the assistant does not
     tell the user a link or formatting was added (Q90)."""
     return (
-        f"Only the words of this {noun} are saved: the gateway writes plain text, so the links, "
-        "formatting and embeds in it were removed. Don't tell the user a link or formatting was added."
+        f"Only the words of this {noun} are saved: the gateway writes new text as plain text, so the "
+        "links, formatting and embeds in what you sent were removed (formatting already on Archidekt "
+        "stays where its words did not change). Don't tell the user a link or formatting was added."
     )
 
 

@@ -287,8 +287,9 @@ async def test_a_restore_puts_the_formatted_description_back(stack: Stack) -> No
 
 # Q90: the note an assistant's reply carries when its description lost links, formatting or embeds
 DESCRIPTION_NOTE = (
-    "Only the words of this description are saved: the gateway writes plain text, so the links, "
-    "formatting and embeds in it were removed. Don't tell the user a link or formatting was added."
+    "Only the words of this description are saved: the gateway writes new text as plain text, so the "
+    "links, formatting and embeds in what you sent were removed (formatting already on Archidekt "
+    "stays where its words did not change). Don't tell the user a link or formatting was added."
 )
 # Texts that lose nothing visible: plain text, Markdown (written as typed) and a words-only document
 NO_LOSS = (

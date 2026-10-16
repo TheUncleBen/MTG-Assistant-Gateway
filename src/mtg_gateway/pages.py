@@ -19,7 +19,7 @@ from urllib.parse import parse_qs, quote
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from . import app_signin, link_disclosure, modes, notify, waiting_strip
+from . import app_signin, formatting, link_disclosure, modes, notify, waiting_strip
 from .archidekt import PATIENCE_SPENT
 from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
 from .avatars import initials_svg
@@ -614,7 +614,8 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 f"<meta http-equiv='refresh' content='5;url=/proposals/{quote(pid, safe='')}'>"
                 if p["state"] == "applying"
                 else ""
-            ),
+            )
+            + DOC_STYLE,
         )
 
     @server.custom_route("/proposals/{pid}", methods=["POST"], include_in_schema=False)
@@ -1246,6 +1247,7 @@ def _change_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, dic
                 extra += (
                     "<span class='small muted'>Will say:</span>"
                     f"<blockquote class='said'>{html.escape(str(r['after_text']))}</blockquote>"
+                    + _formatted_preview(r)
                 )
             if r.get("note"):
                 extra += f"<span class='small'>{html.escape(str(r['note']))}</span>"
@@ -1289,7 +1291,8 @@ def _detail_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, int
                 "<div class='description-change'>"
                 "<p><strong>New description</strong></p>"
                 f"<pre class='diff'>{html.escape(after) if after else '(empty)'}</pre>"
-                "<details><summary>Current description</summary>"
+                + _formatted_preview(r)
+                + "<details><summary>Current description</summary>"
                 f"<pre class='diff'>{html.escape(before) if before else '(empty)'}</pre></details></div>"
             )
             items.append(_li("chg", "description", html.escape(summary) + full))
@@ -1631,6 +1634,29 @@ def _pretty(obj: Any) -> str:
 MAX_PICKS = 100  # one press may apply every change a member can have waiting (decks.MAX_SELECTION)
 BATCH_WAIT_SECONDS = 8.0  # the confirm's Apply waits this long for the result, then shows progress
 LIST_STYLE = f"<style>{waiting_strip.LIST_CSS}</style>"
+DOC_STYLE = f"<style>{formatting.DOC_CSS}</style>"  # Q137: a document drawn with its formatting
+
+
+def _formatted_preview(r: dict[str, Any]) -> str:
+    """Q137: a description or comment change that keeps formatting, drawn as it will look on
+    Archidekt (bold, links with their sites, lists, card links, pictures as "[picture]")."""
+    if not r.get("after_doc"):
+        return ""
+    lost = int(r.get("dropped_embeds") or 0)
+    gone = (
+        f"<p class='small'>{lost} picture{'s' if lost != 1 else ''} or card link{'s' if lost != 1 else ''} "
+        "in text that changed will be removed with it.</p>"
+        if lost
+        else ""
+    )
+    return (
+        "<p><strong>How it will look on Archidekt</strong><br><span class='small muted'>Bold text, links "
+        "and pictures already there are kept where their words did not change; new words are plain "
+        "text.</span></p>"
+        f"<div class='qdoc'>{formatting.doc_html(r['after_doc'])}</div>{gone}"
+    )
+
+
 # Changes that are not edits to one of the member's decks (FLEX §3 "Not tied to one of your decks").
 _UNTIED_KINDS = ("create_deck", "clone", "collection")
 _DECK_ACTIONS = ("collaborator_add", "collaborator_remove", "delete_deck")

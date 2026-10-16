@@ -33,6 +33,8 @@ import time
 from collections import OrderedDict
 from typing import Any
 
+from . import formatting
+
 logger = logging.getLogger(__name__)
 
 # The selection running in this task, deck id -> {"snapshot_id", "backup"}: DeckService's
@@ -50,6 +52,10 @@ RESTORE_ALONE = (
     "It is still waiting: apply it by itself."
 )
 DELETE_ALONE = "Not sent: deleting a deck is approved only on its own review page. It is still waiting."
+FORMATTING_ALONE = (
+    "Not sent: it keeps the bold text, links or pictures already there, so it is approved on its own "
+    "review page, which shows how it will look. It is still waiting."
+)
 EARLIER_FAILED = (
     "Not sent: an earlier change to this deck in this selection failed after part of it reached "
     "Archidekt. It is still waiting: open it to check it against the deck as it is now."
@@ -119,6 +125,8 @@ def plan(svc: Any, sub: str, picks: list[str], versions: dict[str, int] | None =
             changes = row.get("changes") if isinstance(row.get("changes"), dict) else {}
             if row.get("kind") == "action" and changes.get("action") == "delete_deck":
                 skipped.append(_line(svc, sub, row, DELETE_ALONE))
+            elif formatting.keeps_formatting(row):  # Q137: approved where its formatting shows
+                skipped.append(_line(svc, sub, row, FORMATTING_ALONE))
             elif row.get("kind") in ALONE_KINDS and len(group) > 1:
                 skipped.append(_line(svc, sub, row, RESTORE_ALONE))
             else:

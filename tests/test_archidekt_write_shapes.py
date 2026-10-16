@@ -189,8 +189,9 @@ def test_drops_formatting_only_when_a_document_loses_more_than_its_words() -> No
     assert not drops_formatting("**Primer**: [guide](https://example.com/guide)")
     assert not drops_formatting('{"not": "a document"}') and not drops_formatting(None)
     assert words_only_note("comment") == (
-        "Only the words of this comment are saved: the gateway writes plain text, so the links, "
-        "formatting and embeds in it were removed. Don't tell the user a link or formatting was added."
+        "Only the words of this comment are saved: the gateway writes new text as plain text, so the "
+        "links, formatting and embeds in what you sent were removed (formatting already on Archidekt "
+        "stays where its words did not change). Don't tell the user a link or formatting was added."
     )
 
 
