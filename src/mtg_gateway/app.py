@@ -82,7 +82,7 @@ from .chatgpt_plugin import add_chatgpt_plugin_route
 from .cimd import CimdFetcher
 from .collection import add_collection
 from .companion import add_companion_routes
-from .config import Settings
+from .config import LiveSettings, Settings
 from .db import Database
 from .decks import (
     FULL_SCOPE,
@@ -146,6 +146,11 @@ class AppState:
     summaries: Summaries | None = None  # members' plain summaries (summary.py)
     app_signins: AppSignins = field(default_factory=AppSignins)  # the Android app's browser sign-in
     sync: DeckSync | None = None  # automatic Archidekt -> gateway deck sync (sync.py)
+
+    @property
+    def live(self) -> LiveSettings:
+        """The dashboard settings with a deployment value winning (config.LiveSettings)."""
+        return self.decks.live
 
 
 def _tool_error(exc: DeckError) -> dict[str, object]:

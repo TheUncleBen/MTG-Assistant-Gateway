@@ -171,6 +171,18 @@ DECK_COVER_RETENTION_SECONDS = 180 * 86400
 PRICE_RETENTION_DAYS = 365
 # How long a write waits for another connection (such as `mtg-gateway backup`) to finish.
 BUSY_TIMEOUT_MS = 5000
+# Remembered choices that follow the account (G7): how many one account may keep and how large
+# one may be, so a page script cannot grow the database without bound.
+MAX_PREFS_PER_ACCOUNT = 300
+MAX_PREF_BYTES = 4096
+MAX_PREF_NAME = 120
+# Proposal states that end a proposal without applying it. ``withdrawn`` and ``replaced`` (0.7.29,
+# the assistant board) can be brought back while unexpired; all are deleted after
+# CLOSED_PROPOSAL_RETENTION_SECONDS.
+CLOSED_PROPOSAL_STATES = ("expired", "rejected", "failed", "withdrawn", "replaced")
+# Waiting statuses of a pending proposal (0.7.29 flexible approvals): None is plain waiting.
+PROPOSAL_STATUSES = ("updated", "needs_look", "held")
+PROPOSAL_LINK_KINDS = ("depends_on", "replaces")
 
 
 def _url_site(url: str) -> str:
@@ -392,6 +404,197 @@ def _step_12(conn: sqlite3.Connection) -> None:
     )
 
 
+def snapshot_summary(deck: Any) -> tuple[str, int | None, str | None]:
+    """What a snapshot list shows of a stored deck, worked out once when the snapshot is stored
+    (A1): its name, its card count (None when the deck has no card list) and the Archidekt
+    account that owned the deck then (None when not recorded)."""
+    if not isinstance(deck, dict):
+        return "", None, None
+    name = deck.get("name")
+    cards = deck.get("cards")
+    count: int | None = None
+    if isinstance(cards, list):
+        count = 0
+        for c in cards:
+            if isinstance(c, dict):
+                try:
+                    count += int(c.get("quantity", 0) or 0)
+                except (TypeError, ValueError):
+                    pass
+    owner = deck.get("owner")
+    owner_id = owner.get("id") if isinstance(owner, dict) else None
+    return (str(name) if name is not None else ""), count, (str(owner_id) if owner_id is not None else None)
+
+
+# Rows read at a time while schema 13 fills the new snapshot columns: a snapshot is a whole deck
+# (tens to hundreds of KB), so a large file is read a slice at a time, never all at once.
+_STEP_13_BATCH = 200
+
+
+def _step_13(conn: sqlite3.Connection) -> None:
+    """0.7.29, the one upgrade for settings and the new approvals (Q18, Q126 step 0).
+
+    - ``settings``: values the server owner sets on the admin Settings page (config.py
+      MANAGED_SETTINGS; a value set in the deployment always wins and is never stored here).
+    - ``account_prefs``: remembered choices that follow the account (G7), one row per account and
+      choice name, so a new choice needs no upgrade.
+    - proposals: a version, who amended it last and what that version changed, a waiting status
+      with its reason, a number on the deck's board, the Archidekt account it was made under
+      (Q127), past versions
+      (``proposal_versions``) and links between proposals (``proposal_links``: depends on,
+      replaces); and the ``(state, expires_at)`` index of the pending queries (A2).
+    - snapshots: the deck's name, card count and owner, stored when taken so lists don't parse
+      every stored deck (A1), and the Archidekt account it was taken under (Q127).
+    - ``backup_deletes``: the queued deletes of unused backup copies (Q77), moved out of
+      ``job_runs`` into a table of their own with the Archidekt account they belong to (Q127).
+    """
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value_json TEXT NOT NULL,
+            updated_at INTEGER NOT NULL,
+            updated_by TEXT
+        )"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS account_prefs (
+            sub TEXT NOT NULL,
+            name TEXT NOT NULL,
+            value_json TEXT NOT NULL,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (sub, name)
+        )"""
+    )
+    for column, decl in (
+        ("version", "INTEGER NOT NULL DEFAULT 1"),
+        ("amended_at", "INTEGER"),
+        ("amended_by_client", "TEXT"),
+        ("version_note", "TEXT"),
+        ("status", "TEXT"),
+        ("status_reason", "TEXT"),
+        ("status_at", "INTEGER"),
+        ("board_no", "INTEGER"),
+        ("archidekt_user_id", "TEXT"),
+    ):
+        _add_column(conn, "proposals", column, decl)
+    conn.execute("CREATE INDEX IF NOT EXISTS proposals_state_expires ON proposals(state, expires_at)")
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS proposal_versions (
+            proposal_id TEXT NOT NULL REFERENCES proposals(id) ON DELETE CASCADE,
+            version INTEGER NOT NULL,
+            changes_json TEXT NOT NULL,
+            rows_json TEXT,
+            diff_text TEXT NOT NULL,
+            made_by_client TEXT,
+            made_at INTEGER NOT NULL,
+            what_changed TEXT,
+            PRIMARY KEY (proposal_id, version)
+        )"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS proposal_links (
+            proposal_id TEXT NOT NULL REFERENCES proposals(id) ON DELETE CASCADE,
+            kind TEXT NOT NULL CHECK (kind IN ('depends_on', 'replaces')),
+            other_id TEXT NOT NULL REFERENCES proposals(id) ON DELETE CASCADE,
+            created_at INTEGER NOT NULL,
+            PRIMARY KEY (proposal_id, kind, other_id)
+        )"""
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS proposal_links_other ON proposal_links(other_id, kind)")
+    for column, decl in (
+        ("deck_name", "TEXT"),
+        ("card_count", "INTEGER"),
+        ("deck_owner_id", "TEXT"),
+        ("archidekt_user_id", "TEXT"),
+    ):
+        _add_column(conn, "snapshots", column, decl)
+    # Fill the summary of every snapshot taken before this upgrade, a slice at a time (the whole
+    # step is one transaction, so an interrupted upgrade leaves nothing half done and runs again).
+    last = -1
+    while True:
+        rows = conn.execute(
+            "SELECT rowid, deck_json FROM snapshots WHERE rowid > ? ORDER BY rowid LIMIT ?",
+            (last, _STEP_13_BATCH),
+        ).fetchall()
+        if not rows:
+            break
+        last = rows[-1][0]
+        for rowid, deck_json in rows:
+            try:
+                deck = json.loads(deck_json)
+            except (TypeError, ValueError):
+                deck = None
+            name, count, owner_id = snapshot_summary(deck)
+            conn.execute(
+                "UPDATE snapshots SET deck_name = ?, card_count = ?, deck_owner_id = ? WHERE rowid = ?",
+                (name, count, owner_id, rowid),
+            )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS backup_deletes (
+            snapshot_id TEXT PRIMARY KEY,
+            sub TEXT NOT NULL,
+            archidekt_user_id TEXT,
+            backup_deck_id TEXT NOT NULL,
+            deck_id TEXT NOT NULL,
+            proposal_id TEXT,
+            due_at INTEGER NOT NULL,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            queued_at INTEGER NOT NULL,
+            expect_json TEXT
+        )"""
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS backup_deletes_due ON backup_deletes(due_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS backup_deletes_sub ON backup_deletes(sub)")
+    # Move the queued deletes kept in job_runs since 0.7.27. Every relink drops a member's queued
+    # deletes (decks.py _drop_backup_deletes_on_relink), so each one left belongs to the Archidekt
+    # account on the member's link row (active or not); empty where that row recorded none.
+    moved = conn.execute(
+        "SELECT name, at, detail_json FROM job_runs WHERE name LIKE ? ESCAPE '\\'",
+        (_like_prefix(BACKUP_DELETE_JOB),),
+    ).fetchall()
+    for name, at, detail_json in moved:
+        try:
+            d = json.loads(detail_json or "{}")
+        except ValueError:
+            d = {}
+        if not isinstance(d, dict):
+            d = {}
+        snapshot_id = str(d.get("snapshot_id") or name[len(BACKUP_DELETE_JOB) :])
+        sub = d.get("sub")
+        backup_deck_id = d.get("backup_deck_id")
+        if not sub or backup_deck_id is None:
+            continue  # unusable: the old code could not have deleted anything with it either
+        account = conn.execute(
+            "SELECT archidekt_user_id FROM archidekt_links WHERE sub = ?", (str(sub),)
+        ).fetchone()
+        try:
+            attempts = int(d.get("attempts") or 0)
+        except (TypeError, ValueError):
+            attempts = 0
+        try:
+            queued_at = int(d.get("queued_at") or at)
+        except (TypeError, ValueError):
+            queued_at = int(at)
+        conn.execute(
+            """INSERT OR IGNORE INTO backup_deletes (snapshot_id, sub, archidekt_user_id, backup_deck_id,
+               deck_id, proposal_id, due_at, attempts, queued_at, expect_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                snapshot_id,
+                str(sub),
+                account[0] if account else None,
+                str(backup_deck_id),
+                str(d.get("deck_id") or ""),
+                str(d["proposal_id"]) if d.get("proposal_id") is not None else None,
+                int(at),
+                attempts,
+                queued_at,
+                json.dumps(d["expect"]) if isinstance(d.get("expect"), dict) else None,
+            ),
+        )
+    conn.execute("DELETE FROM job_runs WHERE name LIKE ? ESCAPE '\\'", (_like_prefix(BACKUP_DELETE_JOB),))
+
+
 # Applied in order; ``PRAGMA user_version`` records how many have run. Append, never edit.
 MIGRATIONS = [
     _step_1,
@@ -406,6 +609,7 @@ MIGRATIONS = [
     _step_10,
     _step_11,
     _step_12,
+    _step_13,
 ]
 SCHEMA_VERSION = len(MIGRATIONS)
 
@@ -421,12 +625,17 @@ def _like(search: str) -> str:
     return f"%{text}%"
 
 
+def _marks(values: tuple[Any, ...] | list[Any]) -> str:
+    return ",".join("?" * len(values))
+
+
 def _like_prefix(prefix: str) -> str:
     """A LIKE pattern matching what starts with ``prefix``, its wildcards escaped (ESCAPE '\\')."""
     return prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
 
 
-# job_runs rows of the queued backup deletes (Q77): this prefix and the snapshot id
+# job_runs rows of the queued backup deletes (Q77) before schema 13 moved them to backup_deletes:
+# this prefix and the snapshot id (read only by _step_13)
 BACKUP_DELETE_JOB = "backup_delete:"
 
 
@@ -929,8 +1138,8 @@ class Database:
             ).rowcount
             # Closed proposals carry nothing the user can act on: drop them after a month.
             n += c.execute(
-                "DELETE FROM proposals WHERE state IN ('expired', 'rejected', 'failed') AND created_at < ?",
-                (now - CLOSED_PROPOSAL_RETENTION_SECONDS,),
+                f"DELETE FROM proposals WHERE state IN ({_marks(CLOSED_PROPOSAL_STATES)}) AND created_at < ?",
+                (*CLOSED_PROPOSAL_STATES, now - CLOSED_PROPOSAL_RETENTION_SECONDS),
             ).rowcount
             n += c.execute(
                 "DELETE FROM proposals WHERE state = 'applied' AND COALESCE(applied_at, created_at) < ?",
@@ -1215,6 +1424,8 @@ class Database:
         ("watch_decks", "sub"),
         ("deck_values", "sub"),
         ("notify_prefs", "sub"),
+        ("account_prefs", "sub"),
+        ("backup_deletes", "sub"),  # their queued backup deletes (Q77) go with their snapshots
         ("users", "sub"),
     )
 
@@ -1250,12 +1461,6 @@ class Database:
             for table, column in self.MEMBER_TABLES:
                 if table in present:
                     out[table] = c.execute(f"DELETE FROM {table} WHERE {column} = ?", (sub,)).rowcount
-            if "job_runs" in present:  # their queued backup deletes (Q77) go with their snapshots
-                out["backup_deletes"] = c.execute(
-                    "DELETE FROM job_runs WHERE name LIKE ? ESCAPE '\\' "
-                    "AND json_extract(detail_json, '$.sub') = ?",
-                    (_like_prefix(BACKUP_DELETE_JOB), sub),
-                ).rowcount
             c.execute(
                 "INSERT INTO audit_log (at, sub, client_id, event, detail_json) VALUES (?, ?, NULL, ?, ?)",
                 (int(time.time()), sub, "member_data_deleted", json.dumps(out)),
@@ -1430,10 +1635,22 @@ class Database:
                 mine = self.count_pending_for_client(row["owner_sub"], row.get("created_by_client"), c=c)
                 if mine >= max_pending_per_client:
                     return False
+            # The number on the deck's board (0.7.29): one more than the highest of the owner's live
+            # waiting proposals on that deck, so a board that empties starts again at 1, and an
+            # amend keeps it. The Archidekt account is the one linked now (Q127), unless given.
+            account = (
+                "?"
+                if "archidekt_user_id" in row
+                else "(SELECT archidekt_user_id FROM archidekt_links WHERE sub = ? AND status = 'active')"
+            )
             c.execute(
-                """INSERT INTO proposals (id, owner_sub, kind, deck_id, deck_name, baseline_fingerprint,
-                   changes_json, diff_text, state, created_at, expires_at, created_by_client, rows_json)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)""",
+                f"""INSERT INTO proposals (id, owner_sub, kind, deck_id, deck_name, baseline_fingerprint,
+                   changes_json, diff_text, state, created_at, expires_at, created_by_client, rows_json,
+                   board_no, archidekt_user_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?,
+                     (SELECT COALESCE(MAX(board_no), 0) + 1 FROM proposals
+                      WHERE owner_sub = ? AND deck_id = ? AND state = 'pending' AND expires_at >= ?),
+                     {account})""",
                 (
                     row["id"],
                     row["owner_sub"],
@@ -1447,16 +1664,20 @@ class Database:
                     row["expires_at"],
                     row.get("created_by_client"),
                     json.dumps(row["rows"]) if row.get("rows") is not None else None,
+                    row["owner_sub"],
+                    row["deck_id"],
+                    now,
+                    row["archidekt_user_id"] if "archidekt_user_id" in row else row["owner_sub"],
                 ),
             )
             if max_closed is not None:
                 c.execute(
-                    """DELETE FROM proposals WHERE id IN (
+                    f"""DELETE FROM proposals WHERE id IN (
                            SELECT id FROM proposals WHERE owner_sub = ?
-                             AND (state IN ('expired', 'rejected', 'failed')
+                             AND (state IN ({_marks(CLOSED_PROPOSAL_STATES)})
                                   OR (state = 'pending' AND expires_at < ?))
                            ORDER BY created_at DESC, rowid DESC LIMIT -1 OFFSET ?)""",
-                    (row["owner_sub"], now, max_closed),
+                    (row["owner_sub"], *CLOSED_PROPOSAL_STATES, now, max_closed),
                 )
         return True
 
@@ -1582,7 +1803,7 @@ class Database:
         with self._lock:
             rows = self._conn.execute(
                 "SELECT deck_id, deck_name, created_at AS at FROM proposals WHERE owner_sub = ? "
-                "UNION ALL SELECT deck_id, json_extract(deck_json, '$.name'), taken_at FROM snapshots "
+                "UNION ALL SELECT deck_id, deck_name, taken_at FROM snapshots "
                 "WHERE owner_sub = ? ORDER BY at",
                 (owner_sub, owner_sub),
             ).fetchall()
@@ -1609,15 +1830,14 @@ class Database:
         ever linked. Every doubt leaves a deck out, so a deck is never called gone wrongly."""
         with self._lock:
             snaps = self._conn.execute(
-                "SELECT deck_id FROM snapshots WHERE owner_sub = ? "
-                "AND CAST(json_extract(deck_json, '$.owner.id') AS TEXT) = ?",
+                "SELECT deck_id FROM snapshots WHERE owner_sub = ? AND deck_owner_id = ?",
                 (owner_sub, str(account_id)),
             ).fetchall()
             props = self._conn.execute(
                 "SELECT deck_id, created_at FROM proposals WHERE owner_sub = ? "
                 "AND kind IN ('edit', 'details', 'restore', 'create_deck') "
                 "UNION ALL SELECT deck_id, taken_at FROM snapshots WHERE owner_sub = ? "
-                "AND json_extract(deck_json, '$.owner.id') IS NULL",
+                "AND deck_owner_id IS NULL",
                 (owner_sub, owner_sub),
             ).fetchall()
             links = self._conn.execute(
@@ -1687,6 +1907,209 @@ class Database:
             ).fetchone()
         return row is not None
 
+    # 0.7.29 flexible approvals and the assistant board (Track A builds on these) ----------------
+    def pending_board(self, owner_sub: str, deck_id: str | None = None) -> list[dict[str, Any]]:
+        """Every live waiting proposal of the owner (of one deck when ``deck_id``), oldest first,
+        with no cap: the deck's board (BOARD §2). Rows carry what a board line needs; the whole
+        proposal comes from get_proposal."""
+        sql = (
+            "SELECT id, kind, deck_id, deck_name, created_at, expires_at, created_by_client, diff_text, "
+            "version, amended_at, amended_by_client, version_note, status, status_reason, status_at, "
+            "board_no, archidekt_user_id FROM proposals "
+            "WHERE owner_sub = ? AND state = 'pending' AND expires_at >= ?"
+        )
+        args: list[Any] = [owner_sub, int(time.time())]
+        if deck_id is not None:
+            sql += " AND deck_id = ?"
+            args.append(str(deck_id))
+        with self._lock:
+            rows = self._conn.execute(sql + " ORDER BY created_at, rowid", args).fetchall()
+        return [dict(r) for r in rows]
+
+    def pending_count_by_deck(self, owner_sub: str) -> dict[str, int]:
+        """How many live waiting proposals each of the owner's decks has (the Home tile, Q27o's
+        soft 20)."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT deck_id, COUNT(*) AS n FROM proposals WHERE owner_sub = ? AND state = 'pending' "
+                "AND expires_at >= ? GROUP BY deck_id",
+                (owner_sub, int(time.time())),
+            ).fetchall()
+        return {str(r["deck_id"]): int(r["n"]) for r in rows}
+
+    def amend_proposal(
+        self,
+        proposal_id: str,
+        owner_sub: str,
+        *,
+        expect_version: int,
+        changes: Any,
+        rows: list[dict[str, Any]] | None,
+        diff_text: str,
+        by_client: str | None,
+        what_changed: str | None = None,
+        baseline_fingerprint: str | None = None,
+    ) -> int | None:
+        """Replace a waiting proposal's content with a new version, keeping its id, date and board
+        number (BOARD §2, §4). The version being replaced is kept in ``proposal_versions`` with
+        who made it. Only while it is pending, unexpired and still at ``expect_version`` (so two
+        amends, or an amend and an apply that claimed it first, cannot both win). Its waiting
+        status is cleared. Returns the new version, or None when nothing was changed."""
+        now = int(time.time())
+        with self.tx() as c:
+            row = c.execute(
+                "SELECT version, changes_json, rows_json, diff_text, created_by_client, created_at, "
+                "amended_by_client, amended_at, version_note FROM proposals WHERE id = ? AND owner_sub = ? "
+                "AND state = 'pending' AND expires_at >= ? AND version = ?",
+                (proposal_id, owner_sub, now, int(expect_version)),
+            ).fetchone()
+            if row is None:
+                return None
+            old = int(row["version"])
+            c.execute(
+                """INSERT INTO proposal_versions (proposal_id, version, changes_json, rows_json, diff_text,
+                   made_by_client, made_at, what_changed) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    proposal_id,
+                    old,
+                    row["changes_json"],
+                    row["rows_json"],
+                    row["diff_text"],
+                    row["amended_by_client"] if old > 1 else row["created_by_client"],
+                    row["amended_at"] if old > 1 and row["amended_at"] else row["created_at"],
+                    row["version_note"],
+                ),
+            )
+            c.execute(
+                "UPDATE proposals SET changes_json = ?, rows_json = ?, diff_text = ?, version = ?, "
+                "amended_at = ?, amended_by_client = ?, version_note = ?, status = NULL, "
+                "status_reason = NULL, status_at = ?, "
+                "baseline_fingerprint = COALESCE(?, baseline_fingerprint) WHERE id = ?",
+                (
+                    json.dumps(changes),
+                    json.dumps(rows) if rows is not None else None,
+                    diff_text,
+                    old + 1,
+                    now,
+                    by_client,
+                    what_changed,
+                    now,
+                    baseline_fingerprint,
+                    proposal_id,
+                ),
+            )
+            return old + 1
+
+    def proposal_versions(self, proposal_id: str, owner_sub: str) -> list[dict[str, Any]]:
+        """The earlier versions of one of the owner's proposals, oldest first (the current one is
+        the proposal itself)."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT v.version, v.changes_json, v.rows_json, v.diff_text, v.made_by_client, v.made_at, "
+                "v.what_changed FROM proposal_versions v JOIN proposals p ON p.id = v.proposal_id "
+                "WHERE v.proposal_id = ? AND p.owner_sub = ? ORDER BY v.version",
+                (proposal_id, owner_sub),
+            ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["changes"] = json.loads(d.pop("changes_json"))
+            rows_json = d.pop("rows_json")
+            d["rows"] = json.loads(rows_json) if rows_json else None
+            out.append(d)
+        return out
+
+    def set_proposal_status(
+        self, proposal_id: str, owner_sub: str, status: str | None, reason: str | None = None
+    ) -> bool:
+        """Set a waiting proposal's status (None: plain waiting; PROPOSAL_STATUSES) and its
+        reason. Only while it is pending. True when it was changed."""
+        if status is not None and status not in PROPOSAL_STATUSES:
+            raise ValueError(f"unknown proposal status {status!r}")
+        with self.tx() as c:
+            return (
+                c.execute(
+                    "UPDATE proposals SET status = ?, status_reason = ?, status_at = ? "
+                    "WHERE id = ? AND owner_sub = ? AND state = 'pending'",
+                    (status, reason, int(time.time()), proposal_id, owner_sub),
+                ).rowcount
+                == 1
+            )
+
+    def close_proposal(
+        self, proposal_id: str, owner_sub: str, state: str, reason: str | None = None, *, by: Any = None
+    ) -> bool:
+        """Move a live waiting proposal to ``withdrawn`` or ``replaced`` with its reason (kept
+        visible and restorable while unexpired, BOARD §4). ``by`` is merged into its result as
+        ``closed_by``. True when it was changed."""
+        if state not in ("withdrawn", "replaced"):
+            raise ValueError(f"close_proposal does not set {state!r}")
+        patch = json.dumps({"closed_by": by}) if by is not None else None
+        now = int(time.time())
+        with self.tx() as c:
+            return (
+                c.execute(
+                    "UPDATE proposals SET state = ?, status_reason = ?, status_at = ?, result_json = CASE "
+                    "WHEN ? IS NULL THEN result_json ELSE json_patch(COALESCE(result_json, '{}'), ?) END "
+                    "WHERE id = ? AND owner_sub = ? AND state = 'pending' AND expires_at >= ?",
+                    (state, reason, now, patch, patch, proposal_id, owner_sub, now),
+                ).rowcount
+                == 1
+            )
+
+    def reopen_proposal(self, proposal_id: str, owner_sub: str) -> bool:
+        """Bring a withdrawn or replaced proposal back to waiting while it is unexpired (Q27l: a
+        replaced note returns when its replacement is rejected). True when it was changed."""
+        now = int(time.time())
+        with self.tx() as c:
+            return (
+                c.execute(
+                    "UPDATE proposals SET state = 'pending', status = NULL, status_reason = NULL, "
+                    "status_at = ? WHERE id = ? AND owner_sub = ? AND state IN ('withdrawn', 'replaced') "
+                    "AND expires_at >= ?",
+                    (now, proposal_id, owner_sub, now),
+                ).rowcount
+                == 1
+            )
+
+    def link_proposals(self, proposal_id: str, owner_sub: str, kind: str, other_id: str) -> bool:
+        """Record that ``proposal_id`` depends on, or replaces, ``other_id`` (Q27j, BOARD §2). Both
+        must be the owner's and different. True when stored (a repeat is a no-op, still True)."""
+        if kind not in PROPOSAL_LINK_KINDS:
+            raise ValueError(f"unknown proposal link {kind!r}")
+        if proposal_id == other_id:
+            return False
+        with self.tx() as c:
+            (owned,) = c.execute(
+                "SELECT COUNT(*) FROM proposals WHERE owner_sub = ? AND id IN (?, ?)",
+                (owner_sub, proposal_id, other_id),
+            ).fetchone()
+            if owned != 2:
+                return False
+            c.execute(
+                "INSERT OR IGNORE INTO proposal_links (proposal_id, kind, other_id, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                (proposal_id, kind, other_id, int(time.time())),
+            )
+            return True
+
+    def proposal_links(self, owner_sub: str, proposal_ids: list[str]) -> list[dict[str, Any]]:
+        """Every link from or to the given proposals of the owner: {proposal_id, kind, other_id,
+        created_at}, oldest first."""
+        ids = [str(i) for i in proposal_ids][:500]
+        if not ids:
+            return []
+        marks = _marks(ids)
+        with self._lock:
+            rows = self._conn.execute(
+                f"""SELECT l.proposal_id, l.kind, l.other_id, l.created_at FROM proposal_links l
+                    JOIN proposals p ON p.id = l.proposal_id AND p.owner_sub = ?
+                    WHERE l.proposal_id IN ({marks}) OR l.other_id IN ({marks})
+                    ORDER BY l.created_at, l.rowid""",
+                (owner_sub, *ids, *ids),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def claim_proposal(self, proposal_id: str, owner_sub: str) -> bool:
         """Move pending -> applying atomically; False if it was not pending (duplicate apply)."""
         with self.tx() as c:
@@ -1741,6 +2164,7 @@ class Database:
         """Store a snapshot. With ``while_applying``, only while ``proposal_id`` of ``owner_sub``
         is still being applied and the member still exists: an apply that outlives "Delete my
         data" stores nothing for the deleted member. False when nothing was stored."""
+        name, count, owner_id = snapshot_summary(deck)
         values = (
             snapshot_id,
             owner_sub,
@@ -1749,9 +2173,16 @@ class Database:
             int(time.time()),
             fingerprint,
             json.dumps(deck),
+            name,
+            count,
+            owner_id,
+            owner_sub,
         )
+        # The Archidekt account on the member's active link now (Q127), read in the same statement.
         sql = """INSERT INTO snapshots (id, owner_sub, deck_id, proposal_id, taken_at, fingerprint,
-                 deck_json) SELECT ?, ?, ?, ?, ?, ?, ?"""
+                 deck_json, deck_name, card_count, deck_owner_id, archidekt_user_id)
+                 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        (SELECT archidekt_user_id FROM archidekt_links WHERE sub = ? AND status = 'active')"""
         if while_applying:
             sql += """ WHERE EXISTS (SELECT 1 FROM users WHERE sub = ?)
                        AND EXISTS (SELECT 1 FROM proposals WHERE id = ? AND owner_sub = ?
@@ -1771,12 +2202,13 @@ class Database:
         until: int | None = None,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
-        """Newest first. Each row carries the deck name and card count read from the stored deck,
-        never the deck itself (a snapshot is a whole deck; get_snapshot returns one). ``deck_id``,
-        ``search`` (on the stored deck's name) and a time window (``since`` inclusive, ``until``
-        exclusive, epoch seconds) narrow the list in SQL."""
+        """Newest first. Each row carries the deck name, card count and owner stored with the
+        snapshot (A1), never the deck itself (a snapshot is a whole deck; get_snapshot returns
+        one). ``deck_id``, ``search`` (on the deck's name) and a time window (``since`` inclusive,
+        ``until`` exclusive, epoch seconds) narrow the list in SQL."""
         sql = (
-            "SELECT id, deck_id, proposal_id, taken_at, deck_json, backup_deck_id, backup_url, "
+            "SELECT id, deck_id, proposal_id, taken_at, deck_name, card_count, deck_owner_id, "
+            "archidekt_user_id, backup_deck_id, backup_url, "
             # Taken for an apply that stopped before it changed anything (Q78): its proposal is
             # open again or was closed without being applied (only a pending one is rejected or
             # expires), or a later apply of it took another snapshot.
@@ -1790,7 +2222,7 @@ class Database:
             sql += " AND deck_id = ?"
             args.append(str(deck_id))
         if search:
-            sql += " AND json_extract(deck_json, '$.name') LIKE ? ESCAPE '\\'"
+            sql += " AND deck_name LIKE ? ESCAPE '\\'"
             args.append(_like(search))
         if since is not None:
             sql += " AND taken_at >= ?"
@@ -1802,30 +2234,24 @@ class Database:
         args += [max(0, int(limit)), max(0, int(offset))]
         with self._lock:
             rows = self._conn.execute(sql, args).fetchall()
-        out = []
-        for r in rows:
-            deck = json.loads(r["deck_json"])
-            cards = deck.get("cards") if isinstance(deck, dict) else None
-            owner = deck.get("owner") if isinstance(deck, dict) else None
-            owner_id = owner.get("id") if isinstance(owner, dict) else None
-            out.append(
-                {
-                    "snapshot_id": r["id"],
-                    "deck_id": r["deck_id"],
-                    "deck_name": str(deck.get("name", "")) if isinstance(deck, dict) else "",
-                    "proposal_id": r["proposal_id"],
-                    "taken_at": r["taken_at"],
-                    "backup_deck_id": r["backup_deck_id"],
-                    "backup_url": r["backup_url"],
-                    # the Archidekt account that owned the deck then (None when not recorded)
-                    "account_id": str(owner_id) if owner_id is not None else None,
-                    "card_count": sum(int(c.get("quantity", 0)) for c in cards if isinstance(c, dict))
-                    if isinstance(cards, list)
-                    else None,
-                    **({"stopped_attempt": True} if r["stopped_attempt"] else {}),
-                }
-            )
-        return out
+        return [
+            {
+                "snapshot_id": r["id"],
+                "deck_id": r["deck_id"],
+                "deck_name": r["deck_name"] or "",
+                "proposal_id": r["proposal_id"],
+                "taken_at": r["taken_at"],
+                "backup_deck_id": r["backup_deck_id"],
+                "backup_url": r["backup_url"],
+                # the Archidekt account that owned the deck then (None when not recorded)
+                "account_id": r["deck_owner_id"],
+                # the Archidekt account linked when it was taken (Q127; None before schema 13)
+                "linked_account_id": r["archidekt_user_id"],
+                "card_count": r["card_count"],
+                **({"stopped_attempt": True} if r["stopped_attempt"] else {}),
+            }
+            for r in rows
+        ]
 
     def backup_copies(self, owner_sub: str) -> dict[str, dict[str, Any]]:
         """The Archidekt deck copies the gateway made for a member, by the copy's deck id:
@@ -1859,9 +2285,33 @@ class Database:
                 "UPDATE snapshots SET backup_deck_id = NULL, backup_url = NULL WHERE id = ?", (snapshot_id,)
             )
 
-    # Later deletes of unused backup copies (Q77). Kept in job_runs, one row per snapshot whose copy
-    # waits to be deleted (name BACKUP_DELETE_JOB + snapshot id, ``at`` the time it is due), so the
-    # queue outlives a restart and a re-apply of the proposal without a schema change.
+    # Later deletes of unused backup copies (Q77): one row per snapshot whose copy waits to be
+    # deleted (``due_at`` the time it is due), so the queue outlives a restart and a re-apply of
+    # the proposal. Each row records the Archidekt account linked when it was queued (Q127).
+    _BACKUP_DELETE_COLUMNS = (
+        "snapshot_id, sub, archidekt_user_id, backup_deck_id, deck_id, proposal_id, due_at, attempts, "
+        "queued_at, expect_json"
+    )
+
+    @staticmethod
+    def _backup_delete_row(r: sqlite3.Row) -> dict[str, Any]:
+        """A queued delete as the backup code reads it (the shape it had in job_runs, plus the
+        Archidekt account)."""
+        d: dict[str, Any] = {
+            "sub": r["sub"],
+            "snapshot_id": r["snapshot_id"],
+            "backup_deck_id": r["backup_deck_id"],
+            "deck_id": r["deck_id"],
+            "proposal_id": r["proposal_id"],
+            "attempts": r["attempts"],
+            "queued_at": r["queued_at"],
+            "archidekt_user_id": r["archidekt_user_id"],
+        }
+        if r["expect_json"]:
+            d["expect"] = json.loads(r["expect_json"])
+        d["due"] = r["due_at"]
+        return d
+
     def queue_backup_delete(
         self,
         snapshot_id: str,
@@ -1874,64 +2324,57 @@ class Database:
         expect: dict[str, Any] | None = None,
     ) -> None:
         """``expect``: the copy as the gateway made it (name, description, folder id), which the
-        later delete checks before it deletes (review D4); kept in the row's detail, so no schema
-        change."""
-        detail = {
-            "sub": sub,
-            "snapshot_id": snapshot_id,
-            "backup_deck_id": backup_deck_id,
-            "deck_id": deck_id,
-            "proposal_id": proposal_id,
-            "attempts": 0,
-            "queued_at": int(time.time()),
-            **({"expect": expect} if expect else {}),
-        }
+        later delete checks before it deletes (review D4). The Archidekt account is the one on the
+        member's active link now, read in the same transaction (Q127)."""
         with self.tx() as c:
             c.execute(
-                "INSERT OR REPLACE INTO job_runs (name, day, at, detail_json) VALUES (?, ?, ?, ?)",
+                f"""INSERT OR REPLACE INTO backup_deletes ({self._BACKUP_DELETE_COLUMNS})
+                   VALUES (?, ?, (SELECT archidekt_user_id FROM archidekt_links
+                                  WHERE sub = ? AND status = 'active'), ?, ?, ?, ?, 0, ?, ?)""",
                 (
-                    BACKUP_DELETE_JOB + snapshot_id,
-                    _dt.datetime.now(_dt.UTC).date().isoformat(),
+                    snapshot_id,
+                    sub,
+                    sub,
+                    str(backup_deck_id),
+                    str(deck_id),
+                    proposal_id,
                     int(due),
-                    json.dumps(detail),
+                    int(time.time()),
+                    json.dumps(expect) if expect else None,
                 ),
             )
 
     def next_backup_delete(self, now: int) -> dict[str, Any] | None:
         """The queued backup delete due first (at or before ``now``), or None."""
         row = self._one(
-            "SELECT at, detail_json FROM job_runs WHERE name LIKE ? ESCAPE '\\' AND at <= ? "
-            "ORDER BY at, name LIMIT 1",
-            (_like_prefix(BACKUP_DELETE_JOB), int(now)),
+            f"SELECT {self._BACKUP_DELETE_COLUMNS} FROM backup_deletes WHERE due_at <= ? "
+            "ORDER BY due_at, snapshot_id LIMIT 1",
+            (int(now),),
         )
-        return {**json.loads(row["detail_json"]), "due": row["at"]} if row else None
+        return self._backup_delete_row(row) if row else None
 
     def queued_backup_deletes(self) -> list[dict[str, Any]]:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT at, detail_json FROM job_runs WHERE name LIKE ? ESCAPE '\\' ORDER BY at, name",
-                (_like_prefix(BACKUP_DELETE_JOB),),
+                f"SELECT {self._BACKUP_DELETE_COLUMNS} FROM backup_deletes ORDER BY due_at, snapshot_id"
             ).fetchall()
-        return [{**json.loads(r["detail_json"]), "due": r["at"]} for r in rows]
+        return [self._backup_delete_row(r) for r in rows]
 
     def reschedule_backup_delete(self, snapshot_id: str, *, due: int, attempts: int) -> None:
         with self.tx() as c:
             c.execute(
-                "UPDATE job_runs SET at = ?, detail_json = json_set(detail_json, '$.attempts', ?) "
-                "WHERE name = ?",
-                (int(due), int(attempts), BACKUP_DELETE_JOB + snapshot_id),
+                "UPDATE backup_deletes SET due_at = ?, attempts = ? WHERE snapshot_id = ?",
+                (int(due), int(attempts), snapshot_id),
             )
 
     def backup_delete_queued(self, snapshot_id: str) -> bool:
         """Whether the backup delete of ``snapshot_id`` is still queued (a relink or "Delete my
         data" drops it)."""
-        return (
-            self._one("SELECT 1 FROM job_runs WHERE name = ?", (BACKUP_DELETE_JOB + snapshot_id,)) is not None
-        )
+        return self._one("SELECT 1 FROM backup_deletes WHERE snapshot_id = ?", (snapshot_id,)) is not None
 
     def drop_backup_delete(self, snapshot_id: str) -> None:
         with self.tx() as c:
-            c.execute("DELETE FROM job_runs WHERE name = ?", (BACKUP_DELETE_JOB + snapshot_id,))
+            c.execute("DELETE FROM backup_deletes WHERE snapshot_id = ?", (snapshot_id,))
 
     def edit_proposal_result(
         self, proposal_id: str, owner_sub: str, edit: Callable[[Any], dict[str, Any] | None]
@@ -2040,3 +2483,92 @@ class Database:
             except OSError:
                 pass
         return total
+
+    # settings the server owner manages (config.LiveSettings, the admin Settings page) ------------
+    def stored_settings(self) -> dict[str, Any]:
+        """Every value stored from the admin Settings page, by key (config.MANAGED_SETTINGS). A
+        row that no longer parses is left out, so the code default applies."""
+        with self._lock:
+            rows = self._conn.execute("SELECT key, value_json FROM settings").fetchall()
+        out: dict[str, Any] = {}
+        for r in rows:
+            try:
+                out[str(r["key"])] = json.loads(r["value_json"])
+            except ValueError:
+                continue
+        return out
+
+    def save_setting(self, key: str, value: Any, *, by: str | None) -> None:
+        """Store one setting's value (already checked by config.LiveSettings) and who set it."""
+        with self.tx() as c:
+            c.execute(
+                "INSERT INTO settings (key, value_json, updated_at, updated_by) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, "
+                "updated_at = excluded.updated_at, updated_by = excluded.updated_by",
+                (key, json.dumps(value), int(time.time()), by),
+            )
+
+    def clear_setting(self, key: str) -> bool:
+        """Forget a stored value, so the code default applies again. True when one was stored."""
+        with self.tx() as c:
+            return c.execute("DELETE FROM settings WHERE key = ?", (key,)).rowcount > 0
+
+    def setting_changes(self) -> dict[str, dict[str, Any]]:
+        """When each stored setting was last changed and by whom: {key: {updated_at, updated_by}}."""
+        with self._lock:
+            rows = self._conn.execute("SELECT key, updated_at, updated_by FROM settings").fetchall()
+        return {str(r["key"]): {"updated_at": r["updated_at"], "updated_by": r["updated_by"]} for r in rows}
+
+    # remembered choices that follow the account (G7) ----------------------------------------------
+    def get_prefs(self, sub: str) -> dict[str, Any]:
+        """Every remembered choice of one account, by name."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT name, value_json FROM account_prefs WHERE sub = ?", (sub,)
+            ).fetchall()
+        out: dict[str, Any] = {}
+        for r in rows:
+            try:
+                out[str(r["name"])] = json.loads(r["value_json"])
+            except ValueError:
+                continue
+        return out
+
+    def get_pref(self, sub: str, name: str, default: Any = None) -> Any:
+        row = self._one("SELECT value_json FROM account_prefs WHERE sub = ? AND name = ?", (sub, name))
+        if row is None:
+            return default
+        try:
+            return json.loads(row["value_json"])
+        except ValueError:
+            return default
+
+    def set_pref(self, sub: str, name: str, value: Any) -> bool:
+        """Remember one choice for the account. Refused (False) for a name that is empty or over
+        MAX_PREF_NAME characters, a value over MAX_PREF_BYTES as JSON, an account that is not a
+        known user, and a new name once the account keeps MAX_PREFS_PER_ACCOUNT choices."""
+        name = str(name)
+        raw = json.dumps(value, separators=(",", ":"))
+        if not name or len(name) > MAX_PREF_NAME or len(raw.encode("utf-8")) > MAX_PREF_BYTES:
+            return False
+        with self.tx() as c:
+            if c.execute("SELECT 1 FROM users WHERE sub = ?", (sub,)).fetchone() is None:
+                return False
+            known = c.execute(
+                "SELECT 1 FROM account_prefs WHERE sub = ? AND name = ?", (sub, name)
+            ).fetchone()
+            if known is None:
+                (count,) = c.execute("SELECT COUNT(*) FROM account_prefs WHERE sub = ?", (sub,)).fetchone()
+                if count >= MAX_PREFS_PER_ACCOUNT:
+                    return False
+            c.execute(
+                "INSERT INTO account_prefs (sub, name, value_json, updated_at) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(sub, name) DO UPDATE SET value_json = excluded.value_json, "
+                "updated_at = excluded.updated_at",
+                (sub, name, raw, int(time.time())),
+            )
+        return True
+
+    def delete_pref(self, sub: str, name: str) -> bool:
+        with self.tx() as c:
+            return c.execute("DELETE FROM account_prefs WHERE sub = ? AND name = ?", (sub, name)).rowcount > 0
