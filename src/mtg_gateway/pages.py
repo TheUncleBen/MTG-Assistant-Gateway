@@ -19,12 +19,13 @@ from urllib.parse import parse_qs, quote
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from . import app_signin, formatting, link_disclosure, modes, notify, waiting_strip
+from . import app_signin, link_disclosure, modes, notify
 from .archidekt import PATIENCE_SPENT
 from .auth_provider import BROWSER_COOKIE, LoginError, cookie_name
 from .avatars import initials_svg
 from .clickguard import form_stamp, guarded_form, submitted_too_soon
 from .decks import REVIEW_PAGE, DeckError, current_client, row_label, row_line, tag_change_text
+from .formatting import DOC_CSS, doc_html
 from .theme import (
     LAYOUT_COOKIE,
     THEME_COOKIE,
@@ -37,6 +38,8 @@ from .theme import (
     theme_from_cookie,
     time_html,
 )
+from .waiting_strip import LIST_CSS, LIST_SCRIPT, action_bar, line_for, row_html
+from .waiting_strip import _age as age_text
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -1649,8 +1652,8 @@ def _pretty(obj: Any) -> str:
 
 MAX_PICKS = 100  # one press may apply every change a member can have waiting (decks.MAX_SELECTION)
 BATCH_WAIT_SECONDS = 8.0  # the confirm's Apply waits this long for the result, then shows progress
-LIST_STYLE = f"<style>{waiting_strip.LIST_CSS}</style>"
-DOC_STYLE = f"<style>{formatting.DOC_CSS}</style>"  # Q137: a document drawn with its formatting
+LIST_STYLE = f"<style>{LIST_CSS}</style>"
+DOC_STYLE = f"<style>{DOC_CSS}</style>"  # Q137: a document drawn with its formatting
 
 
 def _formatted_preview(r: dict[str, Any]) -> str:
@@ -1669,7 +1672,7 @@ def _formatted_preview(r: dict[str, Any]) -> str:
         "<p><strong>How it will look on Archidekt</strong><br><span class='small muted'>Bold text, links "
         "and pictures already there are kept where their words did not change; new words are plain "
         "text.</span></p>"
-        f"<div class='qdoc'>{formatting.doc_html(r['after_doc'])}</div>{gone}"
+        f"<div class='qdoc'>{doc_html(r['after_doc'])}</div>{gone}"
     )
 
 
@@ -1719,7 +1722,7 @@ def _proposals_body(state: Any, sub: str, csrf: str | None) -> str:
     groups: dict[str, list[dict[str, Any]]] = {}
     untied: list[dict[str, Any]] = []
     for row in waiting:
-        line = waiting_strip.line_for(state.db, sub, row)
+        line = line_for(state.db, sub, row)
         if _untied(state, sub, row):
             untied.append(line)
         else:
@@ -1728,7 +1731,7 @@ def _proposals_body(state: Any, sub: str, csrf: str | None) -> str:
     for deck_id, lines in groups.items():  # pending_board is oldest first, so is this order
         n = len(lines)
         name = lines[0]["deck_name"]
-        oldest = waiting_strip._age(now - min(x["created_at"] for x in lines))
+        oldest = age_text(now - min(x["created_at"] for x in lines))
         parts.append(
             f"<section class='card dgroup' id='deck-{html.escape(deck_id)}'><h2>"
             f"<label class='pick'><input type='checkbox' class='all' data-all='{html.escape(deck_id)}' "
@@ -1736,7 +1739,7 @@ def _proposals_body(state: Any, sub: str, csrf: str | None) -> str:
             f"<a href='/decks/{html.escape(deck_id)}'>{html.escape(name)}</a>"
             f"<span class='meta2'>{n} waiting · oldest {oldest}</span></h2>"
             + "<ul class='wlist'>"
-            + "".join(waiting_strip.row_html(x, now=now, group=deck_id) for x in lines)
+            + "".join(row_html(x, now=now, group=deck_id) for x in lines)
             + "</ul>"
             "</section>"
         )
@@ -1747,7 +1750,7 @@ def _proposals_body(state: Any, sub: str, csrf: str | None) -> str:
             "aria-label='All changes not tied to one of your decks'></label>"
             f"Not tied to one of your decks<span class='meta2'>{len(untied)} waiting</span></h2>"
             + "<ul class='wlist'>"
-            + "".join(waiting_strip.row_html(x, now=now, group="untied") for x in untied)
+            + "".join(row_html(x, now=now, group="untied") for x in untied)
             + "</ul>"
             "</section>"
         )
@@ -1760,9 +1763,9 @@ def _proposals_body(state: Any, sub: str, csrf: str | None) -> str:
             "are applied oldest first, each checked against the deck as it is just before it is sent; "
             "one that would now do something else is not sent and waits as Needs a look.</p>"
             + "".join(parts)
-            + waiting_strip.action_bar()
+            + action_bar()
             + "</form>"
-            f"<script src='{waiting_strip.LIST_SCRIPT}' defer></script>"
+            f"<script src='{LIST_SCRIPT}' defer></script>"
         )
     else:
         body = (
