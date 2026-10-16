@@ -196,3 +196,128 @@ async def test_a_result_token_is_only_read_by_the_member_who_imported(stack: Sta
         assert "Phyrexian" not in page and "Imported into your Archidekt collection." in page
     finally:
         await bob.aclose()
+
+
+# Review L8: a row's line is the physical line it starts on, so a quoted cell with a line break and
+# blank lines at the top are counted, and a name with a line break is read with a space.
+def test_lines_count_quoted_line_breaks_and_leading_blank_lines() -> None:
+    items = parse_collection_import('Quantity,Name,Language\n1,"Sol\nRing",EN\n1,Opt,XX\n')
+    assert [(i["name"], i["line"]) for i in items] == [("Sol Ring", 2), ("Opt", 4)]
+    items = parse_collection_import("\n\n\nQuantity,Name,Language\n1,Opt,XX\n")
+    assert items[0]["line"] == 5
+    items = parse_collection_import('Quantity,Name\r\n1,"A\r\nB"\r\n\r\n1,Opt\r\n')
+    assert [(i["name"], i["line"]) for i in items] == [("A B", 2), ("Opt", 5)]
+    items = parse_collection_import('Quantity,Name,Language\n1,"Opt\u2028X",EN\n1,Y,ZZ\n')
+    assert [i["line"] for i in items] == [2, 3]
+    with pytest.raises(CollectionError, match="^line 5: quantity 'x' is not a number$"):
+        parse_collection_import('Quantity,Name\n1,"A\nB\nC"\nx,Opt\n')
+    with pytest.raises(CollectionError, match="^line 5: no card name$"):
+        parse_collection_import('\nQuantity,Name\n1,"Sol\nRing"\n1,\n')
+
+
+# Review L9 (question 2, recommended option): a Condition the gateway does not know is imported as
+# NM and the result names its line, as a language Archidekt cannot store is kept as English.
+def test_an_unknown_condition_is_near_mint_and_named() -> None:
+    items = parse_collection_import(
+        "Quantity,Name,Condition\n1,Opt,NM\n1,Sol Ring,EX\n2,Forest,ex\n1,Island,D\n1,Swamp,Mint\n1,Foo,EX\n"
+    )
+    assert [(i["condition"], i.get("condition_given"), i["line"]) for i in items] == [
+        ("NM", None, 2),
+        ("NM", "EX", 3),
+        ("NM", "ex", 4),
+        ("DMG", None, 5),
+        ("NM", "Mint", 6),
+        ("NM", "EX", 7),
+    ]
+    result = import_result(items, {"added": [{"id": 1}], "skipped": [{"index": 5}], "merged": []})
+    assert result["kept_condition"] == [
+        {"condition": "EX", "rows": [{"where": "line 3", "name": "Sol Ring"}]},
+        {"condition": "ex", "rows": [{"where": "line 4", "name": "Forest"}]},
+        {"condition": "Mint", "rows": [{"where": "line 6", "name": "Swamp"}]},
+    ]
+    one = import_result_html(
+        import_result(parse_collection_import("Quantity,Name,Condition\n1,Opt,EX\n"), {"added": [{"id": 1}]})
+    )
+    assert one == (
+        "<div class='notice ok importres' role='status'><p>Imported 1 card into your Archidekt "
+        "collection.</p><ul><li>Kept as Near Mint, because “EX” is not a condition Archidekt stores "
+        "for collection cards: line 2 (Opt).</li></ul></div>"
+    )
+    two = import_result_html(
+        import_result(
+            parse_collection_import("Quantity,Name,Condition,Language\n1,Opt,EX,PH\n1,Forest,EX,\n"),
+            {"added": [{"id": 1}]},
+        )
+    )
+    assert (
+        "<li>Kept as English, because Phyrexian is not a language Archidekt stores for collection cards: "
+        "line 2 (Opt).</li><li>Kept as Near Mint, because “EX” is not a condition Archidekt stores for "
+        "collection cards: line 2 (Opt), line 3 (Forest).</li>"
+    ) in two
+
+
+# Review L10: a cell quoted in a refusal is cut, so a refusal kept for the page stays small.
+def test_a_quoted_cell_in_a_refusal_is_cut() -> None:
+    with pytest.raises(CollectionError) as caught:
+        parse_collection_import("Quantity,Name\n" + "x" * 131_000 + ",Opt\n")
+    assert str(caught.value) == "line 2: quantity 'xxxxxxxxxxxxxxxxxxxx…' is not a number"
+
+
+TOO_LONG = "a cell is longer than 131,072 characters; check for a quote that is not closed"
+
+
+# Review L11: a cell over the csv module's limit, or a quantity int() refuses, is a refusal with its
+# line, not an exception the page turns into HTTP 500.
+@pytest.mark.parametrize(
+    ("text", "reason"),
+    [
+        ("Quantity,Name\n1,Opt\n1," + "x" * 140_000 + "\n", f"line 3: {TOO_LONG}"),
+        ('Quantity,Name\n1,"Opt\n' + "x\n" * 70_000, f"line 2: {TOO_LONG}"),
+        (
+            "Quantity,Name\n" + "9" * 5000 + ",Opt\n",
+            "line 2: quantity '99999999999999999999…' must be from 1 to 9999",
+        ),
+        ("Quantity,Name\n1,Opt\n0,Opt\n", "line 3: quantity '0' must be from 1 to 9999"),
+        ("Quantity,Name\n10000,Opt\n", "line 2: quantity '10000' must be from 1 to 9999"),
+    ],
+)
+def test_huge_cells_are_refused_with_their_line(text: str, reason: str) -> None:
+    with pytest.raises(CollectionError) as caught:
+        parse_collection_import(text)
+    assert str(caught.value) == reason
+    assert parse_collection_import("Quantity,Name\n0009999,Opt\n")[0]["quantity"] == 9999
+
+
+async def test_huge_cells_and_an_unknown_condition_through_the_page(stack: Stack) -> None:
+    b = await linked(stack)
+    try:
+        csrf = await b.csrf("/collection")
+        for text, said in [
+            ("Quantity,Name\n1," + "x" * 140_000 + "\n", f"line 2: {TOO_LONG}"),
+            ("Quantity,Name\n" + "9" * 5000 + ",Opt\n", "line 2: quantity &#x27;99999999999999999999…&#x27;"),
+            (
+                "Quantity,Name\n" + "y" * 100_000 + ",Opt\n",
+                "line 2: quantity &#x27;yyyyyyyyyyyyyyyyyyyy…&#x27;",
+            ),
+        ]:
+            r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": text})
+            assert r.status_code == 303, r.status_code
+            assert r.headers["location"].startswith("/collection?err=unreadable&r=")
+            page = (await b.http.get(r.headers["location"], headers=NAV)).text
+            assert f"Nothing was imported: {said}" in page and "y" * 21 not in page
+        text = "Quantity,Name,Condition\n1,Sol Ring,EX\n"
+        r = await b.http.post("/collection", data={"csrf": csrf, "action": "import", "text": text})
+        assert r.headers["location"].startswith("/collection?ok=imported&r=")
+        page = (await b.http.get(r.headers["location"], headers=NAV)).text
+        assert (
+            "Kept as Near Mint, because “EX” is not a condition Archidekt stores for collection cards: "
+            "line 2 (Sol Ring)." in page
+        )
+        recs = [
+            c
+            for c in stack.ark.collections["alice"].values()
+            if c["card"]["oracleCard"]["name"] == "Sol Ring"
+        ]
+        assert [(c["quantity"], c["condition"]) for c in recs] == [(1, 1)]  # Archidekt's 1 is NM
+    finally:
+        await b.aclose()

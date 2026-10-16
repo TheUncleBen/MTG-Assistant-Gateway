@@ -147,6 +147,8 @@ def normalise_items(items: Any) -> list[dict[str, Any]]:
 MAX_IMPORT_ROWS = MAX_ITEMS_PER_CALL  # one import is one add call; Archidekt is written a card at a time
 IMPORT_RESULT_TTL = 300.0  # seconds an import's result waits for the page the redirect lands on
 IMPORT_RESULTS_MAX = 2_000
+QUOTED_CELL_CHARS = 20  # a cell quoted in a refusal is cut to this
+REFUSAL_CHARS = 300  # and a kept refusal to this, whatever made it (none is longer today)
 _IMPORT_COLUMNS = {
     "quantity": ("quantity", "count", "qty"),
     "name": ("name", "card name", "card"),
@@ -159,69 +161,48 @@ _IMPORT_COLUMNS = {
 }
 
 
+def _quoted(value: str) -> str:
+    """A cell quoted in a refusal, cut to QUOTED_CELL_CHARS so a huge cell can't make a huge
+    message (each refusal is kept for the page, up to IMPORT_RESULTS_MAX of them)."""
+    if len(value) > QUOTED_CELL_CHARS:
+        value = value[:QUOTED_CELL_CHARS] + "…"
+    return repr(value)
+
+
 def parse_collection_import(text: str) -> list[dict[str, Any]]:
     """Cards to add from pasted or uploaded text: the gateway's own collection CSV (the Export CSV
     button), a CSV with Archidekt's collection column names (Quantity, Name, Finish, Condition,
     Language, Edition Code, Collector Number, Scryfall ID; headers are matched by name, extra
     columns are ignored; Language and Condition take the gateway's codes or Archidekt's, an empty
     Language is English) or a plain list (``2 Sol Ring (CMR) 436 *F*``). Returns items for ``add``;
-    a CSV row's item also carries ``line`` (its line number) and, when its Language is one Archidekt's
-    collection cannot store, ``language_given`` (the value as given; the item is English). Raises
+    a CSV row's item also carries ``line`` (the physical line its row starts on, so a quoted cell
+    with a line break and blank lines are counted) and, when its Language is one Archidekt's
+    collection cannot store, ``language_given`` (the value as given; the item is English), and when
+    its Condition is not one the gateway knows, ``condition_given`` (the item is NM). Raises
     CollectionError when nothing usable is found or there are more than MAX_IMPORT_ROWS rows."""
-    text = text.lstrip("\ufeff").strip()
-    if not text:
+    text = text.lstrip("\ufeff")
+    if not text.strip():
         raise CollectionError("invalid", "paste or choose a CSV or a card list first")
     if len(text) > 2_000_000:
         raise CollectionError("invalid", "that file is larger than 2 MB")
-    lines = text.splitlines()
     items: list[dict[str, Any]] = []
-    first = [c.strip().lower() for c in next(csv.reader([lines[0]]), [])]
-    if "name" in first or "card name" in first:
-        keys: dict[str, int] = {}
-        for key, names in _IMPORT_COLUMNS.items():
-            for n in names:
-                if n in first and key not in keys:
-                    keys[key] = first.index(n)
-        if "name" not in keys:
-            raise CollectionError("invalid", "the CSV needs a Name column")
-
-        def cell(row: list[str], key: str) -> str:
-            i = keys.get(key)
-            return row[i].strip() if i is not None and i < len(row) else ""
-
-        for n, row in enumerate(csv.reader(lines[1:]), start=2):
-            if not any(c.strip() for c in row):
-                continue
-            name = cell(row, "name")
-            if not name:
-                raise CollectionError("invalid", f"line {n}: no card name")
-            qty = cell(row, "quantity") or "1"
-            if not qty.isascii() or not qty.isdigit():  # str.isdigit alone accepts "²" and int() then fails
-                raise CollectionError("invalid", f"line {n}: quantity {qty!r} is not a number")
-            finish_raw = cell(row, "finish").lower()
-            finish = {"foil": "foil", "etched": "etched", "true": "foil", "yes": "foil"}.get(
-                finish_raw, "nonfoil"
-            )
-            items.append(
-                {
-                    "name": name,
-                    "set": cell(row, "set").lower(),
-                    "collector_number": cell(row, "collector_number"),
-                    "scryfall_id": cell(row, "scryfall_id"),
-                    "quantity": int(qty),
-                    "finish": finish,
-                    "condition": cell(row, "condition").upper(),
-                    "language": _import_language(cell(row, "language")) or "EN",
-                    "line": n,
-                }
-            )
-            if _import_language(cell(row, "language")) is None:
-                items[-1]["language_given"] = cell(row, "language")[:40]
+    reader = csv.reader(io.StringIO(text))
+    first: list[str] = []
+    try:
+        for row in reader:
+            if any(c.strip() for c in row):
+                first = [c.strip().lower() for c in row]
+                break
+    except csv.Error:
+        pass  # no CSV header: a plain list's own check says what is wrong with it
+    is_csv = "name" in first or "card name" in first
+    if is_csv:
+        _read_csv_rows(reader, first, items)
     else:
         from .decklist import DecklistError, parse_decklist
 
         try:
-            parsed = parse_decklist(text)
+            parsed = parse_decklist(text.strip())
         except DecklistError as exc:
             raise CollectionError("invalid", f"the list could not be read: {exc}") from exc
         for c in parsed:
@@ -245,11 +226,79 @@ def parse_collection_import(text: str) -> list[dict[str, Any]]:
         )
     out = normalise_items(items)
     for item, raw in zip(out, items, strict=True):
-        if "line" in raw:
-            item["line"] = raw["line"]
-        if "language_given" in raw:
-            item["language_given"] = raw["language_given"]
+        for key in ("line", "language_given", "condition_given"):
+            if key in raw:
+                item[key] = raw[key]
     return out
+
+
+def _read_csv_rows(reader: Any, first: list[str], items: list[dict[str, Any]]) -> None:
+    """The rows after a CSV's header row ``first`` (lower-cased), appended to ``items``. Each
+    row's ``line`` is the physical line it starts on: ``reader.line_num`` counts the lines read,
+    so a quoted cell with a line break and blank lines are counted."""
+    keys: dict[str, int] = {}
+    for key, names in _IMPORT_COLUMNS.items():
+        for n in names:
+            if n in first and key not in keys:
+                keys[key] = first.index(n)
+    if "name" not in keys:
+        raise CollectionError("invalid", "the CSV needs a Name column")
+
+    def cell(row: list[str], key: str) -> str:
+        i = keys.get(key)
+        return row[i].strip() if i is not None and i < len(row) else ""
+
+    while True:
+        n = reader.line_num + 1
+        try:
+            row = next(reader, None)
+        except csv.Error as exc:
+            # a cell over the csv module's limit (131,072 characters), as an unclosed quote makes
+            # of the rest of the file: named by the line its row starts on
+            raise CollectionError(
+                "invalid",
+                f"line {n}: a cell is longer than {csv.field_size_limit():,} characters; "
+                "check for a quote that is not closed",
+            ) from exc
+        if row is None:
+            break
+        if not any(c.strip() for c in row):
+            continue
+        name = cell(row, "name")
+        if not name:
+            raise CollectionError("invalid", f"line {n}: no card name")
+        qty = cell(row, "quantity") or "1"
+        if not qty.isascii() or not qty.isdigit():  # str.isdigit alone accepts "²" and int() then fails
+            raise CollectionError("invalid", f"line {n}: quantity {_quoted(qty)} is not a number")
+        # a long digit string is past MAX_QUANTITY anyway, and int() refuses one over 4,300 digits
+        if len(qty.lstrip("0")) > len(str(MAX_QUANTITY)) or not 1 <= int(qty) <= MAX_QUANTITY:
+            raise CollectionError(
+                "invalid", f"line {n}: quantity {_quoted(qty)} must be from 1 to {MAX_QUANTITY}"
+            )
+        finish_raw = cell(row, "finish").lower()
+        finish = {"foil": "foil", "etched": "etched", "true": "foil", "yes": "foil"}.get(
+            finish_raw, "nonfoil"
+        )
+        condition = cell(row, "condition").upper()
+        if condition == "D":  # Archidekt's own code for Damaged
+            condition = "DMG"
+        items.append(
+            {
+                "name": name,
+                "set": cell(row, "set").lower(),
+                "collector_number": cell(row, "collector_number"),
+                "scryfall_id": cell(row, "scryfall_id"),
+                "quantity": int(qty),
+                "finish": finish,
+                "condition": condition if condition in CONDITIONS else "NM",
+                "language": _import_language(cell(row, "language")) or "EN",
+                "line": n,
+            }
+        )
+        if _import_language(cell(row, "language")) is None:
+            items[-1]["language_given"] = cell(row, "language")[:40]
+        if condition not in CONDITIONS:  # kept as NM, and the result names the line
+            items[-1]["condition_given"] = cell(row, "condition")[:40]
 
 
 def _import_language(value: str) -> str | None:
@@ -754,7 +803,8 @@ def _language_name(code: str) -> str:
 def import_result(items: list[dict[str, Any]], out: dict[str, Any]) -> dict[str, Any]:
     """What an import did, for the Collection page's notice: ``items`` as parse_collection_import
     returned them, ``out`` as ``add`` returned it. Plain data (copies added, and the rows kept as
-    English, merged into a record of another language, or not found, each with where it was)."""
+    English, kept as Near Mint, merged into a record of another language, or not found, each with
+    where it was)."""
 
     def where(i: int) -> str:
         item = items[i] if 0 <= i < len(items) else {}
@@ -769,6 +819,11 @@ def import_result(items: list[dict[str, Any]], out: dict[str, Any]) -> dict[str,
         if item.get("language_given") and i not in missing:
             lang = _language_name(str(item["language_given"]))
             kept.setdefault(lang, []).append({"where": where(i), "name": name(i)})
+    near_mint: dict[str, list[dict[str, str]]] = {}
+    for i, item in enumerate(items):
+        if item.get("condition_given") and i not in missing:
+            given = str(item["condition_given"]).strip()
+            near_mint.setdefault(given, []).append({"where": where(i), "name": name(i)})
     merged = [
         {
             "where": where(int(m["index"])),
@@ -783,6 +838,7 @@ def import_result(items: list[dict[str, Any]], out: dict[str, Any]) -> dict[str,
         "cards": sum(int(it.get("quantity") or 0) for i, it in enumerate(items) if i not in missing),
         "added": bool(out.get("added")),
         "kept": [{"language": k, "rows": v} for k, v in kept.items()],
+        "kept_condition": [{"condition": k, "rows": v} for k, v in near_mint.items()],
         "merged": merged,
         "missing": [{"where": where(i), "name": name(i)} for i in missing],
     }
@@ -806,6 +862,12 @@ def import_result_html(result: dict[str, Any]) -> str:
         notes.append(
             f"Kept as English, because {said} is not a language Archidekt stores for collection cards: "
             f"{rows(group['rows'])}."
+        )
+    for group in result.get("kept_condition") or []:
+        # a Condition the gateway does not know (Archidekt's are NM, LP, MP, HP and D), as typed
+        notes.append(
+            f"Kept as Near Mint, because “{group['condition']}” is not a condition Archidekt stores for "
+            f"collection cards: {rows(group['rows'])}."
         )
     merged = result.get("merged") or []
     if merged:
@@ -1515,7 +1577,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                     items = parse_collection_import(data.get("text", ""))
                 except CollectionError as exc:
                     code = "err=toomany" if "at most" in str(exc) else "err=unreadable"
-                    code += "&r=" + keep_result(sub, {"refused": str(exc)})
+                    code += "&r=" + keep_result(sub, {"refused": str(exc)[:REFUSAL_CHARS]})
                     return RedirectResponse(f"{back}{'&' if '?' in back else '?'}{code}", status_code=303)
                 out = await service.add(sub, items, source="manual")
                 code = "ok=imported" if out["added"] else "err=nothingimported"
