@@ -746,3 +746,41 @@ def test_drag_onto_the_stack_directly_below_in_the_stacks_view(server: Server) -
         assert land.locator(f".c[data-card={json.dumps(name)}]").count() == 1
         assert errors == []
         browser.close()
+
+
+def test_a_late_refresh_that_takes_a_card_off_closes_its_menu(server: Server) -> None:
+    """Review 2 N3: a save whose re-read was stale reads the deck once more a moment later; when
+    that read no longer has the card the menu is open on, the menu closes with it (it would
+    otherwise act on a card that is gone from the page)."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+
+    def answer(route) -> None:
+        got = route.fetch().json()
+        if json.loads(route.request.post_data or "{}").get("refresh"):
+            got["rows"] = [r for r in got.get("rows") or [] if r["name"] != "Cultivate"]
+        else:
+            got["stale"] = True
+        route.fulfill(status=201, json=got)
+
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1366)
+        page.goto(f"{server.base}/decks/42?view=grid", wait_until="networkidle")
+        page.route(EDIT_URL, answer)
+        card = page.locator(".deckview .c[data-card='Cultivate']").first
+        card.scroll_into_view_if_needed()
+        card.click(button="right")
+        menu = page.locator(".ctxmenu[role=menu]")
+        menu.wait_for(timeout=3000)
+        with page.expect_request(lambda r: EDIT_URL.search(r.url) and "refresh" in (r.post_data or "")):
+            menu.locator(".qtyrow .step").nth(1).click()
+            # the menu stays open for more steps while the page waits to read the deck again
+            page.locator(".deck-toast .msg", has_text="Refreshing").wait_for(timeout=8000)
+            assert page.locator(".ctxmenu").count() == 1
+        page.locator(".deck-toast .msg", has_text="Saved. Snapshot kept").wait_for(timeout=8000)
+        assert page.locator(".deckview .c[data-card='Cultivate']").count() == 0
+        assert page.locator(".ctxmenu").count() == 0
+        assert errors == []
+        browser.close()
