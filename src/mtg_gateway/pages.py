@@ -462,7 +462,10 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 except DeckError:
                     continue  # already closed: nothing to do for it
             return RedirectResponse(_with_query(back, "ok=rejected_some"), status_code=303)
-        the_plan = state.decks.plan_selection(sub, picks, versions)
+        try:
+            the_plan = state.decks.plan_selection(sub, picks, versions)
+        except DeckError as exc:
+            return _pick_one_page(exc, back, sub, sid)
         stamp = form_stamp(s.session_secret, f"select:{sub}")
         return page(
             "Apply these changes?",
@@ -471,6 +474,21 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             sid=sid,
             current="/proposals",
             head_extra=LIST_STYLE,
+        )
+
+    def _pick_one_page(exc: DeckError, back: str, sub: str, sid: str | None) -> Response:
+        """A selection with a change and its replacement: refused, the pair named (Q142 check)."""
+        if exc.kind != "pick_one":
+            raise exc
+        return page(
+            "Apply these changes?",
+            "<div class='card'>"
+            + _err(str(exc))
+            + f"<p><a class='btn' href='{html.escape(back)}'>Back</a></p></div>",
+            status=409,
+            sub=sub,
+            sid=sid,
+            current="/proposals",
         )
 
     @server.custom_route("/proposals/apply", methods=["POST"], include_in_schema=False)
@@ -499,6 +517,10 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         if submitted_too_soon(s.session_secret, f"select:{sub}", data.get("shown")):
             # Faster than a person reads the confirm (or a stamp that is not ours): nothing is
             # applied and the same confirm is shown again, as the single review page does.
+            try:
+                state.decks.plan_selection(sub, picks, versions)
+            except DeckError as exc:
+                return _pick_one_page(exc, back, sub, sid)
             return page(
                 "Apply these changes?",
                 _confirm_body(
@@ -518,6 +540,8 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         try:
             run = state.decks.apply_selection(sub, picks, via=REVIEW_PAGE, versions=versions)
         except DeckError as exc:
+            if exc.kind == "pick_one":
+                return _pick_one_page(exc, back, sub, sid)
             return RedirectResponse(_with_query(back, f"err={_err_code(exc.kind)}"), status_code=303)
         await state.decks.batches.wait(run["batch_id"], BATCH_WAIT_SECONDS)
         return RedirectResponse(f"/proposals/applied/{run['batch_id']}", status_code=303)

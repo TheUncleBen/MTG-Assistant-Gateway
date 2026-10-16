@@ -196,3 +196,54 @@ async def test_rejecting_a_replacement_of_another_apps_change_leaves_that_change
     assert structured(await call(h, a, "reject_proposal", {"proposal_id": new["proposal_id"]}))["ok"]
     row = h.db.get_proposal(theirs["proposal_id"], SUB)
     assert row["state"] == "pending" and row["status"] is None, row
+
+
+async def test_a_change_and_its_replacement_ticked_together_are_refused_by_name(stack: Stack) -> None:
+    """The Q142 check: another app's change waits until its replacement is applied, so both can
+    be ticked; Apply all never applies both, and never picks one for the member."""
+    from mtg_gateway.decks import DeckError
+
+    from .test_decks_and_proxy import Browser
+
+    h, ark = stack.h, stack.ark
+    await linked_user(stack)
+    await _set_mode(h, "manual")
+    a, _ = await _app_token(h, "Claude")
+    b, _ = await _app_token(h, "ChatGPT")
+    theirs = await _propose(h, b, _add("Opt"))
+    new = await _propose(h, a, _add("Delver of Secrets"), replaces=[theirs["proposal_id"]])
+    pair = [theirs["proposal_id"], new["proposal_id"]]
+    decks = h.app.state.gateway.decks
+    want = (
+        f"#{new['board_no']} replaces #{theirs['board_no']} on {theirs['deck_name']}, so they can't "
+        "be applied together. Nothing was sent. Untick one of them, then apply again."
+    )
+    reset = current_client.set(BROWSER_CLIENT)
+    try:
+        try:
+            decks.apply_selection(SUB, pair, via="review_page")
+            raise AssertionError("both were started")
+        except DeckError as exc:
+            assert exc.kind == "pick_one" and str(exc) == want, str(exc)
+    finally:
+        current_client.reset(reset)
+    # the Proposals page names the pair and sends nothing
+    br = Browser(h)
+    try:
+        await br.login()
+        csrf = await br.csrf("/proposals")
+        form = {"csrf": csrf, "action": "apply", "back": "/proposals"}
+        versions = {f"v_{p}": "1" for p in pair}
+        r = await br.http.post("/proposals/select", data={**form, **versions, "pick": pair})
+        assert r.status_code == 409 and "Untick one of them" in r.text, r.text
+        r = await br.http.post(
+            "/proposals/apply", data={**form, **versions, "picks": ",".join(pair), "shown": "1.x"}
+        )
+        assert r.status_code == 409 and "Untick one of them" in r.text
+    finally:
+        await br.aclose()
+    assert ark.patches == []
+    assert all(h.db.get_proposal(p, SUB)["state"] == "pending" for p in pair)
+    # either one alone goes to the confirm
+    plan = decks.plan_selection(SUB, [theirs["proposal_id"]])
+    assert plan["count"] == 1
