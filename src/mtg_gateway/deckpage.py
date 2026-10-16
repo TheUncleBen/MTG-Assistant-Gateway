@@ -1578,10 +1578,13 @@ def compare_forge_html(deck: Deck, other: Any, other_name: str, *, csrf: str | N
     if not (forge_on and csrf and isinstance(other, Deck) and _has_commander(deck) and _has_commander(other)):
         return ""
     name = esc(deck.name or f"Deck {deck.id}")
+    # TODO(Q136 item 6, held for Ben's re-confirmation): which deck's bracket picks the opponents;
+    # this text follows the rule built today (forge.shared_opponents) and changes with it.
     return (
         "<section class='panel compareforge'><h3>Forge games against the same opponents</h3>"
         f"<p class='muted small'>Forge plays each deck against the same three precons, picked for "
-        f"{name}'s bracket. Each deck gets its own report under Reports (and History) with the deck "
+        f"{name}'s bracket, or Archidekt's estimate from cards when none is set. Each deck gets its "
+        "own report on the <a href='/reports'>Reports</a> page (and in History) with the deck "
         "statistics, the decklist check and the Forge games (no solo test). The games play in the "
         "background, one deck after the other. Compare the two decks' 95% intervals, not only their "
         "win rates.</p>"
@@ -1654,8 +1657,8 @@ GOLDFISH_GUIDE_STEPS = (
     ("hand", "Look at your seven cards. Press Keep hand, or Mulligan for seven new ones."),
     (
         "bottom",
-        "After a mulligan, press Keep hand, select the cards to put on the bottom of your library, then "
-        "press Put on bottom.",
+        "After a mulligan, press Keep hand. If the game asks for cards to go on the bottom, select them, "
+        "then press the Put … on the bottom button.",
     ),
     ("land", "Play a land: select it in your hand and choose Play to the battlefield."),
     ("cast", "Tap lands for mana: select a land and choose Tap. Then play what you could pay for."),

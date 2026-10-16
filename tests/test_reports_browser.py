@@ -495,7 +495,9 @@ def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) ->
 
 @pytest.mark.parametrize("width", [320, 717, 1366])
 @pytest.mark.parametrize("scheme", ["light", "dark"])
-def test_saved_descriptions_and_remove_fit_and_read(server: Server, width: int, scheme: str) -> None:
+def test_saved_descriptions_and_remove_fit_and_read(
+    server: Server, width: int, scheme: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Q138 items 4 and 6: a report's saved card descriptions, with Remove on the member's own,
     and both recognition figures: no sideways scroll, 4.5:1 text, a 44px Remove target; Remove
     takes the description away and says so."""
@@ -504,6 +506,7 @@ def test_saved_descriptions_and_remove_fit_and_read(server: Server, width: int, 
 
     from playwright.sync_api import sync_playwright
 
+    from mtg_gateway import card_models
     from mtg_gateway.card_models import KeptModels
 
     from .test_card_models import _Store
@@ -513,6 +516,7 @@ def test_saved_descriptions_and_remove_fit_and_read(server: Server, width: int, 
     if exe == "missing":
         pytest.skip("no Chromium available for Playwright")
     sid = server.sign_in_and_link()
+    monkeypatch.setattr(card_models, "SWITCHED_ON", True)  # built, off until Ben's answer
     store = _Store()
     reports = server.app.state.gateway.reports
     reports.models = KeptModels(store)
@@ -558,7 +562,7 @@ def test_saved_descriptions_and_remove_fit_and_read(server: Server, width: int, 
                 right: Math.max(...Array.from(box.querySelectorAll('*'))
                   .map(e => e.getBoundingClientRect().right)),
                 low: texts.map(e => [e.textContent.trim().slice(0, 30), ratio(e)]).filter(([, r]) => r < 4.5),
-                buttons: Array.from(box.querySelectorAll('button')).map(b => b.getBoundingClientRect().height),
+                buttons: Array.from(box.querySelectorAll('button')).map(b => b.offsetHeight),
               };
             }""",
             CONTRAST,
@@ -568,7 +572,7 @@ def test_saved_descriptions_and_remove_fit_and_read(server: Server, width: int, 
         assert not state["low"], state["low"]
         assert len(state["buttons"]) == 1 and state["buttons"][0] >= 44, state["buttons"]
         coverage = page.locator(".report .coverage").inner_text()
-        assert "Played with their effect:" in coverage and "Modeled or set aside on purpose:" in coverage
+        assert "Played with their effect:" in coverage and "left out on purpose:" in coverage
         page.get_by_role("button", name="Remove the saved description of Sol Ring").click()
         page.wait_for_load_state("networkidle")
         assert "models=removed" in page.url and "sol ring" not in store.rows

@@ -17,7 +17,7 @@ from mtg_gateway.archidekt import parse_deck
 from mtg_gateway.db import Database
 from mtg_gateway.decks import DeckError
 from mtg_gateway.forge import ForgeClient, forge_deck, pick_opponents, refresh, start_run, summarise, wilson
-from mtg_gateway.report_view import forge_lines
+from mtg_gateway.report_view import FORGE_DRIFT_NOTE, forge_lines
 from mtg_gateway.reports import ReportService
 
 from .fake_archidekt import FakeArchidekt
@@ -511,24 +511,25 @@ def test_report_page_shows_a_queued_run_and_its_place() -> None:
     live = forge_html(queued, live=True)
     assert "queued" in live and "data-forge-live" in live
     assert "Waiting for your earlier Forge run to finish." in live
-    assert "Number 1 in your queue, behind your report of Liesa (rep_ahead)" in live
+    assert "Waiting: number 1 in line, behind your report of Liesa:" in live
     assert "Expected to finish in about 79 minutes (at the measured 235.6 seconds a game)." in live
     assert "href='/history/reports/rep_ahead'" in live
     assert "href=" not in forge_html(queued)  # an export links nowhere
     md = report_markdown({"deck_name": "Aesi", "deck_id": "42", "stats": {}, "forge": queued})
-    assert "Number 1 in your queue" in md
+    assert "Waiting: number 1 in line" in md
     seeded = forge_html({"state": "done", "seed": 12, "seed_source": "gateway", "result": {"games": 1}})
-    assert "Seed: 12 (chosen by the gateway and kept with the report)." in seeded
-    assert "forge_seed" not in seeded  # the page promises no replay (C-1)
-    seeded_md = report_markdown(
-        {
-            "deck_name": "Aesi",
-            "deck_id": "42",
-            "stats": {},
-            "forge": {"state": "done", "seed": 12, "seed_source": "gateway"},
-        }
-    )
-    assert "any game can differ, so compare runs by their win rates and intervals" in seeded_md
+    assert "Seed: 12 (chosen by the gateway, kept for the record)." in seeded
+    # R-207: every report says the games can differ, the page and the export, whoever chose the seed;
+    # none promises a replay
+    for source, said in (
+        ("gateway", "(chosen by the gateway, kept for the record)"),
+        ("request", "(from the request)"),
+    ):
+        forge = {"state": "done", "seed": 12, "seed_source": source, "result": {"games": 1}}
+        md = report_markdown({"deck_name": "Aesi", "deck_id": "42", "stats": {}, "forge": forge})
+        for text in (forge_html(forge), md):
+            assert f"Seed: 12 {said}." in text and FORGE_DRIFT_NOTE in text
+            assert "forge_seed" not in text and "repeat" not in text
 
 
 async def test_report_keeps_a_text_result_once(tmp_path: Path) -> None:
@@ -645,7 +646,7 @@ async def test_an_engine_busy_run_waits_and_is_retried(tmp_path: Path) -> None:
     assert forge["state"] == "queued" and forge["engine_busy"] is True and forge["retry_after"] == 1
     assert out["status"] == "queued" and out["forge_status"]["engine_busy"] is True
     assert "start" not in forge
-    assert any("asks the engine again" in ln for ln in forge_lines(forge)), forge_lines(forge)
+    assert any("asks Forge again" in ln for ln in forge_lines(forge)), forge_lines(forge)
     # a second report of the member waits behind it, not beside it
     second = await reports.run("alice", "42", games=300, options={"seed": 10})
     assert second["forge"]["state"] == "queued" and second["forge"]["position"] == 2
@@ -893,4 +894,11 @@ async def test_shared_opponents_that_left_the_engine_or_never_sat() -> None:
     precons = [{"name": n, "bracket": b} for n, b in BRACKETED.items()]
     names, why = shared_opponents(precons, {"deck_name": "Deck A", "bracket": [2, "archidekt"]})
     assert names == ["New 2", "Older 2", "New 3"]
-    assert why["rule"] == "shared" and why["bracket"] == 2 and "picked for Deck A's bracket" in why["note"]
+    assert why["rule"] == "shared" and why["bracket"] == 2
+    assert "picked for Deck A's Forge games by the bracket set on the deck in Archidekt" in why["note"]
+    # N20: an estimate is never called the deck's bracket
+    _, est = shared_opponents(precons, {"deck_name": "Deck A", "bracket": [2, "estimate"]})
+    assert (
+        "by Archidekt's estimate from the deck's cards" in est["note"]
+        and "Deck A's bracket" not in est["note"]
+    )

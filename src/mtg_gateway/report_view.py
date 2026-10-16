@@ -760,7 +760,8 @@ def coverage_text(g: dict[str, Any]) -> str:
     # Q138 item 6: both figures, as scripts/measure_recognition.py prints them
     return (
         f"Played with their effect: {c['modeled']} of {c['deck_size']} cards ({c['pct']}% of the deck). "
-        f"Modeled or set aside on purpose: {c['known']} ({c['known_pct']}%). The rest are listed below."
+        f"Played with their effect or left out on purpose: {c['known']} ({c['known_pct']}%). The rest are "
+        "listed below."
     )
 
 
@@ -776,8 +777,8 @@ UNMODELED_TEXT = (
     "model, such as opponents to interact with."
 )
 UNMODELED_SAVED_TEXT = (
-    "The gateway saves each description that passes its check, and later solo tests of any member's "
-    "deck play that card with it."
+    "The gateway can save descriptions that pass its check, up to 200 per member, and later solo "
+    "tests of any member's deck then play that card with it."
 )
 KEPT_HEADING = "Played with saved card descriptions"
 KEPT_TEXT = (
@@ -924,7 +925,7 @@ def honesty_html(g: dict[str, Any], ask: str = "") -> str:
             for grp in oos
         )
         parts.append(
-            f"<div class='group'><h3>Out of scope <small>{_esc(_share(total, size))}</small></h3>"
+            f"<div class='group'><h3>Left out on purpose <small>{_esc(_share(total, size))}</small></h3>"
             "<p>The simulator plays against an opponent who does nothing, so removal, counterspells and "
             "protection have nothing to act on. These cards sat in hand.</p>" + groups + "</div>"
         )
@@ -1178,7 +1179,15 @@ def _interval(pair: Any) -> str:
     return f"{_pct(low)} to {_pct(high)}" if _float(low) is not None and _float(high) is not None else ""
 
 
-def forge_lines(f: dict[str, Any], *, results: bool = True, markdown: bool = False) -> list[str]:
+# R-207: "Reports carry the 'later games can differ' note". TODO(Ben's re-confirmation card): the
+# exact words wait on his answer (WORDING-1-TEXT-r3); the slot is on the page and every export.
+FORGE_DRIFT_NOTE = (
+    "Forge does not always replay the same games from the same seed, so compare runs by their win "
+    "rates and ranges, not game by game."
+)
+
+
+def forge_lines(f: dict[str, Any], *, results: bool = True) -> list[str]:
     """Forge's result as plain sentences, shared by the page and the Markdown export. The page
     draws the results themselves as a table (forge_results_html) and passes ``results=False``."""
     res = f.get("result") or {}
@@ -1186,14 +1195,11 @@ def forge_lines(f: dict[str, Any], *, results: bool = True, markdown: bool = Fal
     ahead = f.get("waiting_for") if isinstance(f.get("waiting_for"), dict) else None
     if f.get("engine_busy") and f.get("state") == "queued":
         every = f" every {f['retry_after']} seconds" if f.get("retry_after") else ""
-        out.append(f"The gateway asks the engine again{every} and starts the games when it has room.")
+        out.append(f"The gateway asks Forge again{every} and starts the games when Forge has room.")
     elif f.get("waiting") and f.get("state") == "queued":
-        place = f"Number {f['position']} in your queue" if f.get("position") else "In your queue"
+        place = f"Waiting: number {f['position']} in line" if f.get("position") else "Waiting in line"
         behind = (
-            f", behind your report of {front_face(ahead.get('deck_name')) or 'another deck'}"
-            f" ({ahead.get('report_id')})"
-            if ahead
-            else ""
+            f", behind your report of {front_face(ahead.get('deck_name')) or 'another deck'}" if ahead else ""
         )
         out.append(f"{place}{behind}: it starts by itself when the run ahead of it ends.")
     elif f.get("state") == "running" and f.get("games_requested"):
@@ -1245,16 +1251,11 @@ def forge_lines(f: dict[str, Any], *, results: bool = True, markdown: bool = Fal
         seated = ", ".join(f"{front_face(n)} (bracket {b})" for n, b in rated.items())
         out.append(f"Opponents: {choice['note']}" + (f" Seated: {seated}." if seated else ""))
     if f.get("seed") is not None:
-        # The same seed does not always replay the same games (C-1, 10-16 runs: later games of a
-        # group of five can differ), so the page promises nothing and the export says what holds.
-        chosen = (
-            " (chosen by the gateway; with options.forge_seed the first games of each group of five "
-            "usually repeat, but any game can differ, so compare runs by their win rates and "
-            "intervals, not game by game)"
-            if markdown
-            else " (chosen by the gateway and kept with the report)"
-        )
-        out.append(f"Seed: {f['seed']}{chosen if f.get('seed_source') == 'gateway' else ''}.")
+        # The seed is kept for the record only, never as a way to replay the games (R-207; Ben's
+        # re-confirmation card), and every report says why, the page and the export alike.
+        whose = {"gateway": " (chosen by the gateway, kept for the record)", "request": " (from the request)"}
+        out.append(f"Seed: {f['seed']}{whose.get(str(f.get('seed_source')), '')}.")
+        out.append(FORGE_DRIFT_NOTE)
     elif f.get("state") in ("done", "running") and f.get("job_id"):
         out.append("Seed: none recorded (this run was started without one).")
     return out
@@ -1581,7 +1582,7 @@ def report_markdown(r: dict[str, Any]) -> str:
         lines += [f"## {FORGE_HEADING}", ""]
         if forge.get("state") != "done":
             lines += [str(forge.get("error") or FORGE_STATE_TEXT.get(_forge_key(forge), "")), ""]
-        lines += [f"- {ln}" for ln in forge_lines(forge, markdown=True)]
+        lines += [f"- {ln}" for ln in forge_lines(forge)]
         if forge.get("not_played"):
             lines.append("- Cards Forge could not play: " + ", ".join(forge["not_played"]))
         lines.append("")
@@ -1598,7 +1599,7 @@ def report_markdown(r: dict[str, Any]) -> str:
             lines.append("")
         if h["out_of_scope"]:
             total = _copies([c for grp in h["out_of_scope"] for c in grp["cards"]])
-            lines.append(f"Out of scope: {_share(total, size)}.")
+            lines.append(f"Left out on purpose: {_share(total, size)}.")
             for grp in h["out_of_scope"]:
                 lines.append(f"- {grp['label']}: " + ", ".join(_md_name(c) for c in grp["cards"]))
             lines.append("")

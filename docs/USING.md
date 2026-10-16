@@ -143,10 +143,11 @@ One deck:
   with its 95% range. Forge does not run 60-card decks (its opponents are
   Commander precons): their reports never start or queue a Forge run and say
   why. When the Forge engine is busy
-  with other runs, a report waits in the queue and starts by itself. Because
-  each deck meets precons of its own bracket, two decks' Forge win rates are
-  not a like-for-like comparison; the paired goldfish A/B of `compare_decks`
-  is.
+  with other runs, a report waits in the queue and starts by itself. Unless you
+  use the Compare page's Forge button (or your assistant asks for the same
+  opponents), each deck meets precons of its own bracket, so two decks' Forge
+  win rates are not a like-for-like comparison; the paired goldfish A/B of
+  `compare_decks` is.
 - A report without Forge games (Forge not set up, a 60-card deck, or Forge
   left out of the report) is labelled **Preflight only (no rules engine)**
   where the Forge games would be. Each report shows its status: queued,
@@ -337,11 +338,13 @@ assistant applies what that mode allows, always with a snapshot.
   **Restore** puts a deck back exactly as a snapshot had it, cards and the
   deck's own name, description, format, bracket and privacy alike (another
   proposal you approve).
-- **Reports** (under More) list every deck report you or your assistant
-  ran, with what Forge is playing now. Each holds the deck's statistics, a legality check and the
-  solo test, so you can follow how a deck develops.
+- **Reports** (under More) list your stored deck reports, newest first (the
+  gateway keeps the newest 200), with what Forge is playing now. Each holds
+  the deck's statistics, a legality check, and the solo test, the Forge games
+  or both, so you can follow how a deck develops.
 - **Compare** has **Test both in Forge against the same opponents** when
-  Forge is on: both decks play Forge games against the same three precons.
+  Forge is on and both are Commander decks: both decks play Forge games
+  against the same three precons.
 - The **Goldfish** page's **How to play** guide walks a first game step by
   step; you can hide it.
 

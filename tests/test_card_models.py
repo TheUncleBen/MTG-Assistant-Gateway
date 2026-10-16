@@ -34,6 +34,23 @@ GOOD = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _switched_on(monkeypatch: Any) -> None:
+    """Kept models are built but off until Ben's re-confirmation card (card_models.SWITCHED_ON);
+    these tests switch them on to test what is built."""
+    monkeypatch.setattr(card_models, "SWITCHED_ON", True)
+
+
+def test_kept_models_stay_off_until_ben_answers(tmp_path: Path, monkeypatch: Any) -> None:
+    """Q136 item 2 is held: with every schema 14 method there, nothing is kept or used while the
+    switch is off."""
+    monkeypatch.setattr(card_models, "SWITCHED_ON", False)
+    db = FakeModelsDb(tmp_path / "t.sqlite")
+    assert KeptModels(db).available is False
+    monkeypatch.setattr(card_models, "SWITCHED_ON", True)
+    assert KeptModels(db).available is True  # only the switch held it off
+
+
 def test_only_the_validated_shape_is_kept() -> None:
     model = clean_model(GOOD, card="Puresteel Paladin")
     assert model == {
@@ -192,7 +209,19 @@ async def test_each_member_keeps_at_most_the_cap(tmp_path: Path, monkeypatch: An
     assert out["goldfish"]["models_kept"]["kept"] == [] and db.rows[other]["added_by"] == "bob"
 
 
-async def test_nothing_is_kept_without_the_schema_14_table(tmp_path: Path) -> None:
+async def test_nothing_is_kept_without_the_schema_14_table_or_while_off(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """No store without all four schema 14 methods keeps anything (delete included, Q138 item 4);
+    and with the real database, whichever branch's schema it has, nothing is kept while the switch
+    is off (CI runs this branch merged onto Track B's, which has the methods)."""
+    store = _Store()
+    assert KeptModels(store).available
+    no_delete = SimpleNamespace(
+        **{m: getattr(store, m) for m in ("get_card_models", "put_card_model", "count_card_models")}
+    )
+    assert not KeptModels(no_delete).available and not KeptModels(SimpleNamespace()).available
+    monkeypatch.setattr(card_models, "SWITCHED_ON", False)
     db = Database(tmp_path / "t.sqlite")
     db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
     mf = FakeMF()
@@ -333,7 +362,7 @@ async def test_the_adder_removes_a_saved_model_from_the_report_and_through_the_a
         assert out["ok"] and out["removed"] is False and "another member" in out["message"]
         out = structured(await call(h, token, "remove_card_model", {"card_name": "sol ring"}))
         assert out == {"ok": True, "removed": True} and store.rows.keys() == {"arcane signet"}
-        gw.reports.models = real  # the plain database keeps no models
+        gw.reports.models = KeptModels(SimpleNamespace())  # a store without the schema 14 methods
         out = structured(await call(h, token, "remove_card_model", {"card_name": "Sol Ring"}))
         assert out["ok"] is False and "does not save card models" in out["message"]
     finally:

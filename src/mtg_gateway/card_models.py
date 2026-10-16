@@ -18,7 +18,8 @@ Safeguards (the coordinator's check of Q136):
 - Models are data: an assistant that reads one (in a report) is told it was written by members.
 
 The table is schema 14 (Track B's db.py: get_card_models, put_card_model, delete_card_model,
-count_card_models). Until that lands, ``KeptModels.available`` is False and runs keep nothing.
+count_card_models). Until that lands, and while ``SWITCHED_ON`` is False, ``KeptModels.available``
+is False: runs keep nothing, use no kept model, and no page or tool says descriptions are saved.
 """
 
 from __future__ import annotations
@@ -32,6 +33,10 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# TODO(Q136 item 2, held for Ben's re-confirmation card): off until he answers whether one set of
+# descriptions is shared by all members (built here) or each member keeps their own. Nothing in
+# this module's sharing or replace design is final until then.
+SWITCHED_ON = False
 MAX_MODEL_BYTES = 4096
 MAX_PER_MEMBER = 200  # Q138 item 2
 MAX_PER_RUN = 100  # kept models merged into one run (a 100-card deck at most)
@@ -317,7 +322,7 @@ class KeptModels:
 
     @property
     def available(self) -> bool:
-        return all(
+        return SWITCHED_ON and all(
             callable(getattr(self.db, m, None))
             # removal is part of keeping (Q138 item 4): no store without it keeps anything
             for m in ("get_card_models", "put_card_model", "delete_card_model", "count_card_models")

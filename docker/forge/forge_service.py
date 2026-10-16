@@ -6,8 +6,9 @@ ends, so an idle container holds no Forge memory. Only the gateway reaches this 
 stack's private network.
 
 A job's games are cut into fixed slices by their number alone (``slices``), each slice one Forge
-process with its own seed made from the job's seed, so the same seed gives the same games however
-many slices play at once. A job asks for ``parallel`` slices at once; FORGE_MAX_PARALLEL (default 1)
+process with its own seed made from the job's seed, so the cut and the seeds are the same however
+many slices play at once (Forge does not always replay a game exactly from its seed, so the games
+themselves can still differ). A job asks for ``parallel`` slices at once; FORGE_MAX_PARALLEL (default 1)
 caps it, because each Forge process needs its own memory (FORGE_XMX) inside the container's limit.
 
 Endpoints (JSON):
@@ -50,6 +51,8 @@ MAX_QUEUE = int(os.environ.get("FORGE_MAX_QUEUE", "4"))
 # memory (one four-player game peaked near 790 MiB), so raise it only with the container's limit.
 MAX_PARALLEL = max(1, min(4, int(os.environ.get("FORGE_MAX_PARALLEL", "1"))))
 # A job's games are cut into slices of at most this many, the same way at any parallel setting.
+# TODO(Q138 item 1, held for Ben's re-confirmation card): groups of up to five (R-207), which the
+# card recommends keeping; no replay promise rests on the groups.
 SLICE_GAMES = 5
 JOB_TIMEOUT = int(os.environ.get("FORGE_JOB_TIMEOUT", "7200"))
 # Forge's sim calls a game a draw after this many seconds (its -c flag; Forge's own default is 120,

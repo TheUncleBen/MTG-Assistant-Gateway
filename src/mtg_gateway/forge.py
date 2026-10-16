@@ -303,9 +303,9 @@ def pick_opponents(
 def shared_opponents(
     precons: list[dict[str, Any]], shared: dict[str, Any]
 ) -> tuple[list[str] | None, dict[str, Any]]:
-    """K6 (Q136): the precons another report's run sat at the table, for a like-for-like
-    comparison; (None, choice) when one of them is no longer in this Forge image. Without that
-    run's precons (it never started), they are picked for its bracket, as its own run would."""
+    """K6 (Q136): the precons another report's run sat at the table, so both decks meet the same
+    table; (None, choice) when one of them is no longer in this Forge image. Without that run's
+    precons (it never started), they are picked for its bracket, as its own run would."""
     deck = str(shared.get("deck_name") or "the other deck")
     link = {k: shared[k] for k in ("report_id", "deck_name") if isinstance(shared.get(k), str)}
     opponents = shared.get("opponents")
@@ -325,16 +325,18 @@ def shared_opponents(
             "rule": "shared",
             "shared_with": link,
             **({"opponent_brackets": brackets} if brackets else {}),
-            "note": f"The same opponents as {deck}'s Forge games, so the two decks compare like for like.",
+            "note": f"The same opponents as {deck}'s Forge games, so both decks met the same table.",
         }
+    # TODO(Q136 item 6, held for Ben's re-confirmation): seats opponents picked by the first deck's
+    # bracket (or Archidekt's estimate when none is set); finish or change only after his answer.
     level, source = shared.get("bracket") or (None, None)
     chosen, picked = pick_opponents(precons, level if isinstance(level, int) else None, source)
+    why = BRACKET_SOURCES.get(source or "", "the deck's bracket")
     return chosen, {
         **picked,
         "rule": "shared",
         "shared_with": link,
-        "note": f"The opponents picked for {deck}'s bracket, the ones its own Forge games meet, so the "
-        "two decks compare like for like.",
+        "note": f"The opponents picked for {deck}'s Forge games by {why}, so both decks meet the same table.",
     }
 
 
@@ -352,12 +354,12 @@ async def start_run(
 ) -> dict[str, Any]:
     """Start a Forge run of the member's deck against bundled precons and return the report's
     ``forge`` section. ``shared`` (K6, Q136) seats the opponents of another report's run, so two
-    decks compare like for like: its ``opponents`` (that run's precons) when it has them, else
+    decks meet the same table: its ``opponents`` (that run's precons) when it has them, else
     they are picked for its ``bracket``; ``report_id`` and ``deck_name`` say whose they were.
     Cards Forge lacks are removed from the run and named in ``not_played``; the run is refused
     only when the commander itself is missing. Every run is seeded: without a seed from the
     request the gateway picks one, so ``seed`` is always the one Forge used (``seed_source`` says
-    whose it was) and the same games can be asked for again."""
+    whose it was), kept for the record: Forge does not always replay a game exactly from its seed."""
     deck = forge_deck(deck_text)
     if not deck["commander"]:
         return {

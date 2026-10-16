@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
 # Measures Forge games played one, two and three at once (Q136 item 5), inside the deployment's own limits
 # (FORGE_MEMORY_LIMIT 1536M, FORGE_CPUS 2): run time, peak memory, whether the container was killed
-# for memory, and whether the same seed gave the same games each way. Numbers only: it never fails
-# the job (.github/workflows/forge-image.yml runs it with continue-on-error).
+# for memory, and whether the same seed gave the same results each way. A run plays as many groups at
+# once as it has groups (forge_service.py: groups of at most five), so three at once needs at least
+# 11 games; the default 15 is three full groups. Three games at once may well pass the 1536M limit:
+# the "OOM-killed" figure says whether it did. Numbers only: it never fails the job
+# (.github/workflows/forge-image.yml runs it with continue-on-error).
 #   scripts/ci_measure_forge.sh <local image tag> [games]
 set -u
 image="$1"
-games="${2:-6}"
+games="${2:-15}"
+if [ "$games" -lt 11 ]; then echo "need at least 11 games for three groups at once" >&2; exit 0; fi
+# the longest one run may take before it is reported as unfinished
+run_limit=$((50 * 60))
 summary="${GITHUB_STEP_SUMMARY:-/dev/stdout}"
 docker rm -f forge-measure >/dev/null 2>&1 || true
 docker run -d --name forge-measure -p 18101:8000 --memory 1536m --cpus 2 \
@@ -22,7 +28,8 @@ measure() {
   job=$(curl -fsS -X POST http://127.0.0.1:18101/jobs -H 'Content-Type: application/json' -d "$body" \
     | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') || { echo "parallel $1: not started"; return; }
   peak=0
-  for i in $(seq 1 360); do
+  end=$((SECONDS + run_limit))
+  while [ "$SECONDS" -lt "$end" ]; do
     mem=$(docker stats --no-stream --format '{{.MemUsage}}' forge-measure | awk '{print $1}')
     mib=$(python3 -c 'import re,sys; v=sys.argv[1]; n=float(re.match(r"[\d.]+",v).group()); print(int(n*1024 if "GiB" in v else n/1024 if "KiB" in v else n))' "$mem" 2>/dev/null || echo 0)
     [ "$mib" -gt "$peak" ] && peak=$mib
@@ -36,7 +43,7 @@ measure() {
 import json, sys
 v = json.load(sys.stdin)
 games = [r for r in v["results"]]
-print("parallel %s (used %s): state %s, %d of %d games, run %.0f s, peak %s MiB, OOM-killed %s, game ms %s" % (
+print("asked %s at once (played %s at once): state %s, %d of %d games, run %.0f s, peak %s MiB, OOM-killed %s, game ms %s" % (
     sys.argv[1], v.get("parallel"), v["state"], len(games), v["games_requested"], v.get("run_s") or 0,
     sys.argv[2], sys.argv[3], [r["ms"] for r in games]))' "$1" "$peak" "$oom"
 }
@@ -54,7 +61,7 @@ runs = {p: json.load(open(f"results-{p}.json"))["results"] for p in (1, 2, 3) if
 for p in (2, 3):
     if 1 in runs and p in runs:
         same = key(runs[1]) == key(runs[p]) and runs[1]
-        print(f"same seed, same games at 1 and at {p}:", "yes" if same else "no", key(runs[1]), key(runs[p]))
+        print(f"same seed, same results at 1 and at {p} at once:", "yes" if same else "no", key(runs[1]), key(runs[p]))
 PY
   echo '```'
 } | tee -a "$summary"

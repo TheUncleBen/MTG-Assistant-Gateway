@@ -119,8 +119,8 @@ def reports_page_html(
     has_more: bool,
 ) -> str:
     intro = (
-        "<p class='muted'>Every deck report you or your assistant ran, newest first. Each opens the full "
-        "report; History lists them too.</p>"
+        "<p class='muted'>Your stored deck reports, newest first (the gateway keeps the newest 200). Each "
+        "opens the full report; History lists them too.</p>"
     )
     if rows:
         listing = f"<ul class='rp-list'>{''.join(row_html(r) for r in rows)}</ul>"

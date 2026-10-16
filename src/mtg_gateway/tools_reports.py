@@ -8,7 +8,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import Field
 
-from . import deck_stats
+from . import card_models, deck_stats
 from .app import AppState, _tool_error
 from .archidekt import parse_deck
 from .decklist import DecklistError, clean_text, parse_decklist, to_text
@@ -277,16 +277,18 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "with position and "
             "waiting_for, and starts by itself; at most two wait, then a report gets no Forge games; when "
             "the engine itself is busy the run waits too, engine_busy with retry_after seconds), "
-            "with the seed Forge used, the cards it could not play in not_played and forge_status "
+            "with the seed Forge used (kept for the record: the same seed does not always replay the "
+            "same Forge games, so compare runs by win rate and interval), the cards it could not play "
+            "in not_played and forge_status "
             "(state, games_done of games_requested, expected_seconds); its result has each seat's wins "
             "with a 95% interval and how it lost, the median game time and turn, and how the games "
             "ended. Poll with get_deck_report "
             "view='forge' until the state is done. Forge plays Commander decks only: a 60-card deck's "
             "report never starts it (forge state skipped, with the reason). forge=false leaves Forge out "
-            "for a quick goldfish-only report (default: as simulate). A report without Forge games is "
+            "for a quick solo-test-only report (default: as simulate). A report without Forge games is "
             "labelled engine_label 'Preflight only (no rules engine)'. same_opponents_as (another of the "
             "user's report ids, one with Forge games) seats that report's opponents instead of this "
-            "deck's bracket's, so two decks' Forge numbers compare like for like; the forge section's "
+            "deck's bracket's, so two decks' Forge numbers come from the same table; the forge section's "
             "opponent_choice then has rule 'shared' and shared_with. status is the report's overall "
             "state: queued, running, complete, partial or failed. "
             "This is the one tool that "
@@ -314,7 +316,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             str | None,
             Field(
                 description="Another of your report ids (with Forge games): seat its Forge opponents, "
-                "for a like-for-like comparison of two decks."
+                "so both decks meet the same table."
             ),
         ] = None,
     ) -> dict[str, object]:
@@ -383,27 +385,32 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             out["trend"] = state.reports.trend(_sub(), deck_id)
         return out
 
-    @server.tool(
-        name="remove_card_model",
-        title="Remove a saved card model",
-        description=(
-            "Remove the card model the gateway saved for a card, when the user's assistant saved it (a "
-            "report's goldfish.kept_models shows yours: true). Later solo tests then play the card "
-            "without its effect again, for every member, until a new model is saved. Another member's "
-            "model cannot be removed here; an admin removes any from the gateway's admin page. "
-            "card_name is the card's name (the front face is enough). Changes nothing on Archidekt and "
-            "leaves stored reports as they are."
-        ),
-        annotations={"readOnlyHint": False, "destructiveHint": True, "openWorldHint": False},
-    )
-    async def remove_card_model(card_name: str) -> dict[str, object]:
-        if not state.reports.models.available:
-            return {"ok": False, "removed": False, "message": "This gateway does not save card models."}
-        removed = state.reports.models.remove(_sub(), card_name)
-        out: dict[str, object] = {"ok": True, "removed": removed}
-        if not removed:
-            out["message"] = "No saved model of yours for this card (another member's, or none)."
-        return out
+    # TODO(Q136 item 2, held for Ben's re-confirmation card): the tool exists only while kept models
+    # are switched on (card_models.SWITCHED_ON). When they are, guide.py lists it (Track C asks the
+    # owner) and test_approval_modes must not read "model" as "mode".
+    if card_models.SWITCHED_ON:
+
+        @server.tool(
+            name="remove_card_model",
+            title="Remove a saved card model",
+            description=(
+                "Remove the card model the gateway saved for a card, when the user's assistant saved it (a "
+                "report's goldfish.kept_models shows yours: true). Later solo tests then play the card "
+                "without its effect again, for every member, until a new model is saved. Another member's "
+                "model cannot be removed here; an admin removes any from the gateway's admin page. "
+                "card_name is the card's name (the front face is enough). Changes nothing on Archidekt and "
+                "leaves stored reports as they are."
+            ),
+            annotations={"readOnlyHint": False, "destructiveHint": True, "openWorldHint": False},
+        )
+        async def remove_card_model(card_name: str) -> dict[str, object]:
+            if not state.reports.models.available:
+                return {"ok": False, "removed": False, "message": "This gateway does not save card models."}
+            removed = state.reports.models.remove(_sub(), card_name)
+            out: dict[str, object] = {"ok": True, "removed": removed}
+            if not removed:
+                out["message"] = "No saved model of yours for this card (another member's, or none)."
+            return out
 
     @server.tool(
         name="get_deck_report",
