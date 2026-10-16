@@ -155,3 +155,23 @@ def test_a_card_with_commander_as_a_later_category_is_put_commander_first():
     deck = parse_deck(raw)
     want, _rows = category_plan_rows(deck, changes)
     assert card.relation_id not in want
+
+
+def test_the_apply_check_sees_a_primary_category_archidekt_did_not_put_first() -> None:
+    """Set as commander asks for Commander first (K10): a re-read with the same categories in
+    another order, so a different primary, is a mismatch; secondaries in another order are not."""
+    from mtg_gateway.archidekt import Deck
+    from mtg_gateway.decks import _category_mismatches
+
+    def deck(cats: list[str]) -> Deck:
+        return Deck(
+            id="1", name="t", cards=[_card(categories=cats)], owner="u", updated_at="", categories=[], raw={}
+        )
+
+    rid = _card().relation_id
+    assert _category_mismatches(deck(["Ramp", "Commander"]), {rid: ["Commander", "Ramp"]}) == [
+        "Lurrus of the Dream-Den"
+    ]
+    assert (
+        _category_mismatches(deck(["Commander", "Ramp", "Draw"]), {rid: ["Commander", "Draw", "Ramp"]}) == []
+    )

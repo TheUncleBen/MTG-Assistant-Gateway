@@ -4824,12 +4824,17 @@ def _no_such_folder(info: dict[str, Any], name: Any, *, several: bool = False) -
 
 def _category_mismatches(verified: Deck, want: dict[int, list[str]]) -> list[str]:
     """Names of rows whose categories on the re-read deck are not what ``category_plan`` asked
-    for (a row that vanished counts too)."""
+    for (a row that vanished counts too). The first category is the row's primary one (Set as
+    commander puts Commander there, K10), so it must match too; the others in any order."""
     rows = {c.relation_id: c for c in verified.cards if c.relation_id is not None}
     out = set()
     for rel, cats in want.items():
         row = rows.get(rel)
-        if row is None or sorted(row.categories) != sorted(cats):
+        if (
+            row is None
+            or sorted(row.categories) != sorted(cats)
+            or list(row.categories)[:1] != list(cats)[:1]
+        ):
             out.add(row.name if row else f"deck row {rel}")
     return sorted(out)
 
