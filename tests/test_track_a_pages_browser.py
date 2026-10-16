@@ -144,6 +144,8 @@ def test_proposals_page_strip_and_formatting_review_in_the_browser(server: Serve
                 assert strip.count() == 1, where
                 if not strip.evaluate("e => e.open"):
                     strip.locator("summary").click()
+                # open, the heading has no separator left over from the hidden "Review"
+                assert not strip.locator("summary").inner_text().strip().endswith("·"), where
                 _readable(page, "details.wstrip summary, details.wstrip a, details.wstrip label", where)
                 _no_sideways(page, vw, where)
                 if shots:
@@ -198,3 +200,77 @@ def test_proposals_page_strip_and_formatting_review_in_the_browser(server: Serve
             browser.close()
     names = [c["card"]["oracleCard"]["name"] for c in server.ark.decks[42]["cards"]]
     assert "Opt" in names and "Arcane Signet" in names and "Delver of Secrets" not in names
+
+
+WORDS_BROKEN = """(sel) => {
+  const out = [];
+  for (const el of document.querySelectorAll(sel)) {
+    const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+      const re = /\\S+/g;
+      let m;
+      while ((m = re.exec(n.data))) {
+        const r = document.createRange();
+        r.setStart(n, m.index);
+        r.setEnd(n, m.index + m[0].length);
+        const lines = new Set([...r.getClientRects()].map((b) => Math.round(b.top)));
+        if (lines.size > 1) out.push(m[0]);
+      }
+    }
+  }
+  return out;
+}"""
+
+
+def test_the_checked_bar_at_200_percent_text_on_a_phone(server: Server) -> None:
+    """Review round 1, finding 8: at 200% text the bar stays two rows (Apply and Reject side by
+    side, Clear by the count), words wrap whole, and Apply is on screen and not covered."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid, ids, _fmt = _waiting(server)
+    shots = os.environ.get("MTG_SHOTS_DIR")
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe) if exe else p.chromium.launch()
+        try:
+            for vw, vh, scheme in ((360, 780, "dark"), (390, 844, "light")):
+                where = f"{vw}-{scheme}-200"
+                ctx = _context(browser, server, sid, vw, vh, True, scheme)
+                # the phone's text size at 200%: the root font doubles
+                ctx.add_init_script(
+                    "document.addEventListener('DOMContentLoaded', () =>"
+                    " { document.documentElement.style.fontSize = '200%'; });"
+                )
+                page = ctx.new_page()
+                page.goto(f"{server.base}/proposals", wait_until="networkidle")
+                bar = page.locator(".wbar:not(.inline)").first
+                assert not bar.locator("button.clear").is_visible(), where  # nothing checked yet
+                page.locator(f"input[name=pick][value='{ids[0]}']").check()
+                page.locator(f"input[name=pick][value='{ids[1]}']").check()
+                assert bar.locator("button.clear").is_visible(), where
+                apply = bar.locator("button[name=action][value=apply]")
+                reject = bar.locator("button[name=action][value=reject]")
+                a, r, b = apply.bounding_box(), reject.bounding_box(), bar.bounding_box()
+                assert a and r and b, where
+                assert abs(a["y"] - r["y"]) < 2, (where, a, r)
+                assert b["height"] <= 0.3 * vh, (where, b)
+                assert 0 <= a["y"] and a["y"] + a["height"] <= vh, (where, a)
+                hit = page.evaluate(
+                    "([x, y]) => { const e = document.elementFromPoint(x, y);"
+                    " return !!e && !!e.closest('button[name=action][value=apply]'); }",
+                    [a["x"] + a["width"] / 2, a["y"] + a["height"] / 2],
+                )
+                assert hit, f"{where}: Apply is covered"
+                assert page.evaluate(WORDS_BROKEN, ".pick .what") == [], (
+                    where,
+                    page.evaluate(WORDS_BROKEN, ".pick .what"),
+                )
+                _readable(page, ".wbar button, .wbar span", where)
+                _no_sideways(page, vw, where)
+                if shots:
+                    page.screenshot(path=f"{shots}/a-proposals-ticked-{where}.png")
+                ctx.close()
+        finally:
+            browser.close()

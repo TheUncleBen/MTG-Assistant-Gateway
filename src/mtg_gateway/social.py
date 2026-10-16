@@ -377,13 +377,24 @@ class SocialService:
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """(the comment, the thread page it is on): looked for on ``page``, the page of the thread it
         was shown on. The thread is ordered by points, so a vote since can move a comment to the
-        page beside it: those two are read only when it is not where it was shown."""
+        page beside it, and a new one is on the last page: those are read only when it is not
+        where it was shown."""
         thread = await self.comments(sub, deck_id, page, keep_doc=keep_doc, reuse_root=True)
         found = _find(thread["comments"], comment_id)
-        for near in (thread["page"] - 1, thread["page"] + 1):
-            if found is not None or near < 1 or (near > thread["page"] and not thread["has_more"]):
+        near = [thread["page"] - 1, thread["page"] + 1]
+        # A comment just posted has no points yet, so it sits on the last page of a long thread
+        # although the page draws it at the top (review round 1, finding 6). A full page tells
+        # the page size, and the count of comments then gives the last page.
+        if thread["has_more"] and thread["comments"]:
+            near.append(-(-int(thread["count"]) // len(thread["comments"])))
+        seen = {thread["page"]}
+        for other_page in near:
+            if found is not None or other_page < 1 or other_page in seen:
                 continue
-            other = await self.comments(sub, deck_id, near, keep_doc=keep_doc, reuse_root=True)
+            if other_page > thread["page"] and not thread["has_more"]:
+                continue
+            seen.add(other_page)
+            other = await self.comments(sub, deck_id, other_page, keep_doc=keep_doc, reuse_root=True)
             found = _find(other["comments"], comment_id)
             if found is not None:
                 thread = other

@@ -451,6 +451,9 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         versions = _picked_versions(data, picks)
         if not picks:
             return RedirectResponse(_with_query(back, "err=none_selected"), status_code=303)
+        if any(p not in versions for p in picks) and action == "apply":
+            # G16: each checked change applies only as the version the list showed
+            return RedirectResponse(_with_query(back, "err=changed"), status_code=303)
         if action == "reject":
             current_client.set(BROWSER_CLIENT_ID)
             for pid in picks:
@@ -491,6 +494,8 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
         picks = picks[:MAX_PICKS]
         versions = _picked_versions(data, picks)
         back = _list_back(data.get("back"))
+        if any(p not in versions for p in picks):  # G16, as on the list
+            return RedirectResponse(_with_query(back, "err=changed"), status_code=303)
         if submitted_too_soon(s.session_secret, f"select:{sub}", data.get("shown")):
             # Faster than a person reads the confirm (or a stamp that is not ours): nothing is
             # applied and the same confirm is shown again, as the single review page does.
@@ -576,7 +581,7 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             if submitted_too_soon(s.session_secret, f"undo:{sub}:{snapshot_id}", data.get("shown")):
                 return RedirectResponse("/proposals", status_code=303)
             try:
-                done = await state.decks.undo(sub, snapshot_id)
+                done = await state.decks.undo(sub, snapshot_id, seen=data.get("deck_seen") or "")
             except DeckError as exc:
                 return page("Undo", _err(str(exc)), status=409, sub=sub, sid=sid, current="/proposals")
             return RedirectResponse(f"/proposals/{done['proposal_id']}?ok=undone", status_code=303)
@@ -665,6 +670,11 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 state.decks.reject(sub, pid, via=REVIEW_PAGE)
             else:
                 seen = data.get("version") or ""
+                row = state.db.get_proposal(pid, sub)
+                if not seen.isdigit() and row is not None and row.get("state") == "pending":
+                    # G16: Apply refuses a change that is not the version the page showed; a form
+                    # without one (an old page, or one made by hand) is refused the same way
+                    return RedirectResponse(f"/proposals/{pid}?err=changed", status_code=303)
                 result = await state.decks.apply(  # R-142: the one path
                     sub, pid, via=REVIEW_PAGE, version=int(seen) if seen.isdigit() else None
                 )
@@ -1534,6 +1544,13 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str, *, step: boo
             else ""
         )
         + (f"<dt>Proposed by</dt><dd>{actor_html(p['created_by'])}</dd>" if p.get("created_by") else "")
+        + (  # G16, Q134 item 5: an amended change says who changed it and what
+            f"<dt>Version</dt><dd>{int(p['version'])}, changed by {actor_html(p['changed_by'])}"
+            + (f": {html.escape(p['what_changed'])}" if p.get("what_changed") else "")
+            + "</dd>"
+            if p.get("changed_by")
+            else ""
+        )
         + (
             f"<dt>Risk</dt><dd><span class='badge {_risk_badge(p['risk'])}'>"
             f"{html.escape(p['risk'])}</span> <span class='small muted'>"
@@ -1653,7 +1670,10 @@ def _pretty(obj: Any) -> str:
 MAX_PICKS = 100  # one press may apply every change a member can have waiting (decks.MAX_SELECTION)
 BATCH_WAIT_SECONDS = 8.0  # the confirm's Apply waits this long for the result, then shows progress
 LIST_STYLE = f"<style>{LIST_CSS}</style>"
-DOC_STYLE = f"<style>{DOC_CSS}</style>"  # Q137: a document drawn with its formatting
+# Q137: a document drawn with its formatting; the review page's toggles are 44 px tall (finding 13)
+DOC_STYLE = (
+    f"<style>{DOC_CSS}main details > summary{{min-height:44px;padding:.6rem 0;cursor:pointer}}</style>"
+)
 
 
 def _formatted_preview(r: dict[str, Any]) -> str:
@@ -1802,7 +1822,8 @@ def _confirm_body(
         out.append(
             f"<p><strong>{n} change{'s' if n != 1 else ''}, {rows} row{'s' if rows != 1 else ''} in "
             "all.</strong> They run in this order, each checked against the deck just before it is "
-            "sent. A snapshot of each deck is kept first, so Undo can put it back.</p>"
+            "sent. A snapshot of each deck is kept first, so Undo can put its cards and details back. "
+            "Likes, follows, comments, collection edits, new decks and copies have no Undo.</p>"
         )
     for deck in plan["decks"]:
         out.append(f"<h2>{html.escape(deck['deck_name'])}</h2><ol class='order'>")
@@ -1910,6 +1931,7 @@ def _undo_body(look: dict[str, Any], csrf: str | None, shown: str, applied: list
             hidden={
                 "csrf": csrf or "",
                 "shown": shown,
+                "deck_seen": look["fingerprint"],
                 "snapshot": look["snapshot_id"],
                 "applied": ",".join(applied),
                 "after": str(after_at),

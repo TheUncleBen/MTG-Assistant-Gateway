@@ -443,8 +443,11 @@ def guide_body(
         "<strong>Held</strong>. The check never changes a deck, a snapshot or your undo history.</p>"
         "<p>On your Account page you can pick an approval mode: Manual (every change asks you), Semi-auto "
         "(the assistant applies small, low-risk edits itself and asks about the rest) or Full auto (it "
-        "applies the rest too, except a restore, a commander change, a new deck and a big edit). "
-        "Every change keeps a snapshot either way; <a href='#ref-approval'>Approval modes and risk "
+        "also applies bigger deck and collection edits and changes to a deck's details, except a "
+        f"restore, a commander change, a new deck and an edit of more than {int(big_rows)} rows). "
+        "Actions on your Archidekt account (likes, follows, comments and the like) and deleting a deck "
+        "always wait for your press, and so does a held change or one another app changed. "
+        "Every deck change keeps a snapshot either way; <a href='#ref-approval'>Approval modes and risk "
         "levels</a> has the exact rules.</p>"
         f"<p class='tip'>{_esc(writes)}</p>"
     )

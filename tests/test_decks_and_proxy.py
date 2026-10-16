@@ -91,11 +91,16 @@ class Browser:
 
     async def review_form(self, url: str) -> dict[str, str]:
         """The hidden fields of the review page ``url`` (``/proposals/<pid>``) as a person sends
-        them: the CSRF token and a render stamp old enough for the click guard."""
-        return {
+        them: the CSRF token, a render stamp old enough for the click guard and the version the
+        page showed (G16: an Apply without it is refused)."""
+        form = {
             "csrf": await self.csrf(url),
             "shown": proposal_stamp(self.h, self.http, url.rsplit("/", 1)[1]),
         }
+        shown = re.search(r"name='version' value='(\d+)'", (await self.http.get(url)).text)
+        if shown:
+            form["version"] = shown.group(1)
+        return form
 
     async def link(self, login: str, password: str, *, csrf: str | None = None) -> httpx.Response:
         csrf = csrf if csrf is not None else await self.csrf()

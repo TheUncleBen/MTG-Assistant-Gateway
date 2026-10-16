@@ -198,16 +198,37 @@ def test_apply_all_on_the_waiting_card_lists_the_order_then_sends_the_set() -> N
             page = browser.new_page(viewport={"width": 390, "height": 900})
             errors: list[str] = []
             page.on("pageerror", lambda e: errors.append(str(e)))
+            changed = {
+                **WAITING,
+                "waiting": [
+                    {
+                        **WAITING["waiting"][0],
+                        "version": 2,
+                        "changed_by": "app: ChatGPT (c2)",
+                        "what_changed": "Opt instead of Ponder",
+                    },
+                    *WAITING["waiting"][1:],
+                ],
+            }
             card = _open(
                 page,
                 cards_html("waiting-card"),
-                {"structuredContent": WAITING, "_meta": WAITING_META},
+                {"structuredContent": changed, "_meta": WAITING_META},
                 {"confirm_waiting": DONE},
             )
-            card.locator("#apply-all:not([disabled])").click()
+            assert "Version 2, changed by ChatGPT" in card.locator("#row-p1").inner_text()
+            # by keyboard: the press redraws the buttons, and focus lands on what replaced them
+            card.locator("#apply-all:not([disabled])").focus()
+            page.keyboard.press("Enter")
+            assert card.locator("#confirm:focus").count() == 1
+            card.locator("#cancel").focus()
+            page.keyboard.press("Enter")
+            assert card.locator("#apply-all:focus").count() == 1
+            page.keyboard.press("Enter")
+            assert card.locator("#confirm:focus").count() == 1
             assert "Apply 2 changes in this order" in card.locator("#confirm-text").inner_text()
             assert card.locator("#order li").all_inner_texts() == [
-                "#1 +1 Opt",
+                "#1 +1 Opt\nVersion 2, changed by ChatGPT: Opt instead of Ponder.",
                 "#2 -1 Island <img src=x onerror=alert(1)>",
             ]
             assert not _tool_calls(page, "confirm_waiting")
@@ -217,6 +238,7 @@ def test_apply_all_on_the_waiting_card_lists_the_order_then_sends_the_set() -> N
             assert _tool_calls(page, "confirm_waiting") == [
                 {"proposal_ids": ["p1", "p2"], "approval": "set-code"}
             ]
+            assert card.locator("#status:focus").count() == 1
             assert card.locator("#status").inner_text() == "Applied 1. 1 not sent."
             assert card.locator("#res-list li").all_inner_texts() == [
                 "Applied: #1 +1 Opt",
@@ -251,6 +273,20 @@ PROPOSAL = {
         "same_app": 2,
         "other_apps": [{"app": "ChatGPT", "count": 1}],
         "review_all_url": "https://gateway.example.com/proposals#deck-42",
+        "this_app": "app: Claude (c1)",
+        "set_lines": [
+            {
+                "proposal_id": "p1",
+                "board_no": 1,
+                "summary": "+1 Opt",
+                "status": "held",
+                "status_reason": "#3 it depends on was rejected.",
+                "version": 2,
+                "changed_by": "app: ChatGPT (c2)",
+                "what_changed": "Opt instead of Ponder",
+            },
+            {"proposal_id": "p2", "board_no": 2, "summary": "+1 Delver of Secrets", "version": 1},
+        ],
     },
 }
 
@@ -285,16 +321,25 @@ def test_the_proposal_card_names_the_others_and_applies_all(width: int, theme: s
             card.locator("#also:not(.hidden)").wait_for()
             assert (
                 card.locator("#also-text").inner_text()
-                == "1 more from this chat waits on this deck. 1 from ChatGPT also waits."
+                == "1 more from Claude waits on this deck. 1 from ChatGPT also waits."
             )
             assert card.locator("#also a.link").inner_text() == "Review all"
             _shot(page, f"proposal-card-also-{width}-{theme}")
-            card.locator("#apply-all:not([disabled])").click()
+            card.locator("#apply-all:not([disabled])").focus()
+            page.keyboard.press("Enter")
+            assert card.locator("#also:focus").count() == 1
             assert (
                 card.locator("#also-text")
                 .inner_text()
                 .startswith("Apply these 2 changes to this deck, oldest first?")
             )
+            # the confirm lists what the press applies, a held one and a changed one saying so
+            assert card.locator("#also-list li").all_inner_texts() == [
+                "#1 +1 Opt\nHeld: #3 it depends on was rejected.\n"
+                "Version 2, changed by ChatGPT: Opt instead of Ponder.",
+                "#2 +1 Delver of Secrets",
+            ]
+            _shot(page, f"proposal-card-confirm-{width}-{theme}")
             assert not _tool_calls(page, "confirm_waiting")
             # the card reads the proposal again after the apply
             page.evaluate("(r) => { window.replies.get_proposal = r; }", applied)
@@ -305,6 +350,7 @@ def test_the_proposal_card_names_the_others_and_applies_all(width: int, theme: s
             ]
             assert not _tool_calls(page, "confirm_proposal")
             assert card.locator("#status").inner_text() == "Applied 2."
+            assert card.locator("#status:focus").count() == 1
             assert card.locator("#also").get_attribute("class") == "also hidden"
             assert card.locator("#actions a.link", has_text="Undo on the review page").count() == 1
             assert card.locator("#actions a.link", has_text="Undo or see the details").count() == 1
@@ -359,6 +405,106 @@ def test_the_card_quotes_the_comment_and_offers_no_undo_for_an_account_action(wi
             assert card.locator("a.link", has_text="Undo on the review page").count() == 0
             assert card.locator("a.link", has_text="Open in the app or browser").count() == 1
             _shot(page, f"proposal-card-comment-delete-{width}-{theme}")
+        finally:
+            browser.close()
+    assert not errors, errors
+
+
+@pytest.mark.parametrize("width,theme", [(360, "light"), (1280, "dark")])
+def test_the_card_says_who_changed_a_change_and_where_to_approve_another_apps(width: int, theme: str) -> None:
+    """G16, Q134 item 5: an amended change says which app changed it and what. A change another
+    app made says where it can be approved, without calling the card the review page."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    amended = {
+        **PROPOSAL,
+        "version": 3,
+        "changed_by": "app: ChatGPT (c2)",
+        "what_changed": "Added Delver of Secrets",
+        "deck_waiting": None,
+    }
+    other = {**PROPOSAL, "card_other_app": True, "deck_waiting": None}
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            for data, want in (
+                (amended, "Version 3, changed by ChatGPT: Added Delver of Secrets."),
+                (other, "Claude made this change, so only Claude's card or its review page can approve it."),
+            ):
+                page = browser.new_page(viewport={"width": width, "height": 900})
+                errors: list[str] = []
+                page.on("pageerror", lambda e, errors=errors: errors.append(str(e)))
+                page.route("https://api.scryfall.com/**", lambda r: r.abort())
+                card = _open(page, card_html(), {"structuredContent": data, "_meta": {}}, {}, theme)
+                card.locator("#note:not(.hidden)").wait_for()
+                note = card.locator("#note").inner_text()
+                assert want in note, note
+                assert "here on the review page" not in note
+                assert "version 3" not in card.locator("#foot").inner_text()  # said once, above
+                _shot(
+                    page,
+                    f"proposal-card-changed-{width}-{theme}"
+                    if data is amended
+                    else f"proposal-card-other-app-{width}-{theme}",
+                )
+                assert not errors, errors
+                page.close()
+        finally:
+            browser.close()
+
+
+def test_a_change_decided_on_the_waiting_card_is_not_reported_as_not_sent() -> None:
+    """The waiting card's Apply all sends its whole signed set; one already rejected on the card
+    comes back as "no longer waiting" and is left out of the result list, not shown as not sent."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium_or_skip()
+    three = {
+        **WAITING,
+        "waiting": [_line("p1", 1, "+1 Opt"), _line("p2", 2, "+1 Ponder"), _line("p4", 4, "+1 Brainstorm")],
+        "count": 3,
+        "own_count": 3,
+        "other_apps": [],
+    }
+    meta = {
+        APPROVALS_META_KEY: {"p1": "code-1", "p2": "code-2", "p4": "code-4"},
+        APPROVAL_SET_META_KEY: {"ids": ["p1", "p2", "p4"], "code": "set-code"},
+    }
+    done = {
+        **DONE,
+        "summary": "Applied 2. 1 not sent.",
+        "applied": [
+            {"proposal_id": "p2", "board_no": 2, "summary": "+1 Ponder"},
+            {"proposal_id": "p4", "board_no": 4, "summary": "+1 Brainstorm"},
+        ],
+        "not_sent": [
+            {"proposal_id": "p1", "board_no": 1, "summary": "+1 Opt", "why": "It is no longer waiting."}
+        ],
+    }
+    with sync_playwright() as p:
+        browser = _launch(p, exe)
+        try:
+            page = browser.new_page(viewport={"width": 390, "height": 900})
+            errors: list[str] = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            replies = {
+                "confirm_proposal": {"ok": True, "proposal_id": "p1", "state": "rejected"},
+                "confirm_waiting": done,
+            }
+            card = _open(
+                page, cards_html("waiting-card"), {"structuredContent": three, "_meta": meta}, replies
+            )
+            card.locator("#row-p1 button.danger:not([disabled])").click()
+            card.locator("#row-p1 .done").wait_for()
+            card.locator("#apply-all:not([disabled])").click()
+            assert card.locator("#order li").all_inner_texts() == ["#2 +1 Ponder", "#4 +1 Brainstorm"]
+            card.locator("#go:not([disabled])").click()
+            card.locator("#result:not(.hidden)").wait_for()
+            assert card.locator("#res-list li").all_inner_texts() == [
+                "Applied: #2 +1 Ponder",
+                "Applied: #4 +1 Brainstorm",
+            ]
         finally:
             browser.close()
     assert not errors, errors

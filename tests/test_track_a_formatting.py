@@ -212,7 +212,9 @@ async def test_a_comment_edit_keeps_its_link(stack: Stack) -> None:
     p = structured(res)
     row = p["rows"][0]
     assert row["after_text"] == "Read this later." and "example.com/t" in row["after_doc"]
-    assert '"_doc"' not in json.dumps(p)  # the stored document is never sent to the assistant
+    # the comment's original document as read (social.py's internal "_doc") stays in the gateway;
+    # the merged result (rows[].after_doc) does reach the assistant, as on the card
+    assert '"_doc"' not in json.dumps(p) and '"after_doc"' in json.dumps(p)
     assert not (res.get("_meta") or {}).get(APPROVAL_META_KEY)
     out = await _browser_apply(h, p["proposal_id"])
     assert out.get("state") == "applied", out

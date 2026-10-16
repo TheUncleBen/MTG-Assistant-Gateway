@@ -20,6 +20,7 @@
 .wl .done.ok{color:var(--green)} .wl .done.err{color:var(--red)}
 .order{margin:8px 0 0;padding-left:22px;font-size:13px}
 .order li{margin:3px 0;overflow-wrap:anywhere}
+.order .why{display:block;font-size:12px;color:var(--muted)}
 .confirm{margin-top:12px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg2)}
 .confirm p{margin:0;font-size:13px}
 .res{margin:8px 0 0;padding-left:18px;font-size:13px}
@@ -36,9 +37,9 @@ button.danger:disabled{color:var(--red)}
 <div class="card" id="card">
   <div class="head"><h1 id="title">Waiting changes</h1><span class="badge info hidden" id="count"></span></div>
   <p class="sum" id="summary"></p>
-  <ul class="wl hidden" id="list" aria-labelledby="title"></ul>
+  <ul class="wl hidden" id="list" aria-labelledby="title" tabindex="-1"></ul>
   <p class="note hidden" id="note"></p>
-  <div class="confirm hidden" id="confirm" role="group" aria-labelledby="confirm-text">
+  <div class="confirm hidden" id="confirm" role="group" aria-labelledby="confirm-text" tabindex="-1">
     <p id="confirm-text"></p>
     <ol class="order" id="order"></ol>
     <div class="actions">
@@ -51,7 +52,7 @@ button.danger:disabled{color:var(--red)}
     <ul class="res" id="res-list" aria-labelledby="res-head"></ul>
   </div>
   <div class="actions" id="actions"></div>
-  <div class="status hidden" id="status" role="status" aria-live="polite"></div>
+  <div class="status hidden" id="status" role="status" aria-live="polite" tabindex="-1"></div>
 </div>
 <script>
 /*@BRIDGE@*/
@@ -82,6 +83,11 @@ button.danger:disabled{color:var(--red)}
     return Math.floor(s / 86400) + " d ago";
   }
   function label(x) { return (x.board_no ? "#" + x.board_no + " " : "") + String(x.summary || "(no changes listed)"); }
+  function changeNote(x) {
+    if (Number(x.version) <= 1 || !x.changed_by) return "";
+    var what = String(x.what_changed || "").trim();
+    return "Version " + Number(x.version) + ", changed by " + creator(x.changed_by) + (what ? ": " + what : "") + (/[.!?]$/.test(what) ? "" : ".");
+  }
   function statusWord(x) {
     return { updated: "Updated", needs_look: "Needs a look", held: "Held" }[x.status] || "Waiting";
   }
@@ -94,7 +100,7 @@ button.danger:disabled{color:var(--red)}
     var n = Math.max(0, Number(data.count || 0) - Object.keys(decided).length);
     $("title").textContent = data.deck_name ? "Waiting changes to " + data.deck_name : "Waiting changes";
     var c = $("count"); c.textContent = n + " waiting"; c.className = "badge info";
-    $("summary").textContent = n ? "Oldest first. Nothing is sent to Archidekt until you approve it."
+    $("summary").textContent = n ? "Oldest first. Nothing here is sent until you approve it, or your assistant applies it where your approval mode allows."
       : "Nothing is waiting for your approval.";
     var list = $("list"); list.replaceChildren(); list.className = rows.length ? "wl" : "wl hidden";
     rows.forEach(function (x) {
@@ -102,12 +108,13 @@ button.danger:disabled{color:var(--red)}
       var what = el("span", "what");
       what.appendChild(el("span", "name", label(x)));
       var sub = [statusWord(x), "by " + creator(x.created_by), ago(x.created_at)];
-      if (Number(x.version) > 1) sub.push("version " + Number(x.version));
+      if (Number(x.version) > 1 && !x.changed_by) sub.push("version " + Number(x.version));
       if (!data.deck_id && x.deck_name) sub.unshift(String(x.deck_name));
       what.appendChild(el("span", "sub", sub.join(" · ")));
       // the why: status_text on a page's line, status_reason on the board's (show_waiting_changes)
       var why = x.status_text || x.status_reason;
       if ((x.status === "needs_look" || x.status === "held") && why) what.appendChild(el("span", "why", String(why)));
+      if (changeNote(x)) what.appendChild(el("span", "why", changeNote(x)));
       if (x.review_page_only && x.own) what.appendChild(el("span", "why", "Approve it on its review page."));
       li.appendChild(what);
       var btns = el("span", "btns");
@@ -168,19 +175,29 @@ button.danger:disabled{color:var(--red)}
     var ol = $("order"); ol.replaceChildren();
     left.forEach(function (id) {
       var x = byId[id];
-      ol.appendChild(el("li", "", x ? (data.deck_id ? "" : String(x.deck_name || "") + ": ") + label(x) : id));
+      var li = el("li", "", x ? (data.deck_id ? "" : String(x.deck_name || "") + ": ") + label(x) : id);
+      var why = x && (x.status_text || x.status_reason);
+      if (x && x.status === "held" && why) li.appendChild(el("span", "why", "Held: " + String(why)));
+      if (x && changeNote(x)) li.appendChild(el("span", "why", changeNote(x)));
+      ol.appendChild(li);
     });
     $("go").textContent = "Apply " + left.length + " changes";
     $("go").disabled = true;
     $("confirm").className = "confirm";
     drawActions();
+    // the press removed the button it was on: focus the confirm, which Tab leaves for Apply
+    $("confirm").focus();
     setTimeout(function () { $("go").disabled = false; }, ARM_DELAY_MS);
   }
-  $("cancel").onclick = function () { $("confirm").className = "confirm hidden"; drawActions(); };
+  $("cancel").onclick = function () {
+    $("confirm").className = "confirm hidden"; drawActions();
+    var a = $("apply-all"); if (a) a.focus(); else $("list").focus();
+  };
   $("go").onclick = function () {
     if (!set || busy) return;
     busy = true; $("go").disabled = true; $("cancel").disabled = true;
     B.setStatus("Applying to Archidekt…", "");
+    $("status").focus();
     B.request("tools/call", { name: "confirm_waiting", arguments: { proposal_ids: set.ids, approval: set.code } })
       .then(function (res) {
         var sc = (res && res.structuredContent) || {};
@@ -207,7 +224,7 @@ button.danger:disabled{color:var(--red)}
   function showResult(sc) {
     var rl = $("res-list"); rl.replaceChildren();
     (sc.applied || []).forEach(function (c) { decided[c.proposal_id] = { text: "Applied", kind: "ok" }; rl.appendChild(el("li", "", "Applied: " + label(c))); });
-    (sc.not_sent || []).forEach(function (c) { rl.appendChild(el("li", "", "Not sent: " + label(c) + (c.why ? ". " + c.why : ""))); });
+    (sc.not_sent || []).forEach(function (c) { if (decided[c.proposal_id]) return; rl.appendChild(el("li", "", "Not sent: " + label(c) + (c.why ? ". " + c.why : ""))); });
     (sc.failed || []).forEach(function (c) { decided[c.proposal_id] = { text: "Failed", kind: "err" }; rl.appendChild(el("li", "", "Failed: " + label(c) + (c.why ? ". " + c.why : ""))); });
     $("result").className = rl.children.length ? "" : "hidden";
     var running = sc.state === "applying";

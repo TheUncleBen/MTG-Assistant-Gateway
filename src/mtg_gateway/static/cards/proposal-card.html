@@ -62,6 +62,9 @@ button.danger:disabled{color:var(--red)}
 .also{margin-top:12px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg2)}
 .also p{margin:0;font-size:13px;overflow-wrap:anywhere}
 .also .actions{margin-top:8px}
+.also ol{margin:6px 0 0;padding-left:22px;font-size:13px}
+.also ol li{margin:3px 0;overflow-wrap:anywhere}
+.also ol .why{display:block;font-size:12px;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -72,8 +75,9 @@ button.danger:disabled{color:var(--red)}
   <p class="note hidden" id="note"></p>
   <p class="foot" id="foot"></p>
   <div class="actions" id="actions"></div>
-  <div class="also hidden" id="also" role="group" aria-labelledby="also-text">
+  <div class="also hidden" id="also" role="group" aria-labelledby="also-text" tabindex="-1">
     <p id="also-text"></p>
+    <ol id="also-list" class="hidden"></ol>
     <div class="actions" id="also-actions"></div>
   </div>
   <div class="why hidden" id="why">
@@ -81,7 +85,7 @@ button.danger:disabled{color:var(--red)}
     <textarea id="reason" maxlength="500" placeholder="e.g. keep the Islands, cut a creature instead"></textarea>
     <div class="actions"><button type="button" class="danger" id="reject-go">Reject this proposal</button><button type="button" id="reject-cancel">Keep it open</button></div>
   </div>
-  <div class="status hidden" id="status" role="status" aria-live="polite"></div>
+  <div class="status hidden" id="status" role="status" aria-live="polite" tabindex="-1"></div>
 </div>
 <script>
 /*@BRIDGE@*/
@@ -208,9 +212,19 @@ button.danger:disabled{color:var(--red)}
     var head = { updated: "Updated.", needs_look: "Needs a look.", held: "Held." }[p.status] || "";
     return (head + " " + String(p.status_reason || "")).trim();
   }
+  function changeNote(p) {
+    if (Number(p.version) <= 1 || !p.changed_by) return "";
+    var what = String(p.what_changed || "").trim();
+    return "Version " + Number(p.version) + ", changed by " + creator(p.changed_by) + (what ? ": " + what : "") + (/[.!?]$/.test(what) ? "" : ".");
+  }
   function modeNote(p) {
     if (p.state !== "pending" || !p.writes_enabled) return "";
-    if (p.card_other_app) return "This change was made in another app, so its Approve button works only there. You can approve it here on the review page.";
+    if (p.card_other_app) {
+      var maker = creator(p.created_by);
+      return p.created_by === "browser"
+        ? "This change was made in your browser, so only its review page can approve it."
+        : maker + " made this change, so only " + maker + "'s card or its review page can approve it.";
+    }
     // Q137: a change that keeps formatting is approved on the review page, which shows it
     var keeps = (p.rows || []).some(function (r) { return r && r.after_doc; });
     if (keeps && !p.assistant_may_apply) return "This keeps the bold text, links or pictures already there. Open it to see how it will look, and approve it there.";
@@ -264,12 +278,12 @@ button.danger:disabled{color:var(--red)}
     var RISK_TEXT = { consent: "Needs your approval", destructive: "Destructive: deletes a deck" };
     if (sc.risk) { risk.textContent = RISK_TEXT[sc.risk] || sc.risk + " risk"; risk.className = "badge risk " + sc.risk; }
     else risk.className = "badge risk hidden";
-    var note = [statusNote(sc), modeNote(sc)].filter(Boolean).join(" ");
+    var note = [changeNote(sc), statusNote(sc), modeNote(sc)].filter(Boolean).join(" ");
     $("note").textContent = note; $("note").className = "note" + (note ? "" : " hidden");
     renderRows(list, rows, rows.length > COLLAPSE_AT ? COLLAPSE_AT : rows.length);
     var foot = [];
     if (sc.created_by) foot.push("Proposed by " + creator(sc.created_by));
-    if (Number(sc.version) > 1) foot.push("version " + Number(sc.version));
+    if (Number(sc.version) > 1 && !sc.changed_by) foot.push("version " + Number(sc.version));
     if (sc.state === "pending" && sc.expires_at) {
       var mins = Math.max(0, Math.round((Number(sc.expires_at) * 1000 - Date.now()) / 60000));
       foot.push("expires in " + (mins >= 120 ? Math.round(mins / 60) + " h" : mins + " min"));
@@ -476,7 +490,7 @@ button.danger:disabled{color:var(--red)}
     if (!w || !Number(w.earlier)) { box.className = "also hidden"; return; }
     var bits = [];
     var mine = Math.max(0, Number(w.same_app || 0) - 1);
-    if (mine) bits.push(mine + " more from this chat " + (mine === 1 ? "waits" : "wait") + " on this deck.");
+    if (mine) bits.push(mine + " more from " + (w.this_app ? creator(w.this_app) : "this app") + " " + (mine === 1 ? "waits" : "wait") + " on this deck.");
     (w.other_apps || []).forEach(function (o) {
       var who = o.app === "you" ? "your browser" : String(o.app);
       bits.push(Number(o.count) + " from " + who + " also " + (Number(o.count) === 1 ? "waits" : "wait") + ".");
@@ -485,6 +499,21 @@ button.danger:disabled{color:var(--red)}
     $("also-text").textContent = confirming
       ? "Apply these " + n + " changes to this deck, oldest first? Each is checked against the deck just before it is sent; one that no longer fits stays waiting."
       : bits.join(" ");
+    // the confirm lists what the press applies, a held one and a changed one saying so
+    var ol = $("also-list"); ol.replaceChildren();
+    if (confirming && applySet) {
+      var byId = {};
+      (w.set_lines || []).forEach(function (x) { byId[String(x.proposal_id)] = x; });
+      applySet.ids.forEach(function (id) {
+        var x = byId[id] || {};
+        var li = el("li", "", (x.board_no ? "#" + x.board_no + " " : "") + String(x.summary || id));
+        if (x.status === "held" && x.status_reason) li.appendChild(el("span", "why", "Held: " + String(x.status_reason)));
+        var ch = changeNote(x);
+        if (ch) li.appendChild(el("span", "why", ch));
+        ol.appendChild(li);
+      });
+    }
+    ol.className = confirming && ol.children.length ? "" : "hidden";
     if (applySet && n >= 2 && p.writes_enabled && !busy) {
       var all = el("button", confirming ? "primary" : "", confirming ? "Apply " + n + " changes" : "Apply all " + n);
       all.type = "button"; all.id = "apply-all";
@@ -492,11 +521,12 @@ button.danger:disabled{color:var(--red)}
       // never presses it
       all.disabled = true;
       setTimeout(function () { if (!busy) all.disabled = false; }, ARM_DELAY_MS);
-      all.onclick = function () { if (!confirming) { confirming = true; renderAlso(); } else applyAll(); };
+      // the press redraws the buttons, so focus moves to what replaced them (keyboard users)
+      all.onclick = function () { if (!confirming) { confirming = true; renderAlso(); $("also").focus(); } else applyAll(); };
       acts.appendChild(all);
       if (confirming) {
         var cancel = el("button", "", "Cancel"); cancel.type = "button";
-        cancel.onclick = function () { confirming = false; renderAlso(); };
+        cancel.onclick = function () { confirming = false; renderAlso(); var a = $("apply-all"); (a || $("also")).focus(); };
         acts.appendChild(cancel);
       }
     }
@@ -517,6 +547,7 @@ button.danger:disabled{color:var(--red)}
     var ok = $("approve"), no = $("reject");
     if (ok) ok.disabled = true; if (no) no.disabled = true;
     setStatus("Applying to Archidekt…", "");
+    $("status").focus();
     request("tools/call", { name: "confirm_waiting", arguments: { proposal_ids: set.ids, approval: set.code } })
       .then(function (res) {
         busy = false;

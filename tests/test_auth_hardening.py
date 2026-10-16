@@ -399,7 +399,7 @@ async def test_review_page_apply_is_guarded(stack: Stack):
     assert (await b.http.get(url)).text.count("disabled data-guard") >= 1
     sub = h.db.list_users()[0]["sub"]
     aged = form_stamp(h.settings.session_secret, f"proposal:{sub}:{pid}", now=time.time() - 2 * MIN_FORM_AGE)
-    r = await b.http.post(url, data={"csrf": csrf, "action": "apply", "shown": aged})
+    r = await b.http.post(url, data={"csrf": csrf, "action": "apply", "shown": aged, "version": "1"})
     assert r.status_code == 303 and r.headers["location"].endswith("?ok=applied")
     assert len(ark.patches) == 1
     await b.aclose()
