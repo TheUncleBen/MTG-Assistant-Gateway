@@ -357,3 +357,72 @@ def test_link_check_refuses_urls_a_browser_reads_differently(url: str) -> None:
     from mtg_gateway.cardsearch import card_links
 
     assert card_links({"related_uris": {"edhrec": url}}) == {}
+
+
+# -- 0.7.28 review: only a 404 is an unknown card; one member's "busy" stays theirs ------------------
+@pytest.mark.parametrize("status", [400, 403, 422])
+async def test_a_scryfall_refusal_is_not_kept_as_an_unknown_card(stack: Stack, status: int) -> None:  # noqa: F811
+    b = await linked(stack)
+    try:
+        stack.sf.fail_with = status
+        r = await b.http.get("/cards/api/text", params={"name": "Cultivate"})
+        assert r.status_code == 503 and r.json()["error"] == "unavailable", r.json()
+        assert not stack.h.app.state.gateway.card_texts._absent  # nothing remembered as unknown
+        stack.sf.fail_with = None
+        r = await b.http.get("/cards/api/text", params={"name": "Cultivate"})
+        assert r.status_code == 200 and r.json()["card"]["name"] == "Cultivate"
+    finally:
+        stack.sf.fail_with = None
+        await b.aclose()
+
+
+async def test_only_a_404_is_an_unknown_card_at_the_scryfall_client() -> None:
+    import httpx
+
+    from mtg_gateway.scan.scryfall import ScryfallClient, ScryfallError
+
+    status = [404]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status[0], json={"object": "error", "status": status[0], "details": "no"})
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    client = ScryfallClient(base="https://scryfall.invalid", http=http, min_interval=0)
+    with pytest.raises(ScryfallError) as err:
+        await client.named_raw("Lightning Bolt")
+    assert err.value.kind == "not_found"
+    for code in (400, 403, 422):
+        status[0] = code
+        with pytest.raises(ScryfallError) as err:
+            await client.named_raw("Lightning Bolt")
+        assert err.value.kind == "unavailable", code
+        with pytest.raises(ScryfallError) as err:
+            await client.named("Lightning Bolt", fuzzy=True)
+        assert err.value.kind == "unavailable", code
+    await http.aclose()
+
+
+async def test_a_waiter_does_not_take_the_fetching_members_busy_answer() -> None:
+    import asyncio
+
+    from mtg_gateway.cardsearch import TextCache
+    from mtg_gateway.scan.service import ScanError
+
+    cache = TextCache()
+    calls: list[str] = []
+
+    async def busy(name: str) -> dict:  # member A: their other lookups fill their slots
+        await asyncio.sleep(0.05)
+        raise ScanError("busy", "other card lookups for your account are still running; wait for them")
+
+    async def free(name: str) -> dict:  # member B: a slot free
+        calls.append(name)
+        return {"name": "Lightning Bolt", "oracle_text": "x"}
+
+    a = asyncio.create_task(cache.fetch("Lightning Bolt", busy))
+    await asyncio.sleep(0.01)
+    b = asyncio.create_task(cache.fetch("lightning bolt", free))
+    got = await asyncio.gather(a, b, return_exceptions=True)
+    assert isinstance(got[0], ScanError) and got[0].kind == "busy"  # A's own answer
+    assert isinstance(got[1], dict) and got[1]["name"] == "Lightning Bolt", got[1]  # B asked in its slot
+    assert calls == ["lightning bolt"] and not cache._absent and not cache._inflight

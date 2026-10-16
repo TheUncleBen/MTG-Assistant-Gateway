@@ -336,10 +336,15 @@ class ScryfallClient:
         return data
 
     def _card_or_error(self, resp: httpx.Response, what: str) -> dict[str, Any]:
+        """The card in ``resp``. Only a 404 says the name is unknown (or ambiguous); any other
+        error (400, 403, 422) says nothing about the card, so it is ``unavailable``, never
+        ``not_found``, and no cache takes it for an unknown name."""
         data = self._json(resp)
-        if resp.status_code == 404 or data.get("object") == "error":
+        if resp.status_code == 404:
             kind = "ambiguous" if data.get("type") == "ambiguous" else "not_found"
             raise ScryfallError(kind, str(data.get("details") or f"No card found for {what}"))
+        if resp.status_code >= 400 or data.get("object") == "error":
+            raise ScryfallError("unavailable", f"Scryfall returned {resp.status_code} for {what}")
         if data.get("object") != "card" or not data.get("name"):
             raise ScryfallError("contract", "Scryfall returned something that is not a card")
         return data
