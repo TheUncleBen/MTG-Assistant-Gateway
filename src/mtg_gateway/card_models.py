@@ -332,6 +332,15 @@ class KeptModels:
                 out[str(row["card_key"])] = {**dict(row), "model": model}
         return out
 
+    def _owns(self, sub: str, key: str) -> bool:
+        """Whether ``sub`` added the kept model for ``key`` (a failed read counts as no)."""
+        try:
+            rows = self.db.get_card_models([key])
+        except Exception:
+            logger.exception("reading a kept card model failed")
+            return False
+        return any(str(dict(r).get("added_by")) == sub for r in rows)
+
     def keep(self, sub: str, raw_models: list[Any], deck_names: list[str]) -> dict[str, list[dict[str, str]]]:
         """Keep the valid models among ``raw_models`` for cards of the deck (by front face).
         Returns {"kept": [{"name"}], "refused": [{"name", "why"}]}: what the assistant is told."""
@@ -357,7 +366,10 @@ class KeptModels:
             except ModelError as exc:
                 refused.append({"name": card, "why": str(exc)})
                 continue
-            if have >= MAX_PER_MEMBER:
+            # TODO(Q138 items 2-3): the cap value and who may replace a card's model wait on Ben.
+            # The cap counts only a save that newly counts toward the member: re-saving a model the
+            # member already keeps replaces it and is never refused at the cap.
+            if have >= MAX_PER_MEMBER and not self._owns(sub, card_key(card)):
                 refused.append(
                     {
                         "name": card,
