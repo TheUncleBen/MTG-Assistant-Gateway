@@ -266,7 +266,7 @@ def _read_csv_rows(reader: Any, first: list[str], items: list[dict[str, Any]]) -
             raise CollectionError(
                 "invalid",
                 f"line {n}: a cell is longer than {csv.field_size_limit():,} characters; "
-                "check for a quote that is not closed",
+                'check for a quotation mark (") that is not closed',
             ) from exc
         if row is None:
             break

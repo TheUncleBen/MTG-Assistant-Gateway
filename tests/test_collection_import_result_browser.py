@@ -112,8 +112,8 @@ def test_import_result_reads_at_every_width(server: Server, width: int, theme: s
         _check(page, "import-refused-quantity", width, theme)
         _import(page, server, 'Quantity,Name\n1,"Opt' + "x" * 140_000 + "\n")
         assert page.locator(".notice").inner_text() == (
-            "Nothing was imported: line 2: a cell is longer than 131,072 characters; check for a quote "
-            "that is not closed."
+            "Nothing was imported: line 2: a cell is longer than 131,072 characters; check for a quotation "
+            'mark (") that is not closed.'
         )
         _check(page, "import-refused-cell", width, theme)
         assert errors == [], errors

@@ -45,8 +45,8 @@ so going back to 0.7.27 is a plain image swap. The Android app is unchanged.
   `MTG_SERVER_NAME`. Per OpenAI's plugin docs, ChatGPT refuses a plugin file whose name is over
   80 characters, so the gateway warns about a longer name in the log, on the admin page and on
   the install page's plugin-file step, and still starts. A `MTG_SERVER_NAME` over 120 characters
-  is shortened in the plugin file, where OpenAI's plugin check allows 120 for the developer and
-  author names, and the log and the admin page say so.
+  is shortened in the plugin file, where OpenAI's plugin check allows at most 120 characters for
+  the developer and author names, and the log and the admin page say so.
 
 ### Changed
 - The collection CSV export writes condition and language in Archidekt's own codes (D for
