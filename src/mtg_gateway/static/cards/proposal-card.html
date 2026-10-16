@@ -6,54 +6,13 @@
 <meta name="color-scheme" content="light dark">
 <title>Deck change proposal</title>
 <style>
-:root{
-  color-scheme:light dark;
-  --bg:var(--color-background-primary,#ffffff);--bg2:var(--color-background-secondary,#f5f4ed);
-  --text:var(--color-text-primary,#141413);--muted:var(--color-text-secondary,#62615b);
-  --border:var(--color-border-tertiary,rgba(31,30,29,.15));--radius:var(--border-radius-md,8px);
-  --green:var(--color-text-success,#265b19);--green-bg:var(--color-background-success,#e9f1dc);
-  --red:var(--color-text-danger,#7f2c28);--red-bg:var(--color-background-danger,#f7ecec);
-  --amber:var(--color-text-warning,#5a4815);--amber-bg:var(--color-background-warning,#f6eedf);
-  --blue:var(--color-text-info,#2b5a9c);--blue-bg:var(--color-background-info,#d6e4f6);
-  --btn-bg:var(--color-background-inverse,#141413);--btn-text:var(--color-text-inverse,#ffffff);
-  --font:var(--font-sans,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif);
-  --pad:12px;--inset-top:0px;--inset-right:0px;--inset-bottom:0px;--inset-left:0px;
-}
-@media (prefers-color-scheme:dark){:root:not([data-theme=light]){
-  --bg:var(--color-background-primary,#30302e);--bg2:var(--color-background-secondary,#262624);
-  --text:var(--color-text-primary,#faf9f5);--muted:var(--color-text-secondary,#b0aea6);
-  --border:var(--color-border-tertiary,rgba(222,220,209,.15));
-  --green:var(--color-text-success,#7ab948);--green-bg:var(--color-background-success,#1b4614);
-  --red:var(--color-text-danger,#ee8884);--red-bg:var(--color-background-danger,#602a28);
-  --amber:var(--color-text-warning,#d1a041);--amber-bg:var(--color-background-warning,#483a0f);
-  --blue:var(--color-text-info,#80aadd);--blue-bg:var(--color-background-info,#253e5f);
-  --btn-bg:var(--color-background-inverse,#faf9f5);--btn-text:var(--color-text-inverse,#141413);
-}}
-:root[data-theme=dark]{
-  --bg:var(--color-background-primary,#30302e);--bg2:var(--color-background-secondary,#262624);
-  --text:var(--color-text-primary,#faf9f5);--muted:var(--color-text-secondary,#b0aea6);
-  --border:var(--color-border-tertiary,rgba(222,220,209,.15));
-  --green:var(--color-text-success,#7ab948);--green-bg:var(--color-background-success,#1b4614);
-  --red:var(--color-text-danger,#ee8884);--red-bg:var(--color-background-danger,#602a28);
-  --amber:var(--color-text-warning,#d1a041);--amber-bg:var(--color-background-warning,#483a0f);
-  --blue:var(--color-text-info,#80aadd);--blue-bg:var(--color-background-info,#253e5f);
-  --btn-bg:var(--color-background-inverse,#faf9f5);--btn-text:var(--color-text-inverse,#141413);
-}
-*{box-sizing:border-box}
-html,body{margin:0;background:transparent}
-body{font-family:var(--font);font-size:var(--font-text-sm-size,14px);line-height:1.4;color:var(--text);
-  padding:calc(var(--pad) + var(--inset-top)) calc(var(--pad) + var(--inset-right))
-          calc(var(--pad) + var(--inset-bottom)) calc(var(--pad) + var(--inset-left))}
-.card{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:14px 14px 12px;max-width:720px}
-.head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:6px}
-h1{font-size:var(--font-heading-md-size,16px);font-weight:600;margin:0;line-height:1.3;overflow-wrap:anywhere}
-.badge{flex:none;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;border-radius:999px;
-  padding:3px 9px;background:var(--bg2);color:var(--muted);border:1px solid var(--border);white-space:nowrap}
+/*@BASE@*/
+/* The proposal card's own look on top of the shared base (A10, 0.7.29). */
+.card{max-width:720px}
 .badge.pending{background:var(--amber-bg);color:var(--amber)}
 .badge.applying{background:var(--amber-bg);color:var(--amber)}
 .badge.applied{background:var(--green-bg);color:var(--green)}
 .badge.rejected,.badge.failed,.badge.expired{background:var(--red-bg);color:var(--red)}
-.sum{color:var(--muted);font-size:13px;margin:0 0 10px;overflow-wrap:anywhere}
 ul.changes{list-style:none;margin:0;padding:0;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
 ul.changes li{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;padding:7px 10px;
   border-top:1px solid var(--border);border-left:4px solid var(--border);background:var(--bg)}
@@ -61,7 +20,6 @@ ul.changes li:first-child{border-top:0}
 ul.changes li.add{border-left-color:var(--green)} ul.changes li.remove{border-left-color:var(--red)}
 ul.changes li.change,ul.changes li.category,ul.changes li.finish,ul.changes li.printing,ul.changes li.commander,
 ul.changes li.detail,ul.changes li.description{border-left-color:var(--blue)}
-.pic{width:34px;height:48px;border-radius:3px;background:var(--bg2);object-fit:cover;display:block;flex:none}
 /* A row with no picture (a setting, or a picture that did not load) leaves no empty column. */
 ul.changes li.nopic{grid-template-columns:minmax(0,1fr) auto}
 .act{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);display:block}
@@ -85,29 +43,16 @@ ul.changes li .qty{white-space:normal;text-align:right;overflow-wrap:anywhere;ma
 li.add .qty{color:var(--green)} li.remove .qty{color:var(--red)}
 ul.changes li.group{display:block;padding:5px 10px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
   color:var(--muted);background:var(--bg2);border-left-color:var(--border)}
-.more{display:block;width:100%;min-height:40px;padding:6px 10px;font-size:13px;font-weight:600;color:var(--text);
-  border:0;border-top:1px solid var(--border);border-radius:0;background:var(--bg2);text-align:left}
 ul.changes li.more-row{display:block;padding:0;border-left-color:var(--border)}
 /* The state and risk badges stay whole: on a narrow card the risk badge moves under the state one. */
 .badges{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;flex:0 1 auto;min-width:min-content}
 .badge.risk.high,.badge.risk.consent{background:var(--amber-bg);color:var(--amber)}
 .badge.risk.destructive{background:var(--red-bg);color:var(--red)}
-.note{margin:8px 0 0;font-size:13px;color:var(--muted);overflow-wrap:anywhere}
-.foot{margin:10px 0 0;font-size:12px;color:var(--muted);overflow-wrap:anywhere}
-.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;align-items:center}
-button{font:inherit;font-weight:600;min-height:44px;padding:0 16px;border-radius:var(--radius);cursor:pointer;
-  border:1px solid var(--border);background:var(--bg2);color:var(--text)}
-button.primary{background:var(--btn-bg);color:var(--btn-text);border-color:var(--btn-bg)}
-button.danger{color:var(--red)}
 /* Locked (the 700 ms after drawing, and while a press is out), a button keeps a label that reads:
    full-strength text with a dashed outline in its own colour, not faded (as the review page's
    Apply and Reject, R-181) */
 button:disabled{opacity:1;cursor:default;background:transparent;border:1px dashed currentColor;color:var(--text)}
 button.danger:disabled{color:var(--red)}
-a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer;min-height:44px;display:inline-flex;align-items:center}
-.status{margin-top:10px;padding:9px 11px;border-radius:var(--radius);font-size:13px;background:var(--bg2);overflow-wrap:anywhere}
-.status.ok{background:var(--green-bg);color:var(--green)} .status.err{background:var(--red-bg);color:var(--red)}
-.hidden{display:none}
 .why{margin-top:10px;padding:10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg2)}
 .why label{display:block;font-size:13px;margin-bottom:6px}
 .why textarea{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);
@@ -139,94 +84,21 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
   <div class="status hidden" id="status" role="status" aria-live="polite"></div>
 </div>
 <script>
+/*@BRIDGE@*/
 (function () {
   "use strict";
-  var APP = { name: "Proposal card", version: "1" }; // no project name: the file is public
-  var PROTOCOL = "2026-01-26";
+  var B = Bridge; // the shared host protocol (_bridge.js), inlined by cards.card_html (A10)
   var APPROVAL_KEY = "mtg/approval";
   var SET_KEY = "mtg/approval_set"; // "Apply all": this app's waiting changes on the deck (Q134 A3)
   var MAX_IMAGES = 24;   // Scryfall thumbnails at most, over the whole card
   var COLLAPSE_AT = 8;   // a longer list shows a summary and this many rows until "Show all"
   var ARM_DELAY_MS = 700; // buttons stay disabled this long after the card is drawn
-  var host = window.parent;
-  var pending = {}, nextId = 1, hostCaps = null, proposal = null, approval = null, armed = false, busy = false, heldCode = null;
+  var proposal = null, approval = null, armed = false, busy = false, heldCode = null;
   var applySet = null, confirming = false;
-
-  function post(msg) { host.postMessage(msg, "*"); }
-  function request(method, params) {
-    return new Promise(function (resolve, reject) {
-      var id = nextId++;
-      pending[id] = { resolve: resolve, reject: reject };
-      post({ jsonrpc: "2.0", id: id, method: method, params: params || {} });
-    });
-  }
-  function notify(method, params) { post({ jsonrpc: "2.0", method: method, params: params || {} }); }
-  function reply(id, result) { post({ jsonrpc: "2.0", id: id, result: result }); }
-  function replyError(id, code, message) { post({ jsonrpc: "2.0", id: id, error: { code: code, message: message } }); }
-
-  window.addEventListener("message", function (ev) {
-    if (ev.source !== host) return;
-    var m = ev.data;
-    if (!m || m.jsonrpc !== "2.0") return;
-    if (m.id !== undefined && m.method === undefined) {
-      var p = pending[m.id];
-      if (!p) return;
-      delete pending[m.id];
-      if (m.error) p.reject(m.error); else p.resolve(m.result);
-      return;
-    }
-    switch (m.method) {
-      case "ui/notifications/tool-result": render(m.params || {}); refresh(); break;
-      case "ui/notifications/host-context-changed": applyContext(m.params || {}); break;
-      case "ui/notifications/tool-input": case "ui/notifications/tool-input-partial":
-      case "ui/notifications/tool-cancelled": case "ui/notifications/request-teardown": break;
-      case "ui/resource-teardown": if (m.id !== undefined) reply(m.id, {}); break;
-      case "ping": if (m.id !== undefined) reply(m.id, {}); break;
-      default: if (m.id !== undefined) replyError(m.id, -32601, "Method not found");
-    }
-  });
-
-  function applyContext(ctx) {
-    if (!ctx) return;
-    var root = document.documentElement;
-    if (ctx.theme) root.setAttribute("data-theme", ctx.theme);
-    var vars = ctx.styles && ctx.styles.variables;
-    if (vars) Object.keys(vars).forEach(function (k) {
-      root.style.setProperty(k.indexOf("--") === 0 ? k : "--" + k, String(vars[k]));
-    });
-    var fonts = ctx.styles && ctx.styles.css && ctx.styles.css.fonts;
-    if (fonts && !document.getElementById("hostfonts")) {
-      var st = document.createElement("style"); st.id = "hostfonts"; st.textContent = String(fonts);
-      document.head.appendChild(st);
-    }
-    var ins = ctx.safeAreaInsets;
-    if (ins) ["top", "right", "bottom", "left"].forEach(function (side) {
-      if (typeof ins[side] === "number") root.style.setProperty("--inset-" + side, ins[side] + "px");
-    });
-  }
-
-  var sizeTimer = null;
-  function reportSize() {
-    if (sizeTimer) return;
-    sizeTimer = setTimeout(function () {
-      sizeTimer = null;
-      var el = document.documentElement;
-      notify("ui/notifications/size-changed", { width: el.scrollWidth, height: el.scrollHeight });
-    }, 30);
-  }
-  if (window.ResizeObserver) {
-    var ro = new ResizeObserver(reportSize);
-    ro.observe(document.documentElement); ro.observe(document.body);
-  }
+  var request = B.request, reportSize = B.reportSize, el = B.el, $ = B.$, setStatus = B.setStatus, tellModel = B.tellModel;
+  function openLink(url) { B.openLink(url, function (text) { setStatus(text, ""); }); }
 
   // -- rendering (every value goes through textContent; names are data, never markup) ---------
-  function el(tag, cls, text) {
-    var e = document.createElement(tag);
-    if (cls) e.className = cls;
-    if (text !== undefined && text !== null) e.textContent = String(text);
-    return e;
-  }
-  function $(id) { return document.getElementById(id); }
   function label(r) {
     var l = r.name == null ? "" : String(r.name);
     if (r.printing) l += " " + r.printing;
@@ -343,12 +215,6 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
     if (p.approval_mode === "semi" && p.risk === "high") return "High risk (" + (p.risk_reason || "") + "), so this one needs your approval.";
     if (p.approval_mode === "auto" && p.risk_reason) return "This one " + p.risk_reason + ", so it needs your approval even in automatic mode.";
     return "";
-  }
-  function setStatus(text, kind) {
-    var s = $("status");
-    s.textContent = text || "";
-    s.className = "status" + (kind ? " " + kind : "") + (text ? "" : " hidden");
-    reportSize();
   }
 
   function render(result) {
@@ -684,13 +550,6 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
       });
   }
 
-  function openLink(url) {
-    if (!url) return;
-    request("ui/open-link", { url: String(url) }).catch(function () {
-      setStatus("Open this link in your browser: " + url, "");
-    });
-  }
-
   function askWhy(show) {
     var box = $("why");
     box.className = "why" + (show ? "" : " hidden");
@@ -699,10 +558,6 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
   }
   $("reject-go").onclick = function () { var why = String($("reason").value || "").trim(); askWhy(false); decide("reject", why); };
   $("reject-cancel").onclick = function () { askWhy(false); };
-
-  function tellModel(text) {
-    request("ui/update-model-context", { content: [{ type: "text", text: text }] }).catch(function () {});
-  }
 
   function decide(decision, why) {
     if (!proposal || !approval || !armed || busy) return;
@@ -749,14 +604,10 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
       });
   }
 
-  request("ui/initialize", { appInfo: APP, appCapabilities: { availableDisplayModes: ["inline"] }, protocolVersion: PROTOCOL })
-    .then(function (res) {
-      hostCaps = (res && res.hostCapabilities) || {};
-      applyContext(res && res.hostContext);
-      notify("ui/notifications/initialized", {});
-      reportSize();
-    })
-    .catch(function () { setStatus("This app could not connect to the chat. Use the review page in your browser.", "err"); });
+  // no project name in the app's name: the file is public
+  B.start("Proposal card", function (params) { render(params); refresh(); }, {
+    connectError: "This app could not connect to the chat. Use the review page in your browser."
+  });
 })();
 </script>
 </body>

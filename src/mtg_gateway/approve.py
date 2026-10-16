@@ -41,7 +41,7 @@ from mcp.server.apps import Apps, ResourceCsp
 from .archidekt import drops_formatting, words_only_note
 
 CARD_URI = "ui://mtg-assistant-gateway/proposal-card"
-CARD_PATH = Path(__file__).parent / "static" / "proposal-card.html"
+CARD_PATH = Path(__file__).parent / "static" / "cards" / "proposal-card.html"
 APPROVAL_META_KEY = "mtg/approval"  # tool-result _meta key the card reads the code from
 APPROVAL_SET_META_KEY = "mtg/approval_set"  # "Apply all": {"ids": [...], "code": ...} (0.7.29)
 APPROVALS_META_KEY = "mtg/approvals"  # the waiting-changes card: {proposal id: its code}
@@ -267,7 +267,10 @@ def approval_matches(expected: str, given: Any) -> bool:
 
 
 def card_html() -> str:
-    return CARD_PATH.read_text(encoding="utf-8")
+    """The proposal card with the shared bridge and base styles inlined (A10, 0.7.29)."""
+    from .cards import card_html as inline  # cards imports this module
+
+    return inline("proposal-card")
 
 
 def apps_extension(public_url: str | None = None) -> Apps:

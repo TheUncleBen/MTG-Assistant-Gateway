@@ -182,3 +182,15 @@ async def test_in_chat_off_means_no_codes_and_no_apply_all(no_card: Stack) -> No
     got = structured(await call(h, token, "confirm_waiting", {"proposal_ids": [a, b], "approval": "x" * 32}))
     assert got["ok"] is False and got["error"] == "in_chat_disabled"
     assert _writes(no_card.ark) == 0
+
+
+def test_the_proposal_card_uses_the_shared_card_template() -> None:
+    """A10: the proposal card is built like every other card: shared bridge and base inlined, with its
+    own words when it cannot reach the chat."""
+    from mtg_gateway import approve
+
+    html = approve.card_html()
+    assert "/*@BASE@*/" not in html and "/*@BRIDGE@*/" not in html
+    assert "var Bridge" in html or "Bridge =" in html
+    assert "Use the review page in your browser." in html
+    assert html.index("button:disabled{opacity:.55") < html.index("border:1px dashed currentColor")
