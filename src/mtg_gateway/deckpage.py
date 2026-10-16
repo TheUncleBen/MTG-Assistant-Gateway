@@ -366,16 +366,14 @@ def banner_html(
         f"{icon('play')} Play on EDHPlay</a>"
     )
     if csrf:
-        # The same run as the assistant's run_deck_report: statistics, validation, the 300-game solo
-        # test on the research service and, when Forge is on, Forge's games; stored under History.
-        # "Solo test", not "goldfish": Goldfish is the button beside it, where the member plays by
-        # hand (D3, K7 in Q136).
+        # The same run as the assistant's run_deck_report: statistics, validation and 300
+        # simulated games on the research service, stored under History. "Simulated", not
+        # "goldfish": Goldfish is the button beside it, where the member plays by hand (D3).
         primary += (
             f"<form method='post' action='/decks/{did}/report' class='inline'>{csrf_in}"
-            "<button type='submit' data-busy-label='Testing…' title='The solo test (300 games, no "
-            "opponents), a decklist check and the deck statistics, plus Forge games against precons when "
-            "Forge is on; saved under History. The solo test takes up to a minute; the result page opens "
-            f"when it is done.'>{icon('stats')} Run full test</button></form>"
+            "<button type='submit' data-busy-label='Simulating…' title='300 simulated games, a decklist "
+            "check and the deck statistics, saved under History. The run takes up to a minute; the result "
+            f"page opens when it is done.'>{icon('stats')} Run simulation</button></form>"
         )
     more_items = []
     if csrf and forge_on:
@@ -383,9 +381,9 @@ def banner_html(
         more_items.append(
             f"<form method='post' action='/decks/{did}/report'>{csrf_in}"
             "<input type='hidden' name='forge' value='0'>"
-            "<button type='submit' data-busy-label='Testing…' title='The same run without Forge games: "
-            f"the solo test, the decklist check and the statistics'>{icon('stats')} "
-            "Solo test only</button></form>"
+            "<button type='submit' data-busy-label='Simulating…' title='The same run without Forge games: "
+            f"300 simulated games, the decklist check and the statistics'>{icon('stats')} "
+            "Quick simulation (no Forge)</button></form>"
         )
     if own and csrf:
         more_items.append(f"<a href='/decks/{did}/settings'>{icon('settings')} Deck settings</a>")

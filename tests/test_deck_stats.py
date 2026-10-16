@@ -1123,12 +1123,12 @@ def test_list_rows_come_from_one_builder() -> None:
     assert TABLE_HEAD + table in page
 
 
-def test_the_test_button_names_the_solo_test() -> None:
-    """D3, K7: the manual page keeps the name Goldfish; the full test's tooltip names the solo test."""
+def test_the_simulation_button_says_simulated_games() -> None:
+    """D3: the manual page keeps the name Goldfish; the simulation's tooltip says simulated games."""
     from mtg_gateway.deckpage import banner_html
 
     html = banner_html(deck([card("Opt")]), {}, own=True, csrf="t", writes_enabled=True)
-    assert "The solo test (300 games, no opponents)" in html and "goldfish games" not in html
+    assert "300 simulated games" in html and "goldfish games" not in html
     assert " Goldfish</a>" in html and "Playtest</a>" in html  # names kept
 
 
@@ -1138,9 +1138,9 @@ def test_quick_simulation_without_forge_is_offered_only_when_forge_is_on() -> No
 
     off = banner_html(deck([card("Opt")]), {}, own=True, csrf="t", writes_enabled=True)
     on = banner_html(deck([card("Opt")]), {}, own=True, csrf="t", writes_enabled=True, forge_on=True)
-    assert "Solo test only" not in off
-    assert "Solo test only" in on and "name='forge' value='0'" in on
+    assert "Quick simulation (no Forge)" not in off
+    assert "Quick simulation (no Forge)" in on and "name='forge' value='0'" in on
     signed_out = banner_html(
         deck([card("Opt")]), {}, own=False, csrf=None, writes_enabled=True, forge_on=True
     )
-    assert "Solo test only" not in signed_out
+    assert "Quick simulation" not in signed_out
