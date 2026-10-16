@@ -153,10 +153,11 @@ Screenshots of the browser pages are in [docs/screenshots/](docs/screenshots/).
   curve, colour pips against mana sources, types, rarities, lands, average
   mana value, price total, format legality problems, salt, game changers,
   tutors, extra turns and mass land denial from Archidekt's own card data,
-  plus a Commander bracket estimate (2 to 4) from those flags and the
-  structural checks (deck size for the format, commander zone, colour
-  identity, singleton rule, uncategorised rows). It is an
-  estimate, not an official bracket, and the tools say so.
+  plus Archidekt's own Estimated Bracket worked out from those flags, rule
+  for rule as archidekt.com does it, and the structural checks (deck size
+  for the format, commander zone, colour identity, singleton rule,
+  uncategorised rows). A bracket set on the deck is the deck's bracket; the
+  estimate says what the cards suggest, and the tools say so.
 - **Deck reports and history.** `run_deck_report` stores the statistics
   together with a decklist validation and a goldfish simulation (when Mystic
   Forge is up; the simulator's options such as annotations, seed, turns,

@@ -188,7 +188,7 @@ class ForgeClient:
 
 BRACKET_SOURCES = {
     "archidekt": "the bracket set on the deck in Archidekt",
-    "estimate": "the gateway's bracket estimate for the deck",
+    "estimate": "Archidekt's estimate from the deck's cards",
 }
 
 
