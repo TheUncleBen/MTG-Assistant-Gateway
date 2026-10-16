@@ -547,6 +547,13 @@ def test_load_more_pages_and_filters_go_to_scryfall(tmp_path: Path) -> None:
             assert _tiles(page) == ["CMR #472 · 2020", "4ED #325 · 1995", "LEA #270 · 1993"]
             assert "The card's current printing is shown too." in status.inner_text()
             assert [q for q in s.sf.print_searches if " set:" not in q["q"]][-1]["q"].endswith(" frame:1993")
+            # filters Scryfall finds nothing for: only the card's own printing; the box says there
+            # is no match, and the count line doesn't say it a second time
+            _choose(page, "Border", "Borderless")
+            page.wait_for_function("() => document.querySelectorAll('.printpick .pptile').length === 1")
+            assert page.locator(".ppempty", has_text="No printing matches these filters.").is_visible()
+            assert status.inner_text() == "The card's current printing is shown too.", status.inner_text()
+            _choose(page, "Border", "Any border")
             _choose(page, "Frame", "Any frame")
             _choose(page, "Sort", "Cheapest (USD)")
             page.wait_for_function(
@@ -745,6 +752,15 @@ def test_picker_fits_reads_and_touches_at_every_size(server: Server, width: int,
         assert page.evaluate(MEASURE) + page.evaluate(COVERED) == []
         assert page.evaluate(CONTRAST, TEXT + ", .printpick .ppstatus") == []
         _shot(page, f"own-{width}-{theme}")
+        # nothing matches: the card's own printing stays, and "no match" is said once, in the box
+        page.locator("#pp-q").fill("zzz")
+        page.wait_for_timeout(100)
+        assert page.locator(".ppempty", has_text="No printing matches these filters.").is_visible()
+        assert page.locator(".ppstatus").inner_text().count("No printing matches") == 0
+        assert page.evaluate(MEASURE) + page.evaluate(COVERED) == []
+        assert page.evaluate(CONTRAST, TEXT + ", .printpick .ppstatus, .printpick .ppempty p") == []
+        _shot(page, f"own-none-{width}-{theme}")
+        page.locator("#pp-q").fill("")
         # the preview of a printing that changes the finish
         tile = page.locator(".printpick .pptile", has_text="SLD #1074")
         if touch:
