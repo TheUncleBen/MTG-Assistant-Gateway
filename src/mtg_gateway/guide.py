@@ -1192,7 +1192,7 @@ def add_guide_routes(server: MCPServer, state: AppState) -> None:
                 site=s.server_name,
                 writes_enabled=bool(s.writes_enabled),
                 has_collection=getattr(state, "collection", None) is not None,
-                max_rows=int(getattr(s, "auto_apply_max_rows", modes.DEFAULT_MAX_ROWS)),
+                max_rows=int(state.decks.live.get("auto_apply_max_rows")),
                 big_rows=int(state.decks.live.get("auto_big_edit_rows")),
                 archidekt_backups=bool(getattr(s, "archidekt_backups", True)),
                 backup_folder=s.archidekt_backup_folder,
