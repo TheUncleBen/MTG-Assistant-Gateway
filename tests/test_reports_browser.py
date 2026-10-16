@@ -411,3 +411,83 @@ def test_forge_results_fit_and_read(server: Server, width: int, scheme: str) -> 
         assert "turn 12" in text and "commander damage 2" in text and "Stopped at the time limit" in text
         assert not errors, errors
         browser.close()
+
+
+@pytest.mark.parametrize("width", [320, 344, 717, 1366])
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) -> None:
+    """K8 (Q136): the Reports page under More, with a Forge run playing, one waiting and a long deck
+    name: no sideways scroll, 4.5:1 text in both themes, 44px filter and trend targets."""
+    import json
+    import os
+
+    from playwright.sync_api import sync_playwright
+
+    from .test_editor_leave_browser import CONTRAST
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = server.sign_in_and_link()
+    now = int(time.time())
+    store_report(server.db, "user-1", "rep_done", taken_at=now - 3 * 86400)
+    long_name = "The Extremely Long Deck Name That Goes On And On Without Any Break At All"
+    store_report(server.db, "user-1", "rep_play", deck_id="43", deck_name=long_name, taken_at=now - 600)
+    store_report(server.db, "user-1", "rep_wait", taken_at=now - 300)
+    playing = {"state": "running", "job_id": "job1", "games_requested": 10, "result": {"games_done": 3}}
+    waiting = {"state": "queued", "waiting": True, "games_requested": 10, "queued_at": now - 300}
+    with server.db.tx() as c:
+        for rid, section in (("rep_play", playing), ("rep_wait", waiting)):
+            c.execute(
+                "UPDATE reports SET forge_json = ?, forge_state = ? WHERE id = ?",
+                (json.dumps(section), section["state"], rid),
+            )
+    shots = os.environ.get("MTG_SHOTS")
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": width, "height": 900}, color_scheme=scheme)
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        errors: list[str] = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(f"{server.base}/reports", wait_until="networkidle")
+        if shots:
+            page.screenshot(path=f"{shots}/reports-page-{width}-{scheme}.png", full_page=True)
+        state = page.evaluate(
+            """(contrast) => {
+              const ratio = eval(contrast);
+              const box = document.querySelector('.reports-page');
+              const texts = Array.from(box.querySelectorAll('*'))
+                .filter(e => Array.from(e.childNodes).some(n => n.nodeType === 3 && n.textContent.trim()))
+                .filter(e => e.getClientRects().length && !e.closest('.sr-only'));
+              const low = texts.map(e => [e.tagName + ' ' + e.textContent.trim().slice(0, 30), ratio(e)])
+                .filter(([, r]) => r < 4.5);
+              const h = s => Array.from(box.querySelectorAll(s)).map(e => e.getBoundingClientRect().height);
+              return {
+                scrollWidth: document.documentElement.scrollWidth,
+                innerWidth: window.innerWidth,
+                right: Math.max(...Array.from(box.querySelectorAll('*'))
+                  .map(e => e.getBoundingClientRect().right)),
+                low,
+                checked: texts.length,
+                rows: box.querySelectorAll('.rp-row').length,
+                runs: box.querySelectorAll('.rp-runs li').length,
+                targets: [...h('.rp-trend'), ...h('.rp-filter select'), ...h('.rp-filter .btn')],
+              };
+            }""",
+            CONTRAST,
+        )
+        assert state["scrollWidth"] <= state["innerWidth"], state
+        assert state["right"] <= state["innerWidth"] + 0.5, state
+        assert state["checked"] > 10 and not state["low"], state["low"]
+        assert state["rows"] == 3 and state["runs"] == 2
+        assert min(state["targets"]) >= 44, state["targets"]
+        text = page.locator(".rp-queue").inner_text()
+        assert "Playing: 0 of 10 games" in text
+        assert "Waiting, place 1" in text
+        page.select_option("#rp-deck", "43")
+        page.locator(".rp-filter .btn").click()
+        page.wait_for_load_state("networkidle")
+        assert page.locator(".rp-row").count() == 1 and "deck_id=43" in page.url
+        assert not errors, errors
+        browser.close()

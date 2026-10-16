@@ -18,7 +18,7 @@ import secrets
 import time
 from typing import Any
 
-from . import deck_stats
+from . import card_models, deck_stats
 from .archidekt import Deck
 from .db import Database, _like
 from .decklist import DecklistError, front_faces, parse_decklist, to_text
@@ -117,6 +117,8 @@ class ReportService:
         self.db = db
         self.decks = decks
         self.mf = mf
+        # K1-K3 (Q136): card models assistants wrote, kept for every member's later solo tests
+        self.models = card_models.KeptModels(db)
         self.forge = forge
         self._forge_games = forge_games
         self.forge_interval = 15.0  # seconds between refreshes of unfinished Forge runs
@@ -247,9 +249,8 @@ class ReportService:
             if simulate and mode not in SIM_MODES:
                 goldfish = {"tool": "goldfish_run", "ok": False, "text": mode}
             elif simulate:
-                goldfish = await self._mf(
-                    sub, "goldfish_run", _run_args(sim_text, games, _goldfish(options), mode)
-                )
+                names = [c.name for c in cards if c.zone == "main"]
+                goldfish = await self._solo_test(sub, sim_text, games, options, mode, names)
                 _commander_aside(goldfish, sim_commander)
                 _keep_quantities(goldfish, sim_text)
         return {
@@ -306,9 +307,8 @@ class ReportService:
             if simulate and mode not in SIM_MODES:
                 goldfish = {"tool": "goldfish_run", "ok": False, "text": mode}
             elif simulate:
-                goldfish = await self._mf(
-                    sub, "goldfish_run", _run_args(text, games, _goldfish(options), mode)
-                )
+                names = [c.name for c in deck.cards if deck.in_deck(c)]
+                goldfish = await self._solo_test(sub, text, games, options, mode, names)
                 _commander_aside(goldfish, commander)
                 _keep_quantities(goldfish, text)
                 _stored_note(goldfish)
@@ -790,10 +790,31 @@ class ReportService:
             refused = MIXED_MODES_TEXT
         if refused is not None:
             return {"tool": "goldfish_ab", "ok": False, "text": refused}
+        # both decks play the kept models of their cards (K1), as their own solo tests do
+        names = [c.name for t in (text_a, text_b) for c in _cards_or_none(t) if c.zone == "main"]
+        opts, used = card_models.merge(sub, self.models, names, opts)
         args = {"deck_a": text_a, "deck_b": text_b, "n": games, **opts}
         if modes[0] == "constructed":
             args["constructed"] = True
-        return await self._mf(sub, "goldfish_ab", args)
+        out = await self._mf(sub, "goldfish_ab", args)
+        if used:
+            out["kept_models"] = used
+        return out
+
+    async def _solo_test(
+        self, sub: str, text: str, games: int, options: dict[str, Any], mode: str, names: list[str]
+    ) -> dict[str, Any]:
+        """The solo test (Mystic Forge's goldfish_run) with the kept models of the deck's cards
+        (K1). The report records which kept models played (``kept_models``); once the run went
+        through, the valid models the assistant passed are kept (``models_kept``)."""
+        opts, used = card_models.merge(sub, self.models, names, _goldfish(options))
+        goldfish = await self._mf(sub, "goldfish_run", _run_args(text, games, opts, mode))
+        if used:
+            goldfish["kept_models"] = used
+        own = [a for a in options.get("annotations") or [] if isinstance(a, dict)]
+        if own and goldfish.get("ok") and self.models.available:
+            goldfish["models_kept"] = self.models.keep(sub, own, names)
+        return goldfish
 
     async def _mf(self, sub: str, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """One Mystic Forge call, recorded as it came back: structured content when the tool
@@ -898,6 +919,14 @@ class ReportService:
         if out["forge"] and out["forge"].get("state") not in FINAL_STATES:
             self._ensure_forge_refresher()
         return out
+
+    def forge_queue(self, sub: str) -> list[dict[str, Any]]:
+        """The member's unfinished Forge runs for the Reports page (K8): the one playing first, then
+        the waiting ones in turn, each as a reader sees it (place, expected times)."""
+        return [
+            {"report_id": rid, "deck_name": name, "forge": self._forge_view(sub, rid, section)}
+            for rid, name, section in self._member_runs(sub)
+        ]
 
     def forge_only(self, sub: str, report_id: str) -> dict[str, Any]:
         """A report's Forge progress alone (get_deck_report view "forge"), for polling."""
@@ -1124,6 +1153,13 @@ def _forge_not_asked(forge_json: Any) -> bool:
         return True
     section = json.loads(forge_json) if isinstance(forge_json, str) else forge_json
     return isinstance(section, dict) and section.get("reason") == "not_requested"
+
+
+def _cards_or_none(text: str) -> list[Any]:
+    try:
+        return list(parse_decklist(text))
+    except DecklistError:
+        return []
 
 
 def _shared_link(shared: dict[str, Any]) -> dict[str, str]:

@@ -760,9 +760,44 @@ UNMODELED_HEADING = "Played without their effect"
 UNMODELED_TEXT = (
     "The simulator found these cards and their exact text, but it has no model yet of what they do, "
     "so it drew and cast them without their effect. Whatever they would do in a real game is missing "
-    "from the numbers above. Your assistant can write a model for each card from its exact text, and "
-    "a run with those models plays them."
+    "from the numbers above. Your assistant can write a model for each card from its exact text. The "
+    "gateway keeps each model it accepts, and from then on every solo test plays that card, for every "
+    "member's decks."
 )
+KEPT_HEADING = "Played from kept card models"
+KEPT_TEXT = (
+    "An assistant wrote a model for each of these cards from the card's exact text, and the gateway "
+    "kept it. This run played them with those models."
+)
+
+
+def kept_models(r: dict[str, Any]) -> list[dict[str, Any]]:
+    """The kept card models a report's solo test played (K1): card, model hash, whether the
+    member added it, when it last changed. Never who else added one (K2)."""
+    block = r.get("goldfish") if isinstance(r.get("goldfish"), dict) else {}
+    used = block.get("kept_models") if isinstance(block.get("kept_models"), list) else []
+    return [u for u in used if isinstance(u, dict) and isinstance(u.get("name"), str)]
+
+
+def _kept_who(u: dict[str, Any]) -> str:
+    who = "added by you" if u.get("yours") else "added by another member"
+    when = time_text(u.get("changed_at"))[:10]
+    return f"{who}, {when}" if when else who
+
+
+def kept_models_html(used: list[dict[str, Any]]) -> str:
+    if not used:
+        return ""
+    items = "".join(
+        f"<li>{_esc(front_face(u['name']))} <i>{_esc(_kept_who(u))}</i></li>"
+        for u in sorted(used, key=lambda u: u["name"].casefold())
+    )
+    return (
+        f"<div class='kept'><h3>{KEPT_HEADING} <small>{len(used)}</small></h3>"
+        f"<p class='muted small'>{KEPT_TEXT}</p><ul class='names'>{items}</ul></div>"
+    )
+
+
 ASK_LABEL = "Copy a request for your assistant"
 
 
@@ -775,7 +810,8 @@ def ask_prompt(deck_name: str, deck_url: str, cards: list[dict[str, Any]]) -> st
         f"are played without their effect: {names}. Use the gateway's goldfish annotation tool on the "
         "deck to see what each one needs, and write each model only from the card's exact Oracle text "
         "(the gateway's card text and rules tools), never from memory. Then run a new deck report for "
-        "the deck with your models as its annotations, and tell me what changed."
+        "the deck with your models as its annotations, and tell me what changed and which models the "
+        "gateway kept."
     )
 
 
@@ -1402,6 +1438,7 @@ def report_body_html(
             + (f"<div class='tiles wide'>{tiles}</div>" if tiles else "")
             + (f"<div class='charts'>{charts}</div>" if charts else "")
             + s["triggers"]
+            + kept_models_html(kept_models(r))
             + summary
             + "</div>"
         )
@@ -1457,6 +1494,10 @@ def report_markdown(r: dict[str, Any]) -> str:
         lines.append("")
     elif g and g.get("message"):
         lines += [f"## {solo_heading(g)}", "", g["message"], ""]
+    if kept_models(r):
+        used = sorted(kept_models(r), key=lambda u: u["name"].casefold())
+        named = ", ".join(f"{front_face(u['name'])} ({_kept_who(u)})" for u in used)
+        lines += [f"{KEPT_HEADING}: {named}", ""]
     forge = r.get("forge") if isinstance(r.get("forge"), dict) else None
     if forge is None or forge.get("state") == "skipped":
         why = (
@@ -1591,6 +1632,8 @@ REPORT_CSS = """
 .report .names li i{font-style:normal;color:var(--text-muted);font-size:.8rem;white-space:nowrap}
 .report .approx{grid-template-columns:minmax(10rem,max-content) 1fr} .report .approx dd{font-size:.93rem}
 @media (max-width:480px){ .report .approx{grid-template-columns:1fr} }
+.report .kept{margin:1rem 0 0;padding-top:.75rem;border-top:1px solid var(--border-soft)}
+.report .kept h3 small{font-weight:400;color:var(--text-muted);font-size:.86rem;margin-left:.4rem}
 .report .vlines{margin:.25rem 0 0;padding-left:1.25rem}
 .report .vlines li{margin:.2rem 0;overflow-wrap:anywhere}
 .report .sumlines{margin:.5rem 0 0;padding-left:1.25rem}

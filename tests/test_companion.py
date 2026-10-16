@@ -281,6 +281,50 @@ async def test_compare_page_tests_both_decks_against_the_same_forge_opponents(st
         await b.aclose()
 
 
+async def test_reports_page_lists_every_report_and_what_forge_plays(stack: Stack) -> None:
+    """K8 (Q136, T-152): /reports lists the member's reports newest first with their status, what
+    ran and a link to the deck's trend in History; a deck filter; and the Forge runs playing or
+    waiting, with their place. Signed out, it asks to sign in."""
+    from .test_forge import FakeForge
+
+    h = stack.h
+    b = await linked_browser(stack)
+    reports = h.app.state.gateway.reports
+    fake = FakeForge()
+    try:
+        empty = await b.http.get("/reports", headers=NAV)
+        assert empty.status_code == 200 and "No reports yet" in empty.text and "Run full test" in empty.text
+        assert "Forge now" not in empty.text
+        csrf = await b.csrf("/account")
+        await b.http.post("/decks/42/report", data={"csrf": csrf, "forge": "0"})
+        listed = await b.http.get("/reports", headers=NAV)
+        assert "class='rp-deck' href='/history/reports/rep_" in listed.text
+        assert (
+            "Sample Commander Deck" in listed.text and "/history?deck_id=42&amp;type=reports" in listed.text
+        )
+        assert "<option value='42'" in listed.text and "<span class='rp-what'>" in listed.text
+        none = await b.http.get("/reports?deck_id=999", headers=NAV)
+        assert "No reports for this deck yet" in none.text
+        reports.forge = fake.client()
+        sub = h.app.state.gateway.db._conn.execute("SELECT owner_sub FROM reports").fetchone()[0]
+        first = await reports.run(sub, "42", simulate=False, forge=True, options={"seed": 1})
+        await reports.run(sub, "42", simulate=False, forge=True, options={"seed": 2})
+        queued = await b.http.get("/reports", headers=NAV)
+        assert (
+            "Forge now" in queued.text
+            and "Playing: 0 of" in queued.text
+            and "Waiting, place 1" in queued.text
+        )
+        assert f"href='/history/reports/{first['report_id']}'" in queued.text
+        out = await stack.h.http.get("/reports")
+        assert out.status_code in (302, 303)
+    finally:
+        reports.forge = None
+        if reports._forge_task:
+            reports._forge_task.cancel()
+        await b.aclose()
+
+
 # -- new MCP tools ----------------------------------------------------------------
 async def test_new_tools_are_listed_and_work(stack: Stack) -> None:
     h = stack.h
