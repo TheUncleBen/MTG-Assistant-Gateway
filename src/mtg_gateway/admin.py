@@ -19,7 +19,8 @@ from urllib.parse import parse_qs, quote
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from . import idp_sweep, update_check
+from . import idp_sweep, settings_page, update_check
+from .config import MANAGED_SETTINGS
 from .decks import ADMIN_CLIENT, actor_label, current_client
 from .pages import (
     BROWSER_CLIENT_ID,
@@ -89,7 +90,13 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
     s = state.settings
 
     def page(
-        title: str, body: str, *, status: int = 200, sid: str | None = None, sid_sub: str | None = None
+        title: str,
+        body: str,
+        *,
+        status: int = 200,
+        sid: str | None = None,
+        sid_sub: str | None = None,
+        head_extra: str = "",
     ) -> Response:
         return render(
             title,
@@ -100,6 +107,7 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
             csrf=_csrf(s, sid),
             admin=True,
             user=display_name(state.db.get_user(sid_sub) if sid_sub else None),
+            head_extra=head_extra,
         )
 
     def not_found(api: bool) -> Response:
@@ -253,6 +261,91 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
             _nav("/admin/activity") + _activity_body(state, rows, only),
             sid=sid,
             sid_sub=sub,
+        )
+
+    def settings_page_response(
+        sub: str,
+        sid: str | None,
+        *,
+        outcome: settings_page.Outcome | None = None,
+        notice: str = "",
+        focus: str | None = None,
+        status: int = 200,
+    ) -> Response:
+        body = settings_page.settings_body(
+            state.live,
+            state.settings,
+            csrf=_csrf(s, sid),
+            who=lambda who_sub: html.escape(
+                display_name(state.db.get_user(who_sub)) if who_sub else "someone"
+            ),
+            when=_when,
+            outcome=outcome,
+            notice=notice,
+            focus=focus,
+        )
+        return page(
+            "Admin: settings",
+            _nav("/admin/settings") + body,
+            status=status,
+            sid=sid,
+            sid_sub=sub,
+            head_extra=f"<style>{settings_page.SETTINGS_CSS}</style>",
+        )
+
+    @server.custom_route("/admin/settings", methods=["GET"], include_in_schema=False)
+    async def settings_get(request: Request) -> Response:
+        who = admin_user(request)
+        if isinstance(who, Response):
+            return who
+        sub, sid = who
+        q = request.query_params
+        notice, focus = "", None
+        group = q.get("saved")
+        if group in {g for g, _t, _i in settings_page.GROUPS}:
+            focus = group
+            try:
+                since = int(q.get("after", "0"))
+            except ValueError:
+                since = 0
+            notice = settings_page.changes_notice(_saved_changes(state, sub, since))
+        return settings_page_response(sub, sid, notice=notice, focus=focus)
+
+    @server.custom_route("/admin/settings", methods=["POST"], include_in_schema=False)
+    async def settings_post(request: Request) -> Response:
+        who = admin_user(request)
+        if isinstance(who, Response):
+            return who
+        sub, sid = who
+        data = await form(request)
+        if not csrf_form_ok(s, sid, data):
+            return page(
+                "Admin: settings",
+                _nav("/admin/settings") + _err("This form expired. Reload the page and try again."),
+                status=403,
+                sid=sid,
+                sid_sub=sub,
+            )
+        last = state.db.audit_recent(1)
+        started = last[0]["id"] if last else 0
+        outcome = settings_page.apply_form(state.live, data, by=sub)
+        reset = data.get("reset") or ""
+        group = MANAGED_SETTINGS[reset].group if reset in MANAGED_SETTINGS else data.get("group", "")
+        if "_" in outcome.errors:
+            notice = _err(outcome.errors["_"])
+            return settings_page_response(sub, sid, notice=notice, status=400)
+        if outcome.errors:
+            n = len(outcome.errors)
+            first = settings_page.label(next(iter(outcome.errors)))
+            notice = _err(
+                f"Nothing was saved. See the message under \u201c{first}\u201d."
+                if n == 1
+                else f"Nothing was saved. See the {n} messages in this section."
+            )
+            return settings_page_response(sub, sid, outcome=outcome, notice=notice, focus=group, status=400)
+        anchor = f"#s-row-{reset}" if reset else f"#g-{quote(group)}"
+        return RedirectResponse(
+            f"/admin/settings?saved={quote(group)}&after={started}{anchor}", status_code=303
         )
 
     @server.custom_route("/admin/metrics", methods=["GET"], include_in_schema=False)
@@ -555,7 +648,7 @@ def users_data(state: Any) -> list[dict[str, Any]]:
 # -- HTML -------------------------------------------------------------------------
 def _nav(active: str) -> str:
     links = (("/admin", "Overview"), ("/admin/users", "Users"), ("/admin/activity", "Activity"))
-    links += (("/admin/metrics", "Metrics"),)
+    links += (("/admin/metrics", "Metrics"), ("/admin/settings", "Settings"))
     return (
         "<div class='actions' role='navigation' aria-label='Admin'>"
         + "".join(
@@ -564,6 +657,25 @@ def _nav(active: str) -> str:
         )
         + "</div>"
     )
+
+
+def _saved_changes(state: Any, sub: str, after: int) -> list[tuple[str, Any, Any]]:
+    """The settings ``sub`` changed in audit rows after id ``after`` (the save that redirected
+    here), oldest first, for the notice after a save; a key changed twice shows its first value
+    and its last."""
+    rows = [
+        r
+        for r in state.db.audit_recent(200, sub=sub)
+        if r["event"] == "setting_changed" and r["id"] > after and isinstance(r.get("detail"), dict)
+    ]
+    out: dict[str, tuple[Any, Any]] = {}
+    for r in reversed(rows):
+        key = r["detail"].get("key")
+        if key not in MANAGED_SETTINGS:
+            continue
+        before = out[key][0] if key in out else r["detail"].get("previous")
+        out[key] = (before, r["detail"].get("value"))
+    return [(k, b, a) for k, (b, a) in out.items() if b != a]
 
 
 def _notice(ok: str | None, err: str | None) -> str:

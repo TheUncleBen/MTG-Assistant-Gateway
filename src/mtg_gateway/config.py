@@ -1045,6 +1045,30 @@ def _deployment_value(settings: Settings, spec: SettingSpec) -> Any:
     return value
 
 
+def with_stored(settings: Settings, db: Any) -> Settings:
+    """``settings`` with the values stored from the admin Settings page applied, for every key the
+    deployment left blank (a deployment value always wins).
+
+    The gateway calls this once at start-up (create_app), so settings that are read only when the
+    gateway starts ("applies after a restart") take the page's value at the next restart. A stored
+    value the current bounds refuse is skipped, as LiveSettings does."""
+    stored = db.stored_settings()
+    changes: dict[str, Any] = {}
+    for key, raw in stored.items():
+        spec = MANAGED_SETTINGS.get(key)
+        if spec is None or key in settings.env_set:
+            continue
+        try:
+            value = spec.parse(raw)
+        except SettingError:
+            logger.warning("stored setting %s is out of bounds; the default applies", key)
+            continue
+        if key == "chatgpt_name":
+            value = value or None  # blank: the ChatGPT name follows the server name
+        changes[key] = value
+    return replace(settings, **changes) if changes else settings
+
+
 class LiveSettings:
     """The value of every MANAGED_SETTINGS key as it is now: the deployment's when it set one,
     else the value stored from the admin Settings page, else the code default.
