@@ -19,6 +19,7 @@ import asyncio
 import contextvars
 import dataclasses
 import datetime
+import hashlib
 import json
 import logging
 import math
@@ -56,6 +57,7 @@ from .archidekt import (
     backup_writes,
     finish_modifier,
     front_face,
+    is_backup_name,
     jwt_exp,
     no_retry,
     parse_deck,
@@ -165,6 +167,13 @@ BACKUP_DELETE_EVERY = 60.0  # seconds between the loop's passes
 # seconds only (up to 1 s off each way); everything the gateway writes is in the measured part.
 BACKUP_UNCHANGED_SLACK = 2
 BACKUPS_REMEMBERED = 256  # backup copies made recently whose name and description are kept
+# Q14 "All three" (QUESTIONS-2 B14, B15): an edit reuses the deck's newest backup copy instead of
+# making another when the deck is unchanged since that copy, or the copy is under this many
+# seconds old (Ben's 15 minutes). Every edit still takes its own snapshot.
+BACKUP_SHARE_SECONDS = 15 * 60
+# A copy made before 0.7.29 has no stored record of how it was made (B12, card Q135 item 8): it
+# counts as unchanged when Archidekt's updatedAt is within this many seconds of its createdAt.
+BACKUP_LEGACY_SLACK = 120
 BROWSER_CLIENT = "__browser__"  # the same value as pages.BROWSER_CLIENT_ID
 # An administrator acting on a member's account from the admin pages (unlink): recorded in the
 # member's own activity log as done by an administrator, never as the member's browser.
@@ -3326,6 +3335,8 @@ class DeckService:
         backup_id = progress.get("backup_deck_id")
         if not backup_id or _changed_anything(progress):
             return
+        if progress.get("backup_reused") or self.db.backup_users(sub, str(backup_id)) > 1:
+            return  # B16: a copy an earlier edit also relies on is never deleted for this one
         snap = self.db.get_snapshot(str(progress.get("snapshot_id") or ""), sub)
         if (
             not str(backup_id).isdigit()
@@ -3364,8 +3375,7 @@ class DeckService:
             return
         finally:
             patient.reset(allowance)
-        if progress.get("snapshot_id"):
-            self.db.clear_snapshot_backup(progress["snapshot_id"])
+        self.db.clear_backup_everywhere(sub, str(backup_id))
         progress.pop("backup_deck_id", None)
         progress.pop("backup_url", None)
         progress["backup_deleted"] = True
@@ -3387,7 +3397,7 @@ class DeckService:
             deck_id=str(source_deck_id),
             proposal_id=proposal_id,
             due=due,
-            expect=self._backups_made.pop(backup_id, None),
+            expect=self._backups_made.pop(backup_id, None) or self.db.backup_made(backup_id),
         )
         progress["backup_note"] = BACKUP_LATER
         self._audit(
@@ -3418,6 +3428,16 @@ class DeckService:
         sub, sid = job["sub"], job["snapshot_id"]
         backup_id, deck_id, pid = job["backup_deck_id"], job["deck_id"], job["proposal_id"]
         snap = self.db.get_snapshot(sid, sub)
+        expect = job.get("expect") if isinstance(job.get("expect"), dict) else {}
+        trim = bool(expect.get("trim"))
+        if trim and not self._over_backup_limit(sub, deck_id, backup_id):
+            self.db.drop_backup_delete(sid)
+            self._audit(
+                "backup_delete_skipped",
+                sub=sub,
+                detail={"backup_deck_id": backup_id, "later": True, "within_limit": True},
+            )
+            return {"skipped": sid, "within_limit": True}
         proposal = self.db.get_proposal(pid, sub) if pid else None
         changed = (
             proposal is not None
@@ -3463,7 +3483,11 @@ class DeckService:
             user_id = str(link.get("archidekt_user_id") or "")
             if not user_id or not copy.owner_id or str(copy.owner_id) != user_id:
                 return self._give_up_backup_delete(job, attempts, "not_owner")
-            if not _backup_as_made(copy, job):
+            if not _backup_as_made(copy, job, snapshot_id=sid):
+                if trim:  # the member changed it: kept, and no longer counted (B11)
+                    self.db.record_backup_made(
+                        backup_id, {**(self.db.backup_made(backup_id) or {}), "kept": True}
+                    )
                 return self._give_up_backup_delete(job, attempts, "copy_changed")
             await self._call(sub, self.client.delete_deck, backup_id)
         except DeckError as exc:
@@ -3483,7 +3507,7 @@ class DeckService:
                 return self._retry_backup_delete(job, attempts, "internal")
             return self._give_up_backup_delete(job, attempts, "internal")
         self.db.drop_backup_delete(sid)
-        self.db.clear_snapshot_backup(sid)
+        self.db.clear_backup_everywhere(sub, backup_id)
         self._reword_backup_note(sub, pid, sid, None)
         self._audit(
             "backup_deleted",
@@ -3583,13 +3607,16 @@ class DeckService:
         """Before any write, keep a private copy of the deck in the user's backup folder on
         Archidekt (a readable backup next to the gateway's own snapshot). When the copy cannot be
         made the edit does not proceed: the proposal goes back to pending so the user can retry."""
-        if not self.settings.archidekt_backups:
+        if not self.live.get("archidekt_backups"):
             return {}
         if row.get("archidekt_backup") is False:
             return {"archidekt_backup": "skipped"}  # the member's own choice at save time (D-02)
         reason = f"before proposal {row['id']} changed this deck ({row.get('kind') or 'edit'})"
         try:
-            return await self._backup_copy(sub, deck, snapshot_id, reason=reason)
+            reused = await self._reuse_backup(sub, deck, snapshot_id)
+            if reused:
+                return reused
+            made = await self._backup_copy(sub, deck, snapshot_id, reason=reason)
         except DeckError as exc:
             # Kept on the proposal so get_proposal and the review page say why it is pending again,
             # also when the apply was answered "applying" before the backup failed.
@@ -3607,6 +3634,96 @@ class DeckService:
                 "changed; the proposal is still pending, so it can be applied again once Archidekt "
                 "answers.",
             ) from exc
+        self._trim_backups(sub, deck.id)
+        return made
+
+    async def _reuse_backup(self, sub: str, deck: Deck, snapshot_id: str) -> dict[str, Any] | None:
+        """The deck's newest backup copy, recorded on this snapshot too, when Q14 lets this edit
+        share it (B14, B15): the deck is unchanged since the copy was made, or the copy is under
+        BACKUP_SHARE_SECONDS old. The copy is read once first (one call instead of the three a new
+        copy costs) and shared only while it is still as the gateway made it. None: make a new one."""
+        copies = self.db.deck_backup_copies(sub, deck.id)
+        if not copies:
+            return None
+        newest = copies[0]
+        backup_id = str(newest["backup_deck_id"])
+        made = self.db.backup_made(backup_id)
+        if not made or made.get("kept") or not backup_id.isdigit() or backup_id == str(deck.id):
+            return None
+        if self.db.backup_copy_queued(sub, backup_id):
+            return None  # an unused or over-limit copy waiting to be deleted is never shared
+        made_at = int(made.get("made_at") or 0)
+        recent = 0 <= time.time() - made_at < BACKUP_SHARE_SECONDS
+        if not recent:
+            origin = self.db.get_snapshot(str(newest["snapshot_id"]), sub)
+            if origin is None or _content_key(parse_deck(origin["deck"])) != _content_key(deck):
+                return None
+        try:
+            copy = await self._call(sub, self.client.get_deck, backup_id)
+        except DeckError:
+            return None  # gone or unreadable: make a new copy
+        link = self.db.get_link(sub) or {}
+        user_id = str(link.get("archidekt_user_id") or "")
+        if not user_id or str(copy.owner_id or "") != user_id or not _backup_as_made(copy, {"expect": made}):
+            return None
+        url = str(newest.get("backup_url") or "")
+        self.db.set_snapshot_backup(snapshot_id, backup_deck_id=backup_id, backup_url=url)
+        return {
+            "backup_deck_id": backup_id,
+            "backup_url": url,
+            "backup_reused": True,
+            "backup_made_at": made_at,
+            "backup_reason": "recent" if recent else "unchanged",
+            "backup_shared": backup_shared_note(made_at, recent=recent),
+        }
+
+    def _trim_backups(self, sub: str, deck_id: str) -> list[str]:
+        """Queue the deletes of this deck's backup copies past "Backup copies kept per deck" (Q12,
+        Q13; B11): the newest are kept, the rest go through the later-delete queue, one a minute
+        for everyone, with its checks (writes switch, owner, the copy as made). A copy the member
+        changed on Archidekt is kept and not counted. Only copies the gateway recorded on its own
+        snapshots are ever considered. Returns the copies queued."""
+        keep = int(self.live.get("archidekt_backup_copies"))
+        queued: list[str] = []
+        counted = 0
+        for c in self.db.deck_backup_copies(sub, deck_id):
+            backup_id, sid = str(c["backup_deck_id"]), str(c["snapshot_id"] or "")
+            made = self.db.backup_made(backup_id) or {}
+            if made.get("kept"):
+                continue
+            counted += 1
+            if counted <= keep or not backup_id.isdigit() or backup_id == str(deck_id) or not sid:
+                continue
+            if self.db.backup_delete_queued(sid):
+                continue
+            expect = {**made, "trim": True} if made else {"trim": True, "legacy": True}
+            self.db.queue_backup_delete(
+                sid,
+                sub=sub,
+                backup_deck_id=backup_id,
+                deck_id=str(deck_id),
+                proposal_id=None,
+                due=int(time.time()) + BACKUP_DELETE_MARGIN,
+                expect=expect,
+            )
+            queued.append(backup_id)
+        if queued:
+            self._audit("backup_trim_queued", sub=sub, detail={"deck_id": str(deck_id), "copies": queued})
+        return queued
+
+    def _over_backup_limit(self, sub: str, deck_id: str, backup_id: str) -> bool:
+        """Whether a copy queued by _trim_backups is still past the limit now (the limit may have
+        been raised, or newer copies deleted, since)."""
+        keep = int(self.live.get("archidekt_backup_copies"))
+        counted = 0
+        for c in self.db.deck_backup_copies(sub, deck_id):
+            made = self.db.backup_made(str(c["backup_deck_id"])) or {}
+            if made.get("kept"):
+                continue
+            counted += 1
+            if str(c["backup_deck_id"]) == str(backup_id):
+                return counted > keep
+        return False
 
     async def _backup_copy(self, sub: str, deck: Deck, snapshot_id: str, *, reason: str) -> dict[str, Any]:
         """Copy ``deck`` into the backup folder and record the copy on the snapshot. Raises the
@@ -3636,12 +3753,18 @@ class DeckService:
             written_within = math.ceil(time.monotonic() - started)
         backup = {"backup_deck_id": str(copy["id"]), "backup_url": str(copy.get("url") or "")}
         self.db.set_snapshot_backup(snapshot_id, **backup)
-        self._backups_made[str(copy["id"])] = {
+        made = {
             "name": name,
             "description": description,
             "folder_id": str(folder["id"]),
             "written_within": written_within,
         }
+        self._backups_made[str(copy["id"])] = made
+        # B12/B21: also in the database, so a restart never loses it
+        self.db.record_backup_made(
+            str(copy["id"]),
+            {**made, "made_at": int(time.time()), "deck_id": str(deck.id), "snapshot_id": snapshot_id},
+        )
         while len(self._backups_made) > BACKUPS_REMEMBERED:
             self._backups_made.pop(next(iter(self._backups_made)))
         return backup
@@ -4274,7 +4397,7 @@ class DeckService:
         if progress is not None:
             progress["snapshot_id"] = snapshot_id
         backup: dict[str, Any] = {}
-        if self.settings.archidekt_backups:
+        if self.live.get("archidekt_backups"):
             try:
                 backup = await self._backup_copy(sub, deck, snapshot_id, reason="before it was deleted")
                 if progress is not None:
@@ -5008,7 +5131,23 @@ def _iso_time(value: str) -> float | None:
     return when.timestamp()
 
 
-def _backup_as_made(copy: Deck, job: dict[str, Any]) -> bool:
+def backup_shared_note(made_at: int, *, recent: bool) -> str:
+    """What the result says when an edit shares an earlier backup copy (B14, B15; draft wording,
+    WORDING-AND-CALLS-2 W1)."""
+    when = datetime.datetime.fromtimestamp(made_at, tz=datetime.UTC).strftime("%Y-%m-%d %H:%M UTC")
+    why = "made less than 15 minutes earlier" if recent else "the deck is unchanged since"
+    return f"No new backup copy: this edit shares the one made {when} ({why})."
+
+
+def _content_key(deck: Deck) -> str:
+    """What a backup copy holds of a deck: its card rows and its details (not Archidekt's updated
+    time, which a copy or any write bumps). Equal keys: the deck is unchanged (B14)."""
+    details = {key: _current_detail(deck, key) for key in DETAIL_FIELDS}
+    blob = json.dumps({"rows": deck.rows_fingerprint(), "details": details}, sort_keys=True, default=str)
+    return hashlib.sha256(blob.encode()).hexdigest()
+
+
+def _backup_as_made(copy: Deck, job: dict[str, Any], *, snapshot_id: str = "") -> bool:
     """Whether a queued backup copy is still as the gateway made it (review D4): in the backup
     folder it was made in, with the name and description it was given, and with Archidekt's
     updatedAt no later than the copy's own createdAt plus the time the gateway's writes to it
@@ -5019,6 +5158,17 @@ def _backup_as_made(copy: Deck, job: dict[str, Any]) -> bool:
         return False
     updated = _iso_time(copy.updated_at)
     created = _iso_time(copy.created_at)
+    if expect.get("legacy"):
+        # A copy made before 0.7.29, with no stored record (card Q135 item 8): a backup-style name,
+        # the description naming this snapshot, and updated within BACKUP_LEGACY_SLACK of created.
+        return (
+            bool(snapshot_id)
+            and is_backup_name(copy.name or "")
+            and f"Gateway snapshot {snapshot_id}." in rich_text(copy.description)
+            and updated is not None
+            and created is not None
+            and updated <= created + BACKUP_LEGACY_SLACK
+        )
     within = expect.get("written_within")
     return (
         str(copy.parent_folder) == str(expect.get("folder_id"))

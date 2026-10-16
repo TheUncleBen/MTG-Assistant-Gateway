@@ -1202,7 +1202,10 @@ async def test_apply_keeps_a_backup_copy_on_archidekt_first(stack: Stack) -> Non
     a2 = structured(await call(h, token, "apply_proposal", {"proposal_id": p2["proposal_id"]}))
     assert a2["ok"], a2
     assert [f["name"] for f in ark.folders["alice"]] == ["MTG Gateway backups", "Brews"]
-    assert a2["result"]["backup_deck_id"] != a["result"]["backup_deck_id"]
+    # Q14/B15: within 15 minutes of the first copy, the second edit shares it (its own snapshot
+    # still holds the exact deck before it); tests/test_backup_limits.py covers the rest.
+    assert a2["result"]["backup_deck_id"] == a["result"]["backup_deck_id"]
+    assert a2["result"]["backup_reused"] is True and a2["snapshot_id"] != a["snapshot_id"]
 
 
 async def test_apply_refuses_to_edit_when_the_backup_fails(stack: Stack) -> None:
