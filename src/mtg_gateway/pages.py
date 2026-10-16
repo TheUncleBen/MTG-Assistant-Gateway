@@ -354,7 +354,9 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
             # The only place a mode can be set: the member's own browser session, never an
             # assistant over MCP or the API (modes.py).
             mode = data.get("mode", "")
-            if not modes.valid_mode(mode) or modes.rank(mode) > modes.rank(s.approval_mode_max):
+            # the cap as it is now: the Settings page changes it without a restart (LiveSettings)
+            cap = str(state.live.get("approval_mode_max"))
+            if not modes.valid_mode(mode) or modes.rank(mode) > modes.rank(cap):
                 return RedirectResponse("/account?err=mode_invalid", status_code=303)
             before = state.decks.mode_of(sub)
             state.db.set_approval_mode(sub, mode)

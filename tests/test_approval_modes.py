@@ -156,6 +156,17 @@ async def test_no_tool_or_api_route_sets_the_mode(stack: Stack) -> None:
     assert h.db.get_user("user-1")["approval_mode"] is None
 
 
+async def test_a_cap_changed_on_the_settings_page_applies_at_once(stack: Stack) -> None:
+    """An admin lowers the cap on the Settings page: the Account page refuses a mode above it
+    from then on, with no restart."""
+    h = stack.h
+    await linked_user(stack)
+    h.app.state.gateway.live.set("approval_mode_max", "semi", by="admin-1")
+    assert await _set_mode(h, "auto") == "/account?err=mode_invalid"
+    assert h.db.get_user("user-1")["approval_mode"] is None
+    assert await _set_mode(h, "semi") == "/account?ok=mode_semi"
+
+
 async def test_the_cap_limits_what_members_may_choose(capped: Stack) -> None:
     """MTG_APPROVAL_MODE_MAX=semi: the operator's auto default is read as semi, auto cannot be
     chosen, and the Account page shows the auto choice disabled."""

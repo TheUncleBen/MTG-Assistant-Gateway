@@ -160,7 +160,8 @@ def test_both_name_notices_read_together(tmp_path: Path, width: int, theme: str)
     from mtg_gateway.plugin_page import developer_name_warning
 
     site = " ".join(["Commander"] * 14)
-    s = Server(tmp_path, server_name=site, chatgpt_name="", admin_group="mtg-admins")
+    # an empty MTG_CHATGPT_NAME is one the stack leaves blank, not one that locks the setting
+    s = Server(tmp_path, server_name=site, chatgpt_name="", admin_group="mtg-admins", env_set=frozenset())
     s.start()
     try:
         exe = _chromium()

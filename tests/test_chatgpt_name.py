@@ -299,8 +299,14 @@ def test_the_plugin_file_step_carries_the_warning_only_when_over_80() -> None:
 async def test_admin_warns_about_a_long_chatgpt_name(
     tmp_path: Path, idp: FakeIdP, site: str, gpt: str | None, shown: str | None
 ) -> None:
+    # the name as the Settings page leaves it: not set in the stack, so the warning links to the page
     settings = make_settings(
-        tmp_path, required_group="mtg-users", admin_group="mtg-admins", server_name=site, chatgpt_name=gpt
+        tmp_path,
+        required_group="mtg-users",
+        admin_group="mtg-admins",
+        server_name=site,
+        chatgpt_name=gpt,
+        env_set=frozenset(),
     )
     async with running(_with_admin(Harness(settings, idp))) as h:
         b = await admin_browser(h)
