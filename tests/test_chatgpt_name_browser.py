@@ -116,3 +116,35 @@ def test_admin_warning_reads_everywhere(server: Server, width: int, theme: str) 
         _shot(page, note, f"admin-{width}-{theme}.png", pad=80)
         browser.close()
     assert errors == []
+
+
+@pytest.mark.parametrize("width,theme", SIZES)
+def test_admin_note_on_a_shortened_developer_name_reads_everywhere(
+    tmp_path: Path, width: int, theme: str
+) -> None:
+    """B4 b: a MTG_SERVER_NAME over 120 characters, with a short MTG_CHATGPT_NAME: only the
+    developer-name note shows, and it reads at every size."""
+    from playwright.sync_api import sync_playwright
+
+    from mtg_gateway.plugin_page import developer_name_warning
+
+    site = " ".join(["Commander"] * 14)
+    s = Server(tmp_path, server_name=site, chatgpt_name="Decks", admin_group="mtg-admins")
+    s.start()
+    try:
+        exe = _chromium()
+        sid = _admin_sign_in(s)
+        with sync_playwright() as p:
+            browser, page, errors = _page(p, s, sid, width, theme, exe)
+            page.goto(f"{s.base}/admin", wait_until="networkidle")
+            note = page.locator(".notice.warn", has_text="developer name")
+            assert note.count() == 1 and note.is_visible()
+            assert note.inner_text() == developer_name_warning(site)
+            assert page.locator(".notice.warn", has_text="Set MTG_CHATGPT_NAME").count() == 0
+            assert page.evaluate(CONTRAST, ".notice.warn") == []
+            assert page.evaluate(MEASURE) == []
+            _shot(page, note, f"admin-developer-{width}-{theme}.png", pad=80)
+            browser.close()
+        assert errors == []
+    finally:
+        s.stop()
