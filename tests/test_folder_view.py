@@ -250,6 +250,49 @@ async def test_the_backup_folder_stays_hidden_with_backups_switched_off(stack: S
         await b.aclose()
 
 
+async def test_the_server_refuses_the_backup_folder_as_a_target(stack: Stack) -> None:
+    """Q21 (review L14): a hand-made POST cannot move a deck into the backup folder (or a folder
+    in it), rename it, or make a folder inside it; each is refused as the move by name refuses
+    it, and nothing is sent. A deck already in it keeps its place when its own folder is posted."""
+    import pytest
+
+    from mtg_gateway.decks import DeckError
+
+    ark = stack.ark
+    ark.folders["alice"] = [
+        {"id": 501, "name": "Commander", "private": False},
+        {"id": 503, "name": "MTG Gateway backups", "private": True},
+        {"id": 504, "name": "Old copies", "private": True, "parent": 503},
+    ]
+    ark.decks[46] = dict(ark.decks[42], id=46, name="Copy in the backup folder")
+    ark.deck_folder[46] = 503
+    b = await linked_browser(stack)
+    try:
+        csrf = await b.csrf()
+        calls = len(ark.calls)
+        for path, data in (
+            ("/decks/42/move", {"folder_id": "503"}),
+            ("/decks/42/move", {"folder_id": "504"}),
+            ("/folders", {"action": "rename", "folder_id": "503", "name": "Mine now"}),
+            ("/folders", {"action": "rename", "folder_id": "504", "name": "Mine now"}),
+            ("/folders", {"action": "create", "name": "Inside", "parent_id": "503"}),
+            ("/folders", {"action": "create", "name": "Inside", "parent_id": "503", "confirmed": "1"}),
+        ):
+            r = await b.http.post(path, data={"csrf": csrf, **data})
+            assert r.status_code == 400 and "No folder is called" in r.text, (path, data, r.text[:300])
+        assert all(m == "GET" for m, _p in ark.calls[calls:]), ark.calls[calls:]
+        assert ark.deck_folder.get(42) is None
+        assert [f["name"] for f in ark.folders["alice"]] == ["Commander", "MTG Gateway backups", "Old copies"]
+    finally:
+        await b.aclose()
+    decks = stack.h.app.state.gateway.decks
+    sub = "user-1"  # the signed-in member (conftest)
+    with pytest.raises(DeckError) as exc:
+        await decks.move_deck(sub, "42", 503)
+    assert str(exc.value) == "No folder is called 'MTG Gateway backups'. Your folders: Commander"
+    assert (await decks.move_deck(sub, "46", 503))["changed"] is False
+
+
 async def test_a_folder_write_drops_the_kept_tree(stack: Stack) -> None:
     ark = stack.ark
     ark.folders["alice"] = [{"id": 601, "name": "Brews", "private": False}]
