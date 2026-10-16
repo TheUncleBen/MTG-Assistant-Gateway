@@ -38,11 +38,15 @@ so going back to 0.7.27 is a plain image swap. The Android app is unchanged.
   already have in another language, and cards not found. A refused import says why and which line.
 - The collection import reads a Language column, in the gateway's codes, Archidekt's codes or
   the language's English name. Assistants can give a language when they add to the collection.
+  A condition may be written out (Near Mint, Lightly Played, Moderately Played, Heavily Played,
+  Damaged) as well as given as its code.
 - `MTG_CHATGPT_NAME` (optional) gives the ChatGPT connector its own name: the name in the ChatGPT
   plugin file and the name the ChatGPT install steps tell people to type. Empty keeps
   `MTG_SERVER_NAME`. Per OpenAI's plugin docs, ChatGPT refuses a plugin file whose name is over
   80 characters, so the gateway warns about a longer name in the log, on the admin page and on
-  the install page's plugin-file step, and still starts.
+  the install page's plugin-file step, and still starts. A `MTG_SERVER_NAME` over 120 characters
+  is shortened in the plugin file, where OpenAI's plugin check allows 120 for the developer and
+  author names, and the log and the admin page say so.
 
 ### Changed
 - The collection CSV export writes condition and language in Archidekt's own codes (D for
@@ -74,8 +78,17 @@ so going back to 0.7.27 is a plain image swap. The Android app is unchanged.
 - Home, Goldfish and Compare load only the scripts they use, and the deck page's card filter is
   quicker on big decks.
 - Every guarded form needs its render stamp, so a form can't be sent before it was shown.
-- A collection import with a cell or a quantity too big to read says which line, instead of
-  failing with an error page. A CSV whose name column is called Card is read as a CSV.
+- A collection import with a cell longer than 131,072 characters, or a quantity thousands of
+  digits long, is refused with its line number instead of failing with an error page. A CSV whose
+  name column is called Card is read as a CSV.
+- A card search too long to send is refused with "This search is too long. Remove some filters or
+  words." instead of being cut, which could drop its last filters (paper only among them).
+- After Set as commander, the check that Archidekt saved the change also looks at the card's first
+  category, so a commander Archidekt didn't put first is reported.
+- A folder can't be renamed or made with the backup folder's name through the gateway. Such a
+  folder was taken for the backup folder and hidden from My decks.
+- A long server name shortens in the top bar instead of pushing the search box and the account
+  button out of a narrow window.
 
 ## [0.7.27] - 2026-10-14
 
