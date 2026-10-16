@@ -398,3 +398,28 @@ def test_a_late_next_page_is_not_added_to_a_newer_search(server: Server) -> None
         assert asked and all(_query(u)["q"] == ["test land"] for u in asked), asked
         assert errors == [], errors
         browser.close()
+
+
+@pytest.mark.parametrize("width,theme", SIZES)
+def test_a_search_too_long_for_scryfall_says_so_at_every_size(server: Server, width: int, theme: str) -> None:
+    """A search over Scryfall's length is refused whole, not cut (review L6): the page's notice
+    says so, fits the window and keeps a 4.5:1 contrast."""
+    from urllib.parse import urlencode
+
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid = _link(server)
+    words = "This search is too long. Take some filters or words away."
+    query = urlencode([("t", f"{'abcdefghij' * 3}{i:02d}") for i in range(40)])
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, theme, exe)
+        page.goto(f"{server.base}/cards?{query}", wait_until="networkidle")
+        notice = page.locator("#cs-status .notice.error")
+        assert notice.inner_text().strip() == words
+        assert page.evaluate(MEASURE) == []
+        assert page.evaluate(CONTRAST, "#cs-status .notice.error") == []
+        if SHOTS:
+            page.screenshot(path=str(Path(SHOTS) / f"too-long-{width}-{theme}.png"))
+        assert errors == [], errors
+        browser.close()
