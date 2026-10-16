@@ -299,3 +299,49 @@ async def test_a_bookmark_already_so_says_so(stack: Stack) -> None:
     assert p["rows"][0]["text"].endswith(note), p
     p = structured(await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "unbookmark"}))
     assert not p["rows"][0]["text"].endswith(note), p
+
+
+def test_with_writes_switched_off_the_deck_page_is_read_only(tmp_path, monkeypatch) -> None:
+    """The social review: with MTG_WRITES_ENABLED off, the social buttons show their state but are
+    disabled with the reason, and the comment thread has no form, Reply, votes or edits."""
+    import pytest
+    from playwright.sync_api import sync_playwright
+
+    from . import test_social_browser
+    from .test_scan_browser import _chromium_path
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    real = test_social_browser.make_settings
+    monkeypatch.setattr(
+        test_social_browser, "make_settings", lambda *a, **k: real(*a, **{**k, "writes_enabled": False})
+    )
+    server = test_social_browser.Server(tmp_path)
+    server.ark.comments[ROOT] = [_comment(555001, 3)]
+    server.start()
+    try:
+        sid = server.sign_in_and_link()
+        with sync_playwright() as p:
+            browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+            ctx = browser.new_context(viewport={"width": 412, "height": 915}, is_mobile=True, has_touch=True)
+            ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+            page = ctx.new_page()
+            errors: list[str] = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.goto(f"{server.base}/decks/43#comments", wait_until="networkidle")
+            like = page.locator("[data-social=vote]")
+            assert like.is_disabled() and like.get_attribute("title") == (
+                "Archidekt writes are switched off on this gateway"
+            )
+            assert page.locator("[data-social=bookmark]").is_disabled()
+            page.locator("#comments").scroll_into_view_if_needed()
+            page.wait_for_selector("#comments .cmt[data-id='555001']", timeout=10000)
+            assert page.locator("#comments form.newcomment").count() == 0
+            assert "can be read here but not posted" in page.locator("#comments").inner_text()
+            assert page.locator("#comments .cmt button").count() == 0  # no Reply, votes or edits
+            assert server.ark.votes == {}
+            assert errors == [], errors
+            browser.close()
+    finally:
+        server.stop()

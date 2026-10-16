@@ -426,7 +426,7 @@ def banner_html(
         "</div>"
         f"<div class='tags'>{icon('tag')} {tags}</div>"
         f"<div class='controls'><div class='primary'>{primary}{more}</div></div>{writes_note}"
-        f"{social_html(deck, own=own) if csrf else ''}"
+        f"{social_html(deck, own=own, writes_enabled=writes_enabled) if csrf else ''}"
         "</div>"
         f"<a class='owner' href='/users/{esc(deck.owner)}' title='{esc(deck.owner)}: public decks'>"
         f"{avatar_html(deck.owner)}<span class='uname'>{esc(deck.owner or 'unknown')}</span></a>"
@@ -434,28 +434,38 @@ def banner_html(
     )
 
 
-def social_html(deck: Deck, *, own: bool) -> str:
+WRITES_OFF_TITLE = "Archidekt writes are switched off on this gateway"
+
+
+def social_html(deck: Deck, *, own: bool, writes_enabled: bool = True) -> str:
     """Like, Bookmark, Follow and Comments, as Archidekt's deck page offers them. The buttons are
     the person's own clicks: social.js asks for a confirmation and posts to /social/api; without
-    script they are inert and the More menu's "Open on Archidekt" link is the way."""
+    script they are inert and the More menu's "Open on Archidekt" link is the way. With Archidekt
+    writes switched off they show their state but are disabled, saying why (social review)."""
     did = esc(deck.id)
+
+    def title(text: str) -> str:
+        # writes switched off: the button shows its state but is disabled, and says why
+        return f" title='{text}'" if writes_enabled else f" disabled title='{WRITES_OFF_TITLE}'"
+
     liked = deck.user_vote == VOTE_UP
     like = (
         f"<button type='button' class='soc{' on' if liked else ''}' data-social='vote' "
-        f"data-state='{deck.user_vote}' aria-pressed='{'true' if liked else 'false'}' "
-        f"title='{'You like this deck' if liked else 'Like this deck on Archidekt'}'>"
+        f"data-state='{deck.user_vote}' aria-pressed='{'true' if liked else 'false'}'"
+        f"{title('You like this deck' if liked else 'Like this deck on Archidekt')}>"
         f"{icon('heart')}<b class='n'>{deck.points}</b><span>{'Liked' if liked else 'Like'}</span></button>"
     )
     marked = deck.bookmarked
     bookmark = (
         f"<button type='button' class='soc{' on' if marked else ''}' data-social='bookmark' "
-        f"data-state='{1 if marked else 0}' aria-pressed='{'true' if marked else 'false'}' "
-        f"title='{'Bookmarked on Archidekt' if marked else 'Bookmark this deck on Archidekt'}'>"
+        f"data-state='{1 if marked else 0}' aria-pressed='{'true' if marked else 'false'}'"
+        f"{title('Bookmarked on Archidekt' if marked else 'Bookmark this deck on Archidekt')}>"
         f"{icon('bookmark')}<span>{'Bookmarked' if marked else 'Bookmark'}</span></button>"
     )
     follow = (
         f"<button type='button' class='soc' data-social='follow' data-user='{esc(deck.owner_id)}' "
-        f"data-name='{esc(deck.owner)}' data-state='unknown' title='Follow {esc(deck.owner)} on Archidekt'>"
+        f"data-name='{esc(deck.owner)}' data-state='unknown'"
+        f"{title('Follow ' + esc(deck.owner) + ' on Archidekt')}>"
         f"{icon('follow')}<span>Follow {esc(deck.owner)}</span></button>"
         if deck.owner_id and not own
         else ""
@@ -463,23 +473,19 @@ def social_html(deck: Deck, *, own: bool) -> str:
     comments = (
         f"<a class='soc' href='#comments' data-social='comments'>{icon('comment')}<span>Comments</span></a>"
     )
+    off = "" if writes_enabled else " data-writes='off'"
     return (
-        f"<div class='social' data-deck='{did}' aria-label='Archidekt actions'>"
+        f"<div class='social' role='group' data-deck='{did}' aria-label='Archidekt actions'{off}>"
         f"{like}{bookmark}{follow}{comments}</div>"
     )
 
 
-def comments_html(deck: Deck) -> str:
+def comments_html(deck: Deck, *, writes_enabled: bool = True) -> str:
     """The deck's comment thread (loaded by social.js when the section scrolls into view) and the
-    form to add one; a post is confirmed before it goes out, under the member's Archidekt name."""
+    form to add one; a post is confirmed before it goes out, under the member's Archidekt name.
+    With Archidekt writes switched off the thread is read-only: no form, no Reply, votes or edits."""
     did = esc(deck.id)
-    return (
-        f"<section class='panel comments' id='comments' data-deck='{did}' "
-        f"data-root='{esc(deck.comment_root or '')}'>"
-        f"<div class='panel-head'><h2>Comments</h2><span class='muted small' data-count></span></div>"
-        f"<div class='thread' data-src='/social/api/decks/{did}/comments'><p class='muted'>Comments from "
-        f"Archidekt appear here. <a href='https://archidekt.com/decks/{did}' target='_blank' "
-        "rel='noreferrer noopener'>Read the thread on Archidekt</a>.</p></div>"
+    form = (
         "<form class='newcomment'><label for='ctext'>Add a comment</label>"
         "<textarea id='ctext' name='text' rows='3' maxlength='2000' "
         "placeholder='Say something about this deck…'></textarea>"
@@ -487,13 +493,38 @@ def comments_html(deck: Deck) -> str:
         f"<button type='submit' class='btn'>{icon('comment')} Post comment</button>"
         "<p class='muted small'>Posted publicly on Archidekt under your Archidekt name, after you "
         "confirm.</p>"
-        "</form></section>"
+        "</form>"
+        if writes_enabled
+        else f"<p class='muted small'>{WRITES_OFF_TITLE}, so comments can be read here but not "
+        "posted, changed or voted on.</p>"
+    )
+    return (
+        f"<section class='panel comments' id='comments' data-deck='{did}' "
+        f"data-writes='{'on' if writes_enabled else 'off'}' "
+        f"data-root='{esc(deck.comment_root or '')}'>"
+        f"<div class='panel-head'><h2>Comments</h2><span class='muted small' data-count></span></div>"
+        f"<div class='thread' data-src='/social/api/decks/{did}/comments'><p class='muted'>Comments from "
+        f"Archidekt appear here. <a href='https://archidekt.com/decks/{did}' target='_blank' "
+        "rel='noreferrer noopener'>Read the thread on Archidekt</a>.</p></div>"
+        f"{form}</section>"
     )
 
 
 # Track A's own deck page styles (S3): DECK_CSS ends with this, so A's rules for its parts of the
 # page (banner, social actions, the waiting changes strip) need no edit inside DECK_CSS.
-DECK_CSS_A = waiting_strip.LIST_CSS  # the "Waiting changes" strip (Track A)
+DECK_CSS_A = (
+    waiting_strip.LIST_CSS  # the "Waiting changes" strip (Track A)
+    # the social review (G14/Q47): a long name wraps instead of running off a phone screen, replies
+    # indent less on a phone, and a button disabled because writes are off says so by its cursor
+    + """
+.banner .social .soc{height:auto;min-height:34px;max-width:100%}
+.banner .social .soc span{min-width:0;overflow-wrap:anywhere;line-height:1.2;padding:.35rem 0}
+.banner .social[data-writes=off] .soc[disabled]{cursor:not-allowed}
+.comments .cmt .who{flex-wrap:wrap}
+.comments .cmt .who b{overflow-wrap:anywhere}
+@media (max-width:600px){.comments .cmt .replies{margin-left:.35rem;padding-left:.5rem}}
+"""
+)
 
 
 def _select(name: str, options: dict[str, str], current: str, label: str, ic: str) -> str:
@@ -1397,7 +1428,7 @@ def deck_page_html(
         + cards_html(deck, view=view, group=group, sort=sort, q=q, own=own, owned=owned)
         + stats_panel_html(deck, stats)
         + description_html(deck)
-        + (comments_html(deck) if csrf else "")
+        + (comments_html(deck, writes_enabled=writes_enabled) if csrf else "")
     )
 
 
