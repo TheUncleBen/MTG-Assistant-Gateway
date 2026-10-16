@@ -133,7 +133,7 @@ TEXT: dict[str, tuple[str, str]] = {
     "archidekt_cache_seconds": ("Reuse public deck reads for", "Cleared by any change the gateway sends."),
     "archidekt_card_cache_seconds": (
         "Reuse card lookups for",
-        "Card details read from Archidekt are reused for this long. 0 turns it off.",
+        "Card details read from Archidekt are reused for this long.",
     ),
     "scryfall_lookup_interval": ("Time between Scryfall lookups", "For card scanning."),
     "scan_fuzzy_min_similarity": ("Lowest name similarity accepted", "From 0.3 to 1."),
