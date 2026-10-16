@@ -184,7 +184,7 @@ async def test_reports_are_stored_and_listed(stack: Stack) -> None:
         # the history timeline shows the report as a row of its own (history_view), not a "Report:" line
         assert page.status_code == 200 and "k-report" in page.text and "Open the report" in page.text
         detail = await b.http.get(f"/history/reports/{rep['report_id']}", headers=NAV)
-        assert detail.status_code == 200 and "Goldfish simulation" in detail.text
+        assert detail.status_code == 200 and "Solo test (" in detail.text
         gone = await h.http.delete(f"/api/v1/reports/{rep['report_id']}", headers=auth)
         assert gone.status_code == 200
         assert (await h.http.get(f"/api/v1/reports/{rep['report_id']}", headers=auth)).status_code == 404
@@ -218,6 +218,66 @@ async def test_the_rest_and_page_routes_can_leave_forge_out(stack: Stack) -> Non
         assert seen == [False, None, False, None]
     finally:
         reports.run = real_run
+        await b.aclose()
+
+
+async def test_compare_page_tests_both_decks_against_the_same_forge_opponents(stack: Stack) -> None:
+    """K6 (Q136): with Forge set up, the Compare page of two Commander decks offers Forge games of
+    both against the same opponents: this deck's report first, then the other's seated with its
+    opponents (same_opponents_as), both without the solo test; the second report opens. The REST
+    route and run_deck_report take the same same_opponents_as."""
+    from .test_forge import BRACKETED, FakeForge
+
+    h = stack.h
+    b = await linked_browser(stack)
+    reports = h.app.state.gateway.reports
+    real_run, seen = reports.run, []
+    fake = FakeForge(brackets=BRACKETED)
+
+    async def recording(*args, **kwargs):
+        seen.append((args[1], kwargs.get("simulate"), kwargs.get("forge"), kwargs.get("same_opponents_as")))
+        return await real_run(*args, **kwargs)
+
+    reports.run, reports.forge = recording, fake.client()
+    stack.ark.private.discard(43)  # Amy's deck, public for this test
+    try:
+        off = await b.http.get("/decks/42/compare?with=43", headers=NAV)
+        assert "Test both in Forge against the same opponents" in off.text
+        pasted = await b.http.get("/decks/42/compare", params={"paste": "1 Sol Ring\n"}, headers=NAV)
+        assert "Test both in Forge" not in pasted.text  # a pasted list keeps no report
+        csrf = re.search(r"name='csrf' value='([^']+)'", off.text).group(1)
+        assert (await b.http.post("/decks/42/compare/forge", data={"with": "43"})).status_code == 403
+        r = await b.http.post("/decks/42/compare/forge", data={"csrf": csrf, "with": "43"})
+        assert r.status_code == 303, r.text
+        assert [s[:3] for s in seen] == [("42", False, True), ("43", False, True)] and seen[0][3] is None
+        first_id = seen[1][3]
+        assert r.headers["location"].startswith("/history/reports/rep_") and first_id
+        shown = await b.http.get(r.headers["location"], headers=NAV)
+        assert f"href='/history/reports/{first_id}'>Open Sample Commander Deck's report" in shown.text
+        assert [d["precon"] for d in fake.started[0]["decks"][1:]] == ["New 2", "Older 2", "New 3"]
+        bad = await b.http.post("/decks/42/compare/forge", data={"csrf": csrf, "with": "nope"})
+        assert bad.status_code == 400 and "Pick the other deck" in bad.text
+        # the REST route and the tool pass the same option
+        auth = {"Authorization": f"Bearer {await mcp_token(h)}"}
+        api = await h.http.post(
+            "/api/v1/reports", json={"deck_id": "43", "same_opponents_as": first_id}, headers=auth
+        )
+        assert api.status_code == 201 and seen[-1][3] == first_id
+        token = await mcp_token(h)
+        tool = structured(
+            await call(h, token, "run_deck_report", {"deck_ref": "43", "same_opponents_as": first_id})
+        )
+        assert tool["ok"] and seen[-1][3] == first_id
+        listed = structured(
+            await call(
+                h, token, "run_deck_report", {"deck_ref": "1 Sol Ring\n", "same_opponents_as": first_id}
+            )
+        )
+        assert listed["ok"] is False and "pasted list gets no Forge games" in listed["message"]
+    finally:
+        reports.run, reports.forge = real_run, None
+        if reports._forge_task:
+            reports._forge_task.cancel()
         await b.aclose()
 
 
@@ -293,7 +353,7 @@ async def test_deck_pages(stack: Stack) -> None:
         assert "target='_blank'" not in lst.text.split("<main")[1].split("Open on Archidekt")[0]
         deck = await b.http.get("/decks/42", headers=NAV)
         assert deck.status_code == 200
-        assert "Mana curve" in deck.text and "Run simulation" in deck.text and "Edit deck" in deck.text
+        assert "Mana curve" in deck.text and "Run full test" in deck.text and "Edit deck" in deck.text
         assert "Open on Archidekt" in deck.text  # the one external link may open a new tab
         missing = await b.http.get("/decks/999999", headers=NAV)
         assert missing.status_code == 404
@@ -309,7 +369,7 @@ async def test_deck_pages(stack: Stack) -> None:
         ran = await b.http.post("/decks/42/report", data={"csrf": csrf})
         assert ran.status_code == 303 and ran.headers["location"].startswith("/history/reports/")
         shown = await b.http.get(ran.headers["location"], headers=NAV)
-        assert shown.status_code == 200 and "Goldfish simulation" in shown.text and "## Metrics" in shown.text
+        assert shown.status_code == 200 and "Solo test (" in shown.text and "## Metrics" in shown.text
         # the page speaks to a person: no assistant tool names, exports in one row of buttons
         assert "goldfish_" not in shown.text and "run_deck_report" not in shown.text
         assert (

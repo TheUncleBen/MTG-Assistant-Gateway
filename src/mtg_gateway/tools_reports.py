@@ -149,7 +149,9 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "differences, precon upgrades and A/B simulations; its goldfish A/B is the like-for-like "
             "comparison of two decks. Forge seats each deck against precons of its own bracket, so two "
             "decks' Forge win rates (one run_deck_report each) are each against their own bracket's table, "
-            "not the same opponents, even with the same options.seed."
+            "even with the same options.seed; for the same table, run deck a's report first, then deck "
+            "b's with same_opponents_as set to deck a's report_id (the website's Compare page does the "
+            "same with its Forge button)."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": True},
         meta=compare_card_meta,
@@ -247,7 +249,8 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
         title="Run and store a deck report",
         description=(
             "Test a deck and keep the numbers: deck_stats plus, when the research service is available, a "
-            "goldfish simulation (games, default 300) and a decklist validation. A deck with a commander "
+            "goldfish simulation (games, default 300; the website calls it the solo test) and a decklist "
+            "validation. A deck with a commander "
             "plays from the command zone at 40 life; a deck without one and with at least 60 cards "
             "(Standard, Modern, Pioneer, Legacy, Pauper and the like) plays a 60-card game: 7-card "
             "London mulligan with no free one, 20 life, on the play, sideboard left out. deck_ref is an "
@@ -273,7 +276,10 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "view='forge' until the state is done. Forge plays Commander decks only: a 60-card deck's "
             "report never starts it (forge state skipped, with the reason). forge=false leaves Forge out "
             "for a quick goldfish-only report (default: as simulate). A report without Forge games is "
-            "labelled engine_label 'Preflight only (no rules engine)'. status is the report's overall "
+            "labelled engine_label 'Preflight only (no rules engine)'. same_opponents_as (another of the "
+            "user's report ids, one with Forge games) seats that report's opponents instead of this "
+            "deck's bracket's, so two decks' Forge numbers compare like for like; the forge section's "
+            "opponent_choice then has rule 'shared' and shared_with. status is the report's overall "
             "state: queued, running, complete, partial or failed. "
             "This is the one tool that "
             "runs goldfish games of one deck; compare_decks with simulate=true is the paired A/B of two. "
@@ -296,10 +302,22 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             bool | None,
             Field(description="Run Forge games when the gateway has Forge (default: as simulate)."),
         ] = None,
+        same_opponents_as: Annotated[
+            str | None,
+            Field(
+                description="Another of your report ids (with Forge games): seat its Forge opponents, "
+                "for a like-for-like comparison of two decks."
+            ),
+        ] = None,
     ) -> dict[str, object]:
         options = dumped(options)
         try:
             if _looks_like_list(deck_ref):
+                if same_opponents_as is not None:
+                    raise DeckError(
+                        "invalid",
+                        "A pasted list gets no Forge games, so same_opponents_as needs a deck id or URL.",
+                    )
                 report = await state.reports.run_text(
                     _sub(), deck_ref, simulate=simulate, games=games, options=options
                 )
@@ -317,6 +335,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
                     forge=forge,
                     deck=snap,
                     snapshot_id=ref if snap is not None else None,
+                    same_opponents_as=same_opponents_as,
                 )
             failed = _simulation_failure(report.get("goldfish")) if simulate else None
             if failed:

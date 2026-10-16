@@ -509,7 +509,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         if isinstance(data, Response):
             return data
         games = data.get("games", 300)
-        forge = data.get("forge")
+        forge, share = data.get("forge"), data.get("same_opponents_as")
         return ok(
             await reports.run(
                 who.sub,
@@ -518,6 +518,8 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                 games=games if isinstance(games, int) else 300,
                 # Forge games apart from the goldfish ones; unset follows simulate
                 forge=forge if isinstance(forge, bool) else None,
+                # K6: seat another of the member's reports' Forge opponents
+                same_opponents_as=share if isinstance(share, str) else None,
             ),
             201,
         )

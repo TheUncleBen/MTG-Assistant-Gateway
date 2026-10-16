@@ -122,8 +122,8 @@ One deck:
   Commander deck starts with its commander in the command zone; other decks
   have none. The page shows the library count and works with a mouse, a
   finger or the keyboard. Nothing is sent to Archidekt and nothing is kept.
-- **Run simulation** runs the statistics, the decklist validation and the
-  goldfish simulation (300 games) and opens the result, filed under
+- **Run full test** runs the statistics, the decklist validation and the
+  solo test (300 games against no opponent) and opens the result, filed under
   History. It is the same run the assistant's `run_deck_report` makes, so
   the numbers match whichever way it is started. A Commander deck is played
   from the command zone against 40 life. A deck without a commander and with
@@ -131,7 +131,7 @@ One deck:
   the like) is played as a 60-card game: seven-card London mulligan with no
   free one, 20 life, on the play, sideboard left out. A Commander-format
   deck without a card in its Commander category, or a smaller deck without
-  one, is not simulated and the report says why.
+  one, gets no solo test and the report says why.
 - When the gateway runs Forge, a Commander deck's report also has Forge
   games against three precons. They are precons of the deck's bracket: the
   bracket set on the deck in Archidekt, or else Archidekt's estimate from

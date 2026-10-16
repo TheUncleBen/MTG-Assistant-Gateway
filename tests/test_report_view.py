@@ -149,12 +149,12 @@ def test_sixty_card_run_reads_as_a_sixty_card_game() -> None:
 def test_page_speaks_plainly_and_shows_every_panel() -> None:
     html = rv.report_body_html(report(), stats_html="<div class='tiles'>stats</div>", reused=True)
     for text in (
-        "Goldfish simulation",
+        "Solo test (300 games, no opponents)",
         "class='tiles wide'",
         "class='ci'",
         "class='charts'",
         "<svg",
-        "What the simulation could not model",
+        "What the solo test could not model",
         "Played without their effect",
         "32 of 98 cards (33% of the deck)",
         "Out of scope",
@@ -179,7 +179,7 @@ def test_page_without_a_simulation() -> None:
     refused = {
         "tool": "goldfish_run",
         "ok": False,
-        "text": "Not simulated: the goldfish simulator models Commander decks and needs one card in the "
+        "text": "No solo test: the solo test plays Commander decks and needs one card in the "
         "deck's Commander (premier) category.",
     }
     html = rv.report_body_html(report(goldfish=refused["text"]) | {"goldfish": refused})
@@ -193,7 +193,10 @@ def test_markdown_and_html_exports() -> None:
     md = rv.report_markdown(r)
     assert md.startswith("# Deck report: Immortal Reckoning\n")
     assert "- Commander: Liesa, Forgotten Archangel" in md and "- Games: 300, through turn 10" in md
-    assert "## Goldfish simulation" in md and "40 damage dealt by turn 10: 57% (95% interval 51–62%)" in md
+    assert (
+        "## Solo test (300 games, no opponents)" in md
+        and "40 damage dealt by turn 10: 57% (95% interval 51–62%)" in md
+    )
     assert (
         "Played without their effect — 32 of 98 cards (33% of the deck):" in md
         and "## Validation: issues found" in md
@@ -285,7 +288,7 @@ def test_preflight_only_label_and_overall_status() -> None:
     skipped = {"state": "skipped", "reason": "not_commander", "note": "Forge plays Commander games only."}
     html = rv.report_body_html(report(forge=skipped, status="complete"))
     assert "<h2>Preflight only (no rules engine)</h2>" in html and "Commander games only." in html
-    assert "Forge games" not in html and "not run" not in html.split("Goldfish simulation")[0]
+    assert "Forge games" not in html and "not run" not in html.split("Solo test (")[0]
     full = {"state": "skipped", "error": "You already have a Forge run going and 2 reports waiting."}
     html = rv.report_body_html(report(forge=full, status="partial"))
     assert "Preflight only" in html and "notice warn'>You already have" in html
@@ -296,7 +299,9 @@ def test_preflight_only_label_and_overall_status() -> None:
     md = rv.report_markdown(report(forge=skipped, status="complete"))
     assert "## Preflight only (no rules engine)" in md and "- Status: complete" in md
     assert "## Preflight only (no rules engine)" in rv.report_markdown(report())
-    assert "## Forge games" in rv.report_markdown(report(forge={"state": "running"}, status="running"))
+    assert "## Forge games (against precons)" in rv.report_markdown(
+        report(forge={"state": "running"}, status="running")
+    )
 
 
 def test_copies_and_sixty_card_coverage_come_from_the_kept_quantities() -> None:

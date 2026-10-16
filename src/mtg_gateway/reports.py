@@ -162,6 +162,7 @@ class ReportService:
         forge: bool | None = None,
         deck: Deck | None = None,
         snapshot_id: str | None = None,
+        same_opponents_as: str | None = None,
     ) -> dict[str, Any]:
         """Read the deck, compute its statistics, optionally simulate and validate it, store
         the result and return it. Refuses a second report of an unchanged deck within
@@ -169,17 +170,20 @@ class ReportService:
         simulator's knobs, see ``sim_options``) are given, since they change the simulation.
         ``forge`` asks for Forge games apart from the goldfish ones (None: as ``simulate``).
         ``deck`` is a deck already read (one of the member's snapshots, ``snapshot_id``), filed
-        under its Archidekt deck like any other report."""
+        under its Archidekt deck like any other report. ``same_opponents_as`` is another of the
+        member's reports: this run's Forge games seat that run's opponents (K6, Q136), and the run
+        is never a reused report."""
         if not isinstance(games, int) or isinstance(games, bool) or games < 10 or games > MAX_GAMES:
             raise DeckError("invalid", f"games must be an integer from 10 to {MAX_GAMES}")
         options = sim_options(options)
+        shared = self._share_from(sub, same_opponents_as) if same_opponents_as is not None else None
         key = (sub, f"snapshot:{snapshot_id}" if deck is not None else _clean_deck_id(deck_ref))
         flight = self._runs.setdefault(key, _Flight())
         flight.users += 1
         seen = flight.finished
         try:
             async with flight.lock:
-                if flight.finished > seen and flight.report_id:
+                if flight.finished > seen and flight.report_id and shared is None:
                     # A run for this deck finished while this request waited: reuse its report
                     # instead of starting a second simulation (unless that run's research
                     # calls failed; then this request gets its own try).
@@ -198,6 +202,7 @@ class ReportService:
                     forge=simulate if forge is None else bool(forge),
                     deck=deck,
                     snapshot_id=snapshot_id,
+                    shared=shared,
                 )
                 flight.report_id = out["report_id"]
                 flight.finished += 1
@@ -268,6 +273,7 @@ class ReportService:
         forge: bool = True,
         deck: Deck | None = None,
         snapshot_id: str | None = None,
+        shared: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if deck is None:
             deck = await self.decks.get_any_deck(sub, deck_ref)
@@ -275,6 +281,7 @@ class ReportService:
         now = int(time.time())
         if (
             not options
+            and shared is None
             and latest is not None
             and latest["fingerprint"] == deck.fingerprint()
             and now - int(latest["taken_at"]) < self.min_interval
@@ -373,11 +380,20 @@ class ReportService:
             # Forge's own seed when given (A34), else the goldfish's, else one the gateway picks
             seed = options.get("forge_seed", options.get("seed"))
             async with self._forge_start_lock:
-                await self._start_or_queue_forge(sub, rid, deck, games, seed, forge_bracket(deck, stats))
+                await self._start_or_queue_forge(
+                    sub, rid, deck, games, seed, forge_bracket(deck, stats), shared
+                )
         return self.get(sub, rid)
 
     async def _start_or_queue_forge(
-        self, sub: str, rid: str, deck: Any, games: int, seed: Any, bracket: tuple[int | None, str | None]
+        self,
+        sub: str,
+        rid: str,
+        deck: Any,
+        games: int,
+        seed: Any,
+        bracket: tuple[int | None, str | None],
+        shared: dict[str, Any] | None = None,
     ) -> None:
         text, seed = deck_to_text(deck), seed if isinstance(seed, int) else None
         if self._forge_running(sub, rid):
@@ -395,24 +411,74 @@ class ReportService:
                     },
                 )
                 return
-            self._save_forge(rid, self._waiting_section(text, deck.name, games, seed, bracket))
+            self._save_forge(rid, self._waiting_section(text, deck.name, games, seed, bracket, shared=shared))
             self._ensure_forge_refresher()
             return
-        await self._start_forge(rid, text, deck.name, games, seed, bracket)
+        await self._start_forge(rid, text, deck.name, games, seed, bracket, shared=shared)
 
     def _waiting_section(
-        self, text: str, name: str, games: int, seed: int | None, bracket: Any, **extra: Any
+        self,
+        text: str,
+        name: str,
+        games: int,
+        seed: int | None,
+        bracket: Any,
+        shared: dict[str, Any] | None = None,
+        **extra: Any,
     ) -> dict[str, Any]:
         """A Forge section waiting in the gateway's queue, with no engine job yet."""
+        start = {"text": text, "name": name, "games": games, "seed": seed, "bracket": bracket}
+        if shared is not None:
+            start["shared"] = shared
         return {
             "state": "queued",
             "waiting": True,
             "queued_at": int(time.time()),
             "games_requested": min(games, self.forge_games),
             # What starting it later takes; kept with the report, never shown.
-            "start": {"text": text, "name": name, "games": games, "seed": seed, "bracket": bracket},
+            "start": start,
+            **({"shared_with": _shared_link(shared)} if shared is not None else {}),
             **extra,
         }
+
+    def _share_from(self, sub: str, report_id: Any) -> dict[str, Any]:
+        """K6 (Q136): what seating another of the member's reports' opponents takes, checked now:
+        that report must be the member's own and have (or be waiting for) Forge games. Its
+        opponents themselves are read when this run starts (``_shared_now``), as that run may
+        still be waiting for its own."""
+        if not isinstance(report_id, str) or not report_id.strip():
+            raise DeckError("invalid", "same_opponents_as must be the id of one of your reports.")
+        row = self.db._one(
+            "SELECT id, deck_name, forge_json FROM reports WHERE id = ? AND owner_sub = ?",
+            (report_id.strip(), sub),
+        )
+        if row is None:
+            raise DeckError("not_found", "No such report for your account.")
+        section = json.loads(row["forge_json"]) if row["forge_json"] else None
+        if not isinstance(section, dict) or not (
+            section.get("seats") or (section.get("start") or {}).get("text")
+        ):
+            raise DeckError(
+                "invalid",
+                "That report has no Forge games, so there are no opponents to share. Run it again with "
+                "Forge, then compare.",
+            )
+        return {"report_id": str(row["id"]), "deck_name": str(row["deck_name"] or "")}
+
+    def _shared_now(self, sub: str | None, shared: dict[str, Any]) -> dict[str, Any]:
+        """The shared run's opponents as they stand now: its seats once it started, else the
+        bracket its own run is waiting with (forge.shared_opponents picks for that)."""
+        out = dict(shared)
+        rid = shared.get("report_id")
+        query = "SELECT forge_json FROM reports WHERE id = ?" + (" AND owner_sub = ?" if sub else "")
+        row = self.db._one(query, (rid, sub) if sub else (rid,)) if isinstance(rid, str) else None
+        section = json.loads(row["forge_json"]) if row is not None and row["forge_json"] else {}
+        seats = section.get("seats") if isinstance(section, dict) else None
+        if isinstance(seats, list) and len(seats) > 1:
+            out["opponents"] = seats[1:]
+        elif isinstance(section, dict) and (section.get("start") or {}).get("bracket"):
+            out["bracket"] = section["start"]["bracket"]
+        return out
 
     # -- Forge runs (background) ----------------------------------------------
     def _live(self, key: str, fallback: int) -> int:
@@ -446,10 +512,13 @@ class ReportService:
         seed: int | None = None,
         bracket: Any = (None, None),
         busy_since: int | None = None,
+        shared: dict[str, Any] | None = None,
     ) -> None:
         assert self.forge is not None
         level, source = bracket if isinstance(bracket, (list, tuple)) and len(bracket) == 2 else (None, None)
         try:
+            if shared is not None:
+                shared = self._shared_now(self._owner(rid), shared)
             section = await start_run(
                 self.forge,
                 text,
@@ -459,6 +528,7 @@ class ReportService:
                 bracket=level if isinstance(level, int) else None,
                 bracket_source=source if isinstance(source, str) else None,
                 parallel=self.forge_parallel,
+                shared=shared,
             )
         except ForgeError as exc:
             if exc.kind == "busy":
@@ -475,6 +545,7 @@ class ReportService:
                         games,
                         seed,
                         bracket,
+                        shared=shared,
                         engine_busy=True,
                         busy_since=since,
                         retry_after=max(1, round(self.forge_interval)),
@@ -492,6 +563,10 @@ class ReportService:
             self._cancel_forge(section)
             return
         self._ensure_forge_refresher()
+
+    def _owner(self, rid: str) -> str | None:
+        row = self.db._one("SELECT owner_sub FROM reports WHERE id = ?", (rid,))
+        return str(row["owner_sub"]) if row is not None else None
 
     def _forge_running(self, sub: str, rid: str) -> bool:
         finals = tuple(FINAL_STATES)
@@ -550,6 +625,7 @@ class ReportService:
                     start.get("seed") if isinstance(start.get("seed"), int) else None,
                     start.get("bracket") or (None, None),
                     busy_since=section.get("busy_since") if section.get("engine_busy") else None,
+                    shared=start.get("shared") if isinstance(start.get("shared"), dict) else None,
                 )
 
     def measured_game_seconds(self) -> float | None:
@@ -1050,6 +1126,11 @@ def _forge_not_asked(forge_json: Any) -> bool:
     return isinstance(section, dict) and section.get("reason") == "not_requested"
 
 
+def _shared_link(shared: dict[str, Any]) -> dict[str, str]:
+    """Whose opponents a run seats (K6), as the report shows it."""
+    return {k: shared[k] for k in ("report_id", "deck_name") if isinstance(shared.get(k), str)}
+
+
 def _waiting(section: dict[str, Any]) -> bool:
     """A Forge run waiting in the gateway's queue for the member's earlier one (no engine job)."""
     return section.get("state") == "queued" and bool(section.get("waiting")) and not section.get("job_id")
@@ -1222,7 +1303,7 @@ def _commander_aside(goldfish: dict[str, Any], commander: str | None) -> None:
 # What a successful simulation's text always contains (Mystic Forge's renderers).
 SIM_RESULT_MARKERS = {"goldfish_run": "## Metrics", "goldfish_ab": "## Deltas"}
 NO_COMMANDER_TEXT = (
-    "Not simulated: the goldfish simulator models Commander decks and needs one card in the "
+    "No solo test: the solo test plays Commander decks and needs one card in the "
     "deck's Commander (premier) category. Put the commander in that category and run again."
 )
 # A deck without a commander is played as a 60-card game: Mystic Forge's ``constructed`` games
@@ -1231,7 +1312,7 @@ NO_COMMANDER_TEXT = (
 SIM_MODES = ("commander", "constructed")
 MIN_CONSTRUCTED = 60
 SMALL_DECK_TEXT = (
-    "Not simulated: a deck without a commander is played as a 60-card game and needs at least "
+    "No solo test: a deck without a commander is played as a 60-card game and needs at least "
     "{min} cards in the main deck (this one has {count}). For a Commander deck, put the "
     "commander in the deck's Commander (premier) category."
 )
@@ -1240,12 +1321,12 @@ SMALL_DECK_TEXT = (
 # wrong game.
 COMMANDER_SIZED = range(99, 102)
 UNMARKED_COMMANDER_TEXT = (
-    "Not simulated: this {count}-card list has no set format and no commander, so it looks like a "
+    "No solo test: this {count}-card list has no set format and no commander, so it looks like a "
     "Commander deck with its commander unmarked. Put the commander in the deck's Commander "
     '(premier) category, or under a "Commander" heading in a pasted list, and run again.'
 )
 MIXED_MODES_TEXT = (
-    "Not simulated: one deck has a commander and the other does not. The A/B compares two "
+    "No solo test: one deck has a commander and the other does not. The A/B compares two "
     "Commander decks or two 60-card decks."
 )
 
