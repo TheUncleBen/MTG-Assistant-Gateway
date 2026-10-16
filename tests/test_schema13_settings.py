@@ -141,9 +141,9 @@ def test_a_large_0_7_28_database_is_upgraded_to_13_and_keeps_every_row(
         )
         assert c.execute("SELECT deck_owner_id FROM snapshots WHERE id = 's00010'").fetchone()[0] is None
         assert c.execute("SELECT deck_name FROM snapshots WHERE id = 's00005'").fetchone()[0] == ""
-        # proposals keep their rows; new columns start empty, version 1
+        # proposals keep their rows: version 1, no account recorded, and a waiting one is numbered
         p1 = c.execute("SELECT * FROM proposals WHERE id = 'p1'").fetchone()
-        assert p1["version"] == 1 and p1["board_no"] is None and p1["archidekt_user_id"] is None
+        assert p1["version"] == 1 and p1["board_no"] == 1 and p1["archidekt_user_id"] is None
         # the queued deletes moved into their own table with the account on the member's link
         moved = {r["snapshot_id"]: dict(r) for r in c.execute("SELECT * FROM backup_deletes")}
         assert set(moved) == {"s00001", "s00002", "s00004"}
@@ -497,6 +497,8 @@ def test_pacing_can_only_be_made_gentler_from_the_page() -> None:
         "archidekt_max_per_minute",
         "archidekt_retries",
         "scan_art_images_per_hour",
+        "watch_max_cards",  # each watched card is priced through Scryfall daily
+        "watch_max_decks",  # each watched deck is read from Archidekt daily
     )
     faster_when_lower = (
         "archidekt_min_interval",
@@ -505,6 +507,7 @@ def test_pacing_can_only_be_made_gentler_from_the_page() -> None:
         "archidekt_card_cache_seconds",
         "scryfall_lookup_interval",
         "scan_art_image_interval",
+        "deck_sync_minutes",  # the background deck sync reads Archidekt every this many minutes
     )
     for key in faster_when_higher:
         spec = MANAGED_SETTINGS[key]
@@ -515,6 +518,12 @@ def test_pacing_can_only_be_made_gentler_from_the_page() -> None:
         spec = MANAGED_SETTINGS[key]
         assert spec.lo == spec.default, key
     assert MANAGED_SETTINGS["archidekt_calls_per_10_min"].default == 120  # G13
+    # deck sync: 0 turns it off; anything else is every 30 minutes or less often (review fix 2)
+    sync = MANAGED_SETTINGS["deck_sync_minutes"]
+    assert sync.parse("0") == 0 and sync.parse(30) == 30 and sync.parse(1440) == 1440
+    for faster in (1, 29):
+        with pytest.raises(SettingError, match="0 \\(off\\) or between 30 and 1440"):
+            sync.parse(faster)
 
 
 def test_live_settings_default_stored_and_deployment_values(tmp_path: Path) -> None:
@@ -706,3 +715,111 @@ def test_the_folder_helpers_keep_their_frozen_interfaces() -> None:
     assert [f["name"] for f in decks_module._shown_folders(info)] == ["Mine"]
     err = decks_module._no_such_folder(info, "Backups")
     assert err.kind == "invalid" and "Your folders: Mine" in str(err)
+
+
+# -- step 0 review, round 1 -------------------------------------------------------------------------
+
+
+def test_waiting_changes_at_the_upgrade_get_their_board_numbers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review fix 1: proposals waiting (or being applied) when schema 13 arrives are numbered per
+    member and deck, oldest first, and a new one follows them."""
+    path = tmp_path / "old.sqlite"
+    old = _schema_12(path, monkeypatch)
+    old.upsert_user("m1", email=None, name=None, preferred_username="m1", groups=[])
+    old.upsert_user("m2", email=None, name=None, preferred_username="m2", groups=[])
+    now = int(time.time())
+    rows = [  # id, owner, deck, state, created_at
+        ("c", "m1", "1", "pending", now - 10),
+        ("a", "m1", "1", "pending", now - 30),
+        ("b", "m1", "1", "applying", now - 20),
+        ("done", "m1", "1", "applied", now - 40),
+        ("x", "m1", "2", "pending", now - 5),
+        ("y", "m2", "1", "pending", now - 50),
+    ]
+    with old.tx() as c:
+        for pid, sub, deck, state, at in rows:
+            c.execute(
+                "INSERT INTO proposals (id, owner_sub, kind, deck_id, baseline_fingerprint, "
+                "changes_json, diff_text, state, created_at, expires_at) "
+                "VALUES (?, ?, 'edit', ?, 'fp', '[]', 'd', ?, ?, ?)",
+                (pid, sub, deck, state, at, now + WEEK),
+            )
+    old.close()
+    monkeypatch.undo()
+    db = Database(path)
+    try:
+        number = {r["id"]: r["board_no"] for r in db._conn.execute("SELECT id, board_no FROM proposals")}
+        assert number == {"a": 1, "b": 2, "c": 3, "done": None, "x": 1, "y": 1}
+        assert _proposal(db, "new")
+        assert db.get_proposal("new", "m1")["board_no"] == 4
+    finally:
+        db.close()
+
+
+def test_a_note_being_applied_keeps_its_board_number(tmp_path: Path) -> None:
+    """Review fix 4: a note saved while another is being applied doesn't take its number, so the
+    board never shows two #1s when that apply goes back to waiting."""
+    db = Database(tmp_path / "x.sqlite")
+    try:
+        _member(db)
+        assert _proposal(db, "a")
+        assert db.claim_proposal("a", "m1")
+        assert _proposal(db, "b")
+        db.finish_proposal("a", state="pending")  # nothing changed (Q78): back to waiting
+        assert [(r["id"], r["board_no"]) for r in db.pending_board("m1", "1")] == [("a", 1), ("b", 2)]
+    finally:
+        db.close()
+
+
+def test_restoring_a_note_keeps_the_per_account_limit(tmp_path: Path) -> None:
+    """Review fix 5: Q129 keeps 100 waiting per account; restoring a withdrawn note counts too."""
+    db = Database(tmp_path / "x.sqlite")
+    try:
+        _member(db)
+        for pid in ("a", "b"):
+            assert _proposal(db, pid)
+        assert db.close_proposal("a", "m1", "withdrawn")
+        assert _proposal(db, "c")  # two waiting again
+        assert not db.reopen_proposal("a", "m1", max_pending=2)
+        assert db.get_proposal("a", "m1")["state"] == "withdrawn"
+        assert db.reopen_proposal("a", "m1", max_pending=3)
+        assert db.count_pending_proposals("m1") == 3
+    finally:
+        db.close()
+
+
+def test_a_waiting_note_keeps_a_limited_number_of_versions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review fix 3: an app that keeps amending one note can't grow the database without bound."""
+    assert db_module.MAX_PROPOSAL_VERSIONS == 50
+    monkeypatch.setattr(db_module, "MAX_PROPOSAL_VERSIONS", 3)
+    db = Database(tmp_path / "x.sqlite")
+    try:
+        _member(db)
+        assert _proposal(db, "a")
+        for version in (1, 2, 3):
+            assert (
+                db.amend_proposal(
+                    "a",
+                    "m1",
+                    expect_version=version,
+                    changes=[],
+                    rows=None,
+                    diff_text=f"v{version + 1}",
+                    by_client="app",
+                )
+                == version + 1
+            )
+        assert (
+            db.amend_proposal(
+                "a", "m1", expect_version=4, changes=[], rows=None, diff_text="v5", by_client="app"
+            )
+            is None
+        )
+        assert db.get_proposal("a", "m1")["diff_text"] == "v4"
+        assert len(db.proposal_versions("a", "m1")) == 3
+    finally:
+        db.close()
