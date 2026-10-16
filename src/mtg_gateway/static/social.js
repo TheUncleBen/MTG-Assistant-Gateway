@@ -158,9 +158,11 @@
   if (commentsPanel) {
     var thread = $(".thread", commentsPanel);
     var countEl = $("[data-count]", commentsPanel);
+    // writes switched off on this gateway: the thread is read-only (no form, Reply, votes or edits)
+    var canWrite = commentsPanel.getAttribute("data-writes") !== "off";
     var form = $("form.newcomment", commentsPanel);
-    var textarea = $("textarea", form);
-    var replyTo = $(".replyto", form);
+    var textarea = form ? $("textarea", form) : null;
+    var replyTo = form ? $(".replyto", form) : null;
     var parentId = null, parentPage = 1;  // the comment replied to, and the thread page it is on (A29)
     var me = null;  // the member's Archidekt user id, from the thread load; own comments get Edit and Delete
     var deckUrl = "/social/api/decks/" + encodeURIComponent(commentsPanel.getAttribute("data-deck")) + "/comments";
@@ -200,9 +202,9 @@
         replyTo.appendChild(cancel);
         textarea.focus();
       });
-      acts.appendChild(reply);
+      if (canWrite) acts.appendChild(reply);
       // votes on other people's comments (Archidekt's comment vote), asked first like the deck's Like
-      if (me !== null && c.id && !(c.owner && c.owner.id === me)) {
+      if (canWrite && me !== null && c.id && !(c.owner && c.owner.id === me)) {
         var voteBtn = function (up) {
           var btn = el("button", "btn-ghost vote", up ? "▲ Up" : "▼ Down");
           btn.type = "button";
@@ -235,7 +237,7 @@
         acts.appendChild(voteBtn(true));
         acts.appendChild(voteBtn(false));
       }
-      if (me !== null && c.owner && c.owner.id === me) {
+      if (canWrite && me !== null && c.owner && c.owner.id === me) {
         var edit = el("button", "btn-ghost", "Edit");
         edit.type = "button";
         edit.setAttribute("aria-label", "Edit your comment");
@@ -378,7 +380,7 @@
       io.observe(commentsPanel);
     } else { load(); }
     $$("[data-social=comments]").forEach(function (a) { a.addEventListener("click", load); });
-    form.addEventListener("submit", function (e) {
+    if (form) form.addEventListener("submit", function (e) {
       e.preventDefault();
       var text = textarea.value.trim();
       if (!text) { textarea.focus(); return; }
