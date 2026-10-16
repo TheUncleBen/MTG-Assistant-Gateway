@@ -318,9 +318,8 @@ def shared_opponents(
             return None, {
                 "rule": "shared",
                 "shared_with": link,
-                "note": f"The opponents of {deck}'s Forge games are not all in this simulation engine any "
-                f"more ({', '.join(gone)}), so this run cannot seat the same table. Run both reports "
-                "again to compare them.",
+                "note": f"Some of {deck}'s opponents are no longer in this Forge ({', '.join(gone)}), "
+                "so this run cannot seat the same table. Run both reports again to compare them.",
             }
         by_name = {p["name"]: p for p in precons}
         brackets = {o: by_name[o]["bracket"] for o in opponents if isinstance(by_name[o].get("bracket"), int)}

@@ -31,6 +31,7 @@ from .pages import (
     login_redirect,
     read_limited,
 )
+from .reports import NO_FORGE_TO_SHARE
 from .reports_page import PAGE as REPORTS_PAGE
 from .reports_page import REPORTS_PAGE_CSS, reports_page_html
 from .theme import (
@@ -663,9 +664,26 @@ def add_deck_tool_routes(
             if not other.isdigit():
                 raise DeckError("invalid", "Pick the other deck on the Compare page first.")
             first = await reports.run(sub, deck_id, simulate=False, forge=True)
-            second = await reports.run(
-                sub, other, simulate=False, forge=True, same_opponents_as=first["report_id"]
-            )
+            try:
+                second = await reports.run(
+                    sub, other, simulate=False, forge=True, same_opponents_as=first["report_id"]
+                )
+            except DeckError as exc:
+                if str(exc) != NO_FORGE_TO_SHARE:
+                    raise
+                # the member picked no report here: say which deck got no Forge games, and why it may be
+                name = (first.get("deck") or {}).get("name") or "the first deck"
+                return page(
+                    "Compare",
+                    "<div class='panel'><p class='notice error'>"
+                    f"Forge could not start games for {_esc(name)}, so there are no opponents to share. "
+                    f"<a href='/history/reports/{_esc(first['report_id'])}'>Its report</a> is under "
+                    "Reports. If your Forge queue is full, wait for a run to finish, then try again."
+                    f"</p>{back}</div>",
+                    sub=sub,
+                    sid=sid,
+                    status=409,
+                )
         except DeckError as exc:
             if busy := busy_response(exc, request, page, sub=sub, sid=sid):
                 return busy

@@ -7,8 +7,9 @@ Safeguards (the coordinator's check of Q136):
 - Only the shape Mystic Forge validates is kept, rebuilt here key by key from its vocabulary
   (Mystic Forge dd82cd1, mystic_forge/goldfish/cards.py): an unknown key is dropped, an unknown
   value refuses the model. Mystic Forge passes ``grants`` and the name through unchecked
-  (cards.py:336-351), so both are checked here. Every number is bounded, so an inflated model is
-  refused rather than kept.
+  (cards.py:336-351), so both are checked here. Every number is bounded (a model past a bound is
+  refused), which limits how inflated a kept model can be but does not stop one: a draw of 20 cards
+  a turn is in bounds.
 - A model is at most 4 KB, and each member keeps at most ``MAX_PER_MEMBER`` (a call on Ben's card).
 - Other members see "added by another member", never a name.
 - Models are data: an assistant that reads one (in a report) is told it was written by members.
@@ -357,7 +358,12 @@ class KeptModels:
                 refused.append({"name": card, "why": str(exc)})
                 continue
             if have >= MAX_PER_MEMBER:
-                refused.append({"name": card, "why": f"you keep {MAX_PER_MEMBER} card models already"})
+                refused.append(
+                    {
+                        "name": card,
+                        "why": f"you already keep {MAX_PER_MEMBER} card models, the most one member can keep",
+                    }
+                )
                 continue
             try:
                 added = self.db.put_card_model(card_key(card), card, json.dumps(model), sub, now)

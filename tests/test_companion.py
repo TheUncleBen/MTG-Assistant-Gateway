@@ -274,6 +274,14 @@ async def test_compare_page_tests_both_decks_against_the_same_forge_opponents(st
             )
         )
         assert listed["ok"] is False and "pasted list gets no Forge games" in listed["message"]
+        # the first deck gets no Forge games: the page names that deck, not "that report"
+        reports.forge = None
+        h.app.state.gateway.db._conn.execute("DELETE FROM reports")  # nothing to reuse
+        none = await b.http.post("/decks/42/compare/forge", data={"csrf": csrf, "with": "43"})
+        assert none.status_code == 409, none.text
+        assert "Forge could not start games for" in none.text and "That report" not in none.text
+        assert "If your Forge queue is full, wait for a run to finish" in none.text
+        assert re.search(r"href='/history/reports/rep_[^']+'>Its report</a>", none.text)
     finally:
         reports.run, reports.forge = real_run, None
         if reports._forge_task:
@@ -313,7 +321,7 @@ async def test_reports_page_lists_every_report_and_what_forge_plays(stack: Stack
         assert (
             "Forge now" in queued.text
             and "Playing: 0 of" in queued.text
-            and "Waiting, place 1" in queued.text
+            and "Waiting: number 1 in line" in queued.text
         )
         assert f"href='/history/reports/{first['report_id']}'" in queued.text
         out = await stack.h.http.get("/reports")
@@ -933,3 +941,16 @@ async def test_goldfish_guide_choice_is_kept_for_the_account(stack: Stack) -> No
         assert (await stack.h.http.post("/goldfish/guide", json={"hidden": True})).status_code == 403
     finally:
         await b.aclose()
+
+
+def test_reports_page_row_shows_the_set_bracket_over_the_estimate() -> None:
+    """Q49, O14: a bracket set on the deck is THE bracket; Archidekt's estimate shows, labelled,
+    only when none is set."""
+    from mtg_gateway.reports_page import row_html
+
+    base = {"report_id": "rep_1", "deck_id": "42", "deck_name": "Aesi", "status": "complete"}
+    both = row_html({**base, "bracket_set": 4, "bracket_estimate": 2})
+    assert "Bracket: Optimized (4)" in both and "Core (2)" not in both and "estimate" not in both
+    est = row_html({**base, "bracket_set": None, "bracket_estimate": 2})
+    assert "Archidekt's estimate from cards: Core (2)" in est and "Bracket:" not in est
+    assert "racket" not in row_html(base)

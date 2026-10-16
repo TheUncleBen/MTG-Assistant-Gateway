@@ -55,7 +55,10 @@ def test_stats_box_keeps_the_class_deck_js_swaps_and_archidekts_notes() -> None:
     unset = stats_bracket_html({"bracket_estimate": EST, "archidekt_bracket": None})
     assert unset.startswith("<div class='bracket'>") and "set on the deck" not in unset
     assert "Archidekt's estimate from cards: <b>Optimized (4)</b>" in unset
-    assert "<li>If this is a late-game combo, your deck may be a Bracket: Upgraded</li>" in unset
+    assert (
+        "<li>Archidekt notes: “If this is a late-game combo, your deck may be a Bracket: Upgraded”</li>"
+        in unset
+    )
     assert "&lt;A&gt;" in unset and "<A>" not in unset
     both = stats_bracket_html({"bracket_estimate": EST, "archidekt_bracket": 3})
     assert both.index("Bracket: Upgraded (3)</b> · set on the deck") < both.index(ESTIMATE_LABEL)

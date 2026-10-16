@@ -72,7 +72,9 @@ def stats_bracket_html(stats: dict[str, Any]) -> str:
         notes = bracket.get("notes") or []
         if notes:
             parts.append(
-                "<ul class='bracket-notes'>" + "".join(f"<li>{esc(n)}</li>" for n in notes) + "</ul>"
+                "<ul class='bracket-notes'>"
+                + "".join(f"<li>Archidekt notes: “{esc(n)}”</li>" for n in notes)
+                + "</ul>"
             )
         basis = bracket.get("basis") or []
         parts.append(

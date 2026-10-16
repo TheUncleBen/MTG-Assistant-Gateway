@@ -1128,7 +1128,7 @@ def test_the_test_button_names_the_solo_test() -> None:
     from mtg_gateway.deckpage import banner_html
 
     html = banner_html(deck([card("Opt")]), {}, own=True, csrf="t", writes_enabled=True)
-    assert "The solo test (300 games against no opponent)" in html and "goldfish games" not in html
+    assert "The solo test (300 games, no opponents)" in html and "goldfish games" not in html
     assert " Goldfish</a>" in html and "Playtest</a>" in html  # names kept
 
 

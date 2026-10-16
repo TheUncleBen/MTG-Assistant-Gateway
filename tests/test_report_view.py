@@ -198,7 +198,7 @@ def test_markdown_and_html_exports() -> None:
         and "40 damage dealt by turn 10: 57% (95% interval 51–62%)" in md
     )
     assert (
-        "Played without their effect — 32 of 98 cards (33% of the deck):" in md
+        "Played without their effect: 32 of 98 cards (33% of the deck)." in md
         and "## Validation: issues found" in md
     )
     assert "## Simulation output" in md and "## Metrics" in md and "goldfish_" not in md

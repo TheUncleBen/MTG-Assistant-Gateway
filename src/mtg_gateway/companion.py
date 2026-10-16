@@ -134,7 +134,7 @@ def stats_strip(stats: dict[str, Any] | None) -> str:
         ("Price", money(stats.get("price_total")) if stats.get("price_total") is not None else "–"),
         # the bracket set on the deck is the deck's bracket; else Archidekt's estimate (Q49, O14)
         (
-            "Bracket" if stats.get("archidekt_bracket") else "Est. bracket",
+            "Bracket" if stats.get("archidekt_bracket") else "Archidekt's estimate",
             _num(stats.get("archidekt_bracket"), 0)
             if stats.get("archidekt_bracket")
             else (f"~{bracket.get('bracket')}" if bracket.get("bracket") else "–"),

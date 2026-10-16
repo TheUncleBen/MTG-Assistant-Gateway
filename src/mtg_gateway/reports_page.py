@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urlencode
 
+from .bracket_view import ESTIMATE_LABEL, bracket_name
 from .theme import esc, icon, time_html
 
 PAGE = 25
@@ -54,9 +55,11 @@ def queue_html(runs: list[dict[str, Any]]) -> str:
         done, total = f.get("games_done") or 0, f.get("games_requested") or 0
         if f.get("waiting"):
             when = _minutes(f.get("expected_start_seconds"))
-            what = f"Waiting, place {esc(f.get('position') or 1)}" + (f"; starts in {when}" if when else "")
+            what = f"Waiting: number {esc(f.get('position') or 1)} in line" + (
+                f"; starts in {when}" if when else ""
+            )
             if f.get("engine_busy"):
-                what = "Waiting for the simulation engine, which is busy with other members' games"
+                what = "Waiting for Forge, which is busy with other members' games"
         else:
             left = _minutes(f.get("expected_seconds"))
             what = f"Playing: {esc(done)} of {esc(total)} games" + (f"; done in {left}" if left else "")
@@ -89,14 +92,18 @@ def row_html(r: dict[str, Any]) -> str:
     kind, label = STATUS_BADGE.get(str(r.get("status")), ("", str(r.get("status") or "")))
     rid, did = esc(r["report_id"]), str(r.get("deck_id") or "")
     trend = "?" + urlencode({"deck_id": did, "type": "reports"})
-    bracket = r.get("bracket_estimate")
+    # the bracket set on the deck is THE bracket; the estimate shows only without one (Q49, O14)
+    if r.get("bracket_set"):
+        bracket = f" · Bracket: {esc(bracket_name(r['bracket_set']))}"
+    elif r.get("bracket_estimate"):
+        bracket = f" · {ESTIMATE_LABEL}: {esc(bracket_name(r['bracket_estimate']))}"
+    else:
+        bracket = ""
     return (
         "<li class='rp-row'><div class='rp-main'>"
         f"<a class='rp-deck' href='/history/reports/{rid}'>{esc(r.get('deck_name') or f'Deck {did}')}</a>"
         f"<span class='badge {kind}'>{esc(label)}</span></div>"
-        f"<p class='rp-meta'>{time_html(r.get('taken_at'))} · {esc(engines_text(r))}"
-        + (f" · bracket {esc(bracket)}" if isinstance(bracket, int) else "")
-        + "</p>"
+        f"<p class='rp-meta'>{time_html(r.get('taken_at'))} · {esc(engines_text(r))}" + bracket + "</p>"
         f"<a class='rp-trend' href='/history{esc(trend)}'>{icon('stats')} Deck trend and history</a>"
         "</li>"
     )

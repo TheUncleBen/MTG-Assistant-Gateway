@@ -372,8 +372,8 @@ def banner_html(
         # hand (D3, K7 in Q136).
         primary += (
             f"<form method='post' action='/decks/{did}/report' class='inline'>{csrf_in}"
-            "<button type='submit' data-busy-label='Testing…' title='The solo test (300 games against no "
-            "opponent), a decklist check and the deck statistics, plus Forge games against precons when "
+            "<button type='submit' data-busy-label='Testing…' title='The solo test (300 games, no "
+            "opponents), a decklist check and the deck statistics, plus Forge games against precons when "
             "Forge is on; saved under History. The solo test takes up to a minute; the result page opens "
             f"when it is done.'>{icon('stats')} Run full test</button></form>"
         )
@@ -1583,9 +1583,10 @@ def compare_forge_html(deck: Deck, other: Any, other_name: str, *, csrf: str | N
     return (
         "<section class='panel compareforge'><h3>Forge games against the same opponents</h3>"
         f"<p class='muted small'>Forge plays each deck against the same three precons, picked for "
-        f"{name}'s bracket, so the two win rates compare like for like. Each deck gets its own report "
-        "under History with the deck statistics, the decklist check and the Forge games (no solo test). "
-        "The games play in the background, one deck after the other.</p>"
+        f"{name}'s bracket. Each deck gets its own report under Reports (and History) with the deck "
+        "statistics, the decklist check and the Forge games (no solo test). The games play in the "
+        "background, one deck after the other. Compare the two decks' 95% intervals, not only their "
+        "win rates.</p>"
         f"<form method='post' action='/decks/{esc(deck.id)}/compare/forge'>"
         f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
         f"<input type='hidden' name='with' value='{esc(other.id)}'>"
@@ -1652,8 +1653,12 @@ GOLDFISH_GUIDE_INTRO = (
     "it gets going."
 )
 GOLDFISH_GUIDE_STEPS = (
-    ("hand", "Look at your seven cards. Keep them, or take a mulligan for seven new ones."),
-    ("bottom", "After a mulligan, choose which cards go to the bottom of your library."),
+    ("hand", "Look at your seven cards. Press Keep hand, or Mulligan for seven new ones."),
+    (
+        "bottom",
+        "After a mulligan, press Keep hand, select the cards to put on the bottom of your library, then "
+        "press Put on bottom.",
+    ),
     ("land", "Play a land: select it in your hand and choose Play to the battlefield."),
     ("cast", "Tap lands for mana: select a land and choose Tap. Then play what you could pay for."),
     ("next", "Press Next turn: everything untaps and you draw a card."),
