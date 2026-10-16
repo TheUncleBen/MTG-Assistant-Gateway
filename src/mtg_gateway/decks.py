@@ -4430,9 +4430,19 @@ class DeckService:
             raise DeckError("not_found", "That parent folder is not in your Archidekt account.")
         if found.get("backup"):  # no new folder in the gateway's backup folder (Q21)
             raise _no_such_folder(info, found["name"])
+        self._not_the_backup_name(name, found["depth"] + 1)
         if any(f["parent"] == parent and f["name"].casefold() == name.casefold() for f in info["folders"]):
             raise DeckError("invalid", f"There is already a folder called '{name}' there.")
         return name, found
+
+    def _not_the_backup_name(self, name: str, depth: int) -> None:
+        """Refuse a folder name that would make the gateway take that folder for its backup folder
+        (hidden from My decks, its decks listed as backup copies, Q21): the same test the folder
+        list uses, _is_backup_folder (B8 a)."""
+        if self._is_backup_folder(name, depth):
+            raise DeckError(
+                "invalid", f"'{name}' is the name of the gateway's backup folder. Pick another name."
+            )
 
     async def create_folder(self, sub: str, name: str, parent_id: int | None = None) -> dict[str, Any]:
         name, found = await self.check_new_folder(sub, name, parent_id)
@@ -4452,6 +4462,7 @@ class DeckService:
             raise _no_such_folder(info, folder["name"])
         if folder["name"] == name:
             return folder
+        self._not_the_backup_name(name, folder["depth"])
         await self._call(
             sub,
             lambda token, *_: self.client.mass_update(
