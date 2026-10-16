@@ -5046,6 +5046,33 @@ def edit_mismatches(
     )
 
 
+def printing_not_shown(changes: list[Change], now: Deck) -> list[str]:
+    """Names whose rows on ``now`` don't carry yet the printing (set and number) or finish a
+    set_printing or set_finish change asked for: the edit endpoint's test of whether a re-read has
+    caught up with a printing change, which ``edit_mismatches`` leaves out without the apply's
+    specs. A finish a printing change moved on its own (P6) is not compared."""
+    out: list[str] = []
+    for ch in changes:
+        if ch.action not in ("set_printing", "set_finish") or ch.zone == "side":
+            continue
+        face = front_face(ch.card_name).casefold()
+        rows = [c for c in now.main_cards if front_face(c.name).casefold() == face]
+        if not rows:
+            out.append(ch.card_name)
+            continue
+        for c in rows:
+            if ch.action == "set_printing" and (
+                str(c.set_code or "").lower() != str(ch.set_code or "").lower()
+                or str(c.collector_number or "") != str(ch.collector_number or "")
+            ):
+                out.append(ch.card_name)
+                break
+            if ch.finish and (c.modifier or "Normal") != ch.finish:
+                out.append(ch.card_name)
+                break
+    return sorted(set(out))
+
+
 def _mismatches(got: dict[str, int], want: dict[str, int]) -> list[str]:
     """Names whose counts differ, compared case-insensitively (the assistant may type
     'arcane signet' while Archidekt returns the oracle spelling)."""
