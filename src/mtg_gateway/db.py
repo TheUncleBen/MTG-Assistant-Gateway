@@ -2479,12 +2479,28 @@ class Database:
             for r in rows
         }
 
-    def set_snapshot_backup(self, snapshot_id: str, *, backup_deck_id: str, backup_url: str) -> None:
+    def set_snapshot_backup(
+        self, snapshot_id: str, *, backup_deck_id: str, backup_url: str, made: dict[str, Any] | None = None
+    ) -> None:
+        """Record the backup copy on the snapshot. ``made``: a copy just made, whose record of how
+        it was made (record_backup_made) is written in the same transaction, so no restart or crash
+        leaves a snapshot naming a copy made by this version without its exact record (which would
+        put it under the rule for copies made before 0.7.29)."""
         with self.tx() as c:
             c.execute(
                 "UPDATE snapshots SET backup_deck_id = ?, backup_url = ? WHERE id = ?",
                 (backup_deck_id, backup_url, snapshot_id),
             )
+            if made is not None:
+                c.execute(
+                    "INSERT OR REPLACE INTO job_runs (name, day, at, detail_json) VALUES (?, ?, ?, ?)",
+                    (
+                        BACKUP_MADE_JOB + str(backup_deck_id),
+                        self._since_day(0),
+                        int(time.time()),
+                        json.dumps(made),
+                    ),
+                )
 
     def clear_snapshot_backup(self, snapshot_id: str) -> None:
         """The snapshot's Archidekt backup copy was deleted (an apply that failed before it wrote)."""

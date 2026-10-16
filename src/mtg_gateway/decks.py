@@ -3766,18 +3766,19 @@ class DeckService:
             )
             written_within = math.ceil(time.monotonic() - started)
         backup = {"backup_deck_id": str(copy["id"]), "backup_url": str(copy.get("url") or "")}
-        self.db.set_snapshot_backup(snapshot_id, **backup)
         made = {
             "name": name,
             "description": description,
             "folder_id": str(folder["id"]),
             "written_within": written_within,
         }
-        self._backups_made[str(copy["id"])] = made
-        # B12/B21: also in the database, so a restart never loses it
-        self.db.record_backup_made(
-            str(copy["id"]),
-            {
+        # B12/B21: the exact record goes into the database with the snapshot's link to the copy,
+        # in one transaction, so a restart never loses it and a copy made by this version is
+        # never judged by the rule for older copies
+        self.db.set_snapshot_backup(
+            snapshot_id,
+            **backup,
+            made={
                 **made,
                 "made_at": int(time.time()),
                 "deck_id": str(deck.id),
@@ -3785,6 +3786,7 @@ class DeckService:
                 "sub": sub,
             },
         )
+        self._backups_made[str(copy["id"])] = made
         while len(self._backups_made) > BACKUPS_REMEMBERED:
             self._backups_made.pop(next(iter(self._backups_made)))
         return backup

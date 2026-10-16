@@ -19,7 +19,7 @@ from mtg_gateway.db import Database
 from .conftest import Stack
 from .test_background_apply import _finished
 from .test_backup_delete_later import _patches_429, quick_waits  # noqa: F401
-from .test_decks_and_proxy import call, linked_user, structured
+from .test_decks_and_proxy import call, linked_user, mcp_token, structured
 
 SUB = "user-1"
 ADDS = ["Arcane Signet", "Rampant Growth", "Opt", "Island", "Swamp", "Forest"]
@@ -357,3 +357,50 @@ async def test_delete_my_data_removes_the_backup_copy_records_at_once(stack: Sta
     assert out["backup_records"] == 2
     assert db.backup_made(first) is None and db.backup_made("779") is None
     assert db.backup_made("777") is not None and db.backup_made("778") is not None
+
+
+@pytest.mark.usefixtures("no_sharing")
+async def test_a_real_restart_keeps_the_exact_record_of_every_copy(tmp_path: Path, idp) -> None:
+    """Coordinator 20:04Z (card Q135 item 8): a copy made by this version is judged by its exact
+    record after the gateway restarts, never by the rule for copies made before 0.7.29. The
+    record is written with the snapshot's link to the copy, in one transaction."""
+    from cryptography.fernet import Fernet
+
+    from .conftest import AUTO, build_stack, run_stack
+
+    key = Fernet.generate_key().decode()  # the same key across the restart, as on a real server
+    same = {**AUTO.settings, "fernet_key": key}
+    async with run_stack(build_stack(tmp_path, idp, AUTO.but(settings=same))) as st:
+        first_ark = st.ark
+        token = await linked_user(st)
+        _live(st).set("archidekt_backup_copies", 1, by="admin-1")
+        first = (await _apply(st, token, ADDS[0]))["result"]["backup_deck_id"]
+        snap = st.h.db._conn.execute("SELECT id FROM snapshots WHERE backup_deck_id = ?", (first,)).fetchone()
+        assert snap and st.h.db.backup_made(first)["snapshot_id"] == snap["id"]
+    # a new gateway process on the same database and the same Archidekt
+    again = AUTO.but(archidekt=lambda: first_ark, settings=same)
+    async with run_stack(build_stack(tmp_path, idp, again)) as st2:
+        assert _svc(st2)._backups_made == {}
+        await _apply(st2, await mcp_token(st2.h), ADDS[1])
+        queued = st2.h.db.queued_backup_deletes()
+        assert [j["backup_deck_id"] for j in queued] == [first]
+        assert not queued[0]["expect"].get("legacy") and queued[0]["expect"]["name"]
+        _due_now(st2)
+        out = await _svc(st2).delete_one_queued_backup()
+        assert out and out.get("deleted") and int(first) in st2.ark.deleted
+
+
+def test_the_copy_and_its_record_are_written_together(tmp_path: Path) -> None:
+    """A failure while recording leaves no snapshot naming the copy (no half-written state)."""
+    db = Database(tmp_path / "g.sqlite")
+    try:
+        db.upsert_user(SUB, email=None, name=None, preferred_username=None, groups=[])
+        assert db.save_snapshot("s1", owner_sub=SUB, deck_id="42", proposal_id=None, fingerprint="f", deck={})
+        with pytest.raises(TypeError):
+            db.set_snapshot_backup("s1", backup_deck_id="900", backup_url="", made={"bad": object()})
+        row = db._conn.execute("SELECT backup_deck_id FROM snapshots WHERE id = 's1'").fetchone()
+        assert row["backup_deck_id"] is None and db.backup_made("900") is None
+        db.set_snapshot_backup("s1", backup_deck_id="900", backup_url="", made={"name": "x"})
+        assert db.backup_made("900") == {"name": "x"}
+    finally:
+        db.close()
