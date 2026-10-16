@@ -338,8 +338,21 @@ def test_change_printing_from_the_card_menu_saves_with_undo(server: Server) -> N
         assert status.inner_text().startswith("2 of 8 printings match. " + own)
         assert page.locator(".printpick .pptile.current", has_text="CMR #472").count() == 1
         page.locator("#pp-q").fill("LEA")
-        assert _tiles(page) == ["CMR #472 · 2020", "LEA #270 · 1993"]
+        assert _tiles(page) == ["LEA #270 · 1993", "CMR #472 · 2020"]
         assert status.inner_text().startswith("1 of 8 printings matches. " + own)
+        # the card's own printing, shown only because it is the card's, comes after the matches in
+        # every sort order (the matches sorted as chosen)
+        for order in ("Oldest first", "Cheapest (USD)", "Newest first"):
+            _choose(page, "Sort", order)
+            assert _tiles(page) == ["LEA #270 · 1993", "CMR #472 · 2020"], (order, _tiles(page))
+        page.locator("#pp-q").fill("secret")
+        for order, first in (("Oldest first", "SLD #1074 · 2022"), ("Cheapest (USD)", "SLD #1075 · 2022")):
+            _choose(page, "Sort", order)
+            got = _tiles(page)
+            assert got[2:] == ["CMR #472 · 2020"] and got[0] == first, (order, got)
+            if order == "Oldest first":
+                _shots_both_themes(page, "own-oldest-first-1280")
+        _choose(page, "Sort", "Newest first")
         page.locator("#pp-q").fill("CMR")
         assert _tiles(page) == ["CMR #472 · 2020"]
         assert own not in status.inner_text()  # it matches: nothing to explain
@@ -351,13 +364,16 @@ def test_change_printing_from_the_card_menu_saves_with_undo(server: Server) -> N
         assert status.inner_text().startswith("2 of 8 printings match. " + own)
         _choose(page, "Finish", "Any finish")
         _choose(page, "Frame", "1993 frame")
-        assert _tiles(page) == ["CMR #472 · 2020", "4ED #325 · 1995", "LEA #270 · 1993"]
+        assert _tiles(page) == ["4ED #325 · 1995", "LEA #270 · 1993", "CMR #472 · 2020"]
         _choose(page, "Border", "White border")
-        assert _tiles(page) == ["CMR #472 · 2020", "4ED #325 · 1995"]
+        assert _tiles(page) == ["4ED #325 · 1995", "CMR #472 · 2020"]
         assert status.inner_text().startswith("1 of 8 printings matches. " + own)
         _choose(page, "Border", "Borderless")
         assert _tiles(page) == ["CMR #472 · 2020"]
-        assert status.inner_text().startswith("0 of 8 printings match. " + own)
+        # nothing else matches: the line says the card's own printing is the only one shown
+        assert status.inner_text().startswith(
+            "0 of 8 printings match. Only the card's current printing is shown."
+        )
         assert page.locator(".ppempty", has_text="No printing matches these filters.").is_visible()
         page.locator(".ppempty button", has_text="Clear filters").click()
         assert len(_tiles(page)) == 8
@@ -554,7 +570,7 @@ def test_load_more_pages_and_filters_go_to_scryfall(tmp_path: Path) -> None:
             # printing (CMR #472, not a 1993 frame) still shows
             _choose(page, "Frame", "1993 frame")
             page.wait_for_function("() => document.querySelectorAll('.printpick .pptile').length === 3")
-            assert _tiles(page) == ["CMR #472 · 2020", "4ED #325 · 1995", "LEA #270 · 1993"]
+            assert _tiles(page) == ["4ED #325 · 1995", "LEA #270 · 1993", "CMR #472 · 2020"]
             assert "The card's current printing is shown too." in status.inner_text()
             assert [q for q in s.sf.print_searches if " set:" not in q["q"]][-1]["q"].endswith(" frame:1993")
             # filters Scryfall finds nothing for: only the card's own printing; the box says there
@@ -562,7 +578,7 @@ def test_load_more_pages_and_filters_go_to_scryfall(tmp_path: Path) -> None:
             _choose(page, "Border", "Borderless")
             page.wait_for_function("() => document.querySelectorAll('.printpick .pptile').length === 1")
             assert page.locator(".ppempty", has_text="No printing matches these filters.").is_visible()
-            assert status.inner_text() == "The card's current printing is shown too.", status.inner_text()
+            assert status.inner_text() == "Only the card's current printing is shown.", status.inner_text()
             _shots_both_themes(page, "own-scryfall-none-1280")
             _choose(page, "Border", "Any border")
             _choose(page, "Frame", "Any frame")
@@ -582,6 +598,48 @@ def test_load_more_pages_and_filters_go_to_scryfall(tmp_path: Path) -> None:
             assert status.inner_text().startswith("Showing 10 of 30 printings."), status.inner_text()
             assert len(_tiles(page)) == 11 and _tiles(page)[-1] == "CMR #472 · 2020", _tiles(page)
             _shots_both_themes(page, "own-more-pages-off-page-1280")
+            assert errors == []
+            browser.close()
+    finally:
+        s.stop()
+
+
+def test_adding_with_no_match_from_scryfall_says_it_once_on_screen(tmp_path: Path) -> None:
+    """Adding a card (no printing of its own) with more printings than one page: filters that
+    Scryfall finds nothing for leave no tile. The box says "No printing matches these filters.";
+    the count line, which has no count to give, says the same for screen readers only."""
+    from playwright.sync_api import sync_playwright
+
+    s = _server(tmp_path, fillers=19, page_size=10)
+    try:
+        _chromium()
+        sid = s.sign_in_and_link()
+        s.app.state.gateway.scan.names.set_names(sorted({c["name"] for c in s.sf.cards}))
+        with sync_playwright() as p:
+            browser, page, errors = _page(p, s, sid, 1366)
+            page.goto(f"{s.base}/decks/42/edit", wait_until="networkidle")
+            box = page.locator("#addname")
+            box.click()
+            box.press_sequentially("sol r", delay=30)
+            page.locator(".addprints:visible .pptile").first.wait_for(timeout=5000)
+            page.locator(".addprints .allprints").click()
+            page.locator(".printpick .pptile").first.wait_for(timeout=5000)
+            status = page.locator(".ppstatus")
+            assert status.inner_text().startswith("Showing 10 of 30 printings."), status.inner_text()
+            _choose(page, "Frame", "1993 frame")
+            page.wait_for_function("() => document.querySelectorAll('.printpick .pptile').length === 2")
+            _choose(page, "Border", "Borderless")
+            page.wait_for_function("() => !document.querySelector('.printpick .pptile')")
+            assert page.locator(".ppempty", has_text="No printing matches these filters.").is_visible()
+            assert status.text_content() == "No printing matches these filters."
+            assert "sr-only" in (status.get_attribute("class") or "")
+            assert status.bounding_box()["height"] <= 1
+            _choose(page, "Border", "Any border")
+            _choose(page, "Frame", "Any frame")
+            page.wait_for_function(
+                "() => document.querySelector('.ppstatus').innerText.startsWith('Showing 10 of 30')"
+            )
+            assert "sr-only" not in (status.get_attribute("class") or "")
             assert errors == []
             browser.close()
     finally:
@@ -788,6 +846,7 @@ def test_picker_fits_reads_and_touches_at_every_size(server: Server, width: int,
         page.wait_for_timeout(100)
         assert page.locator(".ppempty", has_text="No printing matches these filters.").is_visible()
         assert page.locator(".ppstatus").inner_text().count("No printing matches") == 0
+        assert "Only the card's current printing is shown." in page.locator(".ppstatus").inner_text()
         assert page.evaluate(MEASURE) + page.evaluate(COVERED) == []
         assert page.evaluate(CONTRAST, TEXT + ", .printpick .ppstatus, .printpick .ppempty p") == []
         _shot(page, f"own-none-{width}-{theme}")

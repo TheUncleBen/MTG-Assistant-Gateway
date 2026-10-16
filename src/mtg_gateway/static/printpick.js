@@ -496,12 +496,14 @@
   function draw() {
     if (!st) return;
     var extra = extraMine();
-    var shown = sorted(st.list.filter(matches).concat(extra));
+    var listed = st.list.filter(matches);
     // the printings that match, and the card's own shown only because it is the card's: one the
     // search or filters leave out here, or one not in the pages read (asked for by itself, or
-    // left out of Scryfall's filtered list), which "Showing n of m" doesn't count either
+    // left out of Scryfall's filtered list), which "Showing n of m" doesn't count either. Those
+    // come after the matches, each group in the chosen order.
     var filtered = st.q || st.params.finish || st.params.frame || st.params.border;
-    var ownOnly = shown.filter(function (p) { return !wanted(p) || extra.indexOf(p) >= 0; });
+    var ownOnly = sorted(listed.filter(function (p) { return !wanted(p); }).concat(extra));
+    var shown = sorted(listed.filter(wanted)).concat(ownOnly);
     var hits = shown.length - ownOnly.length;
     var hidden = st.all ? 0 : st.list.filter(function (p) {
       return english(p) && (preview(p) || digital(p)) && !samePrint(p, st.opts.current) && !samePrint(p, st.opts.pending);
@@ -526,10 +528,12 @@
     if (!st.list.length) words = filtered || st.all ? "" : "Scryfall lists no printing of this card.";
     else if (st.complete) words = filtered ? hits + " of " + plural(english_n, "printing") + (hits === 1 ? " matches." : " match.") : plural(hits, "printing") + ".";
     else words = (st.q ? plural(hits, "match", "matches") + ". " : "") + "Showing " + st.list.length + " of " + plural(st.total, "printing") + ".";
-    if (ownOnly.length) words += (words ? " " : "") + ownWords(ownOnly);
+    if (ownOnly.length) words += (words ? " " : "") + ownWords(ownOnly, !hits);
     if (hidden) words += (words ? " " : "") + plural(hidden, "digital-only or preview printing") + " hidden.";
-    if (!words && !shown.length) words = "No printing matches these filters.";  // read out; the box shows it
-    st.status.className = "ppstatus";
+    // with no tile at all, the count line says what the box says, for screen readers only
+    var readOnly = !words && !shown.length;
+    if (readOnly) words = "No printing matches these filters.";
+    st.status.className = readOnly ? "ppstatus sr-only" : "ppstatus";
     st.status.textContent = words;
     // nothing to show: say why, with a way back
     var stuck = !hits && (st.list.length > 0 || !!filtered || st.all);
@@ -551,10 +555,15 @@
     st.filtBtn.textContent = n ? "Filters (" + n + ")" : "Filters";
     if (wide()) showPreview(st.pinned || shown[0] || null);
   }
-  // the card's own printing shown although the search or filters leave it out
-  function ownWords(own) {
+  // the card's own printing shown although the search or filters leave it out; alone, when
+  // nothing else matches
+  function ownWords(own, alone) {
     var cur = own.some(function (p) { return samePrint(p, st.opts.current); });
     var pick = own.some(function (p) { return samePrint(p, st.opts.pending); });
+    if (alone) {
+      if (cur && pick) return "Only the card's current and picked printings are shown.";
+      return pick ? "Only the picked printing is shown." : "Only the card's current printing is shown.";
+    }
     if (cur && pick) return "The card's current and picked printings are shown too.";
     return pick ? "The picked printing is shown too." : "The card's current printing is shown too.";
   }
