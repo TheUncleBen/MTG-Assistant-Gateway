@@ -136,3 +136,25 @@ def test_example_env_files_leave_the_settings_page_its_settings(name: str):
                 spec.env,
                 value,
             )
+
+
+@pytest.mark.parametrize(
+    ("stack_file", "example"),
+    [
+        ("deploy/portainer-stack.yml", "deploy/stack.env.example"),
+        ("deploy/compose/docker-compose.yml", "deploy/compose/.env.example"),
+    ],
+)
+def test_every_managed_setting_the_stack_passes_is_in_its_example(stack_file: str, example: str):
+    """A setting the stack file passes is listed (commented out) in the example file next to it, so
+    the example's note ("Lines starting # MTG_ are settings…") covers every one of them."""
+    from mtg_gateway.config import MANAGED_SETTINGS
+
+    passed = {
+        s.env
+        for s in MANAGED_SETTINGS.values()
+        if f"      {s.env}: ${{{s.env}:-}}" in (ROOT / stack_file).read_text()
+    }
+    text = (ROOT / example).read_text()
+    listed = {s.env for s in MANAGED_SETTINGS.values() if re.search(rf"^# {s.env}=", text, re.M)}
+    assert passed and passed - listed == set()

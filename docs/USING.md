@@ -83,7 +83,7 @@ One deck:
   cannot come back: Archidekt gives the gateway no way to write them, so
   removing a card that has a note asks first.
 - Drag a stack's handle to put the stacks in your own order. That order is
-  kept in this browser on this device only (Archidekt has no stack order);
+  kept with your account, so every device shows it (Archidekt has no stack order);
   **Reset stack order** puts the deck's own order back.
 - **Quick add** types a card name and takes you to the editor with it
   filled in.

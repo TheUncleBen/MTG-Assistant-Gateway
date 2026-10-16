@@ -313,6 +313,24 @@ If the packages are public you can skip this step.
    30 seconds. Check from a manager with
    `docker service logs mtg_mtg-assistant-gateway`.
 
+### Updating to 0.7.29 from an earlier version
+
+0.7.29 adds the admin Settings page. A stack set up before it fixes most of
+those settings itself, so the page would show them read-only. Do these in
+this order:
+
+1. **Paste the new stack file first.** In Portainer, **Stacks** → `mtg` →
+   **Editor**, replace the whole text with the new
+   [`deploy/portainer-stack.yml`](../deploy/portainer-stack.yml). The old
+   file writes its own default for each of these settings, so they stay
+   fixed whatever your variables say. (With the **Repository** build method
+   the stack file follows the repository on its own.)
+2. **Then remove your own variables** for the settings you want to change on
+   the Settings page. A variables file made from the older
+   `stack.env.example` sets 19 of them, such as `MTG_ARCHIDEKT_BACKUPS=true`
+   and `MTG_DECK_SYNC_MINUTES=30`. The ones you keep stay fixed by your stack.
+3. Click **Update the stack**, with "Re-pull image" ticked.
+
 ### Without Portainer
 
 The same stack from a Swarm manager's shell. `docker stack deploy` doesn't

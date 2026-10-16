@@ -33,11 +33,19 @@ class ConfigError(Exception):
 
 def _env(name: str, default: str | None = None, *, required: bool = False) -> str | None:
     value = os.environ.get(name)
+    if value is not None and name in _managed_envs():
+        # A setting the Settings page manages: a value of only spaces is unset, as for its lock
+        # (env_set), and spaces around a value are dropped (0.7.29 proofread).
+        value = value.strip()
     if value is None or value == "":
         if required and default is None:
             raise ConfigError(f"{name} is required")
         return default
     return value
+
+
+def _managed_envs() -> frozenset[str]:
+    return frozenset(spec.env for spec in MANAGED_SETTINGS.values())
 
 
 def _read_secret(env_name: str, *, required: bool = True) -> str | None:
@@ -654,6 +662,10 @@ def _number(value: float) -> str:
     return f"{int(value):,}" if float(value).is_integer() else f"{value:,}"
 
 
+# How to free a setting the stack sets, said wherever the Settings page refuses to change it.
+STACK_LOCK_HOW = "To change it here, remove it from your stack and redeploy."
+
+
 class SettingError(ValueError):
     """A value the admin Settings page cannot store: the key is locked by the deployment, unknown,
     or the value is out of its bounds."""
@@ -1136,7 +1148,7 @@ class LiveSettings:
         record it in the audit log. Refused when the deployment set the key. Returns the value."""
         spec = self.spec(key)
         if self.locked(key):
-            raise SettingError(key, f"is set in your stack ({spec.env}). Change it there and redeploy.")
+            raise SettingError(key, f"is set in your stack ({spec.env}). {STACK_LOCK_HOW}")
         value = spec.parse(raw)
         previous = self.get(key)
         self.db.save_setting(key, value, by=by)
@@ -1151,7 +1163,7 @@ class LiveSettings:
         """Forget the stored value, so the code default applies (unless the deployment set one)."""
         spec = self.spec(key)
         if self.locked(key):
-            raise SettingError(key, f"is set in your stack ({spec.env}). Change it there and redeploy.")
+            raise SettingError(key, f"is set in your stack ({spec.env}). {STACK_LOCK_HOW}")
         previous = self.get(key)
         cleared = self.db.clear_setting(key)
         with self._lock:
