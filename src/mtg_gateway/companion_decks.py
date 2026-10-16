@@ -49,6 +49,7 @@ from .theme import (
     remember_view,
     view_choice,
 )
+from .waiting_strip import waiting_changes
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -415,6 +416,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             sort=qp.get("sort") or "name",
             q=(qp.get("q") or "").strip()[:80],
             notice=notice,
+            waiting=waiting_changes(state.db, sub, deck.id, own=own),  # waiting_strip.py (S4)
         )
         resp = page(
             deck.name or f"Deck {deck.id}",
@@ -427,7 +429,8 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             csp=DECK_CSP,
             heading=False,
             deck_css=True,
-            extra_scripts=("deckstats.js", "printpick.js"),
+            # social.js: the banner's like, bookmark and follow and the comments (Track A's file)
+            extra_scripts=("social.js", "deckstats.js", "printpick.js"),
         )
         return remember_view(resp, "deck", view, secure=secure) if remember else resp
 

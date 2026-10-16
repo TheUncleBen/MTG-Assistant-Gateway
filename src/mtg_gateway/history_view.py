@@ -497,6 +497,10 @@ def pager_html(query: dict[str, Any], *, has_more: bool) -> str:
     return "".join(parts)
 
 
+# Track A's own History page styles (S3): HISTORY_CSS ends with this.
+HISTORY_CSS_A = ""
+
+
 def _trend_value(value: Any, unit: str) -> str:
     """One trend number as the page says it: '$310.00', '57%', 'turn 5', '3.21'."""
     if not isinstance(value, (int, float)) or isinstance(value, bool):
@@ -642,7 +646,12 @@ def trend_html(trend: dict[str, Any] | None) -> str:
     )
 
 
-HISTORY_CSS = """
+# Track C's own History page styles (the trends; S3): HISTORY_CSS ends with this.
+HISTORY_CSS_C = ""
+
+
+HISTORY_CSS = (
+    """
 .filterbar .controls{display:grid;gap:.6rem 1rem;align-items:end;
   grid-template-columns:repeat(auto-fit,minmax(min(100%,11rem),1fr))}
 .filterbar .field label{margin:0 0 .3rem}
@@ -701,6 +710,9 @@ HISTORY_CSS = """
 .backups .copies li{display:flex;flex-wrap:wrap;gap:.25rem .5rem;align-items:baseline;overflow-wrap:anywhere}
 .backups time{font-size:.86rem;font-variant-numeric:tabular-nums}
 """
+    + HISTORY_CSS_A
+    + HISTORY_CSS_C
+)
 
 __all__ = [
     "HISTORY_CSS",

@@ -262,7 +262,14 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
     decks = state.decks
 
     def page(
-        title: str, body: str, *, sub: str, sid: str | None, current: str = "/search", status: int = 200
+        title: str,
+        body: str,
+        *,
+        sub: str,
+        sid: str | None,
+        current: str = "/search",
+        status: int = 200,
+        social: bool = False,
     ) -> Response:
         user = state.db.get_user(sub) or {}
         admin = bool(s.admin_group and s.admin_group in (user.get("groups") or []))
@@ -278,7 +285,9 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             wide=True,
             current=current,
             head_extra=f"{stylesheet_link('deck.css')}<style>{BROWSE_CSS}</style>"
-            "<script src='/static/deck.js' defer></script>",
+            "<script src='/static/deck.js' defer></script>"
+            # the user page's Follow button (static/social.js, the social actions' own file)
+            + ("<script src='/static/social.js' defer></script>" if social else ""),
         )
         resp.headers["Content-Security-Policy"] = SEARCH_CSP
         return resp
@@ -477,7 +486,7 @@ def add_browse_routes(server: MCPServer, state: AppState) -> None:
             f"<select id='f-order' name='order'>{order_opts}</select></span></div>"
             "<noscript><button type='submit' class='apply'>Apply</button></noscript></div></form>"
         )
-        return page(shown, head + results_html(found, query, heading="Decks"), sub=sub, sid=sid)
+        return page(shown, head + results_html(found, query, heading="Decks"), sub=sub, sid=sid, social=True)
 
 
 def add_browse_tools(server: MCPServer, state: AppState) -> None:

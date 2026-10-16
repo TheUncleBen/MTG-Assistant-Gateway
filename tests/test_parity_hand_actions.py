@@ -321,8 +321,10 @@ async def test_own_comments_can_be_edited_and_deleted_others_not(stack: Stack) -
             alice, "DELETE", f"/social/api/decks/42/comments/{cid}", {}, csrf=await alice.csrf("/decks")
         )
         assert r.status_code == 200 and r.json()["deleted"] == cid and stack.ark.comments[300042] == []
-        # the deck page script has the buttons and the thread load carries "me"
-        js = (await alice.http.get("/static/deck.js")).text
+        # the social actions' script (static/social.js, loaded by the deck page) has the buttons and
+        # the thread load carries "me"
+        assert "/static/social.js" in (await alice.http.get("/decks/42")).text
+        js = (await alice.http.get("/static/social.js")).text
         assert '"Edit"' in js and '"Delete"' in js and "d.me" in js
     finally:
         await alice.aclose()

@@ -96,7 +96,7 @@ def _calm(h, ark: FakeArchidekt, seen: dict) -> None:
 
 def _due_now(h) -> None:
     with h.db.tx() as c:
-        c.execute("UPDATE job_runs SET at = 0 WHERE name LIKE 'backup\\_delete:%' ESCAPE '\\'")
+        c.execute("UPDATE backup_deletes SET due_at = 0")
 
 
 def _events(h, event: str) -> list[dict]:
@@ -124,7 +124,7 @@ async def test_a_queued_delete_waits_for_the_pause_then_runs_once_it_ends(stack:
     assert seen["deletes"] == 0 and ark.deleted == []
     _calm(h, ark, seen)
     with h.db.tx() as c:
-        c.execute("UPDATE job_runs SET at = ?", (int(time.time()) + 3600,))
+        c.execute("UPDATE backup_deletes SET due_at = ?", (int(time.time()) + 3600,))
     assert await svc.delete_one_queued_backup() is None  # not due yet
     assert ark.deleted == []
     _due_now(h)

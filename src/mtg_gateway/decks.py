@@ -67,7 +67,7 @@ from .archidekt import (
     written_text,
 )
 from .archidekt_csv import CsvError, parse_export
-from .config import Settings
+from .config import LiveSettings, Settings
 from .db import Database
 from .decklist import (
     DecklistError,
@@ -1716,6 +1716,9 @@ class DeckService:
         self._backups_made: dict[str, dict[str, str]] = {}
         self.max_archidekt_per_user = MAX_ARCHIDEKT_PER_USER
         self.archidekt_budget = RateBudget(settings.archidekt_calls_per_10_min)
+        # the dashboard settings with a deployment value winning (config.MANAGED_SETTINGS); read a
+        # managed key through here, not through ``settings``, so a dashboard change applies
+        self.live = LiveSettings(settings, db)
         # sub -> {matched card name (lower case): what the scan read}; set when scanning is on
         self.guessed_names: Callable[[str], dict[str, str]] | None = None
         # (member, proposal id) for each proposal an assistant saves; set by app.py to notify the
@@ -4445,7 +4448,10 @@ class DeckService:
     def _not_the_backup_name(self, name: str, depth: int) -> None:
         """Refuse a folder name that would make the gateway take that folder for its backup folder
         (hidden from My decks, its decks listed as backup copies, Q21): the same test the folder
-        list uses, _is_backup_folder (B8 a)."""
+        list uses, _is_backup_folder (B8 a).
+
+        Frozen interface (0.7.29, S5): the folder actions (actions.py) rely on this signature and
+        behaviour; a change goes through the owner of the folder helpers."""
         if self._is_backup_folder(name, depth):
             raise DeckError(
                 "invalid", f"'{name}' is the name of the gateway's backup folder. Pick another name."
@@ -4896,13 +4902,19 @@ def _printing_mismatches(verified: Deck, specs: list[dict[str, Any]]) -> list[st
 
 def _shown_folders(info: dict[str, Any]) -> list[dict[str, Any]]:
     """The member's folders below the top level that a deck can be put in: all but the
-    gateway's backup folder and what is inside it (Q21)."""
+    gateway's backup folder and what is inside it (Q21).
+
+    Frozen interface (0.7.29, S5): the deck moves rely on this signature and behaviour; a change
+    goes through the owner of the folder helpers."""
     return [f for f in info["folders"] if f["depth"] > 0 and not f.get("backup")]
 
 
 def _no_such_folder(info: dict[str, Any], name: Any, *, several: bool = False) -> DeckError:
     """The refusal of a folder that is not one to use: none (or, with ``several``, more than one)
-    of the shown folders has that name; the gateway's backup folder is refused with it too."""
+    of the shown folders has that name; the gateway's backup folder is refused with it too.
+
+    Frozen interface (0.7.29, S5): the deck moves rely on this signature and behaviour; a change
+    goes through the owner of the folder helpers."""
     names = ", ".join(sorted({f["name"] for f in _shown_folders(info)})[:30])
     what = "More than one folder" if several else "No folder"
     return DeckError("invalid", f"{what} is called '{name}'. Your folders: {names}")
