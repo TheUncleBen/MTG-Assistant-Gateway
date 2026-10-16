@@ -177,6 +177,7 @@ class Job:
         self.slice_state: list[str] = ["queued"] * len(self.slices)
         self.lock = threading.Lock()
         self.cancelled = False
+        self.timed_out = False  # set by the job's timer, so no group starts after it fired
 
     def view(self) -> dict[str, Any]:
         return {
@@ -280,7 +281,7 @@ def run_slice(job: Job, index: int, work: Path, names: list[str], slot: int) -> 
         home.mkdir(parents=True, exist_ok=True)
         env = {**os.environ, "HOME": str(home)}
     with job.lock:
-        if job.cancelled:
+        if job.cancelled or job.timed_out:
             job.slice_state[index] = "cancelled"
             return None
         proc = subprocess.Popen(
@@ -349,7 +350,7 @@ def run_job(job: Job) -> None:
         job.started = time.time()
         job.state = "running"
         deadline = job.started + JOB_TIMEOUT
-        timer = threading.Timer(JOB_TIMEOUT, lambda: _kill(job))
+        timer = threading.Timer(JOB_TIMEOUT, lambda: _time_out(job))
         timer.start()
         codes: list[int | None] = [None] * len(job.slices)
         pending = list(range(len(job.slices)))
@@ -397,6 +398,14 @@ def run_job(job: Job) -> None:
         with job.lock:
             job.slice_state = [st if st != "queued" else job.state for st in job.slice_state]
         shutil.rmtree(work, ignore_errors=True)
+
+
+def _time_out(job: Job) -> None:
+    """The job's time limit: no group starts after this (run_slice checks it under the same lock),
+    and the running ones are killed."""
+    with job.lock:
+        job.timed_out = True
+    _kill(job)
 
 
 def _kill(job: Job) -> None:

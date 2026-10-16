@@ -25,7 +25,7 @@ from .decklist import DecklistError, front_faces, parse_decklist, to_text
 from .decks import DeckError, DeckService, _clean_deck_id, current_client, deck_to_text
 from .forge import FINAL_STATES, GIVE_UP_SECONDS, ForgeClient, ForgeError, refresh, start_run
 from .mf_proxy import FULL_REPORT, MysticForgeProxy, busy_retry_after, is_busy
-from .report_view import PREFLIGHT_ONLY, goldfish_settings, speed_numbers
+from .report_view import PREFLIGHT_ONLY, goldfish_settings, parse_goldfish, speed_numbers
 
 logger = logging.getLogger(__name__)
 
@@ -249,7 +249,8 @@ class ReportService:
                 goldfish = {"tool": "goldfish_run", "ok": False, "text": mode}
             elif simulate:
                 names = [c.name for c in cards if c.zone == "main"]
-                goldfish = await self._solo_test(sub, sim_text, games, options, mode, names)
+                # a pasted list's names are the member's own spelling: its models are never kept
+                goldfish = await self._solo_test(sub, sim_text, games, options, mode, names, keep=False)
                 _commander_aside(goldfish, sim_commander)
                 _keep_quantities(goldfish, sim_text)
         return {
@@ -307,7 +308,7 @@ class ReportService:
                 goldfish = {"tool": "goldfish_run", "ok": False, "text": mode}
             elif simulate:
                 names = [c.name for c in deck.cards if deck.in_deck(c)]
-                goldfish = await self._solo_test(sub, text, games, options, mode, names)
+                goldfish = await self._solo_test(sub, text, games, options, mode, names, keep=True)
                 _commander_aside(goldfish, commander)
                 _keep_quantities(goldfish, text)
                 _stored_note(goldfish)
@@ -474,8 +475,9 @@ class ReportService:
         bracket its own run is waiting with (forge.shared_opponents picks for that)."""
         out = dict(shared)
         rid = shared.get("report_id")
-        query = "SELECT forge_json FROM reports WHERE id = ?" + (" AND owner_sub = ?" if sub else "")
-        row = self.db._one(query, (rid, sub) if sub else (rid,)) if isinstance(rid, str) else None
+        if not sub or not isinstance(rid, str):
+            return out  # never read a report without its owner (review r1, item 17)
+        row = self.db._one("SELECT forge_json FROM reports WHERE id = ? AND owner_sub = ?", (rid, sub))
         section = json.loads(row["forge_json"]) if row is not None and row["forge_json"] else {}
         seats = section.get("seats") if isinstance(section, dict) else None
         if isinstance(seats, list) and len(seats) > 1:
@@ -652,6 +654,7 @@ class ReportService:
         unfinished, with its place in the member's queue (``position``, the report and job it waits
         for) and the expected time left, from the measured average game time when known."""
         out = {k: v for k, v in section.items() if k != "start"}
+        out["games_done"] = _done_games(out)
         if out.get("state") in FINAL_STATES:
             return out
         runs = self._member_runs(sub)
@@ -803,23 +806,39 @@ class ReportService:
         out = await self._mf(sub, "goldfish_ab", args)
         if used:
             out["kept_models"] = used
+            out["kept_models_note"] = card_models.MEMBER_WRITTEN_NOTE
         return out
 
     async def _solo_test(
-        self, sub: str, text: str, games: int, options: dict[str, Any], mode: str, names: list[str]
+        self,
+        sub: str,
+        text: str,
+        games: int,
+        options: dict[str, Any],
+        mode: str,
+        names: list[str],
+        *,
+        keep: bool,
     ) -> dict[str, Any]:
         """The solo test (Mystic Forge's goldfish_run) with the kept models of the deck's cards
         (K1). The report records which kept models played (``kept_models``); once the run went
-        through, the valid models the assistant passed are kept (``models_kept``)."""
+        through, the valid models the assistant passed are kept (``models_kept``), only when
+        ``keep`` (a stored deck, whose names are Archidekt's own) and only for cards this run
+        played without their effect."""
         opts, used = card_models.merge(sub, self.models, names, _goldfish(options))
         goldfish = await self._mf(sub, "goldfish_run", _run_args(text, games, opts, mode))
         if used:
             goldfish["kept_models"] = used
-        if self.models.available:
+            goldfish["kept_models_note"] = card_models.MEMBER_WRITTEN_NOTE
+        if self.models.available and keep:
             goldfish["models_saved"] = True  # the report may say descriptions are saved (Q136 K1)
         own = [a for a in options.get("annotations") or [] if isinstance(a, dict)]
-        if own and goldfish.get("ok") and self.models.available:
-            goldfish["models_kept"] = self.models.keep(sub, own, names, admin=self.is_admin(sub))
+        if own and keep and goldfish.get("ok") and self.models.available:
+            parsed = parse_goldfish(goldfish) or {}
+            blank = [c["name"] for c in (parsed.get("honesty") or {}).get("unrecognized") or []]
+            goldfish["models_kept"] = self.models.keep(
+                sub, own, names, admin=self.is_admin(sub), unmodeled=blank
+            )
         return goldfish
 
     async def _mf(self, sub: str, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -1152,9 +1171,12 @@ def report_status(goldfish: Any, validation: Any, forge: Any) -> str:
     if isinstance(forge, dict) and forge.get("state") not in FINAL_STATES:
         return "running" if forge.get("state") == "running" else "queued"
     parts = [bool(b.get("ok")) for b in (goldfish, validation) if isinstance(b, dict)]
+    some = list(parts)
     if isinstance(forge, dict) and forge.get("reason") not in ("not_requested", "not_commander"):
         parts.append(forge.get("state") == "done")
-    if parts and not any(parts):
+        # a run that stopped early still brought back the games it played (review r1 fix 3)
+        some.append(forge.get("state") == "done" or _done_games(forge) > 0)
+    if parts and not any(some):
         return "failed"
     return "complete" if all(parts) else "partial"
 

@@ -224,6 +224,16 @@ class Run(unittest.TestCase):
         self.assertEqual(job.state, "cancelled")
         self.assertEqual(len(list((self.tmp / "log").iterdir())), 2)  # no further slice started
 
+    def test_no_group_starts_after_the_time_limit(self):
+        # review r1 item 16: a group picked up just as the timer fires never starts its process
+        deck = {"commander": ["Liesa, Forgotten Archangel"], "main": [[99, "Forest"]]}
+        job = fs.Job([deck, deck], 10, "Commander", 1, 1)
+        fs._time_out(job)
+        self.assertTrue(job.timed_out)
+        self.assertIsNone(fs.run_slice(job, 1, self.tmp, ["D1", "D2"], 0))
+        self.assertEqual(job.slice_state[1], "cancelled")
+        self.assertEqual(list((self.tmp / "log").iterdir()), [])
+
 
 if __name__ == "__main__":
     unittest.main()
