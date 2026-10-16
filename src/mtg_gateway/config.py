@@ -586,6 +586,7 @@ class SettingSpec:
     choices: tuple[str, ...] = ()
     max_len: int = 0  # text: longest value (0 = no text)
     empty_ok: bool = False  # text: "" is allowed (it means "use the other setting", e.g. chatgpt_name)
+    zero_ok: bool = False  # number: 0 is allowed below ``lo`` (it means "off", e.g. deck_sync_minutes)
     # True when the gateway reads it only when it starts (the page says it applies after a restart)
     restart: bool = False
 
@@ -630,9 +631,16 @@ class SettingSpec:
                 self.key, "must be a whole number" if self.kind == "int" else "must be a number"
             ) from None
         assert self.lo is not None and self.hi is not None
+        if value == 0 and self.zero_ok:
+            return 0
         if not self.lo <= value <= self.hi:
             lo, hi = (int(self.lo), int(self.hi)) if self.kind == "int" else (self.lo, self.hi)
-            raise SettingError(self.key, f"must be between {lo} and {hi}")
+            raise SettingError(
+                self.key,
+                f"must be 0 (off) or between {lo} and {hi}"
+                if self.zero_ok
+                else f"must be between {lo} and {hi}",
+            )
         return value
 
 
@@ -657,7 +665,8 @@ _LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
 # Bounds are what the dashboard may store; a deployment value is checked by load_settings instead.
 # They sit inside load_settings' ranges. Pacing towards Archidekt and Scryfall can only be made
-# gentler than today's defaults from the page, never faster ("gentle on Archidekt", R-132; G13).
+# gentler than today's defaults from the page, never faster ("gentle on Archidekt", R-132; G13);
+# the same goes for anything else that adds background reads (deck sync, watchlist sizes).
 MANAGED_SETTINGS: dict[str, SettingSpec] = {
     s.key: s
     for s in (
@@ -686,8 +695,9 @@ MANAGED_SETTINGS: dict[str, SettingSpec] = {
             30,
             "sync",
             "B",
-            lo=0,
+            lo=30,
             hi=24 * 60,
+            zero_ok=True,
             restart=True,
         ),
         _spec("archidekt_backups", "MTG_ARCHIDEKT_BACKUPS", "bool", True, "backups", "B"),
@@ -712,8 +722,8 @@ MANAGED_SETTINGS: dict[str, SettingSpec] = {
         _spec("forge_parallel_games", "MTG_FORGE_PARALLEL_GAMES", "int", 1, "simulation", "C", lo=1, hi=4),
         # watchlists and prices
         _spec("watchlists_enabled", "MTG_WATCHLISTS_ENABLED", "bool", False, "watchlists", "B", restart=True),
-        _spec("watch_max_cards", "MTG_WATCH_MAX_CARDS", "int", 200, "watchlists", "B", lo=0, hi=5000),
-        _spec("watch_max_decks", "MTG_WATCH_MAX_DECKS", "int", 10, "watchlists", "B", lo=0, hi=200),
+        _spec("watch_max_cards", "MTG_WATCH_MAX_CARDS", "int", 200, "watchlists", "B", lo=0, hi=200),
+        _spec("watch_max_decks", "MTG_WATCH_MAX_DECKS", "int", 10, "watchlists", "B", lo=0, hi=10),
         _spec(
             "price_history_days",
             "MTG_PRICE_HISTORY_DAYS",

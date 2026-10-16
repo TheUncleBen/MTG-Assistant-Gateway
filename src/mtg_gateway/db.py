@@ -179,6 +179,9 @@ MAX_PREF_NAME = 120
 # Proposal states that end a proposal without applying it. ``withdrawn`` and ``replaced`` (0.7.29,
 # the assistant board) can be brought back while unexpired; all are deleted after
 # CLOSED_PROPOSAL_RETENTION_SECONDS.
+# Earlier versions kept per waiting proposal (proposal_versions): past it an amend is refused, so an
+# app that keeps amending one note can't grow the database without bound (step 0 review, fix 3).
+MAX_PROPOSAL_VERSIONS = 50
 CLOSED_PROPOSAL_STATES = ("expired", "rejected", "failed", "withdrawn", "replaced")
 # Waiting statuses of a pending proposal (0.7.29 flexible approvals): None is plain waiting.
 PROPOSAL_STATUSES = ("updated", "needs_look", "held")
@@ -478,6 +481,17 @@ def _step_13(conn: sqlite3.Connection) -> None:
     ):
         _add_column(conn, "proposals", column, decl)
     conn.execute("CREATE INDEX IF NOT EXISTS proposals_state_expires ON proposals(state, expires_at)")
+    # The proposals waiting (or being applied) at the upgrade get their board numbers now, oldest
+    # first per member and deck, so the next new one follows them instead of starting at 1.
+    conn.execute(
+        """UPDATE proposals SET board_no = (
+             SELECT n FROM (
+               SELECT id, ROW_NUMBER() OVER (
+                 PARTITION BY owner_sub, deck_id ORDER BY created_at, rowid) AS n
+               FROM proposals WHERE state IN ('pending', 'applying')) AS numbered
+             WHERE numbered.id = proposals.id)
+           WHERE state IN ('pending', 'applying')"""
+    )
     conn.execute(
         """CREATE TABLE IF NOT EXISTS proposal_versions (
             proposal_id TEXT NOT NULL REFERENCES proposals(id) ON DELETE CASCADE,
@@ -1636,8 +1650,9 @@ class Database:
                 if mine >= max_pending_per_client:
                     return False
             # The number on the deck's board (0.7.29): one more than the highest of the owner's live
-            # waiting proposals on that deck, so a board that empties starts again at 1, and an
-            # amend keeps it. The Archidekt account is the one linked now (Q127), unless given.
+            # waiting proposals on that deck, those being applied included (an apply can put one
+            # back to waiting), so a board that empties starts again at 1, and an amend keeps it.
+            # The Archidekt account is the one linked now (Q127), unless given.
             account = (
                 "?"
                 if "archidekt_user_id" in row
@@ -1649,7 +1664,8 @@ class Database:
                    board_no, archidekt_user_id)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?,
                      (SELECT COALESCE(MAX(board_no), 0) + 1 FROM proposals
-                      WHERE owner_sub = ? AND deck_id = ? AND state = 'pending' AND expires_at >= ?),
+                      WHERE owner_sub = ? AND deck_id = ?
+                        AND (state = 'applying' OR (state = 'pending' AND expires_at >= ?))),
                      {account})""",
                 (
                     row["id"],
@@ -1954,7 +1970,8 @@ class Database:
         number (BOARD §2, §4). The version being replaced is kept in ``proposal_versions`` with
         who made it. Only while it is pending, unexpired and still at ``expect_version`` (so two
         amends, or an amend and an apply that claimed it first, cannot both win). Its waiting
-        status is cleared. Returns the new version, or None when nothing was changed."""
+        status is cleared. Refused once it keeps MAX_PROPOSAL_VERSIONS earlier versions. Returns the
+        new version, or None when nothing was changed."""
         now = int(time.time())
         with self.tx() as c:
             row = c.execute(
@@ -1964,6 +1981,11 @@ class Database:
                 (proposal_id, owner_sub, now, int(expect_version)),
             ).fetchone()
             if row is None:
+                return None
+            (kept,) = c.execute(
+                "SELECT COUNT(*) FROM proposal_versions WHERE proposal_id = ?", (proposal_id,)
+            ).fetchone()
+            if kept >= MAX_PROPOSAL_VERSIONS:
                 return None
             old = int(row["version"])
             c.execute(
@@ -2057,11 +2079,21 @@ class Database:
                 == 1
             )
 
-    def reopen_proposal(self, proposal_id: str, owner_sub: str) -> bool:
+    def reopen_proposal(self, proposal_id: str, owner_sub: str, *, max_pending: int | None = None) -> bool:
         """Bring a withdrawn or replaced proposal back to waiting while it is unexpired (Q27l: a
-        replaced note returns when its replacement is rejected). True when it was changed."""
+        replaced note returns when its replacement is rejected). With ``max_pending``, refused when
+        the owner already has that many live waiting proposals, as save_proposal (Q129). True when
+        it was changed."""
         now = int(time.time())
         with self.tx() as c:
+            if max_pending is not None:
+                (pending,) = c.execute(
+                    "SELECT COUNT(*) FROM proposals "
+                    "WHERE owner_sub = ? AND state = 'pending' AND expires_at >= ?",
+                    (owner_sub, now),
+                ).fetchone()
+                if pending >= max_pending:
+                    return False
             return (
                 c.execute(
                     "UPDATE proposals SET state = 'pending', status = NULL, status_reason = NULL, "

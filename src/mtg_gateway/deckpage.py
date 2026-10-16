@@ -435,7 +435,7 @@ def banner_html(
 
 def social_html(deck: Deck, *, own: bool) -> str:
     """Like, Bookmark, Follow and Comments, as Archidekt's deck page offers them. The buttons are
-    the person's own clicks: deck.js asks for a confirmation and posts to /social/api; without
+    the person's own clicks: social.js asks for a confirmation and posts to /social/api; without
     script they are inert and the More menu's "Open on Archidekt" link is the way."""
     did = esc(deck.id)
     liked = deck.user_vote == VOTE_UP
@@ -469,7 +469,7 @@ def social_html(deck: Deck, *, own: bool) -> str:
 
 
 def comments_html(deck: Deck) -> str:
-    """The deck's comment thread (loaded by deck.js when the section scrolls into view) and the
+    """The deck's comment thread (loaded by social.js when the section scrolls into view) and the
     form to add one; a post is confirmed before it goes out, under the member's Archidekt name."""
     did = esc(deck.id)
     return (
