@@ -242,10 +242,13 @@ def test_add_flags_round_trip_through_the_stored_proposal() -> None:
     from mtg_gateway.decks import parse_changes
 
     ch = parse_changes(
-        [{"action": "add", "card_name": "Lurrus", "companion": True, "flipped_default": True}]
+        [{"action": "add", "card_name": "Lurrus", "companion": True, "flipped_default": True}], row_flags=True
     )[0]
     assert ch.companion and ch.flipped_default
-    assert parse_changes([ch.as_dict()]) == [ch]
+    assert parse_changes([ch.as_dict()], row_flags=True) == [ch]
+    # only the deck page's own edit reads them (review 2 N1); every other caller drops them
+    dropped = parse_changes([ch.as_dict()])[0]
+    assert not dropped.companion and not dropped.flipped_default
     plain = parse_changes([{"action": "add", "card_name": "Opt"}])[0].as_dict()
     assert "companion" not in plain and "flipped_default" not in plain
 
