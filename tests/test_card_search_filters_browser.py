@@ -420,6 +420,7 @@ def test_a_search_too_long_for_scryfall_says_so_at_every_size(server: Server, wi
         assert page.evaluate(MEASURE) == []
         assert page.evaluate(CONTRAST, "#cs-status .notice.error") == []
         if SHOTS:
+            notice.scroll_into_view_if_needed()
             page.screenshot(path=str(Path(SHOTS) / f"too-long-{width}-{theme}.png"))
         assert errors == [], errors
         browser.close()
