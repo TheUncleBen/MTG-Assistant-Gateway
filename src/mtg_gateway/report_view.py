@@ -16,6 +16,7 @@ import json
 import re
 from typing import Any
 
+from . import card_models
 from .theme import ICON_DATA_URL, time_html, time_text
 from .theme import esc as _esc
 
@@ -545,10 +546,11 @@ def _tile(t: dict[str, Any]) -> str:
     ci = ""
     if rate and rate.get("lo") is not None and rate.get("hi") is not None:
         lo, hi = max(0.0, rate["lo"]), min(1.0, rate["hi"])
+        text = t.get("ci_text") or _ci_text(rate)  # the Forge card writes it as its table does
         ci = (
-            f"<span class='ci' title='95% interval {_esc(_ci_text(rate))}'>"
+            f"<span class='ci' title='95% interval {_esc(text)}'>"
             f"<i style='left:{100 * lo:.1f}%;width:{max(1.0, 100 * (hi - lo)):.1f}%'></i></span>"
-            f"<span>95% interval {_esc(_ci_text(rate))}</span>"
+            f"<span>95% interval {_esc(text)}</span>"
         )
     note = f"<span>{_esc(t['note'])}</span>" if t.get("note") else ""
     return f"<div class='tile'><b>{_esc(t['value'])}</b><span>{_esc(t['label'])}</span>{ci}{note}</div>"
@@ -757,7 +759,8 @@ def coverage_text(g: dict[str, Any]) -> str:
     c = coverage(g)
     if c is None:
         return ""
-    # Q138 item 6: both figures, as scripts/measure_recognition.py prints them
+    # Q138 item 6: both figures, as scripts/measure_recognition.py prints them. TODO(Q140 item 7,
+    # held for Ben's re-confirmation card): the second figure's name ("Known") and these headings
     return (
         f"Played with their effect: {c['modeled']} of {c['deck_size']} cards ({c['pct']}% of the deck). "
         f"Known: {c['known']} of {c['deck_size']} cards ({c['known_pct']}% of the deck), counting the "
@@ -766,6 +769,7 @@ def coverage_text(g: dict[str, Any]) -> str:
 
 
 # The cards the simulator plays without their effect (its "unrecognized" group), in plain words.
+# TODO(Q140 item 7, held for Ben's re-confirmation card): the honesty headings' names
 UNMODELED_HEADING = "Played without their effect"
 # Q136 item 1: an assistant can describe only some of these (about 6 to 8 of Liesa's 33), so the
 # text says so; the sentence on saving shows only when the gateway can save (the schema 14 table).
@@ -789,7 +793,10 @@ KEPT_TEXT = (
 
 def kept_models(r: dict[str, Any]) -> list[dict[str, Any]]:
     """The kept card models a report's solo test played (K1): card, model hash, whether the
-    member added it, when it last changed. Never who else added one (K2)."""
+    member added it, when it last changed. Never who else added one (K2). None while kept models
+    are switched off (Q140 item 1), even for a report made while they were on (review r1 fix 5)."""
+    if not card_models.SWITCHED_ON:
+        return []
     block = r.get("goldfish") if isinstance(r.get("goldfish"), dict) else {}
     used = block.get("kept_models") if isinstance(block.get("kept_models"), list) else []
     return [u for u in used if isinstance(u, dict) and isinstance(u.get("name"), str)]
@@ -853,17 +860,24 @@ def kept_models_html(
 ASK_LABEL = "Copy a request for your assistant"
 
 
-def ask_prompt(deck_name: str, deck_url: str, cards: list[dict[str, Any]]) -> str:
+def ask_prompt(deck_name: str, deck_url: str, cards: list[dict[str, Any]], *, models: bool = False) -> str:
     """What the member pastes into Claude or ChatGPT to have these cards modeled (the same words
-    for both): the assistant reads each card's exact text and passes its models to a new run."""
+    for both): the assistant reads each card's exact text and passes its models to a new run.
+    ``models``: the gateway keeps card models, so the request asks which it kept."""
     names = ", ".join(front_face(c["name"]) for c in cards)
+    # TODO(Q140 item 1, held for Ben's re-confirmation card): the last clause only while kept
+    # models are switched on (review r1 fix 4)
+    told = (
+        "which cards you could not describe, and which models the gateway kept, if any."
+        if models
+        else "and which cards you could not describe."
+    )
     return (
         f'In the solo test (goldfish simulation) of my deck "{deck_name}" ({deck_url}), these cards '
         f"are played without their effect: {names}. Use the gateway's goldfish annotation tool on the "
         "deck to see what each one needs, and write each model only from the card's exact Oracle text "
         "(the gateway's card text and rules tools), never from memory. Then run a new deck report for "
-        "the deck with your models as its annotations, and tell me what changed, which cards you could "
-        "not describe, and which models the gateway kept, if any."
+        f"the deck with your models as its annotations, and tell me what changed, {told}"
     )
 
 
@@ -871,7 +885,11 @@ def ask_html(r: dict[str, Any], cards: list[dict[str, Any]]) -> str:
     """The copy button and its hidden text for the request above (export.js copies it)."""
     if not cards:
         return ""
-    text = ask_prompt(str(r.get("deck_name") or r.get("deck_id") or ""), str(r.get("deck_url") or ""), cards)
+    g = r.get("goldfish") if isinstance(r.get("goldfish"), dict) else {}
+    models = card_models.SWITCHED_ON and bool(g.get("models_saved"))
+    text = ask_prompt(
+        str(r.get("deck_name") or r.get("deck_id") or ""), str(r.get("deck_url") or ""), cards, models=models
+    )
     return (
         "<div class='ask'><button type='button' class='btn small copybtn' data-copy='ask-model'>"
         f"{_esc(ASK_LABEL)}</button><span id='ask-model-status' class='small muted' role='status' "
@@ -912,7 +930,7 @@ def honesty_html(g: dict[str, Any], ask: str = "") -> str:
             f"<div class='group unmodeled'><h3>{UNMODELED_HEADING} <small>"
             f"{_esc(_share(_copies(unrec), size))}</small></h3>"
             f"<p>{UNMODELED_TEXT}"
-            + (f" {UNMODELED_SAVED_TEXT}" if g.get("models_saved") else "")
+            + (f" {UNMODELED_SAVED_TEXT}" if g.get("models_saved") and card_models.SWITCHED_ON else "")
             + "</p>"
             + _names(unrec)
             + ask
@@ -922,7 +940,7 @@ def honesty_html(g: dict[str, Any], ask: str = "") -> str:
     if oos:
         total = _copies([c for grp in oos for c in grp["cards"]])
         groups = "".join(
-            f"<h4>{_esc(grp['label'])} <small>{len(grp['cards'])}</small></h4>" + _names(grp["cards"])
+            f"<h4>{_esc(grp['label'])} <small>{_copies(grp['cards'])}</small></h4>" + _names(grp["cards"])
             for grp in oos
         )
         parts.append(
@@ -1050,10 +1068,11 @@ def _seconds_text(seconds: Any) -> str:
     if _float(seconds) is None:
         return "–"
     seconds = float(seconds)
+    # a number keeps its unit on a phone's narrow tile (no space to wrap at: review r1 item 15)
     if seconds < 90:
-        return f"{seconds:g} s"
+        return f"{seconds:g}\u00a0s"
     minutes, rest = divmod(round(seconds), 60)
-    return f"{minutes} min {rest:02d} s"
+    return f"{minutes}\u00a0min {rest:02d}\u00a0s"
 
 
 def _losses_text(losses: Any) -> str:
@@ -1083,6 +1102,7 @@ def forge_results_html(f: dict[str, Any]) -> str:
             "label": "Your deck won",
             "value": _pct(_float(mine.get("win_rate"))),
             "rate": {"lo": _float(low), "hi": _float(high)},
+            "ci_text": _interval([low, high]),
         },
         # runs stored before 0.7.30 have only the average, and say so
         {"label": "Median game time", "value": _seconds_text(res["median_game_seconds"])}
@@ -1126,7 +1146,9 @@ def forge_results_html(f: dict[str, Any]) -> str:
         + f"</tr></thead><tbody>{''.join(rows)}</tbody></table></div>"
     )
     ended = res.get("ended") if isinstance(res.get("ended"), dict) else {}
-    if not ended:  # a run stored before 0.7.30 counted only draws and games stopped at the limit
+    if not ended and f.get("state") not in ("queued", "running"):
+        # a run stored before 0.7.30 counted only draws and games stopped at the limit (never worked
+        # out while the run still plays: the games not yet finished are not wins)
         draws, slow = _int(res.get("draws")) or 0, _int(res.get("stopped_slow")) or 0
         ended = {"won": games - draws, "draw": draws - slow, "time_limit": slow}
     ended_rows = "".join(
@@ -1203,7 +1225,8 @@ def forge_lines(f: dict[str, Any], *, results: bool = True) -> list[str]:
             f", behind your report of {front_face(ahead.get('deck_name')) or 'another deck'}" if ahead else ""
         )
         out.append(f"{place}{behind}. It starts by itself when the run ahead of it ends.")
-    elif f.get("state") == "running" and f.get("games_requested"):
+    elif f.get("state") == "running" and f.get("games_requested") and not (res.get("games") and not results):
+        # the page's results show "Games played" as a tile once a game has finished (review r1 item 11)
         out.append(f"Games finished so far: {res.get('games') or 0} of {f['games_requested']}.")
     if f.get("state") in ("queued", "running") and f.get("expected_seconds"):
         minutes = max(1, round(f["expected_seconds"] / 60))
@@ -1280,6 +1303,9 @@ def forge_html(f: Any, *, live: bool = False, report_id: Any = None) -> str:
         "running": " <span class='badge'>running</span>",
     }
     not_run = " <span class='badge danger'>not run</span>"
+    stopped = forge_stopped_text(f)
+    if stopped:
+        not_run = " <span class='badge warn'>stopped early</span>"
     head = f"<h2>{FORGE_HEADING}{badge.get(state, not_run)}</h2>"
     parts = [
         head,
@@ -1290,7 +1316,7 @@ def forge_html(f: Any, *, live: bool = False, report_id: Any = None) -> str:
     ]
     pending = state in ("queued", "running")
     if state != "done":
-        msg = f.get("error") or FORGE_STATE_TEXT.get(_forge_key(f), "")
+        msg = stopped or f.get("error") or FORGE_STATE_TEXT.get(_forge_key(f), "")
         if msg and pending:
             msg += (
                 " This section updates by itself when the games finish."
@@ -1332,6 +1358,33 @@ def forge_html(f: Any, *, live: bool = False, report_id: Any = None) -> str:
     rid = f" data-report-id='{_esc(report_id)}'" if isinstance(report_id, str) and report_id else ""
     attrs = f" data-forge-live aria-live='polite'{rid}" if live and pending else ""
     return f"<div class='card forge'{attrs}>" + "".join(parts) + "</div>"
+
+
+# A run that ended early but played some games (one group failed, the time limit, a cancel, or the
+# gateway losing track of it): the card reports what did play, never "not run" (review r1 fix 3).
+FORGE_STOPPED_WHY = {
+    "failed": "because the rest of the games failed",
+    "timeout": "because the run reached its time limit",
+    "cancelled": "because the run was stopped",
+    "lost": "before the gateway lost track of the run",
+}
+
+
+def forge_stopped_text(f: dict[str, Any]) -> str:
+    """The sentence for a run that ended early with some games played, else ""."""
+    state = str(f.get("state") or "")
+    played = (f.get("result") or {}).get("games") if isinstance(f.get("result"), dict) else None
+    if state not in FORGE_STOPPED_WHY or not isinstance(played, int) or played <= 0:
+        return ""
+    total = f.get("games_requested") or f["result"].get("games_requested")
+    of = f" of {total}" if isinstance(total, int) and total >= played else ""
+    games = "game" if played == 1 and not of else "games"
+    text = (
+        f"Forge stopped after {played}{of} {games}, {FORGE_STOPPED_WHY[state]}. "
+        f"The results below count only the {played} {'game' if played == 1 else 'games'} played."
+    )
+    error = str(f.get("error") or "")
+    return f"{text} {error}" if error else text
 
 
 def _forge_key(f: dict[str, Any]) -> str:
@@ -1585,7 +1638,10 @@ def report_markdown(r: dict[str, Any]) -> str:
     elif forge:
         lines += [f"## {FORGE_HEADING}", ""]
         if forge.get("state") != "done":
-            lines += [str(forge.get("error") or FORGE_STATE_TEXT.get(_forge_key(forge), "")), ""]
+            text = (
+                forge_stopped_text(forge) or forge.get("error") or FORGE_STATE_TEXT.get(_forge_key(forge), "")
+            )
+            lines += [str(text), ""]
         lines += [f"- {ln}" for ln in forge_lines(forge)]
         if forge.get("not_played"):
             lines.append("- Cards Forge could not play: " + ", ".join(forge["not_played"]))

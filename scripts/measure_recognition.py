@@ -142,6 +142,7 @@ def main() -> int:
 
     decks = [d for p in args.decks for d in read_decks(p)]
     rows = measure(decks, derive)
+    # TODO(Q140 item 7, held for Ben's re-confirmation card): the column names and "known"
     print(
         "| Deck | Cards | Played with their effect | Left out on purpose "
         "| Played without their effect (needs a model) | Not on Scryfall | Played with their effect (share) "

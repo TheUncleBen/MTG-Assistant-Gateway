@@ -387,7 +387,11 @@ def test_report_page_and_markdown_show_forge_results() -> None:
     # G9: laid out as a table, a row per deck at the table (a run stored before 0.7.30 as well)
     assert "Forge games" in page and "<table class='qty seats stack'>" in page
     assert "<th scope='row'>Liesa &lt;b&gt; <span class='badge'>your deck</span></th>" in page
-    assert "<td class='num' data-label='95% interval'>15% to 85%</td>" in page and "41 s" in page
+    assert (
+        "<td class='num' data-label='95% interval'>15% to 85%</td>" in page
+        and "41\u00a0s" in page
+        and "95% interval 15% to 85%" in page
+    )
     assert "<li><span>Won by a player</span><b>3</b></li>" in page
     assert "<li><span>Stopped at the time limit (counted as a draw)</span><b>1</b></li>" in page
     assert "Fake Sticker Card" in page and "Seed: 7 (kept for the record)." in page
@@ -398,6 +402,34 @@ def test_report_page_and_markdown_show_forge_results() -> None:
     assert "data-forge-live" in live and "updates by itself" in live
     assert "data-forge-live" not in forge_html(done, live=True)  # a finished run is not refreshed
     assert "not run" in forge_html({"state": "failed", "error": "Forge does not have this deck's commander"})
+    # review r1 fix 3: a run that stopped early reports the games it did play, never "not run"
+    part = {
+        **done,
+        "state": "failed",
+        "games_requested": 10,
+        "result": {**done["result"], "games": 5, "games_requested": 10},
+    }
+    page = forge_html(part)
+    assert "stopped early" in page and "badge danger" not in page and "could not run" not in page
+    assert (
+        "Forge stopped after 5 of 10 games, because the rest of the games failed. The results below count "
+        "only the 5 games played." in page
+    )
+    assert "<table class='qty seats stack'>" in page
+    for state, why in (("timeout", "reached its time limit"), ("cancelled", "was stopped")):
+        assert why in forge_html({**part, "state": state})
+    md = report_markdown({"deck_name": "Liesa", "deck_id": "42", "stats": {}, "forge": part})
+    assert "Forge stopped after 5 of 10 games" in md and "could not run" not in md
+    from mtg_gateway.reports import report_status
+
+    assert report_status(None, None, part) == "partial"
+    assert report_status(None, None, {"state": "failed", "result": {"games": 0}}) == "failed"
+    # review r1 item 11: a run still playing shows its count once, and no "won" figure worked out
+    # from an older run's totals (the games not yet finished are not wins)
+    live = forge_html({**done, "state": "running", "games_requested": 10, "result": {**done["result"]}})
+    assert "Games played" in live and "Games finished so far" not in live
+    assert "Won by a player" not in live
+    assert "Games finished so far: 0 of 10." in forge_html({"state": "running", "games_requested": 10})
     assert forge_html(None) == ""
     md = report_markdown({"deck_name": "Liesa", "deck_id": "42", "stats": {}, "forge": done})
     assert "## Forge games (against precons)" in md and "Cards Forge could not play: Fake Sticker Card" in md
@@ -419,7 +451,7 @@ def test_report_page_and_markdown_show_forge_results() -> None:
         done["result"]["seats"][1],
     ]
     page = forge_html(newer)
-    assert "turn 11" in page and "from turn 8 to 30" in page and "1 min 35 s" in page
+    assert "turn 11" in page and "from turn 8 to 30" in page and "1\u00a0min 35\u00a0s" in page
     assert "<td data-label='How it lost'>commander damage 1, life total 1</td>" in page
     assert "<summary>Each game (1)</summary>" in page
     md = report_markdown({"deck_name": "Liesa", "deck_id": "42", "stats": {}, "forge": newer})
@@ -907,7 +939,7 @@ async def test_shared_opponents_that_left_the_engine_or_never_sat() -> None:
     # P1: with no bracket, or precons without brackets, the note says the newest precons play
     _, none = shared_opponents(precons, {"deck_name": "Deck A"})
     assert none["note"].endswith(
-        "Deck A has no bracket (none set in Archidekt and no estimate), so the newest precons play."
+        "There is no bracket for Deck A (none set in Archidekt and no estimate), so the newest precons play."
     )
     unrated = [{"name": n} for n in BRACKETED]
     _, old = shared_opponents(unrated, {"deck_name": "Deck A", "bracket": [3, "estimate"]})
@@ -919,12 +951,11 @@ async def test_shared_opponents_that_left_the_engine_or_never_sat() -> None:
     # N1: in the second deck's report, every note names the first deck, never "the deck"
     for note in (why["note"], est["note"], none["note"], old["note"]):
         assert "the deck" not in note.lower().replace("the deck's", ""), note
-    # N13: a report stored without a deck name, or a name in lower case, still starts the sentence in capitals
+    # N13 / review r1 item 13: every sentence starts with a capital, and a deck's name is never re-cased
     _, unnamed = shared_opponents(precons, {"deck_name": ""})
-    assert "table. The other deck has no bracket (none set in Archidekt" in unnamed["note"]
-    assert pick_opponents(precons, None, None, deck="aesi landfall")[1]["note"].startswith(
-        "Aesi landfall has"
-    )
+    assert "table. There is no bracket for the other deck (none set in Archidekt" in unnamed["note"]
+    note = pick_opponents(precons, None, None, deck="eldrazi tron")[1]["note"]
+    assert note.startswith("There is no bracket for eldrazi tron (")
     assert pick_opponents(precons, None, None)[1]["note"].startswith("The deck has no bracket")
     # a deck's own report still reads "the deck"
     assert pick_opponents(precons, 4, "estimate")[1]["note"].startswith(

@@ -434,7 +434,7 @@ def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) ->
     long_name = "The Extremely Long Deck Name That Goes On And On Without Any Break At All"
     store_report(server.db, "user-1", "rep_play", deck_id="43", deck_name=long_name, taken_at=now - 600)
     store_report(server.db, "user-1", "rep_wait", taken_at=now - 300)
-    playing = {"state": "running", "job_id": "job1", "games_requested": 10, "result": {"games_done": 3}}
+    playing = {"state": "running", "job_id": "job1", "games_requested": 10, "result": {"games": 3}}
     waiting = {"state": "queued", "waiting": True, "games_requested": 10, "queued_at": now - 300}
     with server.db.tx() as c:
         for rid, section in (("rep_play", playing), ("rep_wait", waiting)):
@@ -472,7 +472,8 @@ def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) ->
                 checked: texts.length,
                 rows: box.querySelectorAll('.rp-row').length,
                 runs: box.querySelectorAll('.rp-runs li').length,
-                targets: [...h('.rp-trend'), ...h('.rp-filter select'), ...h('.rp-filter .btn')],
+                targets: [...h('.rp-trend'), ...h('.rp-filter select:not(.msel-native)'),
+                          ...h('.rp-filter .msel-btn'), ...h('.rp-filter .btn')],
               };
             }""",
             CONTRAST,
@@ -483,8 +484,22 @@ def test_reports_page_fits_and_reads(server: Server, width: int, scheme: str) ->
         assert state["rows"] == 3 and state["runs"] == 2
         assert min(state["targets"]) >= 44, state["targets"]
         text = page.locator(".rp-queue").inner_text()
-        assert "Playing: 0 of 10 games" in text
+        # review r1 fix 1: the games played so far, as the report page counts them
+        assert "Playing: 3 of 10 games" in text
         assert "Waiting: number 1 in line" in text
+        # review r1 fix 2: at 200% text the deck filter still fits (no sideways scroll). Not at 717:
+        # there the site's own top bar (theme.py, not this page's) runs 207px past the window at
+        # 200% text; reported to its owner.
+        from .test_overflow_sweep_browser import MEASURE
+        from .test_text_zoom_browser import ROOT_200, TEXT_200
+
+        for zoom in (ROOT_200, TEXT_200) if width != 717 else ():
+            page.reload(wait_until="networkidle")
+            page.evaluate(zoom)
+            found = page.evaluate(MEASURE)
+            assert found == [], (zoom[:40], found)
+            if shots:
+                page.screenshot(path=f"{shots}/reports-page-{width}-{scheme}-text200.png", full_page=True)
         page.select_option("#rp-deck", "43")
         page.locator(".rp-filter .btn").click()
         page.wait_for_load_state("networkidle")

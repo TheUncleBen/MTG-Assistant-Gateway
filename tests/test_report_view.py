@@ -344,3 +344,23 @@ def test_ask_button_only_on_the_signed_in_page() -> None:
     assert rv.ask_html(r, []) == ""
     # names are escaped in the hidden text
     assert "&lt;b&gt;" in rv.ask_html(r | {"deck_name": "<b>"}, [{"name": "X"}])
+
+
+def test_left_out_groups_count_copies_as_their_heading_does() -> None:
+    """Review r1 item 10: a group under "Left out on purpose" counts copies, like the heading."""
+    g = {
+        "deck_size": 60,
+        "honesty": {
+            "out_of_scope": [
+                {
+                    "kind": "interaction_removal",
+                    "label": "Removal",
+                    "cards": [{"name": "Murder", "copies": 4}],
+                }
+            ],
+            "unrecognized": [],
+            "low_impact": [],
+        },
+    }
+    html = rv.honesty_html(g)
+    assert "<h4>Removal <small>4</small></h4>" in html
