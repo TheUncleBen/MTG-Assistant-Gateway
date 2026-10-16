@@ -283,6 +283,22 @@
     filtBtn.setAttribute("aria-expanded", "false");
     filtBtn.setAttribute("aria-controls", "pp-filters");
     searchRow.appendChild(filtBtn);
+    // card size S / M / L (0.7.29): the same switch as next to "View as"; static/prefs.js applies
+    // and saves it
+    var sizes = el("span", "sizeseg");
+    sizes.setAttribute("role", "group");
+    sizes.setAttribute("aria-label", "Card size");
+    var now = document.documentElement.getAttribute("data-card-size") || "m";
+    [["s", "Small"], ["m", "Medium"], ["l", "Large"]].forEach(function (pair) {
+      var b = el("button", "", pair[0].toUpperCase());
+      b.type = "button";
+      b.setAttribute("data-card-size-set", pair[0]);
+      b.setAttribute("aria-pressed", pair[0] === now ? "true" : "false");
+      b.setAttribute("aria-label", pair[1] + " cards");
+      b.title = pair[1] + " cards";
+      sizes.appendChild(b);
+    });
+    if (window.MtgPrefs) searchRow.appendChild(sizes);
     tools.appendChild(searchRow);
     var filters = el("div", "ppfilters");
     filters.id = "pp-filters";

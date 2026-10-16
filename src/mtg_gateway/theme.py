@@ -74,6 +74,8 @@ APP_UA_MARK = "MTGAssistant/"
 # The app's version follows the mark ("MTGAssistant/0.7.22"); the Account page shows it.
 _APP_VERSION_RE = re.compile(r"MTGAssistant/(\d{1,3}\.\d{1,3}\.\d{1,3})(?![\w.])")
 _app_version: ContextVar[str] = ContextVar("mtg_app_version", default="")
+# The signed-in member's card size (prefs.py), set by pages.browser_session for this request.
+_card_size: ContextVar[str] = ContextVar("mtg_card_size", default="m")
 
 # Archidekt's light set (body custom properties). Emitted twice: under prefers-color-scheme for
 # "system" and under [data-theme=light] for an explicit choice.
@@ -874,6 +876,75 @@ CSS = CSS.replace(
     + "body.app .topbar .brand .word{display:inline}\n",
 )
 
+# Card size S / M / L (0.7.29, Q22, QUESTIONS-2 B10, card Q135 item 7): M is exactly the size each
+# page had before; S is about 75% and L about 135% of its width. On a phone the deck page shows
+# 3, 2 or 1 cards across; on a wide screen My decks shows 6, 5 or 4 decks across. The choice
+# follows the account (prefs.py) and sits on <html data-card-size>, set when the page is drawn
+# (no flash) and by static/prefs.js when the S / M / L switch is pressed.
+CARD_SIZES = ("s", "m", "l")
+CSS += """
+/* the S / M / L switch, styled as card search's Grid / List switch */
+.sizeseg{display:inline-flex;border:1px solid var(--control-border);border-radius:var(--radius);
+  overflow:hidden;vertical-align:middle}
+.sizeseg button{margin:0;min-width:2.75rem;min-height:calc(var(--ctl) - 2px);height:auto;padding:0 .75rem;
+  border:0;border-radius:0;background:transparent;color:var(--text);font:inherit;font-weight:400;box-shadow:none}
+.sizeseg button + button{border-left:1px solid var(--control-border)}
+.sizeseg button[aria-pressed=true]{background:var(--orange-tint);font-weight:700}
+.sizeseg button:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+@media (pointer:coarse){ .sizeseg button{min-height:44px;min-width:44px} }
+.field.cardsize .sizeseg{display:flex;width:max-content}
+.cs-head .cardsize{display:inline-flex;align-items:center;gap:.5rem}
+.cs-head .cardsize .lbl{font-weight:400;color:var(--text-muted)}
+@media (min-width:1000.02px){
+  .listbar .controls:has(.cardsize){
+    grid-template-columns:1fr minmax(140px,auto) auto minmax(140px,auto) auto} }
+/* card search switches Grid / List without a reload: the size switch goes with the Grid view */
+.cs-head:has(input[name=view][value=list]:checked) .cardsize{display:none}
+/* the deck page: stacks, grid and scroll */
+html[data-card-size=s] .deckview.stacks{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+html[data-card-size=l] .deckview.stacks{grid-template-columns:repeat(auto-fill,minmax(270px,1fr))}
+html[data-card-size=s] .deckview.grid .cards{grid-template-columns:repeat(auto-fill,minmax(128px,1fr))}
+html[data-card-size=l] .deckview.grid .cards{grid-template-columns:repeat(auto-fill,minmax(230px,1fr))}
+html[data-card-size=s] .deckview.scroll .c{flex-basis:clamp(105px,16.5vw,150px)}
+html[data-card-size=l] .deckview.scroll .c{flex-basis:clamp(190px,30vw,270px)}
+/* My decks and the folders in it */
+html[data-card-size=s] ul.decklist.grid{grid-template-columns:repeat(6,minmax(0,1fr))}
+html[data-card-size=l] ul.decklist.grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+html[data-card-size=s] ul.decklist .thumb{height:140px}
+html[data-card-size=l] ul.decklist .thumb{height:220px}
+html[data-card-size=s] ul.folderlist.grid{
+  grid-template-columns:repeat(auto-fill,minmax(min(100%,11.25rem),1fr))}
+html[data-card-size=l] ul.folderlist.grid{
+  grid-template-columns:repeat(auto-fill,minmax(min(100%,20.25rem),1fr))}
+/* card search, the collection and the printing picker */
+html[data-card-size=s] .cardgrid{grid-template-columns:repeat(auto-fill,minmax(min(100%,7.9rem),1fr))}
+html[data-card-size=l] .cardgrid{grid-template-columns:repeat(auto-fill,minmax(min(100%,14.2rem),1fr))}
+html[data-card-size=s] ul.collgrid{
+  grid-template-columns:repeat(auto-fill,minmax(min(100%,max(128px,9rem)),1fr))}
+html[data-card-size=l] ul.collgrid{
+  grid-template-columns:repeat(auto-fill,minmax(min(100%,max(230px,16.2rem)),1fr))}
+html[data-card-size=s] .printpick .ppgrid{grid-template-columns:repeat(auto-fill,minmax(112px,1fr))}
+html[data-card-size=l] .printpick .ppgrid{grid-template-columns:repeat(auto-fill,minmax(203px,1fr))}
+@media (max-width:1500px){
+  html[data-card-size=s] ul.decklist.grid{grid-template-columns:repeat(5,minmax(0,1fr))}
+  html[data-card-size=l] ul.decklist.grid{grid-template-columns:repeat(3,minmax(0,1fr))} }
+@media (max-width:1200px){
+  html[data-card-size=s] ul.decklist.grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+  html[data-card-size=l] ul.decklist.grid{grid-template-columns:repeat(2,minmax(0,1fr))} }
+@media (max-width:1000px){
+  html[data-card-size=s] ul.decklist.grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+  html[data-card-size=l] ul.decklist.grid{grid-template-columns:minmax(0,1fr)} }
+@media (max-width:700px){
+  html[data-card-size=s] .printpick .ppgrid{grid-template-columns:repeat(auto-fill,minmax(104px,1fr))}
+  html[data-card-size=l] .printpick .ppgrid{grid-template-columns:repeat(auto-fill,minmax(186px,1fr))} }
+@media (max-width:600px){
+  html[data-card-size=s] .deckview.grid .cards,
+  html[data-card-size=s] .deckview.stacks{grid-template-columns:repeat(3,minmax(0,1fr))}
+  html[data-card-size=l] .deckview.grid .cards,
+  html[data-card-size=l] .deckview.stacks{grid-template-columns:minmax(0,1fr)}
+  html[data-card-size=s] ul.decklist.grid{grid-template-columns:repeat(2,minmax(0,1fr))} }
+"""
+
 # The top bar's search box (cards and decks, static/suggest.js in its site mode): in the bar from
 # 900 px and on the touch rail (600 to 899 px); under 600 px folded behind the magnifier
 # (static/sitesearch.js opens it under the bar). A narrow window with a mouse (600 to 899 px)
@@ -1093,6 +1164,30 @@ VIEW_KINDS = ("deck", "decks", "collection", "cards")
 
 def current_layout() -> str:
     return _layout.get()
+
+
+def set_card_size(size: object) -> None:
+    """The card size this request's page is drawn with (the account's, prefs.py)."""
+    _card_size.set(size if isinstance(size, str) and size in CARD_SIZES else "m")
+
+
+def current_card_size() -> str:
+    return _card_size.get()
+
+
+def card_size_control() -> str:
+    """The S / M / L switch next to "View as" (static/prefs.js presses it and saves the choice).
+    Draft wording (WORDING-AND-CALLS-2 W4)."""
+    size = current_card_size()
+    buttons = "".join(
+        f"<button type='button' data-card-size-set='{k}' aria-pressed='{'true' if k == size else 'false'}' "
+        f"aria-label='{label} cards' title='{label} cards'>{k.upper()}</button>"
+        for k, label in (("s", "Small"), ("m", "Medium"), ("l", "Large"))
+    )
+    return (
+        "<div class='field cardsize'><span class='lbl' aria-hidden='true'>Card size</span>"
+        f"<span class='sizeseg' role='group' aria-label='Card size'>{buttons}</span></div>"
+    )
 
 
 # The site navigation, in Archidekt's order of sections as far as the gateway has them: Home, then
@@ -1359,7 +1454,8 @@ def render(
     )
     description = f"{site}: a private gateway to your Magic: The Gathering decks on Archidekt."
     doc = (
-        f"<!doctype html><html lang='en'{f' data-theme={theme}' if theme != 'system' else ''}>"
+        f"<!doctype html><html lang='en'{f' data-theme={theme}' if theme != 'system' else ''}"
+        f"{f' data-card-size={current_card_size()}' if signed_in else ''}>"
         "<head><meta charset='utf-8'>"
         f"<meta name='viewport' content='{viewport}'>"
         "<meta name='referrer' content='no-referrer'>"
@@ -1465,9 +1561,11 @@ class ThemeMiddleware:
         ptoken = _path.set(path)
         atoken = _app.set(app)
         vtoken = _app_version.set(app_ver)
+        ctoken = _card_size.set("m")
         try:
             await self.app(scope, receive, send)
         finally:
+            _card_size.reset(ctoken)
             _theme.reset(token)
             _layout.reset(ltoken)
             _path.reset(ptoken)

@@ -58,7 +58,9 @@ def valid(name: str, value: Any) -> bool:
             isinstance(value, dict)
             and len(value) <= 12
             and all(
-                isinstance(k, str) and _WORD.match(k) and isinstance(v, str) and len(v) <= 40
+                isinstance(k, str)
+                and _WORD.match(k)
+                and (isinstance(v, bool) or (isinstance(v, str) and len(v) <= 40))
                 for k, v in value.items()
             )
         )

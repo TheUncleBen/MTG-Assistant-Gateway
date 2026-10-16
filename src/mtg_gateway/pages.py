@@ -36,6 +36,7 @@ from .theme import (
     layout_from_cookie,
     plural,
     render,
+    set_card_size,
     theme_from_cookie,
     time_html,
 )
@@ -644,6 +645,7 @@ def browser_session(state: Any, request: Request) -> tuple[str | None, str | Non
     sync = state.sync
     if sync is not None:
         sync.opened(sub)  # opening the app checks the member's decks on Archidekt (sync.py)
+    set_card_size(state.db.get_pref(sub, prefs.CARD_SIZE))  # drawn on <html> (theme.render)
     return sub, sid
 
 

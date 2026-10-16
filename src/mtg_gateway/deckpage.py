@@ -41,7 +41,7 @@ from .deck_stats import (
 from .decks import mana_value_text, split_label
 from .export_formats import EDHPLAY_URL
 from .mana import mana_html as _mana_html
-from .theme import esc, icon, plural
+from .theme import card_size_control, esc, icon, plural
 from .views import cards_by_category
 
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
@@ -55,6 +55,8 @@ VIEWS = {
     "scroll": "Scroll",
     "grid": "Grid",
 }
+# The views that show cards as pictures: the card size switch (0.7.29) sits next to View as in these.
+PICTURE_VIEWS = ("stacks", "scroll", "grid")
 GROUPS = {
     "category": "Categories",
     "type": "Type",
@@ -526,6 +528,7 @@ def toolbar_html(deck: Deck, *, own: bool, view: str, group: str, sort: str, q: 
         f"{add}"
         f"<form method='get' action='/decks/{did}' class='views' id='viewform'>"
         + _select("view", VIEWS, view, "View as", "layers")
+        + (card_size_control() if view in PICTURE_VIEWS else "")
         + _select("group", GROUPS, group, "Group by", "grid")
         + _select("sort", SORTS, sort, "Sort by", "sort")
         + "<div class='field filter'><label for='q'>Local filter</label><span class='search'>"
@@ -1856,6 +1859,7 @@ def deck_list_controls_html(
         + _select(
             "view", {"grid": "Grid", "list": "List"}, view, "View as", "list" if view == "list" else "grid"
         )
+        + (card_size_control() if view == "grid" else "")
         + _select("order", LIST_ORDERS, order, "Order by", "sort")
         + "<div class='field'><span class='lbl' id='decks-total'"
         + (" hidden" if total is None and not pending else "")
@@ -2011,6 +2015,9 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .toolbar .views{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) minmax(10rem,1.4fr);
   gap:.5rem 1rem;margin:0}
 .toolbar .views .field{margin:0}
+/* with the card size switch (0.7.29) next to View as: it takes only its own width */
+.toolbar .views:has(.cardsize){
+  grid-template-columns:minmax(0,1fr) auto repeat(2,minmax(0,1fr)) minmax(10rem,1.4fr)}
 .field .sel{position:relative;display:block}
 .field .sel > svg{position:absolute;left:.75rem;top:50%;transform:translateY(-50%);color:var(--orange);
   pointer-events:none}
@@ -2018,9 +2025,15 @@ h3 .count{font-weight:400;color:var(--text-muted);font-size:.9rem}
 .field .search{margin:0}
 .toolbar .apply{margin-top:.5rem}
 @media (max-width:1200px){ .toolbar .controls{grid-template-columns:1fr}
-  .toolbar .views{grid-template-columns:repeat(3,minmax(0,1fr))} .toolbar .filter{grid-column:1 / -1} }
+  .toolbar .views{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .toolbar .views:has(.cardsize){grid-template-columns:repeat(auto-fit,minmax(min(100%,10rem),1fr))}
+  .toolbar .views .field.cardsize .sizeseg{width:100%}
+  .toolbar .views .field.cardsize .sizeseg button{flex:1 1 0}
+  .toolbar .filter{grid-column:1 / -1} }
 @media (max-width:600px){ .toolbar{padding:.5rem .75rem .75rem}
-  .toolbar .views{grid-template-columns:1fr 1fr} .toolbar .views .field:nth-child(3){grid-column:1 / -1}
+  .toolbar .views{grid-template-columns:1fr 1fr}
+  .toolbar .views .field:nth-child(3){grid-column:1 / -1}
+  .toolbar .views:has(.cardsize) .field:nth-child(3){grid-column:auto}
   .toolbar .quickrow button span{display:none} .toolbar .quickrow button{width:var(--ctl);padding:0;
     justify-content:center} }
 
@@ -2333,7 +2346,10 @@ html.cardview-open{overflow:hidden}
 /* grid view: cards about 170 to 230 px wide, as many per row as fit (five in a 1366 px window) */
 .deckview.grid .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:1rem}
 @media (max-width:600px){ .deckview.grid .cards{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .deckview.stacks{grid-template-columns:1fr 1fr;gap:.75rem} }
+  .deckview.stacks{grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem} }
+/* a stack never widens its column past the window (its header's name ellipsises; 0.7.29 fix: at
+   360 px a stack's Options button sat 11 px outside the window) */
+.deckview.stacks .stack{min-width:0}
 
 /* deck stats panel */
 .stats .head{display:flex;justify-content:space-between;align-items:center;gap:1rem}
@@ -2684,6 +2700,10 @@ html.printpick-open{overflow:hidden}
 .printpick .ppsearch{display:flex;gap:.5rem;min-width:0}
 .printpick .ppsearch input{flex:1 1 auto;min-width:0;width:auto;margin:0}
 .printpick .ppfiltbtn{display:none;margin:0;flex:none}
+/* the card size switch (0.7.29) keeps its size; on a narrow phone it wraps under the search */
+.printpick .ppsearch{flex-wrap:wrap}
+.printpick .ppsearch input{flex-basis:10rem}
+.printpick .ppsearch .sizeseg{flex:none}
 .printpick .ppfilters{display:grid;grid-template-columns:repeat(4,minmax(0,1fr)) auto;gap:.5rem;
   align-items:center;min-width:0}
 .printpick .ppfilters select,.printpick .ppfilters .msel-btn{width:100%;min-width:0;margin:0}

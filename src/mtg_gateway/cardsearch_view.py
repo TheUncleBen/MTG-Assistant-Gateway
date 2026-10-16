@@ -13,8 +13,8 @@ from typing import Any
 from . import cardquery as cq
 from .deckpage import mana_html
 from .mana import pip_html
+from .theme import card_size_control, icon
 from .theme import esc as _esc
-from .theme import icon
 
 VIEWS = ("grid", "list")
 
@@ -504,7 +504,10 @@ def results_head_html(f: cq.Filters, *, view: str, total: int | None, shown: boo
             f"{' checked' if v == view else ''}>{icon(v)}<span>{label}</span></label>"
             for v, label in (("grid", "Grid"), ("list", "List"))
         )
-        + "</span></div></div>"
+        + "</span>"
+        # card size (0.7.29): shown with the Grid view only (cs-head[data-view], cardsearch.js)
+        + card_size_control().replace("class='field cardsize'", "class='cardsize'")
+        + "</div></div>"
     )
 
 

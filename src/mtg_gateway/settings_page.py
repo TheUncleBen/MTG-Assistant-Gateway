@@ -76,7 +76,8 @@ TEXT: dict[str, tuple[str, str]] = {
     ),
     "archidekt_backup_copies": (
         "Backup copies kept per deck",
-        "Older copies are deleted from the backup folder on Archidekt, one at a time.",
+        "Older copies are deleted from the backup folder on Archidekt, one at a time. A copy the member "
+        "changed on Archidekt is never deleted.",
     ),
     "archidekt_backup_box_default": (
         "Backup box ticked by default",
@@ -84,7 +85,8 @@ TEXT: dict[str, tuple[str, str]] = {
     ),
     "snapshots_per_deck": (
         "Restore points kept per deck",
-        "Kept on the gateway, newest first, for History > Restore.",
+        "Kept on the gateway, newest first, for History > Restore. A restore point that records a "
+        "backup copy still kept on Archidekt is kept too.",
     ),
     "backup_hour_utc": ("Nightly backup hour (UTC)", "When the gateway backs up its own database, 0 to 23."),
     "backup_keep_days": ("Days of nightly backups kept", "Older backup files are deleted."),

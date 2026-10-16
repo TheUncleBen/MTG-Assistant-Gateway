@@ -50,7 +50,7 @@ from .pages import (
     read_limited,
 )
 from .schemas import CollectionAdd, CollectionRemove, card_aliases, dumped
-from .theme import display_name, icon, render, stylesheet_link
+from .theme import card_size_control, display_name, icon, render, stylesheet_link
 from .theme import esc as _esc
 
 if TYPE_CHECKING:
@@ -1435,6 +1435,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             f"<input id='q' type='search' name='q' value='{_esc(q)}' placeholder='Card name'>"
             f"<button type='submit' aria-label='Filter' title='Filter'>{icon('search')}</button></span></div>"
             + sel("view", {"grid": "Grid", "list": "List"}, view, "View as", "grid")
+            + (card_size_control() if view == "grid" else "")
             + sel("sort", SORTS, sort, "Sort by", "sort")
             + "<div class='field'><span class='lbl'>&nbsp;</span>"
             f"<a class='btn' href='/collection/export.csv'>{icon('download')} Export CSV</a></div>"
