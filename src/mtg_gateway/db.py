@@ -1585,6 +1585,7 @@ class Database:
         ("deck_values", "sub"),
         ("notify_prefs", "sub"),
         ("account_prefs", "sub"),
+        ("card_models", "added_by"),  # card Q138 item 5: their simulator card models go too
         ("backup_deletes", "sub"),  # their queued backup deletes (Q77) go with their snapshots
         ("users", "sub"),
     )
@@ -2876,13 +2877,12 @@ class Database:
             return c.execute("DELETE FROM account_prefs WHERE sub = ? AND name = ?", (sub, name)).rowcount > 0
 
     # -- simulator card models (schema 14, Track C) --------------------------------------------
-    # TODO(Ben, Track C's next card): a cap on the models one member keeps (C proposes 200; the
-    # caller counts put_card_model's True answers against count_card_models), whether a member's
-    # models go when their data is deleted (they are not in MEMBER_TABLES yet), whether any member
-    # may replace another's model (put_card_model lets the newest win, as C's code expects), and
-    # the "simulator version" column Q136 item 3 approved (built as oracle_hash; on C's card).
-    # Nothing here enforces any of these yet. Decided (Q136 item 2): the member who added a model
-    # and an admin may remove it (delete_card_model, admin_delete_card_model).
+    # Decided (Q136 item 2, card Q138 items 2-5): the member who added a model and an admin may
+    # remove it (delete_card_model, admin_delete_card_model; the admin list is list_card_models);
+    # a member's models go with their data (MEMBER_TABLES). Track C's caller enforces the cap of
+    # 200 per member (count_card_models) and "only the adder or an admin replaces a model" before
+    # put_card_model, which itself keeps the newest. Still on card Q139 item 5: the "simulator
+    # version" column Q136 item 3 approved (built as oracle_hash).
 
     def get_card_models(self, keys: list[str]) -> list[dict[str, Any]]:
         """The models kept for these card keys (front face, casefolded), in no particular order;
@@ -2954,6 +2954,24 @@ class Database:
             detail={"card": str(row["name"]), "card_key": card_key, "added_by": str(row["added_by"])},
         )
         return True
+
+    def list_card_models(self, *, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
+        """The kept models for the admin list (card Q138 item 4), the most recently changed first:
+        card_key, name, added_by, added_at, updated_at and size (bytes of model_json). Holds member
+        ids: only for an admin's page, never another member's."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT card_key, name, added_by, added_at, updated_at, "
+                "length(CAST(model_json AS BLOB)) AS size FROM card_models "
+                "ORDER BY updated_at DESC, card_key LIMIT ? OFFSET ?",
+                (max(0, int(limit)), max(0, int(offset))),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def count_all_card_models(self) -> int:
+        """How many models are kept, for everyone."""
+        row = self._one("SELECT COUNT(*) AS n FROM card_models", ())
+        return int(row["n"]) if row else 0
 
     def count_card_models(self, sub: str) -> int:
         """How many of the kept models are ``sub``'s."""
