@@ -98,6 +98,16 @@
     }
     return pages[q];
   }
+  // one printing by set and number: the card's own, when a card with more printings than a page
+  // hasn't listed it (N7)
+  function oneFor(oid, ref) {
+    var q = "oracle_id=" + encodeURIComponent(oid) + "&set=" + encodeURIComponent(ref.set) + "&number=" + encodeURIComponent(ref.number);
+    if (!pages[q]) {
+      pages[q] = getJSON("/scan/api/prints?" + q);
+      pages[q].catch(function () { delete pages[q]; });
+    }
+    return pages[q];
+  }
   // the default list (P2): released paper printings in English, newest first as Scryfall gives them
   function defaults(list) { return list.filter(function (p) { return english(p) && !preview(p) && !digital(p); }); }
 
@@ -239,6 +249,7 @@
     st = {
       opts: opts, oid: null, list: [], page: 0, hasMore: false, total: 0, complete: false, loading: false,
       params: { finish: "", frame: "", border: "", order: "newest" }, q: "", all: false, pinned: null, seq: 0,
+      mine: Object.create(null), mineAsked: false,
       finish: scryFinish(opts.finish)
     };
     var box = el("div", "ppbox");
@@ -372,6 +383,7 @@
       var seen = Object.create(null);
       st.list.forEach(function (c) { seen[c.set + "#" + c.collector_number] = true; });
       cards.forEach(function (c) { if (!seen[c.set + "#" + c.collector_number]) st.list.push(c); });
+      keepMine(cards);
       st.page = page;
       st.hasMore = !!d.has_more;
       st.total = typeof d.total_cards === "number" ? d.total_cards : st.list.length;
@@ -379,6 +391,7 @@
       if (page === 1 && !st.hasMore && plain) st.complete = true;
       if (page === 1 && !st.pinned) st.pinned = startPick();
       draw();
+      if (page === 1 && st.hasMore) askMine();
     }).catch(function (err) {
       if (st !== mine || seq !== st.seq) return;
       st.loading = false;
@@ -400,17 +413,50 @@
     st.more.removeAttribute("aria-busy");
     st.more.textContent = "Load more printings";
   }
+  /* The card's own printings (current and picked) always show (N7), whatever the filters, the
+     typed search or the page: each one seen on any page is kept, and a card with more printings
+     than a page that hasn't listed it asks for it once by set and number. */
+  function mineRefs() { return [st.opts.current, st.opts.pending].filter(function (r) { return r && r.set && r.number; }); }
+  function keepMine(cards) {
+    mineRefs().forEach(function (r) {
+      cards.forEach(function (c) { if (samePrint(c, r)) st.mine[c.set + "#" + c.collector_number] = c; });
+    });
+  }
+  function askMine() {
+    if (st.mineAsked || !st.oid) return;
+    var missing = mineRefs().filter(function (r) {
+      return !Object.keys(st.mine).some(function (k) { return samePrint(st.mine[k], r); });
+    });
+    if (!missing.length) return;
+    st.mineAsked = true;
+    var mine = st;
+    missing.forEach(function (r) {
+      oneFor(st.oid, r).then(function (d) {
+        if (st !== mine) return;
+        keepMine(d.cards || []);
+        if (!st.pinned) st.pinned = startPick();
+        draw();
+      }).catch(function () { /* the list still works without it */ });
+    });
+  }
   // the preview starts on the card's own printing (or the pick waiting), else on the first
   function startPick() {
     var o = st.opts;
-    return st.list.filter(function (p) { return samePrint(p, o.pending) || samePrint(p, o.current); })[0] || null;
+    return st.list.concat(extraMine()).filter(function (p) { return samePrint(p, o.pending) || samePrint(p, o.current); })[0] || null;
   }
 
-  function matches(p) {
-    var o = st.opts;
-    var mineToo = samePrint(p, o.current) || samePrint(p, o.pending);  // the card's own always shows
-    if (!english(p) && !mineToo) return false;
-    if (!st.all && (preview(p) || digital(p)) && !mineToo) return false;
+  function isMine(p) { return samePrint(p, st.opts.current) || samePrint(p, st.opts.pending); }
+  // the card's own printings kept from other pages and filters that this list doesn't hold
+  function extraMine() {
+    var have = Object.create(null);
+    st.list.forEach(function (c) { have[c.set + "#" + c.collector_number] = true; });
+    return Object.keys(st.mine).filter(function (k) { return !have[k]; }).map(function (k) { return st.mine[k]; });
+  }
+  // what the search and filters ask for; the card's own printings show either way (N7)
+  function matches(p) { return isMine(p) || wanted(p); }
+  function wanted(p) {
+    if (!english(p)) return false;
+    if (!st.all && (preview(p) || digital(p))) return false;
     if (st.complete) {
       if (st.params.finish && (p.finishes || []).indexOf(st.params.finish) < 0) return false;
       if (st.params.frame && String(p.frame || "") !== st.params.frame) return false;
@@ -449,7 +495,13 @@
   }
   function draw() {
     if (!st) return;
-    var shown = sorted(st.list.filter(matches));
+    var extra = extraMine();
+    var shown = sorted(st.list.filter(matches).concat(extra));
+    // the printings that match, and the card's own shown only because it is the card's: one the
+    // search or filters leave out here, or one Scryfall's filtered list doesn't hold
+    var filtered = st.q || st.params.finish || st.params.frame || st.params.border;
+    var ownOnly = shown.filter(function (p) { return !wanted(p) || (filtered && extra.indexOf(p) >= 0); });
+    var hits = shown.length - ownOnly.length;
     var hidden = st.all ? 0 : st.list.filter(function (p) {
       return english(p) && (preview(p) || digital(p)) && !samePrint(p, st.opts.current) && !samePrint(p, st.opts.pending);
     }).length;
@@ -467,19 +519,20 @@
       st.grid.appendChild(li);
     });
     // what the list says
-    var filtered = st.q || st.params.finish || st.params.frame || st.params.border;
     var english_n = st.list.filter(function (p) { return english(p) && (st.all || !(preview(p) || digital(p))); }).length;
     var words;
     // the box below says it when filters leave nothing: the count line then says nothing more
     if (!st.list.length) words = filtered || st.all ? "" : "Scryfall lists no printing of this card.";
-    else if (st.complete) words = filtered ? shown.length + " of " + plural(english_n, "printing") + (shown.length === 1 ? " matches." : " match.") : plural(shown.length, "printing") + ".";
-    else words = (st.q ? plural(shown.length, "match", "matches") + ". " : "") + "Showing " + st.list.length + " of " + plural(st.total, "printing") + ".";
+    else if (st.complete) words = filtered ? hits + " of " + plural(english_n, "printing") + (hits === 1 ? " matches." : " match.") : plural(hits, "printing") + ".";
+    else words = (st.q ? plural(hits, "match", "matches") + ". " : "") + "Showing " + st.list.length + " of " + plural(st.total, "printing") + ".";
+    if (!words && ownOnly.length) words = "No printing matches these filters.";
+    if (ownOnly.length) words += (words ? " " : "") + ownWords(ownOnly);
     if (hidden) words += (words ? " " : "") + plural(hidden, "digital-only or preview printing") + " hidden.";
     if (!words && !shown.length) words = "No printing matches these filters.";  // read out; the box shows it
     st.status.className = "ppstatus";
     st.status.textContent = words;
     // nothing to show: say why, with a way back
-    var stuck = !shown.length && (st.list.length > 0 || !!filtered || st.all);
+    var stuck = !hits && (st.list.length > 0 || !!filtered || st.all);
     st.empty.textContent = "";
     st.empty.hidden = !stuck;
     if (stuck) {
@@ -497,6 +550,13 @@
     var n = ["finish", "frame", "border"].filter(function (k) { return st.params[k]; }).length + (st.all ? 1 : 0) + (st.params.order !== "newest" ? 1 : 0);
     st.filtBtn.textContent = n ? "Filters (" + n + ")" : "Filters";
     if (wide()) showPreview(st.pinned || shown[0] || null);
+  }
+  // the card's own printing shown although the search or filters leave it out
+  function ownWords(own) {
+    var cur = own.some(function (p) { return samePrint(p, st.opts.current); });
+    var pick = own.some(function (p) { return samePrint(p, st.opts.pending); });
+    if (cur && pick) return "The card's current and picked printings are shown too.";
+    return pick ? "The picked printing is shown too." : "The card's current printing is shown too.";
   }
   function clearFilters() {
     st.q = ""; st.search.value = "";

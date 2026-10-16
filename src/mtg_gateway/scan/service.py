@@ -50,6 +50,9 @@ MAX_CALL_SECONDS = 40.0  # wall-clock budget per resolve call, under proxy and c
 MIN_PREFIX = 4
 STATUSES = ("exact", "printing", "fuzzy", "ambiguous", "not_found", "deferred", "error", "conflict")
 MAX_NEWER = 3  # newer printings passed over for the default (previews, digital only) named on a result
+# one printing asked for by the picker (its own, N7): a set code and a collector number
+_PRINT_SET = re.compile(r"[a-z0-9]{2,6}")
+_PRINT_NUMBER = re.compile(r"[A-Za-z0-9★†\-]{1,10}")
 
 
 @dataclass(frozen=True)
@@ -883,6 +886,8 @@ class ScanService:
         frame: str | None = None,
         border: str | None = None,
         order: str | None = None,
+        set_code: str | None = None,
+        number: str | None = None,
     ) -> dict[str, Any]:
         """Every printing of one card for the picker, as card summaries: the released paper
         printings first, newest first, then the rest (previews marked ``unreleased``, printings
@@ -893,13 +898,14 @@ class ScanService:
         (1 to 20) reads the next. ``finish`` (nonfoil, foil, etched), ``frame`` (1993, 1997, 2003,
         2015, future) and ``border`` (black, white, borderless, silver, gold) narrow the list and
         ``order`` (newest, oldest, cheapest) sorts it, on Scryfall's side; with ``oldest`` or
-        ``cheapest`` the list keeps that order. An unknown value is ``invalid``.
+        ``cheapest`` the list keeps that order. An unknown value is ``invalid``. ``set_code`` with
+        ``number`` gives that one printing of the card (the picker's own, N7), or none.
         """
         oid = str(oracle_id or "").strip().lower()
         if not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", oid):
             raise ScanError("invalid", "oracle_id must be a Scryfall oracle id")
         num = str(page if page not in (None, "") else 1).strip()
-        if not num.isdigit() or not 1 <= int(num) <= PRINT_PAGES:
+        if not (num.isascii() and num.isdigit()) or not 1 <= int(num) <= PRINT_PAGES:
             raise ScanError("invalid", f"page must be a whole number from 1 to {PRINT_PAGES}")
         picks: dict[str, str | None] = {}
         for key, value, allowed in (
@@ -913,6 +919,12 @@ class ScanService:
                 raise ScanError("invalid", f"{key} must be one of: {', '.join(allowed)}")
             picks[key] = v
         sort = picks.pop("order") or "newest"
+        code = str(set_code or "").strip().lower()
+        cn = str(number or "").strip()
+        if code or cn:
+            if not (_PRINT_SET.fullmatch(code) and _PRINT_NUMBER.fullmatch(cn)) or num != "1":
+                raise ScanError("invalid", "set and number must name one printing, on page 1")
+            picks.update(set_code=code, number=cn)
         try:
             with self._lookup_slot(owner):
                 out = await self.scryfall.prints(oid, page=int(num), order=sort, **picks)
