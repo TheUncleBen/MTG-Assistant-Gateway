@@ -66,7 +66,7 @@ async def test_edits_within_15_minutes_share_one_copy(stack: Stack) -> None:
     copies = [d for d in stack.ark.decks if d >= 100]
     assert len(copies) == 1 and a2["result"]["backup_deck_id"] == a1["result"]["backup_deck_id"]
     assert a2["result"]["backup_reason"] == "recent"
-    assert "made less than 15 minutes earlier" in a2["result"]["backup_shared"]
+    assert "made less than 15 minutes before this edit" in a2["result"]["backup_shared"]
     # each edit keeps its own snapshot; both record the one copy
     db = stack.h.db
     assert db.backup_users(SUB, a1["result"]["backup_deck_id"]) == 2
@@ -86,7 +86,7 @@ async def test_an_unchanged_deck_shares_its_copy_and_a_changed_one_gets_a_new_co
     a3 = await _apply(stack, token, "Island")
     assert a3["result"]["backup_deck_id"] == a2["result"]["backup_deck_id"]
     assert a3["result"]["backup_reason"] == "unchanged"
-    assert "the deck is unchanged since" in a3["result"]["backup_shared"]
+    assert "(the deck hasn't changed since then)." in a3["result"]["backup_shared"]
 
 
 @pytest.mark.usefixtures("no_sharing")
@@ -285,5 +285,6 @@ async def test_backups_switched_off_on_the_settings_page_make_no_copy(stack: Sta
 
 def test_the_shared_note_reads_as_a_sentence() -> None:
     made = 1_790_000_000
-    assert decks_mod.backup_shared_note(made, recent=True).endswith("(made less than 15 minutes earlier).")
+    recent = decks_mod.backup_shared_note(made, recent=True)
+    assert recent.endswith("(made less than 15 minutes before this edit).")
     assert json.dumps(decks_mod.backup_shared_note(made, recent=False)).count("UTC") == 1

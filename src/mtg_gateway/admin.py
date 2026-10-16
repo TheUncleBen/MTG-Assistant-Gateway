@@ -521,10 +521,13 @@ def _chatgpt_name_warning(settings: Any) -> str:
     if long:
         text = (
             f"The ChatGPT connector name, “{long[0]}”, is {long[1]} characters; ChatGPT refuses a plugin "
-            f"file whose name is over {CHATGPT_NAME_MAX} characters. Set MTG_CHATGPT_NAME to a name of "
-            f"{CHATGPT_NAME_MAX} characters or fewer (see docs/DEPLOY.md)."
+            f"file whose name is over {CHATGPT_NAME_MAX} characters. Set a name of {CHATGPT_NAME_MAX} "
+            "characters or fewer under “Name in ChatGPT” on the "
         )
-        out += f"<div class='notice warn'>{html.escape(text)}</div>"
+        out += (
+            f"<div class='notice warn'>{html.escape(text)}"
+            "<a href='/admin/settings#s-row-chatgpt_name'>Settings page</a>.</div>"
+        )
     # the plugin file's developer and author name: a long MTG_SERVER_NAME shortened (B4 b)
     if cut := developer_name_warning(settings.server_name):
         out += f"<div class='notice warn'>{html.escape(cut)}</div>"
@@ -871,7 +874,10 @@ def _activity_body(state: Any, rows: list[dict[str, Any]], only: str | None) -> 
         if event.startswith("admin_"):
             cls = "warn"
         detail = ""
-        if r.get("detail"):
+        said = settings_page.change_line(r.get("detail")) if event == "setting_changed" else None
+        if said:
+            detail = f"<span class='small'>{html.escape(said)}</span>"
+        elif r.get("detail"):
             detail = f"<code>{html.escape(json.dumps(r['detail'], sort_keys=True)[:300])}</code>"
         cid = r.get("client_id")
         client = actor_label(cid, names.get(cid) if cid and cid != BROWSER_CLIENT_ID else None)

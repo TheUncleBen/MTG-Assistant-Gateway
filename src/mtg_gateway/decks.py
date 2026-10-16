@@ -5135,7 +5135,7 @@ def backup_shared_note(made_at: int, *, recent: bool) -> str:
     """What the result says when an edit shares an earlier backup copy (B14, B15; draft wording,
     WORDING-AND-CALLS-2 W1)."""
     when = datetime.datetime.fromtimestamp(made_at, tz=datetime.UTC).strftime("%Y-%m-%d %H:%M UTC")
-    why = "made less than 15 minutes earlier" if recent else "the deck is unchanged since"
+    why = "made less than 15 minutes before this edit" if recent else "the deck hasn't changed since then"
     return f"No new backup copy: this edit shares the one made {when} ({why})."
 
 

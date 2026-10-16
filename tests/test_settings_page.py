@@ -127,7 +127,7 @@ async def test_one_refused_field_saves_nothing_in_its_section(gw: Harness) -> No
         assert r.status_code == 400
         text = html.unescape(r.text)
         assert "Nothing was saved. See the message under “Backup copies kept per deck”." in text
-        assert "Backup copies kept per deck must be between 1 and 50." in text
+        assert "Must be between 1 and 50." in text
         assert "value='99'" in r.text  # what was typed stays in the field
         assert "id='e-archidekt_backup_copies' role='alert'" in r.text
         assert _live(gw).get("snapshots_per_deck") == 25 and _live(gw).get("archidekt_backup_copies") == 10
@@ -199,7 +199,8 @@ async def test_a_locked_or_unknown_setting_cannot_be_changed(gw: Harness) -> Non
         assert r.status_code == 303
         assert _live(gw).get("forge_games") == 12 and _live(gw).get("forge_parallel_games") == 2
         r = await _post(b, {"reset": "forge_games"})
-        assert r.status_code == 400 and "is set in your stack (MTG_FORGE_GAMES)" in html.unescape(r.text)
+        assert r.status_code == 400
+        assert "Set in your stack (MTG_FORGE_GAMES). To change it here, remove it from your stack" in r.text
         r = await _post(b, {"reset": "writes_enabled"})
         assert r.status_code == 400 and "isn't one this page can change" in html.unescape(r.text)
         r = await _post(b, {"group": "general", "v_writes_enabled": "on"})
@@ -246,5 +247,40 @@ async def test_member_cannot_reach_it_signed_out(gw: Harness) -> None:
     try:
         r = await b.http.get("/admin/settings", headers=NAVIGATE)
         assert r.status_code in (302, 303) and "/login" in r.headers["location"]
+    finally:
+        await b.aclose()
+
+
+async def test_a_chatgpt_name_over_80_characters_is_warned_about(gw: Harness) -> None:
+    """C4: the page warns as the start-up log does, and still saves the name (it is not refused)."""
+    b = await admin_browser(gw)
+    try:
+        page = (await b.http.get("/admin/settings", headers=NAVIGATE)).text
+        assert "id='w-chatgpt_name'" not in page
+        long = "A" * 81
+        r = await _post(b, {"group": "general", "v_chatgpt_name": long})
+        assert r.status_code == 303 and _live(gw).get("chatgpt_name") == long
+        page = (await b.http.get("/admin/settings", headers=NAVIGATE)).text
+        row = html.unescape(page.split("id='s-row-chatgpt_name'", 1)[1].split("id='s-row-", 1)[0])
+        assert f"ChatGPT gets the name “{long}”, which is 81 characters." in row
+        assert "ChatGPT refuses a name over 80 characters" in row
+        assert "aria-describedby='h-chatgpt_name s-chatgpt_name w-chatgpt_name'" in row
+        # Blank follows the gateway name, which is checked too.
+        await _post(b, {"group": "general", "v_chatgpt_name": "", "v_server_name": "B" * 90})
+        page = html.unescape((await b.http.get("/admin/settings", headers=NAVIGATE)).text)
+        assert f"ChatGPT gets the name “{'B' * 90}”, which is 90 characters." in page
+    finally:
+        await b.aclose()
+
+
+async def test_the_activity_logs_say_a_setting_change_in_words(gw: Harness) -> None:
+    b = await admin_browser(gw)
+    try:
+        await _post(b, {"group": "approvals", "v_proposal_expiry_days": "14"})
+        for path in ("/admin/activity", "/activity"):
+            text = _words((await b.http.get(path, headers=NAVIGATE)).text)
+            assert "Days a change waits for approval: 7 days → 14 days" in text, path
+            assert '"previous"' not in text, path
+        assert "Gateway setting changed" in _words((await b.http.get("/activity", headers=NAVIGATE)).text)
     finally:
         await b.aclose()

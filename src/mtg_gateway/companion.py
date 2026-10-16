@@ -36,6 +36,7 @@ from .pages import (
     csrf_form_ok,
     read_limited,
 )
+from .settings_page import change_line
 from .theme import (
     ICON_DATA_URL,
     STYLESHEETS,
@@ -490,6 +491,7 @@ EVENT_LABELS = {
     "membership_unverifiable": "Membership could not be checked",
     "disabled_user_refused": "Request refused: account disabled",
     "not_in_group_refused": "Request refused: not in an allowed group",
+    "setting_changed": "Gateway setting changed",
 }
 DETAIL_LABELS = {
     "proposal_id": "proposal",
@@ -508,6 +510,8 @@ def event_label(event: str) -> str:
 def event_detail_html(detail: dict[str, Any]) -> str:
     """The details of an audit row in words: the deck and the proposal become links."""
     bits = []
+    if said := change_line(detail):
+        bits.append(_esc(said))
     for k, label in DETAIL_LABELS.items():
         v = detail.get(k)
         if v in (None, ""):

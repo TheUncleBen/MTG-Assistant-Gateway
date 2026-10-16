@@ -12,7 +12,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from .config import MANAGED_SETTINGS, LiveSettings, SettingError, SettingSpec, _number
+from .config import MANAGED_SETTINGS, STACK_LOCK_HOW, LiveSettings, SettingError, SettingSpec, _number
+from .plugin_page import CHATGPT_NAME_MAX, chatgpt_name_too_long
 
 # (group, title, intro). The order is the page's; "scan" starts folded away.
 GROUPS: tuple[tuple[str, str, str], ...] = (
@@ -29,8 +30,8 @@ GROUPS: tuple[tuple[str, str, str], ...] = (
     (
         "pacing",
         "Archidekt and Scryfall pacing",
-        "These can only be made gentler than the gateway's defaults here, so it stays gentle on "
-        "Archidekt's and Scryfall's servers. Your stack can set other values.",
+        "These can only be made slower than the gateway's defaults here, to stay gentle on "
+        "Archidekt's and Scryfall's servers. Only your stack can set faster values.",
     ),
     (
         "scan",
@@ -52,11 +53,13 @@ TEXT: dict[str, tuple[str, str]] = {
     ),
     "auto_apply_max_rows": (
         "Rows a small edit may have",
-        "In the middle mode, an edit with at most this many card rows counts as small and low-risk.",
+        "With \u201cApply small, low-risk edits without asking\u201d, an edit with at most this many card "
+        "rows counts as small.",
     ),
     "auto_big_edit_rows": (
         "Rows before an edit counts as big",
-        "In the most automatic mode, an edit with more card rows than this waits for the member.",
+        "With \u201cApply deck and collection changes without asking\u201d, an edit with more card rows "
+        "than this waits for the member.",
     ),
     "proposal_expiry_days": (
         "Days a change waits for approval",
@@ -85,15 +88,15 @@ TEXT: dict[str, tuple[str, str]] = {
     ),
     "snapshots_per_deck": (
         "Restore points kept per deck",
-        "Kept on the gateway, newest first, for History > Restore. A restore point that records a "
-        "backup copy still kept on Archidekt is kept too.",
+        "Kept on the gateway, newest first, for History > Restore. Restore points that record a backup "
+        "copy the gateway may still delete are kept too.",
     ),
     "backup_hour_utc": ("Nightly backup hour (UTC)", "When the gateway backs up its own database, 0 to 23."),
     "backup_keep_days": ("Days of nightly backups kept", "Older backup files are deleted."),
     "forge_games": ("Forge games per report", "More games give steadier numbers and take longer."),
     "forge_parallel_games": ("Forge games played at once", "Higher is faster but uses more memory and CPU."),
     "watchlists_enabled": (
-        "Watchlists and prices",
+        "Turn on watchlists and prices",
         "Shows the Watchlist page, the price buttons and the watch tools.",
     ),
     "watch_max_cards": ("Cards one member may watch", "0 turns card watching off."),
@@ -112,7 +115,7 @@ TEXT: dict[str, tuple[str, str]] = {
     "server_name": ("Gateway name", "Shown in the top bar, on sign-in and in Claude's connector list."),
     "chatgpt_name": (
         "Name in ChatGPT",
-        "Leave it blank to use the gateway name. ChatGPT shortens names over 80 characters.",
+        "Leave it blank to use the gateway name. ChatGPT refuses a name over 80 characters.",
     ),
     "update_check": (
         "Check for new versions",
@@ -128,7 +131,10 @@ TEXT: dict[str, tuple[str, str]] = {
     "archidekt_retries": ("Retries of a failed Archidekt read", "Writes are never retried."),
     "archidekt_backoff_base": ("Wait before a retry", "Doubles with each retry, up to 10 seconds."),
     "archidekt_cache_seconds": ("Reuse public deck reads for", "Cleared by any change the gateway sends."),
-    "archidekt_card_cache_seconds": ("Reuse card lookups for", ""),
+    "archidekt_card_cache_seconds": (
+        "Reuse card lookups for",
+        "Card details read from Archidekt are reused for this long. 0 turns it off.",
+    ),
     "scryfall_lookup_interval": ("Time between Scryfall lookups", "For card scanning."),
     "scan_fuzzy_min_similarity": ("Lowest name similarity accepted", "From 0.3 to 1."),
     "scan_fuzzy_confident_similarity": (
@@ -152,7 +158,10 @@ TEXT: dict[str, tuple[str, str]] = {
     "scan_art_max_printings": ("Printings learned per card", "The newest ones first."),
     "scan_art_image_interval": ("Time between image downloads", "From Scryfall's image server."),
     "scan_art_images_per_hour": ("Image downloads per hour", "For everyone together."),
-    "scan_art_max_galleries": ("Cards whose printings are kept", ""),
+    "scan_art_max_galleries": (
+        "Cards whose printings are kept",
+        "The artwork check keeps what it learned for this many of the most recently scanned cards.",
+    ),
     "scan_art_gallery_idle_days": ("Forget a card's printings after", "Days without a scan of that card."),
 }
 
@@ -161,18 +170,17 @@ TEXT: dict[str, tuple[str, str]] = {
 CONFIRM: dict[str, tuple[str, str]] = {
     "archidekt_backups": (
         "off",
-        "If you turn this off: I understand edits will then have no copy on Archidekt to go back to. "
-        "Restore points on the gateway are still kept.",
+        "I understand that with this off, edits have no copy on Archidekt to go back to. Restore points "
+        "on the gateway are still kept.",
     ),
     "archidekt_backup_copies": (
         "lower",
-        "If you lower this: I understand older copies past the new number are deleted from the backup "
-        "folder on Archidekt, one at a time.",
+        "I understand that copies past the new number are deleted from the backup folder on Archidekt, "
+        "one at a time. Copies a member changed are kept.",
     ),
     "snapshots_per_deck": (
         "lower",
-        "If you lower this: I understand restore points past the new number are deleted at the next "
-        "hourly clean-up.",
+        "I understand that restore points past the new number are deleted at the next hourly clean-up.",
     ),
 }
 
@@ -204,6 +212,8 @@ SETTINGS_CSS = """
 .set-label{font-weight:700;margin:0;display:block}
 .set-help,.set-src{margin:.2rem 0 0}
 .set-err{margin:.35rem 0 0;color:var(--danger-text);font-weight:700}
+.set-warn{margin:.35rem 0 0;padding:.4rem .6rem;border-left:4px solid var(--orange);
+  background:var(--orange-tint);color:var(--orange-text);border-radius:var(--radius)}
 .set-row.bad input,.set-row.bad select{border-color:var(--danger-text)}
 .set-ctl{display:flex;flex-direction:column;gap:.45rem;align-items:stretch;min-width:0}
 .set-num{display:flex;align-items:center;gap:.5rem}
@@ -284,9 +294,7 @@ def apply_form(live: LiveSettings, data: Mapping[str, str], *, by: str) -> Outco
             out.errors["_"] = "That setting isn't one this page can change."
             return out
         if live.locked(reset):
-            out.errors[reset] = (
-                f"{label(reset)} is set in your stack ({spec.env}). Change it there and redeploy."
-            )
+            out.errors[reset] = f"Set in your stack ({spec.env}). {STACK_LOCK_HOW}"
             return out
         before = live.get(reset)
         if needs_confirm(reset, before, spec.default) and data.get(f"confirm_{reset}") != "yes":
@@ -309,7 +317,7 @@ def apply_form(live: LiveSettings, data: Mapping[str, str], *, by: str) -> Outco
         try:
             value = spec.parse(raw)
         except SettingError as exc:
-            out.errors[key] = f"{label(key)} {exc.message}."
+            out.errors[key] = f"{exc.message[:1].upper()}{exc.message[1:]}."
             continue
         before = live.get(key)
         if value != before:
@@ -342,6 +350,7 @@ def settings_body(
     time (both return HTML)."""
     outcome = outcome or Outcome()
     rows = {d["key"]: d for d in live.describe()}
+    warns = {"chatgpt_name": chatgpt_name_warning(live)}
     nav = "".join(
         f"<a href='#g-{g}'>{html.escape(title)}</a>" for g, title, _intro in GROUPS if group_keys(g)
     )
@@ -355,10 +364,10 @@ def settings_body(
         keys = group_keys(group)
         if not keys:
             continue
-        fields = "".join(_row(rows[k], running, outcome, who, when) for k in keys)
+        fields = "".join(_row(rows[k], running, outcome, who, when, warns.get(k, "")) for k in keys)
         editable = any(not live.locked(k) for k in keys)
         save = (
-            f"<div class='set-save'><button type='submit' class='primary'>Save {html.escape(title.lower())}"
+            f"<div class='set-save'><button type='submit' class='primary'>Save {html.escape(title)}"
             "</button></div>"
             if editable
             else "<p class='muted small set-save'>Every setting here is set in your stack.</p>"
@@ -381,7 +390,21 @@ def settings_body(
     return "".join(parts)
 
 
-def _row(d: dict[str, Any], running: Any, outcome: Outcome, who: Callable, when: Callable) -> str:
+def chatgpt_name_warning(live: LiveSettings) -> str:
+    """The warning under "Name in ChatGPT" when the name ChatGPT gets (this setting, else the gateway
+    name) is over the plugin file's limit, as the start-up log and the admin page warn (C4)."""
+    long = chatgpt_name_too_long(live.get("server_name"), live.get("chatgpt_name") or None)
+    if not long:
+        return ""
+    return (
+        f"ChatGPT gets the name “{long[0]}”, which is {long[1]} characters. ChatGPT refuses a name over "
+        f"{CHATGPT_NAME_MAX} characters, so set a name of {CHATGPT_NAME_MAX} characters or fewer here."
+    )
+
+
+def _row(
+    d: dict[str, Any], running: Any, outcome: Outcome, who: Callable, when: Callable, warn: str = ""
+) -> str:
     key = d["key"]
     spec = MANAGED_SETTINGS[key]
     name, help_text = TEXT.get(key, (key, ""))
@@ -389,7 +412,7 @@ def _row(d: dict[str, Any], running: Any, outcome: Outcome, who: Callable, when:
     err = outcome.errors.get(key)
     value = outcome.posted.get(key, d["value"])
     help_id = f"h-{key}"
-    described = f"{help_id} s-{key}" + (f" e-{key}" if err else "")
+    described = f"{help_id} s-{key}" + (f" w-{key}" if warn else "") + (f" e-{key}" if err else "")
     control = _control(spec, value, locked=locked, described=described)
     src = _source(d, spec, running, who, when)
     reset = ""
@@ -419,6 +442,7 @@ def _row(d: dict[str, Any], running: Any, outcome: Outcome, who: Callable, when:
             else f"<span id='{help_id}' hidden></span>"
         )
         + f"<p class='set-src small' id='s-{key}'>{src}</p>"
+        + (f"<p class='set-warn small' id='w-{key}'>{html.escape(warn)}</p>" if warn else "")
         + (f"<p class='set-err small' id='e-{key}' role='alert'>{html.escape(err)}</p>" if err else "")
         + f"</div><div class='set-ctl'>{control}{reset}</div>{confirm}</div>"
     )
@@ -428,7 +452,7 @@ def _source(d: dict[str, Any], spec: SettingSpec, running: Any, who: Callable, w
     if d["source"] == "deployment":
         return (
             "<span class='set-lock'>Set in your stack "
-            f"(<code>{html.escape(spec.env)}</code>). Change it there and redeploy.</span>"
+            f"(<code>{html.escape(spec.env)}</code>). {STACK_LOCK_HOW}</span>"
         )
     if d["source"] == "dashboard":
         changed = d.get("changed") or {}
@@ -491,6 +515,15 @@ def _plain(value: Any) -> str:
     if value is None:
         return ""
     return str(int(value)) if float(value).is_integer() else str(value)
+
+
+def change_line(detail: Any) -> str | None:
+    """A ``setting_changed`` audit entry in words, as the save notice writes it ("Days a change waits
+    for approval: 7 days → 14 days"); None when it isn't one this page knows. Plain text."""
+    if not isinstance(detail, dict) or detail.get("key") not in MANAGED_SETTINGS:
+        return None
+    spec = MANAGED_SETTINGS[detail["key"]]
+    return f"{label(spec.key)}: {shown(spec, detail.get('previous'))} → {shown(spec, detail.get('value'))}"
 
 
 def changes_notice(changes: list[tuple[str, Any, Any]]) -> str:
