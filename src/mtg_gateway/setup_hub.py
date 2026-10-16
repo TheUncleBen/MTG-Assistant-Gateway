@@ -27,9 +27,12 @@ from starlette.responses import PlainTextResponse, Response
 from .app_page import APK_NAME, RELEASES_URL, android_facts
 from .pages import _csrf, browser_session, login_redirect
 from .plugin_page import (
+    CHATGPT_NAME_MAX,
     CONNECTOR_ICON_PATH,
     SERVER_DESCRIPTION,
     SETUP_SKILL,
+    chatgpt_label,
+    chatgpt_name_too_long,
     chatgpt_zip_name,
     claude_connect_link,
     plugin_slug,
@@ -97,6 +100,7 @@ class Step:
     text: str
     copy: Copy | None = None
     link: Link | None = None
+    warn: str | None = None  # a warning under the step's box (a notice on the page)
 
 
 @dataclass(frozen=True)
@@ -112,6 +116,7 @@ class Block:
     # The page's own content (live facts, a long box to copy); not install text.
     page: str = ""
     link: Link | None = None
+    warn: str | None = None  # a warning under the block's text (a notice on the page)
 
 
 @dataclass(frozen=True)
@@ -126,6 +131,7 @@ class Context:
     public_url: str
     site: str
     gpt_text: str | None = None  # the ChatGPT project instructions (skill_page.chatgpt_text)
+    gpt_name: str | None = None  # the owner's MTG_CHATGPT_NAME: the name ChatGPT shows, when set
     app: dict[str, Any] | None = None  # app_page.android_facts, or None when no APK is shipped
     page: bool = True  # False for the public Markdown
 
@@ -189,6 +195,8 @@ def block_html(block: Block, heading: str | None, ctx: Context) -> str:
     h = block.title or heading
     out = [f"<div class='card'>{f'<h2>{html.escape(h)}</h2>' if h else ''}"]
     out += [f"<p>{inline_html(p, ctx.public_url)}</p>" for p in block.paras]
+    if block.warn:
+        out.append(f"<p class='notice warn stepnote'>{inline_html(block.warn, ctx.public_url)}</p>")
     out.append(block.page)
     if block.link:
         out.append(_link_html(block.link, ctx.public_url))
@@ -198,6 +206,8 @@ def block_html(block: Block, heading: str | None, ctx: Context) -> str:
             out.append(f"<li>{inline_html(s.text, ctx.public_url)}")
             if s.copy:
                 out.append(copy_field(s.copy.key, s.copy.label, s.copy.value, s.copy.rows))
+            if s.warn:
+                out.append(f"<p class='notice warn stepnote'>{inline_html(s.warn, ctx.public_url)}</p>")
             if s.link:
                 out.append(_link_html(s.link, ctx.public_url))
             out.append("</li>")
@@ -219,6 +229,8 @@ def _step_md(n: int, s: Step, public_url: str) -> str:
         line += " " + (s.copy.md if s.copy.md is not None else f"{s.copy.label}: `{s.copy.value}`")
     if s.link:
         line += f" [{s.link.label}]({_abs(s.link.href, public_url)})"
+    if s.warn:
+        line += f"\n   {s.warn}"
     return line
 
 
@@ -228,6 +240,8 @@ def section_md(section: Section, ctx: Context) -> str:
         if b.title:
             parts.append(f"**{b.title}**")
         parts += list(b.paras)
+        if b.warn:
+            parts.append(b.warn)
         if b.link:
             parts.append(f"[{b.link.label}]({_abs(b.link.href, ctx.public_url)})")
         parts += list(b.agent)
@@ -348,6 +362,17 @@ def section(key: str, ctx: Context) -> Section:
             ),
         )
     if key == "chatgpt":
+        # The name to type: the owner's MTG_CHATGPT_NAME (filtered as the plugin file writes it)
+        # when set, else the site's name as it is.
+        gpt_name = chatgpt_label(site, ctx.gpt_name) if ctx.gpt_name else site
+        long = chatgpt_name_too_long(site, ctx.gpt_name)
+        plugin_warn = (
+            f"This gateway's ChatGPT connector name, “{long[0]}”, is {long[1]} characters, and ChatGPT "
+            f"refuses a plugin file whose name is over {CHATGPT_NAME_MAX} characters. Add the connector by "
+            "hand with the steps above instead; only the gateway's owner can change the name."
+            if long
+            else None
+        )
         return Section(
             key,
             CLIENTS[key],
@@ -374,7 +399,7 @@ def section(key: str, ctx: Context) -> Section:
                     "Add the connector",
                     paras=(
                         "ChatGPT shows the name and description you type when you add the connector. "
-                        f"Use “{site}” and the description below.",
+                        f"Use “{gpt_name}” and the description below.",
                         "OpenAI's instructions say ChatGPT takes an app's icon from its plugin file or an "
                         "upload, so the gateway's icon may not show for a connector added by hand.",
                     ),
@@ -399,7 +424,7 @@ def section(key: str, ctx: Context) -> Section:
                             "In the sidebar, open **Plugins** (older menus: Apps) and press **+** (or "
                             "Create)."
                         ),
-                        Step("Paste the name.", Copy("gpt-name", "Name", site)),
+                        Step("Paste the name.", Copy("gpt-name", "Name", gpt_name)),
                         Step(
                             "Paste the description.",
                             Copy("gpt-desc", "Description", SERVER_DESCRIPTION, rows=3),
@@ -431,7 +456,7 @@ def section(key: str, ctx: Context) -> Section:
                             "Open the project's menu, then **Project settings**, and paste them into the "
                             "instructions."
                         ),
-                        Step(f"Chat inside that project with the {site} connector on."),
+                        Step(f"Chat inside that project with the {gpt_name} connector on."),
                     ),
                 ),
                 Block(
@@ -449,6 +474,7 @@ def section(key: str, ctx: Context) -> Section:
                         primary=False,
                         icon="download",
                     ),
+                    warn=plugin_warn,
                 ),
                 Block(
                     "If ChatGPT blocks write tools",
@@ -532,7 +558,10 @@ def section(key: str, ctx: Context) -> Section:
                             if gpt or not ctx.page
                             else None,
                         ),
-                        Step(f"Chat inside that project with the {site} connector on."),
+                        Step(
+                            f"Chat inside that project with the "
+                            f"{chatgpt_label(site, ctx.gpt_name) if ctx.gpt_name else site} connector on."
+                        ),
                     ),
                     notes=(
                         "ChatGPT supports custom connectors on the web only, not in its phone apps.",
@@ -731,6 +760,7 @@ INSTALL_CSS = (
     "font-family:ui-monospace,SFMono-Regular,Menlo,monospace;"
     "font-size:.85rem}"
     ".copyline .btn{flex:none;margin:0}"
+    ".notice.stepnote{margin:.5rem 0 0;overflow-wrap:anywhere}"
 )
 
 
@@ -744,7 +774,9 @@ def _context(state: AppState, *, page: bool) -> Context:
 
         base = skill_dir()
         gpt = chatgpt_text(base) if base is not None else None
-    return Context(s.public_url, s.server_name, gpt_text=gpt, app=android_facts(), page=page)
+    return Context(
+        s.public_url, s.server_name, gpt_text=gpt, gpt_name=s.chatgpt_name, app=android_facts(), page=page
+    )
 
 
 def add_setup_routes(server: MCPServer, state: AppState) -> None:

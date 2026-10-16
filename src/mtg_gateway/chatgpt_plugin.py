@@ -34,6 +34,7 @@ from .plugin_page import (
     PLUGIN_NAME,
     SERVER_DESCRIPTION,
     _renamed,
+    chatgpt_label,
     chatgpt_zip_name,
     plugin_dir,
     plugin_label,
@@ -63,9 +64,10 @@ DEFAULT_PROMPTS = [
 ]
 
 
-def manifest(base: Path, site: str, public_url: str) -> dict:
+def manifest(base: Path, site: str, public_url: str, chatgpt_name: str | None = None) -> dict:
     """``plugin.json``: the repository's portable manifest, renamed under an owner's name, with
-    the schema, this version and ChatGPT's display fields added."""
+    the schema, this version and ChatGPT's display fields added. ``displayName`` is the owner's
+    MTG_CHATGPT_NAME when set, else their site name (ChatGPT refuses one over 80 characters)."""
     name = plugin_slug(site)
     raw = (base / PLUGIN_NAME / "plugin.json").read_bytes()
     if site != DEFAULT_SITE:
@@ -81,7 +83,7 @@ def manifest(base: Path, site: str, public_url: str) -> dict:
         "extensions": {
             "com.openai": {
                 "interface": {
-                    "displayName": plugin_label(site),
+                    "displayName": chatgpt_label(site, chatgpt_name),
                     "shortDescription": "MTG decks and research",  # OpenAI documents at most 30 characters
                     "longDescription": SERVER_DESCRIPTION
                     + " Every deck change is shown to you first and applied only after you approve.",
@@ -105,11 +107,13 @@ def mcp_config(site: str, mcp_url: str) -> dict:
     }
 
 
-def build_zip(base: Path, mcp_url: str, public_url: str, site: str = DEFAULT_SITE) -> bytes:
+def build_zip(
+    base: Path, mcp_url: str, public_url: str, site: str = DEFAULT_SITE, chatgpt_name: str | None = None
+) -> bytes:
     """The ChatGPT plugin archive, with ``plugin.json`` at its root (not inside a folder)."""
     name = plugin_slug(site)
     files: dict[str, bytes] = {
-        "plugin.json": (json.dumps(manifest(base, site, public_url), indent=2) + "\n").encode(),
+        "plugin.json": (json.dumps(manifest(base, site, public_url, chatgpt_name), indent=2) + "\n").encode(),
         "mcp.json": (json.dumps(mcp_config(site, mcp_url), indent=2) + "\n").encode(),
     }
     skill = base / PLUGIN_NAME / "skills" / PLUGIN_NAME
@@ -134,10 +138,10 @@ def add_chatgpt_plugin_route(server: MCPServer, state: AppState) -> None:
         base = plugin_dir()
         if base is None:
             return PlainTextResponse("plugin not installed on this gateway", status_code=503)
-        key = f"{base}|{s.mcp_url}|{s.server_name}"
+        key = f"{base}|{s.mcp_url}|{s.server_name}|{s.chatgpt_name}"
         hit = cache.get(key)
         if hit is None:
-            data = build_zip(base, s.mcp_url, s.public_url, s.server_name)
+            data = build_zip(base, s.mcp_url, s.public_url, s.server_name, s.chatgpt_name)
             hit = cache[key] = (data, hashlib.sha256(data).hexdigest())
         return Response(
             hit[0],

@@ -291,7 +291,9 @@ buttons for the name, description and URL, and the icon to download.
 4. Open **Plugins** in the sidebar and press **+** (reported, OpenAI
    developer docs seen 2026-10-05; older pages call this Apps, then Create).
 5. Name: the gateway's name as the owner set it (`MTG Assistant Gateway`
-   unless they changed it; the install page shows the right one).
+   unless they changed it; the install page shows the right one). An owner
+   can set `MTG_CHATGPT_NAME` to give the ChatGPT connector a different name
+   from `MTG_SERVER_NAME` ([DEPLOY.md](DEPLOY.md)).
 6. Description: `Magic: The Gathering deck research, goldfish testing and
    safe Archidekt deck edits, from a self-hosted gateway.` This is the
    description the gateway also gives apps itself.
@@ -316,7 +318,8 @@ buttons for the name, description and URL, and the icon to download.
 **Download the ChatGPT plugin (ZIP)** from the ChatGPT section of the
 gateway's setup hub, or directly at
 `https://mtg.example.com/plugin/mtg-gateway-chatgpt.zip` (the name follows
-the owner's `MTG_SERVER_NAME`, as the Claude plugin's does). It holds the
+the owner's `MTG_SERVER_NAME`, as the Claude plugin's does; the ChatGPT
+connector name is their `MTG_CHATGPT_NAME` when set). It holds the
 connector (this gateway's address) and the MTG skill in one file, in the
 Agent Plugins format that OpenAI's plugins use. It needs no sign-in to
 download: it holds nothing secret.

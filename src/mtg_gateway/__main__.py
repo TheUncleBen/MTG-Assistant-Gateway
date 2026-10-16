@@ -7,7 +7,7 @@ import logging
 import sqlite3
 import sys
 
-from .config import ConfigError, load_settings
+from .config import ConfigError, chatgpt_name_warning, load_settings
 
 # Requests already running get this long on a stop; a background apply then gets up to 90 s more
 # (decks.SHUTDOWN_GRACE_SECONDS). Together they fit inside stop_grace_period (200 s) in
@@ -36,6 +36,8 @@ def main(argv: list[str] | None = None) -> int:
         logging.getLogger("httpx").setLevel(logging.WARNING)
     # httpcore's DEBUG lines carry response headers (Set-Cookie among them): never log them.
     logging.getLogger("httpcore").setLevel(logging.WARNING)
+    if warning := chatgpt_name_warning(settings):
+        logging.getLogger("mtg_gateway.config").warning(warning)
 
     if command == "check-config":
         print("configuration ok")

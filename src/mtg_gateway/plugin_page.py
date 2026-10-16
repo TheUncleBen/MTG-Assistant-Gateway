@@ -47,6 +47,9 @@ SETUP_SKILL = "setup-mtg-gateway"
 # The product name the plugin's files carry; an owner's MTG_SERVER_NAME replaces it.
 DEFAULT_SITE = "MTG Assistant Gateway"
 SLUG_MAX = 40
+# ChatGPT refuses a plugin file whose displayName is over 80 characters (OpenAI's plugin docs,
+# plugin_display_name_too_long, read 2026-10-15; 30 applies only to its public directory).
+CHATGPT_NAME_MAX = 80
 IMAGE_PLUGIN_DIR = Path("/usr/share/mtg-gateway/plugin")
 REPO_PLUGIN_DIR = Path(__file__).resolve().parents[2] / "plugin"
 MAX_FILE_BYTES = 512 * 1024
@@ -99,6 +102,22 @@ def plugin_label(site: str) -> str:
     only, so it can't break the skills' front matter or the JSON it is written into."""
     label = " ".join(re.sub(r"[^A-Za-z0-9 ._'-]+", " ", site).split())
     return label or plugin_slug(site)
+
+
+def chatgpt_label(site: str, chatgpt_name: str | None = None) -> str:
+    """The name ChatGPT shows for this gateway: the owner's MTG_CHATGPT_NAME when set, else their
+    MTG_SERVER_NAME, through plugin_label's filter either way."""
+    if chatgpt_name:
+        label = " ".join(re.sub(r"[^A-Za-z0-9 ._'-]+", " ", chatgpt_name).split())
+        if label:
+            return label
+    return plugin_label(site)
+
+
+def chatgpt_name_too_long(site: str, chatgpt_name: str | None = None) -> tuple[str, int] | None:
+    """The name ChatGPT shows and its length when that is over CHATGPT_NAME_MAX, else None."""
+    label = chatgpt_label(site, chatgpt_name)
+    return (label, len(label)) if len(label) > CHATGPT_NAME_MAX else None
 
 
 def _renamed(data: bytes, rel: str, site: str, name: str) -> bytes:
