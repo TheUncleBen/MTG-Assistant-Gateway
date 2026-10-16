@@ -336,7 +336,7 @@ def parse_goldfish(block: Any, *, deck_size: int | None = None) -> dict[str, Any
     out["honesty"] = honesty
     if not out["metrics"] and not out["summary"]:
         # A refusal or an outage: the simulator's sentence is the whole story.
-        out["message"] = plain_words(preamble or text)[:600] or ("Not simulated." if not ok else "")
+        out["message"] = plain_words(preamble or text)[:600] or ("Not played." if not ok else "")
     return out
 
 
@@ -771,11 +771,11 @@ def ask_prompt(deck_name: str, deck_url: str, cards: list[dict[str, Any]]) -> st
     for both): the assistant reads each card's exact text and passes its models to a new run."""
     names = ", ".join(front_face(c["name"]) for c in cards)
     return (
-        f'In the goldfish simulation of my deck "{deck_name}" ({deck_url}), these cards are played without '
-        f"their effect: {names}. Use the gateway's goldfish annotation tool on the deck to see what each "
-        "one needs, and write each model only from the card's exact Oracle text (the gateway's card text "
-        "and rules tools), never from memory. Then run a new deck report for the deck with your models as "
-        "its annotations, and tell me what changed."
+        f'In the solo test (goldfish simulation) of my deck "{deck_name}" ({deck_url}), these cards '
+        f"are played without their effect: {names}. Use the gateway's goldfish annotation tool on the "
+        "deck to see what each one needs, and write each model only from the card's exact Oracle text "
+        "(the gateway's card text and rules tools), never from memory. Then run a new deck report for "
+        "the deck with your models as its annotations, and tell me what changed."
     )
 
 
@@ -791,6 +791,20 @@ def ask_html(r: dict[str, Any], cards: list[dict[str, Any]]) -> str:
         f"<textarea id='ask-model' class='sr-only' readonly aria-label='{_esc(ASK_LABEL)}'>{_esc(text)}"
         "</textarea></div>"
     )
+
+
+# K7 (Q136): the 300 automatic games are the "solo test"; "Goldfish" is the page where the member
+# plays a hand. Forge's games always seat bundled precons (forge.start_run).
+SOLO_NAME = "Solo test"
+FORGE_HEADING = "Forge games (against precons)"
+
+
+def solo_heading(g: dict[str, Any] | None) -> str:
+    """The solo test's heading, with its game count when the run says it."""
+    games = (g or {}).get("games")
+    if isinstance(games, int) and not isinstance(games, bool) and games > 0:
+        return f"{SOLO_NAME} ({games} games, no opponents)"
+    return f"{SOLO_NAME} (no opponents)"
 
 
 def honesty_html(g: dict[str, Any], ask: str = "") -> str:
@@ -828,8 +842,8 @@ def honesty_html(g: dict[str, Any], ask: str = "") -> str:
         parts.append(
             f"<div class='group'><h3>Modeled but never mattered <small>{_esc(_share(len(low), size))}"
             "</small></h3>"
-            "<p>These cards were understood, drawn and played, and nothing they do changed a goldfish game. "
-            "A goldfish game has no opponent and no interaction, so this says nothing about how the card "
+            "<p>These cards were understood, drawn and played, and nothing they do changed a solo test game. "
+            "A solo test game has no opponent and no interaction, so this says nothing about how the card "
             "does at a real table.</p>" + _names([{"name": n} for n in low]) + "</div>"
         )
     approx = h.get("approximations") or []
@@ -1161,7 +1175,7 @@ def forge_html(f: Any, *, live: bool = False, report_id: Any = None) -> str:
         "running": " <span class='badge'>running</span>",
     }
     not_run = " <span class='badge danger'>not run</span>"
-    head = f"<h2>Forge games{badge.get(state, not_run)}</h2>"
+    head = f"<h2>{FORGE_HEADING}{badge.get(state, not_run)}</h2>"
     parts = [
         head,
         "<p class='muted small'>Forge, an open-source rules engine, plays the deck against the "
@@ -1199,6 +1213,16 @@ def forge_html(f: Any, *, live: bool = False, report_id: Any = None) -> str:
             f"<p class='small'><a href='/history/reports/{_esc(ahead['report_id'])}'>Open the report "
             "it is waiting for</a></p>"
         )
+    # K6: a run seated with another report's opponents links that report (the live page only;
+    # an export has no gateway pages to link to).
+    choice = f.get("opponent_choice") if isinstance(f.get("opponent_choice"), dict) else {}
+    pair = choice.get("shared_with") or f.get("shared_with")
+    if live and isinstance(pair, dict) and isinstance(pair.get("report_id"), str):
+        name = str(pair.get("deck_name") or "the other deck")
+        parts.append(
+            f"<p class='small'><a href='/history/reports/{_esc(pair['report_id'])}'>Open {_esc(name)}'s "
+            "report, which met the same opponents</a></p>"
+        )
     # the report's id lets forge-live.js ask the JSON status route (api.py) for this card alone
     rid = f" data-report-id='{_esc(report_id)}'" if isinstance(report_id, str) and report_id else ""
     attrs = f" data-forge-live aria-live='polite'{rid}" if live and pending else ""
@@ -1224,7 +1248,7 @@ def preflight_html(f: dict[str, Any] | None) -> str:
         warn = str(f.get("error") or "")
     body = (
         f"<p class='muted small'>{_esc(why)} The report holds the deck statistics and, when the research "
-        "service ran, the goldfish games and the validation.</p>"
+        "service ran, the solo test and the validation.</p>"
         if why
         else ""
     )
@@ -1343,15 +1367,15 @@ def report_body_html(
     body = head + engine_html(r, live=not standalone)
     if g is None and v is None:
         body += (
-            "<div class='card'><h2>Goldfish simulation</h2><p class='muted'>The research service was not "
-            "configured when this report ran, so there is no simulation and no validation: only the deck "
-            "statistics below.</p></div>"
+            f"<div class='card'><h2>{_esc(solo_heading(g))}</h2><p class='muted'>The research service "
+            "was not configured when this report ran, so there is no solo test and no validation: only "
+            "the deck statistics below.</p></div>"
         )
     elif g is None:
-        body += "<div class='card'><h2>Goldfish simulation</h2><p class='muted'>Not simulated.</p></div>"
+        body += f"<div class='card'><h2>{_esc(solo_heading(g))}</h2><p class='muted'>Not played.</p></div>"
     elif g.get("message") and not g.get("metrics"):
         body += (
-            "<div class='card'><h2>Goldfish simulation <span class='badge danger'>not run</span></h2>"
+            f"<div class='card'><h2>{_esc(solo_heading(g))} <span class='badge danger'>not run</span></h2>"
             f"<p class='notice warn'>{_esc(g['message'])}</p></div>"
         )
     else:
@@ -1370,11 +1394,10 @@ def report_body_html(
                 + "</ul></details>"
             )
         body += (
-            "<div class='card'><h2>Goldfish simulation</h2>"
-            "<p class='muted small'>A goldfish game is played against an opponent who does nothing: the deck "
-            "draws, plays lands, casts what it can and attacks. The numbers say how fast the deck does its "
-            "own "
-            "thing, not how it fares against interaction.</p>"
+            f"<div class='card'><h2>{_esc(solo_heading(g))}</h2>"
+            "<p class='muted small'>Each solo test game is played against an opponent who does nothing: "
+            "the deck draws, plays lands, casts what it can and attacks. The numbers say how fast the "
+            "deck does its own thing, not how it fares against interaction.</p>"
             + warn
             + (f"<div class='tiles wide'>{tiles}</div>" if tiles else "")
             + (f"<div class='charts'>{charts}</div>" if charts else "")
@@ -1385,9 +1408,9 @@ def report_body_html(
         honesty = s["honesty"] if standalone else honesty_html(g, ask_html(r, s["unmodeled"]))
         if honesty:
             body += (
-                "<div class='card honesty'><h2>What the simulation could not model</h2>"
+                "<div class='card honesty'><h2>What the solo test could not model</h2>"
                 "<p class='muted small'>Read the numbers above with this in mind: the more of the deck sits "
-                "here, the less the simulation says about it.</p>" + honesty + "</div>"
+                "here, the less the solo test says about it.</p>" + honesty + "</div>"
             )
     if g is not None or v is not None:
         body += f"<div class='card'><h2>Validation {_validation_badge(v)}</h2>{validation_html(v)}</div>"
@@ -1426,14 +1449,14 @@ def report_markdown(r: dict[str, Any]) -> str:
         lines.append(f"- Games: {g['games']}{extra}")
     lines.append("")
     if s["tiles"]:
-        lines += ["## Goldfish simulation", ""]
+        lines += [f"## {solo_heading(g)}", ""]
         for t in s["tiles"]:
             ci = f" (95% interval {_ci_text(t['rate'])})" if t.get("rate") and _ci_text(t["rate"]) else ""
             note = f" — {t['note']}" if t.get("note") else ""
             lines.append(f"- {t['label']}: {t['value']}{ci}{note}")
         lines.append("")
     elif g and g.get("message"):
-        lines += ["## Goldfish simulation", "", g["message"], ""]
+        lines += [f"## {solo_heading(g)}", "", g["message"], ""]
     forge = r.get("forge") if isinstance(r.get("forge"), dict) else None
     if forge is None or forge.get("state") == "skipped":
         why = (
@@ -1443,7 +1466,7 @@ def report_markdown(r: dict[str, Any]) -> str:
         )
         lines += [f"## {PREFLIGHT_ONLY}", "", why, ""]
     elif forge:
-        lines += ["## Forge games", ""]
+        lines += [f"## {FORGE_HEADING}", ""]
         if forge.get("state") != "done":
             lines += [str(forge.get("error") or FORGE_STATE_TEXT.get(_forge_key(forge), "")), ""]
         lines += [f"- {ln}" for ln in forge_lines(forge)]
@@ -1454,7 +1477,7 @@ def report_markdown(r: dict[str, Any]) -> str:
         h = g["honesty"]
         size = g.get("deck_size")
         if h["unrecognized"] or h["out_of_scope"] or h["low_impact"]:
-            lines += ["## What the simulation could not model", ""]
+            lines += ["## What the solo test could not model", ""]
             if (h["unrecognized"] or h["out_of_scope"]) and coverage_text(g):
                 lines += [coverage_text(g), ""]
         if h["unrecognized"]:

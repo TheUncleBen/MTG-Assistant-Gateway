@@ -610,6 +610,48 @@ def add_deck_tool_routes(
             saved = True
         return JSONResponse({"ok": saved, "hidden": data["hidden"]}, 200 if saved else 409)
 
+    @server.custom_route("/decks/{deck_id}/compare/forge", methods=["POST"], include_in_schema=False)
+    async def compare_forge(request: Request) -> Response:
+        """K6 (Q136): both decks' Forge games against the same opponents. This deck's report runs
+        first (its own bracket picks the precons); the other deck's seats them
+        (``same_opponents_as``), as the assistants' run_deck_report does. Both run without the
+        solo test, so starting them is quick; the second report opens and links the first."""
+        deck_id = request.path_params["deck_id"]
+        sub, sid = browser_session(state, request)
+        if not sub:
+            return login_redirect(f"/decks/{deck_id}/compare")
+        data = await form(request)
+        if not check_csrf(sid, data):
+            return page(
+                "Compare",
+                "<p class='notice error'>This form expired. Reload and try again.</p>",
+                sub=sub,
+                sid=sid,
+                status=403,
+            )
+        other = str(data.get("with") or "").strip()
+        query = f"?with={other}" if other.isdigit() else ""
+        back = f"<a class='btn' href='/decks/{_esc(deck_id)}/compare{query}'>Back to the comparison</a>"
+        current_client.set(BROWSER_CLIENT_ID)
+        try:
+            if not other.isdigit():
+                raise DeckError("invalid", "Pick the other deck on the Compare page first.")
+            first = await reports.run(sub, deck_id, simulate=False, forge=True)
+            second = await reports.run(
+                sub, other, simulate=False, forge=True, same_opponents_as=first["report_id"]
+            )
+        except DeckError as exc:
+            if busy := busy_response(exc, request, page, sub=sub, sid=sid):
+                return busy
+            return page(
+                "Compare",
+                f"<div class='panel'><p class='notice error'>{_esc(exc)}</p>{back}</div>",
+                sub=sub,
+                sid=sid,
+                status=404 if exc.kind == "not_found" else 400,
+            )
+        return RedirectResponse(f"/history/reports/{_esc(second['report_id'])}", status_code=303)
+
     @server.custom_route("/decks/{deck_id}/compare", methods=["GET"], include_in_schema=False)
     async def compare_page(request: Request) -> Response:
         """This deck against another: a preconstructed deck (the picker lists Archidekt's), any
@@ -672,6 +714,8 @@ def add_deck_tool_routes(
             result=result,
             precons=precons,
             error=error,
+            csrf=_csrf(s, sid),
+            forge_on=reports.forge is not None,
         )
         return page(
             f"Compare: {deck.name or deck.id}",

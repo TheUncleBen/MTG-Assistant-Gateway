@@ -399,7 +399,7 @@ def test_report_page_and_markdown_show_forge_results() -> None:
     assert "not run" in forge_html({"state": "failed", "error": "Forge does not have this deck's commander"})
     assert forge_html(None) == ""
     md = report_markdown({"deck_name": "Liesa", "deck_id": "42", "stats": {}, "forge": done})
-    assert "## Forge games" in md and "Cards Forge could not play: Fake Sticker Card" in md
+    assert "## Forge games (against precons)" in md and "Cards Forge could not play: Fake Sticker Card" in md
     assert "Liesa <b>: 2 wins, 50% (95% interval 15% to 85%)." in md and "1 of them stopped at the time" in md
     # a newer run: turns, losses and each game
     newer = {
@@ -809,3 +809,77 @@ async def test_forge_reads_its_settings_live_and_its_own_seed(tmp_path: Path) ->
     }
     with pytest.raises(DeckError, match="forge_seed must be an integer"):
         reports_module.sim_options({"forge_seed": "x"})
+
+
+class _PairDecks:
+    """Deck 42 with bracket 3 set on Archidekt and deck 43 with bracket 2 (its own table would be
+    the bracket 2 precons)."""
+
+    async def get_any_deck(self, sub: str | None, ref: str) -> Any:
+        raw = FakeArchidekt().decks[42]
+        raw.update(id=int(ref), name=f"Deck {ref}", edhBracket=3 if ref == "42" else 2)
+        return parse_deck(raw)
+
+
+async def test_two_decks_meet_the_same_opponents(tmp_path: Path) -> None:
+    """K6 (Q136): the second deck's run seats the first run's precons (picked for the first deck's
+    bracket), waits behind it as any second run does, says whose opponents they are and links that
+    report; a report of someone else, or one without Forge games, is refused."""
+    from mtg_gateway.report_view import report_body_html
+
+    db = Database(tmp_path / "t.sqlite")
+    for sub in ("alice", "bob"):
+        db.upsert_user(sub, email=None, name=None, preferred_username=None, groups=[])
+    fake = FakeForge(brackets=BRACKETED)
+    reports = ReportService(db, _PairDecks(), None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+    reports.forge_interval = 0.05
+    first = await reports.run("alice", "42", simulate=False, forge=True)
+    assert [d["precon"] for d in fake.started[0]["decks"][1:]] == ["New 3", "Mid 3", "Oldest 3"]
+    second = await reports.run(
+        "alice", "43", simulate=False, forge=True, same_opponents_as=first["report_id"]
+    )
+    assert second["forge"]["state"] == "queued"
+    assert second["forge"]["shared_with"] == {"report_id": first["report_id"], "deck_name": "Deck 42"}
+    page = report_body_html(second)
+    assert f"href='/history/reports/{first['report_id']}'>Open Deck 42's report" in page
+    fake.finish(first["forge"]["job_id"], [1])
+    for _ in range(200):
+        if len(fake.started) == 2:
+            break
+        await asyncio.sleep(0.02)
+    # deck 43's own bracket (2) would seat New 2, Older 2, New 3: it meets deck 42's table instead
+    assert [d["precon"] for d in fake.started[1]["decks"][1:]] == ["New 3", "Mid 3", "Oldest 3"]
+    now = reports.get("alice", second["report_id"])["forge"]
+    choice = now["opponent_choice"]
+    assert choice["rule"] == "shared" and choice["shared_with"]["report_id"] == first["report_id"]
+    assert choice["opponent_brackets"] == {"New 3": 3, "Mid 3": 3, "Oldest 3": 3}
+    assert any("The same opponents as Deck 42's Forge games" in ln for ln in forge_lines(now))
+    fake.finish(now["job_id"], [2])
+    await asyncio.wait_for(reports._forge_task, timeout=20)
+    # a share is never answered with a reused report
+    again = await reports.run("alice", "43", simulate=False, forge=True, same_opponents_as=first["report_id"])
+    assert not again.get("reused") and again["report_id"] != second["report_id"]
+    reports._forge_task.cancel()
+    with pytest.raises(DeckError) as other:
+        await reports.run("bob", "43", forge=True, same_opponents_as=first["report_id"])
+    assert other.value.kind == "not_found"
+    quick = await reports.run("alice", "44", simulate=False, forge=False)
+    with pytest.raises(DeckError, match="no Forge games"):
+        await reports.run("alice", "43", forge=True, same_opponents_as=quick["report_id"])
+    with pytest.raises(DeckError, match="same_opponents_as"):
+        await reports.run("alice", "43", forge=True, same_opponents_as=" ")
+
+
+async def test_shared_opponents_that_left_the_engine_or_never_sat() -> None:
+    """A share whose precons this Forge image no longer has fails and says so; one whose run never
+    started picks for that run's bracket, as its own run would."""
+    from mtg_gateway.forge import shared_opponents
+
+    fake = FakeForge(brackets=BRACKETED)
+    gone = {"report_id": "rep_a", "deck_name": "Deck A", "opponents": ["New 3", "Retired 9"]}
+    section = await start_run(fake.client(), DECK_TEXT, "Liesa", games=1, shared=gone)
+    assert section["state"] == "failed" and "Retired 9" in section["error"] and not fake.started
+    precons = [{"name": n, "bracket": b} for n, b in BRACKETED.items()]
+    names, why = shared_opponents(precons, {"deck_name": "Deck A", "bracket": [2, "archidekt"]})
+    assert names == ["New 2", "Older 2", "New 3"]
+    assert why["rule"] == "shared" and why["bracket"] == 2 and "picked for Deck A's bracket" in why["note"]

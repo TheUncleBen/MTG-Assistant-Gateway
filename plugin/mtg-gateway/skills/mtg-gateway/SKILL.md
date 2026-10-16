@@ -162,7 +162,9 @@ and legal (validate the resulting list if in doubt).
 
 ## Simulation (goldfish)
 
-Goldfish simulation plays the deck alone, against no opponent. It measures
+Goldfish simulation plays the deck alone, against no opponent. The gateway's
+pages call it the "solo test" ("Run full test" and "Solo test only" on the deck
+page); "Goldfish" there is the page where the member plays a hand. It measures
 modelled speed and consistency, such as "how often is the commander cast by
 turn 4". It does **not** predict a win rate in a real multiplayer game and it
 cannot value interaction, removal, politics or an opponent's deck.

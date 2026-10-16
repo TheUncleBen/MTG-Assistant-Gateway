@@ -366,14 +366,16 @@ def banner_html(
         f"{icon('play')} Play on EDHPlay</a>"
     )
     if csrf:
-        # The same run as the assistant's run_deck_report: statistics, validation and 300
-        # simulated games on the research service, stored under History. "Simulated", not
-        # "goldfish": Goldfish is the button beside it, where the member plays by hand (D3).
+        # The same run as the assistant's run_deck_report: statistics, validation, the 300-game solo
+        # test on the research service and, when Forge is on, Forge's games; stored under History.
+        # "Solo test", not "goldfish": Goldfish is the button beside it, where the member plays by
+        # hand (D3, K7 in Q136).
         primary += (
             f"<form method='post' action='/decks/{did}/report' class='inline'>{csrf_in}"
-            "<button type='submit' data-busy-label='Simulating…' title='300 simulated games, a decklist "
-            "check and the deck statistics, saved under History. The run takes up to a minute; the result "
-            f"page opens when it is done.'>{icon('stats')} Run simulation</button></form>"
+            "<button type='submit' data-busy-label='Testing…' title='The solo test (300 games against no "
+            "opponent), a decklist check and the deck statistics, plus Forge games against precons when "
+            "Forge is on; saved under History. The solo test takes up to a minute; the result page opens "
+            f"when it is done.'>{icon('stats')} Run full test</button></form>"
         )
     more_items = []
     if csrf and forge_on:
@@ -381,9 +383,9 @@ def banner_html(
         more_items.append(
             f"<form method='post' action='/decks/{did}/report'>{csrf_in}"
             "<input type='hidden' name='forge' value='0'>"
-            "<button type='submit' data-busy-label='Simulating…' title='The same run without Forge games: "
-            f"300 simulated games, the decklist check and the statistics'>{icon('stats')} "
-            "Quick simulation (no Forge)</button></form>"
+            "<button type='submit' data-busy-label='Testing…' title='The same run without Forge games: "
+            f"the solo test, the decklist check and the statistics'>{icon('stats')} "
+            "Solo test only</button></form>"
         )
     if own and csrf:
         more_items.append(f"<a href='/decks/{did}/settings'>{icon('settings')} Deck settings</a>")
@@ -1474,6 +1476,8 @@ def compare_page_html(
     result: dict[str, Any] | None,
     precons: dict[str, list[dict[str, Any]]],
     error: str = "",
+    csrf: str | None = None,
+    forge_on: bool = False,
 ) -> str:
     """The deck page's compare view: a form to pick the other deck (Archidekt's preconstructed
     decks are offered as suggestions, any deck id or link and a pasted list work too) and, once
@@ -1556,7 +1560,39 @@ def compare_page_html(
             "</table></section>"
         )
     return (
-        form + f"<section class='panel'><div class='tiles'>{tile_html}</div></section>" + lists + delta_html
+        form
+        + f"<section class='panel'><div class='tiles'>{tile_html}</div></section>"
+        + lists
+        + delta_html
+        + compare_forge_html(deck, other, other_name, csrf=csrf, forge_on=forge_on)
+    )
+
+
+def _has_commander(deck: Deck) -> bool:
+    return any(deck.in_deck(c) and deck.is_commander(c) for c in deck.cards)
+
+
+def compare_forge_html(deck: Deck, other: Any, other_name: str, *, csrf: str | None, forge_on: bool) -> str:
+    """K6 (Q136): Forge games of both decks against the same three precons, picked for this
+    deck's bracket, from the Compare page (POST /decks/<id>/compare/forge). Only when Forge is set
+    up and both sides are Archidekt Commander decks: Forge plays nothing else, and a pasted list
+    has no report to keep its games."""
+    if not (forge_on and csrf and isinstance(other, Deck) and _has_commander(deck) and _has_commander(other)):
+        return ""
+    name = esc(deck.name or f"Deck {deck.id}")
+    return (
+        "<section class='panel compareforge'><h3>Forge games against the same opponents</h3>"
+        f"<p class='muted small'>Forge plays each deck against the same three precons, picked for "
+        f"{name}'s bracket, so the two win rates compare like for like. Each deck gets its own report "
+        "under History with the deck statistics, the decklist check and the Forge games (no solo test). "
+        "The games play in the background, one deck after the other.</p>"
+        f"<form method='post' action='/decks/{esc(deck.id)}/compare/forge'>"
+        f"<input type='hidden' name='csrf' value='{esc(csrf)}'>"
+        f"<input type='hidden' name='with' value='{esc(other.id)}'>"
+        "<button type='submit' class='btn-primary' data-busy-label='Starting…' "
+        f"title='Starts both reports; the second opens when both have started'>{icon('stats')} Test both "
+        f"in Forge against the same opponents</button></form>"
+        "</section>"
     )
 
 

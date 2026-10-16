@@ -1138,9 +1138,9 @@ def test_quick_simulation_without_forge_is_offered_only_when_forge_is_on() -> No
 
     off = banner_html(deck([card("Opt")]), {}, own=True, csrf="t", writes_enabled=True)
     on = banner_html(deck([card("Opt")]), {}, own=True, csrf="t", writes_enabled=True, forge_on=True)
-    assert "Quick simulation (no Forge)" not in off
-    assert "Quick simulation (no Forge)" in on and "name='forge' value='0'" in on
+    assert "Solo test only" not in off
+    assert "Solo test only" in on and "name='forge' value='0'" in on
     signed_out = banner_html(
         deck([card("Opt")]), {}, own=False, csrf=None, writes_enabled=True, forge_on=True
     )
-    assert "Quick simulation" not in signed_out
+    assert "Solo test only" not in signed_out

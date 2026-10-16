@@ -302,6 +302,45 @@ def pick_opponents(
     }
 
 
+def shared_opponents(
+    precons: list[dict[str, Any]], shared: dict[str, Any]
+) -> tuple[list[str] | None, dict[str, Any]]:
+    """K6 (Q136): the precons another report's run sat at the table, for a like-for-like
+    comparison; (None, choice) when one of them is no longer in this Forge image. Without that
+    run's precons (it never started), they are picked for its bracket, as its own run would."""
+    deck = str(shared.get("deck_name") or "the other deck")
+    link = {k: shared[k] for k in ("report_id", "deck_name") if isinstance(shared.get(k), str)}
+    opponents = shared.get("opponents")
+    if isinstance(opponents, list) and opponents and all(isinstance(o, str) for o in opponents):
+        have = {p["name"] for p in precons}
+        gone = [o for o in opponents if o not in have]
+        if gone:
+            return None, {
+                "rule": "shared",
+                "shared_with": link,
+                "note": f"The opponents of {deck}'s Forge games are not all in this simulation engine any "
+                f"more ({', '.join(gone)}), so this run cannot seat the same table. Run both reports "
+                "again to compare them.",
+            }
+        by_name = {p["name"]: p for p in precons}
+        brackets = {o: by_name[o]["bracket"] for o in opponents if isinstance(by_name[o].get("bracket"), int)}
+        return list(opponents), {
+            "rule": "shared",
+            "shared_with": link,
+            **({"opponent_brackets": brackets} if brackets else {}),
+            "note": f"The same opponents as {deck}'s Forge games, so the two decks compare like for like.",
+        }
+    level, source = shared.get("bracket") or (None, None)
+    chosen, picked = pick_opponents(precons, level if isinstance(level, int) else None, source)
+    return chosen, {
+        **picked,
+        "rule": "shared",
+        "shared_with": link,
+        "note": f"The opponents picked for {deck}'s bracket, the ones its own Forge games meet, so the "
+        "two decks compare like for like.",
+    }
+
+
 async def start_run(
     client: ForgeClient,
     deck_text: str,
@@ -312,12 +351,16 @@ async def start_run(
     bracket: int | None = None,
     bracket_source: str | None = None,
     parallel: int = 1,
+    shared: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Start a Forge run of the member's deck against bundled precons and return the report's
-    ``forge`` section. Cards Forge lacks are removed from the run and named in ``not_played``;
-    the run is refused only when the commander itself is missing. Every run is seeded: without a
-    seed from the request the gateway picks one, so ``seed`` is always the one Forge used
-    (``seed_source`` says whose it was) and the same games can be asked for again."""
+    ``forge`` section. ``shared`` (K6, Q136) seats the opponents of another report's run, so two
+    decks compare like for like: its ``opponents`` (that run's precons) when it has them, else
+    they are picked for its ``bracket``; ``report_id`` and ``deck_name`` say whose they were.
+    Cards Forge lacks are removed from the run and named in ``not_played``; the run is refused
+    only when the commander itself is missing. Every run is seeded: without a seed from the
+    request the gateway picks one, so ``seed`` is always the one Forge used (``seed_source`` says
+    whose it was) and the same games can be asked for again."""
     deck = forge_deck(deck_text)
     if not deck["commander"]:
         return {
@@ -337,7 +380,12 @@ async def start_run(
         }
     deck["main"] = [[n, name] for n, name in deck["main"] if resolved.get(name)]
     precons = [p for p in await client.precons() if isinstance(p, dict) and isinstance(p.get("name"), str)]
-    chosen, choice = pick_opponents(precons, bracket, bracket_source)
+    if shared is not None:
+        chosen, choice = shared_opponents(precons, shared)
+        if chosen is None:
+            return {"state": "failed", "error": choice["note"], "opponent_choice": choice}
+    else:
+        chosen, choice = pick_opponents(precons, bracket, bracket_source)
     if not chosen:
         return {"state": "failed", "error": "The simulation engine has no opponent decks."}
     seats = [deck_name, *chosen]
