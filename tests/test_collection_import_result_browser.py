@@ -104,5 +104,17 @@ def test_import_result_reads_at_every_width(server: Server, width: int, theme: s
             "Nothing was imported: line 3: quantity 'x' is not a number."
         )
         _check(page, "import-refused", width, theme)
+        # the refusals the review fixes added: a quantity out of range, an unclosed quote
+        _import(page, server, "Quantity,Name\n1,Opt\n0,Opt\n")
+        assert page.locator(".notice").inner_text() == (
+            "Nothing was imported: line 3: quantity '0' is not from 1 to 9,999."
+        )
+        _check(page, "import-refused-quantity", width, theme)
+        _import(page, server, 'Quantity,Name\n1,"Opt' + "x" * 140_000 + "\n")
+        assert page.locator(".notice").inner_text() == (
+            "Nothing was imported: line 2: a cell is longer than 131,072 characters; check for a quote "
+            "that is not closed."
+        )
+        _check(page, "import-refused-cell", width, theme)
         assert errors == [], errors
         browser.close()
