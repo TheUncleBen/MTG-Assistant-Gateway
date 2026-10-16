@@ -2865,7 +2865,9 @@ class Database:
     # caller counts put_card_model's True answers against count_card_models), whether a member's
     # models go when their data is deleted (they are not in MEMBER_TABLES yet), whether any member
     # may replace another's model (put_card_model lets the newest win, as C's code expects), and
-    # who may delete one. Nothing here enforces any of these yet.
+    # the "simulator version" column Q136 item 3 approved (built as oracle_hash; on C's card).
+    # Nothing here enforces any of these yet. Decided (Q136 item 2): the member who added a model
+    # and an admin may remove it (delete_card_model, admin_delete_card_model).
 
     def get_card_models(self, keys: list[str]) -> list[dict[str, Any]]:
         """The models kept for these card keys (front face, casefolded), in no particular order;
@@ -2911,8 +2913,8 @@ class Database:
             return str(row["added_by"]) != sub
 
     def delete_card_model(self, card_key: str, sub: str) -> bool:
-        """Delete the card's model when ``sub``'s is the one kept (the narrowest reading until Ben
-        decides who may delete one; see the TODO above). True when a model was deleted."""
+        """Delete the card's model when ``sub``'s is the one kept (Q136 item 2: the member who
+        added it). True when a model was deleted."""
         with self.tx() as c:
             return (
                 c.execute(
@@ -2920,6 +2922,23 @@ class Database:
                 ).rowcount
                 > 0
             )
+
+    def admin_delete_card_model(self, card_key: str, *, by: str) -> bool:
+        """An admin removes any member's model (Q136 item 2). Audited as ``card_model_removed``
+        under the admin, with the card and whose model it was. True when a model was deleted."""
+        with self.tx() as c:
+            row = c.execute(
+                "SELECT name, added_by FROM card_models WHERE card_key = ?", (card_key,)
+            ).fetchone()
+            if row is None:
+                return False
+            c.execute("DELETE FROM card_models WHERE card_key = ?", (card_key,))
+        self.audit(
+            "card_model_removed",
+            sub=by,
+            detail={"card": str(row["name"]), "card_key": card_key, "added_by": str(row["added_by"])},
+        )
+        return True
 
     def count_card_models(self, sub: str) -> int:
         """How many of the kept models are ``sub``'s."""
