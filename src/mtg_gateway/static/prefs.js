@@ -17,14 +17,20 @@
     var input = document.querySelector("input[name=csrf]");
     return input ? input.value : "";
   }
+  // Saves go one after another, in the order they were made: two quick changes (L, then S) must
+  // never reach the gateway the other way round and leave the account with the first one.
+  var queue = Promise.resolve();
   function post(body) {
     if (!window.fetch) return Promise.resolve(null);
-    return fetch("/api/v1/prefs", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf() },
-      body: JSON.stringify(body)
-    }).then(function (r) { return r.ok ? r.json() : null; }, function () { return null; });
+    queue = queue.then(function () {
+      return fetch("/api/v1/prefs", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf() },
+        body: JSON.stringify(body)
+      }).then(function (r) { return r.ok ? r.json() : null; }, function () { return null; });
+    });
+    return queue;
   }
   function has(name) { return Object.prototype.hasOwnProperty.call(values, name); }
 

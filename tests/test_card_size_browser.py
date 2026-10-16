@@ -120,6 +120,48 @@ def test_the_switch_applies_at_once_and_follows_the_account(server: Server, widt
     assert errors == []
 
 
+# The first save the page sends reaches the network 1.2 s late, as on a slow connection.
+LATE_FIRST_SAVE = """
+(() => {
+  const real = window.fetch; let first = true;
+  window.fetch = function (url, opts) {
+    if (String(url).indexOf('/api/v1/prefs') !== -1 && opts && opts.method === 'POST' && first) {
+      first = false;
+      return new Promise(r => setTimeout(r, 1200)).then(() => real.call(this, url, opts));
+    }
+    return real.apply(this, arguments);
+  };
+})();
+"""
+
+
+def test_quick_size_changes_keep_the_last_one(server: Server) -> None:
+    """CI on a648672: two quick changes are saved in the order they were made, so the account keeps
+    the last one even when the first save is slow (before, M could be stored before L)."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    _size(server, None)
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1280)
+        page.add_init_script(LATE_FIRST_SAVE)
+        page.goto(f"{server.base}/decks/42?view=grid", wait_until="networkidle")
+        answered = []
+        page.on("response", lambda r: answered.append(r) if "/api/v1/prefs" in r.url else None)
+        page.locator(".toolbar [data-card-size-set=l]").click()
+        page.locator(".toolbar [data-card-size-set=s]").click()
+        assert page.get_attribute("html", "data-card-size") == "s"
+        for _ in range(100):  # both saves answered (the first waits 1.2 s on purpose)
+            if len(answered) >= 2:
+                break
+            page.wait_for_timeout(50)
+        assert len(answered) == 2 and all(r.ok for r in answered)
+        assert server.db.get_pref("user-1", "card.size") == "s"
+        browser.close()
+    assert errors == []
+
+
 def test_the_printing_picker_has_the_same_switch(server: Server) -> None:
     from playwright.sync_api import sync_playwright
 
@@ -134,7 +176,10 @@ def test_the_printing_picker_has_the_same_switch(server: Server) -> None:
             sw = page.locator(".printpick .sizeseg")
             assert sw.is_visible()
             before = page.evaluate(COLS, ".printpick .ppgrid")
-            page.locator(".printpick [data-card-size-set=l]").click()
+            # its save answers before the next click, so the next wait can't catch this one's answer
+            with page.expect_response(SAVED) as saved:
+                page.locator(".printpick [data-card-size-set=l]").click()
+            assert saved.value.ok
             assert page.evaluate(COLS, ".printpick .ppgrid") < before
             assert page.get_attribute(".printpick [data-card-size-set=l]", "aria-pressed") == "true"
             assert page.get_attribute(".printpick [data-card-size-set=m]", "aria-pressed") == "false"
