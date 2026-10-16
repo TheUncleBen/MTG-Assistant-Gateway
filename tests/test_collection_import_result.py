@@ -321,3 +321,14 @@ async def test_huge_cells_and_an_unknown_condition_through_the_page(stack: Stack
         assert [(c["quantity"], c["condition"]) for c in recs] == [(1, 1)]  # Archidekt's 1 is NM
     finally:
         await b.aclose()
+
+
+@pytest.mark.parametrize("name_col", ["Card", "card name", "NAME"])
+def test_every_name_column_the_csv_reader_knows_makes_the_text_a_csv(name_col: str) -> None:
+    """A header with "Card" (one of the Name column's names) is read as a CSV, not as a plain
+    list whose every line, the header included, would be a card name."""
+    items = parse_collection_import(f"Quantity,{name_col},Set\n2,Sol Ring,cmr\n1,Opt,xln\n")
+    assert [(i["name"], i["quantity"], i["set"], i.get("line")) for i in items] == [
+        ("Sol Ring", 2, "cmr", 2),
+        ("Opt", 1, "xln", 3),
+    ]
