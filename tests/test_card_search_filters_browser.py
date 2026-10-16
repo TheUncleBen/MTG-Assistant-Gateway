@@ -452,3 +452,33 @@ def test_a_search_too_long_for_scryfall_says_so_at_every_size(server: Server, wi
             page.screenshot(path=str(Path(SHOTS) / f"too-long-{width}-{theme}.png"))
         assert errors == [], errors
         browser.close()
+
+
+def test_a_tap_above_a_dropdown_sheet_in_the_phone_panel_only_closes_it(server: Server) -> None:
+    """Review R4-2: on a phone a dropdown in the Filters panel opens as a sheet over a dim
+    background. A tap on the dimmed part (here on the first colour, above the sheet) closes the
+    sheet and nothing else: the colour stays off."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid = _link(server)
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 360, "light", exe)
+        page.goto(f"{server.base}/cards?q=sol", wait_until="networkidle")
+        page.locator(".cs-open").click()
+        page.locator("#cs-filters.open").wait_for(timeout=3000)
+        colour = page.locator("#cs-filters input[name=c]").first
+        colour.scroll_into_view_if_needed()
+        box = colour.bounding_box()
+        assert box is not None
+        page.locator("#cs-filters .msel-btn[aria-label='Format']").click()
+        sheet = page.locator(".msel-list.sheet")
+        sheet.wait_for(timeout=3000)
+        top = sheet.bounding_box()
+        assert top is not None and box["y"] + box["height"] < top["y"], (box, top)  # it's above the sheet
+        page.touchscreen.tap(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+        page.wait_for_timeout(300)
+        assert page.locator(".msel-list").count() == 0
+        assert not colour.is_checked()
+        assert errors == [], errors
+        browser.close()

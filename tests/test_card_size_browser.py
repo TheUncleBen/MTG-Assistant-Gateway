@@ -162,6 +162,42 @@ def test_quick_size_changes_keep_the_last_one(server: Server) -> None:
     assert errors == []
 
 
+def test_a_save_with_an_unreadable_answer_does_not_stop_the_next_ones(server: Server) -> None:
+    """Review R4-3: the first save's answer is cut off (not JSON). The saves after it still go,
+    in order, and the account keeps the last choice."""
+    from playwright.sync_api import sync_playwright
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    _size(server, None)
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1280)
+        sent: list[str] = []
+
+        def cut_first(route) -> None:
+            if route.request.method != "POST":
+                route.continue_()
+                return
+            sent.append(route.request.post_data or "")
+            if len(sent) == 1:
+                route.fulfill(status=200, content_type="application/json", body='{"ok": tr')
+            else:
+                route.continue_()
+
+        page.route("**/api/v1/prefs", cut_first)
+        page.goto(f"{server.base}/decks/42?view=grid", wait_until="networkidle")
+        for size in ("l", "m", "s"):
+            page.locator(f".toolbar [data-card-size-set={size}]").click()
+        for _ in range(100):
+            if len(sent) >= 3 and server.db.get_pref("user-1", "card.size") == "s":
+                break
+            page.wait_for_timeout(50)
+        assert len(sent) == 3, sent
+        assert server.db.get_pref("user-1", "card.size") == "s"
+        browser.close()
+    assert errors == []
+
+
 def test_the_printing_picker_has_the_same_switch(server: Server) -> None:
     from playwright.sync_api import sync_playwright
 

@@ -256,7 +256,8 @@ is one click:
 3. Deploy (step 6). Portainer stores the login with each service, so
    whichever node runs it can pull. To update later, open the stack, change
    `MTG_TAG` if you're moving to a new release, and click **Update the
-   stack** with **Re-pull image** on.
+   stack**. In the box that asks "Are you sure?", make sure **Re-pull image
+   and redeploy** is on, then click **Update**.
 
 If tasks show `rejected` with `No such image: ghcr.io/<owner>/...`, check
 the image name and tag first, then the registry URL above. A `docker login`
@@ -331,21 +332,27 @@ locked (greyed out) even with no variable set.
    repository, the update brings the new file. If Portainer pulls your own
    copy of the repository instead, bring that copy up to date first and keep
    your edits in it.
-   **Without Portainer:** in your copy of the repository, run
-   `git checkout deploy/portainer-stack.yml` (this undoes your edits to it,
-   so note them first, as above), then `git pull`. Make the same edits in the
-   new `deploy/portainer-stack.yml`.
+   **Without Portainer:** in your copy of the repository, keep a copy of your
+   edited file (`cp deploy/portainer-stack.yml
+   deploy/portainer-stack.old.local.yml`). Then run
+   `git checkout deploy/portainer-stack.yml` (this undoes your edits to it),
+   then `git pull`. Make the same edits in the new
+   `deploy/portainer-stack.yml`.
 2. **Optional:** for each setting you want to change on the Settings page,
    delete its variable. A variables file made from the older
    `stack.env.example` sets 19 of them, such as `MTG_ARCHIDEKT_BACKUPS=true`
    and `MTG_DECK_SYNC_MINUTES=30`. Any variable you keep stays locked: the
    Settings page shows it greyed out with its value, and you change it in
    the stack and redeploy.
-3. Click **Update the stack** (with the Repository build method, **Pull and
-   redeploy**). In the box that asks "Are you sure?", turn on **Re-pull
-   image and redeploy**, then click **Update**. Without Portainer: open a new
-   shell (a variable you deleted from `mtg.env` stays set in the old one) and
-   run the last two lines under “Without Portainer” again.
+3. If `MTG_TAG` names a version, change it to `0.7.29` first (in the stack's
+   variables, or in `mtg.env` without Portainer); otherwise you redeploy the
+   old version with the new stack file. Click **Update the stack** (with the
+   Repository build method, **Pull and redeploy**). In the box that asks
+   "Are you sure?", make sure **Re-pull image and redeploy** is on, then
+   click **Update**. Without Portainer: open a new shell (a variable you
+   deleted from `mtg.env` stays set in the old one), go to your copy of the
+   repository (`cd` into it), and run the last two lines under “Without
+   Portainer” again.
 
 With Docker Compose, see
 [DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md#updating-to-0729-from-an-earlier-version).

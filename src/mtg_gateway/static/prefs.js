@@ -18,18 +18,28 @@
     return input ? input.value : "";
   }
   // Saves go one after another, in the order they were made: two quick changes (L, then S) must
-  // never reach the gateway the other way round and leave the account with the first one.
+  // never reach the gateway the other way round and leave the account with the first one. Each
+  // save ends one way or another (an answer cut off or unreadable, no network, or no answer within
+  // SAVE_WAIT_MS), so one bad save never holds up the ones after it.
+  var SAVE_WAIT_MS = 15000;
   var queue = Promise.resolve();
+  function send(body) {
+    var stop = window.AbortController ? new AbortController() : null;
+    var timer = stop ? setTimeout(function () { stop.abort(); }, SAVE_WAIT_MS) : null;
+    return fetch("/api/v1/prefs", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf() },
+      body: JSON.stringify(body),
+      signal: stop ? stop.signal : undefined
+    })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .catch(function () { return null; })
+      .then(function (answer) { if (timer) clearTimeout(timer); return answer; });
+  }
   function post(body) {
     if (!window.fetch) return Promise.resolve(null);
-    queue = queue.then(function () {
-      return fetch("/api/v1/prefs", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf() },
-        body: JSON.stringify(body)
-      }).then(function (r) { return r.ok ? r.json() : null; }, function () { return null; });
-    });
+    queue = queue.then(function () { return send(body); });
     return queue;
   }
   function has(name) { return Object.prototype.hasOwnProperty.call(values, name); }

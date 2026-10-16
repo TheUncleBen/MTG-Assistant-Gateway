@@ -262,11 +262,31 @@ def test_consent_click_guard_defeats_a_double_click_swap(server: Server) -> None
             browser.close()
 
 
-def test_consent_page_without_javascript_enforces_a_minimum_delay(server: Server) -> None:
+class _Clock:
+    """The click guard's clock, moved only by the test: the age a submit has when it reaches the
+    gateway no longer depends on how fast the runner is."""
+
+    def __init__(self) -> None:
+        self.now = time.time()
+
+    def time(self) -> float:
+        return self.now
+
+
+def test_consent_page_without_javascript_enforces_a_minimum_delay(
+    server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """With scripts off, the <noscript> form works, but the server refuses (and shows the page
-    again for) a submit that arrives faster than a person can read the page."""
+    again for) a submit that arrives faster than a person can read the page.
+
+    The guard's clock is the test's: on a loaded runner (8 workers) the first click once reached
+    the gateway more than MIN_FORM_AGE after the page was drawn and was rightly accepted."""
     from playwright.sync_api import sync_playwright
 
+    from mtg_gateway import clickguard
+
+    clock = _Clock()
+    monkeypatch.setattr(clickguard, "time", clock)
     exe = _chromium_or_skip()
     with sync_playwright() as p:
         browser = _launch(p, exe)
@@ -274,10 +294,17 @@ def test_consent_page_without_javascript_enforces_a_minimum_delay(server: Server
             page = browser.new_context(java_script_enabled=False).new_page()
             page.goto(server.authorize_url())
             assert not page.locator("form.guarded").is_visible()
+            # at once: refused, and the page is shown again (with a new stamp, at this time)
             page.get_by_role("button", name="Approve and sign in").click()
             page.wait_for_load_state()
             assert page.url.startswith(f"{server.base}/authorize/confirm"), page.url  # shown again
-            page.wait_for_timeout(1200)
+            # just under the minimum: still refused
+            clock.now += clickguard.MIN_FORM_AGE - 0.05
+            page.get_by_role("button", name="Approve and sign in").click()
+            page.wait_for_load_state()
+            assert page.url.startswith(f"{server.base}/authorize/confirm"), page.url
+            # past it: accepted
+            clock.now += 1.2
             page.get_by_role("button", name="Approve and sign in").click()
             page.wait_for_url(f"{server.outside}/application/o/authorize/**", timeout=10_000)
         finally:
