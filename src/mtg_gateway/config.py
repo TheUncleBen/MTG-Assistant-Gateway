@@ -15,13 +15,14 @@ import os
 import re
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 from cryptography.fernet import Fernet
 
+from .modes import MODE_LABELS
 from .oidc import TOKEN_AUTH_METHODS, validate_groups_claim
 from .plugin_page import CHATGPT_NAME_MAX, chatgpt_name_from_setting, chatgpt_name_too_long
 
@@ -553,7 +554,10 @@ def load_settings() -> Settings:
         scan_art_images_per_hour=_int_env("MTG_SCAN_ART_IMAGES_PER_HOUR", 1500, lo=1, hi=36000),
         scan_art_max_galleries=_int_env("MTG_SCAN_ART_MAX_GALLERIES", 500, lo=1, hi=100000),
         scan_art_gallery_idle_days=_int_env("MTG_SCAN_ART_GALLERY_IDLE_DAYS", 180, lo=1, hi=3650),
-        env_set=frozenset(key for key, spec in MANAGED_SETTINGS.items() if _env(spec.env) is not None),
+        # set = a value other than blanks; a blank (or only spaces) leaves it to the page (Q17)
+        env_set=frozenset(
+            key for key, spec in MANAGED_SETTINGS.items() if (os.environ.get(spec.env) or "").strip()
+        ),
         **kwargs,
     )
 
@@ -587,6 +591,9 @@ class SettingSpec:
     max_len: int = 0  # text: longest value (0 = no text)
     empty_ok: bool = False  # text: "" is allowed (it means "use the other setting", e.g. chatgpt_name)
     zero_ok: bool = False  # number: 0 is allowed below ``lo`` (it means "off", e.g. deck_sync_minutes)
+    unit: str = ""  # number: what it counts, for the refusal ("minutes", "days", "seconds")
+    # choice: what the page calls each choice (the refusal names these, not the stored values)
+    labels: tuple[str, ...] = ()
     # True when the gateway reads it only when it starts (the page says it applies after a restart)
     restart: bool = False
 
@@ -607,7 +614,8 @@ class SettingSpec:
             for choice in self.choices:
                 if text.lower() == choice.lower():
                     return choice
-            raise SettingError(self.key, "must be one of " + ", ".join(self.choices))
+            names = [f'"{n}"' for n in (self.labels or self.choices)]
+            raise SettingError(self.key, "must be one of " + ", ".join(names[:-1]) + " or " + names[-1])
         if self.kind == "text":
             text = " ".join(str(raw).split()) if raw is not None else ""
             if not text and not self.empty_ok:
@@ -634,14 +642,16 @@ class SettingSpec:
         if value == 0 and self.zero_ok:
             return 0
         if not self.lo <= value <= self.hi:
-            lo, hi = (int(self.lo), int(self.hi)) if self.kind == "int" else (self.lo, self.hi)
-            raise SettingError(
-                self.key,
-                f"must be 0 (off) or between {lo} and {hi}"
-                if self.zero_ok
-                else f"must be between {lo} and {hi}",
+            span = f"between {_number(self.lo)} and {_number(self.hi)}" + (
+                f" {self.unit}" if self.unit else ""
             )
+            raise SettingError(self.key, f"must be 0 (off) or {span}" if self.zero_ok else f"must be {span}")
         return value
+
+
+def _number(value: float) -> str:
+    """A bound as the pages write numbers: thousands commas, no ".0" (browse.py's ``{n:,}``)."""
+    return f"{int(value):,}" if float(value).is_integer() else f"{value:,}"
 
 
 class SettingError(ValueError):
@@ -661,11 +671,12 @@ def _spec(key: str, env: str, kind: str, default: Any, group: str, owner: str, *
 
 
 _MODES = ("manual", "semi", "auto")
+_MODE_NAMES = tuple(MODE_LABELS[m] for m in _MODES)  # the Account page's names (modes.py)
 _LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
 # Bounds are what the dashboard may store; a deployment value is checked by load_settings instead.
 # They sit inside load_settings' ranges. Pacing towards Archidekt and Scryfall can only be made
-# gentler than today's defaults from the page, never faster ("gentle on Archidekt", R-132; G13);
+# gentler than today's defaults from the page, never faster ("be gentle on Archidekt's servers", R-123; G13);
 # the same goes for anything else that adds background reads (deck sync, watchlist sizes).
 MANAGED_SETTINGS: dict[str, SettingSpec] = {
     s.key: s
@@ -679,9 +690,17 @@ MANAGED_SETTINGS: dict[str, SettingSpec] = {
             "approvals",
             "A",
             choices=_MODES,
+            labels=_MODE_NAMES,
         ),
         _spec(
-            "approval_mode_max", "MTG_APPROVAL_MODE_MAX", "choice", "auto", "approvals", "A", choices=_MODES
+            "approval_mode_max",
+            "MTG_APPROVAL_MODE_MAX",
+            "choice",
+            "auto",
+            "approvals",
+            "A",
+            choices=_MODES,
+            labels=_MODE_NAMES,
         ),
         _spec("auto_apply_max_rows", "MTG_AUTO_APPLY_MAX_ROWS", "int", 5, "approvals", "A", lo=1, hi=100),
         _spec("auto_big_edit_rows", "MTG_AUTO_BIG_EDIT_ROWS", "int", 20, "approvals", "A", lo=1, hi=100),
@@ -1002,6 +1021,22 @@ MANAGED_SETTINGS: dict[str, SettingSpec] = {
     )
 }
 
+# What each number counts, named in its refusal ("must be between 30 and 1,440 minutes").
+_UNITS = {
+    "deck_sync_minutes": "minutes",
+    "proposal_expiry_days": "days",
+    "backup_keep_days": "days",
+    "price_history_days": "days",
+    "scan_art_gallery_idle_days": "days",
+    "archidekt_min_interval": "seconds",
+    "archidekt_backoff_base": "seconds",
+    "archidekt_cache_seconds": "seconds",
+    "archidekt_card_cache_seconds": "seconds",
+    "scryfall_lookup_interval": "seconds",
+    "scan_art_image_interval": "seconds",
+}
+MANAGED_SETTINGS = {k: replace(s, unit=_UNITS[k]) if k in _UNITS else s for k, s in MANAGED_SETTINGS.items()}
+
 
 def _deployment_value(settings: Settings, spec: SettingSpec) -> Any:
     value = getattr(settings, spec.key)
@@ -1041,7 +1076,7 @@ class LiveSettings:
         try:
             return MANAGED_SETTINGS[key]
         except KeyError:
-            raise SettingError(key, "is not a setting the admin page manages") from None
+            raise SettingError(key, "isn't a setting this page can change") from None
 
     def locked(self, key: str) -> bool:
         """True when the deployment set it: the page shows it and cannot change it."""
@@ -1077,7 +1112,7 @@ class LiveSettings:
         record it in the audit log. Refused when the deployment set the key. Returns the value."""
         spec = self.spec(key)
         if self.locked(key):
-            raise SettingError(key, f"is set by the deployment ({spec.env}) and can only be changed there")
+            raise SettingError(key, f"is set in your stack ({spec.env}). Change it there and redeploy.")
         value = spec.parse(raw)
         previous = self.get(key)
         self.db.save_setting(key, value, by=by)
@@ -1092,7 +1127,7 @@ class LiveSettings:
         """Forget the stored value, so the code default applies (unless the deployment set one)."""
         spec = self.spec(key)
         if self.locked(key):
-            raise SettingError(key, f"is set by the deployment ({spec.env}) and can only be changed there")
+            raise SettingError(key, f"is set in your stack ({spec.env}). Change it there and redeploy.")
         previous = self.get(key)
         cleared = self.db.clear_setting(key)
         with self._lock:
