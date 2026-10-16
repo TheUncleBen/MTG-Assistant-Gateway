@@ -174,8 +174,9 @@ so:
      row limit, 5 card rows by default, each a card added or removed, or a
      new quantity, category, finish, printing, color tag or custom mana
      value, no more than 4 copies a row, never the commander, and private
-     copies of a deck) or Full auto (the deck and collection changes it
-     proposes). Then the assistant applies what your mode allows and tells
+     copies of a deck) or Full auto (the rest too, except a restore, a
+     commander change, a new deck and an edit of more than 20 rows, which
+     still wait for your press). Then the assistant applies what your mode allows and tells
      you what it did. Actions on your Archidekt account (likes, votes,
      bookmarks, follows, comments, new folders and collaborator changes) and
      deleting a deck are never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck: on the review page only). Be aware that an assistant can be tricked by text it

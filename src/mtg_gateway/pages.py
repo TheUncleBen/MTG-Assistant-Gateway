@@ -1034,6 +1034,7 @@ def _mode_card(state: Any, sub: str, csrf_in: str) -> str:
     choices above the gateway's cap shown disabled, and the plain cost of the auto modes."""
     s = state.settings
     current = state.decks.mode_of(sub)
+    big = int(state.decks.live.get("auto_big_edit_rows"))  # O8, the admin's live setting
     choices = []
     for mode in modes.MODES:
         allowed = modes.rank(mode) <= modes.rank(s.approval_mode_max)
@@ -1041,7 +1042,8 @@ def _mode_card(state: Any, sub: str, csrf_in: str) -> str:
             f"<label class='check mode{'' if allowed else ' muted'}'>"
             f"<input type='radio' name='mode' value='{mode}'{' checked' if mode == current else ''}"
             f"{'' if allowed else ' disabled'}><span><strong>{html.escape(modes.MODE_LABELS[mode])}</strong>"
-            f"<br><span class='small'>{html.escape(modes.mode_help(mode, max_rows=s.auto_apply_max_rows))}"
+            f"<br><span class='small'>"
+            f"{html.escape(modes.mode_help(mode, max_rows=s.auto_apply_max_rows, big_rows=big))}"
             f"{'' if allowed else ' (not allowed on this gateway)'}</span></span></label>"
         )
     rows = s.auto_apply_max_rows
@@ -1310,10 +1312,11 @@ def _detail_rows(rows: list[dict[str, Any]] | None, diff: str) -> tuple[str, int
     return "".join(items), len(items)
 
 
-# The review page's words for a proposal the deck sync (sync.py) saw go out of date.
+# The review page's words for a proposal the re-check (recheck.py) marked Needs a look: the deck
+# changed after it was made and the change no longer fits. The reason follows when known.
 OUT_OF_DATE_PAGE = (
-    "Out of date: this deck changed after the proposal was made, so Apply will be refused and nothing "
-    "will be sent. Reject it and ask your assistant for a new one."
+    "Needs a look: this deck changed after the proposal was made and the change no longer fits, so "
+    "Apply will be refused and nothing will be sent. Ask your assistant to update it, or reject it."
 )
 
 
@@ -1348,7 +1351,8 @@ def _page_step(p: dict[str, Any]) -> str:
     if state == "pending" and not p.get("writes_enabled"):
         return "Review only: deck writes are turned off on this gateway, so this can't be applied yet."
     if state == "pending" and p.get("out_of_date"):
-        return OUT_OF_DATE_PAGE
+        why = str(p.get("status_reason") or "").strip()
+        return OUT_OF_DATE_PAGE + (f" Why: {why}" if why else "")
     if state == "pending" and result.get("error") == "rate_limited":
         # Q78: Archidekt's waits stopped the last apply before it changed anything there
         kept = f" {result['backup_note']}" if result.get("backup_note") else ""
