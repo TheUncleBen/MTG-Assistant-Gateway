@@ -588,6 +588,12 @@ details.disclosure[open] > summary::before{content:'\\25BE'}
 .plist .when{color:var(--text-muted);font-size:.86rem}
 .plist form{margin:0;display:inline}
 .plist form button{margin:0;height:35px;padding:0 .7rem;width:auto}
+/* Admin > Card models: the name and who added it on the left, every Remove button in one column,
+   44 px tall; a long name breaks between words (review round 2, R2-2 and R2-4) */
+.plist.models li{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center}
+.plist.models .model{display:flex;flex-direction:column;gap:.15rem;min-width:0}
+.plist.models .name{overflow-wrap:break-word;hyphens:auto;-webkit-hyphens:auto}
+.plist.models form button{height:auto;min-height:44px}
 
 """
     + VIZ_CSS
@@ -911,7 +917,7 @@ html[data-card-size=s] .deckview.scroll .c{flex-basis:clamp(105px,16.5vw,150px)}
    quantity corner (finding 8) */
 html[data-card-size=s] .deckview.stacks .stackhead h2{flex-wrap:wrap;row-gap:0}
 html[data-card-size=s] .deckview.stacks .stackhead .title{
-  order:2;flex:1 0 100%;white-space:normal;overflow-wrap:anywhere}
+  order:2;flex:1 0 100%;white-space:normal;overflow-wrap:anywhere;hyphens:auto;-webkit-hyphens:auto}
 html[data-card-size=s] .deckview .c .ph{padding-top:max(12%,34px)}
 html[data-card-size=l] .deckview.scroll .c{flex-basis:clamp(190px,30vw,270px)}
 /* My decks and the folders in it */

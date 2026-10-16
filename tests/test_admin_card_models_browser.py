@@ -15,6 +15,23 @@ from .test_suggest_browser import Server
 pytest.importorskip("playwright")
 
 
+# Each card name's lines: a break inside a word (between two letters) is listed.
+NAME_BREAKS = """
+() => [...document.querySelectorAll('.models .name')].flatMap(el => {
+  const n = el.firstChild, text = el.textContent, out = [];
+  let top = null;
+  for (let i = 0; i < text.length; i++) {
+    const r = document.createRange(); r.setStart(n, i); r.setEnd(n, i + 1);
+    const t = Math.round(r.getBoundingClientRect().top);
+    if (top !== null && t > top + 2 && /\\S/.test(text[i - 1]))
+      out.push(text.slice(0, i) + '|' + text.slice(i));
+    top = t;
+  }
+  return out;
+})
+"""
+
+
 @pytest.fixture
 def server(tmp_path):
     s = Server(tmp_path, admin_group="mtg-admins")
@@ -47,7 +64,15 @@ def test_the_card_models_page_fits_and_reads(server: Server, width: int, theme: 
             "() => [...document.querySelectorAll('.models button')]"
             ".map(b => b.getBoundingClientRect().height)"
         )
-        assert min(sizes) >= 38.5, sizes
+        assert min(sizes) >= 43.5, sizes  # review round 2, R2-2: 44 px, as on every touch target
+        # R2-4: every Remove in one column, and a name breaks between words where its words fit
+        rights = page.evaluate(
+            "() => [...document.querySelectorAll('.models button')]"
+            ".map(b => Math.round(b.getBoundingClientRect().right))"
+        )
+        assert len(set(rights)) == 1, rights
+        if width >= 673:
+            assert page.evaluate(NAME_BREAKS) == []
         _shot(page, f"admin-models-{width}-{theme}.png")
         page.locator(".models li", has_text="Opt").locator("button").click()
         page.wait_for_load_state("networkidle")

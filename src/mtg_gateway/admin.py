@@ -868,6 +868,8 @@ def _models_body(state: Any, csrf: str | None, page_no: int) -> str:
     )
     if not total:
         return f"<div class='card'>{intro}<p>No card models are kept yet.</p></div>"
+    pages = (total + MODELS_PER_PAGE - 1) // MODELS_PER_PAGE
+    page_no = min(page_no, pages)  # a page past the end shows the last one (and never overflows SQLite)
     rows = state.db.list_card_models(limit=MODELS_PER_PAGE, offset=(page_no - 1) * MODELS_PER_PAGE)
     csrf_in = f"<input type='hidden' name='csrf' value='{html.escape(csrf or '')}'>"
     people: dict[str, str] = {}
@@ -877,17 +879,16 @@ def _models_body(state: Any, csrf: str | None, page_no: int) -> str:
         if adder not in people:
             people[adder] = _who(state.db.get_user(adder) or {"sub": adder})
         items.append(
-            f"<li><span class='name'>{html.escape(str(r['name']))}</span>"
+            f"<li><div class='model'><span class='name'>{html.escape(str(r['name']))}</span>"
             f"<span class='muted small'>added by {people[adder]}, {_when(r['added_at'])}"
             + (f"; changed {_when(r['updated_at'])}" if r["updated_at"] != r["added_at"] else "")
-            + "</span>"
+            + "</span></div>"
             f"<form method='post' action='/admin/models'>{csrf_in}"
             f"<input type='hidden' name='card_key' value='{html.escape(str(r['card_key']))}'>"
             f"<input type='hidden' name='page' value='{page_no}'>"
             f"<button class='danger' aria-label='Remove the model of {html.escape(str(r['name']))}'>Remove"
             "</button></form></li>"
         )
-    pages = (total + MODELS_PER_PAGE - 1) // MODELS_PER_PAGE
     pager = ""
     if pages > 1:
         links = []
