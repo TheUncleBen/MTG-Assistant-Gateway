@@ -31,6 +31,8 @@ from .pages import (
     login_redirect,
     read_limited,
 )
+from .reports_page import PAGE as REPORTS_PAGE
+from .reports_page import REPORTS_PAGE_CSS, reports_page_html
 from .theme import (
     esc as _esc,
 )
@@ -541,6 +543,30 @@ def add_deck_tool_routes(
             return RedirectResponse(f"/decks/{deck_id}?err={code}", status_code=303)
         reused = "?reused=1" if report.get("reused") else ""
         return RedirectResponse(f"/history/reports/{_esc(report['report_id'])}{reused}", status_code=303)
+
+    @server.custom_route("/reports", methods=["GET"], include_in_schema=False)
+    async def reports_page(request: Request) -> Response:
+        """Every stored report of the member, newest first, with what Forge plays for them now
+        (K8 in Q136; T-152). The gateway's own database only."""
+        sub, sid = browser_session(state, request)
+        if not sub:
+            return login_redirect("/reports")
+        qp = request.query_params
+        deck_id = (qp.get("deck_id") or "").strip()[:40]
+        try:
+            offset = max(0, min(int(qp.get("offset") or 0), 2000))
+        except ValueError:
+            offset = 0
+        rows = reports.list(sub, deck_id or None, limit=REPORTS_PAGE + 1, offset=offset)
+        body = reports_page_html(
+            rows[:REPORTS_PAGE],
+            runs=reports.forge_queue(sub),
+            decks=reports.decks_seen(sub),
+            deck_id=deck_id,
+            offset=offset,
+            has_more=len(rows) > REPORTS_PAGE,
+        )
+        return page("Reports", body, sub=sub, sid=sid, current="/reports", extra_css=REPORTS_PAGE_CSS)
 
     @server.custom_route("/decks/{deck_id}/playtest", methods=["GET"], include_in_schema=False)
     async def playtest_page(request: Request) -> Response:
