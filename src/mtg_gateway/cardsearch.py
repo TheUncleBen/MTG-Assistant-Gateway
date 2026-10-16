@@ -389,7 +389,7 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
             "unavailable": "Scryfall is not answering right now. Try again in a moment.",
             "busy": "Your other card lookups are still running. Try again in a moment.",
             "invalid": f"Scryfall could not read that search: {exc}",
-            "too_long": "This search is too long. Take some filters or words away.",
+            "too_long": "This search is too long. Remove some filters or words.",
             "off": str(exc),
         }.get(exc.kind, f"The cards could not be looked up: {exc}")
 

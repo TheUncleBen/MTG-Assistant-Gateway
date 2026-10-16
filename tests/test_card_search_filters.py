@@ -431,9 +431,9 @@ async def test_a_search_too_long_for_scryfall_is_refused_not_cut(stack: Stack) -
         r = await b.http.get("/cards/api/search", params=params)
         d = r.json()
         assert r.status_code == 400 and d["error"] == "too_long", d
-        assert d["message"] == "This search is too long. Take some filters or words away."
+        assert d["message"] == "This search is too long. Remove some filters or words."
         r = await b.http.get("/cards", params=params)
-        assert "This search is too long. Take some filters or words away." in r.text
+        assert "This search is too long. Remove some filters or words." in r.text
         assert len(stack.sf.searches) == n  # nothing went to Scryfall
     finally:
         await b.aclose()
