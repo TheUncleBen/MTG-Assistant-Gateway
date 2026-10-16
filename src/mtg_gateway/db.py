@@ -184,6 +184,27 @@ MAX_PREF_NAME = 120
 MAX_PROPOSAL_VERSIONS = 50
 
 
+#: States of a note that hold the notes depending on it (K6, Q27j).
+HOLDING_STATES = ("rejected", "withdrawn", "failed")
+
+
+def _blocking_dependency(c: sqlite3.Connection, proposal_id: str) -> dict[str, Any] | None:
+    """The first note ``proposal_id`` depends on that is rejected, withdrawn or failed (its id,
+    board number and state), or None."""
+    row = c.execute(
+        f"SELECT o.id, o.board_no, o.state FROM proposal_links l JOIN proposals o ON o.id = l.other_id "
+        f"WHERE l.proposal_id = ? AND l.kind = 'depends_on' AND o.state IN ({_marks(HOLDING_STATES)}) "
+        f"ORDER BY l.created_at, l.rowid LIMIT 1",
+        (proposal_id, *HOLDING_STATES),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def hold_reason(dep: dict[str, Any]) -> str:
+    """The stored reason of a hold: ``depends:<id>:<state>``, worded when shown."""
+    return f"depends:{dep['id']}:{dep['state']}"
+
+
 class ProposalVersionsFull(Exception):
     """amend_proposal refused: the proposal already keeps MAX_PROPOSAL_VERSIONS earlier versions."""
 
@@ -1996,15 +2017,8 @@ class Database:
             ).fetchone()
             if kept >= MAX_PROPOSAL_VERSIONS:
                 raise ProposalVersionsFull(proposal_id)
-            held = (
-                row["status"] == "held"
-                and c.execute(
-                    "SELECT 1 FROM proposal_links l JOIN proposals o ON o.id = l.other_id "
-                    "WHERE l.proposal_id = ? AND l.kind = 'depends_on' AND o.state = 'rejected' LIMIT 1",
-                    (proposal_id,),
-                ).fetchone()
-                is not None
-            )
+            # A hold stays while a note it depends on is still rejected, withdrawn or failed (K6).
+            held = row["status"] == "held" and _blocking_dependency(c, proposal_id) is not None
             old = int(row["version"])
             c.execute(
                 """INSERT INTO proposal_versions (proposal_id, version, changes_json, rows_json, diff_text,
@@ -2114,12 +2128,21 @@ class Database:
                 ).fetchone()
                 if pending >= max_pending:
                     return False
+            # A note it depends on that is still rejected, withdrawn or failed holds it again (K6).
+            blocking = _blocking_dependency(c, proposal_id)
             changed = (
                 c.execute(
-                    "UPDATE proposals SET state = 'pending', status = NULL, status_reason = NULL, "
+                    "UPDATE proposals SET state = 'pending', status = ?, status_reason = ?, "
                     "status_at = ? WHERE id = ? AND owner_sub = ? AND state IN ('withdrawn', 'replaced') "
                     "AND expires_at >= ?",
-                    (now, proposal_id, owner_sub, now),
+                    (
+                        "held" if blocking else None,
+                        hold_reason(blocking) if blocking else None,
+                        now,
+                        proposal_id,
+                        owner_sub,
+                        now,
+                    ),
                 ).rowcount
                 == 1
             )
