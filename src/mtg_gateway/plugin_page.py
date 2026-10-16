@@ -150,8 +150,9 @@ def developer_name_warning(site: str) -> str | None:
         return None
     return (
         f"MTG_SERVER_NAME is {cut[0]} characters. OpenAI's plugin check refuses a plugin file whose "
-        f"developer name is over {DEVELOPER_NAME_MAX} characters, so the ChatGPT plugin file uses it "
-        f"shortened to “{cut[1]}”, as its developer name and its author name."
+        f"developer name is over {DEVELOPER_NAME_MAX} characters, so the ChatGPT plugin file uses a "
+        f"shortened name, “{cut[1]}”, as its developer and author name. To choose the name yourself, "
+        f"set MTG_SERVER_NAME to {DEVELOPER_NAME_MAX} characters or fewer."
     )
 
 

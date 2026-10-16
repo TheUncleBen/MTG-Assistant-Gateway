@@ -343,8 +343,9 @@ def test_a_shortened_developer_name_is_told_to_the_owner() -> None:
     assert developer_name_cut(site) == (139, cut)
     assert developer_name_warning(site) == (
         "MTG_SERVER_NAME is 139 characters. OpenAI's plugin check refuses a plugin file whose developer "
-        f"name is over 120 characters, so the ChatGPT plugin file uses it shortened to “{cut}”, as its "
-        "developer name and its author name."
+        f"name is over 120 characters, so the ChatGPT plugin file uses a shortened name, “{cut}”, as its "
+        "developer and author name. To choose the name yourself, set MTG_SERVER_NAME to 120 characters "
+        "or fewer."
     )
     assert developer_name_cut("x" * 130) == (130, "x" * 120)
     assert developer_name_cut("x" * 120) is None and developer_name_warning("x" * 120) is None
