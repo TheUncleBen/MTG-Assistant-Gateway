@@ -43,6 +43,8 @@ from .archidekt import drops_formatting, words_only_note
 CARD_URI = "ui://mtg-assistant-gateway/proposal-card"
 CARD_PATH = Path(__file__).parent / "static" / "proposal-card.html"
 APPROVAL_META_KEY = "mtg/approval"  # tool-result _meta key the card reads the code from
+APPROVAL_SET_META_KEY = "mtg/approval_set"  # "Apply all": {"ids": [...], "code": ...} (0.7.29)
+APPROVALS_META_KEY = "mtg/approvals"  # the waiting-changes card: {proposal id: its code}
 # Hosts that render the card load each change's small card image straight from Scryfall.
 CARD_IMAGE_HOSTS = ["https://api.scryfall.com", "https://cards.scryfall.io"]
 APPROVE_DECISIONS = ("approve", "reject")
@@ -102,7 +104,13 @@ def proposal_tool_result(data: dict[str, Any], *, decks: Any, sub: str, in_chat:
     approval, other_app = card_approval(data, decks=decks, sub=sub, in_chat=in_chat)
     if other_app:
         data = {**data, "card_other_app": True}
-    meta = {APPROVAL_META_KEY: approval} if approval else None
+    meta: dict[str, Any] | None = {APPROVAL_META_KEY: approval} if approval else None
+    if in_chat and data.get("state") == "pending":
+        info, apply_all = deck_waiting(data, decks=decks, sub=sub)
+        if info:
+            data = {**data, "deck_waiting": info}
+        if apply_all and approval:
+            meta = {**(meta or {}), APPROVAL_SET_META_KEY: apply_all}
     data = with_words_note(data)
     return CallToolResult(
         content=[TextContent(type="text", text=proposal_text(data))],
@@ -201,6 +209,54 @@ def approval_code(
     msg = "\x00".join(parts).encode()
     digest = hmac.new(secret.encode(), msg, hashlib.sha256).digest()[:24]
     return base64.urlsafe_b64encode(digest).decode().rstrip("=")
+
+
+def approval_set_code(secret: str, *, sub: str, client_id: str, items: list[tuple[str, int]]) -> str:
+    """The one-time code for "Apply all" on a card (FLEX §6, G16): 192 bits of HMAC-SHA256 over
+    the member, the app and every proposal of the set with its version, so a card drawn before
+    one of them was amended no longer matches. The set's proposals are each still applied (or
+    not) on their own, as the member's one press (batch.py)."""
+    parts = ["mtg-approval-set", sub, client_id or ""]
+    parts += [f"{pid}:{int(v)}" for pid, v in sorted((str(p), int(v or 1)) for p, v in items)]
+    msg = "\x00".join(parts).encode()
+    digest = hmac.new(secret.encode(), msg, hashlib.sha256).digest()[:24]
+    return base64.urlsafe_b64encode(digest).decode().rstrip("=")
+
+
+def deck_waiting(data: dict[str, Any], *, decks: Any, sub: str) -> tuple[dict[str, Any] | None, Any]:
+    """For a waiting proposal's card (FLEX flow A step 2; Q134 A3): the other changes waiting on
+    its deck, as data the card and the assistant may both see ("2 earlier changes to this deck
+    are waiting", "1 from ChatGPT also waits"), and the "Apply all" set for _meta: this app's
+    waiting changes on the deck, this one included, when there are at least two."""
+    from .decks import current_client
+
+    pid, deck_id = data.get("proposal_id"), data.get("deck_id")
+    if data.get("state") != "pending" or not pid or not str(deck_id or "").isdigit():
+        return None, None
+    client = current_client.get()
+    rows = [r for r in decks.db.pending_board(sub, str(deck_id))]
+    others = [r for r in rows if r["id"] != pid]
+    if not others:
+        return None, None
+    mine = [r for r in rows if client and r.get("created_by_client") == client]
+    apps: dict[str, int] = {}
+    for r in others:
+        if r.get("created_by_client") != client:
+            label = decks._creator_label(r.get("created_by_client"))
+            name = label[5:].rsplit(" (", 1)[0] if label.startswith("app: ") else "you"
+            apps[name] = apps.get(name, 0) + 1
+    info: dict[str, Any] = {
+        "earlier": len(others),
+        "same_app": len(mine),
+        "other_apps": [{"app": a, "count": n} for a, n in sorted(apps.items())],
+        "review_all_url": f"{decks.settings.public_url}/proposals#deck-{deck_id}",
+    }
+    full = [decks.db.get_proposal(r["id"], sub) or {} for r in mine]
+    items = [(r["id"], int(r.get("version") or 1)) for r in full if r and decks.card_may_approve(r)]
+    if len(items) < 2 or not client:
+        return info, None
+    code = approval_set_code(decks.settings.session_secret, sub=sub, client_id=client, items=items)
+    return info, {"ids": [i for i, _v in items], "code": code}
 
 
 def approval_matches(expected: str, given: Any) -> bool:

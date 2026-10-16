@@ -21,6 +21,7 @@ from mtg_gateway.mf_proxy import MysticForgeProxy
 from .conftest import AUTO, FakeIdP, Harness, Stack, make_settings, open_stack, running
 from .fake_archidekt import FakeArchidekt
 from .test_decks_and_proxy import Browser, _client, call, linked_user, structured
+from .track_a_helpers import apply_any
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -181,7 +182,7 @@ async def test_new_deck_proposal_is_bound_to_its_archidekt_account(stack: Stack)
     decks_before = set(ark.decks)
     r = await b.link("amy", "pw-amy")
     assert r.status_code == 303
-    out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
+    out = await apply_any(h, token, p["proposal_id"])
     assert not out["ok"] and out["error"] == "other_account", out
     assert set(ark.decks) == decks_before
     await b.aclose()

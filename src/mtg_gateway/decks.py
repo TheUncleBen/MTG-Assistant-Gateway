@@ -37,8 +37,8 @@ from urllib.parse import urlparse
 
 from cryptography.fernet import Fernet, InvalidToken
 
-from . import board, modes
-from .approve import approval_code, approval_matches
+from . import batch, board, modes
+from .approve import approval_code, approval_matches, approval_set_code
 from .archidekt import (
     FORMAT_IDS,
     MAX_LIST_PAGES,
@@ -176,6 +176,7 @@ ADMIN_CLIENT = "__admin__"
 # (expired, rejected, failed) beyond the newest MAX_CLOSED_PROPOSALS per member are deleted, so
 # proposals cannot fill the disk.
 MAX_PENDING_PROPOSALS = 100
+MAX_SELECTION = 100  # changes applied with one press (batch.py): every waiting one a member may have
 MAX_CLOSED_PROPOSALS = 100
 # Failed Archidekt sign-ins (wrong username or password) one member may make from the account
 # page in LINK_FAILURE_WINDOW seconds; further attempts are refused until the oldest ages out,
@@ -1746,6 +1747,8 @@ class DeckService:
         # Applies running in the background (proposal id -> task) and what each got done so far.
         self._running: dict[str, asyncio.Task[Any]] = {}
         self._progress: dict[str, dict[str, Any]] = {}
+        # Selections applied with one press (batch.py) and their result panels.
+        self.batches = batch.Batches()
         self._archidekt_in_flight: dict[str, int] = {}
         self._link_locks: dict[str, asyncio.Lock] = {}
         # backup copy id -> the name, description and folder id it was made with, until its
@@ -2414,20 +2417,8 @@ class DeckService:
         """A waiting proposal's status and its reason in words: "updated" (re-checked, still the
         change that was reviewed), "needs_look" (it would now do something else) or "held" (a
         proposal it depends on was rejected, withdrawn or failed, Q27j)."""
-        from . import recheck
-
         status = row.get("status")
-        reason = str(row.get("status_reason") or "")
-        if status == "held" and reason.startswith("depends:"):
-            _tag, other, closed = (reason.split(":", 2) + ["", ""])[:3]
-            no = self.db.proposal_board_numbers(sub, [other]).get(other)
-            words = {"rejected": "was rejected", "withdrawn": "was withdrawn", "failed": "failed"}
-            which = f"#{no}" if no else "another proposal"
-            text = f"It depends on {which}, which {words.get(closed, closed)}."
-        elif status == "updated":
-            text = "The deck changed since this was made; it still does exactly what was reviewed."
-        else:
-            text = recheck.reason_text(reason)
+        text = board.status_text(self.db, sub, row)
         return {"status": status, "status_reason": text, "status_at": row.get("status_at")}
 
     def _forget_page_decks(self) -> None:
@@ -2732,6 +2723,7 @@ class DeckService:
                 in_chat=self.settings.apply_in_chat,
                 partial=bool((row["result"] or {}).get("sent_entries")),
                 kind=kind,
+                card_may_approve=self.card_may_approve(row),
                 rate_limited=(
                     _rate_limited_note(
                         row["result"] or {},
@@ -2987,6 +2979,119 @@ class DeckService:
             )
         return row
 
+    def set_approval_for(self, sub: str, proposal_ids: list[str]) -> str:
+        """The "Apply all" code of a card for these proposals as they are now (approve.py)."""
+        items = []
+        for pid in proposal_ids:
+            row = self.db.get_proposal(str(pid), sub)
+            if row is not None:
+                items.append((row["id"], int(row.get("version") or 1)))
+        return approval_set_code(
+            self.settings.session_secret, sub=sub, client_id=current_client.get() or "", items=items
+        )
+
+    def check_set_approval(self, sub: str, proposal_ids: list[str], approval: Any) -> list[str]:
+        """The proposals of an "Apply all" press when ``approval`` is the card's code for exactly
+        these proposals at the versions it showed, all made by the app calling; otherwise
+        ``changed`` (one was amended since the card was drawn) or ``invalid_approval`` (audited),
+        and nothing else happens."""
+        ids = list(dict.fromkeys(str(p) for p in proposal_ids))[:MAX_SELECTION]
+        client = current_client.get()
+        rows = [self.db.get_proposal(pid, sub) for pid in ids]
+        if not ids or any(
+            r is None or not client or r.get("created_by_client") != client or not self.card_may_approve(r)
+            for r in rows
+        ):
+            self._audit("approval_refused", sub=sub, detail={"proposal_ids": ids[:20], "set": True})
+            raise DeckError(
+                "invalid_approval",
+                "This approval code does not belong to these proposals, this app and this account. "
+                "Nothing was sent to Archidekt.",
+                review_url=f"{self.settings.public_url}/proposals",
+            )
+        if approval_matches(self.set_approval_for(sub, ids), approval):
+            return ids
+        if any(int(r.get("version") or 1) > 1 for r in rows if r is not None):
+            raise DeckError(
+                "changed",
+                "Replaced by a newer version. One of these proposals changed since this card was "
+                "drawn, so nothing was sent to Archidekt. Show the waiting changes again.",
+                review_url=f"{self.settings.public_url}/proposals",
+            )
+        self._audit("approval_refused", sub=sub, detail={"proposal_ids": ids[:20], "set": True})
+        raise DeckError(
+            "invalid_approval",
+            "This approval code does not belong to these proposals, this app and this account. "
+            "Nothing was sent to Archidekt.",
+            review_url=f"{self.settings.public_url}/proposals",
+        )
+
+    def waiting_board(self, sub: str, deck_id: str | None, *, in_chat: bool) -> tuple[dict[str, Any], dict]:
+        """show_waiting_changes (Q134 A6): the waiting changes (of one deck, or all), oldest first,
+        with what the card needs in _meta: a one-time code for each of this app's own (Approve
+        and Reject on each) and the "Apply all" code for all of them. Another app's changes are
+        listed with their review link only (O9)."""
+        from . import approve
+
+        lines = self.board_lines(sub, deck_id)
+        client = current_client.get()
+        mine = [x for x in lines if x["own"]]
+        apps: dict[str, int] = {}
+        for x in lines:
+            if not x["own"]:
+                label = x.get("created_by") or ""
+                name = label[5:].rsplit(" (", 1)[0] if label.startswith("app: ") else "you"
+                apps[name] = apps.get(name, 0) + 1
+        clean = None if deck_id is None else _clean_deck_id(deck_id)
+        data: dict[str, Any] = {
+            "ok": True,
+            "deck_id": clean,
+            "deck_name": lines[0]["deck_name"] if clean and lines else None,
+            "waiting": lines,
+            "count": len(lines),
+            "own_count": len(mine),
+            "other_apps": [{"app": a, "count": n} for a, n in sorted(apps.items())],
+            "review_all_url": f"{self.settings.public_url}/proposals" + (f"#deck-{clean}" if clean else ""),
+            "writes_enabled": self.settings.writes_enabled,
+        }
+        meta: dict[str, Any] = {}
+        if in_chat and client and self.settings.writes_enabled:
+            codes = {}
+            for x in mine:
+                row = self.db.get_proposal(x["proposal_id"], sub)
+                if row is not None and self.card_may_approve(row):
+                    codes[row["id"]] = self.approval_for(sub, row)
+            if codes:
+                meta[approve.APPROVALS_META_KEY] = codes
+            if len(codes) >= 2:
+                meta[approve.APPROVAL_SET_META_KEY] = {
+                    "ids": list(codes),
+                    "code": self.set_approval_for(sub, list(codes)),
+                }
+        return data, meta
+
+    def selection_result(self, run: dict[str, Any]) -> dict[str, Any]:
+        """A selection's outcome for a card and the assistant: what was applied, not sent (and
+        why), failed, and where Undo is (the result page)."""
+
+        def brief(c: dict[str, Any]) -> dict[str, Any]:
+            return {
+                k: c.get(k)
+                for k in ("proposal_id", "board_no", "deck_id", "deck_name", "summary", "why")
+                if c.get(k) is not None
+            }
+
+        return {
+            "ok": True,
+            "batch_id": run["batch_id"],
+            "state": run["state"],
+            "summary": batch.summary_text(run),
+            "applied": [brief(c) for c in run["applied"]],
+            "not_sent": [brief(c) for c in run["not_sent"]],
+            "failed": [brief(c) for c in run["failed"]],
+            "result_url": f"{self.settings.public_url}/proposals/applied/{run['batch_id']}",
+        }
+
     async def apply(
         self,
         sub: str,
@@ -3102,11 +3207,76 @@ class DeckService:
         except TimeoutError:
             return self.describe(sub, proposal_id)
 
+    async def wait_applied(self, proposal_id: str) -> None:
+        """Until a running apply of ``proposal_id`` has ended (its outcome is on the proposal)."""
+        task = self._running.get(proposal_id)
+        if task is not None:
+            await asyncio.gather(asyncio.shield(task), return_exceptions=True)
+
+    def plan_selection(
+        self, sub: str, proposal_ids: list[str], versions: dict[str, int] | None = None
+    ) -> dict[str, Any]:
+        """What applying these waiting changes together would do (batch.plan): the confirm."""
+        return batch.plan(self, sub, [str(p) for p in proposal_ids][:MAX_SELECTION], versions)
+
+    def apply_selection(
+        self, sub: str, proposal_ids: list[str], *, via: str, versions: dict[str, int] | None = None
+    ) -> dict[str, Any]:
+        """Start applying a selection (batch.py), the member's one press: each deck in turn, its
+        changes oldest first, each re-checked just before it is sent. Returns the run, whose
+        ``state`` is "applying" until every change has been tried."""
+        if not self.settings.writes_enabled:
+            raise DeckError("writes_disabled", "Deck writes are disabled on this gateway.")
+        the_plan = self.plan_selection(sub, proposal_ids, versions)
+        if not the_plan["count"]:
+            raise DeckError("invalid", "None of the selected changes can be applied together.")
+        return self.batches.start(self, sub, the_plan, via=via)
+
+    async def undo_preview(
+        self, sub: str, snapshot_id: str, *, applied: list[str], after_at: int
+    ) -> dict[str, Any]:
+        """What "Undo" of an apply (one change or a selection, flow G) would put back: the deck
+        read now against the snapshot taken before that apply, and whether it also reverts what
+        came after it (later applies through the gateway, or edits made on Archidekt)."""
+        snap = self.snapshot(sub, str(snapshot_id))
+        deck = await self.get_own_deck(sub, snap["deck_id"])
+        wanted = parse_deck(snap["deck"])
+        payload, lines = restore_rows(wanted, deck)
+        details, detail_lines = details_rows(deck, snapshot_details(wanted))
+        later = [
+            r
+            for r in self.db.list_proposals(sub, 100, deck_id=str(snap["deck_id"]), states=("applied",))
+            if r["id"] not in applied and int(r.get("applied_at") or 0) >= int(after_at)
+        ]
+        last = None
+        for pid in applied:
+            row = self.db.get_proposal(pid, sub)
+            if row is not None and (row.get("result") or {}).get("after_fingerprint"):
+                last = row["result"]["after_fingerprint"]
+        outside = bool(last) and not later and deck.fingerprint() != last
+        return {
+            "deck_id": str(snap["deck_id"]),
+            "deck_name": deck.name,
+            "snapshot_id": snap["id"],
+            "rows": lines + detail_lines,
+            "nothing": not payload and not details,
+            "later": len(later),
+            "outside": outside,
+            "warning": undo_warning(len(later), outside),
+        }
+
+    async def undo(self, sub: str, snapshot_id: str) -> dict[str, Any]:
+        """The member's "Undo": a restore of the snapshot, applied at once by their own press (the
+        restore is an ordinary proposal, so it can itself be undone)."""
+        made = await self.propose_restore(sub, snapshot_id)
+        return await self.apply(sub, made["proposal_id"], via="browser")
+
     async def aclose(self, grace: float = SHUTDOWN_GRACE_SECONDS) -> None:
         """At shutdown: give running applies ``grace`` seconds to finish, then cancel the rest,
         which records each as failed ("interrupted", with what it had sent) before the database
         closes."""
         await self.deck_lists.aclose()
+        await self.batches.aclose()  # no further change of a selection starts
         running = list(self._running.values())
         if not running:
             return
@@ -3302,6 +3472,7 @@ class DeckService:
             "sent_entries": len(payload),
             "verified": not mismatches,
             "mismatched_cards": mismatches,
+            "after_fingerprint": verified.fingerprint(),  # Undo: did the deck change since?
         }
         if mismatches:
             progress.update(result)  # apply() records it with the error
@@ -3546,6 +3717,12 @@ class DeckService:
         return out
 
     def _take_snapshot(self, sub: str, row: dict[str, Any], deck: Deck) -> str:
+        shared = batch.shared_snapshots.get()
+        if shared is not None and str(deck.id) in shared:
+            # G16: one snapshot per deck per selection, taken before its first change touched it
+            snapshot_id = shared[str(deck.id)]["snapshot_id"]
+            self.db.finish_proposal(row["id"], state="applying", snapshot_id=snapshot_id)
+            return snapshot_id
         snapshot_id = secrets.token_urlsafe(12)
         saved = self.db.save_snapshot(
             snapshot_id,
@@ -3564,6 +3741,8 @@ class DeckService:
                 "Nothing was sent to Archidekt.",
             )
         self.db.finish_proposal(row["id"], state="applying", snapshot_id=snapshot_id)
+        if shared is not None:
+            shared[str(deck.id)] = {"snapshot_id": snapshot_id}
         return snapshot_id
 
     async def _drop_unused_backup(
@@ -3581,6 +3760,10 @@ class DeckService:
         backup_id = progress.get("backup_deck_id")
         if not backup_id or _changed_anything(progress):
             return
+        shared = batch.shared_snapshots.get()
+        for made in (shared or {}).values():
+            if str((made.get("backup") or {}).get("backup_deck_id")) == str(backup_id):
+                made.pop("backup")  # the selection's next change on this deck makes its own
         snap = self.db.get_snapshot(str(progress.get("snapshot_id") or ""), sub)
         if (
             not str(backup_id).isdigit()
@@ -3842,9 +4025,17 @@ class DeckService:
             return {}
         if row.get("archidekt_backup") is False:
             return {"archidekt_backup": "skipped"}  # the member's own choice at save time (D-02)
+        shared = (batch.shared_snapshots.get() or {}).get(str(deck.id))
+        if shared is not None and shared.get("backup"):
+            # G16: the selection's first change on this deck made the copy; the later ones share it
+            # (without its id, so a later change that fails never deletes it)
+            return {"backup_url": shared["backup"].get("backup_url", ""), "backup_shared": True}
         reason = f"before proposal {row['id']} changed this deck ({row.get('kind') or 'edit'})"
         try:
-            return await self._backup_copy(sub, deck, snapshot_id, reason=reason)
+            made = await self._backup_copy(sub, deck, snapshot_id, reason=reason)
+            if shared is not None:
+                shared["backup"] = dict(made)
+            return made
         except DeckError as exc:
             # Kept on the proposal so get_proposal and the review page say why it is pending again,
             # also when the apply was answered "applying" before the backup failed.
@@ -5573,6 +5764,16 @@ def _backup_as_made(copy: Deck, job: dict[str, Any]) -> bool:
     )
 
 
+def undo_warning(later: int, outside: bool) -> str:
+    """Flow G step 4: Undo warns once when it puts back more than that apply."""
+    if later:
+        word = "change" if later == 1 else "changes"
+        return f"This also reverts {later} later {word} to this deck."
+    if outside:
+        return "This also reverts the edits made to this deck on Archidekt since."
+    return ""
+
+
 def needs_look_error(reason: str | None) -> DeckError:
     """The refusal of an apply whose proposal no longer does what was reviewed on the deck as it
     is now (K1). Nothing was sent, and ``_apply_slotted`` puts the proposal back to waiting as
@@ -5854,6 +6055,7 @@ def _next_step(
     closed_by: str | None = None,
     closed_by_app: str | None = None,
     rate_limited: str = "",
+    card_may_approve: bool = True,
 ) -> str:
     """What the assistant should do next with a proposal in ``state``. ``rate_limited``: for an
     apply that stopped on Archidekt's waits, the same note its stored message ends with
@@ -5883,10 +6085,16 @@ def _next_step(
             "They can also press Apply on the review page."
         )
     if state == "pending" and risk in modes.MEMBER_ONLY:
+        if not card_may_approve:  # a deck deletion (R-142): its review page only
+            return (
+                f"Show the user {what} and the review link: deleting a deck is approved only on its "
+                "review page, in every approval mode (the in-chat card only opens that page). Do "
+                "not call apply_proposal."
+            )
         return (
             f"Show the user {what} and the review link: this acts on their Archidekt account, so "
-            "they approve it themselves on the review page, in every approval mode (the in-chat "
-            "card only opens that page). Do not call apply_proposal."
+            "they approve it themselves, in every approval mode, on the proposal card in the chat "
+            "(where your app shows it) or on the review page. Do not call apply_proposal."
         )
     if state == "pending" and mode == "semi":
         return (

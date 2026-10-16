@@ -2293,10 +2293,13 @@ class Database:
         self, owner_sub: str, *, deck_id: str, kind: str, changes: Any, client: str | None
     ) -> str | None:
         """A live waiting proposal of the owner, made by the same app, on the same deck, of the
-        same kind and with exactly these stored changes (Q27k: only exact duplicates are skipped)."""
+        same kind and with exactly these stored changes (Q27k: only exact duplicates are skipped).
+        One marked "needs a look" is not: it no longer does what was reviewed, and asking again is
+        how the assistant makes it fresh from the deck as it is now."""
         row = self._one(
             "SELECT id FROM proposals WHERE owner_sub = ? AND deck_id = ? AND kind = ? "
             "AND changes_json = ? AND created_by_client IS ? AND state = 'pending' AND expires_at >= ? "
+            "AND (status IS NULL OR status != 'needs_look') "
             "ORDER BY created_at, rowid LIMIT 1",
             (owner_sub, str(deck_id), kind, json.dumps(changes), client, int(time.time())),
         )

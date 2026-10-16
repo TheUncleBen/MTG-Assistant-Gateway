@@ -242,7 +242,7 @@ async def test_a_held_note_waits_for_the_member_who_may_still_apply_it(stack: St
     assert h.db.set_hold(top["proposal_id"], SUB, f"depends:{base['proposal_id']}:rejected")
     got = await _get(h, token, top["proposal_id"])
     assert got["status"] == "held" and got["assistant_may_apply"] is False
-    assert got["status_reason"] == "It depends on #1, which was rejected." and got["next_step"].startswith(
+    assert got["status_reason"] == "It depends on #1, which you rejected." and got["next_step"].startswith(
         "Held:"
     )
     out = structured(await call(h, token, "apply_proposal", {"proposal_id": top["proposal_id"]}))

@@ -6,9 +6,21 @@ own apply for those press the card instead, as the member would."""
 
 from __future__ import annotations
 
+from typing import Any
+
 from mtg_gateway.approve import APPROVAL_META_KEY
 
-from .test_decks_and_proxy import call, structured
+
+async def call(h, token: str, tool: str, args: dict) -> dict:
+    from .test_decks_and_proxy import call as _call  # here, as test_decks_and_proxy imports this module
+
+    return await _call(h, token, tool, args)
+
+
+def structured(res: dict) -> Any:
+    from .test_decks_and_proxy import structured as _structured
+
+    return _structured(res)
 
 
 async def card_code(h, token: str, pid: str) -> str:

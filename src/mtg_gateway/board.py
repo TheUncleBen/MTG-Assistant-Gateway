@@ -119,6 +119,25 @@ def settle(svc: Any, sub: str, proposal_id: str, state: str) -> None:
         logger.exception("settling the links of a proposal failed")
 
 
+def status_text(db: Any, sub: str, row: dict[str, Any]) -> str:
+    """A waiting note's status in words, for the pages, the card and the assistant: why it is
+    "held" (Q27j; Q134 A8 "which you rejected"), what "updated" means, or why it "needs a look"
+    (recheck.py)."""
+    from . import recheck
+
+    status = row.get("status")
+    reason = str(row.get("status_reason") or "")
+    if status == "held" and reason.startswith("depends:"):
+        _tag, other, closed = (reason.split(":", 2) + ["", ""])[:3]
+        no = db.proposal_board_numbers(sub, [other]).get(other)
+        words = {"rejected": "you rejected", "withdrawn": "was withdrawn", "failed": "failed"}
+        which = f"#{no}" if no else "another proposal"
+        return f"It depends on {which}, which {words.get(closed, closed)}."
+    if status == "updated":
+        return "The deck changed since this was made; it still does exactly what was reviewed."
+    return recheck.reason_text(reason)
+
+
 def _still_blocked(db: Any, sub: str, proposal_id: str) -> bool:
     for link in db.proposal_links(sub, [proposal_id]):
         if link["proposal_id"] == proposal_id and link["kind"] == "depends_on":

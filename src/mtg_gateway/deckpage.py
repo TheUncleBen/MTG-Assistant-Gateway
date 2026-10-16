@@ -22,6 +22,7 @@ from collections import Counter
 from typing import Any
 from urllib.parse import quote, urlencode
 
+from . import waiting_strip
 from .archidekt import VOTE_UP, Deck, DeckCard, featured_scryfall_id, format_label, rich_text
 from .bracket_view import banner_bracket_html, checks_bracket_row, deck_card_bracket_text, stats_bracket_html
 from .deck_stats import (
@@ -492,7 +493,7 @@ def comments_html(deck: Deck) -> str:
 
 # Track A's own deck page styles (S3): DECK_CSS ends with this, so A's rules for its parts of the
 # page (banner, social actions, the waiting changes strip) need no edit inside DECK_CSS.
-DECK_CSS_A = ""
+DECK_CSS_A = waiting_strip.LIST_CSS  # the "Waiting changes" strip (Track A)
 
 
 def _select(name: str, options: dict[str, str], current: str, label: str, ic: str) -> str:
@@ -1383,12 +1384,14 @@ def deck_page_html(
     forge_on: bool = False,
     waiting: list[dict[str, Any]] | None = None,
 ) -> str:
-    # ``waiting``: the "Waiting changes" strip's rows (waiting_strip.py, S4); not drawn yet
+    # ``waiting``: the "Waiting changes" strip's rows (waiting_strip.py, S4), drawn at the top under
+    # the banner (Q134 A2)
     view = view if view in VIEWS else "text"
     group = group if group in GROUPS else "category"
     sort = sort if sort in SORTS else "name"
     return (
         banner_html(deck, stats, own=own, csrf=csrf, writes_enabled=writes_enabled, forge_on=forge_on)
+        + waiting_strip.strip_html(waiting or [], csrf=csrf, deck_id=str(deck.id))
         + notice
         + toolbar_html(deck, own=own, view=view, group=group, sort=sort, q=q)
         + cards_html(deck, view=view, group=group, sort=sort, q=q, own=own, owned=owned)

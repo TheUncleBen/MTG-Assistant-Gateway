@@ -80,6 +80,17 @@ async def test_an_exact_repeat_from_the_same_app_returns_the_waiting_note(stack:
     assert other["proposal_id"] != first["proposal_id"] and "duplicate_of" not in other
     assert other["overlaps"] == ["Opt: #1 adds 1; this request adds 1."]
     assert h.db.count_pending_proposals(SUB) == 2
+    # one that needs a look is not a duplicate: asking again makes it fresh from the deck as it is
+    h.db.rebase_proposal(
+        first["proposal_id"],
+        SUB,
+        was=h.db.get_proposal(first["proposal_id"], SUB)["baseline_fingerprint"],
+        fingerprint="x",
+        status="needs_look",
+        reason="changed",
+    )
+    fresh = await _propose(h, a, _change("Opt"))
+    assert fresh["proposal_id"] != first["proposal_id"] and "duplicate_of" not in fresh
 
 
 async def test_amend_keeps_the_number_writes_what_changed_and_restarts_the_expiry(stack: Stack) -> None:
@@ -199,3 +210,34 @@ def test_overlap_lines_name_both_sides() -> None:
     assert board.what_changed(
         [{"kind": "add", "name": "Opt", "qty": 1}], [{"kind": "add", "name": "Opt", "qty": 1}]
     ) == ("the same changes")
+
+
+async def test_every_tool_that_changes_something_is_refused_to_a_read_only_token(stack: Stack) -> None:
+    """Review of 0.7.29's own tools: amend, withdraw, combine and the card's Apply all change what
+    waits (or Archidekt), so a read-only token (mtg.read) is refused them like every other tool
+    whose readOnlyHint is false."""
+    import json
+
+    from mtg_gateway.app import WRITE_TOOLS
+
+    from .test_decks_and_proxy import sse_json
+
+    h = stack.h
+    token = await linked_user(stack)
+    r = await h.mcp(token, "tools/list", {}, rid=7)
+    tools = sse_json(r)["result"]["tools"]
+    writes = {t["name"] for t in tools if (t.get("annotations") or {}).get("readOnlyHint") is False}
+    assert {"amend_proposal", "withdraw_proposal", "combine_proposals"} <= writes
+    assert writes <= WRITE_TOOLS, writes - WRITE_TOOLS
+    assert "confirm_waiting" in WRITE_TOOLS
+    await _mode(h, "manual")
+    p = await _propose(h, token, _change("Opt"))
+    reader, _ = await _app_token(h, "reader", scope="mtg.read")
+    for tool, args in (
+        ("amend_proposal", {"proposal_id": p["proposal_id"], "version": 1, "changes": _change("Island")}),
+        ("withdraw_proposal", {"proposal_id": p["proposal_id"], "reason": "x"}),
+        ("combine_proposals", {"proposal_ids": [p["proposal_id"], p["proposal_id"]]}),
+    ):
+        res = await call(h, reader, tool, args)
+        assert res.get("isError") and "insufficient_scope" in json.dumps(res), (tool, res)
+    assert h.db.get_proposal(p["proposal_id"], SUB)["version"] == 1
