@@ -370,12 +370,14 @@ details.dd .menu .actions button.primary:hover,details.dd .menu .actions button.
   background:var(--orange);color:var(--on-orange);filter:brightness(1.08)}
 .msel-btn:active:not(:disabled){transform:none;filter:none}
 .msel-btn .msel-txt{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
-.msel-list{position:fixed;z-index:80;max-width:calc(100vw - 1rem);overflow:auto;overscroll-behavior:contain;
+/* above every panel or dialog a list can open from (the card search Filters panel is 80, the add
+   sheet 90): the sheet's dim background must cover the panel, or a tap above the sheet reaches it */
+.msel-list{position:fixed;z-index:200;max-width:calc(100vw - 1rem);overflow:auto;overscroll-behavior:contain;
   border:1px solid var(--border)}
 .msel-list [role=option]{min-height:40px;white-space:normal;overflow-wrap:anywhere;padding:.3rem 1rem}
 .msel-list [role=option][aria-selected=true]{background:var(--border);box-shadow:inset 3px 0 0 var(--orange)}
 .msel-list .head.title{padding:.6rem 1rem .4rem;font-size:.9rem}
-.msel-scrim{position:fixed;inset:0;z-index:79;background:var(--scrim)}
+.msel-scrim{position:fixed;inset:0;z-index:199;background:var(--scrim)}
 .msel-list.sheet{left:0;right:0;bottom:0;top:auto;width:auto;max-width:none;max-height:min(70vh,70dvh);
   min-width:0;border-radius:var(--radius-sheet) var(--radius-sheet) 0 0;border-bottom:0;
   padding:.5rem 0 calc(.5rem + env(safe-area-inset-bottom));animation:mselup .15s ease-out}
@@ -642,7 +644,8 @@ ul.changes{list-style:none;margin:0 0 .75rem;padding:0;border:1px solid var(--bo
    above it, and the change has the whole row */
 @container (max-width:20em){
   .changes li,.changes li.add,.changes li.del:not(.action){grid-template-columns:minmax(0,1fr) auto}
-  .changes .act{grid-column:1/-1;justify-self:start}
+  /* capitals spaced out don't fit a word like DESCRIPTION across a 320 px phone at 200% text */
+  .changes .act{grid-column:1/-1;justify-self:start;text-transform:capitalize;letter-spacing:0}
   .changes .name{grid-column:1}
   .changes .qty{grid-column:2;text-align:right}
   .changes li.action .qty,.changes li.chg .qty{grid-column:1/-1;text-align:left}

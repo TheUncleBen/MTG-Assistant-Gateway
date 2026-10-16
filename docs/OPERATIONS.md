@@ -93,8 +93,9 @@ Updating to 0.7.29 from an earlier version may need a step first: see
 [DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md#updating-to-0729-from-an-earlier-version)
 (Compose).
 
-In Portainer: **Stacks** → `mtg` → **Update the stack**, with "Re-pull
-image" ticked. With `MTG_TAG=latest` that pulls the newest version; with a
+In Portainer: **Stacks** → `mtg` → **Update the stack**, and in the box that
+asks "Are you sure?" make sure **Re-pull image and redeploy** is on, then
+click **Update**. With `MTG_TAG=latest` that pulls the newest version; with a
 pinned version (for example `0.6.6`), change `MTG_TAG` first
 ([VERSIONS.md](VERSIONS.md)). Or from the command line:
 

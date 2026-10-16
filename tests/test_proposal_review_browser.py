@@ -149,7 +149,7 @@ LABEL_FITS = """() => [...document.querySelectorAll('ul.changes li')].map(li => 
   const words = document.createRange();
   words.selectNodeContents(act);
   return {label: act.textContent, over: act.scrollWidth - act.clientWidth, room: n.width / r.width,
-          lines: words.getClientRects().length,
+          lines: words.getClientRects().length, words: act.textContent.trim().split(/\s+/).length,
           inside: a.left >= r.left - 0.5 && a.right <= r.right + 0.5,
           clear: a.right <= n.left + 0.5 || a.bottom <= n.top + 0.5};
 })"""
@@ -188,6 +188,7 @@ def test_every_change_label_fits_its_box(server: Server, tmp_path: Path) -> None
                     (1280, 800, False),
                     (673, 841, True),
                     (390, 844, True),
+                    (344, 760, True),
                     (320, 640, True),
                 ):
                     ctx = browser.new_context(
@@ -210,6 +211,8 @@ def test_every_change_label_fits_its_box(server: Server, tmp_path: Path) -> None
                     assert not bad, (vw, zoom, bad)
                     if zoom == "none":  # at the normal text size every label is whole, on one line
                         assert all(g["lines"] == 1 for g in got), (vw, got)
+                    # at any size a label breaks only between its words (review R4-5)
+                    assert all(g["lines"] <= g["words"] for g in got), (vw, zoom, got)
                     ctx.close()
         finally:
             browser.close()
