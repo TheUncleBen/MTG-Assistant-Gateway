@@ -132,7 +132,13 @@ def stats_strip(stats: dict[str, Any] | None) -> str:
         ("Lands", _num(stats.get("land_count"), 0)),
         ("Avg MV", _num(stats.get("average_mana_value"))),
         ("Price", money(stats.get("price_total")) if stats.get("price_total") is not None else "–"),
-        ("Bracket", f"~{bracket.get('bracket')}" if bracket.get("bracket") else "–"),
+        # the bracket set on the deck is the deck's bracket; else Archidekt's estimate (Q49, O14)
+        (
+            "Bracket" if stats.get("archidekt_bracket") else "Est. bracket",
+            _num(stats.get("archidekt_bracket"), 0)
+            if stats.get("archidekt_bracket")
+            else (f"~{bracket.get('bracket')}" if bracket.get("bracket") else "–"),
+        ),
         ("Game changers", _num(len(stats.get("game_changers") or []), 0)),
     ]
     tile_html = "".join(f"<div class='tile'><b>{_esc(v)}</b><span>{_esc(k)}</span></div>" for k, v in tiles)
@@ -157,7 +163,7 @@ def stats_strip(stats: dict[str, Any] | None) -> str:
         )
     if bracket.get("basis"):
         out.append(
-            "<p class='muted small'>Bracket estimate from Archidekt's card flags only: "
+            "<p class='muted small'>Archidekt's estimate from cards (its own card flags): "
             + "; ".join(_esc(b) for b in bracket["basis"])
             + ".</p>"
         )

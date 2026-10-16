@@ -134,8 +134,8 @@ One deck:
   one, is not simulated and the report says why.
 - When the gateway runs Forge, a Commander deck's report also has Forge
   games against three precons. They are precons of the deck's bracket: the
-  bracket set on the deck in Archidekt, or else the gateway's estimate. Each
-  precon's bracket comes from the game changers it holds. When there are not
+  bracket set on the deck in Archidekt, or else Archidekt's estimate from
+  the cards. Each precon's bracket comes from the game changers it holds. When there are not
   enough precons of that bracket, the nearest bracket fills in, and an older
   Forge image without precon brackets plays the newest precons; the report
   names the opponents, their brackets and why they were picked. Forge plays
@@ -179,7 +179,8 @@ One deck:
   the four-copies limit, restricted cards, companion, sideboard size, cards
   banned or not legal in the format, the bracket you set against the
   estimate, uncategorised cards; a deck with a banned card is never reported
-  fine), the bracket estimate and the description.
+  fine), the bracket (the one set on the deck, else Archidekt's estimate from
+  the cards) and the description.
 - **Export** (More menu) shows the deck as Archidekt import text (every row
   with printing, finish, categories and labels; paste it into Archidekt's
   Import dialog or the gateway's New deck page), as a plain decklist and as

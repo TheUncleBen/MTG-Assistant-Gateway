@@ -9,6 +9,8 @@ import pytest
 
 from mtg_gateway.archidekt import FORMAT_IDS, FORMAT_NAMES, Deck, DeckCard, parse_deck
 from mtg_gateway.deck_stats import (
+    ARCHIDEKT_COMBO_NOTE,
+    ARCHIDEKT_TURNS_NOTE,
     bracket_estimate,
     colour_identity,
     compare,
@@ -174,7 +176,7 @@ def test_compute_blink_deck() -> None:
     est = s["bracket_estimate"]
     assert est["bracket"] == 4 and est["kind"] == "estimate"
     assert est["basis"][0].startswith("12 game changer(s)")
-    assert any("one extra-turn card" in b for b in est["basis"])
+    assert any(b.startswith("1 extra-turn card(s): ") for b in est["basis"]) and est["notes"] == []
     assert s["archidekt_bracket"] is None
 
 
@@ -183,7 +185,8 @@ def test_compute_precon_deck() -> None:
     assert s["card_count"] == 100 and s["land_count"] == 44
     assert s["commanders"] == ["Aesi, Tyrant of Gyre Strait"] and s["colour_identity"] == ["U", "G"]
     assert s["legality_problems"] == [] and s["game_changers"] == []
-    assert s["bracket_estimate"] == {"bracket": 2, "kind": "estimate", "basis": ["no game changers"]}
+    est = s["bracket_estimate"]
+    assert (est["bracket"], est["basis"], est["notes"]) == (2, ["no game changers"], [])
 
 
 def test_compute_leaves_maybeboard_out() -> None:
@@ -277,32 +280,79 @@ def test_compute_skips_legality_when_format_unknown() -> None:
     assert s["format"] is None and s["legality_problems"] == [] and s["legality_unknown"] == 0
 
 
-def test_bracket_rules() -> None:
+def _filler(n: int) -> list[DeckCard]:
+    """n different unflagged cards: Archidekt gives 1 only below 30 different cards."""
+    return [card(f"filler {i}") for i in range(n)]
+
+
+# Each rule of archidekt.com's "Estimated Bracket" (its deck page script, read 2026-10-14;
+# planning BRACKET-ESTIMATE.md §3), pinned one by one (Q49 "Match Archidekt").
+def test_bracket_matches_archidekts_rules() -> None:
+    big = _filler(40)
     gc = [card(f"gc{i}", game_changer=True) for i in range(4)]
-    assert bracket_estimate([card("plain")])["bracket"] == 2
-    assert bracket_estimate(gc[:1])["bracket"] == 3
-    assert bracket_estimate(gc[:3])["bracket"] == 3
-    assert bracket_estimate(gc)["bracket"] == 4
-    mld = bracket_estimate([card("Armageddon", mass_land_denial=True)])
+    # nothing flagged: 2, or 1 below 30 different cards
+    assert bracket_estimate(big)["bracket"] == 2
+    small = bracket_estimate(_filler(29))
+    assert small["bracket"] == 1 and any("fewer than 30 different cards (29)" in b for b in small["basis"])
+    assert bracket_estimate(_filler(30))["bracket"] == 2
+    # game changers, counted in copies: 1-3 give 3, 4 or more give 4
+    assert bracket_estimate(big + gc[:1])["bracket"] == 3
+    assert bracket_estimate(big + gc[:3])["bracket"] == 3
+    assert bracket_estimate(big + gc)["bracket"] == 4
+    assert bracket_estimate(big + [card("gc", 4, game_changer=True)])["bracket"] == 4
+    # any mass land denial gives 4
+    mld = bracket_estimate(big + [card("Armageddon", mass_land_denial=True)])
     assert mld["bracket"] == 4 and any("mass land denial: Armageddon" in b for b in mld["basis"])
-    one_turn = bracket_estimate([card("Time Warp", extra_turns=True)])
-    assert one_turn["bracket"] == 2 and any("one extra-turn card" in b for b in one_turn["basis"])
+    # one extra-turn card changes nothing; two or more give 3, with Archidekt's note
+    one_turn = bracket_estimate(big + [card("Time Warp", extra_turns=True)])
+    assert one_turn["bracket"] == 2 and one_turn["notes"] == []
     chain = bracket_estimate(
-        [card("Time Warp", extra_turns=True), card("Temporal Mastery", extra_turns=True)]
+        big + [card("Time Warp", extra_turns=True), card("Temporal Mastery", extra_turns=True)]
     )
-    assert chain["bracket"] == 4 and any("chaining" in b for b in chain["basis"])
-    combo = bracket_estimate([card("A", two_card_combo_ids=["1"]), card("B", two_card_combo_ids=["1", "2"])])
-    assert combo["bracket"] == 3 and any("A + B" in b for b in combo["basis"])
-    half = bracket_estimate([card("A", two_card_combo_ids=["1"])])  # partner not in the deck
+    assert chain["bracket"] == 3 and chain["notes"] == [ARCHIDEKT_TURNS_NOTE]
+    assert ARCHIDEKT_TURNS_NOTE == "If your deck chains extra turns, your deck should be Optimized or cEDH"
+    # extra turns never push past 3 on their own, even with game changers below four
+    assert bracket_estimate(big + gc[:3] + [card("t", 2, extra_turns=True)])["bracket"] == 3
+    # a combo piece (an atomicCombos partner in the deck) gives 4, with Archidekt's note
+    combo = bracket_estimate(
+        big + [card("A", oracle_id="a", atomic_combos=["b"]), card("B", oracle_id="b", atomic_combos=["a"])]
+    )
+    assert combo["bracket"] == 4 and combo["notes"] == [ARCHIDEKT_COMBO_NOTE]
+    assert ARCHIDEKT_COMBO_NOTE == "If this is a late-game combo, your deck may be a Bracket: Upgraded"
+    assert any("two-card combo pieces: A, B" in b for b in combo["basis"])
+    half = bracket_estimate(big + [card("A", oracle_id="a", atomic_combos=["b"])])  # partner not in the deck
     assert half["bracket"] == 2 and not any("combo" in b for b in half["basis"])
-    tutors = bracket_estimate([card("Demonic Tutor", tutor=True)])
-    assert tutors["bracket"] == 2 and "1 tutor(s)" in tutors["basis"]
+    # the older twoCardComboIds field no longer counts (Archidekt's estimate reads atomicCombos)
+    old = bracket_estimate(big + [card("A", two_card_combo_ids=["1"]), card("B", two_card_combo_ids=["1"])])
+    assert old["bracket"] == 2
+    # the sideboard counts with the deck
+    side = bracket_estimate(big, side=[card("Armageddon", mass_land_denial=True)])
+    assert side["bracket"] == 4
+    # tutors are listed and never change the number
+    tutors = bracket_estimate(big + [card("Demonic Tutor", tutor=True)])
+    assert tutors["bracket"] == 2 and any("1 tutor(s)" in b for b in tutors["basis"])
+    # never 5, whatever the deck holds
+    everything = big + gc + [card("Armageddon", mass_land_denial=True), card("t", 3, extra_turns=True)]
+    assert bracket_estimate(everything)["bracket"] == 4
+    assert bracket_estimate(everything)["counts"] == {
+        "game_changers": 4,
+        "mass_land_denial": 1,
+        "extra_turns": 3,
+        "combo_pieces": 0,
+        "different_cards": 46,
+    }
     assert bracket_estimate([card("x")], "modern") == {
         "bracket": None,
         "kind": "estimate",
         "basis": ["not a Commander deck (modern)"],
     }
     assert bracket_estimate([], "commander")["bracket"] is None
+
+
+def test_compute_counts_the_sideboard_in_the_estimate() -> None:
+    cards = [*_filler(40), card("Armageddon", categories=["Sideboard"], mass_land_denial=True)]
+    s = compute(deck(cards))
+    assert s["bracket_estimate"]["bracket"] == 4 and s["archidekt_bracket"] is None
 
 
 def test_counts_from_text_only_counts_the_main_zone() -> None:
@@ -646,9 +696,9 @@ def test_companion_and_bracket_mismatch_checks() -> None:
                 card("Time Warp", 1, extra_turns=True), card("Temporal Mastery", 1, extra_turns=True)],
                categories=cat)  # fmt: skip
     low.edh_bracket = 2
-    # archidekt.com's bracket 2 allows extra-turn cards (its estimate of 4 aside); bracket 1 does not
+    # archidekt.com's bracket 2 allows extra-turn cards (its estimate of 3 aside); bracket 1 does not
     checks = compute(low)["checks"]
-    assert checks["bracket"] == {"set": 2, "estimate": 4, "ok": True} and checks["ok"] is True
+    assert checks["bracket"] == {"set": 2, "estimate": 3, "ok": True} and checks["ok"] is True
     low.edh_bracket = 1
     checks = compute(low)["checks"]
     assert checks["bracket"]["ok"] is False and checks["ok"] is False and checks["legal"] is True
