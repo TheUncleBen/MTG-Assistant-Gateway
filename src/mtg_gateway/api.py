@@ -20,7 +20,14 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from . import deck_stats, modes
-from .decks import DeckError, current_client, edit_mismatches, parse_changes, scopes_allow_writes
+from .decks import (
+    DeckError,
+    current_client,
+    edit_mismatches,
+    parse_changes,
+    printing_not_shown,
+    scopes_allow_writes,
+)
 from .pages import BROWSER_CLIENT_ID, browser_session, csrf_header_ok, read_limited
 from .views import deck_brief, deck_out
 
@@ -377,10 +384,11 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         stale = False
         try:
             before = parse_deck(decks.snapshot(who.sub, str(result.get("snapshot_id")))["deck"])
-            if edit_mismatches(before, changes, deck):
+            # a printing change is compared by its set, number and finish (L1)
+            if edit_mismatches(before, changes, deck) or printing_not_shown(changes, deck):
                 await asyncio.sleep(EDIT_REREAD_DELAY)
                 deck = await decks.get_own_deck(who.sub, deck_id)
-                stale = bool(edit_mismatches(before, changes, deck))
+                stale = bool(edit_mismatches(before, changes, deck) or printing_not_shown(changes, deck))
         except DeckError:  # no snapshot to compare with: answer with the read as it is
             logger.info("edit %s: could not compare the re-read deck with its snapshot", pid)
         out.update(view(deck, {front_face(ch.card_name).casefold() for ch in changes}, stale=stale))
