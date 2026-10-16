@@ -504,7 +504,11 @@ The gateway only writes to someone's Archidekt account in two steps:
    to the proposal (Claude, ChatGPT; `MTG_APPLY_IN_CHAT`) or with the Apply
    button on `/proposals/<id>`. A user who chose a looser approval mode on
    their Account page lets the assistant apply low-risk edits (semi) or
-   everything (auto) itself with `apply_proposal`; see below.
+   nearly everything (auto) itself with `apply_proposal`; see below. On
+   `/proposals` the member can also tick several waiting changes and apply
+   them together (one deck at a time, oldest first, one snapshot per deck),
+   and in the chat the `show_waiting_changes` card offers Apply all for the
+   app's own; the result page offers Undo.
 
 Applying an edit or restore:
 

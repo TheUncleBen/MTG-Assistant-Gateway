@@ -109,8 +109,8 @@ async def test_an_outside_change_flags_the_waiting_proposal_at_once(stack: Stack
     try:
         await b.login()
         page = await b.http.get(f"/proposals/{pid}")
-        assert "Out of date: this deck changed after the proposal was made" in page.text
-        assert "out of date</span>" in (await b.http.get("/proposals")).text
+        assert "Needs a look: this deck changed after the proposal was made" in page.text
+        assert "Needs a look</span>" in (await b.http.get("/proposals")).text
     finally:
         await b.aclose()
 

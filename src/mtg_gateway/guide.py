@@ -206,6 +206,7 @@ def guide_body(
     writes_enabled: bool,
     has_collection: bool,
     max_rows: int = modes.DEFAULT_MAX_ROWS,
+    big_rows: int = modes.DEFAULT_BIG_EDIT_ROWS,
     archidekt_backups: bool = True,
     backup_folder: str = "MTG Gateway backups",
     watchlists: bool = False,
@@ -413,22 +414,31 @@ def guide_body(
         "is first saved as a <strong>proposal</strong>: the exact list of what would change.</p>"
         "<ol class='steps'>"
         "<li><span>Approve on the card the assistant shows in the chat (Reject can carry a reason), or "
-        "open <a href='/proposals'>Proposals</a>, which lists what is waiting, open one to read the diff "
-        "and press <strong>Apply</strong> or <strong>Reject</strong>.</span></li>"
-        "<li><span>Before the edit is applied, the gateway checks the deck has not changed in the "
-        f"meantime, saves a snapshot and puts a backup copy of the deck in a “{folder}” folder "
-        "on your Archidekt account, then reads the deck back to confirm.</span></li>"
+        "open <a href='/proposals'>Proposals</a>, which lists what is waiting by deck, oldest first. "
+        "Open one to read the diff and press <strong>Apply</strong> or <strong>Reject</strong>, or tick "
+        "several and press <strong>Apply</strong>: the gateway shows the order first, then applies them "
+        "one deck at a time. A deck's own page shows its waiting changes at the top, and asking the "
+        "assistant what is waiting shows them as a card with <strong>Apply all</strong>.</span></li>"
+        "<li><span>Before the edit is applied, the gateway checks it still fits the deck, saves a "
+        f"snapshot and puts a backup copy of the deck in a “{folder}” folder on your Archidekt "
+        "account, then reads the deck back to confirm.</span></li>"
+        "<li><span>After an apply, <strong>Undo</strong> puts the deck back as it was just before; it "
+        "says first if it would also take back later changes.</span></li>"
         "<li><span>Your own saves appear under Proposals too, already applied, so every change has a "
         "record.</span></li></ol>"
-        "<p><strong>Out of date:</strong> Archidekt is the master copy of your decks. When you open the "
-        "app, and regularly while proposals are waiting (every 30 minutes unless this gateway is set "
-        "otherwise), the gateway checks your decks on Archidekt; it only reads. If a deck changed after "
-        "a proposal for it was made, on archidekt.com, in another app or by another change applied "
-        "here, the proposal is marked <strong>out of date</strong> at once: Apply would be refused and "
-        "nothing sent, so reject it and ask for a new one. The check never changes a deck, a proposal, "
-        "a snapshot or your undo history.</p>"
+        "<p><strong>When the deck changes first:</strong> Archidekt is the master copy of your decks. When "
+        "you open the app, and regularly while proposals are waiting (every 30 minutes unless this "
+        "gateway is set otherwise), the gateway reads your decks on Archidekt; it only reads. If a deck "
+        "changed after a proposal for it was made, on archidekt.com, in another app or by another "
+        "change applied here, the gateway works the proposal out again on the deck as it is now. When "
+        "it still makes exactly the same change it shows <strong>Updated</strong> and can be applied as "
+        "before; when it no longer fits (a card it removes is gone, a count moved) it shows "
+        "<strong>Needs a look</strong> with the reason, and Apply is refused with nothing sent until the "
+        "assistant changes it or you reject it. A change that depends on one you rejected shows "
+        "<strong>Held</strong>. The check never changes a deck, a snapshot or your undo history.</p>"
         "<p>On your Account page you can pick an approval mode: Manual (every change asks you), Semi-auto "
-        "(the assistant applies small, low-risk edits itself and asks about the rest) or Full auto. "
+        "(the assistant applies small, low-risk edits itself and asks about the rest) or Full auto (it "
+        "applies the rest too, except a restore, a commander change, a new deck and a big edit). "
         "Every change keeps a snapshot either way; <a href='#ref-approval'>Approval modes and risk "
         "levels</a> has the exact rules.</p>"
         f"<p class='tip'>{_esc(writes)}</p>"
@@ -731,10 +741,11 @@ def guide_body(
         ),
         (
             "Proposals: list, read, approve with the card's code, reject (with a reason on the card), "
-            "apply; tidy the waiting ones (amend, withdraw, combine)",
+            "apply; show the waiting ones as a card with Apply all; tidy them (amend, withdraw, combine)",
             "<code>list_my_proposals</code>, <code>get_proposal</code>, <code>confirm_proposal</code>, "
-            "<code>reject_proposal</code>, <code>apply_proposal</code>, <code>amend_proposal</code>, "
-            "<code>withdraw_proposal</code>, <code>combine_proposals</code>",
+            "<code>reject_proposal</code>, <code>apply_proposal</code>, <code>show_waiting_changes</code>, "
+            "<code>confirm_waiting</code> and <code>get_apply_result</code> (the card's buttons), "
+            "<code>amend_proposal</code>, <code>withdraw_proposal</code>, <code>combine_proposals</code>",
             "apply writes",
             "<code>apply_proposal</code> succeeds only when the mode allows; one that would now do "
             "something else than what was reviewed is not sent and waits as Needs a look",
@@ -885,7 +896,11 @@ def guide_body(
         "screen every page is a tab on a rail down the left edge, with no More; a wider browser has the "
         "links in the top bar, Home first.</p>"
     )
-    on_review_page = "<td>you press Apply on its review page</td>"  # R-142, in every mode
+    # R-142, in every mode; since 0.7.29 (Q8) the card in the chat too, but never for a deck deletion
+    on_review_page = (
+        "<td>you press Approve on the card or Apply on its review page (deleting a deck: on its review "
+        "page only)</td>"
+    )
     ref_approval = (
         "<p>Your approval mode on the <a href='/account'>Account</a> page says how much your assistant "
         "may change on Archidekt without asking you first. It is your own setting and applies to nobody "
@@ -899,7 +914,9 @@ def guide_body(
         "<td>the assistant applies it</td><td>you press</td>"
         f"{on_review_page}</tr>"
         f"<tr><td><strong>Full auto</strong>: {_esc(modes.MODE_LABELS['auto'])}</td>"
-        f"<td>the assistant applies it</td><td>the assistant applies it</td>{on_review_page}</tr>"
+        "<td>the assistant applies it</td><td>the assistant applies it, except a restore, a commander "
+        f"change, a new deck and an edit of more than {big_rows} rows: you press</td>"
+        f"{on_review_page}</tr>"
         "</tbody></table></div>"
         f"<p><strong>Low risk:</strong> {_esc(modes.low_risk_text(max_rows))} "
         f"<strong>High risk:</strong> {_esc(modes.HIGH_RISK_TEXT)} "
@@ -1176,6 +1193,7 @@ def add_guide_routes(server: MCPServer, state: AppState) -> None:
                 writes_enabled=bool(s.writes_enabled),
                 has_collection=getattr(state, "collection", None) is not None,
                 max_rows=int(getattr(s, "auto_apply_max_rows", modes.DEFAULT_MAX_ROWS)),
+                big_rows=int(state.decks.live.get("auto_big_edit_rows")),
                 archidekt_backups=bool(getattr(s, "archidekt_backups", True)),
                 backup_folder=s.archidekt_backup_folder,
                 watchlists=bool(s.watchlists_enabled),

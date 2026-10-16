@@ -1946,7 +1946,11 @@ class DeckService:
         return {
             "approval_mode": mode,
             "approval_mode_label": modes.MODE_LABELS[mode],
-            "approval_mode_note": modes.mode_help(mode, max_rows=self.settings.auto_apply_max_rows)
+            "approval_mode_note": modes.mode_help(
+                mode,
+                max_rows=self.settings.auto_apply_max_rows,
+                big_rows=int(self.live.get("auto_big_edit_rows")),
+            )
             + " Change it on the account page.",
         }
 
