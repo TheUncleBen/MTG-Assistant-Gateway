@@ -128,3 +128,30 @@ def test_a_restore_puts_the_flags_back():
     assert [
         (e["action"], e["modifications"]["flippedDefault"], e["modifications"]["companion"]) for e in payload
     ] == [("add", True, True)]
+
+
+def test_a_card_with_commander_as_a_later_category_is_put_commander_first():
+    """K10 (review L12): a card that already has Commander, but not first, is rewritten with
+    Commander first, its other categories kept; the review shows it and the proposal is not
+    refused as leaving the deck as it is. A card with Commander first already is left alone."""
+    from mtg_gateway.archidekt import parse_deck
+    from mtg_gateway.decks import category_plan_rows, parse_changes, plan_rows
+
+    from .fake_archidekt import FakeArchidekt
+
+    ark = FakeArchidekt()
+    raw = ark._deck_for(ark.decks[42], None)
+    row = next(e for e in raw["cards"] if e["card"]["oracleCard"]["name"] == "Acidic Slime")
+    row["categories"] = ["Ramp", "Commander"]
+    deck = parse_deck(raw)
+    card = next(c for c in deck.main_cards if c.name == "Acidic Slime")
+    changes = parse_changes([{"action": "set_commander", "card_name": card.name}])
+    want, rows = category_plan_rows(deck, changes)
+    assert want[card.relation_id] == ["Commander", "Ramp"]
+    line = next(r for r in rows if r.get("name") == "Acidic Slime")
+    assert (line["kind"], line["before"], line["after"]) == ("category", "Ramp, Commander", "Commander, Ramp")
+    plan_rows(deck, changes)  # not refused as "these changes would leave the deck exactly as it is"
+    row["categories"] = ["Commander", "Ramp"]
+    deck = parse_deck(raw)
+    want, _rows = category_plan_rows(deck, changes)
+    assert card.relation_id not in want
