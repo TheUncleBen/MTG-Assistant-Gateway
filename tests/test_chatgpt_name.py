@@ -314,3 +314,19 @@ async def test_admin_warns_about_a_long_chatgpt_name(
     else:
         assert f"<div class='notice warn'>{html.escape(_admin_warning(shown))}</div>" in r.text
         assert '<b>"Deck"' not in r.text
+
+
+def test_a_long_server_name_is_cut_where_openai_limits_the_developer_name() -> None:
+    """L15: OpenAI's package validation refuses an author.name or developerName over 120
+    characters; with a short MTG_CHATGPT_NAME the plugin file must still upload, so a long
+    MTG_SERVER_NAME is cut there at a word."""
+    site = " ".join(["Commander"] * 14)  # 139 characters
+    doc = chatgpt_plugin.manifest(REPO_PLUGIN, site, GATEWAY, "Decks")
+    ui = doc["extensions"]["com.openai"]["interface"]
+    assert ui["displayName"] == "Decks"
+    assert len(ui["developerName"]) <= 120 and ui["developerName"] == " ".join(["Commander"] * 12)
+    assert len(doc["author"]["name"]) <= 120
+    # a name within the limit is untouched
+    short = chatgpt_plugin.manifest(REPO_PLUGIN, "Deck Helper", GATEWAY)
+    assert short["extensions"]["com.openai"]["interface"]["developerName"] == short["author"]["name"]
+    assert "Deck Helper" in short["author"]["name"]
