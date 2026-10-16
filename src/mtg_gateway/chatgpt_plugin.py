@@ -101,7 +101,7 @@ def manifest(base: Path, site: str, public_url: str, chatgpt_name: str | None = 
             "com.openai": {
                 "interface": {
                     "displayName": chatgpt_label(site, chatgpt_name),
-                    "shortDescription": "MTG decks and research",  # OpenAI documents at most 30 characters
+                    "shortDescription": "MTG decks and research",  # max 240; 30 in OpenAI's directory
                     "longDescription": SERVER_DESCRIPTION
                     + " Every deck change is shown to you first and applied only after you approve.",
                     "developerName": developer,
