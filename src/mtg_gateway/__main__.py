@@ -84,13 +84,20 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 3
+    # The log level may come from the admin Settings page (create_app applied the stored values).
+    running = app.state.gateway.settings
+    if running.log_level != settings.log_level:
+        logging.getLogger().setLevel(running.log_level)
+        logging.getLogger("httpx").setLevel(
+            logging.NOTSET if running.log_level == "DEBUG" else logging.WARNING
+        )
     uvicorn.run(
         app,
         host=settings.listen_host,
         port=settings.listen_port,
         proxy_headers=True,
         forwarded_allow_ips=settings.trusted_proxies,
-        log_level=settings.log_level.lower(),
+        log_level=running.log_level.lower(),
         access_log=False,
         # On SIGTERM (a redeploy), let running requests such as a deck apply finish before exiting.
         # The stack files give the container a longer stop_grace_period than this.

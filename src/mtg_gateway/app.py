@@ -82,7 +82,7 @@ from .chatgpt_plugin import add_chatgpt_plugin_route
 from .cimd import CimdFetcher
 from .collection import add_collection
 from .companion import add_companion_routes
-from .config import LiveSettings, Settings
+from .config import LiveSettings, Settings, with_stored
 from .db import Database
 from .decks import (
     FULL_SCOPE,
@@ -942,9 +942,11 @@ def create_app(
     mf_proxy: MysticForgeProxy | None = None,
     cimd: CimdFetcher | None = None,
 ) -> Starlette:
+    db = db or Database(settings.db_path)
+    # Values saved on the admin Settings page, for every key the deployment left blank (0.7.29).
+    settings = with_stored(settings, db)
     theme.PUBLIC_URL = settings.public_url.rstrip("/")  # link previews point at the site's icon
     theme.WATCHLISTS = settings.watchlists_enabled  # the Watchlist links and price buttons
-    db = db or Database(settings.db_path)
     oidc = oidc or OIDCClient(
         settings.oidc_issuer,
         settings.oidc_client_id,
