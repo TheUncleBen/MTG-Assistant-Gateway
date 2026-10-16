@@ -1123,9 +1123,30 @@ def category_plan_rows(
             )
             for r in rows
         }
-        changed = [r for r in rows if sorted(r.categories) != sorted(per_row[r.relation_id])]
+        if ch.action == "set_commander":
+            # the order counts: Commander must come first, also when the card already has it
+            # as a later category (["Ramp", "Commander"])
+            changed = [r for r in rows if list(r.categories) != per_row[r.relation_id]]
+        else:
+            changed = [r for r in rows if sorted(r.categories) != sorted(per_row[r.relation_id])]
         for r in changed:
             want[r.relation_id] = per_row[r.relation_id]
+        # a card that is a commander already is not in the commander row below, so its
+        # reordering gets a category row of its own
+        reordered = [r for r in changed if ch.action == "set_commander" and COMMANDER in r.categories]
+        if reordered:
+            lines.append(
+                _row(
+                    "category",
+                    name=rows[0].name,
+                    before=" / ".join(
+                        sorted({", ".join(clean_text(c) for c in r.categories) for r in reordered})
+                    ),
+                    after=" / ".join(
+                        sorted({", ".join(clean_text(c) for c in per_row[r.relation_id]) for r in reordered})
+                    ),
+                )
+            )
         if ch.action == "set_category" and changed:
             old = sorted({", ".join(sorted(clean_text(c) for c in r.categories)) or "(none)" for r in rows})
             lines.append(
