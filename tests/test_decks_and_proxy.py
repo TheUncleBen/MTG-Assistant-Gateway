@@ -15,6 +15,7 @@ from mcp import Client
 from mcp.server.mcpserver import MCPServer
 
 from mtg_gateway.archidekt import ArchidektClient, Pacer
+from mtg_gateway.decklist import parse_decklist
 from mtg_gateway.mf_proxy import MysticForgeProxy
 
 from .conftest import (
@@ -1489,6 +1490,10 @@ async def test_sixty_card_decks_are_simulated_as_sixty_card_games(stack: Stack) 
     # the stored report reads back as a 60-card game
     got = structured(await call(h, token, "get_deck_report", {"report_id": rep["report_id"]}))
     assert "Format: 60-card" in got["goldfish"]["text"], got
+    # the copies of each main-deck card are kept with the run (A30, A31); the sideboard card is not
+    kept = got["goldfish"]["quantities"]
+    sent_total = sum(c.quantity for c in parse_decklist(sent["deck"]) if c.zone == "main")
+    assert sum(kept.values()) == sent_total and sideboard_name.split(" // ")[0] not in kept, kept
     # The same deck under the Commander format, without a commander: refused, not guessed.
     ark.decks[44]["deckFormat"] = 3
     ark.decks[44]["updatedAt"] = "2026-10-03T00:00:00Z"

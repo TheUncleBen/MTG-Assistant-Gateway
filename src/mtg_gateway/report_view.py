@@ -235,6 +235,17 @@ def _honesty_from_text(body: str) -> dict[str, Any]:
     return out
 
 
+def _quantities(value: Any) -> dict[str, int]:
+    """The stored copies per card, keyed by the front face in lower case."""
+    if not isinstance(value, dict):
+        return {}
+    return {
+        front_face(k).casefold(): v
+        for k, v in value.items()
+        if isinstance(k, str) and isinstance(v, int) and not isinstance(v, bool) and v > 0
+    }
+
+
 def parse_goldfish(block: Any, *, deck_size: int | None = None) -> dict[str, Any] | None:
     """The simulation block of a stored report (``{"tool","ok","data"?,"text"?}``) as plain
     data. None for no block; never raises. ``deck_size`` (the deck's card count from the
@@ -261,6 +272,8 @@ def parse_goldfish(block: Any, *, deck_size: int | None = None) -> dict[str, Any
         "honesty": {"out_of_scope": [], "unrecognized": [], "low_impact": [], "approximations": []},
         "message": None,
         "raw": plain_words(text[:MAX_RAW]),
+        # copies of each card in the simulated deck (reports._keep_quantities; none before 0.7.30)
+        "quantities": _quantities(block.get("quantities")),
     }
     for line in preamble.splitlines():
         s = line.strip()
@@ -317,6 +330,9 @@ def parse_goldfish(block: Any, *, deck_size: int | None = None) -> dict[str, Any
     if not (honesty["out_of_scope"] or honesty["unrecognized"] or honesty["low_impact"]):
         honesty.update({k: from_text[k] for k in ("out_of_scope", "unrecognized", "low_impact")})
     honesty["approximations"] = from_text["approximations"]
+    if out["quantities"]:
+        for card in [*honesty["unrecognized"], *(c for grp in honesty["out_of_scope"] for c in grp["cards"])]:
+            card["copies"] = out["quantities"].get(front_face(card["name"]).casefold())
     out["honesty"] = honesty
     if not out["metrics"] and not out["summary"]:
         # A refusal or an outage: the simulator's sentence is the whole story.
@@ -694,22 +710,38 @@ def _share(count: int, deck_size: int | None) -> str:
 def _names(cards: list[dict[str, Any]]) -> str:
     items = []
     for c in cards:
+        copies = f"{c['copies']}× " if isinstance(c.get("copies"), int) and c["copies"] > 1 else ""
         drawn = f" <i>drawn {_pct(c['drawn'])}</i>" if c.get("drawn") is not None else ""
-        items.append(f"<li>{_esc(front_face(c['name']))}{drawn}</li>")
+        items.append(f"<li>{copies}{_esc(front_face(c['name']))}{drawn}</li>")
     return f"<ul class='names'>{''.join(items)}</ul>"
+
+
+def _md_name(c: dict[str, Any]) -> str:
+    copies = f"{c['copies']}× " if isinstance(c.get("copies"), int) and c["copies"] > 1 else ""
+    return copies + front_face(c["name"])
+
+
+def _copies(cards: list[dict[str, Any]]) -> int:
+    """How many copies the listed cards are (each counts once without a stored quantity)."""
+    return sum(c["copies"] if isinstance(c.get("copies"), int) else 1 for c in cards)
 
 
 def coverage(g: dict[str, Any]) -> dict[str, Any] | None:
     """One figure for how much of the deck the simulator modeled: the deck's cards less those it
-    did not recognize and those out of its scope. The panel names each card once, which counts the
-    cards of a singleton Commander deck but not those of a 60-card deck holding several copies of a
-    card, so a 60-card game gets no figure."""
+    played without their effect and those out of its scope, counted in copies. The honesty report
+    names each card once; the copies come from the quantities kept with the run (0.7.30, A30). A
+    60-card game stored before that has several copies per card and no quantities, so no figure."""
     h = g.get("honesty") or {}
     size = g.get("deck_size")
-    if g.get("format") == "constructed" or not isinstance(size, int) or size <= 0:
+    if not isinstance(size, int) or size <= 0:
         return None
-    left = len(h.get("unrecognized") or []) + sum(len(grp["cards"]) for grp in h.get("out_of_scope") or [])
-    modeled = max(0, size - left)
+    if g.get("format") == "constructed" and not g.get("quantities"):
+        return None
+    listed = [
+        *(h.get("unrecognized") or []),
+        *(c for grp in h.get("out_of_scope") or [] for c in grp["cards"]),
+    ]
+    modeled = max(0, size - _copies(listed))
     return {"modeled": modeled, "deck_size": size, "pct": round(100 * modeled / size)}
 
 
@@ -723,8 +755,48 @@ def coverage_text(g: dict[str, Any]) -> str:
     )
 
 
-def honesty_html(g: dict[str, Any]) -> str:
-    """The "what the simulation could not model" panel body, or '' when there is nothing to say."""
+# The cards the simulator plays without their effect (its "unrecognized" group), in plain words.
+UNMODELED_HEADING = "Played without their effect"
+UNMODELED_TEXT = (
+    "The simulator found these cards and their exact text, but it has no model yet of what they do, "
+    "so it drew and cast them without their effect. Whatever they would do in a real game is missing "
+    "from the numbers above. Your assistant can write a model for each card from its exact text, and "
+    "a run with those models plays them."
+)
+ASK_LABEL = "Copy a request for your assistant"
+
+
+def ask_prompt(deck_name: str, deck_url: str, cards: list[dict[str, Any]]) -> str:
+    """What the member pastes into Claude or ChatGPT to have these cards modeled (the same words
+    for both): the assistant reads each card's exact text and passes its models to a new run."""
+    names = ", ".join(front_face(c["name"]) for c in cards)
+    return (
+        f'In the goldfish simulation of my deck "{deck_name}" ({deck_url}), these cards are played without '
+        f"their effect: {names}. Use the gateway's goldfish annotation tool on the deck to see what each "
+        "one needs, and write each model only from the card's exact Oracle text (the gateway's card text "
+        "and rules tools), never from memory. Then run a new deck report for the deck with your models as "
+        "its annotations, and tell me what changed."
+    )
+
+
+def ask_html(r: dict[str, Any], cards: list[dict[str, Any]]) -> str:
+    """The copy button and its hidden text for the request above (export.js copies it)."""
+    if not cards:
+        return ""
+    text = ask_prompt(str(r.get("deck_name") or r.get("deck_id") or ""), str(r.get("deck_url") or ""), cards)
+    return (
+        "<div class='ask'><button type='button' class='btn small copybtn' data-copy='ask-model'>"
+        f"{_esc(ASK_LABEL)}</button><span id='ask-model-status' class='small muted' role='status' "
+        "aria-live='polite'></span>"
+        f"<textarea id='ask-model' class='sr-only' readonly aria-label='{_esc(ASK_LABEL)}'>{_esc(text)}"
+        "</textarea></div>"
+    )
+
+
+def honesty_html(g: dict[str, Any], ask: str = "") -> str:
+    """The "what the simulation could not model" panel body, or '' when there is nothing to say.
+    ``ask`` is the copy-a-request block (ask_html) the signed-in page puts under the cards played
+    without their effect."""
     h = g.get("honesty") or {}
     size = g.get("deck_size")
     parts: list[str] = []
@@ -732,14 +804,16 @@ def honesty_html(g: dict[str, Any]) -> str:
         parts.append(f"<p class='b coverage'>{_esc(coverage_text(g))}</p>")
     unrec = h.get("unrecognized") or []
     if unrec:
+        # The simulator found these cards (their exact text comes from Scryfall; a name it cannot
+        # find is a warning above); "unrecognized" is its word for "no effect model yet" (R-134).
         parts.append(
-            f"<div class='group'><h3>Not recognized <small>{_esc(_share(len(unrec), size))}</small></h3>"
-            "<p>The simulator has no model for these cards. It drew and cast them as blanks, so anything "
-            "they would do in a real game is missing from the numbers above.</p>" + _names(unrec) + "</div>"
+            f"<div class='group unmodeled'><h3>{UNMODELED_HEADING} <small>"
+            f"{_esc(_share(_copies(unrec), size))}</small></h3>"
+            f"<p>{UNMODELED_TEXT}</p>" + _names(unrec) + ask + "</div>"
         )
     oos = h.get("out_of_scope") or []
     if oos:
-        total = sum(len(grp["cards"]) for grp in oos)
+        total = _copies([c for grp in oos for c in grp["cards"]])
         groups = "".join(
             f"<h4>{_esc(grp['label'])} <small>{len(grp['cards'])}</small></h4>" + _names(grp["cards"])
             for grp in oos
@@ -1023,6 +1097,7 @@ def report_sections(r: dict[str, Any]) -> dict[str, Any]:
         "tiles": tiles_for(g) if g else [],
         "charts": charts_for(g) if g else [],
         "honesty": honesty_html(g) if g else "",
+        "unmodeled": ((g or {}).get("honesty") or {}).get("unrecognized") or [],
         "triggers": _triggers_html(g) if g else "",
     }
 
@@ -1117,11 +1192,12 @@ def report_body_html(
             + summary
             + "</div>"
         )
-        if s["honesty"]:
+        honesty = s["honesty"] if standalone else honesty_html(g, ask_html(r, s["unmodeled"]))
+        if honesty:
             body += (
                 "<div class='card honesty'><h2>What the simulation could not model</h2>"
                 "<p class='muted small'>Read the numbers above with this in mind: the more of the deck sits "
-                "here, the less the simulation says about it.</p>" + s["honesty"] + "</div>"
+                "here, the less the simulation says about it.</p>" + honesty + "</div>"
             )
     if g is not None or v is not None:
         body += f"<div class='card'><h2>Validation {_validation_badge(v)}</h2>{validation_html(v)}</div>"
@@ -1192,14 +1268,14 @@ def report_markdown(r: dict[str, Any]) -> str:
             if (h["unrecognized"] or h["out_of_scope"]) and coverage_text(g):
                 lines += [coverage_text(g), ""]
         if h["unrecognized"]:
-            lines.append(f"Not recognized — {_share(len(h['unrecognized']), size)}:")
-            lines.append(", ".join(front_face(c["name"]) for c in h["unrecognized"]))
+            lines.append(f"{UNMODELED_HEADING} — {_share(_copies(h['unrecognized']), size)}:")
+            lines.append(", ".join(_md_name(c) for c in h["unrecognized"]))
             lines.append("")
         if h["out_of_scope"]:
-            total = sum(len(grp["cards"]) for grp in h["out_of_scope"])
+            total = _copies([c for grp in h["out_of_scope"] for c in grp["cards"]])
             lines.append(f"Out of scope — {_share(total, size)}:")
             for grp in h["out_of_scope"]:
-                lines.append(f"- {grp['label']}: " + ", ".join(front_face(c["name"]) for c in grp["cards"]))
+                lines.append(f"- {grp['label']}: " + ", ".join(_md_name(c) for c in grp["cards"]))
             lines.append("")
         if h["low_impact"]:
             lines.append(f"Modeled but never mattered — {_share(len(h['low_impact']), size)}:")

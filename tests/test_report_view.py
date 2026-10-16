@@ -155,7 +155,7 @@ def test_page_speaks_plainly_and_shows_every_panel() -> None:
         "class='charts'",
         "<svg",
         "What the simulation could not model",
-        "Not recognized",
+        "Played without their effect",
         "32 of 98 cards (33% of the deck)",
         "Out of scope",
         "Removal and other interaction",
@@ -194,7 +194,10 @@ def test_markdown_and_html_exports() -> None:
     assert md.startswith("# Deck report: Immortal Reckoning\n")
     assert "- Commander: Liesa, Forgotten Archangel" in md and "- Games: 300, through turn 10" in md
     assert "## Goldfish simulation" in md and "40 damage dealt by turn 10: 57% (95% interval 51–62%)" in md
-    assert "Not recognized — 32 of 98 cards (33% of the deck):" in md and "## Validation: issues found" in md
+    assert (
+        "Played without their effect — 32 of 98 cards (33% of the deck):" in md
+        and "## Validation: issues found" in md
+    )
     assert "## Simulation output" in md and "## Metrics" in md and "goldfish_" not in md
     doc = rv.report_export_html(r, stats_html="<p>stats</p>", theme_css=".tiles{display:grid}")
     assert doc.startswith("<!doctype html>") and "<script" not in doc and "href='/" not in doc
@@ -294,3 +297,41 @@ def test_preflight_only_label_and_overall_status() -> None:
     assert "## Preflight only (no rules engine)" in md and "- Status: complete" in md
     assert "## Preflight only (no rules engine)" in rv.report_markdown(report())
     assert "## Forge games" in rv.report_markdown(report(forge={"state": "running"}, status="running"))
+
+
+def test_copies_and_sixty_card_coverage_come_from_the_kept_quantities() -> None:
+    """A31: the cards played without their effect show their copies; A30: a 60-card game kept with
+    its quantities gets a coverage figure counted in copies (none without them, as before)."""
+    g0 = rv.parse_goldfish({"ok": True, "text": GOLDFISH})
+    name = g0["honesty"]["unrecognized"][0]["name"]
+    quantities = {rv.front_face(name): 3, "Not In The Report": 2, "bad": "x", "neg": -1, "flag": True}
+    g = rv.parse_goldfish({"ok": True, "text": GOLDFISH, "quantities": quantities})
+    assert g["quantities"] == {rv.front_face(name).casefold(): 3, "not in the report": 2}
+    first = g["honesty"]["unrecognized"][0]
+    assert first["copies"] == 3 and g["honesty"]["unrecognized"][1]["copies"] is None
+    assert f"<li>3× {rv.front_face(name)}" in rv.honesty_html(g)
+    # 98 cards less 34 copies played without their effect (32 cards, one of them 3 times) less 17 = 47
+    assert rv.coverage(g) == {"modeled": 47, "deck_size": 98, "pct": 48}
+    con = {**g, "format": "constructed", "deck_size": 60}
+    assert rv.coverage({**con, "quantities": {}}) is None
+    assert rv.coverage(con)["deck_size"] == 60
+    md = rv.report_markdown(
+        report(goldfish=None)
+        | {"goldfish": {"tool": "goldfish_run", "ok": True, "text": GOLDFISH, "quantities": quantities}}
+    )
+    assert f"3× {rv.front_face(name)}" in md
+
+
+def test_ask_button_only_on_the_signed_in_page() -> None:
+    """The cards played without their effect get a copy-a-request button on the signed-in page (the
+    same words for Claude and ChatGPT, no tool names on the page); exports carry no button."""
+    r = report(deck_url="https://archidekt.com/decks/42")
+    html = rv.report_body_html(r)
+    assert "data-copy='ask-model'" in html and rv.ASK_LABEL in html and "id='ask-model-status'" in html
+    assert "Immortal Reckoning" in html.split("id='ask-model'")[1] and "goldfish_" not in html
+    assert "never from memory" in html
+    assert "ask-model" not in rv.report_export_html(r, stats_html="", theme_css="")
+    assert rv.ASK_LABEL not in rv.report_markdown(r)
+    assert rv.ask_html(r, []) == ""
+    # names are escaped in the hidden text
+    assert "&lt;b&gt;" in rv.ask_html(r | {"deck_name": "<b>"}, [{"name": "X"}])

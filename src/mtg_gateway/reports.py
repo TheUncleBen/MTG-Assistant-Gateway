@@ -244,6 +244,7 @@ class ReportService:
             elif simulate:
                 goldfish = await self._mf(sub, "goldfish_run", _run_args(sim_text, games, options, mode))
                 _commander_aside(goldfish, sim_commander)
+                _keep_quantities(goldfish, sim_text)
         return {
             "stored": False,
             "deck": {"id": None, "name": "pasted list", "card_count": stats["card_count"]},
@@ -298,6 +299,7 @@ class ReportService:
             elif simulate:
                 goldfish = await self._mf(sub, "goldfish_run", _run_args(text, games, options, mode))
                 _commander_aside(goldfish, commander)
+                _keep_quantities(goldfish, text)
                 _stored_note(goldfish)
         rid = "rep_" + secrets.token_urlsafe(9)
         # The run's own settings, kept with the statistics (no column of their own) and read back
@@ -1103,6 +1105,25 @@ def _stored_note(goldfish: dict[str, Any]) -> None:
         value = holder.get(key)
         if isinstance(value, str) and FULL_REPORT in value and STORED_NOTE not in value:
             holder[key] = value.replace(FULL_REPORT, f"{FULL_REPORT} {STORED_NOTE}", 1)
+
+
+def _keep_quantities(goldfish: dict[str, Any], text: str) -> None:
+    """Keep how many copies of each card the simulated deck held (front faces, main zone) with the
+    simulation's result: its honesty report names each card once, so the report page shows the
+    copies beside each card (A31) and counts a 60-card deck's coverage in copies (A30)."""
+    if not goldfish.get("ok"):
+        return
+    try:
+        cards = parse_decklist(text)
+    except DecklistError:
+        return
+    copies: dict[str, int] = {}
+    for c in cards:
+        if c.zone == "main":
+            name = _front_face(c.name) or c.name
+            copies[name] = copies.get(name, 0) + c.quantity
+    if copies:
+        goldfish["quantities"] = copies
 
 
 def _front_face(name: str | None) -> str | None:
