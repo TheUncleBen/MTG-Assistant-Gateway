@@ -148,6 +148,35 @@ def _chromium() -> None:
         pytest.skip("no Chromium available for Playwright")
 
 
+# What closed a themed list (static/select.js closes it on a pick, a pointerdown outside it, any
+# scroll outside it, a resize, Escape, Tab, or the focus leaving its button). A filter's list once
+# closed under the test in CI before its option was clicked and the cause could not be reproduced
+# (0.7.29); _choose shows this record if that happens again, so the next failure names its cause.
+WHY_CLOSED = """
+window.__mselLog = [];
+(() => {
+  const log = (...a) => {
+    window.__mselLog.push([Math.round(performance.now()), ...a]);
+    if (window.__mselLog.length > 60) window.__mselLog.shift();
+  };
+  const name = e => e === document ? 'document' : e === window ? 'window'
+    : !e || !e.tagName ? String(e)
+    : e.tagName + (e.id ? '#' + e.id : '')
+      + (typeof e.className === 'string' && e.className ? '.' + e.className.split(' ').join('.') : '');
+  document.addEventListener('scroll', e => log('scroll', name(e.target)), true);
+  window.addEventListener('resize', () => log('resize', innerWidth + 'x' + innerHeight));
+  document.addEventListener('pointerdown', e => log('pointerdown', name(e.target)), true);
+  document.addEventListener('focusin', e => log('focus', name(e.target)), true);
+  const remove = Node.prototype.removeChild;
+  Node.prototype.removeChild = function (c) {
+    if (c && c.classList && c.classList.contains('msel-list'))
+      log('list closed', (new Error()).stack.split(String.fromCharCode(10)).slice(2, 7).join(' < '));
+    return remove.call(this, c);
+  };
+})();
+"""
+
+
 def _page(
     p, server: Server, sid: str, width: int, *, theme: str = "light", height: int = 900, touch: bool = False
 ):
@@ -164,6 +193,7 @@ def _page(
         re.compile(r"https://cards\.scryfall\.io/.*"),
         lambda route: route.fulfill(status=200, content_type="image/png", body=PNG),
     )
+    ctx.add_init_script(WHY_CLOSED)
     page = ctx.new_page()
     errors: list[str] = []
     page.on("pageerror", lambda e: errors.append(str(e)))
@@ -201,7 +231,13 @@ def _choose(page, label: str, value: str) -> None:
     if not btn.is_visible():
         page.locator(".printpick .ppfiltbtn").click()
     btn.click()
-    page.locator(".msel-list [role=option]", has_text=value).first.click()
+    try:
+        page.locator(".msel-list [role=option]", has_text=value).first.click(timeout=10_000)
+    except Exception as exc:  # the list closed before the click: say what closed it
+        log = page.evaluate("() => window.__mselLog || []")
+        raise AssertionError(
+            f"{label} list closed before {value!r} was clicked:\n" + "\n".join(map(str, log))
+        ) from exc
     page.wait_for_timeout(150)
 
 
