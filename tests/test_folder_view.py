@@ -5,6 +5,7 @@ dropdown gone (F3), and the tree read once and kept like the deck list."""
 
 from __future__ import annotations
 
+import html
 import re
 
 from mtg_gateway import folderview as fv
@@ -291,6 +292,44 @@ async def test_the_server_refuses_the_backup_folder_as_a_target(stack: Stack) ->
         await decks.move_deck(sub, "42", 503)
     assert str(exc.value) == "No folder is called 'MTG Gateway backups'. Your folders: Commander"
     assert (await decks.move_deck(sub, "46", 503))["changed"] is False
+
+
+async def test_a_folder_cannot_be_named_like_the_backup_folder(stack: Stack) -> None:
+    """B8 a: renaming a folder to the backup folder's name, or making one with it, would hide that
+    folder and list its decks as backup copies (the folder list matches the name exactly anywhere,
+    and in any capitals directly under the top level), so both are refused and nothing is sent.
+    The same name in other capitals deeper down is not the backup folder and is allowed."""
+    ark = stack.ark
+    ark.folders["alice"] = [
+        {"id": 501, "name": "Commander", "private": False},
+        {"id": 502, "name": "Cube", "private": False, "parent": 501},
+    ]
+    b = await linked_browser(stack)
+    try:
+        csrf = await b.csrf()
+        calls = len(ark.calls)
+        for data in (
+            {"action": "rename", "folder_id": "501", "name": "MTG Gateway backups"},
+            {"action": "rename", "folder_id": "501", "name": "mtg gateway BACKUPS"},
+            {"action": "rename", "folder_id": "502", "name": "MTG Gateway backups"},
+            {"action": "create", "name": "MTG Gateway backups", "confirmed": "1"},
+            {"action": "create", "name": "Mtg Gateway Backups", "confirmed": "1"},
+            {"action": "create", "name": "MTG Gateway backups", "parent_id": "501", "confirmed": "1"},
+        ):
+            r = await b.http.post("/folders", data={"csrf": csrf, **data})
+            assert r.status_code == 400, (data, r.text[:300])
+            words = f"'{data['name']}' is the name of the gateway's backup folder. Pick another name."
+            assert words in r.text or html.escape(words) in r.text, (data, r.text[:300])
+        assert all(m == "GET" for m, _p in ark.calls[calls:]), ark.calls[calls:]
+        # other capitals below the top level are another folder to the gateway, so allowed
+        r = await b.http.post(
+            "/folders",
+            data={"csrf": csrf, "action": "rename", "folder_id": "502", "name": "mtg gateway backups"},
+        )
+        assert r.status_code in (200, 303), r.text[:300]
+        assert [f["name"] for f in ark.folders["alice"]] == ["Commander", "mtg gateway backups"]
+    finally:
+        await b.aclose()
 
 
 async def test_a_folder_write_drops_the_kept_tree(stack: Stack) -> None:

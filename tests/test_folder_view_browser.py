@@ -130,3 +130,47 @@ def test_my_decks_by_folder_fits_every_width(server: Server, width: int, theme: 
                 )
         assert errors == [], errors
         browser.close()
+
+
+@pytest.mark.parametrize("width,theme", SIZES)
+def test_the_backup_folder_name_is_refused_and_reads_everywhere(
+    tmp_path: Path, width: int, theme: str
+) -> None:
+    """B8 a: Manage folders refuses renaming a folder to the backup folder's name; the refusal fits
+    and keeps a 4.5:1 contrast at every size."""
+    server = Server(tmp_path, writes_enabled=True)
+    server.ark.folders["alice"] = [
+        {"id": 501, "name": "Commander", "private": False},
+        {"id": 504, "name": "Archive", "private": False},
+    ]
+    server.start()
+    try:
+        _backup_name_refused(server, width, theme)
+    finally:
+        server.stop()
+
+
+def _backup_name_refused(server: Server, width: int, theme: str) -> None:
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid = _link(server)
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, theme, exe)
+        page.goto(f"{server.base}/folders", wait_until="networkidle")
+        page.select_option("#rfolder", "504")
+        page.fill("#rname", "mtg gateway backups")
+        with page.expect_navigation(wait_until="networkidle"):
+            page.locator("form.folderform button", has_text="Rename").click()
+        note = page.locator(".notice.error")
+        assert note.inner_text() == (
+            "'mtg gateway backups' is the name of the gateway's backup folder. Pick another name."
+        )
+        assert page.evaluate(MEASURE) == []
+        assert page.evaluate(CONTRAST, ".notice.error") == []
+        if SHOTS:
+            note.scroll_into_view_if_needed()
+            page.screenshot(path=str(Path(SHOTS) / f"backup-name-{width}-{theme}.png"))
+        assert [f["name"] for f in server.ark.folders["alice"]] == ["Commander", "Archive"]
+        assert errors == [], errors
+        browser.close()
