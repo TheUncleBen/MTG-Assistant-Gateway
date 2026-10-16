@@ -108,7 +108,8 @@ def test_admin_warning_reads_everywhere(server: Server, width: int, theme: str) 
         assert note.count() == 1 and note.is_visible()
         assert note.inner_text() == (
             f"The ChatGPT connector name, “{LONG}”, is 85 characters; ChatGPT refuses a plugin file "
-            "whose name is over 80 characters. Set a shorter MTG_CHATGPT_NAME (see docs/DEPLOY.md)."
+            "whose name is over 80 characters. Set MTG_CHATGPT_NAME to a name of 80 characters or "
+            "fewer (see docs/DEPLOY.md)."
         )
         assert page.evaluate(CONTRAST, ".notice.warn") == []
         assert page.evaluate(MEASURE) == []
