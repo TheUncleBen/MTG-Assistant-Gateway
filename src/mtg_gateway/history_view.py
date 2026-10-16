@@ -215,8 +215,8 @@ def build_events(
         if m.get("price_total") is not None:
             bits.append(f"${float(m['price_total']):,.0f}")
         # the bracket set on the deck is THE bracket (Q49/O14); the estimate only when none is set
-        if r.get("archidekt_bracket"):
-            bits.append(f"bracket {r['archidekt_bracket']}")
+        if r.get("bracket_set"):
+            bits.append(f"bracket {r['bracket_set']}")
         elif r.get("bracket_estimate"):
             bits.append(f"bracket about {r['bracket_estimate']}")
         sim = "with a goldfish simulation" if r.get("has_goldfish") else "statistics only"

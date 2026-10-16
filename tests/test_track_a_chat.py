@@ -215,9 +215,11 @@ def test_the_history_row_shows_the_bracket_set_on_the_deck_over_the_estimate() -
         )
 
     est = {"bracket_estimate": {"bracket": 3}, "card_count": 100}
-    set_one = build_events([], [], [row({**est, "archidekt_bracket": 2})], csrf_input="")[0]["summary"]
+    # `bracket_set` (the bracket set on the deck) is Track C's summary field (reports.py, C's
+    # branch); until the join the summary is given it here
+    set_one = build_events([], [], [{**row(est), "bracket_set": 2}], csrf_input="")[0]["summary"]
     assert "bracket 2" in set_one and "about" not in set_one
-    none_set = build_events([], [], [row({**est, "archidekt_bracket": None})], csrf_input="")[0]["summary"]
+    none_set = build_events([], [], [{**row(est), "bracket_set": None}], csrf_input="")[0]["summary"]
     assert "bracket about 3" in none_set
 
 
