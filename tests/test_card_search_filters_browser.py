@@ -410,7 +410,7 @@ def test_a_search_too_long_for_scryfall_says_so_at_every_size(server: Server, wi
 
     exe = _chromium()
     sid = _link(server)
-    words = "This search is too long. Take some filters or words away."
+    words = "This search is too long. Remove some filters or words."
     query = urlencode([("t", f"{'abcdefghij' * 3}{i:02d}") for i in range(40)])
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, width, theme, exe)
