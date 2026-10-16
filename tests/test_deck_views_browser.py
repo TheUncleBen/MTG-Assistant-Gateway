@@ -150,6 +150,30 @@ def test_choices_kept_in_the_browser_before_are_copied_to_the_account_once(serve
         browser.close()
 
 
+def test_after_forget_a_devices_old_choices_are_never_shown(server: Server) -> None:
+    """Re-proofread PW 4: after "Forget my view choices" a device's pre-0.7.29 stack order isn't
+    shown even on the first page it opens; it is dropped, not copied, and removed from the browser."""
+    from playwright.sync_api import sync_playwright
+
+    from mtg_gateway.prefs import FORGOTTEN
+
+    _chromium()
+    sid = server.sign_in_and_link()
+    server.db.set_pref("user-1", FORGOTTEN, True)
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, 1366)
+        page.goto(f"{server.base}/decks/42?view=text", wait_until="networkidle")
+        names = page.eval_on_selector_all(".deckview .stack", "l => l.map(s => s.dataset.group)")
+        mine = [names[2], names[0], names[1], *names[3:]]
+        page.evaluate("o => localStorage.setItem('mtg-stack-order:42:category', JSON.stringify(o))", mine)
+        page.reload(wait_until="networkidle")
+        assert page.eval_on_selector_all(".deckview .stack", "l => l.map(s => s.dataset.group)") == names
+        page.wait_for_function("() => localStorage.getItem('mtg-stack-order:42:category') === null")
+        assert server.db.get_pref("user-1", "stack:42:category") is None
+        assert errors == []
+        browser.close()
+
+
 ORDER = "() => [...document.querySelectorAll('.deckview .stack')].map(s => s.dataset.group)"
 
 

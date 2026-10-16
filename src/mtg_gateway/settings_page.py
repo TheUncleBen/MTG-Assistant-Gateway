@@ -30,8 +30,8 @@ GROUPS: tuple[tuple[str, str, str], ...] = (
     (
         "pacing",
         "Archidekt and Scryfall pacing",
-        "These can only be made slower than the gateway's defaults here, to stay gentle on "
-        "Archidekt's and Scryfall's servers. Only your stack can set faster values.",
+        "Here these can only be set to ask Archidekt and Scryfall less often than the gateway's "
+        "defaults, to stay gentle on their servers. Only your stack can make them ask more often.",
     ),
     (
         "scan",
@@ -79,8 +79,8 @@ TEXT: dict[str, tuple[str, str]] = {
     ),
     "archidekt_backup_copies": (
         "Backup copies kept per deck",
-        "Older copies are deleted from the backup folder on Archidekt, one at a time. A copy the member "
-        "changed on Archidekt is never deleted.",
+        "Older copies are deleted from the backup folder on Archidekt, one at a time, after that deck's "
+        "next edit. A copy the member changed or moved, or one the gateway couldn't delete, is kept.",
     ),
     "archidekt_backup_box_default": (
         "Backup box ticked by default",
@@ -96,7 +96,7 @@ TEXT: dict[str, tuple[str, str]] = {
     "forge_games": ("Forge games per report", "More games give steadier numbers and take longer."),
     "forge_parallel_games": ("Forge games played at once", "Higher is faster but uses more memory and CPU."),
     "watchlists_enabled": (
-        "Turn on watchlists and prices",
+        "Watchlist and price features",
         "Shows the Watchlist page, the price buttons and the watch tools.",
     ),
     "watch_max_cards": ("Cards one member may watch", "0 turns card watching off."),
@@ -115,7 +115,8 @@ TEXT: dict[str, tuple[str, str]] = {
     "server_name": ("Gateway name", "Shown in the top bar, on sign-in and in Claude's connector list."),
     "chatgpt_name": (
         "Name in ChatGPT",
-        "Leave it blank to use the gateway name. ChatGPT refuses a name over 80 characters.",
+        "Leave it blank to use the gateway name. ChatGPT refuses a plugin file whose name is over 80 "
+        "characters.",
     ),
     "update_check": (
         "Check for new versions",
@@ -175,8 +176,8 @@ CONFIRM: dict[str, tuple[str, str]] = {
     ),
     "archidekt_backup_copies": (
         "lower",
-        "I understand that copies past the new number are deleted from the backup folder on Archidekt, "
-        "one at a time. Copies a member changed are kept.",
+        "I understand that each deck's copies past the new number are deleted from the backup folder on "
+        "Archidekt, one at a time, after that deck's next edit. Copies a member changed or moved are kept.",
     ),
     "snapshots_per_deck": (
         "lower",
@@ -303,7 +304,10 @@ def shown(spec: SettingSpec, value: Any) -> str:
     if spec.key == "deck_sync_minutes" and value == 0:
         return "0 (off)"
     text = _number(value)
-    return f"{text} {spec.unit}" if spec.unit else text
+    if not spec.unit:
+        return text
+    # "1 second", "1 day": every unit is a plain plural ("seconds", "minutes", "days")
+    return f"{text} {spec.unit[:-1] if value == 1 else spec.unit}"
 
 
 def apply_form(live: LiveSettings, data: Mapping[str, str], *, by: str) -> Outcome:
@@ -320,7 +324,7 @@ def apply_form(live: LiveSettings, data: Mapping[str, str], *, by: str) -> Outco
             return out
         _keep_unsaved(live, data, spec.group, reset, out)
         if live.locked(reset):
-            out.errors[reset] = f"Set in your stack ({spec.env}). {STACK_LOCK_HOW}"
+            out.errors[reset] = f"Set in your stack ({spec.env}), {STACK_LOCK_HOW}"
             return out
         before = live.get(reset)
         if needs_confirm(reset, before, spec.default) and data.get(f"confirm_{reset}") != "yes":
@@ -407,8 +411,8 @@ def settings_body(
         f"<a href='#g-{g}'>{html.escape(title)}</a>" for g, title, _intro in GROUPS if group_keys(g)
     )
     parts = [
-        "<p class='muted'>Settings for the whole gateway. A setting your stack sets is shown here but "
-        "can only be changed in the stack.</p>",
+        "<p class='muted'>Settings for the whole gateway. A setting your stack sets is shown greyed out "
+        "with its value, and can only be changed in the stack.</p>",
         notice,
         f"<nav class='set-nav' aria-label='Setting groups'>{nav}</nav>",
     ]
@@ -448,9 +452,15 @@ def chatgpt_name_warning(live: LiveSettings) -> str:
     long = chatgpt_name_too_long(live.get("server_name"), live.get("chatgpt_name") or None)
     if not long:
         return ""
+    fix = (
+        f"change {MANAGED_SETTINGS['chatgpt_name'].env} in your stack to {CHATGPT_NAME_MAX} characters "
+        "or fewer and redeploy"
+        if live.locked("chatgpt_name")
+        else f"set a name of {CHATGPT_NAME_MAX} characters or fewer here"
+    )
     return (
-        f"ChatGPT gets the name “{long[0]}”, which is {long[1]} characters. ChatGPT refuses a name over "
-        f"{CHATGPT_NAME_MAX} characters, so set a name of {CHATGPT_NAME_MAX} characters or fewer here."
+        f"ChatGPT gets the name “{long[0]}”, which is {long[1]} characters. ChatGPT refuses a plugin file "
+        f"whose name is over {CHATGPT_NAME_MAX} characters, so {fix}."
     )
 
 
@@ -504,7 +514,7 @@ def _source(d: dict[str, Any], spec: SettingSpec, running: Any, who: Callable, w
     if d["source"] == "deployment":
         return (
             "<span class='set-lock'>Set in your stack "
-            f"(<code>{html.escape(spec.env)}</code>). {STACK_LOCK_HOW}</span>"
+            f"(<code>{html.escape(spec.env)}</code>), {STACK_LOCK_HOW}</span>"
         )
     if d["source"] == "dashboard":
         changed = d.get("changed") or {}

@@ -42,6 +42,11 @@ async def test_admins_see_who_added_each_model_and_can_remove_any(gw: Harness) -
         audit = [a for a in gw.db.audit_recent(5, sub="admin-1") if a["event"] == "card_model_removed"]
         removed = {"card": "Sol Ring", "card_key": "sol ring", "added_by": "user-9"}
         assert audit and audit[0]["detail"] == removed
+        # both activity logs say it in words, with whose model it was (re-proofread issue 8)
+        for path in ("/admin/activity", "/activity"):
+            text = html.unescape((await b.http.get(path, headers=NAVIGATE)).text)
+            assert "Sol Ring (added by bram)" in text and '"card_key"' not in text, path
+        assert "Card model removed" in html.unescape((await b.http.get("/activity", headers=NAVIGATE)).text)
         r = await b.http.post("/admin/models", data={"csrf": csrf, "card_key": "sol ring"})
         assert r.headers["location"].startswith("/admin/models?err=model_gone")
         shown = await b.http.get(r.headers["location"], headers=NAVIGATE)
@@ -64,3 +69,15 @@ async def test_members_cannot_see_or_use_the_list(gw: Harness) -> None:
         assert r.status_code == 404 and gw.db.count_all_card_models() == 1
     finally:
         await member.aclose()
+
+
+async def test_the_log_line_survives_the_adders_account_being_deleted(gw: Harness) -> None:
+    gw.db.put_card_model("opt", "Opt", MODEL, "user-9", 100)
+    assert gw.db.admin_delete_card_model("opt", by="admin-1")
+    gw.db.delete_member_data("user-9")
+    b = await admin_browser(gw)
+    try:
+        text = html.unescape((await b.http.get("/admin/activity", headers=NAVIGATE)).text)
+        assert "Opt (added by a deleted account)" in text
+    finally:
+        await b.aclose()

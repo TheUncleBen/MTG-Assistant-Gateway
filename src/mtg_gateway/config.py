@@ -663,7 +663,7 @@ def _number(value: float) -> str:
 
 
 # How to free a setting the stack sets, said wherever the Settings page refuses to change it.
-STACK_LOCK_HOW = "To change it here, remove it from your stack and redeploy."
+STACK_LOCK_HOW = "so it can't be changed here. Change or remove it in your stack, then redeploy."
 
 
 class SettingError(ValueError):
@@ -1148,7 +1148,7 @@ class LiveSettings:
         record it in the audit log. Refused when the deployment set the key. Returns the value."""
         spec = self.spec(key)
         if self.locked(key):
-            raise SettingError(key, f"is set in your stack ({spec.env}). {STACK_LOCK_HOW}")
+            raise SettingError(key, f"is set in your stack ({spec.env}), {STACK_LOCK_HOW}")
         value = spec.parse(raw)
         previous = self.get(key)
         self.db.save_setting(key, value, by=by)
@@ -1163,7 +1163,7 @@ class LiveSettings:
         """Forget the stored value, so the code default applies (unless the deployment set one)."""
         spec = self.spec(key)
         if self.locked(key):
-            raise SettingError(key, f"is set in your stack ({spec.env}). {STACK_LOCK_HOW}")
+            raise SettingError(key, f"is set in your stack ({spec.env}), {STACK_LOCK_HOW}")
         previous = self.get(key)
         cleared = self.db.clear_setting(key)
         with self._lock:

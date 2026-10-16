@@ -20,6 +20,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from . import idp_sweep, settings_page, update_check
+from .companion import card_model_line, member_name
 from .config import MANAGED_SETTINGS
 from .decks import ADMIN_CLIENT, actor_label, current_client
 from .pages import (
@@ -570,13 +571,21 @@ def _chatgpt_name_warning(settings: Any) -> str:
     if long:
         text = (
             f"The ChatGPT connector name, “{long[0]}”, is {long[1]} characters; ChatGPT refuses a plugin "
-            f"file whose name is over {CHATGPT_NAME_MAX} characters. Set a name of {CHATGPT_NAME_MAX} "
-            "characters or fewer under “Name in ChatGPT” on the "
+            f"file whose name is over {CHATGPT_NAME_MAX} characters. "
         )
-        out += (
-            f"<div class='notice warn'>{html.escape(text)}"
-            "<a href='/admin/settings#s-row-chatgpt_name'>Settings page</a>.</div>"
-        )
+        if "chatgpt_name" in getattr(settings, "env_set", ()):
+            # set in the stack: the Settings page row is locked, so the fix is in the stack
+            text += (
+                f"Change MTG_CHATGPT_NAME in your stack to {CHATGPT_NAME_MAX} characters or fewer "
+                "and redeploy."
+            )
+            out += f"<div class='notice warn'>{html.escape(text)}</div>"
+        else:
+            text += f"Set a name of {CHATGPT_NAME_MAX} characters or fewer under “Name in ChatGPT” on the "
+            out += (
+                f"<div class='notice warn'>{html.escape(text)}"
+                "<a href='/admin/settings#s-row-chatgpt_name'>Settings page</a>.</div>"
+            )
     # the plugin file's developer and author name: a long MTG_SERVER_NAME shortened (B4 b)
     if cut := developer_name_warning(settings.server_name):
         out += f"<div class='notice warn'>{html.escape(cut)}</div>"
@@ -979,6 +988,8 @@ def _activity_body(state: Any, rows: list[dict[str, Any]], only: str | None) -> 
             cls = "warn"
         detail = ""
         said = settings_page.change_line(r.get("detail")) if event == "setting_changed" else None
+        if event == "card_model_removed" and isinstance(r.get("detail"), dict):
+            said = card_model_line(r["detail"], member_name(state.db, r["detail"].get("added_by")))
         if said:
             detail = f"<span class='small'>{html.escape(said)}</span>"
         elif r.get("detail"):
