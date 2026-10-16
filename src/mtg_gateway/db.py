@@ -14,7 +14,7 @@ import json
 import sqlite3
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -163,6 +163,9 @@ APPLIED_PROPOSAL_RETENTION_SECONDS = 365 * 86400
 # Snapshots are whole decks taken before every edit. The newest SNAPSHOTS_KEEP_PER_DECK of each
 # member's deck are always kept (and any a pending restore still needs); older ones are deleted.
 SNAPSHOTS_KEEP_PER_DECK = 25
+# Rows deleted per transaction by the purge's plain deletes (leftover A8), so the lock is
+# released between batches.
+PURGE_BATCH = 500
 # Per-day usage counters and remembered deck covers are kept this long.
 METRICS_RETENTION_SECONDS = 400 * 86400
 DECK_COVER_RETENTION_SECONDS = 180 * 86400
@@ -667,6 +670,9 @@ class Database:
         self._lock = threading.RLock()
         self._anonymous_audit_inserts = 0
         self.price_days = PRICE_RETENTION_DAYS
+        # Snapshots kept per deck; None means SNAPSHOTS_KEEP_PER_DECK (the app wires the live
+        # setting in, snapshots_keep()).
+        self.snapshots_per_deck: int | None = None
         self._conn = sqlite3.connect(str(self.path), check_same_thread=False, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
         with self._lock:
@@ -830,6 +836,29 @@ class Database:
             for r in rows
         ]
 
+    def all_user_clients(self) -> dict[str, list[dict[str, Any]]]:
+        """user_clients for every member at once (the admin Users page, leftover A9): one query
+        for the tokens and one name lookup for all their apps, instead of one per member and app."""
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT sub, client_id, MAX(created_at) AS last_issued_at, COUNT(*) AS tokens FROM tokens
+                   WHERE revoked = 0 AND expires_at >= ?
+                   GROUP BY sub, client_id ORDER BY sub, last_issued_at DESC""",
+                (int(time.time()),),
+            ).fetchall()
+        names = self.client_names({r["client_id"] for r in rows})
+        out: dict[str, list[dict[str, Any]]] = {}
+        for r in rows:
+            out.setdefault(r["sub"], []).append(
+                {
+                    "client_id": r["client_id"],
+                    "name": names.get(r["client_id"]),
+                    "last_issued_at": r["last_issued_at"],
+                    "tokens": r["tokens"],
+                }
+            )
+        return out
+
     def revoke_client_for_user(self, sub: str, client_id: str | None = None) -> int:
         """Revoke the tokens ``sub`` gave one connected app (or every app when ``client_id`` is
         None). The person's own browser sessions are left alone."""
@@ -888,6 +917,27 @@ class Database:
             info = json.loads(row["info_json"]) if row else None
         name = info.get("client_name") if isinstance(info, dict) else None
         return str(name)[:200] if name else None
+
+    def client_names(self, client_ids: Iterable[str | None]) -> dict[str, str]:
+        """client_name for many clients in a few queries (registered clients first, then cached
+        metadata documents, as client_name does). Unknown or nameless clients are left out."""
+        wanted = sorted({c for c in client_ids if c})
+        infos: dict[str, Any] = {}
+        for table in ("oauth_clients", "cimd_clients"):
+            left = [c for c in wanted if c not in infos]
+            for i in range(0, len(left), 500):
+                part = left[i : i + 500]
+                with self._lock:
+                    for row in self._conn.execute(
+                        f"SELECT client_id, info_json FROM {table} WHERE client_id IN ({_marks(part)})", part
+                    ):
+                        infos[row["client_id"]] = json.loads(row["info_json"])
+        out: dict[str, str] = {}
+        for cid, info in infos.items():
+            name = info.get("client_name") if isinstance(info, dict) else None
+            if name:
+                out[cid] = str(name)[:200]
+        return out
 
     # client id metadata documents (cached) ---------------------------------
     def save_cimd_client(self, client_id: str, info: dict[str, Any], ttl: int) -> None:
@@ -1126,49 +1176,61 @@ class Database:
             ).rowcount
 
     def purge_expired(self) -> int:
+        """Delete what has expired and apply the retention caps.
+
+        Each step runs in its own short transaction, and the plain time-based deletes go in
+        batches of PURGE_BATCH rows, so a large purge never holds the lock (and every other
+        request) for its whole run (0.7.29, leftover A8). Every step is idempotent: a purge cut
+        short by an error or a restart is finished by the next one."""
         now = int(time.time())
+        n = self._delete_batched("tokens", "expires_at < ?", (now - 86400,))
+        n += self._delete_batched("auth_codes", "expires_at < ?", (now,))
+        n += self._delete_batched("login_sessions", "expires_at < ?", (now,))
+        n += self._delete_batched("browser_sessions", "expires_at < ?", (now,))
         with self.tx() as c:
-            n = c.execute("DELETE FROM tokens WHERE expires_at < ?", (now - 86400,)).rowcount
-            n += c.execute("DELETE FROM auth_codes WHERE expires_at < ?", (now,)).rowcount
-            n += c.execute("DELETE FROM login_sessions WHERE expires_at < ?", (now,)).rowcount
-            n += c.execute("DELETE FROM browser_sessions WHERE expires_at < ?", (now,)).rowcount
             n += self._purge_cimd_clients(c, now)
-            # Registration is open, so every client that registered and never finished a login,
-            # or whose tokens have all expired and been purged, is dropped after a week.
-            n += c.execute(
-                """DELETE FROM oauth_clients WHERE created_at < ?
-                   AND client_id NOT IN (SELECT client_id FROM tokens)
-                   AND client_id NOT IN (SELECT client_id FROM auth_codes)
-                   AND client_id NOT IN (SELECT client_id FROM login_sessions)""",
-                (now - UNUSED_CLIENT_TTL,),
-            ).rowcount
+        # Registration is open, so every client that registered and never finished a login,
+        # or whose tokens have all expired and been purged, is dropped after a week.
+        n += self._delete_batched(
+            "oauth_clients",
+            """created_at < ?
+               AND client_id NOT IN (SELECT client_id FROM tokens)
+               AND client_id NOT IN (SELECT client_id FROM auth_codes)
+               AND client_id NOT IN (SELECT client_id FROM login_sessions)""",
+            (now - UNUSED_CLIENT_TTL,),
+        )
+        n += self._delete_batched("audit_log", "at < ?", (now - AUDIT_RETENTION_SECONDS,))
+        with self.tx() as c:
             n += self._prune_caps(c, now)
-            n += self._prune_snapshots(c)
-            n += c.execute(
-                "DELETE FROM metrics WHERE day < ?", (self._since_day(METRICS_RETENTION_SECONDS // 86400),)
-            ).rowcount
-            n += c.execute(
-                "DELETE FROM deck_covers WHERE updated_at < ?", (now - DECK_COVER_RETENTION_SECONDS,)
-            ).rowcount
-            oldest_day = self._since_day(self.price_days)
-            n += c.execute("DELETE FROM price_points WHERE day < ?", (oldest_day,)).rowcount
-            n += c.execute("DELETE FROM deck_values WHERE day < ?", (oldest_day,)).rowcount
+        with self.tx() as c:
+            n += self._prune_snapshots(c, self.snapshots_keep())
+        n += self._delete_batched(
+            "metrics", "day < ?", (self._since_day(METRICS_RETENTION_SECONDS // 86400),)
+        )
+        n += self._delete_batched("deck_covers", "updated_at < ?", (now - DECK_COVER_RETENTION_SECONDS,))
+        oldest_day = self._since_day(self.price_days)
+        n += self._delete_batched("price_points", "day < ?", (oldest_day,))
+        n += self._delete_batched("deck_values", "day < ?", (oldest_day,))
+        with self.tx() as c:
             n += c.execute(
                 "UPDATE proposals SET state = 'expired' WHERE state = 'pending' AND expires_at < ?", (now,)
             ).rowcount
-            # Closed proposals carry nothing the user can act on: drop them after a month.
-            n += c.execute(
-                f"DELETE FROM proposals WHERE state IN ({_marks(CLOSED_PROPOSAL_STATES)}) AND created_at < ?",
-                (*CLOSED_PROPOSAL_STATES, now - CLOSED_PROPOSAL_RETENTION_SECONDS),
-            ).rowcount
-            n += c.execute(
-                "DELETE FROM proposals WHERE state = 'applied' AND COALESCE(applied_at, created_at) < ?",
-                (now - APPLIED_PROPOSAL_RETENTION_SECONDS,),
-            ).rowcount
-            # A restart already fails every unfinished apply (fail_interrupted_applies); this is a
-            # backstop for one left behind otherwise. Applies run in the background and a large one
-            # under a busy pacer takes many minutes, so only one started six hours ago counts as
-            # stuck: mark it failed and point at the snapshot (and the created deck id).
+        # Closed proposals carry nothing the user can act on: drop them after a month.
+        n += self._delete_batched(
+            "proposals",
+            f"state IN ({_marks(CLOSED_PROPOSAL_STATES)}) AND created_at < ?",
+            (*CLOSED_PROPOSAL_STATES, now - CLOSED_PROPOSAL_RETENTION_SECONDS),
+        )
+        n += self._delete_batched(
+            "proposals",
+            "state = 'applied' AND COALESCE(applied_at, created_at) < ?",
+            (now - APPLIED_PROPOSAL_RETENTION_SECONDS,),
+        )
+        # A restart already fails every unfinished apply (fail_interrupted_applies); this is a
+        # backstop for one left behind otherwise. Applies run in the background and a large one
+        # under a busy pacer takes many minutes, so only one started six hours ago counts as
+        # stuck: mark it failed and point at the snapshot (and the created deck id).
+        with self.tx() as c:
             n += c.execute(
                 """UPDATE proposals SET state = 'failed',
                    result_json = COALESCE(result_json, json_object('error', 'interrupted',
@@ -1179,15 +1241,34 @@ class Database:
             ).rowcount
         return n
 
+    def _delete_batched(self, table: str, where: str, args: tuple[Any, ...]) -> int:
+        """DELETE FROM ``table`` WHERE ``where``, PURGE_BATCH rows per transaction (the lock is
+        released between batches). ``table`` and ``where`` are fixed strings from this module."""
+        n = 0
+        while True:
+            with self.tx() as c:
+                done = c.execute(
+                    f"DELETE FROM {table} WHERE rowid IN (SELECT rowid FROM {table} WHERE {where} LIMIT ?)",
+                    (*args, PURGE_BATCH),
+                ).rowcount
+            n += done
+            if done < PURGE_BATCH:
+                return n
+
+    def snapshots_keep(self) -> int:
+        """Snapshots kept per member's deck: the live setting when one is wired in, else the
+        module default."""
+        return int(self.snapshots_per_deck or SNAPSHOTS_KEEP_PER_DECK)
+
     @staticmethod
     def _prune_caps(c: sqlite3.Connection, now: int) -> int:
-        """Age out the audit log and cap the tables anonymous requests can grow.
+        """Cap the tables anonymous requests can grow (the audit log's age limit runs in
+        purge_expired, in batches).
 
         A flood of /register or /authorize calls inside the normal expiry windows would
         otherwise grow the database without bound. The oldest rows go first.
         """
-        n = c.execute("DELETE FROM audit_log WHERE at < ?", (now - AUDIT_RETENTION_SECONDS,)).rowcount
-        n += Database._trim_anonymous_audit(c)
+        n = Database._trim_anonymous_audit(c)
         n += Database._trim_login_sessions(c, MAX_LOGIN_SESSIONS)
         n += Database._trim_cimd_clients(c, MAX_CIMD_CLIENTS)
         n += c.execute(
@@ -1203,7 +1284,7 @@ class Database:
         return n
 
     @staticmethod
-    def _prune_snapshots(c: sqlite3.Connection) -> int:
+    def _prune_snapshots(c: sqlite3.Connection, keep: int = SNAPSHOTS_KEEP_PER_DECK) -> int:
         """Keep the newest SNAPSHOTS_KEEP_PER_DECK snapshots of each member's deck, and any
         snapshot a pending or running proposal (a restore) still points at; delete the rest."""
         return c.execute(
@@ -1216,7 +1297,7 @@ class Database:
                AND id NOT IN (SELECT json_extract(changes_json, '$.snapshot_id') FROM proposals
                               WHERE kind = 'restore' AND state IN ('pending', 'applying')
                                 AND json_extract(changes_json, '$.snapshot_id') IS NOT NULL)""",
-            (SNAPSHOTS_KEEP_PER_DECK,),
+            (keep,),
         ).rowcount
 
     @staticmethod

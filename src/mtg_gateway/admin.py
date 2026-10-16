@@ -545,10 +545,11 @@ def _cleanup_text(c: dict[str, Any]) -> str:
 
 
 def users_data(state: Any) -> list[dict[str, Any]]:
-    out = []
-    for u in state.db.list_users():
-        out.append({**u, "clients": state.db.user_clients(u["sub"]), "disabled": bool(u["disabled_at"])})
-    return out
+    clients = state.db.all_user_clients()
+    return [
+        {**u, "clients": clients.get(u["sub"], []), "disabled": bool(u["disabled_at"])}
+        for u in state.db.list_users()
+    ]
 
 
 # -- HTML -------------------------------------------------------------------------
@@ -750,6 +751,7 @@ def _activity_body(state: Any, rows: list[dict[str, Any]], only: str | None) -> 
         )
     if not rows:
         return f"<div class='card'>{head}<p>No activity recorded.</p></div>"
+    names = state.db.client_names(r.get("client_id") for r in rows if r.get("client_id") != BROWSER_CLIENT_ID)
     items = []
     for r in rows:
         event = str(r["event"])
@@ -760,7 +762,7 @@ def _activity_body(state: Any, rows: list[dict[str, Any]], only: str | None) -> 
         if r.get("detail"):
             detail = f"<code>{html.escape(json.dumps(r['detail'], sort_keys=True)[:300])}</code>"
         cid = r.get("client_id")
-        client = actor_label(cid, state.db.client_name(cid) if cid and cid != BROWSER_CLIENT_ID else None)
+        client = actor_label(cid, names.get(cid) if cid and cid != BROWSER_CLIENT_ID else None)
         items.append(
             f"<li><span class='badge {cls}'>{html.escape(event)}</span>"
             f"<span class='name'>{html.escape(r.get('sub') or '')}</span>"
