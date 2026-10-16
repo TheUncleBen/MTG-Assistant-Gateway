@@ -1207,7 +1207,7 @@ def forge_lines(f: dict[str, Any], *, results: bool = True, markdown: bool = Fal
         # group of five can differ), so the page promises nothing and the export says what holds.
         chosen = (
             " (chosen by the gateway; with options.forge_seed the first games of each group of five "
-            "usually repeat, but later games can differ, so compare runs by their win rates and "
+            "usually repeat, but any game can differ, so compare runs by their win rates and "
             "intervals, not game by game)"
             if markdown
             else " (chosen by the gateway and kept with the report)"

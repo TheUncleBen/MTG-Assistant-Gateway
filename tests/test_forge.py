@@ -528,7 +528,7 @@ def test_report_page_shows_a_queued_run_and_its_place() -> None:
             "forge": {"state": "done", "seed": 12, "seed_source": "gateway"},
         }
     )
-    assert "later games can differ, so compare runs by their win rates and intervals" in seeded_md
+    assert "any game can differ, so compare runs by their win rates and intervals" in seeded_md
 
 
 async def test_report_keeps_a_text_result_once(tmp_path: Path) -> None:
