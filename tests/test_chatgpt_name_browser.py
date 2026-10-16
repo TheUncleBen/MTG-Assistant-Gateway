@@ -137,13 +137,44 @@ def test_admin_note_on_a_shortened_developer_name_reads_everywhere(
         with sync_playwright() as p:
             browser, page, errors = _page(p, s, sid, width, theme, exe)
             page.goto(f"{s.base}/admin", wait_until="networkidle")
-            note = page.locator(".notice.warn", has_text="developer name")
+            note = page.locator(".notice.warn", has_text="developer and author name")
             assert note.count() == 1 and note.is_visible()
             assert note.inner_text() == developer_name_warning(site)
             assert page.locator(".notice.warn", has_text="Set MTG_CHATGPT_NAME").count() == 0
             assert page.evaluate(CONTRAST, ".notice.warn") == []
             assert page.evaluate(MEASURE) == []
             _shot(page, note, f"admin-developer-{width}-{theme}.png", pad=80)
+            browser.close()
+        assert errors == []
+    finally:
+        s.stop()
+
+
+@pytest.mark.parametrize("width,theme", SIZES)
+def test_both_name_notices_read_together(tmp_path: Path, width: int, theme: str) -> None:
+    """MTG_CHATGPT_NAME empty and MTG_SERVER_NAME over 120 characters: the 80-character warning
+    (W14) and the developer-name notice (B4 b) both show, one under the other, and both read."""
+    from playwright.sync_api import sync_playwright
+
+    from mtg_gateway.plugin_page import developer_name_warning
+
+    site = " ".join(["Commander"] * 14)
+    s = Server(tmp_path, server_name=site, chatgpt_name="", admin_group="mtg-admins")
+    s.start()
+    try:
+        exe = _chromium()
+        sid = _admin_sign_in(s)
+        with sync_playwright() as p:
+            browser, page, errors = _page(p, s, sid, width, theme, exe)
+            page.goto(f"{s.base}/admin", wait_until="networkidle")
+            w14 = page.locator(".notice.warn", has_text="Set MTG_CHATGPT_NAME")
+            dev = page.locator(".notice.warn", has_text="developer and author name")
+            assert w14.count() == 1 and w14.is_visible() and dev.count() == 1 and dev.is_visible()
+            assert dev.inner_text() == developer_name_warning(site)
+            assert w14.bounding_box()["y"] < dev.bounding_box()["y"]
+            assert page.evaluate(CONTRAST, ".notice.warn") == []
+            assert page.evaluate(MEASURE) == []
+            _shot(page, dev.locator("xpath=.."), f"admin-both-notices-{width}-{theme}.png")
             browser.close()
         assert errors == []
     finally:
