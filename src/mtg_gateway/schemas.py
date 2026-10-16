@@ -311,6 +311,11 @@ class RunOptions(_SimShared):
     opponents: StrictInt | None = Field(
         default=None, ge=1, le=5, description="Goldfish opponents (default 1)."
     )
+    forge_seed: StrictInt | None = Field(
+        default=None,
+        description="Seed for the Forge games only. Without it Forge uses seed; without either, the "
+        "gateway picks one and the report records it.",
+    )
     mulligan: Mulligan | None = Field(default=None, description="Mulligan rules.")
 
 

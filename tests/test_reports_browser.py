@@ -177,6 +177,8 @@ def test_forge_section_refreshes_itself_until_the_run_ends(server: Server) -> No
         page = ctx.new_page()
         errors: list[str] = []
         page.on("pageerror", lambda e: errors.append(str(e)))
+        polls: list[str] = []
+        page.on("request", lambda r: polls.append(r.url) if "/api/v1/reports/" in r.url else None)
         page.clock.install()
         page.goto(f"{server.base}/history/reports/rep_forge", wait_until="networkidle")
         assert page.locator(".card.forge[data-forge-live]").count() == 1
@@ -198,7 +200,9 @@ def test_forge_section_refreshes_itself_until_the_run_ends(server: Server) -> No
         page.clock.run_for(16000)
         page.wait_for_function("() => !document.querySelector('.card.forge[data-forge-live]')")
         text = page.locator(".card.forge").inner_text()
-        assert "Games played: 2 of 2." in text and "running" not in text
+        assert "2 of 2\nGames played" in text and "running" not in text, text
+        # A32: it asked the small JSON status route, not the whole page, while the run played
+        assert polls and all(u.endswith("/api/v1/reports/rep_forge/forge") for u in polls), polls
         # the card itself stayed, so it is still the live region screen readers announce
         assert page.locator(".card.forge[aria-live=polite]").count() == 1
         assert page.evaluate("window.__same_page === true")
@@ -282,5 +286,128 @@ def test_report_trends_fit_and_read(server: Server, width: int, scheme: str) -> 
         assert len(state["svgs"]) == 6
         for role, label, w in state["svgs"]:
             assert role == "img" and "over" in label and " on " in label and 0 < w <= state["innerWidth"]
+        assert not errors, errors
+        browser.close()
+
+
+FORGE_DONE = {
+    "state": "done",
+    "job_id": "0" * 16,
+    "seed": 7,
+    "not_played": [],
+    "seats": ["Immortal Reckoning", "Riders of the Long Name Precon Deck", "Precon 2", "Precon 3"],
+    "result": {
+        "games": 10,
+        "games_requested": 10,
+        "draws": 1,
+        "stopped_slow": 1,
+        "average_game_seconds": 141.2,
+        "median_game_seconds": 128.0,
+        "median_turn": 12,
+        "turns_range": [8, 21],
+        "ended": {"won": 9, "time_limit": 1},
+        "seats": [
+            {
+                "deck": "Immortal Reckoning",
+                "wins": 4,
+                "win_rate": 0.4,
+                "win_rate_95": [0.17, 0.69],
+                "losses": {"commander damage": 2, "life": 3},
+            },
+            {
+                "deck": "Riders of the Long Name Precon Deck",
+                "wins": 3,
+                "win_rate": 0.3,
+                "win_rate_95": [0.11, 0.6],
+                "losses": {"life": 6},
+            },
+            {
+                "deck": "Precon 2",
+                "wins": 1,
+                "win_rate": 0.1,
+                "win_rate_95": [0.02, 0.4],
+                "losses": {"life": 8},
+            },
+            {
+                "deck": "Precon 3",
+                "wins": 1,
+                "win_rate": 0.1,
+                "win_rate_95": [0.02, 0.4],
+                "losses": {"poison": 1, "life": 7},
+            },
+        ],
+        "game_list": [
+            {"game": i, "seconds": 100.0 + i, "turn": 8 + i, "winner": 1 + i % 4, "ended": "won"}
+            for i in range(1, 10)
+        ]
+        + [{"game": 10, "seconds": 600.0, "turn": None, "winner": None, "ended": "time_limit"}],
+    },
+}
+
+
+# phone, a folded Fold's cover screen, an unfolded Fold, a laptop
+@pytest.mark.parametrize("width", [320, 344, 717, 1366])
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_forge_results_fit_and_read(server: Server, width: int, scheme: str) -> None:
+    """G9: Forge's games laid out as tiles, a table of the decks at the table, how the games ended
+    and each game: no sideways page scroll (tables scroll in their own box), 4.5:1 text in both
+    themes, and the folded game list opens with a 44px target."""
+    import json
+
+    from playwright.sync_api import sync_playwright
+
+    from .test_editor_leave_browser import CONTRAST
+
+    exe = _chromium_path()
+    if exe == "missing":
+        pytest.skip("no Chromium available for Playwright")
+    sid = server.sign_in_and_link()
+    store_report(server.db, "user-1", "rep_forge")
+    with server.db.tx() as c:
+        c.execute(
+            "UPDATE reports SET forge_json = ?, forge_state = 'done' WHERE id = 'rep_forge'",
+            (json.dumps(FORGE_DONE),),
+        )
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": width, "height": 900}, color_scheme=scheme)
+        ctx.add_cookies([{"name": "mtg_session", "value": sid, "url": server.base}])
+        page = ctx.new_page()
+        errors: list[str] = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(f"{server.base}/history/reports/rep_forge", wait_until="networkidle")
+        summary = page.locator(".forge-results details.games summary")
+        assert summary.bounding_box()["height"] >= 44
+        summary.click()
+        page.locator(".card.forge").scroll_into_view_if_needed()
+        if SCRATCH.is_dir():
+            page.locator(".card.forge").screenshot(path=str(SCRATCH / f"forge-results-{width}-{scheme}.png"))
+        state = page.evaluate(
+            """(contrast) => {
+              const ratio = eval(contrast);
+              const box = document.querySelector('.card.forge');
+              const texts = Array.from(box.querySelectorAll('*'))
+                .filter(e => Array.from(e.childNodes).some(n => n.nodeType === 3 && n.textContent.trim()))
+                .filter(e => e.getClientRects().length && !e.closest('.sr-only'));
+              const low = texts.map(e => [e.tagName + ' ' + e.textContent.trim().slice(0, 30), ratio(e)])
+                .filter(([, r]) => r < 4.5);
+              return {
+                scrollWidth: document.documentElement.scrollWidth,
+                innerWidth: window.innerWidth,
+                cardRight: box.getBoundingClientRect().right,
+                low,
+                checked: texts.length,
+                rows: box.querySelectorAll('table.seats tbody tr').length,
+                games: box.querySelectorAll('details.games tbody tr').length,
+              };
+            }""",
+            CONTRAST,
+        )
+        assert state["scrollWidth"] <= state["innerWidth"], state
+        assert state["cardRight"] <= state["innerWidth"], state
+        assert state["checked"] > 30 and not state["low"], state["low"]
+        assert state["rows"] == 4 and state["games"] == 10
+        text = page.locator(".card.forge").inner_text()
+        assert "turn 12" in text and "commander damage 2" in text and "Stopped at the time limit" in text
         assert not errors, errors
         browser.close()

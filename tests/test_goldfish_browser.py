@@ -238,3 +238,89 @@ def test_sixty_card_goldfish_by_keyboard_and_touch(server: Server) -> None:
         _shot(page, "goldfish-60-412")
         assert errors == []
         browser.close()
+
+
+GUIDE_CONTRAST = CONTRAST.replace(
+    'var sel = ".gf-head p, .gf-head a, .gf-zone h2, .gf-zone h2 span, .gf-empty, .gf-card .tag, "\n'
+    '    + ".gf-controls button";',
+    'var sel = ".gf-guide h2, .gf-guide p, .gf-guide li span, .gf-guide button, .gf-controls button";',
+)
+
+
+def _current_step(page) -> str | None:
+    return page.evaluate(
+        "() => { const li = document.querySelector('#gf-guide li[aria-current=step]');"
+        " return li && li.dataset.step; }"
+    )
+
+
+# phone, a folded Fold's cover screen, an unfolded Fold, a laptop
+@pytest.mark.parametrize("width", [320, 344, 717, 1366])
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_goldfish_guide_walks_a_first_game_and_can_be_hidden(server: Server, width: int, scheme: str) -> None:
+    """G9: the page's own guide takes a first-time player through a game, marking the step the game
+    is at; hidden, it stays hidden for the account (on reload too) until How to play brings it back.
+    Readable (4.5:1) and no wider than the window on every screen, light and dark."""
+    from playwright.sync_api import sync_playwright
+
+    assert GUIDE_CONTRAST != CONTRAST
+    _chromium()
+    sid = server.sign_in_and_link()
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, server, sid, width, color_scheme=scheme)
+        page.goto(f"{server.base}/decks/42/goldfish", wait_until="networkidle")
+        guide = page.locator("#gf-guide")
+        assert guide.is_visible() and page.locator("[data-guide=show]").is_hidden()
+        assert guide.locator("li").count() == 6
+        # phones show only the step the game is at; wider screens all six
+        assert guide.locator("li:visible").count() == (1 if width <= 600 else 6)
+        assert _current_step(page) == "hand"
+        worst, what = page.evaluate(GUIDE_CONTRAST)
+        assert worst >= 4.5, (worst, what)
+        assert _overflow(page) == 0
+        _shot(page, f"goldfish-guide-{width}-{scheme}")
+        # a mulligan, then keeping: the bottom step, then playing
+        page.locator("[data-act=mulligan]").click()
+        page.locator("[data-act=mulligan]").click()
+        page.locator("[data-act=keep]").click()
+        assert _current_step(page) == "bottom"
+        page.locator("#gf-hand .gf-card").first.click()
+        page.locator("[data-act=bottom]").click()
+        assert _current_step(page) == "land"
+        assert "done" in (guide.locator("li[data-step=hand]").get_attribute("class") or "")
+        lands = page.evaluate(
+            "() => JSON.parse(document.getElementById('goldfish-data').textContent).library"
+            ".filter(c => c.land).map(c => c.name)"
+        )
+        hand = page.locator("#gf-hand .gf-card")
+        land_at = next(
+            (i for i in range(hand.count()) if hand.nth(i).get_attribute("data-card") in lands), None
+        )
+        if land_at is not None:
+            _open_card(page, "hand", land_at)
+            _act(page, "Play to the battlefield")
+            assert _current_step(page) == "cast"
+            _open_card(page, "battlefield")
+            _act(page, "Tap")
+            assert _current_step(page) == "next"
+        page.locator("[data-act=next]").click()
+        page.locator("[data-act=next]").click()
+        assert _current_step(page) == "again"
+        # hide it: remembered for the account
+        with page.expect_response(lambda r: r.url.endswith("/goldfish/guide")) as saved:
+            guide.locator("[data-guide=hide]").click()
+        assert saved.value.status == 200 and saved.value.json()["hidden"] is True
+        assert guide.is_hidden()
+        show = page.locator("[data-guide=show]")
+        assert show.is_visible() and page.evaluate("() => document.activeElement.dataset.guide") == "show"
+        # the same size as the game's other buttons beside it
+        assert show.bounding_box()["height"] == page.locator("[data-act=reset]").bounding_box()["height"]
+        page.reload(wait_until="networkidle")
+        assert page.locator("#gf-guide").is_hidden() and page.locator("[data-guide=show]").is_visible()
+        with page.expect_response(lambda r: r.url.endswith("/goldfish/guide")):
+            page.locator("[data-guide=show]").click()
+        assert page.locator("#gf-guide").is_visible()
+        page.reload(wait_until="networkidle")
+        assert page.locator("#gf-guide").is_visible()
+        assert errors == []
+        browser.close()

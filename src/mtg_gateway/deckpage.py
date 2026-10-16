@@ -1607,10 +1607,49 @@ def goldfish_data(deck: Deck) -> dict[str, Any]:
     }
 
 
-def goldfish_page_html(deck: Deck) -> str:
+# The Goldfish page's own guide (G9): what a goldfish game is and its steps, in order. goldfish.js
+# marks the step the game is at; the member can hide the guide, and the choice follows the account
+# (account_prefs GOLDFISH_GUIDE_PREF).
+GOLDFISH_GUIDE_PREF = "goldfish_guide"
+GOLDFISH_GUIDE_INTRO = (
+    "A goldfish game is your deck played alone, with no opponent, to see how it draws and how fast "
+    "it gets going."
+)
+GOLDFISH_GUIDE_STEPS = (
+    ("hand", "Look at your seven cards. Keep them, or take a mulligan for seven new ones."),
+    ("bottom", "After a mulligan, choose which cards go to the bottom of your library."),
+    ("land", "Play a land: select it in your hand and choose Play to the battlefield."),
+    ("cast", "Tap lands for mana: select a land and choose Tap. Then play what you could pay for."),
+    ("next", "Press Next turn: everything untaps and you draw a card."),
+    ("again", "Keep going until the deck does what it was built to do. New game starts over."),
+)
+GOLDFISH_GUIDE_HIDE = "Hide the guide"
+GOLDFISH_GUIDE_SHOW = "How to play"
+
+
+def goldfish_guide_html(*, hidden: bool = False) -> str:
+    """The guide panel. Hidden (the member hid it) it stays in the page, so "How to play" brings
+    it back without a reload."""
+    steps = "".join(
+        f"<li data-step='{key}'><span class='gf-step-n' aria-hidden='true'>{i}</span>"
+        f"<span>{esc(text)}</span></li>"
+        for i, (key, text) in enumerate(GOLDFISH_GUIDE_STEPS, start=1)
+    )
+    return (
+        "<section class='panel gf-guide' id='gf-guide' aria-labelledby='gf-guide-h'"
+        f"{' hidden' if hidden else ''}>"
+        "<div class='gf-guide-head'><h2 id='gf-guide-h'>How to play</h2>"
+        f"<button type='button' class='btn small' data-guide='hide'>{esc(GOLDFISH_GUIDE_HIDE)}</button></div>"
+        f"<p class='muted small'>{esc(GOLDFISH_GUIDE_INTRO)}</p>"
+        f"<ol class='gf-steps'>{steps}</ol>"
+        "</section>"
+    )
+
+
+def goldfish_page_html(deck: Deck, *, guide_hidden: bool = False) -> str:
     """Goldfish by hand: shuffle, an opening hand with London mulligans, then draw, play, tap and
     pass turns, all in the browser (static/goldfish.js) on the deck already read for the page.
-    Nothing is sent anywhere and nothing is kept."""
+    Nothing is sent anywhere and nothing is kept, except whether the member hid the guide."""
     did = esc(deck.id)
     name = esc(deck.name or f"Deck {deck.id}")
     data = goldfish_data(deck)
@@ -1643,10 +1682,13 @@ def goldfish_page_html(deck: Deck) -> str:
         "<button type='button' data-act='next' hidden>Next turn</button>"
         "<button type='button' data-act='untap' hidden>Untap all</button>"
         f"<button type='button' data-act='reset'>{icon('refresh')} New game</button>"
+        f"<button type='button' class='gf-guide-show' data-guide='show'{'' if guide_hidden else ' hidden'}>"
+        f"{icon('guide')} {esc(GOLDFISH_GUIDE_SHOW)}</button>"
         "</div>"
         "<p class='sr-only' id='gf-live' aria-live='polite'></p>"
         "<noscript><p class='notice error'>The goldfish needs JavaScript.</p></noscript>"
         "</section>"
+        + goldfish_guide_html(hidden=guide_hidden)
         + (zone.format(id="command", label="Command zone") if commander else "")
         + zone.format(id="battlefield", label="Battlefield")
         + zone.format(id="hand", label="Hand")
@@ -1689,6 +1731,23 @@ GOLDFISH_CSS = """
 .gf-card[aria-pressed=true]{outline:3px solid var(--orange-ctl);outline-offset:2px}
 .gf-card[aria-pressed=true]:focus-visible{outline-color:var(--focus)}
 @media (prefers-reduced-motion:reduce){.gf-card{transition:none}}
+/* the guide (G9): the step the game is at stands out; numbers in circles, text beside them */
+.gf-guide[hidden],.gf-guide-show[hidden]{display:none}
+.gf-guide-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.5rem}
+.gf-guide h2{font-size:1.1rem;margin:0}
+.gf-guide > p{margin:.35rem 0 .6rem}
+.gf-steps{list-style:none;margin:0;padding:0;display:grid;gap:.4rem;
+  grid-template-columns:repeat(auto-fit,minmax(min(100%,15rem),1fr))}
+.gf-steps li{display:flex;gap:.6rem;align-items:flex-start;padding:.5rem .6rem;
+  border-radius:var(--radius-panel);border:1px solid var(--border-soft);background:var(--surface-2);
+  line-height:1.35}
+.gf-steps .gf-step-n{flex:none;display:inline-flex;align-items:center;justify-content:center;width:1.6rem;
+  height:1.6rem;border-radius:50%;background:var(--surface-3);color:var(--text);font-weight:700;font-size:.85rem}
+.gf-steps li[aria-current=step]{border-color:var(--orange-ctl);box-shadow:inset 3px 0 0 var(--orange-ctl)}
+.gf-steps li[aria-current=step] .gf-step-n{background:var(--orange);color:var(--on-orange)}
+.gf-steps li.done{color:var(--text-muted)}
+/* phones: only the step the game is at, so the hand stays near the top */
+@media (max-width:600px){ .gf-steps:has(li[aria-current=step]) li:not([aria-current=step]){display:none} }
 """
 
 # Track C's own deck page styles (S3): DECK_CSS ends with this, so C's rules for its parts of the
