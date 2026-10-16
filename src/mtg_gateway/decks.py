@@ -2083,7 +2083,7 @@ class DeckService:
         (DECK_LIST_PARTIAL): My decks says so with Try again (Q64), which reads Archidekt again
         through ``reread_deck_list``."""
         _token, row = self._token(sub)  # not linked: raise before touching the cache
-        folder = self.settings.archidekt_backup_folder if self.settings.archidekt_backups else None
+        folder = self.settings.archidekt_backup_folder  # with backups on or off (Q21)
 
         async def fetch() -> list[dict[str, Any]]:
             return await self._call(
@@ -2248,7 +2248,7 @@ class DeckService:
         if state == "fresh":
             return [dict(d) for d in value]
         _token, row = self._token(sub)
-        folder = self.settings.archidekt_backup_folder if self.settings.archidekt_backups else None
+        folder = self.settings.archidekt_backup_folder  # with backups on or off (Q21)
 
         async def fetch() -> list[dict[str, Any]]:
             return await self._call_unslotted(
@@ -4302,8 +4302,9 @@ class DeckService:
     def _is_backup_folder(self, name: str, depth: int) -> bool:
         """The gateway's backup folder: the folder the deck list treats as it (its exact name, as
         archidekt.list_decks compares), or the one ensure_folder would reuse (the same name in
-        other capitals, directly under the top level). Only while backups are on."""
-        wanted = self.settings.archidekt_backup_folder if self.settings.archidekt_backups else None
+        other capitals, directly under the top level). Also while backups are switched off: the
+        folder never shows (Q21), and a deck in it is a backup copy either way."""
+        wanted = self.settings.archidekt_backup_folder
         if not wanted:
             return False
         return name == wanted or (depth == 1 and name.casefold() == wanted.casefold())
