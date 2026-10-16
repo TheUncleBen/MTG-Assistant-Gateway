@@ -141,6 +141,8 @@ async def test_a_kept_model_plays_in_every_members_later_runs(tmp_path: Path) ->
     used = second["goldfish"]["kept_models"]
     assert second["goldfish"]["models_saved"] is True
     assert [(u["name"], u["yours"]) for u in used] == [(name, False)] and len(used[0]["model"]) == 12
+    # the adder's member id never leaves the gateway (schema 14 review, note b)
+    assert "alice" not in json.dumps(second) and "added_by" not in json.dumps(second)
     page = report_body_html(second)
     assert (
         "Played with saved card descriptions" in page
@@ -199,3 +201,11 @@ def test_the_saving_sentence_shows_only_when_the_gateway_saves() -> None:
     assert "Your assistant may be able to describe some of them" in honesty_html(g)
     assert UNMODELED_SAVED_TEXT not in honesty_html(g)
     assert UNMODELED_SAVED_TEXT in honesty_html({**g, "models_saved": True})
+
+
+def test_a_name_too_long_for_a_card_is_refused(tmp_path: Path) -> None:
+    db = FakeModelsDb(tmp_path / "t.sqlite")
+    long = "Front // " + "B" * 300  # a front face over 141 characters never matches a model's name
+    out = KeptModels(db).keep("alice", [{"name": "Front", "inert": True}], [long])
+    assert out == {"kept": [], "refused": [{"name": long[:141], "why": "the card's name is too long"}]}
+    assert db.rows == {}

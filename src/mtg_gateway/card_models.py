@@ -361,6 +361,11 @@ class KeptModels:
             if card is None:
                 refused.append({"name": name, "why": "the deck does not hold this card"})
                 continue
+            # the table has no length limits of its own (Track B's schema 14 review, note a): a
+            # front face is at most 141 characters, both faces at most twice that and the " // "
+            if len(card_key(card)) > 141 or len(card) > 286:
+                refused.append({"name": card[:141], "why": "the card's name is too long"})
+                continue
             try:
                 model = clean_model(raw, card=card)
             except ModelError as exc:
