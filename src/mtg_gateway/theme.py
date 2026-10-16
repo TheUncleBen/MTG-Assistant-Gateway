@@ -686,10 +686,14 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
    button and the page needs no sideways scroll. The word returns above 800 px. */
 @media (min-width:600px) and (max-width:799.98px) and (hover:hover) and (pointer:fine){
   .topbar .brand .word{display:none} }
-.topbar .left{flex:1 1 auto}
+.topbar .left{flex:1 1 0}
 .topbar nav.site{flex:none}
+/* the left side takes only the room the right side leaves: a long MTG_SERVER_NAME shortens the
+   brand's word (an ellipsis) rather than squeeze the search box and the account button past the
+   window's edge; the right side still gives way when even that is not enough (large text) */
+.topbar .right{flex:0 1 auto}
 .brand{min-width:0}
-.brand .word{overflow:hidden;text-overflow:ellipsis}
+.brand .word{overflow:hidden;text-overflow:ellipsis;min-width:0}
 /* home dashboard: section tiles (Archidekt's landing cards) */
 .home .hero{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:1rem;
   margin:0 0 1rem}
