@@ -35,9 +35,7 @@ def banner_bracket_html(deck: Any, stats: dict[str, Any]) -> str:
     bracket = stats.get("bracket_estimate") or {}
     if not bracket.get("bracket"):
         return ""
-    return (
-        f"<span class='bracket-est'>{ESTIMATE_LABEL}: {esc(bracket_name(bracket.get('bracket')))}</span>"
-    )
+    return f"<span class='bracket-est'>{ESTIMATE_LABEL}: {esc(bracket_name(bracket.get('bracket')))}</span>"
 
 
 def checks_bracket_row(checks: dict[str, Any]) -> tuple[str, str, bool] | None:
@@ -73,7 +71,9 @@ def stats_bracket_html(stats: dict[str, Any]) -> str:
         parts.append(f"<p>{ESTIMATE_LABEL}: <b>{esc(bracket_name(bracket.get('bracket')))}</b></p>")
         notes = bracket.get("notes") or []
         if notes:
-            parts.append("<ul class='bracket-notes'>" + "".join(f"<li>{esc(n)}</li>" for n in notes) + "</ul>")
+            parts.append(
+                "<ul class='bracket-notes'>" + "".join(f"<li>{esc(n)}</li>" for n in notes) + "</ul>"
+            )
         basis = bracket.get("basis") or []
         parts.append(
             "<p class='small muted'>"

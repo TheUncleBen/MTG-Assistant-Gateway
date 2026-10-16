@@ -56,7 +56,7 @@ def add_report_tools(state: AppState, h: SimpleNamespace) -> None:
             "or URL, a snapshot id, or a pasted decklist (then only counts and structural checks: no "
             "card data; lines that are not cards are listed in unread_lines). When a bracket is set, call "
             "it the deck's bracket and never present the estimate as a second bracket; quote the "
-            "estimate as \"Archidekt's estimate from cards\" only when none is set or the checks report "
+            'estimate as "Archidekt\'s estimate from cards" only when none is set or the checks report '
             "a bracket mismatch. This is the one tool for an Archidekt deck's legality and "
             "structure; validate_decklist checks a pasted list card by card."
         ),
