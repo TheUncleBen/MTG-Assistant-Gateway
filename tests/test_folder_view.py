@@ -222,6 +222,34 @@ async def test_my_decks_opens_folders_and_hides_the_backup_folder(stack: Stack) 
         await b.aclose()
 
 
+async def test_the_backup_folder_stays_hidden_with_backups_switched_off(stack: Stack) -> None:
+    """Q21 (review L13): with MTG_ARCHIDEKT_BACKUPS off the gateway's backup folder still never
+    shows on My decks or the Folders page, and a deck in it is handled as with backups on: kept
+    out of My decks and listed as a backup copy."""
+    import dataclasses
+
+    ark = stack.ark
+    ark.folders["alice"] = [
+        {"id": 501, "name": "Commander", "private": False},
+        {"id": 503, "name": "MTG Gateway backups", "private": True},
+    ]
+    ark.decks[46] = dict(ark.decks[42], id=46, name="Copy in the backup folder")
+    ark.deck_folder[46] = 503
+    decks = stack.h.app.state.gateway.decks
+    decks.settings = dataclasses.replace(decks.settings, archidekt_backups=False)
+    b = await linked_browser(stack)
+    try:
+        top = (await b.http.get("/decks", headers=NAV)).text
+        assert "Folders <span class='n'>1</span>" in top and ">Commander</span>" in top
+        assert "MTG Gateway backups" not in top and "Copy in the backup folder" not in top
+        assert "MTG Gateway backups" not in (await b.http.get("/decks?folder=503", headers=NAV)).text
+        folders_page = (await b.http.get("/folders", headers=NAV)).text
+        assert "MTG Gateway backups" not in folders_page and ">Commander<" in folders_page
+        assert [d["id"] for d in await decks.backup_copies("user-1")] == ["46"]  # conftest's member
+    finally:
+        await b.aclose()
+
+
 async def test_a_folder_write_drops_the_kept_tree(stack: Stack) -> None:
     ark = stack.ark
     ark.folders["alice"] = [{"id": 601, "name": "Brews", "private": False}]
