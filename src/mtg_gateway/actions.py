@@ -290,6 +290,8 @@ async def propose(decks: DeckService, sub: str, action: str, params: dict[str, A
             parent = hits[0]
         else:
             parent = info["folders"][0]
+        # refused now, not only at apply, so the assistant can pick another name (B8 a)
+        decks._not_the_backup_name(name, parent["depth"] + 1)
         siblings = [f["name"].casefold() for f in info["folders"] if f["parent"] == parent["id"]]
         if name.casefold() in siblings:
             raise DeckError("invalid", f"There is already a folder called '{name}' there.")
