@@ -3,6 +3,7 @@ design; Q27j-Q27m, O9, G6, K5, K10, A1, A4, A5, A12)."""
 
 from __future__ import annotations
 
+import dataclasses
 import time
 
 from mtg_gateway import board
@@ -252,6 +253,9 @@ async def test_approval_settings_changed_on_the_settings_page_apply_at_once(stac
     token = await linked_user(stack)
     await _set_mode(h, "auto")
     decks = h.app.state.gateway.decks
+    # the stack's own values count as the deployment's (R-208 lock); this test stands for a stack
+    # that leaves the approval settings to the Settings page
+    decks.live.settings = dataclasses.replace(decks.live.settings, env_set=frozenset())
     two = [{"action": "add", "card_name": "Opt"}, {"action": "add", "card_name": "Swamp"}]
     p = structured(await call(h, token, "propose_deck_changes", {"deck_id": "42", "changes": two}))
     assert p["assistant_may_apply"] is True, p
