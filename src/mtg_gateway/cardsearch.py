@@ -45,6 +45,7 @@ CARDS_CSP = (
     "img-src 'self' https://cards.scryfall.io; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 )
 MAX_QUERY = 100
+SEARCH_PAGES = 200  # result pages a search can be read to; past it there is no "more"
 
 
 TEXT_TTL = 6 * 3600  # seconds a card's text is kept
@@ -183,7 +184,10 @@ class TextCache:
         name Scryfall does not know is remembered for a while too, so asking again costs no
         request (A15). When the caller whose fetch others are waiting on goes away (its page was
         closed), the fetch is cancelled with it; a waiter that is still wanted then starts its own
-        instead of failing as if it had been cancelled itself (A16)."""
+        instead of failing as if it had been cancelled itself (A16). Likewise a ``busy`` answer
+        belongs to the caller whose lookup slot ran the fetch (its own other lookups were still
+        running): a waiter, maybe another member, starts its own fetch in its own slot instead
+        of taking that answer as its own."""
         k = self.key(name)
         while True:
             if (hit := self.get(name)) is not None:
@@ -195,6 +199,10 @@ class TextCache:
                 break
             try:
                 return await asyncio.shield(waiting)
+            except ScanError as exc:
+                if exc.kind == "busy":
+                    continue  # the fetch's own caller was busy, not this one: ask in this one's slot
+                raise
             except asyncio.CancelledError:
                 task = asyncio.current_task()
                 if waiting.cancelled() and not (task is not None and task.cancelling()):
@@ -381,6 +389,7 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
             "unavailable": "Scryfall is not answering right now. Try again in a moment.",
             "busy": "Your other card lookups are still running. Try again in a moment.",
             "invalid": f"Scryfall could not read that search: {exc}",
+            "too_long": "This search is too long. Take some filters or words away.",
             "off": str(exc),
         }.get(exc.kind, f"The cards could not be looked up: {exc}")
 
@@ -388,9 +397,14 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
         scan = state.scan
         if scan is None:
             raise ScanError("off", "Card lookup is switched off on this gateway.")
-        return await scan.search_cards(
-            cq.scryfall_query(f), order=f.order, direction=f.dir, page=page_no, owner=sub
-        )
+        query = cq.scryfall_query(f)
+        if len(query) > cq.MAX_QUERY:
+            # refused whole: a cut search would lose its last filters (paper only among them)
+            raise ScanError("too_long", f"the search is {len(query)} characters, over {cq.MAX_QUERY}")
+        out = await scan.search_cards(query, order=f.order, direction=f.dir, page=page_no, owner=sub)
+        if page_no >= SEARCH_PAGES:
+            out = {**out, "has_more": False}  # the page number stops here, so no page follows
+        return out
 
     def add_reason(sub: str) -> tuple[bool, str]:
         linked = decks.status(sub)["linked"]
@@ -413,7 +427,7 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
         f = cq.parse(request.query_params)
         view, remember = view_of(request)
         try:
-            page_no = max(1, min(int(request.query_params.get("page") or 1), 200))
+            page_no = max(1, min(int(request.query_params.get("page") or 1), SEARCH_PAGES))
         except ValueError:
             page_no = 1
         if not f.chosen():
@@ -424,7 +438,7 @@ def add_cardsearch_routes(server: MCPServer, state: AppState) -> None:
         try:
             out = await run_search(f, page_no, sub)
         except ScanError as exc:
-            status = {"rate_limited": 429, "busy": 429, "invalid": 400}.get(exc.kind, 503)
+            status = {"rate_limited": 429, "busy": 429, "invalid": 400, "too_long": 400}.get(exc.kind, 503)
             return JSONResponse(
                 {"ok": False, "error": exc.kind, "message": problem_text(exc)}, status, headers=NO_STORE
             )

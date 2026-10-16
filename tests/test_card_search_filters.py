@@ -395,3 +395,67 @@ async def test_the_page_keeps_every_filter_in_its_controls(stack: Stack) -> None
         assert "<details class='cs-more' open>" in t  # a field under More filters is in use
     finally:
         await b.aclose()
+
+
+# -- 0.7.28 review: the free-text boxes keep their grouping; a long search is refused whole ------
+def test_the_free_text_boxes_cannot_escape_their_brackets() -> None:
+    # Scryfall's syntax box: a closing bracket cannot end its group early, an open one is closed
+    assert q(x=") or (game:arena") == "(game:paper) (or game:arena)"
+    assert q(x="t:goblin (") == "(game:paper) (t:goblin)"
+    assert q(x="(t:goblin or t:elf) c:r") == "(game:paper) ((t:goblin or t:elf) c:r)"
+    assert q(x='o:"(" t:elf') == '(game:paper) (o:"(" t:elf)'  # a bracket in quotes is a word
+    assert q(x='o:"draw t:elf') == "(game:paper) (o:draw t:elf)"  # an unpaired quote goes
+    assert q(x='o:"x\\" t:elf') == '(game:paper) (o:"x" t:elf)'  # a backslash cannot hide a quote
+    assert q(x="t:elf\\") == "(game:paper) (t:elf)"
+    assert q(x=")") == "(game:paper)"
+    # the name: an "or" stays among the name's words, an unpaired quote goes
+    assert q(q="bolt or game:arena") == "(bolt or game:arena) (game:paper)"
+    assert q(q='"fire or ice"') == '"fire or ice" (game:paper)'
+    assert q(q='bolt"', r="m") == "bolt (game:paper) rarity:m"
+    assert q(q="lightning bolt") == "lightning bolt (game:paper)"
+    # a word box: a backslash at the end cannot hide the closing quote
+    assert q(o="foo\\") == "oracle:foo (game:paper)"
+
+
+def test_a_long_search_keeps_every_filter() -> None:
+    many = [f"{'abcdefghij' * 3}{i:02d}" for i in range(40)]
+    built = q(t=many)
+    assert len(built) > cq.MAX_QUERY and built.endswith("(game:paper)")  # not cut: refused instead
+
+
+async def test_a_search_too_long_for_scryfall_is_refused_not_cut(stack: Stack) -> None:
+    b = await linked(stack)
+    try:
+        n = len(stack.sf.searches)
+        params = [("t", f"{'abcdefghij' * 3}{i:02d}") for i in range(40)]
+        r = await b.http.get("/cards/api/search", params=params)
+        d = r.json()
+        assert r.status_code == 400 and d["error"] == "too_long", d
+        assert d["message"] == "This search is too long. Take some filters or words away."
+        r = await b.http.get("/cards", params=params)
+        assert "This search is too long. Take some filters or words away." in r.text
+        assert len(stack.sf.searches) == n  # nothing went to Scryfall
+    finally:
+        await b.aclose()
+
+
+async def test_past_the_last_page_there_is_no_more(stack: Stack) -> None:
+    scan = stack.h.app.state.gateway.scan
+    asked: list[int] = []
+
+    async def endless(query: str, *, order: str, direction: str, page: int, owner: str | None) -> dict:
+        asked.append(page)
+        return {"cards": [], "has_more": True, "total_cards": 99999, "warnings": []}
+
+    b = await linked(stack)
+    try:
+        scan.search_cards = endless
+        d = (await b.http.get("/cards/api/search", params={"t": "land", "page": "199"})).json()
+        assert d["page"] == 199 and d["has_more"] is True
+        for page in ("200", "201", "5000"):
+            d = (await b.http.get("/cards/api/search", params={"t": "land", "page": page})).json()
+            assert d["page"] == 200 and d["has_more"] is False, d
+        assert asked == [199, 200, 200, 200]
+    finally:
+        del scan.search_cards
+        await b.aclose()

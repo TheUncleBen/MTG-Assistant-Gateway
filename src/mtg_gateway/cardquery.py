@@ -4,7 +4,8 @@ Every field of Scryfall's own advanced search form (scryfall.com/advanced) has a
 each is written into the search the way that form writes it (read 2026-10-14 by submitting the form
 on scryfall.com and reading the search it produced):
 
-* name: the typed words as they are;
+* name: the typed words as they are (in brackets when they hold an ``or``, so it cannot reach past
+  them);
 * rules text, flavour text, artist and Lore Finder: one ``oracle:``/``flavor:``/``artist:``/``lore:``
   term per word, grouped in brackets when there are several (a quoted phrase stays one term);
 * types: ``type:x``, ``-type:x`` for one marked NOT; several are all required unless "partial" is
@@ -20,7 +21,10 @@ on scryfall.com and reading the search it produced):
 The order goes to Scryfall as its own ``order`` and ``dir`` parameters. Only known values are
 accepted from each control (sets, blocks and types by their shape, since those lists come from
 Scryfall itself), so nothing a page sends can reach Scryfall as anything but a search.
-Cards are shown only for paper unless the games say otherwise (Q5b "Paper default").
+Cards are shown only for paper unless the games say otherwise (Q5b "Paper default"). The two
+free-text boxes (name, Scryfall syntax) have their quotes and brackets balanced, so neither can
+close the bracket around it or open one that swallows the filters after it; a search longer than
+Scryfall takes is refused whole (``too_long``), never cut.
 """
 
 from __future__ import annotations
@@ -34,7 +38,7 @@ from urllib.parse import urlencode
 MAX_TEXT = 200  # characters per text box
 MAX_ROWS = 4  # stat, format and price rows at most
 MAX_PICKS = 40  # types, sets, blocks or criteria at most
-MAX_QUERY = 1000  # characters in the search sent to Scryfall
+MAX_QUERY = 1000  # characters in the search sent to Scryfall; a longer one is refused (too_long)
 
 COLORS = ("W", "U", "B", "R", "G", "C")
 COLOR_NAMES = {"W": "White", "U": "Blue", "B": "Black", "R": "Red", "G": "Green", "C": "Colorless"}
@@ -519,7 +523,8 @@ def _words(text: str) -> list[str]:
     """The typed words, a quoted phrase kept as one."""
     out: list[str] = []
     for quoted, word in _TOKEN.findall(text):
-        value = (quoted if quoted else word).replace('"', "").strip()
+        # a backslash at the end would hide the quote put around the word
+        value = (quoted if quoted else word).replace('"', "").rstrip("\\").strip()
         if value:
             out.append(value)
     return out
@@ -531,6 +536,37 @@ def _term(key: str, value: str) -> str:
     if re.fullmatch(r"[\w{}/+.'*-]+", value) and not value.startswith("-"):
         return f"{key}:{value}"
     return f'{key}:"{value}"'
+
+
+def _balanced(text: str) -> str:
+    """``text`` with its quotes and brackets paired: the last of an odd number of quotes, a ``)``
+    with no ``(`` before it and a ``(`` never closed are left out (brackets inside quotes are
+    words, not grouping). A backslash before a quote, or at the very end, goes too, so it cannot
+    hide the quote or the closing bracket that follows."""
+    text = text.replace('\\"', '"').rstrip("\\")
+    if text.count('"') % 2:
+        cut = text.rindex('"')
+        text = text[:cut] + text[cut + 1 :]
+    drop: set[int] = set()
+    opened: list[int] = []
+    quoted = False
+    for i, ch in enumerate(text):
+        if ch == '"':
+            quoted = not quoted
+        elif quoted:
+            continue
+        elif ch == "(":
+            opened.append(i)
+        elif ch == ")":
+            if opened:
+                opened.pop()
+            else:
+                drop.add(i)
+    drop.update(opened)
+    return " ".join("".join(ch for i, ch in enumerate(text) if i not in drop).split())
+
+
+_OR = re.compile(r'"[^"]*"|(?<!\S)or(?!\S)', re.IGNORECASE)
 
 
 def _all_words(key: str, text: str) -> str:
@@ -558,7 +594,11 @@ def scryfall_query(f: Filters) -> str:
     """The Scryfall search for ``f`` (without the order, which travels as its own parameters)."""
     parts: list[str] = []
     if f.name:
-        parts.append(" ".join(f.name.replace("(", " ").replace(")", " ").split()))
+        name = _balanced(" ".join(f.name.replace("(", " ").replace(")", " ").split()))
+        # an "or" in the name stays between the name's own words, not the filters after it
+        if any(not m.group().startswith('"') for m in _OR.finditer(name)):
+            name = f"({name})"
+        parts.append(name)
     parts.append(_all_words("oracle", f.oracle))
     parts += _signed_terms("type", f.types, f.types_any)
     if f.colors:
@@ -588,12 +628,12 @@ def scryfall_query(f: Filters) -> str:
     parts.append(_all_words("lore", f.lore))
     if f.lang:
         parts.append(f"lang:{f.lang}")
-    if f.syntax:
-        parts.append(f"({f.syntax})")  # its own OR stays inside it
+    if syntax := _balanced(f.syntax):
+        parts.append(f"({syntax})")  # its own OR stays inside it
     if f.prefer:
         parts.append(f"prefer:{f.prefer}")
     if f.prints:
         parts.append("unique:prints")
     if f.extras:
         parts.append("include:extras")
-    return " ".join(p for p in parts if p)[:MAX_QUERY]
+    return " ".join(p for p in parts if p)  # longer than MAX_QUERY: refused by the caller
