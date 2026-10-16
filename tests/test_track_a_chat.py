@@ -194,3 +194,27 @@ def test_the_proposal_card_uses_the_shared_card_template() -> None:
     assert "var Bridge" in html or "Bridge =" in html
     assert "Use the review page in your browser." in html
     assert html.index("button:disabled{opacity:.55") < html.index("border:1px dashed currentColor")
+
+
+def test_the_history_row_shows_the_bracket_set_on_the_deck_over_the_estimate() -> None:
+    """Q49/O14: the bracket set on the deck is THE bracket; the estimate shows only when none is set."""
+    from mtg_gateway.history_view import build_events
+    from mtg_gateway.reports import ReportService
+
+    def row(stats: dict) -> dict:
+        return ReportService._summary(
+            {
+                "id": "r1",
+                "deck_id": 42,
+                "deck_name": "Deck",
+                "taken_at": 1,
+                "fingerprint": "f",
+                "stats_json": json.dumps(stats),
+            }
+        )
+
+    est = {"bracket_estimate": {"bracket": 3}, "card_count": 100}
+    set_one = build_events([], [], [row({**est, "archidekt_bracket": 2})], csrf_input="")[0]["summary"]
+    assert "bracket 2" in set_one and "about" not in set_one
+    none_set = build_events([], [], [row({**est, "archidekt_bracket": None})], csrf_input="")[0]["summary"]
+    assert "bracket about 3" in none_set
