@@ -35,7 +35,7 @@ def _install_warning(name: str) -> str:
     return (
         f"This gateway's ChatGPT connector name, “{name}”, is {len(name)} characters, and ChatGPT refuses "
         "a plugin file whose name is over 80 characters. Add the connector by hand with the steps above "
-        "instead; only the gateway's owner can change the name."
+        "instead, or ask the gateway's owner to shorten the name."
     )
 
 
@@ -48,8 +48,17 @@ def _admin_warning(name: str) -> str:
 
 def _log_warning(n: int) -> str:
     return (
-        f"MTG_CHATGPT_NAME is {n} characters; ChatGPT refuses a plugin file whose name is over 80. "
-        "The gateway runs, but set a shorter name, or leave it empty to use MTG_SERVER_NAME."
+        f"MTG_CHATGPT_NAME is {n} characters; ChatGPT refuses a plugin file whose name is over 80 "
+        "characters. The gateway runs, but set a shorter name, or leave it empty to use MTG_SERVER_NAME "
+        "if that is 80 characters or fewer."
+    )
+
+
+def _log_warning_server(n: int) -> str:
+    return (
+        f"MTG_SERVER_NAME is {n} characters and MTG_CHATGPT_NAME is empty, so the ChatGPT connector name "
+        "is too long: ChatGPT refuses a plugin file whose name is over 80 characters. The gateway runs, "
+        "but set MTG_CHATGPT_NAME to a name of 80 characters or fewer."
     )
 
 
@@ -90,10 +99,24 @@ def test_over_80_characters_only_warns(tmp_path: Path, monkeypatch: pytest.Monke
     assert chatgpt_name_warning(s) == _log_warning(81)
 
 
-@pytest.mark.parametrize("name,logged", [("y" * 81, True), ("y" * 80, False), (None, False)])
+@pytest.mark.parametrize(
+    "site,name,logged",
+    [
+        (None, "y" * 81, _log_warning(81)),
+        (None, "y" * 80, None),
+        (None, None, None),
+        ("s" * 81, None, _log_warning_server(81)),
+        ("s" * 81, "Short", None),
+        # a setting the filter empties falls back to MTG_SERVER_NAME, and the warning says so
+        ("s" * 81, "!!!", _log_warning_server(81)),
+        # counted as the plugin file writes it, as the admin page counts
+        (None, "y" * 79 + "!!!!", None),
+    ],
+)
 def test_the_warning_is_logged_at_start(
+    site: str | None,
     name: str | None,
-    logged: bool,
+    logged: str | None,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -101,6 +124,10 @@ def test_the_warning_is_logged_at_start(
     from mtg_gateway.__main__ import main
 
     _write_secrets(tmp_path, monkeypatch)
+    if site is None:
+        monkeypatch.delenv("MTG_SERVER_NAME", raising=False)
+    else:
+        monkeypatch.setenv("MTG_SERVER_NAME", site)
     if name is None:
         monkeypatch.delenv("MTG_CHATGPT_NAME", raising=False)
     else:
@@ -114,7 +141,7 @@ def test_the_warning_is_logged_at_start(
         for lg, lvl in zip(loggers, before, strict=True):
             lg.setLevel(lvl)
     warnings = [r for r in caplog.records if r.name == "mtg_gateway.config" and r.levelno == logging.WARNING]
-    assert [r.getMessage() for r in warnings] == ([_log_warning(81)] if logged else [])
+    assert [r.getMessage() for r in warnings] == ([logged] if logged else [])
 
 
 def test_the_effective_name_and_its_filter() -> None:

@@ -369,7 +369,7 @@ def section(key: str, ctx: Context) -> Section:
         plugin_warn = (
             f"This gateway's ChatGPT connector name, “{long[0]}”, is {long[1]} characters, and ChatGPT "
             f"refuses a plugin file whose name is over {CHATGPT_NAME_MAX} characters. Add the connector by "
-            "hand with the steps above instead; only the gateway's owner can change the name."
+            "hand with the steps above instead, or ask the gateway's owner to shorten the name."
             if long
             else None
         )

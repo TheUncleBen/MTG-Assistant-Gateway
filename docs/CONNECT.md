@@ -317,9 +317,10 @@ buttons for the name, description and URL, and the icon to download.
 
 **Download the ChatGPT plugin (ZIP)** from the ChatGPT section of the
 gateway's setup hub, or directly at
-`https://mtg.example.com/plugin/mtg-gateway-chatgpt.zip` (the name follows
-the owner's `MTG_SERVER_NAME`, as the Claude plugin's does; the ChatGPT
-connector name is their `MTG_CHATGPT_NAME` when set). It holds the
+`https://mtg.example.com/plugin/mtg-gateway-chatgpt.zip` (the file name
+follows the owner's `MTG_SERVER_NAME`, as the Claude plugin's does; the
+connector name inside it is their `MTG_CHATGPT_NAME` when set, otherwise
+their `MTG_SERVER_NAME`). It holds the
 connector (this gateway's address) and the MTG skill in one file, in the
 Agent Plugins format that OpenAI's plugins use. It needs no sign-in to
 download: it holds nothing secret.
