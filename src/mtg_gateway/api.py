@@ -354,7 +354,8 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
             if p.get("state") != "pending":
                 raise DeckError("invalid", f"That proposal is {p.get('state')}, not waiting for an answer.")
         else:
-            p = await decks.propose(who.sub, deck_id, data.get("changes"))
+            # the deck page's Undo of a removal puts back the row's flags (row_flags; nobody else)
+            p = await decks.propose(who.sub, deck_id, data.get("changes"), row_flags=True)
             why = modes.hand_edit_confirm("edit", p.get("rows"))
             if why and data.get("confirmed") is not True:
                 pid = p["proposal_id"]
@@ -376,7 +377,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         }
         if not applied:  # a large edit still running: the page says so and offers the review page
             return ok(out, 202)
-        changes = parse_changes(result.get("changes") or p.get("changes"))
+        changes = parse_changes(result.get("changes") or p.get("changes"), row_flags=True)
         # The apply verified the deck once; this read is the one the page draws from. Archidekt's
         # reads have been seen to lag a write, so a deck that does not show the change yet is
         # read once more after a short pause, and the answer says when it still has not caught up.

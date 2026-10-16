@@ -668,7 +668,11 @@ _COLLECTOR_NUMBER = re.compile(r"[A-Za-z0-9★†\-]{1,10}")
 FINISHES = {"normal": "Normal", "foil": "Foil", "etched": "Etched"}
 
 
-def parse_changes(raw: Any) -> list[Change]:
+def parse_changes(raw: Any, *, row_flags: bool = False) -> list[Change]:
+    """The changes of a proposal, checked. ``row_flags``: an add may carry ``companion`` and
+    ``flipped_default`` (the deck page's Undo of a removal, and its stored proposal when applied).
+    Any other caller's flags are dropped, never written: an assistant's proposal reads "+1 Opt" in
+    its review and on the chat card, so it must write no more than that (review 2, N1)."""
     if not isinstance(raw, list) or not raw:
         raise DeckError("invalid", "changes must be a non-empty list")
     if len(raw) > MAX_CHANGES:
@@ -744,7 +748,7 @@ def parse_changes(raw: Any) -> list[Change]:
                 "invalid", f"change {i}: a pinned printing is added to the deck proper, not zone side"
             )
         flags = {}
-        for flag in ("companion", "flipped_default"):
+        for flag in ("companion", "flipped_default") if row_flags else ():
             given = item.get(flag)
             if given is None:
                 continue
@@ -2416,9 +2420,12 @@ class DeckService:
                 raise DeckError(exc.kind, str(exc)) from exc
 
     # -- proposals ------------------------------------------------------------
-    async def propose(self, sub: str, deck_id: str, raw_changes: Any) -> dict[str, Any]:
+    async def propose(
+        self, sub: str, deck_id: str, raw_changes: Any, *, row_flags: bool = False
+    ) -> dict[str, Any]:
+        """``row_flags`` only for the deck page's own save (parse_changes)."""
         deck_id = _clean_deck_id(deck_id)
-        changes = parse_changes(raw_changes)
+        changes = parse_changes(raw_changes, row_flags=row_flags)
         self._room_for_proposal(sub)
         deck = await self.get_own_deck(sub, deck_id)
         _before, _after, rows = plan_rows(deck, changes)
@@ -3039,7 +3046,7 @@ class DeckService:
             from . import actions
 
             return await actions.apply(self, sub, row, progress)
-        changes = parse_changes(row["changes"])
+        changes = parse_changes(row["changes"], row_flags=True)  # stored: flags only from the deck page
         deck = await self._current_deck_for(sub, row)
         _before, after, _lines, _before_side, after_side = plan_zones(deck, changes)
         recategorise, _cat_lines = category_plan(deck, changes)
