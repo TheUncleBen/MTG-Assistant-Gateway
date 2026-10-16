@@ -84,6 +84,13 @@ def image_url(uid: str | None, size: str = "normal") -> str | None:
     return f"https://cards.scryfall.io/{size}/front/{uid[0]}/{uid[1]}/{uid}.jpg"
 
 
+def print_label(set_code: str | None, number: str | None) -> str:
+    """A printing as every screen writes it (N15): "SLD #1074"; the set code alone when the
+    number is not known."""
+    code = (set_code or "").upper()
+    return f"{code} #{number}" if code and number else code
+
+
 def card_image(card: DeckCard, size: str = "normal") -> str | None:
     return image_url(getattr(card, "scryfall_uid", "") or None, size)
 
@@ -606,7 +613,7 @@ def card_row(card: DeckCard, *, deck: Deck, view: str = "text", owned: dict[str,
             + f"{price}</span>"
         )
     elif view == "table":
-        printing = f"{card.set_code.upper()} {card.collector_number}".strip()
+        printing = print_label(card.set_code, card.collector_number)
         mv = mana_value(card)
         printed = (
             f" title='Custom mana value; printed {card.cmc:g}'"
@@ -624,7 +631,7 @@ def card_row(card: DeckCard, *, deck: Deck, view: str = "text", owned: dict[str,
         hover = f"<span class='hover'><img src='{esc(img)}' alt='' loading='lazy'></span>" if img else ""
         body = (
             f"{qty}<span class='n'>{marks}{name}{hover}</span>{cost}"
-            f"<span class='set' title='{esc(card.set_code.upper())} {esc(card.collector_number)}'>"
+            f"<span class='set' title='{esc(print_label(card.set_code, card.collector_number))}'>"
             f"{esc(card.set_code.upper())}</span>{price}"
         )
     return (

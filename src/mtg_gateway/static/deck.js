@@ -1024,9 +1024,9 @@
     if (pr.set) {
       card.setAttribute("data-set", pr.set);
       $$(".set", card).forEach(function (s) {
-        // the Text view shows the set code, the Table view the code and number
-        s.textContent = s.textContent.indexOf(" ") >= 0 ? pr.set : pr.set.split(" ")[0];
-        s.title = pr.set;
+        // the Text view shows the set code, the Table view the code and number ("SLD #1074", N15)
+        s.textContent = s.textContent.indexOf(" ") >= 0 ? printLabel(pr.set) : pr.set.split(" ")[0];
+        s.title = printLabel(pr.set);
       });
     }
     if (pr.img && pr.img !== oldImg) {

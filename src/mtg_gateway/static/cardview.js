@@ -101,6 +101,8 @@
   });
 
   function titleCase(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : ""; }
+  // a printing as every screen writes it (N15): "SLD 1074" (the pages' data-set) reads "SLD #1074"
+  function printLabel(set) { return String(set || "").trim().replace(/^([A-Za-z0-9]{2,6}) +(\S+)$/, "$1 #$2"); }
   function faceBlock(face, isOnly) {
     var block = el("div", "face");
     if (!isOnly) {
@@ -208,7 +210,7 @@
     if (!card.text && !(card.faces && card.faces.length)) text.appendChild(el("p", "muted", card.loading ? "Reading the card text…" : "No rules text available for this card."));
     side.appendChild(text);
     var dl = el("dl", "facts");
-    var printing = [card.set, card.rarity ? titleCase(card.rarity) : "",
+    var printing = [printLabel(card.set), card.rarity ? titleCase(card.rarity) : "",
       card.finish && card.finish.toLowerCase() !== "normal" && card.finish.toLowerCase() !== "nonfoil" ? titleCase(card.finish) : ""].filter(Boolean).join(" · ");
     fact(dl, "Printing", printing);
     fact(dl, "Artist", card.artist);
@@ -352,7 +354,7 @@
         return;
       }
       watches.forEach(function (v) {
-        var where = [(v.set || "").toUpperCase(), v.collector_number || ""].filter(Boolean).join(" ") || "any printing";
+        var where = printLabel([(v.set || "").toUpperCase(), v.collector_number || ""].filter(Boolean).join(" ")) || "any printing";
         box.appendChild(el("p", null, where + " · " + v.finish + ": " + money(v.price, v.currency) + (v.day ? " on " + v.day : "")));
         var rows = (v.history || []).filter(function (h) { return h.price !== null; }).reverse().slice(0, 30);
         if (!rows.length) { box.appendChild(el("p", "muted", "No price yet; it comes with the next daily check.")); return; }
