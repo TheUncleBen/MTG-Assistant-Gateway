@@ -275,10 +275,10 @@ TOO_LONG = "a cell is longer than 131,072 characters; check for a quote that is 
         ('Quantity,Name\n1,"Opt\n' + "x\n" * 70_000, f"line 2: {TOO_LONG}"),
         (
             "Quantity,Name\n" + "9" * 5000 + ",Opt\n",
-            "line 2: quantity '99999999999999999999…' must be from 1 to 9999",
+            "line 2: quantity '99999999999999999999…' is not from 1 to 9,999",
         ),
-        ("Quantity,Name\n1,Opt\n0,Opt\n", "line 3: quantity '0' must be from 1 to 9999"),
-        ("Quantity,Name\n10000,Opt\n", "line 2: quantity '10000' must be from 1 to 9999"),
+        ("Quantity,Name\n1,Opt\n0,Opt\n", "line 3: quantity '0' is not from 1 to 9,999"),
+        ("Quantity,Name\n10000,Opt\n", "line 2: quantity '10000' is not from 1 to 9,999"),
     ],
 )
 def test_huge_cells_are_refused_with_their_line(text: str, reason: str) -> None:
@@ -332,3 +332,19 @@ def test_every_name_column_the_csv_reader_knows_makes_the_text_a_csv(name_col: s
         ("Sol Ring", 2, "cmr", 2),
         ("Opt", 1, "xln", 3),
     ]
+
+
+@pytest.mark.parametrize(
+    ("given", "code"),
+    [
+        ("Lightly Played", "LP"),
+        ("near mint", "NM"),
+        ("Moderately-Played", "MP"),
+        ("HEAVILY  PLAYED", "HP"),
+        ("Damaged", "DMG"),
+    ],  # fmt: skip
+)
+def test_a_condition_written_out_is_its_code(given: str, code: str) -> None:
+    """A Condition cell with the condition's name is read as its code, not kept as Near Mint."""
+    item = parse_collection_import(f"Quantity,Name,Condition\n1,Opt,{given}\n")[0]
+    assert item["condition"] == code and "condition_given" not in item

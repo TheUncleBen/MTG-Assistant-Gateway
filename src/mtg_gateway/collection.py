@@ -67,6 +67,14 @@ FIRST_PAGE_TTL = 60.0  # seconds the unfiltered first page is served from memory
 FINISHES = ("nonfoil", "foil", "etched")
 MODIFIERS = {"nonfoil": "Normal", "foil": "Foil", "etched": "Etched"}
 CONDITIONS = ("", "NM", "LP", "MP", "HP", "DMG")
+# the conditions' names, as an import may write them out, upper-cased with single spaces
+CONDITION_NAMES = {
+    "NEAR MINT": "NM",
+    "LIGHTLY PLAYED": "LP",
+    "MODERATELY PLAYED": "MP",
+    "HEAVILY PLAYED": "HP",
+    "DAMAGED": "DMG",
+}
 # Archidekt's own collection orderings the gateway exposes (``collectionOrderBy``; only
 # ``editionDate`` was seen in the site's requests, the default is Archidekt's newest-first).
 SORTS = {"added": "Recently added", "edition": "Set release"}
@@ -273,7 +281,7 @@ def _read_csv_rows(reader: Any, first: list[str], items: list[dict[str, Any]]) -
         # a long digit string is past MAX_QUANTITY anyway, and int() refuses one over 4,300 digits
         if len(qty.lstrip("0")) > len(str(MAX_QUANTITY)) or not 1 <= int(qty) <= MAX_QUANTITY:
             raise CollectionError(
-                "invalid", f"line {n}: quantity {_quoted(qty)} must be from 1 to {MAX_QUANTITY}"
+                "invalid", f"line {n}: quantity {_quoted(qty)} is not from 1 to {MAX_QUANTITY:,}"
             )
         finish_raw = cell(row, "finish").lower()
         finish = {"foil": "foil", "etched": "etched", "true": "foil", "yes": "foil"}.get(
@@ -282,6 +290,8 @@ def _read_csv_rows(reader: Any, first: list[str], items: list[dict[str, Any]]) -
         condition = cell(row, "condition").upper()
         if condition == "D":  # Archidekt's own code for Damaged
             condition = "DMG"
+        # a condition written out ("Lightly Played") is its code, so it isn't kept as Near Mint
+        condition = CONDITION_NAMES.get(" ".join(re.split(r"[\s_-]+", condition)), condition)
         items.append(
             {
                 "name": name,
