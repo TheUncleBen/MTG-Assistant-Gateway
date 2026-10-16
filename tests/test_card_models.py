@@ -168,6 +168,17 @@ async def test_each_member_keeps_at_most_the_cap(tmp_path: Path, monkeypatch: An
         "you already keep 1 card models, the most one member can keep"
         in out["goldfish"]["models_kept"]["refused"][0]["why"]
     )
+    # at the cap, re-saving a model the member already keeps replaces it (it adds nothing)
+    again = {"name": names[0], "triggers": [{"on": "etb", "do": "draw", "count": 1}]}
+    out = await reports.run("alice", "42", options={"annotations": [again]})
+    assert out["goldfish"]["models_kept"] == {"kept": [{"name": names[0]}], "refused": []}
+    saved = db.rows[card_models.card_key(names[0])]
+    assert json.loads(saved["model_json"]) == clean_model(again, card=names[0])
+    # taking over another member's card would newly count toward alice, so it is refused
+    other = card_models.card_key(names[1])
+    db.rows[other] = {**saved, "card_key": other, "name": names[1], "added_by": "bob"}
+    out = await reports.run("alice", "42", options={"annotations": [{"name": names[1], "inert": True}]})
+    assert out["goldfish"]["models_kept"]["kept"] == [] and db.rows[other]["added_by"] == "bob"
 
 
 async def test_nothing_is_kept_without_the_schema_14_table(tmp_path: Path) -> None:
