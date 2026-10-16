@@ -315,21 +315,24 @@ If the packages are public you can skip this step.
 
 ### Updating to 0.7.29 from an earlier version
 
-0.7.29 adds the admin Settings page. A stack set up before it fixes most of
-those settings itself, so the page would show them read-only. Do these in
-this order:
+0.7.29 adds the admin Settings page. A stack file from before 0.7.29 gives 24
+of the page's 47 settings a value of its own, so the page would show them
+locked (greyed out) even with no variable set.
 
-1. **Paste the new stack file first.** In Portainer, **Stacks** → `mtg` →
-   **Editor**, replace the whole text with the new
-   [`deploy/portainer-stack.yml`](../deploy/portainer-stack.yml). The old
-   file writes its own default for each of these settings, so they stay
-   fixed whatever your variables say. (With the **Repository** build method
-   the stack file follows the repository on its own.)
-2. **Then remove your own variables** for the settings you want to change on
-   the Settings page. A variables file made from the older
+1. **If you pasted the stack file into Portainer's Web editor:** in
+   **Stacks** → `mtg` → **Editor**, replace the whole text with the new
+   [`deploy/portainer-stack.yml`](../deploy/portainer-stack.yml). With the
+   **Repository** build method, the update brings the new file.
+2. **Optional:** for each setting you want to change on the Settings page,
+   delete its variable. A variables file made from the older
    `stack.env.example` sets 19 of them, such as `MTG_ARCHIDEKT_BACKUPS=true`
-   and `MTG_DECK_SYNC_MINUTES=30`. The ones you keep stay fixed by your stack.
+   and `MTG_DECK_SYNC_MINUTES=30`. Any variable you keep stays locked: the
+   Settings page shows it greyed out with its value, and you change it in
+   the stack and redeploy.
 3. Click **Update the stack**, with "Re-pull image" ticked.
+
+With Docker Compose, see
+[DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md#updating-to-0729-from-an-earlier-version).
 
 ### Without Portainer
 
@@ -749,8 +752,8 @@ admin on the gateway's Settings page (`/admin/settings`, see
 [OPERATIONS.md](OPERATIONS.md#the-settings-page)). The stack file passes those
 through empty unless your environment sets them, and `stack.env.example`
 lists them commented out with their default. A value you set in the
-environment wins and is shown on the page as set in your stack, read-only; leave
-it out to manage it on the page.
+environment wins and locks the setting: the page shows it greyed out with its
+value. Leave it out to manage it on the page.
 
 | Variable | Required | Default | What it does |
 | --- | --- | --- | --- |

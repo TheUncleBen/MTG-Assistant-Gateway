@@ -551,8 +551,8 @@ def test_live_settings_default_stored_and_deployment_values(tmp_path: Path) -> N
         assert live.source("forge_games") == "deployment"
         with pytest.raises(
             SettingError,
-            match=r"^forge_games is set in your stack \(MTG_FORGE_GAMES\)\. To change it here, remove it "
-            r"from your stack and redeploy\.$",
+            match=r"^forge_games is set in your stack \(MTG_FORGE_GAMES\), so it can't be changed here\. "
+            r"Change or remove it in your stack, then redeploy\.$",
         ):
             live.set("forge_games", 20, by="admin-1")
         with pytest.raises(SettingError):

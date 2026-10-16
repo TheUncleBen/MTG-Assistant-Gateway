@@ -154,10 +154,12 @@ def remember_view(
 
 def page_prefs(db: Database, sub: str | None, *names: str) -> str:
     """The choices a page's scripts read at once, as ``<script id='mtg-prefs'>`` JSON (no request,
-    no flash of the default): only ``names`` (exact names, or a name ending in ':' as a prefix)."""
+    no flash of the default): only ``names`` (exact names, or a name ending in ':' as a prefix), and
+    the "forgotten" marker, so prefs.js never shows a device's old choice it won't copy."""
     if not sub:
         return ""
     stored = db.get_prefs(sub)
+    names = (*names, FORGOTTEN)
     out = {
         k: v for k, v in stored.items() if any(k == n or (n.endswith(":") and k.startswith(n)) for n in names)
     }

@@ -356,7 +356,8 @@ class PriceService:
                     # watches are kept), so the message names both numbers.
                     raise DeckError(
                         "rate_limited",
-                        f"You watch {plural(count, 'card')}; this gateway keeps at most {most} per member. "
+                        f"You watch {plural(count, 'card')}; this gateway lets each member watch "
+                        f"at most {most}. "
                         f"Remove {count - most + 1} to add another.",
                     )
                 wid = "w_" + secrets.token_urlsafe(9)
@@ -426,7 +427,7 @@ class PriceService:
         if str(deck_id) not in {str(d) for d in have} and len(have) >= most:
             raise DeckError(
                 "rate_limited",
-                f"You watch {plural(len(have), 'deck')}; this gateway keeps at most {most} per member. "
+                f"You watch {plural(len(have), 'deck')}; this gateway lets each member watch at most {most}. "
                 f"Remove {len(have) - most + 1} to add another.",
             )
 

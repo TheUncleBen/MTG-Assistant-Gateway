@@ -253,7 +253,7 @@ async def test_watch_refusals_limits_and_unknown_cards(tmp_path: Path, idp: Fake
             assert (await _watch(b, name="Sol Ring")).status_code == 303
             r = await _watch(b, name="Command Tower")
             assert r.status_code == 429
-            said = "You watch 1 card; this gateway keeps at most 1 per member. Remove 1 to add another."
+            said = "You watch 1 card; this gateway lets each member watch at most 1. Remove 1 to add another."
             assert said in r.text
             # 0.7.29: the admin Settings page's limit applies at once, raised or lowered
             st.gw.live.set("watch_max_cards", 2, by="admin-1")
@@ -261,7 +261,9 @@ async def test_watch_refusals_limits_and_unknown_cards(tmp_path: Path, idp: Fake
             st.gw.live.set("watch_max_cards", 1, by="admin-1")
             r = await _watch(b, name="Cultivate")
             assert r.status_code == 429
-            said = "You watch 2 cards; this gateway keeps at most 1 per member. Remove 2 to add another."
+            said = (
+                "You watch 2 cards; this gateway lets each member watch at most 1. Remove 2 to add another."
+            )
             assert said in r.text
             # no form token: refused
             r = await b.http.post("/watchlist", data={"action": "add_card", "name": "Opt"})
@@ -753,6 +755,7 @@ def test_the_deck_limit_says_how_many_to_remove(watched: list[str], remove: str)
         svc._check_deck_limit("user-1", "99")
     noun = "deck" if len(watched) == 1 else "decks"
     assert str(refused.value) == (
-        f"You watch {len(watched)} {noun}; this gateway keeps at most 1 per member. {remove} to add another."
+        f"You watch {len(watched)} {noun}; this gateway lets each member watch at most 1. "
+        f"{remove} to add another."
     )
     svc._check_deck_limit("user-1", "1")  # a deck already watched is never refused

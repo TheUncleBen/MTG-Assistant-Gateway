@@ -297,7 +297,8 @@ def test_a_setting_the_stack_sets_shows_greyed_out_and_cannot_be_changed(
             env = "MTG_" + key.upper()
             assert r["locked"] and r["all_disabled"] and not r["reset"] and not r["tick"], r
             assert r["line"] == (
-                f"Set in your stack ({env}). To change it here, remove it from your stack and redeploy."
+                f"Set in your stack ({env}), so it can't be changed here. Change or remove it in your "
+                "stack, then redeploy."
             )
             assert r["low"] == [] and r["grey"], r
         assert rows["forge_games"]["shown"] == ["12"]

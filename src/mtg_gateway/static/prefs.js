@@ -64,7 +64,9 @@
     if (value === undefined || value === null) return;
     keys.push(key);
     copy[name] = value;
-    if (!has(name)) values[name] = value;  // this page already shows it; the account's wins
+    // this page already shows it; the account's wins. After "Forget my view choices" the old
+    // choice is never shown: the gateway drops it instead of copying it.
+    if (!has(name) && values["prefs.forgotten"] !== true) values[name] = value;
   }
   try {
     for (var i = 0; i < store.length; i++) {

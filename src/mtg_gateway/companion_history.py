@@ -9,7 +9,14 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from .companion import DECKS_JSON_TIMEOUT, _filename, event_detail_html, event_label, stats_strip
+from .companion import (
+    DECKS_JSON_TIMEOUT,
+    _filename,
+    event_detail_html,
+    event_label,
+    member_name,
+    stats_strip,
+)
 from .decks import DeckError, actor_label, current_client, mark_gone
 from .history_view import (
     HISTORY_CSS,
@@ -303,10 +310,12 @@ def add_history_routes(
             detail = r.get("detail") if isinstance(r.get("detail"), dict) else {}
             # browser or app is decided by the client id, never by the app's chosen name
             who = actor_label(r.get("client_id"), detail.get("client_name"))
+            removed_model = r["event"] == "card_model_removed"
+            adder = member_name(state.db, detail.get("added_by")) if removed_model else None
             items.append(
                 f"<li><span class='name'>{_esc(event_label(r['event']))}</span>"
                 + actor_html(who)
-                + f"<span class='muted small'>{event_detail_html(detail)}</span>"
+                + f"<span class='muted small'>{event_detail_html(detail, added_by=adder)}</span>"
                 f"<span class='when'>{_when(r['at'])}</span></li>"
             )
         body = (

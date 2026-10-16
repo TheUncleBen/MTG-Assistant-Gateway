@@ -114,8 +114,8 @@ reaches the gateway if `docker-compose.yml` lists it under the gateway's
 Lines in `.env` that start `# MTG_` (the approval modes, `MTG_APPLY_IN_CHAT`,
 `MTG_UPDATE_CHECK` and the other tuning settings) are left to the gateway's
 admin Settings page (`/admin/settings`, since 0.7.29), starting from the
-default shown. Remove the `# ` to fix one in `.env` instead; the page then
-shows it as set in your stack, read-only
+default shown. Remove the `# ` to lock one in `.env` instead; the page then
+shows it greyed out with its value, and you change it in `.env`
 ([OPERATIONS.md](OPERATIONS.md#the-settings-page)).
 
 Create the folders and give them to `PUID:PGID`:
@@ -234,7 +234,22 @@ docker compose up -d
 ```
 
 Read the [CHANGELOG](../CHANGELOG.md) first; it says when a release needs a
-settings change. The gateway upgrades its database on start and records the
+settings change.
+
+### Updating to 0.7.29 from an earlier version
+
+Download the new `docker-compose.yml` too, before `docker compose pull`:
+
+```bash
+base=https://raw.githubusercontent.com/TheUncleBen/MTG-Assistant-Gateway/main/deploy/compose
+curl -fsSLO "$base/docker-compose.yml"
+```
+
+The old file gives 24 of the Settings page's 47 settings a value of its own,
+which locks them on the page (greyed out with that value). An `.env` made
+from the older `.env.example` sets 17 of them. **Optional:** delete the lines
+of the ones you want to change on the Settings page. Any you keep stay
+locked, and you change them in `.env`. The gateway upgrades its database on start and records the
 schema version in the file. To go back to an older release, restore the backup
 you took before updating (see [OPERATIONS.md](OPERATIONS.md#backups)) and run
 the old image on that; don't run an old image on an upgraded database.

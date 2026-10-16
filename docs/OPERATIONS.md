@@ -88,8 +88,10 @@ project's newest release, and when that is newer, every page shows admins a noti
 overview (**Admin**, **Updates**) shows these steps with the version filled in. It never pulls an
 image or restarts itself. `MTG_UPDATE_CHECK=false` turns the check off.
 
-Updating to 0.7.29 from an earlier version has two steps first: see
-[DEPLOY.md](DEPLOY.md#updating-to-0729-from-an-earlier-version).
+Updating to 0.7.29 from an earlier version may need a step first: see
+[DEPLOY.md](DEPLOY.md#updating-to-0729-from-an-earlier-version) (Portainer) or
+[DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md#updating-to-0729-from-an-earlier-version)
+(Compose).
 
 In Portainer: **Stacks** → `mtg` → **Update the stack**, with "Re-pull
 image" ticked. With `MTG_TAG=latest` that pulls the newest version; with a
@@ -841,27 +843,28 @@ value comes from: the gateway's default, a change made here (who and when),
 or your stack.
 
 - **A value set in your stack wins.** When the stack's environment (Portainer's
-  variables or `.env`) sets one of these, the page shows it as set in your
-  stack, read-only, and says which variable to change. The shipped stack and
+  variables or `.env`) sets one of these, the page shows it locked: greyed
+  out with its value, naming the variable to change or remove. The shipped stack and
   Compose files pass the settings marked *stack* in
   [DEPLOY.md](DEPLOY.md#environment-reference) through empty unless you set
   them, and the example env files list those commented out (`# MTG_…=`) with
   the default, so out of the box the page manages them. Remove the line from
-  your environment (or leave it empty) to manage one on the page. To fix one in
+  your environment (or leave it empty) to manage one on the page. To lock one in
   the stack, set it in your environment; for a setting the stack file doesn't
   list, also add it under the gateway's `environment:`. Updating from an
   earlier version: [DEPLOY.md](DEPLOY.md#updating-to-0729-from-an-earlier-version).
-- **Pacing only gets gentler here.** The Archidekt and Scryfall pacing can be
-  made slower on the page, never faster than the gateway's defaults. Only the
+- **Pacing only gets gentler here.** On the page the Archidekt and Scryfall
+  pacing can only be set to ask less often than the gateway's defaults. Only the
   stack can set faster values, within the bounds in
   [DEPLOY.md](DEPLOY.md#environment-reference).
 - **Some settings stay in the stack only**: sign-in, secrets, token and session
   lifetimes, the membership check, `MTG_WRITES_ENABLED`, the backup folder's
   name and the folders on disk.
-- Every change is written to the activity log ("Setting changed", with the
-  setting's name and its old and new value) under the admin's account. Three ask for a tick first: turning Archidekt backup copies
-  off, and lowering the backup copies or the restore points kept per deck,
-  because older copies or restore points are then deleted.
+- Every change is in the activity log as "Gateway setting changed", with the
+  setting's name and its old and new value, under the admin's account. Three
+  ask for a tick first: turning Archidekt backup copies off (edits then have
+  no copy on Archidekt), and lowering the backup copies or the restore points
+  kept per deck (older ones are then deleted).
 
 ### The metrics table
 

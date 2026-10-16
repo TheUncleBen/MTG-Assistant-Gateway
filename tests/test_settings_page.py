@@ -200,7 +200,10 @@ async def test_a_locked_or_unknown_setting_cannot_be_changed(gw: Harness) -> Non
         assert _live(gw).get("forge_games") == 12 and _live(gw).get("forge_parallel_games") == 2
         r = await _post(b, {"reset": "forge_games"})
         assert r.status_code == 400
-        assert "Set in your stack (MTG_FORGE_GAMES). To change it here, remove it from your stack" in r.text
+        assert (
+            "Set in your stack (MTG_FORGE_GAMES), so it can't be changed here. Change or remove it in "
+            "your stack, then redeploy." in html.unescape(r.text)
+        )
         r = await _post(b, {"reset": "writes_enabled"})
         assert r.status_code == 400 and "isn't one this page can change" in html.unescape(r.text)
         r = await _post(b, {"group": "general", "v_writes_enabled": "on"})
@@ -236,6 +239,18 @@ def test_saved_values_apply_at_the_next_start(tmp_path: Path) -> None:
     db.close()
 
 
+def test_one_second_and_one_day_are_singular() -> None:
+    """Re-proofread issue 5: "1 second", "1 day" in Back to default, the save notice and the log."""
+    shown, specs = settings_page.shown, MANAGED_SETTINGS
+    assert shown(specs["archidekt_min_interval"], 1.0) == "1 second"
+    assert shown(specs["archidekt_min_interval"], 2) == "2 seconds"
+    assert shown(specs["archidekt_backoff_base"], 1.5) == "1.5 seconds"
+    assert shown(specs["proposal_expiry_days"], 1) == "1 day"
+    assert shown(specs["deck_sync_minutes"], 1440) == "1,440 minutes"
+    line = settings_page.change_line({"key": "backup_keep_days", "previous": 14, "value": 1})
+    assert line == "Days of nightly backups kept: 14 days → 1 day"
+
+
 def test_every_setting_has_page_text() -> None:
     assert set(settings_page.TEXT) == set(MANAGED_SETTINGS)
     groups = {g for g, _t, _i in settings_page.GROUPS}
@@ -263,7 +278,10 @@ async def test_a_chatgpt_name_over_80_characters_is_warned_about(gw: Harness) ->
         page = (await b.http.get("/admin/settings", headers=NAVIGATE)).text
         row = html.unescape(page.split("id='s-row-chatgpt_name'", 1)[1].split("id='s-row-", 1)[0])
         assert f"ChatGPT gets the name “{long}”, which is 81 characters." in row
-        assert "ChatGPT refuses a name over 80 characters" in row
+        assert (
+            "ChatGPT refuses a plugin file whose name is over 80 characters, so set a name of 80 "
+            "characters or fewer here." in row
+        )
         assert "aria-describedby='h-chatgpt_name s-chatgpt_name w-chatgpt_name'" in row
         # Blank follows the gateway name, which is checked too.
         await _post(b, {"group": "general", "v_chatgpt_name": "", "v_server_name": "B" * 90})
