@@ -760,8 +760,8 @@ def coverage_text(g: dict[str, Any]) -> str:
     # Q138 item 6: both figures, as scripts/measure_recognition.py prints them
     return (
         f"Played with their effect: {c['modeled']} of {c['deck_size']} cards ({c['pct']}% of the deck). "
-        f"Known: {c['known']} of {c['deck_size']} cards ({c['known_pct']}% of the deck): the cards played "
-        "with their effect plus those left out on purpose. The rest are listed below."
+        f"Known: {c['known']} of {c['deck_size']} cards ({c['known_pct']}% of the deck), counting the "
+        "cards played with their effect and those left out on purpose. The rest are listed below."
     )
 
 
@@ -1258,7 +1258,7 @@ def forge_lines(f: dict[str, Any], *, results: bool = True) -> list[str]:
             "gateway": " (chosen by the gateway, kept for the record)",
             "request": " (set when this report was asked for, kept for the record)",
         }
-        out.append(f"Seed: {f['seed']}{whose.get(str(f.get('seed_source')), '')}.")
+        out.append(f"Seed: {f['seed']}{whose.get(str(f.get('seed_source')), ' (kept for the record)')}.")
         out.append(FORGE_DRIFT_NOTE)
     elif f.get("state") in ("done", "running") and f.get("job_id"):
         out.append("Seed: none recorded (this run was started without one).")

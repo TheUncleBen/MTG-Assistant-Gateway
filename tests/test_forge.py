@@ -390,7 +390,7 @@ def test_report_page_and_markdown_show_forge_results() -> None:
     assert "<td class='num' data-label='95% interval'>15% to 85%</td>" in page and "41 s" in page
     assert "<li><span>Won by a player</span><b>3</b></li>" in page
     assert "<li><span>Stopped at the time limit (counted as a draw)</span><b>1</b></li>" in page
-    assert "Fake Sticker Card" in page and "Seed: 7." in page
+    assert "Fake Sticker Card" in page and "Seed: 7 (kept for the record)." in page
     assert "Average game time" in page and "Median game time" not in page  # stored before 0.7.30
     running = forge_html({"state": "running", "not_played": []})
     assert "running" in running and "data-forge-live" not in running  # an export: no refresh
@@ -907,7 +907,7 @@ async def test_shared_opponents_that_left_the_engine_or_never_sat() -> None:
     # P1: with no bracket, or precons without brackets, the note says the newest precons play
     _, none = shared_opponents(precons, {"deck_name": "Deck A"})
     assert none["note"].endswith(
-        "Deck A has no bracket (none set on Archidekt and no estimate), so the newest precons play."
+        "Deck A has no bracket (none set in Archidekt and no estimate), so the newest precons play."
     )
     unrated = [{"name": n} for n in BRACKETED]
     _, old = shared_opponents(unrated, {"deck_name": "Deck A", "bracket": [3, "estimate"]})
@@ -919,6 +919,13 @@ async def test_shared_opponents_that_left_the_engine_or_never_sat() -> None:
     # N1: in the second deck's report, every note names the first deck, never "the deck"
     for note in (why["note"], est["note"], none["note"], old["note"]):
         assert "the deck" not in note.lower().replace("the deck's", ""), note
+    # N13: a report stored without a deck name, or a name in lower case, still starts the sentence in capitals
+    _, unnamed = shared_opponents(precons, {"deck_name": ""})
+    assert "table. The other deck has no bracket (none set in Archidekt" in unnamed["note"]
+    assert pick_opponents(precons, None, None, deck="aesi landfall")[1]["note"].startswith(
+        "Aesi landfall has"
+    )
+    assert pick_opponents(precons, None, None)[1]["note"].startswith("The deck has no bracket")
     # a deck's own report still reads "the deck"
     assert pick_opponents(precons, 4, "estimate")[1]["note"].startswith(
         "Archidekt's estimate from cards is bracket 4"

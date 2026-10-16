@@ -251,7 +251,8 @@ def add_history_routes(
             if reports.models.available
             else ""
         )
-        body = (f"<p class='notice'>{notice}</p>" if notice else "") + report_body_html(
+        kind = "notice error" if request.query_params.get("models") == "error" else "notice"
+        body = (f"<p class='{kind}'>{notice}</p>" if notice else "") + report_body_html(
             r,
             stats_html=stats_strip(r.get("stats")),
             actions_html=actions,
