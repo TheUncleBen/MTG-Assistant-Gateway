@@ -3550,6 +3550,13 @@ class DeckService:
         the proposal's message says so again, and the audit says why."""
         sid, sub, pid = job["snapshot_id"], job["sub"], job["proposal_id"]
         self.db.drop_backup_delete(sid)
+        backup_id = str(job["backup_deck_id"])
+        if error != "copy_changed" and backup_id.isdigit():
+            # Review round 1, finding 2: the copy stays where it is and is no longer counted, so
+            # no later trim queues it again (one more Archidekt read and give-up per new copy),
+            # and its restore point is no longer held past the newest kept (card Q135 item 9).
+            record = self.db.backup_made(backup_id) or {"sub": sub, "deck_id": str(job["deck_id"])}
+            self.db.record_backup_made(backup_id, {**record, "kept": True, "given_up": error})
         self._reword_backup_note(sub, pid, sid, BACKUP_KEPT)
         self._audit(
             "backup_delete_given_up",
@@ -3686,9 +3693,16 @@ class DeckService:
         keep = int(self.live.get("archidekt_backup_copies"))
         queued: list[str] = []
         counted = 0
-        for c in self.db.deck_backup_copies(sub, deck_id):
+        copies = [
+            (c, self.db.backup_made(str(c["backup_deck_id"])) or {})
+            for c in self.db.deck_backup_copies(sub, deck_id)
+        ]
+        # Card Q135 item 8: a copy is deleted only while it is in the backup folder. A copy made
+        # before 0.7.29 has no record of its folder, so it must be in the folder the newest
+        # recorded copy was made in (review round 1, finding 1); with none recorded it is kept.
+        folder = next((str(m["folder_id"]) for _c, m in copies if m.get("folder_id")), "")
+        for c, made in copies:
             backup_id, sid = str(c["backup_deck_id"]), str(c["snapshot_id"] or "")
-            made = self.db.backup_made(backup_id) or {}
             if made.get("kept"):
                 continue
             counted += 1
@@ -3696,7 +3710,7 @@ class DeckService:
                 continue
             if self.db.backup_delete_queued(sid):
                 continue
-            expect = {**made, "trim": True} if made else {"trim": True, "legacy": True}
+            expect = {**made, "trim": True} if made else {"trim": True, "legacy": True, "folder_id": folder}
             self.db.queue_backup_delete(
                 sid,
                 sub=sub,
@@ -3763,7 +3777,13 @@ class DeckService:
         # B12/B21: also in the database, so a restart never loses it
         self.db.record_backup_made(
             str(copy["id"]),
-            {**made, "made_at": int(time.time()), "deck_id": str(deck.id), "snapshot_id": snapshot_id},
+            {
+                **made,
+                "made_at": int(time.time()),
+                "deck_id": str(deck.id),
+                "snapshot_id": snapshot_id,
+                "sub": sub,
+            },
         )
         while len(self._backups_made) > BACKUPS_REMEMBERED:
             self._backups_made.pop(next(iter(self._backups_made)))
@@ -5159,10 +5179,13 @@ def _backup_as_made(copy: Deck, job: dict[str, Any], *, snapshot_id: str = "") -
     updated = _iso_time(copy.updated_at)
     created = _iso_time(copy.created_at)
     if expect.get("legacy"):
-        # A copy made before 0.7.29, with no stored record (card Q135 item 8): a backup-style name,
-        # the description naming this snapshot, and updated within BACKUP_LEGACY_SLACK of created.
+        # A copy made before 0.7.29, with no stored record (card Q135 item 8): in the backup folder
+        # (the one _trim_backups found), a backup-style name, the description naming this
+        # snapshot, and updated within BACKUP_LEGACY_SLACK of created.
         return (
             bool(snapshot_id)
+            and bool(expect.get("folder_id"))
+            and str(copy.parent_folder) == str(expect.get("folder_id"))
             and is_backup_name(copy.name or "")
             and f"Gateway snapshot {snapshot_id}." in rich_text(copy.description)
             and updated is not None

@@ -288,3 +288,72 @@ def test_the_shared_note_reads_as_a_sentence() -> None:
     recent = decks_mod.backup_shared_note(made, recent=True)
     assert recent.endswith("(made less than 15 minutes before this edit).")
     assert json.dumps(decks_mod.backup_shared_note(made, recent=False)).count("UTC") == 1
+
+
+@pytest.mark.usefixtures("no_sharing")
+async def test_a_copy_from_before_0729_moved_out_of_the_backup_folder_is_kept(stack: Stack) -> None:
+    """Card Q135 item 8: only a copy in the backup folder is deleted, also one with no record
+    (review round 1, finding 1)."""
+    token = await linked_user(stack)
+    _live(stack).set("archidekt_backup_copies", 1, by="admin-1")
+    first = (await _apply(stack, token, ADDS[0]))["result"]["backup_deck_id"]
+    db = stack.h.db
+    with db.tx() as c:  # made by 0.7.28: no record
+        c.execute("DELETE FROM job_runs WHERE name LIKE 'backup_made:%'")
+    stack.ark.deck_folder[int(first)] = 999999  # the member moved it to a folder of their own
+    await _apply(stack, token, ADDS[1])
+    queued = db.queued_backup_deletes()
+    assert [j["backup_deck_id"] for j in queued] == [first] and queued[0]["expect"]["folder_id"]
+    _due_now(stack)
+    out = await _svc(stack).delete_one_queued_backup()
+    assert out == {"given_up": queued[0]["snapshot_id"], "error": "copy_changed"}
+    assert int(first) not in stack.ark.deleted
+
+
+@pytest.mark.usefixtures("no_sharing")
+async def test_a_trim_that_gave_up_is_never_queued_again(stack: Stack) -> None:
+    """Review round 1, finding 2: a copy the gateway could not delete (here: owned by another
+    account than the link's) is no longer counted, so later copies don't queue it again, and its
+    restore point is not held for ever."""
+    token = await linked_user(stack)
+    _live(stack).set("archidekt_backup_copies", 1, by="admin-1")
+    first = (await _apply(stack, token, ADDS[0]))["result"]["backup_deck_id"]
+    svc = _svc(stack)
+    real = svc.db.get_link
+    outs = []
+    for card in ADDS[1:5]:
+        await _apply(stack, token, card)
+        _due_now(stack)
+        svc.db.get_link = lambda sub: {**(real(sub) or {}), "archidekt_user_id": "424242"}
+        try:
+            while out := await svc.delete_one_queued_backup():
+                outs.append(out)
+        finally:
+            svc.db.get_link = real
+    given_up = [o for o in outs if o.get("given_up")]
+    # each copy past the limit is tried once: the first, then each newer one in turn
+    assert len(given_up) == 4 and all(o["error"] == "not_owner" for o in given_up)
+    assert stack.h.db.backup_made(first)["kept"] is True
+    assert stack.h.db.backup_made(first)["given_up"] == "not_owner"
+
+
+@pytest.mark.usefixtures("no_sharing")
+async def test_delete_my_data_removes_the_backup_copy_records_at_once(stack: Stack) -> None:
+    """Review round 1, finding 5: the records (deck name, description, deck URL) go with the
+    member's data, not at the next hourly clean-up; another member's stay."""
+    token = await linked_user(stack)
+    first = (await _apply(stack, token, ADDS[0]))["result"]["backup_deck_id"]
+    db = stack.h.db
+    assert db.backup_made(first)["sub"] == SUB
+    db.record_backup_made("777", {"name": "Other (backup)", "sub": "user-2"})
+    db.record_backup_made("778", {"name": "Old, no member recorded"})
+    db.record_backup_made("779", {"name": "Theirs, no restore point left", "sub": SUB})
+    with db.tx() as c:  # a record from before "sub" was stored, named by the member's snapshot
+        c.execute(
+            "UPDATE job_runs SET detail_json = json_remove(detail_json, '$.sub') WHERE name = ?",
+            ("backup_made:" + first,),
+        )
+    out = db.delete_member_data(SUB)
+    assert out["backup_records"] == 2
+    assert db.backup_made(first) is None and db.backup_made("779") is None
+    assert db.backup_made("777") is not None and db.backup_made("778") is not None
