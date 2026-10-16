@@ -638,8 +638,7 @@ def test_card_menu_near_the_bottom_keeps_move_to_usable(server: Server) -> None:
             target.click()
         assert json.loads(req.value.post_data)["changes"][0]["category"] == to
         page.locator(".deck-toast .msg", has_text="Saved").wait_for(timeout=8000)
-        # "Saved. Refreshing…" redraws the rows once more a moment later, which closes a menu
-        # opened on the old row: wait for the save to have settled
+        # let the save settle (its toast final) before the next step
         page.wait_for_function(
             "() => { const m = document.querySelector('.deck-toast .msg');"
             " return !/Refreshing|Saving/.test(m ? m.innerText : ''); }",
@@ -647,6 +646,11 @@ def test_card_menu_near_the_bottom_keeps_move_to_usable(server: Server) -> None:
         )
         # and in a window too short for the whole menu, it scrolls rather than shrink an item
         page.set_viewport_size({"width": 1366, "height": 420})
+        # the page closes an open menu on a resize, and the resize event can arrive after the
+        # viewport call returns: wait for it (the new height, then one frame) before opening the
+        # menu, or the late event closes it (review 2 N2; the CI failure on 16fa4cf)
+        page.wait_for_function("() => window.innerHeight === 420", timeout=3000)
+        page.evaluate("() => new Promise(r => requestAnimationFrame(() => r()))")
         card.evaluate(
             "c => c.dispatchEvent(new MouseEvent('contextmenu', {bubbles: true, cancelable: true,"
             " clientX: 300, clientY: 400}))"
