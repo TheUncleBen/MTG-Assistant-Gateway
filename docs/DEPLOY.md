@@ -325,13 +325,16 @@ locked (greyed out) even with no variable set.
    places) and any line you added under `environment:`. Then, in
    **Stacks** → `mtg` → **Editor**, replace the whole text with the new
    [`deploy/portainer-stack.yml`](../deploy/portainer-stack.yml) and make
-   the same edits in it. Without the Authentik line the removed-member
-   clean-up turns off (the admin page says so); without the ntfy line the
-   gateway won't start. With the **Repository** build method, the update
-   brings the new file, and edits to the old one need the same care.
-   **Without Portainer:** update your copy of the repository (`git pull`)
-   before you run `docker stack deploy` again, so it uses the new
-   `deploy/portainer-stack.yml`; a file you edited needs the same care.
+   the same edits in it. Without the Authentik lines the removed-member
+   clean-up turns off (the admin page says so); without the ntfy lines the
+   gateway won't start. With the **Repository** build method and this
+   repository, the update brings the new file. If Portainer pulls your own
+   copy of the repository instead, bring that copy up to date first and keep
+   your edits in it.
+   **Without Portainer:** in your copy of the repository, run
+   `git checkout deploy/portainer-stack.yml` (this undoes your edits to it,
+   so note them first, as above), then `git pull`. Make the same edits in the
+   new `deploy/portainer-stack.yml`.
 2. **Optional:** for each setting you want to change on the Settings page,
    delete its variable. A variables file made from the older
    `stack.env.example` sets 19 of them, such as `MTG_ARCHIDEKT_BACKUPS=true`
@@ -339,7 +342,10 @@ locked (greyed out) even with no variable set.
    Settings page shows it greyed out with its value, and you change it in
    the stack and redeploy.
 3. Click **Update the stack** (with the Repository build method, **Pull and
-   redeploy**), with "Re-pull image" ticked.
+   redeploy**). In the box that asks "Are you sure?", turn on **Re-pull
+   image and redeploy**, then click **Update**. Without Portainer: open a new
+   shell (a variable you deleted from `mtg.env` stays set in the old one) and
+   run the last two lines under “Without Portainer” again.
 
 With Docker Compose, see
 [DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md#updating-to-0729-from-an-earlier-version).

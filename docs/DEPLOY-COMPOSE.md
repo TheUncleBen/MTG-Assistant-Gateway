@@ -243,8 +243,9 @@ the old image on that; don't run an old image on an upgraded database.
 
 Before the commands above, note your own edits to the old `docker-compose.yml`:
 the optional secret lines you removed the `# ` from (`mtg_authentik_api_token`,
-`mtg_ntfy_token`) and any line you added under `environment:`. Then download
-the new file (or `git pull`, if you cloned the repository):
+`mtg_ntfy_token`, each in two places) and any line you added under
+`environment:`. Then download the new file (if you cloned the repository, run
+`git checkout docker-compose.yml`, then `git pull`, instead):
 
 ```bash
 base=https://raw.githubusercontent.com/TheUncleBen/MTG-Assistant-Gateway/main/deploy/compose
