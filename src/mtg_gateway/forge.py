@@ -275,10 +275,11 @@ def pick_opponents(
     newest = [p["name"] for p in precons][:DEFAULT_OPPONENTS]
     rated = [p for p in precons if isinstance(p.get("bracket"), int)]
     if bracket is None:
+        who = deck or "the deck"
         return newest, {
             "rule": "newest",
-            "note": f"{deck or 'The deck'} has no bracket (none set on Archidekt and no estimate), so the "
-            "newest precons play.",
+            "note": f"{who[:1].upper()}{who[1:]} has no bracket (none set in Archidekt and no estimate), so "
+            "the newest precons play.",
         }
     why = _source_text(source, deck)
     # Q49 / O14: an estimate is never called the deck's bracket

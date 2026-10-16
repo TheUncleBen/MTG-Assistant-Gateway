@@ -272,8 +272,8 @@ def test_no_causal_claim_and_one_coverage_figure() -> None:
     assert "underperforms" not in html and "says nothing about how the card does" in html
     assert (
         "Played with their effect: 49 of 98 cards (50% of the deck). Known: 66 of 98 cards (67% of the "
-        "deck): the cards played with their effect plus those left out on purpose. The rest are listed below."
-        in html
+        "deck), counting the cards played with their effect and those left out on purpose. The rest are "
+        "listed below." in html
     )
     md = rv.report_markdown(report())
     assert "underperforms" not in md and "Played with their effect: 49 of 98 cards (50% of the deck)" in md

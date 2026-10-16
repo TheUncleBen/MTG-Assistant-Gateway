@@ -377,6 +377,7 @@ async def test_the_adder_removes_a_saved_model_from_the_report_and_through_the_a
         assert failed.headers["location"] == "/history/reports/rep_kept?models=error"
         shown = await b.http.get(failed.headers["location"], headers=NAV)
         assert "could not be removed. Try again later." in shown.text and "already removed" not in shown.text
+        assert "<p class='notice error'>The saved description could not be removed." in shown.text
         out = structured(await call(h, token, "remove_card_model", {"card_name": "Sol Ring"}))
         assert out["ok"] is False and "could not remove" in out["message"]
         monkeypatch.undo()
