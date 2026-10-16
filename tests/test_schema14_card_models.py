@@ -114,3 +114,17 @@ def test_delete_takes_only_the_members_own_model_for_now(tmp_path: Path) -> None
         assert db.get_card_models(["sol ring"]) == []
     finally:
         db.close()
+
+
+def test_an_admin_removes_any_members_model_and_it_is_audited(tmp_path: Path) -> None:
+    """Q136 item 2: the member who added a model and an admin may remove it."""
+    db = Database(tmp_path / "g.sqlite")
+    try:
+        db.put_card_model("sol ring", "Sol Ring", MODEL, "u1", 1)
+        assert db.admin_delete_card_model("sol ring", by="admin-1") is True
+        assert db.admin_delete_card_model("sol ring", by="admin-1") is False
+        assert db.get_card_models(["sol ring"]) == [] and db.count_card_models("u1") == 0
+        (row,) = [e for e in db.audit_recent(5, sub="admin-1") if e["event"] == "card_model_removed"]
+        assert row["detail"] == {"card": "Sol Ring", "card_key": "sol ring", "added_by": "u1"}
+    finally:
+        db.close()
