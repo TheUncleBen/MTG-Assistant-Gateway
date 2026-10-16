@@ -738,6 +738,13 @@ def test_picker_fits_reads_and_touches_at_every_size(server: Server, width: int,
             assert page.evaluate(SMALL) == []
             _shot(page, f"picker-filters-{width}-{theme}")
             page.locator(".printpick .ppfiltbtn").tap()
+        # a search the card's own printing doesn't match: it shows anyway, and the count says why (N7)
+        page.locator("#pp-q").fill("secret")
+        page.wait_for_timeout(100)
+        assert "The card's current printing is shown too." in page.locator(".ppstatus").inner_text()
+        assert page.evaluate(MEASURE) + page.evaluate(COVERED) == []
+        assert page.evaluate(CONTRAST, TEXT + ", .printpick .ppstatus") == []
+        _shot(page, f"own-{width}-{theme}")
         # the preview of a printing that changes the finish
         tile = page.locator(".printpick .pptile", has_text="SLD #1074")
         if touch:
