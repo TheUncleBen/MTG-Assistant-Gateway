@@ -726,6 +726,14 @@ itself:
 through the ones marked *stack*; for any other, add a line under the
 gateway's `environment:` in the stack file, or it has no effect.
 
+Since 0.7.29 most of the tuning settings below can also be changed by an
+admin on the gateway's Settings page (`/admin/settings`, see
+[OPERATIONS.md](OPERATIONS.md#the-settings-page)). The stack file passes those
+through empty unless your environment sets them, and `stack.env.example`
+lists them commented out with their default. A value you set in the
+environment wins and is shown on the page as set in your stack, read-only; leave
+it out to manage it on the page.
+
 | Variable | Required | Default | What it does |
 | --- | --- | --- | --- |
 | `MTG_PUBLIC_URL` | yes, *stack* | | Public https URL, no path |
@@ -774,6 +782,9 @@ gateway's `environment:` in the stack file, or it has no effect.
 | `MTG_ARCHIDEKT_CACHE_SECONDS` | no, *stack* | `60` | How long anonymous public deck reads and deck searches are reused; cleared by any write the gateway sends (0 turns it off, up to 900). A member's deck page is also shown again from memory for up to 20 seconds (or this, if shorter) |
 | `MTG_ARCHIDEKT_CARD_CACHE_SECONDS` | no, *stack* | `3600` | How long card lookups are reused (0 to 86400) |
 | `MTG_ARCHIDEKT_BACKUPS` | no, *stack* | `true` | Before every applied edit or restore, copy the deck as a private deck into the user's backup folder on Archidekt (using Archidekt's own copy feature, so printings, finishes and categories are kept). If the copy fails, nothing changes and the proposal stays pending |
+| `MTG_ARCHIDEKT_BACKUP_COPIES` | no | `10` | Backup copies kept per deck in that folder (1 to 50). Older ones are deleted from Archidekt one at a time, at most one a minute; a copy the member changed on Archidekt is never deleted. Also on the Settings page |
+| `MTG_ARCHIDEKT_BACKUP_BOX_DEFAULT` | no | `false` | Whether the deck editor's "Also keep a backup copy on Archidekt" box starts ticked. Also on the Settings page |
+| `MTG_SNAPSHOTS_PER_DECK` | no | `25` | Restore points kept per deck on the gateway (5 to 100), for History > Restore. One that records a backup copy still kept on Archidekt is kept too. Also on the Settings page |
 | `MTG_ARCHIDEKT_BACKUP_FOLDER` | no, *stack* | `MTG Gateway backups` | Name of that folder (at most 100 characters), created in the account's root folder the first time. Decks in it are left out of the assistant's deck list |
 | `MTG_BROWSER_SESSION_TTL` | no, *stack* | `7200` | Browser session lifetime for `/account` and review pages, seconds (300 to 86400) |
 | `MTG_ARCHIDEKT_BASE` | no, *stack* | `https://archidekt.com/api` | Archidekt API base. Only the tests change it |
