@@ -81,3 +81,15 @@ async def test_the_log_line_survives_the_adders_account_being_deleted(gw: Harnes
         assert "Opt (added by a deleted account)" in text
     finally:
         await b.aclose()
+
+
+async def test_a_page_past_the_end_shows_the_last_page(gw: Harness) -> None:
+    """Review round 2, R2-5: any page number, however large, shows the last page (no error)."""
+    gw.db.put_card_model("opt", "Opt", MODEL, "user-9", 100)
+    b = await admin_browser(gw)
+    try:
+        for page in ("2", "99999999999999999999999", "-5", "x"):
+            r = await b.http.get(f"/admin/models?page={page}", headers=NAVIGATE)
+            assert r.status_code == 200 and "Opt" in r.text, page
+    finally:
+        await b.aclose()

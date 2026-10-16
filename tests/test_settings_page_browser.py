@@ -323,3 +323,87 @@ def test_a_setting_the_stack_sets_shows_greyed_out_and_cannot_be_changed(
         _shot(page, f"settings-locked-approvals-{width}-{theme}.png", page.locator("#g-approvals"))
         browser.close()
     assert errors == []
+
+
+# Where a locked row's variable name breaks onto a new line: each break must follow an underscore.
+MIDWORD_BREAKS = """
+() => [...document.querySelectorAll('.set-lock code')].flatMap(c => {
+  const text = c.textContent, out = [];
+  const walker = document.createTreeWalker(c, NodeFilter.SHOW_TEXT);
+  const chars = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode())
+    for (let i = 0; i < n.length; i++) chars.push([n, i]);
+  let top = null;
+  chars.forEach(([n, i], k) => {
+    const r = document.createRange(); r.setStart(n, i); r.setEnd(n, i + 1);
+    const t = Math.round(r.getBoundingClientRect().top);
+    if (top !== null && t > top + 2 && text[k - 1] !== '_') out.push(text.slice(0, k) + '|' + text.slice(k));
+    top = t;
+  });
+  return out;
+})
+"""
+
+# A locked On/Off or approval-mode row: each label's words, the chosen one, and the radios' own look
+# (in On/Off they stay invisible over their label, in the mode list plain: no grey dashed face).
+LOCKED_CHOICES = """
+(keys) => keys.map(key => {
+  const row = document.getElementById('s-row-' + key);
+  const labels = [...row.querySelectorAll('.set-seg label, .set-choices label')];
+  return {
+    key,
+    words: labels.map(l => l.innerText.trim()),
+    chosen: labels.filter(l => l.querySelector('input').checked).map(l => l.innerText.trim()),
+    segInputs: [...row.querySelectorAll('.set-seg input')].map(i => getComputedStyle(i).opacity),
+    dashedRadios: [...row.querySelectorAll('input[type=radio]')]
+      .filter(i => getComputedStyle(i).borderTopStyle === 'dashed').length,
+  };
+})
+"""
+
+
+@pytest.mark.parametrize(
+    ("width", "theme", "zoom"),
+    [
+        (344, "light", "text"),
+        (360, "light", "text"),
+        (360, "dark", "root"),
+        (1280, "light", ""),
+        (1280, "dark", ""),
+    ],
+)
+def test_a_locked_setting_shows_its_value_in_words_and_its_variable_whole(
+    locked_server: Server, width: int, theme: str, zoom: str
+) -> None:
+    """Review round 2: a locked On/Off row shows "On"/"Off", not the radios on top of them (R2-1); the
+    approval modes keep plain radios (no dashed ring); and at 200% text the variable name breaks
+    only after an underscore (finding 4)."""
+    from playwright.sync_api import sync_playwright
+
+    exe = _chromium()
+    sid = _admin(locked_server)
+    with sync_playwright() as p:
+        browser, page, errors = _page(p, locked_server, sid, width, theme, exe)
+        page.goto(f"{locked_server.base}/admin/settings", wait_until="networkidle")
+        if zoom:
+            page.evaluate(ROOT_200 if zoom == "root" else TEXT_200)
+        assert page.evaluate(MIDWORD_BREAKS) == []
+        rows = {
+            r["key"]: r for r in page.evaluate(LOCKED_CHOICES, ["archidekt_backups", "approval_mode_max"])
+        }
+        backups, modes = rows["archidekt_backups"], rows["approval_mode_max"]
+        assert backups["words"] == ["On", "Off"] and backups["chosen"] == ["Off"], backups
+        assert backups["segInputs"] and set(backups["segInputs"]) == {"0"}, backups
+        semi = "Apply small, low-risk edits without asking"
+        assert len(modes["words"]) == 3 and modes["chosen"] == [semi], modes
+        assert backups["dashedRadios"] == 0 and modes["dashedRadios"] == 0
+        assert page.evaluate(MEASURE) == []
+        assert page.evaluate(CONTRAST, TEXT) == []
+        _shot(page, f"settings-locked-r2-{width}-{theme}-{zoom or 'plain'}.png", page.locator("#g-backups"))
+        _shot(
+            page,
+            f"settings-locked-r2-modes-{width}-{theme}-{zoom or 'plain'}.png",
+            page.locator("#g-approvals"),
+        )
+        browser.close()
+    assert errors == []

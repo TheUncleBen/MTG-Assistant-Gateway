@@ -246,10 +246,13 @@ SETTINGS_CSS = """
 .set-choices label:has(input:checked){background:var(--orange-tint);font-weight:700}
 .set-choices label:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:-2px}
 .set-choices label:has(input:disabled){cursor:default;color:var(--text-muted)}
-.set-lock code{overflow-wrap:anywhere}
+.set-lock code{overflow-wrap:break-word}
 .set-confirm{grid-column:1 / -1}
 /* Set in the stack: shown where it would be changed, greyed out, its value still readable (4.5:1) */
-.set-row.locked input:disabled,.set-row.locked select:disabled,.set-row.locked .msel-btn:disabled{
+/* the radios of On/Off and the approval modes are left out: they stay hidden or plain, and their
+   labels carry the value (review round 2, R2-1) */
+.set-row.locked input:disabled:not([type=radio]):not([type=checkbox]),.set-row.locked select:disabled,
+.set-row.locked .msel-btn:disabled{
   background:var(--surface-2);color:var(--text-muted);-webkit-text-fill-color:var(--text-muted);
   border-style:dashed;opacity:1;cursor:not-allowed}
 .set-row.locked .set-seg,.set-row.locked .set-choices{border-style:dashed}
@@ -514,7 +517,8 @@ def _source(d: dict[str, Any], spec: SettingSpec, running: Any, who: Callable, w
     if d["source"] == "deployment":
         return (
             "<span class='set-lock'>Set in your stack "
-            f"(<code>{html.escape(spec.env)}</code>), {STACK_LOCK_HOW}</span>"
+            # it may break only after an underscore, never mid-word (review round 2, finding 4)
+            f"(<code>{html.escape(spec.env).replace('_', '_<wbr>')}</code>), {STACK_LOCK_HOW}</span>"
         )
     if d["source"] == "dashboard":
         changed = d.get("changed") or {}
