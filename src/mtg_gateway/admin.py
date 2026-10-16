@@ -66,6 +66,7 @@ OK_MESSAGES = {
     "revoke": "Tokens and browser sessions revoked.",
     "unlink": "Archidekt account unlinked; the stored session was deleted.",
     "delete_data": "Deleted everything the gateway kept about that person.",
+    "model_removed": "Card model removed.",
 }
 ERR_MESSAGES = {
     "unknown_action": "Unknown action.",
@@ -74,6 +75,7 @@ ERR_MESSAGES = {
     "self_delete": "Use Delete my data on your Account page.",
     "confirm_delete": "Tick the confirmation box to delete.",
     "failed": "That action could not be done.",
+    "model_gone": "That card model was already removed.",
 }
 
 
@@ -247,6 +249,46 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
         except AdminError as exc:
             return RedirectResponse(f"/admin/users?err={quote(exc.code)}", status_code=303)
         return RedirectResponse(f"/admin/users?ok={out['action']}", status_code=303)
+
+    @server.custom_route("/admin/models", methods=["GET"], include_in_schema=False)
+    async def models(request: Request) -> Response:
+        who = admin_user(request)
+        if isinstance(who, Response):
+            return who
+        sub, sid = who
+        try:
+            page_no = max(1, int(request.query_params.get("page", "1")))
+        except ValueError:
+            page_no = 1
+        notice = _notice(request.query_params.get("ok"), request.query_params.get("err"))
+        return page(
+            "Admin: card models",
+            _nav("/admin/models") + notice + _models_body(state, _csrf(s, sid), page_no),
+            sid=sid,
+            sid_sub=sub,
+        )
+
+    @server.custom_route("/admin/models", methods=["POST"], include_in_schema=False)
+    async def models_post(request: Request) -> Response:
+        who = admin_user(request)
+        if isinstance(who, Response):
+            return who
+        admin_sub, sid = who
+        data = await form(request)
+        if not csrf_form_ok(s, sid, data):
+            return page(
+                "Admin: card models",
+                _nav("/admin/models") + _err("This form expired. Reload the page and try again."),
+                status=403,
+                sid=sid,
+                sid_sub=admin_sub,
+            )
+        key = str(data.get("card_key") or "")
+        removed = bool(key) and state.db.admin_delete_card_model(key, by=admin_sub)
+        back = f"&page={quote(str(data.get('page') or '1'), safe='')}"
+        return RedirectResponse(
+            f"/admin/models?{'ok=model_removed' if removed else 'err=model_gone'}{back}", status_code=303
+        )
 
     @server.custom_route("/admin/activity", methods=["GET"], include_in_schema=False)
     async def activity(request: Request) -> Response:
@@ -658,7 +700,11 @@ def users_data(state: Any) -> list[dict[str, Any]]:
 # -- HTML -------------------------------------------------------------------------
 def _nav(active: str) -> str:
     links = (("/admin", "Overview"), ("/admin/users", "Users"), ("/admin/activity", "Activity"))
-    links += (("/admin/metrics", "Metrics"), ("/admin/settings", "Settings"))
+    links += (
+        ("/admin/metrics", "Metrics"),
+        ("/admin/settings", "Settings"),
+        ("/admin/models", "Card models"),
+    )
     return (
         "<div class='actions' role='navigation' aria-label='Admin'>"
         + "".join(
@@ -798,6 +844,57 @@ def _overview_body(state: Any) -> str:
         "middleware, API calls from the JSON API, admin actions from this page.</p></div>"
     )
     return "".join(cards)
+
+
+MODELS_PER_PAGE = 100
+
+
+def _models_body(state: Any, csrf: str | None, page_no: int) -> str:
+    """The simulator's kept card models (card Q138 item 4): who added each (admins only), when, and
+    a Remove button per model."""
+    total = state.db.count_all_card_models()
+    intro = (
+        "<p class='muted small'>The card models the simulator keeps, most recently changed first. "
+        "Each model is used for every member. Only admins see who added it.</p>"
+    )
+    if not total:
+        return f"<div class='card'>{intro}<p>No card models are kept yet.</p></div>"
+    rows = state.db.list_card_models(limit=MODELS_PER_PAGE, offset=(page_no - 1) * MODELS_PER_PAGE)
+    csrf_in = f"<input type='hidden' name='csrf' value='{html.escape(csrf or '')}'>"
+    people: dict[str, str] = {}
+    items = []
+    for r in rows:
+        adder = str(r["added_by"])
+        if adder not in people:
+            people[adder] = _who(state.db.get_user(adder) or {"sub": adder})
+        items.append(
+            f"<li><span class='name'>{html.escape(str(r['name']))}</span>"
+            f"<span class='muted small'>added by {people[adder]}, {_when(r['added_at'])}"
+            + (f"; changed {_when(r['updated_at'])}" if r["updated_at"] != r["added_at"] else "")
+            + "</span>"
+            f"<form method='post' action='/admin/models'>{csrf_in}"
+            f"<input type='hidden' name='card_key' value='{html.escape(str(r['card_key']))}'>"
+            f"<input type='hidden' name='page' value='{page_no}'>"
+            f"<button class='danger' aria-label='Remove the model of {html.escape(str(r['name']))}'>Remove"
+            "</button></form></li>"
+        )
+    pages = (total + MODELS_PER_PAGE - 1) // MODELS_PER_PAGE
+    pager = ""
+    if pages > 1:
+        links = []
+        if page_no > 1:
+            links.append(f"<a class='btn' href='/admin/models?page={page_no - 1}'>Newer</a>")
+        if page_no < pages:
+            links.append(f"<a class='btn' href='/admin/models?page={page_no + 1}'>Older</a>")
+        pager = (
+            f"<div class='actions'>{''.join(links)}</div>"
+            f"<p class='muted small'>Page {page_no} of {pages}.</p>"
+        )
+    count = f"{total} card model{'s' if total != 1 else ''} kept."
+    return (
+        f"<div class='card'>{intro}<p class='muted small'>{count}</p>"
+        f"<ul class='plain plist models'>{''.join(items)}</ul>{pager}</div>"
+    )
 
 
 def _users_body(state: Any, admin_sub: str, csrf: str | None) -> str:

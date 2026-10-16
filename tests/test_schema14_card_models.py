@@ -1,6 +1,7 @@
-"""Schema 14 (0.7.30, Q128 and Q136): the simulator's card models, one per card for the whole
-gateway. Storage only: the cap per member, what happens to a deleted member's models, who may
-replace and who may delete a model are still to be decided, and nothing here enforces them."""
+"""Schema 14 (0.7.30, Q128, Q136 and card Q138): the simulator's card models, one per card for the
+whole gateway. The member who added a model and an admin may remove it, the admin list shows
+who added each, and a member's models go with their data. The cap per member and who may replace
+a model are Track C's caller's to enforce."""
 
 from __future__ import annotations
 
@@ -126,5 +127,33 @@ def test_an_admin_removes_any_members_model_and_it_is_audited(tmp_path: Path) ->
         assert db.get_card_models(["sol ring"]) == [] and db.count_card_models("u1") == 0
         (row,) = [e for e in db.audit_recent(5, sub="admin-1") if e["event"] == "card_model_removed"]
         assert row["detail"] == {"card": "Sol Ring", "card_key": "sol ring", "added_by": "u1"}
+    finally:
+        db.close()
+
+
+def test_the_admin_list_and_delete_my_data(tmp_path: Path) -> None:
+    """Card Q138 items 4 and 5."""
+    db = Database(tmp_path / "g.sqlite")
+    try:
+        for sub in ("u1", "u2"):
+            db.upsert_user(sub, email=None, name=None, preferred_username=sub, groups=[])
+        db.put_card_model("sol ring", "Sol Ring", MODEL, "u1", 100)
+        db.put_card_model("opt", "Opt", MODEL, "u2", 200)
+        db.put_card_model("island", "Island", MODEL, "u1", 300)
+        assert db.count_all_card_models() == 3
+        listed = db.list_card_models()
+        assert [m["card_key"] for m in listed] == ["island", "opt", "sol ring"]
+        assert listed[0] == {
+            "card_key": "island",
+            "name": "Island",
+            "added_by": "u1",
+            "added_at": 300,
+            "updated_at": 300,
+            "size": len(MODEL.encode()),
+        }
+        assert [m["card_key"] for m in db.list_card_models(limit=1, offset=1)] == ["opt"]
+        out = db.delete_member_data("u1")
+        assert out["card_models"] == 2
+        assert [m["card_key"] for m in db.list_card_models()] == ["opt"]
     finally:
         db.close()
