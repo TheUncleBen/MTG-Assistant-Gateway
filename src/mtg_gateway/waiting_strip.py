@@ -110,12 +110,13 @@ def row_html(line: dict[str, Any], *, now: float | None = None, group: str = "")
         if line.get("status") in ("needs_look", "held") and line.get("status_text")
         else ""
     )
+    who = _who(line.get("created_by") or "")  # empty when no app was recorded (older changes)
     return (
         f"<li class='wrow'><label class='pick'><input type='checkbox' name='pick' value='{pid}'"
         + (f" data-group='{html.escape(group)}'" if group else "")
         + f"><span class='what'><b>{html.escape(no)}</b>{html.escape(line['summary'])}</span>"
         f"<span class='chips'>{chips_html(line, now)}</span>"
-        f"<span class='by'>{html.escape(_who(line.get('created_by') or ''))}, "
+        f"<span class='by'>{html.escape(who) + ', ' if who else ''}"
         f"{_age(now - int(line.get('created_at') or now))} ago</span>{why}</label>"
         f"<input type='hidden' name='v_{pid}' value='{int(line.get('version') or 1)}'>"
         f"<a class='review' href='/proposals/{pid}' "
@@ -221,5 +222,16 @@ LIST_CSS = """
   .wbar button{flex:1 1 6rem}
   .pick .by{flex-basis:100%;padding-left:1.85rem}
   .wrow .review{padding:0 .4rem}
+}
+/* the bar sits above the phone's bottom tab bar and beside the touch rail, never under them */
+@media (max-width:599.98px){
+  .has-tabbar .wbar:not(.inline){bottom:calc(56px + env(safe-area-inset-bottom));padding-bottom:.5rem}
+  body.has-tabbar:has(.wbar:not(.inline)) main.wrap{padding-bottom:calc(12rem + env(safe-area-inset-bottom))}
+}
+@media (min-width:600px) and (max-width:700px) and ((pointer:coarse) or (hover:none)){
+  .has-tabbar .wbar:not(.inline){left:calc(80px + env(safe-area-inset-left))}
+}
+@media (min-width:600px) and (max-width:700px){
+  body.app.has-tabbar .wbar:not(.inline){left:calc(80px + env(safe-area-inset-left))}
 }
 """
