@@ -760,8 +760,8 @@ def coverage_text(g: dict[str, Any]) -> str:
     # Q138 item 6: both figures, as scripts/measure_recognition.py prints them
     return (
         f"Played with their effect: {c['modeled']} of {c['deck_size']} cards ({c['pct']}% of the deck). "
-        f"Known: {c['known']} ({c['known_pct']}%), the cards played with their effect plus those left out "
-        "on purpose. The rest are listed below."
+        f"Known: {c['known']} of {c['deck_size']} cards ({c['known_pct']}% of the deck): the cards played "
+        "with their effect plus those left out on purpose. The rest are listed below."
     )
 
 
@@ -807,6 +807,7 @@ MODEL_NOTICES = {
     "removed": "The saved description was removed. Later solo tests play that card without its effect "
     "again, until a new description is saved.",
     "gone": "That saved description was already removed, or an admin removed or replaced it.",
+    "error": "The saved description could not be removed. Try again later.",
 }
 
 
@@ -1255,7 +1256,7 @@ def forge_lines(f: dict[str, Any], *, results: bool = True) -> list[str]:
         # re-confirmation card), and every report says why, the page and the export alike.
         whose = {
             "gateway": " (chosen by the gateway, kept for the record)",
-            "request": " (set when this report was asked for)",
+            "request": " (set when this report was asked for, kept for the record)",
         }
         out.append(f"Seed: {f['seed']}{whose.get(str(f.get('seed_source')), '')}.")
         out.append(FORGE_DRIFT_NOTE)

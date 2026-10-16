@@ -113,6 +113,10 @@ _KEYWORD = re.compile(r"^[a-z][a-z \-]{0,29}$")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 
 
+class StoreError(RuntimeError):
+    """The kept-models store could not be read or written."""
+
+
 class ModelError(ValueError):
     """A model that is not kept, and why (said to the assistant that wrote it)."""
 
@@ -355,14 +359,16 @@ class KeptModels:
 
     def remove(self, sub: str, name: str) -> bool:
         """Delete the card's kept model when ``sub`` added it (Q138 item 4: the adder removes their
-        own; an admin removes any from the admin page). True when one was deleted."""
+        own; an admin removes any from the admin page). True when one was deleted, False when there
+        was none of theirs; a store that fails raises StoreError, so no page says "already removed"
+        when nothing was checked."""
         if not self.available or not name.strip():
             return False
         try:
             return bool(self.db.delete_card_model(card_key(name), sub))
-        except Exception:
+        except Exception as exc:
             logger.exception("removing a kept card model failed")
-            return False
+            raise StoreError("the gateway could not remove the saved model") from exc
 
     def keep(
         self, sub: str, raw_models: list[Any], deck_names: list[str], *, admin: bool = False

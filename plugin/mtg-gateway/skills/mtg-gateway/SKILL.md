@@ -227,7 +227,7 @@ report again with `get_deck_report` until it is `done`.
   same opponents, even with the same `options.seed` (check `forge.seats`).
   For the same table, run the second deck's report with `same_opponents_as`
   set to the first report's id. The same seed does not always replay the same
-  Forge games, so compare Forge runs by win rate and interval.
+  Forge games, so compare Forge runs by win rate and 95% interval.
 - Forge plays Commander decks only: a 60-card deck's report has
   `forge.state: "skipped"` with the reason. `forge=false` leaves Forge out for
   a quick solo-test-only report. A report without Forge games says
