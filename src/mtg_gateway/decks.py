@@ -3992,12 +3992,9 @@ class DeckService:
                 target = by_id[root]
             else:
                 # the gateway's backup folder is never a place to move a deck to (Q21)
-                shown = [f for f in info["folders"] if f["depth"] > 0 and not f.get("backup")]
-                hits = [f for f in shown if f["name"].casefold() == want]
+                hits = [f for f in _shown_folders(info) if f["name"].casefold() == want]
                 if len(hits) != 1:
-                    names = ", ".join(sorted({f["name"] for f in shown})[:30])
-                    what = "No folder" if not hits else "More than one folder"
-                    raise DeckError("invalid", f"{what} is called '{raw['folder']}'. Your folders: {names}")
+                    raise _no_such_folder(info, raw["folder"], several=bool(hits))
                 target = hits[0]
             current = deck.parent_folder if deck.parent_folder is not None else root
             if target["id"] != current:
@@ -4363,6 +4360,8 @@ class DeckService:
         found = next((f for f in info["folders"] if f["id"] == parent), None)
         if found is None:
             raise DeckError("not_found", "That parent folder is not in your Archidekt account.")
+        if found.get("backup"):  # no new folder in the gateway's backup folder (Q21)
+            raise _no_such_folder(info, found["name"])
         if any(f["parent"] == parent and f["name"].casefold() == name.casefold() for f in info["folders"]):
             raise DeckError("invalid", f"There is already a folder called '{name}' there.")
         return name, found
@@ -4381,6 +4380,8 @@ class DeckService:
         info, folder = await self._folder_in(sub, int(folder_id))
         if folder["depth"] == 0:
             raise DeckError("invalid", "The top-level folder cannot be renamed.")
+        if folder.get("backup"):  # the gateway's backup folder and what is in it (Q21)
+            raise _no_such_folder(info, folder["name"])
         if folder["name"] == name:
             return folder
         await self._call(
@@ -4414,6 +4415,9 @@ class DeckService:
         current = deck.parent_folder if deck.parent_folder is not None else root
         if current == target:
             return {"deck_id": deck.id, "folder_id": target, "changed": False}
+        hidden = next((f for f in info["folders"] if f["id"] == target and f.get("backup")), None)
+        if hidden is not None:  # never into the gateway's backup folder (Q21), as by name
+            raise _no_such_folder(info, hidden["name"])
         # the item archidekt.com's folder page sends for its "Move" (its bundle, read 2026-10-14)
         await _writing(
             progress,
@@ -4802,6 +4806,20 @@ def _printing_mismatches(verified: Deck, specs: list[dict[str, Any]]) -> list[st
         if not ok:
             out.append(spec["name"])
     return out
+
+
+def _shown_folders(info: dict[str, Any]) -> list[dict[str, Any]]:
+    """The member's folders below the top level that a deck can be put in: all but the
+    gateway's backup folder and what is inside it (Q21)."""
+    return [f for f in info["folders"] if f["depth"] > 0 and not f.get("backup")]
+
+
+def _no_such_folder(info: dict[str, Any], name: Any, *, several: bool = False) -> DeckError:
+    """The refusal of a folder that is not one to use: none (or, with ``several``, more than one)
+    of the shown folders has that name; the gateway's backup folder is refused with it too."""
+    names = ", ".join(sorted({f["name"] for f in _shown_folders(info)})[:30])
+    what = "More than one folder" if several else "No folder"
+    return DeckError("invalid", f"{what} is called '{name}'. Your folders: {names}")
 
 
 def _category_mismatches(verified: Deck, want: dict[int, list[str]]) -> list[str]:
