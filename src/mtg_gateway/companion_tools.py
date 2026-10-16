@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -15,6 +16,7 @@ from .companion import DECK_CSP, DECK_ERR_MESSAGES, EDITOR_CSP, TEXT_PLAIN, _fil
 from .decklist import DecklistError, parse_decklist
 from .deckpage import (
     GOLDFISH_CSS,
+    GOLDFISH_GUIDE_PREF,
     card_image,
     compare_page_html,
     goldfish_page_html,
@@ -25,7 +27,9 @@ from .pages import (
     BROWSER_CLIENT_ID,
     _csrf,
     browser_session,
+    csrf_header_ok,
     login_redirect,
+    read_limited,
 )
 from .theme import (
     esc as _esc,
@@ -571,7 +575,7 @@ def add_deck_tool_routes(
             )
         return page(
             f"Goldfish: {deck.name or deck.id}",
-            goldfish_page_html(deck),
+            goldfish_page_html(deck, guide_hidden=state.db.get_pref(sub, GOLDFISH_GUIDE_PREF) == "hidden"),
             sub=sub,
             sid=sid,
             two_pane=True,
@@ -583,6 +587,28 @@ def add_deck_tool_routes(
             extra_css=GOLDFISH_CSS,
             extra_scripts=("goldfish.js",),
         )
+
+    @server.custom_route("/goldfish/guide", methods=["POST"], include_in_schema=False)
+    async def goldfish_guide(request: Request) -> Response:
+        """Remember whether the member hid the Goldfish page's guide (G9), for their account on every
+        device. Browser session and its CSRF header only."""
+        sub, sid = browser_session(state, request)
+        if not sub or not csrf_header_ok(state.settings, sid, request):
+            return JSONResponse({"ok": False, "error": "forbidden", "message": "Sign in again."}, 403)
+        try:
+            data = json.loads(await read_limited(request, 1024) or b"{}")
+        except (ValueError, TypeError):
+            data = None
+        if not isinstance(data, dict) or not isinstance(data.get("hidden"), bool):
+            return JSONResponse(
+                {"ok": False, "error": "invalid", "message": "hidden must be true or false."}, 400
+            )
+        if data["hidden"]:
+            saved = state.db.set_pref(sub, GOLDFISH_GUIDE_PREF, "hidden")
+        else:
+            state.db.delete_pref(sub, GOLDFISH_GUIDE_PREF)
+            saved = True
+        return JSONResponse({"ok": saved, "hidden": data["hidden"]}, 200 if saved else 409)
 
     @server.custom_route("/decks/{deck_id}/compare", methods=["GET"], include_in_schema=False)
     async def compare_page(request: Request) -> Response:

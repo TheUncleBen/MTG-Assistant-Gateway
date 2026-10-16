@@ -118,7 +118,7 @@ class ReportService:
         self.decks = decks
         self.mf = mf
         self.forge = forge
-        self.forge_games = forge_games
+        self._forge_games = forge_games
         self.forge_interval = 15.0  # seconds between refreshes of unfinished Forge runs
         self._forge_task: asyncio.Task[None] | None = None
         self._forge_cancels: set[asyncio.Task[None]] = set()  # held so a pending cancel is not collected
@@ -242,7 +242,9 @@ class ReportService:
             if simulate and mode not in SIM_MODES:
                 goldfish = {"tool": "goldfish_run", "ok": False, "text": mode}
             elif simulate:
-                goldfish = await self._mf(sub, "goldfish_run", _run_args(sim_text, games, options, mode))
+                goldfish = await self._mf(
+                    sub, "goldfish_run", _run_args(sim_text, games, _goldfish(options), mode)
+                )
                 _commander_aside(goldfish, sim_commander)
                 _keep_quantities(goldfish, sim_text)
         return {
@@ -297,7 +299,9 @@ class ReportService:
             if simulate and mode not in SIM_MODES:
                 goldfish = {"tool": "goldfish_run", "ok": False, "text": mode}
             elif simulate:
-                goldfish = await self._mf(sub, "goldfish_run", _run_args(text, games, options, mode))
+                goldfish = await self._mf(
+                    sub, "goldfish_run", _run_args(text, games, _goldfish(options), mode)
+                )
                 _commander_aside(goldfish, commander)
                 _keep_quantities(goldfish, text)
                 _stored_note(goldfish)
@@ -312,6 +316,7 @@ class ReportService:
                 "forge": bool(forge),
                 "games": games if simulate else None,
                 "seed": options.get("seed"),
+                **({"forge_seed": options["forge_seed"]} if "forge_seed" in options else {}),
                 "until_turn": options.get("until_turn"),
                 **({"snapshot_id": snapshot_id} if snapshot_id else {}),
             },
@@ -365,7 +370,8 @@ class ReportService:
             note = FORGE_CONSTRUCTED if mode == "constructed" else FORGE_NO_COMMANDER
             self._save_forge(rid, {"state": "skipped", "reason": "not_commander", "note": note})
         else:
-            seed = options.get("seed")
+            # Forge's own seed when given (A34), else the goldfish's, else one the gateway picks
+            seed = options.get("forge_seed", options.get("seed"))
             async with self._forge_start_lock:
                 await self._start_or_queue_forge(sub, rid, deck, games, seed, forge_bracket(deck, stats))
         return self.get(sub, rid)
@@ -409,6 +415,28 @@ class ReportService:
         }
 
     # -- Forge runs (background) ----------------------------------------------
+    def _live(self, key: str, fallback: int) -> int:
+        """A Forge setting as the admin Settings page or the deployment has it now (decks.live,
+        config.MANAGED_SETTINGS), else the value this service was made with."""
+        live = getattr(self.decks, "live", None)
+        try:
+            value = live.get(key) if live is not None else None
+        except Exception:  # a settings store that cannot be read never stops a report
+            logger.exception("reading the setting %s failed", key)
+            value = None
+        return value if isinstance(value, int) and not isinstance(value, bool) and value >= 1 else fallback
+
+    @property
+    def forge_games(self) -> int:
+        """Forge games per run (forge_games, 1-50)."""
+        return self._live("forge_games", self._forge_games)
+
+    @property
+    def forge_parallel(self) -> int:
+        """Forge games played at once (forge_parallel_games, 1-4; the Forge service's own
+        FORGE_MAX_PARALLEL may lower it)."""
+        return self._live("forge_parallel_games", 1)
+
     async def _start_forge(
         self,
         rid: str,
@@ -430,6 +458,7 @@ class ReportService:
                 seed=seed,
                 bracket=level if isinstance(level, int) else None,
                 bracket_source=source if isinstance(source, str) else None,
+                parallel=self.forge_parallel,
             )
         except ForgeError as exc:
             if exc.kind == "busy":
@@ -1090,7 +1119,9 @@ def _succeeded(row: dict[str, Any]) -> bool:
 # The simulator's knobs a report or an A/B passes through to the research service, which
 # validates their values (the proxy already bounds n and until_turn). Unknown keys are refused
 # here so a typo never silently runs the default simulation.
-RUN_OPTIONS = ("annotations", "combos", "seed", "until_turn", "opponents", "mulligan")
+RUN_OPTIONS = ("annotations", "combos", "seed", "forge_seed", "until_turn", "opponents", "mulligan")
+# Options only the gateway reads, never sent to the goldfish engine.
+GATEWAY_OPTIONS = ("forge_seed",)
 AB_OPTIONS = ("annotations", "annotations_a", "annotations_b", "combos", "seed", "until_turn")
 AB_FLAGS = ("allow_different_commanders",)
 
@@ -1249,6 +1280,11 @@ def forge_bracket(deck: Any, stats: dict[str, Any]) -> tuple[int | None, str | N
     return None, None
 
 
+def _goldfish(options: dict[str, Any]) -> dict[str, Any]:
+    """The options the goldfish engine takes: those for the gateway (forge_seed) left out."""
+    return {k: v for k, v in options.items() if k not in GATEWAY_OPTIONS}
+
+
 def _run_args(text: str, games: int, options: dict[str, Any], mode: str) -> dict[str, Any]:
     args = {"deck": text, "n": games, **options}
     if mode == "constructed":
@@ -1270,7 +1306,12 @@ def sim_options(options: dict[str, Any] | None, *, ab: bool = False) -> dict[str
         raise DeckError("invalid", f"unknown simulation option(s): {', '.join(unknown)}")
     if len(json.dumps(out)) > 60_000:
         raise DeckError("too_large", "simulation options larger than 60 kB")
-    for key, low, high in (("opponents", 1, 5), ("until_turn", 1, 30), ("seed", -(2**63), 2**63 - 1)):
+    for key, low, high in (
+        ("opponents", 1, 5),
+        ("until_turn", 1, 30),
+        ("seed", -(2**63), 2**63 - 1),
+        ("forge_seed", -(2**63), 2**63 - 1),
+    ):
         if key in out and (not isinstance(out[key], int) or isinstance(out[key], bool)):
             raise DeckError("invalid", f"simulation option {key} must be an integer")
         if key in out and not low <= out[key] <= high:

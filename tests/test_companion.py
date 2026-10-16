@@ -164,6 +164,14 @@ async def test_reports_are_stored_and_listed(stack: Stack) -> None:
         assert listed.status_code == 200 and len(listed.json()["reports"]) == 1
         one = await h.http.get(f"/api/v1/reports/{rep['report_id']}", headers=auth)
         assert one.status_code == 200 and one.json()["deck_id"] == "42"
+        # A32: the Forge run alone, for a page or app watching it (no Forge here: preflight only)
+        forge = await h.http.get(f"/api/v1/reports/{rep['report_id']}/forge", headers=auth)
+        body = forge.json()
+        assert forge.status_code == 200 and body["ok"] and body["report_id"] == rep["report_id"], body
+        assert body["live"] is False and "Preflight only" in body["forge_html"] and body["status_html"]
+        missing = await h.http.get("/api/v1/reports/rep_nope/forge", headers=auth)
+        assert missing.status_code == 404
+        assert (await h.http.get(f"/api/v1/reports/{rep['report_id']}/forge")).status_code == 401
         bad = await h.http.post("/api/v1/reports", json={"deck_id": "42", "games": 5}, headers=auth)
         assert bad.status_code == 400
         # the same via MCP tools
@@ -795,5 +803,29 @@ async def test_every_page_that_links_the_manifest_lets_the_browser_load_it(stack
             assert r.text.count("rel='manifest'") <= 1, path  # one manifest; a second would win
             if "rel='manifest'" in r.text:
                 assert "manifest-src 'self'" in r.headers["content-security-policy"], path
+    finally:
+        await b.aclose()
+
+
+async def test_goldfish_guide_choice_is_kept_for_the_account(stack: Stack) -> None:
+    """G9: hiding the Goldfish guide is remembered for the account (account_prefs), only from the
+    member's own browser session with its CSRF header, and showing it again forgets the choice."""
+    b = await linked_browser(stack)
+    try:
+        assert (await b.http.post("/goldfish/guide", json={"hidden": True})).status_code == 403
+        csrf = await b.csrf("/account")
+        bad = await b.http.post("/goldfish/guide", json={"hidden": "yes"}, headers={"X-CSRF-Token": csrf})
+        assert bad.status_code == 400
+        ok = await b.http.post("/goldfish/guide", json={"hidden": True}, headers={"X-CSRF-Token": csrf})
+        assert ok.status_code == 200 and ok.json() == {"ok": True, "hidden": True}
+        page = (await b.http.get("/decks/42/goldfish")).text
+        assert "id='gf-guide' aria-labelledby='gf-guide-h' hidden>" in page
+        assert "data-guide='show'>" in page  # How to play shows, not hidden
+        again = await b.http.post("/goldfish/guide", json={"hidden": False}, headers={"X-CSRF-Token": csrf})
+        assert again.json()["hidden"] is False
+        page = (await b.http.get("/decks/42/goldfish")).text
+        assert "aria-labelledby='gf-guide-h'>" in page and "data-guide='show' hidden>" in page
+        # nobody signed in: refused
+        assert (await stack.h.http.post("/goldfish/guide", json={"hidden": True})).status_code == 403
     finally:
         await b.aclose()

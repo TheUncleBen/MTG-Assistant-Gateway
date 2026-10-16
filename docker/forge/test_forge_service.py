@@ -1,8 +1,12 @@
-"""Offline tests of the Forge job service (no Java needed): name matching, request checks, parsing."""
+"""Offline tests of the Forge job service (no Java needed; a stand-in plays the games): name matching,
+request checks, parsing, and how a job's games are cut into slices and played."""
 
 import os
+import stat
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -78,6 +82,147 @@ class Output(unittest.TestCase):
         self.assertEqual((draw["game"], draw["ms"], draw["winner"], draw["draw"]), (1, 600012, None, True))
         self.assertIn("unparsed", fs.parse_result("Game 2 ended in 5 ms. something else"))
         self.assertIsNone(fs.parse_result("Turn 4 (Ai(1)-D1)"))
+
+    def test_outcome_lines(self):
+        # Lines as Forge 2.0.15 printed them in the arm64 smoke test (forge-image run 38156582933).
+        self.assertEqual(fs.OUTCOME_TURN.search("Game Outcome: Turn 18").group("turn"), "18")
+        lost = fs.OUTCOME_LOST.search(
+            "Game Outcome: Ai(2)-D2 has lost due to accumulation of 21 damage from generals"
+        )
+        self.assertEqual(
+            (lost.group("seat"), lost.group("why")), ("2", "accumulation of 21 damage from generals")
+        )
+        lost = fs.OUTCOME_LOST.search("Game Outcome: Ai(1)-D1 has lost because life total reached 0")
+        self.assertEqual((lost.group("seat"), lost.group("why")), ("1", "life total reached 0"))
+        self.assertIsNone(
+            fs.OUTCOME_LOST.search("Game Outcome: Ai(4)-D4 has won because all opponents have lost")
+        )
+
+
+class Slices(unittest.TestCase):
+    def test_cut_by_the_number_of_games_only(self):
+        self.assertEqual(fs.slices(1), [1])
+        self.assertEqual(fs.slices(5), [5])
+        self.assertEqual(fs.slices(7), [4, 3])
+        self.assertEqual(fs.slices(10), [5, 5])
+        self.assertEqual(fs.slices(12), [4, 4, 4])
+        self.assertEqual(fs.slices(50), [5] * 10)
+        for games in range(1, fs.MAX_GAMES + 1):
+            self.assertEqual(sum(fs.slices(games)), games)
+
+    def test_seeds(self):
+        self.assertEqual(fs.slice_seed(42, 0), 42)  # one slice plays exactly as before slices
+        self.assertIsNone(fs.slice_seed(None, 3))
+        seeds = [fs.slice_seed(42, i) for i in range(10)]
+        self.assertEqual(len(set(seeds)), 10)
+        self.assertTrue(all(0 <= s < 2**63 for s in seeds))
+        self.assertEqual(seeds, [fs.slice_seed(42, i) for i in range(10)])
+
+
+# A stand-in for `java`: prints one result line per game with the seed it was given, so the tests
+# see which slice played which game. FAKE_SLOW makes a slice wait (to see slices overlap).
+FAKE_JAVA = """#!/usr/bin/env python3
+import os, sys, time
+a = sys.argv
+n = int(a[a.index("-n") + 1])
+seed = a[a.index("-s") + 1] if "-s" in a else "none"
+print("Ai(1)-D1 vs Ai(2)-D2 - %d games of Commander seed %s" % (n, seed), flush=True)
+log = os.path.join(os.environ["FAKE_LOG"], "start-%s-%s" % (seed, time.time()))
+open(log, "w").write(os.environ.get("HOME", ""))
+time.sleep(float(os.environ.get("FAKE_SLOW", "0")))
+for g in range(1, n + 1):
+    w = 1 + g % 2
+    print("Game Outcome: Turn %d" % (5 + g), flush=True)
+    print("Game Outcome: Ai(%d)-D%d has lost because life total reached 0" % (3 - w, 3 - w), flush=True)
+    print("Game Result: Game %d ended in %d ms. Ai(%d)-D%d has won!" % (g, 1000 + g, w, w), flush=True)
+"""
+
+
+class Run(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        (self.tmp / "bin").mkdir()
+        java = self.tmp / "bin" / "java"
+        java.write_text(FAKE_JAVA, "utf-8")
+        java.chmod(java.stat().st_mode | stat.S_IEXEC)
+        (self.tmp / "forge").mkdir()
+        (self.tmp / "forge" / "forge-gui-desktop-2.0.15-jar-with-dependencies.jar").write_text("")
+        (self.tmp / "log").mkdir()
+        (self.tmp / "home").mkdir()
+        self.env = {
+            "PATH": f"{self.tmp / 'bin'}{os.pathsep}{os.environ['PATH']}",
+            "FAKE_LOG": str(self.tmp / "log"),
+            "HOME": str(self.tmp / "home"),
+        }
+        self.old = {k: os.environ.get(k) for k in [*self.env, "FAKE_SLOW"]}
+        os.environ.update(self.env)
+        self.home, fs.FORGE_HOME = fs.FORGE_HOME, self.tmp / "forge"
+
+    def tearDown(self):
+        fs.FORGE_HOME = self.home
+        fs.MAX_PARALLEL = 1
+        for k, v in self.old.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    def run_job(self, games, seed=42, parallel=1):
+        deck = {"commander": ["Liesa, Forgotten Archangel"], "main": [[99, "Forest"]]}
+        job = fs.Job([deck, deck], games, "Commander", seed, parallel)
+        fs.run_job(job)
+        return job
+
+    def test_same_seed_same_games_at_any_parallel_setting(self):
+        one = self.run_job(12).view()
+        fs.MAX_PARALLEL = 3
+        three = self.run_job(12, parallel=3).view()
+        self.assertEqual((one["state"], three["state"]), ("done", "done"))
+        self.assertEqual((one["parallel"], three["parallel"]), (1, 3))
+        self.assertEqual([r["game"] for r in one["results"]], list(range(1, 13)))
+        self.assertEqual(one["results"], three["results"])
+        self.assertEqual([s["seed"] for s in one["slices"]], [42, fs.slice_seed(42, 1), fs.slice_seed(42, 2)])
+        self.assertEqual([s["state"] for s in three["slices"]], ["done"] * 3)
+        self.assertIn("seed 42", one["header"])
+        first = one["results"][0]
+        self.assertEqual((first["turn"], first["lost"]), (6, {"1": "life total reached 0"}))
+
+    def test_parallel_is_capped_and_extra_places_get_their_own_home(self):
+        fs.MAX_PARALLEL = 2
+        os.environ["FAKE_SLOW"] = "0.5"
+        job = self.run_job(15, parallel=4)
+        self.assertEqual(job.parallel, 2)
+        homes = sorted(p.read_text() for p in (self.tmp / "log").iterdir())
+        self.assertEqual(len(homes), 3)
+        self.assertIn(str(self.tmp / "home"), homes)
+        self.assertIn(str(self.tmp / "home" / "slot-1"), homes)
+        self.assertEqual(job.view()["games_done"], 15)
+        starts = sorted(float(p.name.split("-")[-1]) for p in (self.tmp / "log").iterdir())
+        self.assertLess(starts[1] - starts[0], 0.4)  # the first two slices played at once
+
+    def test_one_slice_is_one_process_as_before(self):
+        job = self.run_job(5, parallel=4)
+        self.assertEqual((job.parallel, len(job.slices)), (1, 1))
+        self.assertEqual(len(list((self.tmp / "log").iterdir())), 1)
+        self.assertNotIn("[slice", " ".join(job.tail))
+
+    def test_cancel_stops_every_slice(self):
+        fs.MAX_PARALLEL = 2
+        os.environ["FAKE_SLOW"] = "30"
+        deck = {"commander": ["Liesa, Forgotten Archangel"], "main": [[99, "Forest"]]}
+        job = fs.Job([deck, deck], 20, "Commander", 1, 2)
+        t = threading.Thread(target=fs.run_job, args=(job,))
+        t.start()
+        for _ in range(100):
+            if len(job.procs) == 2:
+                break
+            time.sleep(0.05)
+        job.cancelled = True
+        fs._kill(job)
+        t.join(10)
+        self.assertFalse(t.is_alive())
+        self.assertEqual(job.state, "cancelled")
+        self.assertEqual(len(list((self.tmp / "log").iterdir())), 2)  # no further slice started
 
 
 if __name__ == "__main__":

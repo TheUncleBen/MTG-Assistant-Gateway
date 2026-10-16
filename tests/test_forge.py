@@ -384,8 +384,13 @@ def test_report_page_and_markdown_show_forge_results() -> None:
         },
     }
     page = forge_html(done)
-    assert "Forge games" in page and "Liesa &lt;b&gt;: 2 wins, 50%" in page
-    assert "Fake Sticker Card" in page and "stopped at the time limit" in page and "Seed: 7." in page
+    # G9: laid out as a table, a row per deck at the table (a run stored before 0.7.30 as well)
+    assert "Forge games" in page and "<table class='qty seats stack'>" in page
+    assert "<th scope='row'>Liesa &lt;b&gt; <span class='badge'>your deck</span></th>" in page
+    assert "<td class='num' data-label='95% interval'>15% to 85%</td>" in page and "41 s" in page
+    assert "<li><span>Won by a player</span><b>3</b></li>" in page
+    assert "<li><span>Stopped at the time limit (counted as a draw)</span><b>1</b></li>" in page
+    assert "Fake Sticker Card" in page and "Seed: 7." in page
     running = forge_html({"state": "running", "not_played": []})
     assert "running" in running and "data-forge-live" not in running  # an export: no refresh
     live = forge_html({"state": "running", "not_played": []}, live=True)
@@ -395,6 +400,32 @@ def test_report_page_and_markdown_show_forge_results() -> None:
     assert forge_html(None) == ""
     md = report_markdown({"deck_name": "Liesa", "deck_id": "42", "stats": {}, "forge": done})
     assert "## Forge games" in md and "Cards Forge could not play: Fake Sticker Card" in md
+    assert "Liesa <b>: 2 wins, 50% (95% interval 15% to 85%)." in md and "1 of them stopped at the time" in md
+    # a newer run: turns, losses and each game
+    newer = {
+        **done,
+        "result": {
+            **done["result"],
+            "median_turn": 11,
+            "turns_range": [8, 30],
+            "median_game_seconds": 95.0,
+            "ended": {"won": 3, "time_limit": 1},
+            "game_list": [{"game": 1, "seconds": 95.0, "turn": 11, "winner": 1, "ended": "won"}],
+        },
+    }
+    newer["result"]["seats"] = [
+        {**done["result"]["seats"][0], "losses": {"commander damage": 1, "life": 1}},
+        done["result"]["seats"][1],
+    ]
+    page = forge_html(newer)
+    assert "turn 11" in page and "from turn 8 to 30" in page and "1 min 35 s" in page
+    assert "<td data-label='How it lost'>commander damage 1, life total 1</td>" in page
+    assert "<summary>Each game (1)</summary>" in page
+    md = report_markdown({"deck_name": "Liesa", "deck_id": "42", "stats": {}, "forge": newer})
+    assert (
+        "Lost by: commander damage 1, life total 1." in md
+        and "Median game length: turn 11 (from turn 8 to 30)." in md
+    )
 
 
 async def test_deleting_a_report_cancels_its_unfinished_forge_run(tmp_path: Path) -> None:
@@ -486,7 +517,7 @@ def test_report_page_shows_a_queued_run_and_its_place() -> None:
     md = report_markdown({"deck_name": "Aesi", "deck_id": "42", "stats": {}, "forge": queued})
     assert "Number 1 in your queue" in md
     seeded = forge_html({"state": "done", "seed": 12, "seed_source": "gateway", "result": {"games": 1}})
-    assert "Seed: 12 (chosen by the gateway; pass it as options.seed to replay these games)." in seeded
+    assert "Seed: 12 (chosen by the gateway; pass it as options.forge_seed to replay these games)." in seeded
 
 
 async def test_report_keeps_a_text_result_once(tmp_path: Path) -> None:
@@ -704,3 +735,77 @@ def test_a_forge_run_that_ended_without_games_is_labelled_preflight_only() -> No
         s = ReportService._summary({**row, "forge_json": json.dumps({"state": state})})
         assert s["engine"] == engine, state
         assert (s["engine_label"] == PREFLIGHT_ONLY) is (engine == "preflight_only")
+
+
+def test_summary_has_game_lengths_endings_and_losses() -> None:
+    """G9/A33: per-seat losses by kind, the median game time and turn, how the games ended, and
+    each game listed; an older Forge image without turns or reasons leaves those out."""
+    out = summarise(
+        {
+            "results": [
+                {"game": 1, "ms": 10000, "winner": 1, "turn": 9, "lost": {"2": "life total reached 0"}},
+                {
+                    "game": 2,
+                    "ms": 30000,
+                    "winner": 2,
+                    "turn": 14,
+                    "lost": {"1": "accumulation of 21 damage from generals"},
+                },
+                {"game": 3, "ms": 600000, "winner": None, "draw": True, "stopped_slow": True},
+                {"game": 4, "ms": 20000, "winner": None, "unparsed": "something"},
+                {
+                    "game": 5,
+                    "ms": 5000,
+                    "winner": None,
+                    "draw": True,
+                    "turn": 30,
+                    "lost": {"2": "milled 3 cards"},
+                },
+            ]
+        },
+        ["Mine", "Opp"],
+    )
+    assert out["median_game_seconds"] == 20.0 and out["average_game_seconds"] == 133.0
+    assert out["median_turn"] == 14 and out["turns_range"] == [9, 30]
+    assert out["ended"] == {"won": 2, "draw": 1, "time_limit": 1, "unread": 1}
+    assert out["seats"][0]["losses"] == {"commander damage": 1}
+    assert out["seats"][1]["losses"] == {"life": 1, "other": 1}
+    assert [g["ended"] for g in out["game_list"]] == ["won", "won", "time_limit", "unread", "draw"]
+    assert out["game_list"][0] == {"game": 1, "seconds": 10.0, "turn": 9, "winner": 1, "ended": "won"}
+    old = summarise({"results": [{"game": 1, "ms": 1000, "winner": 1}]}, ["Mine", "Opp"])
+    assert "median_turn" not in old and "losses" not in old["seats"][1]
+
+
+class _Live:
+    def __init__(self, **values: Any) -> None:
+        self.values = values
+
+    def get(self, key: str) -> Any:
+        return self.values[key]
+
+
+async def test_forge_reads_its_settings_live_and_its_own_seed(tmp_path: Path) -> None:
+    """O11: games per run and games at once come from the Settings page as they are now
+    (decks.live); A34: options.forge_seed seeds Forge alone and never reaches the goldfish."""
+    db = Database(tmp_path / "t.sqlite")
+    db.upsert_user("alice", email=None, name=None, preferred_username=None, groups=[])
+    fake = FakeForge()
+    decks = _Decks()
+    decks.live = _Live(forge_games=6, forge_parallel_games=2)  # type: ignore[attr-defined]
+    reports = ReportService(db, decks, None, forge=fake.client(), forge_games=4)  # type: ignore[arg-type]
+    out = await reports.run("alice", "42", games=300, options={"seed": 7, "forge_seed": 11})
+    assert fake.started[0]["games"] == 6 and fake.started[0]["parallel"] == 2
+    assert fake.started[0]["seed"] == 11 and out["forge"]["seed"] == 11
+    assert out["forge"]["seed_source"] == "request"
+    decks.live.values.update(forge_parallel_games=1)  # type: ignore[attr-defined]
+    assert reports.forge_parallel == 1
+    reports._forge_task.cancel()  # type: ignore[union-attr]
+    # one game at a time sends no parallel at all (a Forge image before 0.7.30 never sees it)
+    section = await start_run(fake.client(), DECK_TEXT, "Liesa", games=1, parallel=1)
+    assert "parallel" not in fake.started[-1] and "parallel" not in section
+    assert reports_module._goldfish({"seed": 7, "forge_seed": 11, "until_turn": 8}) == {
+        "seed": 7,
+        "until_turn": 8,
+    }
+    with pytest.raises(DeckError, match="forge_seed must be an integer"):
+        reports_module.sim_options({"forge_seed": "x"})

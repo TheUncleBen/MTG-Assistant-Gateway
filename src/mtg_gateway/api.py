@@ -526,6 +526,15 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
     async def get_report(request: Request, who: Caller) -> Response:
         return ok(reports.get(who.sub, request.path_params["rid"]))
 
+    @route("/reports/{rid}/forge", "GET")
+    async def report_forge_status(request: Request, who: Caller) -> Response:
+        """A report's Forge run alone, for a page or an app watching it play (A32): its state and
+        section, the report's status, and the Forge card and status as the report page draws them.
+        Reads the gateway's own database only; Archidekt is never asked."""
+        from .report_view import forge_status
+
+        return ok(forge_status(reports.get(who.sub, request.path_params["rid"])))
+
     @route("/reports/{rid}", "DELETE", write=True)
     async def delete_report(request: Request, who: Caller) -> Response:
         # an app deletes only reports it ran; the member's browser any of theirs

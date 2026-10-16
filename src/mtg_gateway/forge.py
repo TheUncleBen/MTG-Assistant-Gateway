@@ -14,6 +14,7 @@ import asyncio
 import logging
 import math
 import secrets
+import statistics
 import time
 from typing import Any
 
@@ -71,8 +72,28 @@ def wilson(wins: int, games: int) -> tuple[float, float]:
     return (round(max(0.0, centre - half), 4), round(min(1.0, centre + half), 4))
 
 
+# How Forge says a player lost (its "Game Outcome: ... has lost because/due to ..." entries), in a
+# few plain kinds; anything else is "other" and its words are kept with the game.
+LOSS_KINDS = (
+    ("damage from generals", "commander damage"),
+    ("life total", "life"),
+    ("poison", "poison"),
+    ("library", "empty library"),
+    ("conced", "conceded"),
+)
+# Games listed one by one in a summary (a run plays at most 50).
+MAX_GAMES_LISTED = 50
+
+
+def loss_kind(why: Any) -> str:
+    text = str(why or "").casefold()
+    return next((kind for key, kind in LOSS_KINDS if key in text), "other")
+
+
 def summarise(job: dict[str, Any], seats: list[str]) -> dict[str, Any]:
-    """Win rates per seat (seat 1 is the member's deck) from a Forge service job view."""
+    """Win rates per seat (seat 1 is the member's deck) from a Forge service job view, with how
+    long the games took (seconds and, from Forge images that print it, turns), how each ended, and
+    how each seat lost."""
     results = job.get("results") or []
     games = len(results)
     out: dict[str, Any] = {
@@ -87,6 +108,12 @@ def summarise(job: dict[str, Any], seats: list[str]) -> dict[str, Any]:
     for i, name in enumerate(seats, start=1):
         wins = sum(1 for r in results if r.get("winner") == i)
         low, high = wilson(wins, games)
+        losses: dict[str, int] = {}
+        for r in results:
+            lost = r.get("lost") if isinstance(r.get("lost"), dict) else {}
+            if str(i) in lost:
+                kind = loss_kind(lost[str(i)])
+                losses[kind] = losses.get(kind, 0) + 1
         out["seats"].append(
             {
                 "seat": i,
@@ -94,11 +121,40 @@ def summarise(job: dict[str, Any], seats: list[str]) -> dict[str, Any]:
                 "wins": wins,
                 "win_rate": round(wins / games, 4) if games else None,
                 "win_rate_95": [low, high],
+                **({"losses": losses} if losses else {}),
             }
         )
     times = [r["ms"] for r in results if isinstance(r.get("ms"), int)]
     if times:
         out["average_game_seconds"] = round(sum(times) / len(times) / 1000, 1)
+        out["median_game_seconds"] = round(statistics.median(times) / 1000, 1)
+    turns = [r["turn"] for r in results if isinstance(r.get("turn"), int) and not isinstance(r["turn"], bool)]
+    if turns:
+        out["median_turn"] = statistics.median(turns)
+        out["turns_range"] = [min(turns), max(turns)]
+    out["ended"] = {
+        "won": sum(1 for r in results if isinstance(r.get("winner"), int)),
+        "draw": sum(1 for r in results if r.get("draw") and not r.get("stopped_slow")),
+        "time_limit": out["stopped_slow"],
+        "unread": sum(1 for r in results if r.get("unparsed")),
+    }
+    out["game_list"] = [
+        {
+            "game": r.get("game"),
+            "seconds": round(r["ms"] / 1000, 1) if isinstance(r.get("ms"), int) else None,
+            "turn": r.get("turn") if isinstance(r.get("turn"), int) else None,
+            "winner": r.get("winner") if isinstance(r.get("winner"), int) else None,
+            "ended": "time_limit"
+            if r.get("stopped_slow")
+            else "draw"
+            if r.get("draw")
+            else "won"
+            if isinstance(r.get("winner"), int)
+            else "unread",
+        }
+        for r in results[:MAX_GAMES_LISTED]
+        if isinstance(r, dict)
+    ]
     unparsed = [r["unparsed"] for r in results if r.get("unparsed")]
     if unparsed:
         out["unparsed_results"] = unparsed[:10]
@@ -172,11 +228,18 @@ class ForgeClient:
         return resolved
 
     async def start(
-        self, decks: list[dict[str, Any]], games: int, fmt: str = "Commander", seed: int | None = None
+        self,
+        decks: list[dict[str, Any]],
+        games: int,
+        fmt: str = "Commander",
+        seed: int | None = None,
+        parallel: int = 1,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {"decks": decks, "games": games, "format": fmt}
         if seed is not None:
             body["seed"] = seed
+        if parallel > 1:  # a Forge image before 0.7.30 ignores it and plays one game at a time
+            body["parallel"] = parallel
         return await self._call("POST", "/jobs", body)
 
     async def job(self, job_id: str) -> dict[str, Any]:
@@ -248,6 +311,7 @@ async def start_run(
     seed: int | None = None,
     bracket: int | None = None,
     bracket_source: str | None = None,
+    parallel: int = 1,
 ) -> dict[str, Any]:
     """Start a Forge run of the member's deck against bundled precons and return the report's
     ``forge`` section. Cards Forge lacks are removed from the run and named in ``not_played``;
@@ -284,7 +348,9 @@ async def start_run(
     if seed is None:
         seed = secrets.randbelow(2**63)
     forge_seed = seed % 2**63
-    job = await client.start([deck, *({"precon": p} for p in chosen)], games, seed=forge_seed)
+    job = await client.start(
+        [deck, *({"precon": p} for p in chosen)], games, seed=forge_seed, parallel=max(1, parallel)
+    )
     return {
         "state": job.get("state", "queued"),
         "seed": seed,
@@ -296,6 +362,8 @@ async def start_run(
         "not_played": not_played,
         "games_requested": games,
         "forge_version": job.get("forge_version"),
+        # how many games the engine plays at once (its own ceiling may lower what was asked)
+        **({"parallel": job["parallel"]} if isinstance(job.get("parallel"), int) else {}),
         "started_at": int(time.time()),
     }
 

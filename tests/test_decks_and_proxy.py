@@ -1423,9 +1423,17 @@ async def test_simulation_calls_take_the_shape_mystic_forge_accepts(stack: Stack
     h = stack.h
     token = await linked_user(stack)
     rep = structured(
-        await call(h, token, "run_deck_report", {"deck_ref": "42", "games": 20, "options": {"seed": 1}})
+        await call(
+            h,
+            token,
+            "run_deck_report",
+            {"deck_ref": "42", "games": 20, "options": {"seed": 1, "forge_seed": 2}},
+        )
     )
     assert rep["ok"], rep
+    # forge_seed is the gateway's own (A34): the simulator gets seed only
+    ((_, sent),) = [c for c in SIM_CALLS if c[0] == "goldfish_run"][-1:]
+    assert sent["seed"] == 1 and "forge_seed" not in sent, sent
     gf, val = rep["goldfish"], rep["validation"]
     assert gf["ok"] is True and "## Metrics" in gf["text"] and "validation error" not in gf["text"], gf
     assert val["ok"] is True and val["text"].startswith("Validated"), val

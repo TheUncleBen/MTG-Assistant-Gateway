@@ -922,8 +922,159 @@ STATUS_TEXT = {
 }
 
 
-def forge_lines(f: dict[str, Any]) -> list[str]:
-    """Forge's result as plain sentences, shared by the page and the Markdown export."""
+# How a game ended (forge.summarise "ended") and how a seat lost (forge.LOSS_KINDS), in words.
+ENDED_TEXT = {
+    "won": "Won by a player",
+    "draw": "Draw",
+    "time_limit": "Stopped at the time limit (counted as a draw)",
+    "unread": "Result not read",
+}
+LOSS_TEXT = {
+    "life": "life total",
+    "commander damage": "commander damage",
+    "poison": "poison",
+    "empty library": "drew from an empty library",
+    "conceded": "conceded",
+    "other": "another way",
+}
+
+
+def _seconds_text(seconds: Any) -> str:
+    if _float(seconds) is None:
+        return "–"
+    seconds = float(seconds)
+    if seconds < 90:
+        return f"{seconds:g} s"
+    minutes, rest = divmod(round(seconds), 60)
+    return f"{minutes} min {rest:02d} s"
+
+
+def _losses_text(losses: Any) -> str:
+    if not isinstance(losses, dict) or not losses:
+        return ""
+    parts = [
+        f"{LOSS_TEXT.get(k, str(k))} {v}"
+        for k, v in sorted(losses.items(), key=lambda kv: (-(_int(kv[1]) or 0), str(kv[0])))
+    ]
+    return ", ".join(parts)
+
+
+def forge_results_html(f: dict[str, Any]) -> str:
+    """Forge's games laid out (G9): headline tiles, one row per seat with its wins, win rate, 95%
+    interval and how it lost, how the games ended, and each game in a folded table. '' before any
+    game has finished."""
+    res = f.get("result") if isinstance(f.get("result"), dict) else {}
+    seats = [s for s in res.get("seats") or [] if isinstance(s, dict)]
+    games = _int(res.get("games")) or 0
+    if not games or not seats:
+        return ""
+    mine = seats[0]
+    low, high = (mine.get("win_rate_95") or [None, None])[:2]
+    tiles = [
+        {"label": "Games played", "value": f"{games} of {_int(res.get('games_requested')) or games}"},
+        {
+            "label": "Your deck won",
+            "value": _pct(_float(mine.get("win_rate"))),
+            "rate": {"lo": _float(low), "hi": _float(high)},
+        },
+        {
+            "label": "Median game time",
+            "value": _seconds_text(res.get("median_game_seconds", res.get("average_game_seconds"))),
+        },
+    ]
+    if res.get("median_turn") is not None:
+        span = res.get("turns_range") if isinstance(res.get("turns_range"), list) else []
+        note = f"from turn {span[0]} to {span[1]}" if len(span) == 2 else ""
+        tiles.append(
+            {"label": "Median game length", "value": f"turn {_turn(res['median_turn'])}", "note": note}
+        )
+    tiles_html = "<div class='tiles forge-tiles'>" + "".join(_tile(t) for t in tiles) + "</div>"
+    any_losses = any(s.get("losses") for s in seats)
+    rows = []
+    for seat in seats:
+        rate = seat.get("win_rate")
+        width = max(0, min(100, round(100 * rate))) if _float(rate) is not None else 0
+        you = " <span class='badge'>your deck</span>" if seat is mine else ""
+        name = _esc(front_face(seat.get("deck")))
+        mark = " class='mine'" if seat is mine else ""
+        rows.append(
+            f"<tr{mark}><th scope='row'>{name}{you}</th>"
+            f"<td class='num' data-label='Wins'>{_int(seat.get('wins')) or 0}</td>"
+            "<td class='num rate' data-label='Win rate'>"
+            f"<span class='meter' aria-hidden='true'><span style='width:{width}%'></span></span>"
+            f"{_esc(_pct(rate))}</td><td class='num' data-label='95% interval'>"
+            f"{_esc(_interval(seat.get('win_rate_95')) or '–')}</td>"
+            + (
+                f"<td data-label='How it lost'>{_esc(_losses_text(seat.get('losses')) or '–')}</td>"
+                if any_losses
+                else ""
+            )
+            + "</tr>"
+        )
+    table = (
+        "<div class='scroll'><table class='qty seats stack'><caption class='sr-only'>Results for each deck "
+        "at the table</caption><thead><tr><th scope='col'>Deck</th><th scope='col' class='num'>Wins</th>"
+        "<th scope='col' class='num'>Win rate</th><th scope='col' class='num'>95% interval</th>"
+        + ("<th scope='col'>How it lost</th>" if any_losses else "")
+        + f"</tr></thead><tbody>{''.join(rows)}</tbody></table></div>"
+    )
+    ended = res.get("ended") if isinstance(res.get("ended"), dict) else {}
+    if not ended:  # a run stored before 0.7.30 counted only draws and games stopped at the limit
+        draws, slow = _int(res.get("draws")) or 0, _int(res.get("stopped_slow")) or 0
+        ended = {"won": games - draws, "draw": draws - slow, "time_limit": slow}
+    ended_rows = "".join(
+        f"<li><span>{_esc(ENDED_TEXT[k])}</span><b>{_int(ended.get(k)) or 0}</b></li>"
+        for k in ENDED_TEXT
+        if _int(ended.get(k))
+    )
+    ended_html = (
+        "<h3>How the games ended</h3><ul class='ended'>"
+        + ended_rows
+        + "</ul>"
+        + (
+            "<p class='muted small'>A game Forge stops at its time limit is a draw; many of them mean the "
+            "engine had too little time for these decks, and the win rates say less.</p>"
+            if _int(ended.get("time_limit"))
+            else ""
+        )
+        if ended_rows
+        else ""
+    )
+    listed = [g for g in res.get("game_list") or [] if isinstance(g, dict)]
+    games_html = ""
+    if listed:
+        names = {i + 1: front_face(s.get("deck")) for i, s in enumerate(seats)}
+        body = "".join(
+            f"<tr><th scope='row' class='num'>Game {_int(g.get('game')) or ''}</th>"
+            f"<td data-label='Winner'>{_esc(names.get(g.get('winner'), '–'))}</td>"
+            f"<td class='num' data-label='Turn'>{_esc(_turn(g.get('turn')))}</td>"
+            f"<td class='num' data-label='Time'>{_esc(_seconds_text(g.get('seconds')))}</td>"
+            f"<td data-label='Ended'>{_esc(ENDED_TEXT.get(str(g.get('ended')), '–'))}</td></tr>"
+            for g in listed
+        )
+        games_html = (
+            f"<details class='games'><summary>Each game ({len(listed)})</summary><div class='scroll'>"
+            "<table class='qty stack'><thead><tr><th scope='col' class='num'>Game</th>"
+            "<th scope='col'>Winner</th>"
+            "<th scope='col' class='num'>Turn</th><th scope='col' class='num'>Time</th>"
+            f"<th scope='col'>Ended</th></tr></thead><tbody>{body}</tbody></table></div></details>"
+        )
+    return "<div class='forge-results'>" + tiles_html + table + ended_html + games_html + "</div>"
+
+
+def _turn(value: Any) -> str:
+    f = _float(value)
+    return "–" if f is None else (f"{f:.0f}" if f == int(f) else f"{f:.1f}")
+
+
+def _interval(pair: Any) -> str:
+    low, high = pair if isinstance(pair, (list, tuple)) and len(pair) == 2 else (None, None)
+    return f"{_pct(low)} to {_pct(high)}" if _float(low) is not None and _float(high) is not None else ""
+
+
+def forge_lines(f: dict[str, Any], *, results: bool = True) -> list[str]:
+    """Forge's result as plain sentences, shared by the page and the Markdown export. The page
+    draws the results themselves as a table (forge_results_html) and passes ``results=False``."""
     res = f.get("result") or {}
     out: list[str] = []
     ahead = f.get("waiting_for") if isinstance(f.get("waiting_for"), dict) else None
@@ -947,16 +1098,17 @@ def forge_lines(f: dict[str, Any]) -> list[str]:
         basis = f" (at the measured {per} seconds a game)" if per else ""
         out.append(f"Expected to finish in about {minutes} minute{'s' if minutes != 1 else ''}{basis}.")
     seats = res.get("seats") or []
-    if res.get("games"):
+    if res.get("games") and results:
         out.append(f"Games played: {res['games']} of {res.get('games_requested') or res['games']}.")
         for seat in seats:
             low, high = (seat.get("win_rate_95") or [None, None])[:2]
             ci = (
                 f" (95% interval {_pct(low)} to {_pct(high)})" if low is not None and high is not None else ""
             )
+            lost = _losses_text(seat.get("losses"))
             out.append(
                 f"{front_face(seat.get('deck'))}: {seat.get('wins', 0)} wins, "
-                f"{_pct(seat.get('win_rate'))}{ci}."
+                f"{_pct(seat.get('win_rate'))}{ci}." + (f" Lost by: {lost}." if lost else "")
             )
         if res.get("draws"):
             slow = (
@@ -966,7 +1118,19 @@ def forge_lines(f: dict[str, Any]) -> list[str]:
             )
             out.append(f"Draws: {res['draws']}{slow}.")
         if res.get("average_game_seconds") is not None:
-            out.append(f"Average game: {res['average_game_seconds']} seconds.")
+            median = (
+                f", median {res['median_game_seconds']} seconds"
+                if res.get("median_game_seconds") is not None
+                else ""
+            )
+            out.append(f"Average game: {res['average_game_seconds']} seconds{median}.")
+        if res.get("median_turn") is not None:
+            span = res.get("turns_range") if isinstance(res.get("turns_range"), list) else []
+            out.append(
+                f"Median game length: turn {_turn(res['median_turn'])}"
+                + (f" (from turn {span[0]} to {span[1]})" if len(span) == 2 else "")
+                + "."
+            )
     # Why these opponents (forge.pick_opponents): the deck's bracket, where it came from, and
     # each precon's bracket, or the fallback to the newest precons.
     choice = f.get("opponent_choice") if isinstance(f.get("opponent_choice"), dict) else {}
@@ -975,14 +1139,14 @@ def forge_lines(f: dict[str, Any]) -> list[str]:
         seated = ", ".join(f"{front_face(n)} (bracket {b})" for n, b in rated.items())
         out.append(f"Opponents: {choice['note']}" + (f" Seated: {seated}." if seated else ""))
     if f.get("seed") is not None:
-        chosen = " (chosen by the gateway; pass it as options.seed to replay these games)"
+        chosen = " (chosen by the gateway; pass it as options.forge_seed to replay these games)"
         out.append(f"Seed: {f['seed']}{chosen if f.get('seed_source') == 'gateway' else ''}.")
     elif f.get("state") in ("done", "running") and f.get("job_id"):
         out.append("Seed: none recorded (this run was started without one).")
     return out
 
 
-def forge_html(f: Any, *, live: bool = False) -> str:
+def forge_html(f: Any, *, live: bool = False, report_id: Any = None) -> str:
     """The Forge card: real games against precons (forge.py), or why there are none yet. ``live``
     (the signed-in page, not an export) marks an unfinished run for forge-live.js, which refreshes
     the card until the run ends."""
@@ -1018,7 +1182,8 @@ def forge_html(f: Any, *, live: bool = False) -> str:
             parts.append(
                 f"<p class='notice{' warn' if state not in ('queued', 'running') else ''}'>{_esc(msg)}</p>"
             )
-    lines = forge_lines(f)
+    parts.append(forge_results_html(f))
+    lines = forge_lines(f, results=False)
     if lines:
         parts.append("<ul class='sumlines'>" + "".join(f"<li>{_esc(ln)}</li>" for ln in lines) + "</ul>")
     if f.get("not_played"):
@@ -1034,7 +1199,9 @@ def forge_html(f: Any, *, live: bool = False) -> str:
             f"<p class='small'><a href='/history/reports/{_esc(ahead['report_id'])}'>Open the report "
             "it is waiting for</a></p>"
         )
-    attrs = " data-forge-live aria-live='polite'" if live and pending else ""
+    # the report's id lets forge-live.js ask the JSON status route (api.py) for this card alone
+    rid = f" data-report-id='{_esc(report_id)}'" if isinstance(report_id, str) and report_id else ""
+    attrs = f" data-forge-live aria-live='polite'{rid}" if live and pending else ""
     return f"<div class='card forge'{attrs}>" + "".join(parts) + "</div>"
 
 
@@ -1071,17 +1238,40 @@ def engine_html(r: dict[str, Any], *, live: bool = False) -> str:
     f = r.get("forge")
     if not isinstance(f, dict):
         return preflight_html(None)
-    return forge_html(f, live=live)
+    return forge_html(f, live=live, report_id=r.get("report_id"))
 
 
-def status_html(status: Any) -> str:
+def status_inner(status: Any) -> str:
+    """The badge and words inside the head's status (``#rep-status``), or '' for no status."""
     if not isinstance(status, str) or status not in STATUS_TEXT:
         return ""
     cls = {"complete": "ok", "partial": "warn", "failed": "danger"}.get(status, "")
     return (
-        f"<dt>Status</dt><dd id='rep-status'><span class='badge {cls}'>{_esc(status)}</span> "
-        f"<span class='muted small'>{_esc(STATUS_TEXT[status].partition(': ')[2])}</span></dd>"
+        f"<span class='badge {cls}'>{_esc(status)}</span> "
+        f"<span class='muted small'>{_esc(STATUS_TEXT[status].partition(': ')[2])}</span>"
     )
+
+
+def status_html(status: Any) -> str:
+    inner = status_inner(status)
+    return f"<dt>Status</dt><dd id='rep-status'>{inner}</dd>" if inner else ""
+
+
+def forge_status(r: dict[str, Any]) -> dict[str, Any]:
+    """What the report page's live view needs while the Forge games play (A32): the run's state
+    and section, the report's overall status, and the Forge card and the status as the page draws
+    them, so forge-live.js swaps them in without fetching the whole page again."""
+    f = r.get("forge") if isinstance(r.get("forge"), dict) else None
+    state = str((f or {}).get("state") or "") or None
+    return {
+        "report_id": r.get("report_id"),
+        "status": r.get("status"),
+        "state": state,
+        "live": state in ("queued", "running"),
+        "forge": f,
+        "forge_html": engine_html(r, live=True),
+        "status_html": status_inner(r.get("status")),
+    }
 
 
 def report_sections(r: dict[str, Any]) -> dict[str, Any]:
@@ -1389,6 +1579,43 @@ REPORT_CSS = """
 .report table.trig td{padding:.3rem .25rem;border-top:1px solid var(--surface-2);overflow-wrap:anywhere}
 .report table.trig td:last-child,.report table.trig th:last-child{text-align:right;
   font-variant-numeric:tabular-nums}
+/* Forge's games (forge_results_html): a row per deck at the table, how the games ended, each game */
+.report .forge-results{margin:.75rem 0 0}
+.report .forge-results .scroll{overflow-x:auto;max-width:100%}
+.report .forge-results table{width:100%;border-collapse:collapse;font-size:.93rem}
+.report .forge-results th,.report .forge-results td{padding:.35rem .4rem;
+  border-top:1px solid var(--border-soft);text-align:left;vertical-align:baseline;overflow-wrap:break-word}
+.report .forge-results thead th{border-top:0;font-size:.86rem;color:var(--text-muted);font-weight:600}
+.report .forge-results .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.report .forge-results tr.mine th,.report .forge-results tr.mine td{background:var(--surface-2)}
+.report .forge-results tbody th{font-weight:600}
+.report .forge-results .badge{margin-left:.35rem;vertical-align:baseline}
+.report .forge-results .meter{display:inline-block;width:3.5rem;height:6px;margin-right:.4rem;
+  border-radius:3px;background:var(--surface-3);overflow:hidden;vertical-align:middle}
+.report .forge-results .meter span{display:block;height:100%;background:var(--orange)}
+.report .forge-results h3{margin:1rem 0 .35rem}
+.report .forge-results .ended{list-style:none;margin:0;padding:0;border:1px solid var(--border-soft);
+  border-radius:3px;max-width:32rem}
+.report .forge-results .ended li{display:flex;justify-content:space-between;gap:.75rem;padding:.35rem .6rem;
+  border-top:1px solid var(--border-soft)}
+.report .forge-results .ended li:first-child{border-top:0}
+.report .forge-results .ended b{font-variant-numeric:tabular-nums}
+.report .forge-results details.games{margin-top:.75rem}
+.report .forge-results details.games > summary{cursor:pointer;min-height:44px;display:flex;align-items:center}
+/* phones: each row of a results table becomes a small block, every value with its column's name */
+@media (max-width:600px){
+  .report .forge-results table.stack thead{position:absolute;width:1px;height:1px;overflow:hidden;
+    clip:rect(0 0 0 0);white-space:nowrap}
+  .report .forge-results table.stack tr{display:block;padding:.45rem .5rem;
+    border-top:1px solid var(--border-soft)}
+  .report .forge-results table.stack th,.report .forge-results table.stack td{display:flex;
+    justify-content:space-between;gap:.75rem;border:0;padding:.15rem 0;text-align:left;white-space:normal;
+    overflow-wrap:break-word}
+  .report .forge-results table.stack tbody th{display:block;font-size:1rem}
+  .report .forge-results table.stack td::before{content:attr(data-label);color:var(--text-muted);
+    font-size:.86rem;font-weight:400;flex:none}
+  .report .forge-results table.stack td{text-align:right}
+}
 """
 
 __all__ = [

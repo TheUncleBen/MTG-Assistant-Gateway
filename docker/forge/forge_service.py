@@ -1,21 +1,28 @@
 """Job service around Forge's headless ``sim`` mode, for the gateway's deck simulations.
 
 Forge itself runs unchanged: this file only writes deck files, starts ``java -jar <forge> sim``
-and reads what it prints. One simulation runs at a time and its Java process exits when the job
+and reads what it prints. One simulation runs at a time and its Java processes exit when the job
 ends, so an idle container holds no Forge memory. Only the gateway reaches this service, over the
 stack's private network.
+
+A job's games are cut into fixed slices by their number alone (``slices``), each slice one Forge
+process with its own seed made from the job's seed, so the same seed gives the same games however
+many slices play at once. A job asks for ``parallel`` slices at once; FORGE_MAX_PARALLEL (default 1)
+caps it, because each Forge process needs its own memory (FORGE_XMX) inside the container's limit.
 
 Endpoints (JSON):
   GET    /health          status, Forge version, busy flag, queue length
   GET    /precons         the bundled Commander precons a deck entry can name as {"precon": name}
   POST   /check           {"names": [...]} -> each name's spelling in Forge's card list, or null
-  POST   /jobs            {"decks": [{"commander": [...], "main": [[count, name], ...]}], "games": n}
+  POST   /jobs            {"decks": [{"commander": [...], "main": [[count, name], ...]}], "games": n,
+                           "seed"?: s, "parallel"?: p}
   GET    /jobs/<id>       state, games done, per-game winners, cards Forge could not load
   DELETE /jobs/<id>       stop a queued or running job
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import queue
@@ -39,6 +46,11 @@ XMX = os.environ.get("FORGE_XMX", "1g")
 NICE = int(os.environ.get("FORGE_NICE", "10"))
 MAX_GAMES = int(os.environ.get("FORGE_MAX_GAMES", "50"))
 MAX_QUEUE = int(os.environ.get("FORGE_MAX_QUEUE", "4"))
+# Forge processes one job may run at once. Each takes up to FORGE_XMX of heap plus Java's own
+# memory (one four-player game peaked near 790 MiB), so raise it only with the container's limit.
+MAX_PARALLEL = max(1, min(4, int(os.environ.get("FORGE_MAX_PARALLEL", "1"))))
+# A job's games are cut into slices of at most this many, the same way at any parallel setting.
+SLICE_GAMES = 5
 JOB_TIMEOUT = int(os.environ.get("FORGE_JOB_TIMEOUT", "7200"))
 # Forge's sim calls a game a draw after this many seconds (its -c flag; Forge's own default is 120,
 # too short for a four-player Commander game on a Raspberry Pi).
@@ -60,6 +72,14 @@ WINNER = re.compile(r"(?P<who>\S.*?) has won", re.IGNORECASE)
 DRAW = re.compile(r"\bdraw\b", re.IGNORECASE)
 HEADER = re.compile(r"\bvs\b.* - .* of \w+")
 STOPPED_SLOW = re.compile(r"Stopping slow match as draw", re.IGNORECASE)
+# Forge prints each game's outcome entries just before its result line (SimulateMatch.java:233-243):
+#   "Game Outcome: Turn 18"
+#   "Game Outcome: Ai(1)-D1 has lost because life total reached 0"
+#   "Game Outcome: Ai(2)-D2 has lost due to accumulation of 21 damage from generals"
+OUTCOME_TURN = re.compile(r"Game Outcome: Turn (?P<turn>\d+)", re.IGNORECASE)
+OUTCOME_LOST = re.compile(
+    r"Game Outcome: .*?\bD(?P<seat>[1-4]) has lost (?:because|due to) (?P<why>.+)", re.IGNORECASE
+)
 LOAD_PROBLEM = re.compile(
     r"(could not|cannot|can't|unable to) (find|load)|unsupported|not supported|unknown card", re.IGNORECASE
 )
@@ -113,9 +133,30 @@ def resolve(name: str) -> str | None:
     return None
 
 
+def slices(games: int) -> list[int]:
+    """How a job of ``games`` games is cut: the fewest slices of at most SLICE_GAMES, as even as
+    possible, larger first (12 -> [4, 4, 4], 7 -> [4, 3]). It depends on the number of games only."""
+    count = max(1, -(-games // SLICE_GAMES))
+    base, extra = divmod(games, count)
+    return [base + (1 if i < extra else 0) for i in range(count)]
+
+
+def slice_seed(seed: int | None, index: int) -> int | None:
+    """The seed of slice ``index``: the job's own seed for the first, so a job of one slice plays as
+    before slices existed; one made from it for the others (0 to 2**63 - 1, as Forge reads seeds)."""
+    if seed is None or index == 0:
+        return seed
+    digest = hashlib.sha256(f"{seed}:{index}".encode()).digest()
+    return int.from_bytes(digest[:8], "big") % 2**63
+
+
 class Job:
-    def __init__(self, decks: list[dict[str, Any]], games: int, fmt: str, seed: int | None = None) -> None:
+    def __init__(
+        self, decks: list[dict[str, Any]], games: int, fmt: str, seed: int | None = None, parallel: int = 1
+    ) -> None:
         self.seed = seed
+        self.slices = slices(games)
+        self.parallel = max(1, min(parallel, MAX_PARALLEL, len(self.slices)))
         self.id = secrets.token_hex(8)
         self.decks = decks
         self.games = games
@@ -129,7 +170,9 @@ class Job:
         self.tail: list[str] = []
         self.header = ""  # Forge's "Ai(1)-D1 vs Ai(2)-D2 - 3 games of Commander seed 42" line
         self.returncode: int | None = None
-        self.proc: subprocess.Popen[str] | None = None
+        self.procs: dict[int, subprocess.Popen[str]] = {}  # slice index -> its running Forge
+        self.slice_state: list[str] = ["queued"] * len(self.slices)
+        self.lock = threading.Lock()
         self.cancelled = False
 
     def view(self) -> dict[str, Any]:
@@ -139,11 +182,17 @@ class Job:
             "format": self.format,
             "games_requested": self.games,
             "games_done": len(self.results),
-            "results": self.results,
+            "results": sorted(self.results, key=lambda r: r["game"]),
             "load_problems": self.load_problems[:40],
             "log_tail": self.tail[-40:],
             "returncode": self.returncode,
             "seed": self.seed,
+            "parallel": self.parallel,
+            "max_parallel": MAX_PARALLEL,
+            "slices": [
+                {"games": n, "seed": slice_seed(self.seed, i), "state": self.slice_state[i]}
+                for i, n in enumerate(self.slices)
+            ],
             "header": self.header,
             "game_seconds": GAME_SECONDS,
             "queued_s": round((self.started or time.time()) - self.created, 1),
@@ -193,6 +242,98 @@ def parse_result(line: str) -> dict[str, Any] | None:
     return out
 
 
+def run_slice(job: Job, index: int, work: Path, names: list[str], slot: int) -> int | None:
+    """Play slice ``index`` in its own Forge process and add its games to the job, numbered after the
+    slices before it. ``slot`` is which of the job's parallel places it uses: the first keeps the
+    container's HOME (Forge writes its preferences and logs there), the others get their own."""
+    offset = sum(job.slices[:index])
+    seed = slice_seed(job.seed, index)
+    cmd = [
+        "nice",
+        "-n",
+        str(NICE),
+        "java",
+        f"-Xmx{XMX}",
+        "-Djava.awt.headless=true",
+        "-jar",
+        str(forge_jar()),
+        "sim",
+        "-D",
+        str(work),
+        "-d",
+        *names,
+        "-f",
+        job.format,
+        "-n",
+        str(job.slices[index]),
+        "-c",
+        str(GAME_SECONDS),
+        *(["-s", str(seed)] if seed is not None else []),
+        "-q",
+    ]
+    env = None
+    if slot:
+        home = Path(os.environ.get("HOME", "/data")) / f"slot-{slot}"
+        home.mkdir(parents=True, exist_ok=True)
+        env = {**os.environ, "HOME": str(home)}
+    with job.lock:
+        if job.cancelled:
+            job.slice_state[index] = "cancelled"
+            return None
+        proc = subprocess.Popen(
+            cmd,
+            cwd=FORGE_HOME,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            errors="replace",
+            start_new_session=True,
+        )
+        job.procs[index] = proc
+        job.slice_state[index] = "running"
+    tag = f"[slice {index + 1}] " if len(job.slices) > 1 else ""
+    stopped_slow = False
+    outcome: dict[str, Any] = {}  # the turn and each loser's reason, for the next result line
+    assert proc.stdout is not None
+    for raw in proc.stdout:
+        line = raw.rstrip("\n")
+        if not line.strip():
+            continue
+        turn, lost = OUTCOME_TURN.search(line), OUTCOME_LOST.search(line)
+        if turn:
+            outcome["turn"] = int(turn.group("turn"))
+        elif lost:
+            outcome.setdefault("lost", {})[lost.group("seat")] = lost.group("why").strip()[:120]
+        result = parse_result(line)
+        if result:
+            result["game"] += offset
+            result.update(outcome)
+            outcome = {}
+            if stopped_slow:
+                # Forge ends a game that runs past its time limit as a draw; count it as one
+                # even if a winner is printed, and mark why.
+                result.update(winner=None, draw=True, stopped_slow=True)
+                result.pop("winner_text", None)
+                stopped_slow = False
+        with job.lock:
+            job.tail = (job.tail + [(tag + line)[:300]])[-80:]
+            if index == 0 and not job.header and HEADER.search(line):
+                job.header = line.strip()[:300]
+            if STOPPED_SLOW.search(line):
+                stopped_slow = True
+            if result:
+                job.results.append(result)
+            elif LOAD_PROBLEM.search(line) and line.strip()[:300] not in job.load_problems:
+                job.load_problems.append(line.strip()[:300])
+    code = proc.wait()
+    proc.stdout.close()
+    with job.lock:
+        job.procs.pop(index, None)
+        job.slice_state[index] = "done" if code == 0 else "failed"
+    return code
+
+
 def run_job(job: Job) -> None:
     work = Path(tempfile.mkdtemp(prefix="forge-job-"))
     try:
@@ -201,69 +342,42 @@ def run_job(job: Job) -> None:
             fname = f"D{i}.dck"
             (work / fname).write_text(deck_file(i, deck, job.format), "utf-8")
             names.append(fname)
-        cmd = [
-            "nice",
-            "-n",
-            str(NICE),
-            "java",
-            f"-Xmx{XMX}",
-            "-Djava.awt.headless=true",
-            "-jar",
-            str(forge_jar()),
-            "sim",
-            "-D",
-            str(work),
-            "-d",
-            *names,
-            "-f",
-            job.format,
-            "-n",
-            str(job.games),
-            "-c",
-            str(GAME_SECONDS),
-            *(["-s", str(job.seed)] if job.seed is not None else []),
-            "-q",
-        ]
+        forge_jar()  # no jar: the job fails here, before any slice starts
         job.started = time.time()
         job.state = "running"
-        job.proc = subprocess.Popen(
-            cmd,
-            cwd=FORGE_HOME,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            errors="replace",
-            start_new_session=True,
-        )
         deadline = job.started + JOB_TIMEOUT
         timer = threading.Timer(JOB_TIMEOUT, lambda: _kill(job))
         timer.start()
-        stopped_slow = False
+        codes: list[int | None] = [None] * len(job.slices)
+        pending = list(range(len(job.slices)))
+        pending_lock = threading.Lock()
+
+        def place(slot: int) -> None:
+            # Each parallel place takes the next slice in order until none is left.
+            while True:
+                with pending_lock:
+                    if not pending or job.cancelled or time.time() >= deadline:
+                        return
+                    index = pending.pop(0)
+                try:
+                    codes[index] = run_slice(job, index, work, names, slot)
+                except Exception as exc:  # one slice failing ends the job as failed, never the service
+                    with job.lock:
+                        job.slice_state[index] = "failed"
+                        job.tail.append(f"service error: {exc!r}"[:300])
+
         try:
-            assert job.proc.stdout is not None
-            for raw in job.proc.stdout:
-                line = raw.rstrip("\n")
-                if not line.strip():
-                    continue
-                job.tail = (job.tail + [line[:300]])[-80:]
-                if not job.header and HEADER.search(line):
-                    job.header = line.strip()[:300]
-                if STOPPED_SLOW.search(line):
-                    stopped_slow = True
-                result = parse_result(line)
-                if result:
-                    if stopped_slow:
-                        # Forge ends a game that runs past its time limit as a draw; count it as one
-                        # even if a winner is printed, and mark why.
-                        result.update(winner=None, draw=True, stopped_slow=True)
-                        result.pop("winner_text", None)
-                        stopped_slow = False
-                    job.results.append(result)
-                elif LOAD_PROBLEM.search(line):
-                    job.load_problems.append(line.strip()[:300])
-            job.returncode = job.proc.wait()
+            places = [
+                threading.Thread(target=place, args=(slot,), daemon=True) for slot in range(job.parallel)
+            ]
+            for t in places:
+                t.start()
+            for t in places:
+                t.join()
         finally:
             timer.cancel()
+        failed = [c for c in codes if c not in (0, None)]
+        job.returncode = failed[0] if failed else (0 if all(c == 0 for c in codes) else None)
         if job.cancelled:
             job.state = "cancelled"
         elif time.time() >= deadline:
@@ -277,17 +391,20 @@ def run_job(job: Job) -> None:
         job.tail.append(f"service error: {exc!r}"[:300])
     finally:
         job.finished = time.time()
-        job.proc = None
+        with job.lock:
+            job.slice_state = [st if st != "queued" else job.state for st in job.slice_state]
         shutil.rmtree(work, ignore_errors=True)
 
 
 def _kill(job: Job) -> None:
-    proc = job.proc
-    if proc and proc.poll() is None:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+    with job.lock:
+        procs = list(job.procs.values())
+    for proc in procs:
+        if proc.poll() is None:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
 
 
 def worker() -> None:
@@ -397,6 +514,7 @@ class Handler(BaseHTTPRequestHandler):
                     "aliases": len(ALIASES),
                     "busy": busy,
                     "queued": QUEUE.qsize(),
+                    "max_parallel": MAX_PARALLEL,
                 },
             )
             return
@@ -457,7 +575,11 @@ class Handler(BaseHTTPRequestHandler):
                 ):
                     # Forge reads an argument starting with "-" as a flag, so seeds are never negative.
                     raise ValueError("seed must be a whole number from 0 to 2**63 - 1")
-                job = Job(decks, games, fmt, seed)
+                parallel = body.get("parallel", 1)
+                if not isinstance(parallel, int) or isinstance(parallel, bool) or not 1 <= parallel <= 4:
+                    raise ValueError("parallel must be a whole number from 1 to 4")
+                # More than FORGE_MAX_PARALLEL is not refused: the job plays as many at once as allowed.
+                job = Job(decks, games, fmt, seed, parallel)
                 with JOBS_LOCK:
                     JOBS[job.id] = job
                 QUEUE.put(job)
@@ -487,7 +609,11 @@ def main() -> None:
     threading.Thread(target=worker, daemon=True).start()
     port = int(os.environ.get("FORGE_PORT", "8000"))
     server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
-    print(f"forge-service {VERSION}: {len(NAMES)} card names, Xmx {XMX}, port {port}", flush=True)
+    print(
+        f"forge-service {VERSION}: {len(NAMES)} card names, Xmx {XMX}, "
+        f"up to {MAX_PARALLEL} at once, port {port}",
+        flush=True,
+    )
     server.serve_forever()
 
 

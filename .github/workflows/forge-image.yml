@@ -29,6 +29,8 @@ permissions:
 env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/mtg-assistant-forge
   DOCKERFILE: docker/forge/Dockerfile
+  # "1" while the one-off games-at-once measurement is wanted (smoke-arm64), else "0"
+  MEASURE_PARALLEL: "1"
 
 jobs:
   pin:
@@ -110,7 +112,7 @@ jobs:
           persist-credentials: false
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
         with:
-          driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
+          driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
       - name: Scryfall's printed names and the newest Commander precons
         run: |
           python3 docker/forge/scryfall_names.py docker/forge/scryfall-names.json docker/forge/scryfall-legal.json
@@ -135,6 +137,15 @@ jobs:
           head -1 coverage.txt >> "$GITHUB_STEP_SUMMARY"
       - name: Smoke test
         run: scripts/ci_smoke_forge.sh forge:ci-arm64
+      # One-off measurement for the default of Forge games at once (0.7.30): time, peak memory and
+      # same-seed results with one and two games at once, inside the deployment's limits. Numbers
+      # only, never a gate; MEASURE_PARALLEL goes back to "0" once the figures are recorded, so later
+      # Forge image pull requests don't spend the minutes.
+      - name: Measure Forge games at once (numbers only)
+        if: github.event_name == 'pull_request' && env.MEASURE_PARALLEL == '1'
+        continue-on-error: true
+        timeout-minutes: 25
+        run: scripts/ci_measure_forge.sh forge:ci-arm64 6
 
   image:
     needs: [pin, smoke-arm64]
@@ -151,10 +162,10 @@ jobs:
           persist-credentials: false
       - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
         with:
-          image: mirror.gcr.io/tonistiigi/binfmt:latest
+          image: mirror.gcr.io/tonistiigi/binfmt:latest@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
         with:
-          driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
+          driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
       - name: Log in to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
