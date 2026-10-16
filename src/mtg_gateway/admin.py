@@ -343,6 +343,13 @@ def add_admin_routes(server: MCPServer, state: AppState) -> None:
                 else f"Nothing was saved. See the {n} messages in this section."
             )
             return settings_page_response(sub, sid, outcome=outcome, notice=notice, focus=group, status=400)
+        if outcome.unsaved:
+            # Back to default with other edits in the section: say so and keep them in the form,
+            # rather than a redirect that would drop them (review round 1, finding 6).
+            notice = settings_page.changes_notice(outcome.changes) + settings_page.unsaved_notice(
+                outcome.unsaved, group
+            )
+            return settings_page_response(sub, sid, outcome=outcome, notice=notice, focus=group)
         anchor = f"#s-row-{reset}" if reset else f"#g-{quote(group)}"
         return RedirectResponse(
             f"/admin/settings?saved={quote(group)}&after={started}{anchor}", status_code=303

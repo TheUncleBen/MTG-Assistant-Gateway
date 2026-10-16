@@ -214,7 +214,7 @@ SETTINGS_CSS = """
 .set-err{margin:.35rem 0 0;color:var(--danger-text);font-weight:700}
 .set-warn{margin:.35rem 0 0;padding:.4rem .6rem;border-left:4px solid var(--orange);
   background:var(--orange-tint);color:var(--orange-text);border-radius:var(--radius)}
-.set-row.bad input,.set-row.bad select{border-color:var(--danger-text)}
+.set-row.bad input:not([type=checkbox]):not([type=radio]),.set-row.bad select{border-color:var(--danger-text)}
 .set-ctl{display:flex;flex-direction:column;gap:.45rem;align-items:stretch;min-width:0}
 .set-num{display:flex;align-items:center;gap:.5rem}
 .set-num input{flex:1 1 auto;min-width:0}
@@ -233,7 +233,19 @@ SETTINGS_CSS = """
 .set-seg label:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:-2px}
 .set-seg label:has(input:disabled){cursor:default;color:var(--text-muted)}
 .set-ctl .reset{align-self:flex-start;min-height:var(--ctl)}
-.set-lock{display:inline-flex;align-items:center;gap:.35rem}
+.set-choices{display:flex;flex-direction:column;border:1px solid var(--control-border);
+  border-radius:var(--radius);overflow:hidden;margin:0;padding:0;min-width:0}
+.set-choices legend{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);
+  white-space:nowrap}
+.set-choices label{position:relative;display:flex;align-items:center;gap:.6rem;min-height:var(--ctl);
+  padding:.45rem .8rem;margin:0;cursor:pointer;font-weight:400;background:var(--surface);
+  overflow-wrap:anywhere}
+.set-choices label + label{border-top:1px solid var(--control-border)}
+.set-choices input{flex:none;margin:0;width:1.1rem;height:1.1rem;accent-color:var(--orange)}
+.set-choices label:has(input:checked){background:var(--orange-tint);font-weight:700}
+.set-choices label:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:-2px}
+.set-choices label:has(input:disabled){cursor:default;color:var(--text-muted)}
+.set-lock code{overflow-wrap:anywhere}
 .set-confirm{grid-column:1 / -1}
 .set-save{display:flex;flex-wrap:wrap;gap:.75rem;align-items:center;padding-top:.9rem;
   border-top:1px solid var(--border-soft)}
@@ -255,6 +267,9 @@ class Outcome:
     changes: list[tuple[str, Any, Any]] = field(default_factory=list)
     errors: dict[str, str] = field(default_factory=dict)
     posted: dict[str, str] = field(default_factory=dict)
+    # Back to default: the section's other fields the admin had changed but not saved (kept in
+    # the form and named in a notice, never dropped without a word; review round 1, finding 6).
+    unsaved: list[str] = field(default_factory=list)
 
 
 def group_keys(group: str) -> list[str]:
@@ -293,6 +308,7 @@ def apply_form(live: LiveSettings, data: Mapping[str, str], *, by: str) -> Outco
         if spec is None:
             out.errors["_"] = "That setting isn't one this page can change."
             return out
+        _keep_unsaved(live, data, spec.group, reset, out)
         if live.locked(reset):
             out.errors[reset] = f"Set in your stack ({spec.env}). {STACK_LOCK_HOW}"
             return out
@@ -332,6 +348,32 @@ def apply_form(live: LiveSettings, data: Mapping[str, str], *, by: str) -> Outco
         live.set(key, value, by=by)
         out.changes.append((key, before, value))
     return out
+
+
+def _keep_unsaved(live: LiveSettings, data: Mapping[str, str], group: str, reset: str, out: Outcome) -> None:
+    """The fields of ``group`` (besides ``reset``) the form sent with a value other than the saved
+    one: kept as typed, and listed in ``out.unsaved``."""
+    for key in group_keys(group):
+        raw = data.get(f"v_{key}")
+        if key == reset or raw is None or live.locked(key):
+            continue
+        try:
+            same = MANAGED_SETTINGS[key].parse(raw) == live.get(key)
+        except SettingError:
+            same = False
+        if not same:
+            out.posted[key] = raw
+            out.unsaved.append(key)
+
+
+def unsaved_notice(keys: list[str], group: str) -> str:
+    """Said after Back to default when other fields of the section were changed but not saved."""
+    if not keys:
+        return ""
+    title = next((t for g, t, _i in GROUPS if g == group), "")
+    names = ", ".join(f"“{label(k)}”" for k in keys)
+    text = f"Not saved yet: {names}. What you typed is still in the form; press “Save {title}” to keep it."
+    return f"<div class='notice warn' role='status'>{html.escape(text)}</div>"
 
 
 def settings_body(
@@ -424,7 +466,7 @@ def _row(
     badge = "<span class='badge set-badge'>After a restart</span>" if spec.restart else ""
     title = (
         f"<span class='set-label' id='l-{key}'>{html.escape(name)}{badge}</span>"
-        if spec.kind == "bool"
+        if spec.kind == "bool" or (spec.kind == "choice" and spec.labels)
         else f"<label class='set-label' for='f-{key}'>{html.escape(name)}{badge}</label>"
     )
     confirm = ""
@@ -479,6 +521,19 @@ def _control(spec: SettingSpec, value: Any, *, locked: bool, described: str) -> 
             f"<label><input type='radio' name='{name}' value='on'{' checked' if on else ''}{dis}>On</label>"
             f"<label><input type='radio' name='{name}' value='off'{'' if on else ' checked'}{dis}>Off</label>"
             "</fieldset>"
+        )
+    if spec.kind == "choice" and spec.labels:
+        # Named choices (the approval modes) as a list of radio buttons, so the whole name shows
+        # and wraps at any width or text size (review round 1, finding 9).
+        picked = next((c for c in spec.choices if str(value).lower() == c.lower()), None)
+        opts = "".join(
+            f"<label><input type='radio' name='{name}' value='{html.escape(c)}'"
+            f"{' checked' if c == picked else ''}{dis}>{html.escape(n)}</label>"
+            for c, n in zip(spec.choices, spec.labels, strict=True)
+        )
+        return (
+            f"<fieldset class='set-choices' id='f-{key}' aria-labelledby='l-{key}' "
+            f"aria-describedby='{described}'><legend>{html.escape(label(key))}</legend>{opts}</fieldset>"
         )
     if spec.kind == "choice":
         names = spec.labels or spec.choices
