@@ -105,7 +105,10 @@
   var countEl = $("#cs-count"), statusEl = $("#cs-status"), moreWrap = $("#cs-more");
   var moreBtn = moreWrap ? $("[data-more]", moreWrap) : null;
   var openBtn = $(".cs-open", form), badge = openBtn ? $(".n", openBtn) : null;
-  var timer = null, ctrl = null, page = 1, hasMore = false, loadingMore = false, lastQs = null;
+  // lastQs: the search last asked for (an unchanged form asks nothing again). shownQs: the search
+  // whose tiles are on screen; "Load more" asks for its next page, never the form's newer text.
+  var timer = null, ctrl = null, moreCtrl = null, page = 1, hasMore = false, loadingMore = false;
+  var lastQs = null, shownQs = null;
   var startTpl = $("#cs-start"), startHtml = startTpl ? startTpl.innerHTML : null;
   function setStatus(text, isError) {
     statusEl.textContent = "";
@@ -129,6 +132,29 @@
     hasMore = !!on;
     if (moreWrap) moreWrap.hidden = !on;
   }
+  function moreDone() {
+    loadingMore = false;
+    if (moreBtn) { moreBtn.disabled = false; moreBtn.removeAttribute("aria-busy"); }
+  }
+  // a next page asked for the tiles on screen is not wanted once another search starts or lands
+  function stopMore() {
+    if (moreCtrl) moreCtrl.abort();
+    moreCtrl = null;
+    moreDone();
+  }
+  // a failed search: the same search can be asked again (Search, Enter), and tiles left from
+  // another search are taken away rather than shown under the error as if they were its answer
+  function failed(qs, text) {
+    lastQs = null;
+    stopMore();
+    if (shownQs !== qs) {
+      results.innerHTML = "";
+      shownQs = null;
+      setCount(null, true);
+    }
+    setStatus(text, true);
+    showMore(false);
+  }
   function run(immediate) {
     clearTimeout(timer);
     timer = setTimeout(search, immediate ? 0 : DEBOUNCE_MS);
@@ -146,6 +172,7 @@
     try { history.replaceState(null, "", "/cards" + (addr ? "?" + addr : "")); } catch (e) { /* a sandboxed frame */ }
     if (ctrl) ctrl.abort();
     ctrl = window.AbortController ? new AbortController() : null;
+    stopMore();
     results.setAttribute("aria-busy", "true");
     fetch("/cards/api/search?" + qs, { credentials: "same-origin", signal: ctrl ? ctrl.signal : undefined })
       .then(function (r) { return r.json().then(function (d) { d.status = r.status; return d; }); })
@@ -153,10 +180,11 @@
         results.removeAttribute("aria-busy");
         page = 1;
         if (!d.ok) {
-          setStatus(d.message || "The cards could not be looked up.", true);
-          showMore(false);
+          failed(qs, d.message || "The cards could not be looked up.");
           return;
         }
+        stopMore();
+        shownQs = qs;
         setStatus("");
         if (d.empty) {
           if (startHtml !== null) results.innerHTML = startHtml;
@@ -174,21 +202,24 @@
       .catch(function (e) {
         if (e && e.name === "AbortError") return;
         results.removeAttribute("aria-busy");
-        lastQs = null;
-        setStatus("No connection; the cards could not be looked up.", true);
+        failed(qs, "No connection; the cards could not be looked up.");
       });
   }
   function loadMore() {
-    if (!hasMore || loadingMore) return;
+    if (!hasMore || loadingMore || shownQs === null) return;
     loadingMore = true;
     if (moreBtn) { moreBtn.disabled = true; moreBtn.setAttribute("aria-busy", "true"); }
-    var p = params();
+    var forQs = shownQs;
+    var p = new URLSearchParams(forQs);
     p.set("page", String(page + 1));
-    fetch("/cards/api/search?" + p.toString(), { credentials: "same-origin" })
+    var mine = window.AbortController ? new AbortController() : null;
+    moreCtrl = mine;
+    fetch("/cards/api/search?" + p.toString(), { credentials: "same-origin", signal: mine ? mine.signal : undefined })
       .then(function (r) { return r.json(); })
       .then(function (d) {
-        loadingMore = false;
-        if (moreBtn) { moreBtn.disabled = false; moreBtn.removeAttribute("aria-busy"); }
+        if (forQs !== shownQs || (mine && moreCtrl !== mine)) return;  // a newer search is on screen
+        moreCtrl = null;
+        moreDone();
         if (!d.ok) { setStatus(d.message || "More cards could not be loaded.", true); return; }
         var list = results.querySelector(".cardgrid,.cardlist");
         if (!list) return;
@@ -197,9 +228,10 @@
         showMore(d.has_more);
         nearEnd();
       })
-      .catch(function () {
-        loadingMore = false;
-        if (moreBtn) { moreBtn.disabled = false; moreBtn.removeAttribute("aria-busy"); }
+      .catch(function (e) {
+        if ((e && e.name === "AbortError") || forQs !== shownQs || (mine && moreCtrl !== mine)) return;
+        moreCtrl = null;
+        moreDone();
         setStatus("No connection; more cards could not be loaded.", true);
       });
   }
@@ -218,7 +250,8 @@
     }, { rootMargin: "600px 0px" }).observe(moreWrap);
   }
   hasMore = moreWrap ? !moreWrap.hidden : false;
-  lastQs = params().toString();
+  // the page's own first search: when it failed, the same search can be asked again
+  if (!$(".notice.error", statusEl)) lastQs = shownQs = params().toString();
   updateBadge(params());
 
   form.addEventListener("submit", function (e) { e.preventDefault(); run(true); closePanel(); });
