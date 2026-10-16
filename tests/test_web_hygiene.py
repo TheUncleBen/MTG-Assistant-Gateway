@@ -86,7 +86,7 @@ async def test_err_query_shows_only_known_codes(h: Harness) -> None:
         page = await b.http.get("/account", params={"ok": phish})
         assert "evil.example" not in page.text and "notice ok" not in page.text
         page = await b.http.get("/account", params={"err": "stale"})
-        assert "The deck changed on Archidekt" in page.text
+        assert "the deck changed on Archidekt" in page.text  # 0.7.29: the Needs a look wording
     finally:
         await b.aclose()
 
