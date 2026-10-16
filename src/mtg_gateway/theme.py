@@ -609,12 +609,13 @@ details.disclosure[open] > summary::before{content:'\\25BE'}
 .summary .del{color:var(--red-text);border-color:var(--red);background:var(--red-tint)}
 .summary .chg{color:var(--orange-text);border-color:var(--orange);background:var(--orange-tint)}
 ul.changes{list-style:none;margin:0 0 .75rem;padding:0;border:1px solid var(--border);
-  border-radius:var(--radius-panel);overflow:hidden}
-.changes li{display:grid;grid-template-columns:5.6rem minmax(0,1fr) auto;align-items:center;gap:.6rem;
+  border-radius:var(--radius-panel);overflow:hidden;container-type:inline-size}
+.changes li{display:grid;grid-template-columns:6.8rem minmax(0,1fr) auto;align-items:center;gap:.6rem;
   padding:.5rem .75rem;border-bottom:1px solid var(--border-soft);border-left:5px solid var(--border)}
 .changes li:last-child{border-bottom:0}
 .changes .act{font-size:.78rem;font-weight:900;text-transform:uppercase;letter-spacing:.06em;
-  text-align:center;padding:.2rem .3rem;border-radius:3px;border:1px solid}
+  text-align:center;padding:.2rem .3rem;border-radius:3px;border:1px solid;min-width:0;
+  hyphens:auto;-webkit-hyphens:auto;overflow-wrap:anywhere}
 .changes .name{font-weight:700;font-size:1.05rem;overflow-wrap:anywhere}
 .changes .qty{font-weight:700;white-space:nowrap;text-align:right;font-variant-numeric:tabular-nums}
 .changes .qty .was{color:var(--text-muted);font-weight:400;text-decoration:line-through}
@@ -631,11 +632,20 @@ ul.changes{list-style:none;margin:0 0 .75rem;padding:0;border:1px solid var(--bo
 .changes blockquote.said{margin:0;padding:.4rem .6rem;border-left:3px solid var(--border);
   background:var(--surface);color:var(--text);font-weight:400;white-space:pre-wrap;overflow-wrap:anywhere}
 @media (max-width:420px){
-  .changes li{grid-template-columns:4.9rem minmax(0,1fr);gap:.35rem .6rem}
+  .changes li{grid-template-columns:6.8rem minmax(0,1fr);gap:.35rem .6rem}
   .changes .qty{grid-column:2;text-align:left}
   /* an add or remove count (+1, -1) is short: it stays on the card's line, one line a row */
-  .changes li.add,.changes li.del:not(.action){grid-template-columns:4.9rem minmax(0,1fr) auto}
+  .changes li.add,.changes li.del:not(.action){grid-template-columns:6.8rem minmax(0,1fr) auto}
   .changes li.add .qty,.changes li.del:not(.action) .qty{grid-column:auto;text-align:right}
+}
+/* a list too narrow for the label beside the change (a small phone, or large text): the label goes
+   above it, and the change has the whole row */
+@container (max-width:20em){
+  .changes li,.changes li.add,.changes li.del:not(.action){grid-template-columns:minmax(0,1fr) auto}
+  .changes .act{grid-column:1/-1;justify-self:start}
+  .changes .name{grid-column:1}
+  .changes .qty{grid-column:2;text-align:right}
+  .changes li.action .qty,.changes li.chg .qty{grid-column:1/-1;text-align:left}
 }
 details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--text-muted);font-size:.9rem}
 .apply{margin-top:1rem;padding:1rem;border:2px solid var(--orange);border-radius:var(--radius-panel);

@@ -1047,3 +1047,73 @@ def test_saving_messages_and_picked_states_read_at_every_size(server: Server, wi
         check("editor-picked", TEXT)
         assert errors == []
         browser.close()
+
+
+# CI on 1ea9289: the Frame list closed 13 ms after it opened, on a scroll of the picker box. The
+# scroll had happened before the list opened (the box scrolled the filter button into view as it
+# took focus); its event only arrives on the next frame. Here the box scrolls and the button is
+# clicked in one go, so the scroll event lands after the list is open, as it did under load.
+STALE_SCROLL_THEN_OPEN = """
+() => {
+  const box = document.querySelector('.printpick .ppbox');
+  const btn = document.querySelector(".printpick .msel-btn[aria-label='Frame']");
+  // the box overflowed in CI (its fonts differ); a list that won't shrink stands in for that
+  box.querySelector('.ppmain').style.flex = 'none';
+  box.scrollTop += 6;
+  btn.click();
+  return box.scrollTop;
+}
+"""
+
+
+SCROLL_THE_BOX = """
+() => {
+  const box = document.querySelector('.printpick .ppbox');
+  // fewer prints are shown now: a spacer at the end keeps the box taller than it is
+  const spacer = document.createElement('div');
+  spacer.style.cssText = 'flex:none;height:600px';
+  box.appendChild(spacer);
+  const before = box.scrollTop;
+  box.scrollTop = before > 0 ? 0 : 40;
+  return [before, box.scrollTop];
+}
+"""
+
+
+def test_a_filter_list_stays_open_after_a_scroll_that_came_before_it(tmp_path: Path) -> None:
+    """A scroll event that arrives after the list opened, for a scroll that moved nothing since,
+    leaves the list open; a scroll that moves the button after the list opened still closes it."""
+    from playwright.sync_api import sync_playwright
+
+    s = _server(tmp_path, fillers=19, page_size=10)
+    try:
+        _chromium()
+        sid = s.sign_in_and_link()
+        s.app.state.gateway.scan.names.set_names(sorted({c["name"] for c in s.sf.cards}))
+        with sync_playwright() as p:
+            browser, page, errors = _page(p, s, sid, 1366)
+            page.goto(f"{s.base}/decks/42/edit", wait_until="networkidle")
+            box = page.locator("#addname")
+            box.click()
+            box.press_sequentially("sol r", delay=30)
+            page.locator(".addprints:visible .pptile").first.wait_for(timeout=5000)
+            page.locator(".addprints .allprints").click()
+            page.locator(".printpick .pptile").first.wait_for(timeout=5000)
+            if not page.locator(".printpick .msel-btn[aria-label='Frame']").is_visible():
+                page.locator(".printpick .ppfiltbtn").click()
+            assert page.evaluate(STALE_SCROLL_THEN_OPEN) > 0, "the picker box didn't scroll"
+            page.wait_for_timeout(300)  # several frames: the scroll event has arrived
+            assert page.locator(".msel-list").count() == 1, page.evaluate("() => window.__mselLog")
+            page.locator(".msel-list [role=option]", has_text="1993 frame").first.click()
+            assert page.locator(".msel-list").count() == 0
+            # a scroll after the list opened moves the button away from it: the list closes
+            page.locator(".printpick .msel-btn[aria-label='Frame']").click()
+            assert page.locator(".msel-list").count() == 1
+            moved = page.evaluate(SCROLL_THE_BOX)
+            assert moved[0] != moved[1], moved
+            page.wait_for_timeout(300)
+            assert page.locator(".msel-list").count() == 0
+            browser.close()
+            assert errors == []
+    finally:
+        s.stop()

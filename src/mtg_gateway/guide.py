@@ -445,7 +445,7 @@ def guide_body(
         "<li><span>Confirm. <strong>Restore</strong> puts the deck back exactly as the snapshot had it, "
         "cards and the deck's own name, description, format, bracket and privacy alike.</span></li></ol>"
         "<p>Or ask your assistant to “undo yesterday's change”: a restore is a proposal like any other, "
-        "always high risk, so it waits for your press unless you chose Full auto.</p>"
+        "always high risk, so it waits for your press.</p>"
     )
     how_compare = (
         "<p><strong>Compare with another deck…</strong> (More menu on a deck) pits the deck against a "
