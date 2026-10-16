@@ -33,7 +33,7 @@ so going back to 0.7.27 is a plain image swap. The Android app is unchanged.
 - The Collection page explains how to import its Export CSV on archidekt.com: the column type to
   pick for each column, and what each condition and language code means.
 - After a collection import the page says how many cards went in and names each line it could not
-  take as given: a language Archidekt's collection can't store (kept as English), a condition
+  take as given: a language Archidekt's collection doesn't store (kept as English), a condition
   Archidekt's collection doesn't store, such as EX (kept as Near Mint), a copy added to a card you
   already have in another language, and cards not found. A refused import says why and which line.
 - The collection import reads a Language column, in the gateway's codes, Archidekt's codes or
