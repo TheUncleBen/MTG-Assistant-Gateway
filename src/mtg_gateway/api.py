@@ -53,6 +53,7 @@ STATUS_FOR = {
     "not_pending": 409,
     "already_applied": 409,
     "stale": 409,
+    "changed": 409,
     "rate_limited": 429,
     "other_client": 403,
     "other_account": 409,

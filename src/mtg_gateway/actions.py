@@ -16,7 +16,7 @@ from urllib.parse import quote
 
 from .archidekt import VOTE_DOWN, VOTE_NONE, VOTE_UP, drops_formatting, words_only_note
 from .decklist import clean_text
-from .decks import DeckError, _clean_deck_id, _row
+from .decks import DeckError, _clean_deck_id, _row, needs_look_error
 from .social import FOLLOWING_PAGES
 
 if TYPE_CHECKING:
@@ -361,11 +361,7 @@ async def apply(
     elif action == "delete_deck":
         deck = await decks.get_own_deck(sub, deck_id)
         if deck.fingerprint() != row["baseline_fingerprint"]:
-            raise DeckError(
-                "stale",
-                "The deck changed on Archidekt since this proposal was made, so it was not deleted. "
-                "Ask for a new proposal if you still want it gone.",
-            )
+            raise needs_look_error(None)  # a deck deletion stays strict (K1): any change stops it
         try:
             # progress: the snapshot and the backup copy are recorded as every apply's are (review
             # L1), so a stop that changed nothing deletes the copy or queues its delete (Q77)

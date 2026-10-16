@@ -19,6 +19,7 @@ import asyncio
 import contextvars
 import dataclasses
 import datetime
+import functools
 import json
 import logging
 import math
@@ -36,7 +37,7 @@ from urllib.parse import urlparse
 
 from cryptography.fernet import Fernet, InvalidToken
 
-from . import modes
+from . import board, modes
 from .approve import approval_code, approval_matches
 from .archidekt import (
     FORMAT_IDS,
@@ -68,7 +69,7 @@ from .archidekt import (
 )
 from .archidekt_csv import CsvError, parse_export
 from .config import LiveSettings, Settings
-from .db import Database
+from .db import MAX_PROPOSAL_VERSIONS, Database, ProposalVersionsFull
 from .decklist import (
     DecklistError,
     ListCard,
@@ -175,7 +176,6 @@ ADMIN_CLIENT = "__admin__"
 # (expired, rejected, failed) beyond the newest MAX_CLOSED_PROPOSALS per member are deleted, so
 # proposals cannot fill the disk.
 MAX_PENDING_PROPOSALS = 100
-MAX_PENDING_PER_CLIENT = 30
 MAX_CLOSED_PROPOSALS = 100
 # Failed Archidekt sign-ins (wrong username or password) one member may make from the account
 # page in LINK_FAILURE_WINDOW seconds; further attempts are refused until the oldest ages out,
@@ -215,8 +215,14 @@ PAGE_DECKS_MAX = 200  # reads kept at most, the oldest go first
 TOUCH_LINK_INTERVAL = 60.0  # the link's last_used_at is written at most this often per member
 # Said first in a pending proposal's next_step once the deck sync (sync.py) has seen its deck change.
 OUT_OF_DATE_STEP = (
-    "Out of date: the deck changed after this proposal was made, so applying it will be refused "
-    "and nothing will be sent. Reject it and propose again from the current deck. "
+    "Needs a look: the deck changed after this proposal was made and it would now do something "
+    "other than what was reviewed, so applying it will be refused and nothing will be sent. Amend "
+    "it to fit the deck as it is now, or reject it. "
+)
+# Said first in a held proposal's next_step (Q27j, A8).
+HELD_STEP = (
+    "Held: a proposal this one depends on was rejected, withdrawn or failed. An assistant never "
+    "applies it in any mode; the user may still apply it themselves, or it can be amended. "
 )
 # Archidekt work one member may start per ARCHIDEKT_BUDGET_WINDOW seconds (each deck read,
 # proposal, apply or proxied archidekt_* research call counts once), on top of the concurrency
@@ -1699,6 +1705,37 @@ def deck_to_archidekt_text(deck: Deck) -> str:
     return "\n".join(line for *_, line in lines) + ("\n" if lines else "")
 
 
+class _Duplicate(Exception):
+    """_save_proposal found an exact duplicate (Q27k): the same app's waiting note on the same deck
+    with exactly these changes. Nothing new is saved; ``_dedupe`` answers with that note."""
+
+    def __init__(self, proposal_id: str):
+        super().__init__(proposal_id)
+        self.proposal_id = proposal_id
+
+
+def _dedupe(fn: Any) -> Any:
+    """For the propose methods: an exact duplicate of a waiting note of the same app returns that
+    note ("already waiting as #2") instead of a second one (Q27k, BOARD §3)."""
+
+    @functools.wraps(fn)
+    async def run(self: DeckService, sub: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        try:
+            return await fn(self, sub, *args, **kwargs)
+        except _Duplicate as dup:
+            out = self.describe(sub, dup.proposal_id)
+            no = out.get("board_no")
+            out["duplicate_of"] = dup.proposal_id
+            out["note"] = (
+                (f"Already waiting as #{no}" if no else "Already waiting")
+                + ": this exact change was proposed before and has not been decided, so no second "
+                "copy was made."
+            )
+            return out
+
+    return run
+
+
 class DeckService:
     def __init__(self, settings: Settings, db: Database, client: ArchidektClient):
         self.settings = settings
@@ -2336,8 +2373,62 @@ class DeckService:
         deck: Deck = await self._call_unslotted(sub, self.client.get_deck, deck_id, background=True)
         return deck
 
-    def _out_of_date_since(self, proposal_id: str) -> int | None:
-        return self.out_of_date(proposal_id) if self.out_of_date is not None else None
+    async def sync_read_any_deck(self, sub: str, deck_id: str) -> Deck:
+        """``sync_read_deck`` for a deck that is not the member's own (the source of a waiting
+        copy, A10): read as ``get_any_deck`` reads it (the member's session first, else
+        anonymously), so it compares with the deck the proposal was made from; outside the
+        member's slot and budget."""
+        deck_id = _clean_deck_id(deck_id)
+        try:
+            deck: Deck = await self._call_unslotted(sub, self.client.get_deck, deck_id, background=True)
+            return deck
+        except DeckError as exc:
+            if exc.kind not in ("not_found", "auth", "forbidden", "not_linked"):
+                raise
+        try:
+            return await self.client.get_deck(None, deck_id, fresh=True)
+        except ArchidektError as exc:
+            raise DeckError(exc.kind, str(exc)) from exc
+
+    def _assistant_policy(self, sub: str, row: dict[str, Any]) -> tuple[str, str, str, bool]:
+        """(risk, why, mode, allowed): the proposal's risk tier and reason, the member's approval
+        mode, and whether that mode lets the assistant apply it itself. On top of the tiers
+        (modes.py): auto mode still waits for the member's press on a restore, a new deck, a
+        commander change or a big edit (O7, O8: more rows than ``auto_big_edit_rows``); and in
+        every mode an assistant never applies a proposal another app changed after it was made
+        (G5, K7) or one that is held (Q27j, K6)."""
+        kind = row.get("kind", "edit")
+        risk, why = modes.risk_of(kind, row.get("rows"), max_rows=self.settings.auto_apply_max_rows)
+        mode = self.mode_of(sub)
+        creator, amender = row.get("created_by_client"), row.get("amended_by_client")
+        if risk not in modes.MEMBER_ONLY and amender and amender != creator:
+            return "high", "was changed by another app after it was made", mode, False
+        if risk not in modes.MEMBER_ONLY and row.get("status") == "held" and row.get("state") == "pending":
+            return "high", "is held: a proposal it depends on was rejected, withdrawn or failed", mode, False
+        wait = modes.auto_waits(kind, row.get("rows"), big_rows=int(self.live.get("auto_big_edit_rows")))
+        if mode == "auto" and wait and risk not in modes.MEMBER_ONLY:
+            why = wait  # what the assistant is told: why auto mode still waits for the user
+        return risk, why, mode, modes.assistant_may_apply(mode, risk, auto_wait=wait)
+
+    def _status_fields(self, sub: str, row: dict[str, Any]) -> dict[str, Any]:
+        """A waiting proposal's status and its reason in words: "updated" (re-checked, still the
+        change that was reviewed), "needs_look" (it would now do something else) or "held" (a
+        proposal it depends on was rejected, withdrawn or failed, Q27j)."""
+        from . import recheck
+
+        status = row.get("status")
+        reason = str(row.get("status_reason") or "")
+        if status == "held" and reason.startswith("depends:"):
+            _tag, other, closed = (reason.split(":", 2) + ["", ""])[:3]
+            no = self.db.proposal_board_numbers(sub, [other]).get(other)
+            words = {"rejected": "was rejected", "withdrawn": "was withdrawn", "failed": "failed"}
+            which = f"#{no}" if no else "another proposal"
+            text = f"It depends on {which}, which {words.get(closed, closed)}."
+        elif status == "updated":
+            text = "The deck changed since this was made; it still does exactly what was reviewed."
+        else:
+            text = recheck.reason_text(reason)
+        return {"status": status, "status_reason": text, "status_at": row.get("status_at")}
 
     def _forget_page_decks(self) -> None:
         self._page_decks.clear()
@@ -2361,6 +2452,8 @@ class DeckService:
         deck = await (
             self.get_any_deck(sub, deck_ref, fresh=True) if fresh else self.get_any_deck(sub, deck_ref)
         )
+        if sub:
+            self.recheck_waiting(sub, deck)  # K2: a deck page view checks its waiting proposals
         if ttl > 0 and gen == self._page_decks_gen:
             if len(self._page_decks) >= PAGE_DECKS_MAX:
                 oldest = min(self._page_decks, key=lambda k: self._page_decks[k][0])
@@ -2423,6 +2516,7 @@ class DeckService:
                 raise DeckError(exc.kind, str(exc)) from exc
 
     # -- proposals ------------------------------------------------------------
+    @_dedupe
     async def propose(
         self, sub: str, deck_id: str, raw_changes: Any, *, row_flags: bool = False
     ) -> dict[str, Any]:
@@ -2431,6 +2525,7 @@ class DeckService:
         changes = parse_changes(raw_changes, row_flags=row_flags)
         self._room_for_proposal(sub)
         deck = await self.get_own_deck(sub, deck_id)
+        self.recheck_waiting(sub, deck)  # K2: the deck's other waiting proposals, at no cost
         _before, _after, rows = plan_rows(deck, changes)
         pid = secrets.token_urlsafe(12)
         self._save_proposal(
@@ -2445,8 +2540,9 @@ class DeckService:
             rows,
         )
         self._audit("proposal_created", sub=sub, detail={"proposal_id": pid, "deck_id": deck.id})
-        return self.describe(sub, pid)
+        return self._board_note(sub, self.describe(sub, pid), deck.id, rows, pid)
 
+    @_dedupe
     async def propose_new_deck(
         self,
         sub: str,
@@ -2539,16 +2635,22 @@ class DeckService:
         if state == "pending" and row["expires_at"] < int(time.time()):
             state = "expired"
         kind = row.get("kind", "edit")
-        risk, why = modes.risk_of(kind, row.get("rows"), max_rows=self.settings.auto_apply_max_rows)
-        mode = self.mode_of(sub)
+        risk, why, mode, allowed = self._assistant_policy(sub, row)
         # "May apply now": the member's mode allows it for this risk AND the proposal is still
         # pending (risk, approval_mode and risk_reason keep the policy side either way).
+        # A proposal that needs a look would be refused as it stands: the assistant amends it.
         may_apply = (
-            state == "pending" and self.settings.writes_enabled and modes.assistant_may_apply(mode, risk)
+            state == "pending"
+            and self.settings.writes_enabled
+            and allowed
+            and row.get("status") != "needs_look"
         )
         closed_by, closed_by_app = self._closer(row) if state == "rejected" else (None, None)
-        # The deck sync (sync.py) saw the deck change after this proposal was made (R-153).
-        out_of_date = self._out_of_date_since(row["id"]) if state == "pending" else None
+        # Checked against the deck as it is now (K1: after an apply, a deck page view, a new
+        # proposal or the deck sync, R-153), it would no longer do what was reviewed.
+        status = row.get("status") if state == "pending" else None
+        out_of_date = int(row.get("status_at") or row["created_at"]) if status == "needs_look" else None
+        status_info = self._status_fields(sub, row) if status else {}
         # Archidekt's waits stopped the last apply: it failed, or it changed nothing and the
         # proposal is pending again (Q78; an out-of-date one is told only that it is out of date)
         stopped = (row["result"] or {}).get("error") == "rate_limited" and (
@@ -2605,7 +2707,13 @@ class DeckService:
             "risk_reason": why,
             "assistant_may_apply": may_apply,
             **({"out_of_date": True, "out_of_date_since": out_of_date} if out_of_date else {}),
-            "next_step": (OUT_OF_DATE_STEP if out_of_date else "")
+            # 0.7.29: every note has a version (an amend makes the next one) and a number on its
+            # deck's board; a waiting one may be "updated", "needs_look" or "held" (with why).
+            "version": int(row.get("version") or 1),
+            "board_no": row.get("board_no"),
+            **status_info,
+            "next_step": (OUT_OF_DATE_STEP + status_info["status_reason"] + " " if out_of_date else "")
+            + (HELD_STEP if status == "held" else "")
             + (
                 # an apply that stopped at the backup (possibly after its caller had its answer)
                 "The last attempt to apply this stopped before anything changed: the backup copy "
@@ -2651,6 +2759,17 @@ class DeckService:
         name = clean_text(self.db.client_name(client) or "")[:60] if app else ""
         return by, name or None
 
+    def _changed(self, row: dict[str, Any]) -> DeckError:
+        """The refusal of an apply of a version that is no longer the proposal's (G16, K4)."""
+        return DeckError(
+            "changed",
+            "Replaced by a newer version. The proposal was changed after this was shown, so nothing "
+            "was sent to Archidekt. Open it again to see what it does now.",
+            review_url=f"{self.settings.public_url}/proposals/{row['id']}",
+            state=row["state"],
+            version=int(row.get("version") or 1),
+        )
+
     def _not_pending(self, sub: str, proposal_id: str, doing: str) -> DeckError:
         """The refusal for an apply or reject of a proposal that is no longer pending, carrying its
         state now (and when and by whom it was closed), so a card can show it and drop its buttons."""
@@ -2670,22 +2789,21 @@ class DeckService:
         name = None if client_id in (BROWSER_CLIENT, ADMIN_CLIENT) else self.db.client_name(client_id)
         return actor_label(client_id, name)
 
+    def expiry_seconds(self) -> int:
+        """How long a new (or amended, A12) proposal waits: the admin setting
+        ``proposal_expiry_days`` (Q130: 7 by default; a deployment value wins). Changing it does
+        not move proposals already waiting."""
+        return int(self.live.get("proposal_expiry_days")) * 86400
+
     def _room_for_proposal(self, sub: str) -> None:
-        """Refuse a new proposal while the member already has MAX_PENDING_PROPOSALS pending, or
-        the app making it has MAX_PENDING_PER_CLIENT pending for them."""
+        """Refuse a new proposal while the member already has MAX_PENDING_PROPOSALS pending (Q129:
+        the one limit, fixed in code; there is no longer a limit per app)."""
         if self.db.count_pending_proposals(sub) >= MAX_PENDING_PROPOSALS:
             raise DeckError(
                 "rate_limited",
                 f"You already have {MAX_PENDING_PROPOSALS} pending proposals. Apply or reject some "
                 f"of them at {self.settings.public_url}/proposals (or wait for them to expire) "
                 "before proposing more.",
-            )
-        if self.db.count_pending_for_client(sub, current_client.get()) >= MAX_PENDING_PER_CLIENT:
-            raise DeckError(
-                "rate_limited",
-                f"This app already has {MAX_PENDING_PER_CLIENT} pending proposals for you. Apply or "
-                f"reject some of them at {self.settings.public_url}/proposals (or wait for them to "
-                "expire) before proposing more.",
             )
 
     def _save_proposal(self, row: dict[str, Any], rows: list[dict[str, Any]]) -> None:
@@ -2699,6 +2817,17 @@ class DeckService:
         except Exception:
             logger.exception("reading scan guesses failed")
             guesses = {}
+        client = current_client.get()
+        if client not in (None, BROWSER_CLIENT, ADMIN_CLIENT):
+            dup = self.db.find_duplicate(
+                row["owner_sub"],
+                deck_id=str(row["deck_id"]),
+                kind=str(row.get("kind") or "edit"),
+                changes=row["changes"],
+                client=client,
+            )
+            if dup is not None:
+                raise _Duplicate(dup)
         for r in rows:
             adds = r.get("kind") == "add" or (
                 r.get("kind") == "change" and int(r.get("after") or 0) > int(r.get("before") or 0)
@@ -2711,12 +2840,11 @@ class DeckService:
                 **row,
                 "rows": rows,
                 "diff_text": "\n".join(row_line(r) for r in rows),
-                "expires_at": int(time.time()) + self.settings.proposal_ttl,
+                "expires_at": int(time.time()) + self.expiry_seconds(),
                 "created_by_client": current_client.get(),
             },
             max_pending=MAX_PENDING_PROPOSALS,
             max_closed=MAX_CLOSED_PROPOSALS,
-            max_pending_per_client=MAX_PENDING_PER_CLIENT,
         )
         if not saved:
             self._room_for_proposal(row["owner_sub"])
@@ -2748,8 +2876,13 @@ class DeckService:
                     "review_url": f"{self.settings.public_url}/proposals/{r['id']}",
                     **(
                         {"out_of_date": True}
-                        if state == "pending" and self._out_of_date_since(r["id"])
+                        if state == "pending" and r.get("status") == "needs_look"
                         else {}
+                    ),
+                    **(
+                        self._status_fields(sub, r)
+                        if state == "pending" and r.get("status")
+                        else {"status": None}
                     ),
                 }
             )
@@ -2765,27 +2898,39 @@ class DeckService:
             sub=sub,
             detail={"proposal_id": row["id"], "deck_id": row["deck_id"], "risk": risk},
         )
+        where = (
+            "on the review page (review_url)"
+            if not self.card_may_approve(row)
+            else "on the proposal card in the chat or on the review page (review_url)"
+        )
         return DeckError(
             "browser_required",
             "This is an action on the user's Archidekt account (a like, vote, bookmark, follow, "
             "comment, folder, collaborator change or deck deletion). Each one needs the user's "
-            "own approval on the review page (review_url), in every approval mode. Nothing was sent to "
-            "Archidekt; do not retry.",
+            f"own approval {where}, in every approval mode. Nothing was sent to Archidekt; do not retry.",
             review_url=f"{self.settings.public_url}/proposals/{row['id']}",
             state=row["state"],
             approval_mode=self.mode_of(sub),
             risk=risk,
         )
 
-    def approval_for(self, sub: str, row: dict[str, Any]) -> str:
+    @staticmethod
+    def card_may_approve(row: dict[str, Any]) -> bool:
+        """Whether the in-chat card may approve this proposal: everything but a deck deletion,
+        which only its review page applies (R-142). Account actions (likes, comments, folders,
+        collaborators...) may since 0.7.29 (Q8, G3): the member's press on the card, never the
+        assistant's own apply (Q9)."""
+        return not (row.get("kind") == "action" and (row.get("changes") or {}).get("action") == "delete_deck")
+
+    def approval_for(self, sub: str, row: dict[str, Any], *, version: int | None = None) -> str:
         """The in-chat card's one-time code for a proposal (approve.py), bound to the proposal,
-        its owner, the app that made it and its creation time. An account action has no code
-        (R-142: only its review page applies it), so asking for one is refused here, at the source."""
-        if row.get("kind") == "action":
+        its owner, the app that made it, its creation time and its version. A deck deletion has
+        no code (R-142: only its review page applies it), so asking for one is refused here, at
+        the source."""
+        if not self.card_may_approve(row):
             raise DeckError(
                 "browser_required",
-                "An action on the user's Archidekt account has no in-chat approval code; only its "
-                "review page applies it.",
+                "Deleting a deck has no in-chat approval code; only its review page applies it.",
                 review_url=f"{self.settings.public_url}/proposals/{row['id']}",
             )
         return approval_code(
@@ -2794,17 +2939,37 @@ class DeckService:
             sub=sub,
             client_id=row.get("created_by_client") or "",
             created_at=int(row["created_at"]),
+            version=int(version if version is not None else row.get("version") or 1),
         )
 
     def check_approval(self, sub: str, proposal_id: str, approval: Any) -> dict[str, Any]:
         """The proposal row when ``approval`` is its code and the caller is the app that made it;
-        otherwise ``invalid_approval`` (audited), and nothing else happens."""
+        otherwise ``invalid_approval`` (audited), and nothing else happens. A code of one of its
+        earlier versions is ``changed`` (G16, K4): the card was drawn before an amend."""
         row = self.db.get_proposal(proposal_id, sub)
         if row is None:
             raise DeckError("not_found", "No such proposal for your account.")
-        if row.get("kind") == "action":  # R-142: no code exists for it, whatever was sent
+        if not self.card_may_approve(row):  # R-142: no code exists for it, whatever was sent
             raise self._review_page_only(sub, row)
         creator = row.get("created_by_client")
+        version = int(row.get("version") or 1)
+        if (
+            creator
+            and creator == current_client.get()
+            and version > 1
+            and not approval_matches(self.approval_for(sub, row), approval)
+            and any(
+                approval_matches(self.approval_for(sub, row, version=v), approval) for v in range(1, version)
+            )
+        ):
+            raise DeckError(
+                "changed",
+                "Replaced by a newer version. This card shows an earlier version of the proposal, so "
+                "nothing was sent to Archidekt. Open the proposal again to see what it does now.",
+                review_url=f"{self.settings.public_url}/proposals/{proposal_id}",
+                state=row["state"],
+                version=version,
+            )
         if (
             not creator
             or creator != current_client.get()
@@ -2823,11 +2988,19 @@ class DeckService:
         return row
 
     async def apply(
-        self, sub: str, proposal_id: str, *, via: str, archidekt_backup: bool | None = None
+        self,
+        sub: str,
+        proposal_id: str,
+        *,
+        via: str,
+        archidekt_backup: bool | None = None,
+        version: int | None = None,
     ) -> dict[str, Any]:
         """``archidekt_backup=False`` (a member's own hand edit, the save bar's tick box unticked, or a
         quick edit on the deck page) skips the extra backup copy on Archidekt; the gateway's own
-        snapshot is always taken. The assistant's applies always keep the copy."""
+        snapshot is always taken. The assistant's applies always keep the copy. ``version`` is the
+        version the caller showed (G16, K3): the apply claims only that version, and a proposal
+        amended since is refused with ``changed`` and nothing sent."""
         if not self.settings.writes_enabled:
             raise DeckError(
                 "writes_disabled",
@@ -2856,21 +3029,25 @@ class DeckService:
         # "app" is the member's press on the in-chat card, gated by its one-time code
         # (approve.py); "browser" is a member's own page (hand edits, the JSON API with a
         # session); REVIEW_PAGE is the review page's form; "auto" is never a caller's choice.
-        if not review_page and row.get("kind") == "action":
+        if version is not None and int(row.get("version") or 1) != int(version):
+            raise self._changed(row)
+        if (
+            not review_page
+            and row.get("kind") == "action"
+            and not (via == "app" and self.card_may_approve(row))
+        ):
             # R-142: an Archidekt account action (social, folder, collaborator, delete deck) is
-            # applied only by the member's own press on the signed-in review page, whatever the
-            # mode. Not the assistant's apply_proposal, not the REST API, and not the in-chat card
-            # either: the card's press runs inside the chat app, where the model's own calls run
-            # too. This is the one check that decides it, for every route.
+            # applied only by the member's own press, whatever the mode: on the signed-in review
+            # page, or (0.7.29, Q8, G3) on the in-chat card with its one-time code, except a deck
+            # deletion (review page only). Never the assistant's apply_proposal (Q9) and not the
+            # REST API. This is the one check that decides it, for every route.
             raise self._review_page_only(sub, row)
         if via == "mcp":
             # The risk tier (L1) decides only the assistant's own applies of ordinary proposals:
             # for an account action it is display only (what the assistant is told), because the
             # check above has already refused every caller but the review page.
-            kind = row.get("kind", "edit")
-            risk, why = modes.risk_of(kind, row.get("rows"), max_rows=self.settings.auto_apply_max_rows)
-            mode = self.mode_of(sub)
-            if not modes.assistant_may_apply(mode, risk):
+            risk, why, mode, allowed = self._assistant_policy(sub, row)
+            if not allowed:
                 self._audit(
                     "apply_needs_user",
                     sub=sub,
@@ -2901,9 +3078,11 @@ class DeckService:
         if proposal_id in self._running:  # already under way: report it, never start it twice
             return self.describe(sub, proposal_id)
 
+        expect = int(row.get("version") or 1)
+
         async def run() -> dict[str, Any]:
             async with self.archidekt_slot(sub):  # refused before the claim, so nothing is sent
-                return await self._apply_slotted(sub, proposal_id, row, via=via)
+                return await self._apply_slotted(sub, proposal_id, row, via=via, version=expect)
 
         # The apply runs as its own task: a caller that gives up (an app's tool timeout, a closed
         # browser tab) cannot cancel it halfway. The caller waits up to APPLY_WAIT_SECONDS for the
@@ -2937,10 +3116,18 @@ class DeckService:
         await asyncio.gather(*pending, return_exceptions=True)
 
     async def _apply_slotted(
-        self, sub: str, proposal_id: str, row: dict[str, Any], *, via: str
+        self, sub: str, proposal_id: str, row: dict[str, Any], *, via: str, version: int | None = None
     ) -> dict[str, Any]:
-        if not self.db.claim_proposal(proposal_id, sub):
+        if not self.db.claim_proposal(proposal_id, sub, expect_version=version):
+            now = self.db.get_proposal(proposal_id, sub)
+            if now is not None and now["state"] == "pending" and version is not None:
+                raise self._changed(now)  # amended between the check and the claim
             raise self._not_pending(sub, proposal_id, "applied")
+        # G16: the content is read again after the claim, so what is applied is exactly the
+        # version that was claimed (an amend refuses a proposal that is being applied).
+        fresh = self.db.get_proposal(proposal_id, sub)
+        if fresh is not None:
+            row = {**fresh, **({"archidekt_backup": False} if row.get("archidekt_backup") is False else {})}
         lock = self._deck_locks.setdefault(f"{sub}:{row['deck_id']}", asyncio.Lock())
         # What the apply got done so far (snapshot, backup, entries sent of how many, the verify
         # result), kept in the proposal's result whichever way the apply ends, and shown by
@@ -2966,6 +3153,30 @@ class DeckService:
                 if exc.kind == "backup_failed":  # nothing was sent; the proposal is pending again
                     raise
                 await self._drop_unused_backup(sub, proposal_id, progress, source_deck_id=row["deck_id"])
+                if exc.kind == "stale" and not _changed_anything(progress):
+                    # K1: the proposal no longer does what was reviewed on the deck as it is now.
+                    # Nothing was sent, so it waits again as "needs a look" (its snapshot stays).
+                    self.db.finish_proposal(
+                        proposal_id,
+                        state="pending",
+                        result={**progress, "error": exc.kind, "detail": str(exc)},
+                    )
+                    self.db.rebase_proposal(
+                        proposal_id,
+                        sub,
+                        was=row["baseline_fingerprint"],
+                        fingerprint=row["baseline_fingerprint"],
+                        status="needs_look",
+                        reason=getattr(exc, "recheck_reason", None) or "changed",
+                    )
+                    self._audit(
+                        "proposal_apply_stopped",
+                        sub=sub,
+                        detail={"proposal_id": proposal_id, "error": exc.kind, "state": "pending"},
+                    )
+                    if isinstance(exc.extra, dict) and "state" not in exc.extra:
+                        exc.extra.update(state="pending", status="needs_look")
+                    raise
                 if exc.kind == "rate_limited" and not _changed_anything(progress):
                     # Q78: Archidekt's waits stopped it before anything changed there, so the
                     # proposal is pending again, to be approved again later (re-checked against the
@@ -3003,6 +3214,7 @@ class DeckService:
                 self.db.finish_proposal(
                     proposal_id, state="failed", result={**progress, "error": exc.kind, "detail": detail}
                 )
+                board.settle(self, sub, proposal_id, "failed")  # holds its dependents (K6)
                 self._audit(
                     "proposal_failed",
                     sub=sub,
@@ -3020,6 +3232,7 @@ class DeckService:
                 )
                 stored = {**progress, "error": kind, **({"detail": unexpected} if kind == "internal" else {})}
                 self.db.finish_proposal(proposal_id, state="failed", result=stored)
+                board.settle(self, sub, proposal_id, "failed")
                 self._audit(
                     "proposal_failed",
                     sub=sub,
@@ -3032,6 +3245,7 @@ class DeckService:
         finally:
             lock.release()
         self._audit("proposal_applied", sub=sub, detail={"proposal_id": proposal_id, "via": via})
+        board.settle(self, sub, proposal_id, "applied")  # lifts the holds it caused (K6)
         return result
 
     async def _apply_claimed(self, sub: str, row: dict[str, Any], progress: dict[str, Any]) -> dict[str, Any]:
@@ -3080,6 +3294,7 @@ class DeckService:
         await self._rows_unchanged(sub, deck)  # lookups and backup take a while: check again
         await self._send(sub, deck.id, payload, progress)
         verified = await self.get_deck(sub, deck.id)
+        self.recheck_waiting(sub, verified)  # K2: the deck's other waiting proposals, at no cost
         mismatches = edit_mismatches(deck, changes, verified, specs)
         result = {
             "snapshot_id": snapshot_id,
@@ -3270,25 +3485,65 @@ class DeckService:
             progress["sent_entries"] += 1
 
     async def _current_deck_for(self, sub: str, row: dict[str, Any]) -> Deck:
+        """The live deck an apply works on. A deck changed since the proposal was made is fine
+        while the proposal, worked out again on it, gives exactly the rows that were reviewed
+        (K1, recheck.py); otherwise the apply is refused with nothing sent and the proposal goes
+        back to waiting as "needs a look" (``_apply_slotted``)."""
+        from . import recheck
+
         deck = await self.get_own_deck(sub, row["deck_id"])  # ownership re-checked at apply time
-        if deck.fingerprint() != row["baseline_fingerprint"]:
-            raise DeckError(
-                "stale",
-                "The deck changed on Archidekt since this proposal was made. Nothing was sent. "
-                "Create a new proposal from the current deck.",
-            )
+        status, reason = recheck.check(self, sub, row, deck)
+        if status == "needs_look":
+            raise needs_look_error(reason)
         return deck
 
     async def _rows_unchanged(self, sub: str, deck: Deck) -> None:
         """Re-read the deck right before writing and refuse if a card row changed meanwhile.
         Rows only: the backup copy made just before may bump the deck's updated time."""
+        from . import recheck
+
         now = await self.get_own_deck(sub, deck.id)
         if now.rows_fingerprint() != deck.rows_fingerprint():
-            raise DeckError(
-                "stale",
-                "The deck changed on Archidekt while this change was being prepared. Nothing was "
-                "sent. Create a new proposal from the current deck.",
-            )
+            raise needs_look_error(recheck.REASON_DURING_APPLY)
+
+    def recheck_waiting(self, sub: str, deck: Deck) -> dict[str, str]:
+        """Check every waiting proposal of the member on this deck against it (K1, K2: after an
+        apply, on a deck page view, on a new proposal and in the deck sync) and record the
+        outcome: "updated" (its baseline moves to this deck) or "needs_look" with the reason.
+        Held proposals keep their hold. Local only: no Archidekt request. Returns id -> status
+        for the proposals whose status was recorded."""
+        from . import recheck
+
+        out: dict[str, str] = {}
+        try:
+            board = self.db.pending_board(sub, deck.id)
+        except Exception:  # a check must never break the page or apply that triggered it
+            logger.exception("re-check of waiting proposals failed")
+            return out
+        for line in board:
+            if line.get("status") == "held":
+                continue
+            row = self.db.get_proposal(line["id"], sub)
+            if row is None or not row.get("baseline_fingerprint"):
+                continue
+            try:
+                status, reason = recheck.check(self, sub, row, deck)
+            except Exception:
+                logger.exception("re-check of a waiting proposal failed")
+                continue
+            if status is None:
+                continue
+            if self.db.rebase_proposal(
+                row["id"],
+                sub,
+                was=row["baseline_fingerprint"],
+                fingerprint=deck.fingerprint(),
+                status=status,
+                reason=reason,
+                version=row.get("version"),
+            ):
+                out[row["id"]] = status
+        return out
 
     def _take_snapshot(self, sub: str, row: dict[str, Any], deck: Deck) -> str:
         snapshot_id = secrets.token_urlsafe(12)
@@ -3649,6 +3904,7 @@ class DeckService:
     COLLECTION_TARGET = "collection"
     COLLECTION_NAME = "Your Archidekt collection"
 
+    @_dedupe
     async def propose_collection(
         self,
         sub: str,
@@ -3709,12 +3965,14 @@ class DeckService:
         self.db.finish_proposal(row["id"], state="applied", result=result)
         return self.describe(sub, row["id"])
 
+    @_dedupe
     async def propose_action(self, sub: str, action: str, **params: Any) -> dict[str, Any]:
         """A proposal (kind ``action``) for one Archidekt account action: actions.py."""
         from . import actions
 
         return await actions.propose(self, sub, action, params)
 
+    @_dedupe
     async def propose_clone(self, sub: str, deck_id: str, name: str | None = None) -> dict[str, Any]:
         """A proposal (kind ``clone``) that copies any deck the member can read (their own, a
         public deck, a precon) into a new private deck in their root folder, the way Archidekt's
@@ -3752,11 +4010,7 @@ class DeckService:
         # since the proposal still stops the copy (the review showed another list).
         deck = await self.get_any_deck(sub, row["deck_id"])
         if deck.fingerprint() != row["baseline_fingerprint"]:
-            raise DeckError(
-                "stale",
-                "The deck changed on Archidekt since this proposal was made. Nothing was sent. "
-                "Create a new proposal from the current deck.",
-            )
+            raise needs_look_error(None)
         name = clean_text(str((row.get("changes") or {}).get("name") or "")) or f"Copy of - {deck.name}"
         copy = await self._call(sub, lambda token, *_: self.client.copy_deck(token, deck, name=name))
         # Recorded at once, as _apply_create records its new deck (review D1): a stop from here on
@@ -3805,6 +4059,7 @@ class DeckService:
                 progress, self._call(sub, self.client.update_deck, deck.id, details_payload(details))
             )
         verified = await self.get_deck(sub, deck.id)
+        self.recheck_waiting(sub, verified)  # K2
         _left, mismatches = restore_steps(wanted, verified)
         still, _lines = details_rows(verified, snapshot_details(wanted)) if details else ({}, [])
         mismatches += [f"{k} (deck detail)" for k in sorted(still)]
@@ -3938,7 +4193,284 @@ class DeckService:
         self._audit(
             "proposal_rejected", sub=sub, detail={"proposal_id": proposal_id, "deck_id": row["deck_id"]}
         )
+        board.settle(self, sub, proposal_id, "rejected")  # holds (K6), replaced notes back (Q27l)
         return self.describe(sub, proposal_id)
+
+    # -- 0.7.29: the board of waiting notes and the assistant's tidy-up tools (board.py) ----------
+    @staticmethod
+    def max_pending() -> int:
+        return MAX_PENDING_PROPOSALS
+
+    def board_lines(self, sub: str, deck_id: str | None = None) -> list[dict[str, Any]]:
+        """Every waiting note of the member (of one deck), oldest first, with no cap (BOARD §2,
+        K10): its number, date, app, version, status, summary, cards and links, and whether the
+        app asking made it (``own``: O9, it may apply or withdraw only those)."""
+        caller = current_client.get()
+        out = []
+        for line in self.db.pending_board(sub, None if deck_id is None else _clean_deck_id(deck_id)):
+            row = self.db.get_proposal(line["id"], sub) or {}
+            lines = str(line.get("diff_text") or "").splitlines()
+            summary = "; ".join(lines[:3]) + (f" (+{len(lines) - 3} more)" if len(lines) > 3 else "")
+            amender = line.get("amended_by_client")
+            out.append(
+                {
+                    "proposal_id": line["id"],
+                    "board_no": line.get("board_no"),
+                    "kind": line.get("kind"),
+                    "deck_id": line["deck_id"],
+                    "deck_name": line.get("deck_name"),
+                    "created_at": line["created_at"],
+                    "expires_at": line["expires_at"],
+                    "created_by": self._creator_label(line.get("created_by_client")),
+                    "own": bool(caller) and line.get("created_by_client") == caller,
+                    "version": int(line.get("version") or 1),
+                    **(
+                        {
+                            "changed_by": self._creator_label(amender),
+                            "changed_at": line.get("amended_at"),
+                            "what_changed": line.get("version_note"),
+                        }
+                        if amender
+                        else {}
+                    ),
+                    **(self._status_fields(sub, line) if line.get("status") else {"status": None}),
+                    "summary": summary[:400],
+                    "cards": sorted({str(r.get("name")) for r in row.get("rows") or [] if r.get("name")})[
+                        :60
+                    ],
+                    "links": board.links_text(self.db, sub, line["id"]),
+                    "review_url": f"{self.settings.public_url}/proposals/{line['id']}",
+                }
+            )
+        return out
+
+    def _board_note(
+        self, sub: str, out: dict[str, Any], deck_id: str, rows: Any, exclude: str
+    ) -> dict[str, Any]:
+        """A propose or amend result with the deck's other waiting notes, the overlaps card by
+        card (BOARD §2) and, from SOFT_PER_DECK on, the soft hint to tidy up (G6: never refused)."""
+        others = [
+            r
+            for r in (self.db.get_proposal(x["id"], sub) for x in self.db.pending_board(sub, deck_id))
+            if r is not None and r["id"] != exclude
+        ]
+        numbers = {r["id"]: r.get("board_no") for r in others}
+        found = board.overlaps(others, rows, numbers)
+        extra: dict[str, Any] = {
+            "waiting_on_deck": [
+                {
+                    "proposal_id": r["id"],
+                    "board_no": r.get("board_no"),
+                    "summary": str(r.get("diff_text") or "")[:200],
+                }
+                for r in others
+            ]
+        }
+        if found:
+            extra["overlaps"] = found
+        if len(others) + 1 >= board.SOFT_PER_DECK:
+            extra["hint"] = (
+                f"This deck has {len(others) + 1} changes waiting. Combine or amend them "
+                "(combine_proposals, amend_proposal) before adding more, so the user can review them."
+            )
+        return {**out, **extra}
+
+    async def amend(self, sub: str, proposal_id: str, raw_changes: Any, *, version: int) -> dict[str, Any]:
+        """Replace a waiting note's changes with a new version (BOARD §2, §4; Q27m: any app may,
+        labelled). It keeps its number and date; its expiry starts again (A12); the gateway writes
+        what changed (A4). Worked out on the deck as it is now, like a new proposal. Card edits
+        and deck details only; another kind is replaced instead."""
+        row = self.db.get_proposal(proposal_id, sub)
+        if row is None:
+            raise DeckError("not_found", "No such proposal for your account.")
+        if row["state"] != "pending" or row["expires_at"] < int(time.time()):
+            raise self._not_pending(sub, proposal_id, "amended")
+        kind = row.get("kind") or "edit"
+        if kind not in ("edit", "details"):
+            raise DeckError(
+                "invalid",
+                "Only a deck edit or a deck details change can be amended. Make a new proposal and "
+                "pass replaces with this one's id instead.",
+            )
+        deck = await self.get_own_deck(sub, row["deck_id"])
+        self.recheck_waiting(sub, deck)
+        if kind == "edit":
+            changes = parse_changes(raw_changes)
+            _before, _after, rows = plan_rows(deck, changes)
+            stored: Any = [c.as_dict() for c in changes]
+        else:
+            raw = dict(raw_changes) if isinstance(raw_changes, dict) else raw_changes
+            organise_raw = (
+                {k: raw.pop(k) for k in ORGANISE_FIELDS if k in raw} if isinstance(raw, dict) else {}
+            )
+            wanted = parse_details(raw) if raw or not organise_raw else {}
+            stored, rows = details_rows(deck, wanted)
+            organise, organise_rows = await self._organise_plan(sub, deck, organise_raw)
+            if organise:
+                stored = {**stored, "organise": organise}
+                rows = [*rows, *organise_rows]
+            if not stored:
+                raise DeckError("invalid", "The deck already has these details; nothing would change.")
+        try:
+            new = self.db.amend_proposal(
+                proposal_id,
+                sub,
+                expect_version=int(version),
+                changes=stored,
+                rows=rows,
+                diff_text="\n".join(row_line(r) for r in rows),
+                by_client=current_client.get(),
+                what_changed=board.what_changed(row.get("rows"), rows),
+                baseline_fingerprint=deck.fingerprint(),
+            )
+        except ProposalVersionsFull:
+            raise DeckError(
+                "versions_full",
+                f"This proposal already keeps {MAX_PROPOSAL_VERSIONS} earlier versions, so it cannot "
+                "be amended again. Make a new proposal with the changes and pass replaces with this "
+                "one's id; nothing was changed.",
+                proposal_id=proposal_id,
+            ) from None
+        if new is None:
+            now = self.db.get_proposal(proposal_id, sub)
+            if now is not None and now["state"] == "pending":
+                raise self._changed(now)
+            raise self._not_pending(sub, proposal_id, "amended")
+        self.db.restart_expiry(proposal_id, sub, int(time.time()) + self.expiry_seconds())
+        self._audit(
+            "proposal_amended",
+            sub=sub,
+            detail={"proposal_id": proposal_id, "deck_id": row["deck_id"], "version": new},
+        )
+        return self._board_note(sub, self.describe(sub, proposal_id), row["deck_id"], rows, proposal_id)
+
+    def withdraw(self, sub: str, proposal_id: str, reason: str) -> dict[str, Any]:
+        """Close one of the calling app's own waiting notes because the user's newer request
+        makes it pointless (BOARD §2; O9: only its own). It stays visible as withdrawn, with the
+        reason, and comes back with one tap while it has not expired."""
+        row = self.db.get_proposal(proposal_id, sub)
+        if row is None:
+            raise DeckError("not_found", "No such proposal for your account.")
+        caller = current_client.get()
+        if not caller or row.get("created_by_client") != caller:
+            raise DeckError(
+                "other_client",
+                "Only the app that made a proposal may withdraw it. Tell the user; they can reject it "
+                "on the review page. Nothing was changed.",
+                review_url=f"{self.settings.public_url}/proposals/{proposal_id}",
+            )
+        why = clean_text(str(reason or ""))[:200]
+        if not why:
+            raise DeckError("invalid", "reason is required: why the user's request makes it pointless")
+        if not self.db.close_proposal(proposal_id, sub, "withdrawn", why, by={"client": caller}):
+            raise self._not_pending(sub, proposal_id, "withdrawn")
+        self._audit(
+            "proposal_withdrawn", sub=sub, detail={"proposal_id": proposal_id, "deck_id": row["deck_id"]}
+        )
+        board.settle(self, sub, proposal_id, "withdrawn")
+        return self.describe(sub, proposal_id)
+
+    def bring_back(self, sub: str, proposal_id: str) -> dict[str, Any]:
+        """A withdrawn or replaced note back to waiting while it has not expired (BOARD §4: one
+        tap restores it). The member's own pages only."""
+        if not self.db.reopen_proposal(proposal_id, sub, max_pending=MAX_PENDING_PROPOSALS):
+            row = self.db.get_proposal(proposal_id, sub)
+            if row is None:
+                raise DeckError("not_found", "No such proposal for your account.")
+            if row["state"] in ("withdrawn", "replaced") and row["expires_at"] >= int(time.time()):
+                self._room_for_proposal(sub)
+            raise self._not_pending(sub, proposal_id, "brought back")
+        self._audit("proposal_reopened", sub=sub, detail={"proposal_id": proposal_id})
+        board.settle(self, sub, proposal_id, "pending")
+        return self.describe(sub, proposal_id)
+
+    def mark_replaced(self, sub: str, new_id: str, old_ids: list[str]) -> list[str]:
+        """Close each old note as replaced by ``new_id`` (kept, linked, and back if the new one is
+        rejected: Q27l). Returns the ids closed."""
+        no = self.db.proposal_board_numbers(sub, [new_id]).get(new_id)
+        done = []
+        for old in old_ids:
+            if self.db.link_proposals(new_id, sub, "replaces", old) and self.db.close_proposal(
+                old,
+                sub,
+                "replaced",
+                f"replaced by #{no}" if no else "replaced",
+                by={"client": current_client.get()},
+            ):
+                done.append(old)
+                board.settle(self, sub, old, "withdrawn")
+        return done
+
+    def check_replaceable(self, sub: str, deck_id: str, old_ids: Any) -> list[str]:
+        """The notes a new proposal will replace (Q27m: any app's, labelled): waiting, on the
+        same deck. Refused before anything is saved."""
+        if not isinstance(old_ids, list) or not old_ids or len(old_ids) > MAX_CHANGES:
+            raise DeckError("invalid", "replaces must be a non-empty list of waiting proposal ids")
+        out = []
+        for pid in dict.fromkeys(str(x) for x in old_ids):
+            row = self.db.get_proposal(pid, sub)
+            if row is None or row["state"] != "pending" or row["expires_at"] < int(time.time()):
+                raise DeckError("invalid", f"{pid} is not a waiting proposal of this user")
+            if str(row["deck_id"]) != str(deck_id):
+                raise DeckError(
+                    "invalid", f"{pid} is for another deck; a proposal replaces notes on its own deck only"
+                )
+            out.append(pid)
+        return out
+
+    async def propose_linked(
+        self, sub: str, deck_id: str, raw_changes: Any, *, replaces: Any = None, depends_on: Any = None
+    ) -> dict[str, Any]:
+        """``propose`` with the board's links (BOARD §2): the waiting notes it replaces (kept,
+        marked replaced, back if this one is rejected: Q27l) and the ones it depends on (Q27j).
+        Both are checked before anything is saved."""
+        deck = _clean_deck_id(deck_id)
+        old = self.check_replaceable(sub, deck, replaces) if replaces else []
+        if depends_on and (not isinstance(depends_on, list) or len(depends_on) > MAX_CHANGES):
+            raise DeckError("invalid", "depends_on must be a list of proposal ids")
+        for other in depends_on or []:
+            if self.db.get_proposal(str(other), sub) is None:
+                raise DeckError("invalid", f"{other} is not a proposal of this user")
+        out = await self.propose(sub, deck, raw_changes)
+        if out.get("duplicate_of"):
+            return out
+        pid = out["proposal_id"]
+        self.link_depends(sub, pid, depends_on)
+        done = self.mark_replaced(sub, pid, old)
+        if not depends_on and not done:
+            return out
+        fresh = self.describe(sub, pid)
+        return {**out, **fresh, **({"replaced": done} if done else {})}
+
+    async def combine(self, sub: str, proposal_ids: Any) -> dict[str, Any]:
+        """One note of several waiting card edits on one deck, their changes oldest first; the old
+        ones are marked replaced by it (BOARD §2)."""
+        if not isinstance(proposal_ids, list) or len(set(map(str, proposal_ids))) < 2:
+            raise DeckError("invalid", "proposal_ids must name two or more waiting proposals")
+        rows = []
+        for pid in dict.fromkeys(str(x) for x in proposal_ids):
+            row = self.db.get_proposal(pid, sub)
+            if row is None or row["state"] != "pending" or row["expires_at"] < int(time.time()):
+                raise DeckError("invalid", f"{pid} is not a waiting proposal of this user")
+            if (row.get("kind") or "edit") != "edit":
+                raise DeckError("invalid", f"{pid} is not a deck edit; only card edits can be combined")
+            rows.append(row)
+        if len({str(r["deck_id"]) for r in rows}) != 1:
+            raise DeckError("invalid", "Only proposals for the same deck can be combined.")
+        rows.sort(key=lambda r: (r["created_at"], r.get("board_no") or 0))
+        changes = [c for r in rows for c in r["changes"]]
+        return await self.propose_linked(sub, rows[0]["deck_id"], changes, replaces=[r["id"] for r in rows])
+
+    def link_depends(self, sub: str, proposal_id: str, others: Any) -> None:
+        """Record that a new note depends on waiting notes (Q27j): it is held if one of them is
+        later rejected, withdrawn or fails."""
+        if not others:
+            return
+        if not isinstance(others, list) or len(others) > MAX_CHANGES:
+            raise DeckError("invalid", "depends_on must be a list of proposal ids")
+        for other in dict.fromkeys(str(x) for x in others):
+            if not self.db.link_proposals(proposal_id, sub, "depends_on", other):
+                raise DeckError("invalid", f"{other} is not a proposal of this user")
 
     def snapshot(self, sub: str, snapshot_id: str) -> dict[str, Any]:
         row = self.db.get_snapshot(snapshot_id, sub)
@@ -3950,6 +4482,7 @@ class DeckService:
         """Newest first; ``narrow`` is passed to the database (deck_id, search, limit, offset)."""
         return self.db.list_snapshots(sub, **narrow)
 
+    @_dedupe
     async def propose_restore(self, sub: str, snapshot_id: str) -> dict[str, Any]:
         """A proposal that puts the deck back to what a snapshot recorded, relation by relation:
         the same printings, finishes (foil, etched), categories (so the commander, sideboard and
@@ -3974,6 +4507,7 @@ class DeckService:
                 f"snapshot {snap['id']} cannot be restored onto it. Nothing was changed, and the "
                 "snapshot with its card list is still kept in the gateway.",
             ) from exc
+        self.recheck_waiting(sub, deck)  # K2
         payload, lines = restore_rows(wanted, deck)
         details, detail_lines = details_rows(deck, snapshot_details(wanted))
         lines += detail_lines
@@ -4008,6 +4542,7 @@ class DeckService:
         return self.describe(sub, pid)
 
     # -- deck details -----------------------------------------------------------
+    @_dedupe
     async def propose_deck_details(self, sub: str, deck_id: str, details: Any) -> dict[str, Any]:
         """A proposal (kind ``details``) that changes the deck's own settings rather than its cards:
         any of ``name`` (1-200 chars), ``description`` (plain text, up to 20000 chars),
@@ -4022,6 +4557,7 @@ class DeckService:
         wanted = parse_details(raw) if raw or not organise_raw else {}
         self._room_for_proposal(sub)
         deck = await self.get_own_deck(sub, deck_id)
+        self.recheck_waiting(sub, deck)  # K2
         changes, rows = details_rows(deck, wanted)
         organise, organise_rows = await self._organise_plan(sub, deck, organise_raw)
         if organise:
@@ -4133,6 +4669,10 @@ class DeckService:
                 )
                 before = was or ("a card not in this deck" if chosen else "automatic")
                 rows.append(_row("detail", field="cover", before=before, after=card.name))
+        if plan:
+            from .recheck import organise_was
+
+            plan["was"] = organise_was(deck)  # K1: a later check tells whether they moved since
         return plan, rows
 
     async def _apply_organise(
@@ -4175,16 +4715,16 @@ class DeckService:
         # are compared rather than the fingerprint, which the backup copy may bump.
         now = await self.get_own_deck(sub, deck.id)
         if any(_current_detail(now, key) != _current_detail(deck, key) for key in DETAIL_FIELDS):
-            raise DeckError(
-                "stale",
-                "The deck's details changed on Archidekt while this change was being prepared. "
-                "Nothing was sent. Create a new proposal from the current deck.",
-            )
+            from . import recheck
+
+            raise needs_look_error(recheck.REASON_DURING_APPLY)
         if changes:
             await _writing(
                 progress, self._call(sub, self.client.update_deck, deck.id, details_payload(changes))
             )
         verified = await self.get_deck(sub, deck.id)
+        if not organise:  # the organise steps change the deck again after this read
+            self.recheck_waiting(sub, verified)  # K2
         still, _lines = details_diff(verified, wanted)
         mismatches = sorted(still)
         organised: list[str] = []
@@ -5033,6 +5573,23 @@ def _backup_as_made(copy: Deck, job: dict[str, Any]) -> bool:
     )
 
 
+def needs_look_error(reason: str | None) -> DeckError:
+    """The refusal of an apply whose proposal no longer does what was reviewed on the deck as it
+    is now (K1). Nothing was sent, and ``_apply_slotted`` puts the proposal back to waiting as
+    "needs a look" with ``reason`` (its stored form, recheck.py)."""
+    from . import recheck
+
+    exc = DeckError(
+        "stale",
+        f"Not applied: {recheck.reason_text(reason)} Nothing was sent to Archidekt. The proposal is "
+        "still waiting, marked Needs a look: review it again, then apply, amend or reject it.",
+        state="pending",
+        status="needs_look",
+    )
+    exc.recheck_reason = reason or recheck.REASON_CHANGED  # type: ignore[attr-defined]
+    return exc
+
+
 def _changed_anything(progress: dict[str, Any]) -> bool:
     """Whether an apply may have changed anything on Archidekt, by its progress or by the
     proposal's stored result (which holds it): deck rows (or collection records) sent, a deck
@@ -5266,6 +5823,11 @@ def _clean_deck_id(deck_id: Any) -> str:
 
 
 def _needs_user_message(mode: str, why: str) -> str:
+    if mode == "auto":
+        return (
+            f"This proposal {why}, so even in the user's automatic approval mode it needs their own "
+            "press on the proposal card or the review page. Nothing was sent to Archidekt; do not retry."
+        )
     if mode == "semi":
         return (
             f"This proposal is high risk (it {why}), so in the user's semi-automatic approval mode it "

@@ -8,7 +8,12 @@ decks and connected apps:
   on the proposal card in the chat or on the review page, every time.
 * ``semi``: the assistant may apply a *low-risk* proposal itself; anything high-risk waits for
   the member's press as in manual.
-* ``auto``: the assistant may apply every proposal itself.
+* ``auto``: the assistant may apply every proposal itself, except the ones that always wait for
+  a card press (O7, O8; ``auto_waits``): restoring a snapshot, a commander change, a new deck, and
+  a big edit (more rows than the ``auto_big_edit_rows`` setting, 20 by default).
+
+In every mode an assistant never applies a proposal that is held (a proposal it depends on was
+rejected, withdrawn or failed, Q27j) or that another app changed after it was made (G5).
 
 Every apply still snapshots the deck first, so an auto-applied change can be undone from the
 History page. The risk tiers are decided from the proposal's stored review rows, so a
@@ -23,9 +28,10 @@ proposal is low risk only if what the review page would show is small and safe:
   a snapshot, deck details (name, format, description, visibility).
 * **consent** (R-142): the Archidekt account actions of actions.py: likes, votes, bookmarks,
   follows, posting, editing, deleting and voting on comments, creating a folder, and adding or
-  removing a deck's collaborators. Each one waits for the member's own press on its review page,
-  in every mode (0.7.19: not the in-chat card).
-* **destructive** (R-142): deleting a deck. Like consent, no mode lets an assistant apply it.
+  removing a deck's collaborators. Each one waits for the member's own press, in every mode: on
+  the card in the chat (0.7.29, Q8) or on its review page.
+* **destructive** (R-142): deleting a deck. Like consent, no mode lets an assistant apply it, and
+  only its review page applies it (not the card in the chat).
 
 The operator may set the default mode for members who have not chosen (``MTG_APPROVAL_MODE_DEFAULT``)
 and cap what members may choose (``MTG_APPROVAL_MODE_MAX``, default ``auto`` = no cap).
@@ -41,6 +47,7 @@ MODES = ("manual", "semi", "auto")
 MEMBER_ONLY = ("consent", "destructive")
 DEFAULT_MODE = "manual"
 DEFAULT_MAX_ROWS = 5
+DEFAULT_BIG_EDIT_ROWS = 20  # O8: an edit with more rows than this waits for a card press in auto
 MAX_COPIES_PER_ROW = 4  # a row that adds, removes or changes more copies than this is not small
 
 # Row kinds (decks.row_line) a low-risk edit may consist of, each with the word the wording below
@@ -95,17 +102,26 @@ HIGH_RISK_TEXT = (
 # What no mode lets an assistant apply (MEMBER_ONLY), as one sentence.
 MEMBER_ONLY_TEXT = (
     f"Actions on your Archidekt account ({ACCOUNT_ACTIONS_TEXT}) and deleting a deck are never "
-    "applied by an assistant: each one waits for your own press on its review page, in every mode."
+    "applied by an assistant: each one waits for your own press, in every mode, on the card in the "
+    "chat or on its review page (deleting a deck: on the review page only)."
 )
 
 
-def mode_help(mode: str, *, max_rows: int = DEFAULT_MAX_ROWS) -> str:
+def auto_waits_text(big_rows: int = DEFAULT_BIG_EDIT_ROWS) -> str:
+    """What still waits for a press in auto mode (O7, O8), as one sentence."""
+    return (
+        "Restoring a snapshot, a commander change, a new deck and an edit of more than "
+        f"{_rows(big_rows)} still wait for your press on the card."
+    )
+
+
+def mode_help(mode: str, *, max_rows: int = DEFAULT_MAX_ROWS, big_rows: int = DEFAULT_BIG_EDIT_ROWS) -> str:
     """What ``mode`` means, in the member's words, with this gateway's row limit for a low-risk edit."""
     if mode == "manual":
         return (
-            "Every change waits for your own press on the card in the chat or on the review page "
-            "(an action on your Archidekt account, or deleting a deck: on the review page). "
-            "The safest choice, and the default."
+            "Every change waits for your own press on the card in the chat or on the review page, "
+            "actions on your Archidekt account too (deleting a deck: on the review page only). The "
+            "safest choice, and the default."
         )
     if mode == "semi":
         return (
@@ -118,6 +134,8 @@ def mode_help(mode: str, *, max_rows: int = DEFAULT_MAX_ROWS) -> str:
         )
     return (
         "Your assistant applies the deck and collection changes it proposes, without asking you. "
+        + auto_waits_text(big_rows)
+        + " "
         + MEMBER_ONLY_TEXT
     )
 
@@ -238,8 +256,32 @@ def _copies_moved(row: dict[str, Any]) -> int:
     return 0
 
 
-def assistant_may_apply(mode: str, risk: str) -> bool:
-    """Whether the member's mode lets their assistant apply a proposal of this risk itself."""
+def auto_waits(
+    kind: str, rows: list[dict[str, Any]] | None, *, big_rows: int = DEFAULT_BIG_EDIT_ROWS
+) -> str | None:
+    """Why a proposal waits for the member's press even in auto mode (O7, O8), or None when auto
+    applies it: a restore, a new deck, a commander change, or an edit (deck or collection, A7) of
+    more than ``big_rows`` rows. Deck details and clones apply in auto."""
+    if kind == "restore":
+        return "restores a snapshot"
+    if kind == "create_deck":
+        return "creates a new deck"
+    if kind in ("edit", "collection"):
+        if rows is None:
+            return "has no review rows"
+        if any(str(r.get("kind")) == "commander" for r in rows):
+            return "changes the commander"
+        if len(rows) > big_rows:
+            return f"changes {len(rows)} rows, more than the {big_rows} auto mode applies by itself"
+        return None
+    if kind in ("details", "clone"):
+        return None
+    return "is not a deck or collection change"
+
+
+def assistant_may_apply(mode: str, risk: str, *, auto_wait: str | None = None) -> bool:
+    """Whether the member's mode lets their assistant apply a proposal of this risk itself.
+    ``auto_wait`` (``auto_waits``) is why auto mode still waits for the member's press."""
     if risk in MEMBER_ONLY:  # R-142: the member's own press on each one, in every mode
         return False
-    return mode == "auto" or (mode == "semi" and risk == "low")
+    return (mode == "auto" and not auto_wait) or (mode == "semi" and risk == "low")

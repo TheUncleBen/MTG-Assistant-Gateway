@@ -536,19 +536,21 @@ def test_budget_refills_over_time(monkeypatch: pytest.MonkeyPatch) -> None:
     assert budget.retry_after("u") == 1 and budget.take("u")
 
 
-# -- E-7: per-app pending cap; report deletes from apps are limited to their own reports --------
-async def test_one_app_cannot_fill_every_pending_slot(stack: Stack, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(decks_module, "MAX_PENDING_PER_CLIENT", 2)
+# -- E-7: apps delete only their own reports; Q129 (0.7.29): no pending limit per app ----------
+async def test_one_app_may_use_every_pending_slot(stack: Stack, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Q129: the 30-per-app limit is gone; only the member's 100 waiting proposals are counted."""
+    monkeypatch.setattr(decks_module, "MAX_PENDING_PROPOSALS", 3)
     h = stack.h
     await linked_user(stack)
     noisy, _ = await _app_token(h, "noisy")
     quiet, _ = await _app_token(h, "quiet")
-    change = {"deck_id": "42", "changes": [{"action": "add", "card_name": "Opt"}]}
-    assert structured(await call(h, noisy, "propose_deck_changes", change))["ok"]
-    assert structured(await call(h, noisy, "propose_deck_changes", change))["ok"]
-    refused = structured(await call(h, noisy, "propose_deck_changes", change))
-    assert refused["error"] == "rate_limited", refused
-    assert structured(await call(h, quiet, "propose_deck_changes", change))["ok"]
+    assert not hasattr(decks_module, "MAX_PENDING_PER_CLIENT")
+    for card in ("Opt", "Ponder", "Brainstorm"):
+        change = {"deck_id": "42", "changes": [{"action": "add", "card_name": card}]}
+        assert structured(await call(h, noisy, "propose_deck_changes", change))["ok"]
+    change = {"deck_id": "42", "changes": [{"action": "add", "card_name": "Preordain"}]}
+    refused = structured(await call(h, quiet, "propose_deck_changes", change))
+    assert refused["error"] == "rate_limited" and "3 pending proposals" in refused["message"], refused
 
 
 async def test_apps_delete_only_their_own_reports(stack: Stack) -> None:

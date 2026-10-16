@@ -66,25 +66,42 @@ CONFIRM_TOOL_META: dict[str, Any] = {
 APPLY_TOOL_META: dict[str, Any] = {"anthropic/requiresUserInteraction": True}
 
 
+def card_approval(data: dict[str, Any], *, decks: Any, sub: str, in_chat: bool) -> tuple[str | None, bool]:
+    """(code, other_app) for a waiting proposal's card: the one-time approval code when the
+    member decides it in this chat, and whether it was made in another app (whose card alone can
+    approve it, decks.check_approval; this card then sends the member to the review page). A
+    deck deletion never has a code (R-142: its review page only); since 0.7.29 every other account
+    action has one (Q8, G3). A proposal the assistant may apply itself has no buttons to press."""
+    from .decks import current_client
+
+    if not (
+        in_chat
+        and data.get("state") == "pending"
+        and data.get("proposal_id")
+        and (data.get("ok") or data.get("error") == "browser_required")
+        and not data.get("assistant_may_apply")
+    ):
+        return None, False
+    row = decks.db.get_proposal(str(data["proposal_id"]), sub)
+    if row is None or not decks.card_may_approve(row):
+        return None, False
+    creator = row.get("created_by_client")
+    if not creator or creator != current_client.get():
+        return None, True
+    return decks.approval_for(sub, row), False
+
+
 def proposal_tool_result(data: dict[str, Any], *, decks: Any, sub: str, in_chat: bool) -> Any:
     """A propose_* tool's result: the JSON as text and structured content, plus, for a pending
     proposal the member decides on, the in-chat card's one-time approval code in ``_meta`` (kept
-    out of the text and structured content, so not in the model's context)."""
+    out of the text and structured content, so not in the model's context). The code is drawn
+    only in the app that made the proposal (the only one whose press check_approval accepts); in
+    another app the card says where to approve it instead (``card_other_app``)."""
     from mcp_types import CallToolResult, TextContent
 
-    approval = None
-    if (
-        in_chat
-        and data.get("ok")
-        and data.get("state") == "pending"
-        and data.get("proposal_id")
-        and not data.get("assistant_may_apply")  # the assistant applies it: no buttons to press
-    ):
-        row = decks.db.get_proposal(str(data["proposal_id"]), sub)
-        # R-142: an Archidekt account action is approved only on the review page, so its card gets
-        # no code and shows "Approve on the review page" instead of Approve and Reject
-        if row is not None and row.get("kind") != "action":
-            approval = decks.approval_for(sub, row)
+    approval, other_app = card_approval(data, decks=decks, sub=sub, in_chat=in_chat)
+    if other_app:
+        data = {**data, "card_other_app": True}
     meta = {APPROVAL_META_KEY: approval} if approval else None
     data = with_words_note(data)
     return CallToolResult(
@@ -172,10 +189,16 @@ def proposal_text(data: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def approval_code(secret: str, *, proposal_id: str, sub: str, client_id: str, created_at: int) -> str:
+def approval_code(
+    secret: str, *, proposal_id: str, sub: str, client_id: str, created_at: int, version: int = 1
+) -> str:
     """The one-time code for one proposal: 192 bits of HMAC-SHA256 over the proposal, its owner,
-    the app that made it and when, keyed with the gateway's session secret."""
-    msg = "\x00".join(("mtg-approval", proposal_id, sub, client_id or "", str(int(created_at)))).encode()
+    the app that made it, when, and (from its second version on, G16, K4) its version, keyed with
+    the gateway's session secret. A card drawn for an earlier version no longer matches."""
+    parts = ["mtg-approval", proposal_id, sub, client_id or "", str(int(created_at))]
+    if int(version or 1) > 1:
+        parts.append(f"v{int(version)}")
+    msg = "\x00".join(parts).encode()
     digest = hmac.new(secret.encode(), msg, hashlib.sha256).digest()[:24]
     return base64.urlsafe_b64encode(digest).decode().rstrip("=")
 

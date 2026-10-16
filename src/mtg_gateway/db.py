@@ -1801,7 +1801,8 @@ class Database:
         so a deck with many proposals keeps its older ones on its own page."""
         sql = (
             "SELECT id, kind, deck_id, deck_name, state, created_at, expires_at, applied_at, "
-            "created_by_client, diff_text FROM proposals WHERE owner_sub = ?"
+            "created_by_client, diff_text, version, board_no, status, status_reason, status_at, "
+            "amended_by_client FROM proposals WHERE owner_sub = ?"
         )
         args: list[Any] = [owner_sub]
         if deck_id:
@@ -2300,6 +2301,27 @@ class Database:
             (owner_sub, str(deck_id), kind, json.dumps(changes), client, int(time.time())),
         )
         return str(row[0]) if row else None
+
+    def restart_expiry(self, proposal_id: str, owner_sub: str, expires_at: int) -> bool:
+        """A waiting proposal's expiry starts again (an amend, A12). Only while it is pending."""
+        with self.tx() as c:
+            return (
+                c.execute(
+                    "UPDATE proposals SET expires_at = ? "
+                    "WHERE id = ? AND owner_sub = ? AND state = 'pending'",
+                    (int(expires_at), proposal_id, owner_sub),
+                ).rowcount
+                == 1
+            )
+
+    def needs_look_since(self, proposal_id: str) -> int | None:
+        """When a live waiting proposal was marked "needs a look"; None otherwise."""
+        row = self._one(
+            "SELECT status_at FROM proposals WHERE id = ? AND state = 'pending' AND expires_at >= ? "
+            "AND status = 'needs_look'",
+            (proposal_id, int(time.time())),
+        )
+        return int(row[0] or 0) or None if row else None
 
     def proposal_board_numbers(self, owner_sub: str, ids: list[str]) -> dict[str, int | None]:
         """id -> board number, for the owner's proposals among ``ids``."""

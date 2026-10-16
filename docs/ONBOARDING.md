@@ -178,8 +178,7 @@ so:
      proposes). Then the assistant applies what your mode allows and tells
      you what it did. Actions on your Archidekt account (likes, votes,
      bookmarks, follows, comments, new folders and collaborator changes) and
-     deleting a deck are never applied by an assistant: each one waits for
-     your own press on its review page, in every mode. Be aware that an assistant can be tricked by text it
+     deleting a deck are never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck: on the review page only). Be aware that an assistant can be tricked by text it
      reads into proposing a change you did not ask for; in an auto mode
      that change lands without your press. Every change keeps a snapshot
      you can restore from the History page.

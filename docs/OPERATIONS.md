@@ -615,7 +615,7 @@ of mode is in the audit log as `approval_mode_set`.
 |---|---|
 | `manual` (default) | Nothing. Every proposal waits for the member's press on the card or the review page; `apply_proposal` answers `browser_required`. |
 | `semi` | Low-risk proposals only (small deck or collection edits and clones; see below). High-risk ones wait for the member's press as in manual. |
-| `auto` | Every proposal. |
+| `auto` | Every proposal except a restore, a new deck, a commander change and a big edit (more rows than `MTG_AUTO_BIG_EDIT_ROWS`, default 20, also on the admin Settings page), which wait for the member's press on the card. An assistant never applies a proposal another app changed after it was made, or one that is held because a proposal it depends on was rejected, withdrawn or failed. |
 
 The risk of a proposal comes from its stored review rows, so it is judged
 on what the review page would show, not on what the assistant says:
@@ -624,7 +624,7 @@ on what the review page would show, not on what the assistant says:
 |---|---|
 | Low | A small edit to an existing deck or to your collection: at most 5 card rows, each a card added or removed, or a new quantity, category, finish, printing, color tag or custom mana value, no more than 4 copies a row and never the commander; and a private copy of a deck (a clone), which changes nothing that exists. (The row limit is `MTG_AUTO_APPLY_MAX_ROWS`, default 5.) |
 | High | Everything else: more rows than that, a commander change, a new deck, restoring a snapshot, and the deck's details (name, format, bracket, description, visibility, folder, tags and cover). |
-| Consent, destructive (R-142) | Actions on your Archidekt account (likes, votes, bookmarks, follows, comments, new folders and collaborator changes) and deleting a deck are never applied by an assistant: each one waits for your own press on its review page, in every mode. |
+| Consent, destructive (R-142) | Actions on your Archidekt account (likes, votes, bookmarks, follows, comments, new folders and collaborator changes) and deleting a deck are never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck: on the review page only). |
 
 Every proposal result carries `approval_mode`, `risk`, `risk_reason` and
 `assistant_may_apply`, and `next_step` tells the assistant whether to call

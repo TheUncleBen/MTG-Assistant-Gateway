@@ -36,8 +36,7 @@ deck, restoring a snapshot, and the deck's details (name, format, bracket,
 description, visibility, folder, tags and cover).
 Always the member's own press: Actions on your Archidekt account (likes,
 votes, bookmarks, follows, comments, new folders and collaborator changes) and
-deleting a deck are never applied by an assistant: each one waits for your own
-press on its review page, in every mode.
+deleting a deck are never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck: on the review page only).
 Every applied proposal keeps a snapshot first and is read back to verify.
 
 | Capability | The one tool | Writes? | Notes |
