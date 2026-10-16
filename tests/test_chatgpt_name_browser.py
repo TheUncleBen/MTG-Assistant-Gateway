@@ -81,7 +81,7 @@ def test_install_warning_reads_everywhere(server: Server, width: int, theme: str
         assert note.inner_text() == (
             f"This gateway's ChatGPT connector name, “{LONG}”, is 85 characters, and ChatGPT refuses "
             "a plugin file whose name is over 80 characters. Add the connector by hand with the steps "
-            "above instead; only the gateway's owner can change the name."
+            "above instead, or ask the gateway's owner to shorten the name."
         )
         # in the plugin-file card, not under the hand-add Name box
         card = note.locator("xpath=ancestor::div[contains(@class,'card')][1]")

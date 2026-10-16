@@ -104,14 +104,16 @@ def plugin_label(site: str) -> str:
     return label or plugin_slug(site)
 
 
+def chatgpt_name_from_setting(chatgpt_name: str | None) -> str:
+    """The owner's MTG_CHATGPT_NAME through plugin_label's filter; empty when unset or when the
+    filter leaves nothing (MTG_SERVER_NAME is used then)."""
+    return " ".join(re.sub(r"[^A-Za-z0-9 ._'-]+", " ", chatgpt_name or "").split())
+
+
 def chatgpt_label(site: str, chatgpt_name: str | None = None) -> str:
     """The name ChatGPT shows for this gateway: the owner's MTG_CHATGPT_NAME when set, else their
     MTG_SERVER_NAME, through plugin_label's filter either way."""
-    if chatgpt_name:
-        label = " ".join(re.sub(r"[^A-Za-z0-9 ._'-]+", " ", chatgpt_name).split())
-        if label:
-            return label
-    return plugin_label(site)
+    return chatgpt_name_from_setting(chatgpt_name) or plugin_label(site)
 
 
 def chatgpt_name_too_long(site: str, chatgpt_name: str | None = None) -> tuple[str, int] | None:

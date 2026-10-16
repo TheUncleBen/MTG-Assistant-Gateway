@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 from cryptography.fernet import Fernet
 
 from .oidc import TOKEN_AUTH_METHODS, validate_groups_claim
-from .plugin_page import CHATGPT_NAME_MAX
+from .plugin_page import CHATGPT_NAME_MAX, chatgpt_name_from_setting, chatgpt_name_too_long
 
 
 class ConfigError(Exception):
@@ -90,14 +90,22 @@ def _chatgpt_name_env(name: str) -> str | None:
 
 
 def chatgpt_name_warning(settings: Settings) -> str | None:
-    """The startup log warning when MTG_CHATGPT_NAME is over the plugin file's limit, else None."""
-    raw = settings.chatgpt_name
-    if raw is None or len(raw) <= CHATGPT_NAME_MAX:
+    """The startup log warning when the ChatGPT connector name is over the plugin file's limit,
+    else None: the same test the admin page and the install page's plugin-file step use, with the
+    setting the name came from."""
+    long = chatgpt_name_too_long(settings.server_name, settings.chatgpt_name)
+    if not long:
         return None
+    if chatgpt_name_from_setting(settings.chatgpt_name):
+        return (
+            f"MTG_CHATGPT_NAME is {long[1]} characters; ChatGPT refuses a plugin file whose name is over "
+            f"{CHATGPT_NAME_MAX} characters. The gateway runs, but set a shorter name, or leave it empty "
+            f"to use MTG_SERVER_NAME if that is {CHATGPT_NAME_MAX} characters or fewer."
+        )
     return (
-        f"MTG_CHATGPT_NAME is {len(raw)} characters; ChatGPT refuses a plugin file whose name is over "
-        f"{CHATGPT_NAME_MAX}. The gateway runs, but set a shorter name, or leave it empty to use "
-        "MTG_SERVER_NAME."
+        f"MTG_SERVER_NAME is {long[1]} characters and MTG_CHATGPT_NAME is empty, so the ChatGPT connector "
+        f"name is too long: ChatGPT refuses a plugin file whose name is over {CHATGPT_NAME_MAX} characters. "
+        f"The gateway runs, but set MTG_CHATGPT_NAME to a name of {CHATGPT_NAME_MAX} characters or fewer."
     )
 
 
