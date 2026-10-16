@@ -1123,12 +1123,12 @@ def test_list_rows_come_from_one_builder() -> None:
     assert TABLE_HEAD + table in page
 
 
-def test_the_simulation_button_says_simulated_games() -> None:
-    """D3: the manual page keeps the name Goldfish; the simulation's tooltip says simulated games."""
+def test_the_test_button_names_the_solo_test() -> None:
+    """D3, K7: the manual page keeps the name Goldfish; the full test's tooltip names the solo test."""
     from mtg_gateway.deckpage import banner_html
 
     html = banner_html(deck([card("Opt")]), {}, own=True, csrf="t", writes_enabled=True)
-    assert "300 simulated games" in html and "goldfish games" not in html
+    assert "The solo test (300 games against no opponent)" in html and "goldfish games" not in html
     assert " Goldfish</a>" in html and "Playtest</a>" in html  # names kept
 
 
