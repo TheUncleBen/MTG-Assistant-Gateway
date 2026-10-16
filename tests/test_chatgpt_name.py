@@ -407,12 +407,12 @@ async def test_a_long_chatgpt_name_set_in_the_stack_is_fixed_there(tmp_path: Pat
             page = (await b.http.get("/admin/settings", headers=NAVIGATE)).text
         finally:
             await b.aclose()
-    fix = "Change MTG_CHATGPT_NAME in your stack to 80 characters or fewer and redeploy."
+    fix = "Change MTG_CHATGPT_NAME in your stack to a name of 80 characters or fewer, then redeploy."
     assert f"is 81 characters; ChatGPT refuses a plugin file whose name is over 80 characters. {fix}" in admin
     assert "#s-row-chatgpt_name" not in admin
     row = html.unescape(page.split("id='s-row-chatgpt_name'", 1)[1].split("id='s-row-", 1)[0])
     assert (
         "ChatGPT refuses a plugin file whose name is over 80 characters, so change MTG_CHATGPT_NAME in "
-        "your stack to 80 characters or fewer and redeploy." in row
+        "your stack to a name of 80 characters or fewer, then redeploy." in row
     )
     assert "or fewer here" not in row

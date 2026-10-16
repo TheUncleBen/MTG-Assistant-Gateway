@@ -563,6 +563,20 @@ def system_data(state: Any) -> dict[str, Any]:
     return out
 
 
+def _cleanup_warning(c: dict[str, Any]) -> str:
+    """A notice when the removed-member clean-up was set up but its token can't be read, as after a
+    stack file was replaced without its uncommented secret lines (PROOFREAD-W3 H1): the one line in
+    the System list and one start-up warning are easy to miss."""
+    if c.get("state") != "off" or c.get("cause") != "token-unreadable":
+        return ""
+    text = (
+        "The removed-member clean-up is off: its Authentik API token can't be read. If you replaced "
+        "the stack file, check that its mtg_authentik_api_token lines are still uncommented, then "
+        "redeploy."
+    )
+    return f"<div class='notice warn'>{html.escape(text)}</div>"
+
+
 def _chatgpt_name_warning(settings: Any) -> str:
     """A notice when the ChatGPT connector name (MTG_CHATGPT_NAME, else MTG_SERVER_NAME) is over
     the limit ChatGPT puts on a plugin file's name."""
@@ -576,8 +590,8 @@ def _chatgpt_name_warning(settings: Any) -> str:
         if "chatgpt_name" in getattr(settings, "env_set", ()):
             # set in the stack: the Settings page row is locked, so the fix is in the stack
             text += (
-                f"Change MTG_CHATGPT_NAME in your stack to {CHATGPT_NAME_MAX} characters or fewer "
-                "and redeploy."
+                f"Change MTG_CHATGPT_NAME in your stack to a name of {CHATGPT_NAME_MAX} characters or "
+                "fewer, then redeploy."
             )
             out += f"<div class='notice warn'>{html.escape(text)}</div>"
         else:
@@ -836,6 +850,7 @@ def _overview_body(state: Any) -> str:
             if sysd.get("last_backup_copy_error")
             else ""
         )
+        + _cleanup_warning(sysd["member_cleanup"])
         + _chatgpt_name_warning(state.settings)
         + "</div>"
     )

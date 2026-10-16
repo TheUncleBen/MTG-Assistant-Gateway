@@ -515,7 +515,9 @@ def card_model_line(detail: Any, added_by: str | None) -> str | None:
 def member_name(db: Any, sub: Any) -> str | None:
     """The name an admin page shows for a member (username, else email), or None when gone."""
     u = db.get_user(str(sub)) if sub else None
-    return str(u.get("preferred_username") or u.get("email") or "") or None if u else None
+    if u is None:
+        return None
+    return str(u.get("preferred_username") or u.get("email") or "") or "an account with no username or email"
 
 
 def event_label(event: str) -> str:

@@ -357,22 +357,50 @@ def test_a_search_that_failed_can_be_asked_again_and_old_tiles_go(server: Server
         browser.close()
 
 
-def test_a_late_next_page_is_not_added_to_a_newer_search(server: Server) -> None:
+# The page asks for page 2 by itself when the first tiles land; "Load more" is busy until it answers.
+MORE_READY = """
+() => { const b = document.querySelector('#cs-more [data-more]');
+  return !!b && !b.disabled && b.getAttribute('aria-busy') !== 'true' && b.offsetParent !== null; }
+"""
+
+
+@pytest.mark.parametrize("handler_delay", [0.0, 0.6])
+def test_a_late_next_page_is_not_added_to_a_newer_search(server: Server, handler_delay: float) -> None:
     """A next page asked for before the name changed is not added under the new search's tiles,
-    and "Load more" asks for the next page of the search on screen, not of newer typed text."""
+    and "Load more" asks for the next page of the search on screen, not of newer typed text.
+    ``handler_delay`` forces the timing that made it flaky in CI: the page has already asked for
+    page 2 (the button is busy) while the test's list of held requests is still empty."""
+    import threading
+
     from playwright.sync_api import sync_playwright
 
     exe = _chromium()
     sid = _link(server)
     held: list = []
+
+    def hold(route) -> None:
+        if handler_delay:
+            threading.Timer(handler_delay, held.append, (route,)).start()
+        else:
+            held.append(route)
+
     with sync_playwright() as p:
         browser, page, errors = _page(p, server, sid, 1280, "light", exe)
-        page.route("**/cards/api/search?*page=2*", lambda route: held.append(route))
+        page.route("**/cards/api/search?*page=2*", hold)
         page.goto(f"{server.base}/cards?q=test+land", wait_until="domcontentloaded")
         page.wait_for_function("() => document.querySelectorAll('#cardgrid .cc').length > 0", timeout=5000)
-        if not held:
-            page.locator("#cs-more [data-more]").click()
-        page.wait_for_timeout(300)
+        # click only a ready button: a busy one means page 2 is already on its way to `hold`
+        for _ in range(100):
+            if held:
+                break
+            if page.evaluate(MORE_READY):
+                page.locator("#cs-more [data-more]").click()
+                break
+            page.wait_for_timeout(50)
+        for _ in range(100):  # the request reaches `hold` (late on purpose with handler_delay)
+            if held:
+                break
+            page.wait_for_timeout(50)
         assert held, "no page-2 request was made"
         assert _query(held[0].request.url)["q"] == ["test land"]
         page.locator("#c-q").fill("sol")

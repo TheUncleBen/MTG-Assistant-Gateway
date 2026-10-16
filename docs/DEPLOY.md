@@ -319,17 +319,27 @@ If the packages are public you can skip this step.
 of the page's 47 settings a value of its own, so the page would show them
 locked (greyed out) even with no variable set.
 
-1. **If you pasted the stack file into Portainer's Web editor:** in
+1. **If you pasted the stack file into Portainer's Web editor:** first note
+   your own edits to the old text: the optional secret lines you removed the
+   `# ` from (`mtg_authentik_api_token`, `mtg_ntfy_token`, each in two
+   places) and any line you added under `environment:`. Then, in
    **Stacks** → `mtg` → **Editor**, replace the whole text with the new
-   [`deploy/portainer-stack.yml`](../deploy/portainer-stack.yml). With the
-   **Repository** build method, the update brings the new file.
+   [`deploy/portainer-stack.yml`](../deploy/portainer-stack.yml) and make
+   the same edits in it. Without the Authentik line the removed-member
+   clean-up turns off (the admin page says so); without the ntfy line the
+   gateway won't start. With the **Repository** build method, the update
+   brings the new file, and edits to the old one need the same care.
+   **Without Portainer:** update your copy of the repository (`git pull`)
+   before you run `docker stack deploy` again, so it uses the new
+   `deploy/portainer-stack.yml`; a file you edited needs the same care.
 2. **Optional:** for each setting you want to change on the Settings page,
    delete its variable. A variables file made from the older
    `stack.env.example` sets 19 of them, such as `MTG_ARCHIDEKT_BACKUPS=true`
    and `MTG_DECK_SYNC_MINUTES=30`. Any variable you keep stays locked: the
    Settings page shows it greyed out with its value, and you change it in
    the stack and redeploy.
-3. Click **Update the stack**, with "Re-pull image" ticked.
+3. Click **Update the stack** (with the Repository build method, **Pull and
+   redeploy**), with "Re-pull image" ticked.
 
 With Docker Compose, see
 [DEPLOY-COMPOSE.md](DEPLOY-COMPOSE.md#updating-to-0729-from-an-earlier-version).
