@@ -970,7 +970,7 @@ def _forget_choices_card(csrf_in: str) -> str:
         "account to every device. Light or dark mode stays on each device.</p>"
         f"<form method='post'>{csrf_in}<input type='hidden' name='action' value='forget_choices'>"
         "<label class='check'><input type='checkbox' name='confirm' value='yes' required> "
-        "Yes, put every page back to how it starts</label>"
+        "Yes, forget my view choices on every device</label>"
         "<button>Forget my view choices</button></form></div>"
     )
 
