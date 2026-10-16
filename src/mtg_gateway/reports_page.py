@@ -158,6 +158,8 @@ REPORTS_PAGE_CSS = """
 .reports-page .rp-filter label{display:inline;margin:0;font-weight:600}
 .reports-page .rp-filter select{width:auto;min-width:0;max-width:min(18rem,100%);min-height:44px;margin:0}
 .reports-page .rp-filter .btn{min-height:44px;margin:0}
+.reports-page .rp-filter .msel-btn{width:auto;min-width:11rem;max-width:min(18rem,100%);height:44px}
+@media (min-width:600px){ .reports-page .rp-filter{flex-wrap:nowrap} }
 .reports-page .rp-list,.reports-page .rp-runs{list-style:none;margin:0;padding:0}
 .reports-page .rp-row{display:grid;grid-template-columns:minmax(0,1fr);gap:.2rem;padding:.75rem 0;
   border-top:1px solid var(--border-soft)}
