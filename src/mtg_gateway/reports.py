@@ -920,18 +920,12 @@ class ReportService:
             "has_goldfish": bool(goldfish and goldfish.get("ok")),
             "has_validation": bool(validation and validation.get("ok")),
             "bracket_estimate": (stats.get("bracket_estimate") or {}).get("bracket"),
-            # the bracket set on the deck in Archidekt when the report was made: THE bracket (Q49/O14)
-            "archidekt_bracket": _set_bracket(stats.get("archidekt_bracket")),
             "created_by_client": d.get("created_by_client"),
             "status": report_status(goldfish, validation, forge),
             "engine": "preflight_only" if preflight else "forge",
             "engine_label": PREFLIGHT_ONLY if preflight else "Forge rules engine",
             "settings": run_settings(stats, goldfish, forge),
         }
-
-
-def _set_bracket(value: Any) -> int | None:
-    return value if isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= 5 else None
 
 
 def _number(value: Any) -> bool:
