@@ -284,3 +284,28 @@ async def test_the_activity_logs_say_a_setting_change_in_words(gw: Harness) -> N
         assert "Gateway setting changed" in _words((await b.http.get("/activity", headers=NAVIGATE)).text)
     finally:
         await b.aclose()
+
+
+async def test_back_to_default_keeps_the_sections_other_typed_values(gw: Harness) -> None:
+    """Review round 1, finding 6: the other fields of the section are neither saved nor dropped."""
+    b = await admin_browser(gw)
+    try:
+        await _post(b, {"group": "backups", "v_snapshots_per_deck": "40"})
+        typed = {"v_backup_keep_days": "20", "v_snapshots_per_deck": "40", "v_backup_hour_utc": "3"}
+        # refused for its missing tick: nothing saved, the typed value still in its box
+        r = await _post(b, {"reset": "snapshots_per_deck", **typed})
+        assert r.status_code == 400 and "value='20'" in r.text.split("id='s-row-backup_keep_days'")[1]
+        assert _live(gw).get("backup_keep_days") == 14
+        # done: the reset is saved, the other value is kept in the form and named
+        r = await _post(b, {"reset": "snapshots_per_deck", "confirm_snapshots_per_deck": "yes", **typed})
+        assert r.status_code == 200 and _live(gw).get("snapshots_per_deck") == 25
+        assert _live(gw).get("backup_keep_days") == 14
+        text = _words(r.text)
+        assert "Restore points kept per deck: 40 → 25" in text
+        assert "Not saved yet: “Days of nightly backups kept”." in text
+        assert "value='20'" in r.text.split("id='s-row-backup_keep_days'")[1]
+        # with nothing else changed it redirects as before
+        r = await _post(b, {"reset": "snapshots_per_deck", "v_backup_keep_days": "14"})
+        assert r.status_code == 303
+    finally:
+        await b.aclose()
