@@ -471,7 +471,7 @@ async def test_the_apply_path_refuses_an_account_action_even_if_its_tier_said_ye
     h, ark = stack.h, stack.ark
     token = await linked_user(stack)
     await _set_mode(h, "auto")
-    monkeypatch.setattr(modes, "assistant_may_apply", lambda mode, risk: True)
+    monkeypatch.setattr(modes, "assistant_may_apply", lambda mode, risk, **_: True)
     p = structured(await call(h, token, "propose_deck_social", {"deck_id": "43", "action": "like"}))
     out = structured(await call(h, token, "apply_proposal", {"proposal_id": p["proposal_id"]}))
     assert out["ok"] is False and out["error"] == "browser_required" and ark.votes == {}

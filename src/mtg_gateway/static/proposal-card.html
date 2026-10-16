@@ -311,16 +311,24 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
     if (rows.length > 1) head = rows.length + " rows: " + head;
     return head;
   }
+  // 0.7.29: a waiting change checked again against the deck as it is now, or held (Q27j).
+  function statusNote(p) {
+    if (p.state !== "pending" || !p.status) return "";
+    var head = { updated: "Updated.", needs_look: "Needs a look.", held: "Held." }[p.status] || "";
+    return (head + " " + String(p.status_reason || "")).trim();
+  }
   function modeNote(p) {
     if (p.state !== "pending" || !p.writes_enabled) return "";
+    if (p.card_other_app) return "This change was made in another app, so its Approve button works only there. You can approve it here on the review page.";
     if (p.assistant_may_apply) {
       return p.approval_mode === "auto"
-        ? "Your approval mode applies deck and collection changes without asking: your assistant applies this itself."
+        ? "Your approval mode lets your assistant apply this itself, without asking."
         : "Low-risk edit (" + (p.risk_reason || "") + "): your approval mode lets your assistant apply it without asking.";
     }
     if (p.risk === "destructive") return "This deletes the deck from your Archidekt account. Only you can approve it, on the review page, in every approval mode.";
-    if (p.risk === "consent") return "This acts on your Archidekt account under your name. Only you can approve it, on the review page, every time, in every approval mode.";
+    if (p.risk === "consent") return "This acts on your Archidekt account under your name. Only you can approve it, every time, in every approval mode.";
     if (p.approval_mode === "semi" && p.risk === "high") return "High risk (" + (p.risk_reason || "") + "), so this one needs your approval.";
+    if (p.approval_mode === "auto" && p.risk_reason) return "This one " + p.risk_reason + ", so it needs your approval even in automatic mode.";
     return "";
   }
   function setStatus(text, kind) {
@@ -334,7 +342,10 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
     var sc = result.structuredContent || {};
     var meta = result._meta || {};
     approval = typeof meta[APPROVAL_KEY] === "string" ? meta[APPROVAL_KEY] : null;
-    if (sc.ok === false || result.isError) {
+    // T-151: the assistant's apply_proposal of a change the user must approve answers with the
+    // proposal itself (error browser_required), so its card shows the change and the buttons.
+    var needsPress = sc.ok === false && sc.error === "browser_required" && sc.proposal_id && sc.state === "pending";
+    if ((sc.ok === false || result.isError) && !needsPress) {
       proposal = null;
       $("title").textContent = "No proposal";
       $("state").textContent = ""; $("state").className = "badge hidden";
@@ -346,7 +357,7 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
     }
     proposal = sc;
     var rows = Array.isArray(sc.rows) ? sc.rows : [];
-    $("title").textContent = titleFor(sc);
+    $("title").textContent = (sc.state === "pending" && sc.board_no ? "#" + sc.board_no + " " : "") + titleFor(sc);
     var st = $("state"); st.textContent = sc.state || ""; st.className = "badge " + (sc.state || "");
     $("summary").textContent = summaryFor(sc, rows);
     var list = $("rows"); list.replaceChildren();
@@ -362,11 +373,12 @@ a.link{color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer
     var RISK_TEXT = { consent: "Needs your approval", destructive: "Destructive: deletes a deck" };
     if (sc.risk) { risk.textContent = RISK_TEXT[sc.risk] || sc.risk + " risk"; risk.className = "badge risk " + sc.risk; }
     else risk.className = "badge risk hidden";
-    var note = modeNote(sc);
+    var note = [statusNote(sc), modeNote(sc)].filter(Boolean).join(" ");
     $("note").textContent = note; $("note").className = "note" + (note ? "" : " hidden");
     renderRows(list, rows, rows.length > COLLAPSE_AT ? COLLAPSE_AT : rows.length);
     var foot = [];
     if (sc.created_by) foot.push("Proposed by " + creator(sc.created_by));
+    if (Number(sc.version) > 1) foot.push("version " + Number(sc.version));
     if (sc.state === "pending" && sc.expires_at) {
       var mins = Math.max(0, Math.round((Number(sc.expires_at) * 1000 - Date.now()) / 60000));
       foot.push("expires in " + (mins >= 120 ? Math.round(mins / 60) + " h" : mins + " min"));

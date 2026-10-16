@@ -190,6 +190,7 @@ ERROR_CODES = {
     "not_pending": "FAILED_PRECONDITION",
     "already_applied": "FAILED_PRECONDITION",
     "stale": "FAILED_PRECONDITION",
+    "changed": "FAILED_PRECONDITION",
     "backup_failed": "UPSTREAM_ERROR",
     "verify_mismatch": "UPSTREAM_ERROR",
     "simulation_failed": "UPSTREAM_ERROR",

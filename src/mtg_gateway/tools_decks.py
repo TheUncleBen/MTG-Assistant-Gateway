@@ -27,6 +27,7 @@ from .decklist import DecklistError, parse_decklist, to_text
 from .deckpage import decks_unreadable_text
 from .decks import (
     DeckError,
+    _clean_deck_id,
 )
 from .schemas import (
     DeckChange,
@@ -273,10 +274,17 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "0 to 15, null takes it off) on every row of a card in that zone. set_category and "
             "set_commander move every copy of a card (set_category creates the category if the deck "
             "has none of that name). "
-            "One card takes one kind of change per proposal; a pending proposal is replaced by rejecting "
-            "it and proposing again. zone side means the maybeboard and sideboard rows (add, remove, "
-            "set_quantity and set_category only). scan_session (id or name) adds every resolved card of "
-            "that scan session; warnings lists scan cards matched from a misspelt name."
+            "One card takes one kind of change per proposal. Put one request of the user in one proposal. "
+            "The result lists the deck's other waiting proposals (waiting_on_deck) and, card by card, "
+            "where this one overlaps them (overlaps): tidy up in the same turn with amend_proposal, "
+            "replaces, withdraw_proposal or combine_proposals rather than stacking proposals. "
+            "replaces: ids of waiting proposals on this deck this one replaces (they are kept, marked "
+            "replaced, and come back if this one is rejected). depends_on: ids of waiting proposals this "
+            "one needs first (it is held if one of them is rejected). An exact repeat of your own "
+            "waiting proposal returns that one (duplicate_of). zone side means the maybeboard and "
+            "sideboard rows (add, remove, set_quantity and set_category only). scan_session (id or "
+            "name) adds every resolved card of that scan session; warnings lists scan cards matched "
+            "from a misspelt name."
         ),
         annotations={"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
         meta=card_meta,
@@ -289,15 +297,24 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             list[DeckChange] | None, Field(description="The changes, all in one proposal.")
         ] = None,
         scan_session: Annotated[str | None, Field(description="A scan session's id or name to add.")] = None,
+        replaces: Annotated[
+            list[str] | None, Field(description="Waiting proposals on this deck that this one replaces.")
+        ] = None,
+        depends_on: Annotated[
+            list[str] | None, Field(description="Waiting proposals this one needs applied first.")
+        ] = None,
     ) -> CallToolResult:
         warnings: list[str] = []
         try:
+            sub = _sub()
             raw = [deck_change_for_service(c) for c in changes or []]
             if scan_session:
-                session = _scan_session(_sub(), scan_session)
+                session = _scan_session(sub, scan_session)
                 raw += [deck_change_for_service(c) for c in session["changes"]]
                 warnings += _scan_warnings(session)
-            made = await state.decks.propose(_sub(), deck_id, raw or None)
+            made = await state.decks.propose_linked(
+                sub, deck_id, raw or None, replaces=replaces, depends_on=depends_on
+            )
             return _proposal({"ok": True, **made, **({"warnings": warnings} if warnings else {})})
         except DeckError as exc:
             return _proposal(_tool_error(exc))
@@ -306,14 +323,106 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
         name="list_my_proposals",
         title="List my proposals",
         description=(
-            "The user's 20 most recent proposals, newest first: kind, deck, state (pending, applied, "
-            "rejected, expired, failed), a one-line summary of the change, created_at and, for applied "
-            "ones, applied_at (for rejected ones closed_at), as Unix times. get_proposal shows one in full."
+            "The user's proposals. By default the 20 most recent of any state, newest first: kind, deck, "
+            "state (pending, applied, rejected, expired, failed, withdrawn, replaced), a one-line summary, "
+            "created_at and, for applied ones, applied_at (for closed ones closed_at), as Unix times. "
+            "pending_only: every waiting proposal, with no limit, as the deck's board: its number "
+            "(board_no), version, status (updated, needs_look, held, with status_reason), the cards it "
+            "touches, its links, and own (true when this app made it: you may apply or withdraw only "
+            "those). deck_id narrows to one deck; oldest_first puts the oldest first. get_proposal shows "
+            "one in full. To let the user approve waiting changes in the chat, use show_waiting_changes."
         ),
         annotations={"readOnlyHint": True, "openWorldHint": False},
     )
-    async def list_my_proposals() -> dict[str, object]:
-        return {"ok": True, "proposals": [_closed_at(p) for p in state.decks.list_proposals(_sub())]}
+    async def list_my_proposals(
+        pending_only: Annotated[bool, Field(description="Only the waiting ones, all of them.")] = False,
+        deck_id: Annotated[str | None, Field(description="Only this deck's (id or URL).")] = None,
+        oldest_first: Annotated[bool, Field(description="Oldest first instead of newest first.")] = False,
+    ) -> dict[str, object]:
+        try:
+            sub = _sub()
+            if pending_only:
+                lines = state.decks.board_lines(sub, deck_id)
+                return {"ok": True, "proposals": lines if oldest_first else lines[::-1]}
+            narrow = {"deck_id": _clean_deck_id(deck_id)} if deck_id else {}
+            got = [_closed_at(p) for p in state.decks.list_proposals(sub, **narrow)]
+            return {"ok": True, "proposals": got[::-1] if oldest_first else got}
+        except DeckError as exc:
+            return _tool_error(exc)
+
+    @server.tool(
+        name="amend_proposal",
+        title="Amend a waiting proposal",
+        description=(
+            "Change a waiting proposal in place instead of stacking a new one (the user's newer request "
+            "changes it): changes replaces its whole list (same format as propose_deck_changes; for a "
+            "deck details proposal, the same object as propose_deck_details). It keeps its number and "
+            "date, gets the next version, and the user sees which app changed it and what changed. "
+            "version: the version you last saw; a proposal changed since is refused with changed. Any "
+            "app may amend any waiting proposal, but one amended by an app other than the one that made "
+            "it always waits for the user's own press. At its version limit (versions_full) make a new "
+            "proposal that replaces it instead. Changes nothing on Archidekt."
+        ),
+        annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": True},
+        meta=card_meta,
+    )
+    async def amend_proposal(
+        proposal_id: str,
+        version: Annotated[int, Field(description="The version you last saw (get_proposal's version).")],
+        changes: Annotated[
+            list[DeckChange] | dict[str, Any],
+            Field(description="The new changes: a list as for propose_deck_changes, or a details object."),
+        ],
+    ) -> CallToolResult:
+        try:
+            raw: Any = (
+                [deck_change_for_service(c) for c in changes] if isinstance(changes, list) else dict(changes)
+            )
+            return _proposal(
+                {"ok": True, **(await state.decks.amend(_sub(), proposal_id, raw, version=version))}
+            )
+        except DeckError as exc:
+            return _proposal(_tool_error(exc))
+
+    @server.tool(
+        name="withdraw_proposal",
+        title="Withdraw your own waiting proposal",
+        description=(
+            "Take back one of your own waiting proposals because the user's newer request makes it "
+            "pointless (say why in reason, e.g. 'card removed in #5'). It stays visible as withdrawn and "
+            "the user can bring it back. Only the app that made a proposal may withdraw it; for anything "
+            "else the user rejects it. Changes nothing on Archidekt."
+        ),
+        annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
+    )
+    async def withdraw_proposal(
+        proposal_id: str,
+        reason: Annotated[str, Field(description="Why it is withdrawn, in a few words.")],
+    ) -> dict[str, object]:
+        try:
+            return {"ok": True, **_closed_at(state.decks.withdraw(_sub(), proposal_id, reason))}
+        except DeckError as exc:
+            return _tool_error(exc)
+
+    @server.tool(
+        name="combine_proposals",
+        title="Combine waiting proposals into one",
+        description=(
+            "Make one proposal of several waiting deck edits on one deck (for example six small ones), "
+            "their changes in order, oldest first. The old ones are kept, marked replaced, and come back "
+            "if the combined one is rejected. Card edits only, up to 40 changes in all, and one kind of "
+            "change per card. Changes nothing on Archidekt."
+        ),
+        annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": True},
+        meta=card_meta,
+    )
+    async def combine_proposals(
+        proposal_ids: Annotated[list[str], Field(description="Two or more waiting proposals on one deck.")],
+    ) -> CallToolResult:
+        try:
+            return _proposal({"ok": True, **(await state.decks.combine(_sub(), proposal_ids))})
+        except DeckError as exc:
+            return _proposal(_tool_error(exc))
 
     @server.tool(
         name="get_proposal",
@@ -391,9 +500,11 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
             "idempotentHint": True,
             "openWorldHint": True,
         },
-        meta=dict(APPLY_TOOL_META),
+        # T-151: the answer is the proposal card, so asking to apply a change the user must
+        # approve shows the card with Approve and Reject, not only a link.
+        meta={**APPLY_TOOL_META, **(card_meta or {})},
     )
-    async def apply_proposal(proposal_id: str, ctx: Context) -> dict[str, object]:
+    async def apply_proposal(proposal_id: str, ctx: Context) -> CallToolResult:
         try:
             sub = _sub()
             if s.writes_enabled:
@@ -404,12 +515,22 @@ def add_deck_tools(state: AppState, h: SimpleNamespace) -> None:
                     # and the gateway waits a little for the member's Apply there.
                     done = await apply_on_review_page(ctx, lambda: state.decks.describe(sub, proposal_id))
                     if done is not None:
-                        return with_words_note(done)
+                        return _proposal(with_words_note(done))
             # The service re-checks the mode and the risk itself, so there is no way around it.
             # Q90: a proposal stored with a formatted document (0.7.26) is applied as its words
-            return with_words_note({"ok": True, **(await state.decks.apply(sub, proposal_id, via="mcp"))})
+            return _proposal(
+                with_words_note({"ok": True, **(await state.decks.apply(sub, proposal_id, via="mcp"))})
+            )
         except DeckError as exc:
-            return _tool_error(exc)
+            out = _tool_error(exc)
+            if exc.kind == "browser_required":
+                # T-151: the user's own press is needed. The answer carries the proposal itself,
+                # so the chat draws its card (with Approve and Reject in the app that made it).
+                try:
+                    out = {**_closed_at(state.decks.describe(_sub(), proposal_id)), **out}
+                except DeckError:
+                    pass
+            return _proposal(out)
 
     @server.tool(
         name="confirm_proposal",

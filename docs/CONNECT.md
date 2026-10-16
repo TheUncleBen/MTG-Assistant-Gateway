@@ -247,8 +247,7 @@ a restore, the deck's details and bigger edits still ask you) or *Full
 auto* (it applies the deck and collection changes it proposes).
 Actions on your Archidekt account (likes, votes, bookmarks, follows,
 comments, new folders and collaborator changes) and deleting a deck are
-never applied by an assistant: each one waits for your own press on its
-review page, in every mode. It is your own setting:
+never applied by an assistant: each one waits for your own press, in every mode, on the card in the chat or on its review page (deleting a deck: on the review page only). It is your own setting:
 it covers only your account, your decks and the apps you connected, and
 only you can change it, in your browser. In either auto mode the assistant
 applies what the mode allows with `apply_proposal` and tells you; the card
