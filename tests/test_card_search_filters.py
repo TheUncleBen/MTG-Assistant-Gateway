@@ -312,7 +312,7 @@ async def test_the_list_view_is_drawn_and_remembered(stack: Stack) -> None:
         d = r.json()
         assert d["html"].startswith("<ul class='cardlist' id='cardgrid' data-view='list' data-linked>")
         assert "class='nmb' data-open>Sol Ring</button>" in d["html"]
-        assert "mtg_view_cards=list" in r.headers.get("set-cookie", "")
+        assert stack.h.db.get_pref("user-1", "view.cards") == "list"  # on the account (0.7.29)
         r = await b.http.get("/cards", params={"q": "sol"})
         assert "class='cardlist'" in r.text  # the remembered view
         assert "value='list' form='cs-form' checked" in r.text

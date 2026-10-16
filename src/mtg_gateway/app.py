@@ -102,6 +102,7 @@ from .notify import Notifier
 from .oidc import OIDCClient
 from .pages import SESSION_COOKIE, _csrf, add_browser_routes, browser_session
 from .plugin_page import CONNECTOR_ICON_PATH, CONNECTOR_ICON_PX, SERVER_DESCRIPTION, add_plugin_routes
+from .prefs import add_prefs_routes
 from .prices import DailyJobs, PriceService
 from .reports import ReportService
 from .scan import add_scan
@@ -867,6 +868,7 @@ def build_mcp_server(state: AppState) -> MCPServer:
         forge_games=s.forge_games,
     )
     add_api_routes(server, state, state.reports)
+    add_prefs_routes(server, state)
     add_companion_routes(server, state, state.reports)
     add_admin_routes(server, state)
     # Notifications and summaries (notify.py, summary.py), and the watchlists and price history

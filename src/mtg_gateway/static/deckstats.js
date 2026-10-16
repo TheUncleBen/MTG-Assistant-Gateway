@@ -1,6 +1,6 @@
 /* Deck page statistics: Archidekt's extra stats controls. The server draws every variant (curve by
    None / Type / Category, colours as Bar or Pie, production from all cards or lands only); this
-   shows the chosen one without a reload, remembers the choice in this browser, and lets a click on
+   shows the chosen one without a reload, remembers the choice on the member's account, and lets a click on
    a chart part (a curve bar or segment, a colour slice, a legend entry, a quantity row) show just
    those cards in the deck list above, with a "Show all cards" button to go back. */
 (function () {
@@ -8,12 +8,12 @@
   var stats = document.getElementById("stats");
   if (!stats) return;
   var $$ = function (sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); };
-  var KEY = "mtg.deckstats";
+  var KEY = "deckstats";  // kept on the account (0.7.29, prefs.js)
+  var store = window.MtgPrefs;
+  var kept = store ? store.get(KEY) : null;
   var prefs = {};
-  try { prefs = JSON.parse(window.localStorage.getItem(KEY) || "{}") || {}; } catch (e) { prefs = {}; }
-  function save() {
-    try { window.localStorage.setItem(KEY, JSON.stringify(prefs)); } catch (e) { /* private window: not kept */ }
-  }
+  if (kept && typeof kept === "object") Object.keys(kept).forEach(function (k) { prefs[k] = kept[k]; });
+  function save() { if (store) store.set(KEY, prefs); }
 
   // -- the toggles -------------------------------------------------------------------------
   function show(box, attr, value) {

@@ -169,10 +169,10 @@
   const lineKey = (x) => (x && x.card ? x.card.scryfall_id + '|' + String(isFoil(x)) : null);
 
   // ----------------------------------------------------------------- layout
-  // A first-visit explanation of the three steps; "Got it" hides it for this browser, the "How it
-  // works" link under the tabs brings it back.
-  const INTRO_KEY = 'mtg-scan-intro-seen';
-  const introSeen = () => { try { return localStorage.getItem(INTRO_KEY) === '1'; } catch (e) { return false; } };
+  // A first-visit explanation of the three steps; "Got it" hides it on every device (kept on the
+  // account from 0.7.29, prefs.js), the "How it works" link under the tabs brings it back.
+  const INTRO_KEY = 'scan.intro';
+  const introSeen = () => !!(window.MtgPrefs && window.MtgPrefs.get(INTRO_KEY) === true);
   function introCard() {
     const step = (n, title, text) => h('li', null, h('span', { class: 'num', text: String(n) }), h('div', null, h('strong', { text: title }), ' ', text));
     const box = h('section', { class: 'card intro', id: 'intro' },
@@ -181,7 +181,7 @@
         step(1, 'Scan.', 'Hold a card in the frame with its title in the dashed box and tap the shutter, or switch on Auto and show cards one after another. No camera handy? Use the Type tab.'),
         step(2, 'Check the list.', 'Fix a wrong match, pick the exact printing or foil, change quantities.'),
         step(3, 'Choose what to do with the cards.', 'Save them to your collection, add them to one of your decks, start a new deck, or keep the scan for later (your assistant can pick it up too).')),
-      h('div', { class: 'list-actions' }, h('button', { class: 'primary', onclick: () => { try { localStorage.setItem(INTRO_KEY, '1'); } catch (e) { /* private mode */ } box.remove(); } }, 'Got it')));
+      h('div', { class: 'list-actions' }, h('button', { class: 'primary', onclick: () => { if (window.MtgPrefs) window.MtgPrefs.set(INTRO_KEY, true); box.remove(); } }, 'Got it')));
     return box;
   }
 
