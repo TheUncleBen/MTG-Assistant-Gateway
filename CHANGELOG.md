@@ -33,9 +33,9 @@ so going back to 0.7.27 is a plain image swap. The Android app is unchanged.
 - The Collection page explains how to import its Export CSV on archidekt.com: the column type to
   pick for each column, and what each condition and language code means.
 - After a collection import the page says how many cards went in and names each line it could not
-  take as given: a language Archidekt's collection can't store (kept as English), a condition it
-  doesn't store, such as EX (kept as Near Mint), a copy added to a card you already have in another
-  language, and cards not found. A refused import says why and which line.
+  take as given: a language Archidekt's collection can't store (kept as English), a condition
+  Archidekt's collection doesn't store, such as EX (kept as Near Mint), a copy added to a card you
+  already have in another language, and cards not found. A refused import says why and which line.
 - The collection import reads a Language column, in the gateway's codes, Archidekt's codes or
   the language's English name. Assistants can give a language when they add to the collection.
 - `MTG_CHATGPT_NAME` (optional) gives the ChatGPT connector its own name: the name in the ChatGPT
@@ -56,7 +56,7 @@ so going back to 0.7.27 is a plain image swap. The Android app is unchanged.
   description you type and may not show the gateway's icon for a connector added by hand.
 - The ChatGPT install step no longer calls 10 KB ChatGPT's limit for the icon.
 - Prices over a thousand read with a separator ($3,500.00) in the printing picker, the card
-  viewer and the editor, and the card viewer, the deck page and the editor write a printing as
+  viewer and the editor. The card viewer, the deck page and the editor write a printing as
   SET #number.
 - The admin page's clean-up row says each state in plain words.
 - CI also checks that the code compiles and imports on Python 3.11, the oldest version the
@@ -64,7 +64,8 @@ so going back to 0.7.27 is a plain image swap. The Android app is unchanged.
 
 ### Fixed
 - Changing a companion or a double-faced card set to show its back (its printing, category,
-  quantity, label or mana value) no longer clears that setting on Archidekt.
+  quantity, label or mana value) no longer clears that setting on Archidekt, and the deck page's
+  Undo of its removal puts the setting back.
 - Card-name suggestions answer faster while typing; a card Scryfall doesn't know is remembered.
 - The assistant's printing list respects its limit for the set list too.
 - Undo of a move on the deck page files a card back under every category it had.
@@ -74,7 +75,7 @@ so going back to 0.7.27 is a plain image swap. The Android app is unchanged.
   quicker on big decks.
 - Every guarded form needs its render stamp, so a form can't be sent before it was shown.
 - A collection import with a cell or a quantity too big to read says which line, instead of
-  failing with an error page.
+  failing with an error page. A CSV whose name column is called Card is read as a CSV.
 
 ## [0.7.27] - 2026-10-14
 
