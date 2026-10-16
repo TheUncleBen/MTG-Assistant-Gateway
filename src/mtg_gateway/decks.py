@@ -959,6 +959,7 @@ def printing_plan_rows(
                     "categories": list(c.categories),
                     "finish": ch.finish or (c.modifier or "Normal"),
                     "companion": c.companion,
+                    "flipped_default": c.flipped_default,
                     "label": c.label,
                     "custom_cmc": c.custom_cmc,
                 }
@@ -1357,8 +1358,9 @@ def restore_rows(snapshot: Deck, current: Deck) -> tuple[list[dict[str, Any]], l
                     "categories": list(card.categories),
                     "modifications": {
                         "quantity": qty,
-                        "companion": False,
-                        "flippedDefault": False,
+                        # the snapshot row's own flags, so a restore puts them back too
+                        "companion": bool(getattr(card, "companion", False)),
+                        "flippedDefault": bool(getattr(card, "flipped_default", False)),
                         "modifier": card.modifier or "Normal",
                     },
                 }
@@ -3139,6 +3141,8 @@ class DeckService:
                     spec["modifiers"][modifier] = spec["modifiers"].get(modifier, 0) + int(r["quantity"])
                     entry = _add_entry(card["id"], int(r["quantity"]), r["categories"], modifier)
                     entry["modifications"]["companion"] = bool(r.get("companion"))
+                    # a double-faced card set to show its back keeps that on the new printing
+                    entry["modifications"]["flippedDefault"] = bool(r.get("flipped_default"))
                     if r.get("label"):
                         entry["modifications"]["label"] = r["label"]
                     if r.get("custom_cmc") is not None:
