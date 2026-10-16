@@ -28,6 +28,7 @@ import re
 import secrets
 import time
 import uuid
+import weakref
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
@@ -292,6 +293,9 @@ class MemberCache:
         self._limits: dict[str, float] = {}  # sub -> that shorter life, for the value kept now
         self._refreshing: dict[str, tuple[asyncio.Task[Any], float]] = {}  # task, when it started
         self._dropped: dict[str, float] = {}
+        # the deck sync's fetches (``refreshed``): read on the sync's terms, no retry and no unlink,
+        # so a page that shared one which failed reads again on its own terms (A6)
+        self._background: weakref.WeakSet[asyncio.Task[Any]] = weakref.WeakSet()
 
     def peek(self, sub: str) -> tuple[Any, str]:
         """(value, state) where state is fresh, stale or miss (value None)."""
@@ -330,19 +334,21 @@ class MemberCache:
         """A value fetched now (sharing a fetch already in flight), for the deck sync: unlike
         ``get`` it never answers a failed fetch with an older value, so the error reaches the
         caller. None when the fetch takes longer than ``wait`` (it carries on and fills the cache)."""
-        task = self._refresh(sub, fetch)
+        task = self._refresh(sub, fetch, background=True)
         done, _pending = await asyncio.wait({task}, timeout=wait)
         return task.result() if done else None
 
     def refreshing(self, sub: str) -> bool:
         return sub in self._refreshing
 
-    def _refresh(self, sub: str, fetch: Callable[[], Awaitable[Any]]) -> asyncio.Task[Any]:
+    def _refresh(
+        self, sub: str, fetch: Callable[[], Awaitable[Any]], *, background: bool = False
+    ) -> asyncio.Task[Any]:
         running = self._refreshing.get(sub)
         started = time.monotonic()
         # A fetch that started before the last drop is not shared with a reader arriving after it:
         # it may carry the pre-write list. That fetch still finishes (and stores nothing).
-        if running is not None and self._dropped.get(sub, 0.0) <= running[1]:
+        if running is not None and not running[0].done() and self._dropped.get(sub, 0.0) <= running[1]:
             return running[0]
 
         async def run() -> Any:
@@ -366,6 +372,8 @@ class MemberCache:
         # Archidekt slot (_slot_holder), client id or request timing.
         task = asyncio.create_task(run(), context=contextvars.Context())
         task.add_done_callback(done)
+        if background:
+            self._background.add(task)
         self._refreshing[sub] = (task, started)
         if len(self._entries) > 10_000:
             self._entries.clear()
@@ -403,12 +411,23 @@ class MemberCache:
         # waiting for it is what counts as its Archidekt time (timing.py).
         started = time.perf_counter()
         try:
-            if wait is None:
-                return await asyncio.shield(task)
-            done, _pending = await asyncio.wait({task}, timeout=wait)
-            if not done:
-                return None
-            return task.result()
+            for attempt in (1, 2):
+                try:
+                    if wait is None:
+                        return await asyncio.shield(task)
+                    done, _pending = await asyncio.wait({task}, timeout=wait)
+                    if not done:
+                        return None
+                    return task.result()
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    # a page that joined the deck sync's read, which failed: one read of its own,
+                    # with the page's retry and error handling, before the error is shown (A6)
+                    if attempt == 2 or task not in self._background:
+                        raise
+                    task = self._refresh(sub, fetch)
+            return None  # not reached
         finally:
             add_time(archidekt_time, time.perf_counter() - started)
 
@@ -2368,8 +2387,8 @@ class DeckService:
                 background=True,
             )
 
-        # A page arriving meanwhile shares this read, and with it the sync's terms (no retry, no
-        # unlink); its next load reads again.
+        # A page arriving meanwhile shares this read, read on the sync's terms (no retry, no
+        # unlink); when it fails, the page reads once more on its own terms (A6, MemberCache.get).
         rows = await self.deck_lists.refreshed(sub, fetch, wait=wait)
         return None if rows is None else [dict(d) for d in rows]
 

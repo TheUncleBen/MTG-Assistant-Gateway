@@ -218,3 +218,44 @@ def test_the_history_row_shows_the_bracket_set_on_the_deck_over_the_estimate() -
     assert "bracket 2" in set_one and "about" not in set_one
     none_set = build_events([], [], [row({**est, "archidekt_bracket": None})], csrf_input="")[0]["summary"]
     assert "bracket about 3" in none_set
+
+
+async def test_a_page_that_shared_a_failed_sync_read_reads_again_on_its_own() -> None:
+    """A6: a page arriving while the deck sync's read is under way shares it; when that read fails
+    (the sync reads with no retry), the page reads once more on its own terms instead of showing
+    the error. A page's own failed read is not repeated."""
+    import asyncio
+
+    from mtg_gateway.decks import MemberCache
+
+    cache = MemberCache(fresh=60, stale=600)
+    gate = asyncio.Event()
+    calls: list[str] = []
+
+    async def sync_fetch() -> list[str]:
+        calls.append("sync")
+        await gate.wait()
+        raise RuntimeError("Archidekt busy")
+
+    async def page_fetch() -> list[str]:
+        calls.append("page")
+        return ["deck"]
+
+    sync = asyncio.create_task(cache.refreshed("u", sync_fetch, wait=5))
+    await asyncio.sleep(0)
+    page = asyncio.create_task(cache.get("u", page_fetch, wait=5))
+    await asyncio.sleep(0)
+    gate.set()
+    assert await page == ["deck"]
+    with pytest.raises(RuntimeError):
+        await sync
+    assert calls == ["sync", "page"]
+
+    async def failing() -> list[str]:
+        calls.append("own")
+        raise RuntimeError("down")
+
+    cache.drop("u")
+    with pytest.raises(RuntimeError):
+        await cache.get("u", failing, wait=5)
+    assert calls.count("own") == 1

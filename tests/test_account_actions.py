@@ -873,14 +873,42 @@ async def test_only_the_review_page_marker_applies_an_account_action(
     assert p["ok"] and p["kind"] == "action", p
     decks = h.app.state.gateway.decks
     before = (_archidekt_state(ark), [dict(r) for r in ark.editors.get(42, [])])
+    sent = len(ark.calls)
     with pytest.raises(DeckError) as refused:
         await decks.apply(SUB, p["proposal_id"], via=via)
     assert refused.value.kind == "browser_required"
     assert (_archidekt_state(ark), [dict(r) for r in ark.editors.get(42, [])]) == before
+    # nothing reached Archidekt, by its request log (A11, 0.7.21 review N-2): not even a read
+    assert ark.calls[sent:] == [], ark.calls[sent:]
     assert decks.db.get_proposal(p["proposal_id"], SUB)["state"] == "pending"
     # positive control, in the same harness: the review page's marker applies that same proposal
     done = await decks.apply(SUB, p["proposal_id"], via=REVIEW_PAGE)
     assert done["state"] == "applied", done
+
+
+async def test_the_refusal_list_covers_every_account_action(stack: Stack) -> None:
+    """A11 (0.7.21 review N-1): every action type actions.py knows is in ALL_ACCOUNT_ACTIONS, so a new
+    one cannot skip the refusal test above."""
+    from mtg_gateway.actions import ACTIONS
+
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    _seed_comment(ark)
+    own = dict(ark.comments[300043][0], id=555002, text="Mine.")
+    own["owner"] = {"id": 77, "username": "alice", "avatar": None, "frame": None}
+    ark.comments[300043].append(own)
+    ark.follows["alice"] = {78}
+    ark.editors[42] = [_amy_row()]
+    seen = set()
+    for tool, args in ALL_ACCOUNT_ACTIONS:
+        if tool == "propose_collaborator" and args["action"] == "add":
+            ark.editors[42] = []
+        p = structured(await call(h, token, tool, args))
+        assert p["ok"], (tool, args, p)
+        seen.add(p["rows"][0]["action"])
+        h.app.state.gateway.decks.reject(SUB, p["proposal_id"])
+        ark.editors[42] = [_amy_row()]
+    assert seen == set(ACTIONS), set(ACTIONS) - seen
 
 
 def test_only_the_review_page_passes_the_marker() -> None:
