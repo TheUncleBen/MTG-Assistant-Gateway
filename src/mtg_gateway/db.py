@@ -182,6 +182,12 @@ MAX_PREF_NAME = 120
 # Earlier versions kept per waiting proposal (proposal_versions): past it an amend is refused, so an
 # app that keeps amending one note can't grow the database without bound (step 0 review, fix 3).
 MAX_PROPOSAL_VERSIONS = 50
+
+
+class ProposalVersionsFull(Exception):
+    """amend_proposal refused: the proposal already keeps MAX_PROPOSAL_VERSIONS earlier versions."""
+
+
 CLOSED_PROPOSAL_STATES = ("expired", "rejected", "failed", "withdrawn", "replaced")
 # Waiting statuses of a pending proposal (0.7.29 flexible approvals): None is plain waiting.
 PROPOSAL_STATUSES = ("updated", "needs_look", "held")
@@ -1970,13 +1976,16 @@ class Database:
         number (BOARD §2, §4). The version being replaced is kept in ``proposal_versions`` with
         who made it. Only while it is pending, unexpired and still at ``expect_version`` (so two
         amends, or an amend and an apply that claimed it first, cannot both win). Its waiting
-        status is cleared. Refused once it keeps MAX_PROPOSAL_VERSIONS earlier versions. Returns the
-        new version, or None when nothing was changed."""
+        status is cleared, except a hold that a rejected note it depends on put there (Q27j): that
+        stays until the link is gone, so the new version can't apply by itself. Returns the new
+        version, or None when it isn't waiting, has expired or is at another version. Raises
+        ProposalVersionsFull once it keeps MAX_PROPOSAL_VERSIONS earlier versions."""
         now = int(time.time())
         with self.tx() as c:
             row = c.execute(
                 "SELECT version, changes_json, rows_json, diff_text, created_by_client, created_at, "
-                "amended_by_client, amended_at, version_note FROM proposals WHERE id = ? AND owner_sub = ? "
+                "amended_by_client, amended_at, version_note, status, status_reason FROM proposals "
+                "WHERE id = ? AND owner_sub = ? "
                 "AND state = 'pending' AND expires_at >= ? AND version = ?",
                 (proposal_id, owner_sub, now, int(expect_version)),
             ).fetchone()
@@ -1986,7 +1995,16 @@ class Database:
                 "SELECT COUNT(*) FROM proposal_versions WHERE proposal_id = ?", (proposal_id,)
             ).fetchone()
             if kept >= MAX_PROPOSAL_VERSIONS:
-                return None
+                raise ProposalVersionsFull(proposal_id)
+            held = (
+                row["status"] == "held"
+                and c.execute(
+                    "SELECT 1 FROM proposal_links l JOIN proposals o ON o.id = l.other_id "
+                    "WHERE l.proposal_id = ? AND l.kind = 'depends_on' AND o.state = 'rejected' LIMIT 1",
+                    (proposal_id,),
+                ).fetchone()
+                is not None
+            )
             old = int(row["version"])
             c.execute(
                 """INSERT INTO proposal_versions (proposal_id, version, changes_json, rows_json, diff_text,
@@ -2004,8 +2022,8 @@ class Database:
             )
             c.execute(
                 "UPDATE proposals SET changes_json = ?, rows_json = ?, diff_text = ?, version = ?, "
-                "amended_at = ?, amended_by_client = ?, version_note = ?, status = NULL, "
-                "status_reason = NULL, status_at = ?, "
+                "amended_at = ?, amended_by_client = ?, version_note = ?, status = ?, "
+                "status_reason = ?, status_at = ?, "
                 "baseline_fingerprint = COALESCE(?, baseline_fingerprint) WHERE id = ?",
                 (
                     json.dumps(changes),
@@ -2015,6 +2033,8 @@ class Database:
                     now,
                     by_client,
                     what_changed,
+                    "held" if held else None,
+                    row["status_reason"] if held else None,
                     now,
                     baseline_fingerprint,
                     proposal_id,

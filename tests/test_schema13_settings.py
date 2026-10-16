@@ -491,7 +491,8 @@ def test_every_registered_setting_is_a_deployment_setting_with_sane_bounds() -> 
 
 
 def test_pacing_can_only_be_made_gentler_from_the_page() -> None:
-    """R-132, G13: the page can't make the gateway call Archidekt or Scryfall faster than today."""
+    """R-123 (be gentle on Archidekt), G13: the page can't make the gateway call Archidekt or
+    Scryfall faster than today."""
     faster_when_higher = (
         "archidekt_calls_per_10_min",
         "archidekt_max_per_minute",
@@ -522,7 +523,9 @@ def test_pacing_can_only_be_made_gentler_from_the_page() -> None:
     sync = MANAGED_SETTINGS["deck_sync_minutes"]
     assert sync.parse("0") == 0 and sync.parse(30) == 30 and sync.parse(1440) == 1440
     for faster in (1, 29):
-        with pytest.raises(SettingError, match="0 \\(off\\) or between 30 and 1440"):
+        with pytest.raises(
+            SettingError, match="^deck_sync_minutes must be 0 \\(off\\) or between 30 and 1,440 minutes$"
+        ):
             sync.parse(faster)
 
 
@@ -546,7 +549,10 @@ def test_live_settings_default_stored_and_deployment_values(tmp_path: Path) -> N
         # a deployment value wins and locks the setting
         assert live.get("forge_games") == 12 and live.locked("forge_games")
         assert live.source("forge_games") == "deployment"
-        with pytest.raises(SettingError, match="MTG_FORGE_GAMES"):
+        with pytest.raises(
+            SettingError,
+            match=r"^forge_games is set in your stack \(MTG_FORGE_GAMES\)\. Change it there and redeploy\.$",
+        ):
             live.set("forge_games", 20, by="admin-1")
         with pytest.raises(SettingError):
             live.reset("forge_games", by="admin-1")
@@ -628,6 +634,7 @@ def test_the_deployment_marks_what_it_set(tmp_path: Path, monkeypatch: pytest.Mo
     monkeypatch.setenv("MTG_FORGE_PARALLEL_GAMES", "2")
     monkeypatch.setenv("MTG_ARCHIDEKT_CALLS_PER_10_MIN", "600")  # the deployment may go past the page
     monkeypatch.setenv("MTG_SERVER_NAME", "")  # blank: left to the page (Q17)
+    monkeypatch.setenv("MTG_CHATGPT_NAME", "   ")  # only spaces: blank too
     s = load_settings()
     assert s.env_set == {"proposal_expiry_days", "forge_parallel_games", "archidekt_calls_per_10_min"}
     db = Database(tmp_path / "x.sqlite")
@@ -813,13 +820,70 @@ def test_a_waiting_note_keeps_a_limited_number_of_versions(
                 )
                 == version + 1
             )
-        assert (
+        # the cap is told apart from a version conflict (the 3 kept versions are full here)
+        with pytest.raises(db_module.ProposalVersionsFull):
             db.amend_proposal(
                 "a", "m1", expect_version=4, changes=[], rows=None, diff_text="v5", by_client="app"
             )
+        assert (
+            db.amend_proposal(
+                "a", "m1", expect_version=3, changes=[], rows=None, diff_text="v5", by_client="app"
+            )
             is None
-        )
+        )  # a stale version is still None, checked before the cap
         assert db.get_proposal("a", "m1")["diff_text"] == "v4"
         assert len(db.proposal_versions("a", "m1")) == 3
     finally:
         db.close()
+
+
+# -- step 0 follow-up (coordinator's checks of 0c1e347) ---------------------------------------------
+
+
+def test_an_amend_keeps_the_hold_of_a_rejected_dependency(tmp_path: Path) -> None:
+    """Q27j: a note held because a note it depends on was rejected stays held when an app amends
+    it, so the new version can't apply by itself in semi or auto (G5). Any other status clears."""
+    db = Database(tmp_path / "x.sqlite")
+    try:
+        _member(db)
+        for pid in ("base", "top", "other"):
+            assert _proposal(db, pid)
+        assert db.link_proposals("top", "m1", "depends_on", "base")
+        with db.tx() as c:
+            c.execute("UPDATE proposals SET state = 'rejected' WHERE id = 'base'")
+        assert db.set_proposal_status("top", "m1", "held", "#1 was rejected")
+        assert db.amend_proposal(
+            "top", "m1", expect_version=1, changes=[], rows=None, diff_text="v2", by_client="a"
+        )
+        p = db.get_proposal("top", "m1")
+        assert (p["status"], p["status_reason"], p["version"]) == ("held", "#1 was rejected", 2)
+        # held with no rejected dependency (the member's own hold): a new version clears it
+        assert db.set_proposal_status("other", "m1", "held", "later")
+        assert db.amend_proposal(
+            "other", "m1", expect_version=1, changes=[], rows=None, diff_text="v2", by_client="a"
+        )
+        assert db.get_proposal("other", "m1")["status"] is None
+        # needs a look with a rejected dependency: cleared too (only a hold is kept)
+        assert db.set_proposal_status("top", "m1", "needs_look", "deck changed")
+        assert db.amend_proposal(
+            "top", "m1", expect_version=2, changes=[], rows=None, diff_text="v3", by_client="a"
+        )
+        assert db.get_proposal("top", "m1")["status"] is None
+    finally:
+        db.close()
+
+
+def test_settings_refusals_read_as_the_pages_do() -> None:
+    """Units, thousands commas, the Account page's mode names and the stack wording."""
+    with pytest.raises(SettingError, match="^backup_keep_days must be between 1 and 3,650 days$"):
+        MANAGED_SETTINGS["backup_keep_days"].parse(5000)
+    with pytest.raises(SettingError, match="^archidekt_min_interval must be between 1 and 10 seconds$"):
+        MANAGED_SETTINGS["archidekt_min_interval"].parse(0.5)
+    with pytest.raises(SettingError, match="^watch_max_cards must be between 0 and 200$"):
+        MANAGED_SETTINGS["watch_max_cards"].parse(201)
+    with pytest.raises(SettingError) as refused:
+        MANAGED_SETTINGS["approval_mode_default"].parse("yolo")
+    assert refused.value.message == (
+        'must be one of "Ask me every time", "Apply small, low-risk edits without asking" or '
+        '"Apply deck and collection changes without asking"'
+    )
