@@ -234,13 +234,22 @@ def test_consent_click_guard_defeats_a_double_click_swap(server: Server) -> None
             page.goto(server.authorize_url())
             page.wait_for_selector(APPROVE)
             assert page.is_disabled(APPROVE)
-            # The "second click" of a double-click, at once, where the button is.
             box = page.locator(APPROVE).bounding_box()
             assert box is not None
+            # The window is swapped in now: a blur stands for it having been away, and the clocks
+            # restart here. Without this the page's clock started when the script ran, and on a
+            # slow runner the click below came more than the dwell time later; the click itself
+            # then counted as the person's move, and the buttons unlocked during the wait (CI;
+            # reproduced by waiting 500 ms before the click).
+            page.evaluate(
+                "() => { window.dispatchEvent(new Event('blur')); window.__swappedAt = performance.now(); }"
+            )
+            # The "second click" of a double-click, at once, where the button is.
             page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
             page.wait_for_timeout(400)
             assert page.url.startswith(f"{server.base}/authorize/confirm"), page.url
-            assert page.is_disabled(APPROVE)
+            since = page.evaluate("() => performance.now() - window.__swappedAt")
+            assert page.is_disabled(APPROVE), f"unlocked {since:.0f} ms after the swap"
             # A person who keeps using the page (moving the pointer) gets working buttons.
             page.mouse.move(10, 10)
             page.mouse.move(80, 120, steps=4)
