@@ -1011,6 +1011,8 @@ def create_app(
     _friendly_errors(app, state)
     app.add_middleware(ThemeMiddleware)
     app.state.gateway = state
+    # Restore points kept per deck follow the admin Settings page at once (0.7.29).
+    db.snapshots_source = lambda: state.live.get("snapshots_per_deck")
     _use_hashed_client_secrets(app, provider)
     if settings.cimd_enabled:
         _advertise_cimd(app, server)

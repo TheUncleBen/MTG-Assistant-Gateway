@@ -138,11 +138,24 @@ async def test_the_save_bar_tick_box_decides_the_extra_copy_on_archidekt(stack: 
         await b.aclose()
 
 
-def test_the_editor_backup_tick_box_is_off_by_default() -> None:
-    """The extra Archidekt copy is the member's choice per save, unticked until they tick it."""
+async def test_the_editor_backup_tick_box_follows_the_settings(stack: Stack) -> None:  # noqa: F811
+    """The extra Archidekt copy is the member's choice per save: unticked until they tick it, ticked
+    at first when the admin Settings page says so (Q15), and gone with backups off."""
     import re
-    from pathlib import Path
 
-    src = (Path(__file__).resolve().parent.parent / "src/mtg_gateway/companion_tools.py").read_text()
-    box = re.search(r"<input type='checkbox' name='archidekt_backup'[^>]*>", src)
-    assert box is not None and "checked" not in box.group(0)
+    b = await linked(stack)
+    live = stack.h.app.state.gateway.live
+
+    async def box() -> str | None:
+        page = (await b.http.get("/decks/42/edit")).text
+        m = re.search(r"<input type='checkbox' name='archidekt_backup'[^>]*>", page)
+        return m.group(0) if m else None
+
+    try:
+        assert (found := await box()) is not None and "checked" not in found
+        live.set("archidekt_backup_box_default", True, by="admin-1")
+        assert (found := await box()) is not None and " checked" in found
+        live.set("archidekt_backups", False, by="admin-1")
+        assert await box() is None
+    finally:
+        await b.aclose()

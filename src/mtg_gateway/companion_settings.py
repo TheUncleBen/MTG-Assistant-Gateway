@@ -192,7 +192,11 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             + "<section class='panel danger' id='delete'><h2>Delete this deck</h2>"
             "<p class='muted small'>Deletes the deck on Archidekt after you type its name. A snapshot is "
             "kept under History"
-            + (", and a copy in your backup folder on Archidekt" if s.archidekt_backups else "")
+            + (
+                ", and a copy in your backup folder on Archidekt"
+                if state.live.get("archidekt_backups")
+                else ""
+            )
             + ".</p>"
             f"<a class='btn btn-danger' href='/decks/{did}/delete'>{icon('trash')} Delete deck…</a></section>"
         )
@@ -625,7 +629,7 @@ def add_settings_routes(server: MCPServer, state: AppState, h: SimpleNamespace) 
             "A snapshot of the deck is kept under History"
             + (
                 ", and a private copy is made in your backup folder on Archidekt first"
-                if s.archidekt_backups
+                if state.live.get("archidekt_backups")
                 else ""
             )
             + ". Archidekt itself has no undo for a deleted deck."

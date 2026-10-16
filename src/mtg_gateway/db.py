@@ -11,6 +11,7 @@ from __future__ import annotations
 import datetime as _dt
 import hashlib
 import json
+import logging
 import sqlite3
 import threading
 import time
@@ -21,6 +22,8 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .cimd import site_of
+
+logger = logging.getLogger(__name__)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -657,6 +660,8 @@ def _like_prefix(prefix: str) -> str:
     return prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
 
 
+# job_runs rows recording how each backup copy was made (record_backup_made), by the copy's id.
+BACKUP_MADE_JOB = "backup_made:"
 # job_runs rows of the queued backup deletes (Q77) before schema 13 moved them to backup_deletes:
 # this prefix and the snapshot id (read only by _step_13)
 BACKUP_DELETE_JOB = "backup_delete:"
@@ -673,6 +678,7 @@ class Database:
         # Snapshots kept per deck; None means SNAPSHOTS_KEEP_PER_DECK (the app wires the live
         # setting in, snapshots_keep()).
         self.snapshots_per_deck: int | None = None
+        self.snapshots_source: Callable[[], int] | None = None
         self._conn = sqlite3.connect(str(self.path), check_same_thread=False, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
         with self._lock:
@@ -1204,6 +1210,13 @@ class Database:
             n += self._prune_caps(c, now)
         with self.tx() as c:
             n += self._prune_snapshots(c, self.snapshots_keep())
+            # records of how backup copies were made, for copies no snapshot records any more
+            n += c.execute(
+                """DELETE FROM job_runs WHERE name LIKE ? ESCAPE '\\'
+                   AND substr(name, ?) NOT IN
+                       (SELECT backup_deck_id FROM snapshots WHERE backup_deck_id IS NOT NULL)""",
+                (_like_prefix(BACKUP_MADE_JOB), len(BACKUP_MADE_JOB) + 1),
+            ).rowcount
         n += self._delete_batched(
             "metrics", "day < ?", (self._since_day(METRICS_RETENTION_SECONDS // 86400),)
         )
@@ -1258,6 +1271,11 @@ class Database:
     def snapshots_keep(self) -> int:
         """Snapshots kept per member's deck: the live setting when one is wired in, else the
         module default."""
+        if self.snapshots_source is not None:
+            try:
+                return int(self.snapshots_source())
+            except Exception:  # never let a settings problem stop the purge
+                logger.exception("snapshots per deck setting unreadable; the default applies")
         return int(self.snapshots_per_deck or SNAPSHOTS_KEEP_PER_DECK)
 
     @staticmethod
@@ -1285,8 +1303,10 @@ class Database:
 
     @staticmethod
     def _prune_snapshots(c: sqlite3.Connection, keep: int = SNAPSHOTS_KEEP_PER_DECK) -> int:
-        """Keep the newest SNAPSHOTS_KEEP_PER_DECK snapshots of each member's deck, and any
-        snapshot a pending or running proposal (a restore) still points at; delete the rest."""
+        """Keep the newest ``keep`` snapshots of each member's deck, and any snapshot a pending or
+        running proposal (a restore) still points at; delete the rest. Also kept (QUESTIONS-2 B13):
+        the snapshot each recorded Archidekt backup copy was made with, and any snapshot with a
+        queued backup delete, so the gateway never loses its record of a copy it may delete."""
         return c.execute(
             """DELETE FROM snapshots WHERE id IN (
                    SELECT id FROM (
@@ -1296,7 +1316,13 @@ class Database:
                    WHERE n > ?)
                AND id NOT IN (SELECT json_extract(changes_json, '$.snapshot_id') FROM proposals
                               WHERE kind = 'restore' AND state IN ('pending', 'applying')
-                                AND json_extract(changes_json, '$.snapshot_id') IS NOT NULL)""",
+                                AND json_extract(changes_json, '$.snapshot_id') IS NOT NULL)
+            AND id NOT IN (SELECT snapshot_id FROM backup_deletes)
+            AND id NOT IN (SELECT (SELECT s2.id FROM snapshots s2
+                                   WHERE s2.owner_sub = s.owner_sub AND s2.deck_id = s.deck_id
+                                     AND s2.backup_deck_id = s.backup_deck_id
+                                   ORDER BY s2.taken_at, s2.rowid LIMIT 1)
+                           FROM snapshots s WHERE s.backup_deck_id IS NOT NULL)""",
             (keep,),
         ).rowcount
 
@@ -2418,6 +2444,67 @@ class Database:
                 "UPDATE snapshots SET backup_deck_id = NULL, backup_url = NULL WHERE id = ?", (snapshot_id,)
             )
 
+    def clear_backup_everywhere(self, owner_sub: str, backup_deck_id: str) -> int:
+        """A backup copy was deleted on Archidekt: every snapshot of the member that records it
+        forgets it (a copy can be shared by several snapshots, QUESTIONS-2 B14/B15/B16), and so
+        does the record of how it was made."""
+        with self.tx() as c:
+            n = c.execute(
+                "UPDATE snapshots SET backup_deck_id = NULL, backup_url = NULL "
+                "WHERE owner_sub = ? AND backup_deck_id = ?",
+                (owner_sub, str(backup_deck_id)),
+            ).rowcount
+            c.execute("DELETE FROM job_runs WHERE name = ?", (BACKUP_MADE_JOB + str(backup_deck_id),))
+        return n
+
+    def backup_users(self, owner_sub: str, backup_deck_id: str) -> int:
+        """How many of the member's snapshots record this backup copy."""
+        row = self._one(
+            "SELECT COUNT(*) AS n FROM snapshots WHERE owner_sub = ? AND backup_deck_id = ?",
+            (owner_sub, str(backup_deck_id)),
+        )
+        return int(row["n"]) if row else 0
+
+    def deck_backup_copies(self, owner_sub: str, deck_id: str) -> list[dict[str, Any]]:
+        """The backup copies the member's snapshots of ``deck_id`` record, newest first: one entry
+        per copy with its url, the snapshot it was made with (the oldest that records it) and
+        that snapshot's time."""
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT backup_deck_id, MAX(backup_url) AS backup_url, MIN(taken_at) AS made_at,
+                          (SELECT s2.id FROM snapshots s2
+                           WHERE s2.owner_sub = s.owner_sub AND s2.deck_id = s.deck_id
+                             AND s2.backup_deck_id = s.backup_deck_id
+                           ORDER BY s2.taken_at, s2.rowid LIMIT 1) AS snapshot_id
+                   FROM snapshots s WHERE owner_sub = ? AND deck_id = ? AND backup_deck_id IS NOT NULL
+                   GROUP BY backup_deck_id ORDER BY made_at DESC, backup_deck_id DESC""",
+                (owner_sub, str(deck_id)),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def record_backup_made(self, backup_deck_id: str, record: dict[str, Any]) -> None:
+        """How the gateway made a backup copy (name, description, folder, the time its writes took,
+        when, for whom): kept in the database so the checks before a later delete outlive a
+        restart (QUESTIONS-2 B12/B21). One job_runs row per copy; schema 13 is unchanged."""
+        now = int(time.time())
+        with self.tx() as c:
+            c.execute(
+                "INSERT OR REPLACE INTO job_runs (name, day, at, detail_json) VALUES (?, ?, ?, ?)",
+                (BACKUP_MADE_JOB + str(backup_deck_id), self._since_day(0), now, json.dumps(record)),
+            )
+
+    def backup_made(self, backup_deck_id: str) -> dict[str, Any] | None:
+        row = self._one(
+            "SELECT detail_json FROM job_runs WHERE name = ?", (BACKUP_MADE_JOB + str(backup_deck_id),)
+        )
+        if row is None or not row["detail_json"]:
+            return None
+        try:
+            out = json.loads(row["detail_json"])
+        except ValueError:
+            return None
+        return out if isinstance(out, dict) else None
+
     # Later deletes of unused backup copies (Q77): one row per snapshot whose copy waits to be
     # deleted (``due_at`` the time it is due), so the queue outlives a restart and a re-apply of
     # the proposal. Each row records the Archidekt account linked when it was queued (Q127).
@@ -2452,7 +2539,7 @@ class Database:
         sub: str,
         backup_deck_id: str,
         deck_id: str,
-        proposal_id: str,
+        proposal_id: str | None,
         due: int,
         expect: dict[str, Any] | None = None,
     ) -> None:
@@ -2504,6 +2591,16 @@ class Database:
         """Whether the backup delete of ``snapshot_id`` is still queued (a relink or "Delete my
         data" drops it)."""
         return self._one("SELECT 1 FROM backup_deletes WHERE snapshot_id = ?", (snapshot_id,)) is not None
+
+    def backup_copy_queued(self, owner_sub: str, backup_deck_id: str) -> bool:
+        """Whether a delete of this backup copy is queued for the member (from any snapshot)."""
+        return (
+            self._one(
+                "SELECT 1 FROM backup_deletes WHERE sub = ? AND backup_deck_id = ?",
+                (owner_sub, str(backup_deck_id)),
+            )
+            is not None
+        )
 
     def drop_backup_delete(self, snapshot_id: str) -> None:
         with self.tx() as c:

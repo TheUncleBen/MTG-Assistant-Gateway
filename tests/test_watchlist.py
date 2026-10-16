@@ -240,7 +240,8 @@ async def test_a_scryfall_429_stops_the_check_and_it_runs_again_later(stack: Sta
 
 async def test_watch_refusals_limits_and_unknown_cards(tmp_path: Path, idp: FakeIdP, monkeypatch) -> None:
     Clock(monkeypatch)
-    async with open_stack(tmp_path, idp, _options(watch_max_cards=1)) as st:
+    async with open_stack(tmp_path, idp, _options()) as st:
+        st.gw.live.set("watch_max_cards", 1, by="admin-1")  # the admin Settings page's limit
         b = await _browser(st)
         try:
             r = await _watch(b, name="No Such Card Anywhere")
@@ -251,7 +252,13 @@ async def test_watch_refusals_limits_and_unknown_cards(tmp_path: Path, idp: Fake
             assert r.status_code == 400 and "goes with a set code" in r.text
             assert (await _watch(b, name="Sol Ring")).status_code == 303
             r = await _watch(b, name="Command Tower")
-            assert r.status_code == 429 and "the most this gateway keeps per member" in r.text
+            assert r.status_code == 429 and "You watch 1 cards; this gateway keeps at most 1" in r.text
+            # 0.7.29: the admin Settings page's limit applies at once, raised or lowered
+            st.gw.live.set("watch_max_cards", 2, by="admin-1")
+            assert (await _watch(b, name="Command Tower")).status_code == 303
+            st.gw.live.set("watch_max_cards", 1, by="admin-1")
+            r = await _watch(b, name="Cultivate")
+            assert r.status_code == 429 and "You watch 2 cards; this gateway keeps at most 1" in r.text
             # no form token: refused
             r = await b.http.post("/watchlist", data={"action": "add_card", "name": "Opt"})
             assert r.status_code == 403

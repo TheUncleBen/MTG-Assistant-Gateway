@@ -1174,7 +1174,7 @@ def add_guide_routes(server: MCPServer, state: AppState) -> None:
                 writes_enabled=bool(s.writes_enabled),
                 has_collection=getattr(state, "collection", None) is not None,
                 max_rows=int(getattr(s, "auto_apply_max_rows", modes.DEFAULT_MAX_ROWS)),
-                archidekt_backups=bool(getattr(s, "archidekt_backups", True)),
+                archidekt_backups=bool(state.live.get("archidekt_backups")),
                 backup_folder=s.archidekt_backup_folder,
                 watchlists=bool(s.watchlists_enabled),
             ),
