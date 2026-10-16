@@ -325,6 +325,36 @@ async def test_create_folder_waits_for_the_members_press(stack: Stack) -> None:
     assert p["ok"] is False and "already" in p["message"]
 
 
+async def test_a_folder_named_like_the_backup_folder_is_refused_when_proposed(stack: Stack) -> None:
+    """Proofread 3 P6 (B8 a): the assistant's new-folder proposal with the backup folder's name is
+    refused when it is made, so the assistant can pick another name at once; the apply checks again."""
+    import dataclasses
+
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _set_mode(h, "semi")
+    for name in ("MTG Gateway backups", "mtg gateway backups"):
+        p = structured(await call(h, token, "propose_create_folder", {"name": name}))
+        assert p["ok"] is False and p["message"] == (
+            f"'{name}' is the name of the gateway's backup folder. Pick another name."
+        ), p
+    assert not any(f["name"].casefold() == "mtg gateway backups" for f in ark.folders.get("alice", []))
+    # the same name in other capitals inside another folder is not the backup folder's
+    await _press(h, token, await call(h, token, "propose_create_folder", {"name": "Brews"}))
+    inner = structured(
+        await call(h, token, "propose_create_folder", {"name": "mtg gateway backups", "inside": "Brews"})
+    )
+    assert inner["ok"] is True, inner
+    # at apply: a name that became the backup folder's after the proposal was made is refused there
+    p = structured(await call(h, token, "propose_create_folder", {"name": "Archive"}))
+    assert p["ok"] is True, p
+    decks = h.app.state.gateway.decks
+    decks.settings = dataclasses.replace(decks.settings, archidekt_backup_folder="Archive")
+    out = await _browser_apply(h, p["proposal_id"])
+    assert out.get("state") != "applied", out
+    assert not any(f["name"] == "Archive" for f in ark.folders["alice"])
+
+
 async def test_review_page_shows_the_action(stack: Stack) -> None:
     from .test_decks_and_proxy import Browser
 
