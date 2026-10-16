@@ -1,20 +1,32 @@
-/* The card results page (/cards, cardsearch.py): a picture opens the shared card viewer
-   (static/cardview.js) with an Add to deck action, and Add to deck opens a small dialog that
-   picks one of the member's decks (the cached list behind /api/decks/mine), a quantity and a
-   category (the deck's own, read once per deck), then saves through the deck page's own edit
-   endpoint, POST /api/v1/decks/{id}/edit: the proposals path applied at once with its snapshot,
-   a "save anyway" question when the hand-edit rule asks, the review page when writes are off.
-   Nothing is written any other way. Loaded after cardview.js; does nothing without #cardgrid. */
+/* The card search page (/cards, cardsearch.py and cardsearch_view.py).
+
+   Live results (Q4): every change to the filters asks /cards/api/search for the first page about
+   400 ms after the last keystroke or tap (one request in flight; a newer change cancels the older
+   one), puts the HTML it answers in place and writes the filters into the address, so Back, a
+   reload and a shared link show the same search. The next page loads by itself when the end of
+   the list comes into view, or with "Load more cards". The pickers (type, set, block, criteria)
+   read their lists from /cards/api/options when first opened. Under 600 px the filters are a
+   full-screen panel; "Show cards" closes it.
+
+   A picture opens the shared card viewer (static/cardview.js) with an Add to deck action, and
+   Add to deck opens a small dialog that picks one of the member's decks (the cached list behind
+   /api/decks/mine), a quantity and a category (the deck's own, read once per deck), then saves
+   through the deck page's own edit endpoint, POST /api/v1/decks/{id}/edit: the proposals path
+   applied at once with its snapshot, a "save anyway" question when the hand-edit rule asks, the
+   review page when writes are off. Nothing is written any other way. Loaded after cardview.js. */
 (function () {
   "use strict";
-  var grid = document.getElementById("cardgrid");
-  if (!grid) return;
+  var form = document.getElementById("cs-form");
+  var results = document.getElementById("cs-results");
+  if (!form || !results) return;
   var $ = function (sel, root) { return (root || document).querySelector(sel); };
+  var $$ = function (sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); };
   var csrfInput = $("input[name=csrf]");
   var CSRF = csrfInput ? csrfInput.value : "";
-  var linked = grid.hasAttribute("data-linked");
+  var linked = results.getAttribute("data-linked") === "1";
   var enc = encodeURIComponent;
   var LAST_DECK = "mtg.addToDeck";
+  var DEBOUNCE_MS = 400;
   function el(tag, cls, text) {
     var e = document.createElement(tag);
     if (cls) e.className = cls;
@@ -24,6 +36,7 @@
   function icon(name) {
     var paths = {
       plus: "<path d='M12 5v14M5 12h14'/>",
+      x: "<path d='M6 6l12 12M18 6L6 18'/>",
       external: "<path d='M14 4h6v6M20 4l-9 9'/><path d='M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5'/>"
     };
     var span = el("span");
@@ -41,6 +54,437 @@
       return r.json().then(function (d) { d.status = r.status; return d; }, function () { return { ok: false, status: r.status, message: "The gateway answered oddly; nothing was changed." }; });
     });
   }
+
+  // -- the filters as an address: every non-empty field, in the form's order ---------------------
+  function params() {
+    var out = new URLSearchParams();
+    var data = new FormData(form);
+    data.forEach(function (value, key) {
+      if (typeof value !== "string") return;
+      var v = value.trim();
+      if (!v) return;
+      // a picker's own text box is for searching its list; its chips carry the values
+      var box = form.elements[key];
+      if (box && box.nodeType === 1 && box.closest && box.closest("[data-picker]") && box.type === "text") return;
+      out.append(key, v);
+    });
+    // rows left empty send nothing at all (their selects always have a value)
+    ["st:sto:stv", "pc:po:pv", "fs:f"].forEach(function (spec) {
+      var keys = spec.split(":"), cols = keys.map(function (k) { return out.getAll(k); });
+      keys.forEach(function (k) { out.delete(k); });
+      var rows = $$("[data-row]", form).filter(function (r) { return r.querySelector("[name=" + keys[0] + "]"); });
+      rows.forEach(function (r) {
+        var vals = keys.map(function (k) { var f = r.querySelector("[name=" + k + "]"); return f ? f.value.trim() : ""; });
+        if (vals[vals.length - 1]) keys.forEach(function (k, i) { out.append(k, vals[i]); });
+      });
+      void cols;
+    });
+    // the defaults stay out of the address
+    if (out.get("cmp") === "ge" || !out.getAll("c").length) out.delete("cmp");
+    if (out.get("order") === "name") out.delete("order");
+    if (out.get("dir") === "auto") out.delete("dir");
+    var games = out.getAll("g").filter(function (g) { return g !== "any"; });
+    out.delete("g");
+    if (!(games.length === 1 && games[0] === "paper")) {
+      if (games.length) games.forEach(function (g) { out.append("g", g); }); else out.append("g", "any");
+    }
+    return out;
+  }
+  function chosenCount(p) {
+    var n = 0, seen = {};
+    p.forEach(function (v, k) {
+      if (["q", "order", "dir", "view", "cmp", "tany", "isany"].indexOf(k) >= 0) return;
+      if (k === "sto" || k === "stv" || k === "po" || k === "pv" || k === "fs") return;
+      if (k === "c" || k === "id" || k === "r" || k === "g") { if (seen[k]) return; seen[k] = 1; }
+      n += 1;
+    });
+    return n;
+  }
+
+  // -- live results ----------------------------------------------------------------------------
+  var countEl = $("#cs-count"), statusEl = $("#cs-status"), moreWrap = $("#cs-more");
+  var moreBtn = moreWrap ? $("[data-more]", moreWrap) : null;
+  var openBtn = $(".cs-open", form), badge = openBtn ? $(".n", openBtn) : null;
+  // lastQs: the search last asked for (an unchanged form asks nothing again). shownQs: the search
+  // whose tiles are on screen; "Load more" asks for its next page, never the form's newer text.
+  var timer = null, ctrl = null, moreCtrl = null, page = 1, hasMore = false, loadingMore = false;
+  var lastQs = null, shownQs = null;
+  var startTpl = $("#cs-start"), startHtml = startTpl ? startTpl.innerHTML : null;
+  function setStatus(text, isError) {
+    statusEl.textContent = "";
+    if (!text) return;
+    var p = el("p", "notice" + (isError ? " error" : ""), text);
+    statusEl.appendChild(p);
+  }
+  function setCount(total, chosen) {
+    if (!countEl) return;
+    if (!chosen) { countEl.textContent = "Cards"; return; }
+    countEl.textContent = typeof total === "number" ? total.toLocaleString() + (total === 1 ? " card" : " cards") : "Cards";
+  }
+  function updateBadge(p) {
+    if (!badge) return;
+    var n = chosenCount(p);
+    badge.textContent = n ? String(n) : "";
+    var show = $(".cs-show", form);
+    if (show) show.textContent = countEl && /\d/.test(countEl.textContent) ? "Show " + countEl.textContent : "Show cards";
+  }
+  function showMore(on) {
+    hasMore = !!on;
+    if (moreWrap) moreWrap.hidden = !on;
+  }
+  function moreDone() {
+    loadingMore = false;
+    if (moreBtn) { moreBtn.disabled = false; moreBtn.removeAttribute("aria-busy"); }
+  }
+  // a next page asked for the tiles on screen is not wanted once another search starts or lands
+  function stopMore() {
+    if (moreCtrl) moreCtrl.abort();
+    moreCtrl = null;
+    moreDone();
+  }
+  // a failed search: the same search can be asked again (Search, Enter), and tiles left from
+  // another search are taken away rather than shown under the error as if they were its answer
+  function failed(qs, text) {
+    lastQs = null;
+    stopMore();
+    if (shownQs !== qs) {
+      results.innerHTML = "";
+      shownQs = null;
+      setCount(null, true);
+    }
+    setStatus(text, true);
+    showMore(false);
+  }
+  function run(immediate) {
+    clearTimeout(timer);
+    timer = setTimeout(search, immediate ? 0 : DEBOUNCE_MS);
+  }
+  function search() {
+    var p = params();
+    var qs = p.toString();
+    updateBadge(p);
+    if (qs === lastQs) return;
+    lastQs = qs;
+    // the view is remembered per person (a cookie), so a shared address shows the reader's own
+    var addr = new URLSearchParams(qs);
+    addr.delete("view");
+    addr = addr.toString();
+    try { history.replaceState(null, "", "/cards" + (addr ? "?" + addr : "")); } catch (e) { /* a sandboxed frame */ }
+    if (ctrl) ctrl.abort();
+    ctrl = window.AbortController ? new AbortController() : null;
+    stopMore();
+    results.setAttribute("aria-busy", "true");
+    fetch("/cards/api/search?" + qs, { credentials: "same-origin", signal: ctrl ? ctrl.signal : undefined })
+      .then(function (r) { return r.json().then(function (d) { d.status = r.status; return d; }); })
+      .then(function (d) {
+        results.removeAttribute("aria-busy");
+        page = 1;
+        if (!d.ok) {
+          failed(qs, d.message || "The cards could not be looked up.");
+          return;
+        }
+        stopMore();
+        shownQs = qs;
+        setStatus("");
+        if (d.empty) {
+          if (startHtml !== null) results.innerHTML = startHtml;
+          setCount(null, false);
+          showMore(false);
+        } else {
+          results.innerHTML = d.html;
+          setCount(d.total, true);
+          showMore(d.has_more);
+          nearEnd();
+          if (d.warnings && d.warnings.length) setStatus(d.warnings.join(" "), false);
+        }
+        updateBadge(p);
+      })
+      .catch(function (e) {
+        if (e && e.name === "AbortError") return;
+        results.removeAttribute("aria-busy");
+        failed(qs, "No connection; the cards could not be looked up.");
+      });
+  }
+  function loadMore() {
+    if (!hasMore || loadingMore || shownQs === null) return;
+    loadingMore = true;
+    if (moreBtn) { moreBtn.disabled = true; moreBtn.setAttribute("aria-busy", "true"); }
+    var forQs = shownQs;
+    var p = new URLSearchParams(forQs);
+    p.set("page", String(page + 1));
+    var mine = window.AbortController ? new AbortController() : null;
+    moreCtrl = mine;
+    fetch("/cards/api/search?" + p.toString(), { credentials: "same-origin", signal: mine ? mine.signal : undefined })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (forQs !== shownQs || (mine && moreCtrl !== mine)) return;  // a newer search is on screen
+        moreCtrl = null;
+        moreDone();
+        if (!d.ok) { setStatus(d.message || "More cards could not be loaded.", true); return; }
+        var list = results.querySelector(".cardgrid,.cardlist");
+        if (!list) return;
+        list.insertAdjacentHTML("beforeend", d.html);
+        page = d.page;
+        showMore(d.has_more);
+        nearEnd();
+      })
+      .catch(function (e) {
+        if ((e && e.name === "AbortError") || forQs !== shownQs || (mine && moreCtrl !== mine)) return;
+        moreCtrl = null;
+        moreDone();
+        setStatus("No connection; more cards could not be loaded.", true);
+      });
+  }
+  // the observer only speaks when the end comes into reach, so a page too short to push it
+  // back out (a tall window, a short page) asks for the next one itself
+  function nearEnd() {
+    if (!hasMore || !moreWrap || !window.IntersectionObserver) return;
+    requestAnimationFrame(function () {
+      if (moreWrap.getBoundingClientRect().top < window.innerHeight + 600) loadMore();
+    });
+  }
+  if (moreBtn) moreBtn.addEventListener("click", loadMore);
+  if (moreWrap && window.IntersectionObserver) {
+    new IntersectionObserver(function (entries) {
+      if (entries.some(function (e) { return e.isIntersecting; })) loadMore();
+    }, { rootMargin: "600px 0px" }).observe(moreWrap);
+  }
+  hasMore = moreWrap ? !moreWrap.hidden : false;
+  // the page's own first search: when it failed, the same search can be asked again
+  if (!$(".notice.error", statusEl)) lastQs = shownQs = params().toString();
+  updateBadge(params());
+
+  form.addEventListener("submit", function (e) { e.preventDefault(); run(true); closePanel(); });
+  form.addEventListener("input", function (e) {
+    if (e.target.closest && e.target.closest("[data-picker]") && e.target.type === "text") return;
+    run(e.target.type !== "text" && e.target.type !== "search");
+  });
+  form.addEventListener("change", function (e) {
+    if (e.target.closest && e.target.closest("[data-picker]") && e.target.type === "text") return;
+    run(e.target.type !== "text" && e.target.type !== "search");
+  });
+  // the sort, direction and view sit outside the form's element (form="cs-form")
+  $$("[form=cs-form]").forEach(function (f) { f.addEventListener("change", function () { run(true); }); });
+
+  // -- rows: stats, prices and formats; "Add" copies the last row, × removes one ----------------
+  form.addEventListener("click", function (e) {
+    var add = e.target.closest("[data-add-row]");
+    if (add) {
+      var set = add.closest("[data-rows]"), rows = $(".rows", set), max = +set.getAttribute("data-max") || 4;
+      var last = rows.lastElementChild;
+      if (!last || rows.children.length >= max) return;
+      var copy = last.cloneNode(true);
+      $$(".msel-btn", copy).forEach(function (b) { b.remove(); });
+      $$("input", copy).forEach(function (i) { i.value = ""; });
+      $$("select", copy).forEach(function (s, i) { s.selectedIndex = last.querySelectorAll("select")[i].selectedIndex; s.removeAttribute("data-msel"); });
+      rows.appendChild(copy);
+      add.hidden = rows.children.length >= max;
+      var first = copy.querySelector("input,select");
+      if (first) first.focus();
+      return;
+    }
+    var rm = e.target.closest(".rm");
+    if (rm) {
+      var row = rm.closest("[data-row]"), holder = row.parentNode, setEl = row.closest("[data-rows]");
+      if (holder.children.length > 1) row.remove();
+      else $$("input", row).forEach(function (i) { i.value = ""; });
+      var addBtn = setEl && $("[data-add-row]", setEl);
+      if (addBtn) addBtn.hidden = false;
+      run(true);
+      return;
+    }
+    if (e.target.closest(".cs-clear")) { clearAll(); return; }
+    if (e.target.closest(".cs-open")) { openPanel(); return; }
+    if (e.target.closest(".cs-sheet-head .close") || e.target.closest(".cs-show")) { closePanel(); return; }
+  });
+  function clearAll() {
+    $$("[data-picker] .chips", form).forEach(function (c) { c.textContent = ""; });
+    $$("input[type=text],input[type=search]", form).forEach(function (i) { i.value = ""; });
+    $$("input[type=checkbox]", form).forEach(function (i) { i.checked = i.name === "g" && i.value === "paper"; });
+    $$("select", form).forEach(function (s) {
+      if (s.name === "fs") s.value = "legal";
+      else if (s.name === "cmp") s.value = "ge";
+      else if (s.name === "pc") s.value = "usd";
+      else if (s.name === "po") s.value = "le";
+      else if (s.name === "st") s.value = "pow";
+      else if (s.name === "sto") s.value = "ge";
+      else s.selectedIndex = 0;
+      if (window.MtgSelect) window.MtgSelect.refresh(s);
+    });
+    $$("[data-rows] .rows", form).forEach(function (rows) { while (rows.children.length > 1) rows.lastElementChild.remove(); });
+    $$("[data-add-row]", form).forEach(function (b) { b.hidden = false; });
+    run(true);
+  }
+
+  // -- the phone panel ---------------------------------------------------------------------------
+  var panel = $("#cs-filters");
+  function openPanel() {
+    panel.classList.add("open");
+    document.documentElement.classList.add("cs-sheet-open");
+    if (openBtn) openBtn.setAttribute("aria-expanded", "true");
+    var c = $(".cs-sheet-head .close", panel);
+    if (c) c.focus();
+  }
+  function closePanel() {
+    if (!panel.classList.contains("open")) return;
+    panel.classList.remove("open");
+    document.documentElement.classList.remove("cs-sheet-open");
+    if (openBtn) { openBtn.setAttribute("aria-expanded", "false"); openBtn.focus(); }
+  }
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && panel.classList.contains("open") && !(window.MtgSelect && window.MtgSelect.isOpen())
+        && !document.querySelector(".cs .opts:not([hidden])")) closePanel();
+  });
+
+  // -- pickers: a box that searches a list, chosen values as chips ------------------------------
+  var options = null, optionsLoad = null;
+  function loadOptions() {
+    if (options) return Promise.resolve(options);
+    if (optionsLoad) return optionsLoad;
+    optionsLoad = fetch("/cards/api/options", { credentials: "same-origin" })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        optionsLoad = null;
+        if (!d.ok) throw new Error(d.message || "The lists could not be read.");
+        if (!d.partial) options = d;
+        nameChips(d);
+        return d;
+      })
+      .catch(function (e) { optionsLoad = null; throw e; });
+    return optionsLoad;
+  }
+  var SET_TYPES = { expansion: "Expansions", core: "Core sets", masters: "Masters", draft_innovation: "Draft innovation",
+    commander: "Commander", funny: "Funny", promo: "Promos", token: "Tokens", memorabilia: "Memorabilia",
+    box: "Box sets", duel_deck: "Duel decks", from_the_vault: "From the Vault", masterpiece: "Masterpiece",
+    alchemy: "Alchemy", minigame: "Minigames", starter: "Starter", eternal: "Eternal", planechase: "Planechase",
+    archenemy: "Archenemy", arsenal: "Arsenal", spellbook: "Spellbook", premium_deck: "Premium decks",
+    treasure_chest: "Treasure chest", vanguard: "Vanguard" };
+  function itemsFor(source, d) {
+    if (source === "sets") return d.sets.map(function (s) { return { v: s.code, label: s.name, small: s.code.toUpperCase(), group: SET_TYPES[s.type] || "Other" }; });
+    if (source === "blocks") return d.blocks.map(function (b) { return { v: b.code, label: b.name, small: b.code.toUpperCase() }; });
+    if (source === "criteria") return d.criteria.map(function (c) { return { v: c.code, label: c.name }; });
+    var out = [];
+    d.types.forEach(function (g) { g.values.forEach(function (t) { out.push({ v: t.toLowerCase(), label: t, group: g.label }); }); });
+    return out;
+  }
+  function nameChips(d) {
+    $$("[data-picker]", form).forEach(function (pk) {
+      var source = pk.getAttribute("data-source"), byV = {};
+      itemsFor(source, d).forEach(function (it) { byV[it.v] = it; });
+      $$(".chips li", pk).forEach(function (li) {
+        var it = byV[li.getAttribute("data-v")];
+        if (it) $(".nm", li).textContent = it.label + (it.small && source !== "criteria" ? " (" + it.small + ")" : "");
+      });
+    });
+  }
+  function fold(s) { return (s || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase(); }
+  function addChip(pk, value, label) {
+    var key = pk.getAttribute("data-picker"), signed = pk.hasAttribute("data-signed");
+    var chips = $(".chips", pk);
+    if ($$("li", chips).some(function (li) { return li.getAttribute("data-v") === value; })) return;
+    var li = el("li"); li.setAttribute("data-v", value);
+    if (signed) {
+      var pol = el("button", "pol", "IS"); pol.type = "button"; pol.setAttribute("aria-pressed", "false");
+      pol.title = "Switch between IS and NOT";
+      li.appendChild(pol);
+    }
+    li.appendChild(el("span", "nm", label));
+    var hid = el("input"); hid.type = "hidden"; hid.name = key; hid.value = value;
+    li.appendChild(hid);
+    var x = el("button", "x"); x.type = "button"; x.setAttribute("aria-label", "Remove " + label); x.appendChild(icon("x"));
+    li.appendChild(x);
+    chips.appendChild(li);
+    run(true);
+  }
+  $$("[data-picker]", form).forEach(function (pk) {
+    var box = $("input[type=text]", pk), list = $(".opts", pk), source = pk.getAttribute("data-source");
+    box.removeAttribute("name");  // with scripts on, the chips carry the values
+    var active = -1, shown = [];
+    function close() { list.hidden = true; box.setAttribute("aria-expanded", "false"); box.removeAttribute("aria-activedescendant"); active = -1; }
+    function render() {
+      var q = fold(box.value.trim());
+      list.textContent = "";
+      if (!options) {
+        list.appendChild(el("li", "none", "Loading…"));
+        list.hidden = false; box.setAttribute("aria-expanded", "true");
+        loadOptions().then(render, function (e) { list.textContent = ""; list.appendChild(el("li", "none", e.message || "The list could not be read.")); });
+        return;
+      }
+      var chosen = {};
+      $$(".chips li", pk).forEach(function (li) { chosen[li.getAttribute("data-v")] = 1; });
+      var all = itemsFor(source, options).filter(function (it) { return !chosen[it.v]; });
+      var starts = [], inside = [];
+      all.forEach(function (it) {
+        var hay = fold(it.label) + " " + fold(it.small || "");
+        if (!q) { starts.push(it); return; }
+        var at = hay.indexOf(q);
+        if (at === 0 || fold(it.small || "") === q) starts.push(it);
+        else if (at > 0) inside.push(it);
+      });
+      shown = starts.concat(inside).slice(0, 80);
+      if (source === "types" && q && !shown.some(function (it) { return it.v === q; }) && /^[a-z0-9][a-z0-9.' -]{0,39}$/.test(q)) {
+        shown.unshift({ v: q, label: box.value.trim(), group: "", typed: true });
+      }
+      var group = null;
+      shown.forEach(function (it, i) {
+        if (it.group && it.group !== group && !q) { group = it.group; list.appendChild(el("li", "grp", it.group)); }
+        var li = el("li", "opt");
+        li.id = "o-" + pk.getAttribute("data-picker") + "-" + i;
+        li.setAttribute("role", "option");
+        li.setAttribute("data-i", String(i));
+        li.appendChild(el("span", null, it.typed ? "Use “" + it.label + "”" : it.label));
+        if (it.small) li.appendChild(el("small", null, it.small));
+        list.appendChild(li);
+      });
+      if (!shown.length) list.appendChild(el("li", "none", "Nothing matches."));
+      list.hidden = false;
+      box.setAttribute("aria-expanded", "true");
+      active = -1;
+    }
+    function highlight(i) {
+      var opts = $$("li.opt", list);
+      if (!opts.length) return;
+      active = (i + opts.length) % opts.length;
+      opts.forEach(function (o, k) { o.setAttribute("aria-selected", k === active ? "true" : "false"); });
+      box.setAttribute("aria-activedescendant", opts[active].id);
+      opts[active].scrollIntoView({ block: "nearest" });
+    }
+    function pick(i) {
+      var it = shown[i];
+      if (!it) return;
+      addChip(pk, it.v, it.label + (it.small && source !== "criteria" ? " (" + it.small + ")" : ""));
+      box.value = "";
+      close();
+      box.focus();
+    }
+    box.addEventListener("focus", render);
+    box.addEventListener("input", render);
+    box.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowDown") { e.preventDefault(); if (list.hidden) render(); highlight(active + 1); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); highlight(active - 1); }
+      else if (e.key === "Enter") { e.preventDefault(); if (active >= 0) pick(active); else if (shown.length === 1 || (shown[0] && shown[0].typed)) pick(0); }
+      else if (e.key === "Escape") { if (!list.hidden) { e.stopPropagation(); close(); } }
+      else if (e.key === "Backspace" && !box.value) { var last = $(".chips li:last-child", pk); if (last) { last.remove(); run(true); } }
+    });
+    box.addEventListener("blur", function () { setTimeout(function () { if (!pk.contains(document.activeElement)) close(); }, 150); });
+    list.addEventListener("mousedown", function (e) { e.preventDefault(); });
+    list.addEventListener("click", function (e) { var li = e.target.closest("li.opt"); if (li) pick(+li.getAttribute("data-i")); });
+    pk.addEventListener("click", function (e) {
+      var x = e.target.closest(".chips .x");
+      if (x) { x.closest("li").remove(); run(true); box.focus(); return; }
+      var pol = e.target.closest(".chips .pol");
+      if (pol) {
+        var li = pol.closest("li"), hid = $("input[type=hidden]", li), not = !li.classList.contains("not");
+        li.classList.toggle("not", not);
+        pol.textContent = not ? "NOT" : "IS";
+        pol.setAttribute("aria-pressed", not ? "true" : "false");
+        hid.value = (not ? "-" : "") + li.getAttribute("data-v");
+        run(true);
+      }
+    });
+  });
+  // chips the page came with show their full names once the lists are known (cheap after a day)
+  if ($$("[data-picker] .chips li", form).length) loadOptions().catch(function () { /* codes stay */ });
 
   // -- toast: what was saved, with a link to the deck; errors stay until dismissed ---------------
   var toastEl = null, toastTimer = null;
@@ -70,7 +514,11 @@
       add.appendChild(icon("plus"));
       add.appendChild(document.createTextNode(" Add to deck"));
       if (!linked) { add.disabled = true; add.title = "Link your Archidekt account on the Account page to add cards to a deck."; }
-      add.addEventListener("click", function () { window.MtgCardView.close(); openSheet(node.getAttribute("data-card")); });
+      add.addEventListener("click", function () {
+        window.MtgCardView.close();
+        var own = node.closest("li") && node.closest("li").querySelector("button[data-add]");
+        openSheet(node.getAttribute("data-card"), own ? pinOf(own) : null);
+      });
       acts.push(add);
     }
     var scry = node.getAttribute("data-scry");
@@ -119,19 +567,25 @@
       window.MtgCardView.update(merged(base, text), viewerActions(pic));
     });
   }
-  grid.addEventListener("click", function (e) {
+  results.addEventListener("click", function (e) {
     var pic = e.target.closest(".pic");
+    var nameBtn = e.target.closest("[data-open]");
+    if (nameBtn) pic = nameBtn.closest("li").querySelector(".pic");
     if (pic && window.MtgCardView) {
       e.preventDefault();
       openViewer(pic);
       return;
     }
     var add = e.target.closest("button[data-add]");
-    if (add && !add.disabled) openSheet(add.getAttribute("data-add"));
+    if (add && !add.disabled) openSheet(add.getAttribute("data-add"), pinOf(add));
   });
+  function pinOf(btn) {
+    var set = btn.getAttribute("data-set-code"), num = btn.getAttribute("data-number");
+    return set && num ? { set_code: set, collector_number: num } : null;
+  }
 
   // -- Add to deck -----------------------------------------------------------------------------
-  var sheet = null, lastFocus = null, deckSel, qtyIn, catSel, msg, saveBtn, title, cardName = "";
+  var note = null, sheet = null, lastFocus = null, deckSel, qtyIn, catSel, msg, saveBtn, title, cardName = "";
   var deckRows = null, deckLoad = null, cats = {};  // deck id -> categories, once per deck
   function ensureSheet() {
     if (sheet) return sheet;
@@ -171,6 +625,8 @@
     two.appendChild(f2); two.appendChild(f3);
     box.appendChild(two);
 
+    note = el("p", "note"); note.hidden = true;
+    box.appendChild(note);
     msg = el("p", "msg"); msg.setAttribute("aria-live", "polite");
     box.appendChild(msg);
     var acts = el("div", "acts");
@@ -256,12 +712,19 @@
       if (d.ok && d.categories) { cats[id] = d.categories; if (deckSel.value === id) fillCats(cats[id], id); }
     }).catch(function () { delete catLoads[id]; /* the default category still works */ });
   }
-  function openSheet(name) {
+  var cardPin = null;  // the printing shown on the tile, when the search is about printings (C2)
+  function openSheet(name, pin) {
     if (!linked || !name) return;
     ensureSheet();
     cardName = name;
+    cardPin = pin || null;
     title.textContent = "";
     title.appendChild(el("span", null, "Add " + name));
+    note.textContent = "";
+    if (cardPin) note.textContent = "This printing: " + cardPin.set_code.toUpperCase() + " #" + cardPin.collector_number + ".";
+    var lang = form.elements.lang ? form.elements.lang.value : "";
+    if (lang && lang !== "en") note.textContent += (note.textContent ? " " : "") + "Archidekt decks keep no card language, so the deck shows it in English.";
+    note.hidden = !note.textContent;
     qtyIn.value = "1";
     setMsg("");
     saveBtn.disabled = false;
@@ -283,6 +746,7 @@
     var qty = Math.max(1, Math.min(99, parseInt(qtyIn.value, 10) || 1));
     var ch = { action: "add", card_name: cardName, quantity: qty };
     if (catSel.value) ch.category = catSel.value;
+    if (cardPin) { ch.set_code = cardPin.set_code; ch.collector_number = cardPin.collector_number; }
     return [ch];
   }
   function deckName(id) {

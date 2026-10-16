@@ -32,6 +32,7 @@ from .pages import (
     login_redirect,
     read_limited,
 )
+from .plugin_page import CHATGPT_NAME_MAX, chatgpt_name_too_long, developer_name_warning
 from .theme import display_name, plural, render
 
 if TYPE_CHECKING:
@@ -419,6 +420,24 @@ def system_data(state: Any) -> dict[str, Any]:
     return out
 
 
+def _chatgpt_name_warning(settings: Any) -> str:
+    """A notice when the ChatGPT connector name (MTG_CHATGPT_NAME, else MTG_SERVER_NAME) is over
+    the limit ChatGPT puts on a plugin file's name."""
+    out = ""
+    long = chatgpt_name_too_long(settings.server_name, getattr(settings, "chatgpt_name", None))
+    if long:
+        text = (
+            f"The ChatGPT connector name, “{long[0]}”, is {long[1]} characters; ChatGPT refuses a plugin "
+            f"file whose name is over {CHATGPT_NAME_MAX} characters. Set MTG_CHATGPT_NAME to a name of "
+            f"{CHATGPT_NAME_MAX} characters or fewer (see docs/DEPLOY.md)."
+        )
+        out += f"<div class='notice warn'>{html.escape(text)}</div>"
+    # the plugin file's developer and author name: a long MTG_SERVER_NAME shortened (B4 b)
+    if cut := developer_name_warning(settings.server_name):
+        out += f"<div class='notice warn'>{html.escape(cut)}</div>"
+    return out
+
+
 def _updates_card(u: dict[str, Any]) -> str:
     """Whether a newer gateway release is out (update_check.py) and how to move to it."""
     found = update_check.newer()
@@ -496,22 +515,31 @@ def _cleanup_text(c: dict[str, Any]) -> str:
             )
         if cause == "no-group":
             return "Off: it needs MTG_REQUIRED_GROUP. Set it in the stack and redeploy."
-        return f"Off. It is optional; to turn it on, follow {setup}."
+        return (
+            "Off. This optional hourly check deletes the saved Archidekt sign-in of people who no "
+            f"longer have access. To turn it on, follow {setup}."
+        )
     if st == "waiting":
         return (
-            f"On. The first check runs {c['first_after_seconds'] // 60} minutes after start; "
-            "reload this page then."
+            f"On. The first check runs {c['first_after_seconds'] // 60} minutes after the gateway "
+            "starts; reload this page then."
         )
     if st == "ok":
+        removed = int(c["removed"])
+        what = (
+            f"deleted the saved Archidekt sign-in of {plural(removed, 'person', 'people')} who lost access"
+            if removed
+            else "no one lost access"
+        )
         return _Html(
-            f"Working. Last check at {_when(c['at'])}: {plural(int(c['allowed']), 'allowed member')}, "
-            f"{plural(int(c['removed']), 'stored Archidekt session')} removed. Nothing to do."
+            f"Working. Last check at {_when(c['at'])}: {plural(int(c['allowed']), 'member')} with "
+            f"access; {what}. Nothing for you to do."
         )
     if st == "failed":
         err = str(c["error"])
         return _Html(
-            f"Last check at {_when(c['at'])} FAILED, nothing deleted: {html.escape(err)}. "
-            f"Next: {html.escape(idp_sweep.next_step(err))}"
+            f"Not working. The last check at {_when(c['at'])} failed and deleted nothing: "
+            f"{html.escape(err)}. To fix: {html.escape(idp_sweep.next_step(err))}"
         )
     return "Not started yet. Reload this page in a minute."
 
@@ -630,6 +658,7 @@ def _overview_body(state: Any) -> str:
             if sysd.get("last_backup_copy_error")
             else ""
         )
+        + _chatgpt_name_warning(state.settings)
         + "</div>"
     )
     cards.append(_updates_card(sysd["updates"]))

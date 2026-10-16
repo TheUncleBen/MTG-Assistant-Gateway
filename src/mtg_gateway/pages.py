@@ -497,11 +497,9 @@ def add_browser_routes(server: MCPServer, state: AppState) -> None:
                 sub=sub,
                 sid=sid,
             )
-        if action == "apply" and submitted_too_soon(
-            s.session_secret, f"proposal:{sub}:{pid}", data.get("shown")
-        ):
-            # Faster than a person reads the page (double-clickjacking), or a stamp that is not
-            # ours: nothing is applied and the review page is shown again.
+        if submitted_too_soon(s.session_secret, f"proposal:{sub}:{pid}", data.get("shown")):
+            # Faster than a person reads the page (double-clickjacking), or a stamp that is
+            # missing or not ours: nothing is applied or rejected and the page is shown again.
             return RedirectResponse(f"/proposals/{pid}", status_code=303)
         current_client.set(BROWSER_CLIENT_ID)  # the audit rows name the browser as the actor
         try:
@@ -632,7 +630,7 @@ def browser_session(state: Any, request: Request) -> tuple[str | None, str | Non
         return None, None  # a disabled account keeps no browser session either
     if not state.settings.grants_access(user["groups"]):
         return None, None
-    sync = getattr(state, "sync", None)
+    sync = state.sync
     if sync is not None:
         sync.opened(sub)  # opening the app checks the member's decks on Archidekt (sync.py)
     return sub, sid
@@ -817,7 +815,7 @@ def _account_body(state: Any, sub: str, csrf: str | None, *, disclosure_read: bo
         out.append(_app_card())
     out.append(_mode_card(state, sub, csrf_in))
     out.append(_apps_card(state, sub, csrf_in))
-    if getattr(state, "summaries", None) is not None:
+    if state.summaries is not None:
         out.append(notify.account_card_html(state, sub, csrf_in))  # the summary is inside, with ntfy on
     if info["linked"]:
         expires = _when(info.get("link_expires_at"))
@@ -880,7 +878,7 @@ def _identity_details(user: dict[str, Any]) -> str:
 
 def _sweep_on(state: Any) -> bool:
     """Whether this gateway runs the removed-member clean-up (idp_sweep.py)."""
-    sweep = getattr(state, "sweep", None)
+    sweep = state.sweep
     return bool(sweep is not None and sweep.enabled)
 
 
@@ -1312,7 +1310,7 @@ def _risk_badge(risk: str) -> str:
     return "danger" if risk == "destructive" else "warn" if risk in ("high", "consent") else ""
 
 
-def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str = "", *, step: bool = True) -> str:
+def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str, *, step: bool = True) -> str:
     """``step=False``: what happens next is already in the error box above (_failure_on_top)."""
     if p.get("kind") == "details":
         rows, total = _detail_rows(p.get("rows"), p["diff"])
@@ -1421,7 +1419,7 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str = "", *, step
             # connected app must not get its own proposal applied by a double-click on a page it
             # controls that swaps this window in (clickguard.py).
             + guarded_form(
-                hidden={"csrf": csrf or "", **({"shown": shown} if shown else {})},
+                hidden={"csrf": csrf or "", "shown": shown},
                 buttons=[
                     apply_button,
                     ("reject", "Reject this proposal", "btn" if destroy else "danger"),
@@ -1434,6 +1432,7 @@ def _proposal_body(p: dict[str, Any], csrf: str | None, shown: str = "", *, step
         body += (
             "<form method='post' class='reject'>"
             f"<input type='hidden' name='csrf' value='{html.escape(csrf or '')}'>"
+            f"<input type='hidden' name='shown' value='{html.escape(shown)}'>"
             "<input type='hidden' name='action' value='reject'>"
             "<button class='btn'>Reject this proposal</button></form>"
         )

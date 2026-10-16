@@ -13,135 +13,37 @@ import httpx
 import pytest
 from mcp import Client
 from mcp.server.mcpserver import MCPServer
-from pydantic import BaseModel, ConfigDict, Field
 
 from mtg_gateway.archidekt import ArchidektClient, Pacer
 from mtg_gateway.mf_proxy import MysticForgeProxy
 
-from .conftest import GATEWAY, FakeIdP, Harness, make_settings, running, sse_json
+from .conftest import (
+    AUTO_PROXY,
+    GATEWAY,
+    FakeIdP,
+    Harness,
+    Stack,
+    StackOptions,
+    open_stack,
+    proposal_stamp,
+    sse_json,
+    stack_with,
+)
 from .fake_archidekt import FakeArchidekt
-
-
-class _GoldfishRunInput(BaseModel):
-    """The shape of Mystic Forge's goldfish_run input (server.py GoldfishRunInput, extra forbidden):
-    one ``params`` object. A flat call fails validation exactly as it does against the real service."""
-
-    model_config = ConfigDict(extra="forbid")
-    deck: str = Field(min_length=1)
-    n: int = Field(default=300, ge=1, le=5000)
-    seed: int | None = None
-    until_turn: int = Field(default=10, ge=1, le=30)
-    opponents: int = Field(default=1, ge=1, le=5)
-    mulligan: dict[str, object] | None = None
-    annotations: list[dict[str, object]] | None = None
-    combos: list[object] | None = None
-    constructed: bool = False
-
-
-class _GoldfishAbInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    deck_a: str = Field(min_length=1)
-    deck_b: str = Field(min_length=1)
-    n: int = Field(default=300, ge=1, le=5000)
-    seed: int | None = None
-    until_turn: int = Field(default=10, ge=1, le=30)
-    annotations: list[dict[str, object]] | None = None
-    annotations_a: list[dict[str, object]] | None = None
-    annotations_b: list[dict[str, object]] | None = None
-    combos: list[object] | None = None
-    allow_different_commanders: bool = False
-    constructed: bool = False
-
-
-class _ValidateDecklistInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    decklist: str = Field(min_length=1)
-    commander: str | None = None
-
-
-# The simulator calls the fake received, (tool, params), for tests that check what was sent.
-SIM_CALLS: list[tuple[str, dict[str, object]]] = []
-
-
-def fake_mystic_forge() -> MCPServer:
-    mf = MCPServer(name="mystic-forge-fake")
-
-    @mf.tool(name="scryfall_named", description="Look up a card by name")
-    async def scryfall_named(name: str) -> dict[str, object]:
-        return {"name": name, "oracle_text": "fake oracle text"}
-
-    # The simulators, with Mystic Forge's one-model signature and its renderers' headings. A
-    # commander the fake does not know is answered the way Mystic Forge does: a sentence, not an
-    # error.
-    @mf.tool(name="goldfish_run", description="goldfish simulation")
-    async def goldfish_run(params: _GoldfishRunInput) -> str:
-        SIM_CALLS.append(("goldfish_run", params.model_dump()))
-        first = params.deck.strip().splitlines()[0]
-        if params.constructed:
-            # Mystic Forge's header for a 60-card game (patch 0007)
-            size = sum(int(line.split()[0]) for line in params.deck.strip().splitlines())
-            return (
-                f"# Goldfish run\nDeck: {size} cards | Format: 60-card (no commander, 20 life, on the "
-                f"play) | {params.n} games\n\n## Metrics\n```json\n{{}}\n```"
-            )
-        if "Unknown" in first:
-            return f"Commander '{first}' was not recognized by Scryfall; fix the name and rerun."
-        return f"# Goldfish run\nCommander: {first} | {params.n} games\n\n## Metrics\n```json\n{{}}\n```"
-
-    @mf.tool(name="goldfish_ab", description="paired goldfish A/B")
-    async def goldfish_ab(params: _GoldfishAbInput) -> str:
-        SIM_CALLS.append(("goldfish_ab", params.model_dump()))
-        return f"# Goldfish A/B\n{params.n} paired games\n\n## Deltas (A − B)\n(none)"
-
-    @mf.tool(name="validate_decklist", description="validate a decklist")
-    async def validate_decklist(params: _ValidateDecklistInput) -> str:
-        # Like Mystic Forge, which reads names through Scryfall's collection lookup: a
-        # double-faced card named with both faces is "not found".
-        both = [line for line in params.decklist.splitlines() if " // " in line]
-        if both:
-            return "# Validation: ISSUES FOUND\n\n**not found on Scryfall:**\n" + "\n".join(both)
-        return f"Validated {len(params.decklist.splitlines())} lines"
-
-    @mf.tool(name="watchlist_list", description="stateful, must stay hidden")
-    async def watchlist_list() -> list[str]:
-        return ["secret"]
-
-    @mf.tool(name="unknown_future_tool", description="not on either list")
-    async def unknown_future_tool() -> str:
-        return "hidden"
-
-    return mf
+from .fake_mystic_forge import SIM_CALLS, _ValidateDecklistInput, fake_mystic_forge
 
 
 def _client(settings, ark: FakeArchidekt) -> ArchidektClient:
     return ArchidektClient(settings.archidekt_base, "test-agent", Pacer(0.0), http=ark.client())
 
 
-class Stack:
-    def __init__(self, h: Harness, ark: FakeArchidekt):
-        self.h = h
-        self.ark = ark
-
-
-@pytest.fixture
-async def stack(tmp_path: Path, idp: FakeIdP):
-    ark = FakeArchidekt()
-    settings = make_settings(
-        tmp_path, writes_enabled=True, approval_mode_default="auto", archidekt_base="https://ark.test/api"
-    )
-    client = _client(settings, ark)
-    proxy = MysticForgeProxy("http://mf.test/mcp", client_factory=lambda: Client(fake_mystic_forge()))
-    async with running(Harness(settings, idp, archidekt=client, mf_proxy=proxy)) as h:
-        yield Stack(h, ark)
+stack_options = stack_with(AUTO_PROXY)
 
 
 @pytest.fixture
 async def stack_ro(tmp_path: Path, idp: FakeIdP):
-    ark = FakeArchidekt()
-    settings = make_settings(tmp_path, writes_enabled=False, archidekt_base="https://ark.test/api")
-    client = _client(settings, ark)
-    async with running(Harness(settings, idp, archidekt=client)) as h:
-        yield Stack(h, ark)
+    async with open_stack(tmp_path, idp, StackOptions(settings={"writes_enabled": False})) as st:
+        yield st
 
 
 # -- helpers -----------------------------------------------------------------
@@ -185,6 +87,14 @@ class Browser:
         m = re.search(r"name='csrf' value='([0-9a-f]+)'", r.text)
         assert m, r.text
         return m.group(1)
+
+    async def review_form(self, url: str) -> dict[str, str]:
+        """The hidden fields of the review page ``url`` (``/proposals/<pid>``) as a person sends
+        them: the CSRF token and a render stamp old enough for the click guard."""
+        return {
+            "csrf": await self.csrf(url),
+            "shown": proposal_stamp(self.h, self.http, url.rsplit("/", 1)[1]),
+        }
 
     async def link(self, login: str, password: str, *, csrf: str | None = None) -> httpx.Response:
         csrf = csrf if csrf is not None else await self.csrf()
@@ -480,7 +390,7 @@ async def test_browser_apply_with_csrf(stack: Stack) -> None:
     assert "Apply these changes" in page.text
     r = await b.http.post(url, data={"csrf": "nope", "action": "apply"})
     assert r.status_code == 403 and ark.patches == []
-    r = await b.http.post(url, data={"csrf": await b.csrf(url), "action": "apply"})
+    r = await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
     assert r.status_code == 303 and r.headers["location"].endswith("?ok=applied")
     assert len(ark.patches) == 1  # one card added
     page = await b.http.get(url + "?ok=applied")
@@ -506,7 +416,7 @@ async def test_browser_reject_closes_a_pending_proposal(stack: Stack) -> None:
     assert "Reject this proposal" in page.text
     r = await b.http.post(url, data={"csrf": "nope", "action": "reject"})
     assert r.status_code == 403
-    r = await b.http.post(url, data={"csrf": await b.csrf(url), "action": "reject"})
+    r = await b.http.post(url, data={**await b.review_form(url), "action": "reject"})
     assert r.status_code == 303 and r.headers["location"].endswith("?ok=rejected")
     page = await b.http.get(url + "?ok=rejected")
     assert "Rejected." in page.text and ">rejected<" in page.text and "Reject this proposal" not in page.text
@@ -515,9 +425,9 @@ async def test_browser_reject_closes_a_pending_proposal(stack: Stack) -> None:
     got = structured(await call(h, token, "get_proposal", {"proposal_id": p["proposal_id"]}))
     assert got["state"] == "rejected" and "Rejected by the user on the review page" in got["next_step"]
     assert got["closed_by"] == "review_page" and "closed_by_app" not in got
-    r = await b.http.post(url, data={"csrf": await b.csrf(url), "action": "apply"})
+    r = await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
     assert r.status_code == 303 and "err=" in r.headers["location"] and ark.patches == []
-    r = await b.http.post(url, data={"csrf": await b.csrf(url), "action": "reject"})
+    r = await b.http.post(url, data={**await b.review_form(url), "action": "reject"})
     assert r.status_code == 303 and "err=" in r.headers["location"]
     await b.aclose()
 
@@ -917,11 +827,8 @@ async def test_propose_refuses_decks_the_linked_account_does_not_own(stack: Stac
 
 @pytest.fixture
 async def stack_browser_only(tmp_path: Path, idp: FakeIdP):
-    ark = FakeArchidekt()
-    settings = make_settings(tmp_path, writes_enabled=True, archidekt_base="https://ark.test/api")
-    client = _client(settings, ark)
-    async with running(Harness(settings, idp, archidekt=client)) as h:
-        yield Stack(h, ark)
+    async with open_stack(tmp_path, idp, StackOptions(settings={"writes_enabled": True})) as st:
+        yield st
 
 
 async def test_apply_over_mcp_is_refused_by_default(stack_browser_only: Stack) -> None:
@@ -943,7 +850,7 @@ async def test_apply_over_mcp_is_refused_by_default(stack_browser_only: Stack) -
     b = Browser(h)
     await b.login()
     url = f"/proposals/{p['proposal_id']}"
-    r = await b.http.post(url, data={"csrf": await b.csrf(url), "action": "apply"})
+    r = await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
     assert r.status_code == 303 and len(ark.patches) == 1
     await b.aclose()
 
@@ -1028,17 +935,9 @@ async def test_an_app_revoking_its_token_keeps_browser_sessions(stack: Stack) ->
 
 @pytest.fixture
 async def stack_manual(tmp_path: Path, idp: FakeIdP):
-    ark = FakeArchidekt()
-    settings = make_settings(
-        tmp_path,
-        writes_enabled=True,
-        approval_mode_default="manual",
-        archidekt_base="https://ark.test/api",
-    )
-    client = _client(settings, ark)
-    proxy = MysticForgeProxy("http://mf.test/mcp", client_factory=lambda: Client(fake_mystic_forge()))
-    async with running(Harness(settings, idp, archidekt=client, mf_proxy=proxy)) as h:
-        yield Stack(h, ark)
+    manual = AUTO_PROXY.but(settings={"writes_enabled": True, "approval_mode_default": "manual"})
+    async with open_stack(tmp_path, idp, manual) as st:
+        yield st
 
 
 async def test_manual_mode_needs_the_users_own_press(stack_manual: Stack) -> None:
@@ -1066,7 +965,7 @@ async def test_manual_mode_needs_the_users_own_press(stack_manual: Stack) -> Non
     b = Browser(h)
     await b.login()
     url = f"/proposals/{p['proposal_id']}"
-    r = await b.http.post(url, data={"csrf": await b.csrf(url), "action": "apply"})
+    r = await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
     assert r.status_code == 303 and len(ark.patches) == 1
     await b.aclose()
 

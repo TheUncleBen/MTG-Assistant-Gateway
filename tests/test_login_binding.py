@@ -14,7 +14,7 @@ import httpx
 
 from mtg_gateway.oidc import pkce_pair
 
-from .conftest import GATEWAY, Harness
+from .conftest import GATEWAY, Harness, consent_stamp
 
 EVIL = "https://evil.test/cb"
 
@@ -47,7 +47,10 @@ async def _attacker_login(gw: Harness, atk: httpx.AsyncClient) -> tuple[str, str
     login_id = parse_qs(urlparse(r.headers["location"]).query)["state"][0]
     page = await atk.get("/authorize/confirm", params={"state": login_id})
     csrf = re.search(r"name='csrf' value='([0-9a-f]+)'", page.text).group(1)  # type: ignore[union-attr]
-    go = await atk.post("/authorize/confirm", data={"state": login_id, "csrf": csrf, "action": "approve"})
+    shown = consent_stamp(gw.settings, login_id)
+    go = await atk.post(
+        "/authorize/confirm", data={"state": login_id, "csrf": csrf, "action": "approve", "shown": shown}
+    )
     assert go.status_code == 303
     return client_id, login_id, csrf, go.headers["location"]
 
@@ -94,7 +97,12 @@ async def test_victim_browser_cannot_approve_the_attackers_login(gw: Harness):
     await victim.get("/login", params={"next": "/account"})  # the victim has a login key of their own
     _client_id, login_id, csrf, _idp = await _attacker_login(gw, atk)
     # A cross-site form post with the token the attacker read from their own consent page.
-    form = {"state": login_id, "csrf": csrf, "action": "approve"}
+    form = {
+        "state": login_id,
+        "csrf": csrf,
+        "action": "approve",
+        "shown": consent_stamp(gw.settings, login_id),
+    }
     post = await victim.post("/authorize/confirm", data=form)
     assert post.status_code == 403 and "location" not in post.headers
     assert (await victim.get("/authorize/confirm", params={"state": login_id})).status_code == 400

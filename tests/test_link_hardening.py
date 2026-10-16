@@ -15,16 +15,14 @@ from pathlib import Path
 
 import httpx
 import pytest
-from mcp import Client
 
 from mtg_gateway import backup
 from mtg_gateway.archidekt import ArchidektClient, Pacer, _NoCookies
 from mtg_gateway.db import Database
-from mtg_gateway.mf_proxy import MysticForgeProxy
 from mtg_gateway.pages import BROWSER_CLIENT_ID
 
-from .conftest import FakeIdP, Harness, make_settings, running
-from .test_decks_and_proxy import Browser, Stack, _client, fake_mystic_forge
+from .conftest import AUTO_PROXY, FakeIdP, Harness, Stack, make_settings, running, stack_with
+from .test_decks_and_proxy import Browser, _client
 
 
 def _jwt(claims: dict) -> str:
@@ -32,17 +30,7 @@ def _jwt(claims: dict) -> str:
     return f"eyJhbGciOiJIUzI1NiJ9.{payload}.sig"
 
 
-@pytest.fixture
-async def stack(tmp_path: Path, idp: FakeIdP):
-    from .fake_archidekt import FakeArchidekt
-
-    ark = FakeArchidekt()
-    settings = make_settings(
-        tmp_path, writes_enabled=True, approval_mode_default="auto", archidekt_base="https://ark.test/api"
-    )
-    proxy = MysticForgeProxy("http://mf.test/mcp", client_factory=lambda: Client(fake_mystic_forge()))
-    async with running(Harness(settings, idp, archidekt=_client(settings, ark), mf_proxy=proxy)) as h:
-        yield Stack(h, ark)
+stack_options = stack_with(AUTO_PROXY)
 
 
 # -- cookies --------------------------------------------------------------------------------------

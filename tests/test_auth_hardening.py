@@ -23,10 +23,20 @@ from mtg_gateway.cimd import (
 )
 from mtg_gateway.clickguard import MIN_FORM_AGE, form_stamp, submitted_too_soon
 from mtg_gateway.oidc import pkce_pair
-from tests.conftest import GATEWAY, FakeIdP, Harness, make_settings, running
-from tests.fake_archidekt import FakeArchidekt
+from tests.conftest import (
+    GATEWAY,
+    FakeIdP,
+    Harness,
+    Stack,
+    StackOptions,
+    build_stack,
+    make_settings,
+    run_stack,
+    running,
+    stack_with,
+)
 from tests.test_cimd import CLIENT_URL, DocHost, document
-from tests.test_decks_and_proxy import Browser, Stack, _client, call, linked_user, structured
+from tests.test_decks_and_proxy import Browser, call, linked_user, structured
 
 
 def _authorize_params(client_id: str, **over: str) -> dict[str, str]:
@@ -328,10 +338,26 @@ async def test_consent_submit_faster_than_a_person_is_shown_again(gw: Harness):
     assert r.status_code == 303 and r.headers["location"].startswith("https://idp.test/")
 
 
+@pytest.mark.parametrize("action", ["approve", "deny"])
+async def test_consent_submit_without_a_stamp_is_shown_again(gw: Harness, action: str):
+    """A post with no render stamp grants nothing: the consent page is shown again and the
+    login is still pending (the IdP was never visited)."""
+    login_id, csrf, _page = await _consent(gw)
+    r = await gw.http.post("/authorize/confirm", data={"state": login_id, "csrf": csrf, "action": action})
+    assert r.status_code == 303 and r.headers["location"] == f"/authorize/confirm?state={login_id}"
+    assert (await gw.http.get("/authorize/confirm", params={"state": login_id})).status_code == 200
+    aged = form_stamp(gw.settings.session_secret, f"consent:{login_id}", now=time.time() - 2 * MIN_FORM_AGE)
+    r = await gw.http.post(
+        "/authorize/confirm", data={"state": login_id, "csrf": csrf, "action": "approve", "shown": aged}
+    )
+    assert r.status_code == 303 and r.headers["location"].startswith("https://idp.test/")
+
+
 def test_form_stamp_rules():
     secret = "s" * 48
     now = time.time()
-    assert not submitted_too_soon(secret, "x", None)
+    assert submitted_too_soon(secret, "x", None, now)  # a guarded form always needs its stamp
+    assert submitted_too_soon(secret, "x", "", now)
     assert submitted_too_soon(secret, "x", form_stamp(secret, "x", now), now)
     assert not submitted_too_soon(secret, "x", form_stamp(secret, "x", now - 1), now)
     assert submitted_too_soon(secret, "y", form_stamp(secret, "x", now - 1), now)  # other scope
@@ -341,12 +367,8 @@ def test_form_stamp_rules():
 # -- 24/26: proposal review page click guard -------------------------------------------------------
 
 
-@pytest.fixture
-async def stack(tmp_path: Path, idp: FakeIdP):
-    ark = FakeArchidekt()
-    settings = make_settings(tmp_path, writes_enabled=True, archidekt_base="https://ark.test/api")
-    async with running(Harness(settings, idp, archidekt=_client(settings, ark))) as h:
-        yield Stack(h, ark)
+# Writes on with the shipped approval mode.
+stack_options = stack_with(StackOptions(settings={"writes_enabled": True}))
 
 
 async def test_review_page_apply_is_guarded(stack: Stack):
@@ -381,6 +403,56 @@ async def test_review_page_apply_is_guarded(stack: Stack):
     assert r.status_code == 303 and r.headers["location"].endswith("?ok=applied")
     assert len(ark.patches) == 1
     await b.aclose()
+
+
+@pytest.mark.parametrize("action", ["apply", "reject"])
+async def test_review_page_submit_without_a_stamp_changes_nothing(stack: Stack, action: str):
+    """Apply and Reject posted with no render stamp: the review page is shown again and the
+    proposal stays pending; nothing reaches Archidekt."""
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    p = structured(
+        await call(
+            h,
+            token,
+            "propose_deck_changes",
+            {"deck_id": "42", "changes": [{"action": "add", "card_name": "Arcane Signet"}]},
+        )
+    )
+    pid = p["proposal_id"]
+    b = Browser(h)
+    await b.login()
+    url = f"/proposals/{pid}"
+    r = await b.http.post(url, data={"csrf": await b.csrf(url), "action": action})
+    assert r.status_code == 303 and r.headers["location"] == url
+    assert ark.patches == [] and h.app.state.gateway.decks.describe("user-1", pid)["state"] == "pending"
+    r = await b.http.post(url, data={**await b.review_form(url), "action": action})
+    assert r.status_code == 303 and r.headers["location"].endswith(
+        "?ok=applied" if action == "apply" else "?ok=rejected"
+    )
+    await b.aclose()
+
+
+async def test_review_page_reject_without_writes_carries_a_stamp(tmp_path: Path, idp: FakeIdP):
+    """With writes off the page offers only a plain Reject form; it carries the stamp too."""
+    st = build_stack(tmp_path, idp, StackOptions(settings={"writes_enabled": False}))
+    async with run_stack(st):
+        h = st.h
+        token = await linked_user(st)
+        p = structured(
+            await call(
+                h,
+                token,
+                "propose_deck_changes",
+                {"deck_id": "42", "changes": [{"action": "add", "card_name": "Arcane Signet"}]},
+            )
+        )
+        b = Browser(h)
+        await b.login()
+        page = await b.http.get(f"/proposals/{p['proposal_id']}")
+        form = re.search(r"<form method='post' class='reject'>(.*?)</form>", page.text)
+        assert form and re.search(r"name='shown' value='\d+\.[0-9a-f]{32}'", form.group(1)), page.text
+        await b.aclose()
 
 
 def test_guard_script_ships_in_the_wheel():

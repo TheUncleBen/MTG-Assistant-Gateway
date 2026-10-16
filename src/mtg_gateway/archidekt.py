@@ -327,6 +327,7 @@ def list_row(d: dict[str, Any]) -> dict[str, Any]:
     bracket = d.get("edhBracket")
     size = d.get("size")
     folder = d.get("parentFolderName")
+    folder_id = d.get("parentFolderId")
     views = d.get("viewCount")
     return {
         "id": str(d["id"]),
@@ -338,6 +339,8 @@ def list_row(d: dict[str, Any]) -> dict[str, Any]:
         "private": bool(d.get("private", False)),
         "unlisted": bool(d.get("unlisted", False)),
         "folder": str(folder) if isinstance(folder, str) and folder else None,
+        # the folder's id (verified in the v3 listing 2026-10-05); None at the top level
+        "folder_id": folder_id if isinstance(folder_id, int) and not isinstance(folder_id, bool) else None,
         "colors": {k: v for k, v in colors.items() if k in "WUBRG" and isinstance(v, int)},
         "size": size if isinstance(size, int) and not isinstance(size, bool) else None,
         "bracket": bracket if isinstance(bracket, int) and not isinstance(bracket, bool) else None,
@@ -432,6 +435,7 @@ class DeckCard:
     # Archidekt's custom mana value for this row (the deck's own override of the card's), or None
     custom_cmc: float | None = None
     companion: bool = False
+    flipped_default: bool = False  # the row shows its back face by default (the site's flippedDefault)
     image_hash: str = ""
     scryfall_uid: str = ""
     default_category: str = ""  # Archidekt's auto category for cards with categories null
@@ -2146,6 +2150,7 @@ def parse_deck(body: Any) -> Deck:
                 label=str(entry.get("label") or ""),
                 custom_cmc=_number(entry.get("customCmc")),
                 companion=entry.get("companion") is True,
+                flipped_default=entry.get("flippedDefault") is True,
                 image_hash=str(card.get("scryfallImageHash") or ""),
                 scryfall_uid=str(card.get("uid") or ""),
                 default_category=str(oracle.get("defaultCategory") or ""),

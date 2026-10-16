@@ -233,6 +233,10 @@ class CollectionAdd(_Card):
     condition: Annotated[Literal["NM", "LP", "MP", "HP", "DMG"], BeforeValidator(_upper)] | None = Field(
         default=None, description="Card condition."
     )
+    language: str | None = Field(
+        default=None,
+        description="The card's language code: EN (default), ES, FR, DE, IT, PT, JA, KO, RU, ZHS or ZHT.",
+    )
 
 
 class CollectionRemove(BaseModel):

@@ -36,6 +36,26 @@ def server(tmp_path: Path):
         s.stop()
 
 
+DECKS_API = re.compile(r".*/api/decks/mine\?.*")
+
+
+def _goto_held(page, url: str, skeleton: str) -> None:
+    """Open a page whose deck list loads after it, holding that read until the placeholder has
+    been seen, so a fast answer can never swap the placeholder out before the test looks."""
+    held: list = []
+    page.route(DECKS_API, lambda route: held.append(route))
+    page.goto(url, wait_until="commit")
+    page.wait_for_selector(skeleton, state="attached")
+    for _ in range(200):
+        if held:
+            break
+        page.wait_for_timeout(50)
+    assert held, "the page never asked for the deck list"
+    for route in held:
+        route.continue_()
+    page.unroute(DECKS_API)
+
+
 def test_cold_deck_pages_fill_their_placeholders(server: Server) -> None:
     from playwright.sync_api import sync_playwright
 
@@ -55,9 +75,8 @@ def test_cold_deck_pages_fill_their_placeholders(server: Server) -> None:
         page = ctx.new_page()
         errors: list[str] = []
         page.on("pageerror", lambda e: errors.append(str(e)))
-        page.goto(f"{server.base}/decks", wait_until="commit")
         # the shell first: the placeholder list and a blank total...
-        page.wait_for_selector("ul.decklist.skeleton", state="attached")
+        _goto_held(page, f"{server.base}/decks", "ul.decklist.skeleton")
         assert page.locator("#decks-total").inner_text().startswith("Total decks:")
         # ...then the list itself, as the server renders it, and the toolbar filled in
         page.wait_for_selector("ul.decklist li.deck", timeout=10_000)
@@ -65,11 +84,11 @@ def test_cold_deck_pages_fill_their_placeholders(server: Server) -> None:
         assert page.locator("[aria-busy=true]").count() == 0
         assert "Sample Commander Deck" in page.locator("ul.decklist").inner_text()
         assert page.locator("#decks-total").inner_text() == "Total decks: 1"
-        assert page.locator("#folder-field").get_attribute("hidden") is not None  # no folders: stays hidden
+        assert page.locator("#folder-field").count() == 0  # opening folders replaced the dropdown (F3)
+        assert page.locator(".listbar a[href='/folders']").inner_text().strip() == "Manage folders"
         # home, cold again
         svc.deck_lists.drop("user-1")
-        page.goto(f"{server.base}/", wait_until="commit")
-        page.wait_for_selector(".recent.skeleton", state="attached")
+        _goto_held(page, f"{server.base}/", ".recent.skeleton")
         page.wait_for_selector(".recent a", timeout=10_000)
         assert "All decks (1)" in page.locator("[data-decks-src]").inner_text()
         assert page.locator(".skeleton").count() == 0
@@ -98,8 +117,7 @@ def test_a_deck_list_that_cannot_be_read_says_so_with_try_again(server: Server) 
         page.set_default_timeout(10_000)
         errors: list[str] = []
         page.on("pageerror", lambda e: errors.append(str(e)))
-        page.goto(f"{server.base}/decks", wait_until="commit")
-        page.wait_for_selector("ul.decklist.skeleton", state="attached")
+        _goto_held(page, f"{server.base}/decks", "ul.decklist.skeleton")
         note = page.wait_for_selector(".decks-unreadable[role=alert]")
         assert note.inner_text().startswith("Your deck list couldn't be read from Archidekt.")
         assert page.locator("ul.decklist").count() == 0 and "No decks yet" not in page.content()

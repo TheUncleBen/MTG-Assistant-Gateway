@@ -686,10 +686,14 @@ details.raw{margin:.5rem 0 0} details.raw summary{cursor:pointer;color:var(--tex
    button and the page needs no sideways scroll. The word returns above 800 px. */
 @media (min-width:600px) and (max-width:799.98px) and (hover:hover) and (pointer:fine){
   .topbar .brand .word{display:none} }
-.topbar .left{flex:1 1 auto}
+.topbar .left{flex:1 1 0}
 .topbar nav.site{flex:none}
+/* the left side takes only the room the right side leaves: a long MTG_SERVER_NAME shortens the
+   brand's word (an ellipsis) rather than squeeze the search box and the account button past the
+   window's edge; the right side still gives way when even that is not enough (large text) */
+.topbar .right{flex:0 1 auto}
 .brand{min-width:0}
-.brand .word{overflow:hidden;text-overflow:ellipsis}
+.brand .word{overflow:hidden;text-overflow:ellipsis;min-width:0}
 /* home dashboard: section tiles (Archidekt's landing cards) */
 .home .hero{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:1rem;
   margin:0 0 1rem}
@@ -950,6 +954,7 @@ ICONS = {
     "tag": "<path d='M3 12V4h8l9 9-8 8z'/><circle cx='7' cy='8' r='1.2' fill='currentColor'/>",
     "trash": "<path d='M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13'/><path d='M10 11v6M14 11v6'/>",
     "folder": "<path d='M3 6h6l2 2h10v11H3z'/>",
+    "lock": "<rect x='5' y='11' width='14' height='10' rx='2'/><path d='M8 11V8a4 4 0 0 1 8 0v3'/>",
     "image": "<path d='M4 5h16v14H4z'/><circle cx='9' cy='10' r='1.5'/><path d='M4 17l5-5 4 4 3-3 4 4'/>",
     "box": "<path d='M3 8l9-5 9 5-9 5z'/><path d='M3 8v8l9 5 9-5V8'/><path d='M12 13v8'/>",
     "play": "<circle cx='12' cy='12' r='9'/><path d='M10 8l6 4-6 4z' fill='currentColor'/>",
@@ -1084,7 +1089,7 @@ def layout_from_cookie(value: str | None) -> str:
 # flash of the default, no script). The page sets it whenever the view is picked in its address
 # (the toolbar's form puts it there); a visit without one renders the remembered view.
 VIEW_COOKIE = "mtg_view_"
-VIEW_KINDS = ("deck", "decks", "collection")
+VIEW_KINDS = ("deck", "decks", "collection", "cards")
 
 
 def view_choice(request: Any, kind: str, allowed: Iterable[str], default: str) -> tuple[str, bool]:

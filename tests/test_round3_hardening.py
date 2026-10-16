@@ -26,20 +26,12 @@ from mtg_gateway.reports import ReportService
 from mtg_gateway.scan import art
 from mtg_gateway.scan.scryfall import ScryfallClient, ScryfallError
 
-from .conftest import FakeIdP, Harness, make_settings, running
+from .conftest import Harness, Stack, make_settings
 from .fake_archidekt import FakeArchidekt
 from .test_admin import admin_browser, gw  # noqa: F401  (gw is a fixture)
-from .test_decks_and_proxy import Browser, Stack, _client, call, linked_user, mcp_token, structured
+from .test_decks_and_proxy import Browser, call, linked_user, mcp_token, structured
 
-
-@pytest.fixture
-async def stack(tmp_path, idp: FakeIdP):
-    ark = FakeArchidekt()
-    settings = make_settings(
-        tmp_path, writes_enabled=True, approval_mode_default="auto", archidekt_base="https://ark.test/api"
-    )
-    async with running(Harness(settings, idp, archidekt=_client(settings, ark))) as h:
-        yield Stack(h, ark)
+# ``stack`` is the shared AUTO stack (tests/conftest.py): writes on, applies allowed over MCP.
 
 
 def _deck() -> Any:
@@ -189,9 +181,9 @@ async def test_another_app_cannot_reject_the_members_proposals(stack: Stack) -> 
     out = structured(await call(h, token, "reject_proposal", {"proposal_id": mine["proposal_id"]}))
     assert out["ok"] and out["state"] == "rejected", out
     # the browser review page may reject any of the member's proposals
-    page_csrf = re.search(r"name='csrf' value='([0-9a-f]+)'", (await b.http.get(f"/proposals/{pid}")).text)
-    assert page_csrf
-    r = await b.http.post(f"/proposals/{pid}", data={"csrf": page_csrf.group(1), "action": "reject"})
+    r = await b.http.post(
+        f"/proposals/{pid}", data={**await b.review_form(f"/proposals/{pid}"), "action": "reject"}
+    )
     assert r.status_code == 303 and r.headers["location"].endswith("?ok=rejected")
     await b.aclose()
 

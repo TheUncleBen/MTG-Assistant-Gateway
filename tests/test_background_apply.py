@@ -12,9 +12,9 @@ from mtg_gateway import archidekt as ark_mod
 from mtg_gateway import decks as decks_mod
 from mtg_gateway.archidekt import ArchidektClient
 
-from .conftest import FakeIdP, Harness, make_settings, running
+from .conftest import AUTO, Stack, StackOptions
 from .fake_archidekt import FakeArchidekt
-from .test_decks_and_proxy import Browser, Stack, _client, call, linked_user, structured
+from .test_decks_and_proxy import Browser, call, linked_user, structured
 
 THREE = [
     {"action": "set_quantity", "card_name": "Forest", "quantity": 3},
@@ -24,14 +24,10 @@ THREE = [
 
 
 @pytest.fixture
-async def stack(tmp_path, idp: FakeIdP, monkeypatch):
+def stack_options(monkeypatch) -> StackOptions:
+    """The shared AUTO stack, with the assistant's apply answering "applying" after 0.2 s."""
     monkeypatch.setattr(decks_mod, "APPLY_WAIT_SECONDS", 0.2)
-    ark = FakeArchidekt()
-    settings = make_settings(
-        tmp_path, writes_enabled=True, approval_mode_default="auto", archidekt_base="https://ark.test/api"
-    )
-    async with running(Harness(settings, idp, archidekt=_client(settings, ark))) as h:
-        yield Stack(h, ark)
+    return AUTO
 
 
 @pytest.fixture
@@ -125,7 +121,7 @@ async def test_the_review_page_shows_progress_and_refreshes_while_applying(stack
     b = Browser(h)
     await b.login()
     url = f"/proposals/{p['proposal_id']}"
-    r = await b.http.post(url, data={"csrf": await b.csrf(url), "action": "apply"})
+    r = await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
     assert r.status_code == 303 and r.headers["location"].endswith("?ok=applying"), r.headers
     page = await b.http.get(r.headers["location"])
     assert "Applying. This is a large change" in page.text

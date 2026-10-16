@@ -229,13 +229,15 @@ def add_deck_tool_routes(
             "<span class='pastestatus muted small' role='status'></span></div></form></details>"
             "<ul class='erows added'></ul></section>"
             "<div class='cats existing'></div>"
-            "<div class='picker' hidden></div>"
             "</div>"
             + "".join(
                 f"<template id='icon-{n}'>{icon(n)}</template>"
                 for n in ("minus", "plus", "more", "x", "swap")
             )
             + "<script src='/static/cardview.js' defer></script>"
+            # the printing picker the deck page's card menu shares (Change printing, the add
+            # box's printings)
+            + "<script src='/static/printpick.js' defer></script>"
             + "<script src='/static/companion.js' defer></script>"
         )
         return page(
@@ -575,7 +577,7 @@ def add_deck_tool_routes(
             two_pane=True,
             current="/decks",
             csp=DECK_CSP,
-            scripts=True,
+            viewer_only=True,  # the card viewer only: none of deck.js's hooks are on this page
             heading=False,
             deck_css=True,  # the card viewer's styles
             extra_css=GOLDFISH_CSS,
@@ -654,7 +656,7 @@ def add_deck_tool_routes(
             two_pane=True,
             current="/decks",
             csp=DECK_CSP,
-            scripts=True,
+            viewer_only=True,  # the card viewer only: none of deck.js's hooks are on this page
             heading=False,
             deck_css=True,
             extra_scripts=("compare.js",),

@@ -28,13 +28,13 @@ from .deckpage import (
     VIEWS,
     covers_for,
     deck_list_controls_html,
-    deck_list_html,
     deck_page_html,
     decks_unreadable_html,
     featured,
     reread_href,
 )
 from .decks import DeckError, current_client, owns_deck
+from .folderview import FOLDER_CSS, arrange, level_html, resolve_folder
 from .pages import (
     BROWSER_CLIENT_ID,
     _csrf,
@@ -60,7 +60,6 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
     """My decks, new deck, one deck and clone."""
     EXPIRED = h.EXPIRED
     apply_now = h.apply_now
-    arrange_decks = h.arrange_decks
     check_csrf = h.check_csrf
     deck_list_skeleton = h.deck_list_skeleton
     decks = h.decks
@@ -71,6 +70,15 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
     page = h.page
     s = h.s
     secure = h.secure
+
+    async def folder_tree(sub: str, *, wait: float) -> tuple[dict[str, Any] | None, bool]:
+        """(the member's folder tree, still being read). The tree is None when Archidekt could
+        not give it (My decks then lists every deck flat, with a notice) or is still coming."""
+        try:
+            tree = await decks.folder_view(sub, wait=wait)
+        except DeckError:
+            return None, False
+        return tree, tree is None
 
     # -- my decks ---------------------------------------------------------------
     @server.custom_route("/decks", methods=["GET"], include_in_schema=False)
@@ -96,7 +104,15 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
                 hidden = len(await decks.backup_copies(sub, wait=0.0) or [])
             except DeckError:
                 hidden = 0
-        rows, folders, total = arrange_decks(rows or [], q=q, order=order, folder=folder)
+        tree, tree_pending = None, False
+        if not pending and not problem:  # Archidekt failing on the list: no second request
+            tree, tree_pending = await folder_tree(sub, wait=decks.deck_list_wait)
+        pending = pending or tree_pending  # the folders are still being read: decks.js fills the list
+        folder_id = resolve_folder(tree, folder)
+        level = arrange(rows or [], tree, folder_id=folder_id, q=q, order=order)
+        total = level.total
+        if not pending:  # the toolbar keeps the folder shown (an old name address becomes its id)
+            folder = str(folder_id) if folder_id is not None else ""
         unread_html = (
             decks_unreadable_html(some_shown=total > 0, again=reread_href("/decks", qp)) if unreadable else ""
         )
@@ -116,21 +132,27 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             return page("My decks", notice + body, sub=sub, sid=sid, current="/decks")
         if pending:
             src = "/api/decks/mine?" + urlencode(
-                {"shape": "list", "q": q, "order": order, "view": view, "folder": folder}
+                {
+                    "shape": "list",
+                    "q": q,
+                    "order": order,
+                    "view": view,
+                    "folder": request.query_params.get("folder") or "",
+                }
             )
             listing = f"<div data-decks-src='{_esc(src)}' aria-busy='true'>{deck_list_skeleton(view)}</div>"
         else:
-            covers = covers_for(rows, state.db.deck_covers([str(d["id"]) for d in rows]))
+            shown = level.decks
+            covers = covers_for(shown, state.db.deck_covers([str(d["id"]) for d in shown]))
             listing = (f"<p class='notice error'>{_esc(problem)}</p>" if problem else "") + unread_html
             if not (unreadable and not total):  # nothing read: the notice instead of "No decks yet"
-                listing += deck_list_html(rows, covers=covers, q=q, view=view, folder=folder)
+                listing += level_html(level, covers=covers, q=q, view=view, order=order)
         body = (
             notice
             + deck_list_controls_html(
                 q=q,
                 order=order,
                 view=view,
-                folders=folders,
                 folder=folder,
                 total=None if unreadable and not total else total,
                 pending=pending,
@@ -157,6 +179,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             csp=DECK_CSP,  # the covers are Scryfall images
             deck_css=True,
             extra_scripts=("decks.js",),
+            extra_css=FOLDER_CSS,
         )
         return remember_view(resp, "decks", view, secure=secure) if remember else resp
 
@@ -201,7 +224,11 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             out["count"] = len(recent)
         else:
             unreadable = bool(getattr(rows, "unreadable", 0))  # Q64, as on /decks
-            shown, folders, total = arrange_decks(rows or [], q=q, order=order, folder=folder)
+            tree = None
+            if rows is not None:
+                tree, _late = await folder_tree(sub, wait=DECKS_JSON_TIMEOUT)
+            level = arrange(rows or [], tree, folder_id=resolve_folder(tree, folder), q=q, order=order)
+            shown, total = level.decks, level.total
             covers = covers_for(shown, state.db.deck_covers([str(d["id"]) for d in shown]))
             out["html"] = (f"<p class='notice error'>{_esc(problem[1])}</p>" if problem else "") + (
                 decks_unreadable_html(some_shown=total > 0, again=reread_href("/decks", qp))
@@ -209,8 +236,8 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
                 else ""
             )
             if not (unreadable and not total):
-                out["html"] += deck_list_html(shown, covers=covers, q=q, view=view, folder=folder)
-            out["count"], out["folders"] = len(shown), folders
+                out["html"] += level_html(level, covers=covers, q=q, view=view, order=order)
+            out["count"] = len(shown)
             out["total"] = None if unreadable and not total else total  # no count it doesn't know
         for d in rows or []:
             d.setdefault("url", f"https://archidekt.com/decks/{d['id']}")
@@ -400,7 +427,7 @@ def add_deck_routes(server: MCPServer, state: AppState, h: SimpleNamespace) -> N
             csp=DECK_CSP,
             heading=False,
             deck_css=True,
-            extra_scripts=("deckstats.js",),
+            extra_scripts=("deckstats.js", "printpick.js"),
         )
         return remember_view(resp, "deck", view, secure=secure) if remember else resp
 

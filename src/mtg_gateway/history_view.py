@@ -213,7 +213,7 @@ def build_events(
         if m.get("average_mana_value") is not None:
             bits.append(f"average mana value {float(m['average_mana_value']):.1f}")
         if m.get("price_total") is not None:
-            bits.append(f"${float(m['price_total']):.0f}")
+            bits.append(f"${float(m['price_total']):,.0f}")
         if r.get("bracket_estimate"):
             bits.append(f"bracket about {r['bracket_estimate']}")
         sim = "with a goldfish simulation" if r.get("has_goldfish") else "statistics only"

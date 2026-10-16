@@ -15,19 +15,21 @@ from mtg_gateway.approve import APPROVAL_META_KEY, approval_code
 from mtg_gateway.archidekt import rich_doc
 from mtg_gateway.decks import DeckError
 
-from .conftest import FakeIdP, running
-from .test_approval_modes import _set_mode, _stack_with
-from .test_decks_and_proxy import Browser, Stack, call, linked_user, structured
+from .conftest import Stack, stack_with
+from .fake_archidekt import FakeArchidekt
+from .test_approval_modes import SHIPPED, _set_mode
+from .test_decks_and_proxy import Browser, call, linked_user, structured
 
 SUB = "user-1"  # the signed-in member of linked_user
 
 
-@pytest.fixture
-async def stack(tmp_path, idp: FakeIdP):
-    h, ark = _stack_with(tmp_path, idp)
+def _amy_public() -> FakeArchidekt:
+    ark = FakeArchidekt()
     ark.private.discard(43)  # amy's deck is public: someone else's deck to like and follow
-    async with running(h):
-        yield Stack(h, ark)
+    return ark
+
+
+stack_options = stack_with(SHIPPED.but(archidekt=_amy_public))
 
 
 async def _browser_apply(h, pid: str) -> dict:
@@ -35,8 +37,8 @@ async def _browser_apply(h, pid: str) -> dict:
     b = Browser(h)
     try:
         await b.login()
-        csrf = await b.csrf()
-        r = await b.http.post(f"/proposals/{pid}", data={"csrf": csrf, "action": "apply"})
+        url = f"/proposals/{pid}"
+        r = await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
         assert r.status_code == 303, r.text
         err = r.headers["location"].partition("?err=")[2]
         if err:  # the review page shows the refusal by its code
@@ -321,6 +323,36 @@ async def test_create_folder_waits_for_the_members_press(stack: Stack) -> None:
     assert p["ok"] is False and "Brews" in p["message"]
     p = structured(await call(h, token, "propose_create_folder", {"name": "Brews"}))
     assert p["ok"] is False and "already" in p["message"]
+
+
+async def test_a_folder_named_like_the_backup_folder_is_refused_when_proposed(stack: Stack) -> None:
+    """Proofread 3 P6 (B8 a): the assistant's new-folder proposal with the backup folder's name is
+    refused when it is made, so the assistant can pick another name at once; the apply checks again."""
+    import dataclasses
+
+    h, ark = stack.h, stack.ark
+    token = await linked_user(stack)
+    await _set_mode(h, "semi")
+    for name in ("MTG Gateway backups", "mtg gateway backups"):
+        p = structured(await call(h, token, "propose_create_folder", {"name": name}))
+        assert p["ok"] is False and p["message"] == (
+            f"'{name}' is the name of the gateway's backup folder. Pick another name."
+        ), p
+    assert not any(f["name"].casefold() == "mtg gateway backups" for f in ark.folders.get("alice", []))
+    # the same name in other capitals inside another folder is not the backup folder's
+    await _press(h, token, await call(h, token, "propose_create_folder", {"name": "Brews"}))
+    inner = structured(
+        await call(h, token, "propose_create_folder", {"name": "mtg gateway backups", "inside": "Brews"})
+    )
+    assert inner["ok"] is True, inner
+    # at apply: a name that became the backup folder's after the proposal was made is refused there
+    p = structured(await call(h, token, "propose_create_folder", {"name": "Archive"}))
+    assert p["ok"] is True, p
+    decks = h.app.state.gateway.decks
+    decks.settings = dataclasses.replace(decks.settings, archidekt_backup_folder="Archive")
+    out = await _browser_apply(h, p["proposal_id"])
+    assert out.get("state") != "applied", out
+    assert not any(f["name"] == "Archive" for f in ark.folders["alice"])
 
 
 async def test_review_page_shows_the_action(stack: Stack) -> None:

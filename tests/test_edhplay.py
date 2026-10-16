@@ -365,6 +365,10 @@ def _launch(page) -> str:
     with page.context.expect_page() as popup:
         page.locator(".edhplay-dialog a", has_text=GO).click()
     popup.value.wait_for_load_state()
+    # EDHPlay's tab opened in front; the deck page's tab comes back to the front, as the member's
+    # return to it does. Left behind it, the page's frames and timers are throttled, and every
+    # later click waited a second or two for the page to draw.
+    page.bring_to_front()
     note = page.locator(".edhplay-toast")
     note.wait_for()
     return note.inner_text()
@@ -503,6 +507,7 @@ def test_a_cut_sideboard_is_named_in_one_line(server: Server, width: int, scheme
             p, server, sid, width, color_scheme=scheme, permissions=["clipboard-read", "clipboard-write"]
         )
         page.context.route(re.compile(r"https://edhplay\.com/.*"), lambda route: route.fulfill(status=200))
+        page.clock.install()  # runs as usual until the test moves it on past the note's 8 s
         page.goto(f"{server.base}/decks/42", wait_until="networkidle")
         dialog = _open_dialog(page)
         assert dialog.locator(".notice.warn").inner_text() == cut
@@ -522,7 +527,7 @@ def test_a_cut_sideboard_is_named_in_one_line(server: Server, width: int, scheme
         assert page.evaluate(CONTRAST) >= 4.5
         assert _overflow(page) <= 0 and errors == []
         _shot(page, f"edhplay-cut-{width}-{scheme}")
-        page.wait_for_timeout(9000)
+        page.clock.run_for(9000)  # past the 8 s a plain note stays, without waiting for them
         assert page.locator(".edhplay-toast").count() == 1  # a cut list stays until it is closed
         browser.close()
 

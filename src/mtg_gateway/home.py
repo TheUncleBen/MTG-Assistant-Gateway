@@ -253,8 +253,8 @@ def add_home_routes(server: MCPServer, state: AppState) -> None:
             current="/",
             heading=False,
             body_class="home",
-            head_extra="<script src='/static/deck.js' defer></script>"
-            "<script src='/static/decks.js' defer></script>",
+            # decks.js fills the recent-decks panel; Home has none of deck.js's hooks (AUDIT F1)
+            head_extra="<script src='/static/decks.js' defer></script>",
         )
         resp.headers["Content-Security-Policy"] = DECK_CSP  # deck covers come from Scryfall
         return resp

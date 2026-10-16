@@ -592,10 +592,14 @@ class Change:
     # "main" (the deck proper) or "side": the maybeboard and sideboard rows, which count
     # separately. A count or category change names the zone its rows are in.
     zone: str = "main"
-    # add: every category the new row goes in, in order (the first is ``category``, the row's
-    # primary one). The deck page's Undo of a removal sends it, so a card filed under several
-    # categories comes back under all of them.
+    # add and set_category: every category the row goes in, in order (the first is ``category``,
+    # the row's primary one). The deck page's Undo of a removal or a move sends it, so a card
+    # filed under several categories comes back under all of them.
     categories: tuple[str, ...] = ()
+    # add: the row's companion and "flipped by default" flags. The deck page's Undo of a removal
+    # sends them, so a companion or a card set to show its back comes back as it was.
+    companion: bool = False
+    flipped_default: bool = False
 
     @property
     def pinned(self) -> bool:
@@ -631,6 +635,10 @@ class Change:
                 d["color"] = colour
         if self.action == "set_mana_value":
             d["mana_value"] = self.mana_value
+        if self.companion:
+            d["companion"] = True
+        if self.flipped_default:
+            d["flipped_default"] = True
         if self.zone == "side":
             d["zone"] = "side"
         return d
@@ -660,7 +668,11 @@ _COLLECTOR_NUMBER = re.compile(r"[A-Za-z0-9★†\-]{1,10}")
 FINISHES = {"normal": "Normal", "foil": "Foil", "etched": "Etched"}
 
 
-def parse_changes(raw: Any) -> list[Change]:
+def parse_changes(raw: Any, *, row_flags: bool = False) -> list[Change]:
+    """The changes of a proposal, checked. ``row_flags``: an add may carry ``companion`` and
+    ``flipped_default`` (the deck page's Undo of a removal, and its stored proposal when applied).
+    Any other caller's flags are dropped, never written: an assistant's proposal reads "+1 Opt" in
+    its review and on the chat card, so it must write no more than that (review 2, N1)."""
     if not isinstance(raw, list) or not raw:
         raise DeckError("invalid", "changes must be a non-empty list")
     if len(raw) > MAX_CHANGES:
@@ -735,7 +747,19 @@ def parse_changes(raw: Any) -> list[Change]:
             raise DeckError(
                 "invalid", f"change {i}: a pinned printing is added to the deck proper, not zone side"
             )
-        out.append(Change(action, name, qty, cat, set_code, number, finish, zone=zone, categories=cats))
+        flags = {}
+        for flag in ("companion", "flipped_default") if row_flags else ():
+            given = item.get(flag)
+            if given is None:
+                continue
+            if not isinstance(given, bool):
+                raise DeckError("invalid", f"change {i}: {flag} must be true or false")
+            if given and action != "add":
+                raise DeckError("invalid", f"change {i}: {flag} applies to add only")
+            flags[flag] = given
+        out.append(
+            Change(action, name, qty, cat, set_code, number, finish, zone=zone, categories=cats, **flags)
+        )
     pinned = [ch.card_name.lower() for ch in out if ch.pinned]
     if len(pinned) != len(set(pinned)):
         raise DeckError("invalid", "one pinned printing per card name per proposal")
@@ -795,12 +819,12 @@ def _all_categories(chs: list[Change]) -> list[str]:
 
 
 def _parse_add_categories(i: int, action: str, raw: Any) -> tuple[str, ...]:
-    """An add's ``categories``: the row's categories in order (each one line, as ``category``),
-    duplicates dropped. Only an add takes them."""
+    """An add's or set_category's ``categories``: the row's categories in order (each one line,
+    as ``category``), duplicates dropped. Only those two take them."""
     if raw is None or raw == []:
         return ()
-    if action != "add":
-        raise DeckError("invalid", f"change {i}: categories apply to add only")
+    if action not in ("add", "set_category"):
+        raise DeckError("invalid", f"change {i}: categories apply to add and set_category only")
     if not isinstance(raw, list) or len(raw) > MAX_ADD_CATEGORIES or not all(isinstance(c, str) for c in raw):
         raise DeckError(
             "invalid", f"change {i}: categories must be a list of up to {MAX_ADD_CATEGORIES} names"
@@ -959,6 +983,7 @@ def printing_plan_rows(
                     "categories": list(c.categories),
                     "finish": ch.finish or (c.modifier or "Normal"),
                     "companion": c.companion,
+                    "flipped_default": c.flipped_default,
                     "label": c.label,
                     "custom_cmc": c.custom_cmc,
                 }
@@ -1039,8 +1064,9 @@ def _same_label(have: str, want: str) -> bool:
 
 
 def _parse_category_change(i: int, action: str, name: str, item: dict[str, Any]) -> Change:
-    """``set_category`` ({action, card_name, category}) and ``set_commander`` ({action, card_name});
-    neither takes a quantity or a printing."""
+    """``set_category`` ({action, card_name, category, categories?}) and ``set_commander``
+    ({action, card_name}); neither takes a quantity or a printing. A set_category's
+    ``categories`` files the card under all of them (the deck page's Undo of a move sends it)."""
     for key in ("quantity", "set_code", "set", "collector_number", "finish", "modifier", "foil"):
         if item.get(key) not in (None, "", False):
             raise DeckError(
@@ -1051,13 +1077,18 @@ def _parse_category_change(i: int, action: str, name: str, item: dict[str, Any])
     # One line, like every other name and category in a diff (no newlines, bidi or control
     # characters), so a category can never add rows of its own to the review page.
     cat = clean_text(item.get("category") or "")
+    cats = _parse_add_categories(i, action, item.get("categories"))  # never with set_commander
     if action == "set_commander":
         if cat and cat != COMMANDER:
             raise DeckError("invalid", f"change {i}: set_commander always files the card under Commander")
         return Change(action, name, category=COMMANDER)
+    if cats:
+        if cat and cat != cats[0]:
+            raise DeckError("invalid", f"change {i}: category must be the first of categories")
+        cat = cats[0]
     if not cat or len(cat) > MAX_CATEGORY:
         raise DeckError("invalid", f"change {i}: set_category needs a category (up to {MAX_CATEGORY} chars)")
-    return Change(action, name, category=cat)
+    return Change(action, name, category=cat, categories=cats)
 
 
 def category_plan(deck: Deck, changes: list[Change]) -> tuple[dict[int, list[str]], list[str]]:
@@ -1073,10 +1104,12 @@ def category_plan_rows(
     """Rows whose categories the set_category and set_commander changes rewrite, as
     ``{relation id: new categories}``, plus their review rows.
 
-    ``set_category`` moves every row of the card to exactly that one category. ``set_commander``
-    files the card under Commander and takes Commander off every other row that has it (keeping
-    that row's other categories), so after the change the commanders are exactly the cards named
-    by this proposal's set_commander changes (two for partners). Rows that already have the
+    ``set_category`` moves every row of the card to exactly that one category (or, with
+    ``categories``, exactly those, the first the primary one). ``set_commander``
+    files the card under Commander as its primary category, keeping its other categories,
+    and takes Commander off every other row that has it (keeping that row's other
+    categories), so after the change the commanders are exactly the cards named by this
+    proposal's set_commander changes (two for partners). Rows that already have the
     wanted categories are left alone; a card that is not in the deck is an error.
     """
     cat_changes = [ch for ch in changes if ch.action in CATEGORY_ACTIONS]
@@ -1101,12 +1134,43 @@ def category_plan_rows(
         rows = list({r.relation_id: r for r in rows}.values())
         if any(r.relation_id is None for r in rows):
             raise DeckError("contract", f"Archidekt did not number the deck rows of '{ch.card_name}'.")
-        new = [ch.category or COMMANDER]
+        new = list(ch.categories) or [ch.category or COMMANDER]
         if ch.action == "set_commander":
             new_commanders.append(rows[0].name)
-        changed = [r for r in rows if sorted(r.categories) != new]
+        # K10: a new commander keeps its other categories, Commander first (the primary), as
+        # archidekt.com's "Set Commander as primary" does
+        per_row = {
+            r.relation_id: (
+                [COMMANDER] + [c for c in r.categories if c != COMMANDER]
+                if ch.action == "set_commander"
+                else new
+            )
+            for r in rows
+        }
+        if ch.action == "set_commander":
+            # the order counts: Commander must come first, also when the card already has it
+            # as a later category (["Ramp", "Commander"])
+            changed = [r for r in rows if list(r.categories) != per_row[r.relation_id]]
+        else:
+            changed = [r for r in rows if sorted(r.categories) != sorted(per_row[r.relation_id])]
         for r in changed:
-            want[r.relation_id] = new
+            want[r.relation_id] = per_row[r.relation_id]
+        # a card that is a commander already is not in the commander row below, so its
+        # reordering gets a category row of its own
+        reordered = [r for r in changed if ch.action == "set_commander" and COMMANDER in r.categories]
+        if reordered:
+            lines.append(
+                _row(
+                    "category",
+                    name=rows[0].name,
+                    before=" / ".join(
+                        sorted({", ".join(clean_text(c) for c in r.categories) for r in reordered})
+                    ),
+                    after=" / ".join(
+                        sorted({", ".join(clean_text(c) for c in per_row[r.relation_id]) for r in reordered})
+                    ),
+                )
+            )
         if ch.action == "set_category" and changed:
             old = sorted({", ".join(sorted(clean_text(c) for c in r.categories)) or "(none)" for r in rows})
             lines.append(
@@ -1114,7 +1178,7 @@ def category_plan_rows(
                     "category",
                     name=rows[0].name,
                     before=" / ".join(old),
-                    after=new[0],
+                    after=", ".join(new),
                     zone="side" if ch.zone == "side" else None,
                 )
             )
@@ -1129,7 +1193,12 @@ def category_plan_rows(
                 continue
             if c.relation_id is None:
                 raise DeckError("contract", f"Archidekt did not number the deck rows of '{c.name}'.")
-            want[c.relation_id] = [cat for cat in c.categories if cat != COMMANDER]
+            rest = [cat for cat in c.categories if cat != COMMANDER]
+            if not rest and c.default_category and c.default_category != COMMANDER:
+                # archidekt.com never sends an empty list: it falls back to the card's default
+                # category (A50 M2); without one the row is left with none, as before
+                rest = [c.default_category]
+            want[c.relation_id] = rest
         old_names = sorted(set(old_commanders), key=str.lower)
         new_names = sorted(set(new_commanders), key=str.lower)
         if [n.lower() for n in old_names] != [n.lower() for n in new_names]:
@@ -1334,8 +1403,9 @@ def restore_rows(snapshot: Deck, current: Deck) -> tuple[list[dict[str, Any]], l
                     "categories": list(card.categories),
                     "modifications": {
                         "quantity": qty,
-                        "companion": False,
-                        "flippedDefault": False,
+                        # the snapshot row's own flags, so a restore puts them back too
+                        "companion": bool(getattr(card, "companion", False)),
+                        "flippedDefault": bool(getattr(card, "flipped_default", False)),
                         "modifier": card.modifier or "Normal",
                     },
                 }
@@ -1359,8 +1429,14 @@ def build_payload(
     recategorise: dict[int, list[str]] | None = None,
     after_side: dict[str, int] | None = None,
     side_categories: dict[str, list[str]] | None = None,
+    flags: dict[str, tuple[bool, bool]] | None = None,
+    side_flags: dict[str, tuple[bool, bool]] | None = None,
 ) -> list[dict[str, Any]]:
     """Per-card entries for PATCH modifyCards/v2, one entry per request.
+
+    ``flags`` and ``side_flags`` (from ``add_flags``) give a new row its companion and
+    flippedDefault flags, as the deck page's Undo of a removal asks; a row that is already
+    there keeps its own.
 
     ``after_side`` are the maybeboard and sideboard counts after the zone-side changes (as
     ``plan_zones`` returns them); those rows are modified, removed or added (in
@@ -1406,7 +1482,13 @@ def build_payload(
                 qty -= same[0].quantity + int(pin["quantity"])
             else:
                 payload.append(
-                    _add_entry(pin["cardid"], int(pin["quantity"]), pin.get("categories"), pin["modifier"])
+                    _add_entry(
+                        pin["cardid"],
+                        int(pin["quantity"]),
+                        pin.get("categories"),
+                        pin["modifier"],
+                        (flags or {}).get(name, (False, False)),
+                    )
                 )
                 qty -= int(pin["quantity"])
             if qty < sum(c.quantity for c in existing if c not in same):
@@ -1424,7 +1506,11 @@ def build_payload(
         else:
             payload.append(
                 _add_entry(
-                    resolve[name], qty, (categories or {}).get(name), (modifiers or {}).get(name, "Normal")
+                    resolve[name],
+                    qty,
+                    (categories or {}).get(name),
+                    (modifiers or {}).get(name, "Normal"),
+                    (flags or {}).get(name, (False, False)),
                 )
             )
     side_by_name: dict[str, list[Any]] = {}
@@ -1445,6 +1531,7 @@ def build_payload(
                     qty,
                     (side_categories or {}).get(name) or [deck.side_category()],
                     (modifiers or {}).get(name, "Normal"),
+                    (side_flags or {}).get(name, (False, False)),
                 )
             )
     for card in deck.cards:
@@ -1453,7 +1540,14 @@ def build_payload(
     return payload
 
 
-def _add_entry(cardid: int, qty: int, categories: list[str] | None, modifier: str) -> dict[str, Any]:
+def _add_entry(
+    cardid: int,
+    qty: int,
+    categories: list[str] | None,
+    modifier: str,
+    flags: tuple[bool, bool] = (False, False),
+) -> dict[str, Any]:
+    """A new row; ``flags`` are its companion and flippedDefault (an Undo of a removal)."""
     return {
         "action": "add",
         "cardid": cardid,
@@ -1461,11 +1555,25 @@ def _add_entry(cardid: int, qty: int, categories: list[str] | None, modifier: st
         "categories": list(categories or []),
         "modifications": {
             "quantity": qty,
-            "companion": False,
-            "flippedDefault": False,
+            "companion": flags[0],
+            "flippedDefault": flags[1],
             "modifier": modifier,
         },
     }
+
+
+def add_flags(changes: list[Change], counts: dict[str, int], zone: str) -> dict[str, tuple[bool, bool]]:
+    """The companion and flippedDefault flags the adds in ``zone`` ask for, keyed by the spelling
+    in ``counts`` (``after`` or ``after_side``, as build_payload reads them); only names with a
+    flag set."""
+    out: dict[str, tuple[bool, bool]] = {}
+    for ch in changes:
+        if ch.action != "add" or ch.zone != zone or not (ch.companion or ch.flipped_default):
+            continue
+        key = next((k for k in counts if k.lower() == ch.card_name.lower()), ch.card_name)
+        was = out.get(key, (False, False))
+        out[key] = (was[0] or ch.companion, was[1] or ch.flipped_default)
+    return out
 
 
 def _entry(action: str, card: Any, qty: int, categories: list[str] | None = None) -> dict[str, Any]:
@@ -1475,8 +1583,10 @@ def _entry(action: str, card: Any, qty: int, categories: list[str] | None = None
     A row with no tag sends Archidekt's empty one, ``NO_LABEL``, as its editor does (Q58)."""
     mods: dict[str, Any] = {
         "quantity": qty,
-        "companion": False,
-        "flippedDefault": False,
+        # the row's own flags, as the site sends them (its site code, read 2026-10-14): sending
+        # False would clear a companion or a back-face default on any change to the row (A50)
+        "companion": bool(getattr(card, "companion", False)),
+        "flippedDefault": bool(getattr(card, "flipped_default", False)),
         "modifier": card.modifier or "Normal",
         "label": getattr(card, "label", "") or NO_LABEL,
     }
@@ -1627,6 +1737,9 @@ class DeckService:
             keep_for=lambda rows: DECK_LIST_PARTIAL if getattr(rows, "unreadable", 0) else None,
         )
         self.deck_list_wait = DECK_LIST_COLD_WAIT
+        # The member's folder tree as My decks shows it (folder_view), kept like the deck list and
+        # dropped by the same writes. The Folders page and every folder write read Archidekt live.
+        self.folder_trees = MemberCache(DECK_LIST_FRESH, DECK_LIST_STALE)
         # (member, deck id) -> (when read, the deck): what a deck page showed, for the next view of
         # it (page_deck). Every write the gateway sends empties it; the counter tells a read that
         # was under way during a write not to keep what it got.
@@ -1654,12 +1767,14 @@ class DeckService:
             return
         if not path.startswith("/collection"):
             self.deck_lists.drop(sub)
+            self.folder_trees.drop(sub)
         for hook in self.write_hooks:
             hook(sub, path)
 
     def forget_member(self, sub: str) -> None:
         """Drop everything cached for a member (their link changed or their data was deleted)."""
         self.deck_lists.drop(sub)
+        self.folder_trees.drop(sub)
         self._forget_page_decks()
         for hook in self.write_hooks:
             hook(sub, "")
@@ -2030,7 +2145,7 @@ class DeckService:
         (DECK_LIST_PARTIAL): My decks says so with Try again (Q64), which reads Archidekt again
         through ``reread_deck_list``."""
         _token, row = self._token(sub)  # not linked: raise before touching the cache
-        folder = self.settings.archidekt_backup_folder if self.settings.archidekt_backups else None
+        folder = self.settings.archidekt_backup_folder  # with backups on or off (Q21)
 
         async def fetch() -> list[dict[str, Any]]:
             return await self._call(
@@ -2195,7 +2310,7 @@ class DeckService:
         if state == "fresh":
             return [dict(d) for d in value]
         _token, row = self._token(sub)
-        folder = self.settings.archidekt_backup_folder if self.settings.archidekt_backups else None
+        folder = self.settings.archidekt_backup_folder  # with backups on or off (Q21)
 
         async def fetch() -> list[dict[str, Any]]:
             return await self._call_unslotted(
@@ -2305,9 +2420,12 @@ class DeckService:
                 raise DeckError(exc.kind, str(exc)) from exc
 
     # -- proposals ------------------------------------------------------------
-    async def propose(self, sub: str, deck_id: str, raw_changes: Any) -> dict[str, Any]:
+    async def propose(
+        self, sub: str, deck_id: str, raw_changes: Any, *, row_flags: bool = False
+    ) -> dict[str, Any]:
+        """``row_flags`` only for the deck page's own save (parse_changes)."""
         deck_id = _clean_deck_id(deck_id)
-        changes = parse_changes(raw_changes)
+        changes = parse_changes(raw_changes, row_flags=row_flags)
         self._room_for_proposal(sub)
         deck = await self.get_own_deck(sub, deck_id)
         _before, _after, rows = plan_rows(deck, changes)
@@ -2928,7 +3046,7 @@ class DeckService:
             from . import actions
 
             return await actions.apply(self, sub, row, progress)
-        changes = parse_changes(row["changes"])
+        changes = parse_changes(row["changes"], row_flags=True)  # stored: flags only from the deck page
         deck = await self._current_deck_for(sub, row)
         _before, after, _lines, _before_side, after_side = plan_zones(deck, changes)
         recategorise, _cat_lines = category_plan(deck, changes)
@@ -2938,7 +3056,17 @@ class DeckService:
             sub, deck, changes, after, after_side
         )
         payload = build_payload(
-            deck, after, resolve, new_cats, modifiers, pinned, recategorise, after_side, side_cats
+            deck,
+            after,
+            resolve,
+            new_cats,
+            modifiers,
+            pinned,
+            recategorise,
+            after_side,
+            side_cats,
+            add_flags(changes, after, "main"),
+            add_flags(changes, after_side, "side"),
         )
         specs, _print_lines = printing_plan_rows(deck, changes)
         payload += await self._printing_entries(sub, deck, specs)
@@ -3109,6 +3237,8 @@ class DeckService:
                     spec["modifiers"][modifier] = spec["modifiers"].get(modifier, 0) + int(r["quantity"])
                     entry = _add_entry(card["id"], int(r["quantity"]), r["categories"], modifier)
                     entry["modifications"]["companion"] = bool(r.get("companion"))
+                    # a double-faced card set to show its back keeps that on the new printing
+                    entry["modifications"]["flippedDefault"] = bool(r.get("flipped_default"))
                     if r.get("label"):
                         entry["modifications"]["label"] = r["label"]
                     if r.get("custom_cmc") is not None:
@@ -3936,11 +4066,10 @@ class DeckService:
             if not want or want in ("top", "top level", "none"):
                 target = by_id[root]
             else:
-                hits = [f for f in info["folders"] if f["depth"] > 0 and f["name"].casefold() == want]
+                # the gateway's backup folder is never a place to move a deck to (Q21)
+                hits = [f for f in _shown_folders(info) if f["name"].casefold() == want]
                 if len(hits) != 1:
-                    names = ", ".join(sorted({f["name"] for f in info["folders"] if f["depth"] > 0})[:30])
-                    what = "No folder" if not hits else "More than one folder"
-                    raise DeckError("invalid", f"{what} is called '{raw['folder']}'. Your folders: {names}")
+                    raise _no_such_folder(info, raw["folder"], several=bool(hits))
                 target = hits[0]
             current = deck.parent_folder if deck.parent_folder is not None else root
             if target["id"] != current:
@@ -4225,32 +4354,59 @@ class DeckService:
     # Folders -----------------------------------------------------------------------------------
     async def folders(self, sub: str) -> dict[str, Any]:
         """The member's folder tree flattened, root first: ``{root_id, folders: [{id, name, depth,
-        parent, private}]}``. The gateway's backup folder is listed like any other."""
+        parent, private, backup}]}``, read from Archidekt now. ``backup`` marks the gateway's
+        backup folder and everything inside it (``visible_folders`` leaves them out, Q21); the
+        checks before a folder write still see them."""
         tree = await self._call(sub, self.client.folder_tree)
+        return self._flatten_folders(tree)
+
+    async def folder_view(self, sub: str, *, wait: float | None = None) -> dict[str, Any] | None:
+        """``folders`` from the member cache (fresh for DECK_LIST_FRESH, then refreshed in the
+        background like the deck list), for My decks. None when the tree is cold and ``wait``
+        ran out; the read carries on and lands in the cache."""
+
+        async def fetch() -> dict[str, Any]:
+            return await self._call(sub, self.client.folder_tree)
+
+        tree = await self.folder_trees.get(sub, fetch, wait=wait)
+        return None if tree is None else self._flatten_folders(tree)
+
+    def _is_backup_folder(self, name: str, depth: int) -> bool:
+        """The gateway's backup folder: the folder the deck list treats as it (its exact name, as
+        archidekt.list_decks compares), or the one ensure_folder would reuse (the same name in
+        other capitals, directly under the top level). Also while backups are switched off: the
+        folder never shows (Q21), and a deck in it is a backup copy either way."""
+        wanted = self.settings.archidekt_backup_folder
+        if not wanted:
+            return False
+        return name == wanted or (depth == 1 and name.casefold() == wanted.casefold())
+
+    def _flatten_folders(self, tree: dict[str, Any]) -> dict[str, Any]:
         out: list[dict[str, Any]] = []
 
-        def walk(node: dict[str, Any], depth: int, parent: int | None) -> None:
+        def walk(node: dict[str, Any], depth: int, parent: int | None, hidden: bool) -> None:
             if len(out) >= self.MAX_FOLDERS or not isinstance(node.get("id"), int):
                 return
+            raw = clean_text(str(node.get("name") or ""))
+            hidden = hidden or (depth > 0 and self._is_backup_folder(raw, depth))
             out.append(
                 {
                     "id": node["id"],
                     # Archidekt's top-level folder has a technical name; the pages call it by what it is
-                    "name": "Top level (no folder)"
-                    if depth == 0
-                    else clean_text(str(node.get("name") or "")) or "Folder",
+                    "name": "Top level (no folder)" if depth == 0 else raw or "Folder",
                     "depth": depth,
                     "parent": parent,
                     "private": bool(node.get("private")),
+                    "backup": hidden,
                 }
             )
             children = node.get("children") or []
             for child in sorted(
                 (c for c in children if isinstance(c, dict)), key=lambda c: str(c.get("name") or "").lower()
             ):
-                walk(child, depth + 1, node["id"])
+                walk(child, depth + 1, node["id"], hidden)
 
-        walk(tree, 0, None)
+        walk(tree, 0, None, False)
         return {"root_id": tree["id"], "folders": out}
 
     async def _folder_in(self, sub: str, folder_id: int) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -4279,9 +4435,21 @@ class DeckService:
         found = next((f for f in info["folders"] if f["id"] == parent), None)
         if found is None:
             raise DeckError("not_found", "That parent folder is not in your Archidekt account.")
+        if found.get("backup"):  # no new folder in the gateway's backup folder (Q21)
+            raise _no_such_folder(info, found["name"])
+        self._not_the_backup_name(name, found["depth"] + 1)
         if any(f["parent"] == parent and f["name"].casefold() == name.casefold() for f in info["folders"]):
             raise DeckError("invalid", f"There is already a folder called '{name}' there.")
         return name, found
+
+    def _not_the_backup_name(self, name: str, depth: int) -> None:
+        """Refuse a folder name that would make the gateway take that folder for its backup folder
+        (hidden from My decks, its decks listed as backup copies, Q21): the same test the folder
+        list uses, _is_backup_folder (B8 a)."""
+        if self._is_backup_folder(name, depth):
+            raise DeckError(
+                "invalid", f"'{name}' is the name of the gateway's backup folder. Pick another name."
+            )
 
     async def create_folder(self, sub: str, name: str, parent_id: int | None = None) -> dict[str, Any]:
         name, found = await self.check_new_folder(sub, name, parent_id)
@@ -4297,8 +4465,11 @@ class DeckService:
         info, folder = await self._folder_in(sub, int(folder_id))
         if folder["depth"] == 0:
             raise DeckError("invalid", "The top-level folder cannot be renamed.")
+        if folder.get("backup"):  # the gateway's backup folder and what is in it (Q21)
+            raise _no_such_folder(info, folder["name"])
         if folder["name"] == name:
             return folder
+        self._not_the_backup_name(name, folder["depth"])
         await self._call(
             sub,
             lambda token, *_: self.client.mass_update(
@@ -4330,6 +4501,9 @@ class DeckService:
         current = deck.parent_folder if deck.parent_folder is not None else root
         if current == target:
             return {"deck_id": deck.id, "folder_id": target, "changed": False}
+        hidden = next((f for f in info["folders"] if f["id"] == target and f.get("backup")), None)
+        if hidden is not None:  # never into the gateway's backup folder (Q21), as by name
+            raise _no_such_folder(info, hidden["name"])
         # the item archidekt.com's folder page sends for its "Move" (its bundle, read 2026-10-14)
         await _writing(
             progress,
@@ -4720,14 +4894,33 @@ def _printing_mismatches(verified: Deck, specs: list[dict[str, Any]]) -> list[st
     return out
 
 
+def _shown_folders(info: dict[str, Any]) -> list[dict[str, Any]]:
+    """The member's folders below the top level that a deck can be put in: all but the
+    gateway's backup folder and what is inside it (Q21)."""
+    return [f for f in info["folders"] if f["depth"] > 0 and not f.get("backup")]
+
+
+def _no_such_folder(info: dict[str, Any], name: Any, *, several: bool = False) -> DeckError:
+    """The refusal of a folder that is not one to use: none (or, with ``several``, more than one)
+    of the shown folders has that name; the gateway's backup folder is refused with it too."""
+    names = ", ".join(sorted({f["name"] for f in _shown_folders(info)})[:30])
+    what = "More than one folder" if several else "No folder"
+    return DeckError("invalid", f"{what} is called '{name}'. Your folders: {names}")
+
+
 def _category_mismatches(verified: Deck, want: dict[int, list[str]]) -> list[str]:
     """Names of rows whose categories on the re-read deck are not what ``category_plan`` asked
-    for (a row that vanished counts too)."""
+    for (a row that vanished counts too). The first category is the row's primary one (Set as
+    commander puts Commander there, K10), so it must match too; the others in any order."""
     rows = {c.relation_id: c for c in verified.cards if c.relation_id is not None}
     out = set()
     for rel, cats in want.items():
         row = rows.get(rel)
-        if row is None or sorted(row.categories) != sorted(cats):
+        if (
+            row is None
+            or sorted(row.categories) != sorted(cats)
+            or list(row.categories)[:1] != list(cats)[:1]
+        ):
             out.add(row.name if row else f"deck row {rel}")
     return sorted(out)
 
@@ -4982,6 +5175,33 @@ def edit_mismatches(
         | set(_category_mismatches(now, recategorise))
         | set(_printing_mismatches(now, specs or []))
     )
+
+
+def printing_not_shown(changes: list[Change], now: Deck) -> list[str]:
+    """Names whose rows on ``now`` don't carry yet the printing (set and number) or finish a
+    set_printing or set_finish change asked for: the edit endpoint's test of whether a re-read has
+    caught up with a printing change, which ``edit_mismatches`` leaves out without the apply's
+    specs. A finish a printing change moved on its own (P6) is not compared."""
+    out: list[str] = []
+    for ch in changes:
+        if ch.action not in ("set_printing", "set_finish") or ch.zone == "side":
+            continue
+        face = front_face(ch.card_name).casefold()
+        rows = [c for c in now.main_cards if front_face(c.name).casefold() == face]
+        if not rows:
+            out.append(ch.card_name)
+            continue
+        for c in rows:
+            if ch.action == "set_printing" and (
+                str(c.set_code or "").lower() != str(ch.set_code or "").lower()
+                or str(c.collector_number or "") != str(ch.collector_number or "")
+            ):
+                out.append(ch.card_name)
+                break
+            if ch.finish and (c.modifier or "Normal") != ch.finish:
+                out.append(ch.card_name)
+                break
+    return sorted(set(out))
 
 
 def _mismatches(got: dict[str, int], want: dict[str, int]) -> list[str]:

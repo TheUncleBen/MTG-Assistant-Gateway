@@ -20,7 +20,14 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from . import deck_stats, modes
-from .decks import DeckError, current_client, edit_mismatches, parse_changes, scopes_allow_writes
+from .decks import (
+    DeckError,
+    current_client,
+    edit_mismatches,
+    parse_changes,
+    printing_not_shown,
+    scopes_allow_writes,
+)
 from .pages import BROWSER_CLIENT_ID, browser_session, csrf_header_ok, read_limited
 from .views import deck_brief, deck_out
 
@@ -256,7 +263,13 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         named; ``{refresh: true, names: [...]}`` only reads the deck again (the page's follow-up
         when an answer was stale). Browser session only; apps propose through /api/v1/proposals."""
         from .archidekt import front_face, parse_deck
-        from .deckpage import checks_panel_html, legal_problems, legality_chip_html, legality_panel_html
+        from .deckpage import (
+            card_image,
+            checks_panel_html,
+            legal_problems,
+            legality_chip_html,
+            legality_panel_html,
+        )
 
         if who.via != "browser":
             raise DeckError(
@@ -285,6 +298,11 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
                         "label": c.label,
                         "mana_value": c.custom_cmc,
                         "notes": c.notes or "",
+                        # the printing, so a printing change (and its Undo) redraws the picture
+                        "set_code": c.set_code,
+                        "collector_number": c.collector_number,
+                        "image": card_image(c),
+                        "price": c.price,
                     }
                     for c in deck.cards
                     if front_face(c.name).casefold() in touched
@@ -336,7 +354,8 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
             if p.get("state") != "pending":
                 raise DeckError("invalid", f"That proposal is {p.get('state')}, not waiting for an answer.")
         else:
-            p = await decks.propose(who.sub, deck_id, data.get("changes"))
+            # the deck page's Undo of a removal puts back the row's flags (row_flags; nobody else)
+            p = await decks.propose(who.sub, deck_id, data.get("changes"), row_flags=True)
             why = modes.hand_edit_confirm("edit", p.get("rows"))
             if why and data.get("confirmed") is not True:
                 pid = p["proposal_id"]
@@ -358,7 +377,7 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         }
         if not applied:  # a large edit still running: the page says so and offers the review page
             return ok(out, 202)
-        changes = parse_changes(result.get("changes") or p.get("changes"))
+        changes = parse_changes(result.get("changes") or p.get("changes"), row_flags=True)
         # The apply verified the deck once; this read is the one the page draws from. Archidekt's
         # reads have been seen to lag a write, so a deck that does not show the change yet is
         # read once more after a short pause, and the answer says when it still has not caught up.
@@ -366,10 +385,11 @@ def add_api_routes(server: MCPServer, state: AppState, reports: ReportService) -
         stale = False
         try:
             before = parse_deck(decks.snapshot(who.sub, str(result.get("snapshot_id")))["deck"])
-            if edit_mismatches(before, changes, deck):
+            # a printing change is compared by its set, number and finish (L1)
+            if edit_mismatches(before, changes, deck) or printing_not_shown(changes, deck):
                 await asyncio.sleep(EDIT_REREAD_DELAY)
                 deck = await decks.get_own_deck(who.sub, deck_id)
-                stale = bool(edit_mismatches(before, changes, deck))
+                stale = bool(edit_mismatches(before, changes, deck) or printing_not_shown(changes, deck))
         except DeckError:  # no snapshot to compare with: answer with the read as it is
             logger.info("edit %s: could not compare the re-read deck with its snapshot", pid)
         out.update(view(deck, {front_face(ch.card_name).casefold() for ch in changes}, stale=stale))

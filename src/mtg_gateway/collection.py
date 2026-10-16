@@ -17,6 +17,7 @@ import csv
 import io
 import json
 import re
+import secrets
 import time
 from typing import TYPE_CHECKING, Annotated, Any
 
@@ -66,6 +67,14 @@ FIRST_PAGE_TTL = 60.0  # seconds the unfiltered first page is served from memory
 FINISHES = ("nonfoil", "foil", "etched")
 MODIFIERS = {"nonfoil": "Normal", "foil": "Foil", "etched": "Etched"}
 CONDITIONS = ("", "NM", "LP", "MP", "HP", "DMG")
+# the conditions' names, as an import may write them out, upper-cased with single spaces
+CONDITION_NAMES = {
+    "NEAR MINT": "NM",
+    "LIGHTLY PLAYED": "LP",
+    "MODERATELY PLAYED": "MP",
+    "HEAVILY PLAYED": "HP",
+    "DAMAGED": "DMG",
+}
 # Archidekt's own collection orderings the gateway exposes (``collectionOrderBy``; only
 # ``editionDate`` was seen in the site's requests, the default is Archidekt's newest-first).
 SORTS = {"added": "Recently added", "edition": "Set release"}
@@ -144,6 +153,10 @@ def normalise_items(items: Any) -> list[dict[str, Any]]:
 
 
 MAX_IMPORT_ROWS = MAX_ITEMS_PER_CALL  # one import is one add call; Archidekt is written a card at a time
+IMPORT_RESULT_TTL = 300.0  # seconds an import's result waits for the page the redirect lands on
+IMPORT_RESULTS_MAX = 2_000
+QUOTED_CELL_CHARS = 20  # a cell quoted in a refusal is cut to this
+REFUSAL_CHARS = 300  # and a kept refusal to this, whatever made it (none is longer today)
 _IMPORT_COLUMNS = {
     "quantity": ("quantity", "count", "qty"),
     "name": ("name", "card name", "card"),
@@ -152,65 +165,52 @@ _IMPORT_COLUMNS = {
     "set": ("edition code", "set code", "set", "edition"),
     "collector_number": ("collector number", "collector_number", "number"),
     "scryfall_id": ("scryfall id", "scryfall_id", "scryfall uuid"),
+    "language": ("language", "lang"),
 }
+
+
+def _quoted(value: str) -> str:
+    """A cell quoted in a refusal, cut to QUOTED_CELL_CHARS so a huge cell can't make a huge
+    message (each refusal is kept for the page, up to IMPORT_RESULTS_MAX of them)."""
+    if len(value) > QUOTED_CELL_CHARS:
+        value = value[:QUOTED_CELL_CHARS] + "…"
+    return repr(value)
 
 
 def parse_collection_import(text: str) -> list[dict[str, Any]]:
     """Cards to add from pasted or uploaded text: the gateway's own collection CSV (the Export CSV
     button), a CSV with Archidekt's collection column names (Quantity, Name, Finish, Condition,
-    Edition Code, Collector Number, Scryfall ID; headers are matched by name, extra columns are
-    ignored) or a plain list (``2 Sol Ring (CMR) 436 *F*``). Returns items for ``add``. Raises
+    Language, Edition Code, Collector Number, Scryfall ID; headers are matched by name, extra
+    columns are ignored; Language and Condition take the gateway's codes or Archidekt's, an empty
+    Language is English) or a plain list (``2 Sol Ring (CMR) 436 *F*``). Returns items for ``add``;
+    a CSV row's item also carries ``line`` (the physical line its row starts on, so a quoted cell
+    with a line break and blank lines are counted) and, when its Language is one Archidekt's
+    collection cannot store, ``language_given`` (the value as given; the item is English), and when
+    its Condition is not one the gateway knows, ``condition_given`` (the item is NM). Raises
     CollectionError when nothing usable is found or there are more than MAX_IMPORT_ROWS rows."""
-    text = text.lstrip("\ufeff").strip()
-    if not text:
+    text = text.lstrip("\ufeff")
+    if not text.strip():
         raise CollectionError("invalid", "paste or choose a CSV or a card list first")
     if len(text) > 2_000_000:
         raise CollectionError("invalid", "that file is larger than 2 MB")
-    lines = text.splitlines()
     items: list[dict[str, Any]] = []
-    first = [c.strip().lower() for c in next(csv.reader([lines[0]]), [])]
-    if "name" in first or "card name" in first:
-        keys: dict[str, int] = {}
-        for key, names in _IMPORT_COLUMNS.items():
-            for n in names:
-                if n in first and key not in keys:
-                    keys[key] = first.index(n)
-        if "name" not in keys:
-            raise CollectionError("invalid", "the CSV needs a Name column")
-
-        def cell(row: list[str], key: str) -> str:
-            i = keys.get(key)
-            return row[i].strip() if i is not None and i < len(row) else ""
-
-        for n, row in enumerate(csv.reader(lines[1:]), start=2):
-            if not any(c.strip() for c in row):
-                continue
-            name = cell(row, "name")
-            if not name:
-                raise CollectionError("invalid", f"line {n}: no card name")
-            qty = cell(row, "quantity") or "1"
-            if not qty.isascii() or not qty.isdigit():  # str.isdigit alone accepts "²" and int() then fails
-                raise CollectionError("invalid", f"line {n}: quantity {qty!r} is not a number")
-            finish_raw = cell(row, "finish").lower()
-            finish = {"foil": "foil", "etched": "etched", "true": "foil", "yes": "foil"}.get(
-                finish_raw, "nonfoil"
-            )
-            items.append(
-                {
-                    "name": name,
-                    "set": cell(row, "set").lower(),
-                    "collector_number": cell(row, "collector_number"),
-                    "scryfall_id": cell(row, "scryfall_id"),
-                    "quantity": int(qty),
-                    "finish": finish,
-                    "condition": cell(row, "condition").upper(),
-                }
-            )
+    reader = csv.reader(io.StringIO(text))
+    first: list[str] = []
+    try:
+        for row in reader:
+            if any(c.strip() for c in row):
+                first = [c.strip().lower() for c in row]
+                break
+    except csv.Error:
+        pass  # no CSV header: a plain list's own check says what is wrong with it
+    is_csv = any(n in first for n in _IMPORT_COLUMNS["name"])  # any Name column the reader takes
+    if is_csv:
+        _read_csv_rows(reader, first, items)
     else:
         from .decklist import DecklistError, parse_decklist
 
         try:
-            parsed = parse_decklist(text)
+            parsed = parse_decklist(text.strip())
         except DecklistError as exc:
             raise CollectionError("invalid", f"the list could not be read: {exc}") from exc
         for c in parsed:
@@ -232,7 +232,98 @@ def parse_collection_import(text: str) -> list[dict[str, Any]]:
             f"that is {len(items)} rows; an import adds at most {MAX_IMPORT_ROWS} at a time "
             "(Archidekt is written one card at a time). Split the file and import the rest after.",
         )
-    return normalise_items(items)
+    out = normalise_items(items)
+    for item, raw in zip(out, items, strict=True):
+        for key in ("line", "language_given", "condition_given"):
+            if key in raw:
+                item[key] = raw[key]
+    return out
+
+
+def _read_csv_rows(reader: Any, first: list[str], items: list[dict[str, Any]]) -> None:
+    """The rows after a CSV's header row ``first`` (lower-cased), appended to ``items``. Each
+    row's ``line`` is the physical line it starts on: ``reader.line_num`` counts the lines read,
+    so a quoted cell with a line break and blank lines are counted."""
+    keys: dict[str, int] = {}
+    for key, names in _IMPORT_COLUMNS.items():
+        for n in names:
+            if n in first and key not in keys:
+                keys[key] = first.index(n)
+    if "name" not in keys:
+        raise CollectionError("invalid", "the CSV needs a Name column")
+
+    def cell(row: list[str], key: str) -> str:
+        i = keys.get(key)
+        return row[i].strip() if i is not None and i < len(row) else ""
+
+    while True:
+        n = reader.line_num + 1
+        try:
+            row = next(reader, None)
+        except csv.Error as exc:
+            # a cell over the csv module's limit (131,072 characters), as an unclosed quote makes
+            # of the rest of the file: named by the line its row starts on
+            raise CollectionError(
+                "invalid",
+                f"line {n}: a cell is longer than {csv.field_size_limit():,} characters; "
+                'check for a quotation mark (") that is not closed',
+            ) from exc
+        if row is None:
+            break
+        if not any(c.strip() for c in row):
+            continue
+        name = cell(row, "name")
+        if not name:
+            raise CollectionError("invalid", f"line {n}: no card name")
+        qty = cell(row, "quantity") or "1"
+        if not qty.isascii() or not qty.isdigit():  # str.isdigit alone accepts "²" and int() then fails
+            raise CollectionError("invalid", f"line {n}: quantity {_quoted(qty)} is not a number")
+        # a long digit string is past MAX_QUANTITY anyway, and int() refuses one over 4,300 digits
+        if len(qty.lstrip("0")) > len(str(MAX_QUANTITY)) or not 1 <= int(qty) <= MAX_QUANTITY:
+            raise CollectionError(
+                "invalid", f"line {n}: quantity {_quoted(qty)} is not from 1 to {MAX_QUANTITY:,}"
+            )
+        finish_raw = cell(row, "finish").lower()
+        finish = {"foil": "foil", "etched": "etched", "true": "foil", "yes": "foil"}.get(
+            finish_raw, "nonfoil"
+        )
+        condition = cell(row, "condition").upper()
+        if condition == "D":  # Archidekt's own code for Damaged
+            condition = "DMG"
+        # a condition written out ("Lightly Played") is its code, so it isn't kept as Near Mint
+        condition = CONDITION_NAMES.get(" ".join(re.split(r"[\s_-]+", condition)), condition)
+        items.append(
+            {
+                "name": name,
+                "set": cell(row, "set").lower(),
+                "collector_number": cell(row, "collector_number"),
+                "scryfall_id": cell(row, "scryfall_id"),
+                "quantity": int(qty),
+                "finish": finish,
+                "condition": condition if condition in CONDITIONS else "NM",
+                "language": _import_language(cell(row, "language")) or "EN",
+                "line": n,
+            }
+        )
+        if _import_language(cell(row, "language")) is None:
+            items[-1]["language_given"] = cell(row, "language")[:40]
+        if condition not in CONDITIONS:  # kept as NM, and the result names the line
+            items[-1]["condition_given"] = cell(row, "condition")[:40]
+
+
+def _import_language(value: str) -> str | None:
+    """A CSV row's language as the gateway's code: the gateway's own codes, Archidekt's (JP, KR,
+    SP, CS, CT) and the English names (Japanese, ...) are read; an empty cell is English. None for a
+    language Archidekt's collection cannot store (Phyrexian, Hebrew, ... or a value it does not
+    know): ``parse_collection_import`` keeps that row as English and records the value given."""
+    code = value.strip().upper()
+    if not code:
+        return "EN"
+    code = ARCHIDEKT_TO_LANGUAGE.get(code, code)
+    if code in LANGUAGES:
+        return code
+    by_name = {name.casefold(): c for c, name in LANGUAGE_NAMES.items()}
+    return by_name.get(value.strip().casefold())
 
 
 def row_out(rec: dict[str, Any]) -> dict[str, Any]:
@@ -401,22 +492,33 @@ class CollectionService:
     ) -> dict[str, Any]:
         """Add cards to the member's Archidekt Collection. Each item names a printing by
         ``scryfall_id`` (a scan result) or by ``name`` with optional ``set`` and
-        ``collector_number``; ``quantity``, ``finish`` (or ``foil: true``) and ``condition`` are
-        optional. A printing already in the collection in that finish gets its copies added to the
-        existing record (as the site's own add does); otherwise a record is created. ``progress``:
-        a collection proposal's apply, which counts each record written (``_run``)."""
+        ``collector_number``; ``quantity``, ``finish`` (or ``foil: true``), ``condition`` and
+        ``language`` (English when not given; a new record only) are optional. A printing
+        already in the collection in that finish gets its copies added to the existing record
+        (whatever its language, as the site's own add is thought to do, unchecked; ``merged``
+        names each such item whose language differs from the record's, with ``index`` its
+        position in ``items``, ``language`` and ``existing_language``); otherwise a record is
+        created. ``skipped`` items carry ``index`` too. ``progress``: a collection proposal's
+        apply, which counts each record written (``_run``)."""
         self._writes_on()
         wanted = [
-            (it, {k: it[k] for k in ("quantity", "finish", "condition")}) for it in normalise_items(items)
+            (it, {k: it[k] for k in ("quantity", "finish", "condition", "language")})
+            for it in normalise_items(items)
         ]
         self._user_id(sub)  # fail early when no account is linked
         existing: dict[tuple[Any, str], dict[str, Any]] = {}
+        # the language of each record ``existing`` holds, as the gateway's code (a record written
+        # here keeps Archidekt's own shape, so its language is kept apart)
+        lang_of: dict[tuple[Any, str], str] = {}
         for rec in await self._raw_rows(sub, max_pages=10):
             card = rec.get("card") if isinstance(rec.get("card"), dict) else {}
-            existing[(card.get("id"), _finish_of(rec.get("modifier")))] = rec
+            key = (card.get("id"), _finish_of(rec.get("modifier")))
+            existing[key] = rec
+            lang_of[key] = language_code(rec.get("language")) or "EN"
         added: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
-        for spec, opts in wanted:
+        merged: list[dict[str, Any]] = []
+        for index, (spec, opts) in enumerate(wanted):
             try:
                 printing = await self._run(
                     sub,
@@ -430,7 +532,7 @@ class CollectionService:
                 )
             except CollectionError as exc:
                 if exc.kind in ("not_found", "contract", "invalid", "unavailable"):
-                    skipped.append({"input": spec, "status": "not_found", "note": str(exc)})
+                    skipped.append({"input": spec, "status": "not_found", "note": str(exc), "index": index})
                     continue
                 raise
             finish = opts["finish"]
@@ -440,6 +542,15 @@ class CollectionService:
             key = (printing["id"], finish)
             have = existing.get(key)
             if have is not None:
+                if lang_of.get(key, "EN") != opts["language"]:
+                    merged.append(
+                        {
+                            "input": spec,
+                            "index": index,
+                            "language": opts["language"],
+                            "existing_language": lang_of.get(key, "EN"),
+                        }
+                    )
                 qty = min(MAX_QUANTITY, int(have.get("quantity") or 0) + opts["quantity"])
                 out = await self._run(
                     sub,
@@ -458,11 +569,12 @@ class CollectionService:
                         # with none picked, English and Near Mint, as archidekt.com's own new
                         # record (its site code; Q60)
                         condition=opts["condition"] or "NM",
-                        language="EN",
+                        language=opts["language"],
                     ),
                     progress=progress,
                 )
                 rec = {**out, "modifier": MODIFIERS[finish], "card": self._card_stub(printing, spec, out)}
+                lang_of[key] = opts["language"]
             existing[key] = rec
             row = row_out(rec)
             if spec["scryfall_id"] and not row.get("scryfall_id"):
@@ -475,7 +587,7 @@ class CollectionService:
             sub=sub,
             detail={"rows": len(added), "cards": sum(int(r["quantity"]) for r in added), "source": source},
         )
-        return {"added": added, "skipped": skipped}
+        return {"added": added, "skipped": skipped, "merged": merged}
 
     @staticmethod
     def _card_stub(printing: dict[str, Any], spec: dict[str, Any], rec: dict[str, Any]) -> dict[str, Any]:
@@ -575,9 +687,14 @@ class CollectionService:
         return {"removed": row_out(rec), "row": left}
 
     async def export_csv(self, sub: str) -> str:
-        """The collection as CSV in the column layout Archidekt's collection import reads
-        (Quantity, Name, Finish, Condition, Language, Edition code, Collector number, Scryfall ID,
-        Date added). Reported, not verified against a live import."""
+        """The collection as CSV: Quantity, Name, Finish, Condition, Language, Edition Code,
+        Edition Name, Collector Number, Scryfall ID, Date Added. Archidekt's collection import
+        does not read these column names: on archidekt.com the person picks each column's type
+        (Quantity, Card name, Foil/Variant, Condition, Language, Edition code, Edition name,
+        Collector number, Scryfall ID, and Ignore for Date Added) and leaves "Skip first line" on
+        (read from its site's import page; see ``EXPORT_COLUMN_TYPES``). Condition and Language are
+        written in Archidekt's codes (D for DMG; JP, KR, SP, CS, CT for JA, KO, ES, ZHS, ZHT),
+        which the gateway's own import reads back too; the pages keep showing the gateway's."""
         out = io.StringIO()
         w = csv.writer(out)
         w.writerow(
@@ -600,8 +717,8 @@ class CollectionService:
                     r["quantity"],
                     r["name"],
                     MODIFIERS[r["finish"]],
-                    r["condition"],
-                    r["lang"],
+                    ARCHIDEKT_CONDITION.get(r["condition"], r["condition"]),
+                    LANGUAGE_TO_ARCHIDEKT.get(r["lang"], r["lang"]),
                     r["set"].upper(),
                     r["set_name"],
                     r["collector_number"],
@@ -628,14 +745,190 @@ def _item_options(raw: dict[str, Any], i: int) -> dict[str, Any]:
     if finish not in FINISHES:
         raise CollectionError("invalid", f"card {i}: finish must be one of {', '.join(FINISHES)}")
     condition = _clean(raw.get("condition"), 4).upper()
+    if condition == "D":  # Archidekt's own code for Damaged
+        condition = "DMG"
     if condition not in CONDITIONS:
         raise CollectionError("invalid", f"card {i}: condition must be one of NM, LP, MP, HP, DMG or empty")
-    return {"quantity": qty, "finish": finish, "condition": condition}
+    language = _clean(raw.get("language"), 3).upper() or "EN"
+    language = ARCHIDEKT_TO_LANGUAGE.get(language, language)
+    if language not in LANGUAGES:
+        raise CollectionError("invalid", f"card {i}: language must be one of " + ", ".join(LANGUAGES))
+    return {"quantity": qty, "finish": finish, "condition": condition, "language": language}
 
 
 # The languages Archidekt's collection takes (its site's own list of eleven, read 2026-10-14; see
 # LANGUAGE_IDS), in the order the details menu offers them. Archidekt has no Phyrexian.
 LANGUAGES = ("EN", "ES", "FR", "DE", "IT", "PT", "JA", "KO", "RU", "ZHS", "ZHT")
+# Archidekt's site writes five language codes and one condition code differently from the
+# gateway (its bundle's tables, see LANGUAGE_IDS / CONDITION_IDS): the collection CSV export
+# writes Archidekt's, the import reads both.
+LANGUAGE_TO_ARCHIDEKT = {"JA": "JP", "KO": "KR", "ES": "SP", "ZHS": "CS", "ZHT": "CT"}
+ARCHIDEKT_TO_LANGUAGE = {v: k for k, v in LANGUAGE_TO_ARCHIDEKT.items()}
+# Names for the import's result: Archidekt's eleven, then printed languages its collection has no
+# code for (an import keeps those rows as English and names them).
+LANGUAGE_NAMES = {
+    "EN": "English",
+    "ES": "Spanish",
+    "FR": "French",
+    "DE": "German",
+    "IT": "Italian",
+    "PT": "Portuguese",
+    "JA": "Japanese",
+    "KO": "Korean",
+    "RU": "Russian",
+    "ZHS": "Chinese (Simplified)",
+    "ZHT": "Chinese (Traditional)",
+}
+OTHER_LANGUAGE_NAMES = {
+    "PH": "Phyrexian",
+    "HE": "Hebrew",
+    "LA": "Latin",
+    "AR": "Arabic",
+    "SA": "Sanskrit",
+    "GRC": "Ancient Greek",
+}
+ARCHIDEKT_CONDITION = {"DMG": "D"}
+# The column type to pick on archidekt.com's collection import for each column of the export, by
+# the labels its import page offers (its site's own list, read 2026-10-14). It maps columns by
+# position, not by name, and skips the first line by default.
+EXPORT_COLUMN_TYPES = (
+    ("Quantity", "Quantity"),
+    ("Name", "Card name"),
+    ("Finish", "Foil/Variant"),
+    ("Condition", "Condition"),
+    ("Language", "Language"),
+    ("Edition Code", "Edition code"),
+    ("Edition Name", "Edition name"),
+    ("Collector Number", "Collector number"),
+    ("Scryfall ID", "Scryfall ID"),
+    ("Date Added", "Ignore"),
+)
+
+
+def _language_name(code: str) -> str:
+    code = code.strip()
+    return LANGUAGE_NAMES.get(code.upper()) or OTHER_LANGUAGE_NAMES.get(code.upper()) or code
+
+
+def import_result(items: list[dict[str, Any]], out: dict[str, Any]) -> dict[str, Any]:
+    """What an import did, for the Collection page's notice: ``items`` as parse_collection_import
+    returned them, ``out`` as ``add`` returned it. Plain data (copies added, and the rows kept as
+    English, kept as Near Mint, merged into a record of another language, or not found, each with
+    where it was)."""
+
+    def where(i: int) -> str:
+        item = items[i] if 0 <= i < len(items) else {}
+        return f"line {item['line']}" if isinstance(item.get("line"), int) else f"row {i + 1}"
+
+    def name(i: int) -> str:
+        return str(items[i].get("name") or "?") if 0 <= i < len(items) else "?"
+
+    missing = sorted({int(s["index"]) for s in out.get("skipped") or [] if isinstance(s.get("index"), int)})
+    kept: dict[str, list[dict[str, str]]] = {}
+    for i, item in enumerate(items):
+        if item.get("language_given") and i not in missing:
+            lang = _language_name(str(item["language_given"]))
+            kept.setdefault(lang, []).append({"where": where(i), "name": name(i)})
+    near_mint: dict[str, list[dict[str, str]]] = {}
+    for i, item in enumerate(items):
+        if item.get("condition_given") and i not in missing:
+            given = str(item["condition_given"]).strip()
+            near_mint.setdefault(given, []).append({"where": where(i), "name": name(i)})
+    merged = [
+        {
+            "where": where(int(m["index"])),
+            "name": name(int(m["index"])),
+            "language": _language_name(str(m.get("language") or "EN")),
+            "existing": _language_name(str(m.get("existing_language") or "EN")),
+        }
+        for m in out.get("merged") or []
+        if isinstance(m.get("index"), int)
+    ]
+    return {
+        "cards": sum(int(it.get("quantity") or 0) for i, it in enumerate(items) if i not in missing),
+        "added": bool(out.get("added")),
+        "kept": [{"language": k, "rows": v} for k, v in kept.items()],
+        "kept_condition": [{"condition": k, "rows": v} for k, v in near_mint.items()],
+        "merged": merged,
+        "missing": [{"where": where(i), "name": name(i)} for i in missing],
+    }
+
+
+def import_result_html(result: dict[str, Any]) -> str:
+    """The Collection page's notice for an import: a refusal (``refused``: the parser's reason) or
+    what ``import_result`` found. Everything is escaped."""
+    if result.get("refused"):
+        reason = str(result["refused"]).strip().rstrip(".")
+        return f"<p class='notice error'>{_esc(f'Nothing was imported: {reason}.')}</p>"
+
+    def rows(entries: list[dict[str, str]], extra: str = "") -> str:
+        return ", ".join(f"{e['where']} ({e['name']}{(', ' + e[extra]) if extra else ''})" for e in entries)
+
+    notes: list[str] = []
+    for group in result.get("kept") or []:
+        lang = group["language"]
+        # a language Archidekt lacks is named; anything else is quoted as it was typed
+        said = lang if lang in OTHER_LANGUAGE_NAMES.values() else f"“{lang}”"
+        notes.append(
+            f"Kept as English, because {said} is not a language Archidekt stores for collection cards: "
+            f"{rows(group['rows'])}."
+        )
+    for group in result.get("kept_condition") or []:
+        # a Condition the gateway does not know (Archidekt's are NM, LP, MP, HP and D), as typed
+        notes.append(
+            f"Kept as Near Mint, because “{group['condition']}” is not a condition Archidekt stores for "
+            f"collection cards: {rows(group['rows'])}."
+        )
+    merged = result.get("merged") or []
+    if merged:
+        langs = {m["existing"] for m in merged}
+        one = len(merged) == 1
+        count_as = (
+            f"{'it counts' if one else 'they count'} as {next(iter(langs))}"
+            if len(langs) == 1
+            else "each counts in that copy's language"
+        )
+        entries = [{**m, "how": f"{m['language']} added to {m['existing']}"} for m in merged]
+        notes.append(
+            f"Added to a copy you already had in another language, so {count_as}: {rows(entries, 'how')}."
+        )
+    if result.get("missing"):
+        notes.append(f"Not found, so not imported: {rows(result['missing'])}.")
+    if result.get("added"):
+        n = int(result.get("cards") or 0)
+        lead, cls = f"Imported {n} {'card' if n == 1 else 'cards'} into your Archidekt collection.", "ok"
+    else:
+        lead, cls = "Nothing was imported: no card in the list was found.", "error"
+    items = "".join(f"<li>{_esc(n)}</li>" for n in notes)
+    return (
+        f"<div class='notice {cls} importres' role='status'><p>{_esc(lead)}</p>"
+        + (f"<ul>{items}</ul>" if items else "")
+        + "</div>"
+    )
+
+
+def export_help_html() -> str:
+    """The Collection page's fold that says how to import the Export CSV on archidekt.com."""
+    rows = "".join(
+        f"<tr><th scope='row'>{_esc(col)}</th><td>{_esc(kind)}</td></tr>" for col, kind in EXPORT_COLUMN_TYPES
+    )
+    return (
+        f"<details class='addfold csvhelp'><summary>{icon('download')} "
+        "<span class='t'>Importing the CSV on archidekt.com</span>"
+        "<span class='chev'>column types</span></summary><section class='panel'>"
+        "<p>Archidekt does not read the column names. When you import the file on archidekt.com, pick "
+        "each column's type as below and leave <strong>Skip first line</strong> on.</p>"
+        "<div class='tbl'><table><thead><tr><th scope='col'>Column in this file</th>"
+        "<th scope='col'>Type to pick on archidekt.com</th></tr></thead>"
+        f"<tbody>{rows}</tbody></table></div>"
+        "<p class='muted small'>The file writes Condition and Language in Archidekt's own codes. "
+        "Condition: NM Near Mint, LP Lightly Played, MP Moderately Played, HP Heavily Played and "
+        "D Damaged. Language: EN English, DE German, FR French, IT Italian, PT Portuguese, "
+        "RU Russian, JP Japanese, KR Korean, SP Spanish, CS Chinese (Simplified) and "
+        "CT Chinese (Traditional).</p></section></details>"
+    )
+
+
 MAX_PRICE = 99999.0
 
 
@@ -828,6 +1121,10 @@ def details_html(r: dict[str, Any], csrf_in: str) -> str:
 
 
 COLLECTION_CSS = """
+.notice.importres{overflow-wrap:anywhere}
+.notice.importres p{margin:0}
+.notice.importres ul{margin:.45rem 0 0;padding-left:1.2rem;font-weight:400;line-height:1.45}
+.notice.importres li+li{margin-top:.3rem}
 .collbar .controls{display:grid;grid-template-columns:minmax(0,2fr) repeat(2,minmax(9rem,1fr)) auto;gap:1rem;
   align-items:end}
 .collbar .field .btn{margin:0}
@@ -918,6 +1215,18 @@ details.rowmenu.details .menu .actions button{width:100%;margin:0}
 .pager .btn{margin:0}
 .coll-empty{text-align:center;padding:2rem 1rem}
 .coll-empty .actions{justify-content:center}
+/* how to import the Export CSV on archidekt.com: a two-column table in the fold */
+/* with large text the title wraps, even inside "archidekt.com", rather than push the page wider */
+.collection details.csvhelp > summary{flex-wrap:wrap;padding-right:.35rem}
+.collection details.csvhelp > summary .t{min-width:0;overflow-wrap:anywhere}
+/* on a phone the side text would wrap alone against the edge: the title says enough */
+@media (max-width:600px){ .collection details.csvhelp > summary .chev{display:none} }
+.csvhelp .tbl{overflow-x:auto;max-width:min(100%,40rem)}
+.csvhelp table{border-collapse:collapse;width:100%;font-size:.95rem}
+.csvhelp th,.csvhelp td{text-align:left;vertical-align:top;padding:.4rem .5rem;overflow-wrap:anywhere;
+  border-bottom:1px solid var(--border-soft)}
+.csvhelp thead th{background:var(--surface-2)}
+.csvhelp tbody th{font-weight:700}
 """
 
 
@@ -1006,12 +1315,38 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             )
         return data
 
-    def notice(code: str | None) -> str:
+    # An import's result, kept for the page the redirect lands on: by a random token in the URL
+    # (never the text itself), for the member who imported, IMPORT_RESULT_TTL seconds, read once.
+    results: dict[str, tuple[str, float, dict[str, Any]]] = {}
+
+    def keep_result(sub: str, result: dict[str, Any]) -> str:
+        now = time.monotonic()
+        for k in [k for k, (_, t, _) in results.items() if now - t > IMPORT_RESULT_TTL]:
+            results.pop(k, None)
+        while len(results) >= IMPORT_RESULTS_MAX:
+            results.pop(next(iter(results)))
+        token = secrets.token_urlsafe(12)
+        results[token] = (sub, now, result)
+        return token
+
+    def take_result(sub: str, token: str | None) -> dict[str, Any] | None:
+        hit = results.get(token or "")
+        if hit is None or hit[0] != sub:
+            return None
+        results.pop(token or "", None)
+        return hit[2] if time.monotonic() - hit[1] <= IMPORT_RESULT_TTL else None
+
+    def notice(code: str | None, *, sub: str = "", token: str | None = None) -> str:
+        if code in ("imported", "nothingimported", "toomany", "unreadable") and token:
+            result = take_result(sub, token)
+            if result is not None:
+                return import_result_html(result)
         msgs = {
             "added": "Added to your Archidekt collection.",
             "removed": "Removed from your Archidekt collection.",
             "updated": "Card details saved to your Archidekt collection.",
             "nothing": "Nothing was added: no card matched. Check the name or pick a suggestion.",
+            "nothingimported": "Nothing was imported: no card in the list was found.",
             "imported": "Imported into your Archidekt collection.",
             "toomany": f"An import adds at most {MAX_IMPORT_ROWS} rows at a time. Split the file and "
             "import the rest after.",
@@ -1060,6 +1395,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
         open_add = bool(qp.get("add")) or (qp.get("ok") or qp.get("err")) in (
             "added",
             "nothing",
+            "nothingimported",
             "imported",
             "toomany",
             "unreadable",
@@ -1072,7 +1408,7 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             status = 200 if exc.kind in ("not_linked", "auth") else _STATUS.get(exc.kind, 400)
             return page(
                 "My collection",
-                notice(qp.get("err")) + problem(exc),
+                notice(qp.get("err"), sub=sub, token=qp.get("r")) + problem(exc),
                 sub=sub,
                 sid=sid,
                 status=status,
@@ -1188,9 +1524,10 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
             pager += "</nav>"
         resp = page(
             "My collection",
-            notice(qp.get("ok") or qp.get("err"))
+            notice(qp.get("ok") or qp.get("err"), sub=sub, token=qp.get("r"))
             + totals_html
             + controls
+            + export_help_html()
             + f"<details class='addfold'{' open' if open_add else ''}><summary>{icon('plus')} Add cards or "
             "import a list<span class='chev'>name, file or scan</span></summary>"
             + add_box
@@ -1250,9 +1587,11 @@ def add_collection_routes(server: MCPServer, state: AppState, service: Collectio
                     items = parse_collection_import(data.get("text", ""))
                 except CollectionError as exc:
                     code = "err=toomany" if "at most" in str(exc) else "err=unreadable"
+                    code += "&r=" + keep_result(sub, {"refused": str(exc)[:REFUSAL_CHARS]})
                     return RedirectResponse(f"{back}{'&' if '?' in back else '?'}{code}", status_code=303)
                 out = await service.add(sub, items, source="manual")
-                code = "ok=imported" if out["added"] else "err=nothing"
+                code = "ok=imported" if out["added"] else "err=nothingimported"
+                code += "&r=" + keep_result(sub, import_result(items, out))
             elif action == "details":
                 rid = _rid(data.get("id"))
                 await service.update(
@@ -1533,8 +1872,10 @@ def add_collection_tools(server: MCPServer, service: CollectionService) -> None:
             "deck edit this is a proposal: show its diff and review_url; it is applied by the user "
             "(Approve on the proposal card or the review page) or by you when assistant_may_apply is "
             "true, with apply_proposal. add: a list of {name, set_code?, collector_number?, quantity?, "
-            "finish?, condition?} or plain names (a card named without set_code and collector_number is "
-            "added in a printing Archidekt picks, as a nonfoil unless finish says otherwise); text: one "
+            "finish?, condition?, language?} or plain names (a card named without set_code and "
+            "collector_number is added in a printing Archidekt picks, as a nonfoil unless finish says "
+            "otherwise; language: the card's language code, EN default, or ES, FR, DE, IT, PT, JA, KO, "
+            "RU, ZHS, ZHT); text: one "
             "card per line, e.g. '2 Sol Ring (CMR) 472 *F*'; scan_session: the id or name of a scan "
             "session, every matched card in it is added and the session is removed once applied; remove: "
             "a list of {id (from list_collection) | name, quantity?} (no quantity removes every copy). At "

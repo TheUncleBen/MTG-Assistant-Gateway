@@ -84,6 +84,13 @@ def image_url(uid: str | None, size: str = "normal") -> str | None:
     return f"https://cards.scryfall.io/{size}/front/{uid[0]}/{uid[1]}/{uid}.jpg"
 
 
+def print_label(set_code: str | None, number: str | None) -> str:
+    """A printing as every screen writes it (N15): "SLD #1074"; the set code alone when the
+    number is not known."""
+    code = (set_code or "").upper()
+    return f"{code} #{number}" if code and number else code
+
+
 def card_image(card: DeckCard, size: str = "normal") -> str | None:
     return image_url(getattr(card, "scryfall_uid", "") or None, size)
 
@@ -606,7 +613,7 @@ def card_row(card: DeckCard, *, deck: Deck, view: str = "text", owned: dict[str,
             + f"{price}</span>"
         )
     elif view == "table":
-        printing = f"{card.set_code.upper()} {card.collector_number}".strip()
+        printing = print_label(card.set_code, card.collector_number)
         mv = mana_value(card)
         printed = (
             f" title='Custom mana value; printed {card.cmc:g}'"
@@ -624,7 +631,7 @@ def card_row(card: DeckCard, *, deck: Deck, view: str = "text", owned: dict[str,
         hover = f"<span class='hover'><img src='{esc(img)}' alt='' loading='lazy'></span>" if img else ""
         body = (
             f"{qty}<span class='n'>{marks}{name}{hover}</span>{cost}"
-            f"<span class='set' title='{esc(card.set_code.upper())} {esc(card.collector_number)}'>"
+            f"<span class='set' title='{esc(print_label(card.set_code, card.collector_number))}'>"
             f"{esc(card.set_code.upper())}</span>{price}"
         )
     return (
@@ -676,7 +683,9 @@ def _card_data(card: DeckCard, deck: Deck) -> str:
     or side), first category (empty when Archidekt has none) and relation id, which pick the row
     an edit targets when the same card sits in the deck and on the maybeboard. A row in more than
     one category lists them all in data-allcats, so an Undo of its removal puts every one back.
-    data-cmc is the printed mana value, which a cleared custom one (data-mv) goes back to."""
+    data-cmc is the printed mana value, which a cleared custom one (data-mv) goes back to.
+    data-companion and data-flipped mark a companion and a card set to show its back, which an
+    Undo of its removal puts back too."""
     zone = "main" if deck.in_deck(card) else "side"
     cat = card.categories[0] if card.categories else ""
     rel = f" data-rel='{card.relation_id}'" if card.relation_id is not None else ""
@@ -692,6 +701,8 @@ def _card_data(card: DeckCard, deck: Deck) -> str:
         + (f" data-mv='{mana_value_text(card.custom_cmc)}'" if card.custom_cmc is not None else "")
         + (f" data-cmc='{card.cmc:g}'" if card.cmc is not None else "")
         + (f" data-notes='{esc(card.notes)}'" if card.notes else "")
+        + (" data-companion='1'" if card.companion else "")
+        + (" data-flipped='1'" if card.flipped_default else "")
     )
 
 
@@ -778,7 +789,7 @@ def cards_html(
         "<template class='icons'>"
         + "".join(
             f"<span data-ic='{n}'>{icon(n)}</span>"
-            for n in ("eye", "swap", "tag", "eye-off", "x", "edit", "external")
+            for n in ("eye", "swap", "tag", "eye-off", "x", "edit", "external", "image")
         )
         + "</template>"
     )
@@ -1858,37 +1869,28 @@ def deck_list_controls_html(
     q: str,
     order: str,
     view: str,
-    folders: list[str],
     folder: str,
     total: int | None,
     pending: bool = False,
 ) -> str:
-    """The toolbar over the deck list. ``pending``: the list is still being read (the folder picker
-    is rendered hidden and the total left blank; decks.js fills both). ``total`` None: the list
-    couldn't be read (Q64), so no count is shown."""
-    folder_opts = "".join(
-        f"<option value='{esc(f)}'{' selected' if f == folder else ''}>{esc(f)}</option>" for f in folders
-    )
+    """The toolbar over the deck list. ``folder``: the open folder's id ("" at the top level),
+    kept when the toolbar is sent so Order by and View as stay in that folder (the name filter
+    searches every folder, Q20). ``pending``: the list is still being read (the total is left
+    blank; decks.js fills it). ``total`` None: the list couldn't be read (Q64), so no count."""
     return (
         "<section class='panel listbar'><form method='get' action='/decks' class='controls' id='listform'>"
-        "<div class='field grow'><label for='q'>Filter deck name</label><span class='search'>"
+        + (f"<input type='hidden' name='folder' value='{esc(folder)}'>" if folder else "")
+        + "<div class='field grow'><label for='q'>Filter deck name</label><span class='search'>"
         f"<input id='q' type='search' name='q' value='{esc(q)}' placeholder='Example deck name'>"
         f"<button type='submit' aria-label='Filter' title='Filter'>{icon('search')}</button></span></div>"
         + _select(
             "view", {"grid": "Grid", "list": "List"}, view, "View as", "list" if view == "list" else "grid"
         )
         + _select("order", LIST_ORDERS, order, "Order by", "sort")
-        + (
-            f"<div class='field' id='folder-field'{' hidden' if pending else ''}><label for='f-folder'>"
-            f"Folder</label><span class='sel'>{icon('decks')}<select id='f-folder' name='folder'>"
-            f"<option value=''>All folders</option>{folder_opts}</select></span></div>"
-            if folders or pending
-            else ""
-        )
         + "<div class='field'><span class='lbl' id='decks-total'"
         + (" hidden" if total is None and not pending else "")
         + f">Total decks: {'…' if pending or total is None else total}</span>"
-        f"<a class='btn' href='/folders'>{icon('folder')} Folders</a>"
+        f"<a class='btn' href='/folders'>{icon('folder')} Manage folders</a>"
         f"<a class='btn btn-primary' href='/decks/new'>{icon('plus')} New deck</a></div>"
         "<noscript><button type='submit' class='apply'>Apply</button></noscript>"
         "</form></section>"
@@ -2107,9 +2109,12 @@ ul.rows .hover img{width:100%;height:100%;display:block}
 .stack.moving{outline:2px dashed var(--orange);outline-offset:4px;background:var(--surface-2)}
 /* while a stack is dragged a bar shows where it lands and its name follows the pointer; both, and
    a card slid by a finger, move by transform only */
-/* nor does a row's hover picture or a stack's fan open under the pointer meanwhile */
-.deckview.sorting ul.rows .row:hover .hover{display:none}
+/* nor does a row's hover picture or a stack's fan open under the pointer meanwhile, nor while a
+   card is dragged (deck.js): the fan would cover the top of the stack directly below */
+.deckview.sorting ul.rows .row:hover .hover,.deckview.carddrag ul.rows .row:hover .hover{display:none}
 .deckview.sorting.stacks .c:hover ~ .c{transform:none}
+/* at once, not after the fan's 0.3 s slide: a quick drag reaches the lower stack before that */
+.deckview.carddrag.stacks .c:hover ~ .c{transform:none;transition:none}
 .stackdrop,.stacktag,.dragghost{position:fixed;left:0;top:0;pointer-events:none;will-change:transform;margin:0}
 .stackdrop{z-index:70;width:1px;height:1px;opacity:0;transform-origin:0 0;background:var(--orange)}
 .stacktag{z-index:71;max-width:60vw;padding:.3rem .6rem;border-radius:var(--radius);background:var(--surface);
@@ -2304,6 +2309,9 @@ html.cardview-open{overflow:hidden}
 .ctxmenu .qtyrow .n{min-width:1.6rem;text-align:center;font-variant-numeric:tabular-nums}
 .ctxmenu .more .chev{margin-left:auto;color:var(--text-muted);font-size:1.2rem;line-height:1}
 .ctxmenu .more[aria-expanded=true] .chev{transform:rotate(90deg)}
+/* The menu scrolls as a whole when the window is short; its items never shrink to make room (a
+   "Move to" list opened near the bottom of the window was squeezed to 2 px and could not be used) */
+.ctxmenu > *{flex-shrink:0}
 .ctxmenu .sub{display:flex;flex-direction:column;background:var(--surface);border-top:1px solid var(--border);
   border-bottom:1px solid var(--border);max-height:40vh;overflow:auto}
 .ctxmenu .sub[hidden]{display:none}
@@ -2455,7 +2463,7 @@ table.qty td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-
 .description{font-size:16px} .description .empty{color:var(--text-muted)}
 
 /* deck list (deckLink grid: thumbnail with colour bar, info block, tags strip) */
-.listbar .controls{display:grid;grid-template-columns:1fr repeat(3,minmax(140px,auto)) auto;gap:1rem;
+.listbar .controls{display:grid;grid-template-columns:1fr repeat(2,minmax(140px,auto)) auto;gap:1rem;
   align-items:end}
 .listbar .field.grow{min-width:12rem}
 .listbar .field .btn{margin:0}
@@ -2521,9 +2529,13 @@ ul.decklist.list .deck{margin-bottom:.5rem}
   color:var(--text-muted)}
 .editor .edithead h1.deckname{margin:0;font-size:24px}
 .editor .edithead .btn{margin:0}
-.editbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;
+/* the save bar sticks just under the site's top bar (theme.py: sticky, 50px tall, plus the safe
+   area in the app), never over it */
+.editbar{position:sticky;top:50px;z-index:20;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;
   background:var(--toolbar-bg);color:var(--toolbar-text);padding:.5rem 1rem;margin:0 -1rem 1rem;
   box-shadow:0 2px 6px rgba(0,0,0,.35)}
+@media (min-width:600px){ body.app .editbar{top:calc(50px + env(safe-area-inset-top))}
+  html:has(.editbar){scroll-padding-top:120px} }
 .editbar button{margin:0}
 .editbar .count{color:inherit;opacity:.85}
 .editbar .backup{display:inline-flex;align-items:center;gap:.35rem;margin:0;font-size:.9rem;
@@ -2567,15 +2579,11 @@ ul.decklist.list .deck{margin-bottom:.5rem}
   .addprints .head{display:flex;justify-content:space-between;gap:.5rem;align-items:baseline;
     margin-bottom:.5rem}
   .addprints .head b{overflow-wrap:anywhere}
-  .addprints .pgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.4rem}
-  .addprints .print{border:2px solid transparent;border-radius:6px;background:var(--surface-2);padding:.2rem;
-    margin:0;height:auto;display:flex;flex-direction:column;gap:.15rem;align-items:center;cursor:pointer;
-    min-width:0}
-  .addprints .print img{width:100%;aspect-ratio:5/7;border-radius:4.5%;object-fit:cover}
-  .addprints .print .cap{font-size:.7rem;color:var(--text-muted);white-space:nowrap}
-  .addprints .print.current{border-color:var(--orange)}
-  .addprints .print:hover,.addprints .print:focus-visible{border-color:var(--link)}
-  .addprints .hint{margin:.5rem 0 0} }
+  .addprints .pgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.4rem;margin:0;
+    padding:0;list-style:none}
+  .addprints .pgrid li{min-width:0}
+  .addprints .hint{margin:.5rem 0 0}
+  .addprints .allprints{width:100%;margin:.5rem 0 0;min-height:36px;position:sticky;bottom:0} }
 @media (max-width:600px){
   .addbox form.addcard{grid-template-columns:1fr}
   .addbox form.addcard .go{justify-content:space-between}
@@ -2678,19 +2686,131 @@ ul.plain.collablist{margin:0 0 .75rem;border-bottom:1px solid var(--surface-2)}
 .picker .pickbox .close{flex:none;margin:0;width:2.4rem;min-height:2.4rem;height:2.4rem;font-size:1.5rem;
   line-height:1;font-weight:400;border-radius:50%}
 .picker .status{margin:0}
-.picker .prints{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:.6rem;
-  overflow:auto;min-height:0;padding:2px}
-.picker .print{border:2px solid transparent;border-radius:6px;background:var(--surface-2);padding:.3rem;
-  margin:0;height:auto;display:flex;flex-direction:column;gap:.3rem;align-items:center;cursor:pointer}
-.picker .print img{width:100%;aspect-ratio:5/7;border-radius:4.5%;object-fit:cover}
-.picker .print .cap{font-size:.75rem;color:var(--text-muted)}
-.picker .print.current{border-color:var(--orange)}
-.picker .print:hover{border-color:var(--link)}
 @media (max-width:700px){
   .picker{padding:0;align-items:flex-end;-webkit-backdrop-filter:none;backdrop-filter:none}
   .picker .pickbox{width:100%;max-height:94vh;border-radius:var(--radius-panel) var(--radius-panel) 0 0;
+    border-bottom:0;padding:.75rem .75rem calc(.75rem + env(safe-area-inset-bottom))} }
+/* The printing picker (static/printpick.js), shared by the deck page's card menu and the deck
+   editor: a dialog themed like the card viewer, a bottom sheet on a phone. The list of tiles
+   scrolls on its own; beside it on a wide screen the preview shows the pointed-at printing
+   whole, and below 900px the preview is a sheet over the list, opened by a tap. */
+.printpick{position:fixed;inset:0;z-index:62;display:none;align-items:center;justify-content:center;
+  background:var(--scrim-strong,rgba(0,0,0,.78));padding:1.5rem;
+  -webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
+.printpick.open{display:flex}
+html.printpick-open{overflow:hidden}
+.printpick .ppbox{position:relative;width:min(100%,76rem);height:min(100%,56rem);display:flex;
+  flex-direction:column;gap:.6rem;background:var(--surface);color:var(--text);border:1px solid var(--border);
+  border-radius:var(--radius-panel);padding:1.25rem;box-shadow:0 12px 40px rgba(0,0,0,.5);overflow:hidden;
+  animation:cardin .16s ease-out}
+@media (prefers-reduced-motion:reduce){ .printpick .ppbox{animation:none} }
+.printpick .pphead{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;min-width:0;
+  flex:none}
+.printpick .pphead h2{margin:0;font-size:1.3rem;line-height:1.25;overflow-wrap:anywhere;min-width:0}
+.printpick .close{flex:none;margin:0;width:2.4rem;min-height:2.4rem;height:2.4rem;font-size:1.5rem;
+  line-height:1;font-weight:400;border-radius:50%}
+.printpick .pptools{display:flex;flex-direction:column;gap:.5rem;flex:none;min-width:0}
+.printpick .ppsearch{display:flex;gap:.5rem;min-width:0}
+.printpick .ppsearch input{flex:1 1 auto;min-width:0;width:auto;margin:0}
+.printpick .ppfiltbtn{display:none;margin:0;flex:none}
+.printpick .ppfilters{display:grid;grid-template-columns:repeat(4,minmax(0,1fr)) auto;gap:.5rem;
+  align-items:center;min-width:0}
+.printpick .ppfilters select,.printpick .ppfilters .msel-btn{width:100%;min-width:0;margin:0}
+.printpick .ppall{margin:0;font-size:.93rem;line-height:1.3}
+.printpick .ppstatus{margin:0;font-size:.93rem;color:var(--text-muted);flex:none;display:flex;flex-wrap:wrap;
+  align-items:center;gap:.5rem}
+.printpick .ppstatus.error{color:var(--text)}
+.printpick .ppstatus .btn{margin:0}
+.printpick .ppmain{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 21rem;
+  gap:1rem}
+.printpick .ppscroll{overflow:auto;min-height:0;overscroll-behavior:contain;padding:3px}
+.printpick .ppgrid{list-style:none;margin:0;padding:0;display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:.75rem}
+.printpick .ppgrid li,.addprints .pgrid li{min-width:0;display:flex}
+.pptile{position:relative;display:flex;flex-direction:column;align-items:stretch;justify-content:flex-start;
+  gap:.4rem;width:100%;height:auto;min-width:0;margin:0;padding:.4rem;border:2px solid var(--border-soft);
+  border-radius:8px;background:var(--surface-2);color:var(--text);text-align:left;font-weight:400;
+  cursor:pointer}
+.pptile:hover{border-color:var(--link);background:var(--surface-2);color:var(--text)}
+.pptile:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.pptile.current,.pptile.picked{border-color:var(--orange)}
+.pptile.on{border-color:var(--link);box-shadow:0 0 0 2px var(--link)}
+.pptile .ppimg{display:block;width:100%;aspect-ratio:5/7;border-radius:4.5%;overflow:hidden;
+  background:var(--surface-3)}
+.pptile .ppimg img{display:block;width:100%;height:100%;object-fit:cover}
+.pptile .ph,.pppreview .ph{display:flex;align-items:center;justify-content:center;width:100%;height:100%;
+  padding:.5rem;text-align:center;font-weight:700;color:var(--text-muted);overflow-wrap:anywhere}
+.pptile .ppcap{display:flex;flex-direction:column;gap:.2rem;min-width:0}
+.pptile .ppsetname{font-weight:700;font-size:.9rem;line-height:1.25;overflow-wrap:anywhere;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.pptile .ppcode{font-size:.82rem;color:var(--text-muted);font-variant-numeric:tabular-nums;
+  overflow-wrap:anywhere}
+.pptile .ppprice{font-weight:700;font-size:.9rem;font-variant-numeric:tabular-nums}
+.pptile .ppprice.none{font-weight:400;color:var(--text-muted)}
+.pptile .ppmark{position:absolute;top:.7rem;left:.7rem;padding:.1rem .55rem;border-radius:1rem;
+  background:var(--orange);color:var(--on-orange);font-size:.78rem;font-weight:700;box-shadow:var(--shadow)}
+.ppchips{display:flex;flex-wrap:wrap;gap:.25rem}
+.ppchip{display:inline-block;padding:.05rem .45rem;border-radius:1rem;border:1px solid var(--border);
+  background:var(--surface);color:var(--text);font-size:.76rem;line-height:1.45}
+.ppchip.ppflag{border-color:var(--orange);color:var(--orange-text);font-weight:700}
+.ppchip.ppmine{border-color:var(--orange);font-weight:700}
+.pptile.compact{padding:.2rem;gap:.15rem;border-radius:6px;border-color:transparent}
+.pptile.compact.current{border-color:var(--orange)}
+.pptile.compact .ppcode{font-size:.7rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  text-align:center}
+.printpick .ppempty{display:flex;flex-direction:column;align-items:flex-start;gap:.5rem;padding:1rem 0}
+.printpick .ppempty p{margin:0}
+.printpick .ppempty .btn{margin:0}
+.printpick .ppempty[hidden],.printpick .ppmore[hidden]{display:none}
+.printpick .ppmore{display:flex;justify-content:center;padding:1rem 0 .5rem}
+.printpick .ppmore .btn{margin:0}
+.printpick .pppreview{min-height:0;overflow:auto;overscroll-behavior:contain;display:flex;
+  flex-direction:column;
+  gap:.75rem;border-left:1px solid var(--border-soft);padding:0 .25rem 0 1rem}
+.pppreview .ppbig{width:100%;max-width:18rem;align-self:center;flex:none}
+.pppreview .ppbig img,.pppreview .ppbig .ph{display:flex;width:100%;aspect-ratio:5/7;border-radius:4.5%;
+  object-fit:cover;background:var(--surface-2)}
+.pppreview .ppinfo{display:flex;flex-direction:column;gap:.4rem;min-width:0}
+.pppreview h3{margin:0;font-size:1.15rem;line-height:1.25;overflow-wrap:anywhere}
+.pppreview .ppline{margin:0;color:var(--text-muted);font-size:.9rem;font-variant-numeric:tabular-nums}
+.pppreview .ppprices{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:.2rem .9rem;
+  margin:.25rem 0 0;font-variant-numeric:tabular-nums}
+.pppreview .ppprices dt{color:var(--text-muted);font-weight:700}
+.pppreview .ppprices dd{margin:0}
+.pppreview .ppnote{margin:.25rem 0 0;padding:.5rem .65rem;border-left:3px solid var(--orange);
+  background:var(--surface-2);font-size:.9rem;color:var(--text)}
+.pppreview .ppacts{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.5rem}
+.pppreview .ppacts button{margin:0;flex:1 1 auto}
+.pppreview .ppback{display:none}
+.pppreview .pphint{margin:0}
+@media (max-width:899.98px){
+  .printpick .ppmain{grid-template-columns:minmax(0,1fr);position:relative}
+  /* the preview covers the list (the heading and its Close button stay); the search and filters
+     step aside meanwhile */
+  .printpick .pppreview{display:none;position:absolute;inset:0;z-index:2;background:var(--surface);
+    border:0;border-radius:0;padding:.25rem .25rem env(safe-area-inset-bottom)}
+  .printpick .ppbox.previewing .pppreview{display:flex}
+  .printpick .ppbox.previewing .pptools,.printpick .ppbox.previewing .ppstatus{display:none}
+  .printpick .pppreview .ppback{display:inline-flex}
+  .pppreview .ppbig{max-width:min(20rem,72%)}
+  .printpick .ppfilters{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .printpick .ppall{grid-column:1 / -1} }
+@media (max-width:700px){
+  .printpick{padding:0;align-items:flex-end;-webkit-backdrop-filter:none;backdrop-filter:none}
+  .printpick .ppbox{width:100%;height:94vh;height:94dvh;
+    border-radius:var(--radius-panel) var(--radius-panel) 0 0;
     border-bottom:0;padding:.75rem .75rem calc(.75rem + env(safe-area-inset-bottom))}
-  .picker .prints{grid-template-columns:repeat(auto-fill,minmax(96px,1fr))} }
+  .printpick .ppgrid{grid-template-columns:repeat(auto-fill,minmax(138px,1fr));gap:.5rem} }
+@media (max-width:599.98px){
+  .printpick .ppfiltbtn{display:inline-flex}
+  .printpick .ppfilters:not(.open){display:none} }
+/* finger-sized on a touch screen (44 px) */
+@media (pointer:coarse){
+  .printpick .close{width:44px;min-height:44px;height:44px}
+  .printpick input[type=search],.printpick .msel-btn,.printpick select{height:44px;min-height:44px}
+  .printpick .ppfiltbtn,.printpick .ppacts button,.printpick .ppmore .btn,.printpick .ppempty .btn,
+  .printpick .ppstatus .btn{min-height:44px}
+  .printpick .ppall{min-height:44px} }
 /* Compact width: the save bar sits fixed on top of the bottom tab bar. The same breakpoint as the
    tab bar (theme.py's __MOBILE__, under 600px): at exactly 600px the rail or the top bar is
    showing and the bar stays sticky at the top, so nothing is left under a fixed bar with no room

@@ -55,13 +55,40 @@ for the screenshots, not on a phone. The Collection page's **Import a list** has
 **Collection > Import a list** adds cards to your Archidekt Collection from pasted or uploaded
 text: the gateway's own **Export CSV** (so the collection round-trips, same printings and
 finishes, copies topped up), a CSV with Archidekt's collection column names (`Quantity`, `Name`,
-`Finish` or `Foil`, `Condition`, `Edition Code` or `Set Code`, `Collector Number`, `Scryfall ID`;
-headers are matched by name in any order and extra columns are ignored), or a plain card list
-(`2 Sol Ring (CMR) 436 *F*`). At most 100 rows per import, because Archidekt is written one card
-at a time about a second apart; split a bigger file and import the rest after. **Verified**
-against the test double (`tests/test_browse_collection.py::test_collection_import_from_csv_and_plain_list`).
+`Finish` or `Foil`, `Condition`, `Language` or `Lang`, `Edition Code` or `Set Code`, `Collector
+Number`, `Scryfall ID`; headers are matched by name in any order and extra columns are ignored;
+Condition and Language take the gateway's codes or Archidekt's, `D` for DMG and `JP`, `KR`, `SP`,
+`CS`, `CT` for JA, KO, ES, ZHS, ZHT, and the English names such as `Japanese`; an empty
+Language is English), or a plain card list (`2 Sol Ring (CMR) 436 *F*`). At most 100 rows per
+import, because Archidekt is written one card at a time about a second apart; split a bigger file
+and import the rest after.
+
+Archidekt's collection stores eleven languages (EN, ES, FR, DE, IT, PT, JA, KO, RU, ZHS, ZHT). A
+row in any other language (Phyrexian, Hebrew, Latin, Arabic, Sanskrit, Ancient Greek, or a value
+the gateway does not know) is imported as English and the result names its line. A Condition
+may also be written out (`Near Mint`, `Lightly Played`, `Moderately Played`, `Heavily Played`,
+`Damaged`); one the gateway does not know (anything but those, NM, LP, MP, HP, DMG, D or empty,
+such as `EX`) is imported as NM and the result names its line too. A row whose
+printing and finish you already own is added to that record whatever its language (archidekt.com's
+own add is thought to do the same; not checked against the site); when the languages differ the
+result names the line and both languages. Rows Archidekt cannot find are left out and named too. A whole import is refused only
+for a problem with the text itself (no Name column, a line with no card name, a quantity that is
+not a whole number from 1 to 9,999, a cell longer than 131,072 characters, more than 100 rows,
+nothing to read), and the page gives that reason with its line number, counted as the file's own
+lines (blank lines and line breaks inside a quoted cell included; a row whose cell spans several
+lines is named by the line it starts on). **Verified** against the test double
+(`tests/test_browse_collection.py::test_collection_import_from_csv_and_plain_list`,
+`tests/test_collection_import_result.py`, and in a browser at phone, Fold and desktop widths in
+`tests/test_collection_import_result_browser.py`).
 Whether archidekt.com's own collection CSV export carries exactly these headers is **reported**
 from its collection import page, not verified against a live file.
+
+The other way, archidekt.com's collection import does not read column names: the person picks each
+column's type (read from its site's import page, 2026-10-14). For the gateway's Export CSV:
+Quantity→Quantity, Name→Card name, Finish→Foil/Variant, Condition→Condition,
+Language→Language, Edition Code→Edition code, Edition Name→Edition name, Collector
+Number→Collector number, Scryfall ID→Scryfall ID, Date Added→Ignore, with "Skip first line" on.
+The export writes Condition and Language in Archidekt's codes. Not tried against a live import.
 
 ## From the phone app
 

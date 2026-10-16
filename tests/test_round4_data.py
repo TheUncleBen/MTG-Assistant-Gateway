@@ -18,31 +18,21 @@ from mtg_gateway.archidekt import ArchidektError, parse_deck
 from mtg_gateway.db import Database
 from mtg_gateway.mf_proxy import MysticForgeProxy
 
-from .conftest import FakeIdP, Harness, make_settings, running
+from .conftest import AUTO, FakeIdP, Harness, Stack, make_settings, open_stack, running
 from .fake_archidekt import FakeArchidekt
-from .test_decks_and_proxy import Browser, Stack, _client, call, linked_user, structured
+from .test_decks_and_proxy import Browser, _client, call, linked_user, structured
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
-@pytest.fixture
-async def stack(tmp_path: Path, idp: FakeIdP):
-    ark = FakeArchidekt()
-    settings = make_settings(
-        tmp_path, writes_enabled=True, approval_mode_default="auto", archidekt_base="https://ark.test/api"
-    )
-    async with running(Harness(settings, idp, archidekt=_client(settings, ark))) as h:
-        yield Stack(h, ark)
+# ``stack`` is the shared AUTO stack (tests/conftest.py): writes on, applies allowed over MCP.
 
 
 @pytest.fixture
 async def stack_browser_only(tmp_path: Path, idp: FakeIdP):
-    ark = FakeArchidekt()
-    settings = make_settings(
-        tmp_path, writes_enabled=True, approval_mode_default="manual", archidekt_base="https://ark.test/api"
-    )
-    async with running(Harness(settings, idp, archidekt=_client(settings, ark))) as h:
-        yield Stack(h, ark)
+    manual = AUTO.but(settings={"writes_enabled": True, "approval_mode_default": "manual"})
+    async with open_stack(tmp_path, idp, manual) as st:
+        yield st
 
 
 async def _app_token(h: Harness, name: str, scope: str = "mtg") -> tuple[str, str]:
@@ -373,7 +363,7 @@ async def test_set_category_to_maybeboard_is_shown_as_removal(stack_browser_only
     page = (await b.http.get(url)).text
     summary = re.search(r"<div class='summary'>(.*?)</div>", page).group(1)
     assert f"{len(victims)} removed" in summary and f"Net -{gone} cards" in summary, summary
-    await b.http.post(url, data={"csrf": await b.csrf(url), "action": "apply"})
+    await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
     await b.aclose()
     # verify agrees with the review: the cards left the deck proper, so the apply succeeded
     assert h.db.get_proposal(p["proposal_id"], "user-1")["state"] == "applied"
@@ -452,7 +442,7 @@ async def test_proposals_name_their_app_and_close_on_disconnect(stack_browser_on
     r = await b.http.post("/account", data={"csrf": csrf, "action": "disconnect", "client_id": client_id})
     assert r.status_code == 303
     assert h.db.get_proposal(p["proposal_id"], "user-1")["state"] == "rejected"
-    r = await b.http.post(url, data={"csrf": await b.csrf(url), "action": "apply"})
+    r = await b.http.post(url, data={**await b.review_form(url), "action": "apply"})
     assert "err=not_pending" in r.headers["location"]
     assert any(e["event"] == "proposal_rejected" for e in h.db.audit_for_user("user-1", 50))
     await b.aclose()

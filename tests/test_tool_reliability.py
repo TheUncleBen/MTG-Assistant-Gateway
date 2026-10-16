@@ -12,10 +12,8 @@ from mcp import Client
 from mcp.server.mcpserver import MCPServer
 from pydantic import BaseModel, Field
 
-from mtg_gateway.archidekt import ArchidektClient, Pacer
 from mtg_gateway.decklist import parse_decklist
 from mtg_gateway.mf_proxy import MysticForgeProxy
-from mtg_gateway.scan.scryfall import ScryfallClient
 from mtg_gateway.schemas import (
     DeckChange,
     DeckDetails,
@@ -26,9 +24,7 @@ from mtg_gateway.schemas import (
     inline_refs,
 )
 
-from .conftest import FakeIdP, Harness, make_settings, running
-from .fake_archidekt import FakeArchidekt
-from .fake_scryfall import FakeScryfall
+from .conftest import AUTO, FakeIdP, Harness, Stack, make_settings, open_stack, running, stack_with
 from .test_decks_and_proxy import Browser, call, linked_user, mcp_token, sse_json, structured
 
 NAV = {"Sec-Fetch-Mode": "navigate", "Accept": "text/html"}
@@ -96,36 +92,15 @@ def real_shaped_mystic_forge() -> MCPServer:
     return mf
 
 
-class Stack:
-    def __init__(self, h: Harness, ark: FakeArchidekt, sf: FakeScryfall):
-        self.h, self.ark, self.sf = h, ark, sf
-
-
-async def _stack(tmp_path: Path, idp: FakeIdP, mode: str):
-    ark = FakeArchidekt()
-    sf = FakeScryfall()
-    settings = make_settings(
-        tmp_path, writes_enabled=True, approval_mode_default=mode, archidekt_base="https://ark.test/api"
-    )
-    client = ArchidektClient(settings.archidekt_base, "test-agent", Pacer(0.0), http=ark.client())
-    proxy = MysticForgeProxy("http://mf.test/mcp", client_factory=lambda: Client(real_shaped_mystic_forge()))
-    async with running(Harness(settings, idp, archidekt=client, mf_proxy=proxy)) as h:
-        h.app.state.gateway.scan.scryfall = ScryfallClient(
-            "https://scryfall.test", min_interval=0.0, http=sf.client()
-        )
-        yield Stack(h, ark, sf)
-
-
-@pytest.fixture
-async def stack(tmp_path: Path, idp: FakeIdP):
-    async for s in _stack(tmp_path, idp, "auto"):
-        yield s
+RELIABILITY = AUTO.but(mystic_forge=real_shaped_mystic_forge, scryfall=True)
+stack_options = stack_with(RELIABILITY)
 
 
 @pytest.fixture
 async def manual(tmp_path: Path, idp: FakeIdP):
-    async for s in _stack(tmp_path, idp, "manual"):
-        yield s
+    settings = {"writes_enabled": True, "approval_mode_default": "manual"}
+    async with open_stack(tmp_path, idp, RELIABILITY.but(settings=settings)) as st:
+        yield st
 
 
 async def tools(h: Harness, token: str) -> dict[str, dict]:
@@ -521,9 +496,9 @@ async def test_card_printings_filters_and_limits(stack: Stack) -> None:
     token = await mcp_token(stack.h)
     name = "Aesi, Tyrant of Gyre Strait"
     every = structured(await call(stack.h, token, "card_printings", {"name": name}))
-    assert every["total_cards"] == 4 and every["matching"] == 4
+    assert every["total_cards"] == 4 and every["matching_total"] == 4
     cmr = structured(await call(stack.h, token, "card_printings", {"name": name, "set_code": "CMR"}))
-    assert [c["set"] for c in cmr["cards"]] == ["cmr"] and cmr["matching"] == 1
+    assert [c["set"] for c in cmr["cards"]] == ["cmr"] and cmr["matching_total"] == 1
     one = structured(await call(stack.h, token, "card_printings", {"name": name, "limit": 1}))
     assert len(one["cards"]) == 1 and one["truncated"] is True
 
@@ -623,7 +598,8 @@ async def test_folder_tags_and_cover_go_through_a_details_proposal(stack: Stack)
     uid = "be68e315-ffef-40a8-8a46-1c042b148c03"
     ark.decks[42]["cards"][0]["card"]["uid"] = uid  # the fixture deck has no Scryfall ids
     cover_name = ark.decks[42]["cards"][0]["card"]["oracleCard"]["name"]
-    ark.folders["alice"] = [{"id": 501, "name": "Cube", "private": False, "parentFolder": 1077}]
+    # 901, not 501: the fake gives the backup folder made during the apply the ids from 501 up
+    ark.folders["alice"] = [{"id": 901, "name": "Cube", "private": False, "parentFolder": 1077}]
     details = {"folder": "cube", "add_tags": ["budget", "Spicy"], "cover": cover_name}
     p = structured(await call(stack.h, token, "propose_deck_details", {"deck_id": "42", "details": details}))
     assert p["ok"] and p["kind"] == "details" and p["risk"] == "high", p
@@ -643,7 +619,7 @@ async def test_folder_tags_and_cover_go_through_a_details_proposal(stack: Stack)
         a = r.json()
         await b.aclose()
     assert a.get("state") == "applied", a
-    assert ark.deck_folder[42] == 501
+    assert ark.deck_folder[42] == 901
     assert [x["name"] for x in ark.deck_tags[42]] == ["budget", "Spicy"]
     assert ark.updates[-1]["customFeatured"].endswith(f"/{uid}.webp?11") and "featured" not in ark.updates[-1]
     # a tag Archidekt doesn't have is refused when the proposal is made, not when it is applied

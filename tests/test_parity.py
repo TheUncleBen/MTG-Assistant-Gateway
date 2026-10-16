@@ -13,10 +13,11 @@ from mtg_gateway.archidekt import rich_text
 from mtg_gateway.decks import DeckError, parse_changes, split_label
 from mtg_gateway.scan.scryfall import ScryfallClient
 
+from .conftest import AUTO_PROXY, Stack, stack_with
 from .fake_scryfall import FakeScryfall
-from .test_decks_and_proxy import Browser, Stack, call, linked_user, stack, structured
+from .test_decks_and_proxy import Browser, call, linked_user, structured
 
-__all__ = ["stack"]
+stack_options = stack_with(AUTO_PROXY)
 
 NAV = {"Sec-Fetch-Mode": "navigate", "Accept": "text/html"}
 
@@ -87,7 +88,7 @@ async def test_deck_list_controls_and_views(stack: Stack) -> None:
         rows = await b.http.get("/decks?view=list&order=name&q=sample", headers=NAV)
         assert rows.status_code == 200 and "decklist list'" in rows.text
         none = await b.http.get("/decks?q=zzz", headers=NAV)
-        assert none.status_code == 200 and "No decks yet matching" in none.text
+        assert none.status_code == 200 and "No decks matching “zzz” in any folder." in none.text
         # the deck page: text, stacks and grid views; grouping and sorting; the local filter
         deck = await b.http.get("/decks/42", headers=NAV)
         assert deck.status_code == 200

@@ -16,7 +16,10 @@ from mtg_gateway.archidekt_csv import parse_export, to_deck_json
 from mtg_gateway.pages import actor_html
 from mtg_gateway.report_view import report_export_html
 
-from .test_companion import NAV, Stack, linked_browser, stack  # noqa: F401  (fixture)
+from .conftest import Stack, stack_with
+from .test_companion import COMPANION, NAV, linked_browser
+
+stack_options = stack_with(COMPANION)
 
 STATIC = Path(companion.__file__).parent / "static"
 SCAN_STATIC = Path(companion.__file__).parent / "scan" / "static"
@@ -238,16 +241,18 @@ async def test_nav_highlights_export_and_proposals_and_copy_keeps_its_icon(stack
         await b.aclose()
 
 
-async def test_long_folder_filter_and_its_empty_message(stack: Stack) -> None:  # noqa: F811
+async def test_an_unknown_folder_in_the_address_shows_the_top_level(stack: Stack) -> None:  # noqa: F811
+    """A folder address that names no folder (a long made-up name, an old link to a folder since
+    renamed) opens the top level rather than an empty page: no deck is ever out of reach."""
     b = await linked_browser(stack)
     try:
         name = "Commander decks in progress and testing builds for Friday Night Magic at the shop " + "x" * 12
         assert len(name) > 80
         page = (await b.http.get("/decks", params={"folder": name}, headers=NAV)).text
-        assert "No decks yet" not in page and ("No decks in the folder" in page or "data-decks-src" in page)
+        assert "Sample Commander Deck" in page or "data-decks-src" in page
+        assert "class='crumbs'" not in page
         listing = await b.http.get("/api/decks/mine", params={"shape": "list", "folder": name})
-        assert listing.status_code == 200 and "No decks in the folder" in listing.json()["html"]
-        assert "Show every folder" in listing.json()["html"]
+        assert listing.status_code == 200 and "Sample Commander Deck" in listing.json()["html"]
     finally:
         await b.aclose()
 
