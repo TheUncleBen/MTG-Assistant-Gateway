@@ -152,7 +152,7 @@
     var form = $("form.newcomment", commentsPanel);
     var textarea = $("textarea", form);
     var replyTo = $(".replyto", form);
-    var parentId = null;
+    var parentId = null, parentPage = 1;  // the comment replied to, and the thread page it is on (A29)
     var me = null;  // the member's Archidekt user id, from the thread load; own comments get Edit and Delete
     var deckUrl = "/social/api/decks/" + encodeURIComponent(commentsPanel.getAttribute("data-deck")) + "/comments";
     var when = function (iso) {  // one date format across the site (feedback.js)
@@ -160,7 +160,9 @@
       var d = new Date(iso);
       return isNaN(d) ? "" : d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
     };
-    var render = function (c) {
+    // pg: the page of the thread the comment came on, sent with every write so the gateway finds it there
+    var render = function (c, pg) {
+      pg = pg || 1;
       var box = el("article", "cmt");
       box.setAttribute("data-id", c.id);
       var who = el("div", "who");
@@ -178,7 +180,7 @@
       var reply = el("button", "btn-ghost", "Reply");
       reply.type = "button";
       reply.addEventListener("click", function () {
-        parentId = c.id;
+        parentId = c.id; parentPage = pg;
         replyTo.hidden = false;
         replyTo.textContent = "";
         replyTo.appendChild(document.createTextNode("Replying to " + (c.owner.username || "this comment") + " "));
@@ -204,7 +206,7 @@
             var undoing = mine();
             confirmChip(btn, undoing ? "Take back your vote?" : (up ? "Vote this comment up on Archidekt?" : "Vote this comment down on Archidekt?"), undoing ? "Take back" : "Vote", function () {
               btn.disabled = true;
-              socialRequest("POST", deckUrl + "/" + encodeURIComponent(c.id) + "/vote", { vote: undoing ? "none" : (up ? "up" : "down") }).then(function (d) {
+              socialRequest("POST", deckUrl + "/" + encodeURIComponent(c.id) + "/vote", { vote: undoing ? "none" : (up ? "up" : "down"), page: pg }).then(function (d) {
                 btn.disabled = false;
                 if (!d.ok) { var n = el("p", "notice error"); n.appendChild(socialProblem(d)); acts.appendChild(n); setTimeout(function () { n.remove(); }, 8000); return; }
                 c.user_vote = d.vote; c.points = d.points;
@@ -237,7 +239,7 @@
             var text = ta.value.trim();
             if (!text) { ta.focus(); return; }
             save.disabled = true; note.textContent = "Saving…";
-            socialRequest("PATCH", deckUrl + "/" + encodeURIComponent(c.id), { text: text }).then(function (d) {
+            socialRequest("PATCH", deckUrl + "/" + encodeURIComponent(c.id), { text: text, page: pg }).then(function (d) {
               if (!d.ok) { save.disabled = false; note.textContent = ""; note.appendChild(socialProblem(d)); return; }
               c.text = d.comment.text; p.textContent = c.text; p.hidden = false; f.remove();
               if (!/edited/.test(who.textContent)) who.appendChild(document.createTextNode(" · edited"));
@@ -261,7 +263,7 @@
           no.addEventListener("click", function () { bar.remove(); });
           yes.addEventListener("click", function () {
             yes.disabled = true;
-            socialRequest("DELETE", deckUrl + "/" + encodeURIComponent(c.id)).then(function (d) {
+            socialRequest("DELETE", deckUrl + "/" + encodeURIComponent(c.id) + "?page=" + pg).then(function (d) {
               if (!d.ok) { yes.disabled = false; bar.textContent = ""; bar.appendChild(socialProblem(d)); bar.appendChild(no); return; }
               box.remove();
               if (countEl) countEl.textContent = d.count === 1 ? "1 comment" : d.count + " comments";
@@ -276,7 +278,7 @@
       box.appendChild(acts);
       if (c.replies && c.replies.length) {
         var kids = el("div", "replies");
-        c.replies.forEach(function (k) { kids.appendChild(render(k)); });
+        c.replies.forEach(function (k) { kids.appendChild(render(k, pg)); });
         box.appendChild(kids);
       }
       return box;
@@ -308,14 +310,41 @@
         me = typeof d.me === "number" ? d.me : null;
         if (countEl) countEl.textContent = d.count === 1 ? "1 comment" : d.count + " comments";
         if (!d.comments.length) { thread.appendChild(el("p", "muted", "No comments yet. Be the first.")); return; }
-        d.comments.forEach(function (c) { thread.appendChild(render(c)); });
-        if (d.has_more) {
-          var more = el("a", "muted small", "More comments on Archidekt");
-          more.href = "https://archidekt.com/decks/" + encodeURIComponent(commentsPanel.getAttribute("data-deck"));
-          more.target = "_blank"; more.rel = "noopener noreferrer";
-          thread.appendChild(more);
-        }
+        d.comments.forEach(function (c) { thread.appendChild(render(c, 1)); });
+        if (d.has_more) showMore(2);
       }).catch(function () { failed("The comments could not be loaded: no connection."); });
+    };
+    // The next page of the thread, added under the comments already shown (A29: every page can be
+    // voted on and replied to, not only the first).
+    var showMore = function (pg) {
+      var wrap = el("p", "more-comments");
+      var btn = el("button", "btn", "Show more comments");
+      btn.type = "button";
+      wrap.appendChild(btn);
+      thread.appendChild(wrap);
+      btn.addEventListener("click", function () {
+        btn.disabled = true;
+        btn.textContent = "Loading more comments…";
+        var src = thread.getAttribute("data-src");
+        socialRequest("GET", src + (src.indexOf("?") < 0 ? "?" : "&") + "page=" + pg).then(function (d) {
+          if (!d.ok) {
+            btn.disabled = false; btn.textContent = "Show more comments";
+            var n = el("span", "muted small"); n.appendChild(document.createTextNode(" ")); n.appendChild(socialProblem(d));
+            wrap.appendChild(n);
+            return;
+          }
+          var seen = {};
+          $$(".cmt", thread).forEach(function (x) { seen[x.getAttribute("data-id")] = true; });
+          wrap.remove();
+          // a vote since the first page loaded can move a comment from one page to the next: shown once
+          d.comments.forEach(function (c) { if (!seen[String(c.id)]) thread.appendChild(render(c, pg)); });
+          if (d.has_more) showMore(pg + 1);
+        }).catch(function () {
+          btn.disabled = false; btn.textContent = "Show more comments";
+          var n = el("span", "muted small", " No connection; try again.");
+          wrap.appendChild(n);
+        });
+      });
     };
     if ("IntersectionObserver" in window) {
       var io = new IntersectionObserver(function (entries) {
@@ -341,11 +370,11 @@
       no.addEventListener("click", function () { bar.remove(); textarea.focus(); });
       yes.addEventListener("click", function () {
         yes.disabled = true;
-        socialRequest("POST", "/social/api/decks/" + encodeURIComponent(commentsPanel.getAttribute("data-deck")) + "/comments", { text: text, parent: parentId }).then(function (d) {
+        socialRequest("POST", "/social/api/decks/" + encodeURIComponent(commentsPanel.getAttribute("data-deck")) + "/comments", { text: text, parent: parentId, page: parentPage }).then(function (d) {
           bar.remove();
           if (!d.ok) { var p = el("p", "notice error"); p.appendChild(socialProblem(d)); form.insertBefore(p, form.firstChild); return; }
           var old = $(".notice", form); if (old) old.remove();
-          var node = render(d.comment);
+          var node = render(d.comment, parentId ? parentPage : 1);
           var parentBox = parentId ? $("[data-id='" + parentId + "']", thread) : null;
           if (parentBox) {
             var kids = $(".replies", parentBox) || parentBox.appendChild(el("div", "replies"));
